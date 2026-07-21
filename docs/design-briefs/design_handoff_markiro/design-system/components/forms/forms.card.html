@@ -1,0 +1,31 @@
+<!-- @dsCard group="Components" viewport="700x330" name="Формы" subtitle="Button (офис + цех), Input, Select, PinPad" -->
+<!DOCTYPE html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../../styles.css"></head>
+<body style="margin:0;font-family:var(--font-ui);background:var(--surface-page)">
+<div style="display:flex;flex-direction:column;gap:14px;padding:16px 20px">
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <button style="height:40px;padding:0 16px;border-radius:var(--r-2);border:1px solid var(--surface-inverse);background:var(--surface-inverse);color:var(--fg-on-inverse);font:600 14px/1 var(--font-ui)">Сохранить</button>
+    <button style="height:40px;padding:0 16px;border-radius:var(--r-2);border:1px solid var(--line-strong);background:var(--surface-card);color:var(--fg-1);font:600 14px/1 var(--font-ui)">Экспорт</button>
+    <button style="height:40px;padding:0 16px;border-radius:var(--r-2);border:1px solid var(--err-solid);background:var(--err-solid);color:#fff;font:600 14px/1 var(--font-ui)">Удалить</button>
+    <button style="height:40px;padding:0 16px;border-radius:var(--r-2);border:1px solid transparent;background:transparent;color:var(--fg-2);font:600 14px/1 var(--font-ui)">Отмена</button>
+    <button style="height:40px;padding:0 16px;border-radius:var(--r-2);border:1px solid var(--surface-inverse);background:var(--surface-inverse);color:var(--fg-on-inverse);font:600 14px/1 var(--font-ui);opacity:.45">Disabled</button>
+    <button style="height:32px;padding:0 12px;border-radius:var(--r-2);border:1px solid var(--line-strong);background:var(--surface-card);color:var(--fg-1);font:600 13px/1 var(--font-ui)">sm 32</button>
+  </div>
+  <button style="height:64px;width:100%;border-radius:var(--r-2);border:1px solid var(--surface-inverse);background:var(--surface-inverse);color:var(--fg-on-inverse);font:600 20px/1 var(--font-ui)">Открыть смену — цех 64px</button>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+    <label style="display:flex;flex-direction:column;gap:6px"><span style="font:var(--text-caption);color:var(--fg-2)">GTIN</span><span style="display:flex;align-items:center;height:40px;padding:0 12px;border:1px solid var(--line-strong);border-radius:var(--r-2);background:var(--surface-card);font:400 14px/1 var(--font-mono);color:var(--fg-1)">04650075195923</span><span style="font:var(--text-body-sm);color:var(--fg-3)">14 цифр</span></label>
+    <label style="display:flex;flex-direction:column;gap:6px"><span style="font:var(--text-caption);color:var(--fg-2)">Количество</span><span style="display:flex;align-items:center;height:40px;padding:0 12px;border:1px solid var(--err-solid);border-radius:var(--r-2);background:var(--surface-card);font:400 14px/1 var(--font-mono);color:var(--fg-1)">80 000</span><span style="font:var(--text-body-sm);color:var(--err-fg)">Больше остатка: доступно 12 400</span></label>
+    <label style="display:flex;flex-direction:column;gap:6px"><span style="font:var(--text-caption);color:var(--fg-2)">Продуктовая группа</span><span style="display:flex;align-items:center;justify-content:space-between;height:40px;padding:0 12px;border:1px solid var(--line-strong);border-radius:var(--r-2);background:var(--surface-card);font:var(--text-body);color:var(--fg-1)">Пиво <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--fg-3)" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></span></label>
+  </div>
+  <div style="display:flex;gap:16px;align-items:center">
+    <div style="display:grid;grid-template-columns:repeat(3,52px);gap:6px">
+      <button style="height:44px;border:1px solid var(--line-strong);border-radius:var(--r-2);background:var(--surface-card);font:600 18px/1 var(--font-ui);color:var(--fg-1)">1</button>
+      <button style="height:44px;border:1px solid var(--line-strong);border-radius:var(--r-2);background:var(--surface-card);font:600 18px/1 var(--font-ui);color:var(--fg-1)">2</button>
+      <button style="height:44px;border:1px solid var(--line-strong);border-radius:var(--r-2);background:var(--surface-card);font:600 18px/1 var(--font-ui);color:var(--fg-1)">3</button>
+      <button style="height:44px;border:1px solid var(--line-strong);border-radius:var(--r-2);background:var(--surface-card);font:600 18px/1 var(--font-ui);color:var(--fg-1)">⌫</button>
+      <button style="height:44px;border:1px solid var(--line-strong);border-radius:var(--r-2);background:var(--surface-card);font:600 18px/1 var(--font-ui);color:var(--fg-1)">0</button>
+      <button style="height:44px;border:1px solid var(--surface-inverse);border-radius:var(--r-2);background:var(--surface-inverse);font:600 16px/1 var(--font-ui);color:var(--fg-on-inverse)">OK</button>
+    </div>
+    <span style="font:400 11px/1.5 var(--font-mono);color:var(--fg-3)">PinPad — вход оператора,<br>клавиши 64px в реальном размере</span>
+  </div>
+</div>
+</body></html>

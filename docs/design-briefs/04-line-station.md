@@ -51,8 +51,11 @@ GTIN resolved against the catalog:
 - Found: product card appears → choose mode (validation / + aggregation) →
   if aggregation: box capacity (prefilled from product, editable) and pallet
   use yes/no → start.
-- Not found: quick-create — GTIN prefilled, operator types only the name →
-  start; the product is flagged for manager review in the admin panel.
+- Not found: **blocking screen** — "Product is not in the catalog" with the
+  scanned GTIN shown, instruction to ask an administrator to add the product
+  in the admin panel, and actions "Scan again" / "Back to shifts". Products
+  are created **only in the admin panel** (approved decision); a draft
+  product card also blocks shift start until completed.
 The whole flow is 3–4 full-screen steps, each completable in seconds.
 
 ### 4. Work screen — validation mode

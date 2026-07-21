@@ -1,0 +1,35 @@
+<!-- @dsCard group="Components" viewport="700x300" name="Навигация" subtitle="Sidebar (офис), TaskSwitcher + StatusBar (цех)" -->
+<!DOCTYPE html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../../styles.css"></head>
+<body style="margin:0;font-family:var(--font-ui);background:var(--surface-page)">
+<div style="display:flex;gap:16px;padding:16px 20px">
+  <nav style="width:200px;background:var(--surface-panel);border:1px solid var(--line);border-radius:var(--r-2);padding:12px 8px;display:flex;flex-direction:column;gap:2px">
+    <div style="display:flex;align-items:center;gap:8px;padding:2px 10px 12px 10px">
+      <img src="../../assets/mark.svg" width="24" height="24" alt="">
+      <span style="font:600 15px/1 var(--font-mono);color:var(--fg-1)">маркиро</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:var(--r-2);color:var(--fg-2);font:500 13px/1 var(--font-ui)">Обзор</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-radius:var(--r-2);background:var(--surface-card);box-shadow:inset 0 0 0 1px var(--line);color:var(--fg-1);font:500 13px/1 var(--font-ui)">Задания <span style="font:var(--text-meta);background:var(--line);border-radius:var(--r-1);padding:1px 6px;color:var(--fg-2)">3</span></div>
+    <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;color:var(--fg-2);font:500 13px/1 var(--font-ui)">Коды</div>
+    <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;color:var(--fg-2);font:500 13px/1 var(--font-ui)">Устройства</div>
+    <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;color:var(--fg-2);font:500 13px/1 var(--font-ui)">Отчёты</div>
+  </nav>
+  <div style="flex:1;display:flex;flex-direction:column;gap:12px" data-theme="dark">
+    <div style="background:#131216;border-radius:var(--r-2);padding:12px;display:flex;flex-direction:column;gap:12px;border:1px solid #2E2D33">
+      <div style="display:flex;align-items:center;gap:14px;padding:0 8px;height:40px;background:#232228;border-radius:var(--r-1);font:400 13px/1 var(--font-ui);color:#B6B3AB">
+        <span style="color:#3DDC7A;font-weight:600">● В сети</span>
+        <span style="color:#6DB2FF;font-weight:600">⟳ Синхронизация: 1 240</span>
+        <span>Принтер ✓</span>
+        <span style="flex:1"></span>
+        <span>Смирнов А. · смена 2</span>
+        <span style="font-family:var(--font-mono);color:#FAFAF8">14:32</span>
+      </div>
+      <div style="display:flex;gap:8px">
+        <span style="display:flex;align-items:center;gap:10px;height:52px;padding:0 18px;border-radius:var(--r-2);background:#FAFAF8;color:#17161A;font:600 16px/1 var(--font-ui)">Сканирование</span>
+        <span style="display:flex;align-items:center;gap:10px;height:52px;padding:0 18px;border-radius:var(--r-2);border:1px solid #45444B;color:#B6B3AB;font:600 16px/1 var(--font-ui)">Агрегация</span>
+        <span style="display:flex;align-items:center;gap:10px;height:52px;padding:0 18px;border-radius:var(--r-2);border:1px solid #45444B;color:#B6B3AB;font:600 16px/1 var(--font-ui)">Смена</span>
+      </div>
+      <div style="font:400 11px/1.4 var(--font-mono);color:#8A877F;padding:0 4px">StatusBar + TaskSwitcher — тёмная тема, реальные размеры 56/64px</div>
+    </div>
+  </div>
+</div>
+</body></html>

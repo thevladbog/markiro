@@ -1,0 +1,35 @@
+<!-- @dsCard group="Components" viewport="700x330" name="Отображение" subtitle="StatusChip, Tabs, Breadcrumbs, Table, Card" -->
+<!DOCTYPE html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../../styles.css"></head>
+<body style="margin:0;font-family:var(--font-ui);background:var(--surface-page)">
+<div style="display:flex;flex-direction:column;gap:14px;padding:16px 20px">
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <span style="display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border-radius:var(--r-1);background:var(--ok-bg);color:var(--ok-fg);border:1px solid var(--ok-border);font:600 12px/1 var(--font-ui)">✓ Отправлено</span>
+    <span style="display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border-radius:var(--r-1);background:var(--err-bg);color:var(--err-fg);border:1px solid var(--err-border);font:600 12px/1 var(--font-ui)">✕ Ошибка</span>
+    <span style="display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border-radius:var(--r-1);background:var(--warn-bg);color:var(--warn-fg);border:1px solid var(--warn-border);font:600 12px/1 var(--font-ui)">⧉ Дубликат</span>
+    <span style="display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border-radius:var(--r-1);background:var(--info-bg);color:var(--info-fg);border:1px solid var(--info-border);font:600 12px/1 var(--font-ui)">⟳ Синхронизация</span>
+    <span style="display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border-radius:var(--r-1);background:var(--surface-panel);color:var(--fg-2);border:1px solid var(--line-strong);font:600 12px/1 var(--font-ui)">Офлайн</span>
+    <span style="display:inline-flex;align-items:center;gap:8px;height:44px;padding:0 16px;border-radius:var(--r-1);background:var(--ok-fg);color:var(--surface-card);font:600 18px/1 var(--font-ui)">✓ Цех solid</span>
+  </div>
+  <div style="display:flex;justify-content:space-between;align-items:center">
+    <div style="display:flex;gap:4px;border-bottom:1px solid var(--line)">
+      <span style="padding:10px 14px;font:600 14px/1 var(--font-ui);color:var(--fg-1);border-bottom:2px solid var(--fg-1)">Задания</span>
+      <span style="padding:10px 14px;font:600 14px/1 var(--font-ui);color:var(--fg-3)">Коды</span>
+      <span style="padding:10px 14px;font:600 14px/1 var(--font-ui);color:var(--fg-3)">Отчёты</span>
+    </div>
+    <nav style="font:var(--text-body-sm)"><span style="color:var(--fg-3)">Задания</span> <span style="color:var(--fg-disabled)">/</span> <span style="color:var(--fg-1);font-weight:600">Партия № 214</span></nav>
+  </div>
+  <div style="border:1px solid var(--line);border-radius:var(--r-3);background:var(--surface-card);overflow:hidden">
+    <table style="width:100%;border-collapse:collapse">
+      <tr style="background:var(--surface-panel)">
+        <th style="text-align:left;padding:9px 16px;font:500 11px/1 var(--font-ui);color:var(--fg-3);text-transform:uppercase;letter-spacing:.05em">Партия ↓</th>
+        <th style="text-align:left;padding:9px 16px;font:500 11px/1 var(--font-ui);color:var(--fg-3);text-transform:uppercase;letter-spacing:.05em">GTIN</th>
+        <th style="text-align:right;padding:9px 16px;font:500 11px/1 var(--font-ui);color:var(--fg-3);text-transform:uppercase;letter-spacing:.05em">Кол-во</th>
+        <th style="text-align:left;padding:9px 16px;font:500 11px/1 var(--font-ui);color:var(--fg-3);text-transform:uppercase;letter-spacing:.05em">Статус</th>
+      </tr>
+      <tr style="border-top:1px solid var(--line)"><td style="padding:10px 16px;font:var(--text-body)">Жигулёвское 0,5 · № 214</td><td style="padding:10px 16px;font:var(--text-code);color:var(--fg-2)">04650075195923</td><td style="padding:10px 16px;text-align:right;font:var(--text-code)">47 213</td><td style="padding:10px 16px"><span style="display:inline-flex;align-items:center;height:24px;padding:0 10px;border-radius:var(--r-1);background:var(--ok-bg);color:var(--ok-fg);border:1px solid var(--ok-border);font:600 12px/1 var(--font-ui)">✓ Отправлено</span></td></tr>
+      <tr style="border-top:1px solid var(--line)"><td style="padding:10px 16px;font:var(--text-body)">Вода газ. 1,0 · № 215</td><td style="padding:10px 16px;font:var(--text-code);color:var(--fg-2)">04650075195930</td><td style="padding:10px 16px;text-align:right;font:var(--text-code)">12 400</td><td style="padding:10px 16px"><span style="display:inline-flex;align-items:center;height:24px;padding:0 10px;border-radius:var(--r-1);background:var(--info-bg);color:var(--info-fg);border:1px solid var(--info-border);font:600 12px/1 var(--font-ui)">⟳ Синхронизация</span></td></tr>
+    </table>
+    <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;padding:8px 12px;border-top:1px solid var(--line);font:var(--text-meta);color:var(--fg-3)">‹ &nbsp;1 / 12&nbsp; ›</div>
+  </div>
+</div>
+</body></html>

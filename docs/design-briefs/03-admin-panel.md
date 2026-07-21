@@ -10,6 +10,8 @@
 - Active shifts right now: line, product, mode, progress vs plan, operators
   online, per-terminal counters.
 - Day/week summary: units scanned, boxes/pallets closed, error/duplicate rate.
+- Marking-codes stock KPI (optional code pool): codes remaining and estimated
+  days left, when the client pre-loads ordered code files.
 - Recent exports with statuses.
 
 ### 2. Product catalog
@@ -18,8 +20,9 @@
 - Product card: GTIN, name, photo, Chestny ZNAK product group, default box
   capacity, default pallet capacity, default label template (from the label
   library), notes.
-- Products auto-created from the line (ad-hoc quick-create, see brief 04) are
-  flagged "created on line — needs review" until a manager completes the card.
+- Products are created **only here** (approved decision — no creation from
+  the line). Incomplete cards carry a "Draft — complete it" status; a draft
+  product blocks starting a shift on the station until completed.
 
 ### 3. Shifts (production tasks)
 - List with statuses: planned / in progress / closed; filters by date, line,

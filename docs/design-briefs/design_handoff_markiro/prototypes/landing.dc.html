@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+body { margin: 0; background: #FAFAF8; color: #17161A; font-family: 'IBM Plex Sans', sans-serif; }
+a { color: #17161A; } a:hover { color: #0B8A44; }
+button { cursor: pointer; font-family: 'IBM Plex Sans', sans-serif; }
+input { font-family: 'IBM Plex Sans', sans-serif; }
+</style>
+</helmet>
+<div style="display: flex; flex-direction: column; min-height: 100vh">
+
+  <header style="position: sticky; top: 0; z-index: 20; background: rgba(250,250,248,0.92); backdrop-filter: blur(8px); border-bottom: 1px solid #E0DED7">
+    <div style="max-width: 1200px; margin: 0 auto; padding: 0 24px; height: 64px; display: flex; align-items: center; gap: 24px">
+      <span style="display: flex; align-items: center; gap: 10px">
+        <svg width="28" height="28" viewBox="0 0 64 64"><rect x="4" y="4" width="56" height="56" fill="#17161A"/><g fill="#FAFAF8"><rect x="14" y="14" width="8" height="8"/><rect x="14" y="26" width="8" height="8"/><rect x="14" y="38" width="8" height="8"/><rect x="26" y="22" width="8" height="8"/><rect x="38" y="14" width="8" height="8"/><rect x="38" y="26" width="8" height="8"/><rect x="38" y="38" width="8" height="8"/><rect x="26" y="42" width="8" height="8" fill="#3DDC7A"/></g></svg>
+        <span style="font: 600 19px/1 'IBM Plex Mono', monospace">маркиро</span>
+      </span>
+      <nav style="display: flex; gap: 20px; flex: 1; justify-content: center; flex-wrap: wrap">
+        <a href="#product" style="text-decoration: none; font: 500 14px/1 'IBM Plex Sans', sans-serif; color: #45433E">Продукт</a>
+        <a href="#how" style="text-decoration: none; font: 500 14px/1 'IBM Plex Sans', sans-serif; color: #45433E">Как работает</a>
+        <a href="#scheme" style="text-decoration: none; font: 500 14px/1 'IBM Plex Sans', sans-serif; color: #45433E">Оборудование</a>
+        <a href="#pricing" style="text-decoration: none; font: 500 14px/1 'IBM Plex Sans', sans-serif; color: #45433E">Цена</a>
+        <a href="#faq" style="text-decoration: none; font: 500 14px/1 'IBM Plex Sans', sans-serif; color: #45433E">Вопросы</a>
+      </nav>
+      <a href="tel:{{ phoneHref }}" style="text-decoration: none; font: 600 15px/1 'IBM Plex Mono', monospace; color: #17161A; white-space: nowrap">{{ phone }}</a>
+      <a href="#demo" style="text-decoration: none; display: inline-flex; align-items: center; height: 40px; padding: 0 18px; border-radius: 8px; background: #17161A; color: #FAFAF8; font: 600 14px/1 'IBM Plex Sans', sans-serif; white-space: nowrap">Запросить демо</a>
+    </div>
+  </header>
+
+  <!-- Hero -->
+  <section style="border-bottom: 1px solid #E0DED7">
+    <div style="max-width: 1200px; margin: 0 auto; padding: 64px 24px 56px 24px; display: flex; gap: 56px; align-items: center; flex-wrap: wrap">
+      <div style="flex: 1.1; min-width: min(340px, 100%); display: flex; flex-direction: column; gap: 22px">
+        <span style="display: inline-flex; align-self: flex-start; align-items: center; gap: 8px; height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid #CFE8D8; background: #E7F6EC; color: #116335; font: 600 13px/1 'IBM Plex Sans', sans-serif">Сериализация · валидация · агрегация</span>
+        <h1 style="margin: 0; font: 700 46px/54px 'IBM Plex Sans', sans-serif; letter-spacing: -0.01em; text-wrap: balance">Маркировка «Честный ЗНАК» на вашей линии — без остановок и штрафов</h1>
+        <p style="margin: 0; font: 400 19px/30px 'IBM Plex Sans', sans-serif; color: #45433E; max-width: 520px">Станция у конвейера проверяет каждый код, ловит дубли, собирает короба и паллеты и печатает этикетки — даже без интернета. Отчёты для 1С и ГИС МТ за две минуты.</p>
+        <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap">
+          <a href="#demo" style="text-decoration: none; display: inline-flex; align-items: center; height: 52px; padding: 0 26px; border-radius: 8px; background: #17161A; color: #FAFAF8; font: 600 17px/1 'IBM Plex Sans', sans-serif">Запросить демо</a>
+          <button onClick="{{ playVideo }}" style="display: inline-flex; align-items: center; gap: 10px; height: 52px; padding: 0 22px; border-radius: 8px; border: 1px solid #C9C6BD; background: #FFFFFF; color: #17161A; font: 600 16px/1 'IBM Plex Sans', sans-serif">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="#17161A"><path d="M7 4l13 8-13 8z"/></svg>
+            Видео · 2 мин
+          </button>
+        </div>
+        <span style="font: 400 15px/22px 'IBM Plex Sans', sans-serif; color: #6B6862">Позвоните — <a href="tel:{{ phoneHref }}" style="font-family: 'IBM Plex Mono', monospace; font-weight: 600">{{ phone }}</a>, ответит инженер, не бот.</span>
+      </div>
+      <div style="flex: 1; min-width: min(380px, 100%); display: flex; justify-content: center">
+        <div style="width: 100%; max-width: 520px; background: #131216; border-radius: 16px; border: 1px solid #2E2D33; padding: 20px; box-shadow: 0 24px 60px rgba(23,22,26,0.18); display: flex; flex-direction: column; gap: 14px">
+          <div style="display: flex; justify-content: space-between; align-items: center; font: 400 13px/1 'IBM Plex Sans', sans-serif; color: #8A877F">
+            <span style="color: #3DDC7A; font-weight: 600">● В сети · агрегация</span>
+            <span>Жигулёвское 0,5 л</span>
+            <span style="font-family: 'IBM Plex Mono', monospace">смена 2 · 14:32</span>
+          </div>
+          <span style="display: inline-flex; align-self: center; align-items: center; gap: 8px; height: 38px; padding: 0 16px; border-radius: 6px; background: #142E1D; color: #3DDC7A; border: 1px solid #1F4A2E; font: 700 16px/1 'IBM Plex Sans', sans-serif">✓ Код принят</span>
+          <div style="display: flex; justify-content: space-between; align-items: baseline">
+            <span style="font: 600 16px/1 'IBM Plex Sans', sans-serif; color: #FAFAF8">Короб № 214</span>
+            <span style="font: 600 34px/1 'IBM Plex Mono', monospace; color: #FAFAF8; font-variant-numeric: tabular-nums">14 <span style="color: #8A877F; font-size: 18px">/ 20</span></span>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(10, 1fr); gap: 6px">
+            <sc-for list="{{ heroCells }}" as="c" hint-placeholder-count="20">
+              <span style="aspect-ratio: 1; border-radius: 2px; background: {{ c.bg }}; border: 1.5px solid {{ c.border }}"></span>
+            </sc-for>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 5px">
+            <span style="display: flex; justify-content: space-between; font: 400 13px/1 'IBM Plex Sans', sans-serif; color: #8A877F"><span>Паллета 49</span><span style="font-family: 'IBM Plex Mono', monospace">3 / 12 коробов</span></span>
+            <span style="display: flex; gap: 4px">
+              <sc-for list="{{ heroPallet }}" as="p" hint-placeholder-count="12">
+                <span style="flex: 1; height: 8px; border-radius: 2px; background: {{ p.bg }}; border: 1px solid {{ p.border }}"></span>
+              </sc-for>
+            </span>
+          </div>
+          <div style="display: flex; justify-content: space-between; font: 400 13px/1 'IBM Plex Sans', sans-serif; color: #8A877F; border-top: 1px solid #2E2D33; padding-top: 12px">
+            <span>Смена · все терминалы</span>
+            <span style="font-family: 'IBM Plex Mono', monospace; color: #B6B3AB">47 213 / 50 000</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div style="border-top: 1px solid #E0DED7; background: #FFFFFF">
+      <div style="max-width: 1200px; margin: 0 auto; padding: 20px 24px; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px">
+        <div style="display: flex; flex-direction: column; gap: 3px"><span style="font: 600 28px/1 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums">100%</span><span style="font: 400 14px/20px 'IBM Plex Sans', sans-serif; color: #6B6862">кодов проверяется на линии, до короба</span></div>
+        <div style="display: flex; flex-direction: column; gap: 3px"><span style="font: 600 28px/1 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums">8+ часов</span><span style="font: 400 14px/20px 'IBM Plex Sans', sans-serif; color: #6B6862">работы без интернета — полная смена офлайн</span></div>
+        <div style="display: flex; flex-direction: column; gap: 3px"><span style="font: 600 28px/1 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums">2 мин</span><span style="font: 400 14px/20px 'IBM Plex Sans', sans-serif; color: #6B6862">от конца смены до файлов для 1С и ГИС МТ</span></div>
+        <div style="display: flex; flex-direction: column; gap: 3px"><span style="font: 600 28px/1 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums">1 день</span><span style="font: 400 14px/20px 'IBM Plex Sans', sans-serif; color: #6B6862">на подключение — вечером смена уже с отчётом</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Боль → решение -->
+  <section style="background: #F0EFEA; border-bottom: 1px solid #E0DED7">
+    <div style="max-width: 1200px; margin: 0 auto; padding: 64px 24px; display: flex; flex-direction: column; gap: 32px">
+      <div style="display: flex; flex-direction: column; gap: 10px; max-width: 680px">
+        <h2 style="margin: 0; font: 700 32px/40px 'IBM Plex Sans', sans-serif">Маркировка не должна останавливать линию</h2>
+        <p style="margin: 0; font: 400 16px/25px 'IBM Plex Sans', sans-serif; color: #45433E">Каждая привычная боль маркировки — и что с ней делает Маркиро.</p>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 10px">
+        <sc-for list="{{ pains }}" as="p" hint-placeholder-count="4">
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); background: #FFFFFF; border: 1px solid #E0DED7; border-radius: 12px; overflow: hidden">
+            <div style="padding: 20px 24px; display: flex; gap: 14px; align-items: flex-start; border-right: 1px solid #F0EFEA">
+              <span style="flex-shrink: 0; width: 34px; height: 34px; border-radius: 8px; background: #FDEAE7; border: 1px solid #F2D4D0; display: flex; align-items: center; justify-content: center; color: #A1231A; font: 700 16px/1 'IBM Plex Sans', sans-serif">✕</span>
+              <span style="display: flex; flex-direction: column; gap: 3px">
+                <span style="font: 600 16px/22px 'IBM Plex Sans', sans-serif">{{ p.pain }}</span>
+                <span style="font: 400 14px/21px 'IBM Plex Sans', sans-serif; color: #6B6862">{{ p.painText }}</span>
+              </span>
+            </div>
+            <div style="padding: 20px 24px; display: flex; gap: 14px; align-items: flex-start; background: #FBFDF9">
+              <span style="flex-shrink: 0; width: 34px; height: 34px; border-radius: 8px; background: #E7F6EC; border: 1px solid #CFE8D8; display: flex; align-items: center; justify-content: center; color: #116335; font: 700 16px/1 'IBM Plex Sans', sans-serif">✓</span>
+              <span style="display: flex; flex-direction: column; gap: 3px">
+                <span style="font: 600 16px/22px 'IBM Plex Sans', sans-serif">{{ p.fix }}</span>
+                <span style="font: 400 14px/21px 'IBM Plex Sans', sans-serif; color: #6B6862">{{ p.fixText }}</span>
+              </span>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </section>
+
+  <!-- Продукт: два режима -->
+  <section id="product" style="border-bottom: 1px solid #E0DED7">
+    <div style="max-width: 1200px; margin: 0 auto; padding: 64px 24px; display: flex; flex-direction: column; gap: 32px">
+      <div style="display: flex; flex-direction: column; gap: 10px; max-width: 680px">
+        <h2 style="margin: 0; font: 700 32px/40px 'IBM Plex Sans', sans-serif">Один продукт — два рабочих места</h2>
+        <p style="margin: 0; font: 400 16px/25px 'IBM Plex Sans', sans-serif; color: #45433E">Оператор видит крупный экран у линии, менеджер — админ-панель в офисе. Данные общие, в реальном времени.</p>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(440px, 100%), 1fr)); gap: 20px">
+        <div style="border: 1px solid #E0DED7; border-radius: 16px; overflow: hidden; background: #FFFFFF; display: flex; flex-direction: column">
+          <div style="background: #131216; padding: 18px; display: flex; flex-direction: column; gap: 10px">
+            <div style="display: flex; justify-content: space-between; font: 400 12px/1 'IBM Plex Sans', sans-serif; color: #8A877F"><span style="color: #FFB84D; font-weight: 600">⨂ Офлайн · в очереди 1 240</span><span style="font-family: 'IBM Plex Mono', monospace">14:32</span></div>
+            <div style="display: flex; align-items: center; justify-content: center; gap: 14px; padding: 14px 0">
+              <span style="font: 600 52px/1 'IBM Plex Mono', monospace; color: #FAFAF8; font-variant-numeric: tabular-nums">24 613</span>
+              <span style="font: 400 14px/18px 'IBM Plex Sans', sans-serif; color: #8A877F">этот терминал<br>за смену</span>
+            </div>
+            <div style="display: flex; gap: 6px">
+              <span style="flex: 1; height: 40px; border-radius: 6px; background: #FAFAF8; color: #17161A; display: flex; align-items: center; justify-content: center; font: 600 13px/1 'IBM Plex Sans', sans-serif">Сканирование</span>
+              <span style="flex: 1; height: 40px; border-radius: 6px; border: 1px solid #45444B; color: #B6B3AB; display: flex; align-items: center; justify-content: center; font: 600 13px/1 'IBM Plex Sans', sans-serif">Агрегация</span>
+              <span style="flex: 1; height: 40px; border-radius: 6px; border: 1px solid #45444B; color: #B6B3AB; display: flex; align-items: center; justify-content: center; font: 600 13px/1 'IBM Plex Sans', sans-serif">Смена</span>
+            </div>
+          </div>
+          <div style="padding: 24px; display: flex; flex-direction: column; gap: 12px">
+            <span style="font: 700 20px/26px 'IBM Plex Sans', sans-serif">Станция у линии</span>
+            <span style="display: flex; flex-direction: column; gap: 7px; font: 400 15px/22px 'IBM Plex Sans', sans-serif; color: #45433E">
+              <span>· Кнопки 64px — нажимаются в перчатке, тёмная тема для цеха</span>
+              <span>· Полноэкранные сигналы: зелёный «принят», янтарный «дубль», красный «чужой ГТИН» — видно с двух метров</span>
+              <span>· Свои звуковые тоны на каждый случай — слышно в шуме, не глядя на экран</span>
+              <span>· Вход оператора по PIN или бейджу, исключения — сканом</span>
+            </span>
+          </div>
+        </div>
+        <div style="border: 1px solid #E0DED7; border-radius: 16px; overflow: hidden; background: #FFFFFF; display: flex; flex-direction: column">
+          <div style="background: #F0EFEA; padding: 18px; display: flex; gap: 10px">
+            <div style="width: 120px; flex-shrink: 0; display: flex; flex-direction: column; gap: 4px; font: 500 11px/1 'IBM Plex Sans', sans-serif; color: #6B6862">
+              <span style="display: flex; align-items: center; gap: 6px; padding: 6px 8px"><svg width="14" height="14" viewBox="0 0 64 64"><rect x="4" y="4" width="56" height="56" fill="#17161A"/><g fill="#FAFAF8"><rect x="14" y="14" width="8" height="8"/><rect x="26" y="22" width="8" height="8"/><rect x="38" y="14" width="8" height="8"/><rect x="26" y="42" width="8" height="8" fill="#3DDC7A"/></g></svg><span style="font-family: 'IBM Plex Mono', monospace; font-weight: 600; color: #17161A">маркиро</span></span>
+              <span style="padding: 6px 8px">Обзор</span>
+              <span style="padding: 6px 8px; background: #FFFFFF; border-radius: 6px; box-shadow: inset 0 0 0 1px #E0DED7; color: #17161A; font-weight: 600">Смены</span>
+              <span style="padding: 6px 8px">Каталог</span>
+              <span style="padding: 6px 8px">Экспорт</span>
+            </div>
+            <div style="flex: 1; background: #FFFFFF; border: 1px solid #E0DED7; border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 6px; font: 400 11px/16px 'IBM Plex Sans', sans-serif">
+              <span style="display: flex; justify-content: space-between; color: #6B6862; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em"><span>Линия · продукт</span><span>Факт / план</span></span>
+              <span style="display: flex; justify-content: space-between; border-top: 1px solid #F0EFEA; padding-top: 6px"><span>Линия 1 · Жигулёвское 0,5</span><span style="font-family: 'IBM Plex Mono', monospace">47 213 / 50 000</span></span>
+              <span style="display: block; height: 4px; background: #F0EFEA; border-radius: 2px"><span style="display: block; width: 94%; height: 100%; background: #0FAF56; border-radius: 2px"></span></span>
+              <span style="display: flex; justify-content: space-between; border-top: 1px solid #F0EFEA; padding-top: 6px"><span>Линия 2 · Вода газ. 1,0</span><span style="font-family: 'IBM Plex Mono', monospace">12 400 / 40 000</span></span>
+              <span style="display: block; height: 4px; background: #F0EFEA; border-radius: 2px"><span style="display: block; width: 31%; height: 100%; background: #0FAF56; border-radius: 2px"></span></span>
+              <span style="display: flex; gap: 4px; margin-top: 2px"><span style="padding: 2px 6px; border-radius: 3px; background: #E7F6EC; color: #116335; font-weight: 600; font-size: 10px">✓ Отправлено</span><span style="padding: 2px 6px; border-radius: 3px; background: #E5EFFC; color: #1A4F9C; font-weight: 600; font-size: 10px">⟳ Синхронизация</span></span>
+            </div>
+          </div>
+          <div style="padding: 24px; display: flex; flex-direction: column; gap: 12px">
+            <span style="font: 700 20px/26px 'IBM Plex Sans', sans-serif">Админ-панель</span>
+            <span style="display: flex; flex-direction: column; gap: 7px; font: 400 15px/22px 'IBM Plex Sans', sans-serif; color: #45433E">
+              <span>· Живые счётчики всех линий и смен, вклад каждого терминала</span>
+              <span>· Каталог продукции с фото, короба и паллеты — из карточки продукта</span>
+              <span>· Полная история каждого кода: от печати до отгрузки</span>
+              <span>· Экспорт для 1С и ГИС МТ, редактор шаблонов этикеток, роли и PIN операторов</span>
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Как работает -->
+  <section id="how" style="background: #F0EFEA; border-bottom: 1px solid #E0DED7">
+    <div style="max-width: 1200px; margin: 0 auto; padding: 64px 24px; display: flex; flex-direction: column; gap: 32px">
+      <h2 style="margin: 0; font: 700 32px/40px 'IBM Plex Sans', sans-serif">Три шага — и линия работает</h2>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 16px">
+        <div style="border: 1px solid #E0DED7; border-radius: 12px; padding: 28px; display: flex; flex-direction: column; gap: 14px; background: #FFFFFF">
+          <span style="font: 600 15px/1 'IBM Plex Mono', monospace; color: #0B8A44">01</span>
+          <span style="font: 700 20px/26px 'IBM Plex Sans', sans-serif">Создайте смену</span>
+          <span style="font: 400 15px/23px 'IBM Plex Sans', sans-serif; color: #45433E">В админке или прямо на станции: продукт из каталога, план, режим — валидация или валидация с агрегацией. Коды приходят из Честного ЗНАКА автоматически, остаток виден заранее.</span>
+          <span style="margin-top: auto; display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid #E0DED7; border-radius: 8px; font: 400 13px/18px 'IBM Plex Sans', sans-serif; color: #6B6862"><span style="width: 8px; height: 8px; border-radius: 2px; background: #0FAF56; flex-shrink: 0"></span>Смена № 215 · Вода газ. 1,0 · план 40 000 · линия 2</span>
+        </div>
+        <div style="border: 1px solid #E0DED7; border-radius: 12px; padding: 28px; display: flex; flex-direction: column; gap: 14px; background: #FFFFFF">
+          <span style="font: 600 15px/1 'IBM Plex Mono', monospace; color: #0B8A44">02</span>
+          <span style="font: 700 20px/26px 'IBM Plex Sans', sans-serif">Сканируйте и агрегируйте</span>
+          <span style="font: 400 15px/23px 'IBM Plex Sans', sans-serif; color: #45433E">Оператор сканирует — станция проверяет код, ловит дубли между терминалами, заполняет короб и сама печатает этикетку. Интернет пропал? Работаем дальше, отправим позже.</span>
+          <span style="margin-top: auto; display: flex; gap: 6px">
+            <span style="flex: 1; display: flex; align-items: center; justify-content: center; height: 38px; border-radius: 6px; background: #E7F6EC; color: #116335; font: 700 13px/1 'IBM Plex Sans', sans-serif">✓ принят</span>
+            <span style="flex: 1; display: flex; align-items: center; justify-content: center; height: 38px; border-radius: 6px; background: #FDF0DC; color: #8A4C07; font: 700 13px/1 'IBM Plex Sans', sans-serif">⧉ дубль</span>
+            <span style="flex: 1; display: flex; align-items: center; justify-content: center; height: 38px; border-radius: 6px; background: #FDEAE7; color: #A1231A; font: 700 13px/1 'IBM Plex Sans', sans-serif">✕ чужой</span>
+          </span>
+        </div>
+        <div style="border: 1px solid #E0DED7; border-radius: 12px; padding: 28px; display: flex; flex-direction: column; gap: 14px; background: #FFFFFF">
+          <span style="font: 600 15px/1 'IBM Plex Mono', monospace; color: #0B8A44">03</span>
+          <span style="font: 700 20px/26px 'IBM Plex Sans', sans-serif">Заберите отчёты</span>
+          <span style="font: 400 15px/23px 'IBM Plex Sans', sans-serif; color: #45433E">Файлы для 1С и ГИС МТ формируются за две минуты: ввод в оборот, агрегаты, полная история кодов. Никакой ручной сверки и «ночей с Excel».</span>
+          <span style="margin-top: auto; display: flex; gap: 6px; flex-wrap: wrap">
+            <span style="padding: 8px 12px; border: 1px solid #E0DED7; border-radius: 6px; font: 500 13px/1 'IBM Plex Mono', monospace; color: #45433E">gismt_214.xml</span>
+            <span style="padding: 8px 12px; border: 1px solid #E0DED7; border-radius: 6px; font: 500 13px/1 'IBM Plex Mono', monospace; color: #45433E">1c_смена_214.csv</span>
+          </span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Схема / оборудование -->
+  <section id="scheme" style="border-bottom: 1px solid #E0DED7">
+    <div style="max-width: 1200px; margin: 0 auto; padding: 64px 24px; display: flex; flex-direction: column; gap: 32px">
+      <div style="display: flex; flex-direction: column; gap: 10px; max-width: 680px">
+        <h2 style="margin: 0; font: 700 32px/40px 'IBM Plex Sans', sans-serif">Работает на вашем оборудовании</h2>
+        <p style="margin: 0; font: 400 16px/25px 'IBM Plex Sans', sans-serif; color: #45433E">Никаких проприетарных терминалов. Локальный агент подхватывает принтер и сканер за минуты — настройку осилит не-айтишник, по шагам на экране.</p>
+      </div>
+      <div style="display: flex; align-items: stretch; gap: 12px; flex-wrap: wrap">
+        <div style="flex: 1; min-width: min(220px, 100%); border: 1px solid #E0DED7; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 10px; background: #FFFFFF">
+          <span style="font: 600 13px/1 'IBM Plex Sans', sans-serif; color: #6B6862; text-transform: uppercase; letter-spacing: 0.05em">У линии</span>
+          <span style="display: flex; flex-direction: column; gap: 8px; font: 400 14px/20px 'IBM Plex Sans', sans-serif; color: #45433E">
+            <span style="display: flex; gap: 8px; align-items: center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#17161A" stroke-width="2"><path d="M3 7V3h4M17 3h4v4M21 17v4h-4M7 21H3v-4M7 12h10"/></svg>Сканер USB / COM</span>
+            <span style="display: flex; gap: 8px; align-items: center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#17161A" stroke-width="2"><path d="M6 9V3h12v6M6 15H3V9h18v6h-3M6 13h12v8H6z"/></svg>Принтер ZPL / TSPL</span>
+            <span style="display: flex; gap: 8px; align-items: center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#17161A" stroke-width="2"><path d="M4 4h16v12H4zM9 20h6M12 16v4"/></svg>Планшет или ПК</span>
+          </span>
+        </div>
+        <span style="align-self: center; font: 600 20px/1 'IBM Plex Mono', monospace; color: #A5A29A">→</span>
+        <div style="flex: 1.2; min-width: min(240px, 100%); border: 2px solid #17161A; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 10px; background: #FFFFFF">
+          <span style="display: flex; align-items: center; gap: 8px">
+            <svg width="20" height="20" viewBox="0 0 64 64"><rect x="4" y="4" width="56" height="56" fill="#17161A"/><g fill="#FAFAF8"><rect x="14" y="14" width="8" height="8"/><rect x="26" y="22" width="8" height="8"/><rect x="38" y="14" width="8" height="8"/><rect x="26" y="42" width="8" height="8" fill="#3DDC7A"/></g></svg>
+            <span style="font: 700 16px/1 'IBM Plex Sans', sans-serif">Станция Маркиро</span>
+          </span>
+          <span style="font: 400 14px/21px 'IBM Plex Sans', sans-serif; color: #45433E">Локальный агент оборудования + буфер на всю смену. Валидация и агрегация происходят здесь — интернет не нужен в момент скана.</span>
+          <span style="font: 500 12px/1 'IBM Plex Mono', monospace; color: #0B8A44">офлайн-очередь: до 100 000 сканов</span>
+        </div>
+        <span style="align-self: center; font: 600 20px/1 'IBM Plex Mono', monospace; color: #A5A29A">⇄</span>
+        <div style="flex: 1; min-width: min(220px, 100%); border: 1px solid #E0DED7; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 10px; background: #FFFFFF">
+          <span style="font: 600 13px/1 'IBM Plex Sans', sans-serif; color: #6B6862; text-transform: uppercase; letter-spacing: 0.05em">Облако Маркиро</span>
+          <span style="font: 400 14px/21px 'IBM Plex Sans', sans-serif; color: #45433E">Админ-панель, сверка между терминалами, хранение истории кодов. Дата-центры в РФ.</span>
+        </div>
+        <span style="align-self: center; font: 600 20px/1 'IBM Plex Mono', monospace; color: #A5A29A">→</span>
+        <div style="flex: 1; min-width: min(220px, 100%); border: 1px dashed #C9C6BD; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 10px">
+          <span style="font: 600 13px/1 'IBM Plex Sans', sans-serif; color: #6B6862; text-transform: uppercase; letter-spacing: 0.05em">Ваши системы</span>
+          <span style="display: flex; flex-direction: column; gap: 8px; font: 400 14px/20px 'IBM Plex Sans', sans-serif; color: #45433E">
+            <span>ГИС МТ (Честный ЗНАК)</span>
+            <span>1С — выгрузки и API</span>
+            <span>WMS / ERP — открытый API</span>
+          </span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Возможности -->
+  <section id="features" style="background: #F0EFEA; border-bottom: 1px solid #E0DED7">
+    <div style="max-width: 1200px; margin: 0 auto; padding: 64px 24px; display: flex; flex-direction: column; gap: 32px">
+      <h2 style="margin: 0; font: 700 32px/40px 'IBM Plex Sans', sans-serif">Возможности</h2>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 16px">
+        <sc-for list="{{ features }}" as="f" hint-placeholder-count="8">
+          <div style="background: #FFFFFF; border: 1px solid #E0DED7; border-radius: 12px; padding: 22px; display: flex; flex-direction: column; gap: 10px">
+            <span style="font: 600 16px/22px 'IBM Plex Sans', sans-serif">{{ f.title }}</span>
+            <span style="font: 400 14px/21px 'IBM Plex Sans', sans-serif; color: #6B6862">{{ f.text }}</span>
+          </div>
+        </sc-for>
+      </div>
+      <div style="display: flex; align-items: center; gap: 24px; background: #17161A; border-radius: 16px; padding: 28px 32px; flex-wrap: wrap">
+        <div style="flex: 1; min-width: min(280px, 100%); display: flex; flex-direction: column; gap: 8px">
+          <span style="font: 700 22px/30px 'IBM Plex Sans', sans-serif; color: #FAFAF8">Несколько терминалов — одна смена</span>
+          <span style="font: 400 15px/23px 'IBM Plex Sans', sans-serif; color: #B6B3AB">Два-три рабочих места делят общий план: счётчики складываются, дубль между терминалами ловится мгновенно, а после офлайна конфликты разбирает менеджер — не оператор.</span>
+        </div>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap">
+          <span style="display: flex; flex-direction: column; gap: 3px; padding: 14px 18px; border: 1px solid #45444B; border-radius: 10px"><span style="font: 600 24px/1 'IBM Plex Mono', monospace; color: #FAFAF8">Т-1 · 24 613</span><span style="font: 400 13px/1 'IBM Plex Sans', sans-serif; color: #8A877F">Смирнов А.</span></span>
+          <span style="display: flex; flex-direction: column; gap: 3px; padding: 14px 18px; border: 1px solid #45444B; border-radius: 10px"><span style="font: 600 24px/1 'IBM Plex Mono', monospace; color: #FAFAF8">Т-2 · 22 600</span><span style="font: 400 13px/1 'IBM Plex Sans', sans-serif; color: #8A877F">Ковалёва И.</span></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Группы -->
+  <section style="border-bottom: 1px solid #E0DED7">
+    <div style="max-width: 1200px; margin: 0 auto; padding: 56px 24px; display: flex; align-items: center; gap: 32px; flex-wrap: wrap">
+      <div style="flex: 1; min-width: min(300px, 100%); display: flex; flex-direction: column; gap: 12px">
+        <h2 style="margin: 0; font: 700 28px/36px 'IBM Plex Sans', sans-serif">Пиво · вода · безалкогольные</h2>
+        <p style="margin: 0; font: 400 16px/25px 'IBM Plex Sans', sans-serif; color: #45433E">Платформа универсальна для товарных групп Честного ЗНАКА: молочная продукция, БАДы и другие группы подключаются без замены оборудования и переобучения операторов — меняется только карточка продукта.</p>
+      </div>
+      <div style="display: flex; gap: 10px; flex-wrap: wrap">
+        <span style="display: inline-flex; align-items: center; height: 44px; padding: 0 20px; border-radius: 999px; border: 1px solid #17161A; font: 600 15px/1 'IBM Plex Sans', sans-serif">Пиво и слабоалкогольные</span>
+        <span style="display: inline-flex; align-items: center; height: 44px; padding: 0 20px; border-radius: 999px; border: 1px solid #17161A; font: 600 15px/1 'IBM Plex Sans', sans-serif">Упакованная вода</span>
+        <span style="display: inline-flex; align-items: center; height: 44px; padding: 0 20px; border-radius: 999px; border: 1px solid #17161A; font: 600 15px/1 'IBM Plex Sans', sans-serif">Безалкогольные напитки</span>
+        <span style="display: inline-flex; align-items: center; height: 44px; padding: 0 20px; border-radius: 999px; border: 1px dashed #C9C6BD; color: #6B6862; font: 500 15px/1 'IBM Plex Sans', sans-serif">+ ваша группа</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Цена -->
+  <section id="pricing" style="background: #17161A; color: #FAFAF8">
+    <div style="max-width: 1200px; margin: 0 auto; padding: 64px 24px; display: flex; flex-direction: column; gap: 28px">
+      <h2 style="margin: 0; font: 700 32px/40px 'IBM Plex Sans', sans-serif">Понятная цена за линию</h2>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 16px">
+        <div style="border: 1px solid #45444B; border-radius: 12px; padding: 28px; display: flex; flex-direction: column; gap: 14px">
+          <span style="font: 600 14px/1 'IBM Plex Sans', sans-serif; color: #8A877F; text-transform: uppercase; letter-spacing: 0.05em">Подписка</span>
+          <span style="font: 600 clamp(28px, 6vw, 44px)/1.15 'IBM Plex Mono', monospace"><span style="white-space: nowrap">от {{ priceFrom }}</span> <span style="font-size: 22px; color: #8A877F; white-space: nowrap">₽/мес за линию</span></span>
+          <span style="font: 400 15px/23px 'IBM Plex Sans', sans-serif; color: #B6B3AB">Станция + админ-панель + обновления под новые требования Честного ЗНАКА. Терминалы внутри линии — без доплат.</span>
+          <span style="font: 400 13px/19px 'IBM Plex Sans', sans-serif; color: #8A877F">Точный расчёт — после короткого звонка: зависит от числа линий и групп.</span>
+        </div>
+        <div style="border: 1px dashed #45444B; border-radius: 12px; padding: 28px; display: flex; flex-direction: column; gap: 14px; justify-content: center">
+          <span style="font: 600 18px/26px 'IBM Plex Sans', sans-serif">Что входит всегда</span>
+          <span style="display: flex; flex-direction: column; gap: 8px; font: 400 15px/22px 'IBM Plex Sans', sans-serif; color: #B6B3AB">
+            <span>✓ Неограниченные операторы и смены</span>
+            <span>✓ Работа без интернета всю смену</span>
+            <span>✓ Выгрузки для 1С и ГИС МТ, открытый API</span>
+            <span>✓ Редактор шаблонов этикеток</span>
+            <span>✓ Помощь при подключении — 1 день</span>
+          </span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section id="faq" style="border-bottom: 1px solid #E0DED7">
+    <div style="max-width: 1200px; margin: 0 auto; padding: 64px 24px; display: flex; flex-direction: column; gap: 32px">
+      <h2 style="margin: 0; font: 700 32px/40px 'IBM Plex Sans', sans-serif">Частые вопросы</h2>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); gap: 16px 40px">
+        <sc-for list="{{ faq }}" as="q" hint-placeholder-count="6">
+          <div style="display: flex; flex-direction: column; gap: 8px; padding: 20px 0; border-top: 1px solid #E0DED7">
+            <span style="font: 600 17px/24px 'IBM Plex Sans', sans-serif">{{ q.q }}</span>
+            <span style="font: 400 15px/23px 'IBM Plex Sans', sans-serif; color: #45433E">{{ q.a }}</span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </section>
+
+  <!-- Демо-форма -->
+  <section id="demo" style="background: #F0EFEA">
+    <div style="max-width: 1200px; margin: 0 auto; padding: 64px 24px; display: flex; gap: 48px; align-items: center; flex-wrap: wrap">
+      <div style="flex: 1; min-width: min(300px, 100%); display: flex; flex-direction: column; gap: 14px">
+        <h2 style="margin: 0; font: 700 32px/40px 'IBM Plex Sans', sans-serif">Посмотрите на своей линии</h2>
+        <p style="margin: 0; font: 400 16px/25px 'IBM Plex Sans', sans-serif; color: #45433E">Покажем демо на ваших продуктах и посчитаем цену. Обычно перезваниваем в течение часа в рабочее время.</p>
+        <a href="tel:{{ phoneHref }}" style="text-decoration: none; font: 600 26px/1 'IBM Plex Mono', monospace; color: #17161A">{{ phone }}</a>
+        <span style="display: flex; flex-direction: column; gap: 6px; font: 400 14px/20px 'IBM Plex Sans', sans-serif; color: #6B6862">
+          <span>✓ Демо на ваших продуктах и вашем принтере</span>
+          <span>✓ Расчёт цены сразу на звонке</span>
+          <span>✓ Пилот на одной линии до оплаты</span>
+        </span>
+      </div>
+      <div style="flex: 1; min-width: min(320px, 100%); background: #FFFFFF; border: 1px solid #E0DED7; border-radius: 12px; padding: 28px; display: flex; flex-direction: column; gap: 14px; box-shadow: 0 2px 8px rgba(23,22,26,0.06)">
+        <sc-if value="{{ formSent }}" hint-placeholder-val="{{ false }}">
+          <div style="display: flex; flex-direction: column; gap: 10px; align-items: center; text-align: center; padding: 24px 0">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#0FAF56" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M8 12.5l3 3 5.5-6"/></svg>
+            <span style="font: 700 20px/26px 'IBM Plex Sans', sans-serif">Заявка отправлена</span>
+            <span style="font: 400 15px/22px 'IBM Plex Sans', sans-serif; color: #6B6862">Перезвоним в течение часа в рабочее время.</span>
+          </div>
+        </sc-if>
+        <sc-if value="{{ formNotSent }}" hint-placeholder-val="{{ true }}">
+          <label style="display: flex; flex-direction: column; gap: 6px">
+            <span style="font: 500 12px/16px 'IBM Plex Sans', sans-serif; color: #45433E">Как вас зовут</span>
+            <input value="{{ fName }}" onChange="{{ setName }}" placeholder="Имя" style="height: 44px; padding: 0 12px; border: 1px solid #C9C6BD; border-radius: 8px; font-size: 15px; outline-color: #1A4F9C">
+          </label>
+          <label style="display: flex; flex-direction: column; gap: 6px">
+            <span style="font: 500 12px/16px 'IBM Plex Sans', sans-serif; color: #45433E">Компания</span>
+            <input value="{{ fCompany }}" onChange="{{ setCompany }}" placeholder="Название или что производите" style="height: 44px; padding: 0 12px; border: 1px solid #C9C6BD; border-radius: 8px; font-size: 15px; outline-color: #1A4F9C">
+          </label>
+          <label style="display: flex; flex-direction: column; gap: 6px">
+            <span style="font: 500 12px/16px 'IBM Plex Sans', sans-serif; color: #45433E">Телефон</span>
+            <input value="{{ fPhone }}" onChange="{{ setPhone }}" placeholder="+7 ___ ___-__-__" style="height: 44px; padding: 0 12px; border: 1px solid #C9C6BD; border-radius: 8px; font-size: 15px; font-family: 'IBM Plex Mono', monospace; outline-color: #1A4F9C">
+          </label>
+          <button onClick="{{ submitForm }}" style="height: 52px; border-radius: 8px; border: none; background: #17161A; color: #FAFAF8; font: 600 16px/1 'IBM Plex Sans', sans-serif">Запросить демо</button>
+          <span style="font: 400 12px/17px 'IBM Plex Sans', sans-serif; color: #8A877F">Никаких рассылок — только звонок по вашей заявке.</span>
+        </sc-if>
+      </div>
+    </div>
+  </section>
+
+  <footer style="background: #17161A; color: #8A877F">
+    <div style="max-width: 1200px; margin: 0 auto; padding: 28px 24px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap">
+      <span style="display: flex; align-items: center; gap: 8px">
+        <svg width="22" height="22" viewBox="0 0 64 64"><rect x="4" y="4" width="56" height="56" fill="#FAFAF8"/><g fill="#17161A"><rect x="14" y="14" width="8" height="8"/><rect x="14" y="26" width="8" height="8"/><rect x="14" y="38" width="8" height="8"/><rect x="26" y="22" width="8" height="8"/><rect x="38" y="14" width="8" height="8"/><rect x="38" y="26" width="8" height="8"/><rect x="38" y="38" width="8" height="8"/><rect x="26" y="42" width="8" height="8" fill="#0FAF56"/></g></svg>
+        <span style="font: 600 15px/1 'IBM Plex Mono', monospace; color: #FAFAF8">маркиро</span>
+      </span>
+      <span style="font: 400 13px/1 'IBM Plex Sans', sans-serif">Сериализация, валидация и агрегация для маркировки «Честный ЗНАК»</span>
+      <span style="flex: 1"></span>
+      <a href="tel:{{ phoneHref }}" style="text-decoration: none; font: 600 14px/1 'IBM Plex Mono', monospace; color: #FAFAF8">{{ phone }}</a>
+      <span style="font: 400 13px/1 'IBM Plex Sans', sans-serif">markiro.ru · 2026</span>
+    </div>
+  </footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;phone&quot;: {&quot;editor&quot;: &quot;text&quot;, &quot;default&quot;: &quot;+7 800 555-01-42&quot;, &quot;tsType&quot;: &quot;string&quot;, &quot;section&quot;: &quot;Контакты&quot;}, &quot;priceFrom&quot;: {&quot;editor&quot;: &quot;text&quot;, &quot;default&quot;: &quot;15 000&quot;, &quot;tsType&quot;: &quot;string&quot;, &quot;section&quot;: &quot;Цена&quot;}}">
+class Component extends DCLogic {
+  state = { sent: false, name: '', company: '', phone: '' };
+  renderVals() {
+    const phone = this.props.phone ?? '+7 800 555-01-42';
+    return {
+      phone, phoneHref: phone.replace(/[^+\d]/g, ''),
+      priceFrom: this.props.priceFrom ?? '15 000',
+      playVideo: () => {},
+      heroCells: Array.from({ length: 20 }).map((_, i) => ({
+        bg: i < 14 ? '#3DDC7A' : 'transparent',
+        border: i < 14 ? '#3DDC7A' : '#45444B',
+      })),
+      heroPallet: Array.from({ length: 12 }).map((_, i) => ({
+        bg: i < 3 ? '#6DB2FF' : 'transparent',
+        border: i < 3 ? '#6DB2FF' : '#45444B',
+      })),
+      pains: [
+        { pain: 'Штраф до 300 тысяч за ошибку маркировки', painText: 'Один непроверенный код на партию — и проверка превращается в убыток.', fix: '100% кодов проверяется на линии', fixText: 'Невалидный код и чужой ГТИН не попадут в короб: станция остановит именно эту бутылку, а не линию.' },
+        { pain: 'Ручная сверка кодов часами', painText: 'Технолог сверяет выгрузки построчно вместо производства.', fix: 'Сверка происходит в момент скана', fixText: 'История каждого кода ведётся автоматически: от печати до отгрузки. Сверять нечего — всё уже сошлось.' },
+        { pain: 'Агрегация в Excel', painText: 'Короба и паллеты «собираются» копипастом — до первой перепутанной строки.', fix: 'Короб собирается сам, на экране', fixText: 'Ячейки заполняются с каждым сканом, этикетка печатается автоматически. Паллета — так же.' },
+        { pain: '«Система маркировки лежит» — линия стоит', painText: 'Пропал интернет — встала линия. Простой смены дороже любого софта.', fix: 'Полная смена офлайн', fixText: 'Станция работает без связи 8+ часов: проверка, агрегация, печать. Всё отправится само, когда связь вернётся.' },
+      ],
+      features: [
+        { title: 'Валидация с контролем дублей', text: 'Каждый код проверяется на линии; дубль ловится мгновенно — даже между терминалами, с указанием, кто сканировал первым.' },
+        { title: 'Агрегация в 3 уровня', text: 'Единица → короб → паллета с автопечатью этикеток. Вместимость — из карточки продукта. Разагрегация и замена единицы — сканом.' },
+        { title: 'Офлайн на всю смену', text: 'Интернет не нужен в момент скана: очередь до 100 000 сканов хранится на станции и отправляется сама.' },
+        { title: 'Несколько терминалов на смену', text: 'Общий план и счётчики; видно вклад каждого рабочего места и оператора.' },
+        { title: 'Редактор этикеток', text: 'Шаблоны коробов и паллет под ваш принтер — без программиста. SSCC, GTIN, партия, дата — перетаскиванием.' },
+        { title: 'Открытый API', text: 'Интеграция с 1С, WMS и вашими системами. Выгрузки в форматах ГИС МТ из коробки.' },
+        { title: 'Операторам — просто', text: 'Вход по PIN или бейджу, одна задача на экран, подсказки словами: «Проверьте бумагу в принтере», а не код ошибки.' },
+        { title: 'Русский и английский', text: 'Интерфейс станции и админки на двух языках. Светлая и тёмная темы, крупные цели под перчатку.' },
+      ],
+      faq: [
+        { q: 'Что будет, если пропадёт интернет?', a: 'Ничего. Станция работает офлайн всю смену: проверяет коды, собирает короба, печатает этикетки. Когда связь вернётся — всё отправится само, а конфликты (если один код сканировали на двух терминалах) разберёт менеджер в админке.' },
+        { q: 'Какое оборудование нужно?', a: 'Любой принтер этикеток ZPL/TSPL (Zebra, TSC, Godex…), сканер USB или COM и планшет либо обычный компьютер у линии. Скорее всего, у вас всё это уже есть.' },
+        { q: 'Сколько времени занимает запуск?', a: 'Один день: утром подключаем принтер и сканер через локальный агент, днём обучаем оператора — вход по PIN, дальше станция ведёт сама. Вечером первая смена уже с отчётом.' },
+        { q: 'Где хранятся данные?', a: 'В дата-центрах на территории РФ. Коды и отчёты принадлежат вам — выгрузка доступна в любой момент, API открыт.' },
+        { q: 'Наши операторы справятся?', a: 'Да. На экране одна задача: сканируй. Ошибки — на весь экран, словами, со звуком. Кнопки нажимаются в перчатке. Обучение занимает минуты, а не дни.' },
+        { q: 'Поддерживаете нашу товарную группу?', a: 'Сегодня — пиво, вода и безалкогольные напитки. Платформа универсальна для групп Честного ЗНАКА: новая группа — это карточка продукта, не новое внедрение. Спросите нас про вашу.' },
+      ],
+      formSent: this.state.sent, formNotSent: !this.state.sent,
+      fName: this.state.name, fCompany: this.state.company, fPhone: this.state.phone,
+      setName: (e) => this.setState({ name: e.target.value }),
+      setCompany: (e) => this.setState({ company: e.target.value }),
+      setPhone: (e) => this.setState({ phone: e.target.value }),
+      submitForm: () => this.setState({ sent: true }),
+    };
+  }
+}
+</script>
+</body>
+</html>
