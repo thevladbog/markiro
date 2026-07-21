@@ -9,7 +9,7 @@
 | # | Plan | Scope | Depends on |
 |---|------|-------|-----------|
 | 01 | **Foundation & GS1 domain core** (written: `2026-07-21-01-foundation-gs1-domain.md`) | Turborepo+pnpm scaffold, CI, `packages/domain`: check digits, GTIN, KM DataMatrix parsing, SSCC, scan classification, shift-scan validation | — |
-| 02 | DB package & API skeleton | `packages/db` (Drizzle PG schemas: orgs/users/counterparties/products/shifts/codes partitioned/scan_events), NestJS app, Better Auth (organization, api-key plugins), docker-compose dev, health/OpenAPI | 01 |
+| 02 | **DB package & API skeleton** (written: `2026-07-22-02-db-api-skeleton.md`) | `packages/db` (Drizzle PG schemas: orgs/users/counterparties/products/shifts/codes partitioned/scan_events), NestJS app, Better Auth (organization, api-key plugins), docker-compose dev, health/OpenAPI; + lint/CI hardening (ESLint, CodeQL, dependency review) | 01 |
 | 03 | Catalog, counterparties & shifts | CRUD API + admin panel shell (`packages/ui` from handoff tokens, sidebar, RU/EN i18n, light/dark), product cards with GTIN owner auto-detection, shift planning | 02 |
 | 04 | Label templates | Domain: template model, ZPL/TSPL generation, Cyrillic canvas rasterization + font coverage check; admin: template library + WYSIWYG editor + preview | 03 |
 | 05 | Station shell | Tauri 2 app (Windows), device enrollment, offline PIN/badge auth, SQLite mirror via drizzle sqlite-proxy, shift select/ad-hoc create, validation screen + signal system (flash/sound), hardware module (serial scanner, ZPL/TSPL printers, idento-agent-shaped contract) | 04 |
