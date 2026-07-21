@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DomainError } from "../src/errors.js";
 import { kmKey, parseKm } from "../src/gs1/km.js";
 
-const GS = "";
+const GS = "\u001d";
 // Synthetic but structurally exact Chestny ZNAK beverage code:
 // AI 01 (GTIN-14, fixed 14) + AI 21 (serial, GS-terminated) + AI 93 (crypto tail).
 const RAW = `010460068200001321abcDEF1234567${GS}93AbCd`;
@@ -21,6 +21,13 @@ describe("parseKm", () => {
   it("parses a serial terminated by end-of-string (no crypto tail)", () => {
     const km = parseKm("0104600682000013" + "21XyZ9");
     expect(km.serial).toBe("XyZ9");
+  });
+  it("survives consecutive GS separators in the trailing AIs", () => {
+    const km = parseKm(
+      "0104600682000013" + "21XyZ9" + GS + GS + "93AbCd",
+    );
+    expect(km.serial).toBe("XyZ9");
+    expect(km.ais["93"]).toBe("AbCd");
   });
   it("rejects empty input with KM_EMPTY", () => {
     expect(() => parseKm("")).toThrowError(

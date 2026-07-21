@@ -1,7 +1,7 @@
 import { DomainError } from "../errors.js";
 import { normalizeToGtin14 } from "./gtin.js";
 
-const GS = "";
+const GS = "\u001d";
 
 export interface ParsedKm {
   gtin14: string;
@@ -32,11 +32,16 @@ export function parseKm(raw: string): ParsedKm {
   const serial = gsAt === -1 ? s.slice(2) : s.slice(2, gsAt);
   const ais: Record<string, string> = {};
   let rest = gsAt === -1 ? "" : s.slice(gsAt + 1);
-  while (rest.length > 2) {
+  while (rest.length > 0) {
+    if (rest.startsWith(GS)) {
+      rest = rest.slice(1);
+      continue;
+    }
+    if (rest.length <= 2) break;
     const ai = rest.slice(0, 2);
     const end = rest.indexOf(GS);
     ais[ai] = end === -1 ? rest.slice(2) : rest.slice(2, end);
-    rest = end === -1 ? "" : rest.slice(end + 1);
+    rest = end === -1 ? "" : rest.slice(end);
   }
   return { gtin14, serial, raw, ais };
 }
