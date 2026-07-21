@@ -95,7 +95,12 @@ integration screens, billing/tariffs UI, on-premise edition.
 - **GTIN** — global trade item number, identifies the product (also encoded in
   EAN-13).
 - **SSCC** — serial shipping container code: identity of a box/pallet, printed
-  on the group label.
+  on the group label. Built from the GS1 company prefix of the code owner —
+  see GLN below.
+- **GLN** — global location number identifying an organization/site. In
+  **contract manufacturing (tolling)** another plant asks us to bottle and
+  aggregate their product: the shift then runs under the customer's GLN so
+  SSCC codes and export files form for that organization, not ours.
 - **Aggregation** — recording which units are in which box, which boxes on
   which pallet (3 levels: unit → box → pallet), incl. re-packing and
   disassembly.

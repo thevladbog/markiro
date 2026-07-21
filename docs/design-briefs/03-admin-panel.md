@@ -19,7 +19,14 @@
   capacity defaults, default label template.
 - Product card: GTIN, name, photo, Chestny ZNAK product group, default box
   capacity, default pallet capacity, default label template (from the label
-  library), notes.
+  library), optional default **counterparty** (tolling customer — see
+  Counterparties below), notes.
+- **GTIN owner auto-detection:** on entering an EAN/GTIN, its GS1 company
+  prefix is compared against the organization's own prefixes and those of
+  known counterparties. Foreign prefix → inline highlight "GTIN owner looks
+  like another organization" with a one-tap suggestion to set the matching
+  counterparty (or create a new one). Design the hint as helpful, not
+  blocking.
 - Products are created **only here** (approved decision — no creation from
   the line). Incomplete cards carry a "Draft — complete it" status; a draft
   product blocks starting a shift on the station until completed.
@@ -31,7 +38,8 @@
 - Create/edit: product, planned quantity, date, line, mode (validation only /
   validation + aggregation), box & pallet capacity (prefilled from product,
   overridable), label template (default from product, re-selectable per
-  shift).
+  shift), counterparty (default from product, overridable) — a tolling shift
+  runs under the customer's GLN, so SSCC and exports form for them.
 - Shift card (live): progress vs plan, per-terminal counters, participants,
   scan feed, error/duplicate log, aggregation tree as it grows; close-shift
   action with summary.
@@ -63,6 +71,8 @@ design attention.
 ### 6. Exports
 - Build export files by shift or period; format presets for GIS MT / 1C
   (file-exchange formats; direct API comes later).
+- Filter/group by counterparty: tolling exports must be separable so files
+  go to the customer's own GIS MT account.
 - Export history: who, when, what range, file download, status.
 
 ### 7. Users
@@ -70,8 +80,14 @@ design attention.
 - Operators: name, login, numeric PIN, optional **badge barcode** — with
   "print badge" action reusing the label editor/printing pipeline.
 
-### 8. Settings
-- Organization profile; lines/workstations (name, expected hardware);
+### 8. Counterparties
+- Tolling customers: name, GLN, INN (tax id), GS1 company prefixes (for GTIN
+  owner auto-detection), contact notes; used by product cards and shifts.
+  No customer portal in MVP — we hand over export files.
+
+### 9. Settings
+- Organization profile (incl. own GLN and GS1 company prefixes);
+  lines/workstations (name, expected hardware);
 - API keys for external integrations (create/revoke, scopes read/write);
 - Language (RU/EN) and theme (light/dark/system) defaults.
 

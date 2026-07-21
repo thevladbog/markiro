@@ -42,8 +42,10 @@ both paths on one screen. Works in gloves.
 
 ### 2. Shift selection
 Available planned shifts as large cards (product, plan, mode, line) — 1–2
-cards visible, thumb-reachable. Plus "New shift" (below) and "Rejoin active
-shift" when 2–3 terminals share one shift.
+cards visible, thumb-reachable. Tolling shifts are visibly marked with the
+customer name («для: Завод X») on the card and in the work-screen status bar
+— the operator must always see whose product is being aggregated. Plus "New
+shift" (below) and "Rejoin active shift" when 2–3 terminals share one shift.
 
 ### 3. Ad-hoc shift creation (on the station)
 Flow: tap "New shift" → **scan EAN-13 or DataMatrix from a product unit** →
