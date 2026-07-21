@@ -24,7 +24,5 @@ export function validateShiftScan(raw: string, ctx: ShiftScanContext): ScanVerdi
     };
   }
   const key = kmKey(scan.km);
-  return ctx.isDuplicate(key)
-    ? { status: "duplicate", key }
-    : { status: "ok", key };
+  return ctx.isDuplicate(key) ? { status: "duplicate", key } : { status: "ok", key };
 }

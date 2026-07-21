@@ -49,7 +49,7 @@ expect 1–2 iterations.
   - Brand colors for office mode (admin, landing).
   - **Semantic status colors** — green (OK), red (error), amber (duplicate /
     attention), blue (syncing) — designed as first-class brand citizens, not
-    an afterthought: on the shop floor they *are* the interface. Must pass
+    an afterthought: on the shop floor they _are_ the interface. Must pass
     contrast in light and dark themes and remain distinguishable for
     color-blind users when paired with icons/shapes.
 - **Typography:** one family (or a pair) with full **Cyrillic support**,

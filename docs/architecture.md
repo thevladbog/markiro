@@ -27,21 +27,21 @@ exports, admin previews labels, all from the same tested code.
 
 ### Pinned toolchain (registry-checked 2026-07-21, exact versions in lockfile)
 
-| Package | Version |
-|---|---|
-| Node | 24 LTS (engines) |
-| pnpm | 11.10 |
-| turbo | 2.10 |
-| TypeScript | 6.0 |
-| NestJS | 11.1 |
-| drizzle-orm / drizzle-kit | 0.45 / 0.31 |
-| better-auth | 1.6 |
-| React | 19.2 |
-| Vite | 8.1 |
-| Tauri (cli/api) | 2.11 |
-| pg-boss | 12 |
-| Astro | 7.0 |
-| Zod | 4.4 |
+| Package                   | Version          |
+| ------------------------- | ---------------- |
+| Node                      | 24 LTS (engines) |
+| pnpm                      | 11.10            |
+| turbo                     | 2.10             |
+| TypeScript                | 6.0              |
+| NestJS                    | 11.1             |
+| drizzle-orm / drizzle-kit | 0.45 / 0.31      |
+| better-auth               | 1.6              |
+| React                     | 19.2             |
+| Vite                      | 8.1              |
+| Tauri (cli/api)           | 2.11             |
+| pg-boss                   | 12               |
+| Astro                     | 7.0              |
+| Zod                       | 4.4              |
 
 Root `.npmrc` (single, applies to the whole workspace): standard npm
 registry, `save-exact`, `engine-strict`, `minimum-release-age=10080`

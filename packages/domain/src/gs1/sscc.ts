@@ -9,11 +9,7 @@ export function ssccSerialCapacity(gs1Prefix: string): number {
   return 10 ** (16 - gs1Prefix.length);
 }
 
-export function buildSscc(
-  extensionDigit: number,
-  gs1Prefix: string,
-  serial: number,
-): string {
+export function buildSscc(extensionDigit: number, gs1Prefix: string, serial: number): string {
   if (!Number.isInteger(extensionDigit) || extensionDigit < 0 || extensionDigit > 9) {
     throw new DomainError("SSCC_PREFIX", `bad extension digit: ${extensionDigit}`);
   }

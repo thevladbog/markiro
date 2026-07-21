@@ -22,15 +22,18 @@
 ### Task 1: Lint & format toolchain
 
 **Files:**
+
 - Create: `eslint.config.mjs`, `.prettierrc.json`, `.prettierignore`
 - Modify: `package.json` (root: devDeps + scripts), `turbo.json` (lint task), `packages/domain/package.json` (lint script)
 
 **Interfaces:**
+
 - Produces: `pnpm turbo lint` and root `pnpm format` / `format:check`; every workspace package adds `"lint": "eslint ."` from now on.
 
 - [ ] **Step 1: Root config files**
 
 `eslint.config.mjs`:
+
 ```js
 import eslint from "@eslint/js";
 import prettier from "eslint-config-prettier";
@@ -57,11 +60,13 @@ export default tseslint.config(
 ```
 
 `.prettierrc.json`:
+
 ```json
 { "printWidth": 100, "singleQuote": false, "trailingComma": "all" }
 ```
 
 `.prettierignore`:
+
 ```
 dist/
 coverage/
@@ -73,6 +78,7 @@ docs/design-briefs/design_handoff_markiro/
 - [ ] **Step 2: Wire scripts**
 
 Root `package.json` — add devDeps `eslint@10.7.0`, `typescript-eslint@8.65.0`, `eslint-config-prettier@10.1.8`, `globals@17.7.0`, `prettier@3.9.6`, `@eslint/js` (same line pnpm resolves), `typescript@6.0.3`; add scripts:
+
 ```json
     "lint": "turbo run lint",
     "format": "prettier --write .",
@@ -80,6 +86,7 @@ Root `package.json` — add devDeps `eslint@10.7.0`, `typescript-eslint@8.65.0`,
 ```
 
 `turbo.json` — add to tasks:
+
 ```json
     "lint": {}
 ```
@@ -102,15 +109,18 @@ git add -A && git commit -m "chore: eslint 10 flat config + prettier across work
 ### Task 2: CI hardening & security workflows
 
 **Files:**
+
 - Modify: `.github/workflows/ci.yml`
 - Create: `.github/workflows/dependency-review.yml`, `.github/workflows/codeql.yml`
 
 **Interfaces:**
+
 - Produces: PR gate = lint + format + typecheck + test + build; dependency-review on PRs; CodeQL weekly + on PRs.
 
 - [ ] **Step 1: Extend ci.yml**
 
 Replace the run step and add concurrency (final file):
+
 ```yaml
 name: CI
 on:
@@ -144,11 +154,13 @@ jobs:
 - [ ] **Step 2: Pin actions by commit SHA**
 
 Resolve each tag once and replace `@v4` with `@<full-sha> # v4.x.y`:
+
 ```bash
 for a in actions/checkout actions/setup-node pnpm/action-setup actions/dependency-review-action github/codeql-action; do
   gh api repos/$a/tags --jq '.[0] | .name + " " + .commit.sha' | head -1
 done
 ```
+
 Apply the printed SHAs in all three workflow files (checkout/setup-node/pnpm in ci.yml; the rest below).
 
 - [ ] **Step 3: dependency-review.yml**
@@ -195,6 +207,7 @@ jobs:
 - [ ] **Step 5: Verify + commit**
 
 Run: `pnpm format:check && pnpm turbo lint typecheck test build` (mirror of CI).
+
 ```bash
 git add .github && git commit -m "ci: lint+format gate, SHA-pinned actions, dependency review, CodeQL"
 ```
@@ -204,14 +217,17 @@ git add .github && git commit -m "ci: lint+format gate, SHA-pinned actions, depe
 ### Task 3: Domain package dist wiring (deferred from Plan 01 final review)
 
 **Files:**
+
 - Modify: `packages/domain/package.json`
 
 **Interfaces:**
+
 - Produces: `@markiro/domain` importable by a plain-`tsc` CommonJS consumer (NestJS) via `dist/`; bundler consumers keep working.
 
 - [ ] **Step 1: Exports map**
 
 In `packages/domain/package.json` replace `main`/`types` with:
+
 ```json
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -239,16 +255,19 @@ git add packages/domain/package.json && git commit -m "fix(domain): exports map 
 ### Task 4: Dev environment & db package skeleton
 
 **Files:**
+
 - Create: `docker-compose.dev.yml`, `.env.example`
 - Create: `packages/db/package.json`, `packages/db/tsconfig.json`, `packages/db/drizzle.config.ts`, `packages/db/src/client.ts`, `packages/db/src/index.ts`
 - Modify: `.gitignore` (add `.env`)
 
 **Interfaces:**
+
 - Produces: `createDb(url): { db, pool }` (drizzle node-postgres) and `DATABASE_URL` convention; `pnpm --filter @markiro/db db:generate|db:migrate` (drizzle-kit). Later tasks add schema modules under `packages/db/src/schema/` re-exported from `src/schema.ts`.
 
 - [ ] **Step 1: Compose + env**
 
 `docker-compose.dev.yml`:
+
 ```yaml
 services:
   postgres:
@@ -266,6 +285,7 @@ volumes:
 ```
 
 `.env.example`:
+
 ```
 DATABASE_URL=postgres://markiro:markiro@localhost:5432/markiro
 BETTER_AUTH_SECRET=dev-secret-change-me
@@ -278,6 +298,7 @@ Append `.env` to `.gitignore`.
 - [ ] **Step 2: Package skeleton**
 
 `packages/db/package.json`:
+
 ```json
 {
   "name": "@markiro/db",
@@ -312,6 +333,7 @@ Append `.env` to `.gitignore`.
 `packages/db/tsconfig.json`: same shape as domain's (extends base, outDir dist, rootDir src, include src).
 
 `packages/db/drizzle.config.ts`:
+
 ```ts
 import { defineConfig } from "drizzle-kit";
 
@@ -324,6 +346,7 @@ export default defineConfig({
 ```
 
 `packages/db/src/client.ts`:
+
 ```ts
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
@@ -337,6 +360,7 @@ export type Db = ReturnType<typeof createDb>["db"];
 ```
 
 `packages/db/src/index.ts`:
+
 ```ts
 export { createDb } from "./client.js";
 export type { Db } from "./client.js";
@@ -356,10 +380,12 @@ git add -A && git commit -m "chore(db): dev compose, env convention, drizzle cli
 ### Task 5: Better Auth schema (tenancy tables)
 
 **Files:**
+
 - Create: `packages/db/src/auth-config.ts`, `packages/db/src/schema/auth.ts`, `packages/db/src/schema.ts`
 - Modify: `packages/db/package.json` (dep better-auth), `packages/db/src/index.ts`
 
 **Interfaces:**
+
 - Consumes: `createDb` (Task 4).
 - Produces: `buildAuth(db, opts: { secret: string; baseURL: string })` returning a configured better-auth instance with `organization` + `apiKey` plugins and drizzle adapter; drizzle tables `user, session, account, verification, organization, member, invitation, apikey` exported from `schema/auth.ts`. **`organization.id` is the platform-wide `tenant_id`.**
 
@@ -368,6 +394,7 @@ git add -A && git commit -m "chore(db): dev compose, env convention, drizzle cli
 Add dep: `pnpm --filter @markiro/db add better-auth@1.6.23`.
 
 `packages/db/src/auth-config.ts`:
+
 ```ts
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
@@ -390,17 +417,21 @@ export type Auth = ReturnType<typeof buildAuth>;
 - [ ] **Step 2: Generate the schema**
 
 Run better-auth CLI against a temporary config that mirrors `buildAuth` plugins:
+
 ```bash
 cd packages/db && npx @better-auth/cli@latest generate --config src/auth-config.ts --output src/schema/auth.ts
 ```
+
 If the CLI cannot introspect the factory form, create `auth.ts` (a flat `betterAuth({...})` export with the same plugins) temporarily at package root, generate, then delete it. Inspect the generated file: it must define drizzle pg tables `user, session, account, verification, organization, member, invitation, apikey`. Commit the generated file as source (regeneration is manual and reviewed).
 
 `packages/db/src/schema.ts`:
+
 ```ts
 export * from "./schema/auth.js";
 ```
 
 Re-export from `src/index.ts`:
+
 ```ts
 export * as schema from "./schema.js";
 export { buildAuth } from "./auth-config.js";
@@ -425,11 +456,13 @@ git add packages/db && git commit -m "feat(db): better-auth tenancy schema (orga
 ### Task 6: Platform tables (counterparties, products, lines, shifts)
 
 **Files:**
+
 - Create: `packages/db/src/schema/platform.ts`
 - Modify: `packages/db/src/schema.ts`
 - Test: `packages/db/test/schema.test.ts`
 
 **Interfaces:**
+
 - Consumes: `organization` table (Task 5).
 - Produces (drizzle tables, all with `tenantId` FK → `organization.id`):
   - `counterparties(id uuid pk, tenantId, name, gln text, inn text, gs1Prefixes text[], notes, createdAt)`
@@ -440,6 +473,7 @@ git add packages/db && git commit -m "feat(db): better-auth tenancy schema (orga
 - [ ] **Step 1: Failing test**
 
 `packages/db/test/schema.test.ts`:
+
 ```ts
 import { describe, expect, it } from "vitest";
 import { getTableName } from "drizzle-orm";
@@ -464,9 +498,19 @@ Run: `pnpm --filter @markiro/db test` — FAIL (module missing).
 - [ ] **Step 2: Implement**
 
 `packages/db/src/schema/platform.ts`:
+
 ```ts
 import {
-  boolean, char, date, integer, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid,
+  boolean,
+  char,
+  date,
+  integer,
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
 } from "drizzle-orm/pg-core";
 import { organization } from "./auth.js";
 
@@ -476,7 +520,9 @@ export const shiftMode = pgEnum("shift_mode", ["validation", "aggregation"]);
 export const shiftOrigin = pgEnum("shift_origin", ["admin", "station"]);
 
 const tenantId = () =>
-  text("tenant_id").notNull().references(() => organization.id);
+  text("tenant_id")
+    .notNull()
+    .references(() => organization.id);
 
 export const counterparties = pgTable("counterparties", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -516,7 +562,9 @@ export const lines = pgTable("lines", {
 export const shifts = pgTable("shifts", {
   id: uuid("id").primaryKey().defaultRandom(),
   tenantId: tenantId(),
-  productId: uuid("product_id").notNull().references(() => products.id),
+  productId: uuid("product_id")
+    .notNull()
+    .references(() => products.id),
   lineId: uuid("line_id").references(() => lines.id),
   counterpartyId: uuid("counterparty_id").references(() => counterparties.id),
   status: shiftStatus("status").notNull().default("planned"),
@@ -550,11 +598,13 @@ git add packages/db && git commit -m "feat(db): counterparties, products, lines,
 ### Task 7: Partitioned codes & scan_events
 
 **Files:**
+
 - Create: `packages/db/src/schema/codes.ts`, `packages/db/src/partitions.ts`, `packages/db/migrations/NNNN_partitioned_codes.sql` (hand-written; next number after drizzle's)
 - Modify: `packages/db/src/schema.ts`, `packages/db/src/index.ts`
 - Test: `packages/db/test/partitions.test.ts`
 
 **Interfaces:**
+
 - Consumes: `createDb` (Task 4).
 - Produces:
   - `codes` (partitioned parent): `tenant_id, code_hash char(64), shift_id uuid, gtin14 char(14), serial text, scanned_at timestamptz` — PK `(tenant_id, code_hash, scanned_at)`, RANGE partition by `scanned_at`.
@@ -565,6 +615,7 @@ git add packages/db && git commit -m "feat(db): counterparties, products, lines,
 - [ ] **Step 1: Failing test (partition helper against real PG)**
 
 `packages/db/test/partitions.test.ts`:
+
 ```ts
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb } from "../src/client.js";
@@ -593,6 +644,7 @@ Run: `pnpm --filter @markiro/db test` — FAIL (module missing). (Without DATABA
 - [ ] **Step 2: SQL migration (hand-written, appended to drizzle journal)**
 
 Create the next-numbered migration via `drizzle-kit generate --custom --name partitioned_codes`, then fill the generated empty SQL file with:
+
 ```sql
 CREATE TABLE "codes" (
   "tenant_id" text NOT NULL REFERENCES "organization"("id"),
@@ -620,6 +672,7 @@ CREATE INDEX "scan_events_shift_idx" ON "scan_events" ("shift_id", "scanned_at")
 - [ ] **Step 3: Partition helper + drizzle defs**
 
 `packages/db/src/partitions.ts`:
+
 ```ts
 import { sql } from "drizzle-orm";
 import type { Db } from "./client.js";
@@ -645,9 +698,7 @@ export async function ensurePartitions(db: Db, months: Date[]): Promise<string[]
     const [from, to] = monthBounds(month);
     for (const parent of PARENTS) {
       const name = partitionName(parent, month);
-      const exists = await db.execute(
-        sql`SELECT 1 FROM pg_class WHERE relname = ${name}`,
-      );
+      const exists = await db.execute(sql`SELECT 1 FROM pg_class WHERE relname = ${name}`);
       if (exists.rows.length > 0) continue;
       await db.execute(
         sql.raw(
@@ -663,6 +714,7 @@ export async function ensurePartitions(db: Db, months: Date[]): Promise<string[]
 ```
 
 `packages/db/src/schema/codes.ts` — drizzle definitions matching the SQL (for query building; migrations for these two tables stay hand-authored):
+
 ```ts
 import { char, pgTable, text, timestamp, uuid, primaryKey } from "drizzle-orm/pg-core";
 
@@ -706,16 +758,19 @@ git add packages/db && git commit -m "feat(db): partitioned codes/scan_events wi
 ### Task 8: NestJS API skeleton
 
 **Files:**
+
 - Create: `apps/api/package.json`, `apps/api/tsconfig.json`, `apps/api/nest-cli.json`, `apps/api/src/main.ts`, `apps/api/src/app.module.ts`, `apps/api/src/env.ts`, `apps/api/src/health.controller.ts`
 - Test: `apps/api/test/health.e2e.test.ts`
 
 **Interfaces:**
+
 - Consumes: nothing yet (auth mounts in Task 9).
 - Produces: `pnpm --filter @markiro/api dev|build|test`; `GET /health` → `{ status: "ok" }`; **Scalar API reference at `/docs`**, raw OpenAPI JSON at `/openapi.json`; zod-validated env (`env.ts` exports `loadEnv(): Env` with `DATABASE_URL, BETTER_AUTH_SECRET, BETTER_AUTH_URL, PORT`).
 
 - [ ] **Step 1: Package & configs**
 
 `apps/api/package.json` (CommonJS — NestJS default toolchain; note NO `"type": "module"`):
+
 ```json
 {
   "name": "@markiro/api",
@@ -756,6 +811,7 @@ git add packages/db && git commit -m "feat(db): partitioned codes/scan_events wi
 ```
 
 `apps/api/tsconfig.json`:
+
 ```json
 {
   "extends": "../../tsconfig.base.json",
@@ -773,6 +829,7 @@ git add packages/db && git commit -m "feat(db): partitioned codes/scan_events wi
 ```
 
 `apps/api/nest-cli.json`:
+
 ```json
 { "collection": "@nestjs/schematics", "sourceRoot": "src" }
 ```
@@ -780,6 +837,7 @@ git add packages/db && git commit -m "feat(db): partitioned codes/scan_events wi
 - [ ] **Step 2: Env, module, health, main**
 
 `apps/api/src/env.ts`:
+
 ```ts
 import { z } from "zod";
 
@@ -796,6 +854,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
 ```
 
 `apps/api/src/health.controller.ts`:
+
 ```ts
 import { Controller, Get } from "@nestjs/common";
 
@@ -809,6 +868,7 @@ export class HealthController {
 ```
 
 `apps/api/src/app.module.ts`:
+
 ```ts
 import { Module } from "@nestjs/common";
 import { HealthController } from "./health.controller";
@@ -818,6 +878,7 @@ export class AppModule {}
 ```
 
 `apps/api/src/main.ts`:
+
 ```ts
 import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
@@ -843,6 +904,7 @@ void bootstrap();
 - [ ] **Step 3: e2e test (failing first: write before controllers if following strict order)**
 
 `apps/api/test/health.e2e.test.ts`:
+
 ```ts
 import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
@@ -881,18 +943,21 @@ git add apps/api pnpm-lock.yaml && git commit -m "feat(api): nestjs skeleton wit
 ### Task 9: Better Auth mounted + auth e2e in CI
 
 **Files:**
+
 - Modify: `apps/api/src/main.ts`, `apps/api/src/app.module.ts`
 - Create: `apps/api/src/auth/auth.module.ts`, `apps/api/src/auth/auth.setup.ts`
 - Test: `apps/api/test/auth.e2e.test.ts`
 - Modify: `.github/workflows/ci.yml` (postgres service + e2e env)
 
 **Interfaces:**
+
 - Consumes: `buildAuth`, `createDb` (@markiro/db).
 - Produces: auth endpoints under `/api/auth/*` (email/password sign-up/sign-in, organization CRUD, API keys per better-auth plugins); `AuthModule` provides `AUTH` and `DB` injection tokens for later modules.
 
 - [ ] **Step 1: Mount handler before body parser**
 
 `apps/api/src/auth/auth.setup.ts`:
+
 ```ts
 import { toNodeHandler } from "better-auth/node";
 import type { Express } from "express";
@@ -912,12 +977,14 @@ export function mountAuth(server: Express, auth: ReturnType<typeof setupAuth>["a
 ```
 
 `main.ts` changes: create app with `{ bodyParser: false }`, then:
+
 ```ts
-  const { auth } = setupAuth(env);
-  const server = app.getHttpAdapter().getInstance();
-  mountAuth(server, auth);
-  server.use(express.json());
+const { auth } = setupAuth(env);
+const server = app.getHttpAdapter().getInstance();
+mountAuth(server, auth);
+server.use(express.json());
 ```
+
 (`import express from "express";` — dependency already present via platform-express.)
 
 `auth.module.ts` provides `{ provide: "AUTH", useValue: auth }` and `{ provide: "DB", useValue: db }` via a dynamic module `AuthModule.forRoot(setup)` imported by `AppModule` (main passes the setup result through a module-scoped factory; keep it simple: export `AuthModule.forRoot({ auth, db })` returning providers + exports).
@@ -925,6 +992,7 @@ export function mountAuth(server: Express, auth: ReturnType<typeof setupAuth>["a
 - [ ] **Step 2: e2e (requires DATABASE_URL)**
 
 `apps/api/test/auth.e2e.test.ts` (skipIf no DATABASE_URL, like db tests):
+
 ```ts
 // sign-up → session cookie → create organization → list organizations
 const email = `t${Date.now()}@example.com`;
@@ -939,28 +1007,31 @@ const org = await agent
   .expect(200);
 expect(org.body.id).toBeTruthy();
 ```
+
 (Full file mirrors health.e2e structure with beforeAll bootstrap that runs `db:migrate` precondition: document in test header that migrations must be applied; CI applies them in the workflow step.)
 
 - [ ] **Step 3: CI postgres service**
 
 In `ci.yml` verify job add:
+
 ```yaml
-    services:
-      postgres:
-        image: postgres:17-alpine
-        env:
-          POSTGRES_USER: markiro
-          POSTGRES_PASSWORD: markiro
-          POSTGRES_DB: markiro
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U markiro" --health-interval 5s
-          --health-timeout 5s --health-retries 10
+services:
+  postgres:
+    image: postgres:17-alpine
     env:
-      DATABASE_URL: postgres://markiro:markiro@localhost:5432/markiro
-      BETTER_AUTH_SECRET: ci-secret-0123456789abcdef
-      BETTER_AUTH_URL: http://localhost:3000
+      POSTGRES_USER: markiro
+      POSTGRES_PASSWORD: markiro
+      POSTGRES_DB: markiro
+    ports: ["5432:5432"]
+    options: >-
+      --health-cmd "pg_isready -U markiro" --health-interval 5s
+      --health-timeout 5s --health-retries 10
+env:
+  DATABASE_URL: postgres://markiro:markiro@localhost:5432/markiro
+  BETTER_AUTH_SECRET: ci-secret-0123456789abcdef
+  BETTER_AUTH_URL: http://localhost:3000
 ```
+
 and a migration step before tests: `- run: pnpm --filter @markiro/db db:migrate`.
 
 - [ ] **Step 4: Verify + commit**
@@ -976,11 +1047,13 @@ git add -A && git commit -m "feat(api): better-auth mounted (orgs, api keys) wit
 ### Task 10: Tenancy context + partition boot job (pg-boss)
 
 **Files:**
+
 - Create: `apps/api/src/tenancy/tenant.guard.ts`, `apps/api/src/jobs/jobs.module.ts`
 - Test: `apps/api/test/tenant.guard.test.ts`
 - Modify: `apps/api/src/app.module.ts`
 
 **Interfaces:**
+
 - Produces:
   - `TenantGuard` — reads the better-auth session (`auth.api.getSession({ headers })`), requires an active organization, attaches `req.tenantId`; controllers use `@Req() req` → `req.tenantId`. Unauthenticated → 401; no active org → 403.
   - `JobsModule` — pg-boss started on module init (`new PgBoss(env.DATABASE_URL)`); registers job `ensure-partitions` scheduled daily (`0 4 * * *`) and runs it once at boot: `ensurePartitions(db, [thisMonth, nextMonth])`.
@@ -992,9 +1065,15 @@ git add -A && git commit -m "feat(api): better-auth mounted (orgs, api keys) wit
 - [ ] **Step 2: Implement guard + jobs module**
 
 `tenant.guard.ts`:
+
 ```ts
 import {
-  CanActivate, ExecutionContext, ForbiddenException, Inject, Injectable, UnauthorizedException,
+  CanActivate,
+  ExecutionContext,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  UnauthorizedException,
 } from "@nestjs/common";
 import { fromNodeHeaders } from "better-auth/node";
 import type { Auth } from "@markiro/db";
@@ -1030,6 +1109,7 @@ git add apps/api && git commit -m "feat(api): tenant guard from active organizat
 ### Task 11: Docs & release hygiene
 
 **Files:**
+
 - Modify: `docs/architecture.md` (partition management note), `README.md` (create: quickstart)
 
 - [ ] **Step 1: Architecture note**

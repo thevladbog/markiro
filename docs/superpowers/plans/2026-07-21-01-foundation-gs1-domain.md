@@ -21,18 +21,21 @@
 ### Task 1: Monorepo scaffold
 
 **Files:**
+
 - Create: `package.json`, `pnpm-workspace.yaml`, `turbo.json`, `tsconfig.base.json`
 - Modify: `.gitignore`
 - Create: `packages/domain/package.json`, `packages/domain/tsconfig.json`, `packages/domain/vitest.config.ts`, `packages/domain/src/index.ts`
 - Test: `packages/domain/test/smoke.test.ts`
 
 **Interfaces:**
+
 - Consumes: nothing (first task).
 - Produces: workspace commands `pnpm turbo test` / `typecheck` / `build`; package name `@markiro/domain` with entry `src/index.ts` — every later task adds modules under `packages/domain/src/` and re-exports them from `src/index.ts`.
 
 - [ ] **Step 1: Root files**
 
 `package.json`:
+
 ```json
 {
   "name": "markiro",
@@ -51,6 +54,7 @@
 ```
 
 `pnpm-workspace.yaml`:
+
 ```yaml
 packages:
   - "apps/*"
@@ -58,6 +62,7 @@ packages:
 ```
 
 `turbo.json`:
+
 ```json
 {
   "$schema": "https://turborepo.com/schema.json",
@@ -70,6 +75,7 @@ packages:
 ```
 
 `tsconfig.base.json`:
+
 ```json
 {
   "compilerOptions": {
@@ -88,6 +94,7 @@ packages:
 ```
 
 Append to `.gitignore`:
+
 ```
 node_modules/
 dist/
@@ -98,6 +105,7 @@ coverage/
 - [ ] **Step 2: Domain package skeleton**
 
 `packages/domain/package.json`:
+
 ```json
 {
   "name": "@markiro/domain",
@@ -120,6 +128,7 @@ coverage/
 ```
 
 `packages/domain/tsconfig.json`:
+
 ```json
 {
   "extends": "../../tsconfig.base.json",
@@ -129,6 +138,7 @@ coverage/
 ```
 
 `packages/domain/vitest.config.ts`:
+
 ```ts
 import { defineConfig } from "vitest/config";
 
@@ -138,11 +148,13 @@ export default defineConfig({
 ```
 
 `packages/domain/src/index.ts`:
+
 ```ts
 export const DOMAIN_PACKAGE = "@markiro/domain";
 ```
 
 `packages/domain/test/smoke.test.ts`:
+
 ```ts
 import { describe, expect, it } from "vitest";
 import { DOMAIN_PACKAGE } from "../src/index.js";
@@ -174,17 +186,20 @@ git commit -m "chore: scaffold pnpm+turborepo monorepo with @markiro/domain pack
 ### Task 2: GS1 check digit
 
 **Files:**
+
 - Create: `packages/domain/src/gs1/check-digit.ts`
 - Modify: `packages/domain/src/index.ts`
 - Test: `packages/domain/test/check-digit.test.ts`
 
 **Interfaces:**
+
 - Consumes: nothing.
 - Produces: `gs1CheckDigit(body: string): number` — check digit for a GS1 numeric body (GTIN-13 body = 12 digits, SSCC body = 17 digits); `hasValidCheckDigit(code: string): boolean` — validates a full code (last char is the check digit). Both throw `RangeError` on non-digit input or empty body.
 
 - [ ] **Step 1: Write the failing test**
 
 `packages/domain/test/check-digit.test.ts`:
+
 ```ts
 import { describe, expect, it } from "vitest";
 import { gs1CheckDigit, hasValidCheckDigit } from "../src/gs1/check-digit.js";
@@ -231,6 +246,7 @@ Expected: FAIL — `Cannot find module '../src/gs1/check-digit.js'`.
 - [ ] **Step 3: Implement**
 
 `packages/domain/src/gs1/check-digit.ts`:
+
 ```ts
 /** GS1 mod-10 check digit for a numeric body (GTIN/SSCC/GLN families). */
 export function gs1CheckDigit(body: string): number {
@@ -254,6 +270,7 @@ export function hasValidCheckDigit(code: string): boolean {
 ```
 
 Replace `packages/domain/src/index.ts` content:
+
 ```ts
 export { gs1CheckDigit, hasValidCheckDigit } from "./gs1/check-digit.js";
 ```
@@ -277,11 +294,13 @@ git commit -m "feat(domain): GS1 mod-10 check digit"
 ### Task 3: GTIN normalization and prefix matching
 
 **Files:**
+
 - Create: `packages/domain/src/gs1/gtin.ts`
 - Modify: `packages/domain/src/index.ts`
 - Test: `packages/domain/test/gtin.test.ts`
 
 **Interfaces:**
+
 - Consumes: `gs1CheckDigit`, `hasValidCheckDigit` from Task 2.
 - Produces:
   - `normalizeToGtin14(input: string): string` — accepts GTIN-8/12/13/14, returns zero-padded GTIN-14; throws `DomainError("GTIN_INVALID", …)`.
@@ -292,6 +311,7 @@ git commit -m "feat(domain): GS1 mod-10 check digit"
 - [ ] **Step 1: Write the failing test**
 
 `packages/domain/test/gtin.test.ts`:
+
 ```ts
 import { describe, expect, it } from "vitest";
 import { DomainError } from "../src/errors.js";
@@ -349,6 +369,7 @@ Expected: FAIL — missing modules `../src/errors.js`, `../src/gs1/gtin.js`.
 - [ ] **Step 3: Implement**
 
 `packages/domain/src/errors.ts`:
+
 ```ts
 /** Domain failure with a stable machine-readable code. */
 export class DomainError extends Error {
@@ -363,6 +384,7 @@ export class DomainError extends Error {
 ```
 
 `packages/domain/src/gs1/gtin.ts`:
+
 ```ts
 import { DomainError } from "../errors.js";
 import { hasValidCheckDigit } from "./check-digit.js";
@@ -402,6 +424,7 @@ export function gtinMatchesPrefix(gtin14: string, gs1Prefix: string): boolean {
 ```
 
 Add to `packages/domain/src/index.ts`:
+
 ```ts
 export { DomainError } from "./errors.js";
 export { gtinMatchesPrefix, isValidGtin, normalizeToGtin14 } from "./gs1/gtin.js";
@@ -424,11 +447,13 @@ git commit -m "feat(domain): GTIN normalization, validation and GS1 prefix owner
 ### Task 4: Chestny ZNAK DataMatrix (KM) parsing
 
 **Files:**
+
 - Create: `packages/domain/src/gs1/km.ts`
 - Modify: `packages/domain/src/index.ts`
 - Test: `packages/domain/test/km.test.ts`
 
 **Interfaces:**
+
 - Consumes: `normalizeToGtin14`, `DomainError` from Task 3.
 - Produces:
   - `interface ParsedKm { gtin14: string; serial: string; raw: string; ais: Record<string, string> }`
@@ -438,6 +463,7 @@ git commit -m "feat(domain): GTIN normalization, validation and GS1 prefix owner
 - [ ] **Step 1: Write the failing test**
 
 `packages/domain/test/km.test.ts`:
+
 ```ts
 import { describe, expect, it } from "vitest";
 import { DomainError } from "../src/errors.js";
@@ -464,14 +490,10 @@ describe("parseKm", () => {
     expect(km.serial).toBe("XyZ9");
   });
   it("rejects empty input with KM_EMPTY", () => {
-    expect(() => parseKm("")).toThrowError(
-      expect.objectContaining({ code: "KM_EMPTY" }),
-    );
+    expect(() => parseKm("")).toThrowError(expect.objectContaining({ code: "KM_EMPTY" }));
   });
   it("rejects codes not starting with AI 01 with KM_NO_GTIN", () => {
-    expect(() => parseKm("21abc")).toThrowError(
-      expect.objectContaining({ code: "KM_NO_GTIN" }),
-    );
+    expect(() => parseKm("21abc")).toThrowError(expect.objectContaining({ code: "KM_NO_GTIN" }));
   });
   it("rejects a missing serial with KM_NO_SERIAL", () => {
     expect(() => parseKm("0104600682000013")).toThrowError(
@@ -498,6 +520,7 @@ Expected: FAIL — `Cannot find module '../src/gs1/km.js'`.
 - [ ] **Step 3: Implement**
 
 `packages/domain/src/gs1/km.ts`:
+
 ```ts
 import { DomainError } from "../errors.js";
 import { normalizeToGtin14 } from "./gtin.js";
@@ -549,6 +572,7 @@ export function kmKey(km: ParsedKm): string {
 ```
 
 Add to `packages/domain/src/index.ts`:
+
 ```ts
 export { kmKey, parseKm } from "./gs1/km.js";
 export type { ParsedKm } from "./gs1/km.js";
@@ -571,11 +595,13 @@ git commit -m "feat(domain): Chestny ZNAK DataMatrix parsing and dedup key"
 ### Task 5: SSCC generation
 
 **Files:**
+
 - Create: `packages/domain/src/gs1/sscc.ts`
 - Modify: `packages/domain/src/index.ts`
 - Test: `packages/domain/test/sscc.test.ts`
 
 **Interfaces:**
+
 - Consumes: `gs1CheckDigit`, `hasValidCheckDigit` (Task 2), `DomainError` (Task 3).
 - Produces:
   - `buildSscc(extensionDigit: number, gs1Prefix: string, serial: number): string` — 18-digit SSCC; serial is zero-padded into the `16 - prefix.length` positions; throws `DomainError("SSCC_RANGE", …)` when the serial exceeds capacity, `DomainError("SSCC_PREFIX", …)` on a bad prefix or extension digit.
@@ -585,6 +611,7 @@ git commit -m "feat(domain): Chestny ZNAK DataMatrix parsing and dedup key"
 - [ ] **Step 1: Write the failing test**
 
 `packages/domain/test/sscc.test.ts`:
+
 ```ts
 import { describe, expect, it } from "vitest";
 import { buildSscc, isValidSscc, ssccSerialCapacity } from "../src/gs1/sscc.js";
@@ -637,6 +664,7 @@ Expected: FAIL — `Cannot find module '../src/gs1/sscc.js'`.
 - [ ] **Step 3: Implement**
 
 `packages/domain/src/gs1/sscc.ts`:
+
 ```ts
 import { DomainError } from "../errors.js";
 import { gs1CheckDigit, hasValidCheckDigit } from "./check-digit.js";
@@ -646,13 +674,11 @@ export function ssccSerialCapacity(gs1Prefix: string): number {
   return 10 ** (16 - gs1Prefix.length);
 }
 
-export function buildSscc(
-  extensionDigit: number,
-  gs1Prefix: string,
-  serial: number,
-): string {
+export function buildSscc(extensionDigit: number, gs1Prefix: string, serial: number): string {
   if (
-    !Number.isInteger(extensionDigit) || extensionDigit < 0 || extensionDigit > 9 ||
+    !Number.isInteger(extensionDigit) ||
+    extensionDigit < 0 ||
+    extensionDigit > 9 ||
     !/^\d{4,12}$/.test(gs1Prefix)
   ) {
     throw new DomainError("SSCC_PREFIX", `bad extension/prefix: ${extensionDigit}/"${gs1Prefix}"`);
@@ -672,6 +698,7 @@ export function isValidSscc(code: string): boolean {
 ```
 
 Add to `packages/domain/src/index.ts`:
+
 ```ts
 export { buildSscc, isValidSscc, ssccSerialCapacity } from "./gs1/sscc.js";
 ```
@@ -693,11 +720,13 @@ git commit -m "feat(domain): SSCC-18 generation, validation and capacity"
 ### Task 6: Scan classification
 
 **Files:**
+
 - Create: `packages/domain/src/scan/classify.ts`
 - Modify: `packages/domain/src/index.ts`
 - Test: `packages/domain/test/classify.test.ts`
 
 **Interfaces:**
+
 - Consumes: `parseKm`, `ParsedKm` (Task 4), `isValidSscc` (Task 5), `isValidGtin`, `normalizeToGtin14` (Task 3).
 - Produces:
   - `type ScanInput = { kind: "km"; km: ParsedKm } | { kind: "gtin"; gtin14: string } | { kind: "sscc"; sscc: string } | { kind: "unknown"; raw: string }`
@@ -706,6 +735,7 @@ git commit -m "feat(domain): SSCC-18 generation, validation and capacity"
 - [ ] **Step 1: Write the failing test**
 
 `packages/domain/test/classify.test.ts`:
+
 ```ts
 import { describe, expect, it } from "vitest";
 import { classifyScan } from "../src/scan/classify.js";
@@ -749,6 +779,7 @@ Expected: FAIL — `Cannot find module '../src/scan/classify.js'`.
 - [ ] **Step 3: Implement**
 
 `packages/domain/src/scan/classify.ts`:
+
 ```ts
 import { isValidGtin, normalizeToGtin14 } from "../gs1/gtin.js";
 import { parseKm, type ParsedKm } from "../gs1/km.js";
@@ -779,6 +810,7 @@ export function classifyScan(raw: string): ScanInput {
 ```
 
 Add to `packages/domain/src/index.ts`:
+
 ```ts
 export { classifyScan } from "./scan/classify.js";
 export type { ScanInput } from "./scan/classify.js";
@@ -801,11 +833,13 @@ git commit -m "feat(domain): scanner event classification (km/gtin/sscc)"
 ### Task 7: Shift-scan validation
 
 **Files:**
+
 - Create: `packages/domain/src/scan/validate.ts`
 - Modify: `packages/domain/src/index.ts`
 - Test: `packages/domain/test/validate.test.ts`
 
 **Interfaces:**
+
 - Consumes: `classifyScan` (Task 6), `kmKey` (Task 4).
 - Produces:
   - `type ScanVerdict = { status: "ok"; key: string } | { status: "duplicate"; key: string } | { status: "wrong_gtin"; expectedGtin14: string; actualGtin14: string } | { status: "invalid"; raw: string }`
@@ -814,6 +848,7 @@ git commit -m "feat(domain): scanner event classification (km/gtin/sscc)"
 - [ ] **Step 1: Write the failing test**
 
 `packages/domain/test/validate.test.ts`:
+
 ```ts
 import { describe, expect, it } from "vitest";
 import { validateShiftScan } from "../src/scan/validate.js";
@@ -863,6 +898,7 @@ Expected: FAIL — `Cannot find module '../src/scan/validate.js'`.
 - [ ] **Step 3: Implement**
 
 `packages/domain/src/scan/validate.ts`:
+
 ```ts
 import { kmKey } from "../gs1/km.js";
 import { classifyScan } from "./classify.js";
@@ -890,13 +926,12 @@ export function validateShiftScan(raw: string, ctx: ShiftScanContext): ScanVerdi
     };
   }
   const key = kmKey(scan.km);
-  return ctx.isDuplicate(key)
-    ? { status: "duplicate", key }
-    : { status: "ok", key };
+  return ctx.isDuplicate(key) ? { status: "duplicate", key } : { status: "ok", key };
 }
 ```
 
 Add to `packages/domain/src/index.ts`:
+
 ```ts
 export { validateShiftScan } from "./scan/validate.js";
 export type { ScanVerdict, ShiftScanContext } from "./scan/validate.js";
@@ -919,15 +954,18 @@ git commit -m "feat(domain): shift scan validation with injected dedup"
 ### Task 8: CI workflow and green build
 
 **Files:**
+
 - Create: `.github/workflows/ci.yml`
 
 **Interfaces:**
+
 - Consumes: workspace scripts from Task 1.
 - Produces: CI gate every later plan builds on (typecheck + tests on push/PR).
 
 - [ ] **Step 1: Workflow file**
 
 `.github/workflows/ci.yml`:
+
 ```yaml
 name: CI
 on:

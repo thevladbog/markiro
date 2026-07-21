@@ -5,15 +5,15 @@
 
 ## One system, two modes
 
-| | Office mode | Floor mode |
-|---|---|---|
-| Used by | Admin panel, landing | Line station |
-| Reference feel | Linear / Stripe / Vercel | Industrial HMI done tastefully |
-| Density | Regular SaaS | Oversized |
-| Min touch target | 40px | **64px** (gloved finger) |
-| Base font size | 14–16px | **18px+**, counters 48–96px |
-| Readability test | Laptop at desk | Tablet at 1.5–2 m, side glance |
-| Primary theme | Light (dark supported) | **Dark** (light supported) |
+|                  | Office mode              | Floor mode                     |
+| ---------------- | ------------------------ | ------------------------------ |
+| Used by          | Admin panel, landing     | Line station                   |
+| Reference feel   | Linear / Stripe / Vercel | Industrial HMI done tastefully |
+| Density          | Regular SaaS             | Oversized                      |
+| Min touch target | 40px                     | **64px** (gloved finger)       |
+| Base font size   | 14–16px                  | **18px+**, counters 48–96px    |
+| Readability test | Laptop at desk           | Tablet at 1.5–2 m, side glance |
+| Primary theme    | Light (dark supported)   | **Dark** (light supported)     |
 
 Both modes share tokens, iconography, semantic colors and component DNA —
 a floor-mode button is recognizably the office button scaled for the shop

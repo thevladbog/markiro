@@ -4,7 +4,13 @@
     {
       "name": "design-handoff",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "8734", "--directory", "docs/design-briefs/design_handoff_markiro"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8734",
+        "--directory",
+        "docs/design-briefs/design_handoff_markiro"
+      ],
       "port": 8734
     }
   ]

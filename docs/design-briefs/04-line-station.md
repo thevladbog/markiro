@@ -37,10 +37,12 @@ Design the flash states as first-class screens, not toasts.
 ## Screens
 
 ### 1. Sign-in
+
 Numeric PIN pad (giant keys) with login picker, or "scan your badge" —
 both paths on one screen. Works in gloves.
 
 ### 2. Shift selection
+
 Available planned shifts as large cards (product, plan, mode, line) — 1–2
 cards visible, thumb-reachable. Tolling shifts are visibly marked with the
 customer name («для: Завод X») on the card and in the work-screen status bar
@@ -48,8 +50,10 @@ customer name («для: Завод X») on the card and in the work-screen stat
 shift" (below) and "Rejoin active shift" when 2–3 terminals share one shift.
 
 ### 3. Ad-hoc shift creation (on the station)
+
 Flow: tap "New shift" → **scan EAN-13 or DataMatrix from a product unit** →
 GTIN resolved against the catalog:
+
 - Found: product card appears → choose mode (validation / + aggregation) →
   if aggregation: box capacity (prefilled from product, editable) and pallet
   use yes/no → start.
@@ -58,9 +62,10 @@ GTIN resolved against the catalog:
   in the admin panel, and actions "Scan again" / "Back to shifts". Products
   are created **only in the admin panel** (approved decision); a draft
   product card also blocks shift start until completed.
-The whole flow is 3–4 full-screen steps, each completable in seconds.
+  The whole flow is 3–4 full-screen steps, each completable in seconds.
 
 ### 4. Work screen — validation mode
+
 - Dominant central zone: last scan result (huge status + code tail).
 - Counters: shift total vs plan, this terminal, errors/duplicates.
 - Recent scans feed (compact, secondary).
@@ -68,6 +73,7 @@ The whole flow is 3–4 full-screen steps, each completable in seconds.
   teammates in shift ("+2 terminals").
 
 ### 5. Work screen — aggregation mode
+
 Everything from validation, plus the signature **box-fill visual**: a grid of
 cells filling as units are scanned (e.g. 14/20), current box number, and a
 pallet progress strip (boxes on pallet: 3/12) when pallets are enabled.
@@ -75,7 +81,9 @@ On box completion: auto-print label, closed-box animation, next box starts.
 Manual "close box early" action (partial box) with confirmation.
 
 ### 6. Exceptions
+
 Full-screen section, scan-to-confirm everywhere:
+
 - Disassemble a box / pallet (scan its label to select).
 - Replace a unit in a box (defective unit swap): scan box → scan unit out →
   scan unit in.
@@ -83,11 +91,13 @@ Full-screen section, scan-to-confirm everywhere:
 - Undo last action.
 
 ### 7. Workstation setup
+
 Hardware via the local agent: pick printer and scanner from discovered
 devices, connection status, test scan + test print buttons. Sound volume.
 Designed to be done once by a non-IT person.
 
 ### 8. Degradation states
+
 - **Offline:** prominent but calm banner "Working offline — N scans queued";
   everything keeps working; sync progress shown when back online.
 - **Sync conflict / cross-terminal duplicate:** when the same code was scanned
@@ -103,5 +113,5 @@ Designed to be done once by a non-IT person.
 
 The shift is shared: show teammates presence, combined progress vs plan, and
 per-terminal contribution. Duplicates across terminals (online case) resolve
-instantly via the shared backend — the duplicate signal shows *which terminal*
+instantly via the shared backend — the duplicate signal shows _which terminal_
 scanned it first.

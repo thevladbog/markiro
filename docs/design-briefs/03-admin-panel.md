@@ -7,6 +7,7 @@
 ## Screens
 
 ### 1. Dashboard
+
 - Active shifts right now: line, product, mode, progress vs plan, operators
   online, per-terminal counters.
 - Day/week summary: units scanned, boxes/pallets closed, error/duplicate rate.
@@ -15,6 +16,7 @@
 - Recent exports with statuses.
 
 ### 2. Product catalog
+
 - List: search, filter by product group; columns GTIN, name, group, box/pallet
   capacity defaults, default label template.
 - Product card: GTIN, name, photo, Chestny ZNAK product group, default box
@@ -32,6 +34,7 @@
   product blocks starting a shift on the station until completed.
 
 ### 3. Shifts (production tasks)
+
 - List with statuses: planned / in progress / closed; filters by date, line,
   product. Ad-hoc shifts created at the station carry a "created on line"
   badge.
@@ -45,8 +48,10 @@
   action with summary.
 
 ### 4. Label template editor
+
 A canvas editor for group/unit labels — a differentiating feature, worth
 design attention.
+
 - Template library: list with preview thumbnails, size/DPI, printer language
   (ZPL / TSPL), default flags per product.
 - Editor: canvas with drag-and-drop elements — static text, **variable
@@ -62,6 +67,7 @@ design attention.
 - Preview with sample data + "test print" to a selected printer.
 
 ### 5. History & codes
+
 - Search by code / shift / period / status.
 - Code page: full journey — when scanned, by whom, which shift/terminal,
   validation result, current place in aggregation.
@@ -69,6 +75,7 @@ design attention.
   (packed, disassembled, replaced) with timestamps and operators — audit-grade.
 
 ### 6. Exports
+
 - Build export files by shift or period; format presets for GIS MT / 1C
   (file-exchange formats; direct API comes later).
 - Filter/group by counterparty: tolling exports must be separable so files
@@ -76,16 +83,19 @@ design attention.
 - Export history: who, when, what range, file download, status.
 
 ### 7. Users
+
 - Admins/managers: email + password, role.
 - Operators: name, login, numeric PIN, optional **badge barcode** — with
   "print badge" action reusing the label editor/printing pipeline.
 
 ### 8. Counterparties
+
 - Tolling customers: name, GLN, INN (tax id), GS1 company prefixes (for GTIN
   owner auto-detection), contact notes; used by product cards and shifts.
   No customer portal in MVP — we hand over export files.
 
 ### 9. Settings
+
 - Organization profile (incl. own GLN and GS1 company prefixes);
   lines/workstations (name, expected hardware);
 - API keys for external integrations (create/revoke, scopes read/write);
