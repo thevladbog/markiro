@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Exact versions (save-exact is on): `eslint@10.7.0`, `typescript-eslint@8.65.0`, `eslint-config-prettier@10.1.8`, `globals@17.7.0`, `prettier@3.9.6`, `@nestjs/cli@11.0.24`, `@nestjs/common@11.1.28` (core/platform-express/testing same line), `@nestjs/swagger@11.4.6` (document generation only), `@scalar/nestjs-api-reference@1.2.11` (docs UI), `@nestjs/config@4.0.4`, `drizzle-orm@0.45.2`, `drizzle-kit@0.31.10`, `better-auth@1.6.23`, `pg@8.22.0`, `@types/pg@8.20.0`, `pg-boss@12.25.1`, `zod@4.4.3`, `supertest@7.2.2`, `@types/supertest@7.2.1`, `reflect-metadata`, `rxjs` (Nest peer ranges as installed by pnpm).
+- Exact versions (save-exact is on): `eslint@10.7.0`, `typescript-eslint@8.65.0`, `eslint-config-prettier@10.1.8`, `globals@17.7.0`, `prettier@3.9.5`, `@nestjs/cli@11.0.24`, `@nestjs/common@11.1.28` (core/platform-express/testing same line), `@nestjs/swagger@11.4.6` (document generation only), `@scalar/nestjs-api-reference@1.2.11` (docs UI), `@nestjs/config@4.0.4`, `drizzle-orm@0.45.2`, `drizzle-kit@0.31.10`, `better-auth@1.6.23`, `pg@8.22.0`, `@types/pg@8.20.0`, `pg-boss@12.25.1`, `zod@4.4.3`, `supertest@7.2.2`, `@types/supertest@7.2.1`, `reflect-metadata`, `rxjs` (Nest peer ranges as installed by pnpm).
 - Do not modify root `.npmrc`. All new packages: `"type": "module"` except `apps/api` (NestJS CommonJS build — see Task 6).
 - Every domain table: `tenant_id text NOT NULL` referencing `organization.id`.
 - Commit style: conventional commits, English.
@@ -77,7 +77,7 @@ docs/design-briefs/design_handoff_markiro/
 
 - [ ] **Step 2: Wire scripts**
 
-Root `package.json` — add devDeps `eslint@10.7.0`, `typescript-eslint@8.65.0`, `eslint-config-prettier@10.1.8`, `globals@17.7.0`, `prettier@3.9.6`, `@eslint/js` (same line pnpm resolves), `typescript@6.0.3`; add scripts:
+Root `package.json` — add devDeps `eslint@10.7.0`, `typescript-eslint@8.65.0`, `eslint-config-prettier@10.1.8`, `globals@17.7.0`, `prettier@3.9.5`, `@eslint/js` (same line pnpm resolves), `typescript@6.0.3`; add scripts:
 
 ```json
     "lint": "turbo run lint",
