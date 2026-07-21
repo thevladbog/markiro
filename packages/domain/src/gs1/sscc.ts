@@ -3,6 +3,9 @@ import { gs1CheckDigit, hasValidCheckDigit } from "./check-digit.js";
 
 /** Serials available per prefix+extension: the serial field is 16 - |prefix| digits. */
 export function ssccSerialCapacity(gs1Prefix: string): number {
+  if (!/^\d{4,12}$/.test(gs1Prefix)) {
+    throw new DomainError("SSCC_PREFIX", `bad GS1 prefix: "${gs1Prefix}"`);
+  }
   return 10 ** (16 - gs1Prefix.length);
 }
 
@@ -11,13 +14,10 @@ export function buildSscc(
   gs1Prefix: string,
   serial: number,
 ): string {
-  if (
-    !Number.isInteger(extensionDigit) || extensionDigit < 0 || extensionDigit > 9 ||
-    !/^\d{4,12}$/.test(gs1Prefix)
-  ) {
-    throw new DomainError("SSCC_PREFIX", `bad extension/prefix: ${extensionDigit}/"${gs1Prefix}"`);
+  if (!Number.isInteger(extensionDigit) || extensionDigit < 0 || extensionDigit > 9) {
+    throw new DomainError("SSCC_PREFIX", `bad extension digit: ${extensionDigit}`);
   }
-  const capacity = ssccSerialCapacity(gs1Prefix);
+  const capacity = ssccSerialCapacity(gs1Prefix); // throws SSCC_PREFIX on bad prefix
   if (!Number.isInteger(serial) || serial < 0 || serial >= capacity) {
     throw new DomainError("SSCC_RANGE", `serial ${serial} outside 0..${capacity - 1}`);
   }

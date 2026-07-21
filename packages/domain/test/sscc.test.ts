@@ -21,6 +21,17 @@ describe("buildSscc", () => {
       expect.objectContaining({ code: "SSCC_PREFIX" }),
     );
   });
+  it("accepts the last serial in capacity", () => {
+    expect(buildSscc(3, "4600682", 10 ** 9 - 1)).toMatch(/^34600682999999999\d$/);
+  });
+  it("throws SSCC_RANGE on negative and non-integer serials", () => {
+    expect(() => buildSscc(3, "4600682", -1)).toThrowError(
+      expect.objectContaining({ code: "SSCC_RANGE" }),
+    );
+    expect(() => buildSscc(3, "4600682", 1.5)).toThrowError(
+      expect.objectContaining({ code: "SSCC_RANGE" }),
+    );
+  });
 });
 
 describe("isValidSscc", () => {
@@ -37,5 +48,16 @@ describe("ssccSerialCapacity", () => {
   it("is 10^(16 - prefix length)", () => {
     expect(ssccSerialCapacity("4600682")).toBe(10 ** 9);
     expect(ssccSerialCapacity("460068201")).toBe(10 ** 7);
+  });
+  it("throws SSCC_PREFIX on invalid prefixes", () => {
+    expect(() => ssccSerialCapacity("")).toThrowError(
+      expect.objectContaining({ code: "SSCC_PREFIX" }),
+    );
+    expect(() => ssccSerialCapacity("46A0682")).toThrowError(
+      expect.objectContaining({ code: "SSCC_PREFIX" }),
+    );
+    expect(() => ssccSerialCapacity("46006820000006820")).toThrowError(
+      expect.objectContaining({ code: "SSCC_PREFIX" }),
+    );
   });
 });
