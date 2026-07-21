@@ -15,6 +15,13 @@
       "when": 1784676378380,
       "tag": "0001_nervous_war_machine",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784676758415,
+      "tag": "0002_partitioned_codes",
+      "breakpoints": true
     }
   ]
 }
