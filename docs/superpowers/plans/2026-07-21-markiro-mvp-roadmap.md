@@ -17,6 +17,7 @@
 | 07 | Exports, history & dashboard | pg-boss jobs, GIS MT / 1C file adapters (per-counterparty), export history, code history page (hot path), live dashboard (SSE) | 06 |
 | 08 | Landing & deployment | Astro landing, Caddy + compose bundle, Yandex Cloud deploy, CI/CD releases, Tauri updater channel, Windows installer signing | 03+ (deployable as soon as API/admin exist; final content after 07) |
 | 09 | Hardening & lifecycle | Parquet archiving job + lookup, retention & takeout, station shift purge, code-pool KPI, load/perf pass on codes table, RU/EN + theme QA sweep | 07 |
+| 10 | Platform admin (SaaS ops) | `apps/saas-admin` per design brief 06: tenants & subscriptions, plans, semi-auto invoicing, monitoring, audit log, soft overdue escalation; 2FA + platform roles | 03 (billing states touch tenant admin), 07 (monitoring feeds) |
 
 ## Global constraints (apply to every plan)
 

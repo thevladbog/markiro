@@ -81,6 +81,7 @@ One design language, **two modes**:
 | 03 | Admin panel UI | Mockups for all admin screens, RU + EN for key screens |
 | 04 | Line station UI | Mockups for all station screens incl. signal states |
 | 05 | Landing page | Marketing page design |
+| 06 | Platform admin (SaaS ops) | Mockups for the internal operations panel (added after 00–05 were delivered) |
 
 Later phases (not in this engagement, keep in mind): direct Chestny ZNAK
 integration screens, billing/tariffs UI, on-premise edition.

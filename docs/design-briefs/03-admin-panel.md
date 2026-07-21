@@ -98,3 +98,7 @@ design attention.
 - Destructive actions (close shift, revoke key, delete template) get explicit
   confirmation patterns.
 - Tables must survive RU strings and long product names without breaking.
+- **Billing-status banners (delta from brief 06):** the customer admin shows
+  overdue-escalation banners — overdue notice, "new shifts disabled from
+  <date>", read-only mode — designed per the soft-escalation policy in
+  brief 06; production is never interrupted mid-shift.
