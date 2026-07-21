@@ -25,11 +25,14 @@ export function parseKm(raw: string): ParsedKm {
   const gtinDigits = s.slice(2, 16);
   const gtin14 = normalizeToGtin14(gtinDigits); // throws GTIN_INVALID
   s = s.slice(16);
-  if (!s.startsWith("21") || s.length === 2) {
+  if (!s.startsWith("21")) {
     throw new DomainError("KM_NO_SERIAL", "KM must carry AI 21 serial");
   }
   const gsAt = s.indexOf(GS);
   const serial = gsAt === -1 ? s.slice(2) : s.slice(2, gsAt);
+  if (serial.length === 0) {
+    throw new DomainError("KM_NO_SERIAL", "KM serial is empty");
+  }
   const ais: Record<string, string> = {};
   let rest = gsAt === -1 ? "" : s.slice(gsAt + 1);
   while (rest.length > 0) {

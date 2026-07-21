@@ -44,6 +44,11 @@ describe("parseKm", () => {
       expect.objectContaining({ code: "KM_NO_SERIAL" }),
     );
   });
+  it("rejects an empty serial (GS right after AI 21) with KM_NO_SERIAL", () => {
+    expect(() =>
+      parseKm("0104600682000013" + "21" + GS + "93AbCd"),
+    ).toThrowError(expect.objectContaining({ code: "KM_NO_SERIAL" }));
+  });
   it("propagates GTIN check-digit failures as DomainError", () => {
     expect(() => parseKm("010460068200001421abc")).toThrow(DomainError);
   });
