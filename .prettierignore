@@ -3,3 +3,5 @@ coverage/
 .turbo/
 pnpm-lock.yaml
 docs/design-briefs/design_handoff_markiro/
+.superpowers/
+**/migrations/meta/
