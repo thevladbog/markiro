@@ -4,6 +4,7 @@ import { AuthModule } from "./auth/auth.module";
 import type { AuthSetup } from "./auth/auth.setup";
 import { JobsModule } from "./jobs/jobs.module";
 import { OrgProfileModule } from "./modules/org-profile/org-profile.module";
+import { CounterpartiesModule } from "./modules/counterparties/counterparties.module";
 
 @Module({ controllers: [HealthController] })
 export class AppModule {
@@ -23,7 +24,12 @@ export class AppModule {
   ): DynamicModule {
     return {
       module: AppModule,
-      imports: [AuthModule.forRoot(setup), JobsModule.forRoot(setup.databaseUrl), OrgProfileModule],
+      imports: [
+        AuthModule.forRoot(setup),
+        JobsModule.forRoot(setup.databaseUrl),
+        OrgProfileModule,
+        CounterpartiesModule,
+      ],
       controllers: [HealthController],
     };
   }
