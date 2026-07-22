@@ -22,6 +22,13 @@
       "when": 1784676758415,
       "tag": "0002_partitioned_codes",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1784691781672,
+      "tag": "0003_tenant_composite_fks",
+      "breakpoints": true
     }
   ]
 }
