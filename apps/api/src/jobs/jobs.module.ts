@@ -45,19 +45,29 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     // PgBoss extends EventEmitter; an "error" event with no listener throws
     // and crashes the process, so this must be registered before start().
     boss.on("error", (err) => this.logger.error(err));
-
-    await boss.start();
-    await boss.createQueue(QUEUE_NAME);
-    await boss.schedule(QUEUE_NAME, QUEUE_CRON);
-    await boss.work(QUEUE_NAME, async () => {
-      await this.runEnsurePartitions();
-    });
+    // Assign eagerly so onModuleDestroy can always reach this instance and
+    // stop it, even if bootstrap fails partway through below.
     this.boss = boss;
 
-    // Also run once immediately at boot so this month's and next month's
-    // partitions exist right away, instead of waiting for the first
-    // 04:00 UTC tick.
-    await this.runEnsurePartitions();
+    try {
+      await boss.start();
+      await boss.createQueue(QUEUE_NAME);
+      await boss.schedule(QUEUE_NAME, QUEUE_CRON);
+      await boss.work(QUEUE_NAME, async () => {
+        await this.runEnsurePartitions();
+      });
+
+      // Also run once immediately at boot so this month's and next month's
+      // partitions exist right away, instead of waiting for the first
+      // 04:00 UTC tick.
+      await this.runEnsurePartitions();
+    } catch (e) {
+      // Bootstrap failed partway through: stop whatever pg-boss managed to
+      // start so it doesn't leak a connection/maintenance loop, then
+      // rethrow so Nest surfaces the original failure.
+      await boss.stop({ graceful: false }).catch(() => undefined);
+      throw e;
+    }
   }
 
   async onModuleDestroy(): Promise<void> {

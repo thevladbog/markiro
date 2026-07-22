@@ -32,7 +32,7 @@ Note: Database tests require `DATABASE_URL` environment variable; they skip if u
 
 ## Repo structure
 
-```
+```text
 apps/
   api/            NestJS backend + Better Auth + Scalar OpenAPI docs
 packages/

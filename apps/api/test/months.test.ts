@@ -8,8 +8,13 @@ describe("currentMonthUTC", () => {
   });
 
   it("defaults to the current time when no argument is given", () => {
-    const result = currentMonthUTC();
-    const expected = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1));
+    // Capture a single `now` and pass it to both sides explicitly: calling
+    // `new Date()` twice (once inside currentMonthUTC's default, once for
+    // `expected`) is flaky right at a UTC month boundary, where the two
+    // instantiations could land in different months.
+    const now = new Date();
+    const result = currentMonthUTC(now);
+    const expected = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
     expect(result).toEqual(expected);
   });
 });

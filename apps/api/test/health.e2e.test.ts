@@ -34,4 +34,15 @@ describe("env validation", () => {
     expect(env.PORT).toBe(3000);
     expect(env.DATABASE_URL).toBe("postgres://user:pass@localhost/db");
   });
+
+  it("loadEnv rejects a PORT outside the valid 1-65535 range", () => {
+    expect(() =>
+      loadEnv({
+        DATABASE_URL: "postgres://user:pass@localhost/db",
+        BETTER_AUTH_SECRET: "1234567890123456",
+        BETTER_AUTH_URL: "http://localhost:3000",
+        PORT: "70000",
+      } as never),
+    ).toThrow();
+  });
 });

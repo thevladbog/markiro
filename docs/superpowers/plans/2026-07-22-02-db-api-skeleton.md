@@ -153,11 +153,23 @@ jobs:
 
 - [ ] **Step 2: Pin actions by commit SHA**
 
-Resolve each tag once and replace `@v4` with `@<full-sha> # v4.x.y`:
+Resolve each _exact_ tag (don't take `.[0]` off the `/tags` list — it's
+unordered and may not even be the tag you asked for) and replace `@v4` with
+`@<full-sha> # v4.x.y`:
 
 ```bash
-for a in actions/checkout actions/setup-node pnpm/action-setup actions/dependency-review-action github/codeql-action; do
-  gh api repos/$a/tags --jq '.[0] | .name + " " + .commit.sha' | head -1
+for entry in "actions/checkout v4" "actions/setup-node v4" "pnpm/action-setup v4" \
+  "actions/dependency-review-action v4.9.0" "github/codeql-action v3"; do
+  repo=${entry% *}
+  tag=${entry#* }
+  sha=$(gh api "repos/$repo/git/ref/tags/$tag" --jq '.object.sha')
+  type=$(gh api "repos/$repo/git/ref/tags/$tag" --jq '.object.type')
+  # Annotated tags point at a tag object, not a commit -- dereference it to
+  # get the actual commit SHA the ref should be pinned to.
+  if [ "$type" = "tag" ]; then
+    sha=$(gh api "repos/$repo/git/tags/$sha" --jq '.object.sha')
+  fi
+  echo "$repo@$sha # $tag"
 done
 ```
 
@@ -419,7 +431,10 @@ export type Auth = ReturnType<typeof buildAuth>;
 Run better-auth CLI against a temporary config that mirrors `buildAuth` plugins:
 
 ```bash
-cd packages/db && npx @better-auth/cli@latest generate --config src/auth-config.ts --output src/schema/auth.ts
+# Pin the CLI version to match the installed `better-auth` package
+# (packages/db/package.json) -- `@latest` can drift ahead of it and
+# generate a schema the installed runtime doesn't expect.
+cd packages/db && npx @better-auth/cli@1.6.23 generate --config src/auth-config.ts --output src/schema/auth.ts
 ```
 
 If the CLI cannot introspect the factory form, create `auth.ts` (a flat `betterAuth({...})` export with the same plugins) temporarily at package root, generate, then delete it. Inspect the generated file: it must define drizzle pg tables `user, session, account, verification, organization, member, invitation, apikey`. Commit the generated file as source (regeneration is manual and reviewed).

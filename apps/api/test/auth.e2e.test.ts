@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import express from "express";
 import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
@@ -9,15 +10,18 @@ import { loadEnv } from "../src/env";
 
 /**
  * Requires a reachable Postgres with the Better Auth + platform schema
- * already migrated: `pnpm --filter @markiro/db db:migrate`. Skipped when
- * DATABASE_URL isn't set, mirroring packages/db/test/partitions.test.ts.
- * CI applies migrations in the workflow (see .github/workflows/ci.yml)
- * before running this suite against the postgres service container.
+ * already migrated: `pnpm --filter @markiro/db db:migrate`, plus the env
+ * loadEnv() needs. Skipped unless all three are set, mirroring
+ * packages/db/test/partitions.test.ts. CI applies migrations in the
+ * workflow (see .github/workflows/ci.yml) before running this suite
+ * against the postgres service container.
  */
-const url = process.env.DATABASE_URL;
+const ready = Boolean(
+  process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
+);
 
-describe.skipIf(!url)("auth e2e", () => {
-  let app: INestApplication;
+describe.skipIf(!ready)("auth e2e", () => {
+  let app: INestApplication | undefined;
   let setup: AuthSetup;
 
   beforeAll(async () => {
@@ -39,14 +43,16 @@ describe.skipIf(!url)("auth e2e", () => {
 
   // app.close() runs Nest's onModuleDestroy lifecycle, which now closes
   // setup.pool itself (see AuthModule's AuthPoolCloser) -- closing it again
-  // here would throw "Called end on pool more than once".
+  // here would throw "Called end on pool more than once". Guard with `?.`
+  // since beforeAll may never have run (e.g. it threw before assigning
+  // `app`), in which case there's nothing to close.
   afterAll(async () => {
-    await app.close();
+    await app?.close();
   });
 
   it("sign-up -> session cookie -> organization create", async () => {
-    const email = `t${Date.now()}@example.com`;
-    const agent = request.agent(app.getHttpServer());
+    const email = `t-${randomUUID()}@example.com`;
+    const agent = request.agent(app!.getHttpServer());
 
     await agent
       .post("/api/auth/sign-up/email")
@@ -55,16 +61,16 @@ describe.skipIf(!url)("auth e2e", () => {
 
     const org = await agent
       .post("/api/auth/organization/create")
-      .send({ name: "Test Plant", slug: `plant-${Date.now()}` })
+      .send({ name: "Test Plant", slug: `plant-${randomUUID()}` })
       .expect(200);
 
     expect(org.body.id).toBeTruthy();
   });
 
   it("organization create without a session is unauthorized", async () => {
-    await request(app.getHttpServer())
+    await request(app!.getHttpServer())
       .post("/api/auth/organization/create")
-      .send({ name: "No Session", slug: `no-session-${Date.now()}` })
+      .send({ name: "No Session", slug: `no-session-${randomUUID()}` })
       .expect(401);
   });
 });
