@@ -78,7 +78,9 @@ registry, `save-exact`, `engine-strict`, `minimum-release-age=10080`
 - Postgres (Yandex Managed), multi-tenant via `tenant_id` on every row.
 - `codes` and the scan-event journal are **month-partitioned from day one**
   (native RANGE partitions managed by the API's `ensure-partitions` job —
-  portable across docker dev and managed PG; pg_partman intentionally not required).
+  portable across docker dev and managed PG; pg_partman intentionally not required);
+  PK `(tenant_id, code_hash, scanned_at)` (partition key must be part of the PK);
+  BRIN time indexes planned in the hardening pass (plan 09).
 - Scale estimate: ~12–18M codes/year per line → hundreds of millions of rows
   across tenants within a few years.
 - **Warm:** partitions older than the active months serve only exact-code
