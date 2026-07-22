@@ -25,7 +25,7 @@ describe.skipIf(!url)("auth e2e", () => {
     setup = setupAuth(env);
 
     const ref = await Test.createTestingModule({
-      imports: [AppModule.forRoot(setup)],
+      imports: [AppModule.forRoot({ ...setup, databaseUrl: env.DATABASE_URL })],
     }).compile();
 
     // Mirrors main.ts bootstrap: Better Auth needs the raw body, so the Nest
