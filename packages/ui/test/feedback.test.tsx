@@ -264,7 +264,9 @@ describe("toast", () => {
     expect(screen.queryByText("Принтер не отвечает")).toBeNull();
   });
 
-  it("clears the auto-dismiss timer when manually dismissed to prevent double-dismiss", () => {
+  it("clears the auto-dismiss timer when manually dismissed (clearTimeout called)", () => {
+    const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
+
     act(() => {
       toast("ok", "Уведомление", 4000);
     });
@@ -272,37 +274,57 @@ describe("toast", () => {
     const status = screen.getByText("Уведомление").closest('[role="status"]') as HTMLElement;
     const closeButton = within(status).getByRole("button", { name: "Закрыть" });
 
-    // Dismiss manually
+    // Dismiss manually — this must call clearTimeout on the pending timer
     act(() => {
       closeButton.click();
     });
+
+    // Verify clearTimeout was called with a defined handle (the stored timer)
+    expect(clearTimeoutSpy).toHaveBeenCalled();
+    const calls = clearTimeoutSpy.mock.calls;
+    expect(calls.some((call) => call[0] !== undefined)).toBe(true);
+    clearTimeoutSpy.mockRestore();
+
+    // Verify DOM reflects immediate dismissal
     expect(screen.queryByText("Уведомление")).toBeNull();
 
-    // Advance time past the auto-dismiss duration
+    // Advance time past auto-dismiss duration — no toast should reappear
     act(() => {
       vi.advanceTimersByTime(4000);
     });
-
-    // The toast should remain dismissed (no re-render or extra subscription notification)
     expect(screen.queryByText("Уведомление")).toBeNull();
   });
 
-  it("does not drop the first toast when called before viewport subscription exists (cold path)", () => {
-    // Emit two toasts synchronously to simulate the race condition where
-    // the first toast is added to the store before any React component
-    // subscribes. useSyncExternalStore re-checks the snapshot after
-    // subscribing, so both toasts should be captured.
-    act(() => {
-      toast("ok", "Первый");
-      toast("warn", "Второй");
-    });
+  it("does not drop the first toast when called before viewport subscription exists (cold path)", async () => {
+    // Use real timers for this test so React rendering isn't blocked by fake timer state.
+    vi.useRealTimers();
 
-    // Both toasts should appear in the DOM
-    expect(screen.getByText("Первый")).toBeDefined();
-    expect(screen.getByText("Второй")).toBeDefined();
+    // Reset to get a fresh Toast module instance (no container, no listeners).
+    // This tests the race condition where toast() is called before the viewport
+    // has had a chance to subscribe to the store.
+    vi.resetModules();
+    const { toast: freshToast } = await import("../src/components/Toast.js");
 
-    // Assert both appear exactly once (not duplicated)
-    expect(screen.queryAllByText("Первый").length).toBe(1);
-    expect(screen.queryAllByText("Второй").length).toBe(1);
+    // Call toast bare (no act()) before any React render has subscribed.
+    // This simulates the real-world case where toast() might be called in a
+    // click handler or other synchronous context before React effects run.
+    freshToast("ok", "cold-path-race-xyz-unique");
+
+    // Wait for the toast to actually appear in the DOM. This forces the viewport
+    // to mount and subscribe, which re-checks the store snapshot.
+    //
+    // Why this matters: a naive useState store would capture the initial empty
+    // array before any listeners registered. The toast is added to the array,
+    // and listeners fire, but since the component rendered with an empty snapshot
+    // before subscribing, the update is lost. useSyncExternalStore specifically
+    // addresses this by re-checking the snapshot right after subscription — if
+    // it changed, it forces a re-render, so the first toast is never dropped.
+    await screen.findByText("cold-path-race-xyz-unique");
+
+    // Confirm it rendered exactly once (not duplicated or dropped).
+    expect(screen.queryAllByText("cold-path-race-xyz-unique").length).toBe(1);
+
+    // Restore fake timers for remaining tests in this suite.
+    vi.useFakeTimers();
   });
 });
