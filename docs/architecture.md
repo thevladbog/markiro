@@ -27,21 +27,21 @@ exports, admin previews labels, all from the same tested code.
 
 ### Pinned toolchain (registry-checked 2026-07-21, exact versions in lockfile)
 
-| Package | Version |
-|---|---|
-| Node | 24 LTS (engines) |
-| pnpm | 11.10 |
-| turbo | 2.10 |
-| TypeScript | 6.0 |
-| NestJS | 11.1 |
-| drizzle-orm / drizzle-kit | 0.45 / 0.31 |
-| better-auth | 1.6 |
-| React | 19.2 |
-| Vite | 8.1 |
-| Tauri (cli/api) | 2.11 |
-| pg-boss | 12 |
-| Astro | 7.0 |
-| Zod | 4.4 |
+| Package                   | Version          |
+| ------------------------- | ---------------- |
+| Node                      | 24 LTS (engines) |
+| pnpm                      | 11.10            |
+| turbo                     | 2.10             |
+| TypeScript                | 6.0              |
+| NestJS                    | 11.1             |
+| drizzle-orm / drizzle-kit | 0.45 / 0.31      |
+| better-auth               | 1.6              |
+| React                     | 19.2             |
+| Vite                      | 8.1              |
+| Tauri (cli/api)           | 2.11             |
+| pg-boss                   | 12               |
+| Astro                     | 7.0              |
+| Zod                       | 4.4              |
 
 Root `.npmrc` (single, applies to the whole workspace): standard npm
 registry, `save-exact`, `engine-strict`, `minimum-release-age=10080`
@@ -77,7 +77,10 @@ registry, `save-exact`, `engine-strict`, `minimum-release-age=10080`
 
 - Postgres (Yandex Managed), multi-tenant via `tenant_id` on every row.
 - `codes` and the scan-event journal are **month-partitioned from day one**
-  (pg_partman), BRIN on time, PK `(tenant_id, code_hash)`.
+  (native RANGE partitions managed by the API's `ensure-partitions` job —
+  portable across docker dev and managed PG; pg_partman intentionally not required);
+  PK `(tenant_id, code_hash, scanned_at)` (partition key must be part of the PK);
+  BRIN time indexes planned in the hardening pass (plan 09).
 - Scale estimate: ~12–18M codes/year per line → hundreds of millions of rows
   across tenants within a few years.
 - **Warm:** partitions older than the active months serve only exact-code

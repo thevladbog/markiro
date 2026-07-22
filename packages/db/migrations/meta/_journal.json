@@ -1,0 +1,34 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1784674164506,
+      "tag": "0000_slimy_galactus",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1784676378380,
+      "tag": "0001_nervous_war_machine",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784676758415,
+      "tag": "0002_partitioned_codes",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1784691781672,
+      "tag": "0003_tenant_composite_fks",
+      "breakpoints": true
+    }
+  ]
+}

@@ -32,10 +32,10 @@ water are the launch focus.
 
 **Users:**
 
-| Persona | Where | Context |
-|---|---|---|
-| Admin | Web admin panel | Owner or manager; sets up catalog, users, shifts, downloads export files. Email + password sign-in. |
-| Manager | Web admin panel | Same surface as admin, reduced permissions. |
+| Persona  | Where            | Context                                                                                                                                                                                                          |
+| -------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Admin    | Web admin panel  | Owner or manager; sets up catalog, users, shifts, downloads export files. Email + password sign-in.                                                                                                              |
+| Manager  | Web admin panel  | Same surface as admin, reduced permissions.                                                                                                                                                                      |
 | Operator | Line station app | Works at the line on a **touchscreen** terminal (tablet 10–12″ or desktop), often in gloves, in noise, glancing at the screen from 1–2 m away. Signs in with login + numeric PIN or by scanning a badge barcode. |
 
 ## The two products being designed
@@ -74,14 +74,14 @@ One design language, **two modes**:
 
 ## Deliverables and order
 
-| # | Brief | Deliverable |
-|---|---|---|
-| 01 | Brand & naming | Name candidates, logo, palette, typography, mini guideline, tone of voice |
-| 02 | Design system | Figma library: tokens (light/dark), office + floor modes, components, states |
-| 03 | Admin panel UI | Mockups for all admin screens, RU + EN for key screens |
-| 04 | Line station UI | Mockups for all station screens incl. signal states |
-| 05 | Landing page | Marketing page design |
-| 06 | Platform admin (SaaS ops) | Mockups for the internal operations panel (added after 00–05 were delivered) |
+| #   | Brief                     | Deliverable                                                                  |
+| --- | ------------------------- | ---------------------------------------------------------------------------- |
+| 01  | Brand & naming            | Name candidates, logo, palette, typography, mini guideline, tone of voice    |
+| 02  | Design system             | Figma library: tokens (light/dark), office + floor modes, components, states |
+| 03  | Admin panel UI            | Mockups for all admin screens, RU + EN for key screens                       |
+| 04  | Line station UI           | Mockups for all station screens incl. signal states                          |
+| 05  | Landing page              | Marketing page design                                                        |
+| 06  | Platform admin (SaaS ops) | Mockups for the internal operations panel (added after 00–05 were delivered) |
 
 Later phases (not in this engagement, keep in mind): direct Chestny ZNAK
 integration screens, billing/tariffs UI, on-premise edition.

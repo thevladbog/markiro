@@ -18,11 +18,11 @@ over density.
 Sign-in: email + password with **mandatory 2FA** (this surface controls every
 tenant). Three roles:
 
-| Role | Tenants & monitoring | Billing |
-|---|---|---|
-| Platform admin | full | full |
-| Support | full | — (hidden) |
-| Accountant | read-only | full |
+| Role           | Tenants & monitoring | Billing    |
+| -------------- | -------------------- | ---------- |
+| Platform admin | full                 | full       |
+| Support        | full                 | — (hidden) |
+| Accountant     | read-only            | full       |
 
 Every mutating action is audited (see screen 6) — design affordances that
 show "this will be logged" on sensitive actions (block tenant, change plan).
@@ -30,6 +30,7 @@ show "this will be logged" on sensitive actions (block tenant, change plan).
 ## Screens
 
 ### 1. Platform dashboard
+
 - Money row: MRR, revenue this month, invoices awaiting payment, overdue.
 - Adoption row: active tenants, trials (with days left), new this month.
 - Usage: scans/day platform-wide (chart), top tenants by volume.
@@ -37,6 +38,7 @@ show "this will be logged" on sensitive actions (block tenant, change plan).
   station offline alerts — each linking to its tenant.
 
 ### 2. Tenants
+
 - List: name, status chip (trial / active / grace / restricted / read-only /
   blocked), plan, lines count, last activity; filters by status/plan.
 - Tenant card:
@@ -50,12 +52,14 @@ show "this will be logged" on sensitive actions (block tenant, change plan).
     visually separated per design-system destructive patterns.
 
 ### 3. Plans (tariffs)
+
 - Plan constructor: name, price per line/month, limits (lines, stations),
   feature toggles (label editor, public API, pallets).
 - Archiving a plan never touches existing subscribers; archived plans stay
   visible in tenant cards with an "archived" badge.
 
 ### 4. Billing
+
 - Invoice runs: calendar-generated drafts per billing period → review list →
   confirm & send (email with PDF; requisites, numbering RU-style).
 - Invoice statuses: draft / sent / paid / overdue; manual "mark paid"
@@ -64,6 +68,7 @@ show "this will be logged" on sensitive actions (block tenant, change plan).
 - Registry export for accounting: CSV / 1C-friendly file per period.
 
 ### 5. Monitoring
+
 - Health map: per-tenant active stations, sync queue depth, error/duplicate
   rates, export job delays, background jobs (queue) and archiving status.
 - Alert thresholds with sensible defaults: station offline > 4h during an
@@ -73,6 +78,7 @@ show "this will be logged" on sensitive actions (block tenant, change plan).
   support tooling beyond viewing is out of MVP).
 
 ### 6. Audit log
+
 - Every platform-team action: who, what, which tenant, when, reason (where
   required). Filter by user/tenant/action/period. Read-only, exportable.
 

@@ -23,21 +23,15 @@ describe("parseKm", () => {
     expect(km.serial).toBe("XyZ9");
   });
   it("survives consecutive GS separators in the trailing AIs", () => {
-    const km = parseKm(
-      "0104600682000013" + "21XyZ9" + GS + GS + "93AbCd",
-    );
+    const km = parseKm("0104600682000013" + "21XyZ9" + GS + GS + "93AbCd");
     expect(km.serial).toBe("XyZ9");
     expect(km.ais["93"]).toBe("AbCd");
   });
   it("rejects empty input with KM_EMPTY", () => {
-    expect(() => parseKm("")).toThrowError(
-      expect.objectContaining({ code: "KM_EMPTY" }),
-    );
+    expect(() => parseKm("")).toThrowError(expect.objectContaining({ code: "KM_EMPTY" }));
   });
   it("rejects codes not starting with AI 01 with KM_NO_GTIN", () => {
-    expect(() => parseKm("21abc")).toThrowError(
-      expect.objectContaining({ code: "KM_NO_GTIN" }),
-    );
+    expect(() => parseKm("21abc")).toThrowError(expect.objectContaining({ code: "KM_NO_GTIN" }));
   });
   it("rejects a missing serial with KM_NO_SERIAL", () => {
     expect(() => parseKm("0104600682000013")).toThrowError(
@@ -45,9 +39,9 @@ describe("parseKm", () => {
     );
   });
   it("rejects an empty serial (GS right after AI 21) with KM_NO_SERIAL", () => {
-    expect(() =>
-      parseKm("0104600682000013" + "21" + GS + "93AbCd"),
-    ).toThrowError(expect.objectContaining({ code: "KM_NO_SERIAL" }));
+    expect(() => parseKm("0104600682000013" + "21" + GS + "93AbCd")).toThrowError(
+      expect.objectContaining({ code: "KM_NO_SERIAL" }),
+    );
   });
   it("propagates GTIN check-digit failures as DomainError", () => {
     expect(() => parseKm("010460068200001421abc")).toThrow(DomainError);
