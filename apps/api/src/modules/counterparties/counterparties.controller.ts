@@ -10,6 +10,7 @@ import {
   Req,
   UseGuards,
 } from "@nestjs/common";
+import { ApiTags } from "@nestjs/swagger";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
@@ -22,6 +23,7 @@ import {
 } from "./dto";
 import { CounterpartiesService } from "./counterparties.service";
 
+@ApiTags("counterparties")
 @Controller("counterparties")
 @UseGuards(TenantGuard)
 export class CounterpartiesController {

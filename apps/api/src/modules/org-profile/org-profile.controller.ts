@@ -1,9 +1,11 @@
 import { Body, Controller, Get, Put, Req, UseGuards } from "@nestjs/common";
+import { ApiTags } from "@nestjs/swagger";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import { putOrgProfileSchema, type OrgProfileDto, type PutOrgProfileDto } from "./dto";
 import { OrgProfileService } from "./org-profile.service";
 
+@ApiTags("org-profile")
 @Controller("org/profile")
 @UseGuards(TenantGuard)
 export class OrgProfileController {

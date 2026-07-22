@@ -12,6 +12,7 @@ import {
   Req,
   UseGuards,
 } from "@nestjs/common";
+import { ApiTags } from "@nestjs/swagger";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
@@ -29,6 +30,7 @@ import {
 } from "./dto";
 import { ProductsService } from "./products.service";
 
+@ApiTags("products")
 @Controller("products")
 @UseGuards(TenantGuard)
 export class ProductsController {
