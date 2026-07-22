@@ -202,11 +202,9 @@ export class ShiftsService {
 
   /**
    * Close a shift, allowed only from `status === "active"` (409 otherwise).
-   * `reason` is validated (min 3 chars, audit note) but there is no
-   * dedicated column for it yet in the `shifts` schema -- it is accepted as
-   * an input gate only and not persisted.
+   * `reason` is validated (min 3 chars) and persisted to `close_reason`.
    */
-  async closeShift(tenantId: string, id: string, _data: CloseShiftDto): Promise<ShiftDto> {
+  async closeShift(tenantId: string, id: string, data: CloseShiftDto): Promise<ShiftDto> {
     const current = await this.findRow(tenantId, id);
     if (!current) {
       throw new NotFoundException();
@@ -217,7 +215,7 @@ export class ShiftsService {
 
     const [row] = await this.db
       .update(schema.shifts)
-      .set({ status: "closed", closedAt: new Date() })
+      .set({ status: "closed", closedAt: new Date(), closeReason: data.reason })
       .where(
         and(
           eq(schema.shifts.tenantId, tenantId),
@@ -289,6 +287,7 @@ export class ShiftsService {
       createdFrom: schema.shifts.createdFrom,
       openedAt: schema.shifts.openedAt,
       closedAt: schema.shifts.closedAt,
+      closeReason: schema.shifts.closeReason,
       createdAt: schema.shifts.createdAt,
     };
   }

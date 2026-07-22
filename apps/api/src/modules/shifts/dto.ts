@@ -77,6 +77,7 @@ export interface ShiftDto {
   createdFrom: ShiftOrigin;
   openedAt: Date | null;
   closedAt: Date | null;
+  closeReason: string | null;
   createdAt: Date;
 }
 

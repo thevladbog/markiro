@@ -451,6 +451,11 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       .expect(200);
     expect(closeRes.body).toMatchObject({ id, status: "closed" });
     expect(closeRes.body.closedAt).toBeDefined();
+    expect(closeRes.body.closeReason).toBe("Stuck at station, closing manually");
+
+    // Verify closeReason persists on subsequent GET.
+    const getRes = await agent.get(`/shifts/${id}`).expect(200);
+    expect(getRes.body.closeReason).toBe("Stuck at station, closing manually");
 
     // Already closed -> 409.
     await agent.post(`/shifts/${id}/close`).send({ reason: "test close again" }).expect(409);
