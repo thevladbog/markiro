@@ -15,6 +15,21 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: markiro
+          POSTGRES_PASSWORD: markiro
+          POSTGRES_DB: markiro
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U markiro" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://markiro:markiro@localhost:5432/markiro
+      BETTER_AUTH_SECRET: ci-secret-0123456789abcdef
+      BETTER_AUTH_URL: http://localhost:3000
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
@@ -24,4 +39,5 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm format:check
+      - run: pnpm --filter @markiro/db db:migrate
       - run: pnpm turbo lint typecheck test build

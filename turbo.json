@@ -4,6 +4,9 @@
     "build": { "dependsOn": ["^build"], "outputs": ["dist/**"] },
     "lint": {},
     "typecheck": { "dependsOn": ["^build"] },
-    "test": { "dependsOn": ["^build"] }
+    "test": {
+      "dependsOn": ["^build"],
+      "env": ["DATABASE_URL", "BETTER_AUTH_SECRET", "BETTER_AUTH_URL"]
+    }
   }
 }
