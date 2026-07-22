@@ -110,6 +110,38 @@ describe("Modal", () => {
     await user.tab({ shift: true });
     expect(document.activeElement).toBe(last);
   });
+
+  it("restores focus to the trigger button when closed", () => {
+    const { rerender } = render(
+      <>
+        <button data-testid="trigger">Открыть</button>
+        <Modal open={false} title="Модаль" />
+      </>,
+    );
+
+    const trigger = screen.getByTestId("trigger") as HTMLButtonElement;
+    trigger.focus();
+    expect(document.activeElement).toBe(trigger);
+
+    rerender(
+      <>
+        <button data-testid="trigger">Открыть</button>
+        <Modal open title="Модаль" />
+      </>,
+    );
+    expect(screen.getByRole("dialog")).toBeDefined();
+    // focus moved into modal
+    expect(screen.getByRole("dialog").contains(document.activeElement)).toBe(true);
+
+    rerender(
+      <>
+        <button data-testid="trigger">Открыть</button>
+        <Modal open={false} title="Модаль" />
+      </>,
+    );
+    // focus restored to trigger
+    expect(document.activeElement).toBe(trigger);
+  });
 });
 
 describe("Sidebar", () => {
@@ -230,5 +262,47 @@ describe("toast", () => {
     });
 
     expect(screen.queryByText("Принтер не отвечает")).toBeNull();
+  });
+
+  it("clears the auto-dismiss timer when manually dismissed to prevent double-dismiss", () => {
+    act(() => {
+      toast("ok", "Уведомление", 4000);
+    });
+
+    const status = screen.getByText("Уведомление").closest('[role="status"]') as HTMLElement;
+    const closeButton = within(status).getByRole("button", { name: "Закрыть" });
+
+    // Dismiss manually
+    act(() => {
+      closeButton.click();
+    });
+    expect(screen.queryByText("Уведомление")).toBeNull();
+
+    // Advance time past the auto-dismiss duration
+    act(() => {
+      vi.advanceTimersByTime(4000);
+    });
+
+    // The toast should remain dismissed (no re-render or extra subscription notification)
+    expect(screen.queryByText("Уведомление")).toBeNull();
+  });
+
+  it("does not drop the first toast when called before viewport subscription exists (cold path)", () => {
+    // Emit two toasts synchronously to simulate the race condition where
+    // the first toast is added to the store before any React component
+    // subscribes. useSyncExternalStore re-checks the snapshot after
+    // subscribing, so both toasts should be captured.
+    act(() => {
+      toast("ok", "Первый");
+      toast("warn", "Второй");
+    });
+
+    // Both toasts should appear in the DOM
+    expect(screen.getByText("Первый")).toBeDefined();
+    expect(screen.getByText("Второй")).toBeDefined();
+
+    // Assert both appear exactly once (not duplicated)
+    expect(screen.queryAllByText("Первый").length).toBe(1);
+    expect(screen.queryAllByText("Второй").length).toBe(1);
   });
 });

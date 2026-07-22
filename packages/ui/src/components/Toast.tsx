@@ -44,6 +44,7 @@ let container: HTMLDivElement | null = null;
 let entries: ToastEntry[] = [];
 let nextId = 0;
 const listeners = new Set<() => void>();
+const timers = new Map<number, ReturnType<typeof setTimeout>>();
 
 function ensureMounted() {
   if (container) return;
@@ -68,6 +69,11 @@ function getSnapshot() {
 }
 
 function dismiss(id: number) {
+  const timer = timers.get(id);
+  if (timer) {
+    clearTimeout(timer);
+    timers.delete(id);
+  }
   setEntries(entries.filter((entry) => entry.id !== id));
 }
 
@@ -77,7 +83,8 @@ export function toast(tone: ToastTone, message: ReactNode, durationMs = 4000): n
   const id = nextId++;
   setEntries([...entries, { id, tone, message }]);
   if (durationMs > 0) {
-    setTimeout(() => dismiss(id), durationMs);
+    const timer = setTimeout(() => dismiss(id), durationMs);
+    timers.set(id, timer);
   }
   return id;
 }
