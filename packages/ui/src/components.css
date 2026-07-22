@@ -1,0 +1,11 @@
+/* Маркиро — служебные классы компонентов пакета ui. */
+
+/* Числа и коды в таблицах: Table.tsx применяет этот хук к mono-колонкам. */
+.font-mono {
+  font: var(--text-code);
+  font-variant-numeric: tabular-nums;
+}
+
+.nowrap {
+  white-space: nowrap;
+}

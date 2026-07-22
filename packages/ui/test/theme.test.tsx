@@ -31,7 +31,7 @@ describe("ThemeProvider", () => {
     render(
       <ThemeProvider defaultTheme="dark">
         <Probe />
-      </ThemeProvider>
+      </ThemeProvider>,
     );
 
     expect(document.documentElement.dataset.theme).toBe("dark");
@@ -43,7 +43,7 @@ describe("ThemeProvider", () => {
     render(
       <ThemeProvider defaultTheme="dark">
         <Probe />
-      </ThemeProvider>
+      </ThemeProvider>,
     );
 
     expect(document.documentElement.dataset.theme).toBe("dark");
@@ -61,7 +61,7 @@ describe("ThemeProvider", () => {
     render(
       <ThemeProvider defaultTheme="dark">
         <Probe />
-      </ThemeProvider>
+      </ThemeProvider>,
     );
 
     await user.click(screen.getByText("Light"));
@@ -77,7 +77,7 @@ describe("ThemeProvider", () => {
     const { unmount } = render(
       <ThemeProvider defaultTheme="dark">
         <Probe />
-      </ThemeProvider>
+      </ThemeProvider>,
     );
 
     expect(document.documentElement.dataset.theme).toBe("light");

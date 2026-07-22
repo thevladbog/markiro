@@ -1,10 +1,4 @@
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useState,
-  type ReactNode,
-} from "react";
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 
 export type Theme = "light" | "dark" | "system";
 
@@ -33,14 +27,12 @@ export function ThemeProvider({
     }
 
     // If no stored theme, use default
-    const effectiveTheme =
-      defaultTheme === "system" ? resolveSystemTheme() : defaultTheme;
+    const effectiveTheme = defaultTheme === "system" ? resolveSystemTheme() : defaultTheme;
     updateDocumentTheme(effectiveTheme);
   }, [defaultTheme]);
 
   useEffect(() => {
-    const effectiveTheme =
-      theme === "system" ? resolveSystemTheme() : theme;
+    const effectiveTheme = theme === "system" ? resolveSystemTheme() : theme;
     updateDocumentTheme(effectiveTheme);
   }, [theme]);
 
@@ -49,11 +41,7 @@ export function ThemeProvider({
     localStorage.setItem("markiro.theme", newTheme);
   };
 
-  return (
-    <ThemeContext.Provider value={{ theme, setTheme }}>
-      {children}
-    </ThemeContext.Provider>
-  );
+  return <ThemeContext.Provider value={{ theme, setTheme }}>{children}</ThemeContext.Provider>;
 }
 
 export function useTheme() {
@@ -68,9 +56,7 @@ function resolveSystemTheme(): Exclude<Theme, "system"> {
   if (typeof window === "undefined") return "light";
 
   try {
-    return window.matchMedia("(prefers-color-scheme: dark)").matches
-      ? "dark"
-      : "light";
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   } catch {
     return "light";
   }

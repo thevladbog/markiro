@@ -1,98 +1,98 @@
 /* Маркиро — цвет. Бренд = монохром; цвет зарезервирован за статусами. */
 :root {
   /* base */
-  --ink: #17161A;
-  --paper: #FAFAF8;
-  --panel: #F0EFEA;
+  --ink: #17161a;
+  --paper: #fafaf8;
+  --panel: #f0efea;
 
   /* surfaces */
-  --surface-page: #FAFAF8;
-  --surface-card: #FFFFFF;
-  --surface-panel: #F0EFEA;
-  --surface-inverse: #17161A;
+  --surface-page: #fafaf8;
+  --surface-card: #ffffff;
+  --surface-panel: #f0efea;
+  --surface-inverse: #17161a;
   --surface-overlay: rgba(23, 22, 26, 0.55);
 
   /* text */
-  --fg-1: #17161A;
-  --fg-2: #45433E;
-  --fg-3: #6B6862;
-  --fg-disabled: #A5A29A;
-  --fg-on-inverse: #FAFAF8;
+  --fg-1: #17161a;
+  --fg-2: #45433e;
+  --fg-3: #6b6862;
+  --fg-disabled: #a5a29a;
+  --fg-on-inverse: #fafaf8;
 
   /* lines */
-  --line: #E0DED7;
-  --line-strong: #C9C6BD;
+  --line: #e0ded7;
+  --line-strong: #c9c6bd;
 
   /* brand accent — только модуль знака и ключевые CTA */
-  --accent: #0FAF56;
-  --accent-strong: #0B8A44;
-  --accent-module: #3DDC7A;
+  --accent: #0faf56;
+  --accent-strong: #0b8a44;
+  --accent-module: #3ddc7a;
 
   /* semantic: OK */
   --ok-fg: #116335;
-  --ok-bg: #E7F6EC;
-  --ok-border: #CFE8D8;
-  --ok-solid: #0FAF56;
+  --ok-bg: #e7f6ec;
+  --ok-border: #cfe8d8;
+  --ok-solid: #0faf56;
   /* semantic: error */
-  --err-fg: #A1231A;
-  --err-bg: #FDEAE7;
-  --err-border: #F2D4D0;
-  --err-solid: #C0392B;
+  --err-fg: #a1231a;
+  --err-bg: #fdeae7;
+  --err-border: #f2d4d0;
+  --err-solid: #c0392b;
   /* semantic: duplicate / attention */
-  --warn-fg: #8A4C07;
-  --warn-bg: #FDF0DC;
-  --warn-border: #EFDFBE;
-  --warn-solid: #DD9420;
+  --warn-fg: #8a4c07;
+  --warn-bg: #fdf0dc;
+  --warn-border: #efdfbe;
+  --warn-solid: #dd9420;
   /* semantic: syncing */
-  --info-fg: #1A4F9C;
-  --info-bg: #E5EFFC;
-  --info-border: #D2E2F7;
-  --info-solid: #2E6FD0;
+  --info-fg: #1a4f9c;
+  --info-bg: #e5effc;
+  --info-border: #d2e2f7;
+  --info-solid: #2e6fd0;
 
-  --focus-ring: #1A4F9C;
+  --focus-ring: #1a4f9c;
 }
 
 [data-theme="dark"] {
   --surface-page: #131216;
-  --surface-card: #1C1B21;
+  --surface-card: #1c1b21;
   --surface-panel: #232228;
-  --surface-inverse: #FAFAF8;
+  --surface-inverse: #fafaf8;
   --surface-overlay: rgba(0, 0, 0, 0.6);
 
-  --fg-1: #FAFAF8;
-  --fg-2: #B6B3AB;
-  --fg-3: #8A877F;
-  --fg-disabled: #5B5952;
-  --fg-on-inverse: #17161A;
+  --fg-1: #fafaf8;
+  --fg-2: #b6b3ab;
+  --fg-3: #8a877f;
+  --fg-disabled: #5b5952;
+  --fg-on-inverse: #17161a;
 
-  --line: #2E2D33;
-  --line-strong: #45444B;
+  --line: #2e2d33;
+  --line-strong: #45444b;
 
-  --accent: #3DDC7A;
-  --accent-strong: #6BE599;
-  --accent-module: #3DDC7A;
+  --accent: #3ddc7a;
+  --accent-strong: #6be599;
+  --accent-module: #3ddc7a;
 
-  --ok-fg: #3DDC7A;
-  --ok-bg: #142E1D;
-  --ok-border: #1F4A2E;
-  --ok-solid: #3DDC7A;
+  --ok-fg: #3ddc7a;
+  --ok-bg: #142e1d;
+  --ok-border: #1f4a2e;
+  --ok-solid: #3ddc7a;
 
-  --err-fg: #FF6B5E;
-  --err-bg: #391A16;
-  --err-border: #5C2A24;
-  --err-solid: #FF6B5E;
+  --err-fg: #ff6b5e;
+  --err-bg: #391a16;
+  --err-border: #5c2a24;
+  --err-solid: #ff6b5e;
 
-  --warn-fg: #FFB84D;
-  --warn-bg: #33250E;
-  --warn-border: #543E19;
-  --warn-solid: #FFB84D;
+  --warn-fg: #ffb84d;
+  --warn-bg: #33250e;
+  --warn-border: #543e19;
+  --warn-solid: #ffb84d;
 
-  --info-fg: #6DB2FF;
+  --info-fg: #6db2ff;
   --info-bg: #152740;
   --info-border: #234066;
-  --info-solid: #6DB2FF;
+  --info-solid: #6db2ff;
 
-  --focus-ring: #6DB2FF;
+  --focus-ring: #6db2ff;
 }
 
 /* Маркиро — типографика. Plex Sans = интерфейс, Plex Mono = коды/счётчики/логотип. */
@@ -149,9 +149,9 @@
   --shadow-3: 0 8px 24px rgba(23, 22, 26, 0.16);
 
   /* controls */
-  --control-sm: 32px;   /* компактные таблицы, офис */
-  --control-md: 40px;   /* минимальная цель, офис */
-  --control-floor: 64px;/* минимальная цель, цех (перчатка) */
+  --control-sm: 32px; /* компактные таблицы, офис */
+  --control-md: 40px; /* минимальная цель, офис */
+  --control-floor: 64px; /* минимальная цель, цех (перчатка) */
   --focus-ring-w: 2px;
   --focus-ring-offset: 2px;
 }
