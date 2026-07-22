@@ -24,24 +24,28 @@ export class OrgProfileService {
    * Upserts only the fields present in `patch` (undefined = leave untouched,
    * explicit null = clear); fields omitted entirely keep their current
    * value (or the empty default if the row doesn't exist yet).
+   * Atomic: no read-then-write race — merge happens in SQL via onConflictDoUpdate.
    */
   async upsertProfile(tenantId: string, patch: PutOrgProfileDto): Promise<OrgProfileDto> {
-    const current = await this.getProfile(tenantId);
-    const next: OrgProfileDto = {
-      gln: patch.gln !== undefined ? patch.gln : current.gln,
-      gs1Prefixes: patch.gs1Prefixes !== undefined ? patch.gs1Prefixes : current.gs1Prefixes,
-      inn: patch.inn !== undefined ? patch.inn : current.inn,
-    };
+    const setClause: Record<string, unknown> = { updatedAt: new Date() };
+    if (patch.gln !== undefined) setClause.gln = patch.gln;
+    if (patch.gs1Prefixes !== undefined) setClause.gs1Prefixes = patch.gs1Prefixes;
+    if (patch.inn !== undefined) setClause.inn = patch.inn;
 
     await this.db
       .insert(schema.orgProfiles)
-      .values({ tenantId, ...next })
+      .values({
+        tenantId,
+        gln: patch.gln ?? null,
+        gs1Prefixes: patch.gs1Prefixes ?? [],
+        inn: patch.inn ?? null,
+      })
       .onConflictDoUpdate({
         target: schema.orgProfiles.tenantId,
-        set: { ...next, updatedAt: new Date() },
+        set: setClause,
       });
 
-    return next;
+    return this.getProfile(tenantId);
   }
 
   /** Produces the tenant's registered GS1 company prefixes (for Task 6's GTIN-ownership check). */

@@ -97,10 +97,10 @@ describe.skipIf(!ready)("org profile e2e", () => {
 
     const put = await agent
       .put("/org/profile")
-      .send({ gln: "4600000000006", gs1Prefixes: ["4600000", "4600001"], inn: "7701234567" })
+      .send({ gln: "6291041500213", gs1Prefixes: ["4600000", "4600001"], inn: "7701234567" })
       .expect(200);
     expect(put.body).toEqual({
-      gln: "4600000000006",
+      gln: "6291041500213",
       gs1Prefixes: ["4600000", "4600001"],
       inn: "7701234567",
     });
@@ -117,17 +117,17 @@ describe.skipIf(!ready)("org profile e2e", () => {
       .send({ organizationId: orgId })
       .expect(200);
 
-    await agent.put("/org/profile").send({ gln: "4600000000006", inn: "7701234567" }).expect(200);
+    await agent.put("/org/profile").send({ gln: "6291041500213", inn: "7701234567" }).expect(200);
 
     const put2 = await agent.put("/org/profile").send({ inn: "7709876543" }).expect(200);
     expect(put2.body).toEqual({
-      gln: "4600000000006",
+      gln: "6291041500213",
       gs1Prefixes: [],
       inn: "7709876543",
     });
   });
 
-  it("PUT /org/profile rejects an invalid GLN with 400", async () => {
+  it("PUT /org/profile rejects an invalid GLN format with 400", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpWithInactiveOrg(agent);
     await agent
@@ -138,6 +138,45 @@ describe.skipIf(!ready)("org profile e2e", () => {
     await agent.put("/org/profile").send({ gln: "not-a-gln" }).expect(400);
   });
 
+  it("PUT /org/profile rejects GLN with invalid check digit with 400", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpWithInactiveOrg(agent);
+    await agent
+      .post("/api/auth/organization/set-active")
+      .send({ organizationId: orgId })
+      .expect(200);
+
+    await agent.put("/org/profile").send({ gln: "6291041500214" }).expect(400);
+  });
+
+  it("PUT /org/profile merges fields atomically (no lost-update race)", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpWithInactiveOrg(agent);
+    await agent
+      .post("/api/auth/organization/set-active")
+      .send({ organizationId: orgId })
+      .expect(200);
+
+    // PUT gln first
+    await agent.put("/org/profile").send({ gln: "6291041500213" }).expect(200);
+
+    // PUT inn only (should not lose gln)
+    const result = await agent.put("/org/profile").send({ inn: "7701234567" }).expect(200);
+    expect(result.body).toEqual({
+      gln: "6291041500213",
+      gs1Prefixes: [],
+      inn: "7701234567",
+    });
+
+    // Verify GET sees the merged state
+    const get = await agent.get("/org/profile").expect(200);
+    expect(get.body).toEqual({
+      gln: "6291041500213",
+      gs1Prefixes: [],
+      inn: "7701234567",
+    });
+  });
+
   it("tenant isolation: a second organization sees its own empty profile", async () => {
     const agent1 = request.agent(app!.getHttpServer());
     const org1 = await signUpWithInactiveOrg(agent1);
@@ -145,7 +184,7 @@ describe.skipIf(!ready)("org profile e2e", () => {
       .post("/api/auth/organization/set-active")
       .send({ organizationId: org1 })
       .expect(200);
-    await agent1.put("/org/profile").send({ gln: "4600000000006" }).expect(200);
+    await agent1.put("/org/profile").send({ gln: "6291041500213" }).expect(200);
 
     const agent2 = request.agent(app!.getHttpServer());
     const org2 = await signUpWithInactiveOrg(agent2);
