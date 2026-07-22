@@ -236,7 +236,7 @@ describe.skipIf(!ready)("counterparties e2e", () => {
         gln: "6291041500213",
       })
       .expect(201);
-    const counterppartyId = createRes.body.id as string;
+    const counterpartyId = createRes.body.id as string;
 
     // Seed a product that references the counterparty (direct DB insert)
     await db.insert(schema.products).values({
@@ -244,11 +244,11 @@ describe.skipIf(!ready)("counterparties e2e", () => {
       tenantId: orgId,
       gtin14: "12345678901234",
       name: "Test Product",
-      defaultCounterpartyId: counterppartyId,
+      defaultCounterpartyId: counterpartyId,
     });
 
     // DELETE should return 409
-    const deleteRes = await agent.delete(`/counterparties/${counterppartyId}`).expect(409);
+    const deleteRes = await agent.delete(`/counterparties/${counterpartyId}`).expect(409);
 
     expect(deleteRes.body).toMatchObject({
       message: expect.stringContaining("referenced"),
@@ -271,7 +271,7 @@ describe.skipIf(!ready)("counterparties e2e", () => {
         gln: "6291041500213",
       })
       .expect(201);
-    const counterppartyId = createRes.body.id as string;
+    const counterpartyId = createRes.body.id as string;
 
     // Seed a product
     const productId = randomUUID();
@@ -287,12 +287,12 @@ describe.skipIf(!ready)("counterparties e2e", () => {
       id: randomUUID(),
       tenantId: orgId,
       productId,
-      counterpartyId: counterppartyId,
+      counterpartyId: counterpartyId,
       mode: "validation",
     });
 
     // DELETE should return 409
-    const deleteRes = await agent.delete(`/counterparties/${counterppartyId}`).expect(409);
+    const deleteRes = await agent.delete(`/counterparties/${counterpartyId}`).expect(409);
 
     expect(deleteRes.body).toMatchObject({
       message: expect.stringContaining("referenced"),

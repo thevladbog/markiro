@@ -75,9 +75,6 @@ export class CounterpartiesService {
     id: string,
     data: UpdateCounterpartyDto,
   ): Promise<CounterpartyDto> {
-    // First verify the counterparty exists and belongs to this tenant
-    await this.getCounterparty(tenantId, id);
-
     const setClause: Record<string, unknown> = { updatedAt: new Date() };
     if (data.name !== undefined) setClause.name = data.name;
     if (data.gln !== undefined) setClause.gln = data.gln;
@@ -85,16 +82,14 @@ export class CounterpartiesService {
     if (data.gs1Prefixes !== undefined) setClause.gs1Prefixes = data.gs1Prefixes;
     if (data.notes !== undefined) setClause.notes = data.notes;
 
-    // Note: drizzle doesn't support WHERE in UPDATE with returning() easily,
-    // but we already verified ownership above, so we can safely update by id
     const [row] = await this.db
       .update(schema.counterparties)
       .set(setClause)
-      .where(eq(schema.counterparties.id, id))
+      .where(and(eq(schema.counterparties.tenantId, tenantId), eq(schema.counterparties.id, id)))
       .returning();
 
     if (!row) {
-      throw new InternalServerErrorException("Failed to update counterparty");
+      throw new NotFoundException("Counterparty not found or does not belong to this tenant");
     }
 
     return this.rowToDto(row);

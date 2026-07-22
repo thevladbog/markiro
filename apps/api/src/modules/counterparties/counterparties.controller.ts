@@ -4,7 +4,6 @@ import {
   Delete,
   Get,
   HttpCode,
-  NotFoundException,
   Param,
   Patch,
   Post,
@@ -38,14 +37,7 @@ export class CounterpartiesController {
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
   ): Promise<CounterpartyDto> {
-    try {
-      return await this.counterpartiesService.getCounterparty(req.tenantId!, id);
-    } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw error;
-      }
-      throw error;
-    }
+    return this.counterpartiesService.getCounterparty(req.tenantId!, id);
   }
 
   @Post()
