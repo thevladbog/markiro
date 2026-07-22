@@ -4,5 +4,3 @@ packages:
 allowBuilds:
   esbuild: true
   "@scarf/scarf": false # telemetry postinstall — deliberately blocked
-minimumReleaseAgeExclude:
-  - '@vitejs/plugin-react@6.0.4'
