@@ -28,7 +28,7 @@ jobs:
           --health-timeout 5s --health-retries 10
     env:
       DATABASE_URL: postgres://markiro:markiro@localhost:5432/markiro
-      BETTER_AUTH_SECRET: ci-secret-0123456789abcdef
+      BETTER_AUTH_SECRET: insecure-dummy-ci-placeholder-not-a-secret
       BETTER_AUTH_URL: http://localhost:3000
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
