@@ -367,4 +367,51 @@ describe.skipIf(!ready)("products e2e", () => {
     await agent.delete(`/products/${id}`).expect(204);
     await agent.get(`/products/${id}`).expect(404);
   });
+
+  it("POST /products rejects a nonexistent defaultCounterpartyId with 400", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+
+    const res = await agent
+      .post("/products")
+      .send({
+        gtin: EAN13_CANONICAL,
+        name: "Widget with Bad Counterparty",
+        defaultCounterpartyId: randomUUID(),
+      })
+      .expect(400);
+
+    expect(res.body.message).toEqual(expect.stringContaining("Unknown counterparty"));
+  });
+
+  it("POST /products rejects a cross-tenant defaultCounterpartyId with 400", async () => {
+    const agent1 = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent1);
+
+    // Create a counterparty in org 1
+    const cpRes = await agent1
+      .post("/counterparties")
+      .send({
+        name: "Org1 Counterparty",
+        gln: "6291041500213",
+        gs1Prefixes: [],
+      })
+      .expect(201);
+    const counterpartyId = cpRes.body.id as string;
+
+    // Create agent2 (different org) and try to use org1's counterparty
+    const agent2 = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent2);
+
+    const res = await agent2
+      .post("/products")
+      .send({
+        gtin: EAN13_CANONICAL,
+        name: "Widget with Cross-Tenant Counterparty",
+        defaultCounterpartyId: counterpartyId,
+      })
+      .expect(400);
+
+    expect(res.body.message).toEqual(expect.stringContaining("Unknown counterparty"));
+  });
 });

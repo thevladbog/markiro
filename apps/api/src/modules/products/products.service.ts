@@ -234,12 +234,15 @@ export class ProductsService {
       : "draft";
   }
 
-  /** Catch PostgreSQL unique violation (code 23505) on the (tenant, gtin14) constraint -> 409. */
+  /** Catch PostgreSQL violations: unique 23505 -> 409; FK 23503 -> 400. */
   private handleWriteError(error: unknown): never {
     const err = error as Error & { code?: string; cause?: unknown };
     const errorCode = err?.code || (err?.cause as Record<string, string> | undefined)?.code;
     if (errorCode === "23505") {
       throw new ConflictException("A product with this GTIN already exists for this tenant");
+    }
+    if (errorCode === "23503") {
+      throw new BadRequestException("Unknown counterparty for this organization");
     }
     throw error;
   }
