@@ -24,9 +24,7 @@ describe("TenantGuard", () => {
     const guard = new TenantGuard(fakeAuth(async () => null));
     const req: FakeRequest = { headers: {} };
 
-    await expect(guard.canActivate(contextFor(req))).rejects.toBeInstanceOf(
-      UnauthorizedException,
-    );
+    await expect(guard.canActivate(contextFor(req))).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
   it("throws ForbiddenException when the session has no active organization", async () => {
