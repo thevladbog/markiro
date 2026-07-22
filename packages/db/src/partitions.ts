@@ -22,7 +22,10 @@ export async function ensurePartitions(db: Db, months: Date[]): Promise<string[]
     const [from, to] = monthBounds(month);
     for (const parent of PARENTS) {
       const name = partitionName(parent, month);
-      const exists = await db.execute(sql`SELECT 1 FROM pg_class WHERE relname = ${name}`);
+      const exists = await db.execute(
+        sql`SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE c.relname = ${name} AND n.nspname = current_schema()`,
+      );
       if (exists.rows.length > 0) continue;
       await db.execute(
         sql.raw(

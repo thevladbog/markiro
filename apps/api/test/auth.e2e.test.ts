@@ -37,9 +37,11 @@ describe.skipIf(!url)("auth e2e", () => {
     await app.init();
   });
 
+  // app.close() runs Nest's onModuleDestroy lifecycle, which now closes
+  // setup.pool itself (see AuthModule's AuthPoolCloser) -- closing it again
+  // here would throw "Called end on pool more than once".
   afterAll(async () => {
     await app.close();
-    await setup.pool.end();
   });
 
   it("sign-up -> session cookie -> organization create", async () => {

@@ -1,3 +1,5 @@
+// Query-only defs; DDL lives in migrations/0002_partitioned_codes.sql — do
+// NOT let drizzle-kit generate these.
 import { char, pgTable, text, timestamp, uuid, primaryKey } from "drizzle-orm/pg-core";
 
 export const codes = pgTable(

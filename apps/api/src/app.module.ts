@@ -15,7 +15,9 @@ export class AppModule {
    * routes; plain `imports: [AppModule]` (e.g. the health e2e test) keeps
    * working without a DB connection since it never needs AUTH/DB/jobs.
    */
-  static forRoot(setup: Pick<AuthSetup, "auth" | "db"> & { databaseUrl: string }): DynamicModule {
+  static forRoot(
+    setup: Pick<AuthSetup, "auth" | "db" | "pool"> & { databaseUrl: string },
+  ): DynamicModule {
     return {
       module: AppModule,
       imports: [AuthModule.forRoot(setup), JobsModule.forRoot(setup.databaseUrl)],
