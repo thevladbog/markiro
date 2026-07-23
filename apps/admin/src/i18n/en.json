@@ -115,6 +115,7 @@
           "gtinInvalid": "Invalid GTIN (check digit mismatch)",
           "nameRequired": "Enter a name",
           "nameTooLong": "200 characters or fewer",
+          "productGroupTooLong": "200 characters or fewer",
           "capacityInvalid": "Enter a positive whole number"
         }
       },

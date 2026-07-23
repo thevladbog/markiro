@@ -39,7 +39,11 @@ const productFormSchema = z.object({
     .trim()
     .min(1, "pages.catalog.form.errors.nameRequired")
     .max(200, "pages.catalog.form.errors.nameTooLong"),
-  productGroup: z.string().trim().optional(),
+  productGroup: z
+    .string()
+    .trim()
+    .max(200, "pages.catalog.form.errors.productGroupTooLong")
+    .optional(),
   boxCapacity: z
     .string()
     .trim()
