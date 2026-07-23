@@ -1,10 +1,13 @@
-import { Body, Controller, Get, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, HttpCode, Param, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
+import type { Response } from "express";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
+  exportPickupCodesSchema,
   listPickupOrdersQuerySchema,
   resolvePickupOrderSchema,
+  type ExportPickupCodesDto,
   type ListPickupOrdersQueryDto,
   type ListPickupOrdersResponseDto,
   type PickupOrderDetailDto,
@@ -45,5 +48,19 @@ export class PickupOrdersController {
   @Post(":id/cancel")
   async cancel(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<PickupOrderRowDto> {
     return this.pickupOrdersService.cancel(req.tenantId!, id);
+  }
+
+  @Post("export")
+  @HttpCode(200)
+  async export(
+    @Req() req: RequestWithTenant,
+    @Res({ passthrough: true }) res: Response,
+    @Body(new ZodValidationPipe(exportPickupCodesSchema)) body: ExportPickupCodesDto,
+  ): Promise<string> {
+    const txt = await this.pickupOrdersService.exportCodes(req.tenantId!, body.orderIds);
+    const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="codes-${stamp}.txt"`);
+    return txt;
   }
 }

@@ -102,3 +102,9 @@ export interface PickupOrderDetailDto extends PickupOrderRowDto {
   receiptNo: string | null;
   actNo: string | null;
 }
+
+/** POST /pickup-orders/export body. */
+export const exportPickupCodesSchema = z.object({
+  orderIds: z.array(z.string().uuid()).min(1),
+});
+export type ExportPickupCodesDto = z.infer<typeof exportPickupCodesSchema>;

@@ -268,6 +268,26 @@ export class PickupOrdersService {
   }
 
   /**
+   * Export raw KMs from the specified orders. Each item's rawKm is on a separate line.
+   * Order IDs that don't belong to this tenant are silently excluded (no error).
+   * Returns one rawKm per line, joined by newlines, preserving GS bytes.
+   */
+  async exportCodes(tenantId: string, orderIds: string[]): Promise<string> {
+    if (orderIds.length === 0) return "";
+
+    const rows = await this.db
+      .select({ rawKm: schema.pickupOrderItems.rawKm })
+      .from(schema.pickupOrderItems)
+      .where(and(
+        eq(schema.pickupOrderItems.tenantId, tenantId),
+        inArray(schema.pickupOrderItems.orderId, orderIds),
+      ))
+      .orderBy(asc(schema.pickupOrderItems.orderId), asc(schema.pickupOrderItems.scannedAt));
+
+    return rows.map((r) => r.rawKm).join("\n");
+  }
+
+  /**
    * Cancel a pending order (409 otherwise) and void its items in the same
    * transaction — voiding frees the partial-unique index on `kmKey`, so a
    * cancelled code can be re-scanned into a new order.
