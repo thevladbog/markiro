@@ -146,7 +146,7 @@ describe("generateZpl - GS1 DataMatrix FNC1/GS encoding (km.code)", () => {
     // leading-FNC1 half of the decision.
     const zpl = await generateZpl(baseSpec, sampleLabelData());
     // xMm=2,yMm=2 -> 16,16 dots; sizeMm=0.5 -> mmToDots(0.5,203)=4 dots module.
-    expect(zpl).toContain("^FO16,16^BXN,4,200^FH_^FD_1010460068200001321abcDEF1234567^FS");
+    expect(zpl).toContain("^FO16,16^BXN,4,200,,,,_^FH_^FD_1010460068200001321abcDEF1234567^FS");
   });
 
   it("pins an embedded GS separator (^\\u001d^) as the `_1D` hex escape", async () => {
@@ -155,7 +155,7 @@ describe("generateZpl - GS1 DataMatrix FNC1/GS encoding (km.code)", () => {
       "km.code": `0104600682000013211234${String.fromCharCode(0x1d)}915678`,
     };
     const zpl = await generateZpl(baseSpec, data);
-    expect(zpl).toContain("^FO16,16^BXN,4,200^FH_^FD_10104600682000013211234_1D915678^FS");
+    expect(zpl).toContain("^FO16,16^BXN,4,200,,,,_^FH_^FD_10104600682000013211234_1D915678^FS");
   });
 
   it("does NOT auto-apply GS1 FNC1 escaping to a literal datamatrix override", async () => {
@@ -174,7 +174,7 @@ describe("generateZpl - GS1 DataMatrix FNC1/GS encoding (km.code)", () => {
       ],
     };
     const zpl = await generateZpl(literalSpec, sampleLabelData());
-    expect(zpl).toContain("^FO16,16^BXN,4,200^FDjust-some-text^FS");
+    expect(zpl).toContain("^FO16,16^BXN,4,200,,,,_^FDjust-some-text^FS");
     expect(zpl).not.toContain("_1");
   });
 });

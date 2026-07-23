@@ -179,7 +179,7 @@ function resolveBarcodeSource(
   source: LabelBarcodeElement["data"],
   data: Record<LabelField, string>,
 ): { value: string; field?: LabelField } {
-  if (typeof source === "string") return { value: data[source], field: source };
+  if (typeof source === "string") return { value: data[source] ?? "", field: source };
   return { value: source.literal };
 }
 
@@ -210,11 +210,13 @@ function renderBarcodeElement(
       // treatment automatically — an arbitrary `{ literal }` override is
       // assumed to be exactly what the template author typed, not
       // necessarily GS1-formatted data, so it is NOT auto-escaped as GS1.
+      // ^BX's 7th parameter (escape control character) is pinned to `_`
+      // so that _1 and _1D escapes are recognized on all Zebra firmware.
       if (field === "km.code") {
-        return `^FO${x},${y}^BXN,${moduleDots},200${renderGs1DataMatrixTail(value)}`;
+        return `^FO${x},${y}^BXN,${moduleDots},200,,,,_${renderGs1DataMatrixTail(value)}`;
       }
       const { fh, data: escaped } = escapeFdData(value);
-      return `^FO${x},${y}^BXN,${moduleDots},200${fh}^FD${escaped}^FS`;
+      return `^FO${x},${y}^BXN,${moduleDots},200,,,,_${fh}^FD${escaped}^FS`;
     }
     case "qr": {
       const moduleDots = mmToDots(element.sizeMm, dpi);
