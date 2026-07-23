@@ -69,8 +69,9 @@ export class PickupOrdersService {
       tenantId, kioskId, employeeId, dto.reason, writeoffReasonId, dto.deviceSeq, when, accepted, conflicts,
     );
 
-    // 7. Outcome.
-    return { orderNo: order.orderNo, status: "pending", itemCount: order.itemCount, conflicts };
+    // 7. Outcome. (A device-seq race outcome carries its own `conflicts: []`, mirroring the
+    // sequential idempotent path — this request's own conflicts belong to a duplicate submission.)
+    return { orderNo: order.orderNo, status: "pending", itemCount: order.itemCount, conflicts: order.conflicts ?? conflicts };
   }
 
   /** Offline-cache payload: everything a kiosk needs to operate without a round-trip per scan. */
@@ -131,10 +132,15 @@ export class PickupOrdersService {
     const [badge] = await this.db
       .select({ employeeId: schema.employeeBadges.employeeId })
       .from(schema.employeeBadges)
+      .innerJoin(schema.employees, and(
+        eq(schema.employees.tenantId, schema.employeeBadges.tenantId),
+        eq(schema.employees.id, schema.employeeBadges.employeeId),
+      ))
       .where(and(
         eq(schema.employeeBadges.tenantId, tenantId),
         eq(schema.employeeBadges.badgeCode, badgeCode),
         isNull(schema.employeeBadges.revokedAt),
+        eq(schema.employees.status, "active"),
       ));
     return badge?.employeeId;
   }
@@ -279,6 +285,12 @@ export class PickupOrdersService {
    * Inserts the order + accepted items in a transaction. If insertion loses a race against
    * another open order for the same kmKey (23505 on pickup_order_items_tenant_kmkey_open_uq),
    * converts every now-conflicting item to a `duplicate` conflict and retries without them.
+   *
+   * A separate race is possible on (tenantId, kioskId, deviceSeq) itself: two truly-concurrent
+   * POSTs with the same idempotency key both pass the pre-SELECT in `createFromKiosk` (TOCTOU),
+   * so the loser's INSERT hits `pickup_orders_kiosk_device_seq_uq` (23505). That is NOT a
+   * conflict to surface — it means another request already created the order this one wants;
+   * re-fetch and return the winner's outcome instead of erroring or creating a duplicate order.
    */
   private async insertOrderWithRetry(
     tenantId: string,
@@ -290,7 +302,7 @@ export class PickupOrdersService {
     when: Date,
     items: ResolvedItem[],
     conflicts: OrderConflict[],
-  ): Promise<{ orderNo: string; itemCount: number }> {
+  ): Promise<{ orderNo: string; itemCount: number; conflicts?: OrderConflict[] }> {
     let remaining = items;
     for (;;) {
       try {
@@ -323,6 +335,19 @@ export class PickupOrdersService {
           return { orderNo: order.orderNo, itemCount: order.itemCount };
         });
       } catch (error) {
+        if (this.isDeviceSeqRace(error)) {
+          const [winner] = await this.db
+            .select()
+            .from(schema.pickupOrders)
+            .where(and(
+              eq(schema.pickupOrders.tenantId, tenantId),
+              eq(schema.pickupOrders.kioskId, kioskId),
+              eq(schema.pickupOrders.deviceSeq, deviceSeq),
+            ));
+          if (!winner) throw error; // shouldn't happen, but avoid looping forever
+          return { orderNo: winner.orderNo, itemCount: winner.itemCount, conflicts: [] };
+        }
+
         if (!this.isKmKeyRace(error) || remaining.length === 0) throw error;
 
         const keys = remaining.map((i) => i.kmKey);
@@ -367,5 +392,14 @@ export class PickupOrdersService {
     const code = err?.code || cause?.code;
     const constraint = err?.constraint || cause?.constraint;
     return code === "23505" && constraint === "pickup_order_items_tenant_kmkey_open_uq";
+  }
+
+  /** 23505 on pickup_orders_kiosk_device_seq_uq -> lost the idempotency race to a concurrent identical POST. */
+  private isDeviceSeqRace(error: unknown): boolean {
+    const err = error as Error & { code?: string; constraint?: string; cause?: unknown };
+    const cause = err?.cause as { code?: string; constraint?: string } | undefined;
+    const code = err?.code || cause?.code;
+    const constraint = err?.constraint || cause?.constraint;
+    return code === "23505" && constraint === "pickup_orders_kiosk_device_seq_uq";
   }
 }

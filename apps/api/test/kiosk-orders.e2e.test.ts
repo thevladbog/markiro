@@ -4,7 +4,7 @@ import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
@@ -165,6 +165,23 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
       .send({ deviceSeq: 3, badgeCode: "NOPE", reason: "buy", items: [] }).expect(401);
   });
 
+  it("rejects a non-revoked badge belonging to an archived employee", async () => {
+    const archivedEmployeeId = randomUUID();
+    const archivedBadge = `badge-archived-${randomUUID()}`;
+    await db.insert(schema.employees).values({ id: archivedEmployeeId, tenantId, fullName: "Архивов А." });
+    await db.insert(schema.employeeBadges).values({ tenantId, employeeId: archivedEmployeeId, badgeCode: archivedBadge });
+
+    // Sanity: the badge works while the employee is still active.
+    await request(app!.getHttpServer()).post("/kiosk/orders").set("x-kiosk-token", TOKEN)
+      .send({ deviceSeq: 11, badgeCode: archivedBadge, reason: "buy", items: [] }).expect(201);
+
+    await db.update(schema.employees).set({ status: "archived" }).where(eq(schema.employees.id, archivedEmployeeId));
+
+    // The badge itself is still not revoked, but the employee behind it is archived -> unknown badge (401).
+    await request(app!.getHttpServer()).post("/kiosk/orders").set("x-kiosk-token", TOKEN)
+      .send({ deviceSeq: 12, badgeCode: archivedBadge, reason: "buy", items: [] }).expect(401);
+  });
+
   it("flags a not-a-KM scan and a KM missing its crypto tail (dropped GS) distinctly", async () => {
     const res = await request(app!.getHttpServer()).post("/kiosk/orders").set("x-kiosk-token", TOKEN)
       .send({
@@ -227,6 +244,27 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
       }).expect(201);
     expect(res.body.itemCount).toBe(0);
     expect(res.body.conflicts).toEqual([{ rawKm: `01${GTIN}21DUPKEY1${GS}93Abcd`, reason: "duplicate" }]);
+  });
+
+  it("resolves two truly-concurrent POSTs with the same deviceSeq into a single order (no 500)", async () => {
+    const body = {
+      deviceSeq: 20, badgeCode: BADGE, reason: "buy",
+      items: [{ rawKm: `01${GTIN}21CONC1${GS}93Abcd` }],
+    };
+    const [a, b] = await Promise.all([
+      request(app!.getHttpServer()).post("/kiosk/orders").set("x-kiosk-token", TOKEN).send(body),
+      request(app!.getHttpServer()).post("/kiosk/orders").set("x-kiosk-token", TOKEN).send(body),
+    ]);
+    expect(a.status).toBe(201);
+    expect(b.status).toBe(201);
+    expect(a.body.orderNo).toBe(b.body.orderNo);
+
+    const orders = await db.select().from(schema.pickupOrders).where(and(
+      eq(schema.pickupOrders.tenantId, tenantId),
+      eq(schema.pickupOrders.kioskId, kioskId),
+      eq(schema.pickupOrders.deviceSeq, 20),
+    ));
+    expect(orders).toHaveLength(1);
   });
 
   it("day-limit accepts up to dayLimitPerEmployee and marks the overflow over_limit", async () => {
