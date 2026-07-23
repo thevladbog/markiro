@@ -15,5 +15,20 @@
     "clear": "Clear",
     "submit": "Sign in",
     "wrong": "Wrong PIN"
+  },
+  "shifts": {
+    "title": "Shifts",
+    "open": "Open",
+    "rejoin": "Rejoin",
+    "new": "New shift",
+    "gtinPrompt": "Type or scan a GTIN",
+    "gtinInvalid": "Invalid GTIN",
+    "notInCatalog": "Product is not in the catalog",
+    "notInCatalogHint": "Ask an administrator to add it in the admin panel.",
+    "scanAgain": "Scan again",
+    "back": "Back",
+    "modeValidation": "Validation",
+    "modeAggregation": "Aggregation",
+    "start": "Start"
   }
 }

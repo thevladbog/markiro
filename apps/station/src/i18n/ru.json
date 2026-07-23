@@ -15,5 +15,20 @@
     "clear": "Сброс",
     "submit": "Войти",
     "wrong": "Неверный PIN"
+  },
+  "shifts": {
+    "title": "Смены",
+    "open": "Открыть",
+    "rejoin": "Присоединиться",
+    "new": "Новая смена",
+    "gtinPrompt": "Введите или отсканируйте GTIN",
+    "gtinInvalid": "Неверный GTIN",
+    "notInCatalog": "Товар не найден в каталоге",
+    "notInCatalogHint": "Попросите администратора добавить товар в админ-панели.",
+    "scanAgain": "Сканировать снова",
+    "back": "Назад",
+    "modeValidation": "Проверка",
+    "modeAggregation": "Агрегация",
+    "start": "Начать"
   }
 }
