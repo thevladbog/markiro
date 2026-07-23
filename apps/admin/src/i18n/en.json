@@ -2,7 +2,8 @@
   "common": {
     "appName": "Markiro",
     "loading": "Loading…",
-    "signOut": "Sign out"
+    "signOut": "Sign out",
+    "loadError": "Failed to load data. Refresh the page or sign in again."
   },
   "auth": {
     "login": {

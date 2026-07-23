@@ -160,6 +160,33 @@ describe("ShiftsPage", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/shifts", expect.any(Object));
   });
 
+  it("shows a spinner (not EmptyState) while the list request is still pending", async () => {
+    // A fetch that never resolves keeps the query in isPending forever.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => new Promise<Response>(() => {})),
+    );
+
+    renderPage();
+
+    expect(await screen.findByRole("status")).toBeDefined();
+    expect(screen.queryByText("Смены не запланированы")).toBeNull();
+  });
+
+  it("shows an error alert (not EmptyState) when the list request fails, e.g. an expired session (401)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(401, { message: "Unauthorized" })),
+    );
+
+    renderPage();
+
+    expect(
+      await screen.findByText("Не удалось загрузить данные. Обновите страницу или войдите заново."),
+    ).toBeDefined();
+    expect(screen.queryByText("Смены не запланированы")).toBeNull();
+  });
+
   it("shows edit/delete actions only for planned rows, and the close action only for active rows", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       const path = String(url);

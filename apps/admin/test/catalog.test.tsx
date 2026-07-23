@@ -74,6 +74,33 @@ describe("CatalogPage", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/products", expect.any(Object));
   });
 
+  it("shows a spinner (not EmptyState) while the list request is still pending", async () => {
+    // A fetch that never resolves keeps the query in isPending forever.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => new Promise<Response>(() => {})),
+    );
+
+    renderPage();
+
+    expect(await screen.findByRole("status")).toBeDefined();
+    expect(screen.queryByText("Каталог пуст")).toBeNull();
+  });
+
+  it("shows an error alert (not EmptyState) when the list request fails, e.g. an expired session (401)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(401, { message: "Unauthorized" })),
+    );
+
+    renderPage();
+
+    expect(
+      await screen.findByText("Не удалось загрузить данные. Обновите страницу или войдите заново."),
+    ).toBeDefined();
+    expect(screen.queryByText("Каталог пуст")).toBeNull();
+  });
+
   it("never triggers the gtin-check request for a checksum-invalid GTIN", async () => {
     const fetchMock = vi.fn(async (_url: string) => jsonResponse(200, { items: [] }));
     vi.stubGlobal("fetch", fetchMock);
@@ -190,6 +217,61 @@ describe("CatalogPage", () => {
         }),
       );
     });
+  });
+
+  it("ignores a gtin-check response for a GTIN the field no longer holds (stale-response guard)", async () => {
+    let resolveStaleCheck: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path.includes("gtin-check")) {
+        const body = JSON.parse((init?.body as string | undefined) ?? "{}") as { gtin: string };
+        if (body.gtin === "4006381333931") {
+          // GTIN A's check never resolves on its own -- the test resolves it
+          // manually, after the field has already moved on to GTIN B.
+          return new Promise<Response>((resolve) => {
+            resolveStaleCheck = resolve;
+          });
+        }
+        return jsonResponse(200, {
+          gtin14: "04600682000013",
+          owner: "counterparty",
+          counterpartyId: "cp-fresh",
+          counterpartyName: "Fresh Co",
+        });
+      }
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Каталог пуст");
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Добавить продукт" })[0]!);
+    await screen.findByText("Новый продукт");
+
+    // GTIN A -- checksum-valid, kicks off a gtin-check that hangs.
+    fireEvent.change(screen.getByLabelText("ГТИН"), { target: { value: "4006381333931" } });
+    await waitFor(() => expect(resolveStaleCheck).toBeDefined());
+
+    // The user changes their mind before A's check resolves -- GTIN B (also
+    // checksum-valid) fires its own check, which resolves immediately.
+    fireEvent.change(screen.getByLabelText("ГТИН"), { target: { value: "4600682000013" } });
+    expect(await screen.findByText("Владелец ГТИН — Fresh Co")).toBeDefined();
+
+    // Now the stale A response arrives. Since the field no longer holds "A",
+    // it must not clobber the hint that B's (later, matching) response set.
+    resolveStaleCheck?.(
+      jsonResponse(200, {
+        gtin14: "04006381333931",
+        owner: "counterparty",
+        counterpartyId: "cp-stale",
+        counterpartyName: "Stale Co",
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(screen.queryByText("Владелец ГТИН — Stale Co")).toBeNull();
+    expect(screen.getByText("Владелец ГТИН — Fresh Co")).toBeDefined();
   });
 
   it("shows a non-blocking warn hint when the GTIN owner is unknown", async () => {

@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
+  Alert,
   Badge,
   Button,
   EmptyState,
@@ -9,6 +10,7 @@ import {
   Modal,
   PageHeader,
   Select,
+  Spinner,
   StatusChip,
   Table,
   toast,
@@ -54,7 +56,7 @@ export function ShiftsPage() {
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
 
-  const { data } = useShifts({
+  const { data, isPending, isError } = useShifts({
     ...(statusFilter !== "all" ? { status: statusFilter } : {}),
     ...(fromDate ? { from: fromDate } : {}),
     ...(toDate ? { to: toDate } : {}),
@@ -291,7 +293,13 @@ export function ShiftsPage() {
         </div>
       </div>
 
-      {items.length === 0 ? (
+      {isPending ? (
+        <div style={{ display: "flex", justifyContent: "center", padding: 48 }}>
+          <Spinner label={t("common.loading")} />
+        </div>
+      ) : isError ? (
+        <Alert tone="error">{t("common.loadError")}</Alert>
+      ) : items.length === 0 ? (
         <EmptyState
           title={t("pages.shifts.emptyTitle")}
           hint={t("pages.shifts.emptyHint")}

@@ -2,12 +2,14 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
+  Alert,
   Button,
   EmptyState,
   Input,
   Modal,
   PageHeader,
   Select,
+  Spinner,
   StatusChip,
   Table,
   toast,
@@ -47,7 +49,7 @@ export function CatalogPage() {
     return () => clearTimeout(handle);
   }, [searchInput]);
 
-  const { data } = useProducts({
+  const { data, isPending, isError } = useProducts({
     ...(debouncedSearch ? { search: debouncedSearch } : {}),
     ...(statusFilter !== "all" ? { status: statusFilter } : {}),
   });
@@ -206,7 +208,13 @@ export function CatalogPage() {
         </div>
       </div>
 
-      {items.length === 0 ? (
+      {isPending ? (
+        <div style={{ display: "flex", justifyContent: "center", padding: 48 }}>
+          <Spinner label={t("common.loading")} />
+        </div>
+      ) : isError ? (
+        <Alert tone="error">{t("common.loadError")}</Alert>
+      ) : items.length === 0 ? (
         <EmptyState
           title={t("pages.catalog.emptyTitle")}
           hint={t("pages.catalog.emptyHint")}

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Button, EmptyState, Modal, PageHeader, Table, toast } from "@markiro/ui";
+import { Alert, Button, EmptyState, Modal, PageHeader, Spinner, Table, toast } from "@markiro/ui";
 import type { TableColumn } from "@markiro/ui";
 
 import { ApiRequestError } from "../../api/client.js";
@@ -20,7 +20,7 @@ type FormModalState = { mode: "create" } | { mode: "edit"; counterparty: Counter
 /** Admin counterparties CRUD screen -- Plan 03 Task 11 (list/create/edit/delete). */
 export function CounterpartiesPage() {
   const { t } = useTranslation();
-  const { data } = useCounterparties();
+  const { data, isPending, isError } = useCounterparties();
   const createMutation = useCreateCounterparty();
   const updateMutation = useUpdateCounterparty();
   const deleteMutation = useDeleteCounterparty();
@@ -132,7 +132,13 @@ export function CounterpartiesPage() {
         }
       />
 
-      {items.length === 0 ? (
+      {isPending ? (
+        <div style={{ display: "flex", justifyContent: "center", padding: 48 }}>
+          <Spinner label={t("common.loading")} />
+        </div>
+      ) : isError ? (
+        <Alert tone="error">{t("common.loadError")}</Alert>
+      ) : items.length === 0 ? (
         <EmptyState
           title={t("pages.counterparties.emptyTitle")}
           hint={t("pages.counterparties.emptyHint")}

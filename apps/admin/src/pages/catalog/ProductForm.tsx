@@ -108,6 +108,7 @@ export function ProductForm({
     reset,
     watch,
     setValue,
+    getValues,
     formState: { errors },
   } = useForm<ProductFormValues>({
     resolver: zodResolver(productFormSchema),
@@ -144,7 +145,18 @@ export function ProductForm({
     if (lastCheckedGtinRef.current === trimmed) return;
     lastCheckedGtinRef.current = trimmed;
     gtinCheckMutation.mutate(trimmed, {
-      onSuccess: (result) => setOwnerHint(result),
+      // `checkedGtin` is the mutation's variables (the value passed to
+      // `.mutate` above), threaded through by TanStack Query as onSuccess's
+      // 2nd arg -- not the trimmed `gtinValue` closed over here, which may be
+      // stale by the time this resolves. Comparing it against the field's
+      // *current* value (via `getValues`, not `gtinValue`, for the same
+      // staleness reason) drops the response if the user has since changed
+      // the GTIN to something else while the request was in flight, so a
+      // slow response for an old value never paints a hint for the wrong one.
+      onSuccess: (result, checkedGtin) => {
+        if (getValues("gtin").trim() !== checkedGtin) return;
+        setOwnerHint(result);
+      },
     });
     // gtinCheckMutation is a fresh object every render (per TanStack Query) --
     // deliberately left out of the deps array so only gtinValue/open

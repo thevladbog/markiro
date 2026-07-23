@@ -67,6 +67,33 @@ describe("CounterpartiesPage", () => {
     ).toBeDefined();
   });
 
+  it("shows a spinner (not EmptyState) while the list request is still pending", async () => {
+    // A fetch that never resolves keeps the query in isPending forever.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => new Promise<Response>(() => {})),
+    );
+
+    renderPage();
+
+    expect(await screen.findByRole("status")).toBeDefined();
+    expect(screen.queryByText("Контрагенты не добавлены")).toBeNull();
+  });
+
+  it("shows an error alert (not EmptyState) when the list request fails, e.g. an expired session (401)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(401, { message: "Unauthorized" })),
+    );
+
+    renderPage();
+
+    expect(
+      await screen.findByText("Не удалось загрузить данные. Обновите страницу или войдите заново."),
+    ).toBeDefined();
+    expect(screen.queryByText("Контрагенты не добавлены")).toBeNull();
+  });
+
   it("opens the create modal from the page header action", async () => {
     vi.stubGlobal(
       "fetch",
