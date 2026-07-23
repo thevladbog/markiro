@@ -30,6 +30,12 @@ export class EmployeesService {
     if (dto.fullName !== undefined) set.fullName = dto.fullName;
     if (dto.role !== undefined) set.role = dto.role;
     if (dto.status !== undefined) set.status = dto.status;
+    if (Object.keys(set).length === 0) {
+      const [row] = await this.db.select().from(schema.employees)
+        .where(and(eq(schema.employees.tenantId, tenantId), eq(schema.employees.id, id)));
+      if (!row) throw new NotFoundException();
+      return this.toDto(row, await this.badgesFor(tenantId, [id]));
+    }
     const [row] = await this.db.update(schema.employees).set(set)
       .where(and(eq(schema.employees.tenantId, tenantId), eq(schema.employees.id, id))).returning();
     if (!row) throw new NotFoundException();
@@ -70,8 +76,9 @@ export class EmployeesService {
     if (ids.length === 0) return map;
     const rows = await this.db.select().from(schema.employeeBadges)
       .where(eq(schema.employeeBadges.tenantId, tenantId));
+    const idSet = new Set(ids);
     for (const b of rows) {
-      if (!ids.includes(b.employeeId)) continue;
+      if (!idSet.has(b.employeeId)) continue;
       const list = map.get(b.employeeId) ?? [];
       list.push({ id: b.id, badgeCode: b.badgeCode, label: b.label, issuedAt: b.issuedAt, revokedAt: b.revokedAt });
       map.set(b.employeeId, list);

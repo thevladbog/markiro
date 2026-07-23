@@ -91,4 +91,18 @@ describe.skipIf(!ready)("employees e2e", () => {
     const created = await a.post("/employees").send({ fullName: "A" }).expect(201);
     await b.patch(`/employees/${created.body.id}`).send({ fullName: "hax" }).expect(404);
   });
+
+  it("returns the employee unchanged on an empty PATCH body, and 404 for a missing id", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+
+    const created = await agent.post("/employees").send({ fullName: "Empty Patch Тест" }).expect(201);
+    const id = created.body.id as string;
+
+    const patched = await agent.patch(`/employees/${id}`).send({}).expect(200);
+    expect(patched.body.fullName).toBe(created.body.fullName);
+    expect(patched.body.status).toBe(created.body.status);
+
+    await agent.patch(`/employees/${randomUUID()}`).send({}).expect(404);
+  });
 });
