@@ -30,6 +30,18 @@
     "modeValidation": "Validation",
     "modeAggregation": "Aggregation",
     "start": "Start",
-    "actionFailed": "Action failed. Please try again."
+    "actionFailed": "Action failed. Please try again.",
+    "active": "Shift active"
+  },
+  "shell": {
+    "online": "Online",
+    "offline": "Offline",
+    "sync": "Sync",
+    "agent": "Agent",
+    "scanner": "Scanner",
+    "printer": "Printer",
+    "notConfigured": "Not configured",
+    "teammates": "Terminals",
+    "tasks": "Tasks"
   }
 }
