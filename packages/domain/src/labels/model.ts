@@ -112,7 +112,9 @@ export function parseLabelTemplate(json: unknown): LabelTemplateSpec {
   if (!result.success) {
     const firstIssue = result.error.issues[0];
     const pathStr = firstIssue?.path.join(".") ?? "";
-    const message = pathStr ? `${pathStr}: ${firstIssue!.message}` : (firstIssue?.message ?? "invalid label template");
+    const message = pathStr
+      ? `${pathStr}: ${firstIssue!.message}`
+      : (firstIssue?.message ?? "invalid label template");
 
     const cause = result.error.issues.map((issue) => ({
       path: issue.path.join("."),
