@@ -38,6 +38,7 @@ const PRODUCT_A = {
   palletCapacity: 48,
   status: "active",
   defaultCounterpartyId: "cp1",
+  defaultLabelTemplateId: "lt1",
   createdAt: "2026-01-01T00:00:00.000Z",
 };
 
@@ -73,6 +74,16 @@ const COUNTERPARTY = {
   gs1Prefixes: [],
   notes: null,
   createdAt: "2026-01-01T00:00:00.000Z",
+};
+
+const LABEL_TEMPLATE = {
+  id: "lt1",
+  name: "Короб 58×40",
+  widthMm: 58,
+  heightMm: 40,
+  dpi: 203,
+  language: "zpl",
+  updatedAt: "2026-01-01T00:00:00.000Z",
 };
 
 const PLANNED_SHIFT = {
@@ -347,6 +358,113 @@ describe("ShiftsPage", () => {
       if (path === "/api/shifts" && init?.method === "POST") return jsonResponse(201, created);
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
       if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_B] });
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Смены не запланированы");
+    fireEvent.click(screen.getAllByRole("button", { name: "Запланировать смену" })[0]!);
+    await screen.findByText("Новая смена");
+
+    fireEvent.change(screen.getByLabelText("Продукт"), { target: { value: PRODUCT_B.id } });
+    fireEvent.click(screen.getByRole("button", { name: "Запланировать" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/shifts",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            mode: "validation",
+            lineId: null,
+            plannedQty: null,
+            plannedDate: null,
+            productId: PRODUCT_B.id,
+          }),
+        }),
+      );
+    });
+  });
+
+  it("prefills the label template select from the product's default when the product changes", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      const path = String(url);
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
+      if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
+      if (path === "/api/label-templates") return jsonResponse(200, { items: [LABEL_TEMPLATE] });
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Смены не запланированы");
+    fireEvent.click(screen.getAllByRole("button", { name: "Запланировать смену" })[0]!);
+    await screen.findByText("Новая смена");
+
+    fireEvent.change(screen.getByLabelText("Продукт"), { target: { value: PRODUCT_A.id } });
+
+    await waitFor(() => {
+      expect((screen.getByLabelText("Шаблон этикетки") as HTMLSelectElement).value).toBe(
+        PRODUCT_A.defaultLabelTemplateId,
+      );
+    });
+  });
+
+  it("sends labelTemplateId: null when the user clears the prefilled label template before submitting", async () => {
+    const created = { ...PLANNED_SHIFT, id: "new5", productId: PRODUCT_A.id };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/shifts" && init?.method === "POST") return jsonResponse(201, created);
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
+      if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
+      if (path === "/api/label-templates") return jsonResponse(200, { items: [LABEL_TEMPLATE] });
+      if (path === "/api/counterparties") return jsonResponse(200, { items: [] });
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Смены не запланированы");
+    fireEvent.click(screen.getAllByRole("button", { name: "Запланировать смену" })[0]!);
+    await screen.findByText("Новая смена");
+
+    fireEvent.change(screen.getByLabelText("Продукт"), { target: { value: PRODUCT_A.id } });
+    await waitFor(() => {
+      expect((screen.getByLabelText("Шаблон этикетки") as HTMLSelectElement).value).toBe(
+        PRODUCT_A.defaultLabelTemplateId,
+      );
+    });
+
+    fireEvent.change(screen.getByLabelText("Шаблон этикетки"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Запланировать" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/shifts",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            mode: "validation",
+            lineId: null,
+            plannedQty: null,
+            plannedDate: null,
+            labelTemplateId: null,
+            productId: PRODUCT_A.id,
+          }),
+        }),
+      );
+    });
+  });
+
+  it("omits labelTemplateId from the create payload when left untouched", async () => {
+    const created = { ...PLANNED_SHIFT, id: "new6", productId: PRODUCT_B.id };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/shifts" && init?.method === "POST") return jsonResponse(201, created);
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
+      if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_B] });
+      if (path === "/api/label-templates") return jsonResponse(200, { items: [LABEL_TEMPLATE] });
       return jsonResponse(200, { items: [] });
     });
     vi.stubGlobal("fetch", fetchMock);

@@ -48,7 +48,7 @@ Note: Database tests require `DATABASE_URL` environment variable; they skip if u
 ```text
 apps/
   api/            NestJS backend + Better Auth + Scalar OpenAPI docs
-  admin/          React + Vite admin panel (org profile, counterparties, catalog, shifts)
+  admin/          React + Vite admin panel (org profile, counterparties, catalog, shifts, label templates)
 packages/
   domain/         GS1 validation, SSCC, ZPL/TSPL, Cyrillic rasterization
   db/             Drizzle schemas (Postgres + SQLite mirror)
@@ -65,6 +65,31 @@ Station, landing, and the platform-admin app arrive in later plans — see [docs
 - `GET /openapi.json` — OpenAPI schema
 - `ALL /api/auth/*` — Better Auth endpoints (session, sign-up, sign-in)
 - `http://localhost:5173` — Admin app (dev server, see [Admin app](#admin-app) above)
+
+## Label templates
+
+WYSIWYG label editor in the admin app (`/labels` for the library, `/labels/new`
+and `/labels/:id` for the editor). All rasterization and ZPL/TSPL generation
+happens **client-side**, in the browser — the API only stores and
+zod-validates the template's JSON spec (`@markiro/domain`'s `LabelTemplateSpec`)
+and never renders or rasterizes anything itself.
+
+- **Editor:** drag-and-drop canvas for text, data fields (product name/GTIN,
+  KM code, SSCC, shift no., date, qty, operator, counterparty), barcode
+  placeholders (DataMatrix/Code128/EAN-13/QR — schematic in the editor;
+  the real barcode symbology is emitted by the printer via ZPL/TSPL commands),
+  lines and boxes, plus a properties panel and a live "предпросмотр = печать"
+  preview pane. The preview rasterizes any non-Latin-1 text through the same
+  canvas-based rasterizer used for the final document, so Cyrillic renders
+  exactly as it will print, and warns when the selected font lacks Cyrillic
+  glyph coverage.
+- **Download:** the editor's "Скачать ZPL/TSPL" button generates a full
+  document with sample data and downloads it as a `.zpl`/`.tspl` file, using
+  the same `packages/domain` generators (`generateZpl`/`generateTspl`) the
+  station will use to print in Plan 05.
+- **Binding:** products can have a default label template
+  (`defaultLabelTemplateId`); shifts can override it per shift
+  (`labelTemplateId`), falling back to the product's default when left unset.
 
 ## Docs
 

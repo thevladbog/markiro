@@ -213,6 +213,7 @@ describe("CatalogPage", () => {
             boxCapacity: null,
             palletCapacity: null,
             defaultCounterpartyId: "cp1",
+            defaultLabelTemplateId: null,
           }),
         }),
       );
@@ -355,5 +356,82 @@ describe("CatalogPage", () => {
 
     // Exactly one additional fetch after the debounce settles -- not one per keystroke.
     expect(fetchMock.mock.calls.length).toBe(callsAfterMount + 1);
+  });
+
+  const LABEL_TEMPLATE = {
+    id: "lt1",
+    name: "Короб 58×40",
+    widthMm: 58,
+    heightMm: 40,
+    dpi: 203,
+    language: "zpl",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  };
+
+  it("renders label templates as options in the default label template select", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      const path = String(url);
+      if (path === "/api/label-templates") return jsonResponse(200, { items: [LABEL_TEMPLATE] });
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Каталог пуст");
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Добавить продукт" })[0]!);
+    await screen.findByText("Новый продукт");
+
+    const select = (await screen.findByLabelText(
+      "Шаблон этикетки по умолчанию",
+    )) as HTMLSelectElement;
+    expect(within(select).getByRole("option", { name: LABEL_TEMPLATE.name })).toBeDefined();
+  });
+
+  it("sends the chosen defaultLabelTemplateId in the create payload", async () => {
+    const created = { ...DRAFT_PRODUCT, id: "p4", defaultLabelTemplateId: LABEL_TEMPLATE.id };
+    let didCreate = false;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/label-templates") return jsonResponse(200, { items: [LABEL_TEMPLATE] });
+      if (path === "/api/counterparties") return jsonResponse(200, { items: [] });
+      if (path === "/api/products" && init?.method === "POST") {
+        didCreate = true;
+        return jsonResponse(201, created);
+      }
+      return jsonResponse(200, { items: didCreate ? [created] : [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Каталог пуст");
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Добавить продукт" })[0]!);
+    await screen.findByText("Новый продукт");
+
+    fireEvent.change(screen.getByLabelText("Название"), { target: { value: "Йогурт" } });
+    fireEvent.change(screen.getByLabelText("ГТИН"), { target: { value: "4006381333931" } });
+    fireEvent.change(screen.getByLabelText("Шаблон этикетки по умолчанию"), {
+      target: { value: LABEL_TEMPLATE.id },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Создать" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/products",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            gtin: "4006381333931",
+            name: "Йогурт",
+            productGroup: null,
+            boxCapacity: null,
+            palletCapacity: null,
+            defaultCounterpartyId: null,
+            defaultLabelTemplateId: LABEL_TEMPLATE.id,
+          }),
+        }),
+      );
+    });
   });
 });

@@ -11,6 +11,7 @@ import type { SelectOption } from "@markiro/ui";
 import { errorProp } from "../../lib/form-error.js";
 import type { CounterpartyDto } from "../counterparties/api.js";
 import type { ProductDto } from "../catalog/api.js";
+import type { LabelTemplateSummaryDto } from "../labels/api.js";
 import type { CreateShiftInput, LineDto, UpdateShiftInput } from "./api.js";
 
 const SHIFT_MODES = ["validation", "aggregation"] as const;
@@ -39,6 +40,7 @@ const shiftFormSchema = z.object({
   plannedDate: z.string().trim().optional(),
   lineId: z.string().trim().optional(),
   counterpartyId: z.string().trim().optional(),
+  labelTemplateId: z.string().trim().optional(),
   boxCapacity: z
     .string()
     .trim()
@@ -62,6 +64,7 @@ export interface ShiftFormProps {
   products: ProductDto[];
   lines: LineDto[];
   counterparties: CounterpartyDto[];
+  labelTemplates: LabelTemplateSummaryDto[];
   submitting?: boolean;
   onSubmit: (input: CreateShiftInput | UpdateShiftInput) => void | Promise<void>;
   onClose: () => void;
@@ -74,6 +77,7 @@ const EMPTY_VALUES: ShiftFormValues = {
   plannedDate: "",
   lineId: "",
   counterpartyId: "",
+  labelTemplateId: "",
   boxCapacity: "",
   palletCapacity: "",
   palletsEnabled: false,
@@ -93,6 +97,7 @@ export function ShiftForm({
   products,
   lines,
   counterparties,
+  labelTemplates,
   submitting = false,
   onSubmit,
   onClose,
@@ -105,6 +110,8 @@ export function ShiftForm({
   // touching the field and landing back on the same value it started with
   // reads as "not dirty"). See `toPayload`'s comment for why this matters.
   const counterpartyTouchedRef = useRef(false);
+  // Same contract as `counterpartyTouchedRef`, for the label template select.
+  const labelTemplateTouchedRef = useRef(false);
 
   const {
     register,
@@ -122,6 +129,7 @@ export function ShiftForm({
   const shiftMode = watch("mode");
   const lineId = watch("lineId");
   const counterpartyId = watch("counterpartyId");
+  const labelTemplateId = watch("labelTemplateId");
   const palletsEnabled = watch("palletsEnabled");
 
   // Re-seed the form whenever the modal opens (covers both the create ->
@@ -136,21 +144,22 @@ export function ShiftForm({
       reset(seeded);
       lastPrefilledProductRef.current = formMode === "create" ? null : seeded.productId || null;
       counterpartyTouchedRef.current = false;
+      labelTemplateTouchedRef.current = false;
     }
   }, [open, initialValues, reset, formMode]);
 
   // Product-change prefill (create mode only -- the product can't change once
   // a shift exists, and the product select is disabled while editing): seeds
-  // the counterparty select and the capacity inputs' *displayed* values from
-  // the newly-picked product.
+  // the counterparty select, the label template select, and the capacity
+  // inputs' *displayed* values from the newly-picked product.
   //
   // This is a plain `setValue` call, not a user interaction, so it does NOT
-  // set `counterpartyTouchedRef` -- the counterparty field stays "untouched"
-  // for payload purposes even though it now visibly displays the product's
-  // default (see `toPayload`'s comment for the full contract). boxCapacity/
-  // palletCapacity don't need that distinction (their payload rule doesn't
-  // look at touched-ness at all -- see below), but they're seeded the same
-  // way for consistency.
+  // set `counterpartyTouchedRef`/`labelTemplateTouchedRef` -- those fields
+  // stay "untouched" for payload purposes even though they now visibly
+  // display the product's defaults (see `toPayload`'s comment for the full
+  // contract). boxCapacity/palletCapacity don't need that distinction (their
+  // payload rule doesn't look at touched-ness at all -- see below), but
+  // they're seeded the same way for consistency.
   useEffect(() => {
     if (!open || formMode !== "create") return;
     if (!productId || lastPrefilledProductRef.current === productId) return;
@@ -158,6 +167,7 @@ export function ShiftForm({
     const product = products.find((p) => p.id === productId);
     if (!product) return;
     setValue("counterpartyId", product.defaultCounterpartyId ?? "");
+    setValue("labelTemplateId", product.defaultLabelTemplateId ?? "");
     setValue("boxCapacity", product.boxCapacity !== null ? String(product.boxCapacity) : "");
     setValue(
       "palletCapacity",
@@ -166,7 +176,9 @@ export function ShiftForm({
   }, [open, formMode, productId, products, setValue]);
 
   const submit = handleSubmit(async (values) => {
-    await onSubmit(toPayload(values, formMode, counterpartyTouchedRef.current));
+    await onSubmit(
+      toPayload(values, formMode, counterpartyTouchedRef.current, labelTemplateTouchedRef.current),
+    );
   });
 
   const productOptions: SelectOption[] = [
@@ -192,6 +204,11 @@ export function ShiftForm({
       value: counterparty.id,
       label: counterparty.name,
     })),
+  ];
+
+  const labelTemplateOptions: SelectOption[] = [
+    { value: "", label: t("pages.shifts.form.noLabelTemplate") },
+    ...labelTemplates.map((template) => ({ value: template.id, label: template.name })),
   ];
 
   return (
@@ -293,6 +310,16 @@ export function ShiftForm({
           }}
         />
 
+        <Select
+          label={t("pages.shifts.form.labelTemplateLabel")}
+          options={labelTemplateOptions}
+          value={labelTemplateId ?? ""}
+          onChange={(value) => {
+            labelTemplateTouchedRef.current = true;
+            setValue("labelTemplateId", value, { shouldDirty: true, shouldValidate: true });
+          }}
+        />
+
         {shiftMode === "aggregation" && (
           <>
             <Input
@@ -330,13 +357,14 @@ export function ShiftForm({
  * Payload semantics (plan-03 Task 13 brief, chosen + documented here since
  * the brief poses this as an open question):
  *
- * - `counterpartyId`: omitted entirely unless the user actually touched the
- *   select (`counterpartyTouched`, sourced from a plain ref the select's own
+ * - `counterpartyId`/`labelTemplateId`: omitted entirely unless the user
+ *   actually touched the respective select (`counterpartyTouched`/
+ *   `labelTemplateTouched`, each sourced from its own plain ref the select's
  *   `onChange` sets -- deliberately not react-hook-form's `dirtyFields`,
  *   which compares the *final* value to the default and would read "not
  *   dirty" if the user picks a different option and then picks the original
  *   one back). This lets the server's own create-time prefill-from-product
- *   run when the field is left alone, while an explicit user selection
+ *   run when a field is left alone, while an explicit user selection
  *   (including clearing it back to "None") always sends `null`/the chosen
  *   id. On edit, "untouched" maps onto the same `undefined`-means-"no
  *   change" contract `updateShiftSchema` already uses.
@@ -357,11 +385,13 @@ function toPayload(
   values: ShiftFormValues,
   formMode: "create" | "edit",
   counterpartyTouched: boolean,
+  labelTemplateTouched: boolean,
 ): CreateShiftInput | UpdateShiftInput {
   const plannedQty = values.plannedQty?.trim();
   const plannedDate = values.plannedDate?.trim();
   const lineId = values.lineId?.trim();
   const counterpartyId = values.counterpartyId?.trim();
+  const labelTemplateId = values.labelTemplateId?.trim();
   const boxCapacity = values.boxCapacity?.trim();
   const palletCapacity = values.palletCapacity?.trim();
 
@@ -374,6 +404,10 @@ function toPayload(
 
   if (counterpartyTouched) {
     payload.counterpartyId = counterpartyId ? counterpartyId : null;
+  }
+
+  if (labelTemplateTouched) {
+    payload.labelTemplateId = labelTemplateId ? labelTemplateId : null;
   }
 
   if (values.mode === "aggregation") {

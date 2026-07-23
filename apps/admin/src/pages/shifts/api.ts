@@ -30,6 +30,8 @@ export interface ShiftDto {
   lineName: string | null;
   counterpartyId: string | null;
   counterpartyName: string | null;
+  labelTemplateId: string | null;
+  labelTemplateName: string | null;
   plannedQty: number | null;
   plannedDate: string | null;
   boxCapacity: number | null;
@@ -52,6 +54,7 @@ export interface CreateShiftInput {
   mode: ShiftMode;
   lineId?: string | null;
   counterpartyId?: string | null;
+  labelTemplateId?: string | null;
   plannedQty?: number | null;
   plannedDate?: string | null;
   boxCapacity?: number | null;
