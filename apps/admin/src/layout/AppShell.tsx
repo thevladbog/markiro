@@ -5,6 +5,7 @@ import { NavLink, Outlet } from "react-router";
 import { Sidebar, cn, type SidebarItem } from "@markiro/ui";
 
 import { useAuthClient } from "../auth/client.js";
+import { usePendingOrderCount } from "../pages/pickup/api.js";
 import { Header } from "./Header.js";
 
 const NAV_ITEMS: ReadonlyArray<{ to: string; key: string }> = [
@@ -13,6 +14,7 @@ const NAV_ITEMS: ReadonlyArray<{ to: string; key: string }> = [
   { to: "/shifts", key: "nav.shifts" },
   { to: "/counterparties", key: "nav.counterparties" },
   { to: "/labels", key: "nav.labels" },
+  { to: "/pickup", key: "nav.pickup" },
   { to: "/settings", key: "nav.settings" },
 ];
 
@@ -33,8 +35,13 @@ export function AppShell() {
   const { t } = useTranslation();
   const authClient = useAuthClient();
   const { data: session } = authClient.useSession();
+  const pendingOrderCount = usePendingOrderCount();
 
-  const items: SidebarItem[] = NAV_ITEMS.map(({ to, key }) => ({ to, labelKey: t(key) }));
+  const items: SidebarItem[] = NAV_ITEMS.map(({ to, key }) => ({
+    to,
+    labelKey: t(key),
+    ...(to === "/pickup" && pendingOrderCount > 0 ? { badge: pendingOrderCount } : {}),
+  }));
 
   return (
     <div style={{ display: "flex", height: "100vh", overflow: "hidden" }}>

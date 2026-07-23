@@ -418,7 +418,8 @@
       "bulkExport": {
         "toggleAction": "Bulk export",
         "exportAction": "Export codes",
-        "selectedCount": "{{count}} orders selected"
+        "selectedCount": "{{count}} orders selected",
+        "selectRow": "Select order {{orderNo}}"
       },
       "detail": {
         "backAction": "← Orders",

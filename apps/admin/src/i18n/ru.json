@@ -418,7 +418,8 @@
       "bulkExport": {
         "toggleAction": "Массовая выгрузка",
         "exportAction": "Выгрузить коды",
-        "selectedCount": "Выбрано заявок: {{count}}"
+        "selectedCount": "Выбрано заявок: {{count}}",
+        "selectRow": "Выбрать заявку {{orderNo}}"
       },
       "detail": {
         "backAction": "← Заявки",

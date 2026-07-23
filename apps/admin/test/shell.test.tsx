@@ -1,6 +1,7 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ThemeProvider } from "@markiro/ui";
 
@@ -12,8 +13,28 @@ import {
 } from "../src/auth/client.js";
 import { ShellPage } from "../src/pages/Shell.js";
 
+/** Minimal Response stand-in -- only what apps/admin/src/api/client.ts reads. */
+function jsonResponse(status: number, body: unknown): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => body,
+  } as Response;
+}
+
+beforeEach(() => {
+  // AppShell's nav badge reads usePendingOrderCount() (Task 14), which fires
+  // a GET /pickup-orders?status=pending whenever the real shell renders --
+  // stub it so these guard tests don't hit the network.
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => jsonResponse(200, { items: [] })),
+  );
+});
+
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
 });
 
 /** A fully-fake AuthClientLike -- no network, no better-auth internals. */
@@ -43,22 +64,28 @@ function renderShell(client: AuthClientLike) {
     return <div data-testid="location-pathname">{location.pathname}</div>;
   }
 
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+
   return render(
-    <ThemeProvider defaultTheme="light">
-      <MemoryRouter initialEntries={["/shell"]}>
-        <LocationTracker />
-        <AuthClientProvider client={client}>
-          <Routes>
-            <Route path="/shell" element={<ShellPage />} />
-            <Route path="/login" element={<div data-testid="login-page">LOGIN_PAGE</div>} />
-            <Route
-              path="/org/select"
-              element={<div data-testid="org-select-page">ORG_SELECT_PAGE</div>}
-            />
-          </Routes>
-        </AuthClientProvider>
-      </MemoryRouter>
-    </ThemeProvider>,
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider defaultTheme="light">
+        <MemoryRouter initialEntries={["/shell"]}>
+          <LocationTracker />
+          <AuthClientProvider client={client}>
+            <Routes>
+              <Route path="/shell" element={<ShellPage />} />
+              <Route path="/login" element={<div data-testid="login-page">LOGIN_PAGE</div>} />
+              <Route
+                path="/org/select"
+                element={<div data-testid="org-select-page">ORG_SELECT_PAGE</div>}
+              />
+            </Routes>
+          </AuthClientProvider>
+        </MemoryRouter>
+      </ThemeProvider>
+    </QueryClientProvider>,
   );
 }
 

@@ -9,6 +9,7 @@ import { CounterpartiesPage } from "./pages/counterparties/index.js";
 import { DashboardPage } from "./pages/dashboard/index.js";
 import { LabelEditorPage } from "./pages/labels/editor/index.js";
 import { LabelTemplatesPage } from "./pages/labels/index.js";
+import { PickupPage } from "./pages/pickup/index.js";
 import { SettingsPage } from "./pages/settings/index.js";
 import { ShiftsPage } from "./pages/shifts/index.js";
 import { ShellPage } from "./pages/Shell.js";
@@ -38,6 +39,7 @@ export function App() {
           <Route path="labels" element={<LabelTemplatesPage />} />
           <Route path="labels/new" element={<LabelEditorPage />} />
           <Route path="labels/:id" element={<LabelEditorPage />} />
+          <Route path="pickup" element={<PickupPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>
       </Routes>
