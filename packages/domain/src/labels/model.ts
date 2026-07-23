@@ -110,8 +110,16 @@ export type LabelTemplateSpec = z.infer<typeof labelTemplateSpecSchema>;
 export function parseLabelTemplate(json: unknown): LabelTemplateSpec {
   const result = labelTemplateSpecSchema.safeParse(json);
   if (!result.success) {
-    const message = result.error.issues[0]?.message ?? "invalid label template";
-    throw new DomainError("LABEL_INVALID", message);
+    const firstIssue = result.error.issues[0];
+    const pathStr = firstIssue?.path.join(".") ?? "";
+    const message = pathStr ? `${pathStr}: ${firstIssue!.message}` : (firstIssue?.message ?? "invalid label template");
+
+    const cause = result.error.issues.map((issue) => ({
+      path: issue.path.join("."),
+      message: issue.message,
+    }));
+
+    throw new DomainError("LABEL_INVALID", message, { cause });
   }
   return result.data;
 }

@@ -72,11 +72,17 @@ describe("parseLabelTemplate", () => {
     expect(parseLabelTemplate(spec)).toEqual(spec);
   });
 
-  it("rejects an out-of-range dpi", () => {
+  it("rejects an out-of-range dpi and includes path in message", () => {
     const spec = { ...validSpec, dpi: 150 };
-    expect(() => parseLabelTemplate(spec)).toThrowError(
-      expect.objectContaining({ code: "LABEL_INVALID", name: "DomainError" }),
-    );
+    try {
+      parseLabelTemplate(spec);
+      expect.fail("should throw");
+    } catch (err) {
+      const error = err as Error & { code: string; name: string };
+      expect(error.code).toBe("LABEL_INVALID");
+      expect(error.name).toBe("DomainError");
+      expect(error.message).toContain("dpi");
+    }
   });
 
   it("rejects an out-of-range width", () => {
@@ -153,6 +159,40 @@ describe("parseLabelTemplate", () => {
     expect(() => parseLabelTemplate(spec)).toThrowError(
       expect.objectContaining({ code: "LABEL_INVALID" }),
     );
+  });
+
+  it("attaches all validation issues on error.cause", () => {
+    const spec = { ...validSpec, dpi: 150, widthMm: 5, heightMm: 500 };
+    try {
+      parseLabelTemplate(spec);
+      expect.fail("should throw");
+    } catch (err) {
+      const error = err as Error & { code: string; cause?: unknown };
+      expect(error.code).toBe("LABEL_INVALID");
+      expect(error.cause).toBeDefined();
+      expect(Array.isArray(error.cause)).toBe(true);
+      const causes = error.cause as Array<{ path: string; message: string }>;
+      expect(causes.length).toBeGreaterThanOrEqual(2);
+      causes.forEach((cause) => {
+        expect(cause).toHaveProperty("path");
+        expect(cause).toHaveProperty("message");
+        expect(typeof cause.path).toBe("string");
+        expect(typeof cause.message).toBe("string");
+      });
+    }
+  });
+
+  it("includes path and message in first error when path is empty", () => {
+    try {
+      parseLabelTemplate("not an object");
+      expect.fail("should throw");
+    } catch (err) {
+      const error = err as Error & { code: string; cause?: unknown };
+      expect(error.code).toBe("LABEL_INVALID");
+      expect(error.message).toBeTruthy();
+      expect(error.cause).toBeDefined();
+      expect(Array.isArray(error.cause)).toBe(true);
+    }
   });
 });
 
