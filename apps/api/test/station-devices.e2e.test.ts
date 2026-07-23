@@ -65,10 +65,13 @@ describe.skipIf(!ready)("station devices e2e", () => {
     expect(list.body.items.map((d: { id: string }) => d.id)).toContain(deviceId);
     expect(list.body.items[0]).not.toHaveProperty("apiKey");
 
-    // Another tenant cannot delete this device.
+    // Another tenant cannot delete this device, nor see it in their list.
     const other = request.agent(app!.getHttpServer());
     await signUpAndActivate(other);
     await other.delete(`/station-devices/${deviceId}`).expect(404);
+
+    const otherList = await other.get("/station-devices").expect(200);
+    expect(otherList.body.items.map((d: { id: string }) => d.id)).not.toContain(deviceId);
 
     // Owner deletes it; the key stops working afterward.
     await agent.delete(`/station-devices/${deviceId}`).expect(204);

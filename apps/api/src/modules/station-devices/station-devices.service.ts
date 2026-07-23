@@ -59,18 +59,28 @@ export class StationDevicesService {
     return { items: rows.map((r) => this.rowToDto(r)) };
   }
 
-  /** Revoke: delete the device row AND the underlying apikey row. */
+  /**
+   * Revoke: delete the device row AND the underlying apikey row atomically,
+   * so a transient failure can never leave the api-key live while the device
+   * row is gone (which would make a retry 404 without actually revoking).
+   */
   async revoke(tenantId: string, id: string): Promise<void> {
-    const [row] = await this.db
-      .select()
-      .from(schema.stationDevices)
-      .where(and(eq(schema.stationDevices.tenantId, tenantId), eq(schema.stationDevices.id, id)));
-    if (!row) throw new NotFoundException();
+    await this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(schema.stationDevices)
+        .where(
+          and(eq(schema.stationDevices.tenantId, tenantId), eq(schema.stationDevices.id, id)),
+        );
+      if (!row) throw new NotFoundException();
 
-    await this.db
-      .delete(schema.stationDevices)
-      .where(and(eq(schema.stationDevices.tenantId, tenantId), eq(schema.stationDevices.id, id)));
-    await this.db.delete(schema.apikey).where(eq(schema.apikey.id, row.apiKeyId));
+      await tx
+        .delete(schema.stationDevices)
+        .where(
+          and(eq(schema.stationDevices.tenantId, tenantId), eq(schema.stationDevices.id, id)),
+        );
+      await tx.delete(schema.apikey).where(eq(schema.apikey.id, row.apiKeyId));
+    });
   }
 
   private rowToDto(row: typeof schema.stationDevices.$inferSelect): StationDeviceDto {
