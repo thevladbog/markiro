@@ -5,7 +5,7 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from "@nestjs/common";
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import type { LabelTemplateSpec } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
@@ -23,12 +23,21 @@ type LabelTemplateRow = typeof schema.labelTemplates.$inferSelect;
 export class LabelTemplatesService {
   constructor(@Inject(DB) private readonly db: Db) {}
 
-  /** List a tenant's label templates as size/DPI/language summaries (spec projected, not shipped whole). */
+  /**
+   * List a tenant's label templates as size/DPI/language summaries (spec
+   * projected, not shipped whole). Ordered most-recently-updated first
+   * (`updatedAt` desc) — without an explicit `ORDER BY`, Postgres gives no
+   * ordering guarantee at all (it may happen to return insertion order on a
+   * small table today, but that is an implementation detail, not a
+   * contract), so the library screen's list would be free to silently
+   * reshuffle between requests.
+   */
   async listLabelTemplates(tenantId: string): Promise<ListLabelTemplatesResponseDto> {
     const rows = await this.db
       .select()
       .from(schema.labelTemplates)
-      .where(eq(schema.labelTemplates.tenantId, tenantId));
+      .where(eq(schema.labelTemplates.tenantId, tenantId))
+      .orderBy(desc(schema.labelTemplates.updatedAt));
 
     return { items: rows.map((row) => this.rowToSummaryDto(row)) };
   }

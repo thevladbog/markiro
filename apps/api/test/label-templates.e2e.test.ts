@@ -146,6 +146,41 @@ describe.skipIf(!ready)("label-templates e2e", () => {
     await agent.get(`/label-templates/${id}`).expect(404);
   });
 
+  it("GET /label-templates orders items by updatedAt desc (most recently updated first)", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+
+    const createA = await agent
+      .post("/label-templates")
+      .send({ name: "Template A", spec: VALID_SPEC })
+      .expect(201);
+    const idA = createA.body.id as string;
+
+    // Small delay (same pattern as the CRUD happy-path test above) so the
+    // DB-clock-sourced `updatedAt` values are guaranteed to differ.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const createB = await agent
+      .post("/label-templates")
+      .send({ name: "Template B", spec: VALID_SPEC })
+      .expect(201);
+    const idB = createB.body.id as string;
+
+    const listAfterCreate = await agent.get("/label-templates").expect(200);
+    expect(listAfterCreate.body.items.map((item: { id: string }) => item.id)).toEqual([idB, idA]);
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    // Touch A only (name-only patch) -- A is now the most recently updated,
+    // even though it was created FIRST, so this only passes with an
+    // explicit `ORDER BY updatedAt DESC` (never by accidental insertion
+    // order, which would still show B before A here).
+    await agent.patch(`/label-templates/${idA}`).send({ name: "Template A (touched)" }).expect(200);
+
+    const listAfterPatch = await agent.get("/label-templates").expect(200);
+    expect(listAfterPatch.body.items.map((item: { id: string }) => item.id)).toEqual([idA, idB]);
+  });
+
   it("PATCH /label-templates/:id supports a name-only partial update (spec untouched)", async () => {
     const agent = request.agent(app!.getHttpServer());
     await signUpAndActivate(agent);
