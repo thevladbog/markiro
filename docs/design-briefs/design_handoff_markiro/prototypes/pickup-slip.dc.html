@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+body { margin: 0; font-family: 'IBM Plex Sans', sans-serif; color: #17161A; }
+a { color: #17161A; } a:hover { color: #0B8A44; }
+doc-page:not(:defined) { visibility: hidden; }
+.mono { font-family: 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums; }
+</style>
+<script src="./doc-page.js"></script>
+</helmet>
+<doc-page size="a4">
+
+  <section class="page" data-screen-label="Ведомость по заявке" style="background: #FFFFFF; padding: 13mm 15mm; box-sizing: border-box; display: flex; flex-direction: column; gap: 6mm; font-size: 12px; line-height: 1.5">
+
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 24px">
+      <div style="display: flex; align-items: center; gap: 12px">
+        <svg width="44" height="44" viewBox="0 0 64 64"><rect x="4" y="4" width="56" height="56" fill="#17161A"/><g fill="#FAFAF8"><rect x="14" y="14" width="8" height="8"/><rect x="14" y="26" width="8" height="8"/><rect x="14" y="38" width="8" height="8"/><rect x="26" y="22" width="8" height="8"/><rect x="38" y="14" width="8" height="8"/><rect x="38" y="26" width="8" height="8"/><rect x="38" y="38" width="8" height="8"/><rect x="26" y="42" width="8" height="8" fill="#3DDC7A"/></g></svg>
+        <div style="display: flex; flex-direction: column; gap: 2px">
+          <span style="font: 600 22px/1 'IBM Plex Mono', monospace">маркиро</span>
+          <span style="font: 400 11px/1 'IBM Plex Sans', sans-serif; color: #6B6862">Платформа маркировки «Честный ЗНАК» · markiro.ru</span>
+        </div>
+      </div>
+      <div style="text-align: right; display: flex; flex-direction: column; gap: 2px">
+        <span style="font: 700 20px/1.2 'IBM Plex Sans', sans-serif">Ведомость отбора по заявке № 37</span>
+        <span style="font: 400 12.5px/1.4 'IBM Plex Sans', sans-serif; color: #45433E">от 23 июля 2026 г. · отбор «для себя» через киоск, коды «Честный ЗНАК»</span>
+      </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px">
+      <div style="display: flex; flex-direction: column; gap: 3px">
+        <span style="font: 600 10px/1 'IBM Plex Sans', sans-serif; color: #6B6862; text-transform: uppercase; letter-spacing: 0.06em">Организация</span>
+        <span style="font-weight: 600">ООО «Пивзавод „Заря"»</span>
+        <span style="color: #45433E; font-size: 11.5px">ИНН 5029087641</span>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 3px">
+        <span style="font: 600 10px/1 'IBM Plex Sans', sans-serif; color: #6B6862; text-transform: uppercase; letter-spacing: 0.06em">Сотрудник</span>
+        <span style="font-weight: 600">Смирнов Алексей Петрович</span>
+        <span style="color: #45433E; font-size: 11.5px">оператор линии · бейдж …4412</span>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 3px">
+        <span style="font: 600 10px/1 'IBM Plex Sans', sans-serif; color: #6B6862; text-transform: uppercase; letter-spacing: 0.06em">Заявка</span>
+        <span style="font-weight: 600">№ 37 · 23.07.2026 14:05</span>
+        <span style="color: #45433E; font-size: 11.5px">Киоск-1, проходная цеха · причина: <strong>Покупка</strong></span>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column">
+      <div style="display: grid; grid-template-columns: 8mm 1fr 58mm 13mm 15mm; gap: 0 4mm; align-items: center; background: #17161A; color: #FAFAF8; border-radius: 6px 6px 0 0; padding: 7px 10px; font: 600 10px/1 'IBM Plex Sans', sans-serif; text-transform: uppercase; letter-spacing: 0.05em">
+        <span>№</span><span>Продукт</span><span>Код маркировки (КМ)</span><span style="text-align: right">Цена, ₽</span><span style="text-align: center">DataMatrix</span>
+      </div>
+      <sc-for list="{{ rows }}" as="r" hint-placeholder-count="3">
+        <div style="display: grid; grid-template-columns: 8mm 1fr 58mm 13mm 15mm; gap: 0 4mm; align-items: center; border-bottom: 1px solid #E0DED7; padding: 4px 10px">
+          <span class="mono">{{ r.n }}</span>
+          <span>{{ r.product }}</span>
+          <span class="mono" style="font-size: 10px; color: #45433E">{{ r.code }}</span>
+          <span class="mono" style="text-align: right">{{ r.price }}</span>
+          <img src="{{ r.img }}" alt="DataMatrix" style="width: 13mm; height: 13mm; justify-self: center">
+        </div>
+      </sc-for>
+      <div style="display: flex; justify-content: flex-end; gap: 24px; align-items: baseline; padding: 8px 10px; border-bottom: 1px solid #C9C6BD">
+        <span style="font: 600 13px/1.4 'IBM Plex Sans', sans-serif">Итого по заявке:</span>
+        <span class="mono" style="font: 600 14px/1.4 'IBM Plex Mono', monospace">3 единицы · 178 ₽</span>
+      </div>
+    </div>
+
+    <div style="background: #F7F6F2; border: 1px solid #E0DED7; border-radius: 8px; padding: 10px 14px; display: flex; flex-direction: column; gap: 6px; font-size: 11.5px; color: #45433E">
+      <span style="font: 600 10px/1 'IBM Plex Sans', sans-serif; color: #6B6862; text-transform: uppercase; letter-spacing: 0.05em">Способ вывода из оборота</span>
+      <span style="display: flex; gap: 28px">
+        <span style="display: flex; align-items: center; gap: 7px"><span style="width: 11px; height: 11px; border: 1.5px solid #45433E; border-radius: 2px; display: inline-block"></span>Продажа сотруднику — чек ККТ № ______</span>
+        <span style="display: flex; align-items: center; gap: 7px"><span style="width: 11px; height: 11px; border: 1.5px solid #45433E; border-radius: 2px; display: inline-block"></span>Списание — акт № ______ · подпричина: ____________</span>
+      </span>
+      <span style="color: #45433E; font-size: 10.5px">Причина, выбранная сотрудником на киоске: <strong>Покупка</strong> — рекомендован чек ККТ.</span>
+      <span style="color: #6B6862; font-size: 10.5px">DataMatrix в таблице пригоден для сканирования на кассе. После операции статусы кодов обновятся в ГИС МТ автоматически.</span>
+    </div>
+
+    <div style="flex: 1"></div>
+
+    <div style="display: flex; align-items: center; gap: 14px; border: 1px solid #E0DED7; border-radius: 8px; padding: 10px 14px">
+      <img src="{{ badgeQr }}" alt="QR бейджа сотрудника" style="width: 22mm; height: 22mm; flex-shrink: 0">
+      <span style="display: flex; flex-direction: column; gap: 4px">
+        <span style="font: 600 12.5px/1.3 'IBM Plex Sans', sans-serif">Отсканируйте код, чтобы найти сотрудника на кассе или в системе</span>
+        <span style="color: #6B6862; font-size: 10.5px">QR бейджа Смирнова А. П. (…4412) — открывает карточку сотрудника и его заявки в Платформе маркиро.</span>
+      </span>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; padding: 0 10px">
+      <div style="display: flex; flex-direction: column; gap: 14px">
+        <span style="font: 600 10px/1 'IBM Plex Sans', sans-serif; color: #6B6862; text-transform: uppercase; letter-spacing: 0.06em">Продукцию получил</span>
+        <span style="display: flex; align-items: baseline; gap: 10px"><span style="display: inline-block; width: 48mm; border-bottom: 1px solid #17161A"></span><span style="font-size: 11px; color: #6B6862">Смирнов А. П.</span></span>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 14px">
+        <span style="font: 600 10px/1 'IBM Plex Sans', sans-serif; color: #6B6862; text-transform: uppercase; letter-spacing: 0.06em">Администратор</span>
+        <span style="display: flex; align-items: baseline; gap: 10px"><span style="display: inline-block; width: 48mm; border-bottom: 1px solid #17161A"></span><span style="font-size: 11px; color: #6B6862">Ким Е. В.</span></span>
+      </div>
+    </div>
+
+    <div style="border-top: 1px solid #E0DED7; padding-top: 8px; display: flex; justify-content: space-between; font: 400 10px/1.4 'IBM Plex Mono', monospace; color: #6B6862">
+      <span>Сформировано в Платформе маркиро · 23.07.2026 14:12</span>
+      <span>Заявка № 37 · стр. 1 из 1</span>
+    </div>
+
+  </section>
+</doc-page>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  dm(seed) {
+    let h = 0;
+    for (const c of seed) h = ((h * 31 + c.charCodeAt(0)) >>> 0);
+    let x = h || 1;
+    const rnd = () => { x = (x * 1103515245 + 12345) >>> 0; return x / 4294967296; };
+    const n = 14; let r = "";
+    for (let y = 0; y < n; y++) for (let cx = 0; cx < n; cx++) {
+      let f;
+      if (cx === 0 || y === n - 1) f = true;
+      else if (y === 0) f = cx % 2 === 0;
+      else if (cx === n - 1) f = y % 2 === 1;
+      else f = rnd() > 0.5;
+      if (f) r += `<rect x="${cx}" y="${y}" width="1" height="1"/>`;
+    }
+    return "data:image/svg+xml;utf8," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1 -1 16 16"><rect x="-1" y="-1" width="16" height="16" fill="#FFFFFF"/><g fill="#17161A">${r}</g></svg>`);
+  }
+  qr(seed) {
+    let h = 0;
+    for (const c of seed) h = ((h * 31 + c.charCodeAt(0)) >>> 0);
+    let x = h || 1;
+    const rnd = () => { x = (x * 1103515245 + 12345) >>> 0; return x / 4294967296; };
+    const n = 21, inF = (cx, y) => (cx < 8 && y < 8) || (cx >= n - 8 && y < 8) || (cx < 8 && y >= n - 8);
+    let r = "";
+    const finder = (ox, oy) => { r += `<path d="M${ox} ${oy}h7v7h-7zM${ox + 1} ${oy + 1}v5h5v-5z" fill-rule="evenodd"/><rect x="${ox + 2}" y="${oy + 2}" width="3" height="3"/>`; };
+    finder(0, 0); finder(n - 7, 0); finder(0, n - 7);
+    for (let y = 0; y < n; y++) for (let cx = 0; cx < n; cx++) { if (inF(cx, y)) continue; if (rnd() > 0.5) r += `<rect x="${cx}" y="${y}" width="1" height="1"/>`; }
+    return "data:image/svg+xml;utf8," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1.5 -1.5 24 24"><rect x="-1.5" y="-1.5" width="24" height="24" fill="#FFFFFF"/><g fill="#17161A">${r}</g></svg>`);
+  }
+  renderVals() {
+    return {
+      badgeQr: this.qr("MARKIRO-BADGE-4412-SMIRNOV"),
+      rows: [
+        ["1", "Жигулёвское светлое 0,5 л", "01 04650075195923 21 KYC9X7MQ", "52"],
+        ["2", "Жигулёвское светлое 0,5 л", "01 04650075195923 21 ZW4NT0PL", "52"],
+        ["3", "Квас традиционный 1,5 л", "01 04650075196012 21 XT9NL3VB", "74"],
+      ].map(([n, product, code, price]) => ({ n, product, code, price, img: this.dm(code) })),
+    };
+  }
+}
+</script>
+</body>
+</html>

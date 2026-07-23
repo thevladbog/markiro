@@ -43,6 +43,24 @@ td { padding: 11px 14px; font: 400 14px/20px 'IBM Plex Sans', sans-serif; border
   </nav>
   <main style="flex: 1; overflow-y: auto; min-width: 0">
 
+    <sc-if value="{{ billOverdue }}" hint-placeholder-val="{{ false }}">
+      <div style="display: flex; align-items: center; gap: 12px; background: #FDF0DC; border-bottom: 1px solid #EFDFBE; color: #8A4C07; padding: 10px 32px; font: 600 13px/18px 'IBM Plex Sans', sans-serif">
+        <span style="flex: 1">Счёт № 2026-0201 не оплачен (срок был 08.07). Через 9 дней создание новых смен будет приостановлено — текущие смены и экспорт продолжат работать.</span>
+        <button style="height: 30px; padding: 0 12px; border-radius: 6px; border: 1px solid #8A4C07; background: transparent; color: #8A4C07; font: 600 12px/1 'IBM Plex Sans', sans-serif; white-space: nowrap">Скачать счёт (PDF)</button>
+      </div>
+    </sc-if>
+    <sc-if value="{{ billRestricted }}" hint-placeholder-val="{{ false }}">
+      <div style="display: flex; align-items: center; gap: 12px; background: #FDEAE7; border-bottom: 1px solid #F2D4D0; color: #A1231A; padding: 10px 32px; font: 600 13px/18px 'IBM Plex Sans', sans-serif">
+        <span style="flex: 1">Новые смены приостановлены: счёт № 2026-0201 просрочен на 14 дней. Запущенные смены дорабатывают, экспорт доступен. Через 16 дней аккаунт перейдёт в режим «только чтение».</span>
+        <button style="height: 30px; padding: 0 12px; border-radius: 6px; border: 1px solid #A1231A; background: #A1231A; color: #FFFFFF; font: 600 12px/1 'IBM Plex Sans', sans-serif; white-space: nowrap">Скачать счёт (PDF)</button>
+      </div>
+    </sc-if>
+    <sc-if value="{{ billReadonly }}" hint-placeholder-val="{{ false }}">
+      <div style="display: flex; align-items: center; gap: 12px; background: #F0EFEA; border-bottom: 1px solid #C9C6BD; color: #45433E; padding: 10px 32px; font: 600 13px/18px 'IBM Plex Sans', sans-serif">
+        <span style="flex: 1">Аккаунт в режиме «только чтение»: счёт просрочен более 30 дней. Все данные и экспорт доступны. После оплаты работа возобновится автоматически.</span>
+        <button style="height: 30px; padding: 0 12px; border-radius: 6px; border: 1px solid #17161A; background: #17161A; color: #FAFAF8; font: 600 12px/1 'IBM Plex Sans', sans-serif; white-space: nowrap">Скачать счёт (PDF)</button>
+      </div>
+    </sc-if>
     <sc-if value="{{ offline }}" hint-placeholder-val="{{ false }}">
       <div style="display: flex; align-items: center; gap: 10px; background: #FDF0DC; border-bottom: 1px solid #EFDFBE; color: #8A4C07; padding: 10px 32px; font: 600 13px/18px 'IBM Plex Sans', sans-serif">
         Нет связи с сервером. Показаны данные на 14:29 — обновим автоматически, когда связь вернётся.
@@ -204,6 +222,10 @@ td { padding: 11px 14px; font: 400 14px/20px 'IBM Plex Sans', sans-serif; border
           <label style="display: flex; flex-direction: column; gap: 6px"><span style="font: 500 12px/16px 'IBM Plex Sans', sans-serif; color: #45433E">GTIN</span><span style="display: flex; align-items: center; height: 40px; padding: 0 12px; border: 1px solid #C9C6BD; border-radius: 8px; background: #F0EFEA; font: 400 14px/1 'IBM Plex Mono', monospace; color: #6B6862">04650075196012</span></label>
           <label style="display: flex; flex-direction: column; gap: 6px"><span style="font: 500 12px/16px 'IBM Plex Sans', sans-serif; color: #45433E">Название</span><span style="display: flex; align-items: center; height: 40px; padding: 0 12px; border: 1px solid #C9C6BD; border-radius: 8px; background: #FFFFFF; font: 400 14px/1 'IBM Plex Sans', sans-serif">Квас традиционный 1,5 л</span></label>
           <label style="display: flex; flex-direction: column; gap: 6px"><span style="font: 500 12px/16px 'IBM Plex Sans', sans-serif; color: #45433E">Группа Честного ЗНАКА</span><span style="display: flex; align-items: center; justify-content: space-between; height: 40px; padding: 0 12px; border: 1px solid #C9C6BD; border-radius: 8px; background: #FFFFFF; font: 400 14px/1 'IBM Plex Sans', sans-serif">Безалкогольные напитки <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6B6862" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></span></label>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px">
+            <label style="display: flex; flex-direction: column; gap: 6px"><span style="font: 500 12px/16px 'IBM Plex Sans', sans-serif; color: #45433E">Цена за шт., ₽</span><span style="display: flex; align-items: center; height: 40px; padding: 0 12px; border: 1px solid #C9C6BD; border-radius: 8px; background: #FFFFFF; font: 400 14px/1 'IBM Plex Mono', monospace">74,00</span></label>
+            <label style="display: flex; flex-direction: column; gap: 6px"><span style="font: 500 12px/16px 'IBM Plex Sans', sans-serif; color: #45433E">Код ЕГАИС</span><span style="display: flex; align-items: center; height: 40px; padding: 0 12px; border: 1px solid #C9C6BD; border-radius: 8px; background: #FFFFFF; font: 400 14px/1 'IBM Plex Mono', monospace">—</span></label>
+          </div>
         </div>
         <div style="display: flex; flex-direction: column; gap: 14px">
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px">
@@ -317,6 +339,111 @@ td { padding: 11px 14px; font: 400 14px/20px 'IBM Plex Sans', sans-serif; border
             <span style="display: flex; gap: 8px; padding-left: 40px; color: #6B6862">…195923-mQ2! ✓ 14:32:05</span>
           </div>
         </div>
+      </div>
+    </section>
+    </sc-if>
+
+    <sc-if value="{{ isPickups }}" hint-placeholder-val="{{ false }}">
+    <section data-screen-label="Для себя — свод" style="padding: 28px 32px; display: flex; flex-direction: column; gap: 20px">
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px">
+        <h1 style="margin: 0; font: 700 28px/34px 'IBM Plex Sans', sans-serif">Отбор «для себя»</h1>
+      </div>
+      <span style="font: 400 14px/20px 'IBM Plex Sans', sans-serif; color: #6B6862; margin-top: -12px">Заявки сотрудников с киоска. Пробейте на кассе или спишите — коды выйдут из оборота автоматически.</span>
+      <div style="display: flex; gap: 8px">
+        <span style="display: inline-flex; align-items: center; height: 32px; padding: 0 14px; border-radius: 999px; background: #17161A; color: #FAFAF8; font: 600 13px/1 'IBM Plex Sans', sans-serif">Все</span>
+        <span style="display: inline-flex; align-items: center; height: 32px; padding: 0 14px; border-radius: 999px; border: 1px solid #C9C6BD; background: #FFFFFF; color: #45433E; font: 600 13px/1 'IBM Plex Sans', sans-serif">Ожидают — 2</span>
+        <span style="display: inline-flex; align-items: center; height: 32px; padding: 0 14px; border-radius: 999px; border: 1px solid #C9C6BD; background: #FFFFFF; color: #45433E; font: 600 13px/1 'IBM Plex Sans', sans-serif">Пробиты</span>
+        <span style="display: inline-flex; align-items: center; height: 32px; padding: 0 14px; border-radius: 999px; border: 1px solid #C9C6BD; background: #FFFFFF; color: #45433E; font: 600 13px/1 'IBM Plex Sans', sans-serif">Списаны</span>
+        <span style="flex: 1"></span>
+        <span style="display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border: 1px solid #C9C6BD; border-radius: 8px; background: #FFFFFF; font: 400 13px/1 'IBM Plex Sans', sans-serif; color: #45433E">23.07.2026 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#6B6862" stroke-width="2"><path d="M4 5h16v16H4zM4 10h16M8 3v4M16 3v4"/></svg></span>
+      </div>
+      <div style="background: #FFFFFF; border: 1px solid #E0DED7; border-radius: 12px; overflow-x: auto">
+        <table>
+          <thead><tr style="background: #F0EFEA"><th>№</th><th>Сотрудник</th><th>Киоск</th><th>Когда</th><th>Продукция</th><th>Причина</th><th style="text-align: right">Кодов</th><th style="text-align: right">Сумма</th><th>Статус</th><th></th></tr></thead>
+          <tbody>
+            <tr onClick="{{ openPickup }}" style="cursor: pointer">
+              <td style="font-family: 'IBM Plex Mono', monospace">37</td><td style="font-weight: 600">Смирнов Алексей</td><td>Киоск-1</td>
+              <td style="font-family: 'IBM Plex Mono', monospace; color: #6B6862">сегодня 14:05</td>
+              <td>Жигулёвское 0,5 ×2 · Квас 1,5 ×1</td>
+              <td>Покупка</td>
+              <td style="text-align: right; font-family: 'IBM Plex Mono', monospace">3</td>
+              <td style="text-align: right; font-family: 'IBM Plex Mono', monospace">178 ₽</td>
+              <td><span style="display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 4px; background: #FDF0DC; color: #8A4C07; border: 1px solid #EFDFBE; font: 600 12px/1 'IBM Plex Sans', sans-serif">Ожидает кассы</span></td>
+              <td><a href="./pickup-slip.dc.html" target="_blank" onClick="{{ stop }}" style="display: inline-flex; align-items: center; gap: 6px; font: 600 13px/1 'IBM Plex Sans', sans-serif; color: #17161A; text-decoration: none; white-space: nowrap"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V3h12v6M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2M6 14h12v7H6z"/></svg>Печать</a></td>
+            </tr>
+            <tr onClick="{{ openPickup }}" style="cursor: pointer">
+              <td style="font-family: 'IBM Plex Mono', monospace">36</td><td style="font-weight: 600">Гусева Наталья</td><td>Киоск-1</td>
+              <td style="font-family: 'IBM Plex Mono', monospace; color: #6B6862">сегодня 12:40</td>
+              <td>Вода 1,0 ×2</td>
+              <td>Списание · Маркетинг</td>
+              <td style="text-align: right; font-family: 'IBM Plex Mono', monospace">2</td>
+              <td style="text-align: right; font-family: 'IBM Plex Mono', monospace">76 ₽</td>
+              <td><span style="display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 4px; background: #FDF0DC; color: #8A4C07; border: 1px solid #EFDFBE; font: 600 12px/1 'IBM Plex Sans', sans-serif">Ожидает кассы</span></td>
+              <td><a href="./pickup-slip.dc.html" target="_blank" onClick="{{ stop }}" style="display: inline-flex; align-items: center; gap: 6px; font: 600 13px/1 'IBM Plex Sans', sans-serif; color: #17161A; text-decoration: none; white-space: nowrap"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V3h12v6M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2M6 14h12v7H6z"/></svg>Печать</a></td>
+            </tr>
+            <tr>
+              <td style="font-family: 'IBM Plex Mono', monospace">35</td><td style="font-weight: 600">Ли Виктория</td><td>Киоск-1</td>
+              <td style="font-family: 'IBM Plex Mono', monospace; color: #6B6862">сегодня 11:15</td>
+              <td>Вода 1,0 ×4</td>
+              <td>Покупка</td>
+              <td style="text-align: right; font-family: 'IBM Plex Mono', monospace">4</td>
+              <td style="text-align: right; font-family: 'IBM Plex Mono', monospace">152 ₽</td>
+              <td><span style="display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 4px; background: #E7F6EC; color: #116335; border: 1px solid #CFE8D8; font: 600 12px/1 'IBM Plex Sans', sans-serif">✓ Пробита · чек 13:02</span></td>
+              <td><a href="./pickup-slip.dc.html" target="_blank" onClick="{{ stop }}" style="display: inline-flex; align-items: center; gap: 6px; font: 600 13px/1 'IBM Plex Sans', sans-serif; color: #17161A; text-decoration: none; white-space: nowrap"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V3h12v6M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2M6 14h12v7H6z"/></svg>Печать</a></td>
+            </tr>
+            <tr>
+              <td style="font-family: 'IBM Plex Mono', monospace">34</td><td style="font-weight: 600">Смирнов Алексей</td><td>Киоск-1</td>
+              <td style="font-family: 'IBM Plex Mono', monospace; color: #6B6862">вчера 16:48</td>
+              <td>Жигулёвское 0,5 ×2</td>
+              <td>Списание · Бой</td>
+              <td style="text-align: right; font-family: 'IBM Plex Mono', monospace">2</td>
+              <td style="text-align: right; font-family: 'IBM Plex Mono', monospace">104 ₽</td>
+              <td><span style="display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 4px; background: #F0EFEA; color: #45433E; border: 1px solid #C9C6BD; font: 600 12px/1 'IBM Plex Sans', sans-serif">Списана · акт № 8</span></td>
+              <td><a href="./pickup-slip.dc.html" target="_blank" onClick="{{ stop }}" style="display: inline-flex; align-items: center; gap: 6px; font: 600 13px/1 'IBM Plex Sans', sans-serif; color: #17161A; text-decoration: none; white-space: nowrap"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V3h12v6M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2M6 14h12v7H6z"/></svg>Печать</a></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+    </sc-if>
+
+    <sc-if value="{{ isPickup }}" hint-placeholder-val="{{ false }}">
+    <section data-screen-label="Для себя — заявка" style="padding: 28px 32px; display: flex; flex-direction: column; gap: 20px; max-width: 980px">
+      <nav style="font: 400 13px/18px 'IBM Plex Sans', sans-serif; display: flex; gap: 8px; align-items: center">
+        <a onClick="{{ goPickups }}" style="color: #6B6862; cursor: pointer; text-decoration: none">Отбор «для себя»</a><span style="color: #A5A29A">/</span><span style="font-weight: 600">Заявка № 37</span>
+      </nav>
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap">
+        <div style="display: flex; align-items: center; gap: 12px">
+          <h1 style="margin: 0; font: 700 28px/34px 'IBM Plex Sans', sans-serif">Заявка № 37 — Смирнов Алексей</h1>
+          <span style="display: inline-flex; align-items: center; height: 26px; padding: 0 10px; border-radius: 4px; background: #FDF0DC; color: #8A4C07; border: 1px solid #EFDFBE; font: 600 13px/1 'IBM Plex Sans', sans-serif">Ожидает кассы</span>
+        </div>
+        <div style="display: flex; gap: 8px">
+          <a href="./pickup-slip.dc.html" target="_blank" style="display: inline-flex; align-items: center; height: 40px; padding: 0 16px; border-radius: 8px; border: 1px solid #C9C6BD; background: #FFFFFF; color: #17161A; font: 600 14px/1 'IBM Plex Sans', sans-serif; text-decoration: none">Печатная форма</a>
+          <button style="height: 40px; padding: 0 16px; border-radius: 8px; border: 1px solid #C9C6BD; background: #FFFFFF; font: 600 14px/1 'IBM Plex Sans', sans-serif">Списать актом</button>
+          <button style="height: 40px; padding: 0 16px; border-radius: 8px; border: 1px solid #17161A; background: #17161A; color: #FAFAF8; font: 600 14px/1 'IBM Plex Sans', sans-serif">Пробита на кассе</button>
+        </div>
+      </div>
+      <div style="background: #FFFFFF; border: 1px solid #E0DED7; border-radius: 12px; padding: 18px 20px; display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr 1fr; gap: 16px">
+        <span style="display: flex; gap: 12px; align-items: flex-start"><img src="{{ badgeQr }}" alt="QR бейджа" style="width: 56px; height: 56px; flex-shrink: 0; border: 1px solid #E0DED7; border-radius: 4px"><span style="display: flex; flex-direction: column; gap: 4px"><span style="font: 500 12px/16px 'IBM Plex Sans', sans-serif; color: #6B6862">Сотрудник</span><span style="font: 600 14px/20px 'IBM Plex Sans', sans-serif">Смирнов Алексей</span><span style="font: 400 12px/16px 'IBM Plex Mono', monospace; color: #6B6862">бейдж …4412</span></span></span>
+        <span style="display: flex; flex-direction: column; gap: 4px"><span style="font: 500 12px/16px 'IBM Plex Sans', sans-serif; color: #6B6862">Киоск</span><span style="font: 600 14px/20px 'IBM Plex Sans', sans-serif">Киоск-1</span><span style="font: 400 12px/16px 'IBM Plex Sans', sans-serif; color: #6B6862">проходная цеха</span></span>
+        <span style="display: flex; flex-direction: column; gap: 4px"><span style="font: 500 12px/16px 'IBM Plex Sans', sans-serif; color: #6B6862">Причина</span><span style="font: 600 14px/20px 'IBM Plex Sans', sans-serif">Покупка</span><span style="font: 400 12px/16px 'IBM Plex Sans', sans-serif; color: #6B6862">выбрана на киоске</span></span>
+        <span style="display: flex; flex-direction: column; gap: 4px"><span style="font: 500 12px/16px 'IBM Plex Sans', sans-serif; color: #6B6862">Создана</span><span style="font: 600 14px/20px 'IBM Plex Sans', sans-serif">сегодня 14:05</span><span style="font: 400 12px/16px 'IBM Plex Sans', sans-serif; color: #6B6862">лимит: 3 из 5 шт</span></span>
+        <span style="display: flex; flex-direction: column; gap: 4px"><span style="font: 500 12px/16px 'IBM Plex Sans', sans-serif; color: #6B6862">Итого</span><span style="font: 600 14px/20px 'IBM Plex Mono', monospace">3 единицы · 178 ₽</span><span style="font: 400 12px/16px 'IBM Plex Sans', sans-serif; color: #6B6862">цены — для кассы</span></span>
+      </div>
+      <div style="background: #FFFFFF; border: 1px solid #E0DED7; border-radius: 12px; overflow-x: auto">
+        <div style="padding: 14px 20px; border-bottom: 1px solid #E0DED7; display: flex; justify-content: space-between; align-items: baseline"><span style="font: 600 16px/22px 'IBM Plex Sans', sans-serif">Коды маркировки — 3</span><span style="font: 400 12px/16px 'IBM Plex Sans', sans-serif; color: #6B6862">DataMatrix можно сканировать прямо с экрана</span></div>
+        <sc-for list="{{ pickupCodes }}" as="c" hint-placeholder-count="3">
+          <div style="display: flex; align-items: center; gap: 16px; padding: 12px 20px; border-bottom: 1px solid #F0EFEA">
+            <img src="{{ c.img }}" alt="DataMatrix" style="width: 64px; height: 64px; flex-shrink: 0; border: 1px solid #E0DED7; border-radius: 4px">
+            <span style="flex: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0">
+              <span style="font: 600 14px/20px 'IBM Plex Sans', sans-serif">{{ c.product }}</span>
+              <span style="font: 400 13px/18px 'IBM Plex Mono', monospace; color: #45433E">{{ c.code }}</span>
+            </span>
+            <span style="font: 600 14px/1 'IBM Plex Mono', monospace; white-space: nowrap">{{ c.price }} ₽</span>
+            <span style="display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 4px; background: #E5EFFC; color: #1A4F9C; border: 1px solid #D2E2F7; font: 600 12px/1 'IBM Plex Sans', sans-serif; white-space: nowrap">в обороте</span>
+          </div>
+        </sc-for>
+        <div style="padding: 12px 20px; font: 400 13px/18px 'IBM Plex Sans', sans-serif; color: #6B6862">После чека ККТ или акта списания коды будут выведены из оборота в ГИС МТ автоматически.</div>
       </div>
     </section>
     </sc-if>
@@ -523,6 +650,19 @@ td { padding: 11px 14px; font: 400 14px/20px 'IBM Plex Sans', sans-serif; border
         </table>
       </div>
       <div style="background: #FFFFFF; border: 1px solid #E0DED7; border-radius: 12px; overflow-x: auto">
+        <div style="padding: 14px 20px; border-bottom: 1px solid #E0DED7; display: flex; justify-content: space-between; align-items: center"><span style="font: 600 16px/22px 'IBM Plex Sans', sans-serif">Киоск «Для себя»</span><button style="height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid #C9C6BD; background: #FFFFFF; font: 600 13px/1 'IBM Plex Sans', sans-serif">+ Киоск</button></div>
+        <table>
+          <tbody>
+            <tr><td style="border-top: none; font-weight: 600">Киоск-1</td><td style="border-top: none">проходная цеха · планшет 11″ · считыватель бейджей + 2D-сканер</td><td style="border-top: none"><span style="display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 4px; background: #E7F6EC; color: #116335; border: 1px solid #CFE8D8; font: 600 12px/1 'IBM Plex Sans', sans-serif">✓ В сети</span></td></tr>
+          </tbody>
+        </table>
+        <div style="padding: 14px 20px; border-top: 1px solid #E0DED7; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px">
+          <label style="display: flex; flex-direction: column; gap: 6px"><span style="font: 500 12px/16px 'IBM Plex Sans', sans-serif; color: #45433E">Доступная продукция</span><span style="display: flex; align-items: center; justify-content: space-between; height: 40px; padding: 0 12px; border: 1px solid #C9C6BD; border-radius: 8px; font: 400 14px/1 'IBM Plex Sans', sans-serif">Вся подтверждённая из каталога <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6B6862" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></span></label>
+          <label style="display: flex; flex-direction: column; gap: 6px"><span style="font: 500 12px/16px 'IBM Plex Sans', sans-serif; color: #45433E">Лимит на сотрудника</span><span style="display: flex; align-items: center; height: 40px; padding: 0 12px; border: 1px solid #C9C6BD; border-radius: 8px; font: 400 14px/1 'IBM Plex Mono', monospace">5 шт в день</span></label>
+          <label style="display: flex; flex-direction: column; gap: 6px"><span style="font: 500 12px/16px 'IBM Plex Sans', sans-serif; color: #45433E">Показывать цены на киоске</span><span style="display: flex; align-items: center; justify-content: space-between; height: 40px; padding: 0 12px; border: 1px solid #C9C6BD; border-radius: 8px; font: 400 14px/1 'IBM Plex Sans', sans-serif">Да <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6B6862" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></span></label>
+        </div>
+      </div>
+      <div style="background: #FFFFFF; border: 1px solid #E0DED7; border-radius: 12px; overflow-x: auto">
         <div style="padding: 14px 20px; border-bottom: 1px solid #E0DED7; display: flex; justify-content: space-between; align-items: center"><span style="font: 600 16px/22px 'IBM Plex Sans', sans-serif">API-ключи</span><button style="height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid #C9C6BD; background: #FFFFFF; font: 600 13px/1 'IBM Plex Sans', sans-serif">+ Ключ</button></div>
         <table>
           <tbody>
@@ -588,15 +728,43 @@ td { padding: 11px 14px; font: 400 14px/20px 'IBM Plex Sans', sans-serif; border
   </main>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props="{&quot;offline&quot;: {&quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: false, &quot;tsType&quot;: &quot;boolean&quot;, &quot;section&quot;: &quot;Демо-состояния&quot;}}">
+<script type="text/x-dc" data-dc-script data-props="{&quot;offline&quot;: {&quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: false, &quot;tsType&quot;: &quot;boolean&quot;, &quot;section&quot;: &quot;Состояния&quot;}, &quot;billing&quot;: {&quot;editor&quot;: &quot;enum&quot;, &quot;default&quot;: &quot;Оплачено&quot;, &quot;options&quot;: [&quot;Оплачено&quot;, &quot;Просрочка (день 1)&quot;, &quot;Ограничение (день 14)&quot;, &quot;Только чтение (день 30)&quot;], &quot;tsType&quot;: &quot;string&quot;, &quot;section&quot;: &quot;Состояния&quot;}}">
 class Component extends DCLogic {
   state = { screen: "dash", createOpen: false, closeOpen: false };
   go(s) { this.setState({ screen: s, createOpen: false, closeOpen: false }); }
+  dm(seed) {
+    let h = 0;
+    for (const c of seed) h = ((h * 31 + c.charCodeAt(0)) >>> 0);
+    let x = h || 1;
+    const rnd = () => { x = (x * 1103515245 + 12345) >>> 0; return x / 4294967296; };
+    const n = 14; let r = "";
+    for (let y = 0; y < n; y++) for (let cx = 0; cx < n; cx++) {
+      let f;
+      if (cx === 0 || y === n - 1) f = true;
+      else if (y === 0) f = cx % 2 === 0;
+      else if (cx === n - 1) f = y % 2 === 1;
+      else f = rnd() > 0.5;
+      if (f) r += `<rect x="${cx}" y="${y}" width="1" height="1"/>`;
+    }
+    return "data:image/svg+xml;utf8," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1 -1 16 16"><rect x="-1" y="-1" width="16" height="16" fill="#FFFFFF"/><g fill="#17161A">${r}</g></svg>`);
+  }
+  qr(seed) {
+    let h = 0;
+    for (const c of seed) h = ((h * 31 + c.charCodeAt(0)) >>> 0);
+    let x = h || 1;
+    const rnd = () => { x = (x * 1103515245 + 12345) >>> 0; return x / 4294967296; };
+    const n = 21, inF = (cx, y) => (cx < 8 && y < 8) || (cx >= n - 8 && y < 8) || (cx < 8 && y >= n - 8);
+    let r = "";
+    const finder = (ox, oy) => { r += `<path d="M${ox} ${oy}h7v7h-7zM${ox + 1} ${oy + 1}v5h5v-5z" fill-rule="evenodd"/><rect x="${ox + 2}" y="${oy + 2}" width="3" height="3"/>`; };
+    finder(0, 0); finder(n - 7, 0); finder(0, n - 7);
+    for (let y = 0; y < n; y++) for (let cx = 0; cx < n; cx++) { if (inF(cx, y)) continue; if (rnd() > 0.5) r += `<rect x="${cx}" y="${y}" width="1" height="1"/>`; }
+    return "data:image/svg+xml;utf8," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1.5 -1.5 24 24"><rect x="-1.5" y="-1.5" width="24" height="24" fill="#FFFFFF"/><g fill="#17161A">${r}</g></svg>`);
+  }
   renderVals() {
     const s = this.state.screen;
-    const activeOf = { dash: "dash", catalog: "catalog", product: "catalog", shifts: "shifts", shift: "shifts", labels: "labels", editor: "labels", history: "history", code: "history", exports: "exports", users: "users", settings: "settings" };
+    const activeOf = { dash: "dash", catalog: "catalog", product: "catalog", shifts: "shifts", shift: "shifts", pickups: "pickups", pickup: "pickups", labels: "labels", editor: "labels", history: "history", code: "history", exports: "exports", users: "users", settings: "settings" };
     const items = [
-      ["dash", "Обзор", null], ["catalog", "Каталог", null], ["shifts", "Смены", 2],
+      ["dash", "Обзор", null], ["catalog", "Каталог", null], ["shifts", "Смены", 2], ["pickups", "Для себя", 2],
       ["labels", "Этикетки", null], ["history", "История", null], ["exports", "Экспорт", null],
       ["users", "Пользователи", null], ["settings", "Настройки", null],
     ];
@@ -613,8 +781,12 @@ class Component extends DCLogic {
     return {
       nav,
       offline: this.props.offline ?? false,
+      billOverdue: (this.props.billing ?? "Оплачено") === "Просрочка (день 1)",
+      billRestricted: (this.props.billing ?? "Оплачено") === "Ограничение (день 14)",
+      billReadonly: (this.props.billing ?? "Оплачено") === "Только чтение (день 30)",
       isDash: s === "dash", isCatalog: s === "catalog", isProduct: s === "product",
       isShifts: s === "shifts", isShift: s === "shift", isLabels: s === "labels",
+      isPickups: s === "pickups", isPickup: s === "pickup",
       isEditor: s === "editor", isHistory: s === "history",
       isExports: s === "exports", isUsers: s === "users", isSettings: s === "settings",
       createOpen: this.state.createOpen, closeOpen: this.state.closeOpen,
@@ -622,10 +794,17 @@ class Component extends DCLogic {
       goLabels: () => this.go("labels"), goExports: () => this.go("exports"),
       openProduct: () => this.go("product"), openShift: () => this.go("shift"),
       openEditor: () => this.go("editor"),
+      goPickups: () => this.go("pickups"), openPickup: () => this.go("pickup"),
       openCreate: () => this.setState({ createOpen: true }),
       openClose: () => this.setState({ closeOpen: true }),
       closeModals: () => this.setState({ createOpen: false, closeOpen: false }),
       stop: (e) => e.stopPropagation(),
+      badgeQr: this.qr("MARKIRO-BADGE-4412-SMIRNOV"),
+      pickupCodes: [
+        ["Жигулёвское светлое 0,5 л", "01 04650075195923 21 KYC9X7MQ", "52"],
+        ["Жигулёвское светлое 0,5 л", "01 04650075195923 21 ZW4NT0PL", "52"],
+        ["Квас традиционный 1,5 л", "01 04650075196012 21 XT9NL3VB", "74"],
+      ].map(([product, code, price]) => ({ product, code, price, img: this.dm(code) })),
       palette: ["Текст", "Поле {данные}", "DataMatrix", "Code128", "EAN-13", "QR-код", "Лого / картинка", "Линия / рамка"],
     };
   }
