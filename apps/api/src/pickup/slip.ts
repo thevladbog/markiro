@@ -64,7 +64,8 @@ function escapeHtml(value: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function money(value: string | null): string {
@@ -172,7 +173,7 @@ body { margin: 0; font-family: sans-serif; color: #17161A; }
       </div>${data.items.map(itemRow).join("")}
       <div style="display: flex; justify-content: flex-end; gap: 24px; align-items: baseline; padding: 8px 10px; border-bottom: 1px solid #C9C6BD">
         <span style="font: 600 13px/1.4 sans-serif">Итого по заявке:</span>
-        <span class="mono" style="font: 600 14px/1.4 monospace">${itemCountLabel} · ${money(data.total)}</span>
+        <span class="mono" style="font: 600 14px/1.4 monospace">${itemCountLabel} · ${escapeHtml(money(data.total))}</span>
       </div>
     </div>
 

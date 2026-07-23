@@ -128,4 +128,29 @@ describe.skipIf(!ready)("pickup order printed slip e2e", () => {
   it("404s for an order that doesn't exist", async () => {
     await agent.get(`/pickup-orders/${randomUUID()}/slip`).expect(404);
   });
+
+  it("cancelled order's slip has no item rows and no stale total (Итого stays consistent with the empty table)", async () => {
+    const created = await request(app!.getHttpServer())
+      .post("/kiosk/orders").set("x-kiosk-token", TOKEN)
+      .send({
+        deviceSeq: 2, badgeCode: BADGE, reason: "buy",
+        items: [{ rawKm: `01${GTIN}21CANCELSLIP${GS}93Abcd` }],
+      })
+      .expect(201);
+    const orderId = await orderIdByNo(created.body.orderNo);
+
+    // Sanity: before cancelling, the slip shows the item and its (non-null) price.
+    const preCancel = await agent.get(`/pickup-orders/${orderId}/slip`).expect(200);
+    expect(preCancel.text).toContain("CANCELSLIP");
+    expect(preCancel.text).toContain("52.00");
+
+    await agent.post(`/pickup-orders/${orderId}/cancel`).expect(201);
+
+    const postCancel = await agent.get(`/pickup-orders/${orderId}/slip`).expect(200);
+    // No rendered row for the (now-voided) KM...
+    expect(postCancel.text).not.toContain("CANCELSLIP");
+    // ...and no stale "Итого" carried over from the pre-cancel total — the
+    // pre-cancel price string must not appear anywhere in the cancelled slip.
+    expect(postCancel.text).not.toContain("52.00");
+  });
 });

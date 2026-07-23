@@ -285,7 +285,12 @@ export class PickupOrdersService {
       kioskName: row.kioskName ?? "",
       reason: row.reason,
       writeoffReasonName: row.writeoffReasonName,
-      total: row.totalPrice,
+      // Derived FROM the (non-voided) items rendered below, not from the stored
+      // `pickupOrders.totalPrice` passthrough — that column isn't recomputed by
+      // `cancel()` when it voids items, so it would go stale (non-zero total
+      // next to an empty table) for a cancelled order. This keeps "Итого"
+      // consistent with the table for every status.
+      total: this.computeTotalPrice(itemRows),
       items: itemRows.map((item, index) => ({
         n: index + 1,
         productName: item.productName ?? "",
@@ -738,7 +743,7 @@ export class PickupOrdersService {
     }
   }
 
-  private computeTotalPrice(items: ResolvedItem[]): string | null {
+  private computeTotalPrice(items: { unitPrice: string | null }[]): string | null {
     if (items.length === 0) return null;
     let sum = 0;
     for (const item of items) {
