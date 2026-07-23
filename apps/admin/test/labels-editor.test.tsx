@@ -31,7 +31,7 @@ import { parseLabelTemplate, type RasterResult, type RasterizeTextFn } from "@ma
 
 import { buildZplBlob, latin1ToUint8Array } from "../src/pages/labels/editor/download.js";
 import { LabelEditorPage } from "../src/pages/labels/editor/index.js";
-import { decodeRasterToRgba } from "../src/pages/labels/editor/raster-preview.js";
+import { decodeRasterToRgba, rasterDestXPx } from "../src/pages/labels/editor/raster-preview.js";
 
 afterEach(() => {
   cleanup();
@@ -312,6 +312,18 @@ describe("decodeRasterToRgba (pure bit-unpacking, no canvas needed)", () => {
   });
 });
 
+describe("rasterDestXPx (pure align-offset-to-px math, no canvas needed)", () => {
+  it("returns xMm*scale unchanged when offsetDots is 0 (left-aligned / no maxWidth)", () => {
+    expect(rasterDestXPx(5, 0, 203, 3)).toBe(15);
+  });
+
+  it("converts a non-zero dots offset to mm (at the given dpi) before adding and scaling", () => {
+    // dotsToMm(203, 203) = 203/203*25.4 = 25.4mm exactly (1 inch at 203dpi).
+    // (2mm + 25.4mm) * 3px/mm = 82.2.
+    expect(rasterDestXPx(2, 203, 203, 3)).toBeCloseTo(82.2, 10);
+  });
+});
+
 describe("Download (ZPL/TSPL byte safety)", () => {
   it("latin1ToUint8Array preserves a byte > 0x7F exactly (no UTF-8 mangling)", () => {
     const bytes = latin1ToUint8Array("ÿA");
@@ -402,6 +414,15 @@ describe("Dirty guard", () => {
     fireEvent.click(screen.getByRole("link", { name: "← Шаблоны" }));
 
     expect(await screen.findByText("Library page")).toBeDefined();
+  });
+});
+
+describe("Zoom captions (LabelCanvas + PreviewPane)", () => {
+  it("shows each canvas's own zoom caption (LabelCanvas 4px/mm, PreviewPane 3px/mm)", () => {
+    renderCreateFlow();
+
+    expect(screen.getByText("масштаб 4 px/мм")).toBeDefined();
+    expect(screen.getByText("масштаб 3 px/мм")).toBeDefined();
   });
 });
 

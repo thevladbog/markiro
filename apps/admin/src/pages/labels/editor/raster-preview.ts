@@ -43,6 +43,32 @@ const OPAQUE_ALPHA = 255;
  * runtimes, whereas this array is plain data this function can build (and a
  * test can assert against byte-for-byte) with zero DOM dependency.
  */
+/** Converts printer dots (at `dpi`) to millimetres: `dots / dpi * 25.4`. */
+export function dotsToMm(dots: number, dpi: number): number {
+  return (dots / dpi) * 25.4;
+}
+
+/**
+ * Computes the preview canvas's on-screen x (in CSS px) at which a
+ * rasterized bitmap must be drawn, so that a `PreviewPane` composite lands
+ * at EXACTLY the same place `generateZpl`/`generateTspl`'s raster branch
+ * would print it (see `@markiro/domain`'s `rasterAlignOffsetDots` doc
+ * comment: without this, a centered/right-aligned rasterized -- e.g.
+ * Cyrillic -- piece of text would always preview flush-left, silently
+ * diverging from what actually prints).
+ *
+ * `offsetDots` is `rasterAlignOffsetDots`'s own return value -- computed by
+ * the caller, which alone knows the element's `align`/`maxWidthMm` and the
+ * raster's pixel width -- kept as a plain number here (not re-derived) so
+ * this function stays a THIN, canvas-independent dots-to-px conversion,
+ * split out from `PreviewPane.tsx`'s effect specifically so it is
+ * unit-testable without a real 2D canvas context, exactly like
+ * `decodeRasterToRgba` above.
+ */
+export function rasterDestXPx(xMm: number, offsetDots: number, dpi: number, scale: number): number {
+  return (xMm + dotsToMm(offsetDots, dpi)) * scale;
+}
+
 export function decodeRasterToRgba(raster: RasterResult): Uint8ClampedArray<ArrayBuffer> {
   const bytes: number[] = [];
   for (let i = 0; i < raster.hex.length; i += 2) {

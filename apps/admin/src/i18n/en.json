@@ -258,6 +258,7 @@
           "operator": "Operator",
           "counterparty.name": "Counterparty"
         },
+        "zoomCaption": "zoom {{scale}} px/mm",
         "preview": {
           "caption": "preview = print",
           "cyrillicWarning": "The selected font has no Cyrillic glyphs — text will print as a raster image. Sharpness may be reduced.",

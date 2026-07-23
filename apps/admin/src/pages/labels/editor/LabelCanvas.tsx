@@ -13,6 +13,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
+import { useTranslation } from "react-i18next";
 
 import { sampleLabelData, type LabelField, type LabelTemplateSpec } from "@markiro/domain";
 
@@ -86,6 +87,7 @@ export function LabelCanvas({
   onMoveBy,
   onDelete,
 }: LabelCanvasProps) {
+  const { t } = useTranslation();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const dragOriginRef = useRef<{ xMm: number; yMm: number } | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -192,14 +194,19 @@ export function LabelCanvas({
   }
 
   return (
-    <canvas
-      ref={canvasRef}
-      tabIndex={0}
-      width={widthPx}
-      height={heightPx}
-      style={{ width: widthPx, height: heightPx, background: "#ffffff", outline: "none" }}
-      onMouseDown={handleMouseDown}
-      onKeyDown={handleKeyDown}
-    />
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+      <canvas
+        ref={canvasRef}
+        tabIndex={0}
+        width={widthPx}
+        height={heightPx}
+        style={{ width: widthPx, height: heightPx, background: "#ffffff", outline: "none" }}
+        onMouseDown={handleMouseDown}
+        onKeyDown={handleKeyDown}
+      />
+      <span style={{ font: "400 12px/16px var(--font-mono)", color: "var(--fg-3)" }}>
+        {t("pages.labels.editor.zoomCaption", { scale })}
+      </span>
+    </div>
   );
 }

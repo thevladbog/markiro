@@ -30,8 +30,10 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
+  mmToDots,
   needsImageRendering,
   ptToDots,
+  rasterAlignOffsetDots,
   sampleLabelData,
   type LabelField,
   type LabelFieldElement,
@@ -46,8 +48,8 @@ import {
   type LabelFontFamily,
 } from "../../../labels/fontCoverage.js";
 import { rasterizeText as realRasterizeText } from "../../../labels/rasterizer.js";
-import { decodeRasterToRgba } from "./raster-preview.js";
-import { draw } from "./renderer.js";
+import { decodeRasterToRgba, dotsToMm, rasterDestXPx } from "./raster-preview.js";
+import { draw, elementBoundsMm, LABEL_BACKGROUND_COLOR } from "./renderer.js";
 
 /**
  * MVP SIMPLIFICATION (documented, not an oversight): `LabelTextElement`/
@@ -82,10 +84,6 @@ function resolvedTextOf(
   data: Record<LabelField, string>,
 ): string {
   return element.kind === "text" ? element.text : (data[element.field] ?? "");
-}
-
-function dotsToMm(dots: number, dpi: number): number {
-  return (dots / dpi) * 25.4;
 }
 
 /** Every text/field element whose RESOLVED text needs rasterization -- the
@@ -150,10 +148,36 @@ export function PreviewPane({
           const rgba = decodeRasterToRgba(raster);
           offCtx.putImageData(new ImageData(rgba, raster.width, raster.height), 0, 0);
 
-          const destXPx = element.xMm * scale;
+          // Mirror the same align/maxWidthMm offset `generateZpl`/
+          // `generateTspl`'s raster branch applies (see
+          // `rasterAlignOffsetDots`'s doc comment in `@markiro/domain`) so
+          // the preview's bitmap position never diverges from print.
+          const maxWidthDots =
+            element.maxWidthMm !== undefined ? mmToDots(element.maxWidthMm, spec.dpi) : undefined;
+          const offsetDots = rasterAlignOffsetDots(element.align, maxWidthDots, raster.width);
+          const destXPx = rasterDestXPx(element.xMm, offsetDots, spec.dpi, scale);
           const destYPx = element.yMm * scale;
           const destWidthPx = dotsToMm(raster.width, spec.dpi) * scale;
           const destHeightPx = dotsToMm(raster.height, spec.dpi) * scale;
+
+          // `draw()` already schematic-painted this element with a plain
+          // `ctx.fillText` (see `renderer.ts`'s `drawTextElement`), whose
+          // approximate `AVG_CHAR_WIDTH_EM`/`LINE_HEIGHT_EM` heuristic bounds
+          // (`elementBoundsMm`) can be WIDER than the real rasterized bitmap
+          // about to be drawn on top of it (a genuinely proportional font's
+          // glyph tails can extend past the 0.55em/char average). Painting
+          // the label-background color over the schematic's own bounds
+          // FIRST ensures no stray schematic ink peeks out from under/around
+          // the bitmap once it's composited.
+          const schematicBounds = elementBoundsMm(element, resolvedData);
+          ctx!.fillStyle = LABEL_BACKGROUND_COLOR;
+          ctx!.fillRect(
+            schematicBounds.x * scale,
+            schematicBounds.y * scale,
+            schematicBounds.w * scale,
+            schematicBounds.h * scale,
+          );
+
           ctx!.drawImage(offscreen, destXPx, destYPx, destWidthPx, destHeightPx);
         } catch {
           // A single element's rasterization failing (e.g. a real browser
@@ -211,6 +235,9 @@ export function PreviewPane({
       />
       <span style={{ font: "400 12px/16px var(--font-mono)", color: "var(--fg-3)" }}>
         {t("pages.labels.editor.preview.caption")}
+      </span>
+      <span style={{ font: "400 12px/16px var(--font-mono)", color: "var(--fg-3)" }}>
+        {t("pages.labels.editor.zoomCaption", { scale })}
       </span>
       {coverageStatus === "missing" && (
         <Alert tone="warn">{t("pages.labels.editor.preview.cyrillicWarning")}</Alert>

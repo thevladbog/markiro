@@ -203,7 +203,7 @@ function mmToPx(mm: number, scale: number): number {
  * label preview must show what the THERMAL PRINTER will actually produce
  * (black ink on label stock), not follow the surrounding UI's palette.
  */
-const LABEL_BACKGROUND_COLOR = "#ffffff";
+export const LABEL_BACKGROUND_COLOR = "#ffffff";
 const INK_COLOR = "#000000";
 
 function drawTextElement(
