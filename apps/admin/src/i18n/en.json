@@ -50,6 +50,9 @@
     "shifts": "Shifts",
     "counterparties": "Counterparties",
     "labels": "Labels",
+    "pickup": "Self-pickup",
+    "employees": "Employees",
+    "kiosks": "Kiosks",
     "settings": "Settings"
   },
   "shell": {
@@ -364,6 +367,244 @@
         "deleteError": "Could not delete the shift",
         "closeSuccess": "Shift closed",
         "closeError": "Could not close the shift"
+      }
+    },
+    "pickup": {
+      "title": "Self-pickup",
+      "emptyTitle": "No orders yet",
+      "emptyHint": "Orders will appear here once employees start picking up items at the self-service kiosk.",
+      "addAction": "Bulk export",
+      "print": "Print",
+      "cancel": "Cancel",
+      "filters": {
+        "statusLabel": "Status",
+        "reasonLabel": "Reason",
+        "fromLabel": "From",
+        "toLabel": "To",
+        "status": {
+          "all": "All statuses",
+          "pending": "Pending",
+          "punched": "Punched",
+          "writtenoff": "Written off",
+          "cancelled": "Cancelled"
+        },
+        "reason": {
+          "all": "All reasons",
+          "buy": "Purchase",
+          "writeoff": "Write-off"
+        }
+      },
+      "status": {
+        "pending": "Pending",
+        "punched": "Punched",
+        "writtenoff": "Written off",
+        "cancelled": "Cancelled"
+      },
+      "reason": {
+        "buy": "Purchase",
+        "writeoff": "Write-off"
+      },
+      "table": {
+        "orderNo": "Order no.",
+        "employeeName": "Employee",
+        "kioskName": "Kiosk",
+        "createdAt": "When",
+        "reason": "Reason",
+        "itemCount": "Codes",
+        "totalPrice": "Total",
+        "status": "Status",
+        "actions": "Actions"
+      },
+      "bulkExport": {
+        "toggleAction": "Bulk export",
+        "exportAction": "Export codes",
+        "selectedCount": "{{count}} orders selected"
+      },
+      "detail": {
+        "backAction": "← Orders",
+        "employeeLabel": "Employee",
+        "kioskLabel": "Kiosk",
+        "reasonLabel": "Reason",
+        "writeoffReasonLabel": "Sub-reason",
+        "createdAtLabel": "Created",
+        "totalLabel": "Total",
+        "itemsTitle": "Marking codes",
+        "table": {
+          "code": "Code",
+          "productName": "Product",
+          "unitPrice": "Price",
+          "status": "Status"
+        },
+        "inCirculation": "in circulation",
+        "actions": {
+          "punch": "Punched at register",
+          "writeoff": "Write off with act",
+          "print": "Print",
+          "cancel": "Cancel"
+        },
+        "punchModal": {
+          "title": "Punched at register",
+          "receiptNoLabel": "Receipt no.",
+          "submit": "Confirm"
+        },
+        "writeoffModal": {
+          "title": "Write off with act",
+          "actNoLabel": "Act no.",
+          "reasonLabel": "Write-off sub-reason",
+          "submit": "Confirm"
+        },
+        "loadError": "Could not load the order. Refresh the page or sign in again."
+      },
+      "toasts": {
+        "resolveSuccess": "Order resolved",
+        "resolveError": "Could not resolve the order",
+        "cancelSuccess": "Order cancelled",
+        "cancelError": "Could not cancel the order",
+        "exportSuccess": "Codes exported",
+        "exportError": "Could not export the codes"
+      }
+    },
+    "employees": {
+      "title": "Employees",
+      "emptyTitle": "No employees yet",
+      "emptyHint": "Add your first employee to issue them a self-service QR badge.",
+      "addAction": "Add employee",
+      "edit": "Edit",
+      "archive": "Archive",
+      "cancel": "Cancel",
+      "archiveConfirmTitle": "Archive this employee?",
+      "archiveConfirmBody": "Employee \"{{name}}\" will be archived; their issued badges will be revoked.",
+      "archiveConfirmAction": "Archive",
+      "status": {
+        "active": "Active",
+        "archived": "Archived"
+      },
+      "filters": {
+        "statusLabel": "Status",
+        "status": {
+          "all": "All statuses",
+          "active": "Active",
+          "archived": "Archived"
+        }
+      },
+      "table": {
+        "fullName": "Full name",
+        "role": "Role",
+        "status": "Status",
+        "badges": "Badges",
+        "actions": "Actions"
+      },
+      "form": {
+        "createTitle": "New employee",
+        "editTitle": "Edit employee",
+        "fullNameLabel": "Full name",
+        "roleLabel": "Role",
+        "submitCreate": "Create",
+        "submitUpdate": "Save",
+        "errors": {
+          "fullNameRequired": "Enter a full name",
+          "fullNameTooLong": "200 characters or fewer",
+          "roleTooLong": "120 characters or fewer"
+        }
+      },
+      "badges": {
+        "title": "Badges",
+        "emptyHint": "No badges issued",
+        "codeLabel": "Badge code",
+        "labelLabel": "Label",
+        "issueAction": "Issue badge",
+        "revokeAction": "Revoke",
+        "revokedBadge": "Revoked",
+        "issuedAt": "Issued {{date}}"
+      },
+      "toasts": {
+        "createSuccess": "Employee added",
+        "createError": "Could not create the employee",
+        "updateSuccess": "Employee updated",
+        "updateError": "Could not update the employee",
+        "archiveSuccess": "Employee archived",
+        "archiveError": "Could not archive the employee",
+        "issueBadgeSuccess": "Badge issued",
+        "issueBadgeError": "Could not issue the badge",
+        "revokeBadgeSuccess": "Badge revoked",
+        "revokeBadgeError": "Could not revoke the badge"
+      }
+    },
+    "kiosks": {
+      "title": "Kiosks",
+      "emptyTitle": "No kiosks yet",
+      "emptyHint": "Add your first self-service kiosk for personal pickups.",
+      "addAction": "Add kiosk",
+      "edit": "Edit",
+      "archive": "Archive",
+      "cancel": "Cancel",
+      "archiveConfirmTitle": "Archive this kiosk?",
+      "archiveConfirmBody": "Kiosk \"{{name}}\" will be archived.",
+      "archiveConfirmAction": "Archive",
+      "onlineStatus": {
+        "online": "Online",
+        "offline": "Offline"
+      },
+      "status": {
+        "active": "Active",
+        "archived": "Archived"
+      },
+      "table": {
+        "name": "Name",
+        "location": "Location",
+        "online": "Status",
+        "dayLimit": "Limit/employee",
+        "showPrices": "Prices",
+        "actions": "Actions"
+      },
+      "form": {
+        "createTitle": "New kiosk",
+        "editTitle": "Edit kiosk",
+        "nameLabel": "Name",
+        "locationLabel": "Location",
+        "dayLimitLabel": "Daily item limit per employee",
+        "showPricesLabel": "Show prices",
+        "productsLabel": "Allowed products",
+        "submitCreate": "Create",
+        "submitUpdate": "Save",
+        "errors": {
+          "nameRequired": "Enter a name",
+          "nameTooLong": "200 characters or fewer",
+          "dayLimitInvalid": "Enter a positive whole number"
+        }
+      },
+      "enroll": {
+        "action": "Issue token",
+        "modalTitle": "Kiosk enrollment token",
+        "hint": "Copy the token and enter it on the kiosk during first-time setup. The token is shown only once.",
+        "copyAction": "Copy"
+      },
+      "reasons": {
+        "title": "Write-off reasons",
+        "emptyHint": "No reasons yet",
+        "addAction": "Add reason",
+        "nameLabel": "Name",
+        "sortOrderLabel": "Order",
+        "saveAction": "Save",
+        "archiveAction": "Delete"
+      },
+      "toasts": {
+        "createSuccess": "Kiosk added",
+        "createError": "Could not create the kiosk",
+        "updateSuccess": "Kiosk updated",
+        "updateError": "Could not update the kiosk",
+        "archiveSuccess": "Kiosk archived",
+        "archiveError": "Could not archive the kiosk",
+        "setProductsSuccess": "Product list updated",
+        "setProductsError": "Could not update the product list",
+        "enrollSuccess": "Token issued",
+        "enrollError": "Could not issue the token",
+        "reasonCreateSuccess": "Reason added",
+        "reasonCreateError": "Could not add the reason",
+        "reasonUpdateSuccess": "Reason updated",
+        "reasonUpdateError": "Could not update the reason",
+        "reasonArchiveSuccess": "Reason deleted",
+        "reasonArchiveError": "Could not delete the reason"
       }
     },
     "settings": {
