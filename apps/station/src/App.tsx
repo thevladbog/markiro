@@ -111,17 +111,9 @@ export function App() {
           <p>{shift.id}</p>
         </main>
       ) : floorView === "select" ? (
-        <ShiftSelection
-          client={client}
-          onSelected={setShift}
-          onNew={() => setFloorView("new")}
-        />
+        <ShiftSelection client={client} onSelected={setShift} onNew={() => setFloorView("new")} />
       ) : (
-        <NewShift
-          client={client}
-          onStarted={setShift}
-          onBack={() => setFloorView("select")}
-        />
+        <NewShift client={client} onStarted={setShift} onBack={() => setFloorView("select")} />
       )}
     </FloorShell>
   );

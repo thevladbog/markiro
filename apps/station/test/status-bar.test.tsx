@@ -3,7 +3,9 @@ import { beforeAll, describe, expect, it } from "vitest";
 import i18n from "../src/i18n/index.js";
 import { StatusBar } from "../src/ui/StatusBar.js";
 
-beforeAll(async () => { await i18n.changeLanguage("en"); });
+beforeAll(async () => {
+  await i18n.changeLanguage("en");
+});
 
 describe("StatusBar", () => {
   it("shows the online state", () => {

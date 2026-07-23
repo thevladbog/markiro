@@ -1,6 +1,13 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
-import { applyMigrations, upsertBundle, readShiftMirror, readOperatorsMirror, type SqlExecutor, type StationBundle } from "../src/lib/mirror.js";
+import {
+  applyMigrations,
+  upsertBundle,
+  readShiftMirror,
+  readOperatorsMirror,
+  type SqlExecutor,
+  type StationBundle,
+} from "../src/lib/mirror.js";
 
 function nodeExecutor(): SqlExecutor {
   const db = new DatabaseSync(":memory:");
@@ -16,20 +23,50 @@ function nodeExecutor(): SqlExecutor {
 
 const bundle: StationBundle = {
   shift: {
-    id: "s1", status: "active", mode: "validation", productId: "p1", productName: "Cola",
-    lineId: null, lineName: null, counterpartyId: "c1", counterpartyName: "Buyer",
-    labelTemplateId: "lt1", labelTemplateName: "T", plannedQty: 100, plannedDate: "2026-07-23",
-    boxCapacity: 12, palletCapacity: 48, palletsEnabled: false, openedAt: "2026-07-23T08:00:00Z",
+    id: "s1",
+    status: "active",
+    mode: "validation",
+    productId: "p1",
+    productName: "Cola",
+    lineId: null,
+    lineName: null,
+    counterpartyId: "c1",
+    counterpartyName: "Buyer",
+    labelTemplateId: "lt1",
+    labelTemplateName: "T",
+    plannedQty: 100,
+    plannedDate: "2026-07-23",
+    boxCapacity: 12,
+    palletCapacity: 48,
+    palletsEnabled: false,
+    openedAt: "2026-07-23T08:00:00Z",
   },
   product: {
-    id: "p1", gtin14: "04600000000017", name: "Cola", productGroup: "Beverages",
-    boxCapacity: 12, palletCapacity: 48, status: "active",
-    defaultCounterpartyId: "c1", defaultLabelTemplateId: "lt1",
+    id: "p1",
+    gtin14: "04600000000017",
+    name: "Cola",
+    productGroup: "Beverages",
+    boxCapacity: 12,
+    palletCapacity: 48,
+    status: "active",
+    defaultCounterpartyId: "c1",
+    defaultLabelTemplateId: "lt1",
   },
-  labelTemplate: { id: "lt1", name: "T", spec: { widthMm: 58, heightMm: 40, dpi: 203, language: "zpl", elements: [] } },
+  labelTemplate: {
+    id: "lt1",
+    name: "T",
+    spec: { widthMm: 58, heightMm: 40, dpi: 203, language: "zpl", elements: [] },
+  },
   counterpartyGln: "6291041500213",
   operators: [
-    { operatorId: "op1", name: "Ivan", role: "operator", pinHash: "pbkdf2$sha256$1$c2FsdA==$aA==", badgeHash: null, active: true },
+    {
+      operatorId: "op1",
+      name: "Ivan",
+      role: "operator",
+      pinHash: "pbkdf2$sha256$1$c2FsdA==$aA==",
+      badgeHash: null,
+      active: true,
+    },
   ],
 };
 

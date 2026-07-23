@@ -12,7 +12,9 @@ const invokeMock = vi.fn<(cmd: string) => Promise<unknown>>((cmd) => {
   if (cmd === "plugin:sql|select") return Promise.resolve([]);
   return Promise.resolve(undefined);
 });
-vi.mock("@tauri-apps/api/core", () => ({ invoke: (...args: unknown[]) => invokeMock(...(args as [string])) }));
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: (...args: unknown[]) => invokeMock(...(args as [string])),
+}));
 
 import i18n from "../src/i18n/index.js";
 import { App, nextStationView } from "../src/App.js";

@@ -9,8 +9,12 @@ import { OperatorLogin } from "../src/pages/OperatorLogin.js";
 function nodeExecutor(): SqlExecutor {
   const db = new DatabaseSync(":memory:");
   return {
-    async run(sql, params = []) { db.prepare(sql).run(...(params as never[])); },
-    async all<T>(sql: string, params: unknown[] = []): Promise<T[]> { return db.prepare(sql).all(...(params as never[])) as T[]; },
+    async run(sql, params = []) {
+      db.prepare(sql).run(...(params as never[]));
+    },
+    async all<T>(sql: string, params: unknown[] = []): Promise<T[]> {
+      return db.prepare(sql).all(...(params as never[])) as T[];
+    },
   };
 }
 
@@ -21,7 +25,9 @@ async function seedOperator(exec: SqlExecutor, pin: string): Promise<void> {
   );
 }
 
-beforeAll(async () => { await i18n.changeLanguage("en"); });
+beforeAll(async () => {
+  await i18n.changeLanguage("en");
+});
 
 describe("OperatorLogin", () => {
   it("accepts a correct PIN against the seeded mirror and calls onAuthed", async () => {
@@ -34,7 +40,9 @@ describe("OperatorLogin", () => {
     for (const d of "4321") fireEvent.click(screen.getByRole("button", { name: d }));
     fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
 
-    await waitFor(() => expect(onAuthed).toHaveBeenCalledWith(expect.objectContaining({ operatorId: "op1" })));
+    await waitFor(() =>
+      expect(onAuthed).toHaveBeenCalledWith(expect.objectContaining({ operatorId: "op1" })),
+    );
   });
 
   it("shows a floor error on a wrong PIN and does not authenticate", async () => {

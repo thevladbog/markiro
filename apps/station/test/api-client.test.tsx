@@ -5,14 +5,12 @@ afterEach(() => vi.restoreAllMocks());
 
 describe("createStationClient", () => {
   it("sends the x-api-key header and base-URLs from config", async () => {
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValue(
-        new Response(JSON.stringify({ ok: true }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
-      );
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
     const client = createStationClient({
       machineId: "m1",
       tenantId: "org_1",

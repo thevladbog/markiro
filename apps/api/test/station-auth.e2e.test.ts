@@ -45,7 +45,10 @@ describe.skipIf(!ready)("station api-key auth e2e", () => {
       .post("/api/auth/organization/create")
       .send({ name: "Plant", slug: `plant-${randomUUID()}`, keepCurrentActiveOrganization: true })
       .expect(200);
-    await agent.post("/api/auth/organization/set-active").send({ organizationId: org.body.id }).expect(200);
+    await agent
+      .post("/api/auth/organization/set-active")
+      .send({ organizationId: org.body.id })
+      .expect(200);
     // The sign-up user is the org owner (always permitted to create org keys).
     // Better Auth's sign-up/email returns the created user; if the body shape
     // differs, read it from GET /api/auth/get-session instead.
@@ -60,10 +63,7 @@ describe.skipIf(!ready)("station api-key auth e2e", () => {
     });
 
     // A fresh (session-less) client authenticates purely by x-api-key.
-    await request(app!.getHttpServer())
-      .get("/shifts")
-      .set("x-api-key", created.key)
-      .expect(200);
+    await request(app!.getHttpServer()).get("/shifts").set("x-api-key", created.key).expect(200);
   });
 
   it("a bad api-key and no session -> 401", async () => {

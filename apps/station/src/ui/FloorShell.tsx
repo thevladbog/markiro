@@ -10,7 +10,13 @@ export interface FloorShellProps {
   children: ReactNode;
 }
 
-export function FloorShell({ online, tasks, activeTaskId, onSelectTask, children }: FloorShellProps) {
+export function FloorShell({
+  online,
+  tasks,
+  activeTaskId,
+  onSelectTask,
+  children,
+}: FloorShellProps) {
   const { t } = useTranslation();
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>

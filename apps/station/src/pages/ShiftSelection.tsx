@@ -46,7 +46,9 @@ export function ShiftSelection({ client, onSelected, onNew }: ShiftSelectionProp
     setError(null);
     setBusy(true);
     try {
-      const opened = await client.post<{ id: string; status: string; mode: string }>(`/shifts/${shift.id}/open`);
+      const opened = await client.post<{ id: string; status: string; mode: string }>(
+        `/shifts/${shift.id}/open`,
+      );
       onSelected(opened);
     } catch (err) {
       setError(err instanceof StationApiError ? err.message : t("shifts.actionFailed"));

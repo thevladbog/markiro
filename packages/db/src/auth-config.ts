@@ -95,9 +95,7 @@ export type Auth = Omit<AuthBase, "api"> & {
     // `verifyApiKey({ body: { key } })` without it throws
     // NO_DEFAULT_API_KEY_CONFIGURATION_FOUND (verified against the running
     // plugin -- see task-5-report.md). Callers must pass `configId: "station"`.
-    verifyApiKey(input: {
-      body: { key: string; configId?: string };
-    }): Promise<VerifyApiKeyResult>;
+    verifyApiKey(input: { body: { key: string; configId?: string } }): Promise<VerifyApiKeyResult>;
     createApiKey(input: {
       body: {
         configId?: string;

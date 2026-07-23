@@ -31,8 +31,15 @@ describe("STATION_MIGRATIONS", () => {
     ).run("op_1", "Ivan", "operator", "pbkdf2$sha256$100000$c2FsdA==$aGFzaA==", null, 1);
 
     const row = db
-      .prepare("SELECT operator_id, name, badge_hash, active FROM operators_mirror WHERE operator_id = ?")
-      .get("op_1") as { operator_id: string; name: string; badge_hash: string | null; active: number };
+      .prepare(
+        "SELECT operator_id, name, badge_hash, active FROM operators_mirror WHERE operator_id = ?",
+      )
+      .get("op_1") as {
+      operator_id: string;
+      name: string;
+      badge_hash: string | null;
+      active: number;
+    };
 
     expect(row).toEqual({ operator_id: "op_1", name: "Ivan", badge_hash: null, active: 1 });
   });

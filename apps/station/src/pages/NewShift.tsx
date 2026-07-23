@@ -43,7 +43,9 @@ export function NewShift({ client, onStarted, onBack }: NewShiftProps) {
     setBusy(true);
     try {
       // Owner hint (also validates against the catalog indirectly).
-      await client.post<{ gtin14: string; owner: string }>("/products/gtin-check", { gtin: gtin14 });
+      await client.post<{ gtin14: string; owner: string }>("/products/gtin-check", {
+        gtin: gtin14,
+      });
       const list = await client.get<{ items: ResolvedProduct[] }>(`/products?search=${gtin14}`);
       const match = list.items.find((p) => p.gtin14 === gtin14) ?? null;
       if (!match) {
@@ -66,7 +68,9 @@ export function NewShift({ client, onStarted, onBack }: NewShiftProps) {
     setBusy(true);
     try {
       const created = await client.post<{ id: string }>("/shifts", { productId: product.id, mode });
-      const opened = await client.post<{ id: string; status: string; mode: string }>(`/shifts/${created.id}/open`);
+      const opened = await client.post<{ id: string; status: string; mode: string }>(
+        `/shifts/${created.id}/open`,
+      );
       onStarted(opened);
     } catch (err) {
       setError(err instanceof StationApiError ? err.message : t("shifts.actionFailed"));
@@ -77,12 +81,20 @@ export function NewShift({ client, onStarted, onBack }: NewShiftProps) {
 
   if (view === "notFound") {
     return (
-      <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", gap: 16, padding: 32 }}>
+      <main
+        style={{ minHeight: "100vh", display: "grid", placeItems: "center", gap: 16, padding: 32 }}
+      >
         <h1 style={{ fontSize: "2rem" }}>{t("shifts.notInCatalog")}</h1>
         <p style={{ fontSize: "1.25rem" }}>GTIN: {unknownGtin}</p>
         <p>{t("shifts.notInCatalogHint")}</p>
         <div style={{ display: "flex", gap: 12 }}>
-          <Button style={{ minHeight: 64 }} onClick={() => { setRaw(""); setView("input"); }}>
+          <Button
+            style={{ minHeight: 64 }}
+            onClick={() => {
+              setRaw("");
+              setView("input");
+            }}
+          >
             {t("shifts.scanAgain")}
           </Button>
           <Button variant="secondary" style={{ minHeight: 64 }} onClick={onBack}>
@@ -95,16 +107,26 @@ export function NewShift({ client, onStarted, onBack }: NewShiftProps) {
 
   if (view === "found" && product) {
     return (
-      <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", gap: 16, padding: 32 }}>
+      <main
+        style={{ minHeight: "100vh", display: "grid", placeItems: "center", gap: 16, padding: 32 }}
+      >
         <Card style={{ padding: 24, minWidth: 480 }}>
           <div style={{ fontSize: "1.75rem" }}>{product.name}</div>
           <div>{product.gtin14}</div>
         </Card>
         <div style={{ display: "flex", gap: 12 }}>
-          <Button variant={mode === "validation" ? "primary" : "secondary"} style={{ minHeight: 64 }} onClick={() => setMode("validation")}>
+          <Button
+            variant={mode === "validation" ? "primary" : "secondary"}
+            style={{ minHeight: 64 }}
+            onClick={() => setMode("validation")}
+          >
             {t("shifts.modeValidation")}
           </Button>
-          <Button variant={mode === "aggregation" ? "primary" : "secondary"} style={{ minHeight: 64 }} onClick={() => setMode("aggregation")}>
+          <Button
+            variant={mode === "aggregation" ? "primary" : "secondary"}
+            style={{ minHeight: 64 }}
+            onClick={() => setMode("aggregation")}
+          >
             {t("shifts.modeAggregation")}
           </Button>
         </div>
@@ -117,12 +139,18 @@ export function NewShift({ client, onStarted, onBack }: NewShiftProps) {
   }
 
   return (
-    <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", gap: 16, padding: 32 }}>
+    <main
+      style={{ minHeight: "100vh", display: "grid", placeItems: "center", gap: 16, padding: 32 }}
+    >
       <form onSubmit={(e) => void resolve(e)} style={{ display: "grid", gap: 16, minWidth: 480 }}>
-        <label htmlFor="gtin" style={{ fontSize: "1.25rem" }}>{t("shifts.gtinPrompt")}</label>
+        <label htmlFor="gtin" style={{ fontSize: "1.25rem" }}>
+          {t("shifts.gtinPrompt")}
+        </label>
         <Input id="gtin" autoFocus value={raw} onChange={(e) => setRaw(e.target.value)} />
         {error ? <Alert tone="error">{error}</Alert> : null}
-        <Button type="submit" style={{ minHeight: 64 }} disabled={busy}>{t("shifts.open")}</Button>
+        <Button type="submit" style={{ minHeight: 64 }} disabled={busy}>
+          {t("shifts.open")}
+        </Button>
       </form>
     </main>
   );

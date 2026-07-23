@@ -1,4 +1,9 @@
-import { Inject, Injectable, InternalServerErrorException, NotFoundException } from "@nestjs/common";
+import {
+  Inject,
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+} from "@nestjs/common";
 import { and, desc, eq } from "drizzle-orm";
 import { schema, type Auth, type Db } from "@markiro/db";
 import { AUTH, DB } from "../../auth/auth.module";
@@ -69,16 +74,12 @@ export class StationDevicesService {
       const [row] = await tx
         .select()
         .from(schema.stationDevices)
-        .where(
-          and(eq(schema.stationDevices.tenantId, tenantId), eq(schema.stationDevices.id, id)),
-        );
+        .where(and(eq(schema.stationDevices.tenantId, tenantId), eq(schema.stationDevices.id, id)));
       if (!row) throw new NotFoundException();
 
       await tx
         .delete(schema.stationDevices)
-        .where(
-          and(eq(schema.stationDevices.tenantId, tenantId), eq(schema.stationDevices.id, id)),
-        );
+        .where(and(eq(schema.stationDevices.tenantId, tenantId), eq(schema.stationDevices.id, id)));
       await tx.delete(schema.apikey).where(eq(schema.apikey.id, row.apiKeyId));
     });
   }

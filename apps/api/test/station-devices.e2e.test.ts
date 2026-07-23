@@ -59,7 +59,10 @@ describe.skipIf(!ready)("station devices e2e", () => {
     const deviceId = enroll.body.deviceId as string;
 
     // The freshly issued key authenticates a session-less station request.
-    await request(app!.getHttpServer()).get("/shifts").set("x-api-key", enroll.body.apiKey).expect(200);
+    await request(app!.getHttpServer())
+      .get("/shifts")
+      .set("x-api-key", enroll.body.apiKey)
+      .expect(200);
 
     const list = await agent.get("/station-devices").expect(200);
     expect(list.body.items.map((d: { id: string }) => d.id)).toContain(deviceId);
@@ -75,6 +78,9 @@ describe.skipIf(!ready)("station devices e2e", () => {
 
     // Owner deletes it; the key stops working afterward.
     await agent.delete(`/station-devices/${deviceId}`).expect(204);
-    await request(app!.getHttpServer()).get("/shifts").set("x-api-key", enroll.body.apiKey).expect(401);
+    await request(app!.getHttpServer())
+      .get("/shifts")
+      .set("x-api-key", enroll.body.apiKey)
+      .expect(401);
   });
 });

@@ -38,6 +38,7 @@ Every task's requirements implicitly include this section.
 ### Task 1: `apps/station` scaffold (Tauri 2.11 + React 19.2 + Vite, floor dark theme, i18n, smoke tests)
 
 **Files:**
+
 - Create: `apps/station/package.json`
 - Create: `apps/station/index.html`
 - Create: `apps/station/vite.config.ts`
@@ -60,6 +61,7 @@ Every task's requirements implicitly include this section.
 - Test: `apps/station/test/App.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `@markiro/ui` (`ThemeProvider`), the admin i18n init pattern (`apps/admin/src/i18n/index.ts`).
 - Produces: Rust `#[tauri::command] fn hello(name: &str) -> String`; TS i18n singleton (default export) + `SUPPORTED_LANGUAGES`; `App` React component; a bootable `apps/station` workspace member with turbo `lint`/`typecheck`/`test`/`build`.
 
@@ -506,11 +508,13 @@ git commit -m "feat(station): scaffold Tauri + React floor-mode app with i18n an
 ### Task 2: Rust core — secure config store (`station.json`, mode 0600, stable machineId)
 
 **Files:**
+
 - Create: `apps/station/src-tauri/src/config.rs`
 - Modify: `apps/station/src-tauri/src/lib.rs` (register `config` module + `read_config`/`write_config` commands)
 - Modify: `apps/station/src-tauri/src/commands.rs` (add the two Tauri command wrappers)
 
 **Interfaces:**
+
 - Consumes: `commands::hello` (Task 1); `tauri::Manager` (for `app_config_dir`).
 - Produces:
   - `pub struct StationConfig { machine_id: String, tenant_id: Option<String>, device_id: Option<String>, api_key: Option<String>, server_url: Option<String> }` (serde).
@@ -733,10 +737,12 @@ git commit -m "feat(station): secure Rust config store with stable machineId and
 ### Task 3: Rust core — kiosk lockdown + updater endpoint skeletons
 
 **Files:**
+
 - Modify: `apps/station/src-tauri/src/commands.rs` (add lockdown + updater-URL commands)
 - Modify: `apps/station/src-tauri/src/lib.rs` (manage `LockdownState`, register commands, block close while locked)
 
 **Interfaces:**
+
 - Consumes: `config::validate_http_url` (Task 2).
 - Produces:
   - `pub struct LockdownState(pub Mutex<bool>)`.
@@ -893,6 +899,7 @@ git commit -m "feat(station): kiosk lockdown commands and updater endpoint valid
 ### Task 4: `packages/db` — SQLite mirror schema + `STATION_MIGRATIONS`
 
 **Files:**
+
 - Create: `packages/db/src/sqlite/schema.ts` (drizzle sqlite-core tables + `OperatorMirrorRecord` type)
 - Create: `packages/db/src/sqlite/migrations.ts` (`STATION_MIGRATIONS: string[]`)
 - Create: `packages/db/drizzle.sqlite.config.ts` (sqlite generate config, for regeneration parity)
@@ -902,6 +909,7 @@ git commit -m "feat(station): kiosk lockdown commands and updater endpoint valid
 - Test: `packages/db/test/sqlite-schema.test.ts`
 
 **Interfaces:**
+
 - Consumes: nothing (leaf schema module).
 - Produces:
   - drizzle sqlite tables `stationMeta`, `operatorsMirror`, `shiftMirror`, `productMirror`, `codesMirror`, `scanEventsMirror` (exported from `@markiro/db` under `sqliteSchema`).
@@ -1172,8 +1180,15 @@ describe("STATION_MIGRATIONS", () => {
     ).run("op_1", "Ivan", "operator", "pbkdf2$sha256$100000$c2FsdA==$aGFzaA==", null, 1);
 
     const row = db
-      .prepare("SELECT operator_id, name, badge_hash, active FROM operators_mirror WHERE operator_id = ?")
-      .get("op_1") as { operator_id: string; name: string; badge_hash: string | null; active: number };
+      .prepare(
+        "SELECT operator_id, name, badge_hash, active FROM operators_mirror WHERE operator_id = ?",
+      )
+      .get("op_1") as {
+      operator_id: string;
+      name: string;
+      badge_hash: string | null;
+      active: number;
+    };
 
     expect(row).toEqual({ operator_id: "op_1", name: "Ivan", badge_hash: null, active: 1 });
   });
@@ -1207,12 +1222,14 @@ git commit -m "feat(db): SQLite station mirror schema and STATION_MIGRATIONS wit
 ### Task 5: Server — extend `TenantGuard` to accept station api-key auth
 
 **Files:**
+
 - Modify: `packages/db/src/auth-config.ts` (add `verifyApiKey`/`createApiKey` to the `Auth` companion type)
 - Modify: `apps/api/src/tenancy/tenant.guard.ts` (api-key fallback path)
 - Modify: `apps/api/test/tenant.guard.test.ts` (unit tests for the api-key path)
 - Test: `apps/api/test/station-auth.e2e.test.ts`
 
 **Interfaces:**
+
 - Consumes: `Auth` (`@markiro/db`), existing `TenantGuard` session path.
 - Produces:
   - `Auth["api"].verifyApiKey({ body: { key } })` and `Auth["api"].createApiKey({ body: { configId?, name?, userId?, organizationId?, metadata? } })` typed on the companion `Auth` type.
@@ -1408,7 +1425,10 @@ describe.skipIf(!ready)("station api-key auth e2e", () => {
       .post("/api/auth/organization/create")
       .send({ name: "Plant", slug: `plant-${randomUUID()}`, keepCurrentActiveOrganization: true })
       .expect(200);
-    await agent.post("/api/auth/organization/set-active").send({ organizationId: org.body.id }).expect(200);
+    await agent
+      .post("/api/auth/organization/set-active")
+      .send({ organizationId: org.body.id })
+      .expect(200);
     // The sign-up user is the org owner (always permitted to create org keys).
     // Better Auth's sign-up/email returns the created user; if the body shape
     // differs, read it from GET /api/auth/get-session instead.
@@ -1423,10 +1443,7 @@ describe.skipIf(!ready)("station api-key auth e2e", () => {
     });
 
     // A fresh (session-less) client authenticates purely by x-api-key.
-    await request(app!.getHttpServer())
-      .get("/shifts")
-      .set("x-api-key", created.key)
-      .expect(200);
+    await request(app!.getHttpServer()).get("/shifts").set("x-api-key", created.key).expect(200);
   });
 
   it("a bad api-key and no session -> 401", async () => {
@@ -1456,6 +1473,7 @@ git commit -m "feat(api): accept station x-api-key auth in TenantGuard via refer
 ### Task 6: Server — `station_devices` table + enrollment endpoints
 
 **Files:**
+
 - Modify: `packages/db/src/schema/platform.ts` (add `stationDevices` table)
 - Create: `packages/db/migrations/0008_station_devices.sql` (generated)
 - Create: `apps/api/src/modules/station-devices/dto.ts`
@@ -1466,6 +1484,7 @@ git commit -m "feat(api): accept station x-api-key auth in TenantGuard via refer
 - Test: `apps/api/test/station-devices.e2e.test.ts`
 
 **Interfaces:**
+
 - Consumes: `TenantGuard` (Task 5); `Auth.createApiKey` (Task 5); `schema.stationDevices`, `schema.apikey`.
 - Produces:
   - `stationDevices` table `(id, tenantId, name, apiKeyId, enrolledAt, lastSeenAt)` with `(tenant_id, id)` unique.
@@ -1539,7 +1558,12 @@ export interface ListStationDevicesResponseDto {
 `apps/api/src/modules/station-devices/station-devices.service.ts`:
 
 ```ts
-import { Inject, Injectable, InternalServerErrorException, NotFoundException } from "@nestjs/common";
+import {
+  Inject,
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+} from "@nestjs/common";
 import { and, desc, eq } from "drizzle-orm";
 import { schema, type Auth, type Db } from "@markiro/db";
 import { AUTH, DB } from "../../auth/auth.module";
@@ -1625,7 +1649,17 @@ export class StationDevicesService {
 `apps/api/src/modules/station-devices/station-devices.controller.ts`:
 
 ```ts
-import { Body, Controller, Delete, Get, HttpCode, Param, Post, Req, UseGuards } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Req,
+  UseGuards,
+} from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
@@ -1689,32 +1723,38 @@ Register in `apps/api/src/app.module.ts` — import and add `StationDevicesModul
 `apps/api/test/station-devices.e2e.test.ts` (reuse the `beforeAll`/`signUpAndActivate` harness from Task 5's e2e):
 
 ```ts
-  it("enroll -> list -> delete, cross-tenant isolation", async () => {
-    const agent = request.agent(app!.getHttpServer());
-    await signUpAndActivate(agent);
+it("enroll -> list -> delete, cross-tenant isolation", async () => {
+  const agent = request.agent(app!.getHttpServer());
+  await signUpAndActivate(agent);
 
-    const enroll = await agent.post("/station-devices").send({ name: "Terminal 1" }).expect(201);
-    expect(enroll.body).toMatchObject({ name: "Terminal 1" });
-    expect(typeof enroll.body.apiKey).toBe("string");
-    expect(enroll.body.serverUrl).toBe("http://localhost:3000");
-    const deviceId = enroll.body.deviceId as string;
+  const enroll = await agent.post("/station-devices").send({ name: "Terminal 1" }).expect(201);
+  expect(enroll.body).toMatchObject({ name: "Terminal 1" });
+  expect(typeof enroll.body.apiKey).toBe("string");
+  expect(enroll.body.serverUrl).toBe("http://localhost:3000");
+  const deviceId = enroll.body.deviceId as string;
 
-    // The freshly issued key authenticates a session-less station request.
-    await request(app!.getHttpServer()).get("/shifts").set("x-api-key", enroll.body.apiKey).expect(200);
+  // The freshly issued key authenticates a session-less station request.
+  await request(app!.getHttpServer())
+    .get("/shifts")
+    .set("x-api-key", enroll.body.apiKey)
+    .expect(200);
 
-    const list = await agent.get("/station-devices").expect(200);
-    expect(list.body.items.map((d: { id: string }) => d.id)).toContain(deviceId);
-    expect(list.body.items[0]).not.toHaveProperty("apiKey");
+  const list = await agent.get("/station-devices").expect(200);
+  expect(list.body.items.map((d: { id: string }) => d.id)).toContain(deviceId);
+  expect(list.body.items[0]).not.toHaveProperty("apiKey");
 
-    // Another tenant cannot delete this device.
-    const other = request.agent(app!.getHttpServer());
-    await signUpAndActivate(other);
-    await other.delete(`/station-devices/${deviceId}`).expect(404);
+  // Another tenant cannot delete this device.
+  const other = request.agent(app!.getHttpServer());
+  await signUpAndActivate(other);
+  await other.delete(`/station-devices/${deviceId}`).expect(404);
 
-    // Owner deletes it; the key stops working afterward.
-    await agent.delete(`/station-devices/${deviceId}`).expect(204);
-    await request(app!.getHttpServer()).get("/shifts").set("x-api-key", enroll.body.apiKey).expect(401);
-  });
+  // Owner deletes it; the key stops working afterward.
+  await agent.delete(`/station-devices/${deviceId}`).expect(204);
+  await request(app!.getHttpServer())
+    .get("/shifts")
+    .set("x-api-key", enroll.body.apiKey)
+    .expect(401);
+});
 ```
 
 - [ ] **Step 7: Migrate + run the e2e to verify pass**
@@ -1734,12 +1774,14 @@ git commit -m "feat(api): station device enrollment endpoints issuing tenant-sco
 ### Task 7: Server — shift `open` endpoint + station `bundle` GET
 
 **Files:**
+
 - Modify: `apps/api/src/modules/shifts/dto.ts` (add `ShiftBundleDto`, `OperatorMirrorRecord`)
 - Modify: `apps/api/src/modules/shifts/shifts.service.ts` (add `openShift`, `getBundle`)
 - Modify: `apps/api/src/modules/shifts/shifts.controller.ts` (add `POST /:id/open`, `GET /:id/bundle`)
 - Test: `apps/api/test/shifts-bundle.e2e.test.ts`
 
 **Interfaces:**
+
 - Consumes: `TenantGuard` (station key OR session); `ShiftDto`, `ProductDto` (`../products/dto`); `LabelTemplateSpec` (`@markiro/domain`); `schema.products`, `schema.counterparties`, `schema.labelTemplates`.
 - Produces:
   - `POST /shifts/:id/open` → `ShiftDto` (planned→active, sets `openedAt`; 409 if not planned; 404 cross-tenant).
@@ -1782,55 +1824,65 @@ export interface ShiftBundleDto {
 `apps/api/test/shifts-bundle.e2e.test.ts` (reuse the harness + `seedProduct`/`seedLabelTemplate`/`seedCounterparty` helpers from `shifts.e2e.test.ts`):
 
 ```ts
-  it("POST /shifts/:id/open flips planned->active and sets openedAt; 409 if not planned", async () => {
-    const agent = request.agent(app!.getHttpServer());
-    const orgId = await signUpAndActivate(agent);
-    const productId = await seedProduct(orgId, {
-      status: "active", productGroup: "Beverages", boxCapacity: 12, palletCapacity: 48,
-    });
-    const created = await agent.post("/shifts").send({ productId, mode: "validation" }).expect(201);
-    const id = created.body.id as string;
-
-    const opened = await agent.post(`/shifts/${id}/open`).expect(200);
-    expect(opened.body).toMatchObject({ id, status: "active" });
-    expect(opened.body.openedAt).toBeDefined();
-
-    // Re-open once active -> 409.
-    await agent.post(`/shifts/${id}/open`).expect(409);
+it("POST /shifts/:id/open flips planned->active and sets openedAt; 409 if not planned", async () => {
+  const agent = request.agent(app!.getHttpServer());
+  const orgId = await signUpAndActivate(agent);
+  const productId = await seedProduct(orgId, {
+    status: "active",
+    productGroup: "Beverages",
+    boxCapacity: 12,
+    palletCapacity: 48,
   });
+  const created = await agent.post("/shifts").send({ productId, mode: "validation" }).expect(201);
+  const id = created.body.id as string;
 
-  it("GET /shifts/:id/bundle returns shift+product+labelTemplate+counterpartyGln and operators=[]", async () => {
-    const agent = request.agent(app!.getHttpServer());
-    const orgId = await signUpAndActivate(agent);
-    const counterpartyId = await seedCounterparty(orgId, "Buyer");
-    const templateId = await seedLabelTemplate(orgId, "Bundle Template");
-    const productId = await seedProduct(orgId, {
-      status: "active", productGroup: "Beverages", boxCapacity: 12, palletCapacity: 48,
-      defaultCounterpartyId: counterpartyId, defaultLabelTemplateId: templateId,
-    });
-    const created = await agent.post("/shifts").send({ productId, mode: "aggregation" }).expect(201);
-    const id = created.body.id as string;
+  const opened = await agent.post(`/shifts/${id}/open`).expect(200);
+  expect(opened.body).toMatchObject({ id, status: "active" });
+  expect(opened.body.openedAt).toBeDefined();
 
-    const bundle = await agent.get(`/shifts/${id}/bundle`).expect(200);
-    expect(bundle.body.shift).toMatchObject({ id, productId });
-    expect(bundle.body.product).toMatchObject({ id: productId, gtin14: expect.any(String) });
-    expect(bundle.body.labelTemplate).toMatchObject({ id: templateId, name: "Bundle Template" });
-    expect(bundle.body.labelTemplate.spec).toMatchObject({ language: "zpl" });
-    expect(bundle.body.counterpartyGln).toBe("6291041500213");
-    expect(bundle.body.operators).toEqual([]);
+  // Re-open once active -> 409.
+  await agent.post(`/shifts/${id}/open`).expect(409);
+});
+
+it("GET /shifts/:id/bundle returns shift+product+labelTemplate+counterpartyGln and operators=[]", async () => {
+  const agent = request.agent(app!.getHttpServer());
+  const orgId = await signUpAndActivate(agent);
+  const counterpartyId = await seedCounterparty(orgId, "Buyer");
+  const templateId = await seedLabelTemplate(orgId, "Bundle Template");
+  const productId = await seedProduct(orgId, {
+    status: "active",
+    productGroup: "Beverages",
+    boxCapacity: 12,
+    palletCapacity: 48,
+    defaultCounterpartyId: counterpartyId,
+    defaultLabelTemplateId: templateId,
   });
+  const created = await agent.post("/shifts").send({ productId, mode: "aggregation" }).expect(201);
+  const id = created.body.id as string;
 
-  it("GET /shifts/:id/bundle is 404 for another tenant's shift", async () => {
-    const a1 = request.agent(app!.getHttpServer());
-    const org1 = await signUpAndActivate(a1);
-    const productId = await seedProduct(org1, {
-      status: "active", productGroup: "Beverages", boxCapacity: 12, palletCapacity: 48,
-    });
-    const created = await a1.post("/shifts").send({ productId, mode: "validation" }).expect(201);
-    const a2 = request.agent(app!.getHttpServer());
-    await signUpAndActivate(a2);
-    await a2.get(`/shifts/${created.body.id}/bundle`).expect(404);
+  const bundle = await agent.get(`/shifts/${id}/bundle`).expect(200);
+  expect(bundle.body.shift).toMatchObject({ id, productId });
+  expect(bundle.body.product).toMatchObject({ id: productId, gtin14: expect.any(String) });
+  expect(bundle.body.labelTemplate).toMatchObject({ id: templateId, name: "Bundle Template" });
+  expect(bundle.body.labelTemplate.spec).toMatchObject({ language: "zpl" });
+  expect(bundle.body.counterpartyGln).toBe("6291041500213");
+  expect(bundle.body.operators).toEqual([]);
+});
+
+it("GET /shifts/:id/bundle is 404 for another tenant's shift", async () => {
+  const a1 = request.agent(app!.getHttpServer());
+  const org1 = await signUpAndActivate(a1);
+  const productId = await seedProduct(org1, {
+    status: "active",
+    productGroup: "Beverages",
+    boxCapacity: 12,
+    palletCapacity: 48,
   });
+  const created = await a1.post("/shifts").send({ productId, mode: "validation" }).expect(201);
+  const a2 = request.agent(app!.getHttpServer());
+  await signUpAndActivate(a2);
+  await a2.get(`/shifts/${created.body.id}/bundle`).expect(404);
+});
 ```
 
 - [ ] **Step 3: Run the e2e to verify it fails**
@@ -1966,6 +2018,7 @@ git commit -m "feat(api): shift open endpoint and station bundle GET (operators 
 ### Task 8: Station — API client + config bridge + enrollment UI
 
 **Files:**
+
 - Create: `apps/station/src/lib/config.ts` (Tauri `invoke` bridge to `read_config`/`write_config`)
 - Create: `apps/station/src/lib/api-client.ts` (`createStationClient`)
 - Create: `apps/station/src/pages/Enrollment.tsx`
@@ -1974,6 +2027,7 @@ git commit -m "feat(api): shift open endpoint and station bundle GET (operators 
 - Test: `apps/station/test/enrollment.test.tsx`
 
 **Interfaces:**
+
 - Consumes: Rust `read_config`/`write_config` (Task 2); `@markiro/ui` (`Button`, `Field`, `Input`, `Card`, `Alert`).
 - Produces:
   - `export interface StationConfig { machineId: string; tenantId?: string; deviceId?: string; apiKey?: string; serverUrl?: string }` (camelCase mirror of the Rust struct — the Tauri IPC boundary serializes the Rust snake_case fields; see the field-name note).
@@ -2057,7 +2111,10 @@ afterEach(() => vi.restoreAllMocks());
 describe("createStationClient", () => {
   it("sends the x-api-key header and base-URLs from config", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Content-Type": "application/json" } }),
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
     );
     const client = createStationClient({
       machineId: "m1",
@@ -2075,9 +2132,16 @@ describe("createStationClient", () => {
 
   it("throws with the server message on non-2xx", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ message: "nope" }), { status: 401, headers: { "Content-Type": "application/json" } }),
+      new Response(JSON.stringify({ message: "nope" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      }),
     );
-    const client = createStationClient({ machineId: "m1", apiKey: "bad", serverUrl: "http://localhost:3000" });
+    const client = createStationClient({
+      machineId: "m1",
+      apiKey: "bad",
+      serverUrl: "http://localhost:3000",
+    });
     await expect(client.get("/shifts")).rejects.toThrow("nope");
   });
 });
@@ -2116,7 +2180,9 @@ export interface StationClient {
  * enrolled `serverUrl`. There is no session cookie — the station is stateless
  * against the server.
  */
-export function createStationClient(cfg: Pick<StationConfig, "apiKey" | "serverUrl"> & { machineId?: string }): StationClient {
+export function createStationClient(
+  cfg: Pick<StationConfig, "apiKey" | "serverUrl"> & { machineId?: string },
+): StationClient {
   const base = (cfg.serverUrl ?? "").replace(/\/+$/, "");
 
   async function request<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
@@ -2220,7 +2286,9 @@ describe("Enrollment", () => {
     const onEnrolled = vi.fn();
 
     render(<Enrollment machineId="m1" onEnrolled={onEnrolled} />);
-    fireEvent.change(screen.getByLabelText("Server URL"), { target: { value: "http://localhost:3000" } });
+    fireEvent.change(screen.getByLabelText("Server URL"), {
+      target: { value: "http://localhost:3000" },
+    });
     fireEvent.change(screen.getByLabelText("Device key"), { target: { value: "mk_key" } });
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
 
@@ -2233,11 +2301,15 @@ describe("Enrollment", () => {
     const onEnrolled = vi.fn();
 
     render(<Enrollment machineId="m1" onEnrolled={onEnrolled} />);
-    fireEvent.change(screen.getByLabelText("Server URL"), { target: { value: "http://localhost:3000" } });
+    fireEvent.change(screen.getByLabelText("Server URL"), {
+      target: { value: "http://localhost:3000" },
+    });
     fireEvent.change(screen.getByLabelText("Device key"), { target: { value: "bad" } });
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
 
-    await waitFor(() => expect(screen.getByText("Could not connect. Check the URL and key.")).toBeDefined());
+    await waitFor(() =>
+      expect(screen.getByText("Could not connect. Check the URL and key.")).toBeDefined(),
+    );
     expect(onEnrolled).not.toHaveBeenCalled();
     expect(invokeMock).not.toHaveBeenCalledWith("write_config", expect.anything());
   });
@@ -2328,11 +2400,13 @@ git commit -m "feat(station): API client, config bridge, and device enrollment s
 ### Task 9: Station — shift bundle download → SQLite mirror
 
 **Files:**
+
 - Create: `apps/station/src/lib/mirror.ts` (`SqlExecutor`, `applyMigrations`, `upsertBundle`, offline read helpers)
 - Create: `apps/station/src/lib/sqlite.ts` (Tauri `tauri-plugin-sql` executor implementing `SqlExecutor`)
 - Test: `apps/station/test/mirror.test.ts` (node:sqlite executor)
 
 **Interfaces:**
+
 - Consumes: `STATION_MIGRATIONS`, `OperatorMirrorRecord` (`@markiro/db`); `ShiftBundleDto` shape (Task 7) as a local type; `createStationClient` (Task 8).
 - Produces:
   - `export interface SqlExecutor { run(sql, params?): Promise<void>; all<T>(sql, params?): Promise<T[]> }`.
@@ -2356,7 +2430,14 @@ Modify `apps/station/vitest.config.ts` `test` block — add:
 ```ts
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
-import { applyMigrations, upsertBundle, readShiftMirror, readOperatorsMirror, type SqlExecutor, type StationBundle } from "../src/lib/mirror.js";
+import {
+  applyMigrations,
+  upsertBundle,
+  readShiftMirror,
+  readOperatorsMirror,
+  type SqlExecutor,
+  type StationBundle,
+} from "../src/lib/mirror.js";
 
 function nodeExecutor(): SqlExecutor {
   const db = new DatabaseSync(":memory:");
@@ -2372,20 +2453,50 @@ function nodeExecutor(): SqlExecutor {
 
 const bundle: StationBundle = {
   shift: {
-    id: "s1", status: "active", mode: "validation", productId: "p1", productName: "Cola",
-    lineId: null, lineName: null, counterpartyId: "c1", counterpartyName: "Buyer",
-    labelTemplateId: "lt1", labelTemplateName: "T", plannedQty: 100, plannedDate: "2026-07-23",
-    boxCapacity: 12, palletCapacity: 48, palletsEnabled: false, openedAt: "2026-07-23T08:00:00Z",
+    id: "s1",
+    status: "active",
+    mode: "validation",
+    productId: "p1",
+    productName: "Cola",
+    lineId: null,
+    lineName: null,
+    counterpartyId: "c1",
+    counterpartyName: "Buyer",
+    labelTemplateId: "lt1",
+    labelTemplateName: "T",
+    plannedQty: 100,
+    plannedDate: "2026-07-23",
+    boxCapacity: 12,
+    palletCapacity: 48,
+    palletsEnabled: false,
+    openedAt: "2026-07-23T08:00:00Z",
   },
   product: {
-    id: "p1", gtin14: "04600000000017", name: "Cola", productGroup: "Beverages",
-    boxCapacity: 12, palletCapacity: 48, status: "active",
-    defaultCounterpartyId: "c1", defaultLabelTemplateId: "lt1",
+    id: "p1",
+    gtin14: "04600000000017",
+    name: "Cola",
+    productGroup: "Beverages",
+    boxCapacity: 12,
+    palletCapacity: 48,
+    status: "active",
+    defaultCounterpartyId: "c1",
+    defaultLabelTemplateId: "lt1",
   },
-  labelTemplate: { id: "lt1", name: "T", spec: { widthMm: 58, heightMm: 40, dpi: 203, language: "zpl", elements: [] } },
+  labelTemplate: {
+    id: "lt1",
+    name: "T",
+    spec: { widthMm: 58, heightMm: 40, dpi: 203, language: "zpl", elements: [] },
+  },
   counterpartyGln: "6291041500213",
   operators: [
-    { operatorId: "op1", name: "Ivan", role: "operator", pinHash: "pbkdf2$sha256$1$c2FsdA==$aA==", badgeHash: null, active: true },
+    {
+      operatorId: "op1",
+      name: "Ivan",
+      role: "operator",
+      pinHash: "pbkdf2$sha256$1$c2FsdA==$aA==",
+      badgeHash: null,
+      active: true,
+    },
   ],
 };
 
@@ -2504,11 +2615,25 @@ export async function upsertBundle(exec: SqlExecutor, bundle: StationBundle): Pr
        box_capacity=excluded.box_capacity, pallet_capacity=excluded.pallet_capacity,
        pallets_enabled=excluded.pallets_enabled, opened_at=excluded.opened_at`,
     [
-      s.id, s.status, s.mode, s.productId, s.productName, s.lineId, s.lineName,
-      s.counterpartyId, s.counterpartyName, bundle.counterpartyGln,
-      s.labelTemplateId, s.labelTemplateName,
+      s.id,
+      s.status,
+      s.mode,
+      s.productId,
+      s.productName,
+      s.lineId,
+      s.lineName,
+      s.counterpartyId,
+      s.counterpartyName,
+      bundle.counterpartyGln,
+      s.labelTemplateId,
+      s.labelTemplateName,
       bundle.labelTemplate ? JSON.stringify(bundle.labelTemplate.spec) : null,
-      s.plannedQty, s.plannedDate, s.boxCapacity, s.palletCapacity, b(s.palletsEnabled), s.openedAt,
+      s.plannedQty,
+      s.plannedDate,
+      s.boxCapacity,
+      s.palletCapacity,
+      b(s.palletsEnabled),
+      s.openedAt,
     ],
   );
 
@@ -2524,8 +2649,15 @@ export async function upsertBundle(exec: SqlExecutor, bundle: StationBundle): Pr
        status=excluded.status, default_counterparty_id=excluded.default_counterparty_id,
        default_label_template_id=excluded.default_label_template_id`,
     [
-      p.id, p.gtin14, p.name, p.productGroup, p.boxCapacity, p.palletCapacity, p.status,
-      p.defaultCounterpartyId, p.defaultLabelTemplateId,
+      p.id,
+      p.gtin14,
+      p.name,
+      p.productGroup,
+      p.boxCapacity,
+      p.palletCapacity,
+      p.status,
+      p.defaultCounterpartyId,
+      p.defaultLabelTemplateId,
     ],
   );
 
@@ -2541,21 +2673,39 @@ export async function upsertBundle(exec: SqlExecutor, bundle: StationBundle): Pr
   }
 }
 
-export async function readShiftMirror(exec: SqlExecutor, id: string): Promise<ShiftMirrorRow | null> {
+export async function readShiftMirror(
+  exec: SqlExecutor,
+  id: string,
+): Promise<ShiftMirrorRow | null> {
   const rows = await exec.all<{
-    id: string; status: string; mode: string; counterparty_gln: string | null; label_template_spec: string | null;
+    id: string;
+    status: string;
+    mode: string;
+    counterparty_gln: string | null;
+    label_template_spec: string | null;
   }>(
     "SELECT id, status, mode, counterparty_gln, label_template_spec FROM shift_mirror WHERE id = ?",
     [id],
   );
   const r = rows[0];
   if (!r) return null;
-  return { id: r.id, status: r.status, mode: r.mode, counterpartyGln: r.counterparty_gln, labelTemplateSpec: r.label_template_spec };
+  return {
+    id: r.id,
+    status: r.status,
+    mode: r.mode,
+    counterpartyGln: r.counterparty_gln,
+    labelTemplateSpec: r.label_template_spec,
+  };
 }
 
 export async function readOperatorsMirror(exec: SqlExecutor): Promise<OperatorMirrorRecord[]> {
   const rows = await exec.all<{
-    operator_id: string; name: string; role: string; pin_hash: string; badge_hash: string | null; active: number;
+    operator_id: string;
+    name: string;
+    role: string;
+    pin_hash: string;
+    badge_hash: string | null;
+    active: number;
   }>("SELECT operator_id, name, role, pin_hash, badge_hash, active FROM operators_mirror");
   return rows.map((r) => ({
     operatorId: r.operator_id,
@@ -2621,6 +2771,7 @@ git commit -m "feat(station): bundle download to SQLite mirror with offline read
 ### Task 10: Station — offline operator PIN/badge auth (PBKDF2 PHC)
 
 **Files:**
+
 - Create: `apps/station/src/lib/crypto.ts` (`hashSecret`, `verifyPin`, `verifyBadge`)
 - Create: `apps/station/src/lib/auth.ts` (`verifyOperatorPin`, `verifyOperatorBadge` against the mirror)
 - Create: `apps/station/src/ui/PinPad.tsx`
@@ -2630,6 +2781,7 @@ git commit -m "feat(station): bundle download to SQLite mirror with offline read
 - Test: `apps/station/test/operator-login.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `SqlExecutor`, `readOperatorsMirror` (Task 9); `OperatorMirrorRecord` (`@markiro/db`); `@markiro/ui` (`Button`, `Alert`).
 - Produces:
   - `export async function hashSecret(secret: string): Promise<string>` (PHC `pbkdf2$sha256$<iter>$<saltB64>$<hashB64>`).
@@ -2698,8 +2850,18 @@ function fromB64(b64: string): Uint8Array {
   return out;
 }
 
-async function deriveBits(secret: string, salt: Uint8Array, iterations: number): Promise<Uint8Array> {
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), "PBKDF2", false, ["deriveBits"]);
+async function deriveBits(
+  secret: string,
+  salt: Uint8Array,
+  iterations: number,
+): Promise<Uint8Array> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    "PBKDF2",
+    false,
+    ["deriveBits"],
+  );
   const bits = await crypto.subtle.deriveBits(
     { name: "PBKDF2", salt: salt as BufferSource, iterations, hash: "SHA-256" },
     key,
@@ -2763,7 +2925,10 @@ import { readOperatorsMirror, type SqlExecutor } from "./mirror.js";
 import { verifyBadge, verifyPin } from "./crypto.js";
 
 /** Returns the matching active operator for a PIN, or null. PINs are all-digits, min 4. */
-export async function verifyOperatorPin(exec: SqlExecutor, pin: string): Promise<OperatorMirrorRecord | null> {
+export async function verifyOperatorPin(
+  exec: SqlExecutor,
+  pin: string,
+): Promise<OperatorMirrorRecord | null> {
   if (!/^\d{4,}$/.test(pin)) return null;
   for (const op of await readOperatorsMirror(exec)) {
     if (op.active && (await verifyPin(pin, op.pinHash))) return op;
@@ -2772,7 +2937,10 @@ export async function verifyOperatorPin(exec: SqlExecutor, pin: string): Promise
 }
 
 /** Returns the matching active operator for a scanned badge string, or null. */
-export async function verifyOperatorBadge(exec: SqlExecutor, code: string): Promise<OperatorMirrorRecord | null> {
+export async function verifyOperatorBadge(
+  exec: SqlExecutor,
+  code: string,
+): Promise<OperatorMirrorRecord | null> {
   if (code.length === 0) return null;
   for (const op of await readOperatorsMirror(exec)) {
     if (op.active && op.badgeHash && (await verifyBadge(code, op.badgeHash))) return op;
@@ -2823,8 +2991,12 @@ import { OperatorLogin } from "../src/pages/OperatorLogin.js";
 function nodeExecutor(): SqlExecutor {
   const db = new DatabaseSync(":memory:");
   return {
-    async run(sql, params = []) { db.prepare(sql).run(...(params as never[])); },
-    async all<T>(sql: string, params: unknown[] = []): Promise<T[]> { return db.prepare(sql).all(...(params as never[])) as T[]; },
+    async run(sql, params = []) {
+      db.prepare(sql).run(...(params as never[]));
+    },
+    async all<T>(sql: string, params: unknown[] = []): Promise<T[]> {
+      return db.prepare(sql).all(...(params as never[])) as T[];
+    },
   };
 }
 
@@ -2835,7 +3007,9 @@ async function seedOperator(exec: SqlExecutor, pin: string): Promise<void> {
   );
 }
 
-beforeAll(async () => { await i18n.changeLanguage("en"); });
+beforeAll(async () => {
+  await i18n.changeLanguage("en");
+});
 
 describe("OperatorLogin", () => {
   it("accepts a correct PIN against the seeded mirror and calls onAuthed", async () => {
@@ -2848,7 +3022,9 @@ describe("OperatorLogin", () => {
     for (const d of "4321") fireEvent.click(screen.getByRole("button", { name: d }));
     fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
 
-    await waitFor(() => expect(onAuthed).toHaveBeenCalledWith(expect.objectContaining({ operatorId: "op1" })));
+    await waitFor(() =>
+      expect(onAuthed).toHaveBeenCalledWith(expect.objectContaining({ operatorId: "op1" })),
+    );
   });
 
   it("shows a floor error on a wrong PIN and does not authenticate", async () => {
@@ -2975,6 +3151,7 @@ git commit -m "feat(station): offline operator PIN/badge auth with PBKDF2 PHC ve
 ### Task 11: Station — shift selection + ad-hoc shift create
 
 **Files:**
+
 - Create: `apps/station/src/pages/ShiftSelection.tsx`
 - Create: `apps/station/src/pages/NewShift.tsx`
 - Modify: `apps/station/src/i18n/ru.json`, `apps/station/src/i18n/en.json` (shift keys)
@@ -2982,6 +3159,7 @@ git commit -m "feat(station): offline operator PIN/badge auth with PBKDF2 PHC ve
 - Test: `apps/station/test/new-shift.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `createStationClient` (Task 8); `normalizeToGtin14`, `DomainError` (`@markiro/domain`); `ShiftDto`/`ProductDto` shapes; `@markiro/ui` (`Card`, `Button`, `Input`, `Alert`).
 - Produces:
   - `ShiftSelection` (planned "open" → `POST /shifts/:id/open`; active "rejoin").
@@ -3040,24 +3218,51 @@ import i18n from "../src/i18n/index.js";
 import { createStationClient } from "../src/lib/api-client.js";
 import { ShiftSelection } from "../src/pages/ShiftSelection.js";
 
-beforeAll(async () => { await i18n.changeLanguage("en"); });
+beforeAll(async () => {
+  await i18n.changeLanguage("en");
+});
 afterEach(() => vi.restoreAllMocks());
 
-const client = createStationClient({ machineId: "m1", apiKey: "k", serverUrl: "http://localhost:3000" });
+const client = createStationClient({
+  machineId: "m1",
+  apiKey: "k",
+  serverUrl: "http://localhost:3000",
+});
 
 describe("ShiftSelection", () => {
   it("opens a planned shift and calls onSelected with the opened shift", async () => {
     vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [
-        { id: "s1", status: "planned", mode: "validation", productName: "Cola", plannedQty: 100 },
-      ] }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "s1", status: "active", mode: "validation" }), { status: 200 }));
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            items: [
+              {
+                id: "s1",
+                status: "planned",
+                mode: "validation",
+                productName: "Cola",
+                plannedQty: 100,
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "s1", status: "active", mode: "validation" }), {
+          status: 200,
+        }),
+      );
 
     const onSelected = vi.fn();
     render(<ShiftSelection client={client} onSelected={onSelected} onNew={() => {}} />);
     await waitFor(() => expect(screen.getByText("Cola")).toBeDefined());
     fireEvent.click(screen.getByRole("button", { name: "Open" }));
-    await waitFor(() => expect(onSelected).toHaveBeenCalledWith(expect.objectContaining({ id: "s1", status: "active" })));
+    await waitFor(() =>
+      expect(onSelected).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "s1", status: "active" }),
+      ),
+    );
   });
 });
 ```
@@ -3101,7 +3306,9 @@ export function ShiftSelection({ client, onSelected, onNew }: ShiftSelectionProp
   }, [client]);
 
   async function open(shift: ShiftListItem) {
-    const opened = await client.post<{ id: string; status: string; mode: string }>(`/shifts/${shift.id}/open`);
+    const opened = await client.post<{ id: string; status: string; mode: string }>(
+      `/shifts/${shift.id}/open`,
+    );
     onSelected(opened);
   }
 
@@ -3148,41 +3355,76 @@ import i18n from "../src/i18n/index.js";
 import { createStationClient } from "../src/lib/api-client.js";
 import { NewShift } from "../src/pages/NewShift.js";
 
-beforeAll(async () => { await i18n.changeLanguage("en"); });
+beforeAll(async () => {
+  await i18n.changeLanguage("en");
+});
 afterEach(() => vi.restoreAllMocks());
 
-const client = createStationClient({ machineId: "m1", apiKey: "k", serverUrl: "http://localhost:3000" });
+const client = createStationClient({
+  machineId: "m1",
+  apiKey: "k",
+  serverUrl: "http://localhost:3000",
+});
 
 describe("NewShift", () => {
   it("resolves a known GTIN, creates + opens a validation shift", async () => {
     vi.spyOn(globalThis, "fetch")
       // POST /products/gtin-check
-      .mockResolvedValueOnce(new Response(JSON.stringify({ gtin14: "04600000000017", owner: "own" }), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ gtin14: "04600000000017", owner: "own" }), { status: 200 }),
+      )
       // GET /products?search=... (resolve productId)
-      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [{ id: "p1", gtin14: "04600000000017", name: "Cola", status: "active" }] }), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            items: [{ id: "p1", gtin14: "04600000000017", name: "Cola", status: "active" }],
+          }),
+          { status: 200 },
+        ),
+      )
       // POST /shifts
-      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "s9", status: "planned", mode: "validation" }), { status: 201 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "s9", status: "planned", mode: "validation" }), {
+          status: 201,
+        }),
+      )
       // POST /shifts/s9/open
-      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "s9", status: "active", mode: "validation" }), { status: 200 }));
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "s9", status: "active", mode: "validation" }), {
+          status: 200,
+        }),
+      );
 
     const onStarted = vi.fn();
     render(<NewShift client={client} onStarted={onStarted} onBack={() => {}} />);
-    fireEvent.change(screen.getByLabelText("Type or scan a GTIN"), { target: { value: "4600000000017" } });
+    fireEvent.change(screen.getByLabelText("Type or scan a GTIN"), {
+      target: { value: "4600000000017" },
+    });
     fireEvent.submit(screen.getByLabelText("Type or scan a GTIN").closest("form")!);
 
     await waitFor(() => expect(screen.getByText("Cola")).toBeDefined());
     fireEvent.click(screen.getByRole("button", { name: "Validation" }));
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
-    await waitFor(() => expect(onStarted).toHaveBeenCalledWith(expect.objectContaining({ id: "s9", status: "active" })));
+    await waitFor(() =>
+      expect(onStarted).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "s9", status: "active" }),
+      ),
+    );
   });
 
   it("shows the blocking not-in-catalog screen for an unknown GTIN", async () => {
     vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(JSON.stringify({ gtin14: "04600000000017", owner: "unknown" }), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ gtin14: "04600000000017", owner: "unknown" }), {
+          status: 200,
+        }),
+      )
       .mockResolvedValueOnce(new Response(JSON.stringify({ items: [] }), { status: 200 }));
 
     render(<NewShift client={client} onStarted={vi.fn()} onBack={() => {}} />);
-    fireEvent.change(screen.getByLabelText("Type or scan a GTIN"), { target: { value: "4600000000017" } });
+    fireEvent.change(screen.getByLabelText("Type or scan a GTIN"), {
+      target: { value: "4600000000017" },
+    });
     fireEvent.submit(screen.getByLabelText("Type or scan a GTIN").closest("form")!);
 
     await waitFor(() => expect(screen.getByText("Product is not in the catalog")).toBeDefined());
@@ -3263,18 +3505,28 @@ export function NewShift({ client, onStarted, onBack }: NewShiftProps) {
   async function start() {
     if (!product) return;
     const created = await client.post<{ id: string }>("/shifts", { productId: product.id, mode });
-    const opened = await client.post<{ id: string; status: string; mode: string }>(`/shifts/${created.id}/open`);
+    const opened = await client.post<{ id: string; status: string; mode: string }>(
+      `/shifts/${created.id}/open`,
+    );
     onStarted(opened);
   }
 
   if (view === "notFound") {
     return (
-      <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", gap: 16, padding: 32 }}>
+      <main
+        style={{ minHeight: "100vh", display: "grid", placeItems: "center", gap: 16, padding: 32 }}
+      >
         <h1 style={{ fontSize: "2rem" }}>{t("shifts.notInCatalog")}</h1>
         <p style={{ fontSize: "1.25rem" }}>GTIN: {unknownGtin}</p>
         <p>{t("shifts.notInCatalogHint")}</p>
         <div style={{ display: "flex", gap: 12 }}>
-          <Button style={{ minHeight: 64 }} onClick={() => { setRaw(""); setView("input"); }}>
+          <Button
+            style={{ minHeight: 64 }}
+            onClick={() => {
+              setRaw("");
+              setView("input");
+            }}
+          >
             {t("shifts.scanAgain")}
           </Button>
           <Button variant="secondary" style={{ minHeight: 64 }} onClick={onBack}>
@@ -3287,16 +3539,26 @@ export function NewShift({ client, onStarted, onBack }: NewShiftProps) {
 
   if (view === "found" && product) {
     return (
-      <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", gap: 16, padding: 32 }}>
+      <main
+        style={{ minHeight: "100vh", display: "grid", placeItems: "center", gap: 16, padding: 32 }}
+      >
         <Card style={{ padding: 24, minWidth: 480 }}>
           <div style={{ fontSize: "1.75rem" }}>{product.name}</div>
           <div>{product.gtin14}</div>
         </Card>
         <div style={{ display: "flex", gap: 12 }}>
-          <Button variant={mode === "validation" ? "primary" : "secondary"} style={{ minHeight: 64 }} onClick={() => setMode("validation")}>
+          <Button
+            variant={mode === "validation" ? "primary" : "secondary"}
+            style={{ minHeight: 64 }}
+            onClick={() => setMode("validation")}
+          >
             {t("shifts.modeValidation")}
           </Button>
-          <Button variant={mode === "aggregation" ? "primary" : "secondary"} style={{ minHeight: 64 }} onClick={() => setMode("aggregation")}>
+          <Button
+            variant={mode === "aggregation" ? "primary" : "secondary"}
+            style={{ minHeight: 64 }}
+            onClick={() => setMode("aggregation")}
+          >
             {t("shifts.modeAggregation")}
           </Button>
         </div>
@@ -3308,12 +3570,18 @@ export function NewShift({ client, onStarted, onBack }: NewShiftProps) {
   }
 
   return (
-    <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", gap: 16, padding: 32 }}>
+    <main
+      style={{ minHeight: "100vh", display: "grid", placeItems: "center", gap: 16, padding: 32 }}
+    >
       <form onSubmit={resolve} style={{ display: "grid", gap: 16, minWidth: 480 }}>
-        <label htmlFor="gtin" style={{ fontSize: "1.25rem" }}>{t("shifts.gtinPrompt")}</label>
+        <label htmlFor="gtin" style={{ fontSize: "1.25rem" }}>
+          {t("shifts.gtinPrompt")}
+        </label>
         <Input id="gtin" autoFocus value={raw} onChange={(e) => setRaw(e.target.value)} />
         {error ? <Alert tone="error">{error}</Alert> : null}
-        <Button type="submit" style={{ minHeight: 64 }}>{t("shifts.open")}</Button>
+        <Button type="submit" style={{ minHeight: 64 }}>
+          {t("shifts.open")}
+        </Button>
       </form>
     </main>
   );
@@ -3339,6 +3607,7 @@ git commit -m "feat(station): shift selection and ad-hoc GTIN-driven shift creat
 ### Task 12: Station — floor-mode shell (status bar, task switcher, SignalOverlay skeleton, i18n lockstep)
 
 **Files:**
+
 - Create: `apps/station/src/ui/StatusBar.tsx`
 - Create: `apps/station/src/ui/SignalOverlay.tsx`
 - Create: `apps/station/src/ui/FloorShell.tsx`
@@ -3348,6 +3617,7 @@ git commit -m "feat(station): shift selection and ad-hoc GTIN-driven shift creat
 - Test: `apps/station/test/i18n.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `@markiro/ui` (`StatusChip`), i18n singleton, `SUPPORTED_LANGUAGES`.
 - Produces:
   - `StatusBar` (network online/offline, sync placeholder, agent/scanner/printer "not configured", teammates placeholder).
@@ -3398,7 +3668,9 @@ import { beforeAll, describe, expect, it } from "vitest";
 import i18n from "../src/i18n/index.js";
 import { StatusBar } from "../src/ui/StatusBar.js";
 
-beforeAll(async () => { await i18n.changeLanguage("en"); });
+beforeAll(async () => {
+  await i18n.changeLanguage("en");
+});
 
 describe("StatusBar", () => {
   it("shows the online state", () => {
@@ -3477,15 +3749,27 @@ export function StatusBar({ online }: StatusBarProps) {
   return (
     <header
       role="contentinfo"
-      style={{ display: "flex", gap: 16, alignItems: "center", padding: "8px 16px", fontSize: "1rem" }}
+      style={{
+        display: "flex",
+        gap: 16,
+        alignItems: "center",
+        padding: "8px 16px",
+        fontSize: "1rem",
+      }}
     >
       <StatusChip status={online ? "ok" : "warn"}>
         {online ? t("shell.online") : t("shell.offline")}
       </StatusChip>
       <span>{t("shell.sync")}: 0</span>
-      <span>{t("shell.agent")}: {notConfigured}</span>
-      <span>{t("shell.scanner")}: {notConfigured}</span>
-      <span>{t("shell.printer")}: {notConfigured}</span>
+      <span>
+        {t("shell.agent")}: {notConfigured}
+      </span>
+      <span>
+        {t("shell.scanner")}: {notConfigured}
+      </span>
+      <span>
+        {t("shell.printer")}: {notConfigured}
+      </span>
       <span>{t("shell.teammates")}: +0</span>
     </header>
   );
@@ -3555,7 +3839,13 @@ export interface FloorShellProps {
   children: ReactNode;
 }
 
-export function FloorShell({ online, tasks, activeTaskId, onSelectTask, children }: FloorShellProps) {
+export function FloorShell({
+  online,
+  tasks,
+  activeTaskId,
+  onSelectTask,
+  children,
+}: FloorShellProps) {
   const { t } = useTranslation();
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
@@ -3601,11 +3891,13 @@ git commit -m "feat(station): floor-mode shell with status bar, task switcher, a
 ### Task 13: Docs + CI (cargo + Tauri Windows matrix) + final verification
 
 **Files:**
+
 - Create: `apps/station/README.md`
 - Modify: `.github/workflows/ci.yml` (add a `cargo` step + a Windows Tauri-build matrix note/job)
 - Modify: `docs/architecture.md` (station cross-ref note only — do NOT rewrite §2)
 
 **Interfaces:**
+
 - Consumes: everything from Tasks 1–12.
 - Produces: station README (dev run, offline model, enrollment steps), CI coverage for Rust + the Windows installer build, and a full green verification run.
 
@@ -3613,7 +3905,7 @@ git commit -m "feat(station): floor-mode shell with status bar, task switcher, a
 
 `apps/station/README.md`:
 
-```markdown
+````markdown
 # @markiro/station
 
 Markiro line station — a Tauri 2.11 + React 19 floor-mode app. Reuses
@@ -3636,6 +3928,7 @@ docker compose -f docker-compose.dev.yml up -d   # API + Postgres for enrollment
 pnpm --filter @markiro/api dev                    # http://localhost:3000
 pnpm --filter @markiro/station tauri dev          # launches the desktop webview
 ```
+````
 
 The Windows installer is produced in CI (see `.github/workflows/ci.yml`); a
 `tauri build` is not required on macOS for development.
@@ -3654,7 +3947,8 @@ The Windows installer is produced in CI (see `.github/workflows/ci.yml`); a
 pnpm --filter @markiro/station test    # vitest (jsdom); uses node:sqlite
 cargo test --manifest-path apps/station/src-tauri/Cargo.toml
 ```
-```
+
+````
 
 - [ ] **Step 2: Add the cargo + Windows-build CI coverage**
 
@@ -3692,7 +3986,7 @@ Append a `station-rust` job and a Windows Tauri-build matrix job to `.github/wor
       - run: pnpm install --frozen-lockfile
       - name: Build the Windows installer (NSIS)
         run: pnpm --filter @markiro/station tauri build
-```
+````
 
 > Note: pin `dtolnay/rust-toolchain@stable` to a commit SHA at execution to match the repo's SHA-pinning convention for third-party actions.
 

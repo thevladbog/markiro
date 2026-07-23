@@ -77,11 +77,25 @@ export async function upsertBundle(exec: SqlExecutor, bundle: StationBundle): Pr
        box_capacity=excluded.box_capacity, pallet_capacity=excluded.pallet_capacity,
        pallets_enabled=excluded.pallets_enabled, opened_at=excluded.opened_at`,
     [
-      s.id, s.status, s.mode, s.productId, s.productName, s.lineId, s.lineName,
-      s.counterpartyId, s.counterpartyName, bundle.counterpartyGln,
-      s.labelTemplateId, s.labelTemplateName,
+      s.id,
+      s.status,
+      s.mode,
+      s.productId,
+      s.productName,
+      s.lineId,
+      s.lineName,
+      s.counterpartyId,
+      s.counterpartyName,
+      bundle.counterpartyGln,
+      s.labelTemplateId,
+      s.labelTemplateName,
       bundle.labelTemplate ? JSON.stringify(bundle.labelTemplate.spec) : null,
-      s.plannedQty, s.plannedDate, s.boxCapacity, s.palletCapacity, b(s.palletsEnabled), s.openedAt,
+      s.plannedQty,
+      s.plannedDate,
+      s.boxCapacity,
+      s.palletCapacity,
+      b(s.palletsEnabled),
+      s.openedAt,
     ],
   );
 
@@ -97,8 +111,15 @@ export async function upsertBundle(exec: SqlExecutor, bundle: StationBundle): Pr
        status=excluded.status, default_counterparty_id=excluded.default_counterparty_id,
        default_label_template_id=excluded.default_label_template_id`,
     [
-      p.id, p.gtin14, p.name, p.productGroup, p.boxCapacity, p.palletCapacity, p.status,
-      p.defaultCounterpartyId, p.defaultLabelTemplateId,
+      p.id,
+      p.gtin14,
+      p.name,
+      p.productGroup,
+      p.boxCapacity,
+      p.palletCapacity,
+      p.status,
+      p.defaultCounterpartyId,
+      p.defaultLabelTemplateId,
     ],
   );
 
@@ -114,21 +135,39 @@ export async function upsertBundle(exec: SqlExecutor, bundle: StationBundle): Pr
   }
 }
 
-export async function readShiftMirror(exec: SqlExecutor, id: string): Promise<ShiftMirrorRow | null> {
+export async function readShiftMirror(
+  exec: SqlExecutor,
+  id: string,
+): Promise<ShiftMirrorRow | null> {
   const rows = await exec.all<{
-    id: string; status: string; mode: string; counterparty_gln: string | null; label_template_spec: string | null;
+    id: string;
+    status: string;
+    mode: string;
+    counterparty_gln: string | null;
+    label_template_spec: string | null;
   }>(
     "SELECT id, status, mode, counterparty_gln, label_template_spec FROM shift_mirror WHERE id = ?",
     [id],
   );
   const r = rows[0];
   if (!r) return null;
-  return { id: r.id, status: r.status, mode: r.mode, counterpartyGln: r.counterparty_gln, labelTemplateSpec: r.label_template_spec };
+  return {
+    id: r.id,
+    status: r.status,
+    mode: r.mode,
+    counterpartyGln: r.counterparty_gln,
+    labelTemplateSpec: r.label_template_spec,
+  };
 }
 
 export async function readOperatorsMirror(exec: SqlExecutor): Promise<OperatorMirrorRecord[]> {
   const rows = await exec.all<{
-    operator_id: string; name: string; role: string; pin_hash: string; badge_hash: string | null; active: number;
+    operator_id: string;
+    name: string;
+    role: string;
+    pin_hash: string;
+    badge_hash: string | null;
+    active: number;
   }>("SELECT operator_id, name, role, pin_hash, badge_hash, active FROM operators_mirror");
   return rows.map((r) => ({
     operatorId: r.operator_id,
