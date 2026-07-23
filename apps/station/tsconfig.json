@@ -1,0 +1,21 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // Deviates from the monorepo's default NodeNext module/resolution
+    // (tsconfig.base.json), same as apps/admin/tsconfig.json: this is a
+    // Vite-bundled app, not a published Node package, so it uses Vite's own
+    // "bundler" resolution instead. This also avoids NodeNext's requirement
+    // that JSON imports (src/i18n/*.json) carry an explicit `type: "json"`
+    // import attribute, and picks up vite/client's ambient `ImportMeta.env`
+    // and `*.css` module declarations used by src/i18n/index.ts and
+    // src/main.tsx.
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["vite/client", "vitest/globals"],
+    "noEmit": true,
+    "resolveJsonModule": true
+  },
+  "include": ["src", "test", "vite.config.ts", "vitest.config.ts"]
+}
