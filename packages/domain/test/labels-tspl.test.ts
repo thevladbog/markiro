@@ -222,9 +222,7 @@ describe("generateTspl - GS1 DataMatrix (km.code) - open question, see report", 
     // The DMATRIX line should contain the GS byte verbatim in the string
     // between the quotes. We verify this by checking that the GS character
     // (0x1D) appears at the expected position in the generated document.
-    const dmatrixLine = tspl
-      .split("\n")
-      .find((line) => line.startsWith("DMATRIX"));
+    const dmatrixLine = tspl.split("\n").find((line) => line.startsWith("DMATRIX"));
     expect(dmatrixLine).toBeDefined();
 
     // Find the DMATRIX command and extract the data portion (everything
