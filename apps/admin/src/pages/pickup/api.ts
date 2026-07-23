@@ -15,7 +15,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 
-import { apiFetch } from "../../api/client.js";
+import { apiFetch, ApiRequestError } from "../../api/client.js";
 
 export type PickupOrderStatus = "pending" | "punched" | "writtenoff" | "cancelled";
 export type PickupOrderReason = "buy" | "writeoff";
@@ -173,7 +173,10 @@ export function useCancelOrder(): UseMutationResult<PickupOrderRowDto, Error, st
 /**
  * `POST /pickup-orders/export` -- returns a `text/plain` codes file, not
  * JSON, so this bypasses `apiFetch` and calls `fetch` directly, then triggers
- * a browser download of the response text.
+ * a browser download of the response text. A non-`ok` response throws an
+ * `ApiRequestError` (mirroring `apiFetch`'s own error handling) *before* the
+ * body is read or a download is triggered, so a failed export rejects the
+ * mutation instead of downloading an error page as `codes.txt`.
  */
 async function exportCodes(orderIds: string[]): Promise<string> {
   const res = await fetch("/api/pickup-orders/export", {
@@ -182,6 +185,9 @@ async function exportCodes(orderIds: string[]): Promise<string> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ orderIds }),
   });
+  if (!res.ok) {
+    throw new ApiRequestError(res.status, res.statusText || `HTTP ${res.status}`);
+  }
   const text = await res.text();
   const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
   const url = URL.createObjectURL(blob);

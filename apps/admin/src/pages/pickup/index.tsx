@@ -202,7 +202,7 @@ export function PickupPage() {
             variant={bulkMode ? "secondary" : "primary"}
             onClick={handleToggleBulkMode}
           >
-            {bulkMode ? t("pages.pickup.cancel") : t("pages.pickup.addAction")}
+            {bulkMode ? t("pages.pickup.cancel") : t("pages.pickup.bulkExport.toggleAction")}
           </Button>
         }
       />
