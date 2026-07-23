@@ -12,6 +12,27 @@
         "docs/design-briefs/design_handoff_markiro"
       ],
       "port": 8734
+    },
+    {
+      "name": "api",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "DATABASE_URL=postgres://markiro:markiro@localhost:5432/markiro",
+        "BETTER_AUTH_SECRET=insecure-dummy-ci-placeholder-not-a-secret",
+        "BETTER_AUTH_URL=http://localhost:3000",
+        "ADMIN_ORIGIN=http://localhost:5173",
+        "pnpm",
+        "--filter",
+        "@markiro/api",
+        "dev"
+      ],
+      "port": 3000
+    },
+    {
+      "name": "admin",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@markiro/admin", "dev"],
+      "port": 5173
     }
   ]
 }

@@ -1,3 +1,14 @@
 @import "./fonts.css";
 @import "./tokens.css";
 @import "./components.css";
+
+/* Paint the page from tokens: without this the browser's own (possibly dark)
+   canvas shows through transparent html/body and breaks the light theme. */
+html {
+  background: var(--surface-page);
+  color: var(--fg-1);
+  color-scheme: light;
+}
+html[data-theme="dark"] {
+  color-scheme: dark;
+}
