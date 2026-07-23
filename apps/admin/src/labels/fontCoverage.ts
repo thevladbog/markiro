@@ -103,12 +103,30 @@ export function checkCyrillicCoverage(
  * Fetches BOTH the `latin` and `cyrillic` subset files bundled for `family`
  * and reports whether EITHER one alone covers `CYRILLIC_SAMPLE` -- see this
  * module's "SUBSET-UNION POLICY" doc comment above for the full rationale.
+ *
+ * CARRY-OVER FIX (Plan 04 Task 10 brief): the original Task 5 implementation
+ * fetched each subset URL and immediately called `.arrayBuffer()` without
+ * ever checking `response.ok` -- a 404/500 for a font asset (a genuinely
+ * possible failure: a bad build, a CDN hiccup, a future custom-font-upload
+ * URL that 404s) would silently hand an HTML error page's bytes to
+ * `checkCyrillicCoverage`/`opentype.parse`, which would then throw a
+ * confusing parse error instead of a clear "the font fetch itself failed"
+ * one. `response.ok` is checked HERE (not left to the caller) so every
+ * caller -- today just `PreviewPane.tsx` -- gets one unambiguous failure
+ * mode (a rejected promise) for every kind of fetch-time problem; that
+ * caller is still responsible for turning the rejection into the honest
+ * "could not verify" UI warning (never an unhandled rejection) per this
+ * task's brief, since fetch/parse errors are a fact of life this function
+ * cannot fully prevent, only surface clearly.
  */
 export async function checkFamilyCoverage(family: LabelFontFamily): Promise<boolean> {
   const urls = FAMILY_SUBSET_URLS[family];
   const buffers = await Promise.all(
     urls.map(async (url) => {
       const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`failed to fetch font subset ${url}: HTTP ${response.status}`);
+      }
       return response.arrayBuffer();
     }),
   );

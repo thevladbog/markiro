@@ -127,7 +127,7 @@ function resolveTextForBounds(
   element: LabelTextElement | LabelFieldElement,
   data: Record<LabelField, string>,
 ): string {
-  return element.kind === "text" ? element.text : data[element.field] ?? "";
+  return element.kind === "text" ? element.text : (data[element.field] ?? "");
 }
 
 /** Same requirement as `resolveTextForBounds`: callers pass the data used by `draw`. */
@@ -135,7 +135,7 @@ function resolveBarcodeTextForBounds(
   element: LabelBarcodeElement,
   data: Record<LabelField, string>,
 ): string {
-  return typeof element.data === "string" ? data[element.data] ?? "" : element.data.literal;
+  return typeof element.data === "string" ? (data[element.data] ?? "") : element.data.literal;
 }
 
 /**
@@ -158,10 +158,7 @@ function resolveBarcodeTextForBounds(
  * directly from the element's own documented geometry fields, no
  * heuristic needed).
  */
-export function elementBoundsMm(
-  element: LabelElement,
-  data: Record<LabelField, string>,
-): BoundsMm {
+export function elementBoundsMm(element: LabelElement, data: Record<LabelField, string>): BoundsMm {
   switch (element.kind) {
     case "text":
     case "field": {

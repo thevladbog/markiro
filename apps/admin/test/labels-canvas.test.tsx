@@ -21,11 +21,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { sampleLabelData, type LabelElement, type LabelTemplateSpec } from "@markiro/domain";
 
 import { DEFAULT_SCALE, hitTest, LabelCanvas } from "../src/pages/labels/editor/LabelCanvas.js";
-import {
-  elementBoundsMm,
-  mulberry32,
-  simpleHash,
-} from "../src/pages/labels/editor/renderer.js";
+import { elementBoundsMm, mulberry32, simpleHash } from "../src/pages/labels/editor/renderer.js";
 import {
   createEditorState,
   editorReducer,

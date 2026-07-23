@@ -123,7 +123,7 @@ describe("checkFamilyCoverage (subset-union policy)", () => {
     const fetchMock = vi.fn(async () => {
       const buffer = buffers[callIndex];
       callIndex += 1;
-      return { arrayBuffer: async () => buffer };
+      return { ok: true, status: 200, arrayBuffer: async () => buffer };
     });
     vi.stubGlobal("fetch", fetchMock);
     return fetchMock;
@@ -155,5 +155,29 @@ describe("checkFamilyCoverage (subset-union policy)", () => {
     stubFetchSequence([noCoverageA, noCoverageB]);
 
     await expect(checkFamilyCoverage("IBM Plex Sans")).resolves.toBe(false);
+  });
+
+  it("rejects (does not silently parse garbage) when a subset fetch responds with a non-ok status", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: false,
+      status: 404,
+      arrayBuffer: async () => {
+        throw new Error("must not be called: response.ok must be checked first");
+      },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(checkFamilyCoverage("IBM Plex Sans")).rejects.toThrow(/HTTP 404/);
+  });
+
+  it("rejects when the underlying fetch itself throws (network failure)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("network down");
+      }),
+    );
+
+    await expect(checkFamilyCoverage("IBM Plex Sans")).rejects.toThrow("network down");
   });
 });
