@@ -191,6 +191,56 @@ describe("generateTspl - GS1 DataMatrix (km.code) - open question, see report", 
     const tspl = await generateTspl(spec, sampleLabelData());
     expect(tspl).toContain('DMATRIX 16,16,4,4,"just-some-text"');
   });
+
+  it("passes through embedded GS (0x1D) verbatim without escaping or expansion (golden test)", async () => {
+    // GS1 DataMatrix can contain embedded GS separator bytes (0x1D). This
+    // test verifies that the DMATRIX command emits the GS byte as-is,
+    // not escaped (e.g., not as "c29" or any control-character form).
+    const gsChar = String.fromCharCode(0x1d); // The actual GS byte
+    const kmCodeWithGs = `01046006820000132${gsChar}1abcDEF1234567`;
+    const dataWithGs = { ...sampleLabelData(), "km.code": kmCodeWithGs };
+
+    const spec: LabelTemplateSpec = {
+      widthMm: 58,
+      heightMm: 40,
+      dpi: 203,
+      language: "tspl",
+      elements: [
+        {
+          kind: "barcode",
+          id: "b1",
+          xMm: 2,
+          yMm: 2,
+          format: "datamatrix",
+          data: "km.code",
+          sizeMm: 0.5,
+        },
+      ],
+    };
+    const tspl = await generateTspl(spec, dataWithGs);
+
+    // The DMATRIX line should contain the GS byte verbatim in the string
+    // between the quotes. We verify this by checking that the GS character
+    // (0x1D) appears at the expected position in the generated document.
+    const dmatrixLine = tspl
+      .split("\n")
+      .find((line) => line.startsWith("DMATRIX"));
+    expect(dmatrixLine).toBeDefined();
+
+    // Find the DMATRIX command and extract the data portion (everything
+    // between the quotes). The DMATRIX format is: DMATRIX x,y,w,h,"<data>"
+    const quoteStart = dmatrixLine!.indexOf('"');
+    const quoteEnd = dmatrixLine!.lastIndexOf('"');
+    const embeddedData = dmatrixLine!.substring(quoteStart + 1, quoteEnd);
+
+    // Verify that the GS byte (0x1D) appears at position 17 (right after
+    // "01046006820000132") in the embedded data string.
+    expect(embeddedData.charCodeAt(17)).toBe(0x1d);
+    // Verify it is NOT escaped (not followed by another escape sequence).
+    // The character immediately after should be "1" (the next digit in the
+    // GS1 AIM string).
+    expect(embeddedData.charCodeAt(18)).toBe("1".charCodeAt(0));
+  });
 });
 
 describe("generateTspl - barcode formats", () => {

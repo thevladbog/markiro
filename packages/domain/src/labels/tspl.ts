@@ -1,3 +1,48 @@
+/**
+ * TSPL (TSC TSPL2) label document generator — emits complete, printer-ready
+ * TSPL source text compatible with TSC thermal printers.
+ *
+ * BINARY CARRIER STRATEGY (BITMAP DATA):
+ * When text requires rasterization (Cyrillic, CJK, etc.), the rasterized
+ * bitmap is embedded in a TSPL `BITMAP` command whose raw binary payload is
+ * carried as a plain JavaScript string with one Latin-1 character per byte
+ * (via `String.fromCharCode(byte)` for each 0x00-0xFF value). This is NOT
+ * UTF-8 or hex-encoded; it is the actual binary bytes, packed into JS's
+ * native string type. This design choice made by the entire `@markiro/domain`
+ * package (ZPL/TSPL/raster modules all use this same representation) has one
+ * critical TRANSPORT REQUIREMENT:
+ *
+ * CRITICAL: When sending a TSPL document (or any `buildBitmapCommand` result)
+ * to a printer, to a file, or to any external system, the sender MUST encode
+ * the string using Latin-1 (ISO-8859-1) or binary encoding, NOT UTF-8. UTF-8
+ * would multi-byte-encode any character code >= 0x80, corrupting every bit in
+ * the binary payload (e.g., byte 0x80 becomes 0xC2 0x80 in UTF-8, destroying
+ * the bitmap data). The receiving printer or file system MUST see exactly the
+ * byte sequence embedded in the string: one byte per character. Both the
+ * downstream print station (Plan 05) and any admin Blob/file download handler
+ * must enforce Latin-1/binary encoding. See this task's report for a
+ * durability note linking to the verification checklist.
+ *
+ * OPEN HARDWARE QUESTION (GS1 DataMatrix / FNC1):
+ * TSPL's plain `DMATRIX` command (used for `km.code` GS1 DataMatrix barcodes)
+ * has UNVERIFIED GS1/FNC1 handling. The `km.code` value is emitted RAW into
+ * the DMATRIX command — verbatim, with embedded GS (0x1D) bytes passed through
+ * as-is, with no FNC1 prefix and no escaping beyond the ordinary `""-doubling
+ * for string literals. This worked for ZPL's documented `^FH` FNC1 convention,
+ * but TSC's manual for TSPL `DMATRIX` contains only a generic control-character
+ * escape (`cXXX` form, e.g. `c126` for `~`) with no specific GS1 example or
+ * verified mode parameter. Plan 05's hardware verification pass MUST:
+ *   1. Print a test label with a GS1 DataMatrix (km.code with embedded GS bytes).
+ *   2. Scan the printed barcode on a physical TSC printer to verify it renders
+ *      as valid GS1 and decodes correctly.
+ *   3. If rendering fails, investigate:
+ *      - Whether DMATRIX needs an explicit FNC1 prefix (e.g., a documented
+ *        control-character escape like `c232` or `c157` per TSC's own table).
+ *      - Whether a firmware update or newer DMATRIX parameter mode is required.
+ *   4. Document the outcome (success / required firmware / parameter change) in
+ *      the Plan 05 report so Plan 06+ can close this question durably.
+ */
+
 import { DomainError } from "../errors.js";
 import {
   mmToDots,
