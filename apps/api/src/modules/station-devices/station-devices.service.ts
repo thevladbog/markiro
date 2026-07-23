@@ -2,6 +2,7 @@ import {
   Inject,
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
 } from "@nestjs/common";
 import { and, desc, eq } from "drizzle-orm";
@@ -15,6 +16,8 @@ import type {
 
 @Injectable()
 export class StationDevicesService {
+  private readonly logger = new Logger(StationDevicesService.name);
+
   constructor(
     @Inject(DB) private readonly db: Db,
     @Inject(AUTH) private readonly auth: Auth,
@@ -46,13 +49,42 @@ export class StationDevicesService {
       },
     });
 
-    const [row] = await this.db
-      .insert(schema.stationDevices)
-      .values({ tenantId, name, apiKeyId: key.id })
-      .returning();
-    if (!row) throw new InternalServerErrorException("Failed to enroll device");
+    // `createApiKey` and the `station_devices` insert are not transactional
+    // (the key is minted via Better Auth's own store, not this `db` handle),
+    // so if the insert throws — or returns no row — the just-minted key
+    // would otherwise be orphaned: live, but unreachable via
+    // `/station-devices/:id` (no device row exists to revoke it through).
+    // Roll it back here so a failed enroll never leaves a dangling api-key.
+    let row: typeof schema.stationDevices.$inferSelect | undefined;
+    try {
+      [row] = await this.db
+        .insert(schema.stationDevices)
+        .values({ tenantId, name, apiKeyId: key.id })
+        .returning();
+    } catch (err) {
+      await this.rollbackApiKey(key.id);
+      throw err;
+    }
+    if (!row) {
+      await this.rollbackApiKey(key.id);
+      throw new InternalServerErrorException("Failed to enroll device");
+    }
 
     return { deviceId: row.id, name: row.name, apiKey: key.key, serverUrl };
+  }
+
+  /** Best-effort cleanup of an api-key minted for an enroll that failed to persist. */
+  private async rollbackApiKey(apiKeyId: string): Promise<void> {
+    try {
+      await this.db.delete(schema.apikey).where(eq(schema.apikey.id, apiKeyId));
+    } catch (cleanupErr) {
+      // Log-only: this must not mask the original enroll failure being
+      // thrown by the caller, but an orphaned key is otherwise silent.
+      this.logger.error(
+        `Failed to roll back orphaned api-key ${apiKeyId} after a failed station-device enroll`,
+        cleanupErr instanceof Error ? cleanupErr.stack : String(cleanupErr),
+      );
+    }
   }
 
   async list(tenantId: string): Promise<ListStationDevicesResponseDto> {
