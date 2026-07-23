@@ -60,8 +60,9 @@ export interface AuthClientLike {
  * client targets `${window.location.origin}/api/auth` (its own default
  * path), which the Vite dev proxy forwards untouched to the API (see
  * vite.config.ts) -- so this and the API server share an origin from the
- * browser's point of view and the session cookie is sent under fetch's
- * default "same-origin" credentials mode without extra config.
+ * browser's point of view. Better Auth's createFetch sets `credentials: "include"`
+ * by default (see node_modules/better-auth/dist/client/config.mjs), so the
+ * session cookie is sent without extra config.
  */
 const realAuthClient = createAuthClient({
   plugins: [organizationClient()],
