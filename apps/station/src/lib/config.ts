@@ -55,7 +55,13 @@ export async function writeConfig(cfg: StationConfig): Promise<void> {
   await invoke("write_config", { cfg: toRust(cfg) });
 }
 
-/** True once the device is enrolled (has a tenant, key, and server URL). */
+/**
+ * True once the device is enrolled (has a device key and server URL). The
+ * api-key implies the tenant server-side (Better Auth resolves it from the
+ * key's `referenceId`) — the station has no use for the raw org id in 05a,
+ * and `Enrollment` never persists `tenantId`, so requiring it here would
+ * strand a successfully enrolled device back on the enrollment screen.
+ */
 export function isEnrolled(cfg: StationConfig): boolean {
-  return Boolean(cfg.tenantId && cfg.apiKey && cfg.serverUrl);
+  return Boolean(cfg.apiKey && cfg.serverUrl);
 }

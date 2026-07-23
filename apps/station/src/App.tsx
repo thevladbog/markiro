@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { OperatorMirrorRecord } from "@markiro/db";
 import { isEnrolled, readConfig, type StationConfig } from "./lib/config.js";
 import { createStationClient } from "./lib/api-client.js";
 import { applyMigrations } from "./lib/mirror.js";
+import { mirrorShiftBundle } from "./lib/shift-bundle.js";
 import { tauriExecutor } from "./lib/sqlite.js";
 import { Enrollment } from "./pages/Enrollment.js";
 import { OperatorLogin } from "./pages/OperatorLogin.js";
@@ -77,6 +78,17 @@ export function App() {
     };
   }, []);
 
+  // Memoized (keyed on apiKey+serverUrl, not the whole `config` object, which
+  // is a fresh reference on every `readConfig()`/`refreshConfig()` call) so
+  // ShiftSelection's fetch-on-mount effect (keyed on `client`) does not
+  // refetch on every render — e.g. every online/offline flap re-renders App.
+  // Must run unconditionally (before the `!config` early return below) to
+  // respect the Rules of Hooks; it degrades to `null` until enrolled.
+  const client = useMemo(
+    () => (config?.apiKey && config.serverUrl ? createStationClient(config) : null),
+    [config?.apiKey, config?.serverUrl],
+  );
+
   async function refreshConfig() {
     setConfig(await readConfig());
   }
@@ -100,8 +112,20 @@ export function App() {
     return <OperatorLogin exec={tauriExecutor} onAuthed={setOperator} />;
   }
 
-  // stage === "floor" here.
-  const client = createStationClient(config);
+  // stage === "floor" here, which requires `isEnrolled(config)` (apiKey +
+  // serverUrl truthy) — the same condition the `client` memo above builds
+  // from, so it is guaranteed non-null in this branch.
+  const activeClient = client!;
+
+  // Shared by ShiftSelection's `onSelected` and NewShift's `onStarted`: the
+  // shift is entered immediately (never blocked on the network), and the
+  // bundle download + SQLite mirror happens in the background so it's
+  // available offline afterward. See `mirrorShiftBundle` for the
+  // resilience contract (a download failure must not block entry).
+  function handleShiftEntered(entered: ActiveShift) {
+    setShift(entered);
+    void mirrorShiftBundle(activeClient, tauriExecutor, entered.id);
+  }
 
   return (
     <FloorShell online={online} tasks={[]} activeTaskId="" onSelectTask={() => {}}>
@@ -111,9 +135,17 @@ export function App() {
           <p>{shift.id}</p>
         </main>
       ) : floorView === "select" ? (
-        <ShiftSelection client={client} onSelected={setShift} onNew={() => setFloorView("new")} />
+        <ShiftSelection
+          client={activeClient}
+          onSelected={handleShiftEntered}
+          onNew={() => setFloorView("new")}
+        />
       ) : (
-        <NewShift client={client} onStarted={setShift} onBack={() => setFloorView("select")} />
+        <NewShift
+          client={activeClient}
+          onStarted={handleShiftEntered}
+          onBack={() => setFloorView("select")}
+        />
       )}
     </FloorShell>
   );
