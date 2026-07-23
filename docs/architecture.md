@@ -60,6 +60,10 @@ registry, `save-exact`, `engine-strict`, `minimum-release-age=10080`
   OFL), icons, sounds; zero CDN (the shop floor is offline).
 - Windows targets for MVP; Linux later; Android deferred (serial is painful).
 - Station cleanup: a shift is purged N days after confirmed sync.
+- Foundation delivered in Plan 05a (`docs/superpowers/plans/2026-07-23-05a-station-foundation.md`):
+  Tauri scaffold, Rust config/lockdown/updater skeletons, SQLite mirror, device
+  enrollment (api-key), shift bundle download, and offline operator auth.
+  The scan pipeline, hardware module, and signal behavior land in 05b.
 
 ## 3. Offline & sync
 
