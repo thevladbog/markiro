@@ -57,6 +57,13 @@
       "when": 1784797079462,
       "tag": "0007_dry_lilith",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1784837720502,
+      "tag": "0008_station_devices",
+      "breakpoints": true
     }
   ]
 }

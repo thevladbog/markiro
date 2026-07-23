@@ -34,7 +34,17 @@ function buildAuthImpl(
     emailAndPassword: { enabled: true },
     plugins: [
       organization(),
-      apiKey([{ configId: "station", defaultPrefix: "mk_", references: "organization" }]),
+      apiKey([
+        {
+          configId: "station",
+          defaultPrefix: "mk_",
+          references: "organization",
+          // Station enrollment (Task 6) tags minted keys with
+          // `metadata: { kind: "station" }`; the plugin rejects any
+          // `metadata` on createApiKey unless explicitly enabled per config.
+          enableMetadata: true,
+        },
+      ]),
     ],
   });
 }

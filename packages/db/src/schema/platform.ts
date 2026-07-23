@@ -139,3 +139,18 @@ export const shifts = pgTable(
     }),
   ],
 );
+
+export const stationDevices = pgTable(
+  "station_devices",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    name: text("name").notNull(),
+    // References better-auth's apikey.id (text). Not a composite tenant FK:
+    // apikey is a Better Auth-managed table without a (tenant_id, id) unique.
+    apiKeyId: text("api_key_id").notNull(),
+    enrolledAt: timestamp("enrolled_at", { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+  },
+  (t) => [unique("station_devices_tenant_id_uq").on(t.tenantId, t.id)],
+);
