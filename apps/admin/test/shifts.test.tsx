@@ -432,22 +432,25 @@ describe("ShiftsPage", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
 
-    await waitFor(() => {
-      // Find the PATCH call and verify the body contains plannedQty but not counterpartyId/productId
-      const patchCalls = fetchMock.mock.calls.filter(
-        (call) => call[0] === "/api/shifts/s1" && call[1]?.method === "PATCH"
-      );
-      expect(patchCalls.length).toBeGreaterThan(0);
-      const patchCall = patchCalls[0]!;
-      const body = JSON.parse(patchCall[1]?.body as string);
-      // The test changes only plannedQty, so it should be in the payload with the new value
-      expect(body.plannedQty).toBe(750);
-      // Other fields are either sent as-is or omitted if untouched
-      expect(body.mode).toBe("validation");
-      // counterpartyId and productId should NOT be in PATCH payloads at all
-      expect(body).not.toHaveProperty("counterpartyId");
-      expect(body).not.toHaveProperty("productId");
-    }, { timeout: 3000 });
+    await waitFor(
+      () => {
+        // Find the PATCH call and verify the body contains plannedQty but not counterpartyId/productId
+        const patchCalls = fetchMock.mock.calls.filter(
+          (call) => call[0] === "/api/shifts/s1" && call[1]?.method === "PATCH",
+        );
+        expect(patchCalls.length).toBeGreaterThan(0);
+        const patchCall = patchCalls[0]!;
+        const body = JSON.parse(patchCall[1]?.body as string);
+        // The test changes only plannedQty, so it should be in the payload with the new value
+        expect(body.plannedQty).toBe(750);
+        // Other fields are either sent as-is or omitted if untouched
+        expect(body.mode).toBe("validation");
+        // counterpartyId and productId should NOT be in PATCH payloads at all
+        expect(body).not.toHaveProperty("counterpartyId");
+        expect(body).not.toHaveProperty("productId");
+      },
+      { timeout: 3000 },
+    );
   });
 
   it("sends POST with prefilled boxCapacity and mode aggregation; palletCapacity omitted while pallets disabled", async () => {
@@ -487,23 +490,26 @@ describe("ShiftsPage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Запланировать" }));
 
-    await waitFor(() => {
-      // Find the POST call to /api/shifts (skip initial GET calls)
-      const postCalls = fetchMock.mock.calls.filter(
-        (call) => call[0] === "/api/shifts" && call[1]?.method === "POST"
-      );
-      expect(postCalls.length).toBeGreaterThan(0);
-      const postCall = postCalls[0]!;
-      const body = JSON.parse(postCall[1]?.body as string);
-      expect(body.mode).toBe("aggregation");
-      expect(body.productId).toBe(PRODUCT_A.id);
-      expect(body.boxCapacity).toBe(PRODUCT_A.boxCapacity);
-      expect(body.palletsEnabled).toBe(false);
-      expect(body.lineId).toBeNull();
-      expect(body.plannedQty).toBeNull();
-      expect(body.plannedDate).toBeNull();
-      expect(body.palletCapacity).toBeUndefined();
-    }, { timeout: 3000 });
+    await waitFor(
+      () => {
+        // Find the POST call to /api/shifts (skip initial GET calls)
+        const postCalls = fetchMock.mock.calls.filter(
+          (call) => call[0] === "/api/shifts" && call[1]?.method === "POST",
+        );
+        expect(postCalls.length).toBeGreaterThan(0);
+        const postCall = postCalls[0]!;
+        const body = JSON.parse(postCall[1]?.body as string);
+        expect(body.mode).toBe("aggregation");
+        expect(body.productId).toBe(PRODUCT_A.id);
+        expect(body.boxCapacity).toBe(PRODUCT_A.boxCapacity);
+        expect(body.palletsEnabled).toBe(false);
+        expect(body.lineId).toBeNull();
+        expect(body.plannedQty).toBeNull();
+        expect(body.plannedDate).toBeNull();
+        expect(body.palletCapacity).toBeUndefined();
+      },
+      { timeout: 3000 },
+    );
   });
 
   it("sends POST with palletsEnabled:true and prefilled palletCapacity when pallets checkbox is toggled", async () => {
@@ -551,22 +557,25 @@ describe("ShiftsPage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Запланировать" }));
 
-    await waitFor(() => {
-      // Find the POST call to /api/shifts (skip initial GET calls)
-      const postCalls = fetchMock.mock.calls.filter(
-        (call) => call[0] === "/api/shifts" && call[1]?.method === "POST"
-      );
-      expect(postCalls.length).toBeGreaterThan(0);
-      const postCall = postCalls[0]!;
-      const body = JSON.parse(postCall[1]?.body as string);
-      expect(body.mode).toBe("aggregation");
-      expect(body.productId).toBe(PRODUCT_A.id);
-      expect(body.boxCapacity).toBe(PRODUCT_A.boxCapacity);
-      expect(body.palletsEnabled).toBe(true);
-      expect(body.palletCapacity).toBe(PRODUCT_A.palletCapacity);
-      expect(body.lineId).toBeNull();
-      expect(body.plannedQty).toBeNull();
-      expect(body.plannedDate).toBeNull();
-    }, { timeout: 3000 });
+    await waitFor(
+      () => {
+        // Find the POST call to /api/shifts (skip initial GET calls)
+        const postCalls = fetchMock.mock.calls.filter(
+          (call) => call[0] === "/api/shifts" && call[1]?.method === "POST",
+        );
+        expect(postCalls.length).toBeGreaterThan(0);
+        const postCall = postCalls[0]!;
+        const body = JSON.parse(postCall[1]?.body as string);
+        expect(body.mode).toBe("aggregation");
+        expect(body.productId).toBe(PRODUCT_A.id);
+        expect(body.boxCapacity).toBe(PRODUCT_A.boxCapacity);
+        expect(body.palletsEnabled).toBe(true);
+        expect(body.palletCapacity).toBe(PRODUCT_A.palletCapacity);
+        expect(body.lineId).toBeNull();
+        expect(body.plannedQty).toBeNull();
+        expect(body.plannedDate).toBeNull();
+      },
+      { timeout: 3000 },
+    );
   });
 });
