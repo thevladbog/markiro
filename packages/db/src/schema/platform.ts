@@ -13,6 +13,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { organization } from "./auth.js";
+import { labelTemplates } from "./labels.js";
 
 export const productStatus = pgEnum("product_status", ["draft", "active"]);
 export const shiftStatus = pgEnum("shift_status", ["planned", "active", "closed"]);
@@ -53,6 +54,7 @@ export const products = pgTable(
     palletCapacity: integer("pallet_capacity"),
     status: productStatus("status").notNull().default("draft"),
     defaultCounterpartyId: uuid("default_counterparty_id"),
+    defaultLabelTemplateId: uuid("default_label_template_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -64,6 +66,13 @@ export const products = pgTable(
       name: "products_tenant_default_counterparty_fk",
       columns: [t.tenantId, t.defaultCounterpartyId],
       foreignColumns: [counterparties.tenantId, counterparties.id],
+    }),
+    // Composite FK: default_label_template_id must belong to the same
+    // tenant as the product referencing it (plan-04 Task 7).
+    foreignKey({
+      name: "products_tenant_default_label_template_fk",
+      columns: [t.tenantId, t.defaultLabelTemplateId],
+      foreignColumns: [labelTemplates.tenantId, labelTemplates.id],
     }),
   ],
 );
@@ -87,6 +96,7 @@ export const shifts = pgTable(
     productId: uuid("product_id").notNull(),
     lineId: uuid("line_id"),
     counterpartyId: uuid("counterparty_id"),
+    labelTemplateId: uuid("label_template_id"),
     status: shiftStatus("status").notNull().default("planned"),
     mode: shiftMode("mode").notNull(),
     plannedQty: integer("planned_qty"),
@@ -119,6 +129,13 @@ export const shifts = pgTable(
       name: "shifts_tenant_counterparty_fk",
       columns: [t.tenantId, t.counterpartyId],
       foreignColumns: [counterparties.tenantId, counterparties.id],
+    }),
+    // label_template_id is nullable — MATCH SIMPLE means a NULL skips the
+    // check; a shift may have no effective label template (plan-04 Task 7).
+    foreignKey({
+      name: "shifts_tenant_label_template_fk",
+      columns: [t.tenantId, t.labelTemplateId],
+      foreignColumns: [labelTemplates.tenantId, labelTemplates.id],
     }),
   ],
 );

@@ -59,6 +59,22 @@ const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
 );
 
+/** Direct-DB label template seed (bypasses domain spec validation -- not under test here). */
+async function seedLabelTemplate(
+  db: Db,
+  tenantId: string,
+  name = "Seed Template",
+): Promise<string> {
+  const id = randomUUID();
+  await db.insert(schema.labelTemplates).values({
+    id,
+    tenantId,
+    name,
+    spec: { widthMm: 58, heightMm: 40, dpi: 203, language: "zpl", elements: [] },
+  });
+  return id;
+}
+
 describe.skipIf(!ready)("products e2e", () => {
   let app: INestApplication | undefined;
   let setup: AuthSetup;
@@ -133,6 +149,7 @@ describe.skipIf(!ready)("products e2e", () => {
       palletCapacity: null,
       status: "draft",
       defaultCounterpartyId: null,
+      defaultLabelTemplateId: null,
     });
     expect(res.body.id).toBeDefined();
     expect(res.body.createdAt).toBeDefined();
@@ -413,5 +430,105 @@ describe.skipIf(!ready)("products e2e", () => {
       .expect(400);
 
     expect(res.body.message).toEqual(expect.stringContaining("Unknown counterparty"));
+  });
+
+  it("POST /products accepts a defaultLabelTemplateId and PATCH can clear it back to null", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+
+    const templateId = await seedLabelTemplate(db, orgId, "Bottle Template");
+
+    const createRes = await agent
+      .post("/products")
+      .send({
+        gtin: EAN13_CANONICAL,
+        name: "Widget with Template",
+        defaultLabelTemplateId: templateId,
+      })
+      .expect(201);
+    expect(createRes.body.defaultLabelTemplateId).toEqual(templateId);
+    const id = createRes.body.id as string;
+
+    const clearRes = await agent
+      .patch(`/products/${id}`)
+      .send({ defaultLabelTemplateId: null })
+      .expect(200);
+    expect(clearRes.body.defaultLabelTemplateId).toBeNull();
+  });
+
+  it("PATCH /products/:id omitting defaultLabelTemplateId leaves it unchanged", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+
+    const templateId = await seedLabelTemplate(db, orgId, "Kept Template");
+    const createRes = await agent
+      .post("/products")
+      .send({
+        gtin: EAN13_CANONICAL,
+        name: "Widget with Kept Template",
+        defaultLabelTemplateId: templateId,
+      })
+      .expect(201);
+    const id = createRes.body.id as string;
+
+    const patchRes = await agent.patch(`/products/${id}`).send({ name: "Renamed" }).expect(200);
+    expect(patchRes.body).toMatchObject({ name: "Renamed", defaultLabelTemplateId: templateId });
+  });
+
+  it("POST /products rejects a nonexistent defaultLabelTemplateId with 400", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+
+    const res = await agent
+      .post("/products")
+      .send({
+        gtin: EAN13_CANONICAL,
+        name: "Widget with Bad Template",
+        defaultLabelTemplateId: randomUUID(),
+      })
+      .expect(400);
+
+    expect(res.body.message).toEqual(expect.stringContaining("Unknown label template"));
+  });
+
+  it("POST /products rejects a cross-tenant defaultLabelTemplateId with 400", async () => {
+    const agent1 = request.agent(app!.getHttpServer());
+    const org1 = await signUpAndActivate(agent1);
+    const templateId = await seedLabelTemplate(db, org1, "Org1 Template");
+
+    const agent2 = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent2);
+
+    const res = await agent2
+      .post("/products")
+      .send({
+        gtin: EAN13_CANONICAL,
+        name: "Widget with Cross-Tenant Template",
+        defaultLabelTemplateId: templateId,
+      })
+      .expect(400);
+
+    expect(res.body.message).toEqual(expect.stringContaining("Unknown label template"));
+  });
+
+  it("PATCH /products/:id rejects a cross-tenant defaultLabelTemplateId with 400", async () => {
+    const agent1 = request.agent(app!.getHttpServer());
+    const org1 = await signUpAndActivate(agent1);
+    const templateId = await seedLabelTemplate(db, org1, "Org1 Template");
+
+    const agent2 = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent2);
+    const createRes = await agent2
+      .post("/products")
+      .send({ gtin: EAN13_CANONICAL, name: "Org2 Widget" })
+      .expect(201);
+    const id = createRes.body.id as string;
+
+    const res = await agent2
+      .patch(`/products/${id}`)
+      .send({ defaultLabelTemplateId: templateId })
+      .expect(400);
+
+    expect(res.body.message).toEqual(expect.stringContaining("Unknown label template"));
   });
 });

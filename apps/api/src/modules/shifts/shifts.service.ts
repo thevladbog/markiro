@@ -42,6 +42,7 @@ export class ShiftsService {
       .leftJoin(schema.products, eq(schema.shifts.productId, schema.products.id))
       .leftJoin(schema.lines, eq(schema.shifts.lineId, schema.lines.id))
       .leftJoin(schema.counterparties, eq(schema.shifts.counterpartyId, schema.counterparties.id))
+      .leftJoin(schema.labelTemplates, eq(schema.shifts.labelTemplateId, schema.labelTemplates.id))
       .where(and(...conditions))
       .orderBy(schema.shifts.createdAt);
 
@@ -56,6 +57,7 @@ export class ShiftsService {
       .leftJoin(schema.products, eq(schema.shifts.productId, schema.products.id))
       .leftJoin(schema.lines, eq(schema.shifts.lineId, schema.lines.id))
       .leftJoin(schema.counterparties, eq(schema.shifts.counterpartyId, schema.counterparties.id))
+      .leftJoin(schema.labelTemplates, eq(schema.shifts.labelTemplateId, schema.labelTemplates.id))
       .where(and(eq(schema.shifts.tenantId, tenantId), eq(schema.shifts.id, id)));
 
     if (!row) {
@@ -65,11 +67,14 @@ export class ShiftsService {
   }
 
   /**
-   * Create a shift. Server prefill (plan-03 contract): `boxCapacity`/
-   * `palletCapacity`/`counterpartyId` default from the product when omitted
-   * (`undefined`); an explicit `null` in the body opts out of the prefill.
-   * Draft products are rejected outright (422) -- a product must be
-   * "complete" (group + both capacities) before any shift can reference it.
+   * Create a shift. Server prefill (plan-03 contract, extended in plan-04
+   * for label templates): `boxCapacity`/`palletCapacity`/`counterpartyId`/
+   * `labelTemplateId` default from the product when omitted (`undefined`);
+   * an explicit `null` in the body opts out of the prefill. Draft products
+   * are rejected outright (422) -- a product must be "complete" (group +
+   * both capacities) before any shift can reference it. A shift may end up
+   * with no effective label template (neither the shift nor its product has
+   * one) -- allowed by design; the printing station decides the fallback.
    */
   async createShift(tenantId: string, data: CreateShiftDto): Promise<ShiftDto> {
     const product = await this.findProductRow(tenantId, data.productId);
@@ -85,6 +90,8 @@ export class ShiftsService {
       data.palletCapacity !== undefined ? data.palletCapacity : product.palletCapacity;
     const counterpartyId =
       data.counterpartyId !== undefined ? data.counterpartyId : product.defaultCounterpartyId;
+    const labelTemplateId =
+      data.labelTemplateId !== undefined ? data.labelTemplateId : product.defaultLabelTemplateId;
     const palletsEnabled = data.palletsEnabled ?? false;
 
     this.assertCapacityRules(data.mode, boxCapacity, palletsEnabled, palletCapacity);
@@ -97,6 +104,7 @@ export class ShiftsService {
           productId: data.productId,
           lineId: data.lineId ?? null,
           counterpartyId: counterpartyId ?? null,
+          labelTemplateId: labelTemplateId ?? null,
           mode: data.mode,
           plannedQty: data.plannedQty ?? null,
           plannedDate: data.plannedDate ?? null,
@@ -133,6 +141,8 @@ export class ShiftsService {
     const lineId = data.lineId !== undefined ? data.lineId : current.lineId;
     const counterpartyId =
       data.counterpartyId !== undefined ? data.counterpartyId : current.counterpartyId;
+    const labelTemplateId =
+      data.labelTemplateId !== undefined ? data.labelTemplateId : current.labelTemplateId;
     const plannedQty = data.plannedQty !== undefined ? data.plannedQty : current.plannedQty;
     const plannedDate = data.plannedDate !== undefined ? data.plannedDate : current.plannedDate;
     const boxCapacity = data.boxCapacity !== undefined ? data.boxCapacity : current.boxCapacity;
@@ -150,6 +160,7 @@ export class ShiftsService {
           mode,
           lineId,
           counterpartyId,
+          labelTemplateId,
           plannedQty,
           plannedDate,
           boxCapacity,
@@ -279,6 +290,8 @@ export class ShiftsService {
       lineName: schema.lines.name,
       counterpartyId: schema.shifts.counterpartyId,
       counterpartyName: schema.counterparties.name,
+      labelTemplateId: schema.shifts.labelTemplateId,
+      labelTemplateName: schema.labelTemplates.name,
       plannedQty: schema.shifts.plannedQty,
       plannedDate: schema.shifts.plannedDate,
       boxCapacity: schema.shifts.boxCapacity,
@@ -295,7 +308,8 @@ export class ShiftsService {
   /**
    * Catch PostgreSQL violations: unique 23505 -> 409; FK 23503 -> 400,
    * naming the referenced entity per FK constraint name (shifts has
-   * composite FKs to products/lines/counterparties -- see platform.ts).
+   * composite FKs to products/lines/counterparties/label_templates --
+   * see platform.ts).
    */
   private handleWriteError(error: unknown): never {
     const err = error as Error & { code?: string; constraint?: string; cause?: unknown };
@@ -315,6 +329,9 @@ export class ShiftsService {
       }
       if (constraint === "shifts_tenant_counterparty_fk") {
         throw new BadRequestException("Unknown counterparty for this organization");
+      }
+      if (constraint === "shifts_tenant_label_template_fk") {
+        throw new BadRequestException("Unknown label template for this organization");
       }
       throw new BadRequestException(
         "Referenced entity does not belong to this organization or does not exist",

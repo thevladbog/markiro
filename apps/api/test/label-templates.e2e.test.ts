@@ -4,9 +4,11 @@ import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
+import { schema, type Db } from "@markiro/db";
 
 /**
  * A minimal, valid `LabelTemplateSpec` (see packages/domain/src/labels/model.ts)
@@ -37,10 +39,12 @@ const ready = Boolean(
 describe.skipIf(!ready)("label-templates e2e", () => {
   let app: INestApplication | undefined;
   let setup: AuthSetup;
+  let db: Db;
 
   beforeAll(async () => {
     const env = loadEnv();
     setup = setupAuth(env);
+    db = setup.db;
 
     const ref = await Test.createTestingModule({
       imports: [AppModule.forRoot({ ...setup, databaseUrl: env.DATABASE_URL })],
@@ -273,5 +277,76 @@ describe.skipIf(!ready)("label-templates e2e", () => {
     expect(listA.body.items).toHaveLength(1);
     const listB = await agent2.get("/label-templates").expect(200);
     expect(listB.body.items).toHaveLength(0);
+  });
+
+  it("DELETE /label-templates/:id returns 409 if referenced by a product's defaultLabelTemplateId", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+
+    const createRes = await agent
+      .post("/label-templates")
+      .send({ name: "Referenced Template", spec: VALID_SPEC })
+      .expect(201);
+    const id = createRes.body.id as string;
+
+    // Seed a product that references the template (direct DB insert).
+    await db.insert(schema.products).values({
+      id: randomUUID(),
+      tenantId: orgId,
+      gtin14: `${Math.floor(Math.random() * 1e13)}`.padStart(14, "0"),
+      name: "Seed Product",
+      status: "draft",
+      defaultLabelTemplateId: id,
+    });
+
+    const deleteRes = await agent.delete(`/label-templates/${id}`).expect(409);
+    expect(deleteRes.body).toMatchObject({
+      message: expect.stringContaining("referenced"),
+    });
+  });
+
+  it("DELETE /label-templates/:id returns 409 if referenced by a shift's labelTemplateId, then 204 once unreferenced", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+
+    const createRes = await agent
+      .post("/label-templates")
+      .send({ name: "Shift Referenced Template", spec: VALID_SPEC })
+      .expect(201);
+    const id = createRes.body.id as string;
+
+    const productId = randomUUID();
+    await db.insert(schema.products).values({
+      id: productId,
+      tenantId: orgId,
+      gtin14: `${Math.floor(Math.random() * 1e13)}`.padStart(14, "0"),
+      name: "Seed Product",
+      status: "active",
+      productGroup: "Beverages",
+      boxCapacity: 12,
+      palletCapacity: 48,
+    });
+    const shiftId = randomUUID();
+    await db.insert(schema.shifts).values({
+      id: shiftId,
+      tenantId: orgId,
+      productId,
+      mode: "validation",
+      labelTemplateId: id,
+    });
+
+    const deleteRes = await agent.delete(`/label-templates/${id}`).expect(409);
+    expect(deleteRes.body).toMatchObject({
+      message: expect.stringContaining("referenced"),
+    });
+
+    // Unreference (clear the shift's labelTemplateId) -> delete now succeeds.
+    await db
+      .update(schema.shifts)
+      .set({ labelTemplateId: null })
+      .where(eq(schema.shifts.id, shiftId));
+
+    await agent.delete(`/label-templates/${id}`).expect(204);
+    await agent.get(`/label-templates/${id}`).expect(404);
   });
 });

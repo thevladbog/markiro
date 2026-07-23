@@ -1,0 +1,4 @@
+ALTER TABLE "products" ADD COLUMN "default_label_template_id" uuid;--> statement-breakpoint
+ALTER TABLE "shifts" ADD COLUMN "label_template_id" uuid;--> statement-breakpoint
+ALTER TABLE "products" ADD CONSTRAINT "products_tenant_default_label_template_fk" FOREIGN KEY ("tenant_id","default_label_template_id") REFERENCES "public"."label_templates"("tenant_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "shifts" ADD CONSTRAINT "shifts_tenant_label_template_fk" FOREIGN KEY ("tenant_id","label_template_id") REFERENCES "public"."label_templates"("tenant_id","id") ON DELETE no action ON UPDATE no action;

@@ -13,15 +13,17 @@ export type ShiftOrigin = "admin" | "station";
 const plannedDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "plannedDate must be YYYY-MM-DD");
 
 /**
- * POST /shifts schema. `boxCapacity`/`palletCapacity`/`counterpartyId` are
- * server-prefilled from the product when omitted (`undefined`); an explicit
- * `null` opts out of the prefill (see ShiftsService.createShift).
+ * POST /shifts schema. `boxCapacity`/`palletCapacity`/`counterpartyId`/
+ * `labelTemplateId` are server-prefilled from the product when omitted
+ * (`undefined`); an explicit `null` opts out of the prefill (see
+ * ShiftsService.createShift).
  */
 export const createShiftSchema = z.object({
   productId: z.string().uuid(),
   mode: z.enum(SHIFT_MODES),
   lineId: z.string().uuid().nullable().optional(),
   counterpartyId: z.string().uuid().nullable().optional(),
+  labelTemplateId: z.string().uuid().nullable().optional(),
   plannedQty: z.number().int().min(1).nullable().optional(),
   plannedDate: plannedDateSchema.nullable().optional(),
   boxCapacity: z.number().int().min(1).nullable().optional(),
@@ -35,6 +37,7 @@ export const updateShiftSchema = z.object({
   mode: z.enum(SHIFT_MODES).optional(),
   lineId: z.string().uuid().nullable().optional(),
   counterpartyId: z.string().uuid().nullable().optional(),
+  labelTemplateId: z.string().uuid().nullable().optional(),
   plannedQty: z.number().int().min(1).nullable().optional(),
   plannedDate: plannedDateSchema.nullable().optional(),
   boxCapacity: z.number().int().min(1).nullable().optional(),
@@ -69,6 +72,8 @@ export interface ShiftDto {
   lineName: string | null;
   counterpartyId: string | null;
   counterpartyName: string | null;
+  labelTemplateId: string | null;
+  labelTemplateName: string | null;
   plannedQty: number | null;
   plannedDate: string | null;
   boxCapacity: number | null;

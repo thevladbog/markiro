@@ -96,6 +96,18 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     return id;
   }
 
+  /** Direct-DB label template seed (bypasses domain spec validation -- not under test here). */
+  async function seedLabelTemplate(tenantId: string, name = "Seed Template"): Promise<string> {
+    const id = randomUUID();
+    await db.insert(schema.labelTemplates).values({
+      id,
+      tenantId,
+      name,
+      spec: { widthMm: 58, heightMm: 40, dpi: 203, language: "zpl", elements: [] },
+    });
+    return id;
+  }
+
   // ---------------------------------------------------------------------
   // Lines CRUD
   // ---------------------------------------------------------------------
@@ -231,6 +243,86 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     });
   });
 
+  it("POST /shifts prefills labelTemplateId from the product's defaultLabelTemplateId", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+
+    const templateId = await seedLabelTemplate(orgId, "Product Default Template");
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      productGroup: "Beverages",
+      boxCapacity: 12,
+      palletCapacity: 48,
+      defaultLabelTemplateId: templateId,
+    });
+
+    const res = await agent.post("/shifts").send({ productId, mode: "validation" }).expect(201);
+
+    expect(res.body).toMatchObject({ productId, labelTemplateId: templateId });
+  });
+
+  it("POST /shifts: explicit labelTemplateId null overrides the product default (no effective template)", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+
+    const templateId = await seedLabelTemplate(orgId, "Product Default Template");
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      productGroup: "Beverages",
+      boxCapacity: 12,
+      palletCapacity: 48,
+      defaultLabelTemplateId: templateId,
+    });
+
+    // aggregation mode is deliberately used here to pin the plan's rule that
+    // a shift WITHOUT an effective label template is still allowed to be
+    // created -- the printing station decides the fallback later.
+    const res = await agent
+      .post("/shifts")
+      .send({ productId, mode: "aggregation", labelTemplateId: null })
+      .expect(201);
+
+    expect(res.body).toMatchObject({ productId, labelTemplateId: null });
+  });
+
+  it("POST /shifts: an explicit labelTemplateId overrides the product default with its own", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+
+    const defaultTemplateId = await seedLabelTemplate(orgId, "Product Default Template");
+    const ownTemplateId = await seedLabelTemplate(orgId, "Shift Own Template");
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      productGroup: "Beverages",
+      boxCapacity: 12,
+      palletCapacity: 48,
+      defaultLabelTemplateId: defaultTemplateId,
+    });
+
+    const res = await agent
+      .post("/shifts")
+      .send({ productId, mode: "validation", labelTemplateId: ownTemplateId })
+      .expect(201);
+
+    expect(res.body).toMatchObject({ productId, labelTemplateId: ownTemplateId });
+  });
+
+  it("POST /shifts: no product default and no override -> labelTemplateId is null (allowed)", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      productGroup: "Beverages",
+      boxCapacity: 12,
+      palletCapacity: 48,
+    });
+
+    const res = await agent.post("/shifts").send({ productId, mode: "aggregation" }).expect(201);
+
+    expect(res.body).toMatchObject({ productId, labelTemplateId: null });
+  });
+
   it("POST /shifts rejects a draft product with 422", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpAndActivate(agent);
@@ -361,6 +453,28 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     expect(res.body.message).toEqual(expect.stringContaining("Unknown counterparty"));
   });
 
+  it("POST /shifts rejects a cross-tenant labelTemplateId with 400", async () => {
+    const agent1 = request.agent(app!.getHttpServer());
+    const org1 = await signUpAndActivate(agent1);
+    const templateId = await seedLabelTemplate(org1, "Org1 Template");
+
+    const agent2 = request.agent(app!.getHttpServer());
+    const org2 = await signUpAndActivate(agent2);
+    const productId = await seedProduct(org2, {
+      status: "active",
+      productGroup: "Beverages",
+      boxCapacity: 12,
+      palletCapacity: 48,
+    });
+
+    const res = await agent2
+      .post("/shifts")
+      .send({ productId, mode: "validation", labelTemplateId: templateId })
+      .expect(400);
+
+    expect(res.body.message).toEqual(expect.stringContaining("Unknown label template"));
+  });
+
   // ---------------------------------------------------------------------
   // Shifts: PATCH/DELETE gated by planned status
   // ---------------------------------------------------------------------
@@ -465,11 +579,12 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
   // Shifts: list joins + filters
   // ---------------------------------------------------------------------
 
-  it("GET /shifts joins productName/lineName/counterpartyName and supports status/date/line filters", async () => {
+  it("GET /shifts joins productName/lineName/counterpartyName/labelTemplateName and supports status/date/line filters", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpAndActivate(agent);
 
     const counterpartyId = await seedCounterparty(orgId, "Joined Counterparty");
+    const templateId = await seedLabelTemplate(orgId, "Joined Template");
     const productId = await seedProduct(orgId, {
       name: "Joined Product",
       status: "active",
@@ -477,6 +592,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       boxCapacity: 12,
       palletCapacity: 48,
       defaultCounterpartyId: counterpartyId,
+      defaultLabelTemplateId: templateId,
     });
     const lineRes = await agent.post("/lines").send({ name: "Joined Line" }).expect(201);
     const lineId = lineRes.body.id as string;
@@ -509,6 +625,8 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       productName: "Joined Product",
       lineName: "Joined Line",
       counterpartyName: "Joined Counterparty",
+      labelTemplateId: templateId,
+      labelTemplateName: "Joined Template",
     });
 
     const byStatus = await agent.get("/shifts").query({ status: "active" }).expect(200);
