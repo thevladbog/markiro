@@ -12,6 +12,7 @@ import { LabelTemplatesModule } from "./modules/label-templates/label-templates.
 import { EmployeesModule } from "./modules/employees/employees.module";
 import { KiosksModule } from "./modules/kiosks/kiosks.module";
 import { PickupReasonsModule } from "./modules/pickup-reasons/pickup-reasons.module";
+import { KioskModule } from "./modules/kiosk/kiosk.module";
 
 @Module({ controllers: [HealthController] })
 export class AppModule {
@@ -43,6 +44,7 @@ export class AppModule {
         EmployeesModule,
         KiosksModule,
         PickupReasonsModule,
+        KioskModule,
       ],
       controllers: [HealthController],
     };
