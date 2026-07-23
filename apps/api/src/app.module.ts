@@ -8,6 +8,7 @@ import { CounterpartiesModule } from "./modules/counterparties/counterparties.mo
 import { ProductsModule } from "./modules/products/products.module";
 import { LinesModule } from "./modules/lines/lines.module";
 import { ShiftsModule } from "./modules/shifts/shifts.module";
+import { LabelTemplatesModule } from "./modules/label-templates/label-templates.module";
 
 @Module({ controllers: [HealthController] })
 export class AppModule {
@@ -35,6 +36,7 @@ export class AppModule {
         ProductsModule,
         LinesModule,
         ShiftsModule,
+        LabelTemplatesModule,
       ],
       controllers: [HealthController],
     };
