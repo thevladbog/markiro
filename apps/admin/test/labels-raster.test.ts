@@ -28,7 +28,7 @@ import {
   CYRILLIC_SAMPLE,
   sampleCoveredByFont,
 } from "../src/labels/fontCoverage.js";
-import { RasterUnavailableError, rasterizeText } from "../src/labels/rasterizer.js";
+import { mapFontFamily, RasterUnavailableError, rasterizeText } from "../src/labels/rasterizer.js";
 
 /**
  * Builds a minimal, real, serializable `opentype.Font` whose glyph set is
@@ -68,6 +68,20 @@ describe("rasterizeText (browser canvas rasterizer)", () => {
         expect((err as Error).name).toBe("RasterUnavailableError");
       },
     );
+  });
+});
+
+describe("mapFontFamily (generic CSS keyword -> bundled IBM Plex family)", () => {
+  it('maps "sans-serif" to the bundled IBM Plex Sans family, keeping the generic fallback', () => {
+    expect(mapFontFamily("sans-serif")).toBe("IBM Plex Sans, sans-serif");
+  });
+
+  it('maps "monospace" to the bundled IBM Plex Mono family, keeping the generic fallback', () => {
+    expect(mapFontFamily("monospace")).toBe("IBM Plex Mono, monospace");
+  });
+
+  it("returns any other family unchanged (defensive fallback, e.g. an already-bundled family name)", () => {
+    expect(mapFontFamily("IBM Plex Sans")).toBe("IBM Plex Sans");
   });
 });
 

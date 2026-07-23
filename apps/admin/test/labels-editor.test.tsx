@@ -29,7 +29,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { parseLabelTemplate, type RasterResult, type RasterizeTextFn } from "@markiro/domain";
 
-import { latin1ToUint8Array } from "../src/pages/labels/editor/download.js";
+import { buildZplBlob, latin1ToUint8Array } from "../src/pages/labels/editor/download.js";
 import { LabelEditorPage } from "../src/pages/labels/editor/index.js";
 import { decodeRasterToRgba } from "../src/pages/labels/editor/raster-preview.js";
 
@@ -316,6 +316,13 @@ describe("Download (ZPL/TSPL byte safety)", () => {
   it("latin1ToUint8Array preserves a byte > 0x7F exactly (no UTF-8 mangling)", () => {
     const bytes = latin1ToUint8Array("ÿA");
     expect(Array.from(bytes)).toEqual([0xff, 0x41]);
+  });
+
+  it("buildZplBlob keeps a Latin-1 byte in ^FD data single-byte (no UTF-8 re-encoding)", async () => {
+    const blob = buildZplBlob("^XA^FDé^FS^XZ");
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    expect(Array.from(bytes)).toContain(0xe9);
+    expect(Array.from(bytes)).not.toContain(0xc3); // the UTF-8 lead byte "é" would become if re-encoded
   });
 
   it("Скачать ZPL produces a Blob whose text contains ^XA", async () => {

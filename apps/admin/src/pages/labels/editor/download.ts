@@ -3,28 +3,38 @@
  *
  * BYTE-SAFETY (the reason this tiny module exists at all): both
  * `@markiro/domain`'s `generateZpl` and `generateTspl` return a plain JS
- * `string`. For ZPL that string is always printable ASCII (raster images are
- * embedded as `^GFA`'s ASCII-HEX payload -- see `raster-types.ts`'s
- * `buildGfaCommand`), so handing it straight to the `Blob` constructor is
- * safe: `Blob` UTF-8-encodes a JS string, and UTF-8 is a no-op for every
- * code point <= 0x7F.
+ * `string` using ONE JS STRING CODE UNIT PER BYTE semantics wherever they
+ * embed raw/binary data. ZPL's own raster images are embedded as `^GFA`'s
+ * ASCII-HEX payload (see `raster-types.ts`'s `buildGfaCommand`) -- always
+ * printable ASCII, a no-op under UTF-8 -- but a ZPL document is NOT
+ * guaranteed all-ASCII end to end: `zpl.ts`'s `escapeFdData` only hex-escapes
+ * `^`/`~`/`_` inside `^FD` field data, so a raw Latin-1 Supplement byte
+ * (0x80-0xFF -- e.g. `"é"` = 0xE9) reaching a `^FD` field UNESCAPED (a
+ * barcode's `{ literal }` override, in particular, is never routed through
+ * `needsImageRendering`/rasterization at all) would still corrupt exactly
+ * like TSPL's case below.
  *
- * TSPL is different: `generateTspl`'s `BITMAP` command embeds RAW BINARY
- * bytes as one JS string character per byte (code points 0x00-0xFF, produced
- * via `String.fromCharCode` -- see `tspl.ts`'s module doc comment, "BINARY
- * CARRIER STRATEGY"). Handing THAT string straight to `Blob` would corrupt
- * every embedded byte >= 0x80: `Blob`'s UTF-8 encoding turns a single
- * code point like U+00FF into the TWO bytes `0xC3 0xBF`, not the original
- * single byte `0xFF` the printer's `BITMAP` payload actually needs. This is
- * not a theoretical concern -- it was verified directly against this
- * runtime's real `Blob`: `new Blob(["ÿ"]).arrayBuffer()` yields
- * `[0xC3, 0xBF]`, two bytes, not one.
+ * TSPL goes further by design: `generateTspl`'s `BITMAP` command embeds RAW
+ * BINARY bytes as one JS string character per byte (code points 0x00-0xFF,
+ * produced via `String.fromCharCode` -- see `tspl.ts`'s module doc comment,
+ * "BINARY CARRIER STRATEGY").
+ *
+ * Either way, handing such a string straight to the `Blob` constructor would
+ * corrupt every embedded byte >= 0x80: `Blob` UTF-8-encodes a JS string, and
+ * UTF-8 is a no-op ONLY for code points <= 0x7F. A code point like U+00FF
+ * becomes the TWO bytes `0xC3 0xBF`, not the original single byte `0xFF` the
+ * document actually needs. This is not a theoretical concern -- it was
+ * verified directly against this runtime's real `Blob`:
+ * `new Blob(["ÿ"]).arrayBuffer()` yields `[0xC3, 0xBF]`, two bytes, not one.
  *
  * `latin1ToUint8Array` sidesteps this entirely by converting the string to
  * exact bytes FIRST (one `charCodeAt` per character, matching the encoding
- * `generateTspl` itself used to produce the string) and handing `Blob` a
- * `Uint8Array` instead of a string -- `Blob` copies typed-array bytes
- * verbatim, with no text-encoding step at all.
+ * these emitters themselves used to produce the string) and handing `Blob`
+ * a `Uint8Array` instead of a string -- `Blob` copies typed-array bytes
+ * verbatim, with no text-encoding step at all. BOTH `buildZplBlob` and
+ * `buildTsplBlob` route through it for exactly this reason: a no-op for
+ * ZPL's common all-ASCII case, but load-bearing the moment any non-ASCII
+ * byte reaches either document unescaped.
  */
 
 /**
@@ -55,9 +65,15 @@ export function latin1ToUint8Array(text: string): Uint8Array<ArrayBuffer> {
   return bytes;
 }
 
-/** Builds a downloadable ZPL `Blob` -- plain ASCII text, safe to hand to `Blob` as a string directly. */
+/**
+ * Builds a downloadable ZPL `Blob` -- routed through `latin1ToUint8Array`
+ * like TSPL (see this module's doc comment): a no-op for the common
+ * all-ASCII document, but it keeps an unescaped Latin-1 byte in `^FD` data
+ * (e.g. a barcode `{ literal }` containing `"é"` = 0xE9) a single byte
+ * instead of `Blob`'s two-byte UTF-8 re-encoding.
+ */
 export function buildZplBlob(zplText: string): Blob {
-  return new Blob([zplText], { type: "text/plain" });
+  return new Blob([latin1ToUint8Array(zplText)], { type: "text/plain" });
 }
 
 /**
