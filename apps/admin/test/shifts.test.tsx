@@ -450,7 +450,7 @@ describe("ShiftsPage", () => {
     }, { timeout: 3000 });
   });
 
-  it("sends POST with boxCapacity and palletCapacity when creating in aggregation mode", async () => {
+  it("sends POST with prefilled boxCapacity and mode aggregation; palletCapacity omitted while pallets disabled", async () => {
     const created = {
       ...PLANNED_SHIFT,
       id: "new3",
@@ -458,7 +458,8 @@ describe("ShiftsPage", () => {
       productName: PRODUCT_A.name,
       mode: "aggregation",
       boxCapacity: PRODUCT_A.boxCapacity,
-      palletCapacity: PRODUCT_A.palletCapacity,
+      palletCapacity: null,
+      palletsEnabled: false,
     };
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       const path = String(url);
@@ -502,6 +503,70 @@ describe("ShiftsPage", () => {
       expect(body.plannedQty).toBeNull();
       expect(body.plannedDate).toBeNull();
       expect(body.palletCapacity).toBeUndefined();
+    }, { timeout: 3000 });
+  });
+
+  it("sends POST with palletsEnabled:true and prefilled palletCapacity when pallets checkbox is toggled", async () => {
+    const created = {
+      ...PLANNED_SHIFT,
+      id: "new4",
+      productId: PRODUCT_A.id,
+      productName: PRODUCT_A.name,
+      mode: "aggregation",
+      boxCapacity: PRODUCT_A.boxCapacity,
+      palletCapacity: PRODUCT_A.palletCapacity,
+      palletsEnabled: true,
+    };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/shifts" && init?.method === "POST") return jsonResponse(201, created);
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
+      if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
+      if (path === "/api/counterparties") return jsonResponse(200, { items: [] });
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Смены не запланированы");
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Запланировать смену" })[0]!);
+    await screen.findByText("Новая смена");
+
+    fireEvent.click(screen.getByLabelText("Агрегация"));
+    fireEvent.change(screen.getByLabelText("Продукт"), { target: { value: PRODUCT_A.id } });
+    await waitFor(() => {
+      expect((screen.getByLabelText("Вместимость короба, шт") as HTMLInputElement).value).toBe(
+        String(PRODUCT_A.boxCapacity),
+      );
+    });
+
+    // Toggle the pallets checkbox to show and prefill the pallet capacity field
+    fireEvent.click(screen.getByLabelText("Использовать паллеты"));
+    await waitFor(() => {
+      expect((screen.getByLabelText("Вместимость паллеты, шт") as HTMLInputElement).value).toBe(
+        String(PRODUCT_A.palletCapacity),
+      );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Запланировать" }));
+
+    await waitFor(() => {
+      // Find the POST call to /api/shifts (skip initial GET calls)
+      const postCalls = fetchMock.mock.calls.filter(
+        (call) => call[0] === "/api/shifts" && call[1]?.method === "POST"
+      );
+      expect(postCalls.length).toBeGreaterThan(0);
+      const postCall = postCalls[0]!;
+      const body = JSON.parse(postCall[1]?.body as string);
+      expect(body.mode).toBe("aggregation");
+      expect(body.productId).toBe(PRODUCT_A.id);
+      expect(body.boxCapacity).toBe(PRODUCT_A.boxCapacity);
+      expect(body.palletsEnabled).toBe(true);
+      expect(body.palletCapacity).toBe(PRODUCT_A.palletCapacity);
+      expect(body.lineId).toBeNull();
+      expect(body.plannedQty).toBeNull();
+      expect(body.plannedDate).toBeNull();
     }, { timeout: 3000 });
   });
 });
