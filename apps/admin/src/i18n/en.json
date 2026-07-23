@@ -177,7 +177,88 @@
     "shifts": {
       "title": "Shifts",
       "emptyTitle": "No shifts planned",
-      "emptyHint": "Plan your first shift to start production."
+      "emptyHint": "Plan your first shift to start production.",
+      "addAction": "Plan a shift",
+      "edit": "Edit",
+      "delete": "Delete",
+      "close": "Close shift",
+      "cancel": "Cancel",
+      "forCounterparty": "for: {{name}}",
+      "deleteConfirmTitle": "Delete shift?",
+      "deleteConfirmBody": "The shift for \"{{name}}\" will be permanently deleted.",
+      "deleteConfirmAction": "Delete",
+      "filters": {
+        "statusLabel": "Status",
+        "fromLabel": "From",
+        "toLabel": "To",
+        "status": {
+          "all": "All statuses",
+          "planned": "Planned",
+          "active": "Active",
+          "closed": "Closed"
+        }
+      },
+      "table": {
+        "plannedDate": "Date",
+        "product": "Product",
+        "line": "Line",
+        "mode": "Mode",
+        "plannedQty": "Plan, units",
+        "status": "Status",
+        "actions": "Actions"
+      },
+      "mode": {
+        "validation": "Validation",
+        "aggregation": "Aggregation"
+      },
+      "status": {
+        "planned": "Planned",
+        "active": "Active",
+        "closed": "Closed"
+      },
+      "form": {
+        "createTitle": "New shift",
+        "editTitle": "Edit shift",
+        "productLabel": "Product",
+        "productPlaceholder": "Select a product",
+        "draftHint": "draft -- unavailable",
+        "modeLabel": "Mode",
+        "modeValidation": "Validation",
+        "modeAggregation": "Aggregation",
+        "plannedQtyLabel": "Planned quantity, units",
+        "plannedDateLabel": "Shift date",
+        "lineLabel": "Line",
+        "noLine": "None selected",
+        "noLinesHint": "No lines yet -- create one via the API or settings.",
+        "counterpartyLabel": "For counterparty (tolling)",
+        "noCounterparty": "None selected",
+        "boxCapacityLabel": "Box capacity, units",
+        "palletsEnabledLabel": "Use pallets",
+        "palletCapacityLabel": "Pallet capacity, units",
+        "submitCreate": "Plan",
+        "submitUpdate": "Save",
+        "errors": {
+          "productRequired": "Select a product",
+          "qtyInvalid": "Enter a positive whole number",
+          "capacityInvalid": "Enter a positive whole number"
+        }
+      },
+      "closeModal": {
+        "title": "Close shift",
+        "reasonLabel": "Close reason",
+        "submit": "Close shift",
+        "cancel": "Cancel"
+      },
+      "toasts": {
+        "createSuccess": "Shift planned",
+        "createError": "Could not plan the shift",
+        "updateSuccess": "Shift updated",
+        "updateError": "Could not update the shift",
+        "deleteSuccess": "Shift deleted",
+        "deleteError": "Could not delete the shift",
+        "closeSuccess": "Shift closed",
+        "closeError": "Could not close the shift"
+      }
     },
     "settings": {
       "title": "Settings",

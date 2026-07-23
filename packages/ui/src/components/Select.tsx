@@ -3,7 +3,7 @@ import { useId, useState, type FocusEvent, type SelectHTMLAttributes } from "rea
 import { cn } from "../cn.js";
 
 /** Порт `design-system/components/forms/Select.jsx` (нативный select) — только офисный режим. */
-export type SelectOption = string | { value: string; label: string };
+export type SelectOption = string | { value: string; label: string; disabled?: boolean };
 
 export interface SelectProps extends Omit<SelectHTMLAttributes<HTMLSelectElement>, "onChange"> {
   label?: string;
@@ -91,8 +91,9 @@ export function Select({
           {options.map((option) => {
             const optionValue = typeof option === "string" ? option : option.value;
             const optionLabel = typeof option === "string" ? option : option.label;
+            const optionDisabled = typeof option === "string" ? false : Boolean(option.disabled);
             return (
-              <option key={optionValue} value={optionValue}>
+              <option key={optionValue} value={optionValue} disabled={optionDisabled}>
                 {optionLabel}
               </option>
             );
