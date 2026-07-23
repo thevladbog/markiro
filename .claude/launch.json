@@ -16,10 +16,7 @@
     {
       "name": "api",
       "runtimeExecutable": "sh",
-      "runtimeArgs": [
-        "-c",
-        "set -a; . ./.env; set +a; pnpm --filter @markiro/api dev"
-      ],
+      "runtimeArgs": ["-c", "set -a; . ./.env; set +a; pnpm --filter @markiro/api dev"],
       "port": 3000
     },
     {
