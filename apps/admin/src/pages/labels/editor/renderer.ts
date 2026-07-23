@@ -31,7 +31,6 @@
  * based on whether a real 2D context is available) by `LabelCanvas.tsx`.
  */
 import {
-  sampleLabelData,
   type LabelBarcodeElement,
   type LabelBoxElement,
   type LabelElement,
@@ -120,25 +119,23 @@ const TOTAL_MODULES = INTERIOR_MODULES + QUIET_ZONE_MODULES * 2;
 /**
  * Resolves the display text `elementBoundsMm` measures for a `text`/`field`
  * element. `text` elements carry their own literal string; `field`
- * elements do not (their real value comes from whatever `data` a caller
- * hands `draw` at render time) -- since `elementBoundsMm` takes no `data`
- * parameter (it must stay usable purely from the element itself, e.g. for
- * hit-testing before any data is even loaded), it falls back to
- * `sampleLabelData()`, the SAME deterministic sample set the whole app uses
- * for previews/goldens. In practice this is not just a fallback but the
- * common case: the editor and preview panes always render with sample
- * data (per the design's "предпросмотр = печать" guarantee), so this
- * heuristic and the actual on-screen render size agree whenever a caller
- * passes `sampleLabelData()` into `draw` too -- which every current caller
- * does.
+ * elements resolve from the provided `data` record. Callers MUST pass the
+ * SAME data used by `draw`; there is no fallback -- the bounds and the
+ * actual rendered size must always agree, matching the on-canvas render.
  */
-function resolveTextForBounds(element: LabelTextElement | LabelFieldElement): string {
-  return element.kind === "text" ? element.text : sampleLabelData()[element.field];
+function resolveTextForBounds(
+  element: LabelTextElement | LabelFieldElement,
+  data: Record<LabelField, string>,
+): string {
+  return element.kind === "text" ? element.text : data[element.field] ?? "";
 }
 
-/** Same fallback-to-sample-data rationale as `resolveTextForBounds`, for barcode elements. */
-function resolveBarcodeTextForBounds(element: LabelBarcodeElement): string {
-  return typeof element.data === "string" ? sampleLabelData()[element.data] : element.data.literal;
+/** Same requirement as `resolveTextForBounds`: callers pass the data used by `draw`. */
+function resolveBarcodeTextForBounds(
+  element: LabelBarcodeElement,
+  data: Record<LabelField, string>,
+): string {
+  return typeof element.data === "string" ? data[element.data] ?? "" : element.data.literal;
 }
 
 /**
@@ -151,16 +148,24 @@ function resolveBarcodeTextForBounds(element: LabelBarcodeElement): string {
  * `renderTextLikeElement`). Used for hit-testing (`hitTest` in
  * `LabelCanvas.tsx`), drag bounds, and the selected-element outline.
  *
+ * CRITICAL: `data` is REQUIRED and must be the SAME data used by `draw`.
+ * Bounds and rendered size must always agree; callers MUST pass the actual
+ * data, never relying on sample fallbacks. This ensures hit-testing, drag
+ * bounds, and selection outlines all match the actual on-screen render.
+ *
  * See the heuristic constants above for exactly how `text`/`field`/
  * `barcode` sizes are approximated; `line`/`box` bounds are exact (derived
  * directly from the element's own documented geometry fields, no
  * heuristic needed).
  */
-export function elementBoundsMm(element: LabelElement): BoundsMm {
+export function elementBoundsMm(
+  element: LabelElement,
+  data: Record<LabelField, string>,
+): BoundsMm {
   switch (element.kind) {
     case "text":
     case "field": {
-      const text = resolveTextForBounds(element);
+      const text = resolveTextForBounds(element, data);
       const w =
         element.maxWidthMm ??
         Math.max(text.length, 1) * ptToMm(element.fontSizePt) * AVG_CHAR_WIDTH_EM;
@@ -172,7 +177,7 @@ export function elementBoundsMm(element: LabelElement): BoundsMm {
         const side = TOTAL_MODULES * element.sizeMm;
         return { x: element.xMm, y: element.yMm, w: side, h: side };
       }
-      const text = resolveBarcodeTextForBounds(element);
+      const text = resolveBarcodeTextForBounds(element, data);
       const w = Math.max(text.length, 1) * BAR_WIDTH_PER_CHAR_FACTOR * element.sizeMm;
       return { x: element.xMm, y: element.yMm, w, h: element.sizeMm };
     }
@@ -240,7 +245,7 @@ function drawTextElement(
  * brief's "deterministic module pattern derived from a simple hash of
  * data" requirement for matrix-code schematics.
  */
-function simpleHash(text: string): number {
+export function simpleHash(text: string): number {
   let hash = 0;
   for (let i = 0; i < text.length; i++) {
     hash = (Math.imul(hash, 31) + text.charCodeAt(i)) | 0;
@@ -249,7 +254,7 @@ function simpleHash(text: string): number {
 }
 
 /** Deterministic seeded PRNG (mulberry32) -- same seed always yields the same output sequence. */
-function mulberry32(seed: number): () => number {
+export function mulberry32(seed: number): () => number {
   let state = seed;
   return function next() {
     state = (state + 0x6d2b79f5) | 0;

@@ -30,11 +30,19 @@ const NUDGE_MM_SHIFT = 5;
  * back-to-front and returns the FIRST match -- the topmost element under
  * the point, per the plan brief's "topmost element wins" requirement --
  * rather than the first match walking front-to-back.
+ *
+ * CRITICAL: `data` must be the SAME data used by `draw`; hitTest bounds
+ * must match the actual on-screen render for hit-testing to be reliable.
  */
-export function hitTest(spec: LabelTemplateSpec, xMm: number, yMm: number): string | null {
+export function hitTest(
+  spec: LabelTemplateSpec,
+  xMm: number,
+  yMm: number,
+  data: Record<LabelField, string>,
+): string | null {
   for (let i = spec.elements.length - 1; i >= 0; i--) {
     const element = spec.elements[i]!;
-    const bounds = elementBoundsMm(element);
+    const bounds = elementBoundsMm(element, data);
     if (
       xMm >= bounds.x &&
       xMm <= bounds.x + bounds.w &&
@@ -103,7 +111,7 @@ export function LabelCanvas({
     draw(spec, ctx, scale, resolvedData);
     if (selectedId !== null) {
       const selected = spec.elements.find((el) => el.id === selectedId);
-      if (selected) drawSelectionOutline(ctx, elementBoundsMm(selected), scale);
+      if (selected) drawSelectionOutline(ctx, elementBoundsMm(selected, resolvedData), scale);
     }
   });
 
@@ -145,7 +153,7 @@ export function LabelCanvas({
     if (!canvas) return;
     canvas.focus();
     const { xMm, yMm } = clientPointToMm(canvas, event.clientX, event.clientY, scale);
-    const id = hitTest(spec, xMm, yMm);
+    const id = hitTest(spec, xMm, yMm, resolvedData);
     onSelect(id);
     if (id !== null) {
       dragOriginRef.current = { xMm, yMm };

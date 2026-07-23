@@ -21,7 +21,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import { sampleLabelData, type LabelElement, type LabelTemplateSpec } from "@markiro/domain";
 
 import { DEFAULT_SCALE, hitTest, LabelCanvas } from "../src/pages/labels/editor/LabelCanvas.js";
-import { elementBoundsMm } from "../src/pages/labels/editor/renderer.js";
+import {
+  elementBoundsMm,
+  mulberry32,
+  simpleHash,
+} from "../src/pages/labels/editor/renderer.js";
 import {
   createEditorState,
   editorReducer,
@@ -56,15 +60,20 @@ function makeSpec(elements: LabelElement[]): LabelTemplateSpec {
 }
 
 describe("elementBoundsMm", () => {
+  const sampleData = sampleLabelData();
+
   it("text: width from char-count heuristic, height from line-height heuristic", () => {
-    const bounds = elementBoundsMm({
-      kind: "text",
-      id: "t1",
-      xMm: 5,
-      yMm: 7,
-      text: "Hello",
-      fontSizePt: 12,
-    });
+    const bounds = elementBoundsMm(
+      {
+        kind: "text",
+        id: "t1",
+        xMm: 5,
+        yMm: 7,
+        text: "Hello",
+        fontSizePt: 12,
+      },
+      sampleData,
+    );
     expect(bounds.x).toBe(5);
     expect(bounds.y).toBe(7);
     expect(bounds.w).toBeCloseTo(textWidthMm("Hello", 12), 6);
@@ -72,131 +81,263 @@ describe("elementBoundsMm", () => {
   });
 
   it("text: an explicit maxWidthMm overrides the heuristic width", () => {
-    const bounds = elementBoundsMm({
-      kind: "text",
-      id: "t1",
-      xMm: 0,
-      yMm: 0,
-      text: "A very long line of text",
-      fontSizePt: 10,
-      maxWidthMm: 30,
-    });
+    const bounds = elementBoundsMm(
+      {
+        kind: "text",
+        id: "t1",
+        xMm: 0,
+        yMm: 0,
+        text: "A very long line of text",
+        fontSizePt: 10,
+        maxWidthMm: 30,
+      },
+      sampleData,
+    );
     expect(bounds.w).toBe(30);
   });
 
-  it("field: measures the field's sampleLabelData() value (no literal text on the element itself)", () => {
-    const sampleText = sampleLabelData()["product.name"];
-    const bounds = elementBoundsMm({
-      kind: "field",
-      id: "f1",
-      xMm: 2,
-      yMm: 3,
-      field: "product.name",
-      fontSizePt: 10,
-    });
+  it("field: measures the field's value from the provided data (no literal text on the element itself)", () => {
+    const sampleText = sampleData["product.name"];
+    const bounds = elementBoundsMm(
+      {
+        kind: "field",
+        id: "f1",
+        xMm: 2,
+        yMm: 3,
+        field: "product.name",
+        fontSizePt: 10,
+      },
+      sampleData,
+    );
     expect(bounds.w).toBeCloseTo(textWidthMm(sampleText, 10), 6);
     expect(bounds.h).toBeCloseTo(textHeightMm(10), 6);
   });
 
+  it("field: width expands when data is longer than sample", () => {
+    const shortData = { ...sampleData, "product.name": "A" };
+    const longData = { ...sampleData, "product.name": "A very long product name" };
+    const shortBounds = elementBoundsMm(
+      {
+        kind: "field",
+        id: "f1",
+        xMm: 0,
+        yMm: 0,
+        field: "product.name",
+        fontSizePt: 10,
+      },
+      shortData,
+    );
+    const longBounds = elementBoundsMm(
+      {
+        kind: "field",
+        id: "f1",
+        xMm: 0,
+        yMm: 0,
+        field: "product.name",
+        fontSizePt: 10,
+      },
+      longData,
+    );
+    expect(longBounds.w).toBeGreaterThan(shortBounds.w);
+  });
+
   it("barcode (code128/ean13, literal data): height = sizeMm, width from char-count heuristic", () => {
-    const bounds = elementBoundsMm({
-      kind: "barcode",
-      id: "b1",
-      xMm: 1,
-      yMm: 2,
-      format: "code128",
-      data: { literal: "12345" },
-      sizeMm: 10,
-    });
+    const bounds = elementBoundsMm(
+      {
+        kind: "barcode",
+        id: "b1",
+        xMm: 1,
+        yMm: 2,
+        format: "code128",
+        data: { literal: "12345" },
+        sizeMm: 10,
+      },
+      sampleData,
+    );
     expect(bounds.h).toBe(10);
     expect(bounds.w).toBeCloseTo(Math.max("12345".length, 1) * BAR_WIDTH_PER_CHAR_FACTOR * 10, 6);
   });
 
-  it("barcode (ean13, field-bound data): measures sampleLabelData() for that field", () => {
-    const sampleText = sampleLabelData().sscc;
-    const bounds = elementBoundsMm({
-      kind: "barcode",
-      id: "b2",
-      xMm: 0,
-      yMm: 0,
-      format: "ean13",
-      data: "sscc",
-      sizeMm: 8,
-    });
+  it("barcode (ean13, field-bound data): measures the field's value from provided data", () => {
+    const sampleText = sampleData.sscc;
+    const bounds = elementBoundsMm(
+      {
+        kind: "barcode",
+        id: "b2",
+        xMm: 0,
+        yMm: 0,
+        format: "ean13",
+        data: "sscc",
+        sizeMm: 8,
+      },
+      sampleData,
+    );
     expect(bounds.w).toBeCloseTo(Math.max(sampleText.length, 1) * BAR_WIDTH_PER_CHAR_FACTOR * 8, 6);
   });
 
   it("barcode (datamatrix/qr): square bounds = TOTAL_MODULES * sizeMm (module square side)", () => {
-    const bounds = elementBoundsMm({
-      kind: "barcode",
-      id: "b3",
-      xMm: 4,
-      yMm: 4,
-      format: "datamatrix",
-      data: "km.code",
-      sizeMm: 0.5,
-    });
+    const bounds = elementBoundsMm(
+      {
+        kind: "barcode",
+        id: "b3",
+        xMm: 4,
+        yMm: 4,
+        format: "datamatrix",
+        data: "km.code",
+        sizeMm: 0.5,
+      },
+      sampleData,
+    );
     expect(bounds.w).toBeCloseTo(TOTAL_MODULES * 0.5, 6);
     expect(bounds.h).toBeCloseTo(TOTAL_MODULES * 0.5, 6);
 
-    const qrBounds = elementBoundsMm({
-      kind: "barcode",
-      id: "b4",
-      xMm: 0,
-      yMm: 0,
-      format: "qr",
-      data: { literal: "https://example.com" },
-      sizeMm: 0.4,
-    });
+    const qrBounds = elementBoundsMm(
+      {
+        kind: "barcode",
+        id: "b4",
+        xMm: 0,
+        yMm: 0,
+        format: "qr",
+        data: { literal: "https://example.com" },
+        sizeMm: 0.4,
+      },
+      sampleData,
+    );
     expect(qrBounds.w).toBeCloseTo(TOTAL_MODULES * 0.4, 6);
   });
 
   it("line: bounding box from endpoints, clamped to thicknessMm on a degenerate axis", () => {
     // Perfectly horizontal: y-span is 0, must clamp up to thicknessMm.
-    const horizontal = elementBoundsMm({
-      kind: "line",
-      id: "l1",
-      xMm: 10,
-      yMm: 20,
-      x2Mm: 40,
-      y2Mm: 20,
-      thicknessMm: 0.6,
-    });
+    const horizontal = elementBoundsMm(
+      {
+        kind: "line",
+        id: "l1",
+        xMm: 10,
+        yMm: 20,
+        x2Mm: 40,
+        y2Mm: 20,
+        thicknessMm: 0.6,
+      },
+      sampleData,
+    );
     expect(horizontal).toEqual({ x: 10, y: 20, w: 30, h: 0.6 });
 
     // A genuinely diagonal line still gets its bounding rectangle.
-    const diagonal = elementBoundsMm({
-      kind: "line",
-      id: "l2",
-      xMm: 5,
-      yMm: 5,
-      x2Mm: 0,
-      y2Mm: 15,
-      thicknessMm: 0.2,
-    });
+    const diagonal = elementBoundsMm(
+      {
+        kind: "line",
+        id: "l2",
+        xMm: 5,
+        yMm: 5,
+        x2Mm: 0,
+        y2Mm: 15,
+        thicknessMm: 0.2,
+      },
+      sampleData,
+    );
     expect(diagonal).toEqual({ x: 0, y: 5, w: 5, h: 10 });
   });
 
   it("box: bounds are the element's own literal x/y/width/height", () => {
-    const bounds = elementBoundsMm({
-      kind: "box",
-      id: "bx1",
-      xMm: 1,
-      yMm: 2,
-      widthMm: 20,
-      heightMm: 15,
-      thicknessMm: 0.5,
-    });
+    const bounds = elementBoundsMm(
+      {
+        kind: "box",
+        id: "bx1",
+        xMm: 1,
+        yMm: 2,
+        widthMm: 20,
+        heightMm: 15,
+        thicknessMm: 0.5,
+      },
+      sampleData,
+    );
     expect(bounds).toEqual({ x: 1, y: 2, w: 20, h: 15 });
   });
 });
 
+describe("Pattern helper determinism", () => {
+  it("simpleHash: same input string produces identical hash every call", () => {
+    const text = "test-data";
+    const hash1 = simpleHash(text);
+    const hash2 = simpleHash(text);
+    expect(hash1).toBe(hash2);
+  });
+
+  it("simpleHash: different inputs produce different hashes", () => {
+    const hash1 = simpleHash("input1");
+    const hash2 = simpleHash("input2");
+    expect(hash1).not.toBe(hash2);
+  });
+
+  it("mulberry32: same seed produces identical PRNG sequence every call", () => {
+    const seed = simpleHash("test-string");
+    const rng1 = mulberry32(seed);
+    const rng2 = mulberry32(seed);
+    const sequence1 = Array.from({ length: 10 }, () => rng1());
+    const sequence2 = Array.from({ length: 10 }, () => rng2());
+    expect(sequence1).toEqual(sequence2);
+  });
+
+  it("mulberry32: different seeds produce different sequences", () => {
+    const rng1 = mulberry32(12345);
+    const rng2 = mulberry32(54321);
+    const sequence1 = Array.from({ length: 5 }, () => rng1());
+    const sequence2 = Array.from({ length: 5 }, () => rng2());
+    // At least one value should differ (with overwhelming probability for different seeds)
+    expect(sequence1).not.toEqual(sequence2);
+  });
+
+  it("pattern generation: same text produces identical matrix pattern grid", () => {
+    const testText = "barcode-123";
+    const seed = simpleHash(testText);
+    const rng1 = mulberry32(seed);
+    const rng2 = mulberry32(seed);
+
+    const gridSize = 20; // interior modules
+    const pattern1: number[] = [];
+    const pattern2: number[] = [];
+
+    for (let i = 0; i < gridSize * gridSize; i++) {
+      pattern1.push(rng1() < 0.5 ? 1 : 0);
+    }
+    for (let i = 0; i < gridSize * gridSize; i++) {
+      pattern2.push(rng2() < 0.5 ? 1 : 0);
+    }
+
+    expect(pattern1).toEqual(pattern2);
+  });
+
+  it("pattern generation: different text produces different patterns", () => {
+    const text1 = "data-v1";
+    const text2 = "data-v2";
+    const rng1 = mulberry32(simpleHash(text1));
+    const rng2 = mulberry32(simpleHash(text2));
+
+    const gridSize = 20;
+    const pattern1: number[] = [];
+    const pattern2: number[] = [];
+
+    for (let i = 0; i < gridSize * gridSize; i++) {
+      pattern1.push(rng1() < 0.5 ? 1 : 0);
+    }
+    for (let i = 0; i < gridSize * gridSize; i++) {
+      pattern2.push(rng2() < 0.5 ? 1 : 0);
+    }
+
+    // At least one cell should differ
+    const diffCount = pattern1.filter((v, i) => v !== pattern2[i]).length;
+    expect(diffCount).toBeGreaterThan(0);
+  });
+});
+
 describe("hitTest", () => {
+  const sampleData = sampleLabelData();
+
   it("returns null for a point that misses every element", () => {
     const spec = makeSpec([
       { kind: "box", id: "bx1", xMm: 0, yMm: 0, widthMm: 10, heightMm: 10, thicknessMm: 0.5 },
     ]);
-    expect(hitTest(spec, 50, 50)).toBeNull();
+    expect(hitTest(spec, 50, 50, sampleData)).toBeNull();
   });
 
   it("resolves in millimetre coordinates (a point inside one element's box, outside the other's)", () => {
@@ -204,9 +345,9 @@ describe("hitTest", () => {
       { kind: "box", id: "left", xMm: 0, yMm: 0, widthMm: 10, heightMm: 10, thicknessMm: 0.5 },
       { kind: "box", id: "right", xMm: 50, yMm: 50, widthMm: 10, heightMm: 10, thicknessMm: 0.5 },
     ]);
-    expect(hitTest(spec, 5, 5)).toBe("left");
-    expect(hitTest(spec, 55, 55)).toBe("right");
-    expect(hitTest(spec, 25, 25)).toBeNull();
+    expect(hitTest(spec, 5, 5, sampleData)).toBe("left");
+    expect(hitTest(spec, 55, 55, sampleData)).toBe("right");
+    expect(hitTest(spec, 25, 25, sampleData)).toBeNull();
   });
 
   it("topmost element (last in the array) wins when boxes overlap", () => {
@@ -215,9 +356,9 @@ describe("hitTest", () => {
       { kind: "box", id: "front", xMm: 5, yMm: 5, widthMm: 20, heightMm: 20, thicknessMm: 0.5 },
     ]);
     // (10, 10) is inside BOTH boxes -- "front" (drawn last / on top) must win.
-    expect(hitTest(spec, 10, 10)).toBe("front");
+    expect(hitTest(spec, 10, 10, sampleData)).toBe("front");
     // (2, 2) is inside "back" only.
-    expect(hitTest(spec, 2, 2)).toBe("back");
+    expect(hitTest(spec, 2, 2, sampleData)).toBe("back");
   });
 });
 
@@ -418,6 +559,8 @@ describe("editorReducer", () => {
 });
 
 describe("LabelCanvas (rendered through the real useEditorState hook)", () => {
+  const sampleData = sampleLabelData();
+
   /** Test-local harness: wires the real hook to the real component, and
    * surfaces state as text so assertions don't need to reach into React
    * internals -- mirrors the `LocationTracker` pattern used elsewhere in
@@ -429,6 +572,7 @@ describe("LabelCanvas (rendered through the real useEditorState hook)", () => {
         <LabelCanvas
           spec={state.spec}
           selectedId={state.selectedId}
+          data={sampleData}
           onSelect={select}
           onMoveBy={moveBy}
           onDelete={removeElement}
@@ -511,5 +655,50 @@ describe("LabelCanvas (rendered through the real useEditorState hook)", () => {
     fireEvent.keyDown(canvas, { key: "Delete" });
     expect(screen.getByTestId("selected-id").textContent).toBe("");
     expect(readElements()).toHaveLength(0);
+  });
+
+  it("drag-to-move: moves element by 3mm when dragged 3.4mm (1mm grid snap applied)", () => {
+    const { canvas } = renderHarness();
+    const centerX = 20 * DEFAULT_SCALE; // box1 at (10, 10) with size (20, 20), center at (20, 20)
+    const centerY = 20 * DEFAULT_SCALE;
+
+    // mouseDown on element center to select and start drag
+    fireEvent.mouseDown(canvas, { clientX: centerX, clientY: centerY });
+    expect(screen.getByTestId("selected-id").textContent).toBe("box1");
+
+    // Drag 3.4mm to the right and down (convert to pixels via DEFAULT_SCALE)
+    const dragOffsetPx = 3.4 * DEFAULT_SCALE; // 13.6px for 3.4mm at 4px/mm
+    const newX = centerX + dragOffsetPx;
+    const newY = centerY + dragOffsetPx;
+
+    fireEvent.mouseMove(window, { clientX: newX, clientY: newY });
+    fireEvent.mouseUp(window);
+
+    // Element should snap to 1mm grid: +3.4mm rounds to +3mm
+    const elements = readElements();
+    expect(elements[0]?.xMm).toBe(13); // 10 + 3
+    expect(elements[0]?.yMm).toBe(13); // 10 + 3
+  });
+
+  it("drag-to-move: ignores tiny moves under 0.5mm (0.5mm snap threshold means changes < 0.5mm are lost)", () => {
+    const { canvas } = renderHarness();
+    const centerX = 20 * DEFAULT_SCALE;
+    const centerY = 20 * DEFAULT_SCALE;
+
+    fireEvent.mouseDown(canvas, { clientX: centerX, clientY: centerY });
+    expect(screen.getByTestId("selected-id").textContent).toBe("box1");
+
+    // Drag only 0.3mm (1.2px), which is below the 0.5mm threshold
+    const tinyDragPx = 0.3 * DEFAULT_SCALE; // 1.2px
+    const newX = centerX + tinyDragPx;
+    const newY = centerY + tinyDragPx;
+
+    fireEvent.mouseMove(window, { clientX: newX, clientY: newY });
+    fireEvent.mouseUp(window);
+
+    // Position should be unchanged (0.3mm rounds to 0)
+    const elements = readElements();
+    expect(elements[0]?.xMm).toBe(10);
+    expect(elements[0]?.yMm).toBe(10);
   });
 });
