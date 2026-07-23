@@ -1,0 +1,49 @@
+{
+  "common": {
+    "appName": "Markiro",
+    "loading": "Loading…",
+    "signOut": "Sign out"
+  },
+  "auth": {
+    "login": {
+      "title": "Sign in",
+      "emailLabel": "Email",
+      "passwordLabel": "Password",
+      "submit": "Sign in",
+      "noAccount": "No account?",
+      "registerLink": "Register",
+      "genericError": "Could not sign in. Check your email and password."
+    },
+    "register": {
+      "title": "Register",
+      "nameLabel": "Name",
+      "emailLabel": "Email",
+      "passwordLabel": "Password",
+      "submit": "Register",
+      "haveAccount": "Already have an account?",
+      "loginLink": "Sign in",
+      "genericError": "Could not register. Try a different email address."
+    },
+    "createOrg": {
+      "title": "Create organization",
+      "nameLabel": "Organization name",
+      "slugLabel": "Slug",
+      "slugRequired": "Enter a slug.",
+      "slugInvalid": "Lowercase letters, digits and hyphens only.",
+      "submit": "Create",
+      "selectExisting": "Select an existing organization",
+      "genericError": "Could not create the organization."
+    },
+    "selectOrg": {
+      "title": "Select organization",
+      "empty": "You don't have any organizations yet.",
+      "selectButton": "Select",
+      "createNew": "Create a new organization",
+      "genericError": "Could not load the organization list."
+    }
+  },
+  "shell": {
+    "welcome": "Signed in as {{email}}",
+    "activeOrg": "Active organization: {{organizationId}}"
+  }
+}
