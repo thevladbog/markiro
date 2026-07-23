@@ -1,3 +1,11 @@
 {
-  "app": { "title": "Markiro — Station", "booting": "Loading station…" }
+  "app": { "title": "Markiro — Station", "booting": "Loading station…" },
+  "enroll": {
+    "title": "Connect station",
+    "serverUrl": "Server URL",
+    "apiKey": "Device key",
+    "submit": "Connect",
+    "invalid": "Could not connect. Check the URL and key.",
+    "success": "Station connected"
+  }
 }
