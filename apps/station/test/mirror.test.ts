@@ -93,4 +93,18 @@ describe("mirror", () => {
     const rows = await exec.all<{ n: number }>("SELECT COUNT(*) AS n FROM shift_mirror");
     expect(rows[0]!.n).toBe(1);
   });
+
+  it("re-upserting a shift with a server-edited product updates product_id (regression: ON CONFLICT omitted product_id)", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    await upsertBundle(exec, bundle);
+    await upsertBundle(exec, {
+      ...bundle,
+      shift: { ...bundle.shift, productId: "p2", productName: "Sprite" },
+    });
+    const rows = await exec.all<{ product_id: string; product_name: string }>(
+      "SELECT product_id, product_name FROM shift_mirror WHERE id = 's1'",
+    );
+    expect(rows[0]).toEqual({ product_id: "p2", product_name: "Sprite" });
+  });
 });

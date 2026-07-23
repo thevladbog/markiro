@@ -57,4 +57,20 @@ describe("OperatorLogin", () => {
     await waitFor(() => expect(screen.getByText("Wrong PIN")).toBeDefined());
     expect(onAuthed).not.toHaveBeenCalled();
   });
+
+  it("shows the wrong-PIN error (not an unhandled rejection) when the mirror query throws, e.g. after failed boot migrations (regression for M6)", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const exec: SqlExecutor = {
+      run: () => Promise.reject(new Error("no such table: operators_mirror")),
+      all: () => Promise.reject(new Error("no such table: operators_mirror")),
+    };
+    const onAuthed = vi.fn();
+    render(<OperatorLogin exec={exec} onAuthed={onAuthed} />);
+    for (const d of "4321") fireEvent.click(screen.getByRole("button", { name: d }));
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await waitFor(() => expect(screen.getByText("Wrong PIN")).toBeDefined());
+    expect(onAuthed).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
 });

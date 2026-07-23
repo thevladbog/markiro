@@ -16,6 +16,29 @@ const client = createStationClient({
 });
 
 describe("ShiftSelection", () => {
+  it("renders the counterparty label through i18n, not a hard-coded Russian string (regression for M8)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          items: [
+            {
+              id: "s1",
+              status: "planned",
+              mode: "validation",
+              productName: "Cola",
+              plannedQty: 100,
+              counterpartyName: "Buyer Co",
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+
+    render(<ShiftSelection client={client} onSelected={() => {}} onNew={() => {}} />);
+    await waitFor(() => expect(screen.getByText("for: Buyer Co")).toBeDefined());
+  });
+
   it("opens a planned shift and calls onSelected with the opened shift", async () => {
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(

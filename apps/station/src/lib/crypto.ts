@@ -3,6 +3,10 @@
 // globalThis.crypto) — no native dependency.
 const ITERATIONS = 100_000;
 const KEY_BITS = 256;
+// Newly minted hashes always use ITERATIONS (100000); this is a lower floor
+// so a tampered/downgraded bundle (or a foreign hash) can't push the cost
+// down to something trivially brute-forceable offline.
+const MIN_ITERATIONS = 10_000;
 
 function toB64(bytes: Uint8Array): string {
   let s = "";
@@ -55,7 +59,7 @@ async function verifySecret(secret: string, phc: string): Promise<boolean> {
   const parts = phc.split("$");
   if (parts.length !== 5 || parts[0] !== "pbkdf2" || parts[1] !== "sha256") return false;
   const iterations = Number(parts[2]);
-  if (!Number.isInteger(iterations) || iterations <= 0) return false;
+  if (!Number.isInteger(iterations) || iterations < MIN_ITERATIONS) return false;
   let salt: Uint8Array;
   let expected: Uint8Array;
   try {

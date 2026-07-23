@@ -68,7 +68,8 @@ export async function upsertBundle(exec: SqlExecutor, bundle: StationBundle): Pr
        planned_qty, planned_date, box_capacity, pallet_capacity, pallets_enabled, opened_at
      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
      ON CONFLICT(id) DO UPDATE SET
-       status=excluded.status, mode=excluded.mode, product_name=excluded.product_name,
+       status=excluded.status, mode=excluded.mode, product_id=excluded.product_id,
+       product_name=excluded.product_name,
        line_id=excluded.line_id, line_name=excluded.line_name,
        counterparty_id=excluded.counterparty_id, counterparty_name=excluded.counterparty_name,
        counterparty_gln=excluded.counterparty_gln, label_template_id=excluded.label_template_id,

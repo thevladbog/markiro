@@ -72,7 +72,11 @@ export function ShiftSelection({ client, onSelected, onNew }: ShiftSelectionProp
           .map((s) => (
             <Card key={s.id} style={{ padding: 24 }}>
               <div style={{ fontSize: "1.5rem" }}>{s.productName}</div>
-              {s.counterpartyName ? <div>для: {s.counterpartyName}</div> : null}
+              {s.counterpartyName ? (
+                <div>
+                  {t("shifts.forCounterparty")} {s.counterpartyName}
+                </div>
+              ) : null}
               <Button
                 style={{ minHeight: 64, marginTop: 12 }}
                 disabled={busy}

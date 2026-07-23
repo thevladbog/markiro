@@ -18,7 +18,17 @@ export function OperatorLogin({ exec, onAuthed }: OperatorLoginProps) {
 
   async function submit() {
     setError(null);
-    const operator = await verifyOperatorPin(exec, pin);
+    let operator: OperatorMirrorRecord | null;
+    try {
+      operator = await verifyOperatorPin(exec, pin);
+    } catch (err) {
+      // If boot migrations failed (App.tsx logs and continues rather than
+      // strand the device), `operators_mirror` may not exist yet and this
+      // query throws — surface the same wrong-PIN slot instead of an
+      // unhandled rejection, so the operator gets a legible error either way.
+      console.error("station: verifyOperatorPin failed", err);
+      operator = null;
+    }
     if (operator) {
       onAuthed(operator);
     } else {

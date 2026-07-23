@@ -12,7 +12,6 @@ export function StatusBar({ online }: StatusBarProps) {
   const notConfigured = t("shell.notConfigured");
   return (
     <header
-      role="contentinfo"
       style={{
         display: "flex",
         gap: 16,

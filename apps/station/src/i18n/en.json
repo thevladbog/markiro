@@ -31,7 +31,8 @@
     "modeAggregation": "Aggregation",
     "start": "Start",
     "actionFailed": "Action failed. Please try again.",
-    "active": "Shift active"
+    "active": "Shift active",
+    "forCounterparty": "for:"
   },
   "shell": {
     "online": "Online",

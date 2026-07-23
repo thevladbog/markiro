@@ -22,4 +22,12 @@ describe("crypto (PBKDF2 PHC)", () => {
     expect(await verifyPin("1234", "not-a-phc")).toBe(false);
     expect(await verifyPin("1234", "argon2$x$y$z$w")).toBe(false);
   });
+
+  it("rejects a downgraded iteration count below the floor, even with an otherwise-correct hash (regression for M11)", async () => {
+    const salt = Uint8Array.from(Array.from({ length: 16 }, (_, i) => i));
+    const iterations = 1; // far below the 10000-iteration floor
+    const derived = pbkdf2Sync("1234", Buffer.from(salt), iterations, 32, "sha256");
+    const phc = `pbkdf2$sha256$${iterations}$${Buffer.from(salt).toString("base64")}$${derived.toString("base64")}`;
+    expect(await verifyPin("1234", phc)).toBe(false);
+  });
 });

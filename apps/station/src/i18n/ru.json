@@ -31,7 +31,8 @@
     "modeAggregation": "Агрегация",
     "start": "Начать",
     "actionFailed": "Не удалось выполнить действие. Попробуйте ещё раз.",
-    "active": "Смена активна"
+    "active": "Смена активна",
+    "forCounterparty": "для:"
   },
   "shell": {
     "online": "В сети",
