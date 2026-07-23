@@ -49,6 +49,7 @@
     "catalog": "Catalog",
     "shifts": "Shifts",
     "counterparties": "Counterparties",
+    "labels": "Labels",
     "settings": "Settings"
   },
   "shell": {
@@ -176,6 +177,15 @@
         "deleteSuccess": "Counterparty deleted",
         "deleteError": "Could not delete the counterparty"
       }
+    },
+    "labels": {
+      "title": "Label templates",
+      "emptyTitle": "No templates yet",
+      "emptyHint": "Create your first label template to print marking codes.",
+      "addAction": "+ Template",
+      "newTemplateCard": "+ New template",
+      "sizeBadge": "{{width}}×{{height}} mm",
+      "dpiBadge": "{{dpi}} dpi"
     },
     "shifts": {
       "title": "Shifts",

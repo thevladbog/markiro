@@ -85,7 +85,7 @@ function renderApp(client: AuthClientLike, initialPath = "/") {
 }
 
 describe("app shell layout", () => {
-  it("renders all five nav items from the RU dictionary with correct hrefs", () => {
+  it("renders all six nav items from the RU dictionary with correct hrefs", () => {
     renderApp(createFakeAuthClient());
 
     const expectedLinks: Array<[string, string]> = [
@@ -93,6 +93,7 @@ describe("app shell layout", () => {
       ["Каталог", "/catalog"],
       ["Смены", "/shifts"],
       ["Контрагенты", "/counterparties"],
+      ["Этикетки", "/labels"],
       ["Настройки", "/settings"],
     ];
     for (const [label, href] of expectedLinks) {

@@ -49,6 +49,7 @@
     "catalog": "Каталог",
     "shifts": "Смены",
     "counterparties": "Контрагенты",
+    "labels": "Этикетки",
     "settings": "Настройки"
   },
   "shell": {
@@ -176,6 +177,15 @@
         "deleteSuccess": "Контрагент удалён",
         "deleteError": "Не удалось удалить контрагента"
       }
+    },
+    "labels": {
+      "title": "Шаблоны этикеток",
+      "emptyTitle": "Шаблоны не созданы",
+      "emptyHint": "Создайте первый шаблон этикетки для печати кодов маркировки.",
+      "addAction": "+ Шаблон",
+      "newTemplateCard": "+ Новый шаблон",
+      "sizeBadge": "{{width}}×{{height}} мм",
+      "dpiBadge": "{{dpi}} dpi"
     },
     "shifts": {
       "title": "Смены",

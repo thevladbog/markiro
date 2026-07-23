@@ -7,6 +7,7 @@ import { SelectOrgPage } from "./pages/auth/SelectOrg.js";
 import { CatalogPage } from "./pages/catalog/index.js";
 import { CounterpartiesPage } from "./pages/counterparties/index.js";
 import { DashboardPage } from "./pages/dashboard/index.js";
+import { LabelTemplatesPage } from "./pages/labels/index.js";
 import { SettingsPage } from "./pages/settings/index.js";
 import { ShiftsPage } from "./pages/shifts/index.js";
 import { ShellPage } from "./pages/Shell.js";
@@ -33,6 +34,7 @@ export function App() {
           <Route path="catalog" element={<CatalogPage />} />
           <Route path="shifts" element={<ShiftsPage />} />
           <Route path="counterparties" element={<CounterpartiesPage />} />
+          <Route path="labels" element={<LabelTemplatesPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>
       </Routes>
