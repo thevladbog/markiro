@@ -443,6 +443,7 @@
           "print": "Print",
           "cancel": "Cancel"
         },
+        "dismissAction": "Cancel",
         "punchModal": {
           "title": "Punched at register",
           "receiptNoLabel": "Receipt no.",
@@ -452,8 +453,15 @@
           "title": "Write off with act",
           "actNoLabel": "Act no.",
           "reasonLabel": "Write-off sub-reason",
+          "noReasonsHint": "No write-off reasons configured",
           "submit": "Confirm"
         },
+        "cancelModal": {
+          "title": "Cancel this order?",
+          "body": "The order will be cancelled and the codes returned to the employee. This action cannot be undone.",
+          "confirmAction": "Cancel order"
+        },
+        "codeUnavailable": "Code unavailable",
         "loadError": "Could not load the order. Refresh the page or sign in again."
       },
       "toasts": {
