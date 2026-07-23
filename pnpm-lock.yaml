@@ -216,7 +216,7 @@ importers:
   packages/domain:
     dependencies:
       bwip-js:
-        specifier: ^4.11.2
+        specifier: 4.11.2
         version: 4.11.2
     devDependencies:
       '@types/node':
