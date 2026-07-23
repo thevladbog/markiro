@@ -1,13 +1,17 @@
 import { Module } from "@nestjs/common";
+import { PickupOrdersController } from "./pickup-orders.controller";
 import { PickupOrdersService } from "./pickup-orders.service";
 
 /**
  * Shared module for `PickupOrdersService`: `KioskModule` (device-facing,
- * Task 8) and the admin `PickupOrdersController` (Task 9) both import this
- * module rather than each declaring the service as their own provider, so
- * there's exactly one instance in the DI graph.
+ * Task 8) imports this module for the service only, and this module also
+ * declares the admin `PickupOrdersController` (Task 9). Registering
+ * `PickupOrdersModule` directly in `AppModule` activates that controller;
+ * NestJS keeps a single module instance across both import sites, so
+ * `PickupOrdersService` stays a shared singleton.
  */
 @Module({
+  controllers: [PickupOrdersController],
   providers: [PickupOrdersService],
   exports: [PickupOrdersService],
 })

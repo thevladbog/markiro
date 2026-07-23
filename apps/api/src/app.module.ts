@@ -13,6 +13,7 @@ import { EmployeesModule } from "./modules/employees/employees.module";
 import { KiosksModule } from "./modules/kiosks/kiosks.module";
 import { PickupReasonsModule } from "./modules/pickup-reasons/pickup-reasons.module";
 import { KioskModule } from "./modules/kiosk/kiosk.module";
+import { PickupOrdersModule } from "./modules/pickup-orders/pickup-orders.module";
 
 @Module({ controllers: [HealthController] })
 export class AppModule {
@@ -45,6 +46,7 @@ export class AppModule {
         KiosksModule,
         PickupReasonsModule,
         KioskModule,
+        PickupOrdersModule,
       ],
       controllers: [HealthController],
     };

@@ -1,10 +1,27 @@
-import { BadRequestException, Inject, Injectable, UnauthorizedException } from "@nestjs/common";
-import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  NotFoundException,
+  UnauthorizedException,
+} from "@nestjs/common";
+import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, sql, type SQL } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { validatePickupKm } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
 import { nextOrderNo } from "../../pickup/order-number";
-import type { CreateOrderDto, CreateOrderResultDto, KioskBootstrapDto, OrderConflict } from "./dto";
+import type {
+  CreateOrderDto,
+  CreateOrderResultDto,
+  KioskBootstrapDto,
+  ListPickupOrdersQueryDto,
+  ListPickupOrdersResponseDto,
+  OrderConflict,
+  PickupOrderDetailDto,
+  PickupOrderRowDto,
+  ResolvePickupOrderDto,
+} from "./dto";
 
 /** An item that survived KM validation, allowlist resolution and in-request dedup. */
 interface ResolvedItem {
@@ -125,6 +142,247 @@ export class PickupOrdersService {
       employees: employeeRows.map((e) => ({
         id: e.id, fullName: e.fullName, role: e.role, badgeCodes: badgesByEmployee.get(e.id) ?? [],
       })),
+    };
+  }
+
+  /** Admin list, joined with employee/kiosk/writeoff-reason names, newest first. */
+  async list(tenantId: string, query: ListPickupOrdersQueryDto): Promise<ListPickupOrdersResponseDto> {
+    const conditions: SQL[] = [eq(schema.pickupOrders.tenantId, tenantId)];
+    if (query.status) conditions.push(eq(schema.pickupOrders.status, query.status));
+    if (query.reason) conditions.push(eq(schema.pickupOrders.reason, query.reason));
+    if (query.from) conditions.push(gte(schema.pickupOrders.createdAt, new Date(`${query.from}T00:00:00.000Z`)));
+    if (query.to) conditions.push(lte(schema.pickupOrders.createdAt, new Date(`${query.to}T23:59:59.999Z`)));
+
+    const rows = await this.queryJoinedRows(conditions);
+    return { items: rows.map((row) => this.mapRowDto(row)) };
+  }
+
+  /** Admin detail: joined row + the employee's active badge code + items (with product names). */
+  async detail(tenantId: string, id: string): Promise<PickupOrderDetailDto> {
+    const [row] = await this.db
+      .select({
+        ...this.joinedSelection(),
+        employeeId: schema.pickupOrders.employeeId,
+        receiptNo: schema.pickupOrders.receiptNo,
+        actNo: schema.pickupOrders.actNo,
+      })
+      .from(schema.pickupOrders)
+      .leftJoin(schema.employees, eq(schema.employees.id, schema.pickupOrders.employeeId))
+      .leftJoin(schema.kiosks, eq(schema.kiosks.id, schema.pickupOrders.kioskId))
+      .leftJoin(schema.pickupOrderReasons, eq(schema.pickupOrderReasons.id, schema.pickupOrders.writeoffReasonId))
+      .where(and(eq(schema.pickupOrders.tenantId, tenantId), eq(schema.pickupOrders.id, id)));
+
+    if (!row) throw new NotFoundException();
+
+    const [badge] = await this.db
+      .select({ badgeCode: schema.employeeBadges.badgeCode })
+      .from(schema.employeeBadges)
+      .where(and(
+        eq(schema.employeeBadges.tenantId, tenantId),
+        eq(schema.employeeBadges.employeeId, row.employeeId),
+        isNull(schema.employeeBadges.revokedAt),
+      ));
+
+    const itemRows = await this.db
+      .select({
+        id: schema.pickupOrderItems.id,
+        gtin14: schema.pickupOrderItems.gtin14,
+        serial: schema.pickupOrderItems.serial,
+        rawKm: schema.pickupOrderItems.rawKm,
+        productName: schema.products.name,
+        unitPrice: schema.pickupOrderItems.unitPrice,
+      })
+      .from(schema.pickupOrderItems)
+      .leftJoin(schema.products, eq(schema.products.id, schema.pickupOrderItems.productId))
+      .where(and(eq(schema.pickupOrderItems.tenantId, tenantId), eq(schema.pickupOrderItems.orderId, id)));
+
+    return {
+      ...this.mapRowDto(row),
+      employeeBadgeCode: badge?.badgeCode ?? null,
+      items: itemRows.map((item) => ({
+        id: item.id,
+        gtin14: item.gtin14,
+        serial: item.serial,
+        rawKm: item.rawKm,
+        productName: item.productName ?? "",
+        unitPrice: item.unitPrice,
+      })),
+      receiptNo: row.receiptNo,
+      actNo: row.actNo,
+    };
+  }
+
+  /**
+   * Resolve a pending order: `punch` records the receipt number; `writeoff`
+   * requires a writeoff reason (supplied — validated against this tenant,
+   * else inherited from the order's own `writeoffReasonId` — else 400) and
+   * records the act number. Either way, must currently be `pending` (409
+   * otherwise), and records who resolved it (`resolvedByUserId`, threaded
+   * from `TenantGuard`).
+   */
+  async resolve(
+    tenantId: string,
+    id: string,
+    dto: ResolvePickupOrderDto,
+    userId: string,
+  ): Promise<PickupOrderRowDto> {
+    const current = await this.findRow(tenantId, id);
+    if (!current) throw new NotFoundException();
+    if (current.status !== "pending") {
+      throw new ConflictException("Order can only be resolved while pending");
+    }
+
+    const resolvedAt = new Date();
+    const pendingCondition = and(
+      eq(schema.pickupOrders.tenantId, tenantId),
+      eq(schema.pickupOrders.id, id),
+      eq(schema.pickupOrders.status, "pending"),
+    );
+
+    let updatedId: string | undefined;
+    if (dto.action === "punch") {
+      const [row] = await this.db
+        .update(schema.pickupOrders)
+        .set({ status: "punched", receiptNo: dto.receiptNo ?? null, resolvedAt, resolvedByUserId: userId })
+        .where(pendingCondition)
+        .returning({ id: schema.pickupOrders.id });
+      updatedId = row?.id;
+    } else {
+      const writeoffReasonId = dto.writeoffReasonId ?? current.writeoffReasonId;
+      if (!writeoffReasonId) {
+        throw new BadRequestException("writeoffReasonId is required to write off this order");
+      }
+      if (dto.writeoffReasonId) {
+        await this.assertValidWriteoffReason(tenantId, dto.writeoffReasonId);
+      }
+      const [row] = await this.db
+        .update(schema.pickupOrders)
+        .set({ status: "writtenoff", actNo: dto.actNo ?? null, writeoffReasonId, resolvedAt, resolvedByUserId: userId })
+        .where(pendingCondition)
+        .returning({ id: schema.pickupOrders.id });
+      updatedId = row?.id;
+    }
+
+    if (!updatedId) throw new ConflictException("Order can only be resolved while pending");
+    return this.rowDtoById(tenantId, updatedId);
+  }
+
+  /**
+   * Cancel a pending order (409 otherwise) and void its items in the same
+   * transaction — voiding frees the partial-unique index on `kmKey`, so a
+   * cancelled code can be re-scanned into a new order.
+   */
+  async cancel(tenantId: string, id: string): Promise<PickupOrderRowDto> {
+    const cancelledId = await this.db.transaction(async (tx) => {
+      const [current] = await tx
+        .select({ status: schema.pickupOrders.status })
+        .from(schema.pickupOrders)
+        .where(and(eq(schema.pickupOrders.tenantId, tenantId), eq(schema.pickupOrders.id, id)));
+
+      if (!current) throw new NotFoundException();
+      if (current.status !== "pending") {
+        throw new ConflictException("Order can only be cancelled while pending");
+      }
+
+      const [row] = await tx
+        .update(schema.pickupOrders)
+        .set({ status: "cancelled" })
+        .where(and(
+          eq(schema.pickupOrders.tenantId, tenantId),
+          eq(schema.pickupOrders.id, id),
+          eq(schema.pickupOrders.status, "pending"),
+        ))
+        .returning({ id: schema.pickupOrders.id });
+
+      if (!row) throw new ConflictException("Order can only be cancelled while pending");
+
+      await tx
+        .update(schema.pickupOrderItems)
+        .set({ voided: true })
+        .where(and(eq(schema.pickupOrderItems.tenantId, tenantId), eq(schema.pickupOrderItems.orderId, id)));
+
+      return row.id;
+    });
+
+    return this.rowDtoById(tenantId, cancelledId);
+  }
+
+  /** A writeoffReasonId explicitly supplied to /resolve must belong to this tenant. */
+  private async assertValidWriteoffReason(tenantId: string, writeoffReasonId: string): Promise<void> {
+    const [reason] = await this.db
+      .select({ id: schema.pickupOrderReasons.id })
+      .from(schema.pickupOrderReasons)
+      .where(and(eq(schema.pickupOrderReasons.tenantId, tenantId), eq(schema.pickupOrderReasons.id, writeoffReasonId)));
+    if (!reason) throw new BadRequestException("Unknown writeoff reason for this organization");
+  }
+
+  private async findRow(tenantId: string, id: string) {
+    const [row] = await this.db
+      .select()
+      .from(schema.pickupOrders)
+      .where(and(eq(schema.pickupOrders.tenantId, tenantId), eq(schema.pickupOrders.id, id)));
+    return row;
+  }
+
+  private async rowDtoById(tenantId: string, id: string): Promise<PickupOrderRowDto> {
+    const rows = await this.queryJoinedRows([
+      eq(schema.pickupOrders.tenantId, tenantId),
+      eq(schema.pickupOrders.id, id),
+    ]);
+    const row = rows[0];
+    if (!row) throw new NotFoundException();
+    return this.mapRowDto(row);
+  }
+
+  private async queryJoinedRows(conditions: SQL[]) {
+    return this.db
+      .select(this.joinedSelection())
+      .from(schema.pickupOrders)
+      .leftJoin(schema.employees, eq(schema.employees.id, schema.pickupOrders.employeeId))
+      .leftJoin(schema.kiosks, eq(schema.kiosks.id, schema.pickupOrders.kioskId))
+      .leftJoin(schema.pickupOrderReasons, eq(schema.pickupOrderReasons.id, schema.pickupOrders.writeoffReasonId))
+      .where(and(...conditions))
+      .orderBy(desc(schema.pickupOrders.createdAt));
+  }
+
+  private joinedSelection() {
+    return {
+      id: schema.pickupOrders.id,
+      orderNo: schema.pickupOrders.orderNo,
+      employeeName: schema.employees.fullName,
+      kioskName: schema.kiosks.name,
+      reason: schema.pickupOrders.reason,
+      writeoffReasonName: schema.pickupOrderReasons.name,
+      itemCount: schema.pickupOrders.itemCount,
+      totalPrice: schema.pickupOrders.totalPrice,
+      status: schema.pickupOrders.status,
+      createdAt: schema.pickupOrders.createdAt,
+    };
+  }
+
+  private mapRowDto(row: {
+    id: string;
+    orderNo: string;
+    employeeName: string | null;
+    kioskName: string | null;
+    reason: "buy" | "writeoff";
+    writeoffReasonName: string | null;
+    itemCount: number;
+    totalPrice: string | null;
+    status: "pending" | "punched" | "writtenoff" | "cancelled";
+    createdAt: Date;
+  }): PickupOrderRowDto {
+    return {
+      id: row.id,
+      orderNo: row.orderNo,
+      employeeName: row.employeeName ?? "",
+      kioskName: row.kioskName ?? "",
+      reason: row.reason,
+      writeoffReasonName: row.writeoffReasonName,
+      itemCount: row.itemCount,
+      totalPrice: row.totalPrice,
+      status: row.status,
+      createdAt: row.createdAt,
     };
   }
 

@@ -7,6 +7,7 @@ import { TenantGuard } from "../src/tenancy/tenant.guard";
 interface FakeRequest {
   headers: Record<string, string>;
   tenantId?: string;
+  userId?: string;
 }
 
 function fakeAuth(getSession: Auth["api"]["getSession"]): Auth {
@@ -25,6 +26,7 @@ describe("TenantGuard", () => {
     const req: FakeRequest = { headers: {} };
 
     await expect(guard.canActivate(contextFor(req))).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(req.userId).toBeUndefined();
   });
 
   it("throws ForbiddenException when the session has no active organization", async () => {
@@ -50,5 +52,6 @@ describe("TenantGuard", () => {
 
     await expect(guard.canActivate(contextFor(req))).resolves.toBe(true);
     expect(req.tenantId).toBe("org_1");
+    expect(req.userId).toBe("user_1");
   });
 });
