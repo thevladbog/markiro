@@ -8,3 +8,14 @@ export { classifyScan } from "./scan/classify.js";
 export type { ScanInput } from "./scan/classify.js";
 export { validateShiftScan } from "./scan/validate.js";
 export type { ScanVerdict, ShiftScanContext } from "./scan/validate.js";
+export { mmToDots, parseLabelTemplate, ptToDots, sampleLabelData } from "./labels/model.js";
+export type {
+  LabelBarcodeElement,
+  LabelBoxElement,
+  LabelElement,
+  LabelField,
+  LabelFieldElement,
+  LabelLineElement,
+  LabelTemplateSpec,
+  LabelTextElement,
+} from "./labels/model.js";
