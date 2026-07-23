@@ -17,7 +17,7 @@
    - **Derived key length is EXACTLY 32 bytes** (`dkLen=32` / 256-bit) — `crypto.subtle.deriveBits` is called with `KEY_BITS = 256`.
    - **Base64 is STANDARD, WITH padding** (`btoa`/`atob`, RFC 4648 §4) — **NOT** the PHC-spec unpadded B64 (RFC 4648 §5 without `=`). A stock PHC encoder/decoder will silently mis-decode `hashBase64`/`saltBase64` if it strips or expects no padding; the server must byte-for-byte match `btoa`'s output, not re-derive it from a generic PHC library.
    - **Salt is 16 bytes**, generated with `crypto.getRandomValues(new Uint8Array(16))`.
-   - **Iterations ≥ 100000 for newly minted hashes** (`hashSecret` always mints at `ITERATIONS = 100_000`); the verifier (`verifyPin`/`verifyBadge`) accepts any positive integer read from an existing PHC string (so an old/foreign hash can still be verified), but the server must never mint below 100000 for a hash the station will consume.
+   - **Iterations ≥ 100000 for newly minted hashes** (`hashSecret` always mints at `ITERATIONS = 100_000`); the verifier (`verifyPin`/`verifyBadge`) enforces a floor of `MIN_ITERATIONS = 10_000` and returns `false` for any PHC string below it (so a tampered/downgraded bundle can't force a trivial-cost hash), and the server must never mint below 100000 for a hash the station will consume.
    - **The executable spec is `apps/station/test/crypto.test.ts`'s known-vector test**, which cross-checks the station's PBKDF2 output byte-for-byte against Node's `pbkdf2Sync` for a fixed salt/PIN/iteration count. The 05b server team must reproduce that exact vector (same salt bytes, same PIN, same iteration count → same derived bytes → same base64 string) before considering their hasher interop-compatible; do not rely on the prose above alone.
 
 ## Global Constraints
