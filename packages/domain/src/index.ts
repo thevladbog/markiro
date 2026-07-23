@@ -19,7 +19,12 @@ export type {
   LabelTemplateSpec,
   LabelTextElement,
 } from "./labels/model.js";
-export { buildGfaCommand, generateZpl, needsImageRendering } from "./labels/zpl.js";
+export {
+  buildGfaCommand,
+  generateZpl,
+  needsImageRendering,
+  rasterAlignOffsetDots,
+} from "./labels/zpl.js";
 export type { GenerateZplDeps, RasterResult, RasterizeTextFn } from "./labels/zpl.js";
 export { buildBitmapCommand, generateTspl } from "./labels/tspl.js";
 export type { GenerateTsplDeps } from "./labels/tspl.js";

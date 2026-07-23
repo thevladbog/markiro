@@ -151,6 +151,43 @@ describe("parseLabelTemplate", () => {
     );
   });
 
+  it("rejects a spec with two elements sharing the same id", () => {
+    const spec: LabelTemplateSpec = {
+      ...validSpec,
+      elements: [
+        { kind: "text", id: "dup", xMm: 0, yMm: 0, text: "First", fontSizePt: 12 },
+        { kind: "text", id: "dup", xMm: 10, yMm: 10, text: "Second", fontSizePt: 12 },
+      ],
+    };
+    try {
+      parseLabelTemplate(spec);
+      expect.fail("should throw");
+    } catch (err) {
+      const error = err as Error & { code: string; name: string; cause?: unknown };
+      expect(error.code).toBe("LABEL_INVALID");
+      expect(error.name).toBe("DomainError");
+      expect(error.message).toContain("elements");
+      const causes = error.cause as Array<{ path: string; message: string }>;
+      expect(causes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ path: "elements", message: expect.stringContaining("dup") }),
+        ]),
+      );
+    }
+  });
+
+  it("accepts a spec whose elements all have distinct ids (three-plus elements, no false positive)", () => {
+    const spec: LabelTemplateSpec = {
+      ...validSpec,
+      elements: [
+        { kind: "text", id: "a", xMm: 0, yMm: 0, text: "A", fontSizePt: 12 },
+        { kind: "text", id: "b", xMm: 5, yMm: 5, text: "B", fontSizePt: 12 },
+        { kind: "text", id: "c", xMm: 10, yMm: 10, text: "C", fontSizePt: 12 },
+      ],
+    };
+    expect(parseLabelTemplate(spec)).toEqual(spec);
+  });
+
   it("rejects a negative thicknessMm on a line", () => {
     const spec: LabelTemplateSpec = {
       ...validSpec,

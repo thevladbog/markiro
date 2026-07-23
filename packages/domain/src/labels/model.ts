@@ -96,14 +96,38 @@ const dpiSchema = z.union([z.literal(203), z.literal(300)]);
  * command language, and the positioned elements. Elements MAY fall outside
  * `[0, widthMm] x [0, heightMm]` — the schema does not enforce label bounds;
  * that is an editor-time concern, not a model invariant.
+ *
+ * `superRefine` enforces the one CROSS-element invariant `labelElementSchema`
+ * itself can't express in isolation: every element's `id` must be unique
+ * within the template. Element ids are how the editor (selection, drag,
+ * property edits) and the ZPL/TSPL emitters' callers address a specific
+ * element — a duplicate id would make "the element with id X" ambiguous,
+ * silently breaking whichever consumer picks the "wrong" of the two matches
+ * (e.g. `Array.prototype.find` always resolving to the first). The issue is
+ * rooted at `["elements"]` (not a specific index) since the defect is a
+ * relationship BETWEEN elements, not a single element's own field.
  */
-const labelTemplateSpecSchema = z.object({
-  widthMm: z.number().min(10).max(300),
-  heightMm: z.number().min(10).max(300),
-  dpi: dpiSchema,
-  language: z.enum(["zpl", "tspl"]),
-  elements: z.array(labelElementSchema),
-});
+const labelTemplateSpecSchema = z
+  .object({
+    widthMm: z.number().min(10).max(300),
+    heightMm: z.number().min(10).max(300),
+    dpi: dpiSchema,
+    language: z.enum(["zpl", "tspl"]),
+    elements: z.array(labelElementSchema),
+  })
+  .superRefine((spec, ctx) => {
+    const seenIds = new Set<string>();
+    for (const element of spec.elements) {
+      if (seenIds.has(element.id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `duplicate element id "${element.id}": every element's id must be unique within a label template`,
+          path: ["elements"],
+        });
+      }
+      seenIds.add(element.id);
+    }
+  });
 export type LabelTemplateSpec = z.infer<typeof labelTemplateSpecSchema>;
 
 /** Parses and validates an unknown value as a `LabelTemplateSpec`. */

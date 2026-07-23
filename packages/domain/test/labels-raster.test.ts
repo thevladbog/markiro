@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildGfaCommand, type RasterResult } from "../src/labels/raster-types.js";
+import {
+  buildGfaCommand,
+  rasterAlignOffsetDots,
+  type RasterResult,
+} from "../src/labels/raster-types.js";
 import { bitmapToTsplBytes, bitmapToZplHex, convertToMonochrome } from "../src/labels/raster.js";
 
 /** Builds a solid-color RGBA buffer (one pixel repeated `width*height` times). */
@@ -99,6 +103,46 @@ describe("bitmapToZplHex", () => {
       // are carried for callers but never appear in the emitted command.
       expect(buildGfaCommand(result)).toBe("^GFA,2,2,2,FFC0");
     });
+  });
+});
+
+describe("rasterAlignOffsetDots", () => {
+  it("returns 0 when maxWidthDots is undefined, regardless of align", () => {
+    expect(rasterAlignOffsetDots("center", undefined, 10)).toBe(0);
+    expect(rasterAlignOffsetDots("right", undefined, 10)).toBe(0);
+  });
+
+  it("returns 0 for align left even when maxWidthDots is set", () => {
+    expect(rasterAlignOffsetDots("left", 100, 20)).toBe(0);
+  });
+
+  it("returns 0 for align undefined even when maxWidthDots is set", () => {
+    expect(rasterAlignOffsetDots(undefined, 100, 20)).toBe(0);
+  });
+
+  it("centers exactly for an even remainder", () => {
+    // (100 - 20) / 2 = 40, no rounding needed.
+    expect(rasterAlignOffsetDots("center", 100, 20)).toBe(40);
+  });
+
+  it("rounds an odd remainder for align center", () => {
+    // (101 - 20) / 2 = 40.5 -> Math.round -> 41.
+    expect(rasterAlignOffsetDots("center", 101, 20)).toBe(41);
+  });
+
+  it("aligns flush to the trailing edge for align right", () => {
+    // 100 - 20 = 80.
+    expect(rasterAlignOffsetDots("right", 100, 20)).toBe(80);
+  });
+
+  it("clamps to 0 for align center when the raster is wider than maxWidthDots", () => {
+    // (10 - 20) / 2 = -5 -> clamped to 0.
+    expect(rasterAlignOffsetDots("center", 10, 20)).toBe(0);
+  });
+
+  it("clamps to 0 for align right when the raster is wider than maxWidthDots", () => {
+    // 10 - 20 = -10 -> clamped to 0.
+    expect(rasterAlignOffsetDots("right", 10, 20)).toBe(0);
   });
 });
 

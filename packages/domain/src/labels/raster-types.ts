@@ -126,3 +126,52 @@ export function invertHexToTsplBytes(hex: string): string {
 export function buildBitmapCommand(x: number, y: number, r: RasterResult): string {
   return `BITMAP ${x},${y},${r.bytesPerRow},${r.height},0,${invertHexToTsplBytes(r.hex)}`;
 }
+
+/**
+ * Computes the extra x-offset (in dots) a rasterized-text bitmap must be
+ * shifted by, to honor an element's `align`/`maxWidthMm` the same way the
+ * native-text branch does (ZPL's `^FB` block / TSPL's `TEXT` alignment
+ * parameter both anchor relative to the element's declared box, not its raw
+ * `x`) — without this offset the raster branch would always anchor the
+ * bitmap flush to the element's bare `x`, silently dropping `align` for any
+ * text that happens to need rasterization (Cyrillic/CJK/etc.).
+ *
+ * `align: "left"` (or unset) needs no offset: the native path's default
+ * already anchors flush-left at `x`, exactly where the raster bitmap is
+ * drawn regardless. `"center"` splits the leftover space
+ * (`maxWidthDots - rasterWidthDots`) evenly on both sides, rounding to the
+ * nearest whole dot (a fractional dot can't be rendered) via `Math.round`.
+ * `"right"` shifts the bitmap flush to the box's trailing edge, i.e. by the
+ * FULL leftover space.
+ *
+ * Both branches are clamped to a minimum of 0: if the rasterized bitmap
+ * turns out WIDER than `maxWidthDots` (a long/dense piece of text at a
+ * fixed font size — the model does not shrink text to fit), there is no
+ * leftover space to distribute and the bitmap stays anchored at `x`, the
+ * same graceful degradation the native `^FB`/alignment paths exhibit rather
+ * than emitting a negative, off-label offset.
+ *
+ * With no `maxWidthMm` on the element (`maxWidthDots === undefined`) there
+ * is no box to align within, so the offset is always 0 regardless of
+ * `align` — matching TSPL's native-text behavior, where `align` without a
+ * width is meaningless (see `tspl.ts`'s `renderTextLikeElement` doc
+ * comment), and keeping ZPL's raster and native paths consistent with each
+ * other for the same case.
+ *
+ * A single pure function (not duplicated per emitter) so `zpl.ts`,
+ * `tspl.ts`, and (via a re-export chain, ultimately from `@markiro/domain`)
+ * `apps/admin`'s `PreviewPane.tsx` compositor all apply the EXACT same
+ * arithmetic — the preview and the two print-document emitters can never
+ * silently drift apart on this offset.
+ */
+export function rasterAlignOffsetDots(
+  align: "left" | "center" | "right" | undefined,
+  maxWidthDots: number | undefined,
+  rasterWidthDots: number,
+): number {
+  if (maxWidthDots === undefined) return 0;
+  const leftover = maxWidthDots - rasterWidthDots;
+  if (align === "center") return Math.max(0, Math.round(leftover / 2));
+  if (align === "right") return Math.max(0, leftover);
+  return 0;
+}

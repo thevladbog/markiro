@@ -13,8 +13,12 @@ describe("needsImageRendering", () => {
     expect(needsImageRendering("ACME Foods 123")).toBe(false);
   });
 
-  it("returns false for Latin-1 Supplement accented text", () => {
-    expect(needsImageRendering("café naïve")).toBe(false);
+  it("returns true for Latin-1 Supplement accented text (native code-page support is unverified)", () => {
+    expect(needsImageRendering("café naïve")).toBe(true);
+  });
+
+  it("returns true for a single Latin-1 Supplement character (é)", () => {
+    expect(needsImageRendering("é")).toBe(true);
   });
 
   it("returns true for Cyrillic text", () => {
@@ -283,5 +287,51 @@ describe("generateZpl - raster fallback", () => {
   it("buildGfaCommand assembles the ^GFA command from a RasterResult in isolation", () => {
     const r: RasterResult = { hex: "AAAA5555", totalBytes: 4, bytesPerRow: 1, width: 8, height: 4 };
     expect(buildGfaCommand(r)).toBe("^GFA,4,4,1,AAAA5555");
+  });
+
+  it("offsets the rasterized bitmap's x for a centered element with maxWidthMm (golden)", async () => {
+    // Same fake 16x8 checkerboard as above, but the element now carries
+    // align: "center" and maxWidthMm: 20.
+    const fakeResult: RasterResult = {
+      hex: "AAAA5555AAAA5555AAAA5555AAAA5555",
+      totalBytes: 16,
+      bytesPerRow: 2,
+      width: 16,
+      height: 8,
+    };
+    const rasterizeText: RasterizeTextFn = vi.fn(async () => fakeResult);
+    const centeredSpec: LabelTemplateSpec = {
+      widthMm: 58,
+      heightMm: 40,
+      dpi: 203,
+      language: "zpl",
+      elements: [
+        {
+          kind: "text",
+          id: "t1",
+          xMm: 5,
+          yMm: 5,
+          text: "Тест",
+          fontSizePt: 12,
+          align: "center",
+          maxWidthMm: 20,
+        },
+      ],
+    };
+
+    const zpl = await generateZpl(centeredSpec, sampleLabelData(), { rasterizeText });
+
+    // x=mmToDots(5,203)=40; maxWidthDots=mmToDots(20,203)=160;
+    // offset=round((160-16)/2)=72; final x = 40+72 = 112. y is untouched.
+    expect(zpl).toBe(
+      [
+        "^XA",
+        "^PW464",
+        "^LL320",
+        "^FO112,40^GFA,16,16,2,AAAA5555AAAA5555AAAA5555AAAA5555^FS",
+        "^XZ",
+        "",
+      ].join("\n"),
+    );
   });
 });

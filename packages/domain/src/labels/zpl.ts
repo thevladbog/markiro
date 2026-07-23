@@ -10,10 +10,10 @@ import {
   type LabelTemplateSpec,
   type LabelTextElement,
 } from "./model.js";
-import { buildGfaCommand, type RasterizeTextFn } from "./raster-types.js";
+import { buildGfaCommand, rasterAlignOffsetDots, type RasterizeTextFn } from "./raster-types.js";
 import { needsImageRendering } from "./text.js";
 
-export { buildGfaCommand } from "./raster-types.js";
+export { buildGfaCommand, rasterAlignOffsetDots } from "./raster-types.js";
 export type { RasterResult, RasterizeTextFn } from "./raster-types.js";
 // Re-exported so existing importers of `needsImageRendering` from this
 // module (e.g. the barrel) keep working unchanged now that the check itself
@@ -110,9 +110,31 @@ function alignToJustification(align: "left" | "center" | "right" | undefined): "
 /**
  * Renders a `text` or `field` element's resolved string as either native
  * ZPL text (`^A0N,<h>,<w>` + optional `^FB` block for align/maxWidth) or,
- * when the resolved text needs non-Latin-1 script rendering, a rasterized
- * `^GFA` image field. Shared by both element kinds since they differ only
+ * when the resolved text contains any non-ASCII character, a rasterized
+ * `^GFA` image field (see `text.ts`'s `needsImageRendering` doc comment for
+ * why the native path is ASCII-only rather than Latin-1: native `^FD` text
+ * carrying Latin-1 Supplement characters depends on the printer's active
+ * code page, which is unverified and would diverge from the always-ASCII-
+ * aware admin preview). Shared by both element kinds since they differ only
  * in where their display text comes from (literal vs. `data` lookup).
+ *
+ * VERTICAL-BASELINE HEURISTIC (rasterized branch only, documented trade-off
+ * not a bug): the bitmap this branch emits is positioned with its TOP-LEFT
+ * corner at `(x, y)` — `^FO`'s own anchor — exactly like the native branch
+ * below anchors its text's top-left character cell there. But the bitmap's
+ * CONTENT is produced by `apps/admin/src/labels/rasterizer.ts`, which draws
+ * the glyphs `textBaseline = "middle"` vertically CENTERED inside a
+ * `1.5em`-tall box (`ceil(fontSizePx * 1.5)`), not flush against the box's
+ * top edge the way a native font's ascender roughly is. Net effect: a
+ * rasterized (e.g. Cyrillic/CJK) glyph sits approximately `0.25em` LOWER
+ * than a native-ASCII glyph would at the identical `yMm` — an accepted
+ * Idento-parity trade (matching `panel/src/features/badge/zpl/
+ * canvasRasterizer.ts`'s own heuristic), not something this emitter
+ * compensates for. WYSIWYG still holds despite the offset: `PreviewPane.tsx`
+ * composites this EXACT SAME bitmap (same rasterizer, same box math) on top
+ * of its schematic canvas, so whatever the admin preview shows is pixel-
+ * identical to what prints, even though it may not perfectly line up with a
+ * neighboring native-ASCII element's baseline on the same label.
  */
 async function renderTextLikeElement(
   element: LabelTextElement | LabelFieldElement,
@@ -127,7 +149,7 @@ async function renderTextLikeElement(
     if (!deps.rasterizeText) {
       throw new DomainError(
         "RASTER_REQUIRED",
-        `label text "${text}" contains characters outside printable Latin-1 and needs image rendering, but no rasterizeText dependency was provided`,
+        `label text "${text}" contains characters outside printable ASCII and needs image rendering, but no rasterizeText dependency was provided`,
       );
     }
     const fontSizePx = ptToDots(element.fontSizePt, spec.dpi);
@@ -140,7 +162,14 @@ async function renderTextLikeElement(
       fontSizePx,
       bold: element.bold ?? false,
     });
-    return `^FO${x},${y}${buildGfaCommand(raster)}^FS`;
+    // Honor align/maxWidthMm the same way the native ^FB branch below does
+    // — see `rasterAlignOffsetDots`'s doc comment for the full rationale;
+    // without this, a rasterized (e.g. Cyrillic) piece of centered/
+    // right-aligned text would always render flush-left instead.
+    const maxWidthDots =
+      element.maxWidthMm !== undefined ? mmToDots(element.maxWidthMm, spec.dpi) : undefined;
+    const offsetXDots = rasterAlignOffsetDots(element.align, maxWidthDots, raster.width);
+    return `^FO${x + offsetXDots},${y}${buildGfaCommand(raster)}^FS`;
   }
 
   const heightDots = ptToDots(element.fontSizePt, spec.dpi);

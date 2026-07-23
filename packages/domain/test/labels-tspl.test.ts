@@ -349,4 +349,55 @@ describe("generateTspl - raster fallback", () => {
       bold: false,
     });
   });
+
+  it("offsets the rasterized bitmap's x for a centered element with maxWidthMm (golden)", async () => {
+    const fakeResult: RasterResult = {
+      hex: "AAAA5555AAAA5555AAAA5555AAAA5555",
+      totalBytes: 16,
+      bytesPerRow: 2,
+      width: 16,
+      height: 8,
+    };
+    const rasterizeText: RasterizeTextFn = vi.fn(async () => fakeResult);
+    const centeredSpec: LabelTemplateSpec = {
+      widthMm: 58,
+      heightMm: 40,
+      dpi: 203,
+      language: "tspl",
+      elements: [
+        {
+          kind: "text",
+          id: "t1",
+          xMm: 5,
+          yMm: 5,
+          text: "Тест",
+          fontSizePt: 12,
+          align: "center",
+          maxWidthMm: 20,
+        },
+      ],
+    };
+
+    const tspl = await generateTspl(centeredSpec, sampleLabelData(), { rasterizeText });
+
+    // Same inversion as the golden above (checkerboard -> alternating
+    // 0x55/0xAA rows). x=mmToDots(5,203)=40; maxWidthDots=mmToDots(20,203)=160;
+    // offset=round((160-16)/2)=72; final x = 40+72 = 112. y is untouched.
+    const invertedBytes = [
+      0x55, 0x55, 0xaa, 0xaa, 0x55, 0x55, 0xaa, 0xaa, 0x55, 0x55, 0xaa, 0xaa, 0x55, 0x55, 0xaa,
+      0xaa,
+    ];
+    const invertedPayload = invertedBytes.map((b) => String.fromCharCode(b)).join("");
+    expect(tspl).toBe(
+      [
+        "SIZE 58 mm, 40 mm",
+        "GAP 2 mm, 0 mm",
+        "DIRECTION 1",
+        "CLS",
+        `BITMAP 112,40,2,8,0,${invertedPayload}`,
+        "PRINT 1",
+        "",
+      ].join("\n"),
+    );
+  });
 });

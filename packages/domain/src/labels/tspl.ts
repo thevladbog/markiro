@@ -55,10 +55,10 @@ import {
   type LabelTemplateSpec,
   type LabelTextElement,
 } from "./model.js";
-import { buildBitmapCommand, type RasterizeTextFn } from "./raster-types.js";
+import { buildBitmapCommand, rasterAlignOffsetDots, type RasterizeTextFn } from "./raster-types.js";
 import { needsImageRendering } from "./text.js";
 
-export { buildBitmapCommand } from "./raster-types.js";
+export { buildBitmapCommand, rasterAlignOffsetDots } from "./raster-types.js";
 export type { RasterResult, RasterizeTextFn } from "./raster-types.js";
 // Re-exported for symmetry with zpl.ts (same shared check, same barrel shape).
 export { needsImageRendering } from "./text.js";
@@ -95,10 +95,12 @@ function alignToTsplAlignment(
 /**
  * Renders a `text` or `field` element's resolved string as either native
  * TSPL text (`TEXT x,y,"0",0,<xmul>,<ymul>[,<alignment>],"..."`) or, when
- * the resolved text needs non-Latin-1 script rendering, a rasterized
- * `BITMAP` command. Mirrors `zpl.ts`'s `renderTextLikeElement` (same
- * signature, same raster-fallback structure) since text/field elements
- * differ only in where their display text comes from.
+ * the resolved text contains any non-ASCII character, a rasterized
+ * `BITMAP` command (see `text.ts`'s `needsImageRendering` doc comment for
+ * why the native path is ASCII-only rather than Latin-1). Mirrors
+ * `zpl.ts`'s `renderTextLikeElement` (same signature, same raster-fallback
+ * structure) since text/field elements differ only in where their display
+ * text comes from.
  *
  * TEXT SIZING (verified against the TSC TSPL2 Programming Manual): font
  * `"0"` is documented as "Monotype CG Triumvirate Bold Condensed with
@@ -119,12 +121,27 @@ function alignToTsplAlignment(
  * `bold` has no native effect here (font `"0"` has no separate weight
  * parameter, matching ZPL's `^A0` built-in font) — it is fully honored on
  * the raster branch below (passed to `rasterizeText`) only, exactly like
- * `zpl.ts`. `maxWidthMm` likewise has no TSPL equivalent: unlike ZPL's
+ * `zpl.ts`. `maxWidthMm` has no NATIVE TSPL equivalent either: unlike ZPL's
  * `^FB` (a field-block command that takes an explicit width to wrap/justify
  * text within), TSPL's `TEXT` alignment parameter has no accompanying
- * width — it aligns relative to the given `x`/`y` alone. Accepting but
- * ignoring `maxWidthMm` here is a deliberate, documented no-op rather than
- * inventing an unsupported wrapping behavior.
+ * width — it aligns relative to the given `x`/`y` alone, so the NATIVE
+ * branch below accepts but ignores `maxWidthMm` (a deliberate, documented
+ * no-op rather than inventing an unsupported wrapping behavior). The
+ * RASTER branch is different: since it emits a plain positioned `BITMAP`
+ * (not a native alignment-aware command), it honors `align`/`maxWidthMm`
+ * itself by shifting the bitmap's x via `rasterAlignOffsetDots` — see that
+ * function's doc comment.
+ *
+ * VERTICAL-BASELINE HEURISTIC (rasterized branch only, documented trade-off
+ * not a bug — identical to `zpl.ts`'s own note on its raster branch, see
+ * that doc comment for the full rationale): the bitmap is positioned with
+ * its TOP-LEFT corner at `(x, y)`, but `apps/admin/src/labels/rasterizer.ts`
+ * draws the glyphs `textBaseline = "middle"` vertically CENTERED inside a
+ * `1.5em`-tall box rather than flush against the box's top edge, so a
+ * rasterized glyph sits ~`0.25em` lower than a native-ASCII glyph would at
+ * the identical `yMm`. WYSIWYG still holds: `PreviewPane.tsx` composites
+ * this exact same bitmap on screen, so the preview and the print are always
+ * pixel-identical even though this offset exists relative to native text.
  */
 async function renderTextLikeElement(
   element: LabelTextElement | LabelFieldElement,
@@ -139,7 +156,7 @@ async function renderTextLikeElement(
     if (!deps.rasterizeText) {
       throw new DomainError(
         "RASTER_REQUIRED",
-        `label text "${text}" contains characters outside printable Latin-1 and needs image rendering, but no rasterizeText dependency was provided`,
+        `label text "${text}" contains characters outside printable ASCII and needs image rendering, but no rasterizeText dependency was provided`,
       );
     }
     const fontSizePx = ptToDots(element.fontSizePt, spec.dpi);
@@ -148,7 +165,17 @@ async function renderTextLikeElement(
       fontSizePx,
       bold: element.bold ?? false,
     });
-    return buildBitmapCommand(x, y, raster);
+    // Honor align/maxWidthMm — see zpl.ts's identical raster-branch offset
+    // and `rasterAlignOffsetDots`'s doc comment for the full rationale.
+    // Unlike native TSPL `TEXT` (whose alignment parameter has no
+    // accompanying width, see this function's doc comment above), a
+    // rasterized element DOES carry `maxWidthMm` through to this offset, so
+    // a rasterized (e.g. Cyrillic) centered/right-aligned text still lines
+    // up the same way the ZPL raster branch does.
+    const maxWidthDots =
+      element.maxWidthMm !== undefined ? mmToDots(element.maxWidthMm, spec.dpi) : undefined;
+    const offsetXDots = rasterAlignOffsetDots(element.align, maxWidthDots, raster.width);
+    return buildBitmapCommand(x + offsetXDots, y, raster);
   }
 
   const alignment = alignToTsplAlignment(element.align);
