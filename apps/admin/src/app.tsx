@@ -7,6 +7,7 @@ import { SelectOrgPage } from "./pages/auth/SelectOrg.js";
 import { CatalogPage } from "./pages/catalog/index.js";
 import { CounterpartiesPage } from "./pages/counterparties/index.js";
 import { DashboardPage } from "./pages/dashboard/index.js";
+import { EmployeesPage } from "./pages/employees/index.js";
 import { LabelEditorPage } from "./pages/labels/editor/index.js";
 import { LabelTemplatesPage } from "./pages/labels/index.js";
 import { OrderDetailPage } from "./pages/pickup/OrderDetail.js";
@@ -37,6 +38,7 @@ export function App() {
           <Route path="catalog" element={<CatalogPage />} />
           <Route path="shifts" element={<ShiftsPage />} />
           <Route path="counterparties" element={<CounterpartiesPage />} />
+          <Route path="employees" element={<EmployeesPage />} />
           <Route path="labels" element={<LabelTemplatesPage />} />
           <Route path="labels/new" element={<LabelEditorPage />} />
           <Route path="labels/:id" element={<LabelEditorPage />} />
