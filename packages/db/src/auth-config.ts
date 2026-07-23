@@ -32,7 +32,10 @@ function buildAuthImpl(
     trustedOrigins: opts.trustedOrigins,
     database: drizzleAdapter(db, { provider: "pg", schema: authSchema }),
     emailAndPassword: { enabled: true },
-    plugins: [organization(), apiKey()],
+    plugins: [
+      organization(),
+      apiKey([{ configId: "station", defaultPrefix: "mk_", references: "organization" }]),
+    ],
   });
 }
 
@@ -47,17 +50,53 @@ export interface SessionWithActiveOrg {
 
 type AuthBase = ReturnType<typeof buildAuthImpl>;
 
+/** Result of an api-key verification (apiKey plugin). */
+export interface VerifyApiKeyResult {
+  valid: boolean;
+  error: { message: string; code: string } | null;
+  key: { id: string; referenceId: string; enabled: boolean | null } | null;
+}
+
+/** Minimal created-api-key shape (apiKey plugin) used by device enrollment. */
+export interface CreatedApiKey {
+  id: string;
+  key: string;
+  referenceId: string;
+}
+
 /**
  * Narrowed Auth: identical to the widened base except `api.getSession`, which is
- * re-typed to expose the organization plugin's session fields. The
+ * re-typed to expose the organization plugin's session fields, plus the
+ * `apiKey` plugin's `verifyApiKey`/`createApiKey` endpoints. The
  * `<BetterAuthOptions>` widening in `buildAuthImpl` erases plugin type additions
- * (TS2883 workaround) — this companion type restores the one contract
- * downstream tasks depend on.
+ * (TS2883 workaround) — this companion type restores the contract downstream
+ * tasks depend on. `verifyApiKey`/`createApiKey` don't exist at all on the
+ * widened `AuthBase["api"]` (they're plugin-only endpoints, unlike the
+ * always-present `getSession`), so `buildAuth` below casts through `unknown`
+ * to attach them; the runtime object always has them because the `apiKey()`
+ * plugin is unconditionally registered in `buildAuthImpl`.
  * Update `SessionWithActiveOrg` if the plugin set changes.
  */
 export type Auth = Omit<AuthBase, "api"> & {
   api: Omit<AuthBase["api"], "getSession"> & {
     getSession(input: { headers: Headers }): Promise<SessionWithActiveOrg | null>;
+    // `configId` is required here in practice: our single "station" apiKey
+    // configuration has no `configId: "default"` fallback, so
+    // `verifyApiKey({ body: { key } })` without it throws
+    // NO_DEFAULT_API_KEY_CONFIGURATION_FOUND (verified against the running
+    // plugin -- see task-5-report.md). Callers must pass `configId: "station"`.
+    verifyApiKey(input: {
+      body: { key: string; configId?: string };
+    }): Promise<VerifyApiKeyResult>;
+    createApiKey(input: {
+      body: {
+        configId?: string;
+        name?: string;
+        userId?: string;
+        organizationId?: string;
+        metadata?: Record<string, unknown>;
+      };
+    }): Promise<CreatedApiKey>;
   };
 };
 
@@ -65,5 +104,5 @@ export function buildAuth(
   db: Db,
   opts: { secret: string; baseURL: string; trustedOrigins?: string[] },
 ): Auth {
-  return buildAuthImpl(db, opts);
+  return buildAuthImpl(db, opts) as unknown as Auth;
 }
