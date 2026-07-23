@@ -65,7 +65,67 @@
     "catalog": {
       "title": "Каталог продукции",
       "emptyTitle": "Каталог пуст",
-      "emptyHint": "Добавьте первый продукт, чтобы начать планирование смен."
+      "emptyHint": "Добавьте первый продукт, чтобы начать планирование смен.",
+      "addAction": "Добавить продукт",
+      "edit": "Изменить",
+      "delete": "Удалить",
+      "cancel": "Отмена",
+      "searchLabel": "Поиск",
+      "searchPlaceholder": "Название или ГТИН",
+      "statusFilterLabel": "Статус",
+      "statusFilter": {
+        "all": "Все статусы",
+        "draft": "Черновик",
+        "active": "Активен"
+      },
+      "status": {
+        "draft": "Черновик",
+        "active": "Активен"
+      },
+      "deleteConfirmTitle": "Удалить продукт?",
+      "deleteConfirmBody": "Продукт «{{name}}» будет удалён без возможности восстановления.",
+      "deleteConfirmAction": "Удалить",
+      "table": {
+        "gtin": "ГТИН",
+        "name": "Название",
+        "productGroup": "Группа",
+        "boxCapacity": "В коробе",
+        "palletCapacity": "На поддоне",
+        "status": "Статус",
+        "actions": "Действия"
+      },
+      "form": {
+        "createTitle": "Новый продукт",
+        "editTitle": "Изменить продукт",
+        "gtinLabel": "ГТИН",
+        "nameLabel": "Название",
+        "productGroupLabel": "Группа продукции",
+        "boxCapacityLabel": "Вместимость короба, шт",
+        "palletCapacityLabel": "Вместимость поддона, шт",
+        "defaultCounterpartyLabel": "Контрагент по умолчанию",
+        "noCounterparty": "Не выбран",
+        "submitCreate": "Создать",
+        "submitUpdate": "Сохранить",
+        "draftBanner": "Черновик — заполните группу и вместимости, чтобы запускать смены",
+        "gtinOwnerHint": "Владелец ГТИН — {{name}}",
+        "applyCounterparty": "Подставить контрагента",
+        "gtinOwnerUnknown": "Владелец ГТИН не определён — проверьте код перед сохранением.",
+        "errors": {
+          "gtinRequired": "Укажите ГТИН",
+          "gtinInvalid": "Неверный ГТИН (проверьте контрольную цифру)",
+          "nameRequired": "Укажите название",
+          "nameTooLong": "Не более 200 символов",
+          "capacityInvalid": "Введите положительное целое число"
+        }
+      },
+      "toasts": {
+        "createSuccess": "Продукт добавлен",
+        "createError": "Не удалось создать продукт",
+        "updateSuccess": "Продукт обновлён",
+        "updateError": "Не удалось обновить продукт",
+        "deleteSuccess": "Продукт удалён",
+        "deleteError": "Не удалось удалить продукт"
+      }
     },
     "counterparties": {
       "title": "Контрагенты",

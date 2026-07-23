@@ -65,7 +65,67 @@
     "catalog": {
       "title": "Product catalog",
       "emptyTitle": "Catalog is empty",
-      "emptyHint": "Add your first product to start planning shifts."
+      "emptyHint": "Add your first product to start planning shifts.",
+      "addAction": "Add product",
+      "edit": "Edit",
+      "delete": "Delete",
+      "cancel": "Cancel",
+      "searchLabel": "Search",
+      "searchPlaceholder": "Name or GTIN",
+      "statusFilterLabel": "Status",
+      "statusFilter": {
+        "all": "All statuses",
+        "draft": "Draft",
+        "active": "Active"
+      },
+      "status": {
+        "draft": "Draft",
+        "active": "Active"
+      },
+      "deleteConfirmTitle": "Delete product?",
+      "deleteConfirmBody": "Product \"{{name}}\" will be permanently deleted.",
+      "deleteConfirmAction": "Delete",
+      "table": {
+        "gtin": "GTIN",
+        "name": "Name",
+        "productGroup": "Group",
+        "boxCapacity": "Per box",
+        "palletCapacity": "Per pallet",
+        "status": "Status",
+        "actions": "Actions"
+      },
+      "form": {
+        "createTitle": "New product",
+        "editTitle": "Edit product",
+        "gtinLabel": "GTIN",
+        "nameLabel": "Name",
+        "productGroupLabel": "Product group",
+        "boxCapacityLabel": "Box capacity, units",
+        "palletCapacityLabel": "Pallet capacity, units",
+        "defaultCounterpartyLabel": "Default counterparty",
+        "noCounterparty": "None selected",
+        "submitCreate": "Create",
+        "submitUpdate": "Save",
+        "draftBanner": "Draft — fill in the group and capacities to run shifts",
+        "gtinOwnerHint": "GTIN owner — {{name}}",
+        "applyCounterparty": "Apply counterparty",
+        "gtinOwnerUnknown": "GTIN owner could not be determined — double check the code before saving.",
+        "errors": {
+          "gtinRequired": "Enter a GTIN",
+          "gtinInvalid": "Invalid GTIN (check digit mismatch)",
+          "nameRequired": "Enter a name",
+          "nameTooLong": "200 characters or fewer",
+          "capacityInvalid": "Enter a positive whole number"
+        }
+      },
+      "toasts": {
+        "createSuccess": "Product added",
+        "createError": "Could not create the product",
+        "updateSuccess": "Product updated",
+        "updateError": "Could not update the product",
+        "deleteSuccess": "Product deleted",
+        "deleteError": "Could not delete the product"
+      }
     },
     "counterparties": {
       "title": "Counterparties",
