@@ -9,6 +9,14 @@ export function partitionName(parent: string, month: Date): string {
   return `${parent}_${y}${m}`;
 }
 
+/** Extracts the Postgres SQLSTATE from a raw pg error or a drizzle-wrapped one. */
+export function pgCode(error: unknown): string | undefined {
+  const direct = (error as { code?: unknown }).code;
+  if (typeof direct === "string") return direct;
+  const cause = (error as { cause?: { code?: unknown } }).cause;
+  return typeof cause?.code === "string" ? cause.code : undefined;
+}
+
 function monthBounds(month: Date): [string, string] {
   const from = new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth(), 1));
   const to = new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth() + 1, 1));
@@ -39,8 +47,9 @@ export async function ensurePartitions(db: Db, months: Date[]): Promise<string[]
         // both pass the existence probe; PARTITION OF takes a lock on the
         // parent and the loser raises 42P07 even with IF NOT EXISTS. The
         // partition exists — that is the desired end state, so swallow it.
-        const code = (error as { code?: string }).code;
-        if (code === "42P07") continue;
+        // NB: drizzle wraps pg errors (DrizzleQueryError) — the SQLSTATE
+        // lives on error.cause, so check both levels.
+        if (pgCode(error) === "42P07") continue;
         throw error;
       }
       created.push(name);
