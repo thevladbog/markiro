@@ -9,6 +9,7 @@ import { ProductsModule } from "./modules/products/products.module";
 import { LinesModule } from "./modules/lines/lines.module";
 import { ShiftsModule } from "./modules/shifts/shifts.module";
 import { LabelTemplatesModule } from "./modules/label-templates/label-templates.module";
+import { EmployeesModule } from "./modules/employees/employees.module";
 
 @Module({ controllers: [HealthController] })
 export class AppModule {
@@ -37,6 +38,7 @@ export class AppModule {
         LinesModule,
         ShiftsModule,
         LabelTemplatesModule,
+        EmployeesModule,
       ],
       controllers: [HealthController],
     };
