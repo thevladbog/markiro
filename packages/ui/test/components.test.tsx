@@ -151,6 +151,28 @@ describe("Select", () => {
 
     expect(onChange).toHaveBeenCalledWith("Вода");
   });
+
+  it("renders per-option disabled state and reflects it in the DOM", () => {
+    render(
+      <Select
+        label="Продукты"
+        options={[
+          { value: "p1", label: "Молоко", disabled: false },
+          { value: "p2", label: "Сыр", disabled: true },
+          { value: "p3", label: "Йогурт", disabled: false },
+        ]}
+        value="p1"
+      />,
+    );
+
+    const milkOption = screen.getByRole("option", { name: "Молоко" }) as HTMLOptionElement;
+    const cheeseOption = screen.getByRole("option", { name: "Сыр" }) as HTMLOptionElement;
+    const yogurtOption = screen.getByRole("option", { name: "Йогурт" }) as HTMLOptionElement;
+
+    expect(milkOption.disabled).toBe(false);
+    expect(cheeseOption.disabled).toBe(true);
+    expect(yogurtOption.disabled).toBe(false);
+  });
 });
 
 describe("Card", () => {

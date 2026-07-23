@@ -406,4 +406,102 @@ describe("ShiftsPage", () => {
       );
     });
   });
+
+  it("sends PATCH with plannedQty but omits counterpartyId and productId when editing", async () => {
+    const updated = { ...PLANNED_SHIFT, plannedQty: 750 };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/shifts/s1" && init?.method === "PATCH") {
+        return jsonResponse(200, updated);
+      }
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [PLANNED_SHIFT] });
+      if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
+      if (path === "/api/counterparties") return jsonResponse(200, { items: [] });
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Молоко 1л");
+
+    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+    await screen.findByText("Изменить смену");
+
+    fireEvent.change(screen.getByLabelText("Плановое количество, шт"), {
+      target: { value: "750" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    await waitFor(() => {
+      // Find the PATCH call and verify the body contains plannedQty but not counterpartyId/productId
+      const patchCalls = fetchMock.mock.calls.filter(
+        (call) => call[0] === "/api/shifts/s1" && call[1]?.method === "PATCH"
+      );
+      expect(patchCalls.length).toBeGreaterThan(0);
+      const patchCall = patchCalls[0]!;
+      const body = JSON.parse(patchCall[1]?.body as string);
+      // The test changes only plannedQty, so it should be in the payload with the new value
+      expect(body.plannedQty).toBe(750);
+      // Other fields are either sent as-is or omitted if untouched
+      expect(body.mode).toBe("validation");
+      // counterpartyId and productId should NOT be in PATCH payloads at all
+      expect(body).not.toHaveProperty("counterpartyId");
+      expect(body).not.toHaveProperty("productId");
+    }, { timeout: 3000 });
+  });
+
+  it("sends POST with boxCapacity and palletCapacity when creating in aggregation mode", async () => {
+    const created = {
+      ...PLANNED_SHIFT,
+      id: "new3",
+      productId: PRODUCT_A.id,
+      productName: PRODUCT_A.name,
+      mode: "aggregation",
+      boxCapacity: PRODUCT_A.boxCapacity,
+      palletCapacity: PRODUCT_A.palletCapacity,
+    };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/shifts" && init?.method === "POST") return jsonResponse(201, created);
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
+      if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
+      if (path === "/api/counterparties") return jsonResponse(200, { items: [] });
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Смены не запланированы");
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Запланировать смену" })[0]!);
+    await screen.findByText("Новая смена");
+
+    fireEvent.click(screen.getByLabelText("Агрегация"));
+    fireEvent.change(screen.getByLabelText("Продукт"), { target: { value: PRODUCT_A.id } });
+    await waitFor(() => {
+      expect((screen.getByLabelText("Вместимость короба, шт") as HTMLInputElement).value).toBe(
+        String(PRODUCT_A.boxCapacity),
+      );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Запланировать" }));
+
+    await waitFor(() => {
+      // Find the POST call to /api/shifts (skip initial GET calls)
+      const postCalls = fetchMock.mock.calls.filter(
+        (call) => call[0] === "/api/shifts" && call[1]?.method === "POST"
+      );
+      expect(postCalls.length).toBeGreaterThan(0);
+      const postCall = postCalls[0]!;
+      const body = JSON.parse(postCall[1]?.body as string);
+      expect(body.mode).toBe("aggregation");
+      expect(body.productId).toBe(PRODUCT_A.id);
+      expect(body.boxCapacity).toBe(PRODUCT_A.boxCapacity);
+      expect(body.palletsEnabled).toBe(false);
+      expect(body.lineId).toBeNull();
+      expect(body.plannedQty).toBeNull();
+      expect(body.plannedDate).toBeNull();
+      expect(body.palletCapacity).toBeUndefined();
+    }, { timeout: 3000 });
+  });
 });
