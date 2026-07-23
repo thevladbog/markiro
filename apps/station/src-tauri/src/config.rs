@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -50,15 +51,37 @@ pub fn read_config(dir: &Path) -> Result<StationConfig, String> {
 }
 
 /// Writes `station.json` atomically-ish (create dir, write, tighten perms).
-/// On unix the file is forced to mode 0600 (owner read/write only); on
-/// Windows the app-config dir is already per-user, so ACLs govern access.
+/// On unix the file is *created* at mode 0600 (owner read/write only) so
+/// there is never a window where a fresh file is group/world-readable
+/// under a permissive umask; `set_owner_only` is then re-applied as a
+/// belt-and-suspenders to also tighten a pre-existing file whose mode was
+/// already wrong (create+truncate on an existing file keeps its old mode).
+/// On Windows the app-config dir is already per-user, so ACLs govern access.
 pub fn write_config(dir: &Path, cfg: &StationConfig) -> Result<(), String> {
     fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let path = config_path(dir);
     let data = serde_json::to_string_pretty(cfg).map_err(|e| e.to_string())?;
-    fs::write(&path, data).map_err(|e| e.to_string())?;
+    write_owner_only(&path, data.as_bytes())?;
     set_owner_only(&path)?;
     Ok(())
+}
+
+#[cfg(unix)]
+fn write_owner_only(path: &Path, data: &[u8]) -> Result<(), String> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)
+        .map_err(|e| e.to_string())?;
+    file.write_all(data).map_err(|e| e.to_string())
+}
+
+#[cfg(not(unix))]
+fn write_owner_only(path: &Path, data: &[u8]) -> Result<(), String> {
+    fs::write(path, data).map_err(|e| e.to_string())
 }
 
 #[cfg(unix)]
@@ -128,6 +151,33 @@ mod tests {
         write_config(&dir, &cfg).unwrap();
         let mode = fs::metadata(config_path(&dir)).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
+    }
+
+    /// Proves `set_owner_only` still earns its keep: a pre-existing
+    /// `station.json` created at a permissive 0644 (e.g. by an older binary,
+    /// or restored from a backup) must be tightened to 0600 by
+    /// `write_config`, even though create+truncate on an existing file does
+    /// not itself change its mode.
+    #[cfg(unix)]
+    #[test]
+    fn write_config_tightens_preexisting_permissive_file_to_0600() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_dir();
+        fs::create_dir_all(&dir).unwrap();
+        let path = config_path(&dir);
+
+        // Pre-create the file at a permissive 0644 mode, simulating a file
+        // that predates this hardening (or was restored with bad perms).
+        fs::write(&path, "{}").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        let mode_before = fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode_before & 0o777, 0o644);
+
+        let cfg = StationConfig::new_with_machine_id();
+        write_config(&dir, &cfg).unwrap();
+
+        let mode_after = fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode_after & 0o777, 0o600);
     }
 
     #[test]
