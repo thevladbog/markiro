@@ -15,16 +15,10 @@
     },
     {
       "name": "api",
-      "runtimeExecutable": "env",
+      "runtimeExecutable": "sh",
       "runtimeArgs": [
-        "DATABASE_URL=postgres://markiro:markiro@localhost:5432/markiro",
-        "BETTER_AUTH_SECRET=insecure-dummy-ci-placeholder-not-a-secret",
-        "BETTER_AUTH_URL=http://localhost:3000",
-        "ADMIN_ORIGIN=http://localhost:5173",
-        "pnpm",
-        "--filter",
-        "@markiro/api",
-        "dev"
+        "-c",
+        "set -a; . ./.env; set +a; pnpm --filter @markiro/api dev"
       ],
       "port": 3000
     },

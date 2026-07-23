@@ -27,12 +27,22 @@ export async function ensurePartitions(db: Db, months: Date[]): Promise<string[]
             WHERE c.relname = ${name} AND n.nspname = current_schema()`,
       );
       if (exists.rows.length > 0) continue;
-      await db.execute(
-        sql.raw(
-          `CREATE TABLE IF NOT EXISTS "${name}" PARTITION OF "${parent}"
-           FOR VALUES FROM ('${from}') TO ('${to}')`,
-        ),
-      );
+      try {
+        await db.execute(
+          sql.raw(
+            `CREATE TABLE IF NOT EXISTS "${name}" PARTITION OF "${parent}"
+             FOR VALUES FROM ('${from}') TO ('${to}')`,
+          ),
+        );
+      } catch (error) {
+        // Concurrent bootstraps (parallel test files, multi-instance API) can
+        // both pass the existence probe; PARTITION OF takes a lock on the
+        // parent and the loser raises 42P07 even with IF NOT EXISTS. The
+        // partition exists — that is the desired end state, so swallow it.
+        const code = (error as { code?: string }).code;
+        if (code === "42P07") continue;
+        throw error;
+      }
       created.push(name);
     }
   }
