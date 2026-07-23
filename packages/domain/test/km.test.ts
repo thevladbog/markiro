@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DomainError } from "../src/errors.js";
-import { kmKey, parseKm } from "../src/gs1/km.js";
+import { kmKey, parseKm, parseKmSegments } from "../src/gs1/km.js";
 
 const GS = "\u001d";
 // Synthetic but structurally exact Chestny ZNAK beverage code:
@@ -51,5 +51,27 @@ describe("parseKm", () => {
 describe("kmKey", () => {
   it("builds the canonical dedup key", () => {
     expect(kmKey(parseKm(RAW))).toBe("010460068200001321abcDEF1234567");
+  });
+});
+
+describe("parseKmSegments", () => {
+  // Three trailing AIs (91/92/93), each GS-separated, to prove ordering
+  // survives past the first — this is the shared parser both `parseKm` and
+  // the DataMatrix renderer (barcodes/svg.ts) rely on.
+  const multiAiRaw = `010460068200001321abcDEF1234567${GS}91X${GS}92Y${GS}93Z`;
+
+  it("returns gtin14, serial and multiple trailing AIs in encounter order", () => {
+    const segments = parseKmSegments(multiAiRaw);
+    expect(segments.gtin14).toBe("04600682000013");
+    expect(segments.serial).toBe("abcDEF1234567");
+    expect(segments.ais).toEqual([
+      { ai: "91", value: "X" },
+      { ai: "92", value: "Y" },
+      { ai: "93", value: "Z" },
+    ]);
+  });
+
+  it("parses identically whether or not a ]d2 symbology-identifier prefix is present", () => {
+    expect(parseKmSegments(`]d2${multiAiRaw}`)).toEqual(parseKmSegments(multiAiRaw));
   });
 });
