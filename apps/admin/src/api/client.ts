@@ -55,6 +55,19 @@ async function readErrorMessage(response: Response): Promise<string> {
       if (Array.isArray(message) && message.every((m) => typeof m === "string")) {
         return message.join(", ");
       }
+      // ZodValidationPipe (see ../../../api/src/zod.pipe.ts) reports 400s as
+      // an array of `{ path, message }` issues rather than plain strings --
+      // join their `message` fields so a validation error still surfaces as
+      // readable text instead of falling through to the generic status text.
+      if (
+        Array.isArray(message) &&
+        message.every((m) => m && typeof m === "object" && "message" in m)
+      ) {
+        const issues = message
+          .map((m) => (m as { message?: unknown }).message)
+          .filter((m): m is string => typeof m === "string");
+        if (issues.length > 0) return issues.join(", ");
+      }
     }
   } catch {
     // response body wasn't JSON (or was empty) -- fall through
