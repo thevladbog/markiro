@@ -14,7 +14,11 @@ type DbConnection = ReturnType<typeof createDb>;
 /** Builds the DB pool + Better Auth instance from validated env. */
 export function setupAuth(env: Env): DbConnection & { auth: Auth } {
   const { db, pool } = createDb(env.DATABASE_URL);
-  const auth = buildAuth(db, { secret: env.BETTER_AUTH_SECRET, baseURL: env.BETTER_AUTH_URL });
+  const auth = buildAuth(db, {
+    secret: env.BETTER_AUTH_SECRET,
+    baseURL: env.BETTER_AUTH_URL,
+    trustedOrigins: [env.ADMIN_ORIGIN],
+  });
   return { db, pool, auth };
 }
 

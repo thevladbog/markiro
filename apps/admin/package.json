@@ -1,0 +1,38 @@
+{
+  "name": "@markiro/admin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "lint": "eslint .",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@hookform/resolvers": "5.4.0",
+    "@markiro/domain": "workspace:*",
+    "@markiro/ui": "workspace:*",
+    "@tanstack/react-query": "5.101.4",
+    "better-auth": "1.6.23",
+    "i18next": "26.3.6",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "react-hook-form": "7.82.0",
+    "react-i18next": "17.0.10",
+    "react-router": "8.2.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@testing-library/react": "16.3.2",
+    "@types/node": "26.1.1",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.3",
+    "jsdom": "29.1.1",
+    "typescript": "6.0.3",
+    "vite": "8.1.3",
+    "vitest": "4.1.10"
+  }
+}

@@ -1,0 +1,272 @@
+{
+  "common": {
+    "appName": "Markiro",
+    "loading": "Загрузка…",
+    "signOut": "Выйти",
+    "close": "Закрыть",
+    "loadError": "Не удалось загрузить данные. Обновите страницу или войдите заново."
+  },
+  "auth": {
+    "login": {
+      "title": "Вход",
+      "emailLabel": "Электронная почта",
+      "passwordLabel": "Пароль",
+      "submit": "Войти",
+      "noAccount": "Нет аккаунта?",
+      "registerLink": "Зарегистрироваться",
+      "genericError": "Не удалось войти. Проверьте почту и пароль."
+    },
+    "register": {
+      "title": "Регистрация",
+      "nameLabel": "Имя",
+      "emailLabel": "Электронная почта",
+      "passwordLabel": "Пароль",
+      "submit": "Зарегистрироваться",
+      "haveAccount": "Уже есть аккаунт?",
+      "loginLink": "Войти",
+      "genericError": "Не удалось зарегистрироваться. Попробуйте другой адрес почты."
+    },
+    "createOrg": {
+      "title": "Создание организации",
+      "nameLabel": "Название организации",
+      "slugLabel": "Короткий идентификатор (slug)",
+      "slugRequired": "Укажите короткий идентификатор.",
+      "slugInvalid": "Только строчные латинские буквы, цифры и дефисы.",
+      "submit": "Создать",
+      "selectExisting": "Выбрать существующую организацию",
+      "genericError": "Не удалось создать организацию."
+    },
+    "selectOrg": {
+      "title": "Выбор организации",
+      "empty": "У вас пока нет организаций.",
+      "selectButton": "Выбрать",
+      "createNew": "Создать новую организацию",
+      "genericError": "Не удалось загрузить список организаций."
+    }
+  },
+  "nav": {
+    "dashboard": "Обзор",
+    "catalog": "Каталог",
+    "shifts": "Смены",
+    "counterparties": "Контрагенты",
+    "settings": "Настройки"
+  },
+  "shell": {
+    "navLabel": "Основная навигация",
+    "header": {
+      "noOrgName": "Организация не выбрана",
+      "toggleTheme": "Переключить тему",
+      "toggleLanguage": "Переключить язык"
+    }
+  },
+  "pages": {
+    "dashboard": {
+      "title": "Обзор",
+      "emptyTitle": "Пока нет данных",
+      "emptyHint": "Сводка по сменам и производству появится здесь после первых смен."
+    },
+    "catalog": {
+      "title": "Каталог продукции",
+      "emptyTitle": "Каталог пуст",
+      "emptyHint": "Добавьте первый продукт, чтобы начать планирование смен.",
+      "addAction": "Добавить продукт",
+      "edit": "Изменить",
+      "delete": "Удалить",
+      "cancel": "Отмена",
+      "searchLabel": "Поиск",
+      "searchPlaceholder": "Название или ГТИН",
+      "statusFilterLabel": "Статус",
+      "statusFilter": {
+        "all": "Все статусы",
+        "draft": "Черновик",
+        "active": "Активен"
+      },
+      "status": {
+        "draft": "Черновик",
+        "active": "Активен"
+      },
+      "deleteConfirmTitle": "Удалить продукт?",
+      "deleteConfirmBody": "Продукт «{{name}}» будет удалён без возможности восстановления.",
+      "deleteConfirmAction": "Удалить",
+      "table": {
+        "gtin": "ГТИН",
+        "name": "Название",
+        "productGroup": "Группа",
+        "boxCapacity": "В коробе",
+        "palletCapacity": "На поддоне",
+        "status": "Статус",
+        "actions": "Действия"
+      },
+      "form": {
+        "createTitle": "Новый продукт",
+        "editTitle": "Изменить продукт",
+        "gtinLabel": "ГТИН",
+        "nameLabel": "Название",
+        "productGroupLabel": "Группа продукции",
+        "boxCapacityLabel": "Вместимость короба, шт",
+        "palletCapacityLabel": "Вместимость поддона, шт",
+        "defaultCounterpartyLabel": "Контрагент по умолчанию",
+        "noCounterparty": "Не выбран",
+        "submitCreate": "Создать",
+        "submitUpdate": "Сохранить",
+        "draftBanner": "Черновик — заполните группу и вместимости, чтобы запускать смены",
+        "gtinOwnerHint": "Владелец ГТИН — {{name}}",
+        "applyCounterparty": "Подставить контрагента",
+        "gtinOwnerUnknown": "Владелец ГТИН не определён — проверьте код перед сохранением.",
+        "errors": {
+          "gtinRequired": "Укажите ГТИН",
+          "gtinInvalid": "Неверный ГТИН (проверьте контрольную цифру)",
+          "nameRequired": "Укажите название",
+          "nameTooLong": "Не более 200 символов",
+          "productGroupTooLong": "Не более 200 символов",
+          "capacityInvalid": "Введите положительное целое число"
+        }
+      },
+      "toasts": {
+        "createSuccess": "Продукт добавлен",
+        "createError": "Не удалось создать продукт",
+        "updateSuccess": "Продукт обновлён",
+        "updateError": "Не удалось обновить продукт",
+        "deleteSuccess": "Продукт удалён",
+        "deleteError": "Не удалось удалить продукт"
+      }
+    },
+    "counterparties": {
+      "title": "Контрагенты",
+      "emptyTitle": "Контрагенты не добавлены",
+      "emptyHint": "Добавьте первого контрагента — держателя ГТИН или толлингового партнёра.",
+      "addAction": "Добавить контрагента",
+      "edit": "Изменить",
+      "delete": "Удалить",
+      "cancel": "Отмена",
+      "deleteConfirmTitle": "Удалить контрагента?",
+      "deleteConfirmBody": "Контрагент «{{name}}» будет удалён без возможности восстановления.",
+      "deleteConfirmAction": "Удалить",
+      "table": {
+        "name": "Название",
+        "gln": "GLN",
+        "inn": "ИНН",
+        "prefixes": "Префиксы GS1",
+        "actions": "Действия"
+      },
+      "form": {
+        "createTitle": "Новый контрагент",
+        "editTitle": "Изменить контрагента",
+        "nameLabel": "Название",
+        "glnLabel": "GLN",
+        "innLabel": "ИНН",
+        "prefixesLabel": "Префиксы GS1",
+        "prefixesHint": "Через запятую, например 4600000, 4600001",
+        "notesLabel": "Примечания",
+        "submitCreate": "Создать",
+        "submitUpdate": "Сохранить",
+        "errors": {
+          "nameRequired": "Укажите название",
+          "nameTooLong": "Не более 200 символов",
+          "glnFormat": "GLN должен состоять ровно из 13 цифр",
+          "glnCheckDigit": "Неверная контрольная цифра GLN",
+          "gs1PrefixesFormat": "Каждый префикс должен состоять из 4-12 цифр"
+        }
+      },
+      "toasts": {
+        "createSuccess": "Контрагент добавлен",
+        "createError": "Не удалось создать контрагента",
+        "updateSuccess": "Контрагент обновлён",
+        "updateError": "Не удалось обновить контрагента",
+        "deleteSuccess": "Контрагент удалён",
+        "deleteError": "Не удалось удалить контрагента"
+      }
+    },
+    "shifts": {
+      "title": "Смены",
+      "emptyTitle": "Смены не запланированы",
+      "emptyHint": "Запланируйте первую смену, чтобы начать выпуск продукции.",
+      "addAction": "Запланировать смену",
+      "edit": "Изменить",
+      "delete": "Удалить",
+      "close": "Закрыть смену",
+      "cancel": "Отмена",
+      "forCounterparty": "для: {{name}}",
+      "deleteConfirmTitle": "Удалить смену?",
+      "deleteConfirmBody": "Смена по продукту «{{name}}» будет удалена без возможности восстановления.",
+      "deleteConfirmAction": "Удалить",
+      "filters": {
+        "statusLabel": "Статус",
+        "fromLabel": "С даты",
+        "toLabel": "По дату",
+        "status": {
+          "all": "Все статусы",
+          "planned": "Запланирована",
+          "active": "Активна",
+          "closed": "Закрыта"
+        }
+      },
+      "table": {
+        "plannedDate": "Дата",
+        "product": "Продукт",
+        "line": "Линия",
+        "mode": "Режим",
+        "plannedQty": "План, шт",
+        "status": "Статус",
+        "actions": "Действия"
+      },
+      "mode": {
+        "validation": "Валидация",
+        "aggregation": "Агрегация"
+      },
+      "status": {
+        "planned": "Запланирована",
+        "active": "Активна",
+        "closed": "Закрыта"
+      },
+      "form": {
+        "createTitle": "Новая смена",
+        "editTitle": "Изменить смену",
+        "productLabel": "Продукт",
+        "productPlaceholder": "Выберите продукт",
+        "draftHint": "черновик — недоступно",
+        "modeLabel": "Режим",
+        "modeValidation": "Валидация",
+        "modeAggregation": "Агрегация",
+        "plannedQtyLabel": "Плановое количество, шт",
+        "plannedDateLabel": "Дата смены",
+        "lineLabel": "Линия",
+        "noLine": "Не выбрана",
+        "noLinesHint": "Линии не заведены — создайте через API или в настройках.",
+        "counterpartyLabel": "Для контрагента (толлинг)",
+        "noCounterparty": "Не выбран",
+        "boxCapacityLabel": "Вместимость короба, шт",
+        "palletsEnabledLabel": "Использовать паллеты",
+        "palletCapacityLabel": "Вместимость паллеты, шт",
+        "submitCreate": "Запланировать",
+        "submitUpdate": "Сохранить",
+        "errors": {
+          "productRequired": "Выберите продукт",
+          "qtyInvalid": "Введите положительное целое число",
+          "capacityInvalid": "Введите положительное целое число"
+        }
+      },
+      "closeModal": {
+        "title": "Закрыть смену",
+        "reasonLabel": "Причина закрытия",
+        "submit": "Закрыть смену",
+        "cancel": "Отмена"
+      },
+      "toasts": {
+        "createSuccess": "Смена запланирована",
+        "createError": "Не удалось запланировать смену",
+        "updateSuccess": "Смена обновлена",
+        "updateError": "Не удалось обновить смену",
+        "deleteSuccess": "Смена удалена",
+        "deleteError": "Не удалось удалить смену",
+        "closeSuccess": "Смена закрыта",
+        "closeError": "Не удалось закрыть смену"
+      }
+    },
+    "settings": {
+      "title": "Настройки",
+      "emptyTitle": "Настройки организации",
+      "emptyHint": "Профиль организации, GLN и префиксы GS1 появятся здесь."
+    }
+  }
+}

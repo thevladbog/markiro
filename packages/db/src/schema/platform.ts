@@ -97,6 +97,7 @@ export const shifts = pgTable(
     plannedDate: date("planned_date"),
     openedAt: timestamp("opened_at", { withTimezone: true }),
     closedAt: timestamp("closed_at", { withTimezone: true }),
+    closeReason: text("close_reason"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

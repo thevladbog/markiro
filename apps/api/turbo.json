@@ -1,0 +1,10 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "test": {
+      "dependsOn": ["^build", "@markiro/db#test"],
+      "env": ["DATABASE_URL", "BETTER_AUTH_SECRET", "BETTER_AUTH_URL", "ADMIN_ORIGIN"]
+    }
+  }
+}

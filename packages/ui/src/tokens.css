@@ -1,0 +1,157 @@
+/* Маркиро — цвет. Бренд = монохром; цвет зарезервирован за статусами. */
+:root {
+  /* base */
+  --ink: #17161a;
+  --paper: #fafaf8;
+  --panel: #f0efea;
+
+  /* surfaces */
+  --surface-page: #fafaf8;
+  --surface-card: #ffffff;
+  --surface-panel: #f0efea;
+  --surface-inverse: #17161a;
+  --surface-overlay: rgba(23, 22, 26, 0.55);
+
+  /* text */
+  --fg-1: #17161a;
+  --fg-2: #45433e;
+  --fg-3: #6b6862;
+  --fg-disabled: #a5a29a;
+  --fg-on-inverse: #fafaf8;
+
+  /* lines */
+  --line: #e0ded7;
+  --line-strong: #c9c6bd;
+
+  /* brand accent — только модуль знака и ключевые CTA */
+  --accent: #0faf56;
+  --accent-strong: #0b8a44;
+  --accent-module: #3ddc7a;
+
+  /* semantic: OK */
+  --ok-fg: #116335;
+  --ok-bg: #e7f6ec;
+  --ok-border: #cfe8d8;
+  --ok-solid: #0faf56;
+  /* semantic: error */
+  --err-fg: #a1231a;
+  --err-bg: #fdeae7;
+  --err-border: #f2d4d0;
+  --err-solid: #c0392b;
+  /* semantic: duplicate / attention */
+  --warn-fg: #8a4c07;
+  --warn-bg: #fdf0dc;
+  --warn-border: #efdfbe;
+  --warn-solid: #dd9420;
+  /* semantic: syncing */
+  --info-fg: #1a4f9c;
+  --info-bg: #e5effc;
+  --info-border: #d2e2f7;
+  --info-solid: #2e6fd0;
+
+  --focus-ring: #1a4f9c;
+}
+
+[data-theme="dark"] {
+  --surface-page: #131216;
+  --surface-card: #1c1b21;
+  --surface-panel: #232228;
+  --surface-inverse: #fafaf8;
+  --surface-overlay: rgba(0, 0, 0, 0.6);
+
+  --fg-1: #fafaf8;
+  --fg-2: #b6b3ab;
+  --fg-3: #8a877f;
+  --fg-disabled: #5b5952;
+  --fg-on-inverse: #17161a;
+
+  --line: #2e2d33;
+  --line-strong: #45444b;
+
+  --accent: #3ddc7a;
+  --accent-strong: #6be599;
+  --accent-module: #3ddc7a;
+
+  --ok-fg: #3ddc7a;
+  --ok-bg: #142e1d;
+  --ok-border: #1f4a2e;
+  --ok-solid: #3ddc7a;
+
+  --err-fg: #ff6b5e;
+  --err-bg: #391a16;
+  --err-border: #5c2a24;
+  --err-solid: #ff6b5e;
+
+  --warn-fg: #ffb84d;
+  --warn-bg: #33250e;
+  --warn-border: #543e19;
+  --warn-solid: #ffb84d;
+
+  --info-fg: #6db2ff;
+  --info-bg: #152740;
+  --info-border: #234066;
+  --info-solid: #6db2ff;
+
+  --focus-ring: #6db2ff;
+}
+
+/* Маркиро — типографика. Plex Sans = интерфейс, Plex Mono = коды/счётчики/логотип. */
+:root {
+  --font-ui: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  /* office ramp (12–32) */
+  --text-caption: 500 12px/16px var(--font-ui);
+  --text-body-sm: 400 13px/18px var(--font-ui);
+  --text-body: 400 14px/20px var(--font-ui);
+  --text-body-lg: 400 16px/24px var(--font-ui);
+  --text-h3: 600 16px/22px var(--font-ui);
+  --text-h2: 600 20px/26px var(--font-ui);
+  --text-h1: 700 28px/34px var(--font-ui);
+  --text-display: 700 32px/38px var(--font-ui);
+
+  /* floor ramp (18–96) */
+  --floor-body: 400 18px/26px var(--font-ui);
+  --floor-body-strong: 600 18px/26px var(--font-ui);
+  --floor-lg: 600 22px/30px var(--font-ui);
+  --floor-title: 700 28px/34px var(--font-ui);
+  --floor-counter-sm: 600 48px/52px var(--font-mono);
+  --floor-counter: 600 64px/68px var(--font-mono);
+  --floor-counter-xl: 600 96px/100px var(--font-mono);
+
+  /* code & meta */
+  --text-code: 400 13px/18px var(--font-mono);
+  --text-meta: 400 12px/16px var(--font-mono);
+}
+/* Все количества, счётчики и коды: font-variant-numeric: tabular-nums. Минимум 12px в офисе, 18px в цехе. */
+
+/* Маркиро — пространство, радиусы, тени, размеры контролов. */
+:root {
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-7: 32px;
+  --sp-8: 40px;
+  --sp-9: 48px;
+  --sp-10: 64px;
+
+  --r-1: 4px;
+  --r-2: 8px;
+  --r-3: 12px;
+  --r-round: 999px;
+
+  /* elevation: границы важнее теней — характер «прибора» */
+  --shadow-1: 0 1px 2px rgba(23, 22, 26, 0.06);
+  --shadow-2: 0 2px 8px rgba(23, 22, 26, 0.1);
+  --shadow-3: 0 8px 24px rgba(23, 22, 26, 0.16);
+
+  /* controls */
+  --control-sm: 32px; /* компактные таблицы, офис */
+  --control-md: 40px; /* минимальная цель, офис */
+  --control-floor: 64px; /* минимальная цель, цех (перчатка) */
+  --focus-ring-w: 2px;
+  --focus-ring-offset: 2px;
+}

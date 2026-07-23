@@ -12,6 +12,18 @@
         "docs/design-briefs/design_handoff_markiro"
       ],
       "port": 8734
+    },
+    {
+      "name": "api",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "set -a; . ./.env; set +a; pnpm --filter @markiro/api dev"],
+      "port": 3000
+    },
+    {
+      "name": "admin",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@markiro/admin", "dev"],
+      "port": 5173
     }
   ]
 }

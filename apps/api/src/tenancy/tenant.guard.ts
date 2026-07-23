@@ -11,7 +11,8 @@ import type { Request } from "express";
 import type { Auth } from "@markiro/db";
 import { AUTH } from "../auth/auth.module";
 
-interface RequestWithTenant extends Request {
+/** Exported so guarded controllers can type `@Req()` without re-declaring this. */
+export interface RequestWithTenant extends Request {
   tenantId?: string;
 }
 

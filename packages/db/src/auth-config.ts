@@ -18,10 +18,18 @@ import * as authSchema from "./schema/auth.js";
 // is derived from the literal `Options` type, not the runtime plugin list.
 // `buildAuth`/`Auth` below restore that one contract with a narrow companion
 // type layered back on top, without reintroducing the unnameable-type problem.
-function buildAuthImpl(db: Db, opts: { secret: string; baseURL: string }) {
+function buildAuthImpl(
+  db: Db,
+  opts: { secret: string; baseURL: string; trustedOrigins?: string[] },
+) {
   return betterAuth<BetterAuthOptions>({
     secret: opts.secret,
     baseURL: opts.baseURL,
+    // Enforced by better-auth's own origin-check middleware (see
+    // apps/api/test/cors.e2e.test.ts for the pinned, verified behavior --
+    // including a documented gotcha where better-auth *itself* skips this
+    // enforcement whenever it detects a test runner).
+    trustedOrigins: opts.trustedOrigins,
     database: drizzleAdapter(db, { provider: "pg", schema: authSchema }),
     emailAndPassword: { enabled: true },
     plugins: [organization(), apiKey()],
@@ -53,6 +61,9 @@ export type Auth = Omit<AuthBase, "api"> & {
   };
 };
 
-export function buildAuth(db: Db, opts: { secret: string; baseURL: string }): Auth {
+export function buildAuth(
+  db: Db,
+  opts: { secret: string; baseURL: string; trustedOrigins?: string[] },
+): Auth {
   return buildAuthImpl(db, opts);
 }

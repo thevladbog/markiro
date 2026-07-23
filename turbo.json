@@ -6,7 +6,7 @@
     "typecheck": { "dependsOn": ["^build"] },
     "test": {
       "dependsOn": ["^build"],
-      "env": ["DATABASE_URL", "BETTER_AUTH_SECRET", "BETTER_AUTH_URL"]
+      "env": ["DATABASE_URL", "BETTER_AUTH_SECRET", "BETTER_AUTH_URL", "ADMIN_ORIGIN"]
     }
   }
 }

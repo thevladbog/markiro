@@ -1,6 +1,41 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb } from "../src/client.js";
-import { ensurePartitions, partitionName } from "../src/partitions.js";
+import { ensurePartitions, partitionName, pgCode } from "../src/partitions.js";
+import type { Db } from "../src/client.js";
+
+describe("pgCode", () => {
+  it("reads a raw pg error code", () => {
+    expect(pgCode({ code: "42P07" })).toBe("42P07");
+  });
+  it("reads a drizzle-wrapped error code from cause", () => {
+    const wrapped = Object.assign(new Error("Failed query"), {
+      cause: { code: "42P07" },
+    });
+    expect(pgCode(wrapped)).toBe("42P07");
+  });
+  it("returns undefined otherwise", () => {
+    expect(pgCode(new Error("boom"))).toBeUndefined();
+  });
+});
+
+describe("ensurePartitions race tolerance", () => {
+  it("swallows drizzle-wrapped 42P07 from a concurrent winner", async () => {
+    const raced = Object.assign(new Error("Failed query: CREATE TABLE"), {
+      cause: { code: "42P07" },
+    });
+    // ensurePartitions alternates probe → create per parent; odd calls are
+    // existence probes ("missing"), even calls are CREATEs losing the race.
+    let call = 0;
+    const fakeDb = {
+      execute: () => {
+        call += 1;
+        return call % 2 === 1 ? Promise.resolve({ rows: [] }) : Promise.reject(raced);
+      },
+    } as unknown as Db;
+    const created = await ensurePartitions(fakeDb, [new Date(Date.UTC(2001, 1, 1))]);
+    expect(created).toEqual([]); // both parents lost the race, none reported created
+  });
+});
 
 const url = process.env.DATABASE_URL;
 describe.skipIf(!url)("ensurePartitions", () => {

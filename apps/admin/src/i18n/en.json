@@ -1,0 +1,272 @@
+{
+  "common": {
+    "appName": "Markiro",
+    "loading": "Loading…",
+    "signOut": "Sign out",
+    "close": "Close",
+    "loadError": "Failed to load data. Refresh the page or sign in again."
+  },
+  "auth": {
+    "login": {
+      "title": "Sign in",
+      "emailLabel": "Email",
+      "passwordLabel": "Password",
+      "submit": "Sign in",
+      "noAccount": "No account?",
+      "registerLink": "Register",
+      "genericError": "Could not sign in. Check your email and password."
+    },
+    "register": {
+      "title": "Register",
+      "nameLabel": "Name",
+      "emailLabel": "Email",
+      "passwordLabel": "Password",
+      "submit": "Register",
+      "haveAccount": "Already have an account?",
+      "loginLink": "Sign in",
+      "genericError": "Could not register. Try a different email address."
+    },
+    "createOrg": {
+      "title": "Create organization",
+      "nameLabel": "Organization name",
+      "slugLabel": "Slug",
+      "slugRequired": "Enter a slug.",
+      "slugInvalid": "Lowercase letters, digits and hyphens only.",
+      "submit": "Create",
+      "selectExisting": "Select an existing organization",
+      "genericError": "Could not create the organization."
+    },
+    "selectOrg": {
+      "title": "Select organization",
+      "empty": "You don't have any organizations yet.",
+      "selectButton": "Select",
+      "createNew": "Create a new organization",
+      "genericError": "Could not load the organization list."
+    }
+  },
+  "nav": {
+    "dashboard": "Overview",
+    "catalog": "Catalog",
+    "shifts": "Shifts",
+    "counterparties": "Counterparties",
+    "settings": "Settings"
+  },
+  "shell": {
+    "navLabel": "Main navigation",
+    "header": {
+      "noOrgName": "No organization selected",
+      "toggleTheme": "Toggle theme",
+      "toggleLanguage": "Switch language"
+    }
+  },
+  "pages": {
+    "dashboard": {
+      "title": "Overview",
+      "emptyTitle": "No data yet",
+      "emptyHint": "A summary of shifts and production will appear here once the first shift runs."
+    },
+    "catalog": {
+      "title": "Product catalog",
+      "emptyTitle": "Catalog is empty",
+      "emptyHint": "Add your first product to start planning shifts.",
+      "addAction": "Add product",
+      "edit": "Edit",
+      "delete": "Delete",
+      "cancel": "Cancel",
+      "searchLabel": "Search",
+      "searchPlaceholder": "Name or GTIN",
+      "statusFilterLabel": "Status",
+      "statusFilter": {
+        "all": "All statuses",
+        "draft": "Draft",
+        "active": "Active"
+      },
+      "status": {
+        "draft": "Draft",
+        "active": "Active"
+      },
+      "deleteConfirmTitle": "Delete product?",
+      "deleteConfirmBody": "Product \"{{name}}\" will be permanently deleted.",
+      "deleteConfirmAction": "Delete",
+      "table": {
+        "gtin": "GTIN",
+        "name": "Name",
+        "productGroup": "Group",
+        "boxCapacity": "Per box",
+        "palletCapacity": "Per pallet",
+        "status": "Status",
+        "actions": "Actions"
+      },
+      "form": {
+        "createTitle": "New product",
+        "editTitle": "Edit product",
+        "gtinLabel": "GTIN",
+        "nameLabel": "Name",
+        "productGroupLabel": "Product group",
+        "boxCapacityLabel": "Box capacity, units",
+        "palletCapacityLabel": "Pallet capacity, units",
+        "defaultCounterpartyLabel": "Default counterparty",
+        "noCounterparty": "None selected",
+        "submitCreate": "Create",
+        "submitUpdate": "Save",
+        "draftBanner": "Draft — fill in the group and capacities to run shifts",
+        "gtinOwnerHint": "GTIN owner — {{name}}",
+        "applyCounterparty": "Apply counterparty",
+        "gtinOwnerUnknown": "GTIN owner could not be determined — double check the code before saving.",
+        "errors": {
+          "gtinRequired": "Enter a GTIN",
+          "gtinInvalid": "Invalid GTIN (check digit mismatch)",
+          "nameRequired": "Enter a name",
+          "nameTooLong": "200 characters or fewer",
+          "productGroupTooLong": "200 characters or fewer",
+          "capacityInvalid": "Enter a positive whole number"
+        }
+      },
+      "toasts": {
+        "createSuccess": "Product added",
+        "createError": "Could not create the product",
+        "updateSuccess": "Product updated",
+        "updateError": "Could not update the product",
+        "deleteSuccess": "Product deleted",
+        "deleteError": "Could not delete the product"
+      }
+    },
+    "counterparties": {
+      "title": "Counterparties",
+      "emptyTitle": "No counterparties yet",
+      "emptyHint": "Add your first counterparty — a GTIN owner or tolling partner.",
+      "addAction": "Add counterparty",
+      "edit": "Edit",
+      "delete": "Delete",
+      "cancel": "Cancel",
+      "deleteConfirmTitle": "Delete counterparty?",
+      "deleteConfirmBody": "Counterparty \"{{name}}\" will be permanently deleted.",
+      "deleteConfirmAction": "Delete",
+      "table": {
+        "name": "Name",
+        "gln": "GLN",
+        "inn": "Tax ID",
+        "prefixes": "GS1 prefixes",
+        "actions": "Actions"
+      },
+      "form": {
+        "createTitle": "New counterparty",
+        "editTitle": "Edit counterparty",
+        "nameLabel": "Name",
+        "glnLabel": "GLN",
+        "innLabel": "Tax ID",
+        "prefixesLabel": "GS1 prefixes",
+        "prefixesHint": "Comma-separated, e.g. 4600000, 4600001",
+        "notesLabel": "Notes",
+        "submitCreate": "Create",
+        "submitUpdate": "Save",
+        "errors": {
+          "nameRequired": "Enter a name",
+          "nameTooLong": "200 characters or fewer",
+          "glnFormat": "GLN must be exactly 13 digits",
+          "glnCheckDigit": "Invalid GLN check digit",
+          "gs1PrefixesFormat": "Each prefix must be 4-12 digits"
+        }
+      },
+      "toasts": {
+        "createSuccess": "Counterparty added",
+        "createError": "Could not create the counterparty",
+        "updateSuccess": "Counterparty updated",
+        "updateError": "Could not update the counterparty",
+        "deleteSuccess": "Counterparty deleted",
+        "deleteError": "Could not delete the counterparty"
+      }
+    },
+    "shifts": {
+      "title": "Shifts",
+      "emptyTitle": "No shifts planned",
+      "emptyHint": "Plan your first shift to start production.",
+      "addAction": "Plan a shift",
+      "edit": "Edit",
+      "delete": "Delete",
+      "close": "Close shift",
+      "cancel": "Cancel",
+      "forCounterparty": "for: {{name}}",
+      "deleteConfirmTitle": "Delete shift?",
+      "deleteConfirmBody": "The shift for \"{{name}}\" will be permanently deleted.",
+      "deleteConfirmAction": "Delete",
+      "filters": {
+        "statusLabel": "Status",
+        "fromLabel": "From",
+        "toLabel": "To",
+        "status": {
+          "all": "All statuses",
+          "planned": "Planned",
+          "active": "Active",
+          "closed": "Closed"
+        }
+      },
+      "table": {
+        "plannedDate": "Date",
+        "product": "Product",
+        "line": "Line",
+        "mode": "Mode",
+        "plannedQty": "Plan, units",
+        "status": "Status",
+        "actions": "Actions"
+      },
+      "mode": {
+        "validation": "Validation",
+        "aggregation": "Aggregation"
+      },
+      "status": {
+        "planned": "Planned",
+        "active": "Active",
+        "closed": "Closed"
+      },
+      "form": {
+        "createTitle": "New shift",
+        "editTitle": "Edit shift",
+        "productLabel": "Product",
+        "productPlaceholder": "Select a product",
+        "draftHint": "draft -- unavailable",
+        "modeLabel": "Mode",
+        "modeValidation": "Validation",
+        "modeAggregation": "Aggregation",
+        "plannedQtyLabel": "Planned quantity, units",
+        "plannedDateLabel": "Shift date",
+        "lineLabel": "Line",
+        "noLine": "None selected",
+        "noLinesHint": "No lines yet -- create one via the API or settings.",
+        "counterpartyLabel": "For counterparty (tolling)",
+        "noCounterparty": "None selected",
+        "boxCapacityLabel": "Box capacity, units",
+        "palletsEnabledLabel": "Use pallets",
+        "palletCapacityLabel": "Pallet capacity, units",
+        "submitCreate": "Plan",
+        "submitUpdate": "Save",
+        "errors": {
+          "productRequired": "Select a product",
+          "qtyInvalid": "Enter a positive whole number",
+          "capacityInvalid": "Enter a positive whole number"
+        }
+      },
+      "closeModal": {
+        "title": "Close shift",
+        "reasonLabel": "Close reason",
+        "submit": "Close shift",
+        "cancel": "Cancel"
+      },
+      "toasts": {
+        "createSuccess": "Shift planned",
+        "createError": "Could not plan the shift",
+        "updateSuccess": "Shift updated",
+        "updateError": "Could not update the shift",
+        "deleteSuccess": "Shift deleted",
+        "deleteError": "Could not delete the shift",
+        "closeSuccess": "Shift closed",
+        "closeError": "Could not close the shift"
+      }
+    },
+    "settings": {
+      "title": "Settings",
+      "emptyTitle": "Organization settings",
+      "emptyHint": "Organization profile, GLN and GS1 prefixes will appear here."
+    }
+  }
+}

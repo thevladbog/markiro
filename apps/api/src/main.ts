@@ -17,6 +17,10 @@ async function bootstrap() {
     AppModule.forRoot({ ...setup, databaseUrl: env.DATABASE_URL }),
     { bodyParser: false },
   );
+  // Enabled before mountAuth below so the CORS middleware (registered here
+  // via server.use()) sits ahead of the auth handler in Express's middleware
+  // stack and applies to /api/auth/* too, not just Nest-routed controllers.
+  app.enableCors({ origin: [env.ADMIN_ORIGIN], credentials: true });
   const server = app.getHttpAdapter().getInstance() as Express;
   mountAuth(server, setup.auth);
   server.use(express.json());
