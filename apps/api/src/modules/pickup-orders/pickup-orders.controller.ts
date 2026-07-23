@@ -2,6 +2,7 @@ import { Body, Controller, Get, HttpCode, Param, Post, Query, Req, Res, UseGuard
 import { ApiTags } from "@nestjs/swagger";
 import type { Response } from "express";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
+import { renderPickupSlipHtml } from "../../pickup/slip";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
   exportPickupCodesSchema,
@@ -34,6 +35,18 @@ export class PickupOrdersController {
   @Get(":id")
   async detail(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<PickupOrderDetailDto> {
     return this.pickupOrdersService.detail(req.tenantId!, id);
+  }
+
+  /** Print-ready A4 "Ведомость отбора по заявке": DataMatrix per item, badge QR, footer Code128 of the order number. */
+  @Get(":id/slip")
+  async slip(
+    @Req() req: RequestWithTenant,
+    @Param("id") id: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<string> {
+    const data = await this.pickupOrdersService.slipData(req.tenantId!, id);
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    return renderPickupSlipHtml(data);
   }
 
   @Post(":id/resolve")

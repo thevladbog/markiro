@@ -11,6 +11,7 @@ import { schema, type Db } from "@markiro/db";
 import { validatePickupKm } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
 import { nextOrderNo } from "../../pickup/order-number";
+import type { PickupSlipData } from "../../pickup/slip";
 import type {
   CreateOrderDto,
   CreateOrderResultDto,
@@ -209,6 +210,90 @@ export class PickupOrdersService {
       })),
       receiptNo: row.receiptNo,
       actNo: row.actNo,
+    };
+  }
+
+  /**
+   * Gathers everything `renderPickupSlipHtml` needs for the printed A4 slip:
+   * the order + its (non-voided) items joined with product names, the
+   * employee's currently-active badge (may be none), and this tenant's
+   * `organization` name + `orgProfiles` INN (the profile row may not exist
+   * yet — org comes back null in that case, not a 404).
+   */
+  async slipData(tenantId: string, id: string): Promise<PickupSlipData> {
+    const [row] = await this.db
+      .select({
+        orderNo: schema.pickupOrders.orderNo,
+        createdAt: schema.pickupOrders.createdAt,
+        reason: schema.pickupOrders.reason,
+        totalPrice: schema.pickupOrders.totalPrice,
+        employeeId: schema.pickupOrders.employeeId,
+        employeeFullName: schema.employees.fullName,
+        employeeRole: schema.employees.role,
+        kioskName: schema.kiosks.name,
+        writeoffReasonName: schema.pickupOrderReasons.name,
+      })
+      .from(schema.pickupOrders)
+      .leftJoin(schema.employees, eq(schema.employees.id, schema.pickupOrders.employeeId))
+      .leftJoin(schema.kiosks, eq(schema.kiosks.id, schema.pickupOrders.kioskId))
+      .leftJoin(schema.pickupOrderReasons, eq(schema.pickupOrderReasons.id, schema.pickupOrders.writeoffReasonId))
+      .where(and(eq(schema.pickupOrders.tenantId, tenantId), eq(schema.pickupOrders.id, id)));
+
+    if (!row) throw new NotFoundException();
+
+    const [badge] = await this.db
+      .select({ badgeCode: schema.employeeBadges.badgeCode })
+      .from(schema.employeeBadges)
+      .where(and(
+        eq(schema.employeeBadges.tenantId, tenantId),
+        eq(schema.employeeBadges.employeeId, row.employeeId),
+        isNull(schema.employeeBadges.revokedAt),
+      ));
+
+    const [org] = await this.db
+      .select({ name: schema.organization.name, inn: schema.orgProfiles.inn })
+      .from(schema.organization)
+      .leftJoin(schema.orgProfiles, eq(schema.orgProfiles.tenantId, schema.organization.id))
+      .where(eq(schema.organization.id, tenantId));
+
+    const itemRows = await this.db
+      .select({
+        gtin14: schema.pickupOrderItems.gtin14,
+        serial: schema.pickupOrderItems.serial,
+        rawKm: schema.pickupOrderItems.rawKm,
+        productName: schema.products.name,
+        unitPrice: schema.pickupOrderItems.unitPrice,
+      })
+      .from(schema.pickupOrderItems)
+      .leftJoin(schema.products, eq(schema.products.id, schema.pickupOrderItems.productId))
+      .where(and(
+        eq(schema.pickupOrderItems.tenantId, tenantId),
+        eq(schema.pickupOrderItems.orderId, id),
+        eq(schema.pickupOrderItems.voided, false),
+      ))
+      .orderBy(asc(schema.pickupOrderItems.scannedAt));
+
+    return {
+      orderNo: row.orderNo,
+      createdAt: row.createdAt,
+      org: org ? { name: org.name, inn: org.inn } : null,
+      employee: {
+        fullName: row.employeeFullName ?? "",
+        role: row.employeeRole,
+        badgeCode: badge?.badgeCode ?? null,
+      },
+      kioskName: row.kioskName ?? "",
+      reason: row.reason,
+      writeoffReasonName: row.writeoffReasonName,
+      total: row.totalPrice,
+      items: itemRows.map((item, index) => ({
+        n: index + 1,
+        productName: item.productName ?? "",
+        gtin14: item.gtin14,
+        serial: item.serial,
+        rawKm: item.rawKm,
+        unitPrice: item.unitPrice,
+      })),
     };
   }
 
