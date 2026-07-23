@@ -129,7 +129,7 @@ export class ProductsService {
     const status = this.computeStatus({ productGroup, boxCapacity, palletCapacity });
 
     try {
-      const set = {
+      const set: Partial<typeof schema.products.$inferInsert> = {
         gtin14,
         name,
         productGroup,
@@ -138,7 +138,7 @@ export class ProductsService {
         defaultCounterpartyId,
         defaultLabelTemplateId,
         status,
-      } as Record<string, unknown>;
+      };
 
       if (data.unitPrice !== undefined) {
         set.unitPrice = data.unitPrice;
@@ -152,7 +152,7 @@ export class ProductsService {
 
       const [row] = await this.db
         .update(schema.products)
-        .set(set as never)
+        .set(set)
         .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.id, id)))
         .returning();
 
