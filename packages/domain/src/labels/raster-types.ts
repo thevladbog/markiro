@@ -4,22 +4,22 @@
  * `RasterizeTextFn` and consumed by `buildGfaCommand` below.
  *
  * PACKAGE-BOUNDARY NOTE (Plan 04 controller decision, pinned here for both
- * this task and Task 4 to read): Task 4 ("raster primitives") is not built
- * yet. It will own the PIXEL-LEVEL conversion functions that PRODUCE a
+ * this task and Task 4 to read): Task 4 ("raster primitives") lives in
+ * `./raster.ts`. It owns the PIXEL-LEVEL conversion functions that PRODUCE a
  * `RasterResult` — `convertToMonochrome`, `bitmapToZplHex`,
- * `bitmapToTsplBytes` — and will import the two types below from this
- * module rather than redeclaring them. `buildGfaCommand` and
- * `buildBitmapCommand` are defined HERE (Tasks 2/3, the ZPL/TSPL emitters),
- * not in Task 4's raster module, because they are pure printer-language
- * command-string assembly (`^GFA` field syntax / TSPL `BITMAP` syntax), not
- * raster math — these modules' golden tests need working implementations
- * before Task 4 exists, and Task 4's own tests can import them back from
- * here once it lands, so there is exactly one implementation of each, never
- * two that could silently drift apart. `buildBitmapCommand` in particular
- * OWNS the ZPL-to-TSPL polarity inversion (see its doc comment) so that
- * Task 4's `bitmapToTsplBytes` — whatever its internal pixel-packing
- * strategy turns out to be — can reuse this exact inversion instead of
- * re-deriving it.
+ * `bitmapToTsplBytes` — and imports the two types below from this module
+ * rather than redeclaring them. `buildGfaCommand` and `buildBitmapCommand`
+ * are defined HERE (Tasks 2/3, the ZPL/TSPL emitters), not in Task 4's
+ * raster module, because they are pure printer-language command-string
+ * assembly (`^GFA` field syntax / TSPL `BITMAP` syntax), not raster math —
+ * these modules' golden tests needed working implementations before Task 4
+ * existed, and Task 4's own tests import them back from here, so there is
+ * exactly one implementation of each, never two that could silently drift
+ * apart. `invertHexToTsplBytes` (below) is exported for exactly one reason:
+ * so that Task 4's `bitmapToTsplBytes` can reuse this exact inversion
+ * instead of re-deriving it — `raster-types.ts` remains the single source
+ * of truth for ZPL<->TSPL bit-polarity; `raster.ts` only packs pixels and
+ * delegates the polarity flip back here.
  */
 export interface RasterResult {
   hex: string;
@@ -91,8 +91,13 @@ export function buildGfaCommand(r: RasterResult): string {
  * is intentional and correct: it also flips this package's ZPL white/0 row
  * padding (see `bitmapToZplHex`) into TSPL's white/1 padding convention, so
  * padding columns stay blank under either polarity.
+ *
+ * Exported (rather than module-private) specifically so `raster.ts`'s
+ * `bitmapToTsplBytes` can reuse this exact inversion instead of
+ * re-implementing it — see the PACKAGE-BOUNDARY NOTE at the top of this
+ * file.
  */
-function invertHexToTsplBytes(hex: string): string {
+export function invertHexToTsplBytes(hex: string): string {
   let bytes = "";
   for (let i = 0; i < hex.length; i += 2) {
     const byte = parseInt(hex.slice(i, i + 2), 16);
