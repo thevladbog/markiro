@@ -11,6 +11,7 @@ import { ShiftsModule } from "./modules/shifts/shifts.module";
 import { LabelTemplatesModule } from "./modules/label-templates/label-templates.module";
 import { EmployeesModule } from "./modules/employees/employees.module";
 import { KiosksModule } from "./modules/kiosks/kiosks.module";
+import { PickupReasonsModule } from "./modules/pickup-reasons/pickup-reasons.module";
 
 @Module({ controllers: [HealthController] })
 export class AppModule {
@@ -41,6 +42,7 @@ export class AppModule {
         LabelTemplatesModule,
         EmployeesModule,
         KiosksModule,
+        PickupReasonsModule,
       ],
       controllers: [HealthController],
     };
