@@ -6,6 +6,8 @@ export type { ParsedKm } from "./gs1/km.js";
 export { buildSscc, isValidSscc, ssccSerialCapacity } from "./gs1/sscc.js";
 export { classifyScan } from "./scan/classify.js";
 export type { ScanInput } from "./scan/classify.js";
+export { validatePickupKm } from "./scan/pickup.js";
+export type { PickupKmResult } from "./scan/pickup.js";
 export { validateShiftScan } from "./scan/validate.js";
 export type { ScanVerdict, ShiftScanContext } from "./scan/validate.js";
 export { mmToDots, parseLabelTemplate, ptToDots, sampleLabelData } from "./labels/model.js";
