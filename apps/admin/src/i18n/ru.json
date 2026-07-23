@@ -70,7 +70,48 @@
     "counterparties": {
       "title": "Контрагенты",
       "emptyTitle": "Контрагенты не добавлены",
-      "emptyHint": "Добавьте первого контрагента — держателя ГТИН или толлингового партнёра."
+      "emptyHint": "Добавьте первого контрагента — держателя ГТИН или толлингового партнёра.",
+      "addAction": "Добавить контрагента",
+      "edit": "Изменить",
+      "delete": "Удалить",
+      "cancel": "Отмена",
+      "deleteConfirmTitle": "Удалить контрагента?",
+      "deleteConfirmBody": "Контрагент «{{name}}» будет удалён без возможности восстановления.",
+      "deleteConfirmAction": "Удалить",
+      "table": {
+        "name": "Название",
+        "gln": "GLN",
+        "inn": "ИНН",
+        "prefixes": "Префиксы GS1",
+        "actions": "Действия"
+      },
+      "form": {
+        "createTitle": "Новый контрагент",
+        "editTitle": "Изменить контрагента",
+        "nameLabel": "Название",
+        "glnLabel": "GLN",
+        "innLabel": "ИНН",
+        "prefixesLabel": "Префиксы GS1",
+        "prefixesHint": "Через запятую, например 4600000, 4600001",
+        "notesLabel": "Примечания",
+        "submitCreate": "Создать",
+        "submitUpdate": "Сохранить",
+        "errors": {
+          "nameRequired": "Укажите название",
+          "nameTooLong": "Не более 200 символов",
+          "glnFormat": "GLN должен состоять ровно из 13 цифр",
+          "glnCheckDigit": "Неверная контрольная цифра GLN",
+          "gs1PrefixesFormat": "Каждый префикс должен состоять из 4-12 цифр"
+        }
+      },
+      "toasts": {
+        "createSuccess": "Контрагент добавлен",
+        "createError": "Не удалось создать контрагента",
+        "updateSuccess": "Контрагент обновлён",
+        "updateError": "Не удалось обновить контрагента",
+        "deleteSuccess": "Контрагент удалён",
+        "deleteError": "Не удалось удалить контрагента"
+      }
     },
     "shifts": {
       "title": "Смены",

@@ -70,7 +70,48 @@
     "counterparties": {
       "title": "Counterparties",
       "emptyTitle": "No counterparties yet",
-      "emptyHint": "Add your first counterparty — a GTIN owner or tolling partner."
+      "emptyHint": "Add your first counterparty — a GTIN owner or tolling partner.",
+      "addAction": "Add counterparty",
+      "edit": "Edit",
+      "delete": "Delete",
+      "cancel": "Cancel",
+      "deleteConfirmTitle": "Delete counterparty?",
+      "deleteConfirmBody": "Counterparty \"{{name}}\" will be permanently deleted.",
+      "deleteConfirmAction": "Delete",
+      "table": {
+        "name": "Name",
+        "gln": "GLN",
+        "inn": "Tax ID",
+        "prefixes": "GS1 prefixes",
+        "actions": "Actions"
+      },
+      "form": {
+        "createTitle": "New counterparty",
+        "editTitle": "Edit counterparty",
+        "nameLabel": "Name",
+        "glnLabel": "GLN",
+        "innLabel": "Tax ID",
+        "prefixesLabel": "GS1 prefixes",
+        "prefixesHint": "Comma-separated, e.g. 4600000, 4600001",
+        "notesLabel": "Notes",
+        "submitCreate": "Create",
+        "submitUpdate": "Save",
+        "errors": {
+          "nameRequired": "Enter a name",
+          "nameTooLong": "200 characters or fewer",
+          "glnFormat": "GLN must be exactly 13 digits",
+          "glnCheckDigit": "Invalid GLN check digit",
+          "gs1PrefixesFormat": "Each prefix must be 4-12 digits"
+        }
+      },
+      "toasts": {
+        "createSuccess": "Counterparty added",
+        "createError": "Could not create the counterparty",
+        "updateSuccess": "Counterparty updated",
+        "updateError": "Could not update the counterparty",
+        "deleteSuccess": "Counterparty deleted",
+        "deleteError": "Could not delete the counterparty"
+      }
     },
     "shifts": {
       "title": "Shifts",
