@@ -57,6 +57,13 @@
       "when": 1784797079462,
       "tag": "0007_dry_lilith",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1784835256777,
+      "tag": "0008_vengeful_skrulls",
+      "breakpoints": true
     }
   ]
 }
