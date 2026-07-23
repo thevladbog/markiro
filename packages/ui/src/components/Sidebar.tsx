@@ -46,6 +46,8 @@ export interface SidebarProps {
   footer?: ReactNode;
   className?: string;
   style?: CSSProperties;
+  /** aria-label for the `<nav>` landmark -- this package has no i18n dependency, so a caller in a non-English locale (e.g. `apps/admin`) should pass a translated string. */
+  navLabel?: string;
 }
 
 const SIDEBAR_LINK_CSS = `
@@ -71,10 +73,17 @@ const SIDEBAR_LINK_CSS = `
 }
 `;
 
-export function Sidebar({ items, renderLink, footer, className, style }: SidebarProps) {
+export function Sidebar({
+  items,
+  renderLink,
+  footer,
+  className,
+  style,
+  navLabel = "Main navigation",
+}: SidebarProps) {
   return (
     <nav
-      aria-label="Основная навигация"
+      aria-label={navLabel}
       className={cn("mk-sidebar", className)}
       style={{
         width: 224,

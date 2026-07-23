@@ -3,6 +3,7 @@
     "appName": "Markiro",
     "loading": "Loading…",
     "signOut": "Sign out",
+    "close": "Close",
     "loadError": "Failed to load data. Refresh the page or sign in again."
   },
   "auth": {
@@ -51,6 +52,7 @@
     "settings": "Settings"
   },
   "shell": {
+    "navLabel": "Main navigation",
     "header": {
       "noOrgName": "No organization selected",
       "toggleTheme": "Toggle theme",

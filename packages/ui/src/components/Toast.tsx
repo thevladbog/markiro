@@ -31,6 +31,8 @@ interface ToastEntry {
   id: number;
   tone: ToastTone;
   message: ReactNode;
+  /** aria-label for this entry's dismiss button (per-toast override -- see `toast()`'s `dismissLabel` param). */
+  dismissLabel: string;
 }
 
 const TONE_GLYPH: Record<ToastTone, string> = {
@@ -77,11 +79,23 @@ function dismiss(id: number) {
   setEntries(entries.filter((entry) => entry.id !== id));
 }
 
-/** Показывает временное уведомление (офис). В цехе тосты не используются. */
-export function toast(tone: ToastTone, message: ReactNode, durationMs = 4000): number {
+/**
+ * Показывает временное уведомление (офис). В цехе тосты не используются.
+ *
+ * `dismissLabel` is the aria-label for this toast's dismiss button --
+ * this package has no i18n dependency, so its default ("Close") is plain
+ * English; a caller in a non-English locale (e.g. `apps/admin`) should pass
+ * a translated string per call.
+ */
+export function toast(
+  tone: ToastTone,
+  message: ReactNode,
+  durationMs = 4000,
+  dismissLabel = "Close",
+): number {
   ensureMounted();
   const id = nextId++;
-  setEntries([...entries, { id, tone, message }]);
+  setEntries([...entries, { id, tone, message, dismissLabel }]);
   if (durationMs > 0) {
     const timer = setTimeout(() => dismiss(id), durationMs);
     timers.set(id, timer);
@@ -129,7 +143,7 @@ function ToastViewport() {
           <button
             type="button"
             onClick={() => dismiss(entry.id)}
-            aria-label="Закрыть"
+            aria-label={entry.dismissLabel}
             style={{
               border: "none",
               background: "transparent",

@@ -142,6 +142,22 @@ describe("Modal", () => {
     // focus restored to trigger
     expect(document.activeElement).toBe(trigger);
   });
+
+  it("defaults the × button's aria-label to 'Close' and honors a custom closeLabel", () => {
+    const { rerender } = render(
+      <Modal open title="Модаль" onClose={() => {}}>
+        Тело
+      </Modal>,
+    );
+    expect(screen.getByRole("button", { name: "Close" })).toBeDefined();
+
+    rerender(
+      <Modal open title="Модаль" onClose={() => {}} closeLabel="Закрыть">
+        Тело
+      </Modal>,
+    );
+    expect(screen.getByRole("button", { name: "Закрыть" })).toBeDefined();
+  });
 });
 
 describe("Sidebar", () => {
@@ -184,6 +200,22 @@ describe("Sidebar", () => {
     );
 
     expect(screen.getByText("Елена Ким")).toBeDefined();
+  });
+
+  it("defaults the nav landmark's aria-label to 'Main navigation' and honors a custom navLabel", () => {
+    const { rerender } = render(
+      <Sidebar items={items} renderLink={(item, content) => <a href={item.to}>{content}</a>} />,
+    );
+    expect(screen.getByRole("navigation", { name: "Main navigation" })).toBeDefined();
+
+    rerender(
+      <Sidebar
+        items={items}
+        renderLink={(item, content) => <a href={item.to}>{content}</a>}
+        navLabel="Основная навигация"
+      />,
+    );
+    expect(screen.getByRole("navigation", { name: "Основная навигация" })).toBeDefined();
   });
 });
 
@@ -255,13 +287,22 @@ describe("toast", () => {
     const status = screen
       .getByText("Принтер не отвечает")
       .closest('[role="status"]') as HTMLElement;
-    const closeButton = within(status).getByRole("button", { name: "Закрыть" });
+    const closeButton = within(status).getByRole("button", { name: "Close" });
 
     act(() => {
       closeButton.click();
     });
 
     expect(screen.queryByText("Принтер не отвечает")).toBeNull();
+  });
+
+  it("uses the per-call dismissLabel for the dismiss button's aria-label", () => {
+    act(() => {
+      toast("ok", "С переводом", 4000, "Закрыть");
+    });
+
+    const status = screen.getByText("С переводом").closest('[role="status"]') as HTMLElement;
+    expect(within(status).getByRole("button", { name: "Закрыть" })).toBeDefined();
   });
 
   it("clears the auto-dismiss timer when manually dismissed (clearTimeout called)", () => {
@@ -272,7 +313,7 @@ describe("toast", () => {
     });
 
     const status = screen.getByText("Уведомление").closest('[role="status"]') as HTMLElement;
-    const closeButton = within(status).getByRole("button", { name: "Закрыть" });
+    const closeButton = within(status).getByRole("button", { name: "Close" });
 
     // Dismiss manually — this must call clearTimeout on the pending timer
     act(() => {

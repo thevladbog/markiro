@@ -223,4 +223,10 @@ describe("Table", () => {
 
     expect(screen.getByText("Пока пусто")).toBeDefined();
   });
+
+  it("defaults the empty state to the neutral EN 'No data' when `empty` isn't provided", () => {
+    render(<Table columns={[{ key: "batch", title: "Партия" }]} rows={[]} />);
+
+    expect(screen.getByText("No data")).toBeDefined();
+  });
 });

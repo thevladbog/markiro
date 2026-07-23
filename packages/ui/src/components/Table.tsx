@@ -57,7 +57,7 @@ export function Table<Row>({
   page,
   pageCount,
   onPage,
-  empty = "Пока пусто",
+  empty = "No data",
   className,
   style,
 }: TableProps<Row>) {

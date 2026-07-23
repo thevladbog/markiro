@@ -110,6 +110,7 @@ export function CounterpartyForm({
     <Modal
       open={open}
       onClose={onClose}
+      closeLabel={t("common.close")}
       title={
         mode === "create"
           ? t("pages.counterparties.form.createTitle")

@@ -185,6 +185,7 @@ export function ProductForm({
     <Modal
       open={open}
       onClose={onClose}
+      closeLabel={t("common.close")}
       title={
         mode === "create" ? t("pages.catalog.form.createTitle") : t("pages.catalog.form.editTitle")
       }

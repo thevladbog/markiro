@@ -13,11 +13,11 @@ import {
   Spinner,
   StatusChip,
   Table,
-  toast,
 } from "@markiro/ui";
 import type { BadgeTone, SelectOption, StatusChipStatus, TableColumn } from "@markiro/ui";
 
 import { ApiRequestError } from "../../api/client.js";
+import { toast } from "../../lib/toast.js";
 import { useProducts } from "../catalog/api.js";
 import { useCounterparties } from "../counterparties/api.js";
 import { ShiftForm, type ShiftFormValues } from "./ShiftForm.js";
@@ -328,6 +328,7 @@ export function ShiftsPage() {
       <Modal
         open={deleteTarget !== null}
         onClose={() => setDeleteTarget(null)}
+        closeLabel={t("common.close")}
         title={t("pages.shifts.deleteConfirmTitle")}
         footer={
           <>
@@ -355,6 +356,7 @@ export function ShiftsPage() {
       <Modal
         open={closeTarget !== null}
         onClose={() => setCloseTarget(null)}
+        closeLabel={t("common.close")}
         title={t("pages.shifts.closeModal.title")}
         footer={
           <>

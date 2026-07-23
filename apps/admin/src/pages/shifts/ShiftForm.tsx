@@ -198,6 +198,7 @@ export function ShiftForm({
     <Modal
       open={open}
       onClose={onClose}
+      closeLabel={t("common.close")}
       title={
         formMode === "create"
           ? t("pages.shifts.form.createTitle")

@@ -31,6 +31,8 @@ export interface ModalProps {
   width?: number | string;
   className?: string;
   style?: CSSProperties;
+  /** aria-label for the × close button -- this package has no i18n dependency, so a caller in a non-English locale (e.g. `apps/admin`) should pass a translated string. */
+  closeLabel?: string;
 }
 
 const FOCUSABLE_SELECTOR = [
@@ -55,6 +57,7 @@ export function Modal({
   width = 480,
   className,
   style,
+  closeLabel = "Close",
 }: ModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
@@ -168,7 +171,7 @@ export function Modal({
               <button
                 type="button"
                 onClick={onClose}
-                aria-label="Закрыть"
+                aria-label={closeLabel}
                 style={{
                   border: "none",
                   background: "transparent",

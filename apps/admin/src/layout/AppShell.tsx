@@ -39,6 +39,7 @@ export function AppShell() {
     <div style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
       <Sidebar
         items={items}
+        navLabel={t("shell.navLabel")}
         renderLink={(item, content) => (
           <NavLink
             to={item.to}

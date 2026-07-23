@@ -12,11 +12,11 @@ import {
   Spinner,
   StatusChip,
   Table,
-  toast,
 } from "@markiro/ui";
 import type { SelectOption, TableColumn } from "@markiro/ui";
 
 import { ApiRequestError } from "../../api/client.js";
+import { toast } from "../../lib/toast.js";
 import { useCounterparties } from "../counterparties/api.js";
 import { ProductForm, type ProductFormValues } from "./ProductForm.js";
 import {
@@ -242,6 +242,7 @@ export function CatalogPage() {
       <Modal
         open={deleteTarget !== null}
         onClose={() => setDeleteTarget(null)}
+        closeLabel={t("common.close")}
         title={t("pages.catalog.deleteConfirmTitle")}
         footer={
           <>
