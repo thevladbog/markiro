@@ -33,6 +33,22 @@ export interface AuthClientLike {
     isPending: boolean;
     error: unknown;
   };
+  /**
+   * Better Auth's `organizationClient()` plugin exposes a `listOrganizations`
+   * atom via its `getAtoms` (see `dist/plugins/organization/client.d.mts`).
+   * The React client (`dist/client/react/index.d.mts`'s `InferResolvedHooks`
+   * mapped type) auto-bridges every non-signal atom key to a
+   * `use${Capitalize<key>}` hook returning `{ data, error, isPending, ... }`
+   * -- i.e. the real client genuinely has `useListOrganizations()`, not just
+   * the one-shot `organization.list()` below. `useActiveOrg` (`src/layout/
+   * useActiveOrg.ts`) uses this hook rather than `organization.list()` so the
+   * header re-renders when the active organization changes.
+   */
+  useListOrganizations: () => {
+    data: OrganizationSummary[] | null | undefined;
+    isPending: boolean;
+    error: unknown;
+  };
   signIn: {
     email: (input: { email: string; password: string }) => Promise<AuthActionResult<unknown>>;
   };

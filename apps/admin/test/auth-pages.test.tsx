@@ -21,6 +21,7 @@ afterEach(() => {
 function createFakeAuthClient(overrides: Partial<AuthClientLike> = {}): AuthClientLike {
   return {
     useSession: () => ({ data: null, isPending: false, error: null }),
+    useListOrganizations: () => ({ data: [], isPending: false, error: null }),
     signIn: { email: vi.fn(async () => ({ data: {}, error: null })) },
     signUp: { email: vi.fn(async () => ({ data: {}, error: null })) },
     signOut: vi.fn(async () => ({ data: {}, error: null })),

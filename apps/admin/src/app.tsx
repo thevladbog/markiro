@@ -4,6 +4,11 @@ import { CreateOrgPage } from "./pages/auth/CreateOrg.js";
 import { LoginPage } from "./pages/auth/Login.js";
 import { RegisterPage } from "./pages/auth/Register.js";
 import { SelectOrgPage } from "./pages/auth/SelectOrg.js";
+import { CatalogPage } from "./pages/catalog/index.js";
+import { CounterpartiesPage } from "./pages/counterparties/index.js";
+import { DashboardPage } from "./pages/dashboard/index.js";
+import { SettingsPage } from "./pages/settings/index.js";
+import { ShiftsPage } from "./pages/shifts/index.js";
 import { ShellPage } from "./pages/Shell.js";
 
 /**
@@ -23,7 +28,13 @@ export function App() {
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/org/create" element={<CreateOrgPage />} />
         <Route path="/org/select" element={<SelectOrgPage />} />
-        <Route path="/" element={<ShellPage />} />
+        <Route path="/" element={<ShellPage />}>
+          <Route index element={<DashboardPage />} />
+          <Route path="catalog" element={<CatalogPage />} />
+          <Route path="shifts" element={<ShiftsPage />} />
+          <Route path="counterparties" element={<CounterpartiesPage />} />
+          <Route path="settings" element={<SettingsPage />} />
+        </Route>
       </Routes>
     </BrowserRouter>
   );

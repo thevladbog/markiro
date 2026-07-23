@@ -42,8 +42,45 @@
       "genericError": "Could not load the organization list."
     }
   },
+  "nav": {
+    "dashboard": "Overview",
+    "catalog": "Catalog",
+    "shifts": "Shifts",
+    "counterparties": "Counterparties",
+    "settings": "Settings"
+  },
   "shell": {
-    "welcome": "Signed in as {{email}}",
-    "activeOrg": "Active organization: {{organizationId}}"
+    "header": {
+      "noOrgName": "No organization selected",
+      "toggleTheme": "Toggle theme",
+      "toggleLanguage": "Switch language"
+    }
+  },
+  "pages": {
+    "dashboard": {
+      "title": "Overview",
+      "emptyTitle": "No data yet",
+      "emptyHint": "A summary of shifts and production will appear here once the first shift runs."
+    },
+    "catalog": {
+      "title": "Product catalog",
+      "emptyTitle": "Catalog is empty",
+      "emptyHint": "Add your first product to start planning shifts."
+    },
+    "counterparties": {
+      "title": "Counterparties",
+      "emptyTitle": "No counterparties yet",
+      "emptyHint": "Add your first counterparty — a GTIN owner or tolling partner."
+    },
+    "shifts": {
+      "title": "Shifts",
+      "emptyTitle": "No shifts planned",
+      "emptyHint": "Plan your first shift to start production."
+    },
+    "settings": {
+      "title": "Settings",
+      "emptyTitle": "Organization settings",
+      "emptyHint": "Organization profile, GLN and GS1 prefixes will appear here."
+    }
   }
 }

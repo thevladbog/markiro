@@ -2,6 +2,8 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { ThemeProvider } from "@markiro/ui";
+
 import {
   AuthClientProvider,
   type AuthClientLike,
@@ -18,6 +20,7 @@ afterEach(() => {
 function createFakeAuthClient(overrides: Partial<AuthClientLike> = {}): AuthClientLike {
   return {
     useSession: () => ({ data: null, isPending: false, error: null }),
+    useListOrganizations: () => ({ data: [], isPending: false, error: null }),
     signIn: { email: async () => ({ data: {}, error: null }) },
     signUp: { email: async () => ({ data: {}, error: null }) },
     signOut: async () => ({ data: {}, error: null }),
@@ -41,19 +44,21 @@ function renderShell(client: AuthClientLike) {
   }
 
   return render(
-    <MemoryRouter initialEntries={["/shell"]}>
-      <LocationTracker />
-      <AuthClientProvider client={client}>
-        <Routes>
-          <Route path="/shell" element={<ShellPage />} />
-          <Route path="/login" element={<div data-testid="login-page">LOGIN_PAGE</div>} />
-          <Route
-            path="/org/select"
-            element={<div data-testid="org-select-page">ORG_SELECT_PAGE</div>}
-          />
-        </Routes>
-      </AuthClientProvider>
-    </MemoryRouter>,
+    <ThemeProvider defaultTheme="light">
+      <MemoryRouter initialEntries={["/shell"]}>
+        <LocationTracker />
+        <AuthClientProvider client={client}>
+          <Routes>
+            <Route path="/shell" element={<ShellPage />} />
+            <Route path="/login" element={<div data-testid="login-page">LOGIN_PAGE</div>} />
+            <Route
+              path="/org/select"
+              element={<div data-testid="org-select-page">ORG_SELECT_PAGE</div>}
+            />
+          </Routes>
+        </AuthClientProvider>
+      </MemoryRouter>
+    </ThemeProvider>,
   );
 }
 
@@ -106,19 +111,28 @@ describe("ShellPage", () => {
     expect(locationPathname.textContent).toBe("/org/select");
   });
 
-  it("renders content when session has activeOrganizationId", async () => {
+  it("renders the app shell (sidebar + header) when session has activeOrganizationId", async () => {
     const session: SessionData = {
       session: { activeOrganizationId: "org_1" },
       user: { id: "user_1", email: "user@example.com", name: "User" },
     };
     const client = createFakeAuthClient({
       useSession: () => ({ data: session, isPending: false, error: null }),
+      useListOrganizations: () => ({
+        data: [{ id: "org_1", name: "Test Org", slug: "test-org" }],
+        isPending: false,
+        error: null,
+      }),
     });
     renderShell(client);
 
-    // Verify content is rendered (searching for parts of the actual Russian text)
-    expect(await screen.findByText(/user@example.com/)).toBeDefined();
-    expect(screen.getByText(/org_1/)).toBeDefined();
+    // Sidebar nav item, resolved org name (via useListOrganizations), signed-in
+    // user's email, and the sign-out button all come from the real AppShell now
+    // (the Task 9 placeholder content is gone). The email appears twice (header
+    // + sidebar footer), so assert at least one match rather than a unique one.
+    expect(screen.getByRole("link", { name: "Обзор" })).toBeDefined();
+    expect(await screen.findByText("Test Org")).toBeDefined();
+    expect(screen.getAllByText("user@example.com").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: /Выйти|Sign out/i })).toBeDefined();
 
     // Verify no redirect occurred -- location should still be /shell
