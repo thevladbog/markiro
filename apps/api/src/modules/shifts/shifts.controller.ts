@@ -23,6 +23,7 @@ import {
   type CreateShiftDto,
   type ListShiftsQueryDto,
   type ListShiftsResponseDto,
+  type ShiftBundleDto,
   type ShiftDto,
   type UpdateShiftDto,
 } from "./dto";
@@ -78,5 +79,16 @@ export class ShiftsController {
     @Body(new ZodValidationPipe(closeShiftSchema)) body: CloseShiftDto,
   ): Promise<ShiftDto> {
     return this.shiftsService.closeShift(req.tenantId!, id, body);
+  }
+
+  @Post(":id/open")
+  @HttpCode(200)
+  async openShift(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<ShiftDto> {
+    return this.shiftsService.openShift(req.tenantId!, id);
+  }
+
+  @Get(":id/bundle")
+  async getBundle(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<ShiftBundleDto> {
+    return this.shiftsService.getBundle(req.tenantId!, id);
   }
 }
