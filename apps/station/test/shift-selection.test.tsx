@@ -23,4 +23,20 @@ describe("ShiftSelection", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open" }));
     await waitFor(() => expect(onSelected).toHaveBeenCalledWith(expect.objectContaining({ id: "s1", status: "active" })));
   });
+
+  it("surfaces an error and does not call onSelected when opening a shift fails", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [
+        { id: "s1", status: "planned", mode: "validation", productName: "Cola", plannedQty: 100 },
+      ] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: "Shift already closed" }), { status: 422 }));
+
+    const onSelected = vi.fn();
+    render(<ShiftSelection client={client} onSelected={onSelected} onNew={() => {}} />);
+    await waitFor(() => expect(screen.getByText("Cola")).toBeDefined());
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+
+    await waitFor(() => expect(screen.getByText("Shift already closed")).toBeDefined());
+    expect(onSelected).not.toHaveBeenCalled();
+  });
 });

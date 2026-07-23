@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Card } from "@markiro/ui";
-import type { StationClient } from "../lib/api-client.js";
+import { Alert, Button, Card } from "@markiro/ui";
+import { StationApiError, type StationClient } from "../lib/api-client.js";
 
 interface ShiftListItem {
   id: string;
@@ -21,19 +21,49 @@ export interface ShiftSelectionProps {
 export function ShiftSelection({ client, onSelected, onNew }: ShiftSelectionProps) {
   const { t } = useTranslation();
   const [items, setItems] = useState<ShiftListItem[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    void client.get<{ items: ShiftListItem[] }>("/shifts").then((r) => setItems(r.items));
-  }, [client]);
+    let cancelled = false;
+    client
+      .get<{ items: ShiftListItem[] }>("/shifts")
+      .then((r) => {
+        if (!cancelled) setItems(r.items);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setError(err instanceof StationApiError ? err.message : t("shifts.actionFailed"));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, t]);
 
   async function open(shift: ShiftListItem) {
-    const opened = await client.post<{ id: string; status: string; mode: string }>(`/shifts/${shift.id}/open`);
-    onSelected(opened);
+    if (busy) return;
+    setError(null);
+    setBusy(true);
+    try {
+      const opened = await client.post<{ id: string; status: string; mode: string }>(`/shifts/${shift.id}/open`);
+      onSelected(opened);
+    } catch (err) {
+      setError(err instanceof StationApiError ? err.message : t("shifts.actionFailed"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function rejoin(shift: ShiftListItem) {
+    if (busy) return;
+    onSelected(shift);
   }
 
   return (
     <main style={{ minHeight: "100vh", padding: 32 }}>
       <h1 style={{ fontSize: "2.25rem", marginBottom: 24 }}>{t("shifts.title")}</h1>
+      {error ? <Alert tone="error">{error}</Alert> : null}
       <div style={{ display: "grid", gap: 16 }}>
         {items
           .filter((s) => s.status !== "closed")
@@ -43,7 +73,8 @@ export function ShiftSelection({ client, onSelected, onNew }: ShiftSelectionProp
               {s.counterpartyName ? <div>для: {s.counterpartyName}</div> : null}
               <Button
                 style={{ minHeight: 64, marginTop: 12 }}
-                onClick={() => (s.status === "active" ? onSelected(s) : void open(s))}
+                disabled={busy}
+                onClick={() => (s.status === "active" ? rejoin(s) : void open(s))}
               >
                 {s.status === "active" ? t("shifts.rejoin") : t("shifts.open")}
               </Button>

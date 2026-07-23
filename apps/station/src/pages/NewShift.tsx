@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, Card, Input } from "@markiro/ui";
 import { DomainError, normalizeToGtin14 } from "@markiro/domain";
-import type { StationClient } from "../lib/api-client.js";
+import { StationApiError, type StationClient } from "../lib/api-client.js";
 
 interface ResolvedProduct {
   id: string;
@@ -24,12 +24,14 @@ export function NewShift({ client, onStarted, onBack }: NewShiftProps) {
   const [raw, setRaw] = useState("");
   const [view, setView] = useState<View>("input");
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const [product, setProduct] = useState<ResolvedProduct | null>(null);
   const [mode, setMode] = useState<"validation" | "aggregation">("validation");
   const [unknownGtin, setUnknownGtin] = useState<string>("");
 
   async function resolve(e: FormEvent) {
     e.preventDefault();
+    if (busy) return;
     setError(null);
     let gtin14: string;
     try {
@@ -38,24 +40,39 @@ export function NewShift({ client, onStarted, onBack }: NewShiftProps) {
       setError(err instanceof DomainError ? t("shifts.gtinInvalid") : String(err));
       return;
     }
-    // Owner hint (also validates against the catalog indirectly).
-    await client.post<{ gtin14: string; owner: string }>("/products/gtin-check", { gtin: gtin14 });
-    const list = await client.get<{ items: ResolvedProduct[] }>(`/products?search=${gtin14}`);
-    const match = list.items.find((p) => p.gtin14 === gtin14) ?? null;
-    if (!match) {
-      setUnknownGtin(gtin14);
-      setView("notFound");
-      return;
+    setBusy(true);
+    try {
+      // Owner hint (also validates against the catalog indirectly).
+      await client.post<{ gtin14: string; owner: string }>("/products/gtin-check", { gtin: gtin14 });
+      const list = await client.get<{ items: ResolvedProduct[] }>(`/products?search=${gtin14}`);
+      const match = list.items.find((p) => p.gtin14 === gtin14) ?? null;
+      if (!match) {
+        setUnknownGtin(gtin14);
+        setView("notFound");
+        return;
+      }
+      setProduct(match);
+      setView("found");
+    } catch (err) {
+      setError(err instanceof StationApiError ? err.message : t("shifts.actionFailed"));
+    } finally {
+      setBusy(false);
     }
-    setProduct(match);
-    setView("found");
   }
 
   async function start() {
-    if (!product) return;
-    const created = await client.post<{ id: string }>("/shifts", { productId: product.id, mode });
-    const opened = await client.post<{ id: string; status: string; mode: string }>(`/shifts/${created.id}/open`);
-    onStarted(opened);
+    if (!product || busy) return;
+    setError(null);
+    setBusy(true);
+    try {
+      const created = await client.post<{ id: string }>("/shifts", { productId: product.id, mode });
+      const opened = await client.post<{ id: string; status: string; mode: string }>(`/shifts/${created.id}/open`);
+      onStarted(opened);
+    } catch (err) {
+      setError(err instanceof StationApiError ? err.message : t("shifts.actionFailed"));
+    } finally {
+      setBusy(false);
+    }
   }
 
   if (view === "notFound") {
@@ -91,7 +108,8 @@ export function NewShift({ client, onStarted, onBack }: NewShiftProps) {
             {t("shifts.modeAggregation")}
           </Button>
         </div>
-        <Button style={{ minHeight: 64 }} onClick={() => void start()}>
+        {error ? <Alert tone="error">{error}</Alert> : null}
+        <Button style={{ minHeight: 64 }} disabled={busy} onClick={() => void start()}>
           {t("shifts.start")}
         </Button>
       </main>
@@ -104,7 +122,7 @@ export function NewShift({ client, onStarted, onBack }: NewShiftProps) {
         <label htmlFor="gtin" style={{ fontSize: "1.25rem" }}>{t("shifts.gtinPrompt")}</label>
         <Input id="gtin" autoFocus value={raw} onChange={(e) => setRaw(e.target.value)} />
         {error ? <Alert tone="error">{error}</Alert> : null}
-        <Button type="submit" style={{ minHeight: 64 }}>{t("shifts.open")}</Button>
+        <Button type="submit" style={{ minHeight: 64 }} disabled={busy}>{t("shifts.open")}</Button>
       </form>
     </main>
   );

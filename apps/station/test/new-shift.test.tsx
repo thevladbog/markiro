@@ -50,4 +50,33 @@ describe("NewShift", () => {
     fireEvent.submit(screen.getByLabelText("Type or scan a GTIN").closest("form")!);
     await waitFor(() => expect(screen.getByText("Invalid GTIN")).toBeDefined());
   });
+
+  it("surfaces a server error on failed shift creation, disables Start while busy, and does not call onStarted", async () => {
+    let resolveCreate!: (value: Response) => void;
+    const createPromise = new Promise<Response>((resolve) => {
+      resolveCreate = resolve;
+    });
+    vi.spyOn(globalThis, "fetch")
+      // POST /products/gtin-check
+      .mockResolvedValueOnce(new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), { status: 200 }))
+      // GET /products?search=... (resolve productId)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [{ id: "p1", gtin14: "04600000000015", name: "Cola", status: "active" }] }), { status: 200 }))
+      // POST /shifts — a still-`draft` product rejected by the server
+      .mockImplementationOnce(() => createPromise);
+
+    const onStarted = vi.fn();
+    render(<NewShift client={client} onStarted={onStarted} onBack={() => {}} />);
+    fireEvent.change(screen.getByLabelText("Type or scan a GTIN"), { target: { value: "4600000000015" } });
+    fireEvent.submit(screen.getByLabelText("Type or scan a GTIN").closest("form")!);
+    await waitFor(() => expect(screen.getByText("Cola")).toBeDefined());
+
+    const startButton = screen.getByRole("button", { name: "Start" });
+    fireEvent.click(startButton);
+    await waitFor(() => expect((startButton as HTMLButtonElement).disabled).toBe(true));
+
+    resolveCreate(new Response(JSON.stringify({ message: "Product is not active" }), { status: 422 }));
+
+    await waitFor(() => expect(screen.getByText("Product is not active")).toBeDefined());
+    expect(onStarted).not.toHaveBeenCalled();
+  });
 });

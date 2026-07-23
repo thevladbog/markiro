@@ -29,6 +29,7 @@
     "back": "Back",
     "modeValidation": "Validation",
     "modeAggregation": "Aggregation",
-    "start": "Start"
+    "start": "Start",
+    "actionFailed": "Action failed. Please try again."
   }
 }
