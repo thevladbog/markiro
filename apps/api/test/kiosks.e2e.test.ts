@@ -147,6 +147,22 @@ describe.skipIf(!ready)("kiosks e2e", () => {
     expect(replaced.body.productIds).toEqual([productB]);
   });
 
+  it("PUT /kiosks/:id/products dedupes duplicate product ids instead of 500ing", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const productId = randomUUID();
+    await db.insert(schema.products).values({ id: productId, tenantId, gtin14: "04650075195927", name: "Product C" });
+
+    const kiosk = await agent.post("/kiosks").send({ name: "Киоск-4" }).expect(201);
+    const id = kiosk.body.id as string;
+
+    const res = await agent
+      .put(`/kiosks/${id}/products`)
+      .send({ productIds: [productId, productId] })
+      .expect(200);
+    expect(res.body.productIds).toEqual([productId]);
+  });
+
   it("PUT /kiosks/:id/products 404s for a nonexistent kiosk", async () => {
     const agent = request.agent(app!.getHttpServer());
     await signUpAndActivate(agent);

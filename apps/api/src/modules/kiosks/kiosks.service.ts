@@ -62,13 +62,17 @@ export class KiosksService {
     const row = await this.findRow(tenantId, id);
     if (!row) throw new NotFoundException();
 
+    // The allowlist is a set of products; duplicate ids in the desired state are redundant, not
+    // a client error. Dedupe before insert to avoid tripping kiosk_products_uq (23505).
+    const uniqueIds = Array.from(new Set(dto.productIds));
+
     try {
       await this.db.transaction(async (tx) => {
         await tx.delete(schema.kioskProducts)
           .where(and(eq(schema.kioskProducts.tenantId, tenantId), eq(schema.kioskProducts.kioskId, id)));
-        if (dto.productIds.length > 0) {
+        if (uniqueIds.length > 0) {
           await tx.insert(schema.kioskProducts).values(
-            dto.productIds.map((productId) => ({ tenantId, kioskId: id, productId })),
+            uniqueIds.map((productId) => ({ tenantId, kioskId: id, productId })),
           );
         }
       });
