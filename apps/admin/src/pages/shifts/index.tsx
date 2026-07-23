@@ -20,6 +20,7 @@ import { ApiRequestError } from "../../api/client.js";
 import { toast } from "../../lib/toast.js";
 import { useProducts } from "../catalog/api.js";
 import { useCounterparties } from "../counterparties/api.js";
+import { useLabelTemplates } from "../labels/api.js";
 import { ShiftForm, type ShiftFormValues } from "./ShiftForm.js";
 import {
   useCloseShift,
@@ -64,6 +65,7 @@ export function ShiftsPage() {
   const { data: productsData } = useProducts();
   const { data: linesData } = useLines();
   const { data: counterpartiesData } = useCounterparties();
+  const { data: labelTemplatesData } = useLabelTemplates();
 
   const createMutation = useCreateShift();
   const updateMutation = useUpdateShift();
@@ -79,6 +81,7 @@ export function ShiftsPage() {
   const products = productsData ?? [];
   const lines = linesData ?? [];
   const counterparties = counterpartiesData ?? [];
+  const labelTemplates = labelTemplatesData ?? [];
 
   const statusFilterOptions: SelectOption[] = [
     { value: "all", label: t("pages.shifts.filters.status.all") },
@@ -200,6 +203,7 @@ export function ShiftsPage() {
         plannedDate: editingShift.plannedDate ?? "",
         lineId: editingShift.lineId ?? "",
         counterpartyId: editingShift.counterpartyId ?? "",
+        labelTemplateId: editingShift.labelTemplateId ?? "",
         boxCapacity: editingShift.boxCapacity !== null ? String(editingShift.boxCapacity) : "",
         palletCapacity:
           editingShift.palletCapacity !== null ? String(editingShift.palletCapacity) : "",
@@ -320,6 +324,7 @@ export function ShiftsPage() {
         products={products}
         lines={lines}
         counterparties={counterparties}
+        labelTemplates={labelTemplates}
         submitting={createMutation.isPending || updateMutation.isPending}
         onSubmit={handleSubmit}
         onClose={() => setFormState(null)}

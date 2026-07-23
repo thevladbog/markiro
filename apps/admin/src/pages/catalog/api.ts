@@ -23,6 +23,7 @@ export interface ProductDto {
   palletCapacity: number | null;
   status: ProductStatus;
   defaultCounterpartyId: string | null;
+  defaultLabelTemplateId: string | null;
   createdAt: string;
 }
 
@@ -38,6 +39,7 @@ export interface CreateProductInput {
   boxCapacity?: number | null;
   palletCapacity?: number | null;
   defaultCounterpartyId?: string | null;
+  defaultLabelTemplateId?: string | null;
 }
 
 export type UpdateProductInput = Partial<CreateProductInput>;

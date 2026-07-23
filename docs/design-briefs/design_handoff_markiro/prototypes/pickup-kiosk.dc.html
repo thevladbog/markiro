@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+body { margin: 0; background: #26252B; font-family: 'IBM Plex Sans', sans-serif; color: #FAFAF8; }
+a { color: #FAFAF8; } a:hover { color: #3DDC7A; }
+button { cursor: pointer; font-family: 'IBM Plex Sans', sans-serif; }
+</style>
+<script src="./image-slot.js"></script>
+</helmet>
+<div style="display: flex; flex-direction: column; align-items: safe center; gap: 12px; padding: 20px; overflow-x: auto; box-sizing: border-box; min-height: 100vh">
+  <div style="display: flex; gap: 8px; flex-wrap: wrap; justify-content: center">
+    <button onClick="{{ goIdle }}" style="height: 32px; padding: 0 12px; border-radius: 6px; border: 1px solid {{ navIdle }}; background: transparent; color: #B6B3AB; font: 500 12px/1 'IBM Plex Sans', sans-serif">1 Ожидание</button>
+    <button onClick="{{ goCart }}" style="height: 32px; padding: 0 12px; border-radius: 6px; border: 1px solid {{ navCart }}; background: transparent; color: #B6B3AB; font: 500 12px/1 'IBM Plex Sans', sans-serif">2 Отбор</button>
+    <button onClick="{{ goDone }}" style="height: 32px; padding: 0 12px; border-radius: 6px; border: 1px solid {{ navDone }}; background: transparent; color: #B6B3AB; font: 500 12px/1 'IBM Plex Sans', sans-serif">3 Передано</button>
+    <button onClick="{{ toggleOrient }}" style="height: 32px; padding: 0 12px; border-radius: 6px; border: 1px solid #45444B; background: #1C1B21; color: #B6B3AB; font: 500 12px/1 'IBM Plex Sans', sans-serif">⟳ {{ orientLabel }}</button>
+  </div>
+
+  <div style="width: {{ frameW }}px; height: {{ frameH }}px; background: #131216; border-radius: 16px; border: 1px solid #2E2D33; overflow: hidden; position: relative; display: flex; flex-direction: column; flex-shrink: 0">
+
+    <!-- ===== 1 Ожидание ===== -->
+    <sc-if value="{{ sIdle }}" hint-placeholder-val="{{ true }}">
+    <div data-screen-label="01 Ожидание бейджа" style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px; padding: 40px; box-sizing: border-box">
+      <svg width="88" height="88" viewBox="0 0 64 64"><rect x="4" y="4" width="56" height="56" fill="#FAFAF8"/><g fill="#131216"><rect x="14" y="14" width="8" height="8"/><rect x="14" y="26" width="8" height="8"/><rect x="14" y="38" width="8" height="8"/><rect x="26" y="22" width="8" height="8"/><rect x="38" y="14" width="8" height="8"/><rect x="38" y="26" width="8" height="8"/><rect x="38" y="38" width="8" height="8"/><rect x="26" y="42" width="8" height="8" fill="#0FAF56"/></g></svg>
+      <div style="display: flex; flex-direction: column; align-items: center; gap: 10px">
+        <div style="font: 700 40px/48px 'IBM Plex Sans', sans-serif; text-align: center">Возьмите продукцию для себя</div>
+        <div style="font: 400 20px/28px 'IBM Plex Sans', sans-serif; color: #B6B3AB; text-align: center">Оформление и оплата — на кассе у администратора</div>
+      </div>
+      <button onClick="{{ demoBadge }}" style="width: 420px; padding: 36px 32px; border-radius: 16px; border: 2px dashed #45444B; background: #1C1B21; color: #FAFAF8; display: flex; flex-direction: column; align-items: center; gap: 16px">
+        <svg width="72" height="72" viewBox="0 0 24 24" fill="none" stroke="#B6B3AB" stroke-width="1.5"><path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3z"/><path d="M5.5 5.5h2v2h-2zM16.5 5.5h2v2h-2zM5.5 16.5h2v2h-2z" fill="#B6B3AB" stroke="none"/><path d="M14 14h2.5v2.5H14zM18.5 14H21v2.5h-2.5zM14 18.5h2.5V21H14zM18.5 18.5H21V21h-2.5z" fill="#B6B3AB" stroke="none"/></svg>
+        <span style="font: 600 26px/32px 'IBM Plex Sans', sans-serif">Отсканируйте QR-код<br>на бейдже</span>
+        <span style="font: 500 14px/1 'IBM Plex Sans', sans-serif; color: #8A877F">▶ демо: бейдж Смирнов А.</span>
+      </button>
+      <div style="font: 400 16px/24px 'IBM Plex Sans', sans-serif; color: #8A877F; text-align: center; max-width: 560px">QR-код — на обороте бейджа. Поднесите его к сканеру под экраном,<br>затем отсканируйте коды маркировки с бутылок.</div>
+    </div>
+    </sc-if>
+
+    <!-- ===== 2 Отбор ===== -->
+    <sc-if value="{{ sCart }}" hint-placeholder-val="{{ false }}">
+    <div data-screen-label="02 Отбор продукции" style="flex: 1; display: flex; flex-direction: column; min-height: 0">
+      <div style="height: 76px; flex-shrink: 0; background: #1C1B21; border-bottom: 1px solid #2E2D33; display: flex; align-items: center; gap: 16px; padding: 0 24px">
+        <svg width="30" height="30" viewBox="0 0 64 64"><rect x="4" y="4" width="56" height="56" fill="#FAFAF8"/><g fill="#131216"><rect x="14" y="14" width="8" height="8"/><rect x="14" y="26" width="8" height="8"/><rect x="14" y="38" width="8" height="8"/><rect x="26" y="22" width="8" height="8"/><rect x="38" y="14" width="8" height="8"/><rect x="38" y="26" width="8" height="8"/><rect x="38" y="38" width="8" height="8"/><rect x="26" y="42" width="8" height="8" fill="#0FAF56"/></g></svg>
+        <span style="font: 600 17px/1 'IBM Plex Mono', monospace">маркиро · для себя</span>
+        <span style="flex: 1"></span>
+        <span style="display: flex; align-items: center; gap: 12px">
+          <span style="width: 44px; height: 44px; border-radius: 10px; background: #FAFAF8; color: #17161A; display: flex; align-items: center; justify-content: center; font: 600 17px/1 'IBM Plex Sans', sans-serif">СА</span>
+          <span style="font: 600 20px/1 'IBM Plex Sans', sans-serif">Смирнов Алексей</span>
+        </span>
+        <button onClick="{{ reset }}" style="height: 56px; padding: 0 22px; border-radius: 10px; border: 1px solid #45444B; background: transparent; color: #B6B3AB; font: 600 18px/1 'IBM Plex Sans', sans-serif">Не я</button>
+      </div>
+
+      <sc-if value="{{ dupFlash }}" hint-placeholder-val="{{ false }}">
+      <div style="flex-shrink: 0; background: #33250E; border-bottom: 1px solid #543E19; color: #FFB84D; padding: 14px 24px; font: 600 19px/26px 'IBM Plex Sans', sans-serif">Этот код уже в списке. У каждой бутылки — свой код: возьмите другую.</div>
+      </sc-if>
+
+      <div style="flex: 1; display: flex; flex-direction: {{ cartDir }}; min-height: 0">
+        <div style="flex: {{ topFlex }}; padding: 24px; display: flex; flex-direction: column; gap: 16px; min-width: 0; min-height: 0">
+          <sc-if value="{{ canScan }}" hint-placeholder-val="{{ true }}">
+          <div style="flex: {{ scanFlex }}; border: 2px dashed #45444B; border-radius: 16px; background: #1C1B21; display: flex; flex-direction: {{ scanDir }}; align-items: center; justify-content: center; gap: {{ scanGap }}; padding: {{ scanPad }}">
+            <svg width="{{ scanIcon }}" height="{{ scanIcon }}" viewBox="0 0 24 24" fill="none" stroke="#45444B" stroke-width="1.5" style="flex-shrink: 0"><path d="M3 7V3h4M17 3h4v4M21 17v4h-4M7 21H3v-4M7 12h10"/></svg>
+            <div style="display: flex; flex-direction: column; gap: 8px; text-align: {{ scanAlign }}">
+              <div style="font: 700 {{ scanTitle }} 'IBM Plex Sans', sans-serif">Поднесите бутылку<br>кодом к сканеру</div>
+              <div style="font: 400 17px/24px 'IBM Plex Sans', sans-serif; color: #8A877F">Код — на этикетке, рядом со знаком «Честный ЗНАК»</div>
+            </div>
+          </div>
+          </sc-if>
+          <sc-if value="{{ limitReached }}" hint-placeholder-val="{{ false }}">
+          <div style="flex: {{ scanFlex }}; border: 2px solid #543E19; border-radius: 16px; background: #33250E; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px">
+            <div style="font: 700 28px/36px 'IBM Plex Sans', sans-serif; color: #FFB84D; text-align: center">Лимит на сегодня — {{ limit }} шт</div>
+            <div style="font: 400 18px/26px 'IBM Plex Sans', sans-serif; color: #B6B3AB; text-align: center">Уберите лишнее из списка или нажмите «Готово»</div>
+          </div>
+          </sc-if>
+          <div style="display: flex; gap: 10px; flex-wrap: wrap">
+            <button onClick="{{ scanBeer }}" style="height: 48px; padding: 0 16px; border-radius: 8px; border: 1px dashed #45444B; background: transparent; color: #8A877F; font: 500 14px/1 'IBM Plex Sans', sans-serif">▶ демо: скан «Жигулёвское 0,5»</button>
+            <button onClick="{{ scanWater }}" style="height: 48px; padding: 0 16px; border-radius: 8px; border: 1px dashed #45444B; background: transparent; color: #8A877F; font: 500 14px/1 'IBM Plex Sans', sans-serif">▶ демо: скан «Вода 1,0»</button>
+            <button onClick="{{ scanKvas }}" style="height: 48px; padding: 0 16px; border-radius: 8px; border: 1px dashed #45444B; background: transparent; color: #8A877F; font: 500 14px/1 'IBM Plex Sans', sans-serif">▶ демо: скан «Квас 1,5»</button>
+            <button onClick="{{ scanDup }}" style="height: 48px; padding: 0 16px; border-radius: 8px; border: 1px dashed #543E19; background: transparent; color: #8A877F; font: 500 14px/1 'IBM Plex Sans', sans-serif">▶ демо: повторный код</button>
+          </div>
+        </div>
+
+        <div style="width: {{ panelW }}; flex: {{ panelFlex }}; flex-shrink: 0; border-left: {{ panelBL }}; border-top: {{ panelBT }}; display: flex; flex-direction: column; min-height: 0; box-sizing: border-box">
+          <div style="padding: 20px 24px 14px 24px; display: flex; align-items: baseline; gap: 10px; border-bottom: 1px solid #2E2D33">
+            <span style="font: 700 24px/30px 'IBM Plex Sans', sans-serif">Вы берёте</span>
+            <span style="font: 600 20px/1 'IBM Plex Mono', monospace; color: #8A877F">{{ count }}</span>
+          </div>
+          <div style="flex: 1; overflow-y: auto; min-height: 0">
+            <sc-if value="{{ isEmpty }}" hint-placeholder-val="{{ true }}">
+            <div style="padding: 48px 24px; display: flex; flex-direction: column; align-items: center; gap: 10px; color: #5B5952; text-align: center">
+              <span style="font: 600 20px/28px 'IBM Plex Sans', sans-serif">Пока пусто</span>
+              <span style="font: 400 16px/24px 'IBM Plex Sans', sans-serif; color: #8A877F">Отсканируйте первую бутылку —<br>она появится здесь</span>
+            </div>
+            </sc-if>
+            <sc-for list="{{ items }}" as="it" hint-placeholder-count="0">
+              <div style="display: flex; align-items: center; gap: 14px; padding: 12px 20px 12px 24px; border-bottom: 1px solid #232228">
+                <image-slot id="product-{{ it.gtin }}" shape="rounded" radius="8" style="width: 56px; height: 56px; flex-shrink: 0" placeholder=""></image-slot>
+                <span style="flex: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0">
+                  <span style="font: 600 18px/24px 'IBM Plex Sans', sans-serif; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{ it.name }}</span>
+                  <span style="font: 400 14px/18px 'IBM Plex Mono', monospace; color: #8A877F">{{ it.tail }}</span>
+                </span>
+                <sc-if value="{{ showPrices }}" hint-placeholder-val="{{ true }}">
+                <span style="font: 600 19px/1 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums; white-space: nowrap">{{ it.price }} ₽</span>
+                </sc-if>
+                <button onClick="{{ it.remove }}" style="width: 56px; height: 56px; flex-shrink: 0; border-radius: 10px; border: 1px solid #45444B; background: transparent; color: #B6B3AB; display: flex; align-items: center; justify-content: center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+              </div>
+            </sc-for>
+          </div>
+          <div style="flex-shrink: 0; border-top: 1px solid #2E2D33; padding: 20px 24px; display: flex; flex-direction: column; gap: 12px">
+            <div style="display: flex; flex-direction: column; gap: 8px">
+              <span style="font: 500 14px/1 'IBM Plex Sans', sans-serif; color: #8A877F">Причина</span>
+              <div style="display: flex; gap: 8px">
+                <button onClick="{{ pickBuy }}" style="flex: 1; height: 56px; border-radius: 10px; border: 1px solid {{ buyBd }}; background: {{ buyBg }}; color: {{ buyFg }}; font: 600 18px/1 'IBM Plex Sans', sans-serif">Покупка</button>
+                <button onClick="{{ pickWo }}" style="flex: 1; height: 56px; border-radius: 10px; border: 1px solid {{ woBd }}; background: {{ woBg }}; color: {{ woFg }}; font: 600 18px/1 'IBM Plex Sans', sans-serif">Списание</button>
+              </div>
+              <sc-if value="{{ isWo }}" hint-placeholder-val="{{ false }}">
+              <div style="display: flex; gap: 8px; flex-wrap: wrap">
+                <sc-for list="{{ subs }}" as="sb" hint-placeholder-count="4">
+                  <button onClick="{{ sb.pick }}" style="height: 48px; padding: 0 20px; border-radius: 999px; border: 1px solid {{ sb.bd }}; background: {{ sb.bg }}; color: {{ sb.fg }}; font: 600 16px/1 'IBM Plex Sans', sans-serif">{{ sb.name }}</button>
+                </sc-for>
+              </div>
+              </sc-if>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: baseline">
+              <span style="font: 600 20px/26px 'IBM Plex Sans', sans-serif">{{ countLabel }}</span>
+              <sc-if value="{{ showPrices }}" hint-placeholder-val="{{ true }}">
+              <span style="font: 600 26px/1 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums">{{ sum }} ₽</span>
+              </sc-if>
+            </div>
+            <span style="font: 400 15px/20px 'IBM Plex Sans', sans-serif; color: #8A877F">Лимит {{ limit }} шт в день · осталось {{ remaining }}</span>
+            <button onClick="{{ confirm }}" style="height: 84px; border-radius: 12px; border: none; background: {{ confirmBg }}; color: {{ confirmFg }}; font: 700 24px/1 'IBM Plex Sans', sans-serif">Готово — передать администратору</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- ===== 3 Передано ===== -->
+    <sc-if value="{{ sDone }}" hint-placeholder-val="{{ false }}">
+    <div data-screen-label="03 Заявка передана" style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 26px; padding: 40px; box-sizing: border-box">
+      <svg width="104" height="104" viewBox="0 0 24 24" fill="none" stroke="#3DDC7A" stroke-width="2"><rect x="2" y="2" width="20" height="20"/><path d="M7 12.5l3.5 3.5L17 8.5"/></svg>
+      <div style="display: flex; flex-direction: column; align-items: center; gap: 10px">
+        <div style="font: 700 40px/48px 'IBM Plex Sans', sans-serif; text-align: center">Заявка № {{ order }} передана</div>
+        <div style="font: 400 20px/30px 'IBM Plex Sans', sans-serif; color: #B6B3AB; text-align: center">Сообщите администратору — он оформит заявку<br>и выведет коды из оборота.</div>
+      </div>
+      <span style="display: inline-flex; align-items: center; height: 52px; padding: 0 24px; border-radius: 10px; background: #1C1B21; border: 1px solid #2E2D33; font: 600 20px/1 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums">{{ doneSummary }}</span>
+      <button onClick="{{ reset }}" style="height: 72px; padding: 0 48px; border-radius: 12px; border: 1px solid #45444B; background: #1C1B21; color: #FAFAF8; font: 600 22px/1 'IBM Plex Sans', sans-serif">Готово</button>
+      <div style="font: 400 15px/20px 'IBM Plex Sans', sans-serif; color: #5B5952">Экран вернётся к началу через 10 секунд</div>
+    </div>
+    </sc-if>
+
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;dayLimit&quot;: {&quot;editor&quot;: &quot;int&quot;, &quot;default&quot;: 5, &quot;min&quot;: 1, &quot;max&quot;: 20, &quot;tsType&quot;: &quot;number&quot;, &quot;section&quot;: &quot;Правила киоска&quot;}, &quot;showPrices&quot;: {&quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: true, &quot;tsType&quot;: &quot;boolean&quot;, &quot;section&quot;: &quot;Правила киоска&quot;}}">
+class Component extends DCLogic {
+  state = { screen: "idle", items: [], seq: 0, dup: false, order: 38, lastDone: "", portrait: false, reason: "buy", sub: null };
+  static POOL = [
+    { gtin: "04650075195923", name: "Жигулёвское светлое 0,5 л", price: 52 },
+    { gtin: "04650075195930", name: "Вода газированная 1,0 л", price: 38 },
+    { gtin: "04650075196012", name: "Квас традиционный 1,5 л", price: 74 },
+  ];
+  mkSerial(i) {
+    const A = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+    let x = ((i + 7) * 2654435761) >>> 0, s = "";
+    for (let k = 0; k < 7; k++) { s += A[x % A.length]; x = ((x >> 5) ^ (x * 747796405 + 2891336453)) >>> 0; }
+    return s;
+  }
+  limit() { return this.props.dayLimit ?? 5; }
+  scan(pi) {
+    if (this.state.items.length >= this.limit()) return;
+    const p = Component.POOL[pi];
+    const serial = this.mkSerial(this.state.seq);
+    this.setState(s => ({ items: [...s.items, { ...p, serial, key: s.seq }], seq: s.seq + 1, dup: false }));
+  }
+  flashDup() {
+    if (!this.state.items.length) { this.scan(0); return; }
+    this.setState({ dup: true });
+    clearTimeout(this._dupT);
+    this._dupT = setTimeout(() => this.setState({ dup: false }), 2600);
+  }
+  reset() { clearTimeout(this._doneT); this.setState({ screen: "idle", items: [], dup: false, reason: "buy", sub: null }); }
+  canConfirm() { return this.state.items.length > 0 && (this.state.reason === "buy" || this.state.sub); }
+  confirm() {
+    if (!this.canConfirm()) return;
+    const n = this.state.items.length;
+    const sum = this.state.items.reduce((a, it) => a + it.price, 0);
+    const showP = this.props.showPrices ?? true;
+    const reason = this.state.reason === "buy" ? "Покупка" : `Списание — ${this.state.sub}`;
+    this.setState(s => ({ screen: "done", lastDone: `${reason} · ${n} ${this.plural(n)}${showP ? ` · ${sum} ₽` : ""}`, order: s.order }));
+    clearTimeout(this._doneT);
+    this._doneT = setTimeout(() => { if (this.state.screen === "done") this.setState(s => ({ screen: "idle", items: [], order: s.order + 1 })); }, 10000);
+  }
+  plural(n) { const m = n % 10, h = n % 100; if (m === 1 && h !== 11) return "единица"; if (m >= 2 && m <= 4 && (h < 12 || h > 14)) return "единицы"; return "единиц"; }
+  componentWillUnmount() { clearTimeout(this._dupT); clearTimeout(this._doneT); }
+  renderVals() {
+    const s = this.state.screen, limit = this.limit();
+    const items = this.state.items.map(it => ({
+      gtin: it.gtin, name: it.name, price: it.price,
+      tail: `…${it.gtin.slice(-6)}-${it.serial}`,
+      remove: () => this.setState(st => ({ items: st.items.filter(x => x.key !== it.key), dup: false })),
+    }));
+    const n = items.length, sum = items.reduce((a, it) => a + it.price, 0);
+    const nb = (a) => a ? "#FAFAF8" : "#45444B";
+    const p = this.state.portrait;
+    return {
+      frameW: p ? 800 : 1180, frameH: p ? 1180 : 800,
+      orientLabel: p ? "Альбомный" : "Вертикальный",
+      toggleOrient: () => this.setState(s => ({ portrait: !s.portrait })),
+      cartDir: p ? "column" : "row",
+      topFlex: p ? "0 0 auto" : "1 1 0",
+      scanFlex: p ? "0 0 auto" : "1 1 0",
+      scanDir: p ? "row" : "column",
+      scanGap: p ? "20px" : "18px",
+      scanPad: p ? "16px 22px" : "24px",
+      scanIcon: p ? 52 : 96,
+      scanAlign: p ? "left" : "center",
+      scanTitle: p ? "22px/28px" : "28px/36px",
+      panelW: p ? "auto" : "460px",
+      panelFlex: p ? "1 1 0" : "0 0 auto",
+      panelBL: p ? "none" : "1px solid #2E2D33",
+      panelBT: p ? "1px solid #2E2D33" : "none",
+      sIdle: s === "idle", sCart: s === "cart", sDone: s === "done",
+      navIdle: nb(s === "idle"), navCart: nb(s === "cart"), navDone: nb(s === "done"),
+      goIdle: () => this.reset(), goCart: () => this.setState({ screen: "cart" }), goDone: () => { if (this.state.items.length) this.confirm(); else this.setState({ screen: "done", lastDone: "3 единицы · 178 ₽" }); },
+      demoBadge: () => this.setState({ screen: "cart" }),
+      scanBeer: () => this.scan(0), scanWater: () => this.scan(1), scanKvas: () => this.scan(2),
+      scanDup: () => this.flashDup(),
+      dupFlash: this.state.dup,
+      items, count: n, isEmpty: n === 0,
+      countLabel: `${n} ${this.plural(n)}`,
+      sum, limit, remaining: Math.max(0, limit - n),
+      canScan: n < limit, limitReached: n >= limit,
+      showPrices: this.props.showPrices ?? true,
+      pickBuy: () => this.setState({ reason: "buy", sub: null }),
+      pickWo: () => this.setState({ reason: "wo" }),
+      isWo: this.state.reason === "wo",
+      buyBd: this.state.reason === "buy" ? "#FAFAF8" : "#45444B",
+      buyBg: this.state.reason === "buy" ? "#FAFAF8" : "transparent",
+      buyFg: this.state.reason === "buy" ? "#17161A" : "#B6B3AB",
+      woBd: this.state.reason === "wo" ? "#FAFAF8" : "#45444B",
+      woBg: this.state.reason === "wo" ? "#FAFAF8" : "transparent",
+      woFg: this.state.reason === "wo" ? "#17161A" : "#B6B3AB",
+      subs: ["Бой", "Маркетинг", "Подарок", "Другое"].map(name => {
+        const on = this.state.sub === name;
+        return { name, pick: () => this.setState({ sub: name }), bd: on ? "#3DDC7A" : "#45444B", bg: on ? "#142E1D" : "transparent", fg: on ? "#3DDC7A" : "#B6B3AB" };
+      }),
+      confirmBg: this.canConfirm() ? "#3DDC7A" : "#232228", confirmFg: this.canConfirm() ? "#17161A" : "#5B5952",
+      confirm: () => this.confirm(),
+      reset: () => this.reset(),
+      order: this.state.order, doneSummary: this.state.lastDone || "3 единицы · 178 ₽",
+    };
+  }
+}
+</script>
+</body>
+</html>

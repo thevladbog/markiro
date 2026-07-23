@@ -49,6 +49,7 @@
     "catalog": "Catalog",
     "shifts": "Shifts",
     "counterparties": "Counterparties",
+    "labels": "Labels",
     "settings": "Settings"
   },
   "shell": {
@@ -107,6 +108,8 @@
         "palletCapacityLabel": "Pallet capacity, units",
         "defaultCounterpartyLabel": "Default counterparty",
         "noCounterparty": "None selected",
+        "defaultLabelTemplateLabel": "Default label template",
+        "noLabelTemplate": "None selected",
         "submitCreate": "Create",
         "submitUpdate": "Save",
         "draftBanner": "Draft — fill in the group and capacities to run shifts",
@@ -177,6 +180,104 @@
         "deleteError": "Could not delete the counterparty"
       }
     },
+    "labels": {
+      "title": "Label templates",
+      "emptyTitle": "No templates yet",
+      "emptyHint": "Create your first label template to print marking codes.",
+      "addAction": "+ Template",
+      "newTemplateCard": "+ New template",
+      "sizeBadge": "{{width}}×{{height}} mm",
+      "dpiBadge": "{{dpi}} dpi",
+      "editor": {
+        "back": "← Templates",
+        "nameLabel": "Name",
+        "defaultName": "New template",
+        "save": "Save",
+        "saving": "Saving…",
+        "download": "Download {{format}}",
+        "sizePresetLabel": "Size",
+        "customSizeOption": "Custom size",
+        "widthLabel": "Label width, mm",
+        "heightLabel": "Label height, mm",
+        "dpiLabel": "DPI",
+        "languageLabel": "Language",
+        "loadError": "Could not load the template. Refresh the page or sign in again.",
+        "palette": {
+          "title": "Elements",
+          "text": "Text",
+          "field": "Field",
+          "datamatrix": "DataMatrix",
+          "code128": "Code128",
+          "ean13": "EAN-13",
+          "qr": "QR",
+          "line": "Line",
+          "box": "Box"
+        },
+        "defaultText": "Text",
+        "kinds": {
+          "text": "Text",
+          "field": "Field",
+          "barcode": "Barcode",
+          "line": "Line",
+          "box": "Box"
+        },
+        "properties": {
+          "selected": "Selected: {{kind}}",
+          "none": "Select an element on the canvas",
+          "x": "X, mm",
+          "y": "Y, mm",
+          "fontSize": "Font size, pt",
+          "bold": "Bold",
+          "align": "Alignment",
+          "alignLeft": "Left",
+          "alignCenter": "Center",
+          "alignRight": "Right",
+          "maxWidth": "Max width, mm (0 = auto)",
+          "text": "Text",
+          "field": "Data field",
+          "size": "Size, mm",
+          "source": "Data source",
+          "sourceField": "Field",
+          "sourceLiteral": "Text",
+          "literal": "Value",
+          "x2": "X2, mm",
+          "y2": "Y2, mm",
+          "thickness": "Thickness, mm",
+          "width": "Width, mm",
+          "height": "Height, mm",
+          "delete": "Delete element"
+        },
+        "fields": {
+          "product.name": "Product name",
+          "product.gtin": "Product GTIN",
+          "km.code": "Marking code",
+          "sscc": "SSCC",
+          "shift.no": "Shift no.",
+          "date": "Date",
+          "qty": "Quantity",
+          "operator": "Operator",
+          "counterparty.name": "Counterparty"
+        },
+        "zoomCaption": "zoom {{scale}} px/mm",
+        "preview": {
+          "caption": "preview = print",
+          "cyrillicWarning": "The selected font has no Cyrillic glyphs — text will print as a raster image. Sharpness may be reduced.",
+          "coverageCheckFailed": "Could not verify the font — printed text may look different from this preview."
+        },
+        "toasts": {
+          "createSuccess": "Template created",
+          "createError": "Could not create the template",
+          "updateSuccess": "Template saved",
+          "updateError": "Could not save the template"
+        },
+        "dirtyGuard": {
+          "title": "Discard unsaved changes?",
+          "body": "Changes to this template have not been saved and will be lost.",
+          "cancel": "Stay",
+          "discard": "Discard changes"
+        }
+      }
+    },
     "shifts": {
       "title": "Shifts",
       "emptyTitle": "No shifts planned",
@@ -235,6 +336,8 @@
         "noLinesHint": "No lines yet -- create one via the API or settings.",
         "counterpartyLabel": "For counterparty (tolling)",
         "noCounterparty": "None selected",
+        "labelTemplateLabel": "Label template",
+        "noLabelTemplate": "None selected",
         "boxCapacityLabel": "Box capacity, units",
         "palletsEnabledLabel": "Use pallets",
         "palletCapacityLabel": "Pallet capacity, units",

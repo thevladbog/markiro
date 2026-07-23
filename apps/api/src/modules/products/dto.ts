@@ -16,6 +16,7 @@ export const createProductSchema = z.object({
   boxCapacity: z.number().int().min(1).nullable().optional(),
   palletCapacity: z.number().int().min(1).nullable().optional(),
   defaultCounterpartyId: z.string().uuid().nullable().optional(),
+  defaultLabelTemplateId: z.string().uuid().nullable().optional(),
 });
 export type CreateProductDto = z.infer<typeof createProductSchema>;
 
@@ -27,6 +28,7 @@ export const updateProductSchema = z.object({
   boxCapacity: z.number().int().min(1).nullable().optional(),
   palletCapacity: z.number().int().min(1).nullable().optional(),
   defaultCounterpartyId: z.string().uuid().nullable().optional(),
+  defaultLabelTemplateId: z.string().uuid().nullable().optional(),
 });
 export type UpdateProductDto = z.infer<typeof updateProductSchema>;
 
@@ -53,6 +55,7 @@ export interface ProductDto {
   palletCapacity: number | null;
   status: ProductStatus;
   defaultCounterpartyId: string | null;
+  defaultLabelTemplateId: string | null;
   createdAt: Date;
 }
 

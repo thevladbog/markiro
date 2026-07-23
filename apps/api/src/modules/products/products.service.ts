@@ -85,6 +85,7 @@ export class ProductsService {
           palletCapacity,
           status,
           defaultCounterpartyId: data.defaultCounterpartyId ?? null,
+          defaultLabelTemplateId: data.defaultLabelTemplateId ?? null,
         })
         .returning();
 
@@ -118,6 +119,10 @@ export class ProductsService {
       data.defaultCounterpartyId !== undefined
         ? data.defaultCounterpartyId
         : current.defaultCounterpartyId;
+    const defaultLabelTemplateId =
+      data.defaultLabelTemplateId !== undefined
+        ? data.defaultLabelTemplateId
+        : current.defaultLabelTemplateId;
     const status = this.computeStatus({ productGroup, boxCapacity, palletCapacity });
 
     try {
@@ -130,6 +135,7 @@ export class ProductsService {
           boxCapacity,
           palletCapacity,
           defaultCounterpartyId,
+          defaultLabelTemplateId,
           status,
         })
         .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.id, id)))
@@ -234,14 +240,24 @@ export class ProductsService {
       : "draft";
   }
 
-  /** Catch PostgreSQL violations: unique 23505 -> 409; FK 23503 -> 400. */
+  /**
+   * Catch PostgreSQL violations: unique 23505 -> 409; FK 23503 -> 400,
+   * naming the referenced entity per FK constraint name (products has
+   * composite FKs to counterparties/label_templates -- see platform.ts).
+   */
   private handleWriteError(error: unknown): never {
-    const err = error as Error & { code?: string; cause?: unknown };
-    const errorCode = err?.code || (err?.cause as Record<string, string> | undefined)?.code;
+    const err = error as Error & { code?: string; constraint?: string; cause?: unknown };
+    const cause = err?.cause as { code?: string; constraint?: string } | undefined;
+    const errorCode = err?.code || cause?.code;
+    const constraint = err?.constraint || cause?.constraint;
+
     if (errorCode === "23505") {
       throw new ConflictException("A product with this GTIN already exists for this tenant");
     }
     if (errorCode === "23503") {
+      if (constraint === "products_tenant_default_label_template_fk") {
+        throw new BadRequestException("Unknown label template for this organization");
+      }
       throw new BadRequestException("Unknown counterparty for this organization");
     }
     throw error;
@@ -257,6 +273,7 @@ export class ProductsService {
       palletCapacity: row.palletCapacity,
       status: row.status,
       defaultCounterpartyId: row.defaultCounterpartyId,
+      defaultLabelTemplateId: row.defaultLabelTemplateId,
       createdAt: row.createdAt,
     };
   }

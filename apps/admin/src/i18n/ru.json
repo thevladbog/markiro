@@ -49,6 +49,7 @@
     "catalog": "Каталог",
     "shifts": "Смены",
     "counterparties": "Контрагенты",
+    "labels": "Этикетки",
     "settings": "Настройки"
   },
   "shell": {
@@ -107,6 +108,8 @@
         "palletCapacityLabel": "Вместимость поддона, шт",
         "defaultCounterpartyLabel": "Контрагент по умолчанию",
         "noCounterparty": "Не выбран",
+        "defaultLabelTemplateLabel": "Шаблон этикетки по умолчанию",
+        "noLabelTemplate": "Не выбран",
         "submitCreate": "Создать",
         "submitUpdate": "Сохранить",
         "draftBanner": "Черновик — заполните группу и вместимости, чтобы запускать смены",
@@ -177,6 +180,104 @@
         "deleteError": "Не удалось удалить контрагента"
       }
     },
+    "labels": {
+      "title": "Шаблоны этикеток",
+      "emptyTitle": "Шаблоны не созданы",
+      "emptyHint": "Создайте первый шаблон этикетки для печати кодов маркировки.",
+      "addAction": "+ Шаблон",
+      "newTemplateCard": "+ Новый шаблон",
+      "sizeBadge": "{{width}}×{{height}} мм",
+      "dpiBadge": "{{dpi}} dpi",
+      "editor": {
+        "back": "← Шаблоны",
+        "nameLabel": "Название",
+        "defaultName": "Новый шаблон",
+        "save": "Сохранить",
+        "saving": "Сохранение…",
+        "download": "Скачать {{format}}",
+        "sizePresetLabel": "Размер",
+        "customSizeOption": "Свой размер",
+        "widthLabel": "Ширина этикетки, мм",
+        "heightLabel": "Высота этикетки, мм",
+        "dpiLabel": "DPI",
+        "languageLabel": "Язык",
+        "loadError": "Не удалось загрузить шаблон. Обновите страницу или войдите заново.",
+        "palette": {
+          "title": "Элементы",
+          "text": "Текст",
+          "field": "Поле",
+          "datamatrix": "DataMatrix",
+          "code128": "Code128",
+          "ean13": "EAN-13",
+          "qr": "QR",
+          "line": "Линия",
+          "box": "Рамка"
+        },
+        "defaultText": "Текст",
+        "kinds": {
+          "text": "Текст",
+          "field": "Поле",
+          "barcode": "Штрихкод",
+          "line": "Линия",
+          "box": "Рамка"
+        },
+        "properties": {
+          "selected": "Выбрано: {{kind}}",
+          "none": "Выберите элемент на холсте",
+          "x": "X, мм",
+          "y": "Y, мм",
+          "fontSize": "Размер шрифта, пт",
+          "bold": "Жирный",
+          "align": "Выравнивание",
+          "alignLeft": "Слева",
+          "alignCenter": "По центру",
+          "alignRight": "Справа",
+          "maxWidth": "Макс. ширина, мм (0 = авто)",
+          "text": "Текст",
+          "field": "Поле данных",
+          "size": "Размер, мм",
+          "source": "Источник данных",
+          "sourceField": "Поле",
+          "sourceLiteral": "Текст",
+          "literal": "Значение",
+          "x2": "X2, мм",
+          "y2": "Y2, мм",
+          "thickness": "Толщина, мм",
+          "width": "Ширина, мм",
+          "height": "Высота, мм",
+          "delete": "Удалить элемент"
+        },
+        "fields": {
+          "product.name": "Название товара",
+          "product.gtin": "GTIN товара",
+          "km.code": "Код маркировки",
+          "sscc": "SSCC",
+          "shift.no": "№ смены",
+          "date": "Дата",
+          "qty": "Количество",
+          "operator": "Оператор",
+          "counterparty.name": "Контрагент"
+        },
+        "zoomCaption": "масштаб {{scale}} px/мм",
+        "preview": {
+          "caption": "предпросмотр = печать",
+          "cyrillicWarning": "В выбранном шрифте нет кириллицы — текст напечатается растром. Возможна потеря чёткости.",
+          "coverageCheckFailed": "Не удалось проверить шрифт — текст может напечататься не так, как в предпросмотре."
+        },
+        "toasts": {
+          "createSuccess": "Шаблон создан",
+          "createError": "Не удалось создать шаблон",
+          "updateSuccess": "Шаблон сохранён",
+          "updateError": "Не удалось сохранить шаблон"
+        },
+        "dirtyGuard": {
+          "title": "Отменить несохранённые изменения?",
+          "body": "Изменения в шаблоне не сохранены и будут потеряны.",
+          "cancel": "Остаться",
+          "discard": "Отменить изменения"
+        }
+      }
+    },
     "shifts": {
       "title": "Смены",
       "emptyTitle": "Смены не запланированы",
@@ -235,6 +336,8 @@
         "noLinesHint": "Линии не заведены — создайте через API или в настройках.",
         "counterpartyLabel": "Для контрагента (толлинг)",
         "noCounterparty": "Не выбран",
+        "labelTemplateLabel": "Шаблон этикетки",
+        "noLabelTemplate": "Не выбран",
         "boxCapacityLabel": "Вместимость короба, шт",
         "palletsEnabledLabel": "Использовать паллеты",
         "palletCapacityLabel": "Вместимость паллеты, шт",

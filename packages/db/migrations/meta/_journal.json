@@ -43,6 +43,20 @@
       "when": 1784763006105,
       "tag": "0005_freezing_stepford_cuckoos",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1784795769772,
+      "tag": "0006_nappy_the_spike",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1784797079462,
+      "tag": "0007_dry_lilith",
+      "breakpoints": true
     }
   ]
 }

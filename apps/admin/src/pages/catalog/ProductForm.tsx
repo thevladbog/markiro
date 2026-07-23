@@ -11,6 +11,7 @@ import type { SelectOption } from "@markiro/ui";
 
 import { errorProp } from "../../lib/form-error.js";
 import type { CounterpartyDto } from "../counterparties/api.js";
+import type { LabelTemplateSummaryDto } from "../labels/api.js";
 import {
   useGtinCheck,
   type CreateProductInput,
@@ -55,6 +56,7 @@ const productFormSchema = z.object({
     .optional()
     .refine((v) => !v || /^[1-9]\d*$/.test(v), "pages.catalog.form.errors.capacityInvalid"),
   defaultCounterpartyId: z.string().trim().optional(),
+  defaultLabelTemplateId: z.string().trim().optional(),
 });
 
 export type ProductFormValues = z.infer<typeof productFormSchema>;
@@ -66,6 +68,7 @@ export interface ProductFormProps {
   /** Only meaningful in edit mode -- drives the draft banner. */
   productStatus?: ProductStatus;
   counterparties: CounterpartyDto[];
+  labelTemplates: LabelTemplateSummaryDto[];
   submitting?: boolean;
   onSubmit: (input: CreateProductInput) => void | Promise<void>;
   onClose: () => void;
@@ -78,6 +81,7 @@ const EMPTY_VALUES: ProductFormValues = {
   boxCapacity: "",
   palletCapacity: "",
   defaultCounterpartyId: "",
+  defaultLabelTemplateId: "",
 };
 
 const FORM_ID = "product-form";
@@ -93,6 +97,7 @@ export function ProductForm({
   initialValues,
   productStatus,
   counterparties,
+  labelTemplates,
   submitting = false,
   onSubmit,
   onClose,
@@ -117,6 +122,7 @@ export function ProductForm({
 
   const gtinValue = watch("gtin");
   const defaultCounterpartyId = watch("defaultCounterpartyId");
+  const defaultLabelTemplateId = watch("defaultLabelTemplateId");
 
   // Re-seed the form (and the owner-hint state) whenever the modal opens --
   // covers both the create -> create and edit A -> edit B cases, since
@@ -170,6 +176,11 @@ export function ProductForm({
   const counterpartyOptions: SelectOption[] = [
     { value: "", label: t("pages.catalog.form.noCounterparty") },
     ...counterparties.map((c) => ({ value: c.id, label: c.name })),
+  ];
+
+  const labelTemplateOptions: SelectOption[] = [
+    { value: "", label: t("pages.catalog.form.noLabelTemplate") },
+    ...labelTemplates.map((tpl) => ({ value: tpl.id, label: tpl.name })),
   ];
 
   const applyCounterpartyHint = () => {
@@ -272,6 +283,14 @@ export function ProductForm({
             setValue("defaultCounterpartyId", value, { shouldDirty: true, shouldValidate: true })
           }
         />
+        <Select
+          label={t("pages.catalog.form.defaultLabelTemplateLabel")}
+          options={labelTemplateOptions}
+          value={defaultLabelTemplateId ?? ""}
+          onChange={(value) =>
+            setValue("defaultLabelTemplateId", value, { shouldDirty: true, shouldValidate: true })
+          }
+        />
       </form>
     </Modal>
   );
@@ -283,6 +302,7 @@ function toCreateInput(values: ProductFormValues): CreateProductInput {
   const boxCapacity = values.boxCapacity?.trim();
   const palletCapacity = values.palletCapacity?.trim();
   const defaultCounterpartyId = values.defaultCounterpartyId?.trim();
+  const defaultLabelTemplateId = values.defaultLabelTemplateId?.trim();
   return {
     gtin: values.gtin.trim(),
     name: values.name.trim(),
@@ -290,5 +310,6 @@ function toCreateInput(values: ProductFormValues): CreateProductInput {
     boxCapacity: boxCapacity ? Number(boxCapacity) : null,
     palletCapacity: palletCapacity ? Number(palletCapacity) : null,
     defaultCounterpartyId: defaultCounterpartyId ? defaultCounterpartyId : null,
+    defaultLabelTemplateId: defaultLabelTemplateId ? defaultLabelTemplateId : null,
   };
 }

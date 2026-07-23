@@ -18,6 +18,7 @@ import type { SelectOption, TableColumn } from "@markiro/ui";
 import { ApiRequestError } from "../../api/client.js";
 import { toast } from "../../lib/toast.js";
 import { useCounterparties } from "../counterparties/api.js";
+import { useLabelTemplates } from "../labels/api.js";
 import { ProductForm, type ProductFormValues } from "./ProductForm.js";
 import {
   useCreateProduct,
@@ -54,6 +55,7 @@ export function CatalogPage() {
     ...(statusFilter !== "all" ? { status: statusFilter } : {}),
   });
   const { data: counterpartiesData } = useCounterparties();
+  const { data: labelTemplatesData } = useLabelTemplates();
   const createMutation = useCreateProduct();
   const updateMutation = useUpdateProduct();
   const deleteMutation = useDeleteProduct();
@@ -63,6 +65,7 @@ export function CatalogPage() {
 
   const items = data ?? [];
   const counterparties = counterpartiesData ?? [];
+  const labelTemplates = labelTemplatesData ?? [];
 
   const statusFilterOptions: SelectOption[] = [
     { value: "all", label: t("pages.catalog.statusFilter.all") },
@@ -142,6 +145,7 @@ export function CatalogPage() {
         palletCapacity:
           editingProduct.palletCapacity !== null ? String(editingProduct.palletCapacity) : "",
         defaultCounterpartyId: editingProduct.defaultCounterpartyId ?? "",
+        defaultLabelTemplateId: editingProduct.defaultLabelTemplateId ?? "",
       }
     : undefined;
 
@@ -234,6 +238,7 @@ export function CatalogPage() {
         {...(initialValues ? { initialValues } : {})}
         {...(editingProduct ? { productStatus: editingProduct.status } : {})}
         counterparties={counterparties}
+        labelTemplates={labelTemplates}
         submitting={createMutation.isPending || updateMutation.isPending}
         onSubmit={handleSubmit}
         onClose={() => setFormState(null)}

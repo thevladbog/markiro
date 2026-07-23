@@ -17,9 +17,13 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "test": "vitest run"
   },
+  "peerDependencies": {
+    "zod": "4.4.3"
+  },
   "devDependencies": {
     "@types/node": "26.1.1",
     "typescript": "6.0.3",
-    "vitest": "4.1.10"
+    "vitest": "4.1.10",
+    "zod": "4.4.3"
   }
 }
