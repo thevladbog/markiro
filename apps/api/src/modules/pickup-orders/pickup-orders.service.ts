@@ -102,10 +102,36 @@ export class PickupOrdersService {
 
     // 5b. A non-empty scan that produced only conflicts (nothing accepted) must
     // NOT persist an empty pending order — it would clutter the свод with a
-    // 0-item row that can never be resolved. Return the conflicts without an
-    // order (empty orderNo). A genuinely item-less sync (`items: []`, e.g. a
-    // badge heartbeat) is deliberately excluded and still creates its order.
+    // 0-item row that can never be resolved. But first re-check idempotency: a
+    // concurrent submission carrying the same deviceSeq may have created the
+    // real order since step 1 (e.g. this request over-limited precisely because
+    // its twin's items just landed — so that winner is already committed).
+    // Return the winner if present; otherwise it's a genuine all-conflict scan
+    // and we return the conflicts with an empty orderNo. (A genuinely item-less
+    // sync, `items: []` e.g. a badge heartbeat, is excluded and still creates
+    // its order.)
     if (accepted.length === 0 && dto.items.length > 0) {
+      const [twin] = await this.db
+        .select({
+          orderNo: schema.pickupOrders.orderNo,
+          itemCount: schema.pickupOrders.itemCount,
+        })
+        .from(schema.pickupOrders)
+        .where(
+          and(
+            eq(schema.pickupOrders.tenantId, tenantId),
+            eq(schema.pickupOrders.kioskId, kioskId),
+            eq(schema.pickupOrders.deviceSeq, dto.deviceSeq),
+          ),
+        );
+      if (twin) {
+        return {
+          orderNo: twin.orderNo,
+          status: "pending",
+          itemCount: twin.itemCount,
+          conflicts: [],
+        };
+      }
       return { orderNo: "", status: "pending", itemCount: 0, conflicts };
     }
 
@@ -926,6 +952,15 @@ export class PickupOrdersService {
           }
         }
         remaining = stillOk;
+        // NOTE: when `remaining` empties here we deliberately fall through and
+        // let the next iteration attempt an (item-less) insert. That insert is
+        // what reliably distinguishes a genuine all-conflict scan from a
+        // concurrent same-deviceSeq duplicate: the latter hits
+        // `pickup_orders_kiosk_device_seq_uq` and returns the winner via
+        // `isDeviceSeqRace` above. A post-hoc SELECT here cannot make that
+        // distinction race-free (the twin's commit may not yet be visible), so
+        // the empty-order guard stays at classification time (createFromKiosk's
+        // step 5b), which covers the common case without breaking idempotency.
       }
     }
   }

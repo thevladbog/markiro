@@ -29,4 +29,11 @@ describe("computeTotalPrice", () => {
     expect(computeTotalPrice([{ unitPrice: "5.05" }])).toBe("5.05");
     expect(computeTotalPrice([{ unitPrice: "5.00" }])).toBe("5.00");
   });
+
+  it("parses the decimal string exactly, rounding half away from zero at the kopeck", () => {
+    // Number("1.005") * 100 === 100.4999… would truncate to "1.00"; exact
+    // decimal parsing rounds to "1.01" (matching the numeric(_,2) column).
+    expect(computeTotalPrice([{ unitPrice: "1.005" }])).toBe("1.01");
+    expect(computeTotalPrice([{ unitPrice: "1.004" }])).toBe("1.00");
+  });
 });

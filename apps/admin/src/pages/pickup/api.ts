@@ -176,16 +176,17 @@ const DEFAULT_CODES_FILENAME = "codes.txt";
 /**
  * Reads the attachment filename the server chose (`codes-YYYYMMDD.txt`) from a
  * `Content-Disposition` header, so the download matches the API's own naming.
- * Handles the RFC 5987 `filename*=UTF-8''…` form as well as a plain/quoted
+ * Handles the RFC 5987 `filename*=charset'lang'value` form (only decoding
+ * UTF-8, discarding the charset/language fields) as well as a plain/quoted
  * `filename=…`, and falls back to `codes.txt` when the header is absent or
  * unparseable.
  */
-function filenameFromContentDisposition(header: string | null): string {
+export function filenameFromContentDisposition(header: string | null): string {
   if (!header) return DEFAULT_CODES_FILENAME;
-  const extended = /filename\*=(?:UTF-8'')?([^;]+)/i.exec(header);
-  if (extended?.[1]) {
+  const extended = /filename\*\s*=\s*([^']*)'[^']*'([^;]+)/i.exec(header);
+  if (extended?.[1]?.toLowerCase() === "utf-8" && extended[2]) {
     try {
-      return decodeURIComponent(extended[1].trim().replace(/^"|"$/g, ""));
+      return decodeURIComponent(extended[2].trim().replace(/^"|"$/g, ""));
     } catch {
       // fall through to the plain form
     }
