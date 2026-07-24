@@ -107,4 +107,38 @@ describe("mirror", () => {
     );
     expect(rows[0]).toEqual({ product_id: "p2", product_name: "Sprite" });
   });
+
+  it("replaces the full operator set: a removed operator is deleted from the mirror", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+
+    const operatorB = {
+      operatorId: "op2",
+      name: "Boris",
+      role: "operator",
+      pinHash: "pbkdf2$sha256$1$c2FsdA==$bB==",
+      badgeHash: null,
+      active: true,
+    };
+
+    await upsertBundle(exec, { ...bundle, operators: [...bundle.operators, operatorB] });
+    let ops = await readOperatorsMirror(exec);
+    expect(ops.map((o) => o.operatorId).sort()).toEqual(["op1", "op2"]);
+
+    // Next refresh's bundle only carries operator A: B was removed server-side
+    // and must stop being able to authenticate offline.
+    await upsertBundle(exec, bundle);
+    ops = await readOperatorsMirror(exec);
+    expect(ops.map((o) => o.operatorId)).toEqual(["op1"]);
+  });
+
+  it("an empty-operators bundle clears the operators mirror entirely", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    await upsertBundle(exec, bundle);
+    expect(await readOperatorsMirror(exec)).toHaveLength(1);
+
+    await upsertBundle(exec, { ...bundle, operators: [] });
+    expect(await readOperatorsMirror(exec)).toEqual([]);
+  });
 });

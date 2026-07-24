@@ -57,8 +57,27 @@ export async function applyMigrations(exec: SqlExecutor): Promise<void> {
 
 const b = (v: boolean) => (v ? 1 : 0);
 
-/** Idempotent upsert of a downloaded bundle into the local mirror tables. */
+/**
+ * Idempotent upsert of a downloaded bundle into the local mirror tables.
+ *
+ * Wrapped in a transaction: after upserting the bundle's operators, every
+ * `operators_mirror` row NOT present in the new bundle is deleted, so a
+ * server-side removal (or a subsequent bundle with fewer/zero operators)
+ * actually revokes offline PIN login instead of leaving stale rows behind
+ * (`verifyOperatorPin` reads every active row in the mirror).
+ */
 export async function upsertBundle(exec: SqlExecutor, bundle: StationBundle): Promise<void> {
+  await exec.run("BEGIN");
+  try {
+    await upsertBundleBody(exec, bundle);
+    await exec.run("COMMIT");
+  } catch (err) {
+    await exec.run("ROLLBACK");
+    throw err;
+  }
+}
+
+async function upsertBundleBody(exec: SqlExecutor, bundle: StationBundle): Promise<void> {
   const s = bundle.shift;
   await exec.run(
     `INSERT INTO shift_mirror (
@@ -132,6 +151,20 @@ export async function upsertBundle(exec: SqlExecutor, bundle: StationBundle): Pr
          name=excluded.name, role=excluded.role, pin_hash=excluded.pin_hash,
          badge_hash=excluded.badge_hash, active=excluded.active`,
       [op.operatorId, op.name, op.role, op.pinHash, op.badgeHash, b(op.active)],
+    );
+  }
+
+  // Replace the full operator set: drop any previously-mirrored operator not
+  // present in this bundle (including the 05a case of zero operators, which
+  // clears the table entirely), so a removed/deactivated-elsewhere operator
+  // can no longer authenticate offline via a stale mirror row.
+  if (bundle.operators.length === 0) {
+    await exec.run("DELETE FROM operators_mirror");
+  } else {
+    const placeholders = bundle.operators.map(() => "?").join(",");
+    await exec.run(
+      `DELETE FROM operators_mirror WHERE operator_id NOT IN (${placeholders})`,
+      bundle.operators.map((op) => op.operatorId),
     );
   }
 }
