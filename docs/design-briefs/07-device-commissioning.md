@@ -86,7 +86,10 @@ mode). Shown on first run and whenever the device is unbound/revoked.
 - an **on-screen numeric keypad** to enter the code + a large **"Scan code"**
   button (uses the device's barcode scanner);
 - a **collapsible "Server address"** field for on-prem (hidden/prefilled for
-  the SaaS build — draw it, but collapsed);
+  the SaaS build — draw it, but collapsed). On-prem accepts **https only** and
+  the address is validated (certificate-checked) before the code is redeemed —
+  design an inline "address not reachable / not secure" error; the SaaS build
+  pins its origin and shows no field;
 - helper: "Code from the cabinet — type the digits or scan the barcode."
 - **Binding in progress**: "Binding device… downloading settings and
   operators" (progress/spinner).
@@ -124,8 +127,18 @@ printer + scanner). Access depends on binding state:
   session exists yet), directly from the first-run / pairing screen. Practical:
   the scanner often needs to be up _before_ pairing so the pairing barcode can
   be scanned.
-- **After binding** — changing the scanner requires a **login** (staff/operator
-  auth), reached from the running kiosk's settings.
+- **After binding** — changing the scanner requires a **staff sign-in**. Design
+  the entry path: a **"Settings"** affordance on the running kiosk (e.g. a
+  small gear, or a deliberate long-press on the header so a customer can't hit
+  it by accident) that opens a **sign-in gate** using the same operator
+  credentials as the station — **badge scan or login + PIN** (screen 4's tiers,
+  in kiosk styling). On success → the scanner settings (same picker + test scan
+  as pre-binding). Any authenticated operator in the org roster qualifies (no
+  separate role in MVP). **Recovery** when sign-in is impossible (empty/roster
+  unavailable, forgotten credentials): the device can be **re-paired from the
+  cabinet** (unbind → new code) to reach setup again — surface this as the
+  "can't sign in?" hint on the gate. Draw: the Settings entry point, the
+  sign-in gate, and the reachable scanner-settings screen.
 
 ### 6. Printable pairing instruction sheet
 
@@ -148,15 +161,25 @@ and high-contrast (barcode must stay legible in B/W):
 
 ## States & constraints (apply throughout)
 
-- **Pairing code**: single-use, ~15 min TTL with a live countdown in the
-  cabinet; "Regenerate" kills the old one. Device entry is digits-only
-  (on-screen keypad) or a scan of the same code.
-- **Brute-force protection**: server-side lockout after N wrong attempts; the
-  code claims a pre-created device record, so guessing is bounded.
-- **Unbind (revoke)**: kills the credential and any code; on next contact the
-  device drops to the pairing screen. Destructive-confirm styling.
-- **Re-pair / reassign**: regenerate a code or change place for a bound device
-  (e.g. a terminal moved between lines).
+- **Pairing code**: **8 digits**, single-use, **15 min** TTL with a live
+  countdown in the cabinet; "Regenerate" kills the old one. Device entry is
+  digits-only (on-screen keypad) or a scan of the same code.
+- **Brute-force protection**: server-side lockout after **5** failed attempts
+  per device; the code claims a pre-created device record, so guessing is
+  bounded. (Full code contract — CSPRNG, hashed at rest, atomic single-use — in
+  the spec; here it drives the "too many attempts" and "expired" copy.)
+- **Lifecycle → status chip → retention** (one chip per state; screen 1):
+  `awaiting pairing` → chip _awaiting pairing_, no local data yet;
+  `bound / online` → chip _online_, full local cache;
+  `bound / offline` → chip _offline — last seen N ago_, keeps cache, still
+  works; `revoked` → back to chip _awaiting pairing_, device wipes its
+  credential + cache on next contact.
+- **Unbind (revoke)**: deletes **only that device's** credential and any code;
+  on next contact the device drops to the pairing screen and clears its cache.
+  Destructive-confirm styling.
+- **Re-pair / reassign** (independent): **re-pair** = new code for a bound
+  device, place unchanged; **reassign place** = move a bound device to another
+  line/pickup point, credential kept (key not rotated).
 - **Offline after binding**: cabinet shows `offline — last seen N ago`; the
   device keeps working on its local cache (operators/shifts already downloaded).
 - **Quota**: adding is blocked at the plan limit; unbinding frees a slot.
