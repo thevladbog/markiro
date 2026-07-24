@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -25,12 +26,30 @@ const ACTIVE_SESSION: SessionData = {
 
 const ORGANIZATIONS: OrganizationSummary[] = [{ id: "org_1", name: "Марка Ко", slug: "marka-co" }];
 
+/** Minimal Response stand-in -- only what apps/admin/src/api/client.ts reads. */
+function jsonResponse(status: number, body: unknown): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => body,
+  } as Response;
+}
+
 beforeEach(() => {
   localStorage.clear();
+  // AppShell's nav badge reads usePendingOrderCount() (Task 14), which fires
+  // a GET /pickup-orders?status=pending on every render regardless of route
+  // -- stub it to an empty list so these layout/navigation tests don't hit
+  // the network.
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => jsonResponse(200, { items: [] })),
+  );
 });
 
 afterEach(async () => {
   cleanup();
+  vi.unstubAllGlobals();
   await i18n.changeLanguage("ru");
 });
 
@@ -63,29 +82,35 @@ function renderApp(client: AuthClientLike, initialPath = "/") {
     return <div data-testid="location-pathname">{location.pathname}</div>;
   }
 
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+
   return render(
-    <ThemeProvider defaultTheme="light">
-      <MemoryRouter initialEntries={[initialPath]}>
-        <LocationTracker />
-        <AuthClientProvider client={client}>
-          <Routes>
-            <Route path="/login" element={<div data-testid="login-page">LOGIN_PAGE</div>} />
-            <Route path="/" element={<ShellPage />}>
-              <Route index element={<DashboardPage />} />
-              <Route path="catalog" element={<CatalogPage />} />
-              <Route path="shifts" element={<ShiftsPage />} />
-              <Route path="counterparties" element={<CounterpartiesPage />} />
-              <Route path="settings" element={<SettingsPage />} />
-            </Route>
-          </Routes>
-        </AuthClientProvider>
-      </MemoryRouter>
-    </ThemeProvider>,
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider defaultTheme="light">
+        <MemoryRouter initialEntries={[initialPath]}>
+          <LocationTracker />
+          <AuthClientProvider client={client}>
+            <Routes>
+              <Route path="/login" element={<div data-testid="login-page">LOGIN_PAGE</div>} />
+              <Route path="/" element={<ShellPage />}>
+                <Route index element={<DashboardPage />} />
+                <Route path="catalog" element={<CatalogPage />} />
+                <Route path="shifts" element={<ShiftsPage />} />
+                <Route path="counterparties" element={<CounterpartiesPage />} />
+                <Route path="settings" element={<SettingsPage />} />
+              </Route>
+            </Routes>
+          </AuthClientProvider>
+        </MemoryRouter>
+      </ThemeProvider>
+    </QueryClientProvider>,
   );
 }
 
 describe("app shell layout", () => {
-  it("renders all six nav items from the RU dictionary with correct hrefs", () => {
+  it("renders all seven nav items from the RU dictionary with correct hrefs", () => {
     renderApp(createFakeAuthClient());
 
     const expectedLinks: Array<[string, string]> = [
@@ -94,6 +119,7 @@ describe("app shell layout", () => {
       ["Смены", "/shifts"],
       ["Контрагенты", "/counterparties"],
       ["Этикетки", "/labels"],
+      ["Для себя", "/pickup"],
       ["Настройки", "/settings"],
     ];
     for (const [label, href] of expectedLinks) {

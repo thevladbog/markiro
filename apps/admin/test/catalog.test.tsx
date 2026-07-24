@@ -36,6 +36,8 @@ const DRAFT_PRODUCT = {
   productGroup: null,
   boxCapacity: null,
   palletCapacity: null,
+  unitPrice: null,
+  egaisCode: null,
   status: "draft",
   defaultCounterpartyId: null,
   createdAt: "2026-01-01T00:00:00.000Z",
@@ -48,6 +50,8 @@ const ACTIVE_PRODUCT = {
   productGroup: "Молочные продукты",
   boxCapacity: 12,
   palletCapacity: 48,
+  unitPrice: null,
+  egaisCode: null,
   status: "active",
   defaultCounterpartyId: null,
   createdAt: "2026-01-02T00:00:00.000Z",
@@ -212,6 +216,8 @@ describe("CatalogPage", () => {
             productGroup: null,
             boxCapacity: null,
             palletCapacity: null,
+            unitPrice: null,
+            egaisCode: null,
             defaultCounterpartyId: "cp1",
             defaultLabelTemplateId: null,
           }),
@@ -427,11 +433,120 @@ describe("CatalogPage", () => {
             productGroup: null,
             boxCapacity: null,
             palletCapacity: null,
+            unitPrice: null,
+            egaisCode: null,
             defaultCounterpartyId: null,
             defaultLabelTemplateId: LABEL_TEMPLATE.id,
           }),
         }),
       );
     });
+  });
+
+  it("renders unitPrice and egaisCode inputs and sends them normalized in the create payload", async () => {
+    const created = { ...DRAFT_PRODUCT, id: "p5", unitPrice: "52.00", egaisCode: "ЕГАИС123" };
+    let didCreate = false;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/counterparties") return jsonResponse(200, { items: [] });
+      if (path === "/api/products" && init?.method === "POST") {
+        didCreate = true;
+        return jsonResponse(201, created);
+      }
+      return jsonResponse(200, { items: didCreate ? [created] : [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Каталог пуст");
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Добавить продукт" })[0]!);
+    await screen.findByText("Новый продукт");
+
+    // Assert the new inputs are rendered
+    expect(screen.getByLabelText("Цена за шт., ₽")).toBeDefined();
+    expect(screen.getByLabelText("Код ЕГАИС")).toBeDefined();
+
+    // Fill required and new optional fields
+    fireEvent.change(screen.getByLabelText("Название"), { target: { value: "Напиток" } });
+    fireEvent.change(screen.getByLabelText("ГТИН"), { target: { value: "4006381333931" } });
+    fireEvent.change(screen.getByLabelText("Цена за шт., ₽"), { target: { value: "52,00" } });
+    fireEvent.change(screen.getByLabelText("Код ЕГАИС"), { target: { value: "ЕГАИС123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Создать" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/products",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            gtin: "4006381333931",
+            name: "Напиток",
+            productGroup: null,
+            boxCapacity: null,
+            palletCapacity: null,
+            unitPrice: "52.00",
+            egaisCode: "ЕГАИС123",
+            defaultCounterpartyId: null,
+            defaultLabelTemplateId: null,
+          }),
+        }),
+      );
+    });
+  });
+
+  it("pre-fills unitPrice/egaisCode when editing a product that has them, and preserves them on an untouched save", async () => {
+    // Based on DRAFT_PRODUCT (not ACTIVE_PRODUCT) -- its gtin14 is a
+    // checksum-valid vector, so the zod-validated edit form can actually
+    // submit; ACTIVE_PRODUCT's gtin14 fails the check digit and would block
+    // the PATCH before it ever fires.
+    const priced = {
+      ...DRAFT_PRODUCT,
+      id: "p6",
+      unitPrice: "52.00",
+      egaisCode: "EG-123",
+    };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/counterparties") return jsonResponse(200, { items: [] });
+      if (path === `/api/products/${priced.id}` && init?.method === "PATCH") {
+        return jsonResponse(200, priced);
+      }
+      return jsonResponse(200, { items: [priced] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText(priced.name);
+
+    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+    await screen.findByText("Изменить продукт");
+
+    // The edit form must seed from the product being edited, not render blank.
+    expect((screen.getByLabelText("Цена за шт., ₽") as HTMLInputElement).value).toBe("52.00");
+    expect((screen.getByLabelText("Код ЕГАИС") as HTMLInputElement).value).toBe("EG-123");
+
+    // Save without touching either field -- the PATCH must round-trip the
+    // original values, not overwrite them with null (data loss).
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        `/api/products/${priced.id}`,
+        expect.objectContaining({
+          method: "PATCH",
+          body: expect.stringContaining('"unitPrice":"52.00"'),
+        }),
+      );
+    });
+    const patchCall = fetchMock.mock.calls.find(
+      ([url, init]) => url === `/api/products/${priced.id}` && init?.method === "PATCH",
+    );
+    const patchBody = JSON.parse((patchCall?.[1]?.body as string | undefined) ?? "{}") as Record<
+      string,
+      unknown
+    >;
+    expect(patchBody.unitPrice).toBe("52.00");
+    expect(patchBody.egaisCode).toBe("EG-123");
   });
 });

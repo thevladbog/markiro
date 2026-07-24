@@ -86,6 +86,9 @@ export class ProductsService {
           status,
           defaultCounterpartyId: data.defaultCounterpartyId ?? null,
           defaultLabelTemplateId: data.defaultLabelTemplateId ?? null,
+          unitPrice: data.unitPrice ?? null,
+          egaisCode: data.egaisCode ?? null,
+          externalRef: data.externalRef ?? null,
         })
         .returning();
 
@@ -126,18 +129,30 @@ export class ProductsService {
     const status = this.computeStatus({ productGroup, boxCapacity, palletCapacity });
 
     try {
+      const set: Partial<typeof schema.products.$inferInsert> = {
+        gtin14,
+        name,
+        productGroup,
+        boxCapacity,
+        palletCapacity,
+        defaultCounterpartyId,
+        defaultLabelTemplateId,
+        status,
+      };
+
+      if (data.unitPrice !== undefined) {
+        set.unitPrice = data.unitPrice;
+      }
+      if (data.egaisCode !== undefined) {
+        set.egaisCode = data.egaisCode;
+      }
+      if (data.externalRef !== undefined) {
+        set.externalRef = data.externalRef;
+      }
+
       const [row] = await this.db
         .update(schema.products)
-        .set({
-          gtin14,
-          name,
-          productGroup,
-          boxCapacity,
-          palletCapacity,
-          defaultCounterpartyId,
-          defaultLabelTemplateId,
-          status,
-        })
+        .set(set)
         .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.id, id)))
         .returning();
 
@@ -274,6 +289,9 @@ export class ProductsService {
       status: row.status,
       defaultCounterpartyId: row.defaultCounterpartyId,
       defaultLabelTemplateId: row.defaultLabelTemplateId,
+      unitPrice: row.unitPrice,
+      egaisCode: row.egaisCode,
+      externalRef: row.externalRef,
       createdAt: row.createdAt,
     };
   }

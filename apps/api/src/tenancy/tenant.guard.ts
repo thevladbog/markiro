@@ -22,7 +22,9 @@ export interface RequestWithTenant extends Request {
  * UI) or a station's org-owned `x-api-key` (kiosk device), and requires an
  * active organization: no session and no valid api-key -> 401, session
  * without an active org -> 403. On success, attaches `req.tenantId` for
- * downstream handlers/repositories.
+ * downstream handlers/repositories, and (on the session path) `req.userId`
+ * (the Better Auth user id) for handlers that need to record who performed
+ * an action (e.g. pickup order resolve).
  */
 @Injectable()
 export class TenantGuard implements CanActivate {
