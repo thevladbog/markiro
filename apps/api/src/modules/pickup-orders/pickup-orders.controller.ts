@@ -1,4 +1,15 @@
-import { Body, Controller, Get, HttpCode, Param, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+  Req,
+  Res,
+  UseGuards,
+} from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import type { Response } from "express";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
@@ -33,7 +44,10 @@ export class PickupOrdersController {
   }
 
   @Get(":id")
-  async detail(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<PickupOrderDetailDto> {
+  async detail(
+    @Req() req: RequestWithTenant,
+    @Param("id") id: string,
+  ): Promise<PickupOrderDetailDto> {
     return this.pickupOrdersService.detail(req.tenantId!, id);
   }
 

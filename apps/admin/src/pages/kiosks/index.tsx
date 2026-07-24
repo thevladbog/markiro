@@ -1,7 +1,16 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Alert, Button, EmptyState, Modal, PageHeader, Spinner, StatusChip, Table } from "@markiro/ui";
+import {
+  Alert,
+  Button,
+  EmptyState,
+  Modal,
+  PageHeader,
+  Spinner,
+  StatusChip,
+  Table,
+} from "@markiro/ui";
 import type { TableColumn } from "@markiro/ui";
 
 import { ApiRequestError } from "../../api/client.js";
@@ -167,7 +176,9 @@ export function KiosksPage() {
     } catch (error) {
       toast(
         "error",
-        error instanceof ApiRequestError ? error.message : t("pages.kiosks.toasts.setProductsError"),
+        error instanceof ApiRequestError
+          ? error.message
+          : t("pages.kiosks.toasts.setProductsError"),
       );
     }
   };

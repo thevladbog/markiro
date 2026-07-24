@@ -1,5 +1,15 @@
 import {
-  boolean, foreignKey, integer, numeric, pgEnum, pgTable, text, timestamp, unique, uniqueIndex, uuid,
+  boolean,
+  foreignKey,
+  integer,
+  numeric,
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  unique,
+  uniqueIndex,
+  uuid,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { organization } from "./auth.js";
@@ -9,11 +19,16 @@ export const employeeStatus = pgEnum("employee_status", ["active", "archived"]);
 export const kioskStatus = pgEnum("kiosk_status", ["active", "archived"]);
 export const pickupReason = pgEnum("pickup_reason", ["buy", "writeoff"]);
 export const pickupOrderStatus = pgEnum("pickup_order_status", [
-  "pending", "punched", "writtenoff", "cancelled",
+  "pending",
+  "punched",
+  "writtenoff",
+  "cancelled",
 ]);
 
 const tenantId = () =>
-  text("tenant_id").notNull().references(() => organization.id);
+  text("tenant_id")
+    .notNull()
+    .references(() => organization.id);
 
 export const employees = pgTable(
   "employees",
@@ -69,7 +84,9 @@ export const kiosks = pgTable(
   (t) => [
     unique("kiosks_tenant_id_uq").on(t.tenantId, t.id),
     // device_token_hash is a deterministic sha256, unique when present.
-    uniqueIndex("kiosks_device_token_uq").on(t.deviceTokenHash).where(sql`device_token_hash is not null`),
+    uniqueIndex("kiosks_device_token_uq")
+      .on(t.deviceTokenHash)
+      .where(sql`device_token_hash is not null`),
   ],
 );
 
@@ -113,7 +130,9 @@ export const pickupOrderReasons = pgTable(
 // Per-tenant monotonic counter for ORD-ГГ-НННН. One row per tenant, created
 // lazily on first order (INSERT ... ON CONFLICT DO UPDATE ... RETURNING seq).
 export const pickupOrderCounters = pgTable("pickup_order_counters", {
-  tenantId: text("tenant_id").primaryKey().references(() => organization.id),
+  tenantId: text("tenant_id")
+    .primaryKey()
+    .references(() => organization.id),
   seq: integer("seq").notNull().default(0),
 });
 

@@ -127,7 +127,9 @@ export function EmployeeForm({
     } catch (error) {
       toast(
         "error",
-        error instanceof ApiRequestError ? error.message : t("pages.employees.toasts.issueBadgeError"),
+        error instanceof ApiRequestError
+          ? error.message
+          : t("pages.employees.toasts.issueBadgeError"),
       );
     }
   };
@@ -141,7 +143,9 @@ export function EmployeeForm({
     } catch (error) {
       toast(
         "error",
-        error instanceof ApiRequestError ? error.message : t("pages.employees.toasts.revokeBadgeError"),
+        error instanceof ApiRequestError
+          ? error.message
+          : t("pages.employees.toasts.revokeBadgeError"),
       );
     } finally {
       setRevokingBadgeId(null);
@@ -154,7 +158,9 @@ export function EmployeeForm({
       onClose={onClose}
       closeLabel={t("common.close")}
       title={
-        mode === "create" ? t("pages.employees.form.createTitle") : t("pages.employees.form.editTitle")
+        mode === "create"
+          ? t("pages.employees.form.createTitle")
+          : t("pages.employees.form.editTitle")
       }
       footer={
         <>
@@ -207,11 +213,25 @@ export function EmployeeForm({
                 {t("pages.employees.badges.emptyHint")}
               </p>
             ) : (
-              <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+              <ul
+                style={{
+                  listStyle: "none",
+                  margin: 0,
+                  padding: 0,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                }}
+              >
                 {employee.badges.map((badge) => (
                   <li
                     key={badge.id}
-                    style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 8,
+                    }}
                   >
                     <div style={{ display: "flex", flexDirection: "column" }}>
                       <span style={{ font: "var(--text-body)", color: "var(--fg-1)" }}>
@@ -234,7 +254,10 @@ export function EmployeeForm({
                         {t("pages.employees.badges.revokeAction")}
                       </Button>
                     ) : (
-                      <StatusChip status="neutral" label={t("pages.employees.badges.revokedBadge")} />
+                      <StatusChip
+                        status="neutral"
+                        label={t("pages.employees.badges.revokedBadge")}
+                      />
                     )}
                   </li>
                 ))}

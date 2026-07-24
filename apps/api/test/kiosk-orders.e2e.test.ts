@@ -64,20 +64,32 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
     tenantId = await signUpAndActivate(agent);
 
     employeeId = randomUUID();
-    await db.insert(schema.employees).values({ id: employeeId, tenantId, fullName: "Иван Иванов", role: "оператор" });
+    await db
+      .insert(schema.employees)
+      .values({ id: employeeId, tenantId, fullName: "Иван Иванов", role: "оператор" });
     await db.insert(schema.employeeBadges).values({ tenantId, employeeId, badgeCode: BADGE });
 
     productId = randomUUID();
-    await db.insert(schema.products).values({ id: productId, tenantId, gtin14: GTIN, name: "Товар", unitPrice: "99.90" });
+    await db
+      .insert(schema.products)
+      .values({ id: productId, tenantId, gtin14: GTIN, name: "Товар", unitPrice: "99.90" });
     // A real product for this tenant that is deliberately NOT allowlisted on the main kiosk (-> not_allowed).
     await db.insert(schema.products).values({
-      id: randomUUID(), tenantId, gtin14: GTIN_NOT_ALLOWED, name: "Другой товар",
+      id: randomUUID(),
+      tenantId,
+      gtin14: GTIN_NOT_ALLOWED,
+      name: "Другой товар",
     });
 
     kioskId = randomUUID();
-    await db.insert(schema.kiosks).values({ id: kioskId, tenantId, name: "Киоск А", dayLimitPerEmployee: 5 });
+    await db
+      .insert(schema.kiosks)
+      .values({ id: kioskId, tenantId, name: "Киоск А", dayLimitPerEmployee: 5 });
     await db.insert(schema.kioskProducts).values({ tenantId, kioskId, productId });
-    await db.update(schema.kiosks).set({ deviceTokenHash: hashDeviceToken(TOKEN) }).where(eq(schema.kiosks.id, kioskId));
+    await db
+      .update(schema.kiosks)
+      .set({ deviceTokenHash: hashDeviceToken(TOKEN) })
+      .where(eq(schema.kiosks.id, kioskId));
   });
 
   afterAll(async () => {
@@ -114,9 +126,12 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
 
   it("creates a pending order from valid KM scans and echoes the order number", async () => {
     const res = await request(app!.getHttpServer())
-      .post("/kiosk/orders").set("x-kiosk-token", TOKEN)
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", TOKEN)
       .send({
-        deviceSeq: 1, badgeCode: BADGE, reason: "buy",
+        deviceSeq: 1,
+        badgeCode: BADGE,
+        reason: "buy",
         items: [{ rawKm: `01${GTIN}21KYC9X7MQ${GS}93Abcd` }],
       })
       .expect(201);
@@ -128,21 +143,36 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
 
   it("is idempotent on (kiosk, deviceSeq)", async () => {
     const body = {
-      deviceSeq: 7, badgeCode: BADGE, reason: "buy",
+      deviceSeq: 7,
+      badgeCode: BADGE,
+      reason: "buy",
       items: [{ rawKm: `01${GTIN}21ZZZ1${GS}93Abcd` }],
     };
-    const a = await request(app!.getHttpServer()).post("/kiosk/orders").set("x-kiosk-token", TOKEN).send(body).expect(201);
-    const b = await request(app!.getHttpServer()).post("/kiosk/orders").set("x-kiosk-token", TOKEN).send(body).expect(201);
+    const a = await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", TOKEN)
+      .send(body)
+      .expect(201);
+    const b = await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", TOKEN)
+      .send(body)
+      .expect(201);
     expect(b.body.orderNo).toBe(a.body.orderNo);
     expect(b.body.itemCount).toBe(a.body.itemCount);
   });
 
   it("flags a code whose GTIN has no product at all for this tenant as unknown_product", async () => {
-    const res = await request(app!.getHttpServer()).post("/kiosk/orders").set("x-kiosk-token", TOKEN)
+    const res = await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", TOKEN)
       .send({
-        deviceSeq: 2, badgeCode: BADGE, reason: "buy",
+        deviceSeq: 2,
+        badgeCode: BADGE,
+        reason: "buy",
         items: [{ rawKm: `01${GTIN_UNKNOWN}21S1${GS}93Abcd` }],
-      }).expect(201);
+      })
+      .expect(201);
     expect(res.body.itemCount).toBe(0);
     expect(res.body.conflicts).toHaveLength(1);
     expect(res.body.conflicts[0].reason).toMatch(/unknown_product|not_allowed/);
@@ -150,47 +180,73 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
   });
 
   it("flags a code for a real product that isn't on this kiosk's allowlist as not_allowed", async () => {
-    const res = await request(app!.getHttpServer()).post("/kiosk/orders").set("x-kiosk-token", TOKEN)
+    const res = await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", TOKEN)
       .send({
-        deviceSeq: 9, badgeCode: BADGE, reason: "buy",
+        deviceSeq: 9,
+        badgeCode: BADGE,
+        reason: "buy",
         items: [{ rawKm: `01${GTIN_NOT_ALLOWED}21S2${GS}93Abcd` }],
-      }).expect(201);
+      })
+      .expect(201);
     expect(res.body.itemCount).toBe(0);
     expect(res.body.conflicts).toHaveLength(1);
     expect(res.body.conflicts[0].reason).toBe("not_allowed");
   });
 
   it("rejects an unknown badge", async () => {
-    await request(app!.getHttpServer()).post("/kiosk/orders").set("x-kiosk-token", TOKEN)
-      .send({ deviceSeq: 3, badgeCode: "NOPE", reason: "buy", items: [] }).expect(401);
+    await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", TOKEN)
+      .send({ deviceSeq: 3, badgeCode: "NOPE", reason: "buy", items: [] })
+      .expect(401);
   });
 
   it("rejects a non-revoked badge belonging to an archived employee", async () => {
     const archivedEmployeeId = randomUUID();
     const archivedBadge = `badge-archived-${randomUUID()}`;
-    await db.insert(schema.employees).values({ id: archivedEmployeeId, tenantId, fullName: "Архивов А." });
-    await db.insert(schema.employeeBadges).values({ tenantId, employeeId: archivedEmployeeId, badgeCode: archivedBadge });
+    await db
+      .insert(schema.employees)
+      .values({ id: archivedEmployeeId, tenantId, fullName: "Архивов А." });
+    await db
+      .insert(schema.employeeBadges)
+      .values({ tenantId, employeeId: archivedEmployeeId, badgeCode: archivedBadge });
 
     // Sanity: the badge works while the employee is still active.
-    await request(app!.getHttpServer()).post("/kiosk/orders").set("x-kiosk-token", TOKEN)
-      .send({ deviceSeq: 11, badgeCode: archivedBadge, reason: "buy", items: [] }).expect(201);
+    await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", TOKEN)
+      .send({ deviceSeq: 11, badgeCode: archivedBadge, reason: "buy", items: [] })
+      .expect(201);
 
-    await db.update(schema.employees).set({ status: "archived" }).where(eq(schema.employees.id, archivedEmployeeId));
+    await db
+      .update(schema.employees)
+      .set({ status: "archived" })
+      .where(eq(schema.employees.id, archivedEmployeeId));
 
     // The badge itself is still not revoked, but the employee behind it is archived -> unknown badge (401).
-    await request(app!.getHttpServer()).post("/kiosk/orders").set("x-kiosk-token", TOKEN)
-      .send({ deviceSeq: 12, badgeCode: archivedBadge, reason: "buy", items: [] }).expect(401);
+    await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", TOKEN)
+      .send({ deviceSeq: 12, badgeCode: archivedBadge, reason: "buy", items: [] })
+      .expect(401);
   });
 
   it("flags a not-a-KM scan and a KM missing its crypto tail (dropped GS) distinctly", async () => {
-    const res = await request(app!.getHttpServer()).post("/kiosk/orders").set("x-kiosk-token", TOKEN)
+    const res = await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", TOKEN)
       .send({
-        deviceSeq: 8, badgeCode: BADGE, reason: "buy",
+        deviceSeq: 8,
+        badgeCode: BADGE,
+        reason: "buy",
         items: [
           { rawKm: "not-a-valid-code-at-all" },
           { rawKm: `01${GTIN}21INCOMP1` }, // no GS, no trailing AI 91/92/93 -> incomplete
         ],
-      }).expect(201);
+      })
+      .expect(201);
     expect(res.body.itemCount).toBe(0);
     expect(res.body.conflicts).toEqual([
       { rawKm: "not-a-valid-code-at-all", reason: "not_km" },
@@ -199,27 +255,52 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
   });
 
   it("requires a non-archived writeoffReasonId of this tenant for reason=writeoff", async () => {
-    const missing = await request(app!.getHttpServer()).post("/kiosk/orders").set("x-kiosk-token", TOKEN)
-      .send({ deviceSeq: 4, badgeCode: BADGE, reason: "writeoff", items: [] }).expect(400);
+    const missing = await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", TOKEN)
+      .send({ deviceSeq: 4, badgeCode: BADGE, reason: "writeoff", items: [] })
+      .expect(400);
     expect(missing.body.message).toBeDefined();
 
     const archivedReasonId = randomUUID();
     await db.insert(schema.pickupOrderReasons).values({
-      id: archivedReasonId, tenantId, name: "Просрочка", sortOrder: 0, archived: true,
+      id: archivedReasonId,
+      tenantId,
+      name: "Просрочка",
+      sortOrder: 0,
+      archived: true,
     });
-    await request(app!.getHttpServer()).post("/kiosk/orders").set("x-kiosk-token", TOKEN)
-      .send({ deviceSeq: 4, badgeCode: BADGE, reason: "writeoff", writeoffReasonId: archivedReasonId, items: [] })
+    await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", TOKEN)
+      .send({
+        deviceSeq: 4,
+        badgeCode: BADGE,
+        reason: "writeoff",
+        writeoffReasonId: archivedReasonId,
+        items: [],
+      })
       .expect(400);
 
     const activeReasonId = randomUUID();
     await db.insert(schema.pickupOrderReasons).values({
-      id: activeReasonId, tenantId, name: "Брак", sortOrder: 0, archived: false,
+      id: activeReasonId,
+      tenantId,
+      name: "Брак",
+      sortOrder: 0,
+      archived: false,
     });
-    const ok = await request(app!.getHttpServer()).post("/kiosk/orders").set("x-kiosk-token", TOKEN)
+    const ok = await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", TOKEN)
       .send({
-        deviceSeq: 4, badgeCode: BADGE, reason: "writeoff", writeoffReasonId: activeReasonId,
+        deviceSeq: 4,
+        badgeCode: BADGE,
+        reason: "writeoff",
+        writeoffReasonId: activeReasonId,
         items: [{ rawKm: `01${GTIN}21WRITEOFF1${GS}93Abcd` }],
-      }).expect(201);
+      })
+      .expect(201);
     expect(ok.body.itemCount).toBe(1);
     expect(ok.body.conflicts).toHaveLength(0);
   });
@@ -229,26 +310,50 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
     // simulates a concurrent request winning the race on the DB's partial unique index.
     const seedOrderId = randomUUID();
     await db.insert(schema.pickupOrders).values({
-      id: seedOrderId, tenantId, orderNo: `SEED-DUP-${randomUUID().slice(0, 8)}`, kioskId, employeeId,
-      reason: "buy", status: "pending", itemCount: 1, deviceSeq: null,
+      id: seedOrderId,
+      tenantId,
+      orderNo: `SEED-DUP-${randomUUID().slice(0, 8)}`,
+      kioskId,
+      employeeId,
+      reason: "buy",
+      status: "pending",
+      itemCount: 1,
+      deviceSeq: null,
     });
     await db.insert(schema.pickupOrderItems).values({
-      id: randomUUID(), tenantId, orderId: seedOrderId, productId, gtin14: GTIN, serial: "DUPKEY1",
-      rawKm: "seed-duplicate", kmKey: `01${GTIN}21DUPKEY1`, voided: false, scannedAt: new Date(),
+      id: randomUUID(),
+      tenantId,
+      orderId: seedOrderId,
+      productId,
+      gtin14: GTIN,
+      serial: "DUPKEY1",
+      rawKm: "seed-duplicate",
+      kmKey: `01${GTIN}21DUPKEY1`,
+      voided: false,
+      scannedAt: new Date(),
     });
 
-    const res = await request(app!.getHttpServer()).post("/kiosk/orders").set("x-kiosk-token", TOKEN)
+    const res = await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", TOKEN)
       .send({
-        deviceSeq: 10, badgeCode: BADGE, reason: "buy",
+        deviceSeq: 10,
+        badgeCode: BADGE,
+        reason: "buy",
         items: [{ rawKm: `01${GTIN}21DUPKEY1${GS}93Abcd` }],
-      }).expect(201);
+      })
+      .expect(201);
     expect(res.body.itemCount).toBe(0);
-    expect(res.body.conflicts).toEqual([{ rawKm: `01${GTIN}21DUPKEY1${GS}93Abcd`, reason: "duplicate" }]);
+    expect(res.body.conflicts).toEqual([
+      { rawKm: `01${GTIN}21DUPKEY1${GS}93Abcd`, reason: "duplicate" },
+    ]);
   });
 
   it("resolves two truly-concurrent POSTs with the same deviceSeq into a single order (no 500)", async () => {
     const body = {
-      deviceSeq: 20, badgeCode: BADGE, reason: "buy",
+      deviceSeq: 20,
+      badgeCode: BADGE,
+      reason: "buy",
       items: [{ rawKm: `01${GTIN}21CONC1${GS}93Abcd` }],
     };
     const [a, b] = await Promise.all([
@@ -259,11 +364,16 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
     expect(b.status).toBe(201);
     expect(a.body.orderNo).toBe(b.body.orderNo);
 
-    const orders = await db.select().from(schema.pickupOrders).where(and(
-      eq(schema.pickupOrders.tenantId, tenantId),
-      eq(schema.pickupOrders.kioskId, kioskId),
-      eq(schema.pickupOrders.deviceSeq, 20),
-    ));
+    const orders = await db
+      .select()
+      .from(schema.pickupOrders)
+      .where(
+        and(
+          eq(schema.pickupOrders.tenantId, tenantId),
+          eq(schema.pickupOrders.kioskId, kioskId),
+          eq(schema.pickupOrders.deviceSeq, 20),
+        ),
+      );
     expect(orders).toHaveLength(1);
   });
 
@@ -271,55 +381,92 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
     const limitKioskId = randomUUID();
     const limitBadge = `badge-limit-${randomUUID()}`;
     const limitEmployeeId = randomUUID();
-    await db.insert(schema.employees).values({ id: limitEmployeeId, tenantId, fullName: "Лимитов Л." });
-    await db.insert(schema.employeeBadges).values({ tenantId, employeeId: limitEmployeeId, badgeCode: limitBadge });
-    await db.insert(schema.kiosks).values({ id: limitKioskId, tenantId, name: "Киоск-лимит", dayLimitPerEmployee: 2 });
+    await db
+      .insert(schema.employees)
+      .values({ id: limitEmployeeId, tenantId, fullName: "Лимитов Л." });
+    await db
+      .insert(schema.employeeBadges)
+      .values({ tenantId, employeeId: limitEmployeeId, badgeCode: limitBadge });
+    await db
+      .insert(schema.kiosks)
+      .values({ id: limitKioskId, tenantId, name: "Киоск-лимит", dayLimitPerEmployee: 2 });
     await db.insert(schema.kioskProducts).values({ tenantId, kioskId: limitKioskId, productId });
     const limitToken = `kiosk-token-limit-${randomUUID()}`;
-    await db.update(schema.kiosks).set({ deviceTokenHash: hashDeviceToken(limitToken) })
+    await db
+      .update(schema.kiosks)
+      .set({ deviceTokenHash: hashDeviceToken(limitToken) })
       .where(eq(schema.kiosks.id, limitKioskId));
 
-    const res = await request(app!.getHttpServer()).post("/kiosk/orders").set("x-kiosk-token", limitToken)
+    const res = await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", limitToken)
       .send({
-        deviceSeq: 1, badgeCode: limitBadge, reason: "buy",
+        deviceSeq: 1,
+        badgeCode: limitBadge,
+        reason: "buy",
         items: [
           { rawKm: `01${GTIN}21LIM1${GS}93Abcd` },
           { rawKm: `01${GTIN}21LIM2${GS}93Abcd` },
           { rawKm: `01${GTIN}21LIM3${GS}93Abcd` },
         ],
-      }).expect(201);
+      })
+      .expect(201);
     expect(res.body.itemCount).toBe(2);
-    expect(res.body.conflicts).toEqual([{ rawKm: `01${GTIN}21LIM3${GS}93Abcd`, reason: "over_limit" }]);
+    expect(res.body.conflicts).toEqual([
+      { rawKm: `01${GTIN}21LIM3${GS}93Abcd`, reason: "over_limit" },
+    ]);
   });
 
   it("bootstrap returns config, reasons, allowlist products and employees with badge codes", async () => {
-    const res = await request(app!.getHttpServer()).get("/kiosk/bootstrap").set("x-kiosk-token", TOKEN).expect(200);
+    const res = await request(app!.getHttpServer())
+      .get("/kiosk/bootstrap")
+      .set("x-kiosk-token", TOKEN)
+      .expect(200);
     expect(res.body.config.dayLimitPerEmployee).toBeGreaterThan(0);
     expect(res.body.config.showPrices).toBe(true);
     expect(res.body.products.some((p: { gtin14: string }) => p.gtin14 === GTIN)).toBe(true);
-    expect(res.body.products.every((p: { gtin14: string }) => p.gtin14 !== GTIN_NOT_ALLOWED)).toBe(true);
+    expect(res.body.products.every((p: { gtin14: string }) => p.gtin14 !== GTIN_NOT_ALLOWED)).toBe(
+      true,
+    );
     const employee = res.body.employees.find((e: { id: string }) => e.id === employeeId);
     expect(employee.badgeCodes).toContain(BADGE);
   });
 
   it("401s a kiosk token that is missing entirely", async () => {
-    await request(app!.getHttpServer()).get("/kiosk/bootstrap").set("x-kiosk-token", "not-a-real-token").expect(401);
+    await request(app!.getHttpServer())
+      .get("/kiosk/bootstrap")
+      .set("x-kiosk-token", "not-a-real-token")
+      .expect(401);
   });
 
   it("archived kiosk -> 401, even with a previously-valid token (locks the guard's active-status filter)", async () => {
     const archivedKioskId = randomUUID();
     const archivedToken = `kiosk-token-archived-${randomUUID()}`;
     await db.insert(schema.kiosks).values({ id: archivedKioskId, tenantId, name: "Киоск-архив" });
-    await db.update(schema.kiosks).set({ deviceTokenHash: hashDeviceToken(archivedToken) })
+    await db
+      .update(schema.kiosks)
+      .set({ deviceTokenHash: hashDeviceToken(archivedToken) })
       .where(eq(schema.kiosks.id, archivedKioskId));
 
     // Sanity: the token works while the kiosk is active.
-    await request(app!.getHttpServer()).get("/kiosk/bootstrap").set("x-kiosk-token", archivedToken).expect(200);
+    await request(app!.getHttpServer())
+      .get("/kiosk/bootstrap")
+      .set("x-kiosk-token", archivedToken)
+      .expect(200);
 
-    await db.update(schema.kiosks).set({ status: "archived" }).where(eq(schema.kiosks.id, archivedKioskId));
+    await db
+      .update(schema.kiosks)
+      .set({ status: "archived" })
+      .where(eq(schema.kiosks.id, archivedKioskId));
 
-    await request(app!.getHttpServer()).get("/kiosk/bootstrap").set("x-kiosk-token", archivedToken).expect(401);
-    await request(app!.getHttpServer()).post("/kiosk/orders").set("x-kiosk-token", archivedToken)
-      .send({ deviceSeq: 1, badgeCode: BADGE, reason: "buy", items: [] }).expect(401);
+    await request(app!.getHttpServer())
+      .get("/kiosk/bootstrap")
+      .set("x-kiosk-token", archivedToken)
+      .expect(401);
+    await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", archivedToken)
+      .send({ deviceSeq: 1, badgeCode: BADGE, reason: "buy", items: [] })
+      .expect(401);
   });
 });

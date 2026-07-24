@@ -32,8 +32,18 @@ export interface PickupSlipData {
 }
 
 const MONTHS_RU = [
-  "января", "февраля", "марта", "апреля", "мая", "июня",
-  "июля", "августа", "сентября", "октября", "ноября", "декабря",
+  "января",
+  "февраля",
+  "марта",
+  "апреля",
+  "мая",
+  "июня",
+  "июля",
+  "августа",
+  "сентября",
+  "октября",
+  "ноября",
+  "декабря",
 ];
 
 function pad2(n: number): string {
@@ -97,7 +107,10 @@ export function renderPickupSlipHtml(data: PickupSlipData): string {
     : `<span style="font-weight: 600">—</span>
         <span style="color: #45433E; font-size: 11.5px">Профиль организации не заполнен</span>`;
 
-  const employeeTail = [data.employee.role, data.employee.badgeCode ? `бейдж ${maskBadge(data.employee.badgeCode)}` : null]
+  const employeeTail = [
+    data.employee.role,
+    data.employee.badgeCode ? `бейдж ${maskBadge(data.employee.badgeCode)}` : null,
+  ]
     .filter((s): s is string => Boolean(s))
     .join(" · ");
 

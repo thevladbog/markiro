@@ -4,8 +4,12 @@ import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
 import { generateDeviceToken, hashDeviceToken } from "../../pickup/device-token";
 import type {
-  CreateKioskDto, EnrollKioskResponseDto, KioskDto,
-  ListKiosksResponseDto, SetKioskProductsDto, UpdateKioskDto,
+  CreateKioskDto,
+  EnrollKioskResponseDto,
+  KioskDto,
+  ListKiosksResponseDto,
+  SetKioskProductsDto,
+  UpdateKioskDto,
 } from "./dto";
 
 type KioskRow = typeof schema.kiosks.$inferSelect;
@@ -15,20 +19,29 @@ export class KiosksService {
   constructor(@Inject(DB) private readonly db: Db) {}
 
   async listKiosks(tenantId: string): Promise<ListKiosksResponseDto> {
-    const rows = await this.db.select().from(schema.kiosks)
-      .where(eq(schema.kiosks.tenantId, tenantId)).orderBy(schema.kiosks.name);
-    const productIds = await this.productIdsFor(tenantId, rows.map((r) => r.id));
+    const rows = await this.db
+      .select()
+      .from(schema.kiosks)
+      .where(eq(schema.kiosks.tenantId, tenantId))
+      .orderBy(schema.kiosks.name);
+    const productIds = await this.productIdsFor(
+      tenantId,
+      rows.map((r) => r.id),
+    );
     return { items: rows.map((r) => this.toDto(r, productIds.get(r.id) ?? [])) };
   }
 
   async createKiosk(tenantId: string, dto: CreateKioskDto): Promise<KioskDto> {
-    const [row] = await this.db.insert(schema.kiosks).values({
-      tenantId,
-      name: dto.name,
-      location: dto.location ?? null,
-      dayLimitPerEmployee: dto.dayLimitPerEmployee,
-      showPrices: dto.showPrices,
-    }).returning();
+    const [row] = await this.db
+      .insert(schema.kiosks)
+      .values({
+        tenantId,
+        name: dto.name,
+        location: dto.location ?? null,
+        dayLimitPerEmployee: dto.dayLimitPerEmployee,
+        showPrices: dto.showPrices,
+      })
+      .returning();
     return this.toDto(row!, []);
   }
 
@@ -46,15 +59,21 @@ export class KiosksService {
       return this.toDto(row, await this.productIdsForOne(tenantId, id));
     }
 
-    const [row] = await this.db.update(schema.kiosks).set(set)
-      .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, id))).returning();
+    const [row] = await this.db
+      .update(schema.kiosks)
+      .set(set)
+      .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, id)))
+      .returning();
     if (!row) throw new NotFoundException();
     return this.toDto(row, await this.productIdsForOne(tenantId, id));
   }
 
   async archiveKiosk(tenantId: string, id: string): Promise<void> {
-    const [row] = await this.db.update(schema.kiosks).set({ status: "archived" })
-      .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, id))).returning();
+    const [row] = await this.db
+      .update(schema.kiosks)
+      .set({ status: "archived" })
+      .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, id)))
+      .returning();
     if (!row) throw new NotFoundException();
   }
 
@@ -68,12 +87,15 @@ export class KiosksService {
 
     try {
       await this.db.transaction(async (tx) => {
-        await tx.delete(schema.kioskProducts)
-          .where(and(eq(schema.kioskProducts.tenantId, tenantId), eq(schema.kioskProducts.kioskId, id)));
-        if (uniqueIds.length > 0) {
-          await tx.insert(schema.kioskProducts).values(
-            uniqueIds.map((productId) => ({ tenantId, kioskId: id, productId })),
+        await tx
+          .delete(schema.kioskProducts)
+          .where(
+            and(eq(schema.kioskProducts.tenantId, tenantId), eq(schema.kioskProducts.kioskId, id)),
           );
+        if (uniqueIds.length > 0) {
+          await tx
+            .insert(schema.kioskProducts)
+            .values(uniqueIds.map((productId) => ({ tenantId, kioskId: id, productId })));
         }
       });
     } catch (error) {
@@ -88,13 +110,17 @@ export class KiosksService {
     if (!row) throw new NotFoundException();
 
     const token = generateDeviceToken();
-    await this.db.update(schema.kiosks).set({ deviceTokenHash: hashDeviceToken(token) })
+    await this.db
+      .update(schema.kiosks)
+      .set({ deviceTokenHash: hashDeviceToken(token) })
       .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, id)));
     return { token };
   }
 
   private async findRow(tenantId: string, id: string): Promise<KioskRow | undefined> {
-    const [row] = await this.db.select().from(schema.kiosks)
+    const [row] = await this.db
+      .select()
+      .from(schema.kiosks)
       .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, id)));
     return row;
   }
@@ -104,10 +130,15 @@ export class KiosksService {
     return map.get(kioskId) ?? [];
   }
 
-  private async productIdsFor(tenantId: string, kioskIds: string[]): Promise<Map<string, string[]>> {
+  private async productIdsFor(
+    tenantId: string,
+    kioskIds: string[],
+  ): Promise<Map<string, string[]>> {
     const map = new Map<string, string[]>();
     if (kioskIds.length === 0) return map;
-    const rows = await this.db.select().from(schema.kioskProducts)
+    const rows = await this.db
+      .select()
+      .from(schema.kioskProducts)
       .where(eq(schema.kioskProducts.tenantId, tenantId));
     const idSet = new Set(kioskIds);
     for (const r of rows) {

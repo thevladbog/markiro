@@ -17,7 +17,11 @@ export const createProductSchema = z.object({
   palletCapacity: z.number().int().min(1).nullable().optional(),
   defaultCounterpartyId: z.string().uuid().nullable().optional(),
   defaultLabelTemplateId: z.string().uuid().nullable().optional(),
-  unitPrice: z.string().regex(/^\d+(\.\d{1,2})?$/).nullable().optional(),
+  unitPrice: z
+    .string()
+    .regex(/^\d+(\.\d{1,2})?$/)
+    .nullable()
+    .optional(),
   egaisCode: z.string().trim().min(1).max(64).nullable().optional(),
   externalRef: z.string().trim().min(1).max(200).nullable().optional(),
 });
@@ -32,7 +36,11 @@ export const updateProductSchema = z.object({
   palletCapacity: z.number().int().min(1).nullable().optional(),
   defaultCounterpartyId: z.string().uuid().nullable().optional(),
   defaultLabelTemplateId: z.string().uuid().nullable().optional(),
-  unitPrice: z.string().regex(/^\d+(\.\d{1,2})?$/).nullable().optional(),
+  unitPrice: z
+    .string()
+    .regex(/^\d+(\.\d{1,2})?$/)
+    .nullable()
+    .optional(),
   egaisCode: z.string().trim().min(1).max(64).nullable().optional(),
   externalRef: z.string().trim().min(1).max(200).nullable().optional(),
 });

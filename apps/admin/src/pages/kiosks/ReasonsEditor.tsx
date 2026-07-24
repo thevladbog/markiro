@@ -68,7 +68,9 @@ export function ReasonsEditor() {
     } catch (error) {
       toast(
         "error",
-        error instanceof ApiRequestError ? error.message : t("pages.kiosks.toasts.reasonCreateError"),
+        error instanceof ApiRequestError
+          ? error.message
+          : t("pages.kiosks.toasts.reasonCreateError"),
       );
     }
   };
@@ -87,7 +89,9 @@ export function ReasonsEditor() {
     } catch (error) {
       toast(
         "error",
-        error instanceof ApiRequestError ? error.message : t("pages.kiosks.toasts.reasonUpdateError"),
+        error instanceof ApiRequestError
+          ? error.message
+          : t("pages.kiosks.toasts.reasonUpdateError"),
       );
     }
   };
@@ -125,10 +129,7 @@ export function ReasonsEditor() {
             {items.map((reason) => {
               const draft = drafts[reason.id] ?? draftFrom(reason);
               return (
-                <div
-                  key={reason.id}
-                  style={{ display: "flex", gap: 8, alignItems: "flex-end" }}
-                >
+                <div key={reason.id} style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
                   <div style={{ flex: 1 }}>
                     <Input
                       label={t("pages.kiosks.reasons.nameLabel")}

@@ -34,5 +34,9 @@ export interface KioskDto {
   productIds: string[];
   createdAt: Date;
 }
-export interface ListKiosksResponseDto { items: KioskDto[]; }
-export interface EnrollKioskResponseDto { token: string; }
+export interface ListKiosksResponseDto {
+  items: KioskDto[];
+}
+export interface EnrollKioskResponseDto {
+  token: string;
+}

@@ -2,7 +2,12 @@ import { Body, Controller, Get, Post, Req, UseGuards } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { KioskDeviceGuard, type RequestWithKiosk } from "../../tenancy/kiosk-device.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
-import { createOrderSchema, type CreateOrderDto, type CreateOrderResultDto, type KioskBootstrapDto } from "../pickup-orders/dto";
+import {
+  createOrderSchema,
+  type CreateOrderDto,
+  type CreateOrderResultDto,
+  type KioskBootstrapDto,
+} from "../pickup-orders/dto";
 import { PickupOrdersService } from "../pickup-orders/pickup-orders.service";
 
 /** Device-facing routes under `/kiosk`, authenticated via `x-kiosk-token` (no session cookie). */

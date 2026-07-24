@@ -26,13 +26,16 @@ Copied from `docs/superpowers/specs/2026-07-23-pickup-kiosk-design.md` and the M
 ## File Structure
 
 **`packages/domain`**
+
 - Create `src/scan/pickup.ts` — `validatePickupKm()` + `PickupKmResult`. Modify `src/index.ts` (export). Test `test/pickup.test.ts`.
 - Create `src/barcodes/svg.ts` — `renderDataMatrixSvg` / `renderQrSvg` / `renderCode128Svg` (bwip-js `toSVG`). Modify `src/index.ts` (export). Test `test/barcodes.test.ts`. Modify `packages/domain/package.json` (add `bwip-js`).
 
 **`packages/db`**
+
 - Create `src/schema/pickup.ts` — enums + tables (employees, employee_badges, kiosks, kiosk_products, pickup_order_reasons, pickup_order_counters, pickup_orders, pickup_order_items). Modify `src/schema/platform.ts` (products: `unit_price`, `egais_code`, `external_ref`). Modify `src/schema.ts` (barrel export). Modify `drizzle.config.ts` (add pickup.ts to schema list). Generate `migrations/00NN_*.sql`. Test `test/pickup-schema.test.ts`.
 
 **`apps/api`**
+
 - Create `src/tenancy/kiosk-device.guard.ts` — `KioskDeviceGuard`, `RequestWithKiosk`. Test `test/kiosk-device.guard.test.ts`.
 - Create modules under `src/modules/`: `employees/`, `kiosks/`, `pickup-reasons/`, `pickup-orders/`, `kiosk/` (device-facing). Each = `dto.ts` + `*.service.ts` + `*.controller.ts` + `*.module.ts`.
 - Create `src/pickup/order-number.ts` — `nextOrderNo(...)` helper (used by pickup-orders service). Create `src/pickup/slip.ts` — A4 HTML slip renderer.
@@ -41,6 +44,7 @@ Copied from `docs/superpowers/specs/2026-07-23-pickup-kiosk-design.md` and the M
 - Tests `test/employees.e2e.test.ts`, `kiosks.e2e.test.ts`, `pickup-reasons.e2e.test.ts`, `pickup-orders.e2e.test.ts`, `kiosk-orders.e2e.test.ts`, `pickup-export.e2e.test.ts`, `pickup-slip.e2e.test.ts`, `order-number.test.ts` (unit).
 
 **`apps/admin`**
+
 - Create `src/pages/pickup/` — `index.tsx` (orders свод + filters + bulk export), `OrderDetail.tsx` (route), `api.ts`. Create `src/pages/employees/` (`index.tsx`, `EmployeeForm.tsx`, `api.ts`). Create `src/pages/kiosks/` (`index.tsx`, `KioskForm.tsx`, `ReasonsEditor.tsx`, `api.ts`). Modify `src/pages/catalog/ProductForm.tsx` (price/EGAIS fields).
 - Modify `src/app.tsx` (routes), `src/layout/AppShell.tsx` (nav item + pending badge), `src/i18n/ru.json` + `en.json`.
 - Tests `test/pickup.test.tsx`, `employees.test.tsx`, `kiosks.test.tsx`.
@@ -52,11 +56,13 @@ Copied from `docs/superpowers/specs/2026-07-23-pickup-kiosk-design.md` and the M
 ### Task 1: Pickup KM guard
 
 **Files:**
+
 - Create: `packages/domain/src/scan/pickup.ts`
 - Modify: `packages/domain/src/index.ts`
 - Test: `packages/domain/test/pickup.test.ts`
 
 **Interfaces:**
+
 - Consumes: `classifyScan` (`src/scan/classify.ts`), `kmKey`, `ParsedKm` (`src/gs1/km.ts`).
 - Produces:
   ```ts
@@ -64,7 +70,10 @@ Copied from `docs/superpowers/specs/2026-07-23-pickup-kiosk-design.md` and the M
     | { status: "ok"; km: ParsedKm; key: string }
     | { status: "not_km"; raw: string }
     | { status: "incomplete"; raw: string; reason: string };
-  export function validatePickupKm(raw: string, opts?: { requireCryptoTail?: boolean }): PickupKmResult;
+  export function validatePickupKm(
+    raw: string,
+    opts?: { requireCryptoTail?: boolean },
+  ): PickupKmResult;
   ```
 
 Rationale: the existing `parseKm` does NOT fail on a missing GS — it silently folds the crypto tail into the serial, producing a wrong `kmKey`. Keyboard-wedge scanners are the common source of dropped GS. Chestny ZNAK product codes always carry a crypto tail AI (91/92/93) after the GS; if `parseKm` reports zero trailing AIs, the GS was almost certainly dropped (serial swallowed the tail) → reject as `incomplete`. `requireCryptoTail` defaults `true` (assumption from spec §16; make it a switch so future non-crypto product groups can opt out).
@@ -172,12 +181,14 @@ git commit -m "feat(domain): pickup KM guard rejecting dropped-GS scans"
 ### Task 2: Barcode SVG renderer (bwip-js)
 
 **Files:**
+
 - Modify: `packages/domain/package.json` (add `bwip-js`)
 - Create: `packages/domain/src/barcodes/svg.ts`
 - Modify: `packages/domain/src/index.ts`
 - Test: `packages/domain/test/barcodes.test.ts`
 
 **Interfaces:**
+
 - Produces:
   ```ts
   export function renderDataMatrixSvg(text: string): string; // <svg>…</svg>
@@ -238,7 +249,14 @@ export function renderQrSvg(text: string): string {
 }
 
 export function renderCode128Svg(text: string): string {
-  return bwipjs.toSVG({ bcid: "code128", text, scale: 2, height: 10, includetext: true, textxalign: "center" });
+  return bwipjs.toSVG({
+    bcid: "code128",
+    text,
+    scale: 2,
+    height: 10,
+    includetext: true,
+    textxalign: "center",
+  });
 }
 ```
 
@@ -267,6 +285,7 @@ git commit -m "feat(domain): bwip-js SVG renderers for DataMatrix/QR/Code128"
 ### Task 3: Pickup schema + product fields + migration
 
 **Files:**
+
 - Create: `packages/db/src/schema/pickup.ts`
 - Modify: `packages/db/src/schema/platform.ts` (products columns)
 - Modify: `packages/db/src/schema.ts` (barrel), `packages/db/drizzle.config.ts` (schema list)
@@ -274,13 +293,24 @@ git commit -m "feat(domain): bwip-js SVG renderers for DataMatrix/QR/Code128"
 - Test: `packages/db/test/pickup-schema.test.ts`
 
 **Interfaces:**
+
 - Produces Drizzle tables under `schema.*`: `employees`, `employeeBadges`, `kiosks`, `kioskProducts`, `pickupOrderReasons`, `pickupOrderCounters`, `pickupOrders`, `pickupOrderItems`; enums `employeeStatus`, `kioskStatus`, `pickupReason`, `pickupOrderStatus`; new `products` columns `unitPrice`, `egaisCode`, `externalRef`.
 
 - [ ] **Step 1: Write the schema** — `packages/db/src/schema/pickup.ts`:
 
 ```ts
 import {
-  boolean, foreignKey, integer, numeric, pgEnum, pgTable, text, timestamp, unique, uniqueIndex, uuid,
+  boolean,
+  foreignKey,
+  integer,
+  numeric,
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  unique,
+  uniqueIndex,
+  uuid,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { organization } from "./auth.js";
@@ -290,11 +320,16 @@ export const employeeStatus = pgEnum("employee_status", ["active", "archived"]);
 export const kioskStatus = pgEnum("kiosk_status", ["active", "archived"]);
 export const pickupReason = pgEnum("pickup_reason", ["buy", "writeoff"]);
 export const pickupOrderStatus = pgEnum("pickup_order_status", [
-  "pending", "punched", "writtenoff", "cancelled",
+  "pending",
+  "punched",
+  "writtenoff",
+  "cancelled",
 ]);
 
 const tenantId = () =>
-  text("tenant_id").notNull().references(() => organization.id);
+  text("tenant_id")
+    .notNull()
+    .references(() => organization.id);
 
 export const employees = pgTable(
   "employees",
@@ -350,7 +385,9 @@ export const kiosks = pgTable(
   (t) => [
     unique("kiosks_tenant_id_uq").on(t.tenantId, t.id),
     // device_token_hash is a deterministic sha256, unique when present.
-    uniqueIndex("kiosks_device_token_uq").on(t.deviceTokenHash).where(sql`device_token_hash is not null`),
+    uniqueIndex("kiosks_device_token_uq")
+      .on(t.deviceTokenHash)
+      .where(sql`device_token_hash is not null`),
   ],
 );
 
@@ -394,7 +431,9 @@ export const pickupOrderReasons = pgTable(
 // Per-tenant monotonic counter for ORD-ГГ-НННН. One row per tenant, created
 // lazily on first order (INSERT ... ON CONFLICT DO UPDATE ... RETURNING seq).
 export const pickupOrderCounters = pgTable("pickup_order_counters", {
-  tenantId: text("tenant_id").primaryKey().references(() => organization.id),
+  tenantId: text("tenant_id")
+    .primaryKey()
+    .references(() => organization.id),
   seq: integer("seq").notNull().default(0),
 });
 
@@ -501,6 +540,7 @@ Expected: a new `packages/db/migrations/00NN_*.sql` creating the enums + 8 table
 - [ ] **Step 5: Verify the generated SQL — CRITICAL partial indexes**
 
 Open the generated `.sql`. Confirm the two partial unique indexes carry their `WHERE` clause:
+
 - `... "pickup_order_items_tenant_kmkey_open_uq" ... ("tenant_id","km_key") WHERE voided = false;`
 - `... "employee_badges_tenant_code_active_uq" ... WHERE revoked_at is null;`
 - `... "kiosks_device_token_uq" ... WHERE device_token_hash is not null;`
@@ -520,7 +560,12 @@ const { organization } = schema;
 
 describe.skipIf(!url)("pickup schema constraints", () => {
   const { db, pool } = createDb(url!);
-  const org = { id: `org-${randomUUID()}`, name: "T", slug: `t-${randomUUID()}`, createdAt: new Date() };
+  const org = {
+    id: `org-${randomUUID()}`,
+    name: "T",
+    slug: `t-${randomUUID()}`,
+    createdAt: new Date(),
+  };
   const empId = randomUUID();
   const kioskId = randomUUID();
   const productId = randomUUID();
@@ -529,19 +574,42 @@ describe.skipIf(!url)("pickup schema constraints", () => {
 
   beforeAll(async () => {
     await db.insert(organization).values(org);
-    await db.insert(schema.employees).values({ id: empId, tenantId: org.id, fullName: "Смирнов А." });
+    await db
+      .insert(schema.employees)
+      .values({ id: empId, tenantId: org.id, fullName: "Смирнов А." });
     await db.insert(schema.kiosks).values({ id: kioskId, tenantId: org.id, name: "Киоск-1" });
     await db.insert(schema.products).values({
-      id: productId, tenantId: org.id, gtin14: "04650075195923", name: "Пиво",
+      id: productId,
+      tenantId: org.id,
+      gtin14: "04650075195923",
+      name: "Пиво",
     });
     await db.insert(schema.pickupOrders).values([
-      { id: order1, tenantId: org.id, orderNo: "ORD-26-0001", kioskId, employeeId: empId, reason: "buy", itemCount: 1 },
-      { id: order2, tenantId: org.id, orderNo: "ORD-26-0002", kioskId, employeeId: empId, reason: "buy", itemCount: 1 },
+      {
+        id: order1,
+        tenantId: org.id,
+        orderNo: "ORD-26-0001",
+        kioskId,
+        employeeId: empId,
+        reason: "buy",
+        itemCount: 1,
+      },
+      {
+        id: order2,
+        tenantId: org.id,
+        orderNo: "ORD-26-0002",
+        kioskId,
+        employeeId: empId,
+        reason: "buy",
+        itemCount: 1,
+      },
     ]);
   });
 
   afterAll(async () => {
-    await db.delete(schema.pickupOrderItems).where(inArray(schema.pickupOrderItems.orderId, [order1, order2]));
+    await db
+      .delete(schema.pickupOrderItems)
+      .where(inArray(schema.pickupOrderItems.orderId, [order1, order2]));
     await db.delete(schema.pickupOrders).where(inArray(schema.pickupOrders.id, [order1, order2]));
     await db.delete(schema.kiosks).where(inArray(schema.kiosks.id, [kioskId]));
     await db.delete(schema.products).where(inArray(schema.products.id, [productId]));
@@ -551,15 +619,21 @@ describe.skipIf(!url)("pickup schema constraints", () => {
   });
 
   const item = (orderId: string) => ({
-    tenantId: org.id, orderId, productId, gtin14: "04650075195923",
-    serial: "KYC9X7MQ", rawKm: "raw", kmKey: "01046500751959232 1KYC9X7MQ",
+    tenantId: org.id,
+    orderId,
+    productId,
+    gtin14: "04650075195923",
+    serial: "KYC9X7MQ",
+    rawKm: "raw",
+    kmKey: "01046500751959232 1KYC9X7MQ",
     scannedAt: new Date(),
   });
 
   it("blocks the same km_key in a second non-cancelled order", async () => {
     await db.insert(schema.pickupOrderItems).values(item(order1));
-    await expect(db.insert(schema.pickupOrderItems).values(item(order2)))
-      .rejects.toMatchObject({ cause: { code: "23505" } });
+    await expect(db.insert(schema.pickupOrderItems).values(item(order2))).rejects.toMatchObject({
+      cause: { code: "23505" },
+    });
   });
 
   it("allows the km_key again once the first item is voided", async () => {
@@ -591,16 +665,32 @@ git commit -m "feat(db): pickup kiosk schema (employees, kiosks, orders) + produ
 ### Task 4: Employees module (+ badges)
 
 **Files:**
+
 - Create: `apps/api/src/modules/employees/dto.ts`, `employees.service.ts`, `employees.controller.ts`, `employees.module.ts`
 - Modify: `apps/api/src/app.module.ts`
 - Test: `apps/api/test/employees.e2e.test.ts`
 
 **Interfaces:**
+
 - Produces routes under `/employees`: `GET /` (list, `?status=active|archived`), `POST /`, `PATCH /:id`, `DELETE /:id` (archive), `POST /:id/badges`, `DELETE /:id/badges/:badgeId`.
 - Produces response DTOs consumed by admin (Task 12/14) and kiosk bootstrap (Task 8):
+
   ```ts
-  export interface BadgeDto { id: string; badgeCode: string; label: string | null; issuedAt: Date; revokedAt: Date | null; }
-  export interface EmployeeDto { id: string; fullName: string; role: string | null; status: "active" | "archived"; badges: BadgeDto[]; createdAt: Date; }
+  export interface BadgeDto {
+    id: string;
+    badgeCode: string;
+    label: string | null;
+    issuedAt: Date;
+    revokedAt: Date | null;
+  }
+  export interface EmployeeDto {
+    id: string;
+    fullName: string;
+    role: string | null;
+    status: "active" | "archived";
+    badges: BadgeDto[];
+    createdAt: Date;
+  }
   ```
 
 - [ ] **Step 1: Write the failing e2e test** — `apps/api/test/employees.e2e.test.ts`. Copy the full harness (`loadEnv`, `setupAuth`, `mountAuth`, `signUpAndActivate`, cookie `agent`) from `products.e2e.test.ts`, then:
@@ -610,27 +700,40 @@ it("creates an employee, issues and revokes a badge", async () => {
   const agent = request.agent(app!.getHttpServer());
   await signUpAndActivate(agent);
 
-  const created = await agent.post("/employees").send({ fullName: "Смирнов Алексей", role: "оператор" }).expect(201);
+  const created = await agent
+    .post("/employees")
+    .send({ fullName: "Смирнов Алексей", role: "оператор" })
+    .expect(201);
   const id = created.body.id as string;
   expect(created.body.status).toBe("active");
 
-  const withBadge = await agent.post(`/employees/${id}/badges`)
-    .send({ badgeCode: "MARKIRO-BADGE-4412", label: "…4412" }).expect(201);
+  const withBadge = await agent
+    .post(`/employees/${id}/badges`)
+    .send({ badgeCode: "MARKIRO-BADGE-4412", label: "…4412" })
+    .expect(201);
   const badgeId = withBadge.body.badges[0].id as string;
   expect(withBadge.body.badges).toHaveLength(1);
 
   // Same active code again on another employee → 409.
   const other = await agent.post("/employees").send({ fullName: "Ким Е." }).expect(201);
-  await agent.post(`/employees/${other.body.id}/badges`).send({ badgeCode: "MARKIRO-BADGE-4412" }).expect(409);
+  await agent
+    .post(`/employees/${other.body.id}/badges`)
+    .send({ badgeCode: "MARKIRO-BADGE-4412" })
+    .expect(409);
 
   await agent.delete(`/employees/${id}/badges/${badgeId}`).expect(204);
   // After revoke the code can be reissued.
-  await agent.post(`/employees/${other.body.id}/badges`).send({ badgeCode: "MARKIRO-BADGE-4412" }).expect(201);
+  await agent
+    .post(`/employees/${other.body.id}/badges`)
+    .send({ badgeCode: "MARKIRO-BADGE-4412" })
+    .expect(201);
 });
 
 it("isolates employees across tenants", async () => {
-  const a = request.agent(app!.getHttpServer()); await signUpAndActivate(a);
-  const b = request.agent(app!.getHttpServer()); await signUpAndActivate(b);
+  const a = request.agent(app!.getHttpServer());
+  await signUpAndActivate(a);
+  const b = request.agent(app!.getHttpServer());
+  await signUpAndActivate(b);
   const created = await a.post("/employees").send({ fullName: "A" }).expect(201);
   await b.patch(`/employees/${created.body.id}`).send({ fullName: "hax" }).expect(404);
 });
@@ -670,38 +773,76 @@ export const issueBadgeSchema = z.object({
 });
 export type IssueBadgeDto = z.infer<typeof issueBadgeSchema>;
 
-export interface BadgeDto { id: string; badgeCode: string; label: string | null; issuedAt: Date; revokedAt: Date | null; }
-export interface EmployeeDto { id: string; fullName: string; role: string | null; status: "active" | "archived"; badges: BadgeDto[]; createdAt: Date; }
-export interface ListEmployeesResponseDto { items: EmployeeDto[]; }
+export interface BadgeDto {
+  id: string;
+  badgeCode: string;
+  label: string | null;
+  issuedAt: Date;
+  revokedAt: Date | null;
+}
+export interface EmployeeDto {
+  id: string;
+  fullName: string;
+  role: string | null;
+  status: "active" | "archived";
+  badges: BadgeDto[];
+  createdAt: Date;
+}
+export interface ListEmployeesResponseDto {
+  items: EmployeeDto[];
+}
 ```
 
 - [ ] **Step 4: Implement `employees.service.ts`** — inject `DB`; every op scoped by tenant. Aggregate active + revoked badges per employee (badges loaded and grouped in-memory). Key methods:
 
 ```ts
-import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { and, eq } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
 import type {
-  BadgeDto, CreateEmployeeDto, EmployeeDto, IssueBadgeDto,
-  ListEmployeesQueryDto, ListEmployeesResponseDto, UpdateEmployeeDto,
+  BadgeDto,
+  CreateEmployeeDto,
+  EmployeeDto,
+  IssueBadgeDto,
+  ListEmployeesQueryDto,
+  ListEmployeesResponseDto,
+  UpdateEmployeeDto,
 } from "./dto";
 
 @Injectable()
 export class EmployeesService {
   constructor(@Inject(DB) private readonly db: Db) {}
 
-  async listEmployees(tenantId: string, query: ListEmployeesQueryDto): Promise<ListEmployeesResponseDto> {
+  async listEmployees(
+    tenantId: string,
+    query: ListEmployeesQueryDto,
+  ): Promise<ListEmployeesResponseDto> {
     const conds = [eq(schema.employees.tenantId, tenantId)];
     if (query.status) conds.push(eq(schema.employees.status, query.status));
-    const rows = await this.db.select().from(schema.employees).where(and(...conds)).orderBy(schema.employees.fullName);
-    const badges = await this.badgesFor(tenantId, rows.map((r) => r.id));
+    const rows = await this.db
+      .select()
+      .from(schema.employees)
+      .where(and(...conds))
+      .orderBy(schema.employees.fullName);
+    const badges = await this.badgesFor(
+      tenantId,
+      rows.map((r) => r.id),
+    );
     return { items: rows.map((r) => this.toDto(r, badges)) };
   }
 
   async createEmployee(tenantId: string, dto: CreateEmployeeDto): Promise<EmployeeDto> {
-    const [row] = await this.db.insert(schema.employees)
-      .values({ tenantId, fullName: dto.fullName, role: dto.role ?? null }).returning();
+    const [row] = await this.db
+      .insert(schema.employees)
+      .values({ tenantId, fullName: dto.fullName, role: dto.role ?? null })
+      .returning();
     return this.toDto(row!, new Map());
   }
 
@@ -710,27 +851,39 @@ export class EmployeesService {
     if (dto.fullName !== undefined) set.fullName = dto.fullName;
     if (dto.role !== undefined) set.role = dto.role;
     if (dto.status !== undefined) set.status = dto.status;
-    const [row] = await this.db.update(schema.employees).set(set)
-      .where(and(eq(schema.employees.tenantId, tenantId), eq(schema.employees.id, id))).returning();
+    const [row] = await this.db
+      .update(schema.employees)
+      .set(set)
+      .where(and(eq(schema.employees.tenantId, tenantId), eq(schema.employees.id, id)))
+      .returning();
     if (!row) throw new NotFoundException();
     return this.toDto(row, await this.badgesFor(tenantId, [id]));
   }
 
   async archiveEmployee(tenantId: string, id: string): Promise<void> {
-    const [row] = await this.db.update(schema.employees).set({ status: "archived" })
-      .where(and(eq(schema.employees.tenantId, tenantId), eq(schema.employees.id, id))).returning();
+    const [row] = await this.db
+      .update(schema.employees)
+      .set({ status: "archived" })
+      .where(and(eq(schema.employees.tenantId, tenantId), eq(schema.employees.id, id)))
+      .returning();
     if (!row) throw new NotFoundException();
   }
 
   async issueBadge(tenantId: string, employeeId: string, dto: IssueBadgeDto): Promise<EmployeeDto> {
-    const [emp] = await this.db.select().from(schema.employees)
+    const [emp] = await this.db
+      .select()
+      .from(schema.employees)
       .where(and(eq(schema.employees.tenantId, tenantId), eq(schema.employees.id, employeeId)));
     if (!emp) throw new NotFoundException();
     try {
-      await this.db.insert(schema.employeeBadges).values({ tenantId, employeeId, badgeCode: dto.badgeCode, label: dto.label ?? null });
+      await this.db
+        .insert(schema.employeeBadges)
+        .values({ tenantId, employeeId, badgeCode: dto.badgeCode, label: dto.label ?? null });
     } catch (error) {
-      if ((error as { cause?: { code?: string } })?.cause?.code === "23505"
-        || (error as { code?: string })?.code === "23505") {
+      if (
+        (error as { cause?: { code?: string } })?.cause?.code === "23505" ||
+        (error as { code?: string })?.code === "23505"
+      ) {
         throw new ConflictException("Badge code already in use");
       }
       throw error;
@@ -739,29 +892,54 @@ export class EmployeesService {
   }
 
   async revokeBadge(tenantId: string, employeeId: string, badgeId: string): Promise<void> {
-    const [row] = await this.db.update(schema.employeeBadges).set({ revokedAt: new Date() })
-      .where(and(eq(schema.employeeBadges.tenantId, tenantId), eq(schema.employeeBadges.id, badgeId),
-        eq(schema.employeeBadges.employeeId, employeeId))).returning();
+    const [row] = await this.db
+      .update(schema.employeeBadges)
+      .set({ revokedAt: new Date() })
+      .where(
+        and(
+          eq(schema.employeeBadges.tenantId, tenantId),
+          eq(schema.employeeBadges.id, badgeId),
+          eq(schema.employeeBadges.employeeId, employeeId),
+        ),
+      )
+      .returning();
     if (!row) throw new NotFoundException();
   }
 
   private async badgesFor(tenantId: string, ids: string[]): Promise<Map<string, BadgeDto[]>> {
     const map = new Map<string, BadgeDto[]>();
     if (ids.length === 0) return map;
-    const rows = await this.db.select().from(schema.employeeBadges)
+    const rows = await this.db
+      .select()
+      .from(schema.employeeBadges)
       .where(eq(schema.employeeBadges.tenantId, tenantId));
     for (const b of rows) {
       if (!ids.includes(b.employeeId)) continue;
       const list = map.get(b.employeeId) ?? [];
-      list.push({ id: b.id, badgeCode: b.badgeCode, label: b.label, issuedAt: b.issuedAt, revokedAt: b.revokedAt });
+      list.push({
+        id: b.id,
+        badgeCode: b.badgeCode,
+        label: b.label,
+        issuedAt: b.issuedAt,
+        revokedAt: b.revokedAt,
+      });
       map.set(b.employeeId, list);
     }
     return map;
   }
 
-  private toDto(row: typeof schema.employees.$inferSelect, badges: Map<string, BadgeDto[]>): EmployeeDto {
-    return { id: row.id, fullName: row.fullName, role: row.role, status: row.status,
-      badges: badges.get(row.id) ?? [], createdAt: row.createdAt };
+  private toDto(
+    row: typeof schema.employees.$inferSelect,
+    badges: Map<string, BadgeDto[]>,
+  ): EmployeeDto {
+    return {
+      id: row.id,
+      fullName: row.fullName,
+      role: row.role,
+      status: row.status,
+      badges: badges.get(row.id) ?? [],
+      createdAt: row.createdAt,
+    };
   }
 }
 ```
@@ -785,24 +963,42 @@ git commit -m "feat(api): employees + badges module"
 ### Task 5: Kiosks module (+ allowlist + enrollment token)
 
 **Files:**
+
 - Create: `apps/api/src/modules/kiosks/{dto.ts,kiosks.service.ts,kiosks.controller.ts,kiosks.module.ts}`
 - Create: `apps/api/src/pickup/device-token.ts` — `generateDeviceToken(): string`, `hashDeviceToken(token: string): string` (sha256)
 - Modify: `apps/api/src/app.module.ts`
 - Test: `apps/api/test/kiosks.e2e.test.ts`
 
 **Interfaces:**
+
 - Produces routes under `/kiosks`: `GET /`, `POST /`, `PATCH /:id`, `DELETE /:id` (archive), `PUT /:id/products` (set allowlist `{ productIds: string[] }`), `POST /:id/enroll` (rotate token → returns `{ token }` plaintext ONCE).
 - Produces `hashDeviceToken` consumed by `KioskDeviceGuard` (Task 7). `KioskDto`:
+
   ```ts
-  export interface KioskDto { id: string; name: string; location: string | null; dayLimitPerEmployee: number; showPrices: boolean; status: "active" | "archived"; lastSeenAt: Date | null; enrolled: boolean; productIds: string[]; createdAt: Date; }
+  export interface KioskDto {
+    id: string;
+    name: string;
+    location: string | null;
+    dayLimitPerEmployee: number;
+    showPrices: boolean;
+    status: "active" | "archived";
+    lastSeenAt: Date | null;
+    enrolled: boolean;
+    productIds: string[];
+    createdAt: Date;
+  }
   ```
 
 - [ ] **Step 1: Write `device-token.ts`** (pure, unit-testable):
 
 ```ts
 import { createHash, randomBytes } from "node:crypto";
-export function generateDeviceToken(): string { return randomBytes(24).toString("base64url"); }
-export function hashDeviceToken(token: string): string { return createHash("sha256").update(token).digest("hex"); }
+export function generateDeviceToken(): string {
+  return randomBytes(24).toString("base64url");
+}
+export function hashDeviceToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
 ```
 
 - [ ] **Step 2: Write the failing e2e test** — `apps/api/test/kiosks.e2e.test.ts` (harness copied). Cover: create kiosk (`enrolled=false`), set allowlist to a seeded product id, enroll returns a token and flips `enrolled=true`, and allowlist rejects a foreign-tenant product id with 400 (`kiosk_products_tenant_product_fk`). Seed products via direct `db.insert(schema.products)` like `products.e2e.test.ts` does for related rows.
@@ -812,13 +1008,21 @@ it("creates a kiosk, sets its allowlist, and enrolls a device token", async () =
   const agent = request.agent(app!.getHttpServer());
   const tenantId = await signUpAndActivate(agent);
   const productId = randomUUID();
-  await db.insert(schema.products).values({ id: productId, tenantId, gtin14: "04650075195923", name: "Пиво" });
+  await db
+    .insert(schema.products)
+    .values({ id: productId, tenantId, gtin14: "04650075195923", name: "Пиво" });
 
-  const kiosk = await agent.post("/kiosks").send({ name: "Киоск-1", location: "Проходная", dayLimitPerEmployee: 5 }).expect(201);
+  const kiosk = await agent
+    .post("/kiosks")
+    .send({ name: "Киоск-1", location: "Проходная", dayLimitPerEmployee: 5 })
+    .expect(201);
   expect(kiosk.body.enrolled).toBe(false);
   const id = kiosk.body.id as string;
 
-  const withList = await agent.put(`/kiosks/${id}/products`).send({ productIds: [productId] }).expect(200);
+  const withList = await agent
+    .put(`/kiosks/${id}/products`)
+    .send({ productIds: [productId] })
+    .expect(200);
   expect(withList.body.productIds).toEqual([productId]);
 
   const enroll = await agent.post(`/kiosks/${id}/enroll`).send({}).expect(201);
@@ -851,11 +1055,13 @@ git commit -m "feat(api): kiosks module with allowlist and device enrollment"
 ### Task 6: Pickup reasons module (configurable write-off sub-reasons)
 
 **Files:**
+
 - Create: `apps/api/src/modules/pickup-reasons/{dto.ts,pickup-reasons.service.ts,pickup-reasons.controller.ts,pickup-reasons.module.ts}`
 - Modify: `apps/api/src/app.module.ts`
 - Test: `apps/api/test/pickup-reasons.e2e.test.ts`
 
 **Interfaces:**
+
 - Produces routes under `/pickup-reasons`: `GET /` (non-archived, ordered by `sortOrder`), `POST /`, `PATCH /:id`, `DELETE /:id` (archive). `ReasonDto { id: string; name: string; sortOrder: number; }`.
 - Consumed by admin (Task 15), kiosk bootstrap (Task 8), and order resolve/create validation (Task 7/9).
 
@@ -868,15 +1074,21 @@ git commit -m "feat(api): kiosks module with allowlist and device enrollment"
 ### Task 7: Kiosk device guard + order-number helper
 
 **Files:**
+
 - Create: `apps/api/src/tenancy/kiosk-device.guard.ts` — `KioskDeviceGuard`, `RequestWithKiosk`
 - Create: `apps/api/src/pickup/order-number.ts` — `nextOrderNo(...)`
 - Test: `apps/api/test/kiosk-device.guard.test.ts` (unit, no DB), `apps/api/test/order-number.test.ts` (unit, no DB — uses a fake tx)
 
 **Interfaces:**
+
 - Produces:
   ```ts
-  export interface RequestWithKiosk extends Request { tenantId?: string; kioskId?: string; }
-  @Injectable() export class KioskDeviceGuard implements CanActivate {}
+  export interface RequestWithKiosk extends Request {
+    tenantId?: string;
+    kioskId?: string;
+  }
+  @Injectable()
+  export class KioskDeviceGuard implements CanActivate {}
   // formats a seq + date into ORD-YY-NNNN; nextOrderNo runs the atomic upsert.
   export function formatOrderNo(seq: number, when: Date): string;
   export async function nextOrderNo(tx: DbLike, tenantId: string, when: Date): Promise<string>;
@@ -927,14 +1139,23 @@ Run: `pnpm --filter @markiro/api test -- order-number` → FAIL, then PASS after
 - [ ] **Step 3: Write `kiosk-device.guard.ts`**:
 
 ```ts
-import { Inject, Injectable, UnauthorizedException, type CanActivate, type ExecutionContext } from "@nestjs/common";
+import {
+  Inject,
+  Injectable,
+  UnauthorizedException,
+  type CanActivate,
+  type ExecutionContext,
+} from "@nestjs/common";
 import { and, eq } from "drizzle-orm";
 import type { Request } from "express";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../auth/auth.module";
 import { hashDeviceToken } from "../pickup/device-token";
 
-export interface RequestWithKiosk extends Request { tenantId?: string; kioskId?: string; }
+export interface RequestWithKiosk extends Request {
+  tenantId?: string;
+  kioskId?: string;
+}
 
 @Injectable()
 export class KioskDeviceGuard implements CanActivate {
@@ -945,12 +1166,22 @@ export class KioskDeviceGuard implements CanActivate {
     const header = req.headers["x-kiosk-token"];
     const token = Array.isArray(header) ? header[0] : header;
     if (!token) throw new UnauthorizedException();
-    const [kiosk] = await this.db.select().from(schema.kiosks)
-      .where(and(eq(schema.kiosks.deviceTokenHash, hashDeviceToken(token)), eq(schema.kiosks.status, "active")));
+    const [kiosk] = await this.db
+      .select()
+      .from(schema.kiosks)
+      .where(
+        and(
+          eq(schema.kiosks.deviceTokenHash, hashDeviceToken(token)),
+          eq(schema.kiosks.status, "active"),
+        ),
+      );
     if (!kiosk) throw new UnauthorizedException();
     req.tenantId = kiosk.tenantId;
     req.kioskId = kiosk.id;
-    await this.db.update(schema.kiosks).set({ lastSeenAt: new Date() }).where(eq(schema.kiosks.id, kiosk.id));
+    await this.db
+      .update(schema.kiosks)
+      .set({ lastSeenAt: new Date() })
+      .where(eq(schema.kiosks.id, kiosk.id));
     return true;
   }
 }
@@ -970,23 +1201,55 @@ git commit -m "feat(api): kiosk device guard and ORD-YY-NNNN order-number helper
 ### Task 8: Pickup orders service — kiosk create path + bootstrap
 
 **Files:**
+
 - Create: `apps/api/src/modules/pickup-orders/dto.ts`, `pickup-orders.service.ts`
 - Create: `apps/api/src/modules/kiosk/{kiosk.controller.ts,kiosk.module.ts}` (device-facing)
 - Modify: `apps/api/src/app.module.ts`
 - Test: `apps/api/test/kiosk-orders.e2e.test.ts`
 
 **Interfaces:**
+
 - Produces device routes (guarded by `KioskDeviceGuard`) under `/kiosk`: `GET /bootstrap` (offline cache payload), `POST /orders` (create/sync). Reads `req.tenantId!`/`req.kioskId!`.
 - `PickupOrdersService.createFromKiosk(tenantId, kioskId, dto): Promise<CreateOrderResultDto>` and `.bootstrap(tenantId, kioskId): Promise<KioskBootstrapDto>` — both consumed here; `list/detail/resolve/cancel/exportCodes` come in Tasks 9–11 on the same service.
   ```ts
-  export interface CreateOrderItemInput { rawKm: string; }
-  export interface CreateOrderDto { deviceSeq: number; badgeCode: string; reason: "buy" | "writeoff"; writeoffReasonId?: string | null; items: CreateOrderItemInput[]; createdAt?: string; }
-  export interface OrderConflict { rawKm: string; reason: "not_km" | "incomplete" | "unknown_product" | "not_allowed" | "duplicate" | "over_limit"; }
-  export interface CreateOrderResultDto { orderNo: string; status: "pending"; itemCount: number; conflicts: OrderConflict[]; }
-  export interface KioskBootstrapDto { config: { dayLimitPerEmployee: number; showPrices: boolean }; reasons: { id: string; name: string }[]; products: { id: string; gtin14: string; name: string; unitPrice: string | null; egaisCode: string | null }[]; employees: { id: string; fullName: string; role: string | null; badgeCodes: string[] }[]; }
+  export interface CreateOrderItemInput {
+    rawKm: string;
+  }
+  export interface CreateOrderDto {
+    deviceSeq: number;
+    badgeCode: string;
+    reason: "buy" | "writeoff";
+    writeoffReasonId?: string | null;
+    items: CreateOrderItemInput[];
+    createdAt?: string;
+  }
+  export interface OrderConflict {
+    rawKm: string;
+    reason:
+      "not_km" | "incomplete" | "unknown_product" | "not_allowed" | "duplicate" | "over_limit";
+  }
+  export interface CreateOrderResultDto {
+    orderNo: string;
+    status: "pending";
+    itemCount: number;
+    conflicts: OrderConflict[];
+  }
+  export interface KioskBootstrapDto {
+    config: { dayLimitPerEmployee: number; showPrices: boolean };
+    reasons: { id: string; name: string }[];
+    products: {
+      id: string;
+      gtin14: string;
+      name: string;
+      unitPrice: string | null;
+      egaisCode: string | null;
+    }[];
+    employees: { id: string; fullName: string; role: string | null; badgeCodes: string[] }[];
+  }
   ```
 
 Create-path server logic (authoritative; the kiosk also does a best-effort local pass in Plan B):
+
 1. Idempotency: if an order already exists for `(tenantId, kioskId, deviceSeq)`, return it unchanged.
 2. Resolve `badgeCode` → active employee (`revoked_at is null`). Unknown → `UnauthorizedException` (kiosk shows "bad badge").
 3. If `reason === "writeoff"`, require a non-archived `writeoffReasonId` of this tenant (else `BadRequestException`).
@@ -1000,9 +1263,14 @@ Create-path server logic (authoritative; the kiosk also does a best-effort local
 ```ts
 it("creates a pending order from valid KM scans and echoes the order number", async () => {
   const res = await request(app!.getHttpServer())
-    .post("/kiosk/orders").set("x-kiosk-token", TOKEN)
-    .send({ deviceSeq: 1, badgeCode: BADGE, reason: "buy",
-      items: [{ rawKm: `01${GTIN}21KYC9X7MQ93Abcd` }] })
+    .post("/kiosk/orders")
+    .set("x-kiosk-token", TOKEN)
+    .send({
+      deviceSeq: 1,
+      badgeCode: BADGE,
+      reason: "buy",
+      items: [{ rawKm: `01${GTIN}21KYC9X7MQ93Abcd` }],
+    })
     .expect(201);
   expect(res.body.orderNo).toMatch(/^ORD-\d{2}-\d{4,}$/);
   expect(res.body.itemCount).toBe(1);
@@ -1010,25 +1278,52 @@ it("creates a pending order from valid KM scans and echoes the order number", as
 });
 
 it("is idempotent on (kiosk, deviceSeq)", async () => {
-  const body = { deviceSeq: 7, badgeCode: BADGE, reason: "buy", items: [{ rawKm: `01${GTIN}21ZZZ193Abcd` }] };
-  const a = await request(app!.getHttpServer()).post("/kiosk/orders").set("x-kiosk-token", TOKEN).send(body).expect(201);
-  const b = await request(app!.getHttpServer()).post("/kiosk/orders").set("x-kiosk-token", TOKEN).send(body).expect(201);
+  const body = {
+    deviceSeq: 7,
+    badgeCode: BADGE,
+    reason: "buy",
+    items: [{ rawKm: `01${GTIN}21ZZZ193Abcd` }],
+  };
+  const a = await request(app!.getHttpServer())
+    .post("/kiosk/orders")
+    .set("x-kiosk-token", TOKEN)
+    .send(body)
+    .expect(201);
+  const b = await request(app!.getHttpServer())
+    .post("/kiosk/orders")
+    .set("x-kiosk-token", TOKEN)
+    .send(body)
+    .expect(201);
   expect(b.body.orderNo).toBe(a.body.orderNo);
 });
 
 it("flags a code that is not in the kiosk allowlist", async () => {
-  const res = await request(app!.getHttpServer()).post("/kiosk/orders").set("x-kiosk-token", TOKEN)
-    .send({ deviceSeq: 2, badgeCode: BADGE, reason: "buy", items: [{ rawKm: `0199999999999994 21S193Abcd` }] }).expect(201);
+  const res = await request(app!.getHttpServer())
+    .post("/kiosk/orders")
+    .set("x-kiosk-token", TOKEN)
+    .send({
+      deviceSeq: 2,
+      badgeCode: BADGE,
+      reason: "buy",
+      items: [{ rawKm: `0199999999999994 21S193Abcd` }],
+    })
+    .expect(201);
   expect(res.body.conflicts[0].reason).toMatch(/unknown_product|not_allowed/);
 });
 
 it("rejects an unknown badge", async () => {
-  await request(app!.getHttpServer()).post("/kiosk/orders").set("x-kiosk-token", TOKEN)
-    .send({ deviceSeq: 3, badgeCode: "NOPE", reason: "buy", items: [] }).expect(401);
+  await request(app!.getHttpServer())
+    .post("/kiosk/orders")
+    .set("x-kiosk-token", TOKEN)
+    .send({ deviceSeq: 3, badgeCode: "NOPE", reason: "buy", items: [] })
+    .expect(401);
 });
 
 it("bootstrap returns config, reasons, allowlist products and employees with badge codes", async () => {
-  const res = await request(app!.getHttpServer()).get("/kiosk/bootstrap").set("x-kiosk-token", TOKEN).expect(200);
+  const res = await request(app!.getHttpServer())
+    .get("/kiosk/bootstrap")
+    .set("x-kiosk-token", TOKEN)
+    .expect(200);
   expect(res.body.config.dayLimitPerEmployee).toBeGreaterThan(0);
   expect(res.body.products[0].gtin14).toBe(GTIN);
   expect(res.body.employees[0].badgeCodes).toContain(BADGE);
@@ -1055,16 +1350,42 @@ git commit -m "feat(api): kiosk device endpoints — bootstrap and order create/
 ### Task 9: Pickup orders — admin list/detail/resolve/cancel
 
 **Files:**
+
 - Create: `apps/api/src/modules/pickup-orders/{pickup-orders.controller.ts,pickup-orders.module.ts}` (admin, session-guarded)
 - Modify: `apps/api/src/modules/pickup-orders/dto.ts` (add list/detail/resolve DTOs), `pickup-orders.service.ts` (add methods), `apps/api/src/app.module.ts`
 - Test: `apps/api/test/pickup-orders.e2e.test.ts`
 
 **Interfaces:**
+
 - Produces admin routes under `/pickup-orders` (`@UseGuards(TenantGuard)`): `GET /` (`?status=&reason=&from=&to=`), `GET /:id` (detail with items), `POST /:id/resolve` (`{ action: "punch" | "writeoff", receiptNo?, actNo?, writeoffReasonId? }`), `POST /:id/cancel`.
+
   ```ts
-  export interface PickupOrderRowDto { id: string; orderNo: string; employeeName: string; kioskName: string; reason: "buy" | "writeoff"; writeoffReasonName: string | null; itemCount: number; totalPrice: string | null; status: "pending" | "punched" | "writtenoff" | "cancelled"; createdAt: Date; }
-  export interface PickupOrderItemDto { id: string; gtin14: string; serial: string; rawKm: string; productName: string; unitPrice: string | null; }
-  export interface PickupOrderDetailDto extends PickupOrderRowDto { employeeBadgeCode: string | null; items: PickupOrderItemDto[]; receiptNo: string | null; actNo: string | null; }
+  export interface PickupOrderRowDto {
+    id: string;
+    orderNo: string;
+    employeeName: string;
+    kioskName: string;
+    reason: "buy" | "writeoff";
+    writeoffReasonName: string | null;
+    itemCount: number;
+    totalPrice: string | null;
+    status: "pending" | "punched" | "writtenoff" | "cancelled";
+    createdAt: Date;
+  }
+  export interface PickupOrderItemDto {
+    id: string;
+    gtin14: string;
+    serial: string;
+    rawKm: string;
+    productName: string;
+    unitPrice: string | null;
+  }
+  export interface PickupOrderDetailDto extends PickupOrderRowDto {
+    employeeBadgeCode: string | null;
+    items: PickupOrderItemDto[];
+    receiptNo: string | null;
+    actNo: string | null;
+  }
   ```
 
 - [ ] **Step 1: Failing e2e test** — create an order via the kiosk path (reuse the Task 8 seed helpers), then as the admin agent: list filters by `status=pending`/`reason=buy`; `resolve` with `action=punch, receiptNo` flips status to `punched` and sets `resolvedAt`; `cancel` on a fresh pending order flips to `cancelled` AND voids its items (assert the same code can then be re-scanned). Cross-tenant `GET /:id` → 404.
@@ -1089,18 +1410,23 @@ git commit -m "feat(api): kiosk device endpoints — bootstrap and order create/
 ### Task 10: Bulk code export (txt UTF-8)
 
 **Files:**
+
 - Modify: `apps/api/src/modules/pickup-orders/{dto.ts,pickup-orders.service.ts,pickup-orders.controller.ts}`
 - Test: `apps/api/test/pickup-export.e2e.test.ts`
 
 **Interfaces:**
+
 - Produces `POST /pickup-orders/export` (`{ orderIds: string[] }`) → `text/plain; charset=utf-8`, one `raw_km` per line (GS byte preserved), `Content-Disposition: attachment; filename="codes-YYYYMMDD.txt"`.
 - `PickupOrdersService.exportCodes(tenantId, orderIds): Promise<string>`.
 
 - [ ] **Step 1: Failing e2e test** — create two orders, `POST /pickup-orders/export` with both ids, assert the response body has one line per item and the content-type is `text/plain`. Cross-tenant ids are silently excluded (only same-tenant items exported).
 
 ```ts
-const res = await agent.post("/pickup-orders/export").send({ orderIds: [id1, id2] })
-  .expect(200).expect("Content-Type", /text\/plain/);
+const res = await agent
+  .post("/pickup-orders/export")
+  .send({ orderIds: [id1, id2] })
+  .expect(200)
+  .expect("Content-Type", /text\/plain/);
 expect(res.text.split("\n").filter(Boolean).length).toBe(totalItems);
 ```
 
@@ -1129,11 +1455,13 @@ async export(@Req() req: RequestWithTenant, @Res({ passthrough: true }) res: Res
 ### Task 11: Printed slip (A4 HTML)
 
 **Files:**
+
 - Create: `apps/api/src/pickup/slip.ts` — `renderPickupSlipHtml(data): string`
 - Modify: `apps/api/src/modules/pickup-orders/{pickup-orders.service.ts,pickup-orders.controller.ts}`
 - Test: `apps/api/test/pickup-slip.e2e.test.ts`, `apps/api/test/slip.test.ts` (unit, no DB)
 
 **Interfaces:**
+
 - Produces `GET /pickup-orders/:id/slip` → `text/html; charset=utf-8` — a print-ready A4 page (mirrors `prototypes/pickup-slip.dc.html`) with per-item DataMatrix (13mm), a badge QR (22mm), and a Code128 of the order number in the footer. `renderPickupSlipHtml(data: PickupSlipData): string` is pure (unit-tested); `PickupOrdersService.slipData(tenantId, id)` gathers the data.
 
 - [ ] **Step 1: Unit-test the pure renderer** — `apps/api/test/slip.test.ts`: feed a `PickupSlipData` fixture with 2 items, assert the HTML contains the order number, both product names, three `<svg` occurrences minimum (2 DataMatrix + 1 Code128), and `@page` A4 CSS.
@@ -1150,6 +1478,7 @@ async export(@Req() req: RequestWithTenant, @Res({ passthrough: true }) res: Res
 ### Task 12: Product price / EGAIS fields in the products API
 
 **Files:**
+
 - Modify: `apps/api/src/modules/products/dto.ts`, `products.service.ts`
 - Test: extend `apps/api/test/products.e2e.test.ts`
 
@@ -1170,6 +1499,7 @@ async export(@Req() req: RequestWithTenant, @Res({ passthrough: true }) res: Res
 ### Task 13: Admin API layer + i18n scaffolding for «Для себя»
 
 **Files:**
+
 - Create: `apps/admin/src/pages/pickup/api.ts`, `apps/admin/src/pages/employees/api.ts`, `apps/admin/src/pages/kiosks/api.ts`
 - Modify: `apps/admin/src/i18n/ru.json`, `apps/admin/src/i18n/en.json`
 - Test: `apps/admin/test/pickup-api.test.tsx`
@@ -1186,6 +1516,7 @@ async export(@Req() req: RequestWithTenant, @Res({ passthrough: true }) res: Res
 ### Task 14: «Для себя» orders list (свод) + filters + bulk export + nav badge
 
 **Files:**
+
 - Create: `apps/admin/src/pages/pickup/index.tsx`
 - Modify: `apps/admin/src/app.tsx` (route `pickup`), `apps/admin/src/layout/AppShell.tsx` (nav item + pending badge)
 - Test: `apps/admin/test/pickup.test.tsx`
@@ -1200,6 +1531,7 @@ async export(@Req() req: RequestWithTenant, @Res({ passthrough: true }) res: Res
 ### Task 15: Order detail card + resolve/cancel/print actions
 
 **Files:**
+
 - Create: `apps/admin/src/pages/pickup/OrderDetail.tsx`
 - Modify: `apps/admin/src/app.tsx` (already routed in Task 14)
 - Test: `apps/admin/test/pickup-detail.test.tsx`
@@ -1213,6 +1545,7 @@ async export(@Req() req: RequestWithTenant, @Res({ passthrough: true }) res: Res
 ### Task 16: Employees management page
 
 **Files:**
+
 - Create: `apps/admin/src/pages/employees/index.tsx`, `EmployeeForm.tsx`
 - Modify: `apps/admin/src/app.tsx` (route), `apps/admin/src/layout/AppShell.tsx` (nav item)
 - Test: `apps/admin/test/employees.test.tsx`
@@ -1226,6 +1559,7 @@ async export(@Req() req: RequestWithTenant, @Res({ passthrough: true }) res: Res
 ### Task 17: Kiosk settings page + reasons editor
 
 **Files:**
+
 - Create: `apps/admin/src/pages/kiosks/index.tsx`, `KioskForm.tsx`, `ReasonsEditor.tsx`
 - Modify: `apps/admin/src/app.tsx` (route), `apps/admin/src/layout/AppShell.tsx` (nav item)
 - Test: `apps/admin/test/kiosks.test.tsx`
@@ -1239,6 +1573,7 @@ async export(@Req() req: RequestWithTenant, @Res({ passthrough: true }) res: Res
 ### Task 18: Product form — price & EGAIS fields
 
 **Files:**
+
 - Modify: `apps/admin/src/pages/catalog/ProductForm.tsx`, `apps/admin/src/i18n/{ru,en}.json`
 - Test: extend `apps/admin/test/catalog.test.tsx`
 

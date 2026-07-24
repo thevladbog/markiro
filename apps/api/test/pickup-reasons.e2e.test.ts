@@ -79,8 +79,14 @@ describe.skipIf(!ready)("pickup-reasons e2e", () => {
     expect(marketing.body.id).toBeDefined();
     expect(marketing.body.archived).toBeUndefined();
 
-    const damage = await agent.post("/pickup-reasons").send({ name: "Бой", sortOrder: 1 }).expect(201);
-    const gift = await agent.post("/pickup-reasons").send({ name: "Подарок", sortOrder: 1 }).expect(201);
+    const damage = await agent
+      .post("/pickup-reasons")
+      .send({ name: "Бой", sortOrder: 1 })
+      .expect(201);
+    const gift = await agent
+      .post("/pickup-reasons")
+      .send({ name: "Подарок", sortOrder: 1 })
+      .expect(201);
 
     const listed = await agent.get("/pickup-reasons").expect(200);
     expect(listed.body.items).toHaveLength(3);
@@ -127,11 +133,18 @@ describe.skipIf(!ready)("pickup-reasons e2e", () => {
     const agent = request.agent(app!.getHttpServer());
     await signUpAndActivate(agent);
 
-    const created = await agent.post("/pickup-reasons").send({ name: "Empty Patch Тест" }).expect(201);
+    const created = await agent
+      .post("/pickup-reasons")
+      .send({ name: "Empty Patch Тест" })
+      .expect(201);
     const id = created.body.id as string;
 
     const patched = await agent.patch(`/pickup-reasons/${id}`).send({}).expect(200);
-    expect(patched.body).toMatchObject({ id, name: created.body.name, sortOrder: created.body.sortOrder });
+    expect(patched.body).toMatchObject({
+      id,
+      name: created.body.name,
+      sortOrder: created.body.sortOrder,
+    });
 
     await agent.patch(`/pickup-reasons/${randomUUID()}`).send({}).expect(404);
   });

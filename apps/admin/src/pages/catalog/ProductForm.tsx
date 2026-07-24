@@ -59,7 +59,10 @@ const productFormSchema = z.object({
     .string()
     .trim()
     .optional()
-    .refine((v) => !v || /^\d+([.,]\d{1,2})?$/.test(v), "pages.catalog.form.errors.unitPriceInvalid"),
+    .refine(
+      (v) => !v || /^\d+([.,]\d{1,2})?$/.test(v),
+      "pages.catalog.form.errors.unitPriceInvalid",
+    ),
   egaisCode: z.string().trim().optional(),
   defaultCounterpartyId: z.string().trim().optional(),
   defaultLabelTemplateId: z.string().trim().optional(),

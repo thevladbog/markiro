@@ -53,16 +53,36 @@ describe.skipIf(!ready)("pickup order printed slip e2e", () => {
     tenantId = await signUpAndActivate(agent);
 
     employeeId = randomUUID();
-    await db.insert(schema.employees).values({ id: employeeId, tenantId, fullName: "Смирнов Алексей Петрович", role: "оператор линии" });
+    await db
+      .insert(schema.employees)
+      .values({
+        id: employeeId,
+        tenantId,
+        fullName: "Смирнов Алексей Петрович",
+        role: "оператор линии",
+      });
     await db.insert(schema.employeeBadges).values({ tenantId, employeeId, badgeCode: BADGE });
 
     productId = randomUUID();
-    await db.insert(schema.products).values({ id: productId, tenantId, gtin14: GTIN, name: "Жигулёвское светлое 0,5 л", unitPrice: "52.00" });
+    await db
+      .insert(schema.products)
+      .values({
+        id: productId,
+        tenantId,
+        gtin14: GTIN,
+        name: "Жигулёвское светлое 0,5 л",
+        unitPrice: "52.00",
+      });
 
     kioskId = randomUUID();
-    await db.insert(schema.kiosks).values({ id: kioskId, tenantId, name: "Киоск-1", dayLimitPerEmployee: 20 });
+    await db
+      .insert(schema.kiosks)
+      .values({ id: kioskId, tenantId, name: "Киоск-1", dayLimitPerEmployee: 20 });
     await db.insert(schema.kioskProducts).values({ tenantId, kioskId, productId });
-    await db.update(schema.kiosks).set({ deviceTokenHash: hashDeviceToken(TOKEN) }).where(eq(schema.kiosks.id, kioskId));
+    await db
+      .update(schema.kiosks)
+      .set({ deviceTokenHash: hashDeviceToken(TOKEN) })
+      .where(eq(schema.kiosks.id, kioskId));
   });
 
   afterAll(async () => {
@@ -90,10 +110,7 @@ describe.skipIf(!ready)("pickup order printed slip e2e", () => {
 
   async function signUpAndActivate(a: ReturnType<typeof request.agent>): Promise<string> {
     const orgId = await signUpWithInactiveOrg(a);
-    await a
-      .post("/api/auth/organization/set-active")
-      .send({ organizationId: orgId })
-      .expect(200);
+    await a.post("/api/auth/organization/set-active").send({ organizationId: orgId }).expect(200);
     return orgId;
   }
 
@@ -101,16 +118,21 @@ describe.skipIf(!ready)("pickup order printed slip e2e", () => {
     const [row] = await db
       .select({ id: schema.pickupOrders.id })
       .from(schema.pickupOrders)
-      .where(and(eq(schema.pickupOrders.tenantId, tenantId), eq(schema.pickupOrders.orderNo, orderNo)));
+      .where(
+        and(eq(schema.pickupOrders.tenantId, tenantId), eq(schema.pickupOrders.orderNo, orderNo)),
+      );
     if (!row) throw new Error(`No order found for orderNo ${orderNo}`);
     return row.id;
   }
 
   it("GET /pickup-orders/:id/slip returns a print-ready A4 HTML page containing the order number", async () => {
     const created = await request(app!.getHttpServer())
-      .post("/kiosk/orders").set("x-kiosk-token", TOKEN)
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", TOKEN)
       .send({
-        deviceSeq: 1, badgeCode: BADGE, reason: "buy",
+        deviceSeq: 1,
+        badgeCode: BADGE,
+        reason: "buy",
         items: [{ rawKm: `01${GTIN}21SLIP1${GS}93Abcd` }],
       })
       .expect(201);
@@ -131,9 +153,12 @@ describe.skipIf(!ready)("pickup order printed slip e2e", () => {
 
   it("cancelled order's slip has no item rows and no stale total (Итого stays consistent with the empty table)", async () => {
     const created = await request(app!.getHttpServer())
-      .post("/kiosk/orders").set("x-kiosk-token", TOKEN)
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", TOKEN)
       .send({
-        deviceSeq: 2, badgeCode: BADGE, reason: "buy",
+        deviceSeq: 2,
+        badgeCode: BADGE,
+        reason: "buy",
         items: [{ rawKm: `01${GTIN}21CANCELSLIP${GS}93Abcd` }],
       })
       .expect(201);

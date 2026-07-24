@@ -187,22 +187,19 @@ describe("OrderDetailPage", () => {
   });
 
   it("shows an Alert instead of crashing when the order 404s", async () => {
-    const fetchMock = vi.fn(async () =>
-      jsonResponse(404, { message: "Not found" }),
-    );
+    const fetchMock = vi.fn(async () => jsonResponse(404, { message: "Not found" }));
     renderPage(fetchMock);
 
     expect(
-      await screen.findByText(
-        "Не удалось загрузить заявку. Обновите страницу или войдите заново.",
-      ),
+      await screen.findByText("Не удалось загрузить заявку. Обновите страницу или войдите заново."),
     ).toBeDefined();
   });
 
   it("disables all actions when the order is not pending", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       const path = String(url);
-      if (path === "/api/pickup-orders/o1") return jsonResponse(200, { ...ORDER, status: "punched" });
+      if (path === "/api/pickup-orders/o1")
+        return jsonResponse(200, { ...ORDER, status: "punched" });
       if (path === "/api/pickup-reasons") return jsonResponse(200, REASONS);
       throw new Error(`unexpected fetch: ${path}`);
     });

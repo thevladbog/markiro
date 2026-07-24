@@ -566,10 +566,7 @@ describe.skipIf(!ready)("products e2e", () => {
     });
 
     // PATCH unitPrice to null clears it
-    const patchRes = await agent
-      .patch(`/products/${id}`)
-      .send({ unitPrice: null })
-      .expect(200);
+    const patchRes = await agent.patch(`/products/${id}`).send({ unitPrice: null }).expect(200);
     expect(patchRes.body).toMatchObject({
       unitPrice: null,
       egaisCode: "0123456789", // should remain unchanged

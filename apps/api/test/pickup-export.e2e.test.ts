@@ -53,16 +53,25 @@ describe.skipIf(!ready)("pickup orders export e2e", () => {
     tenantId = await signUpAndActivate(agent);
 
     employeeId = randomUUID();
-    await db.insert(schema.employees).values({ id: employeeId, tenantId, fullName: "Иван Иванов", role: "оператор" });
+    await db
+      .insert(schema.employees)
+      .values({ id: employeeId, tenantId, fullName: "Иван Иванов", role: "оператор" });
     await db.insert(schema.employeeBadges).values({ tenantId, employeeId, badgeCode: BADGE });
 
     productId = randomUUID();
-    await db.insert(schema.products).values({ id: productId, tenantId, gtin14: GTIN, name: "Товар", unitPrice: "99.90" });
+    await db
+      .insert(schema.products)
+      .values({ id: productId, tenantId, gtin14: GTIN, name: "Товар", unitPrice: "99.90" });
 
     kioskId = randomUUID();
-    await db.insert(schema.kiosks).values({ id: kioskId, tenantId, name: "Киоск А", dayLimitPerEmployee: 20 });
+    await db
+      .insert(schema.kiosks)
+      .values({ id: kioskId, tenantId, name: "Киоск А", dayLimitPerEmployee: 20 });
     await db.insert(schema.kioskProducts).values({ tenantId, kioskId, productId });
-    await db.update(schema.kiosks).set({ deviceTokenHash: hashDeviceToken(TOKEN) }).where(eq(schema.kiosks.id, kioskId));
+    await db
+      .update(schema.kiosks)
+      .set({ deviceTokenHash: hashDeviceToken(TOKEN) })
+      .where(eq(schema.kiosks.id, kioskId));
   });
 
   afterAll(async () => {
@@ -90,14 +99,15 @@ describe.skipIf(!ready)("pickup orders export e2e", () => {
 
   async function signUpAndActivate(a: ReturnType<typeof request.agent>): Promise<string> {
     const orgId = await signUpWithInactiveOrg(a);
-    await a
-      .post("/api/auth/organization/set-active")
-      .send({ organizationId: orgId })
-      .expect(200);
+    await a.post("/api/auth/organization/set-active").send({ organizationId: orgId }).expect(200);
     return orgId;
   }
 
-  function scan(deviceSeq: number, rawKm: string, extra: Record<string, unknown> = {}): request.Test {
+  function scan(
+    deviceSeq: number,
+    rawKm: string,
+    extra: Record<string, unknown> = {},
+  ): request.Test {
     return request(app!.getHttpServer())
       .post("/kiosk/orders")
       .set("x-kiosk-token", TOKEN)
@@ -108,7 +118,9 @@ describe.skipIf(!ready)("pickup orders export e2e", () => {
     const [row] = await db
       .select({ id: schema.pickupOrders.id })
       .from(schema.pickupOrders)
-      .where(and(eq(schema.pickupOrders.tenantId, tenantId), eq(schema.pickupOrders.orderNo, orderNo)));
+      .where(
+        and(eq(schema.pickupOrders.tenantId, tenantId), eq(schema.pickupOrders.orderNo, orderNo)),
+      );
     if (!row) throw new Error(`No order found for orderNo ${orderNo}`);
     return row.id;
   }
@@ -194,10 +206,7 @@ describe.skipIf(!ready)("pickup orders export e2e", () => {
 
   it("validates orderIds schema: min 1, uuid format", async () => {
     // Empty array should fail validation
-    await agent
-      .post("/pickup-orders/export")
-      .send({ orderIds: [] })
-      .expect(400);
+    await agent.post("/pickup-orders/export").send({ orderIds: [] }).expect(400);
 
     // Non-uuid string should fail validation
     await agent

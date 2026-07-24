@@ -129,7 +129,9 @@ export function KioskForm({
       open={open}
       onClose={onClose}
       closeLabel={t("common.close")}
-      title={mode === "create" ? t("pages.kiosks.form.createTitle") : t("pages.kiosks.form.editTitle")}
+      title={
+        mode === "create" ? t("pages.kiosks.form.createTitle") : t("pages.kiosks.form.editTitle")
+      }
       footer={
         <>
           <Button type="button" variant="secondary" onClick={onClose}>

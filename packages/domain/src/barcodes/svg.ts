@@ -50,5 +50,12 @@ export function renderQrSvg(text: string): string {
 }
 
 export function renderCode128Svg(text: string): string {
-  return bwipjs.toSVG({ bcid: "code128", text, scale: 2, height: 10, includetext: true, textxalign: "center" });
+  return bwipjs.toSVG({
+    bcid: "code128",
+    text,
+    scale: 2,
+    height: 10,
+    includetext: true,
+    textxalign: "center",
+  });
 }

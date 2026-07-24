@@ -20,7 +20,11 @@ function fixture(overrides: Partial<PickupSlipData> = {}): PickupSlipData {
     orderNo: "ORD-26-0042",
     createdAt: new Date("2026-07-23T14:05:00.000Z"),
     org: { name: "ООО «Пивзавод „Заря“»", inn: "5029087641" },
-    employee: { fullName: "Смирнов Алексей Петрович", role: "оператор линии", badgeCode: "MARKIRO-BADGE-4412" },
+    employee: {
+      fullName: "Смирнов Алексей Петрович",
+      role: "оператор линии",
+      badgeCode: "MARKIRO-BADGE-4412",
+    },
     kioskName: "Киоск-1, проходная цеха",
     reason: "buy",
     writeoffReasonName: null,
@@ -79,7 +83,9 @@ describe("renderPickupSlipHtml", () => {
   });
 
   it("renders gracefully with no org profile and no active badge", () => {
-    const html = renderPickupSlipHtml(fixture({ org: null, employee: { fullName: "Без бейджа", role: null, badgeCode: null } }));
+    const html = renderPickupSlipHtml(
+      fixture({ org: null, employee: { fullName: "Без бейджа", role: null, badgeCode: null } }),
+    );
     expect(html).toContain("Без бейджа");
     const svgCount = (html.match(/<svg/g) ?? []).length;
     // No badge -> no QR block; still 2 DataMatrix + 1 Code128.

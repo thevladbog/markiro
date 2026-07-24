@@ -1,13 +1,13 @@
-import { Inject, Injectable, InternalServerErrorException, NotFoundException } from "@nestjs/common";
+import {
+  Inject,
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+} from "@nestjs/common";
 import { and, asc, eq } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
-import type {
-  CreateReasonDto,
-  ListReasonsResponseDto,
-  ReasonDto,
-  UpdateReasonDto,
-} from "./dto";
+import type { CreateReasonDto, ListReasonsResponseDto, ReasonDto, UpdateReasonDto } from "./dto";
 
 @Injectable()
 export class PickupReasonsService {
@@ -71,10 +71,7 @@ export class PickupReasonsService {
       .update(schema.pickupOrderReasons)
       .set(set)
       .where(
-        and(
-          eq(schema.pickupOrderReasons.tenantId, tenantId),
-          eq(schema.pickupOrderReasons.id, id),
-        ),
+        and(eq(schema.pickupOrderReasons.tenantId, tenantId), eq(schema.pickupOrderReasons.id, id)),
       )
       .returning();
 
@@ -88,10 +85,7 @@ export class PickupReasonsService {
       .update(schema.pickupOrderReasons)
       .set({ archived: true })
       .where(
-        and(
-          eq(schema.pickupOrderReasons.tenantId, tenantId),
-          eq(schema.pickupOrderReasons.id, id),
-        ),
+        and(eq(schema.pickupOrderReasons.tenantId, tenantId), eq(schema.pickupOrderReasons.id, id)),
       )
       .returning();
 

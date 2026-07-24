@@ -1,4 +1,10 @@
-import { Inject, Injectable, UnauthorizedException, type CanActivate, type ExecutionContext } from "@nestjs/common";
+import {
+  Inject,
+  Injectable,
+  UnauthorizedException,
+  type CanActivate,
+  type ExecutionContext,
+} from "@nestjs/common";
 import { and, eq } from "drizzle-orm";
 import type { Request } from "express";
 import { schema, type Db } from "@markiro/db";
@@ -31,12 +37,20 @@ export class KioskDeviceGuard implements CanActivate {
     const [kiosk] = await this.db
       .select()
       .from(schema.kiosks)
-      .where(and(eq(schema.kiosks.deviceTokenHash, hashDeviceToken(token)), eq(schema.kiosks.status, "active")));
+      .where(
+        and(
+          eq(schema.kiosks.deviceTokenHash, hashDeviceToken(token)),
+          eq(schema.kiosks.status, "active"),
+        ),
+      );
     if (!kiosk) throw new UnauthorizedException();
 
     req.tenantId = kiosk.tenantId;
     req.kioskId = kiosk.id;
-    await this.db.update(schema.kiosks).set({ lastSeenAt: new Date() }).where(eq(schema.kiosks.id, kiosk.id));
+    await this.db
+      .update(schema.kiosks)
+      .set({ lastSeenAt: new Date() })
+      .where(eq(schema.kiosks.id, kiosk.id));
     return true;
   }
 }

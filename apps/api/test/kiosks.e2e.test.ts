@@ -74,7 +74,9 @@ describe.skipIf(!ready)("kiosks e2e", () => {
     const agent = request.agent(app!.getHttpServer());
     const tenantId = await signUpAndActivate(agent);
     const productId = randomUUID();
-    await db.insert(schema.products).values({ id: productId, tenantId, gtin14: "04650075195923", name: "Пиво" });
+    await db
+      .insert(schema.products)
+      .values({ id: productId, tenantId, gtin14: "04650075195923", name: "Пиво" });
 
     const kiosk = await agent
       .post("/kiosks")
@@ -139,7 +141,10 @@ describe.skipIf(!ready)("kiosks e2e", () => {
     const kiosk = await agent.post("/kiosks").send({ name: "Киоск-3" }).expect(201);
     const id = kiosk.body.id as string;
 
-    await agent.put(`/kiosks/${id}/products`).send({ productIds: [productA] }).expect(200);
+    await agent
+      .put(`/kiosks/${id}/products`)
+      .send({ productIds: [productA] })
+      .expect(200);
     const replaced = await agent
       .put(`/kiosks/${id}/products`)
       .send({ productIds: [productB] })
@@ -151,7 +156,9 @@ describe.skipIf(!ready)("kiosks e2e", () => {
     const agent = request.agent(app!.getHttpServer());
     const tenantId = await signUpAndActivate(agent);
     const productId = randomUUID();
-    await db.insert(schema.products).values({ id: productId, tenantId, gtin14: "04650075195927", name: "Product C" });
+    await db
+      .insert(schema.products)
+      .values({ id: productId, tenantId, gtin14: "04650075195927", name: "Product C" });
 
     const kiosk = await agent.post("/kiosks").send({ name: "Киоск-4" }).expect(201);
     const id = kiosk.body.id as string;

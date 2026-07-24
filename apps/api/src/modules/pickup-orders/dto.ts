@@ -38,7 +38,13 @@ export interface CreateOrderResultDto {
 export interface KioskBootstrapDto {
   config: { dayLimitPerEmployee: number; showPrices: boolean };
   reasons: { id: string; name: string }[];
-  products: { id: string; gtin14: string; name: string; unitPrice: string | null; egaisCode: string | null }[];
+  products: {
+    id: string;
+    gtin14: string;
+    name: string;
+    unitPrice: string | null;
+    egaisCode: string | null;
+  }[];
   employees: { id: string; fullName: string; role: string | null; badgeCodes: string[] }[];
 }
 

@@ -67,27 +67,40 @@ describe.skipIf(!ready)("employees e2e", () => {
     const agent = request.agent(app!.getHttpServer());
     await signUpAndActivate(agent);
 
-    const created = await agent.post("/employees").send({ fullName: "Смирнов Алексей", role: "оператор" }).expect(201);
+    const created = await agent
+      .post("/employees")
+      .send({ fullName: "Смирнов Алексей", role: "оператор" })
+      .expect(201);
     const id = created.body.id as string;
     expect(created.body.status).toBe("active");
 
-    const withBadge = await agent.post(`/employees/${id}/badges`)
-      .send({ badgeCode: "MARKIRO-BADGE-4412", label: "…4412" }).expect(201);
+    const withBadge = await agent
+      .post(`/employees/${id}/badges`)
+      .send({ badgeCode: "MARKIRO-BADGE-4412", label: "…4412" })
+      .expect(201);
     const badgeId = withBadge.body.badges[0].id as string;
     expect(withBadge.body.badges).toHaveLength(1);
 
     // Same active code again on another employee → 409.
     const other = await agent.post("/employees").send({ fullName: "Ким Е." }).expect(201);
-    await agent.post(`/employees/${other.body.id}/badges`).send({ badgeCode: "MARKIRO-BADGE-4412" }).expect(409);
+    await agent
+      .post(`/employees/${other.body.id}/badges`)
+      .send({ badgeCode: "MARKIRO-BADGE-4412" })
+      .expect(409);
 
     await agent.delete(`/employees/${id}/badges/${badgeId}`).expect(204);
     // After revoke the code can be reissued.
-    await agent.post(`/employees/${other.body.id}/badges`).send({ badgeCode: "MARKIRO-BADGE-4412" }).expect(201);
+    await agent
+      .post(`/employees/${other.body.id}/badges`)
+      .send({ badgeCode: "MARKIRO-BADGE-4412" })
+      .expect(201);
   });
 
   it("isolates employees across tenants", async () => {
-    const a = request.agent(app!.getHttpServer()); await signUpAndActivate(a);
-    const b = request.agent(app!.getHttpServer()); await signUpAndActivate(b);
+    const a = request.agent(app!.getHttpServer());
+    await signUpAndActivate(a);
+    const b = request.agent(app!.getHttpServer());
+    await signUpAndActivate(b);
     const created = await a.post("/employees").send({ fullName: "A" }).expect(201);
     await b.patch(`/employees/${created.body.id}`).send({ fullName: "hax" }).expect(404);
   });
@@ -96,7 +109,10 @@ describe.skipIf(!ready)("employees e2e", () => {
     const agent = request.agent(app!.getHttpServer());
     await signUpAndActivate(agent);
 
-    const created = await agent.post("/employees").send({ fullName: "Empty Patch Тест" }).expect(201);
+    const created = await agent
+      .post("/employees")
+      .send({ fullName: "Empty Patch Тест" })
+      .expect(201);
     const id = created.body.id as string;
 
     const patched = await agent.patch(`/employees/${id}`).send({}).expect(200);

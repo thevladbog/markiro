@@ -24,6 +24,21 @@ export const issueBadgeSchema = z.object({
 });
 export type IssueBadgeDto = z.infer<typeof issueBadgeSchema>;
 
-export interface BadgeDto { id: string; badgeCode: string; label: string | null; issuedAt: Date; revokedAt: Date | null; }
-export interface EmployeeDto { id: string; fullName: string; role: string | null; status: "active" | "archived"; badges: BadgeDto[]; createdAt: Date; }
-export interface ListEmployeesResponseDto { items: EmployeeDto[]; }
+export interface BadgeDto {
+  id: string;
+  badgeCode: string;
+  label: string | null;
+  issuedAt: Date;
+  revokedAt: Date | null;
+}
+export interface EmployeeDto {
+  id: string;
+  fullName: string;
+  role: string | null;
+  status: "active" | "archived";
+  badges: BadgeDto[];
+  createdAt: Date;
+}
+export interface ListEmployeesResponseDto {
+  items: EmployeeDto[];
+}

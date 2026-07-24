@@ -53,18 +53,29 @@ export class PickupOrdersService {
    * 6. transactional insert, retrying around a kmKey race (23505)
    * 7. return the outcome
    */
-  async createFromKiosk(tenantId: string, kioskId: string, dto: CreateOrderDto): Promise<CreateOrderResultDto> {
+  async createFromKiosk(
+    tenantId: string,
+    kioskId: string,
+    dto: CreateOrderDto,
+  ): Promise<CreateOrderResultDto> {
     // 1. Idempotency: a replayed sync for the same device sequence returns the same order, unchanged.
     const [existing] = await this.db
       .select()
       .from(schema.pickupOrders)
-      .where(and(
-        eq(schema.pickupOrders.tenantId, tenantId),
-        eq(schema.pickupOrders.kioskId, kioskId),
-        eq(schema.pickupOrders.deviceSeq, dto.deviceSeq),
-      ));
+      .where(
+        and(
+          eq(schema.pickupOrders.tenantId, tenantId),
+          eq(schema.pickupOrders.kioskId, kioskId),
+          eq(schema.pickupOrders.deviceSeq, dto.deviceSeq),
+        ),
+      );
     if (existing) {
-      return { orderNo: existing.orderNo, status: "pending", itemCount: existing.itemCount, conflicts: [] };
+      return {
+        orderNo: existing.orderNo,
+        status: "pending",
+        itemCount: existing.itemCount,
+        conflicts: [],
+      };
     }
 
     // 2. Badge -> active employee (badge's revoked_at is null). Unknown -> 401 ("bad badge" on the kiosk).
@@ -79,43 +90,78 @@ export class PickupOrdersService {
 
     // 5. Day-limit: accept up to dayLimitPerEmployee, flag the rest as over_limit.
     const when = dto.createdAt ? new Date(dto.createdAt) : new Date();
-    const { accepted, overflowConflicts } = await this.applyDayLimit(tenantId, kioskId, employeeId, when, candidates);
+    const { accepted, overflowConflicts } = await this.applyDayLimit(
+      tenantId,
+      kioskId,
+      employeeId,
+      when,
+      candidates,
+    );
     conflicts.push(...overflowConflicts);
 
     // 6. Transactional insert; a kmKey race against another open order converts that item to a duplicate conflict.
     const order = await this.insertOrderWithRetry(
-      tenantId, kioskId, employeeId, dto.reason, writeoffReasonId, dto.deviceSeq, when, accepted, conflicts,
+      tenantId,
+      kioskId,
+      employeeId,
+      dto.reason,
+      writeoffReasonId,
+      dto.deviceSeq,
+      when,
+      accepted,
+      conflicts,
     );
 
     // 7. Outcome. (A device-seq race outcome carries its own `conflicts: []`, mirroring the
     // sequential idempotent path — this request's own conflicts belong to a duplicate submission.)
-    return { orderNo: order.orderNo, status: "pending", itemCount: order.itemCount, conflicts: order.conflicts ?? conflicts };
+    return {
+      orderNo: order.orderNo,
+      status: "pending",
+      itemCount: order.itemCount,
+      conflicts: order.conflicts ?? conflicts,
+    };
   }
 
   /** Offline-cache payload: everything a kiosk needs to operate without a round-trip per scan. */
   async bootstrap(tenantId: string, kioskId: string): Promise<KioskBootstrapDto> {
     const [kiosk] = await this.db
-      .select({ dayLimitPerEmployee: schema.kiosks.dayLimitPerEmployee, showPrices: schema.kiosks.showPrices })
+      .select({
+        dayLimitPerEmployee: schema.kiosks.dayLimitPerEmployee,
+        showPrices: schema.kiosks.showPrices,
+      })
       .from(schema.kiosks)
       .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, kioskId)));
 
     const reasons = await this.db
       .select({ id: schema.pickupOrderReasons.id, name: schema.pickupOrderReasons.name })
       .from(schema.pickupOrderReasons)
-      .where(and(eq(schema.pickupOrderReasons.tenantId, tenantId), eq(schema.pickupOrderReasons.archived, false)))
+      .where(
+        and(
+          eq(schema.pickupOrderReasons.tenantId, tenantId),
+          eq(schema.pickupOrderReasons.archived, false),
+        ),
+      )
       .orderBy(asc(schema.pickupOrderReasons.sortOrder), asc(schema.pickupOrderReasons.name));
 
     const products = await this.db
       .select({
-        id: schema.products.id, gtin14: schema.products.gtin14, name: schema.products.name,
-        unitPrice: schema.products.unitPrice, egaisCode: schema.products.egaisCode,
+        id: schema.products.id,
+        gtin14: schema.products.gtin14,
+        name: schema.products.name,
+        unitPrice: schema.products.unitPrice,
+        egaisCode: schema.products.egaisCode,
       })
       .from(schema.kioskProducts)
-      .innerJoin(schema.products, and(
-        eq(schema.products.tenantId, schema.kioskProducts.tenantId),
-        eq(schema.products.id, schema.kioskProducts.productId),
-      ))
-      .where(and(eq(schema.kioskProducts.tenantId, tenantId), eq(schema.kioskProducts.kioskId, kioskId)));
+      .innerJoin(
+        schema.products,
+        and(
+          eq(schema.products.tenantId, schema.kioskProducts.tenantId),
+          eq(schema.products.id, schema.kioskProducts.productId),
+        ),
+      )
+      .where(
+        and(eq(schema.kioskProducts.tenantId, tenantId), eq(schema.kioskProducts.kioskId, kioskId)),
+      );
 
     const employeeRows = await this.db
       .select()
@@ -123,9 +169,14 @@ export class PickupOrdersService {
       .where(and(eq(schema.employees.tenantId, tenantId), eq(schema.employees.status, "active")))
       .orderBy(asc(schema.employees.fullName));
     const badgeRows = await this.db
-      .select({ employeeId: schema.employeeBadges.employeeId, badgeCode: schema.employeeBadges.badgeCode })
+      .select({
+        employeeId: schema.employeeBadges.employeeId,
+        badgeCode: schema.employeeBadges.badgeCode,
+      })
       .from(schema.employeeBadges)
-      .where(and(eq(schema.employeeBadges.tenantId, tenantId), isNull(schema.employeeBadges.revokedAt)));
+      .where(
+        and(eq(schema.employeeBadges.tenantId, tenantId), isNull(schema.employeeBadges.revokedAt)),
+      );
     const badgesByEmployee = new Map<string, string[]>();
     for (const b of badgeRows) {
       const list = badgesByEmployee.get(b.employeeId) ?? [];
@@ -141,18 +192,26 @@ export class PickupOrdersService {
       reasons,
       products,
       employees: employeeRows.map((e) => ({
-        id: e.id, fullName: e.fullName, role: e.role, badgeCodes: badgesByEmployee.get(e.id) ?? [],
+        id: e.id,
+        fullName: e.fullName,
+        role: e.role,
+        badgeCodes: badgesByEmployee.get(e.id) ?? [],
       })),
     };
   }
 
   /** Admin list, joined with employee/kiosk/writeoff-reason names, newest first. */
-  async list(tenantId: string, query: ListPickupOrdersQueryDto): Promise<ListPickupOrdersResponseDto> {
+  async list(
+    tenantId: string,
+    query: ListPickupOrdersQueryDto,
+  ): Promise<ListPickupOrdersResponseDto> {
     const conditions: SQL[] = [eq(schema.pickupOrders.tenantId, tenantId)];
     if (query.status) conditions.push(eq(schema.pickupOrders.status, query.status));
     if (query.reason) conditions.push(eq(schema.pickupOrders.reason, query.reason));
-    if (query.from) conditions.push(gte(schema.pickupOrders.createdAt, new Date(`${query.from}T00:00:00.000Z`)));
-    if (query.to) conditions.push(lte(schema.pickupOrders.createdAt, new Date(`${query.to}T23:59:59.999Z`)));
+    if (query.from)
+      conditions.push(gte(schema.pickupOrders.createdAt, new Date(`${query.from}T00:00:00.000Z`)));
+    if (query.to)
+      conditions.push(lte(schema.pickupOrders.createdAt, new Date(`${query.to}T23:59:59.999Z`)));
 
     const rows = await this.queryJoinedRows(conditions);
     return { items: rows.map((row) => this.mapRowDto(row)) };
@@ -170,7 +229,10 @@ export class PickupOrdersService {
       .from(schema.pickupOrders)
       .leftJoin(schema.employees, eq(schema.employees.id, schema.pickupOrders.employeeId))
       .leftJoin(schema.kiosks, eq(schema.kiosks.id, schema.pickupOrders.kioskId))
-      .leftJoin(schema.pickupOrderReasons, eq(schema.pickupOrderReasons.id, schema.pickupOrders.writeoffReasonId))
+      .leftJoin(
+        schema.pickupOrderReasons,
+        eq(schema.pickupOrderReasons.id, schema.pickupOrders.writeoffReasonId),
+      )
       .where(and(eq(schema.pickupOrders.tenantId, tenantId), eq(schema.pickupOrders.id, id)));
 
     if (!row) throw new NotFoundException();
@@ -178,11 +240,13 @@ export class PickupOrdersService {
     const [badge] = await this.db
       .select({ badgeCode: schema.employeeBadges.badgeCode })
       .from(schema.employeeBadges)
-      .where(and(
-        eq(schema.employeeBadges.tenantId, tenantId),
-        eq(schema.employeeBadges.employeeId, row.employeeId),
-        isNull(schema.employeeBadges.revokedAt),
-      ));
+      .where(
+        and(
+          eq(schema.employeeBadges.tenantId, tenantId),
+          eq(schema.employeeBadges.employeeId, row.employeeId),
+          isNull(schema.employeeBadges.revokedAt),
+        ),
+      );
 
     const itemRows = await this.db
       .select({
@@ -195,7 +259,12 @@ export class PickupOrdersService {
       })
       .from(schema.pickupOrderItems)
       .leftJoin(schema.products, eq(schema.products.id, schema.pickupOrderItems.productId))
-      .where(and(eq(schema.pickupOrderItems.tenantId, tenantId), eq(schema.pickupOrderItems.orderId, id)));
+      .where(
+        and(
+          eq(schema.pickupOrderItems.tenantId, tenantId),
+          eq(schema.pickupOrderItems.orderId, id),
+        ),
+      );
 
     return {
       ...this.mapRowDto(row),
@@ -236,7 +305,10 @@ export class PickupOrdersService {
       .from(schema.pickupOrders)
       .leftJoin(schema.employees, eq(schema.employees.id, schema.pickupOrders.employeeId))
       .leftJoin(schema.kiosks, eq(schema.kiosks.id, schema.pickupOrders.kioskId))
-      .leftJoin(schema.pickupOrderReasons, eq(schema.pickupOrderReasons.id, schema.pickupOrders.writeoffReasonId))
+      .leftJoin(
+        schema.pickupOrderReasons,
+        eq(schema.pickupOrderReasons.id, schema.pickupOrders.writeoffReasonId),
+      )
       .where(and(eq(schema.pickupOrders.tenantId, tenantId), eq(schema.pickupOrders.id, id)));
 
     if (!row) throw new NotFoundException();
@@ -244,11 +316,13 @@ export class PickupOrdersService {
     const [badge] = await this.db
       .select({ badgeCode: schema.employeeBadges.badgeCode })
       .from(schema.employeeBadges)
-      .where(and(
-        eq(schema.employeeBadges.tenantId, tenantId),
-        eq(schema.employeeBadges.employeeId, row.employeeId),
-        isNull(schema.employeeBadges.revokedAt),
-      ));
+      .where(
+        and(
+          eq(schema.employeeBadges.tenantId, tenantId),
+          eq(schema.employeeBadges.employeeId, row.employeeId),
+          isNull(schema.employeeBadges.revokedAt),
+        ),
+      );
 
     const [org] = await this.db
       .select({ name: schema.organization.name, inn: schema.orgProfiles.inn })
@@ -266,11 +340,13 @@ export class PickupOrdersService {
       })
       .from(schema.pickupOrderItems)
       .leftJoin(schema.products, eq(schema.products.id, schema.pickupOrderItems.productId))
-      .where(and(
-        eq(schema.pickupOrderItems.tenantId, tenantId),
-        eq(schema.pickupOrderItems.orderId, id),
-        eq(schema.pickupOrderItems.voided, false),
-      ))
+      .where(
+        and(
+          eq(schema.pickupOrderItems.tenantId, tenantId),
+          eq(schema.pickupOrderItems.orderId, id),
+          eq(schema.pickupOrderItems.voided, false),
+        ),
+      )
       .orderBy(asc(schema.pickupOrderItems.scannedAt));
 
     return {
@@ -333,7 +409,12 @@ export class PickupOrdersService {
     if (dto.action === "punch") {
       const [row] = await this.db
         .update(schema.pickupOrders)
-        .set({ status: "punched", receiptNo: dto.receiptNo ?? null, resolvedAt, resolvedByUserId: userId })
+        .set({
+          status: "punched",
+          receiptNo: dto.receiptNo ?? null,
+          resolvedAt,
+          resolvedByUserId: userId,
+        })
         .where(pendingCondition)
         .returning({ id: schema.pickupOrders.id });
       updatedId = row?.id;
@@ -347,7 +428,13 @@ export class PickupOrdersService {
       }
       const [row] = await this.db
         .update(schema.pickupOrders)
-        .set({ status: "writtenoff", actNo: dto.actNo ?? null, writeoffReasonId, resolvedAt, resolvedByUserId: userId })
+        .set({
+          status: "writtenoff",
+          actNo: dto.actNo ?? null,
+          writeoffReasonId,
+          resolvedAt,
+          resolvedByUserId: userId,
+        })
         .where(pendingCondition)
         .returning({ id: schema.pickupOrders.id });
       updatedId = row?.id;
@@ -368,11 +455,13 @@ export class PickupOrdersService {
     const rows = await this.db
       .select({ rawKm: schema.pickupOrderItems.rawKm })
       .from(schema.pickupOrderItems)
-      .where(and(
-        eq(schema.pickupOrderItems.tenantId, tenantId),
-        inArray(schema.pickupOrderItems.orderId, orderIds),
-        eq(schema.pickupOrderItems.voided, false),
-      ))
+      .where(
+        and(
+          eq(schema.pickupOrderItems.tenantId, tenantId),
+          inArray(schema.pickupOrderItems.orderId, orderIds),
+          eq(schema.pickupOrderItems.voided, false),
+        ),
+      )
       .orderBy(asc(schema.pickupOrderItems.orderId), asc(schema.pickupOrderItems.scannedAt));
 
     return rows.map((r) => r.rawKm).join("\n");
@@ -398,11 +487,13 @@ export class PickupOrdersService {
       const [row] = await tx
         .update(schema.pickupOrders)
         .set({ status: "cancelled" })
-        .where(and(
-          eq(schema.pickupOrders.tenantId, tenantId),
-          eq(schema.pickupOrders.id, id),
-          eq(schema.pickupOrders.status, "pending"),
-        ))
+        .where(
+          and(
+            eq(schema.pickupOrders.tenantId, tenantId),
+            eq(schema.pickupOrders.id, id),
+            eq(schema.pickupOrders.status, "pending"),
+          ),
+        )
         .returning({ id: schema.pickupOrders.id });
 
       if (!row) throw new ConflictException("Order can only be cancelled while pending");
@@ -410,7 +501,12 @@ export class PickupOrdersService {
       await tx
         .update(schema.pickupOrderItems)
         .set({ voided: true })
-        .where(and(eq(schema.pickupOrderItems.tenantId, tenantId), eq(schema.pickupOrderItems.orderId, id)));
+        .where(
+          and(
+            eq(schema.pickupOrderItems.tenantId, tenantId),
+            eq(schema.pickupOrderItems.orderId, id),
+          ),
+        );
 
       return row.id;
     });
@@ -419,11 +515,19 @@ export class PickupOrdersService {
   }
 
   /** A writeoffReasonId explicitly supplied to /resolve must belong to this tenant. */
-  private async assertValidWriteoffReason(tenantId: string, writeoffReasonId: string): Promise<void> {
+  private async assertValidWriteoffReason(
+    tenantId: string,
+    writeoffReasonId: string,
+  ): Promise<void> {
     const [reason] = await this.db
       .select({ id: schema.pickupOrderReasons.id })
       .from(schema.pickupOrderReasons)
-      .where(and(eq(schema.pickupOrderReasons.tenantId, tenantId), eq(schema.pickupOrderReasons.id, writeoffReasonId)));
+      .where(
+        and(
+          eq(schema.pickupOrderReasons.tenantId, tenantId),
+          eq(schema.pickupOrderReasons.id, writeoffReasonId),
+        ),
+      );
     if (!reason) throw new BadRequestException("Unknown writeoff reason for this organization");
   }
 
@@ -451,7 +555,10 @@ export class PickupOrdersService {
       .from(schema.pickupOrders)
       .leftJoin(schema.employees, eq(schema.employees.id, schema.pickupOrders.employeeId))
       .leftJoin(schema.kiosks, eq(schema.kiosks.id, schema.pickupOrders.kioskId))
-      .leftJoin(schema.pickupOrderReasons, eq(schema.pickupOrderReasons.id, schema.pickupOrders.writeoffReasonId))
+      .leftJoin(
+        schema.pickupOrderReasons,
+        eq(schema.pickupOrderReasons.id, schema.pickupOrders.writeoffReasonId),
+      )
       .where(and(...conditions))
       .orderBy(desc(schema.pickupOrders.createdAt));
   }
@@ -497,24 +604,35 @@ export class PickupOrdersService {
     };
   }
 
-  private async resolveActiveEmployeeId(tenantId: string, badgeCode: string): Promise<string | undefined> {
+  private async resolveActiveEmployeeId(
+    tenantId: string,
+    badgeCode: string,
+  ): Promise<string | undefined> {
     const [badge] = await this.db
       .select({ employeeId: schema.employeeBadges.employeeId })
       .from(schema.employeeBadges)
-      .innerJoin(schema.employees, and(
-        eq(schema.employees.tenantId, schema.employeeBadges.tenantId),
-        eq(schema.employees.id, schema.employeeBadges.employeeId),
-      ))
-      .where(and(
-        eq(schema.employeeBadges.tenantId, tenantId),
-        eq(schema.employeeBadges.badgeCode, badgeCode),
-        isNull(schema.employeeBadges.revokedAt),
-        eq(schema.employees.status, "active"),
-      ));
+      .innerJoin(
+        schema.employees,
+        and(
+          eq(schema.employees.tenantId, schema.employeeBadges.tenantId),
+          eq(schema.employees.id, schema.employeeBadges.employeeId),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.employeeBadges.tenantId, tenantId),
+          eq(schema.employeeBadges.badgeCode, badgeCode),
+          isNull(schema.employeeBadges.revokedAt),
+          eq(schema.employees.status, "active"),
+        ),
+      );
     return badge?.employeeId;
   }
 
-  private async resolveWriteoffReasonId(tenantId: string, dto: CreateOrderDto): Promise<string | null> {
+  private async resolveWriteoffReasonId(
+    tenantId: string,
+    dto: CreateOrderDto,
+  ): Promise<string | null> {
     if (dto.reason !== "writeoff") return null;
     if (!dto.writeoffReasonId) {
       throw new BadRequestException("writeoffReasonId is required when reason is writeoff");
@@ -522,11 +640,13 @@ export class PickupOrdersService {
     const [reason] = await this.db
       .select({ id: schema.pickupOrderReasons.id })
       .from(schema.pickupOrderReasons)
-      .where(and(
-        eq(schema.pickupOrderReasons.tenantId, tenantId),
-        eq(schema.pickupOrderReasons.id, dto.writeoffReasonId),
-        eq(schema.pickupOrderReasons.archived, false),
-      ));
+      .where(
+        and(
+          eq(schema.pickupOrderReasons.tenantId, tenantId),
+          eq(schema.pickupOrderReasons.id, dto.writeoffReasonId),
+          eq(schema.pickupOrderReasons.archived, false),
+        ),
+      );
     if (!reason) throw new BadRequestException("Unknown or archived writeoff reason");
     return reason.id;
   }
@@ -542,7 +662,13 @@ export class PickupOrdersService {
       if (result.status === "not_km" || result.status === "incomplete") {
         return { rawKm: item.rawKm, ok: false, conflictReason: result.status };
       }
-      return { rawKm: item.rawKm, ok: true, gtin14: result.km.gtin14, serial: result.km.serial, key: result.key };
+      return {
+        rawKm: item.rawKm,
+        ok: true,
+        gtin14: result.km.gtin14,
+        serial: result.km.serial,
+        key: result.key,
+      };
     });
 
     const allowlist = await this.kioskAllowlist(tenantId, kioskId);
@@ -550,9 +676,10 @@ export class PickupOrdersService {
     for (const p of parsed) {
       if (p.ok && !allowlist.has(p.gtin14)) gtinsToCheck.add(p.gtin14);
     }
-    const existingGtins = gtinsToCheck.size > 0
-      ? await this.existingProductGtins(tenantId, Array.from(gtinsToCheck))
-      : new Set<string>();
+    const existingGtins =
+      gtinsToCheck.size > 0
+        ? await this.existingProductGtins(tenantId, Array.from(gtinsToCheck))
+        : new Set<string>();
 
     const conflicts: OrderConflict[] = [];
     const seenKeys = new Set<string>();
@@ -564,7 +691,10 @@ export class PickupOrdersService {
       }
       const allowed = allowlist.get(p.gtin14);
       if (!allowed) {
-        conflicts.push({ rawKm: p.rawKm, reason: existingGtins.has(p.gtin14) ? "not_allowed" : "unknown_product" });
+        conflicts.push({
+          rawKm: p.rawKm,
+          reason: existingGtins.has(p.gtin14) ? "not_allowed" : "unknown_product",
+        });
         continue;
       }
       if (seenKeys.has(p.key)) {
@@ -573,8 +703,12 @@ export class PickupOrdersService {
       }
       seenKeys.add(p.key);
       candidates.push({
-        rawKm: p.rawKm, productId: allowed.productId, gtin14: p.gtin14, serial: p.serial,
-        kmKey: p.key, unitPrice: allowed.unitPrice,
+        rawKm: p.rawKm,
+        productId: allowed.productId,
+        gtin14: p.gtin14,
+        serial: p.serial,
+        kmKey: p.key,
+        unitPrice: allowed.unitPrice,
       });
     }
     return { conflicts, candidates };
@@ -585,13 +719,22 @@ export class PickupOrdersService {
     kioskId: string,
   ): Promise<Map<string, { productId: string; unitPrice: string | null }>> {
     const rows = await this.db
-      .select({ productId: schema.products.id, gtin14: schema.products.gtin14, unitPrice: schema.products.unitPrice })
+      .select({
+        productId: schema.products.id,
+        gtin14: schema.products.gtin14,
+        unitPrice: schema.products.unitPrice,
+      })
       .from(schema.kioskProducts)
-      .innerJoin(schema.products, and(
-        eq(schema.products.tenantId, schema.kioskProducts.tenantId),
-        eq(schema.products.id, schema.kioskProducts.productId),
-      ))
-      .where(and(eq(schema.kioskProducts.tenantId, tenantId), eq(schema.kioskProducts.kioskId, kioskId)));
+      .innerJoin(
+        schema.products,
+        and(
+          eq(schema.products.tenantId, schema.kioskProducts.tenantId),
+          eq(schema.products.id, schema.kioskProducts.productId),
+        ),
+      )
+      .where(
+        and(eq(schema.kioskProducts.tenantId, tenantId), eq(schema.kioskProducts.kioskId, kioskId)),
+      );
     const map = new Map<string, { productId: string; unitPrice: string | null }>();
     for (const r of rows) map.set(r.gtin14, { productId: r.productId, unitPrice: r.unitPrice });
     return map;
@@ -624,17 +767,22 @@ export class PickupOrdersService {
     const existingRows = await this.db
       .select({ id: schema.pickupOrderItems.id })
       .from(schema.pickupOrderItems)
-      .innerJoin(schema.pickupOrders, and(
-        eq(schema.pickupOrders.tenantId, schema.pickupOrderItems.tenantId),
-        eq(schema.pickupOrders.id, schema.pickupOrderItems.orderId),
-      ))
-      .where(and(
-        eq(schema.pickupOrderItems.tenantId, tenantId),
-        eq(schema.pickupOrders.employeeId, employeeId),
-        ne(schema.pickupOrders.status, "cancelled"),
-        eq(schema.pickupOrderItems.voided, false),
-        sql`(${schema.pickupOrders.createdAt} at time zone 'utc')::date = ${dateStr}`,
-      ));
+      .innerJoin(
+        schema.pickupOrders,
+        and(
+          eq(schema.pickupOrders.tenantId, schema.pickupOrderItems.tenantId),
+          eq(schema.pickupOrders.id, schema.pickupOrderItems.orderId),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.pickupOrderItems.tenantId, tenantId),
+          eq(schema.pickupOrders.employeeId, employeeId),
+          ne(schema.pickupOrders.status, "cancelled"),
+          eq(schema.pickupOrderItems.voided, false),
+          sql`(${schema.pickupOrders.createdAt} at time zone 'utc')::date = ${dateStr}`,
+        ),
+      );
     let count = existingRows.length;
 
     const accepted: ResolvedItem[] = [];
@@ -688,18 +836,34 @@ export class PickupOrdersService {
           const [order] = await tx
             .insert(schema.pickupOrders)
             .values({
-              tenantId, orderNo, kioskId, employeeId, reason,
-              writeoffReasonId, status: "pending", itemCount: remaining.length,
-              totalPrice: this.computeTotalPrice(remaining), deviceSeq, createdAt: when,
+              tenantId,
+              orderNo,
+              kioskId,
+              employeeId,
+              reason,
+              writeoffReasonId,
+              status: "pending",
+              itemCount: remaining.length,
+              totalPrice: this.computeTotalPrice(remaining),
+              deviceSeq,
+              createdAt: when,
             })
             .returning();
           if (!order) throw new Error("Failed to insert pickup order");
           if (remaining.length > 0) {
-            await tx.insert(schema.pickupOrderItems).values(remaining.map((item) => ({
-              tenantId, orderId: order.id, productId: item.productId, gtin14: item.gtin14,
-              serial: item.serial, rawKm: item.rawKm, kmKey: item.kmKey,
-              unitPrice: item.unitPrice, scannedAt: when,
-            })));
+            await tx.insert(schema.pickupOrderItems).values(
+              remaining.map((item) => ({
+                tenantId,
+                orderId: order.id,
+                productId: item.productId,
+                gtin14: item.gtin14,
+                serial: item.serial,
+                rawKm: item.rawKm,
+                kmKey: item.kmKey,
+                unitPrice: item.unitPrice,
+                scannedAt: when,
+              })),
+            );
           }
           return { orderNo: order.orderNo, itemCount: order.itemCount };
         });
@@ -708,11 +872,13 @@ export class PickupOrdersService {
           const [winner] = await this.db
             .select()
             .from(schema.pickupOrders)
-            .where(and(
-              eq(schema.pickupOrders.tenantId, tenantId),
-              eq(schema.pickupOrders.kioskId, kioskId),
-              eq(schema.pickupOrders.deviceSeq, deviceSeq),
-            ));
+            .where(
+              and(
+                eq(schema.pickupOrders.tenantId, tenantId),
+                eq(schema.pickupOrders.kioskId, kioskId),
+                eq(schema.pickupOrders.deviceSeq, deviceSeq),
+              ),
+            );
           if (!winner) throw error; // shouldn't happen, but avoid looping forever
           return { orderNo: winner.orderNo, itemCount: winner.itemCount, conflicts: [] };
         }
@@ -723,11 +889,13 @@ export class PickupOrdersService {
         const openRows = await this.db
           .select({ kmKey: schema.pickupOrderItems.kmKey })
           .from(schema.pickupOrderItems)
-          .where(and(
-            eq(schema.pickupOrderItems.tenantId, tenantId),
-            eq(schema.pickupOrderItems.voided, false),
-            inArray(schema.pickupOrderItems.kmKey, keys),
-          ));
+          .where(
+            and(
+              eq(schema.pickupOrderItems.tenantId, tenantId),
+              eq(schema.pickupOrderItems.voided, false),
+              inArray(schema.pickupOrderItems.kmKey, keys),
+            ),
+          );
         const conflictingKeys = new Set(openRows.map((r) => r.kmKey));
         if (conflictingKeys.size === 0) throw error; // shouldn't happen, but avoid looping forever
 
