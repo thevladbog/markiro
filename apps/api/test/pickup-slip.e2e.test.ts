@@ -53,26 +53,22 @@ describe.skipIf(!ready)("pickup order printed slip e2e", () => {
     tenantId = await signUpAndActivate(agent);
 
     employeeId = randomUUID();
-    await db
-      .insert(schema.employees)
-      .values({
-        id: employeeId,
-        tenantId,
-        fullName: "Смирнов Алексей Петрович",
-        role: "оператор линии",
-      });
+    await db.insert(schema.employees).values({
+      id: employeeId,
+      tenantId,
+      fullName: "Смирнов Алексей Петрович",
+      role: "оператор линии",
+    });
     await db.insert(schema.employeeBadges).values({ tenantId, employeeId, badgeCode: BADGE });
 
     productId = randomUUID();
-    await db
-      .insert(schema.products)
-      .values({
-        id: productId,
-        tenantId,
-        gtin14: GTIN,
-        name: "Жигулёвское светлое 0,5 л",
-        unitPrice: "52.00",
-      });
+    await db.insert(schema.products).values({
+      id: productId,
+      tenantId,
+      gtin14: GTIN,
+      name: "Жигулёвское светлое 0,5 л",
+      unitPrice: "52.00",
+    });
 
     kioskId = randomUUID();
     await db
