@@ -494,4 +494,59 @@ describe("CatalogPage", () => {
       );
     });
   });
+
+  it("pre-fills unitPrice/egaisCode when editing a product that has them, and preserves them on an untouched save", async () => {
+    // Based on DRAFT_PRODUCT (not ACTIVE_PRODUCT) -- its gtin14 is a
+    // checksum-valid vector, so the zod-validated edit form can actually
+    // submit; ACTIVE_PRODUCT's gtin14 fails the check digit and would block
+    // the PATCH before it ever fires.
+    const priced = {
+      ...DRAFT_PRODUCT,
+      id: "p6",
+      unitPrice: "52.00",
+      egaisCode: "EG-123",
+    };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/counterparties") return jsonResponse(200, { items: [] });
+      if (path === `/api/products/${priced.id}` && init?.method === "PATCH") {
+        return jsonResponse(200, priced);
+      }
+      return jsonResponse(200, { items: [priced] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText(priced.name);
+
+    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+    await screen.findByText("Изменить продукт");
+
+    // The edit form must seed from the product being edited, not render blank.
+    expect((screen.getByLabelText("Цена за шт., ₽") as HTMLInputElement).value).toBe("52.00");
+    expect((screen.getByLabelText("Код ЕГАИС") as HTMLInputElement).value).toBe("EG-123");
+
+    // Save without touching either field -- the PATCH must round-trip the
+    // original values, not overwrite them with null (data loss).
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        `/api/products/${priced.id}`,
+        expect.objectContaining({
+          method: "PATCH",
+          body: expect.stringContaining('"unitPrice":"52.00"'),
+        }),
+      );
+    });
+    const patchCall = fetchMock.mock.calls.find(
+      ([url, init]) => url === `/api/products/${priced.id}` && init?.method === "PATCH",
+    );
+    const patchBody = JSON.parse((patchCall?.[1]?.body as string | undefined) ?? "{}") as Record<
+      string,
+      unknown
+    >;
+    expect(patchBody.unitPrice).toBe("52.00");
+    expect(patchBody.egaisCode).toBe("EG-123");
+  });
 });
