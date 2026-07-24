@@ -14,6 +14,7 @@ const NAV_ITEMS: ReadonlyArray<{ to: string; key: string }> = [
   { to: "/shifts", key: "nav.shifts" },
   { to: "/counterparties", key: "nav.counterparties" },
   { to: "/employees", key: "nav.employees" },
+  { to: "/kiosks", key: "nav.kiosks" },
   { to: "/labels", key: "nav.labels" },
   { to: "/pickup", key: "nav.pickup" },
   { to: "/settings", key: "nav.settings" },

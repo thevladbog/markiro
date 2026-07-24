@@ -4,7 +4,9 @@
     "loading": "Loading…",
     "signOut": "Sign out",
     "close": "Close",
-    "loadError": "Failed to load data. Refresh the page or sign in again."
+    "loadError": "Failed to load data. Refresh the page or sign in again.",
+    "yes": "Yes",
+    "no": "No"
   },
   "auth": {
     "login": {
@@ -574,6 +576,7 @@
         "dayLimitLabel": "Daily item limit per employee",
         "showPricesLabel": "Show prices",
         "productsLabel": "Allowed products",
+        "saveProductsAction": "Save list",
         "submitCreate": "Create",
         "submitUpdate": "Save",
         "errors": {
