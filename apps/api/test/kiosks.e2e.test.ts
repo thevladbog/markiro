@@ -93,7 +93,7 @@ describe.skipIf(!ready)("kiosks e2e", () => {
       .expect(200);
     expect(withList.body.productIds).toEqual([productId]);
 
-    const enroll = await agent.post(`/kiosks/${id}/enroll`).send({}).expect(201);
+    const enroll = await agent.post(`/kiosks/${id}/enroll`).send({}).expect(200);
     expect(typeof enroll.body.token).toBe("string");
     expect(enroll.body.token.length).toBeGreaterThan(0);
 

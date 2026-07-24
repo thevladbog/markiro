@@ -431,7 +431,6 @@
         "employeeLabel": "Employee",
         "kioskLabel": "Kiosk",
         "reasonLabel": "Reason",
-        "writeoffReasonLabel": "Sub-reason",
         "createdAtLabel": "Created",
         "totalLabel": "Total",
         "itemsTitle": "Marking codes",

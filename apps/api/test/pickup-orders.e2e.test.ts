@@ -180,7 +180,7 @@ describe.skipIf(!ready)("pickup orders admin e2e", () => {
     const resolveWriteoffRes = await agent
       .post(`/pickup-orders/${idWriteoff}/resolve`)
       .send({ action: "writeoff", actNo: "ACT-1" })
-      .expect(201);
+      .expect(200);
     expect(resolveWriteoffRes.body.status).toBe("writtenoff");
     const writeoffDetail = await agent.get(`/pickup-orders/${idWriteoff}`).expect(200);
     expect(writeoffDetail.body.actNo).toBe("ACT-1");
@@ -198,11 +198,27 @@ describe.skipIf(!ready)("pickup orders admin e2e", () => {
       .send({ action: "writeoff", actNo: "ACT-Y", writeoffReasonId: randomUUID() })
       .expect(400);
 
+    // --- Resolve: writeoff with an ARCHIVED (but tenant-owned) reason -> 400 ---
+    // Symmetric with the kiosk create path: an archived reason can't be
+    // (re-)attached on resolve any more than it can on ingest.
+    const archivedResolveReasonId = randomUUID();
+    await db.insert(schema.pickupOrderReasons).values({
+      id: archivedResolveReasonId,
+      tenantId,
+      name: "Архивная причина",
+      sortOrder: 0,
+      archived: true,
+    });
+    await agent
+      .post(`/pickup-orders/${idList}/resolve`)
+      .send({ action: "writeoff", actNo: "ACT-Z", writeoffReasonId: archivedResolveReasonId })
+      .expect(400);
+
     // --- Resolve: punch sets status + receiptNo + resolvedAt (+ resolvedByUserId) ---
     const resolvePunchRes = await agent
       .post(`/pickup-orders/${idPunch}/resolve`)
       .send({ action: "punch", receiptNo: "R-1" })
-      .expect(201);
+      .expect(200);
     expect(resolvePunchRes.body.status).toBe("punched");
 
     const [punchRow] = await db
@@ -220,7 +236,7 @@ describe.skipIf(!ready)("pickup orders admin e2e", () => {
       .expect(409);
 
     // --- Cancel a fresh pending order: flips to cancelled AND voids its items (frees the code) ---
-    const cancelRes = await agent.post(`/pickup-orders/${idCancel}/cancel`).expect(201);
+    const cancelRes = await agent.post(`/pickup-orders/${idCancel}/cancel`).expect(200);
     expect(cancelRes.body.status).toBe("cancelled");
 
     const voidedItems = await db
@@ -243,14 +259,33 @@ describe.skipIf(!ready)("pickup orders admin e2e", () => {
     await agent.post(`/pickup-orders/${idCancel}/cancel`).expect(409);
   });
 
-  it("cross-tenant isolation: org B cannot GET org A's pickup order", async () => {
+  it("cross-tenant isolation: org B cannot read, resolve, cancel, slip or export org A's order", async () => {
     const orderRes = await scan(999, `01${GTIN}21XTEN1${GS}93Abcd`).expect(201);
     const orderId = await orderIdByNo(orderRes.body.orderNo);
 
     const agent2 = request.agent(app!.getHttpServer());
     await signUpAndActivate(agent2);
 
+    // Reads and mutations alike 404 — the order simply doesn't exist for org B.
     await agent2.get(`/pickup-orders/${orderId}`).expect(404);
+    await agent2.get(`/pickup-orders/${orderId}/slip`).expect(404);
+    await agent2
+      .post(`/pickup-orders/${orderId}/resolve`)
+      .send({ action: "punch", receiptNo: "R-X" })
+      .expect(404);
+    await agent2.post(`/pickup-orders/${orderId}/cancel`).expect(404);
+
+    // Export silently scopes to the caller's tenant, so org B's export of org
+    // A's id yields an empty file (200), never org A's codes.
+    const exportRes = await agent2
+      .post(`/pickup-orders/export`)
+      .send({ orderIds: [orderId] })
+      .expect(200);
+    expect(exportRes.text).toBe("");
+
+    // Org A's order is untouched by any of org B's attempts.
+    const stillPending = await agent.get(`/pickup-orders/${orderId}`).expect(200);
+    expect(stillPending.body.status).toBe("pending");
   });
 
   async function orderIdByNo(orderNo: string): Promise<string> {

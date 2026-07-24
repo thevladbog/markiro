@@ -15,6 +15,7 @@ import {
 } from "@markiro/ui";
 import type { SelectOption, StatusChipStatus, TableColumn } from "@markiro/ui";
 
+import { formatCreatedAt } from "../../lib/datetime.js";
 import { toast } from "../../lib/toast.js";
 import {
   useExportCodes,
@@ -33,21 +34,6 @@ const STATUS_TO_CHIP: Record<PickupOrderStatus, StatusChipStatus> = {
   writtenoff: "neutral",
   cancelled: "error",
 };
-
-/**
- * Formats an ISO timestamp for the `createdAt` column using the active
- * i18next language -- "ru"/"en" are the only two languages the app ships
- * (see `src/i18n/index.ts`), so this maps each to its matching
- * `Intl.DateTimeFormat` locale rather than passing `i18n.language` straight
- * through (which for "ru" is a valid BCP-47 tag anyway, but being explicit
- * keeps this independent of exactly how i18next's `lng` is spelled).
- */
-function formatCreatedAt(iso: string, language: string): string {
-  const locale = language.startsWith("ru") ? "ru-RU" : "en-US";
-  return new Intl.DateTimeFormat(locale, { dateStyle: "short", timeStyle: "short" }).format(
-    new Date(iso),
-  );
-}
 
 /**
  * Admin «Для себя» (self-pickup) orders list -- Plan A Task 14. Filterable

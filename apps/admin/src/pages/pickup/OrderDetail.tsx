@@ -1,8 +1,7 @@
-import { useState, type ReactNode } from "react";
+import { lazy, Suspense, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router";
 
-import { renderDataMatrixSvg } from "@markiro/domain";
 import {
   Alert,
   Button,
@@ -18,6 +17,7 @@ import {
 import type { SelectOption, StatusChipStatus, TableColumn } from "@markiro/ui";
 
 import { ApiRequestError } from "../../api/client.js";
+import { formatCreatedAt } from "../../lib/datetime.js";
 import { toast } from "../../lib/toast.js";
 import { usePickupReasons } from "../kiosks/api.js";
 import {
@@ -35,15 +35,14 @@ const STATUS_TO_CHIP: Record<PickupOrderStatus, StatusChipStatus> = {
   cancelled: "error",
 };
 
-/** Mirrors `pages/pickup/index.tsx`'s identically-named helper. */
-function formatCreatedAt(iso: string, language: string): string {
-  const locale = language.startsWith("ru") ? "ru-RU" : "en-US";
-  return new Intl.DateTimeFormat(locale, { dateStyle: "short", timeStyle: "short" }).format(
-    new Date(iso),
-  );
-}
-
 type ModalKind = "punch" | "writeoff" | "cancel" | null;
+
+/**
+ * Lazily loaded so bwip-js (reached through `@markiro/domain`'s DataMatrix
+ * renderer) stays out of the main admin bundle and is fetched only when an
+ * order-detail view actually renders codes. See `./ItemCode.tsx`.
+ */
+const ItemCode = lazy(() => import("./ItemCode.js"));
 
 function DetailField({ label, value }: { label: string; value: ReactNode }) {
   return (
@@ -51,38 +50,6 @@ function DetailField({ label, value }: { label: string; value: ReactNode }) {
       <span style={{ font: "var(--text-caption)", color: "var(--fg-3)" }}>{label}</span>
       <span style={{ font: "var(--text-body)", color: "var(--fg-1)" }}>{value}</span>
     </div>
-  );
-}
-
-/**
- * Renders an item's DataMatrix inline as an SVG string
- * (`renderDataMatrixSvg` -- `@markiro/domain`), embedded via
- * `dangerouslySetInnerHTML` since that function returns a raw `<svg>…</svg>`
- * string, not a React element. Wrapped in try/catch: bwip-js's
- * `gs1datamatrix` encoder enforces the AI-01 GTIN check digit and THROWS on a
- * malformed stored KM -- that must not crash the whole detail card, so a
- * single bad code falls back to a small placeholder instead.
- */
-function ItemCode({ rawKm, fallbackLabel }: { rawKm: string; fallbackLabel: string }) {
-  let svg: string | null;
-  try {
-    svg = renderDataMatrixSvg(rawKm);
-  } catch {
-    svg = null;
-  }
-
-  if (!svg) {
-    return (
-      <span style={{ font: "var(--text-body-sm)", color: "var(--fg-3)" }}>{fallbackLabel}</span>
-    );
-  }
-
-  return (
-    <div
-      className="mk-pickup-dm"
-      style={{ width: 64, height: 64, flexShrink: 0 }}
-      dangerouslySetInnerHTML={{ __html: svg }}
-    />
   );
 }
 
@@ -195,7 +162,13 @@ export function OrderDetailPage() {
       title: t("pages.pickup.detail.table.code"),
       render: (item) => (
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <ItemCode rawKm={item.rawKm} fallbackLabel={t("pages.pickup.detail.codeUnavailable")} />
+          <Suspense
+            fallback={
+              <span style={{ width: 64, height: 64, flexShrink: 0, display: "inline-block" }} />
+            }
+          >
+            <ItemCode rawKm={item.rawKm} fallbackLabel={t("pages.pickup.detail.codeUnavailable")} />
+          </Suspense>
           <span
             className="font-mono"
             style={{ font: "var(--text-code)", color: "var(--fg-2)", overflowWrap: "anywhere" }}

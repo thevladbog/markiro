@@ -72,6 +72,7 @@ export class KiosksController {
   }
 
   @Post(":id/enroll")
+  @HttpCode(200)
   async enroll(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,

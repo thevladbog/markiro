@@ -185,32 +185,49 @@ export function KioskForm({
             gap: 10,
           }}
         >
-          <span style={{ font: "var(--text-caption)", color: "var(--fg-2)" }}>
-            {t("pages.kiosks.form.productsLabel")}
-          </span>
-          <div
+          <fieldset
             style={{
+              border: "none",
+              margin: 0,
+              padding: 0,
+              minInlineSize: 0,
               display: "flex",
               flexDirection: "column",
               gap: 6,
-              maxHeight: 220,
-              overflowY: "auto",
             }}
           >
-            {products.map((product) => (
-              <label
-                key={product.id}
-                style={{ display: "flex", alignItems: "center", gap: 8, font: "var(--text-body)" }}
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedProductIds.has(product.id)}
-                  onChange={() => toggleProduct(product.id)}
-                />
-                {product.name}
-              </label>
-            ))}
-          </div>
+            <legend style={{ font: "var(--text-caption)", color: "var(--fg-2)", padding: 0 }}>
+              {t("pages.kiosks.form.productsLabel")}
+            </legend>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 6,
+                maxHeight: 220,
+                overflowY: "auto",
+              }}
+            >
+              {products.map((product) => (
+                <label
+                  key={product.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    font: "var(--text-body)",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedProductIds.has(product.id)}
+                    onChange={() => toggleProduct(product.id)}
+                  />
+                  {product.name}
+                </label>
+              ))}
+            </div>
+          </fieldset>
           <Button
             type="button"
             variant="secondary"

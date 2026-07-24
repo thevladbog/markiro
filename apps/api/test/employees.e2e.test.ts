@@ -129,6 +129,34 @@ describe.skipIf(!ready)("employees e2e", () => {
     await signUpAndActivate(b);
     const created = await a.post("/employees").send({ fullName: "A" }).expect(201);
     await b.patch(`/employees/${created.body.id}`).send({ fullName: "hax" }).expect(404);
+    // Badge routes are tenant-scoped too: org B can't issue a badge on org A's
+    // employee (the employee simply doesn't exist for B).
+    await b
+      .post(`/employees/${created.body.id}/badges`)
+      .send({ badgeCode: "HAX-BADGE" })
+      .expect(404);
+
+    // Issue a real badge as org A, then have org B try to revoke *that* badge
+    // by its real id: it must 404 and leave the badge active — proving the
+    // guard is authorization, not just a nonexistent-id 404.
+    const withBadge = await a
+      .post(`/employees/${created.body.id}/badges`)
+      .send({ badgeCode: "ORG-A-BADGE" })
+      .expect(201);
+    const badgeId = withBadge.body.badges[0].id as string;
+
+    await b.delete(`/employees/${created.body.id}/badges/${badgeId}`).expect(404);
+
+    const listed = await a.get("/employees").expect(200);
+    const badge = (
+      listed.body.items as Array<{
+        id: string;
+        badges: Array<{ id: string; revokedAt: string | null }>;
+      }>
+    )
+      .find((e) => e.id === created.body.id)!
+      .badges.find((x) => x.id === badgeId)!;
+    expect(badge.revokedAt).toBeNull();
   });
 
   it("returns the employee unchanged on an empty PATCH body, and 404 for a missing id", async () => {

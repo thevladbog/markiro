@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { usePickupOrders } from "../src/pages/pickup/api.js";
+import { filenameFromContentDisposition, usePickupOrders } from "../src/pages/pickup/api.js";
 
 afterEach(() => {
   cleanup();
@@ -46,6 +46,30 @@ function renderProbe() {
     </QueryClientProvider>,
   );
 }
+
+describe("filenameFromContentDisposition", () => {
+  it("falls back to codes.txt when the header is absent", () => {
+    expect(filenameFromContentDisposition(null)).toBe("codes.txt");
+  });
+
+  it("reads a plain quoted filename", () => {
+    expect(filenameFromContentDisposition('attachment; filename="codes-20260724.txt"')).toBe(
+      "codes-20260724.txt",
+    );
+  });
+
+  it("decodes an RFC 5987 filename* with a non-empty language tag", () => {
+    expect(filenameFromContentDisposition("attachment; filename*=UTF-8'ru'codes.txt")).toBe(
+      "codes.txt",
+    );
+  });
+
+  it("percent-decodes an RFC 5987 filename* value", () => {
+    expect(filenameFromContentDisposition("attachment; filename*=UTF-8''codes%2Dexport.txt")).toBe(
+      "codes-export.txt",
+    );
+  });
+});
 
 describe("usePickupOrders", () => {
   it("surfaces the order row from GET /pickup-orders?status=pending", async () => {

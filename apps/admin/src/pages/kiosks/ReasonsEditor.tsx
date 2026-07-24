@@ -80,11 +80,19 @@ export function ReasonsEditor() {
     const draft = drafts[reason.id] ?? draftFrom(reason);
     const name = draft.name.trim();
     if (!name) return;
-    const sortOrder = Number(draft.sortOrder);
+    // A blank input must NOT persist 0: `Number("") === 0` sails through the
+    // finite check, so guard the empty string and fall back to the reason's
+    // current order instead.
+    const trimmedSortOrder = draft.sortOrder.trim();
+    const parsedSortOrder = Number(trimmedSortOrder);
+    const sortOrder =
+      trimmedSortOrder !== "" && Number.isFinite(parsedSortOrder)
+        ? parsedSortOrder
+        : reason.sortOrder;
     try {
       await updateMutation.mutateAsync({
         id: reason.id,
-        input: { name, sortOrder: Number.isFinite(sortOrder) ? sortOrder : reason.sortOrder },
+        input: { name, sortOrder },
       });
       toast("ok", t("pages.kiosks.toasts.reasonUpdateSuccess"));
     } catch (error) {

@@ -44,6 +44,12 @@ export function parseKmSegments(raw: string): KmSegments {
     throw new DomainError("KM_NO_GTIN", "KM must start with AI 01");
   }
   const gtin14 = s.slice(2, 16);
+  if (!/^\d{14}$/.test(gtin14)) {
+    // Shape-only guard (not check-digit — that stays `parseKm`'s job). Fails
+    // a malformed AI-01 here so the DataMatrix renderer / slip get a
+    // DomainError instead of a raw bwip-js `GS1notNumeric`.
+    throw new DomainError("KM_BAD_GTIN", "KM AI 01 GTIN must be 14 digits");
+  }
   s = s.slice(16);
   if (!s.startsWith("21")) {
     throw new DomainError("KM_NO_SERIAL", "KM must carry AI 21 serial");

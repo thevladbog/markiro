@@ -165,7 +165,7 @@ describe.skipIf(!ready)("pickup order printed slip e2e", () => {
     expect(preCancel.text).toContain("CANCELSLIP");
     expect(preCancel.text).toContain("52.00");
 
-    await agent.post(`/pickup-orders/${orderId}/cancel`).expect(201);
+    await agent.post(`/pickup-orders/${orderId}/cancel`).expect(200);
 
     const postCancel = await agent.get(`/pickup-orders/${orderId}/slip`).expect(200);
     // No rendered row for the (now-voided) KM...

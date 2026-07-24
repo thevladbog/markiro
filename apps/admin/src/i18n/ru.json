@@ -431,7 +431,6 @@
         "employeeLabel": "Сотрудник",
         "kioskLabel": "Киоск",
         "reasonLabel": "Причина",
-        "writeoffReasonLabel": "Подпричина",
         "createdAtLabel": "Создана",
         "totalLabel": "Итого",
         "itemsTitle": "Коды маркировки",

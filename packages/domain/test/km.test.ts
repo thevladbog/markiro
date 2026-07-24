@@ -74,4 +74,14 @@ describe("parseKmSegments", () => {
   it("parses identically whether or not a ]d2 symbology-identifier prefix is present", () => {
     expect(parseKmSegments(`]d2${multiAiRaw}`)).toEqual(parseKmSegments(multiAiRaw));
   });
+
+  it("rejects a non-numeric 14-char AI-01 GTIN with a clean DomainError", () => {
+    // Shape guard: the AI-01 slot must be 14 digits. Without it, a malformed
+    // GTIN flows straight into the DataMatrix renderer, where bwip-js throws a
+    // raw `GS1notNumeric` — this surfaces a DomainError at the parse boundary
+    // instead. (Check-digit validation stays `parseKm`'s job, not this one's.)
+    expect(() => parseKmSegments(`01ABCDEFGHIJKLMN21SER1${GS}93Z`)).toThrowError(
+      expect.objectContaining({ code: "KM_BAD_GTIN" }),
+    );
+  });
 });

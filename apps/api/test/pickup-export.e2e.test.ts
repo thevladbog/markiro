@@ -176,7 +176,7 @@ describe.skipIf(!ready)("pickup orders export e2e", () => {
     const cancelledRes = await scan(401, `01${GTIN}21SER1${GS}93Abcd`).expect(201);
     const cancelledOrderId = await orderIdByNo(cancelledRes.body.orderNo);
 
-    await agent.post(`/pickup-orders/${cancelledOrderId}/cancel`).expect(201);
+    await agent.post(`/pickup-orders/${cancelledOrderId}/cancel`).expect(200);
 
     const exportCancelledOnly = await agent
       .post("/pickup-orders/export")
