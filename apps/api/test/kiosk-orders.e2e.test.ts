@@ -417,6 +417,35 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
     ]);
   });
 
+  it("does not persist an empty order when a non-empty scan yields only conflicts", async () => {
+    const rawKm = `01${GTIN_UNKNOWN}21NOORDER1${GS}93Abcd`;
+    const ordersBefore = await db
+      .select({ id: schema.pickupOrders.id })
+      .from(schema.pickupOrders)
+      .where(
+        and(eq(schema.pickupOrders.tenantId, tenantId), eq(schema.pickupOrders.kioskId, kioskId)),
+      );
+
+    const res = await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", TOKEN)
+      .send({ deviceSeq: 30, badgeCode: BADGE, reason: "buy", items: [{ rawKm }] })
+      .expect(201);
+    // The conflict is reported, but no order number is minted and no row lands
+    // in the свод.
+    expect(res.body.itemCount).toBe(0);
+    expect(res.body.orderNo).toBe("");
+    expect(res.body.conflicts).toEqual([{ rawKm, reason: "unknown_product" }]);
+
+    const ordersAfter = await db
+      .select({ id: schema.pickupOrders.id })
+      .from(schema.pickupOrders)
+      .where(
+        and(eq(schema.pickupOrders.tenantId, tenantId), eq(schema.pickupOrders.kioskId, kioskId)),
+      );
+    expect(ordersAfter.length).toBe(ordersBefore.length);
+  });
+
   it("bootstrap returns config, reasons, allowlist products and employees with badge codes", async () => {
     const res = await request(app!.getHttpServer())
       .get("/kiosk/bootstrap")

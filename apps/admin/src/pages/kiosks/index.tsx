@@ -114,14 +114,16 @@ export function KiosksPage() {
             >
               {t("pages.kiosks.edit")}
             </Button>
-            <Button
-              type="button"
-              size="compact"
-              variant="secondary"
-              onClick={() => void handleEnroll(row)}
-            >
-              {t("pages.kiosks.enroll.action")}
-            </Button>
+            {row.status === "active" && (
+              <Button
+                type="button"
+                size="compact"
+                variant="secondary"
+                onClick={() => void handleEnroll(row)}
+              >
+                {t("pages.kiosks.enroll.action")}
+              </Button>
+            )}
             {row.status === "active" && (
               <Button
                 type="button"

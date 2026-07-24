@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { DomainError } from "../src/errors.js";
 import { renderCode128Svg, renderDataMatrixSvg, renderQrSvg } from "../src/barcodes/svg.js";
 
 const GS = String.fromCharCode(0x1d); // ASCII 0x1D separator
@@ -33,6 +34,12 @@ describe("barcode SVG renderers", () => {
     expect(multiAi.startsWith("<svg")).toBe(true);
     expect(multiAi).toContain("</svg>");
     expect(multiAi).not.toBe(singleAi);
+  });
+  it("surfaces a DomainError (not a raw bwip-js GS1notNumeric) for a non-numeric GTIN", () => {
+    // A malformed stored KM whose AI-01 slot isn't 14 digits must fail at the
+    // parse boundary with a DomainError, so callers (OrderDetail's ItemCode,
+    // the slip renderer) can catch it uniformly instead of a bwip-js internal.
+    expect(() => renderDataMatrixSvg(`01ABCDEFGHIJKLMN21${SERIAL}${GS}93Z`)).toThrow(DomainError);
   });
   it("renders a ]d2-prefixed KM identically to the un-prefixed one", () => {
     const raw = `01${GTIN14_2}21${SERIAL}${GS}93Z`;

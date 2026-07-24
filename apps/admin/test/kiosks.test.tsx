@@ -59,6 +59,14 @@ const OFFLINE_KIOSK = {
   createdAt: "2026-01-02T00:00:00.000Z",
 };
 
+const ARCHIVED_KIOSK = {
+  ...OFFLINE_KIOSK,
+  id: "k9",
+  name: "Архивный киоск",
+  status: "archived",
+  enrolled: true,
+};
+
 const PRODUCT_A = {
   id: "p1",
   gtin14: "04006381333931",
@@ -198,6 +206,18 @@ describe("KiosksPage", () => {
     expect(screen.getByText("Токен подключения киоска")).toBeDefined();
   });
 
+  it("hides the enroll and archive row actions for an archived kiosk", async () => {
+    stubFetch({ kiosks: [ARCHIVED_KIOSK], products: [] });
+
+    renderPage();
+    await screen.findByText("Архивный киоск");
+
+    // Both lifecycle actions are meaningless once archived -- only Edit remains.
+    expect(screen.queryByRole("button", { name: "Выдать токен" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "В архив" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Изменить" })).toBeDefined();
+  });
+
   it("edits a kiosk and toggles the product allowlist, saving via PUT /api/kiosks/:id/products", async () => {
     const updated = { ...ONLINE_KIOSK, productIds: ["p1", "p2"] };
     const fetchMock = stubFetch({
@@ -306,5 +326,38 @@ describe("KiosksPage", () => {
         }),
       );
     });
+  });
+
+  it("keeps the original sort order when a reason's sort-order input is cleared (does not persist 0)", async () => {
+    const fetchMock = stubFetch({
+      kiosks: [],
+      reasons: [REASON_A], // sortOrder: 1
+      onPost: (path, init) => {
+        if (path === "/api/pickup-reasons/r1" && init?.method === "PATCH") {
+          return jsonResponse(200, { ...REASON_A });
+        }
+        return undefined;
+      },
+    });
+
+    renderPage();
+    await screen.findByDisplayValue("Испорчен товар");
+
+    fireEvent.change(screen.getByLabelText("Порядок"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/pickup-reasons/r1",
+        expect.objectContaining({ method: "PATCH" }),
+      );
+    });
+    const patchCall = fetchMock.mock.calls.find(
+      (call) => call[0] === "/api/pickup-reasons/r1" && call[1]?.method === "PATCH",
+    )!;
+    const body = JSON.parse(patchCall[1]?.body as string);
+    // Number("") === 0 passes the finite guard; a blank input must fall back to
+    // the reason's existing order, not silently persist 0.
+    expect(body.sortOrder).toBe(1);
   });
 });

@@ -34,6 +34,20 @@ function textResponse(status: number, body: string): Response {
   } as Response;
 }
 
+/** Like `textResponse`, but with headers (so the download can read Content-Disposition). */
+function textResponseWithHeaders(
+  status: number,
+  body: string,
+  headers: Record<string, string>,
+): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: new Headers(headers),
+    text: async () => body,
+  } as Response;
+}
+
 function renderPage() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -149,6 +163,44 @@ describe("PickupPage", () => {
       expect(createObjectURLSpy).toHaveBeenCalled();
     });
     expect(await screen.findByText("Коды выгружены")).toBeDefined();
+  });
+
+  it("names the downloaded file from the server's Content-Disposition header", async () => {
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:mock-url");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    // Capture every anchor the page creates; the export download is the only
+    // one that sets a (non-empty) `download`, so it's unambiguous to find.
+    const anchors: HTMLAnchorElement[] = [];
+    const realCreateElement = document.createElement.bind(document);
+    vi.spyOn(document, "createElement").mockImplementation((tag: string) => {
+      const el = realCreateElement(tag);
+      if (tag === "a") anchors.push(el as HTMLAnchorElement);
+      return el;
+    });
+
+    const fetchMock = vi.fn(async (url: string) => {
+      const path = String(url);
+      if (path === "/api/pickup-orders/export") {
+        return textResponseWithHeaders(200, "0104006381333931211234567890", {
+          "Content-Disposition": 'attachment; filename="codes-20260724.txt"',
+        });
+      }
+      return jsonResponse(200, { items: [ORDER_A, ORDER_B] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Смирнов Алексей");
+
+    fireEvent.click(screen.getByRole("button", { name: "Массовая выгрузка" }));
+    const row = screen.getByText("37").closest("tr");
+    if (!row) throw new Error("expected a table row for order 37");
+    fireEvent.click(within(row).getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: "Выгрузить коды" }));
+
+    await waitFor(() => expect(anchors.some((a) => a.download)).toBe(true));
+    expect(anchors.find((a) => a.download)?.download).toBe("codes-20260724.txt");
   });
 
   it("rejects the export mutation and does NOT trigger a download when the export endpoint responds with an HTTP error", async () => {

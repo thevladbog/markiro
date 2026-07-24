@@ -170,13 +170,38 @@ export function useCancelOrder(): UseMutationResult<PickupOrderRowDto, Error, st
   });
 }
 
+/** Fallback filename if the server sends no (parseable) Content-Disposition. */
+const DEFAULT_CODES_FILENAME = "codes.txt";
+
+/**
+ * Reads the attachment filename the server chose (`codes-YYYYMMDD.txt`) from a
+ * `Content-Disposition` header, so the download matches the API's own naming.
+ * Handles the RFC 5987 `filename*=UTF-8''…` form as well as a plain/quoted
+ * `filename=…`, and falls back to `codes.txt` when the header is absent or
+ * unparseable.
+ */
+function filenameFromContentDisposition(header: string | null): string {
+  if (!header) return DEFAULT_CODES_FILENAME;
+  const extended = /filename\*=(?:UTF-8'')?([^;]+)/i.exec(header);
+  if (extended?.[1]) {
+    try {
+      return decodeURIComponent(extended[1].trim().replace(/^"|"$/g, ""));
+    } catch {
+      // fall through to the plain form
+    }
+  }
+  const plain = /filename="?([^";]+)"?/i.exec(header);
+  return plain?.[1]?.trim() || DEFAULT_CODES_FILENAME;
+}
+
 /**
  * `POST /pickup-orders/export` -- returns a `text/plain` codes file, not
  * JSON, so this bypasses `apiFetch` and calls `fetch` directly, then triggers
  * a browser download of the response text. A non-`ok` response throws an
  * `ApiRequestError` (mirroring `apiFetch`'s own error handling) *before* the
  * body is read or a download is triggered, so a failed export rejects the
- * mutation instead of downloading an error page as `codes.txt`.
+ * mutation instead of downloading an error page. The filename comes from the
+ * server's `Content-Disposition` (`codes-YYYYMMDD.txt`).
  */
 async function exportCodes(orderIds: string[]): Promise<string> {
   const res = await fetch("/api/pickup-orders/export", {
@@ -188,12 +213,15 @@ async function exportCodes(orderIds: string[]): Promise<string> {
   if (!res.ok) {
     throw new ApiRequestError(res.status, res.statusText || `HTTP ${res.status}`);
   }
+  const filename = filenameFromContentDisposition(
+    res.headers?.get?.("Content-Disposition") ?? null,
+  );
   const text = await res.text();
   const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = "codes.txt";
+  a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
   return text;

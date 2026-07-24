@@ -129,6 +129,13 @@ describe.skipIf(!ready)("employees e2e", () => {
     await signUpAndActivate(b);
     const created = await a.post("/employees").send({ fullName: "A" }).expect(201);
     await b.patch(`/employees/${created.body.id}`).send({ fullName: "hax" }).expect(404);
+    // Badge routes are tenant-scoped too: org B can neither issue nor revoke a
+    // badge on org A's employee (the employee simply doesn't exist for B).
+    await b
+      .post(`/employees/${created.body.id}/badges`)
+      .send({ badgeCode: "HAX-BADGE" })
+      .expect(404);
+    await b.delete(`/employees/${created.body.id}/badges/${randomUUID()}`).expect(404);
   });
 
   it("returns the employee unchanged on an empty PATCH body, and 404 for a missing id", async () => {

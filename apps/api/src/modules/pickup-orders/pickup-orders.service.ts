@@ -11,6 +11,7 @@ import { schema, type Db } from "@markiro/db";
 import { validatePickupKm } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
 import { nextOrderNo } from "../../pickup/order-number";
+import { computeTotalPrice } from "../../pickup/total-price";
 import type { PickupSlipData } from "../../pickup/slip";
 import type {
   CreateOrderDto,
@@ -98,6 +99,15 @@ export class PickupOrdersService {
       candidates,
     );
     conflicts.push(...overflowConflicts);
+
+    // 5b. A non-empty scan that produced only conflicts (nothing accepted) must
+    // NOT persist an empty pending order — it would clutter the свод with a
+    // 0-item row that can never be resolved. Return the conflicts without an
+    // order (empty orderNo). A genuinely item-less sync (`items: []`, e.g. a
+    // badge heartbeat) is deliberately excluded and still creates its order.
+    if (accepted.length === 0 && dto.items.length > 0) {
+      return { orderNo: "", status: "pending", itemCount: 0, conflicts };
+    }
 
     // 6. Transactional insert; a kmKey race against another open order converts that item to a duplicate conflict.
     const order = await this.insertOrderWithRetry(
@@ -366,7 +376,7 @@ export class PickupOrdersService {
       // `cancel()` when it voids items, so it would go stale (non-zero total
       // next to an empty table) for a cancelled order. This keeps "Итого"
       // consistent with the table for every status.
-      total: this.computeTotalPrice(itemRows),
+      total: computeTotalPrice(itemRows),
       items: itemRows.map((item, index) => ({
         n: index + 1,
         productName: item.productName ?? "",
@@ -514,7 +524,12 @@ export class PickupOrdersService {
     return this.rowDtoById(tenantId, cancelledId);
   }
 
-  /** A writeoffReasonId explicitly supplied to /resolve must belong to this tenant. */
+  /**
+   * A writeoffReasonId explicitly supplied to /resolve must belong to this
+   * tenant and be non-archived — symmetric with the kiosk create path
+   * (`resolveWriteoffReasonId`), so an archived reason can't be re-attached
+   * on resolve any more than it can on ingest.
+   */
   private async assertValidWriteoffReason(
     tenantId: string,
     writeoffReasonId: string,
@@ -526,9 +541,12 @@ export class PickupOrdersService {
         and(
           eq(schema.pickupOrderReasons.tenantId, tenantId),
           eq(schema.pickupOrderReasons.id, writeoffReasonId),
+          eq(schema.pickupOrderReasons.archived, false),
         ),
       );
-    if (!reason) throw new BadRequestException("Unknown writeoff reason for this organization");
+    if (!reason) {
+      throw new BadRequestException("Unknown or archived writeoff reason for this organization");
+    }
   }
 
   private async findRow(tenantId: string, id: string) {
@@ -844,7 +862,7 @@ export class PickupOrdersService {
               writeoffReasonId,
               status: "pending",
               itemCount: remaining.length,
-              totalPrice: this.computeTotalPrice(remaining),
+              totalPrice: computeTotalPrice(remaining),
               deviceSeq,
               createdAt: when,
             })
@@ -910,16 +928,6 @@ export class PickupOrdersService {
         remaining = stillOk;
       }
     }
-  }
-
-  private computeTotalPrice(items: { unitPrice: string | null }[]): string | null {
-    if (items.length === 0) return null;
-    let sum = 0;
-    for (const item of items) {
-      if (item.unitPrice === null) return null;
-      sum += Number(item.unitPrice);
-    }
-    return sum.toFixed(2);
   }
 
   /** 23505 on pickup_order_items_tenant_kmkey_open_uq -> the code is already open in another order. */

@@ -64,6 +64,7 @@ export class PickupOrdersController {
   }
 
   @Post(":id/resolve")
+  @HttpCode(200)
   async resolve(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
@@ -73,6 +74,7 @@ export class PickupOrdersController {
   }
 
   @Post(":id/cancel")
+  @HttpCode(200)
   async cancel(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<PickupOrderRowDto> {
     return this.pickupOrdersService.cancel(req.tenantId!, id);
   }

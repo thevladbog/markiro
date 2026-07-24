@@ -229,6 +229,9 @@ describe("OrderDetailPage", () => {
     renderPage(fetchMock);
 
     expect(await screen.findByText("Смирнов Алексей")).toBeDefined();
-    expect(screen.getByText("Код не отображается")).toBeDefined();
+    // ItemCode (and its bwip-js dependency) is lazy-loaded, so the fallback
+    // placeholder for a malformed code appears asynchronously once that chunk
+    // resolves -- hence findByText rather than a synchronous getByText.
+    expect(await screen.findByText("Код не отображается")).toBeDefined();
   });
 });
