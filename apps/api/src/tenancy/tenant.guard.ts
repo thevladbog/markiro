@@ -18,11 +18,13 @@ export interface RequestWithTenant extends Request {
 }
 
 /**
- * Resolves the caller's Better Auth session and requires an active
- * organization: no session -> 401, session without an active org -> 403.
- * On success, attaches `req.tenantId` for downstream handlers/repositories,
- * and `req.userId` (the Better Auth user id) for handlers that need to
- * record who performed an action (e.g. pickup order resolve).
+ * Resolves the caller's tenant from either a Better Auth session (admin/manager
+ * UI) or a station's org-owned `x-api-key` (kiosk device), and requires an
+ * active organization: no session and no valid api-key -> 401, session
+ * without an active org -> 403. On success, attaches `req.tenantId` for
+ * downstream handlers/repositories, and (on the session path) `req.userId`
+ * (the Better Auth user id) for handlers that need to record who performed
+ * an action (e.g. pickup order resolve).
  */
 @Injectable()
 export class TenantGuard implements CanActivate {
@@ -30,14 +32,35 @@ export class TenantGuard implements CanActivate {
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
     const req = ctx.switchToHttp().getRequest<RequestWithTenant>();
+
+    // Primary path: an admin/manager Better Auth session with an active org.
     const session = await this.auth.api.getSession({ headers: fromNodeHeaders(req.headers) });
-    if (!session) throw new UnauthorizedException();
+    if (session) {
+      const tenantId = session.session.activeOrganizationId;
+      if (!tenantId) throw new ForbiddenException("No active organization");
+      req.tenantId = tenantId;
+      // Enrollment (Task 6) mints an org-owned key server-side and needs the
+      // acting member's id as the key's `userId`; expose it on the request.
+      req.userId = session.user.id;
+      return true;
+    }
 
-    const tenantId = session.session.activeOrganizationId;
-    if (!tenantId) throw new ForbiddenException("No active organization");
+    // Station path: no session, but a device-enrolled api-key. The key's
+    // referenceId carries the tenantId (set at enrollment, Task 6).
+    const apiKey = req.headers["x-api-key"];
+    if (typeof apiKey === "string" && apiKey.length > 0) {
+      // `configId` is required: the "station" apiKey configuration has no
+      // "default" fallback, so verifyApiKey without it throws
+      // NO_DEFAULT_API_KEY_CONFIGURATION_FOUND (see packages/db/src/auth-config.ts).
+      const result = await this.auth.api.verifyApiKey({
+        body: { key: apiKey, configId: "station" },
+      });
+      if (result.valid && result.key) {
+        req.tenantId = result.key.referenceId;
+        return true;
+      }
+    }
 
-    req.tenantId = tenantId;
-    req.userId = session.user.id;
-    return true;
+    throw new UnauthorizedException();
   }
 }

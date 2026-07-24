@@ -1,0 +1,48 @@
+{
+  "app": { "title": "Markiro — Station", "booting": "Loading station…" },
+  "enroll": {
+    "title": "Connect station",
+    "serverUrl": "Server URL",
+    "apiKey": "Device key",
+    "submit": "Connect",
+    "invalid": "Could not connect. Check the URL and key.",
+    "success": "Station connected"
+  },
+  "login": {
+    "title": "Operator sign-in",
+    "pinPrompt": "Enter PIN",
+    "badgePrompt": "Or scan your badge",
+    "clear": "Clear",
+    "submit": "Sign in",
+    "wrong": "Wrong PIN"
+  },
+  "shifts": {
+    "title": "Shifts",
+    "open": "Open",
+    "rejoin": "Rejoin",
+    "new": "New shift",
+    "gtinPrompt": "Type or scan a GTIN",
+    "gtinInvalid": "Invalid GTIN",
+    "notInCatalog": "Product is not in the catalog",
+    "notInCatalogHint": "Ask an administrator to add it in the admin panel.",
+    "scanAgain": "Scan again",
+    "back": "Back",
+    "modeValidation": "Validation",
+    "modeAggregation": "Aggregation",
+    "start": "Start",
+    "actionFailed": "Action failed. Please try again.",
+    "active": "Shift active",
+    "forCounterparty": "for:"
+  },
+  "shell": {
+    "online": "Online",
+    "offline": "Offline",
+    "sync": "Sync",
+    "agent": "Agent",
+    "scanner": "Scanner",
+    "printer": "Printer",
+    "notConfigured": "Not configured",
+    "teammates": "Terminals",
+    "tasks": "Tasks"
+  }
+}

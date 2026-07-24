@@ -9,12 +9,16 @@ import {
 } from "@nestjs/common";
 import { and, eq, gte, lte } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
+import type { LabelTemplateSpec } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
+import type { ProductDto } from "../products/dto";
 import type {
   CloseShiftDto,
   CreateShiftDto,
   ListShiftsQueryDto,
   ListShiftsResponseDto,
+  OperatorMirrorRecord,
+  ShiftBundleDto,
   ShiftDto,
   ShiftMode,
   UpdateShiftDto,
@@ -240,6 +244,88 @@ export class ShiftsService {
       throw new ConflictException("Shift can only be closed while active");
     }
     return this.getShift(tenantId, row.id);
+  }
+
+  /** Open a planned shift: planned -> active, stamps openedAt. 409 otherwise. */
+  async openShift(tenantId: string, id: string): Promise<ShiftDto> {
+    const current = await this.findRow(tenantId, id);
+    if (!current) throw new NotFoundException();
+    if (current.status !== "planned") {
+      throw new ConflictException("Shift can only be opened while planned");
+    }
+    const [row] = await this.db
+      .update(schema.shifts)
+      .set({ status: "active", openedAt: new Date() })
+      .where(
+        and(
+          eq(schema.shifts.tenantId, tenantId),
+          eq(schema.shifts.id, id),
+          eq(schema.shifts.status, "planned"),
+        ),
+      )
+      .returning();
+    if (!row) throw new ConflictException("Shift can only be opened while planned");
+    return this.getShift(tenantId, row.id);
+  }
+
+  /**
+   * Everything the station downloads for a shift. `operators` is `[]` in 05a
+   * (the server operators table is a PARALLEL 05b workstream — do NOT query a
+   * non-existent table).
+   */
+  async getBundle(tenantId: string, id: string): Promise<ShiftBundleDto> {
+    const shift = await this.getShift(tenantId, id); // 404 if cross-tenant/missing
+
+    const productRow = await this.findProductRow(tenantId, shift.productId);
+    if (!productRow) throw new NotFoundException("Shift product missing");
+    const product: ProductDto = {
+      id: productRow.id,
+      gtin14: productRow.gtin14,
+      name: productRow.name,
+      productGroup: productRow.productGroup,
+      boxCapacity: productRow.boxCapacity,
+      palletCapacity: productRow.palletCapacity,
+      status: productRow.status,
+      defaultCounterpartyId: productRow.defaultCounterpartyId,
+      defaultLabelTemplateId: productRow.defaultLabelTemplateId,
+      unitPrice: productRow.unitPrice,
+      egaisCode: productRow.egaisCode,
+      externalRef: productRow.externalRef,
+      createdAt: productRow.createdAt,
+    };
+
+    let labelTemplate: ShiftBundleDto["labelTemplate"] = null;
+    if (shift.labelTemplateId) {
+      const [lt] = await this.db
+        .select()
+        .from(schema.labelTemplates)
+        .where(
+          and(
+            eq(schema.labelTemplates.tenantId, tenantId),
+            eq(schema.labelTemplates.id, shift.labelTemplateId),
+          ),
+        );
+      if (lt) labelTemplate = { id: lt.id, name: lt.name, spec: lt.spec as LabelTemplateSpec };
+    }
+
+    let counterpartyGln: string | null = null;
+    if (shift.counterpartyId) {
+      const [cp] = await this.db
+        .select()
+        .from(schema.counterparties)
+        .where(
+          and(
+            eq(schema.counterparties.tenantId, tenantId),
+            eq(schema.counterparties.id, shift.counterpartyId),
+          ),
+        );
+      counterpartyGln = cp ? cp.gln : null;
+    }
+
+    // TODO(05b): populate from the server operators table (parallel workstream).
+    const operators: OperatorMirrorRecord[] = [];
+
+    return { shift, product, labelTemplate, counterpartyGln, operators };
   }
 
   private async findRow(tenantId: string, id: string): Promise<ShiftRow | undefined> {

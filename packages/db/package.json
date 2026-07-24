@@ -17,7 +17,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:migrate": "drizzle-kit migrate",
+    "db:generate:sqlite": "drizzle-kit generate --config drizzle.sqlite.config.ts"
   },
   "dependencies": {
     "@better-auth/api-key": "1.6.23",
