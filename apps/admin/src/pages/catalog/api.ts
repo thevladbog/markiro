@@ -21,6 +21,8 @@ export interface ProductDto {
   productGroup: string | null;
   boxCapacity: number | null;
   palletCapacity: number | null;
+  unitPrice: string | null;
+  egaisCode: string | null;
   status: ProductStatus;
   defaultCounterpartyId: string | null;
   defaultLabelTemplateId: string | null;
@@ -38,6 +40,8 @@ export interface CreateProductInput {
   productGroup?: string | null;
   boxCapacity?: number | null;
   palletCapacity?: number | null;
+  unitPrice?: string | null;
+  egaisCode?: string | null;
   defaultCounterpartyId?: string | null;
   defaultLabelTemplateId?: string | null;
 }

@@ -111,6 +111,8 @@
         "productGroupLabel": "Группа продукции",
         "boxCapacityLabel": "Вместимость короба, шт",
         "palletCapacityLabel": "Вместимость поддона, шт",
+        "unitPriceLabel": "Цена за шт., ₽",
+        "egaisCodeLabel": "Код ЕГАИС",
         "defaultCounterpartyLabel": "Контрагент по умолчанию",
         "noCounterparty": "Не выбран",
         "defaultLabelTemplateLabel": "Шаблон этикетки по умолчанию",
@@ -127,7 +129,8 @@
           "nameRequired": "Укажите название",
           "nameTooLong": "Не более 200 символов",
           "productGroupTooLong": "Не более 200 символов",
-          "capacityInvalid": "Введите положительное целое число"
+          "capacityInvalid": "Введите положительное целое число",
+          "unitPriceInvalid": "Укажите цену в формате 0.00 или оставьте пустым"
         }
       },
       "toasts": {

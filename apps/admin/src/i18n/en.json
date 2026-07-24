@@ -111,6 +111,8 @@
         "productGroupLabel": "Product group",
         "boxCapacityLabel": "Box capacity, units",
         "palletCapacityLabel": "Pallet capacity, units",
+        "unitPriceLabel": "Price per unit, ₽",
+        "egaisCodeLabel": "EGAIS code",
         "defaultCounterpartyLabel": "Default counterparty",
         "noCounterparty": "None selected",
         "defaultLabelTemplateLabel": "Default label template",
@@ -127,7 +129,8 @@
           "nameRequired": "Enter a name",
           "nameTooLong": "200 characters or fewer",
           "productGroupTooLong": "200 characters or fewer",
-          "capacityInvalid": "Enter a positive whole number"
+          "capacityInvalid": "Enter a positive whole number",
+          "unitPriceInvalid": "Enter price in format 0.00 or leave blank"
         }
       },
       "toasts": {
