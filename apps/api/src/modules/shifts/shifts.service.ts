@@ -288,6 +288,9 @@ export class ShiftsService {
       status: productRow.status,
       defaultCounterpartyId: productRow.defaultCounterpartyId,
       defaultLabelTemplateId: productRow.defaultLabelTemplateId,
+      unitPrice: productRow.unitPrice,
+      egaisCode: productRow.egaisCode,
+      externalRef: productRow.externalRef,
       createdAt: productRow.createdAt,
     };
 
