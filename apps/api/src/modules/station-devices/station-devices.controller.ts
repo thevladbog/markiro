@@ -10,6 +10,7 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
+import { SessionOnlyGuard } from "../../tenancy/session-only.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import { loadEnv } from "../../env";
@@ -23,7 +24,11 @@ import { StationDevicesService } from "./station-devices.service";
 
 @ApiTags("station-devices")
 @Controller("station-devices")
-@UseGuards(TenantGuard)
+// Device management (list/revoke/mint station keys) is an admin action:
+// TenantGuard alone would also accept a station's own x-api-key (needed for
+// other station-facing endpoints), so SessionOnlyGuard enforces that only a
+// logged-in user (never a station) can reach these routes.
+@UseGuards(TenantGuard, SessionOnlyGuard)
 export class StationDevicesController {
   constructor(private readonly service: StationDevicesService) {}
 

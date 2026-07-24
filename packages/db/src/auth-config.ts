@@ -43,6 +43,15 @@ function buildAuthImpl(
           // `metadata: { kind: "station" }`; the plugin rejects any
           // `metadata` on createApiKey unless explicitly enabled per config.
           enableMetadata: true,
+          // The plugin default (10 requests/day) throttles a live station
+          // into RATE_LIMITED failures within a single shift, since
+          // TenantGuard calls verifyApiKey() on every request. Keep rate
+          // limiting enabled (revoke remains the hard kill switch for a
+          // leaked key) but raise the cap to a station-appropriate value:
+          // 600 requests/minute is a safe operational ceiling with generous
+          // headroom for normal + scanning traffic, to be validated against
+          // real line throughput in a later plan.
+          rateLimit: { enabled: true, maxRequests: 600, timeWindow: 1000 * 60 },
         },
       ]),
     ],

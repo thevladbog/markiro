@@ -83,4 +83,30 @@ describe.skipIf(!ready)("station devices e2e", () => {
       .set("x-api-key", enroll.body.apiKey)
       .expect(401);
   });
+
+  it("rejects device-management requests authenticated by a station api-key (session required)", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+
+    const enroll = await agent.post("/station-devices").send({ name: "Terminal 2" }).expect(201);
+    const apiKey = enroll.body.apiKey as string;
+
+    // A valid station key satisfies TenantGuard (tenant resolution), but
+    // device management is an admin-only action requiring a user session.
+    await request(app!.getHttpServer())
+      .get("/station-devices")
+      .set("x-api-key", apiKey)
+      .expect(403);
+
+    await request(app!.getHttpServer())
+      .delete(`/station-devices/${enroll.body.deviceId}`)
+      .set("x-api-key", apiKey)
+      .expect(403);
+
+    await request(app!.getHttpServer())
+      .post("/station-devices")
+      .set("x-api-key", apiKey)
+      .send({ name: "Terminal 3" })
+      .expect(403);
+  });
 });
