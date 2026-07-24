@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { createDb, schema } from "../src/index.js";
 
 const url = process.env.DATABASE_URL;
@@ -85,7 +85,31 @@ describe.skipIf(!url)("pickup schema constraints", () => {
   });
 
   it("allows the km_key again once the first item is voided", async () => {
-    await db.update(schema.pickupOrderItems).set({ voided: true });
+    // Self-contained: don't rely on the previous test's insert having run
+    // first -- make sure order1's item exists regardless of execution order
+    // (`onConflictDoNothing` no-ops if the prior test already inserted it).
+    await db
+      .insert(schema.pickupOrderItems)
+      .values(item(order1))
+      .onConflictDoNothing({
+        target: [
+          schema.pickupOrderItems.tenantId,
+          schema.pickupOrderItems.orderId,
+          schema.pickupOrderItems.kmKey,
+        ],
+      });
+    // Scoped to THIS test's data (tenant + order1) -- an unscoped update
+    // here would void every pickup_order_item row in the shared Postgres,
+    // including ones from concurrently-running api e2e tests.
+    await db
+      .update(schema.pickupOrderItems)
+      .set({ voided: true })
+      .where(
+        and(
+          eq(schema.pickupOrderItems.tenantId, org.id),
+          eq(schema.pickupOrderItems.orderId, order1),
+        ),
+      );
     await expect(db.insert(schema.pickupOrderItems).values(item(order2))).resolves.toBeDefined();
   });
 });

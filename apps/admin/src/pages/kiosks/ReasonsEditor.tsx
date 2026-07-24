@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Alert, Button, Card, Input, Spinner } from "@markiro/ui";
+import { Alert, Button, Card, Input, Modal, Spinner } from "@markiro/ui";
 
 import { ApiRequestError } from "../../api/client.js";
 import { toast } from "../../lib/toast.js";
@@ -43,6 +43,7 @@ export function ReasonsEditor() {
 
   const [newName, setNewName] = useState("");
   const [drafts, setDrafts] = useState<Record<string, ReasonDraft>>({});
+  const [archiveTarget, setArchiveTarget] = useState<ReasonDto | null>(null);
 
   const items = data ?? [];
 
@@ -96,10 +97,12 @@ export function ReasonsEditor() {
     }
   };
 
-  const handleArchive = async (id: string) => {
+  const handleArchive = async () => {
+    if (!archiveTarget) return;
     try {
-      await archiveMutation.mutateAsync(id);
+      await archiveMutation.mutateAsync(archiveTarget.id);
       toast("ok", t("pages.kiosks.toasts.reasonArchiveSuccess"));
+      setArchiveTarget(null);
     } catch (error) {
       toast(
         "error",
@@ -111,87 +114,121 @@ export function ReasonsEditor() {
   };
 
   return (
-    <Card title={t("pages.kiosks.reasons.title")}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {isPending ? (
-          <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
-            <Spinner label={t("common.loading")} />
-          </div>
-        ) : isError ? (
-          <Alert tone="error">{t("common.loadError")}</Alert>
-        ) : (
-          <>
-            {items.length === 0 && (
-              <p style={{ font: "var(--text-body)", color: "var(--fg-3)" }}>
-                {t("pages.kiosks.reasons.emptyHint")}
-              </p>
-            )}
-            {items.map((reason) => {
-              const draft = drafts[reason.id] ?? draftFrom(reason);
-              return (
-                <div key={reason.id} style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
-                  <div style={{ flex: 1 }}>
-                    <Input
-                      label={t("pages.kiosks.reasons.nameLabel")}
-                      value={draft.name}
-                      onChange={(event) =>
-                        setDrafts((prev) => ({
-                          ...prev,
-                          [reason.id]: { ...draft, name: event.target.value },
-                        }))
-                      }
-                    />
+    <>
+      <Card title={t("pages.kiosks.reasons.title")}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {isPending ? (
+            <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
+              <Spinner label={t("common.loading")} />
+            </div>
+          ) : isError ? (
+            <Alert tone="error">{t("common.loadError")}</Alert>
+          ) : (
+            <>
+              {items.length === 0 && (
+                <p style={{ font: "var(--text-body)", color: "var(--fg-3)" }}>
+                  {t("pages.kiosks.reasons.emptyHint")}
+                </p>
+              )}
+              {items.map((reason) => {
+                const draft = drafts[reason.id] ?? draftFrom(reason);
+                return (
+                  <div key={reason.id} style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+                    <div style={{ flex: 1 }}>
+                      <Input
+                        label={t("pages.kiosks.reasons.nameLabel")}
+                        value={draft.name}
+                        onChange={(event) =>
+                          setDrafts((prev) => ({
+                            ...prev,
+                            [reason.id]: { ...draft, name: event.target.value },
+                          }))
+                        }
+                      />
+                    </div>
+                    <div style={{ width: 100 }}>
+                      <Input
+                        label={t("pages.kiosks.reasons.sortOrderLabel")}
+                        mono
+                        inputMode="numeric"
+                        value={draft.sortOrder}
+                        onChange={(event) =>
+                          setDrafts((prev) => ({
+                            ...prev,
+                            [reason.id]: { ...draft, sortOrder: event.target.value },
+                          }))
+                        }
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      size="compact"
+                      variant="secondary"
+                      loading={updateMutation.isPending}
+                      onClick={() => void handleSave(reason)}
+                    >
+                      {t("pages.kiosks.reasons.saveAction")}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="compact"
+                      variant="destructive"
+                      onClick={() => setArchiveTarget(reason)}
+                    >
+                      {t("pages.kiosks.reasons.archiveAction")}
+                    </Button>
                   </div>
-                  <div style={{ width: 100 }}>
-                    <Input
-                      label={t("pages.kiosks.reasons.sortOrderLabel")}
-                      mono
-                      inputMode="numeric"
-                      value={draft.sortOrder}
-                      onChange={(event) =>
-                        setDrafts((prev) => ({
-                          ...prev,
-                          [reason.id]: { ...draft, sortOrder: event.target.value },
-                        }))
-                      }
-                    />
-                  </div>
-                  <Button
-                    type="button"
-                    size="compact"
-                    variant="secondary"
-                    loading={updateMutation.isPending}
-                    onClick={() => void handleSave(reason)}
-                  >
-                    {t("pages.kiosks.reasons.saveAction")}
-                  </Button>
-                  <Button
-                    type="button"
-                    size="compact"
-                    variant="destructive"
-                    onClick={() => void handleArchive(reason.id)}
-                  >
-                    {t("pages.kiosks.reasons.archiveAction")}
-                  </Button>
-                </div>
-              );
-            })}
-          </>
-        )}
+                );
+              })}
+            </>
+          )}
 
-        <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
-          <div style={{ flex: 1 }}>
-            <Input
-              label={t("pages.kiosks.reasons.nameLabel")}
-              value={newName}
-              onChange={(event) => setNewName(event.target.value)}
-            />
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+            <div style={{ flex: 1 }}>
+              <Input
+                label={t("pages.kiosks.reasons.nameLabel")}
+                value={newName}
+                onChange={(event) => setNewName(event.target.value)}
+              />
+            </div>
+            <Button
+              type="button"
+              loading={createMutation.isPending}
+              onClick={() => void handleAdd()}
+            >
+              {t("pages.kiosks.reasons.addAction")}
+            </Button>
           </div>
-          <Button type="button" loading={createMutation.isPending} onClick={() => void handleAdd()}>
-            {t("pages.kiosks.reasons.addAction")}
-          </Button>
         </div>
-      </div>
-    </Card>
+      </Card>
+
+      <Modal
+        open={archiveTarget !== null}
+        onClose={() => setArchiveTarget(null)}
+        closeLabel={t("common.close")}
+        title={t("pages.kiosks.reasons.archiveConfirmTitle")}
+        footer={
+          <>
+            <Button type="button" variant="secondary" onClick={() => setArchiveTarget(null)}>
+              {t("pages.kiosks.cancel")}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              loading={archiveMutation.isPending}
+              onClick={() => void handleArchive()}
+            >
+              {t("pages.kiosks.reasons.archiveConfirmAction")}
+            </Button>
+          </>
+        }
+      >
+        {archiveTarget && (
+          <p style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>
+            {t("pages.kiosks.reasons.archiveConfirmBody", { name: archiveTarget.name })}
+          </p>
+        )}
+      </Modal>
+    </>
   );
 }

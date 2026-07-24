@@ -592,7 +592,8 @@
         "action": "Issue token",
         "modalTitle": "Kiosk enrollment token",
         "hint": "Copy the token and enter it on the kiosk during first-time setup. The token is shown only once.",
-        "copyAction": "Copy"
+        "copyAction": "Copy",
+        "copyError": "Could not copy the token"
       },
       "reasons": {
         "title": "Write-off reasons",
@@ -601,7 +602,10 @@
         "nameLabel": "Name",
         "sortOrderLabel": "Order",
         "saveAction": "Save",
-        "archiveAction": "Delete"
+        "archiveAction": "Delete",
+        "archiveConfirmTitle": "Delete this reason?",
+        "archiveConfirmBody": "Reason \"{{name}}\" will be deleted.",
+        "archiveConfirmAction": "Delete"
       },
       "toasts": {
         "createSuccess": "Kiosk added",

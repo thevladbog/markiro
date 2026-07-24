@@ -1,5 +1,5 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
 import type {
@@ -104,6 +104,7 @@ export class EmployeesService {
           eq(schema.employeeBadges.tenantId, tenantId),
           eq(schema.employeeBadges.id, badgeId),
           eq(schema.employeeBadges.employeeId, employeeId),
+          isNull(schema.employeeBadges.revokedAt),
         ),
       )
       .returning();

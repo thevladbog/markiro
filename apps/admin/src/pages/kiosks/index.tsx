@@ -210,6 +210,14 @@ export function KiosksPage() {
     }
   };
 
+  const handleCopyToken = async (token: string) => {
+    try {
+      await navigator.clipboard.writeText(token);
+    } catch {
+      toast("error", t("pages.kiosks.enroll.copyError"));
+    }
+  };
+
   return (
     <div style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: 20 }}>
       <PageHeader
@@ -316,7 +324,7 @@ export function KiosksPage() {
             <Button
               type="button"
               variant="secondary"
-              onClick={() => void navigator.clipboard.writeText(tokenModal.token)}
+              onClick={() => void handleCopyToken(tokenModal.token)}
             >
               {t("pages.kiosks.enroll.copyAction")}
             </Button>

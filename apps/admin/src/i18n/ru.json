@@ -592,7 +592,8 @@
         "action": "Выдать токен",
         "modalTitle": "Токен подключения киоска",
         "hint": "Скопируйте токен и введите его на киоске при первом запуске. Токен показывается один раз.",
-        "copyAction": "Скопировать"
+        "copyAction": "Скопировать",
+        "copyError": "Не удалось скопировать токен"
       },
       "reasons": {
         "title": "Причины списания",
@@ -601,7 +602,10 @@
         "nameLabel": "Название",
         "sortOrderLabel": "Порядок",
         "saveAction": "Сохранить",
-        "archiveAction": "Удалить"
+        "archiveAction": "Удалить",
+        "archiveConfirmTitle": "Удалить причину?",
+        "archiveConfirmBody": "Причина «{{name}}» будет удалена.",
+        "archiveConfirmAction": "Удалить"
       },
       "toasts": {
         "createSuccess": "Киоск добавлен",

@@ -94,6 +94,32 @@ describe.skipIf(!ready)("employees e2e", () => {
       .post(`/employees/${other.body.id}/badges`)
       .send({ badgeCode: "MARKIRO-BADGE-4412" })
       .expect(201);
+
+    // Revoking the same (already-revoked) badge again must not succeed, and
+    // must not overwrite the original revocation timestamp.
+    const afterFirstRevoke = await agent.get("/employees").expect(200);
+    const badgeAfterFirstRevoke = (
+      afterFirstRevoke.body.items as Array<{
+        id: string;
+        badges: Array<{ id: string; revokedAt: string }>;
+      }>
+    )
+      .find((e) => e.id === id)!
+      .badges.find((b) => b.id === badgeId)!;
+    expect(badgeAfterFirstRevoke.revokedAt).not.toBeNull();
+
+    await agent.delete(`/employees/${id}/badges/${badgeId}`).expect(404);
+
+    const afterSecondRevoke = await agent.get("/employees").expect(200);
+    const badgeAfterSecondRevoke = (
+      afterSecondRevoke.body.items as Array<{
+        id: string;
+        badges: Array<{ id: string; revokedAt: string }>;
+      }>
+    )
+      .find((e) => e.id === id)!
+      .badges.find((b) => b.id === badgeId)!;
+    expect(badgeAfterSecondRevoke.revokedAt).toBe(badgeAfterFirstRevoke.revokedAt);
   });
 
   it("isolates employees across tenants", async () => {
