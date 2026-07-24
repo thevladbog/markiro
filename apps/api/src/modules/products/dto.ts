@@ -17,6 +17,13 @@ export const createProductSchema = z.object({
   palletCapacity: z.number().int().min(1).nullable().optional(),
   defaultCounterpartyId: z.string().uuid().nullable().optional(),
   defaultLabelTemplateId: z.string().uuid().nullable().optional(),
+  unitPrice: z
+    .string()
+    .regex(/^\d+(\.\d{1,2})?$/)
+    .nullable()
+    .optional(),
+  egaisCode: z.string().trim().min(1).max(64).nullable().optional(),
+  externalRef: z.string().trim().min(1).max(200).nullable().optional(),
 });
 export type CreateProductDto = z.infer<typeof createProductSchema>;
 
@@ -29,6 +36,13 @@ export const updateProductSchema = z.object({
   palletCapacity: z.number().int().min(1).nullable().optional(),
   defaultCounterpartyId: z.string().uuid().nullable().optional(),
   defaultLabelTemplateId: z.string().uuid().nullable().optional(),
+  unitPrice: z
+    .string()
+    .regex(/^\d+(\.\d{1,2})?$/)
+    .nullable()
+    .optional(),
+  egaisCode: z.string().trim().min(1).max(64).nullable().optional(),
+  externalRef: z.string().trim().min(1).max(200).nullable().optional(),
 });
 export type UpdateProductDto = z.infer<typeof updateProductSchema>;
 
@@ -56,6 +70,9 @@ export interface ProductDto {
   status: ProductStatus;
   defaultCounterpartyId: string | null;
   defaultLabelTemplateId: string | null;
+  unitPrice: string | null;
+  egaisCode: string | null;
+  externalRef: string | null;
   createdAt: Date;
 }
 

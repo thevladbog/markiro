@@ -55,6 +55,15 @@ const productFormSchema = z.object({
     .trim()
     .optional()
     .refine((v) => !v || /^[1-9]\d*$/.test(v), "pages.catalog.form.errors.capacityInvalid"),
+  unitPrice: z
+    .string()
+    .trim()
+    .optional()
+    .refine(
+      (v) => !v || /^\d+([.,]\d{1,2})?$/.test(v),
+      "pages.catalog.form.errors.unitPriceInvalid",
+    ),
+  egaisCode: z.string().trim().optional(),
   defaultCounterpartyId: z.string().trim().optional(),
   defaultLabelTemplateId: z.string().trim().optional(),
 });
@@ -80,6 +89,8 @@ const EMPTY_VALUES: ProductFormValues = {
   productGroup: "",
   boxCapacity: "",
   palletCapacity: "",
+  unitPrice: "",
+  egaisCode: "",
   defaultCounterpartyId: "",
   defaultLabelTemplateId: "",
 };
@@ -275,6 +286,18 @@ export function ProductForm({
           {...errorProp(translateFieldError(t, errors.palletCapacity?.message))}
           {...register("palletCapacity")}
         />
+        <Input
+          label={t("pages.catalog.form.unitPriceLabel")}
+          mono
+          inputMode="decimal"
+          {...errorProp(translateFieldError(t, errors.unitPrice?.message))}
+          {...register("unitPrice")}
+        />
+        <Input
+          label={t("pages.catalog.form.egaisCodeLabel")}
+          {...errorProp(translateFieldError(t, errors.egaisCode?.message))}
+          {...register("egaisCode")}
+        />
         <Select
           label={t("pages.catalog.form.defaultCounterpartyLabel")}
           options={counterpartyOptions}
@@ -301,6 +324,8 @@ function toCreateInput(values: ProductFormValues): CreateProductInput {
   const productGroup = values.productGroup?.trim();
   const boxCapacity = values.boxCapacity?.trim();
   const palletCapacity = values.palletCapacity?.trim();
+  const unitPrice = values.unitPrice?.trim();
+  const egaisCode = values.egaisCode?.trim();
   const defaultCounterpartyId = values.defaultCounterpartyId?.trim();
   const defaultLabelTemplateId = values.defaultLabelTemplateId?.trim();
   return {
@@ -309,6 +334,8 @@ function toCreateInput(values: ProductFormValues): CreateProductInput {
     productGroup: productGroup ? productGroup : null,
     boxCapacity: boxCapacity ? Number(boxCapacity) : null,
     palletCapacity: palletCapacity ? Number(palletCapacity) : null,
+    unitPrice: unitPrice ? unitPrice.replace(",", ".") : null,
+    egaisCode: egaisCode ? egaisCode : null,
     defaultCounterpartyId: defaultCounterpartyId ? defaultCounterpartyId : null,
     defaultLabelTemplateId: defaultLabelTemplateId ? defaultLabelTemplateId : null,
   };

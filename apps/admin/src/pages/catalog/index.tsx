@@ -144,6 +144,8 @@ export function CatalogPage() {
         boxCapacity: editingProduct.boxCapacity !== null ? String(editingProduct.boxCapacity) : "",
         palletCapacity:
           editingProduct.palletCapacity !== null ? String(editingProduct.palletCapacity) : "",
+        unitPrice: editingProduct.unitPrice ?? "",
+        egaisCode: editingProduct.egaisCode ?? "",
         defaultCounterpartyId: editingProduct.defaultCounterpartyId ?? "",
         defaultLabelTemplateId: editingProduct.defaultLabelTemplateId ?? "",
       }

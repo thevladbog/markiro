@@ -531,4 +531,54 @@ describe.skipIf(!ready)("products e2e", () => {
 
     expect(res.body.message).toEqual(expect.stringContaining("Unknown label template"));
   });
+
+  it("POST /products accepts unitPrice, egaisCode, externalRef and GET returns them; PATCH unitPrice: null clears it", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+
+    const createRes = await agent
+      .post("/products")
+      .send({
+        gtin: EAN13_CANONICAL,
+        name: "Product with Price",
+        unitPrice: "52.00",
+        egaisCode: "0123456789",
+        externalRef: "ext-ref-001",
+      })
+      .expect(201);
+
+    expect(createRes.body).toMatchObject({
+      gtin14: GTIN14_CANONICAL,
+      name: "Product with Price",
+      unitPrice: "52.00",
+      egaisCode: "0123456789",
+      externalRef: "ext-ref-001",
+    });
+
+    const id = createRes.body.id as string;
+
+    // GET /products returns the fields
+    const getRes = await agent.get(`/products/${id}`).expect(200);
+    expect(getRes.body).toMatchObject({
+      unitPrice: "52.00",
+      egaisCode: "0123456789",
+      externalRef: "ext-ref-001",
+    });
+
+    // PATCH unitPrice to null clears it
+    const patchRes = await agent.patch(`/products/${id}`).send({ unitPrice: null }).expect(200);
+    expect(patchRes.body).toMatchObject({
+      unitPrice: null,
+      egaisCode: "0123456789", // should remain unchanged
+      externalRef: "ext-ref-001", // should remain unchanged
+    });
+
+    // Verify the clear persists
+    const verifyRes = await agent.get(`/products/${id}`).expect(200);
+    expect(verifyRes.body).toMatchObject({
+      unitPrice: null,
+      egaisCode: "0123456789",
+      externalRef: "ext-ref-001",
+    });
+  });
 });

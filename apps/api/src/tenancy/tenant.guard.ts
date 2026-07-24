@@ -14,12 +14,15 @@ import { AUTH } from "../auth/auth.module";
 /** Exported so guarded controllers can type `@Req()` without re-declaring this. */
 export interface RequestWithTenant extends Request {
   tenantId?: string;
+  userId?: string;
 }
 
 /**
  * Resolves the caller's Better Auth session and requires an active
  * organization: no session -> 401, session without an active org -> 403.
- * On success, attaches `req.tenantId` for downstream handlers/repositories.
+ * On success, attaches `req.tenantId` for downstream handlers/repositories,
+ * and `req.userId` (the Better Auth user id) for handlers that need to
+ * record who performed an action (e.g. pickup order resolve).
  */
 @Injectable()
 export class TenantGuard implements CanActivate {
@@ -34,6 +37,7 @@ export class TenantGuard implements CanActivate {
     if (!tenantId) throw new ForbiddenException("No active organization");
 
     req.tenantId = tenantId;
+    req.userId = session.user.id;
     return true;
   }
 }

@@ -4,6 +4,7 @@ import {
   date,
   foreignKey,
   integer,
+  numeric,
   pgEnum,
   pgTable,
   text,
@@ -55,6 +56,9 @@ export const products = pgTable(
     status: productStatus("status").notNull().default("draft"),
     defaultCounterpartyId: uuid("default_counterparty_id"),
     defaultLabelTemplateId: uuid("default_label_template_id"),
+    unitPrice: numeric("unit_price", { precision: 12, scale: 2 }),
+    egaisCode: text("egais_code"),
+    externalRef: text("external_ref"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

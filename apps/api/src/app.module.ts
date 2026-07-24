@@ -9,6 +9,11 @@ import { ProductsModule } from "./modules/products/products.module";
 import { LinesModule } from "./modules/lines/lines.module";
 import { ShiftsModule } from "./modules/shifts/shifts.module";
 import { LabelTemplatesModule } from "./modules/label-templates/label-templates.module";
+import { EmployeesModule } from "./modules/employees/employees.module";
+import { KiosksModule } from "./modules/kiosks/kiosks.module";
+import { PickupReasonsModule } from "./modules/pickup-reasons/pickup-reasons.module";
+import { KioskModule } from "./modules/kiosk/kiosk.module";
+import { PickupOrdersModule } from "./modules/pickup-orders/pickup-orders.module";
 
 @Module({ controllers: [HealthController] })
 export class AppModule {
@@ -37,6 +42,11 @@ export class AppModule {
         LinesModule,
         ShiftsModule,
         LabelTemplatesModule,
+        EmployeesModule,
+        KiosksModule,
+        PickupReasonsModule,
+        KioskModule,
+        PickupOrdersModule,
       ],
       controllers: [HealthController],
     };
