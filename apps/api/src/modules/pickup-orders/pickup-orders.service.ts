@@ -371,6 +371,7 @@ export class PickupOrdersService {
       .where(and(
         eq(schema.pickupOrderItems.tenantId, tenantId),
         inArray(schema.pickupOrderItems.orderId, orderIds),
+        eq(schema.pickupOrderItems.voided, false),
       ))
       .orderBy(asc(schema.pickupOrderItems.orderId), asc(schema.pickupOrderItems.scannedAt));
 

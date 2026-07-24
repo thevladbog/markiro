@@ -145,7 +145,7 @@ describe.skipIf(!ready)("pickup orders export e2e", () => {
 
     // Create a separate agent for tenant B
     const agent2 = request.agent(app!.getHttpServer());
-    const tenantId2 = await signUpAndActivate(agent2);
+    await signUpAndActivate(agent2);
 
     // Tenant B attempts to export with tenant A's order ID (should get 0 items)
     // Since tenant A's order ID doesn't belong to tenant B, it contributes nothing
@@ -157,6 +157,39 @@ describe.skipIf(!ready)("pickup orders export e2e", () => {
 
     const lines = res.text.split("\n").filter(Boolean);
     expect(lines).toHaveLength(0);
+  });
+
+  it("excludes voided items of a cancelled order from export", async () => {
+    // Create an order, then cancel it — cancel voids its items and frees the codes.
+    const cancelledRes = await scan(401, `01${GTIN}21SER1${GS}93Abcd`).expect(201);
+    const cancelledOrderId = await orderIdByNo(cancelledRes.body.orderNo);
+
+    await agent.post(`/pickup-orders/${cancelledOrderId}/cancel`).expect(201);
+
+    const exportCancelledOnly = await agent
+      .post("/pickup-orders/export")
+      .send({ orderIds: [cancelledOrderId] })
+      .expect(200)
+      .expect("Content-Type", /text\/plain/);
+
+    // The cancelled order's items are voided, so it contributes nothing to the export.
+    expect(exportCancelledOnly.text.split("\n").filter(Boolean)).toHaveLength(0);
+    expect(exportCancelledOnly.text).not.toContain(`01${GTIN}21SER1${GS}93Abcd`);
+
+    // Mix a live order with the cancelled one — only the live order's item should appear.
+    const liveRes = await scan(402, `01${GTIN}21SER2${GS}93Abcd`).expect(201);
+    const liveOrderId = await orderIdByNo(liveRes.body.orderNo);
+
+    const mixedExport = await agent
+      .post("/pickup-orders/export")
+      .send({ orderIds: [cancelledOrderId, liveOrderId] })
+      .expect(200)
+      .expect("Content-Type", /text\/plain/);
+
+    const mixedLines = mixedExport.text.split("\n").filter(Boolean);
+    expect(mixedLines).toHaveLength(1);
+    expect(mixedExport.text).toContain(`01${GTIN}21SER2${GS}93Abcd`);
+    expect(mixedExport.text).not.toContain(`01${GTIN}21SER1${GS}93Abcd`);
   });
 
   it("validates orderIds schema: min 1, uuid format", async () => {
