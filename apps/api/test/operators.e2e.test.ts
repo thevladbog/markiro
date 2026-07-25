@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
 import express from "express";
-import { Test } from "@nestjs/testing";
+import { Test, type TestingModule } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
+import { OperatorsService } from "../src/modules/operators/operators.service";
+import { verifySecret } from "../src/lib/pin-hash";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -14,6 +16,7 @@ const ready = Boolean(
 
 describe.skipIf(!ready)("operators e2e", () => {
   let app: INestApplication | undefined;
+  let moduleRef: TestingModule;
   let setup: AuthSetup;
 
   beforeAll(async () => {
@@ -22,6 +25,7 @@ describe.skipIf(!ready)("operators e2e", () => {
     const ref = await Test.createTestingModule({
       imports: [AppModule.forRoot({ ...setup, databaseUrl: env.DATABASE_URL })],
     }).compile();
+    moduleRef = ref;
     app = ref.createNestApplication({ bodyParser: false });
     const server = app.getHttpAdapter().getInstance();
     mountAuth(server, setup.auth);
@@ -61,6 +65,14 @@ describe.skipIf(!ready)("operators e2e", () => {
   ): Promise<string> {
     const res = await agent.post("/employees").send({ fullName }).expect(201);
     return res.body.id as string;
+  }
+
+  async function issueBadge(
+    agent: ReturnType<typeof request.agent>,
+    employeeId: string,
+    badgeCode: string,
+  ): Promise<void> {
+    await agent.post(`/employees/${employeeId}/badges`).send({ badgeCode }).expect(201);
   }
 
   it("grants station access, lists it, and never leaks the PIN", async () => {
@@ -128,5 +140,36 @@ describe.skipIf(!ready)("operators e2e", () => {
     const bobList = await bob.get("/operators").expect(200);
     expect(bobList.body.items).toHaveLength(0);
     await bob.delete(`/operators/${employeeId}`).expect(404);
+  });
+
+  it("buildRoster is deterministic on multi-badge employees and scoped to operators only", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+
+    // Employee WITH station access and two active badges — the roster's
+    // badgeHash must correspond to the most recently issued one.
+    const operatorId = await createEmployee(agent, "Двубейджевый Оператор");
+    await agent.put(`/operators/${operatorId}`).send({ login: "5150", pin: "9911" }).expect(200);
+    const oldCode = `OLD-${randomUUID()}`;
+    const newCode = `NEW-${randomUUID()}`;
+    await issueBadge(agent, operatorId, oldCode);
+    await issueBadge(agent, operatorId, newCode);
+
+    // Employee WITHOUT station access — must not appear in the roster at all,
+    // even though it has an active badge (proves the helper is scoped to
+    // operators, not every badge in the tenant).
+    const bystanderId = await createEmployee(agent, "Без доступа");
+    await issueBadge(agent, bystanderId, `BYSTANDER-${randomUUID()}`);
+
+    const operatorsService = moduleRef.get(OperatorsService);
+    const roster = await operatorsService.buildRoster(tenantId);
+
+    expect(roster.some((r) => r.operatorId === bystanderId)).toBe(false);
+
+    const entry = roster.find((r) => r.operatorId === operatorId);
+    expect(entry).toBeDefined();
+    expect(entry!.badgeHash).toBeTruthy();
+    await expect(verifySecret(newCode, entry!.badgeHash!)).resolves.toBe(true);
+    await expect(verifySecret(oldCode, entry!.badgeHash!)).resolves.toBe(false);
   });
 });

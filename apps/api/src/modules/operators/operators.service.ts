@@ -1,5 +1,5 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { schema, type Db, type OperatorMirrorRecord } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
 import { hashSecret } from "../../lib/pin-hash";
@@ -145,7 +145,10 @@ export class OperatorsService {
       )
       .orderBy(schema.employees.fullName);
 
-    const badgeHashes = await this.activeBadgeHashes(tenantId);
+    const badgeHashes = await this.activeBadgeHashes(
+      tenantId,
+      rows.map((r) => r.employeeId),
+    );
     return rows.map((r) => ({
       operatorId: r.employeeId,
       name: r.fullName,
@@ -158,31 +161,56 @@ export class OperatorsService {
   }
 
   /**
-   * Badge hashes for the roster. The plaintext code stays server-side (it is a
-   * shared identifier used by the pickup kiosk and external systems); the
-   * device only ever receives the hash. Rows issued before the `badge_hash`
-   * column existed are hashed and backfilled on first read.
+   * Badge hashes for the given roster employees only (never the whole
+   * tenant's badge table — legacy tenants can carry thousands of unrelated
+   * badges). The plaintext code stays server-side (it is a shared identifier
+   * used by the pickup kiosk and external systems); the device only ever
+   * receives the hash. Rows issued before the `badge_hash` column existed are
+   * hashed and backfilled on first read, concurrently rather than one at a
+   * time, since PBKDF2 is deliberately slow.
+   *
+   * Determinism: an employee can hold more than one active badge (nothing in
+   * the schema forbids it). The rule, enforced here, is "the most recently
+   * issued active badge wins" — rows are fetched ordered by `issuedAt`
+   * ascending (tie-broken by `id` for full determinism), and later rows
+   * overwrite earlier ones in the returned map.
    */
-  private async activeBadgeHashes(tenantId: string): Promise<Map<string, string>> {
+  private async activeBadgeHashes(
+    tenantId: string,
+    employeeIds: string[],
+  ): Promise<Map<string, string>> {
+    if (employeeIds.length === 0) return new Map();
     const rows = await this.db
       .select()
       .from(schema.employeeBadges)
       .where(
-        and(eq(schema.employeeBadges.tenantId, tenantId), isNull(schema.employeeBadges.revokedAt)),
-      );
-    const map = new Map<string, string>();
-    for (const b of rows) {
-      let hash = b.badgeHash;
-      if (!hash) {
-        hash = await hashSecret(b.badgeCode);
+        and(
+          eq(schema.employeeBadges.tenantId, tenantId),
+          isNull(schema.employeeBadges.revokedAt),
+          inArray(schema.employeeBadges.employeeId, employeeIds),
+        ),
+      )
+      .orderBy(asc(schema.employeeBadges.issuedAt), asc(schema.employeeBadges.id));
+
+    // Backfill missing hashes concurrently; each write stays tenant-scoped.
+    const needsHash = rows.filter((b) => !b.badgeHash);
+    const backfilled = new Map<string, string>();
+    await Promise.all(
+      needsHash.map(async (b) => {
+        const hash = await hashSecret(b.badgeCode);
+        backfilled.set(b.id, hash);
         await this.db
           .update(schema.employeeBadges)
           .set({ badgeHash: hash })
           .where(
             and(eq(schema.employeeBadges.tenantId, tenantId), eq(schema.employeeBadges.id, b.id)),
           );
-      }
-      map.set(b.employeeId, hash);
+      }),
+    );
+
+    const map = new Map<string, string>();
+    for (const b of rows) {
+      map.set(b.employeeId, b.badgeHash ?? backfilled.get(b.id)!);
     }
     return map;
   }
