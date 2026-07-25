@@ -83,7 +83,7 @@ describe("OperatorLogin", () => {
     }
     fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
 
-    await waitFor(() => expect(screen.getByText("Wrong PIN")).toBeDefined());
+    await waitFor(() => expect(screen.getByText("Wrong personnel number or PIN")).toBeDefined());
     expect(onAuthed).not.toHaveBeenCalled();
     // Back at stage 1: the personnel-number prompt is shown again, cleared.
     expect(screen.getByText("Enter your personnel number")).toBeDefined();
@@ -109,7 +109,7 @@ describe("OperatorLogin", () => {
     }
     fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
 
-    await waitFor(() => expect(screen.getByText("Wrong PIN")).toBeDefined());
+    await waitFor(() => expect(screen.getByText("Wrong personnel number or PIN")).toBeDefined());
     expect(onAuthed).not.toHaveBeenCalled();
     consoleError.mockRestore();
   });

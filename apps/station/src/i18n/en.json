@@ -19,7 +19,7 @@
     "badgePrompt": "Or scan your badge",
     "clear": "Clear",
     "submit": "Sign in",
-    "wrong": "Wrong PIN"
+    "wrong": "Wrong personnel number or PIN"
   },
   "shifts": {
     "title": "Shifts",
