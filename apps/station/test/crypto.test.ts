@@ -30,4 +30,11 @@ describe("crypto (PBKDF2 PHC)", () => {
     const phc = `pbkdf2$sha256$${iterations}$${Buffer.from(salt).toString("base64")}$${derived.toString("base64")}`;
     expect(await verifyPin("1234", phc)).toBe(false);
   });
+
+  it("verifies a hash produced the way the server's pin-hash.ts builds it (interop)", async () => {
+    const salt = Buffer.from(Array.from({ length: 16 }, (_, i) => 255 - i));
+    const derived = pbkdf2Sync("4821", salt, 100000, 32, "sha256");
+    const phc = `pbkdf2$sha256$100000$${salt.toString("base64")}$${derived.toString("base64")}`;
+    expect(await verifyPin("4821", phc)).toBe(true);
+  });
 });
