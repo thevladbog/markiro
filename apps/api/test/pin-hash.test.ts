@@ -52,4 +52,30 @@ describe("pin-hash (PBKDF2 PHC, station-compatible)", () => {
     const phc = `pbkdf2$sha256$100000$${salt.toString("base64")}$${derived.toString("base64")}`;
     expect(await verifySecret("1234", phc)).toBe(false);
   });
+
+  it("rejects a non-canonical base64 salt field, even for the correct secret (C2)", async () => {
+    const salt = Buffer.from(Array.from({ length: 16 }, (_, i) => i));
+    const derived = pbkdf2Sync("1234", salt, 100000, 32, "sha256");
+    // Buffer.from(x, "base64") silently drops the trailing "!" and still
+    // decodes 16 bytes -- but this string is not the canonical encoding of
+    // those bytes, so it must be rejected rather than accepted as-if clean.
+    const nonCanonicalSalt = `${salt.toString("base64")}!`;
+    const phc = `pbkdf2$sha256$100000$${nonCanonicalSalt}$${derived.toString("base64")}`;
+    expect(await verifySecret("1234", phc)).toBe(false);
+  });
+
+  it("rejects a non-canonical base64 hash field, even for the correct secret (C2)", async () => {
+    const salt = Buffer.from(Array.from({ length: 16 }, (_, i) => i));
+    const derived = pbkdf2Sync("1234", salt, 100000, 32, "sha256");
+    const nonCanonicalHash = `${derived.toString("base64")}!`;
+    const phc = `pbkdf2$sha256$100000$${salt.toString("base64")}$${nonCanonicalHash}`;
+    expect(await verifySecret("1234", phc)).toBe(false);
+  });
+
+  it("rejects a wrong-length (8-byte) salt, even for the correct secret (C2)", async () => {
+    const shortSalt = Buffer.from(Array.from({ length: 8 }, (_, i) => i));
+    const derived = pbkdf2Sync("1234", shortSalt, 100000, 32, "sha256");
+    const phc = `pbkdf2$sha256$100000$${shortSalt.toString("base64")}$${derived.toString("base64")}`;
+    expect(await verifySecret("1234", phc)).toBe(false);
+  });
 });
