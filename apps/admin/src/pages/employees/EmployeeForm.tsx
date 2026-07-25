@@ -434,9 +434,16 @@ export function EmployeeForm({
               <p style={{ font: "var(--text-caption)", color: "var(--err-fg)", margin: 0 }}>
                 {t("pages.employees.stationAccess.loadError")}
               </p>
-            ) : (
+            ) : operatorsQuery.isSuccess ? (
               <p style={{ font: "var(--text-caption)", color: "var(--fg-3)", margin: 0 }}>
                 {t("pages.employees.stationAccess.emptyHint")}
+              </p>
+            ) : (
+              // Still loading: same rationale as the error branch above --
+              // an undefined `access` here must not be read as "no access"
+              // (see C4 review finding).
+              <p style={{ font: "var(--text-caption)", color: "var(--fg-3)", margin: 0 }}>
+                {t("pages.employees.stationAccess.loading")}
               </p>
             )}
 
@@ -467,7 +474,13 @@ export function EmployeeForm({
                   {t("pages.employees.stationAccess.resetAction")}
                 </Button>
               </div>
-            ) : (
+            ) : operatorsQuery.isSuccess ? (
+              // Only render the grant controls once the lookup has actually
+              // confirmed there is no access -- while pending or after an
+              // error, `access` is `undefined` for the same reason a real
+              // "no access" employee is, and a duplicate grant here would
+              // 409 against a credential the UI never saw (see C4 review
+              // finding).
               <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
                 <div style={{ flex: 1 }}>
                   <Input
@@ -498,7 +511,7 @@ export function EmployeeForm({
                   {t("pages.employees.stationAccess.grantAction")}
                 </Button>
               </div>
-            )}
+            ) : null}
           </div>
         )}
       </div>

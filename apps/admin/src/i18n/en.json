@@ -534,6 +534,7 @@
         "title": "Station access",
         "emptyHint": "No line-station access granted",
         "loadError": "Could not load station access status. Refresh the page before granting access.",
+        "loading": "Loading station access status…",
         "loginLabel": "Personnel number",
         "pinLabel": "PIN",
         "grantAction": "Grant access",

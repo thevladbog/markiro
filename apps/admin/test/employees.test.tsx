@@ -449,5 +449,29 @@ describe("EmployeesPage station access (rendered in English)", () => {
       ),
     ).toBeDefined();
     expect(screen.queryByText("No line-station access granted")).toBeNull();
+    // A failed lookup must not leave the grant control enabled -- that would
+    // invite a duplicate grant which then 409s (C4 review finding).
+    expect(screen.queryByRole("button", { name: "Grant access" })).toBeNull();
+  });
+
+  it("suppresses the Grant access control while GET /api/operators is still pending (C4)", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === "/api/operators") {
+        // Never resolves -- simulates an in-flight lookup.
+        return new Promise<Response>(() => {});
+      }
+      return jsonResponse(200, { items: [JANE] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Jane Doe");
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await screen.findByText("Edit employee");
+
+    expect(await screen.findByText("Loading station access status…")).toBeDefined();
+    expect(screen.queryByText("No line-station access granted")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Grant access" })).toBeNull();
   });
 });
