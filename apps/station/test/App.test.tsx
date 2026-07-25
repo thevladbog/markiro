@@ -42,6 +42,7 @@ const enrolledConfig: StationConfig = {
 const operator: OperatorMirrorRecord = {
   operatorId: "op1",
   name: "Ivan",
+  login: "1001",
   role: "operator",
   pinHash: "hash",
   badgeHash: null,

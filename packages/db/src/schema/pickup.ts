@@ -5,6 +5,7 @@ import {
   numeric,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   unique,
@@ -51,6 +52,7 @@ export const employeeBadges = pgTable(
     employeeId: uuid("employee_id").notNull(),
     badgeCode: text("badge_code").notNull(),
     label: text("label"),
+    badgeHash: text("badge_hash"),
     issuedAt: timestamp("issued_at", { withTimezone: true }).notNull().defaultNow(),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
   },
@@ -64,6 +66,37 @@ export const employeeBadges = pgTable(
     uniqueIndex("employee_badges_tenant_code_active_uq")
       .on(t.tenantId, t.badgeCode)
       .where(sql`revoked_at is null`),
+  ],
+);
+
+/**
+ * Station access for an employee (1:1). An operator is NOT a separate person
+ * record: `employees` stays the single people registry and `employee_badges`
+ * the single badge registry (badge codes are shared identifiers used by the
+ * pickup kiosk and external systems). Only employees WITH a row here appear in
+ * the line station's roster. `pinHash` is a PBKDF2 PHC verifier byte-compatible
+ * with apps/station/src/lib/crypto.ts — plaintext PINs are never stored.
+ */
+export const operatorCredentials = pgTable(
+  "operator_credentials",
+  {
+    tenantId: tenantId(),
+    employeeId: uuid("employee_id").notNull(),
+    login: text("login").notNull(),
+    pinHash: text("pin_hash").notNull(),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.employeeId] }),
+    foreignKey({
+      name: "operator_credentials_tenant_employee_fk",
+      columns: [t.tenantId, t.employeeId],
+      foreignColumns: [employees.tenantId, employees.id],
+    }),
+    // The personnel number the operator types on the station keypad.
+    unique("operator_credentials_tenant_login_uq").on(t.tenantId, t.login),
   ],
 );
 

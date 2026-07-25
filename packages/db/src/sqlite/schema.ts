@@ -15,6 +15,10 @@ export const stationMeta = sqliteTable("station_meta", {
 export const operatorsMirror = sqliteTable("operators_mirror", {
   operatorId: text("operator_id").primaryKey(),
   name: text("name").notNull(),
+  // Nullable in SQLite only because devices enrolled before this column
+  // existed already have rows; the server always sends a login and the first
+  // roster sync replaces the whole set (see readOperatorsMirror's `?? ""`).
+  login: text("login"),
   role: text("role").notNull(),
   pinHash: text("pin_hash").notNull(),
   badgeHash: text("badge_hash"),
@@ -88,6 +92,7 @@ export const scanEventsMirror = sqliteTable("scan_events_mirror", {
 export interface OperatorMirrorRecord {
   operatorId: string;
   name: string;
+  login: string;
   role: string;
   pinHash: string;
   badgeHash: string | null;
