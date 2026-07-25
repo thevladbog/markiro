@@ -99,6 +99,18 @@ export function App() {
     void syncOperatorRoster(client, tauriExecutor);
   }, [client]);
 
+  // Retry: the initial sync above runs exactly once, so a device that is
+  // briefly offline at that moment would otherwise strand the operator at a
+  // PIN pad no PIN can satisfy until the app is restarted. Re-running on
+  // every `online` event is a cheap one-shot retry (`syncOperatorRoster`
+  // never throws), not a polling loop.
+  useEffect(() => {
+    if (!client) return;
+    const retrySync = () => void syncOperatorRoster(client, tauriExecutor);
+    window.addEventListener("online", retrySync);
+    return () => window.removeEventListener("online", retrySync);
+  }, [client]);
+
   async function refreshConfig() {
     setConfig(await readConfig());
   }
