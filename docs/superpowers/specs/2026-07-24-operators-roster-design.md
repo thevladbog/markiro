@@ -80,11 +80,23 @@ New table **`operator_credentials`** (Postgres), 1:1 with an employee:
   credential set;
 - `login` — numeric personnel number, **unique per tenant**;
 - `pinHash` — PBKDF2 PHC string;
-- `active` — boolean; revoking station access flips it (the employee record and
-  their badges are untouched);
+- `active` — boolean. **Disabling** access (`PATCH /operators/:employeeId`
+  with `{ active: false }`) flips this flag in place, keeping the row (login +
+  `pinHash`) around so it can be re-enabled later. **Revoking** access
+  (`DELETE /operators/:employeeId`) is a separate, harder operation: as
+  implemented, `OperatorsService.revokeAccess` deletes the
+  `operator_credentials` row outright rather than flipping a flag — there is
+  no soft-revoked state to re-enable from. Either way, the employee record
+  and their badges are untouched;
 - `createdAt` / `updatedAt`.
 
-`employees` and `employee_badges` are **not modified**.
+`employees` is **not modified** by this slice. `employee_badges` gains one new
+column, **`badgeHash`** (`badge_hash`, nullable): the server-side plaintext
+`badgeCode` is unchanged and remains the identifier handed to external systems
+and reprints, but `badgeHash` — a PBKDF2 verifier derived from that plaintext —
+is computed for the station roster (and backfilled lazily, on first read, for
+badges issued before this column existed) so the device only ever receives a
+hash, never the plaintext code.
 
 ## API
 
