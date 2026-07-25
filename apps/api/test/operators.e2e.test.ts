@@ -39,10 +39,10 @@ describe.skipIf(!ready)("operators e2e", () => {
 
   async function signUpAndActivate(agent: ReturnType<typeof request.agent>): Promise<string> {
     const email = `t-${randomUUID()}@example.com`;
-    await agent
-      .post("/api/auth/sign-up/email")
-      .send({ email, password: "Passw0rd!123", name: "T" })
-      .expect(200);
+    // Generated per run rather than a hardcoded literal, so it can't be
+    // flagged as a leaked secret (GitGuardian "Generic Password").
+    const password = `Pw-${randomUUID()}!Aa1`;
+    await agent.post("/api/auth/sign-up/email").send({ email, password, name: "T" }).expect(200);
     const org = await agent
       .post("/api/auth/organization/create")
       .send({
@@ -99,6 +99,16 @@ describe.skipIf(!ready)("operators e2e", () => {
       hasBadge: false,
     });
     expect(JSON.stringify(list.body)).not.toContain("pbkdf2");
+  });
+
+  it("returns 400 (not a raw pg 500) for a malformed employeeId on grant/update/revoke (C3)", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+    const malformed = "not-a-uuid";
+
+    await agent.put(`/operators/${malformed}`).send({ login: "1", pin: "1234" }).expect(400);
+    await agent.patch(`/operators/${malformed}`).send({ active: false }).expect(400);
+    await agent.delete(`/operators/${malformed}`).expect(400);
   });
 
   it("rejects a duplicate login in the same tenant with 409", async () => {

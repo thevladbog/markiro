@@ -5,6 +5,7 @@ import {
   Get,
   HttpCode,
   Param,
+  ParseUUIDPipe,
   Patch,
   Put,
   Req,
@@ -43,7 +44,7 @@ export class OperatorsController {
   @Put(":employeeId")
   async grantAccess(
     @Req() req: RequestWithTenant,
-    @Param("employeeId") employeeId: string,
+    @Param("employeeId", new ParseUUIDPipe()) employeeId: string,
     @Body(new ZodValidationPipe(grantStationAccessSchema)) body: GrantStationAccessDto,
   ): Promise<StationAccessDto> {
     return this.operatorsService.grantAccess(req.tenantId!, employeeId, body);
@@ -52,7 +53,7 @@ export class OperatorsController {
   @Patch(":employeeId")
   async updateAccess(
     @Req() req: RequestWithTenant,
-    @Param("employeeId") employeeId: string,
+    @Param("employeeId", new ParseUUIDPipe()) employeeId: string,
     @Body(new ZodValidationPipe(updateStationAccessSchema)) body: UpdateStationAccessDto,
   ): Promise<StationAccessDto> {
     return this.operatorsService.updateAccess(req.tenantId!, employeeId, body);
@@ -62,7 +63,7 @@ export class OperatorsController {
   @HttpCode(204)
   async revokeAccess(
     @Req() req: RequestWithTenant,
-    @Param("employeeId") employeeId: string,
+    @Param("employeeId", new ParseUUIDPipe()) employeeId: string,
   ): Promise<void> {
     return this.operatorsService.revokeAccess(req.tenantId!, employeeId);
   }
