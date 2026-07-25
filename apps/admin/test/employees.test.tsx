@@ -377,4 +377,77 @@ describe("EmployeesPage station access (rendered in English)", () => {
       );
     });
   });
+
+  it("resets the PIN via PATCH (login/active untouched) when access already exists (F1)", async () => {
+    const existingAccess = {
+      employeeId: "1",
+      fullName: "Jane Doe",
+      role: "Кассир",
+      login: "123456",
+      active: true,
+      hasBadge: false,
+    };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === "PATCH" && url === "/api/operators/1") {
+        return jsonResponse(200, {
+          employeeId: "1",
+          login: "123456",
+          active: true,
+          createdAt: "2026-01-03T00:00:00.000Z",
+          updatedAt: "2026-01-04T00:00:00.000Z",
+        });
+      }
+      if (url === "/api/operators") {
+        return jsonResponse(200, { items: [existingAccess] });
+      }
+      return jsonResponse(200, { items: [JANE] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Jane Doe");
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await screen.findByText("Edit employee");
+
+    // The reset row exposes only the PIN field -- no personnel-number input
+    // to retype (and thus nothing to accidentally rename).
+    expect(screen.queryByLabelText("Personnel number")).toBeNull();
+
+    fireEvent.change(screen.getByLabelText("PIN"), { target: { value: "9999" } });
+    fireEvent.click(screen.getByRole("button", { name: "Change PIN" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/operators/1",
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify({ pin: "9999" }),
+        }),
+      );
+    });
+  });
+
+  it("shows an error line (not the empty hint) when GET /api/operators fails (F4)", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === "/api/operators") {
+        return jsonResponse(500, { message: "Internal error" });
+      }
+      return jsonResponse(200, { items: [JANE] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Jane Doe");
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await screen.findByText("Edit employee");
+
+    expect(
+      await screen.findByText(
+        "Could not load station access status. Refresh the page before granting access.",
+      ),
+    ).toBeDefined();
+    expect(screen.queryByText("No line-station access granted")).toBeNull();
+  });
 });

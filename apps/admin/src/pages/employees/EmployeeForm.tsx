@@ -192,6 +192,7 @@ export function EmployeeForm({
     }
   };
 
+  /** No existing access yet: PUT grants it, establishing both the login and the PIN. */
   const handleGrantAccess = async () => {
     if (!employee) return;
     const login = accessLogin.trim();
@@ -199,6 +200,22 @@ export function EmployeeForm({
     if (!login || !pin) return;
     await runAccess(() =>
       grantAccessMutation.mutateAsync({ employeeId: employee.id, input: { login, pin } }),
+    );
+    setAccessPin("");
+  };
+
+  /**
+   * Access already exists: PATCH only `pin`, leaving `login` and `active`
+   * untouched. Using the PUT/grant path here would silently re-activate a
+   * deliberately disabled operator and, on a mistyped personnel number,
+   * rename the login instead of resetting the PIN (see F1 review finding).
+   */
+  const handleResetPin = async () => {
+    if (!employee) return;
+    const pin = accessPin.trim();
+    if (!pin) return;
+    await runAccess(() =>
+      updateAccessMutation.mutateAsync({ employeeId: employee.id, input: { pin } }),
     );
     setAccessPin("");
   };
@@ -410,44 +427,78 @@ export function EmployeeForm({
                   </Button>
                 </div>
               </div>
+            ) : operatorsQuery.isError ? (
+              // A failed GET /operators must not be mistaken for "no access
+              // granted" -- that empty-state hint invites a duplicate grant
+              // which then 409s (see F4 review finding).
+              <p style={{ font: "var(--text-caption)", color: "var(--err-fg)", margin: 0 }}>
+                {t("pages.employees.stationAccess.loadError")}
+              </p>
             ) : (
               <p style={{ font: "var(--text-caption)", color: "var(--fg-3)", margin: 0 }}>
                 {t("pages.employees.stationAccess.emptyHint")}
               </p>
             )}
 
-            <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
-              <div style={{ flex: 1 }}>
-                <Input
-                  label={t("pages.employees.stationAccess.loginLabel")}
-                  mono
-                  inputMode="numeric"
-                  value={accessLogin}
-                  onChange={(event) => setAccessLogin(event.target.value)}
-                />
+            {access ? (
+              // Access already exists: reset only the PIN (PATCH). The personnel
+              // number is already shown above (`stationAccess.current`), so it is
+              // dropped from this row rather than re-collected -- a retyped value
+              // here would tempt a PUT/replace that could rename the login on a
+              // typo (see F1 review finding).
+              <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+                <div style={{ flex: 1 }}>
+                  <Input
+                    label={t("pages.employees.stationAccess.pinLabel")}
+                    mono
+                    inputMode="numeric"
+                    type="password"
+                    value={accessPin}
+                    onChange={(event) => setAccessPin(event.target.value)}
+                  />
+                </div>
+                <Button
+                  type="button"
+                  size="compact"
+                  disabled={accessPin.trim().length === 0}
+                  loading={updateAccessMutation.isPending}
+                  onClick={() => void handleResetPin()}
+                >
+                  {t("pages.employees.stationAccess.resetAction")}
+                </Button>
               </div>
-              <div style={{ flex: 1 }}>
-                <Input
-                  label={t("pages.employees.stationAccess.pinLabel")}
-                  mono
-                  inputMode="numeric"
-                  type="password"
-                  value={accessPin}
-                  onChange={(event) => setAccessPin(event.target.value)}
-                />
+            ) : (
+              <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+                <div style={{ flex: 1 }}>
+                  <Input
+                    label={t("pages.employees.stationAccess.loginLabel")}
+                    mono
+                    inputMode="numeric"
+                    value={accessLogin}
+                    onChange={(event) => setAccessLogin(event.target.value)}
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <Input
+                    label={t("pages.employees.stationAccess.pinLabel")}
+                    mono
+                    inputMode="numeric"
+                    type="password"
+                    value={accessPin}
+                    onChange={(event) => setAccessPin(event.target.value)}
+                  />
+                </div>
+                <Button
+                  type="button"
+                  size="compact"
+                  disabled={accessLogin.trim().length === 0 || accessPin.trim().length === 0}
+                  loading={grantAccessMutation.isPending}
+                  onClick={() => void handleGrantAccess()}
+                >
+                  {t("pages.employees.stationAccess.grantAction")}
+                </Button>
               </div>
-              <Button
-                type="button"
-                size="compact"
-                disabled={accessLogin.trim().length === 0 || accessPin.trim().length === 0}
-                loading={grantAccessMutation.isPending}
-                onClick={() => void handleGrantAccess()}
-              >
-                {access
-                  ? t("pages.employees.stationAccess.resetAction")
-                  : t("pages.employees.stationAccess.grantAction")}
-              </Button>
-            </div>
+            )}
           </div>
         )}
       </div>
