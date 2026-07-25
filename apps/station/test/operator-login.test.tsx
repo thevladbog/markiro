@@ -150,4 +150,54 @@ describe("OperatorLogin", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(onAuthed).toHaveBeenCalledTimes(1);
   });
+
+  it("disables Back while a verification is in flight, so it can't reset the stage out from under a pending sign-in (C5)", async () => {
+    // An exec whose query never resolves on its own -- keeps `submit()`
+    // suspended at `await verifyOperatorPin(...)` so the test can assert on
+    // the UI mid-flight, then release it to observe recovery afterwards.
+    let releaseQuery: (() => void) | undefined;
+    const pending = new Promise<never[]>((resolve) => {
+      releaseQuery = () => resolve([]);
+    });
+    const exec: SqlExecutor = {
+      run: async () => {},
+      all: async () => pending,
+    };
+    const onAuthed = vi.fn();
+    render(<OperatorLogin exec={exec} onAuthed={onAuthed} />);
+
+    for (const digit of "1042") {
+      fireEvent.click(screen.getByRole("button", { name: digit }));
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+
+    for (const digit of "4821") {
+      fireEvent.click(screen.getByRole("button", { name: digit }));
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+    // Still on the PIN stage, verification in flight: Back must be disabled --
+    // otherwise clicking it now would reset to the login stage, and a later
+    // successful verification would still fire `onAuthed` and jump straight to
+    // the floor view even though the UI looked like it had gone back.
+    await waitFor(() =>
+      expect((screen.getByRole("button", { name: "Back" }) as HTMLButtonElement).disabled).toBe(
+        true,
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    // The disabled click must be a no-op: still on the PIN stage.
+    expect(screen.getByLabelText("pin")).toBeDefined();
+    expect(screen.queryByLabelText("login")).toBeNull();
+
+    releaseQuery?.();
+    await waitFor(() => expect(onAuthed).not.toHaveBeenCalled());
+    // readOperatorsMirror resolved to an empty roster, so the credentials
+    // don't match: the UI settles back on the login stage with Back re-enabled.
+    await waitFor(() =>
+      expect((screen.getByRole("button", { name: "Clear" }) as HTMLButtonElement).disabled).toBe(
+        false,
+      ),
+    );
+  });
 });

@@ -75,6 +75,7 @@ export function OperatorLogin({ exec, onAuthed }: OperatorLoginProps) {
         <Button
           variant="secondary"
           style={{ minHeight: 64 }}
+          disabled={busy}
           onClick={() => {
             if (stage === "pin") {
               setPin("");
