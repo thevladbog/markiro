@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { applyMigrations, replaceOperatorsMirror, type SqlExecutor } from "../src/lib/mirror.js";
+import * as crypto from "../src/lib/crypto.js";
 import { hashSecret } from "../src/lib/crypto.js";
 import { verifyOperatorBadge, verifyOperatorPin } from "../src/lib/auth.js";
 
@@ -83,5 +84,33 @@ describe("operator auth (login + PIN)", () => {
 
     expect((await verifyOperatorBadge(exec, "BADGE-77"))?.operatorId).toBe("op-d");
     expect(await verifyOperatorBadge(exec, "BADGE-00")).toBeNull();
+  });
+
+  it("still performs a crypto verification when the login matches no operator (equal-work timing guard)", async () => {
+    const exec = makeExec();
+    await applyMigrations(exec);
+    await replaceOperatorsMirror(exec, [
+      {
+        operatorId: "op-e",
+        name: "Существующий",
+        login: "5001",
+        role: "operator",
+        pinHash: await hashSecret("6789"),
+        badgeHash: null,
+        active: true,
+      },
+    ]);
+
+    const verifyPinSpy = vi.spyOn(crypto, "verifyPin");
+    try {
+      // "9999" matches no operator's login at all — a short-circuit implementation
+      // would return before ever calling verifyPin, which is exactly the timing
+      // side channel this guards against.
+      const result = await verifyOperatorPin(exec, "9999", "6789");
+      expect(result).toBeNull();
+      expect(verifyPinSpy).toHaveBeenCalled();
+    } finally {
+      verifyPinSpy.mockRestore();
+    }
   });
 });

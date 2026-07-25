@@ -113,4 +113,41 @@ describe("OperatorLogin", () => {
     expect(onAuthed).not.toHaveBeenCalled();
     consoleError.mockRestore();
   });
+
+  it("guards against a double-tap on the sign-in button: only one verification/onAuthed call", async () => {
+    const exec = makeExec();
+    await applyMigrations(exec);
+    await replaceOperatorsMirror(exec, [
+      {
+        operatorId: "op-1",
+        name: "Смирнов А.",
+        login: "1042",
+        role: "operator",
+        pinHash: await hashSecret("4821"),
+        badgeHash: null,
+        active: true,
+      },
+    ]);
+    const onAuthed = vi.fn();
+    render(<OperatorLogin exec={exec} onAuthed={onAuthed} />);
+
+    for (const digit of "1042") {
+      fireEvent.click(screen.getByRole("button", { name: digit }));
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+
+    for (const digit of "4821") {
+      fireEvent.click(screen.getByRole("button", { name: digit }));
+    }
+    const signInButton = screen.getByRole("button", { name: "Sign in" });
+    // Two rapid taps, as a kiosk touchscreen double-tap would fire — the
+    // `busy` guard must ensure only one verification actually runs.
+    fireEvent.click(signInButton);
+    fireEvent.click(signInButton);
+
+    await waitFor(() => expect(onAuthed).toHaveBeenCalledTimes(1));
+    // Give any spurious second call a chance to land before asserting it didn't.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(onAuthed).toHaveBeenCalledTimes(1);
+  });
 });
