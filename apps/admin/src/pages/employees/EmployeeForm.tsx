@@ -402,7 +402,9 @@ export function EmployeeForm({
                     size="compact"
                     variant="destructive"
                     loading={revokeAccessMutation.isPending}
-                    onClick={() => void runAccess(() => revokeAccessMutation.mutateAsync(employee.id))}
+                    onClick={() =>
+                      void runAccess(() => revokeAccessMutation.mutateAsync(employee.id))
+                    }
                   >
                     {t("pages.employees.stationAccess.revokeAction")}
                   </Button>

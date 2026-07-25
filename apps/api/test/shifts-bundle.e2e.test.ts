@@ -140,8 +140,14 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
       defaultCounterpartyId: counterpartyId,
       defaultLabelTemplateId: templateId,
     });
-    const employee = await agent.post("/employees").send({ fullName: "Оператор Бандла" }).expect(201);
-    await agent.put(`/operators/${employee.body.id}`).send({ login: "3300", pin: "1234" }).expect(200);
+    const employee = await agent
+      .post("/employees")
+      .send({ fullName: "Оператор Бандла" })
+      .expect(201);
+    await agent
+      .put(`/operators/${employee.body.id}`)
+      .send({ login: "3300", pin: "1234" })
+      .expect(200);
     const created = await agent
       .post("/shifts")
       .send({ productId, mode: "aggregation" })

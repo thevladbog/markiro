@@ -183,7 +183,10 @@ describe.skipIf(!ready)("operators e2e", () => {
       .send({ badgeCode: `BADGE-${randomUUID()}` })
       .expect(201);
 
-    const device = await agent.post("/station-devices").send({ name: "Line 1 terminal" }).expect(201);
+    const device = await agent
+      .post("/station-devices")
+      .send({ name: "Line 1 terminal" })
+      .expect(201);
     const apiKey = device.body.apiKey as string;
 
     const roster = await request(app!.getHttpServer())

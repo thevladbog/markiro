@@ -43,11 +43,9 @@ describe("syncOperatorRoster", () => {
     await applyMigrations(exec);
     await syncOperatorRoster(
       {
-        get: vi
-          .fn()
-          .mockResolvedValue({
-            items: [OPERATOR, { ...OPERATOR, operatorId: "op-2", login: "1043" }],
-          }),
+        get: vi.fn().mockResolvedValue({
+          items: [OPERATOR, { ...OPERATOR, operatorId: "op-2", login: "1043" }],
+        }),
       },
       exec,
     );
