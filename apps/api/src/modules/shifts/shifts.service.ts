@@ -11,13 +11,13 @@ import { and, eq, gte, lte } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import type { LabelTemplateSpec } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
+import { OperatorsService } from "../operators/operators.service";
 import type { ProductDto } from "../products/dto";
 import type {
   CloseShiftDto,
   CreateShiftDto,
   ListShiftsQueryDto,
   ListShiftsResponseDto,
-  OperatorMirrorRecord,
   ShiftBundleDto,
   ShiftDto,
   ShiftMode,
@@ -29,7 +29,10 @@ type ProductRow = typeof schema.products.$inferSelect;
 
 @Injectable()
 export class ShiftsService {
-  constructor(@Inject(DB) private readonly db: Db) {}
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    private readonly operatorsService: OperatorsService,
+  ) {}
 
   /** List a tenant's shifts, joined with product/line/counterparty names. */
   async listShifts(tenantId: string, query: ListShiftsQueryDto): Promise<ListShiftsResponseDto> {
@@ -269,9 +272,10 @@ export class ShiftsService {
   }
 
   /**
-   * Everything the station downloads for a shift. `operators` is `[]` in 05a
-   * (the server operators table is a PARALLEL 05b workstream — do NOT query a
-   * non-existent table).
+   * Everything the station downloads for a shift. `operators` is the
+   * tenant's active roster, from the same `OperatorsService.buildRoster`
+   * query `GET /station/operators` uses -- one method, two consumers, so the
+   * initialization sync and the per-shift refresh can never drift.
    */
   async getBundle(tenantId: string, id: string): Promise<ShiftBundleDto> {
     const shift = await this.getShift(tenantId, id); // 404 if cross-tenant/missing
@@ -322,8 +326,11 @@ export class ShiftsService {
       counterpartyGln = cp ? cp.gln : null;
     }
 
-    // TODO(05b): populate from the server operators table (parallel workstream).
-    const operators: OperatorMirrorRecord[] = [];
+    // The tenant's active operators, hydrated into the station's
+    // `operators_mirror`. Same query as GET /station/operators (one service
+    // method, two consumers) so the initialization sync and the per-shift
+    // refresh can never drift.
+    const operators = await this.operatorsService.buildRoster(tenantId);
 
     return { shift, product, labelTemplate, counterpartyGln, operators };
   }
