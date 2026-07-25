@@ -1,7 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
+import i18n from "../src/i18n/index.js";
 import { EmployeesPage } from "../src/pages/employees/index.js";
 
 afterEach(() => {
@@ -321,6 +322,58 @@ describe("EmployeesPage", () => {
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/employees/1/badges/b1",
         expect.objectContaining({ method: "DELETE" }),
+      );
+    });
+  });
+});
+
+// Scoped EN block: the rest of this file asserts against the RU dictionary
+// (the app's default language), so the language switch is confined to this
+// describe's beforeAll/afterAll instead of a file-wide hook.
+describe("EmployeesPage station access (rendered in English)", () => {
+  beforeAll(async () => {
+    await i18n.changeLanguage("en");
+  });
+
+  afterAll(async () => {
+    await i18n.changeLanguage("ru");
+  });
+
+  it("opens an employee in edit mode and grants station access (PUT /api/operators/:id with login + pin)", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === "PUT" && url.startsWith("/api/operators/")) {
+        return jsonResponse(200, {
+          employeeId: "1",
+          login: "123456",
+          active: true,
+          createdAt: "2026-01-03T00:00:00.000Z",
+          updatedAt: "2026-01-03T00:00:00.000Z",
+        });
+      }
+      if (url === "/api/operators") {
+        return jsonResponse(200, { items: [] });
+      }
+      return jsonResponse(200, { items: [JANE] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Jane Doe");
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await screen.findByText("Edit employee");
+
+    fireEvent.change(screen.getByLabelText("Personnel number"), { target: { value: "123456" } });
+    fireEvent.change(screen.getByLabelText("PIN"), { target: { value: "4321" } });
+    fireEvent.click(screen.getByRole("button", { name: "Grant access" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/operators/1",
+        expect.objectContaining({
+          method: "PUT",
+          body: JSON.stringify({ login: "123456", pin: "4321" }),
+        }),
       );
     });
   });

@@ -530,6 +530,20 @@
         "revokedBadge": "Отозван",
         "issuedAt": "Выпущен {{date}}"
       },
+      "stationAccess": {
+        "title": "Доступ на станцию",
+        "emptyHint": "Доступ на линейную станцию не выдан",
+        "loginLabel": "Табельный номер",
+        "pinLabel": "ПИН-код",
+        "grantAction": "Выдать доступ",
+        "resetAction": "Сменить ПИН",
+        "disableAction": "Отключить",
+        "enableAction": "Включить",
+        "revokeAction": "Убрать доступ",
+        "activeBadge": "Активен",
+        "disabledBadge": "Отключён",
+        "current": "Табельный номер {{login}}"
+      },
       "toasts": {
         "createSuccess": "Сотрудник добавлен",
         "createError": "Не удалось создать сотрудника",
@@ -540,7 +554,9 @@
         "issueBadgeSuccess": "Бейдж выпущен",
         "issueBadgeError": "Не удалось выпустить бейдж",
         "revokeBadgeSuccess": "Бейдж отозван",
-        "revokeBadgeError": "Не удалось отозвать бейдж"
+        "revokeBadgeError": "Не удалось отозвать бейдж",
+        "stationAccessSuccess": "Доступ на станцию обновлён",
+        "stationAccessError": "Не удалось обновить доступ на станцию"
       }
     },
     "kiosks": {

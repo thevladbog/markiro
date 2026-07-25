@@ -17,6 +17,12 @@ import {
   type CreateEmployeeInput,
   type EmployeeDto,
 } from "./api.js";
+import {
+  useGrantStationAccess,
+  useOperators,
+  useRevokeStationAccess,
+  useUpdateStationAccess,
+} from "./station-access-api.js";
 
 /**
  * Client-side mirror of the server's zod schema
@@ -150,6 +156,51 @@ export function EmployeeForm({
     } finally {
       setRevokingBadgeId(null);
     }
+  };
+
+  // --- Station access sub-panel (edit mode only) ---
+  const operatorsQuery = useOperators();
+  const grantAccessMutation = useGrantStationAccess();
+  const updateAccessMutation = useUpdateStationAccess();
+  const revokeAccessMutation = useRevokeStationAccess();
+  const [accessLogin, setAccessLogin] = useState("");
+  const [accessPin, setAccessPin] = useState("");
+
+  const access = employee
+    ? operatorsQuery.data?.find((op) => op.employeeId === employee.id)
+    : undefined;
+
+  useEffect(() => {
+    if (open) {
+      setAccessLogin("");
+      setAccessPin("");
+    }
+  }, [open, employee?.id]);
+
+  /** Runs a station-access mutation with the file's shared toast/error idiom. */
+  const runAccess = async (action: () => Promise<unknown>) => {
+    try {
+      await action();
+      toast("ok", t("pages.employees.toasts.stationAccessSuccess"));
+    } catch (error) {
+      toast(
+        "error",
+        error instanceof ApiRequestError
+          ? error.message
+          : t("pages.employees.toasts.stationAccessError"),
+      );
+    }
+  };
+
+  const handleGrantAccess = async () => {
+    if (!employee) return;
+    const login = accessLogin.trim();
+    const pin = accessPin.trim();
+    if (!login || !pin) return;
+    await runAccess(() =>
+      grantAccessMutation.mutateAsync({ employeeId: employee.id, input: { login, pin } }),
+    );
+    setAccessPin("");
   };
 
   return (
@@ -288,6 +339,111 @@ export function EmployeeForm({
                 onClick={() => void handleIssueBadge()}
               >
                 {t("pages.employees.badges.issueAction")}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {mode === "edit" && employee && (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 12,
+              borderTop: "1px solid var(--line)",
+              paddingTop: 16,
+            }}
+          >
+            <span style={{ font: "600 13px/1 var(--font-ui)", color: "var(--fg-1)" }}>
+              {t("pages.employees.stationAccess.title")}
+            </span>
+
+            {access ? (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 8,
+                }}
+              >
+                <span style={{ font: "var(--text-body)", color: "var(--fg-1)" }}>
+                  {t("pages.employees.stationAccess.current", { login: access.login })}
+                </span>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <StatusChip
+                    status={access.active ? "ok" : "neutral"}
+                    label={
+                      access.active
+                        ? t("pages.employees.stationAccess.activeBadge")
+                        : t("pages.employees.stationAccess.disabledBadge")
+                    }
+                  />
+                  <Button
+                    type="button"
+                    size="compact"
+                    variant="secondary"
+                    loading={updateAccessMutation.isPending}
+                    onClick={() =>
+                      void runAccess(() =>
+                        updateAccessMutation.mutateAsync({
+                          employeeId: employee.id,
+                          input: { active: !access.active },
+                        }),
+                      )
+                    }
+                  >
+                    {access.active
+                      ? t("pages.employees.stationAccess.disableAction")
+                      : t("pages.employees.stationAccess.enableAction")}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="compact"
+                    variant="destructive"
+                    loading={revokeAccessMutation.isPending}
+                    onClick={() => void runAccess(() => revokeAccessMutation.mutateAsync(employee.id))}
+                  >
+                    {t("pages.employees.stationAccess.revokeAction")}
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <p style={{ font: "var(--text-caption)", color: "var(--fg-3)", margin: 0 }}>
+                {t("pages.employees.stationAccess.emptyHint")}
+              </p>
+            )}
+
+            <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+              <div style={{ flex: 1 }}>
+                <Input
+                  label={t("pages.employees.stationAccess.loginLabel")}
+                  mono
+                  inputMode="numeric"
+                  value={accessLogin}
+                  onChange={(event) => setAccessLogin(event.target.value)}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <Input
+                  label={t("pages.employees.stationAccess.pinLabel")}
+                  mono
+                  inputMode="numeric"
+                  type="password"
+                  value={accessPin}
+                  onChange={(event) => setAccessPin(event.target.value)}
+                />
+              </div>
+              <Button
+                type="button"
+                size="compact"
+                disabled={accessLogin.trim().length === 0 || accessPin.trim().length === 0}
+                loading={grantAccessMutation.isPending}
+                onClick={() => void handleGrantAccess()}
+              >
+                {access
+                  ? t("pages.employees.stationAccess.resetAction")
+                  : t("pages.employees.stationAccess.grantAction")}
               </Button>
             </div>
           </div>
