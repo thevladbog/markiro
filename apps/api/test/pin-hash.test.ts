@@ -38,4 +38,18 @@ describe("pin-hash (PBKDF2 PHC, station-compatible)", () => {
     const phc = `pbkdf2$sha256$1$${salt.toString("base64")}$${derived.toString("base64")}`;
     expect(await verifySecret("1234", phc)).toBe(false);
   });
+
+  it("rejects a PHC whose hash field decodes to fewer than 32 bytes, even for the correct secret", async () => {
+    const salt = Buffer.from(Array.from({ length: 16 }, (_, i) => i));
+    const derived = pbkdf2Sync("1234", salt, 100000, 4, "sha256");
+    const phc = `pbkdf2$sha256$100000$${salt.toString("base64")}$${derived.toString("base64")}`;
+    expect(await verifySecret("1234", phc)).toBe(false);
+  });
+
+  it("rejects a PHC whose hash field decodes to more than 32 bytes, even for the correct secret", async () => {
+    const salt = Buffer.from(Array.from({ length: 16 }, (_, i) => i));
+    const derived = pbkdf2Sync("1234", salt, 100000, 64, "sha256");
+    const phc = `pbkdf2$sha256$100000$${salt.toString("base64")}$${derived.toString("base64")}`;
+    expect(await verifySecret("1234", phc)).toBe(false);
+  });
 });

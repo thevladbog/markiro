@@ -393,9 +393,13 @@ export async function verifySecret(secret: string, phc: string): Promise<boolean
   if (!Number.isInteger(iterations) || iterations < MIN_ITERATIONS) return false;
   const salt = Buffer.from(parts[3]!, "base64");
   const expected = Buffer.from(parts[4]!, "base64");
-  if (salt.length === 0 || expected.length === 0) return false;
-  const actual = await pbkdf2Async(secret, salt, iterations, expected.length, "sha256");
-  return actual.length === expected.length && timingSafeEqual(actual, expected);
+  // Reject malformed/tampered hash fields up front: never derive a key whose
+  // length is taken from untrusted input (that would let a truncated hash
+  // "fail open" with far less entropy, and diverge from the station, which
+  // always derives a fixed KEY_BITS = 256).
+  if (salt.length === 0 || expected.length !== KEY_BYTES) return false;
+  const actual = await pbkdf2Async(secret, salt, iterations, KEY_BYTES, "sha256");
+  return timingSafeEqual(actual, expected);
 }
 ```
 
