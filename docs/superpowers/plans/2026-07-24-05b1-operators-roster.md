@@ -406,7 +406,7 @@ export async function verifySecret(secret: string, phc: string): Promise<boolean
 - [ ] **Step 4: Run the test**
 
 Run: `pnpm --filter @markiro/api exec vitest run pin-hash`
-Expected: PASS (4 tests).
+Expected: PASS (6 tests).
 
 - [ ] **Step 5: Prove interop against the station implementation**
 
