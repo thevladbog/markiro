@@ -39,9 +39,9 @@ The Windows installer is produced in CI (see `.github/workflows/ci.yml`); a
 `operators_mirror` stores PIN/badge verifiers as a PHC-like string:
 `pbkdf2$sha256$<iterations>$<saltBase64>$<hashBase64>`, computed by
 `apps/station/src/lib/crypto.ts` with WebCrypto `SubtleCrypto`
-PBKDF2-SHA256. The format string alone underspecifies interop — the 05b
-server team (which mints these hashes server-side, since operators are a
-parallel workstream) MUST also match these pinned constraints:
+PBKDF2-SHA256. The format string alone underspecifies interop — the
+server-side hasher (`apps/api/src/lib/pin-hash.ts`, which mints these hashes
+for `operator_credentials`) MUST also match these pinned constraints:
 
 - **Derived key length is EXACTLY 32 bytes** (`dkLen=32` / 256-bit).
 - **Base64 is STANDARD, WITH padding** (`btoa`/`atob`, RFC 4648 §4) — **NOT**
@@ -58,6 +58,21 @@ parallel workstream) MUST also match these pinned constraints:
 byte-for-byte against Node's `pbkdf2Sync`) is the **executable spec**: the
 server's hasher must reproduce that exact vector, not just satisfy the prose
 above.
+
+## Operator roster
+
+During initialization — right after enrollment, and again on every later
+app start while online — the station pulls `GET /station/operators` (device
+api-key, callable before any operator has signed in) into `operators_mirror`;
+see "Operator credential hash contract" above for the verifier format stored
+there. The same roster, produced by the same server-side service method,
+also rides along with every `GET /shifts/:id/bundle` download, so opening a
+shift refreshes the mirror too. Sign-in is by personnel number + PIN, or a
+badge scan, checked locally against whatever is currently in the mirror. An
+operator hired, or newly granted station access, while the device is offline
+cannot sign in until the next successful roster sync — a successful sync
+replaces the whole mirror, so a revoked or deactivated operator likewise
+stops authenticating offline as soon as the device reconnects.
 
 ## Tests
 
