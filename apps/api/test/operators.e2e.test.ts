@@ -172,4 +172,62 @@ describe.skipIf(!ready)("operators e2e", () => {
     await expect(verifySecret(newCode, entry!.badgeHash!)).resolves.toBe(true);
     await expect(verifySecret(oldCode, entry!.badgeHash!)).resolves.toBe(false);
   });
+
+  it("serves the roster to a station api-key and refuses admin routes to it", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+    const employeeId = await createEmployee(agent, "Оператор Смены");
+    await agent.put(`/operators/${employeeId}`).send({ login: "1042", pin: "4821" }).expect(200);
+    await agent
+      .post(`/employees/${employeeId}/badges`)
+      .send({ badgeCode: `BADGE-${randomUUID()}` })
+      .expect(201);
+
+    const device = await agent.post("/station-devices").send({ name: "Line 1 terminal" }).expect(201);
+    const apiKey = device.body.apiKey as string;
+
+    const roster = await request(app!.getHttpServer())
+      .get("/station/operators")
+      .set("x-api-key", apiKey)
+      .expect(200);
+
+    expect(roster.body.items).toHaveLength(1);
+    const op = roster.body.items[0];
+    expect(op).toMatchObject({
+      operatorId: employeeId,
+      name: "Оператор Смены",
+      login: "1042",
+      active: true,
+    });
+    expect(op.pinHash).toMatch(/^pbkdf2\$sha256\$100000\$/);
+    expect(op.badgeHash).toMatch(/^pbkdf2\$sha256\$100000\$/);
+    // The plaintext badge code must never reach the device.
+    expect(JSON.stringify(roster.body)).not.toContain("BADGE-");
+
+    // The same key must NOT be able to manage operators.
+    await request(app!.getHttpServer()).get("/operators").set("x-api-key", apiKey).expect(403);
+    await request(app!.getHttpServer())
+      .delete(`/operators/${employeeId}`)
+      .set("x-api-key", apiKey)
+      .expect(403);
+  });
+
+  it("requires auth for the roster and never crosses tenants", async () => {
+    const alice = request.agent(app!.getHttpServer());
+    await signUpAndActivate(alice);
+    const aliceEmployee = await createEmployee(alice, "Алисин оператор");
+    await alice.put(`/operators/${aliceEmployee}`).send({ login: "5001", pin: "1234" }).expect(200);
+
+    const bob = request.agent(app!.getHttpServer());
+    await signUpAndActivate(bob);
+    const bobDevice = await bob.post("/station-devices").send({ name: "Bob terminal" }).expect(201);
+
+    await request(app!.getHttpServer()).get("/station/operators").expect(401);
+
+    const bobRoster = await request(app!.getHttpServer())
+      .get("/station/operators")
+      .set("x-api-key", bobDevice.body.apiKey as string)
+      .expect(200);
+    expect(bobRoster.body.items).toHaveLength(0);
+  });
 });
