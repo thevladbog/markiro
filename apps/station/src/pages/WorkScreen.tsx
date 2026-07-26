@@ -50,9 +50,17 @@ export function WorkScreen({
   const keys = useRef<Set<string>>(new Set());
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // The duplicate index must be in memory before the first scan is judged.
+  // The scan source starts listening immediately (so nothing is missed) and
+  // the queue serialises, so awaiting the load here simply makes the first
+  // scan wait rather than validating against an empty set — which would
+  // accept an already-known code, fail the INSERT, roll the journal write
+  // back, and leave the operator with no signal at all.
+  const keysReady = useRef<Promise<void> | null>(null);
+
   useEffect(() => {
     let cancelled = false;
-    void loadCodeKeys(exec).then((loaded) => {
+    keysReady.current = loadCodeKeys(exec).then((loaded) => {
       if (!cancelled) keys.current = loaded;
     });
     return () => {
@@ -64,6 +72,7 @@ export function WorkScreen({
     () =>
       createScanQueue({
         async process(raw): Promise<ScanOutcome> {
+          await keysReady.current;
           const verdict = validateShiftScan(raw, {
             expectedGtin14,
             isDuplicate: (key) => keys.current.has(key),
