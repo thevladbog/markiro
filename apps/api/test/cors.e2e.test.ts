@@ -73,7 +73,7 @@ describe.skipIf(!ready)("cors e2e", () => {
     const res = await request(app!.getHttpServer())
       .post("/api/auth/sign-up/email")
       .set("Origin", adminOrigin)
-      .send({ email, password: "Passw0rd!123", name: "T" })
+      .send({ email, password: `Pw-${randomUUID()}!Aa1`, name: "T" })
       .expect(200);
 
     expect(res.body.user).toBeTruthy();
@@ -112,7 +112,7 @@ describe.skipIf(!ready)("cors e2e", () => {
     const res = await request(app!.getHttpServer())
       .post("/api/auth/sign-up/email")
       .set("Origin", FOREIGN_ORIGIN)
-      .send({ email, password: "Passw0rd!123", name: "T" })
+      .send({ email, password: `Pw-${randomUUID()}!Aa1`, name: "T" })
       .expect(200);
 
     expect(res.body.user).toBeTruthy();

@@ -39,7 +39,7 @@ describe.skipIf(!ready)("pickup-reasons e2e", () => {
     const email = `t-${randomUUID()}@example.com`;
     await agent
       .post("/api/auth/sign-up/email")
-      .send({ email, password: "Passw0rd!123", name: "T" })
+      .send({ email, password: `Pw-${randomUUID()}!Aa1`, name: "T" })
       .expect(200);
 
     const org = await agent
