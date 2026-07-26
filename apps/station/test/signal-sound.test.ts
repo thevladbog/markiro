@@ -37,6 +37,8 @@ function fakeAudio() {
   const ctx = {
     currentTime: 0,
     destination: {},
+    state: "running",
+    resume: vi.fn(() => Promise.resolve()),
     createGain: () => gain,
     createOscillator: () => osc,
     close: vi.fn(),
@@ -89,5 +91,47 @@ describe("signal tones", () => {
 
   it("does not throw when WebAudio is unavailable", () => {
     expect(() => playSignalTone("ok", { muted: false, volume: 1 }, () => null)).not.toThrow();
+  });
+
+  it("constructs the underlying AudioContext only once across several tones, reusing it rather than recreating it per call", async () => {
+    vi.resetModules();
+    const audio = fakeAudio();
+    // A real `function`, not an arrow: browsers' `AudioContext` is invoked
+    // with `new`, and only a proper function (or class) can be constructed
+    // that way — an arrow-based vi.fn() implementation would throw
+    // "not a constructor" every time, which the module's own catch-all would
+    // then silently swallow, masking the very bug this test exists to catch.
+    const ctorSpy = vi.fn(function AudioContextStub() {
+      return audio.ctx;
+    });
+    vi.stubGlobal("AudioContext", ctorSpy);
+    try {
+      const fresh = await import("../src/lib/signal-sound.js");
+      fresh.playSignalTone("ok", { muted: false, volume: 1 });
+      fresh.playSignalTone("error", { muted: false, volume: 1 });
+      fresh.playSignalTone("duplicate", { muted: false, volume: 1 });
+
+      // All three tones actually played (proving the cached context is
+      // genuinely usable, not just returned and ignored)...
+      expect(audio.osc.start).toHaveBeenCalledTimes(3);
+      // ...yet the constructor behind it ran exactly once.
+      expect(ctorSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.resetModules();
+    }
+  });
+
+  it("resumes a suspended context but never throws or rejects unhandled when resume fails", () => {
+    const audio = fakeAudio();
+    (audio.ctx as unknown as { state: string }).state = "suspended";
+    const resume = vi.fn(() => Promise.reject(new Error("resume failed")));
+    (audio.ctx as unknown as { resume: () => Promise<void> }).resume = resume;
+
+    expect(() =>
+      playSignalTone("ok", { muted: false, volume: 1 }, () => audio.ctx),
+    ).not.toThrow();
+    expect(resume).toHaveBeenCalled();
+    expect(audio.osc.start).toHaveBeenCalled();
   });
 });

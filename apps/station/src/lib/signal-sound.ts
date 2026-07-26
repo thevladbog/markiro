@@ -64,9 +64,24 @@ const TONES: Record<SignalTone, { hz: number; seconds: number; type: OscillatorT
   duplicate: { hz: 440, seconds: 0.3, type: "triangle" },
 };
 
+/**
+ * Cached across calls: browsers cap concurrent hardware audio contexts
+ * (Chromium enforces roughly six). A fresh `AudioContext` per scan would
+ * exhaust that limit after a handful of tones, `new AudioContext()` would
+ * then throw `NotSupportedError`, and `playSignalTone`'s catch-all below
+ * would swallow it — silently losing the audio verdict design brief 04
+ * requires to stand on its own when the operator is watching the line
+ * rather than the screen. Do NOT "clean this up" by constructing a new
+ * context per call; create it lazily once and reuse it for the page's
+ * lifetime instead.
+ */
+let cachedContext: AudioContext | null = null;
+
 function defaultContext(): AudioContext | null {
+  if (cachedContext) return cachedContext;
   const Ctor = (globalThis as { AudioContext?: typeof AudioContext }).AudioContext;
-  return Ctor ? new Ctor() : null;
+  cachedContext = Ctor ? new Ctor() : null;
+  return cachedContext;
 }
 
 /**
@@ -83,6 +98,16 @@ export function playSignalTone(
   try {
     const ctx = ctxFactory();
     if (!ctx) return;
+    if (ctx.state === "suspended") {
+      // Browsers start audio contexts suspended until a user gesture, and a
+      // kiosk's first tap/click may land after the first scan is already
+      // queued. Resuming is best-effort and inherently async: the tone
+      // below is attempted regardless, and a rejection here must never
+      // surface as an unhandled rejection or throw.
+      ctx.resume().catch(() => {
+        // Best-effort only; see comment above.
+      });
+    }
     const spec = TONES[tone];
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
