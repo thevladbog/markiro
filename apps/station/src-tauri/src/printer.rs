@@ -45,10 +45,18 @@ fn resolve_socket_addr(host: &str, port: u16) -> Result<SocketAddr, String> {
 /// does blocking I/O (serial and TCP), and a mistyped printer address —
 /// exactly what the setup screen's test print exists to catch — must not
 /// freeze the whole station while the OS gives up on the connection.
+///
+/// Being an `async fn` alone is not enough: the body below still does
+/// blocking serial open/write/flush and blocking DNS resolution
+/// (`to_socket_addrs`), which would run straight on whichever async worker
+/// thread Tauri picked for this command and starve every other async task
+/// scheduled on it for as long as the OS takes. `spawn_blocking` moves the
+/// entire match onto a thread dedicated to blocking work, and this command
+/// just awaits the result.
 #[tauri::command]
 pub async fn print_bytes(target: PrintTarget, payload_base64: String) -> Result<(), String> {
     let bytes = decode_payload(&payload_base64)?;
-    match target {
+    let result = tauri::async_runtime::spawn_blocking(move || match target {
         PrintTarget::Serial { port, baud } => {
             let mut handle = serialport::new(&port, baud)
                 .timeout(Duration::from_secs(5))
@@ -67,7 +75,10 @@ pub async fn print_bytes(target: PrintTarget, payload_base64: String) -> Result<
             stream.write_all(&bytes).map_err(|e| e.to_string())?;
             stream.flush().map_err(|e| e.to_string())
         }
-    }
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    result
 }
 
 #[cfg(test)]
