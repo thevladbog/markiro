@@ -55,5 +55,11 @@
     "wrongGtin": "WRONG GTIN",
     "duplicate": "DUPLICATE",
     "firstSeen": "First scanned at {{time}}"
+  },
+  "work": {
+    "accepted": "Accepted",
+    "rejected": "Rejected",
+    "lastScan": "Last scan",
+    "waiting": "Waiting for a scan…"
   }
 }

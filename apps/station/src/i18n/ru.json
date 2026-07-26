@@ -55,5 +55,11 @@
     "wrongGtin": "ЧУЖОЙ ГТИН",
     "duplicate": "ДУБЛЬ",
     "firstSeen": "Первый скан в {{time}}"
+  },
+  "work": {
+    "accepted": "Принято",
+    "rejected": "Отклонено",
+    "lastScan": "Последний скан",
+    "waiting": "Ожидание скана…"
   }
 }
