@@ -56,7 +56,7 @@ describe.skipIf(!ready)("auth e2e", () => {
 
     await agent
       .post("/api/auth/sign-up/email")
-      .send({ email, password: "Passw0rd!123", name: "T" })
+      .send({ email, password: `Pw-${randomUUID()}!Aa1`, name: "T" })
       .expect(200);
 
     const org = await agent
