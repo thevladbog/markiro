@@ -3,6 +3,8 @@ export type SignalTone = "ok" | "error" | "duplicate";
 export interface SignalOverlayProps {
   tone: SignalTone;
   title: string;
+  /** Extra line under the title — the duplicate's first-seen time. */
+  detail?: string;
 }
 
 // Skeleton only: renders a full-screen colored state given a tone + title.
@@ -18,7 +20,7 @@ const TONE_BG: Record<SignalTone, string> = {
   duplicate: "var(--warn-solid, #a66500)",
 };
 
-export function SignalOverlay({ tone, title }: SignalOverlayProps) {
+export function SignalOverlay({ tone, title, detail }: SignalOverlayProps) {
   return (
     <div
       role="alert"
@@ -28,14 +30,16 @@ export function SignalOverlay({ tone, title }: SignalOverlayProps) {
         inset: 0,
         display: "grid",
         placeItems: "center",
+        alignContent: "center",
+        gap: 16,
         background: TONE_BG[tone],
         color: "#fff",
-        fontSize: "4rem",
-        fontWeight: 800,
         textAlign: "center",
+        padding: 32,
       }}
     >
-      {title}
+      <span style={{ fontSize: "4rem", fontWeight: 800 }}>{title}</span>
+      {detail !== undefined && <span style={{ fontSize: "1.75rem" }}>{detail}</span>}
     </div>
   );
 }

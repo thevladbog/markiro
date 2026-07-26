@@ -49,5 +49,11 @@
     "notConfigured": "Not configured",
     "teammates": "Terminals",
     "tasks": "Tasks"
+  },
+  "signal": {
+    "wrongCode": "WRONG CODE",
+    "wrongGtin": "WRONG GTIN",
+    "duplicate": "DUPLICATE",
+    "firstSeen": "First scanned at {{time}}"
   }
 }

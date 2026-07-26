@@ -49,5 +49,11 @@
     "notConfigured": "Не настроено",
     "teammates": "Терминалы",
     "tasks": "Задачи"
+  },
+  "signal": {
+    "wrongCode": "НЕВЕРНЫЙ КОД",
+    "wrongGtin": "ЧУЖОЙ ГТИН",
+    "duplicate": "ДУБЛЬ",
+    "firstSeen": "Первый скан в {{time}}"
   }
 }
