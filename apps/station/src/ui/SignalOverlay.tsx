@@ -7,13 +7,13 @@ export interface SignalOverlayProps {
   detail?: string;
 }
 
-// Skeleton only: renders a full-screen colored state given a tone + title.
-// The flash timing and sound are wired in 05b's signal system. Color is
-// paired with the title text (color + text; icons added in 05b) per the
-// color-blind-safety rule.
+// Renders a full-screen colored state given a tone + title, driven by
+// WorkScreen's signal system (flash timing in FLASH_MS, sound in
+// playSignalTone). Color is paired with the title text per the
+// color-blind-safety rule (no color-only signal).
 // Uses the same status token family as @markiro/ui (--ok-solid / --err-solid /
 // --warn-solid, per Input/StatusChip) with literal hex fallbacks so the
-// skeleton renders even if a token is absent.
+// overlay still renders correctly even if a token is absent.
 const TONE_BG: Record<SignalTone, string> = {
   ok: "var(--ok-solid, #1f8a4c)",
   error: "var(--err-solid, #b3261e)",
