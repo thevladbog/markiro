@@ -12,10 +12,22 @@ beside each item.
 - [ ] Cyrillic raster output matches the admin editor's preview byte-for-byte.
 - [ ] TSPL binary payload survives serial and TCP transport (base64 → Rust → printer).
 
-## Station storage (plans 05a, 05b-1)
+## Station storage (plans 05a, 05b-1, 05b-2)
 
 - [ ] `tauri-plugin-sql` accepts `?` positional placeholders on device.
-- [ ] Mirror transactions behave correctly under real scan load (BEGIN/COMMIT over the connection pool).
+- [ ] Multi-statement `BEGIN`/`COMMIT` over `tauri-plugin-sql`'s connection
+      pool is NOT atomic — each `exec.run` call can land on a different
+      pooled connection (sqlx `Pool::connect`, up to 10, FIFO idle queue), so
+      a `COMMIT` can fail with "no transaction is active" under real
+      overlapping DB work. The scan journal (`journal.ts`'s `recordScan`) no
+      longer relies on a transaction at all: it writes the code row first and
+      treats a `codes_mirror.code_hash` PRIMARY KEY violation as the
+      duplicate verdict. `upsertBundle` (`mirror.ts`) and `syncOperatorRoster`
+      (`roster-sync.ts`) still write their statements individually with no
+      transaction; confirm on real hardware that the partial-update window
+      this leaves (a failure between the operator upserts and the trailing
+      delete can leave a stale operator row until the next successful sync)
+      is acceptable, or close it properly in the next slice.
 
 ## Station lifecycle (plan 05a)
 
@@ -26,5 +38,12 @@ beside each item.
 
 - [ ] Serial scanner: real device, baud negotiation, payload terminators.
 - [ ] Keyboard-wedge fallback works with a HID scanner and no setup.
+- [ ] Scanner AIM symbology identifier / prefix-suffix configuration: some
+      scanners emit an AIM prefix (e.g. `]d2` for a GS1 DataMatrix) before
+      every scanned string by default. If nobody disables that in the
+      scanner's own configuration (or strips it in code), every scan fails
+      `classifyScan` as invalid — this can burn an hour on the floor before
+      anyone thinks to check it. Confirm the scanner is configured to send
+      the bare payload, or that prefix stripping is handled.
 - [ ] Printer over TCP 9100 and over serial; test print from the setup screen.
 - [ ] USB/spooler printing — out of the 05b-2 transport scope; decide whether it is needed.

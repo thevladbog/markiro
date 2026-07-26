@@ -48,16 +48,20 @@ ScanSource (keyboard-wedge | serial)
 ScanQueue ── one scan at a time, to completion ──▶ next scan
       │
       ├─▶ validateShiftScan(raw, { expectedGtin14, isDuplicate })   [domain]
-      ├─▶ journal write (one transaction)
+      ├─▶ journal write (no transaction — code row first, PK is the dup check)
       └─▶ signal (flash + tone)
 ```
 
 **Why serial.** Operators scan several codes per second. Concurrent processing
-lets two scans both pass the duplicate check before either is written, and
-makes them contend for `tauri-plugin-sql`'s connection pool — the transaction
-hazard deferred from 05b-1. Processing one scan to completion before starting
-the next removes both by construction and makes the loop deterministic in
-tests. Fast input is **buffered, never dropped**.
+would let two scans both pass the duplicate check before either is written.
+Processing one scan to completion before starting the next removes that
+scan-vs-scan race by construction and makes the loop deterministic in tests.
+Serializing scans does **not**, by itself, remove `tauri-plugin-sql`'s
+pooled-connection hazard deferred from 05b-1: the pool can hand a different
+connection to every call regardless of how many scans are in flight, so a
+multi-call transaction would still be unsound even one scan at a time. That
+hazard is why the journal write below does not use a transaction at all (see
+"Journal"). Fast input is **buffered, never dropped**.
 
 **Duplicate index.** `ShiftScanContext.isDuplicate(key): boolean` is
 **synchronous** while SQLite is async, so the shift's existing code keys are
@@ -66,15 +70,25 @@ insert. This satisfies the domain contract and keeps the check instant.
 
 ### Journal
 
-Per scan, in one transaction:
+Per scan, as two independent statements — deliberately **not** one transaction:
 
-- **every** scan → `scan_events_mirror` (`raw`, `verdict`, `scanned_at`,
-  `terminal_id`);
-- **accepted** scans → `codes_mirror` (`code_hash` = the domain's `kmKey`,
-  `gtin14`, `serial`, `shift_id`, `scanned_at`).
+- **accepted** scans → `codes_mirror` FIRST (`code_hash` = the domain's
+  `kmKey`, `gtin14`, `serial`, `shift_id`, `scanned_at`);
+- **every** scan → `scan_events_mirror` SECOND (`raw`, `verdict`,
+  `scanned_at`, `terminal_id`).
 
-`codes_mirror.code_hash` is the primary key, so the unique constraint is a
-second line of defence behind the in-memory index.
+`tauri-plugin-sql` opens SQLite through sqlx's `Pool::connect` (up to 10
+connections, a FIFO idle queue) and can hand a _different_ pooled connection
+to every call, so `BEGIN`/inserts/`COMMIT` sent as separate calls would not
+actually be one transaction — under real overlapping DB work (the settings
+read racing migrations, the shift-context poll overlapping the bundle
+mirror, roster sync re-running on `online`), `COMMIT` can fail with "no
+transaction is active." The journal write therefore uses no transaction at
+all and instead relies on `codes_mirror.code_hash` being the PRIMARY KEY: the
+code insert runs first, and a UNIQUE/PRIMARY KEY constraint violation on it
+**is** the duplicate verdict rather than a write failure. The event row is
+still written afterwards either way, so the audit trail survives regardless
+of what the code insert did.
 
 ### Hardware layer
 
@@ -149,8 +163,10 @@ scattered across ledgers:
 
 - ZPL `^BX` FNC1 on real printers; TSPL `DMATRIX` GS1 behaviour (unverified);
   TSPL `DMATRIX` cell-size form; TSPL transport latin1/base64 discipline.
-- `tauri-plugin-sql` `?` placeholder behaviour on device; mirror transaction
-  behaviour under real load.
+- `tauri-plugin-sql` `?` placeholder behaviour on device; confirming that
+  `upsertBundle`/`replaceOperatorsMirror`/`syncOperatorRoster` — which no
+  longer use BEGIN/COMMIT, since the pool makes that unsound — don't leave a
+  visible partial-update window under real sync timing.
 - Updater endpoint and the `{{target}}` placeholder allowlist; kiosk lockdown
   actually invoked.
 - Scanner: real serial device, baud negotiation, keyboard-wedge fallback.
