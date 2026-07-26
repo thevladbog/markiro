@@ -81,4 +81,27 @@ describe("scan queue", () => {
     expect(consoleError).toHaveBeenCalled();
     consoleError.mockRestore();
   });
+
+  it("calls onError with the raw scan and the thrown error, and keeps draining", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const done: string[] = [];
+    const errors: Array<{ raw: string; err: unknown }> = [];
+    const boom = new Error("journal write failed");
+    const queue = createScanQueue({
+      process: async (raw) => {
+        if (raw === "boom") throw boom;
+        return outcome(raw);
+      },
+      onOutcome: (o) => done.push(o.raw),
+      onError: (raw, err) => errors.push({ raw, err }),
+    });
+
+    queue.enqueue("boom");
+    queue.enqueue("after");
+    await queue.idle();
+
+    expect(errors).toEqual([{ raw: "boom", err: boom }]);
+    expect(done).toEqual(["after"]);
+    consoleError.mockRestore();
+  });
 });

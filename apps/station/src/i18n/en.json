@@ -56,7 +56,8 @@
     "wrongCode": "WRONG CODE",
     "wrongGtin": "WRONG GTIN",
     "duplicate": "DUPLICATE",
-    "firstSeen": "First scanned at {{time}}"
+    "firstSeen": "First scanned at {{time}}",
+    "systemError": "WRITE FAILED"
   },
   "work": {
     "accepted": "Accepted",

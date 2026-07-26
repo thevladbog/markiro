@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { render, screen, waitFor } from "@testing-library/react";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { STATION_MIGRATIONS } from "@markiro/db";
 import i18n from "../src/i18n/index.js";
 import type { SqlExecutor } from "../src/lib/mirror.js";
@@ -54,6 +54,31 @@ function makeAsyncAllExec(): SqlExecutor {
     all: async <T,>(sql: string, params: unknown[] = []) => {
       await Promise.resolve();
       return db.prepare(sql).all(...(params as never[])) as T[];
+    },
+  };
+}
+
+/** Same schema, but every `run()` call throws — simulates a journal write failure. */
+function makeThrowingRunExec(): SqlExecutor {
+  const base = makeExec();
+  return {
+    run: async () => {
+      throw new Error("disk full");
+    },
+    all: base.all,
+  };
+}
+
+/** Same schema, but the FIRST `all()` call rejects — simulates a failed initial key load. */
+function makeFailFirstAllExec(): SqlExecutor {
+  const base = makeExec();
+  let calls = 0;
+  return {
+    run: base.run,
+    all: async <T,>(sql: string, params: unknown[] = []) => {
+      calls += 1;
+      if (calls === 1) throw new Error("boom: first all() call fails");
+      return base.all<T>(sql, params);
     },
   };
 }
@@ -197,5 +222,40 @@ describe("WorkScreen", () => {
     );
     expect(screen.getByText("Water 0.5")).toBeDefined();
     expect(screen.getByText(/Plant X/)).toBeDefined();
+  });
+
+  it("shows the system-error signal and counts the scan as rejected when the journal write throws", async () => {
+    const source = manualSource();
+    const exec = makeThrowingRunExec();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    renderScreen(source, exec);
+    source.emit(KM);
+
+    const alert = await screen.findByRole("alert");
+    await waitFor(() => expect(alert.dataset.tone).toBe("error"));
+    expect(alert.textContent).toContain("WRITE FAILED");
+    expect(await screen.findByText("1")).toBeDefined(); // rejected counter, not accepted
+
+    expect(consoleError).toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
+  it("keeps scanning after the initial code-key load fails, instead of losing every later scan", async () => {
+    const source = manualSource();
+    const exec = makeFailFirstAllExec();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    renderScreen(source, exec);
+    source.emit(KM);
+
+    await waitFor(async () => {
+      const rows = await exec.all<{ code_hash: string }>("SELECT code_hash FROM codes_mirror");
+      expect(rows).toHaveLength(1);
+    });
+    expect(await screen.findByText("1")).toBeDefined(); // accepted counter
+
+    expect(consoleError).toHaveBeenCalled();
+    consoleError.mockRestore();
   });
 });

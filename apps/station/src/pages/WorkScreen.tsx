@@ -54,15 +54,27 @@ export function WorkScreen({
   // The scan source starts listening immediately (so nothing is missed) and
   // the queue serialises, so awaiting the load here simply makes the first
   // scan wait rather than validating against an empty set — which would
-  // accept an already-known code, fail the INSERT, roll the journal write
-  // back, and leave the operator with no signal at all.
+  // wrongly accept an already-known code. Even then, codes_mirror's PRIMARY
+  // KEY is the backstop: recordScan reports that as `alreadyPresent` and the
+  // verdict is corrected below, rather than the write failing outright.
   const keysReady = useRef<Promise<void> | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    keysReady.current = loadCodeKeys(exec).then((loaded) => {
-      if (!cancelled) keys.current = loaded;
-    });
+    // Resilient by construction: `keysReady` is awaited before every scan is
+    // judged, so if this promise ever REJECTED, every later scan would await
+    // a rejected promise and vanish silently forever. A failed load instead
+    // falls back to an empty index — codes_mirror's PRIMARY KEY is still the
+    // real backstop against duplicates (see journal.ts's recordScan), and now
+    // correctly yields a `duplicate` verdict instead of a lost scan.
+    keysReady.current = loadCodeKeys(exec)
+      .then((loaded) => {
+        if (!cancelled) keys.current = loaded;
+      })
+      .catch((err) => {
+        console.error("station: failed to load accepted code keys", err);
+        if (!cancelled) keys.current = new Set();
+      });
     return () => {
       cancelled = true;
     };
@@ -84,20 +96,24 @@ export function WorkScreen({
             const scan = classifyScan(raw);
             // `ok` is only produced for a parsed KM, so this branch always holds.
             const km = scan.kind === "km" ? scan.km : null;
-            await recordScan(
+            const codeHash = km ? kmKey(km) : null;
+            const result = await recordScan(
               exec,
               event,
-              km
-                ? {
-                    codeHash: kmKey(km),
-                    shiftId,
-                    gtin14: km.gtin14,
-                    serial: km.serial,
-                    scannedAt,
-                  }
+              km && codeHash
+                ? { codeHash, shiftId, gtin14: km.gtin14, serial: km.serial, scannedAt }
                 : null,
             );
-            if (km) keys.current.add(kmKey(km));
+            if (result.alreadyPresent && codeHash) {
+              // The in-memory duplicate index missed this one; codes_mirror's
+              // PRIMARY KEY is the real backstop (see journal.ts's recordScan
+              // doc comment), so the verdict is corrected here instead of
+              // reporting a false accept.
+              keys.current.add(codeHash);
+              const firstSeen = await findFirstSeen(exec, codeHash);
+              return { raw, verdict: { status: "duplicate", key: codeHash }, firstSeen };
+            }
+            if (codeHash) keys.current.add(codeHash);
             return { raw, verdict, firstSeen: null };
           }
 
@@ -135,6 +151,18 @@ export function WorkScreen({
           setSignal({ tone, title, ...(detail === undefined ? {} : { detail }) });
           if (flashTimer.current) clearTimeout(flashTimer.current);
           flashTimer.current = setTimeout(() => setSignal(null), FLASH_MS[tone]);
+        },
+        onError(raw, err) {
+          // A throw from process() (e.g. the journal write) must never leave
+          // the operator with silence: they scanned something and need SOME
+          // signal, distinct from an ordinary rejection, so they know to
+          // rescan rather than assume the code was accepted.
+          console.error("station: scan write failed", raw, err);
+          setRejected((n) => n + 1);
+          playSignalTone("error", sound);
+          setSignal({ tone: "error", title: t("signal.systemError") });
+          if (flashTimer.current) clearTimeout(flashTimer.current);
+          flashTimer.current = setTimeout(() => setSignal(null), FLASH_MS.error);
         },
       }),
     [exec, shiftId, terminalId, expectedGtin14, sound, t, i18n.language],

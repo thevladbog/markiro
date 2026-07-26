@@ -56,7 +56,8 @@
     "wrongCode": "НЕВЕРНЫЙ КОД",
     "wrongGtin": "ЧУЖОЙ ГТИН",
     "duplicate": "ДУБЛЬ",
-    "firstSeen": "Первый скан в {{time}}"
+    "firstSeen": "Первый скан в {{time}}",
+    "systemError": "ОШИБКА ЗАПИСИ"
   },
   "work": {
     "accepted": "Принято",

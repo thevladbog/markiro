@@ -12,6 +12,11 @@ export interface ScanQueueDeps {
   /** Validate + journal one scan. Runs with no other scan in flight. */
   process(raw: string): Promise<ScanOutcome>;
   onOutcome(outcome: ScanOutcome): void;
+  /**
+   * Called when `process` throws, so a lost write is never silent — the
+   * operator scanned something and must see SOME signal, even a failure one.
+   */
+  onError?(raw: string, err: unknown): void;
 }
 
 export interface ScanQueue {
@@ -50,12 +55,19 @@ export function createScanQueue(deps: ScanQueueDeps): ScanQueue {
     try {
       while (buffer.length > 0) {
         const raw = buffer.shift()!;
+        let outcome: ScanOutcome;
         try {
-          deps.onOutcome(await deps.process(raw));
+          outcome = await deps.process(raw);
         } catch (err) {
-          // One bad scan must never stall the line: log and take the next.
+          // One bad scan must never stall the line: log, signal, take the
+          // next. deps.onOutcome is deliberately called OUTSIDE this try —
+          // a throw from the UI callback must never be misreported as a
+          // processing (validate/journal) failure.
           console.error("station: scan processing failed", err);
+          deps.onError?.(raw, err);
+          continue;
         }
+        deps.onOutcome(outcome);
       }
     } finally {
       draining = false;
