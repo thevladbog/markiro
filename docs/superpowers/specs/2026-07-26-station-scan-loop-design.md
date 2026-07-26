@@ -118,11 +118,17 @@ lit up with scanner / printer / online state.
 `SignalOverlay` is promoted from skeleton to three full-screen states, per
 design brief 04:
 
-| Verdict                | Flash            | Copy                                                                         |
-| ---------------------- | ---------------- | ---------------------------------------------------------------------------- |
-| `ok`                   | green, short     | —                                                                            |
-| `invalid`/`wrong_gtin` | red, held longer | «НЕВЕРНЫЙ КОД» / «ЧУЖОЙ ГТИН»                                                |
-| `duplicate`            | amber            | «ДУБЛЬ» + when and on which terminal it was first scanned (from the journal) |
+| Verdict                | Flash            | Copy                                                   |
+| ---------------------- | ---------------- | ------------------------------------------------------ |
+| `ok`                   | green, short     | —                                                      |
+| `invalid`/`wrong_gtin` | red, held longer | «НЕВЕРНЫЙ КОД» / «ЧУЖОЙ ГТИН»                          |
+| `duplicate`            | amber            | «ДУБЛЬ» + when it was first scanned (from the journal) |
+
+Terminal attribution ("first scanned on Terminal 2") is **deferred to plan
+06**: `codes_mirror` stores no `terminal_id` (only `scan_events_mirror`
+does), so `findFirstSeen` can only report the timestamp in this slice. It is
+added once cross-terminal sync gives a duplicate's original terminal any
+meaning beyond "this device."
 
 Tones are **synthesised with WebAudio** (a distinct frequency and envelope per
 verdict) — no audio assets, no CDN, tunable by ear. Volume and mute are

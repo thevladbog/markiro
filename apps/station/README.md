@@ -98,11 +98,21 @@ verdict → journal → signal.
   `codes_mirror` and kept **device-wide, not shift-scoped**: `code_hash`
   is a global primary key, and a KM identifies one physical item, so the
   same code scanned under a different shift is still a duplicate.
-- **Journal** (`src/lib/journal.ts`): every scan — accepted or not — is
-  written to `scan_events_mirror`; an accepted scan is additionally
-  written to `codes_mirror`, both inside one transaction (`recordScan`),
-  so a failed code insert can never leave a phantom "accepted" event
-  behind.
+- **Journal** (`src/lib/journal.ts`): `recordScan` writes the code row to
+  `codes_mirror` FIRST — only for an accepted scan — then always appends the
+  event row to `scan_events_mirror` second. These are deliberately two
+  independent statements, not one transaction: `tauri-plugin-sql` hands a
+  possibly different pooled connection to every call, so a `BEGIN` on one
+  call and a `COMMIT` on another are not actually one transaction, and can
+  fail outright under real overlapping DB work. Instead, `codes_mirror`'s
+  `PRIMARY KEY` on `code_hash` is the real backstop: a constraint violation
+  on the code insert **is** the duplicate verdict (reported back as
+  `alreadyPresent`), not a write failure. The event row is always appended
+  regardless, and records the verdict the operator actually saw — journalled
+  as `"duplicate"` when the code insert hit `alreadyPresent`, even if the
+  caller predicted `"ok"`. Failure semantics: if the event write fails after
+  the code row already landed, the code stays accepted without its audit
+  row — deliberately preferred over losing the code itself.
 - **Signal** (`src/lib/signal-sound.ts` + `src/ui/SignalOverlay.tsx`): the
   verdict drives a full-screen colored flash plus a tone synthesised with
   WebAudio (no audio assets, nothing fetched from a CDN). Mute and volume
