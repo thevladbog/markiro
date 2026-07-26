@@ -60,5 +60,22 @@
     "accepted": "Accepted",
     "rejected": "Rejected",
     "waiting": "Waiting for a scan…"
+  },
+  "setup": {
+    "title": "Workstation setup",
+    "scanner": "Scanner",
+    "port": "Port",
+    "baud": "Baud rate",
+    "openScanner": "Connect scanner",
+    "testScanHint": "Scan any code to test the connection.",
+    "lastScan": "Last scan",
+    "printer": "Printer",
+    "host": "Printer address (leave empty for a serial printer)",
+    "testPrint": "Test print",
+    "sound": "Sound",
+    "mute": "Mute",
+    "volume": "Volume",
+    "done": "Done",
+    "failed": "Action failed. Check the connection and try again."
   }
 }
