@@ -4,6 +4,8 @@ import { StatusBar } from "./StatusBar.js";
 
 export interface FloorShellProps {
   online: boolean;
+  scannerConnected: boolean;
+  printerConfigured: boolean;
   tasks: Array<{ id: string; label: string }>;
   activeTaskId: string;
   onSelectTask: (id: string) => void;
@@ -12,6 +14,8 @@ export interface FloorShellProps {
 
 export function FloorShell({
   online,
+  scannerConnected,
+  printerConfigured,
   tasks,
   activeTaskId,
   onSelectTask,
@@ -20,7 +24,7 @@ export function FloorShell({
   const { t } = useTranslation();
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-      <StatusBar online={online} />
+      <StatusBar online={online} scannerConnected={scannerConnected} printerConfigured={printerConfigured} />
       <nav aria-label={t("shell.tasks")} style={{ display: "flex", gap: 8, padding: "8px 16px" }}>
         {tasks.map((task) => (
           <button

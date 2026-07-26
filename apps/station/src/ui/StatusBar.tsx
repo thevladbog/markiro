@@ -3,13 +3,17 @@ import { StatusChip } from "@markiro/ui";
 
 export interface StatusBarProps {
   online: boolean;
+  scannerConnected: boolean;
+  printerConfigured: boolean;
 }
 
-// Persistent floor status bar. Hardware indicators are "not configured"
-// placeholders in 05a — the hardware module + workstation setup land in 05b.
-export function StatusBar({ online }: StatusBarProps) {
+// Persistent floor status bar. Scanner/printer indicators reflect the live
+// hardware state passed in by App/FloorShell (05b) rather than the hardcoded
+// "not configured" placeholders from 05a.
+export function StatusBar({ online, scannerConnected, printerConfigured }: StatusBarProps) {
   const { t } = useTranslation();
   const notConfigured = t("shell.notConfigured");
+  const connected = t("shell.connected");
   return (
     <header
       style={{
@@ -35,10 +39,10 @@ export function StatusBar({ online }: StatusBarProps) {
         {t("shell.agent")}: <span>{notConfigured}</span>
       </span>
       <span>
-        {t("shell.scanner")}: <span>{notConfigured}</span>
+        {t("shell.scanner")}: <span>{scannerConnected ? connected : notConfigured}</span>
       </span>
       <span>
-        {t("shell.printer")}: <span>{notConfigured}</span>
+        {t("shell.printer")}: <span>{printerConfigured ? connected : notConfigured}</span>
       </span>
       <span>{t("shell.teammates")}: +0</span>
     </header>

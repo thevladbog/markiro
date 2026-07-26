@@ -37,7 +37,8 @@
     "start": "Начать",
     "actionFailed": "Не удалось выполнить действие. Попробуйте ещё раз.",
     "active": "Смена активна",
-    "forCounterparty": "для:"
+    "forCounterparty": "для:",
+    "preparing": "Готовим смену…"
   },
   "shell": {
     "online": "В сети",
@@ -47,6 +48,7 @@
     "scanner": "Сканер",
     "printer": "Принтер",
     "notConfigured": "Не настроено",
+    "connected": "Подключён",
     "teammates": "Терминалы",
     "tasks": "Задачи"
   },

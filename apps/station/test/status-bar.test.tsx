@@ -8,13 +8,13 @@ beforeAll(async () => {
 });
 
 describe("StatusBar", () => {
-  it("shows the online state", () => {
-    render(<StatusBar online />);
-    expect(screen.getByText("Online")).toBeDefined();
+  it("reports a connected scanner", () => {
+    render(<StatusBar online scannerConnected printerConfigured={false} />);
+    expect(screen.getByText("Connected")).toBeDefined();
   });
-  it("shows the offline state and 'not configured' hardware placeholders", () => {
-    render(<StatusBar online={false} />);
-    expect(screen.getByText("Offline")).toBeDefined();
-    expect(screen.getAllByText("Not configured").length).toBeGreaterThanOrEqual(3);
+
+  it("reports hardware that is not set up yet", () => {
+    render(<StatusBar online={false} scannerConnected={false} printerConfigured={false} />);
+    expect(screen.getAllByText("Not configured")).toHaveLength(3);
   });
 });

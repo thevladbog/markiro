@@ -218,6 +218,40 @@ export async function readShiftMirror(
   };
 }
 
+export interface ShiftContextRow {
+  gtin14: string;
+  productName: string;
+  counterpartyName: string | null;
+}
+
+/**
+ * What the work screen needs to judge scans, joined out of the mirrored
+ * bundle. Returns null until `mirrorShiftBundle` has finished writing — the
+ * station cannot validate a code before it knows the shift's product.
+ */
+export async function readShiftContext(
+  exec: SqlExecutor,
+  shiftId: string,
+): Promise<ShiftContextRow | null> {
+  const rows = await exec.all<{
+    gtin14: string;
+    name: string;
+    counterparty_name: string | null;
+  }>(
+    `SELECT p.gtin14 AS gtin14, p.name AS name, s.counterparty_name AS counterparty_name
+     FROM shift_mirror s JOIN product_mirror p ON p.id = s.product_id
+     WHERE s.id = ?`,
+    [shiftId],
+  );
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    gtin14: row.gtin14,
+    productName: row.name,
+    counterpartyName: row.counterparty_name,
+  };
+}
+
 export async function readOperatorsMirror(exec: SqlExecutor): Promise<OperatorMirrorRecord[]> {
   const rows = await exec.all<{
     operator_id: string;

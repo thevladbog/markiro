@@ -37,7 +37,8 @@
     "start": "Start",
     "actionFailed": "Action failed. Please try again.",
     "active": "Shift active",
-    "forCounterparty": "for:"
+    "forCounterparty": "for:",
+    "preparing": "Preparing the shift…"
   },
   "shell": {
     "online": "Online",
@@ -47,6 +48,7 @@
     "scanner": "Scanner",
     "printer": "Printer",
     "notConfigured": "Not configured",
+    "connected": "Connected",
     "teammates": "Terminals",
     "tasks": "Tasks"
   },
