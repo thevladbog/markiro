@@ -89,8 +89,14 @@ export function WorkstationSetup({
   }
 
   async function changeSound(next: SoundSettings) {
+    // Optimistic: the UI reflects the operator's choice immediately even if
+    // persistence below fails, so the toggle never appears stuck.
     onSoundChange(next);
-    await saveSoundSettings(exec, next);
+    try {
+      await saveSoundSettings(exec, next);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("setup.failed"));
+    }
   }
 
   return (

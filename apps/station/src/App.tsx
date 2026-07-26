@@ -184,14 +184,15 @@ export function App() {
   }
 
   return (
-    // scannerConnected is true because `scanSource` above is always the
-    // keyboard wedge, which needs no hardware handshake to be usable; a
-    // serial scanner's live connection state belongs to WorkstationSetup, not
-    // the floor shell. printerConfigured is false because no printer target
-    // is persisted anywhere yet (a future slice).
+    // Both indicators report only hardware we have actually verified. The
+    // keyboard wedge is indistinguishable from a keyboard, so a working
+    // wedge cannot be detected — and no serial scanner or printer is
+    // persisted yet (the workstation setup screen is not wired into the
+    // app in this slice). Claiming "connected" here would tell an operator
+    // with no scanner attached that everything is fine.
     <FloorShell
       online={online}
-      scannerConnected
+      scannerConnected={false}
       printerConfigured={false}
       tasks={[]}
       activeTaskId=""

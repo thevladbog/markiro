@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import i18n from "../src/i18n/index.js";
 import type { HardwareContract } from "../src/lib/hardware.js";
@@ -55,7 +55,7 @@ describe("WorkstationSetup", () => {
     );
 
     await waitFor(() => expect(emit).toBeTypeOf("function"));
-    emit("0104600000000015");
+    act(() => emit("0104600000000015"));
     expect(await screen.findByText("0104600000000015")).toBeDefined();
   });
 
@@ -101,5 +101,28 @@ describe("WorkstationSetup", () => {
     fireEvent.click(screen.getByLabelText("Mute"));
     await waitFor(() => expect(onSoundChange).toHaveBeenCalledWith({ muted: true, volume: 1 }));
     expect(runs.some((sql) => sql.includes("station_meta"))).toBe(true);
+  });
+
+  it("surfaces a sound-save failure without losing the optimistic UI update", async () => {
+    const onSoundChange = vi.fn();
+    const exec: SqlExecutor = {
+      run: async () => {
+        throw new Error("database unavailable");
+      },
+      all: async () => [],
+    };
+    render(
+      <WorkstationSetup
+        hw={hardware()}
+        exec={exec}
+        sound={{ muted: false, volume: 1 }}
+        onSoundChange={onSoundChange}
+        onDone={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText("Mute"));
+    expect(await screen.findByText(/database unavailable/)).toBeDefined();
+    expect(onSoundChange).toHaveBeenCalledWith({ muted: true, volume: 1 });
   });
 });
