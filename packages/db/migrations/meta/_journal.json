@@ -71,6 +71,13 @@
       "when": 1784860977221,
       "tag": "0009_melted_black_bolt",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1785001150399,
+      "tag": "0010_material_ogun",
+      "breakpoints": true
     }
   ]
 }

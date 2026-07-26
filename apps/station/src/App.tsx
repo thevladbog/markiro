@@ -5,6 +5,7 @@ import { isEnrolled, readConfig, type StationConfig } from "./lib/config.js";
 import { createStationClient } from "./lib/api-client.js";
 import { applyMigrations } from "./lib/mirror.js";
 import { mirrorShiftBundle } from "./lib/shift-bundle.js";
+import { syncOperatorRoster } from "./lib/roster-sync.js";
 import { tauriExecutor } from "./lib/sqlite.js";
 import { Enrollment } from "./pages/Enrollment.js";
 import { OperatorLogin } from "./pages/OperatorLogin.js";
@@ -88,6 +89,27 @@ export function App() {
     () => (config?.apiKey && config.serverUrl ? createStationClient(config) : null),
     [config?.apiKey, config?.serverUrl],
   );
+
+  // Initialization sync: as soon as the device has a credential — right after
+  // enrollment, and on every later start — pull the operator roster so the
+  // sign-in screen has someone to authenticate. Without this a freshly
+  // enrolled station shows a PIN pad no PIN can ever satisfy.
+  useEffect(() => {
+    if (!client) return;
+    void syncOperatorRoster(client, tauriExecutor);
+  }, [client]);
+
+  // Retry: the initial sync above runs exactly once, so a device that is
+  // briefly offline at that moment would otherwise strand the operator at a
+  // PIN pad no PIN can satisfy until the app is restarted. Re-running on
+  // every `online` event is a cheap one-shot retry (`syncOperatorRoster`
+  // never throws), not a polling loop.
+  useEffect(() => {
+    if (!client) return;
+    const retrySync = () => void syncOperatorRoster(client, tauriExecutor);
+    window.addEventListener("online", retrySync);
+    return () => window.removeEventListener("online", retrySync);
+  }, [client]);
 
   async function refreshConfig() {
     setConfig(await readConfig());

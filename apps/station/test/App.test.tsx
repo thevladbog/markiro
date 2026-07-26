@@ -16,6 +16,38 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invokeMock(...(args as [string])),
 }));
 
+// `@tauri-apps/plugin-sql` is a real npm package outside the Vite SSR module
+// graph, so its OWN internal `import { invoke } from "@tauri-apps/api/core"`
+// does not resolve through the mock above (Vitest cannot rewrite a transitive
+// import inside an externalized dependency) -- `Database.load`/`execute`
+// would otherwise hit the real Tauri bridge and throw under jsdom. Mocking
+// the package directly, routed through the same `invokeMock`, keeps every
+// existing `plugin:sql|*` expectation in this file meaningful. The factory
+// body is hoisted above this file's other top-level statements, so it must
+// declare its own class rather than close over one defined further down.
+vi.mock("@tauri-apps/plugin-sql", () => {
+  // `invokeMock`'s declared type only takes `cmd` -- the real `invoke()` (and
+  // this file's other mock, above) also forward the command's payload, cast
+  // away here the same way, so `toHaveBeenCalledWith(cmd, payload)`
+  // assertions keep working.
+  const callInvoke = (...args: unknown[]) => invokeMock(...(args as [string]));
+
+  class FakeDatabase {
+    constructor(private readonly path: string) {}
+    static async load(path: string): Promise<FakeDatabase> {
+      const resolved = await callInvoke("plugin:sql|load", { db: path });
+      return new FakeDatabase(resolved as string);
+    }
+    async execute(query: string, values: unknown[] = []): Promise<unknown> {
+      return callInvoke("plugin:sql|execute", { db: this.path, query, values });
+    }
+    async select<T>(query: string, values: unknown[] = []): Promise<T> {
+      return callInvoke("plugin:sql|select", { db: this.path, query, values }) as Promise<T>;
+    }
+  }
+  return { default: FakeDatabase };
+});
+
 import i18n from "../src/i18n/index.js";
 import { App, nextStationView } from "../src/App.js";
 import type { StationConfig } from "../src/lib/config.js";
@@ -27,6 +59,7 @@ beforeAll(async () => {
 
 afterEach(() => {
   invokeMock.mockClear();
+  vi.unstubAllGlobals();
 });
 
 // No `tenantId` here on purpose: `Enrollment` never persists one (the
@@ -42,6 +75,7 @@ const enrolledConfig: StationConfig = {
 const operator: OperatorMirrorRecord = {
   operatorId: "op1",
   name: "Ivan",
+  login: "1001",
   role: "operator",
   pinHash: "hash",
   badgeHash: null,
@@ -115,5 +149,58 @@ describe("App", () => {
     expect(screen.queryByText("Connect station")).toBeNull();
 
     vi.restoreAllMocks();
+  });
+
+  it("retries the roster sync when the browser fires 'online' after the initial sync failed (F3)", async () => {
+    invokeMock.mockImplementation((cmd: string): Promise<unknown> => {
+      if (cmd === "read_config") {
+        return Promise.resolve({
+          machine_id: "m1",
+          api_key: "mk_key",
+          server_url: "http://localhost:3000",
+        });
+      }
+      if (cmd === "plugin:sql|load") return Promise.resolve("sqlite:station-mirror.db");
+      if (cmd === "plugin:sql|execute") return Promise.resolve([0, 0]);
+      if (cmd === "plugin:sql|select") return Promise.resolve([]);
+      return Promise.resolve(undefined);
+    });
+
+    const rosterBody = JSON.stringify({
+      items: [
+        {
+          operatorId: "op1",
+          name: "Ivan",
+          login: "1001",
+          role: "operator",
+          pinHash: "hash",
+          badgeHash: null,
+          active: true,
+        },
+      ],
+    });
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("device offline"))
+      .mockResolvedValueOnce(new Response(rosterBody, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    // Initial sync (App mounts with a client already configured) fails.
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    // The device comes back online -- this must trigger a second attempt.
+    window.dispatchEvent(new Event("online"));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith(
+        "plugin:sql|execute",
+        expect.objectContaining({
+          query: expect.stringContaining("INSERT INTO operators_mirror"),
+        }),
+      ),
+    );
   });
 });

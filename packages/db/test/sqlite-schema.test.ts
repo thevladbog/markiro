@@ -4,7 +4,19 @@ import { STATION_MIGRATIONS } from "../src/sqlite/migrations.js";
 
 function migratedDb(): DatabaseSync {
   const db = new DatabaseSync(":memory:");
-  for (const stmt of STATION_MIGRATIONS) db.exec(stmt);
+  for (const stmt of STATION_MIGRATIONS) {
+    try {
+      db.exec(stmt);
+    } catch (err) {
+      // Mirrors apps/station/src/lib/mirror.ts's applyMigrations: the
+      // operators_mirror CREATE TABLE already declares `login`, so the
+      // upgrade-path ALTER TABLE ADD COLUMN that follows it always collides
+      // on a fresh database. That's expected — swallow only that error.
+      if (!/duplicate column name/i.test(err instanceof Error ? err.message : String(err))) {
+        throw err;
+      }
+    }
+  }
   return db;
 }
 

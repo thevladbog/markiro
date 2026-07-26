@@ -13,6 +13,7 @@ export const STATION_MIGRATIONS: string[] = [
   `CREATE TABLE IF NOT EXISTS operators_mirror (
      operator_id TEXT PRIMARY KEY,
      name TEXT NOT NULL,
+     login TEXT,
      role TEXT NOT NULL,
      pin_hash TEXT NOT NULL,
      badge_hash TEXT,
@@ -65,4 +66,9 @@ export const STATION_MIGRATIONS: string[] = [
      verdict TEXT NOT NULL,
      scanned_at TEXT NOT NULL
    );`,
+  // Upgrade path for devices enrolled before operators had a personnel number.
+  // SQLite has no `ADD COLUMN IF NOT EXISTS`, and applyMigrations re-runs every
+  // statement on each boot, so this throws "duplicate column name" once the
+  // column exists — applyMigrations swallows exactly that error.
+  `ALTER TABLE operators_mirror ADD COLUMN login TEXT;`,
 ];

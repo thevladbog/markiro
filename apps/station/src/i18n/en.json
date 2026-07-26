@@ -10,11 +10,16 @@
   },
   "login": {
     "title": "Operator sign-in",
+    "loginPrompt": "Enter your personnel number",
+    "loginLabel": "Personnel number",
+    "pinLabel": "PIN",
+    "next": "Next",
+    "back": "Back",
     "pinPrompt": "Enter PIN",
     "badgePrompt": "Or scan your badge",
     "clear": "Clear",
     "submit": "Sign in",
-    "wrong": "Wrong PIN"
+    "wrong": "Wrong personnel number or PIN"
   },
   "shifts": {
     "title": "Shifts",

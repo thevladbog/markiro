@@ -1,7 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
+import i18n from "../src/i18n/index.js";
 import { EmployeesPage } from "../src/pages/employees/index.js";
 
 afterEach(() => {
@@ -323,5 +324,154 @@ describe("EmployeesPage", () => {
         expect.objectContaining({ method: "DELETE" }),
       );
     });
+  });
+});
+
+// Scoped EN block: the rest of this file asserts against the RU dictionary
+// (the app's default language), so the language switch is confined to this
+// describe's beforeAll/afterAll instead of a file-wide hook.
+describe("EmployeesPage station access (rendered in English)", () => {
+  beforeAll(async () => {
+    await i18n.changeLanguage("en");
+  });
+
+  afterAll(async () => {
+    await i18n.changeLanguage("ru");
+  });
+
+  it("opens an employee in edit mode and grants station access (PUT /api/operators/:id with login + pin)", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === "PUT" && url.startsWith("/api/operators/")) {
+        return jsonResponse(200, {
+          employeeId: "1",
+          login: "123456",
+          active: true,
+          createdAt: "2026-01-03T00:00:00.000Z",
+          updatedAt: "2026-01-03T00:00:00.000Z",
+        });
+      }
+      if (url === "/api/operators") {
+        return jsonResponse(200, { items: [] });
+      }
+      return jsonResponse(200, { items: [JANE] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Jane Doe");
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await screen.findByText("Edit employee");
+
+    fireEvent.change(screen.getByLabelText("Personnel number"), { target: { value: "123456" } });
+    fireEvent.change(screen.getByLabelText("PIN"), { target: { value: "4321" } });
+    fireEvent.click(screen.getByRole("button", { name: "Grant access" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/operators/1",
+        expect.objectContaining({
+          method: "PUT",
+          body: JSON.stringify({ login: "123456", pin: "4321" }),
+        }),
+      );
+    });
+  });
+
+  it("resets the PIN via PATCH (login/active untouched) when access already exists (F1)", async () => {
+    const existingAccess = {
+      employeeId: "1",
+      fullName: "Jane Doe",
+      role: "Кассир",
+      login: "123456",
+      active: true,
+      hasBadge: false,
+    };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === "PATCH" && url === "/api/operators/1") {
+        return jsonResponse(200, {
+          employeeId: "1",
+          login: "123456",
+          active: true,
+          createdAt: "2026-01-03T00:00:00.000Z",
+          updatedAt: "2026-01-04T00:00:00.000Z",
+        });
+      }
+      if (url === "/api/operators") {
+        return jsonResponse(200, { items: [existingAccess] });
+      }
+      return jsonResponse(200, { items: [JANE] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Jane Doe");
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await screen.findByText("Edit employee");
+
+    // The reset row exposes only the PIN field -- no personnel-number input
+    // to retype (and thus nothing to accidentally rename).
+    expect(screen.queryByLabelText("Personnel number")).toBeNull();
+
+    fireEvent.change(screen.getByLabelText("PIN"), { target: { value: "9999" } });
+    fireEvent.click(screen.getByRole("button", { name: "Change PIN" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/operators/1",
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify({ pin: "9999" }),
+        }),
+      );
+    });
+  });
+
+  it("shows an error line (not the empty hint) when GET /api/operators fails (F4)", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === "/api/operators") {
+        return jsonResponse(500, { message: "Internal error" });
+      }
+      return jsonResponse(200, { items: [JANE] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Jane Doe");
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await screen.findByText("Edit employee");
+
+    expect(
+      await screen.findByText(
+        "Could not load station access status. Refresh the page before granting access.",
+      ),
+    ).toBeDefined();
+    expect(screen.queryByText("No line-station access granted")).toBeNull();
+    // A failed lookup must not leave the grant control enabled -- that would
+    // invite a duplicate grant which then 409s (C4 review finding).
+    expect(screen.queryByRole("button", { name: "Grant access" })).toBeNull();
+  });
+
+  it("suppresses the Grant access control while GET /api/operators is still pending (C4)", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === "/api/operators") {
+        // Never resolves -- simulates an in-flight lookup.
+        return new Promise<Response>(() => {});
+      }
+      return jsonResponse(200, { items: [JANE] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Jane Doe");
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await screen.findByText("Edit employee");
+
+    expect(await screen.findByText("Loading station access status…")).toBeDefined();
+    expect(screen.queryByText("No line-station access granted")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Grant access" })).toBeNull();
   });
 });

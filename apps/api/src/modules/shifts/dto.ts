@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { LabelTemplateSpec } from "@markiro/domain";
+import type { OperatorMirrorRecord } from "@markiro/db";
 import type { ProductDto } from "../products/dto";
 
 const SHIFT_MODES = ["validation", "aggregation"] as const;
@@ -91,20 +92,6 @@ export interface ShiftDto {
 /** GET /shifts response. */
 export interface ListShiftsResponseDto {
   items: ShiftDto[];
-}
-
-/**
- * A station-local operator record. In 05a the bundle returns `[]` for
- * `operators` (the server operators table is a PARALLEL 05b workstream); this
- * type pins the shape the station will hydrate into `operators_mirror`.
- */
-export interface OperatorMirrorRecord {
-  operatorId: string;
-  name: string;
-  role: string;
-  pinHash: string;
-  badgeHash: string | null;
-  active: boolean;
 }
 
 /** GET /shifts/:id/bundle response — everything the station downloads offline. */

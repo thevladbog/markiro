@@ -51,8 +51,23 @@ export interface ShiftMirrorRow {
   labelTemplateSpec: string | null;
 }
 
+/** True for SQLite's "duplicate column name: x" error from a re-run ALTER. */
+function isDuplicateColumnError(err: unknown): boolean {
+  return /duplicate column name/i.test(err instanceof Error ? err.message : String(err));
+}
+
 export async function applyMigrations(exec: SqlExecutor): Promise<void> {
-  for (const stmt of STATION_MIGRATIONS) await exec.run(stmt);
+  for (const stmt of STATION_MIGRATIONS) {
+    try {
+      await exec.run(stmt);
+    } catch (err) {
+      // `CREATE TABLE IF NOT EXISTS` is idempotent; `ALTER TABLE ADD COLUMN`
+      // is not, and every statement re-runs on each boot. A duplicate-column
+      // error means the desired end state already holds — anything else is a
+      // real failure and must surface.
+      if (!isDuplicateColumnError(err)) throw err;
+    }
+  }
 }
 
 const b = (v: boolean) => (v ? 1 : 0);
@@ -143,28 +158,37 @@ async function upsertBundleBody(exec: SqlExecutor, bundle: StationBundle): Promi
     ],
   );
 
-  for (const op of bundle.operators) {
+  await replaceOperatorsMirror(exec, bundle.operators);
+}
+
+/**
+ * Replaces the ENTIRE local operator set with `operators`: upserts each record
+ * and deletes every mirrored operator not present in the new set (including the
+ * empty case, which clears the table). Shared by the shift-bundle mirror and the
+ * initialization roster sync so a removed/deactivated operator can never keep
+ * authenticating offline from a stale row. The caller owns the transaction.
+ */
+export async function replaceOperatorsMirror(
+  exec: SqlExecutor,
+  operators: OperatorMirrorRecord[],
+): Promise<void> {
+  for (const op of operators) {
     await exec.run(
-      `INSERT INTO operators_mirror (operator_id, name, role, pin_hash, badge_hash, active)
-       VALUES (?,?,?,?,?,?)
+      `INSERT INTO operators_mirror (operator_id, name, login, role, pin_hash, badge_hash, active)
+       VALUES (?,?,?,?,?,?,?)
        ON CONFLICT(operator_id) DO UPDATE SET
-         name=excluded.name, role=excluded.role, pin_hash=excluded.pin_hash,
-         badge_hash=excluded.badge_hash, active=excluded.active`,
-      [op.operatorId, op.name, op.role, op.pinHash, op.badgeHash, b(op.active)],
+         name=excluded.name, login=excluded.login, role=excluded.role,
+         pin_hash=excluded.pin_hash, badge_hash=excluded.badge_hash, active=excluded.active`,
+      [op.operatorId, op.name, op.login, op.role, op.pinHash, op.badgeHash, b(op.active)],
     );
   }
-
-  // Replace the full operator set: drop any previously-mirrored operator not
-  // present in this bundle (including the 05a case of zero operators, which
-  // clears the table entirely), so a removed/deactivated-elsewhere operator
-  // can no longer authenticate offline via a stale mirror row.
-  if (bundle.operators.length === 0) {
+  if (operators.length === 0) {
     await exec.run("DELETE FROM operators_mirror");
   } else {
-    const placeholders = bundle.operators.map(() => "?").join(",");
+    const placeholders = operators.map(() => "?").join(",");
     await exec.run(
       `DELETE FROM operators_mirror WHERE operator_id NOT IN (${placeholders})`,
-      bundle.operators.map((op) => op.operatorId),
+      operators.map((op) => op.operatorId),
     );
   }
 }
@@ -198,14 +222,18 @@ export async function readOperatorsMirror(exec: SqlExecutor): Promise<OperatorMi
   const rows = await exec.all<{
     operator_id: string;
     name: string;
+    login: string | null;
     role: string;
     pin_hash: string;
     badge_hash: string | null;
     active: number;
-  }>("SELECT operator_id, name, role, pin_hash, badge_hash, active FROM operators_mirror");
+  }>("SELECT operator_id, name, login, role, pin_hash, badge_hash, active FROM operators_mirror");
   return rows.map((r) => ({
     operatorId: r.operator_id,
     name: r.name,
+    // Legacy rows (mirrored before the column existed) read as "", which never
+    // matches a real personnel number; the first roster sync overwrites them.
+    login: r.login ?? "",
     role: r.role,
     pinHash: r.pin_hash,
     badgeHash: r.badge_hash,

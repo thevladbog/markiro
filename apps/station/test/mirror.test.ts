@@ -5,6 +5,7 @@ import {
   upsertBundle,
   readShiftMirror,
   readOperatorsMirror,
+  replaceOperatorsMirror,
   type SqlExecutor,
   type StationBundle,
 } from "../src/lib/mirror.js";
@@ -62,6 +63,7 @@ const bundle: StationBundle = {
     {
       operatorId: "op1",
       name: "Ivan",
+      login: "1001",
       role: "operator",
       pinHash: "pbkdf2$sha256$1$c2FsdA==$aA==",
       badgeHash: null,
@@ -115,6 +117,7 @@ describe("mirror", () => {
     const operatorB = {
       operatorId: "op2",
       name: "Boris",
+      login: "1002",
       role: "operator",
       pinHash: "pbkdf2$sha256$1$c2FsdA==$bB==",
       badgeHash: null,
@@ -140,5 +143,27 @@ describe("mirror", () => {
 
     await upsertBundle(exec, { ...bundle, operators: [] });
     expect(await readOperatorsMirror(exec)).toEqual([]);
+  });
+
+  it("round-trips an operator login and tolerates re-running the migrations", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    // Re-running must not throw on the non-idempotent ALTER.
+    await applyMigrations(exec);
+
+    await replaceOperatorsMirror(exec, [
+      {
+        operatorId: "op-1",
+        name: "Смирнов А.",
+        login: "1042",
+        role: "operator",
+        pinHash: "pbkdf2$sha256$100000$c2FsdA==$aGFzaA==",
+        badgeHash: null,
+        active: true,
+      },
+    ]);
+
+    const [op] = await readOperatorsMirror(exec);
+    expect(op?.login).toBe("1042");
   });
 });

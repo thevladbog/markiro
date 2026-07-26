@@ -127,7 +127,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     await agent.post(`/shifts/${id}/open`).expect(409);
   });
 
-  it("GET /shifts/:id/bundle returns shift+product+labelTemplate+counterpartyGln and operators=[]", async () => {
+  it("GET /shifts/:id/bundle returns shift+product+labelTemplate+counterpartyGln and the operator roster", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpAndActivate(agent);
     const counterpartyId = await seedCounterparty(orgId, "Buyer");
@@ -140,6 +140,14 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
       defaultCounterpartyId: counterpartyId,
       defaultLabelTemplateId: templateId,
     });
+    const employee = await agent
+      .post("/employees")
+      .send({ fullName: "Оператор Бандла" })
+      .expect(201);
+    await agent
+      .put(`/operators/${employee.body.id}`)
+      .send({ login: "3300", pin: "1234" })
+      .expect(200);
     const created = await agent
       .post("/shifts")
       .send({ productId, mode: "aggregation" })
@@ -152,7 +160,16 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     expect(bundle.body.labelTemplate).toMatchObject({ id: templateId, name: "Bundle Template" });
     expect(bundle.body.labelTemplate.spec).toMatchObject({ language: "zpl" });
     expect(bundle.body.counterpartyGln).toBe("6291041500213");
-    expect(bundle.body.operators).toEqual([]);
+    expect(bundle.body.operators).toHaveLength(1);
+    expect(bundle.body.operators[0]).toMatchObject({
+      operatorId: employee.body.id,
+      name: "Оператор Бандла",
+      login: "3300",
+      role: "operator",
+      badgeHash: null,
+      active: true,
+    });
+    expect(bundle.body.operators[0].pinHash).toMatch(/^pbkdf2\$sha256\$100000\$/);
   });
 
   it("GET /shifts/:id/bundle is 404 for another tenant's shift", async () => {

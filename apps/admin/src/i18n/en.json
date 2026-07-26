@@ -530,6 +530,22 @@
         "revokedBadge": "Revoked",
         "issuedAt": "Issued {{date}}"
       },
+      "stationAccess": {
+        "title": "Station access",
+        "emptyHint": "No line-station access granted",
+        "loadError": "Could not load station access status. Refresh the page before granting access.",
+        "loading": "Loading station access status…",
+        "loginLabel": "Personnel number",
+        "pinLabel": "PIN",
+        "grantAction": "Grant access",
+        "resetAction": "Change PIN",
+        "disableAction": "Disable",
+        "enableAction": "Enable",
+        "revokeAction": "Remove access",
+        "activeBadge": "Active",
+        "disabledBadge": "Disabled",
+        "current": "Personnel number {{login}}"
+      },
       "toasts": {
         "createSuccess": "Employee added",
         "createError": "Could not create the employee",
@@ -540,7 +556,9 @@
         "issueBadgeSuccess": "Badge issued",
         "issueBadgeError": "Could not issue the badge",
         "revokeBadgeSuccess": "Badge revoked",
-        "revokeBadgeError": "Could not revoke the badge"
+        "revokeBadgeError": "Could not revoke the badge",
+        "stationAccessSuccess": "Station access updated",
+        "stationAccessError": "Could not update station access"
       }
     },
     "kiosks": {
