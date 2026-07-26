@@ -74,6 +74,7 @@
     "lastScan": "Last scan",
     "printer": "Printer",
     "host": "Printer address (leave empty for a serial printer)",
+    "printerPort": "Printer port",
     "testPrint": "Test print",
     "sound": "Sound",
     "mute": "Mute",

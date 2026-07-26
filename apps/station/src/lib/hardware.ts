@@ -46,10 +46,20 @@ export function createHardwareScanSource(hw: HardwareContract): ScanSource {
     start(listener) {
       let unsubscribe: (() => void) | null = null;
       let stopped = false;
-      void hw.onScan(listener).then((fn) => {
-        if (stopped) fn();
-        else unsubscribe = fn;
-      });
+      void hw
+        .onScan(listener)
+        .then((fn) => {
+          if (stopped) fn();
+          else unsubscribe = fn;
+        })
+        .catch((err: unknown) => {
+          // A rejected `listen` (e.g. the Tauri event channel never came up)
+          // must not become an unhandled rejection, and must not leave
+          // `unsubscribe` silently unset — log it so a scan source that
+          // never fires is at least visible in the console instead of
+          // failing in total silence.
+          console.error("station: failed to subscribe to hardware scans", err);
+        });
       return () => {
         stopped = true;
         unsubscribe?.();

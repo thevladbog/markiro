@@ -34,6 +34,7 @@ export function WorkstationSetup({
   const [baud, setBaud] = useState(String(DEFAULT_BAUD));
   const [lastScan, setLastScan] = useState<string | null>(null);
   const [printerHost, setPrinterHost] = useState("");
+  const [printerPort, setPrinterPort] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -49,15 +50,24 @@ export function WorkstationSetup({
   useEffect(() => {
     let unsubscribe: (() => void) | null = null;
     let stopped = false;
-    void hw.onScan(setLastScan).then((fn) => {
-      if (stopped) fn();
-      else unsubscribe = fn;
-    });
+    void hw
+      .onScan(setLastScan)
+      .then((fn) => {
+        if (stopped) fn();
+        else unsubscribe = fn;
+      })
+      .catch((err: unknown) => {
+        // A rejected `listen` leaves the scan source silently dead — surface
+        // it through the same on-screen error line as every other failure
+        // here, but only if the screen is still mounted to show it.
+        if (stopped) return;
+        setError(err instanceof Error ? err.message : t("setup.failed"));
+      });
     return () => {
       stopped = true;
       unsubscribe?.();
     };
-  }, [hw]);
+  }, [hw, t]);
 
   async function openScanner() {
     setBusy(true);
@@ -77,7 +87,7 @@ export function WorkstationSetup({
     try {
       const target: PrintTarget = printerHost
         ? { kind: "tcp", host: printerHost, port: DEFAULT_PRINTER_PORT }
-        : { kind: "serial", port, baud: Number(baud) || DEFAULT_BAUD };
+        : { kind: "serial", port: printerPort, baud: Number(baud) || DEFAULT_BAUD };
       // A minimal, printer-agnostic ZPL self-test: start, one line, end.
       const zpl = "^XA^FO40,40^A0N,40,40^FDMarkiro^FS^XZ";
       await hw.print(target, new TextEncoder().encode(zpl));
@@ -141,10 +151,15 @@ export function WorkstationSetup({
           value={printerHost}
           onChange={(e) => setPrinterHost(e.target.value)}
         />
+        <Input
+          label={t("setup.printerPort")}
+          value={printerPort}
+          onChange={(e) => setPrinterPort(e.target.value)}
+        />
         <Button
           type="button"
           style={{ minHeight: 64 }}
-          disabled={busy}
+          disabled={busy || (printerHost.length === 0 && printerPort.length === 0)}
           onClick={() => void testPrint()}
         >
           {t("setup.testPrint")}

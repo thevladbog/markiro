@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import i18n from "../src/i18n/index.js";
-import type { HardwareContract } from "../src/lib/hardware.js";
+import type { HardwareContract, PrintTarget } from "../src/lib/hardware.js";
 import type { SqlExecutor } from "../src/lib/mirror.js";
 import { WorkstationSetup } from "../src/pages/WorkstationSetup.js";
 
@@ -75,8 +75,52 @@ describe("WorkstationSetup", () => {
       />,
     );
 
+    fireEvent.change(screen.getByLabelText("Printer port"), { target: { value: "COM5" } });
     fireEvent.click(screen.getByRole("button", { name: "Test print" }));
     expect(await screen.findByText(/printer offline/)).toBeDefined();
+  });
+
+  it("sends a serial print target built from the printer port, not the scanner's port", async () => {
+    const print = vi.fn(async (_target: PrintTarget, _bytes: Uint8Array) => {});
+    const hw = hardware({ print });
+    render(
+      <WorkstationSetup
+        hw={hw}
+        exec={noopExec}
+        sound={{ muted: false, volume: 1 }}
+        onSoundChange={() => {}}
+        onDone={() => {}}
+      />,
+    );
+
+    // Pick a scanner port — this must NOT end up in the print target.
+    fireEvent.click(await screen.findByText("COM3"));
+    fireEvent.change(screen.getByLabelText("Printer port"), { target: { value: "COM9" } });
+    fireEvent.click(screen.getByRole("button", { name: "Test print" }));
+
+    await waitFor(() => expect(print).toHaveBeenCalled());
+    const [target] = print.mock.calls[0]!;
+    expect(target).toMatchObject({ kind: "serial", port: "COM9" });
+  });
+
+  it("disables test print when neither a printer host nor a printer port is set", async () => {
+    render(
+      <WorkstationSetup
+        hw={hardware()}
+        exec={noopExec}
+        sound={{ muted: false, volume: 1 }}
+        onSoundChange={() => {}}
+        onDone={() => {}}
+      />,
+    );
+
+    // No jest-dom matcher in this project's setup, so assert the DOM
+    // attribute directly; wait for the port list to settle first so the
+    // effects `render` kicked off don't trigger an act() warning after
+    // this test's assertion has already run.
+    await screen.findByText("COM3");
+    const button = screen.getByRole("button", { name: "Test print" }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
   });
 
   it("persists a mute change", async () => {
