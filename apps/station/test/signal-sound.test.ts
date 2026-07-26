@@ -128,9 +128,7 @@ describe("signal tones", () => {
     const resume = vi.fn(() => Promise.reject(new Error("resume failed")));
     (audio.ctx as unknown as { resume: () => Promise<void> }).resume = resume;
 
-    expect(() =>
-      playSignalTone("ok", { muted: false, volume: 1 }, () => audio.ctx),
-    ).not.toThrow();
+    expect(() => playSignalTone("ok", { muted: false, volume: 1 }, () => audio.ctx)).not.toThrow();
     expect(resume).toHaveBeenCalled();
     expect(audio.osc.start).toHaveBeenCalled();
   });
