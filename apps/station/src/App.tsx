@@ -70,11 +70,18 @@ export function App() {
     // mirrorShiftBundle writes in the background, so poll briefly until the
     // product row lands rather than blocking shift entry on the network.
     const tick = setInterval(() => {
-      void readShiftContext(tauriExecutor, shift.id).then((ctx) => {
-        if (cancelled || !ctx) return;
-        setShiftContext(ctx);
-        clearInterval(tick);
-      });
+      void readShiftContext(tauriExecutor, shift.id)
+        .then((ctx) => {
+          if (cancelled || !ctx) return;
+          setShiftContext(ctx);
+          clearInterval(tick);
+        })
+        .catch((err) => {
+          // A transient SQLite lock while mirrorShiftBundle's transaction is
+          // in flight must not surface as an unhandled rejection on this
+          // tick; the poll keeps running and the next tick self-heals.
+          console.error("station: readShiftContext poll failed", err);
+        });
     }, 250);
     return () => {
       cancelled = true;

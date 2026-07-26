@@ -10,11 +10,26 @@ export interface SoundSettings {
 const DEFAULTS: SoundSettings = { muted: false, volume: 1 };
 const META_KEY = "sound_settings";
 
+/**
+ * Never throws: on a genuinely fresh device this read races
+ * `applyMigrations` for the same shared `dbPromise` (both are unconditional
+ * effects in App.tsx, and this one is not gated on `config`/migrations
+ * finishing), so `SELECT ... FROM station_meta` can be dispatched — and
+ * reject with "no such table: station_meta" — before `CREATE TABLE IF NOT
+ * EXISTS station_meta` runs. A transient lock or a malformed row are
+ * equally harmless to lose. Sound settings are a preference, not data, so
+ * defaulting is always safe — do not remove this guard.
+ */
 export async function loadSoundSettings(exec: SqlExecutor): Promise<SoundSettings> {
-  const rows = await exec.all<{ value: string | null }>(
-    "SELECT value FROM station_meta WHERE key = ?",
-    [META_KEY],
-  );
+  let rows: { value: string | null }[];
+  try {
+    rows = await exec.all<{ value: string | null }>(
+      "SELECT value FROM station_meta WHERE key = ?",
+      [META_KEY],
+    );
+  } catch {
+    return { ...DEFAULTS };
+  }
   const raw = rows[0]?.value;
   if (!raw) return { ...DEFAULTS };
   try {

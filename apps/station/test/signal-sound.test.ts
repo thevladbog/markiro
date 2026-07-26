@@ -54,6 +54,16 @@ describe("sound settings", () => {
     await saveSoundSettings(exec, { muted: true, volume: 0.4 });
     expect(await loadSoundSettings(exec)).toEqual({ muted: true, volume: 0.4 });
   });
+
+  it("falls back to defaults instead of rejecting when the read itself fails (e.g. a first-boot device where station_meta does not exist yet)", async () => {
+    const exec: SqlExecutor = {
+      run: async () => {},
+      all: async () => {
+        throw new Error("no such table: station_meta");
+      },
+    };
+    await expect(loadSoundSettings(exec)).resolves.toEqual({ muted: false, volume: 1 });
+  });
 });
 
 describe("signal tones", () => {
