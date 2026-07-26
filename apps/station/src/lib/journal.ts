@@ -19,15 +19,18 @@ export interface AcceptedCode {
 }
 
 /**
- * The shift's already-accepted code keys, as a Set for the domain's
+ * Every accepted code key on this device, as a Set for the domain's
  * SYNCHRONOUS `isDuplicate(key)` contract (SQLite itself is async, so the
  * check cannot hit the database at scan time).
+ *
+ * Device-wide, not shift-scoped, because `codes_mirror.code_hash` is a global
+ * primary key and a KM identifies one physical item: the same code scanned
+ * under a different shift is still a duplicate. A shift-scoped set would let
+ * such a scan pass validation and then fail the insert, losing the journal
+ * entry AND the operator's signal.
  */
-export async function loadCodeKeys(exec: SqlExecutor, shiftId: string): Promise<Set<string>> {
-  const rows = await exec.all<{ code_hash: string }>(
-    "SELECT code_hash FROM codes_mirror WHERE shift_id = ?",
-    [shiftId],
-  );
+export async function loadCodeKeys(exec: SqlExecutor): Promise<Set<string>> {
+  const rows = await exec.all<{ code_hash: string }>("SELECT code_hash FROM codes_mirror");
   return new Set(rows.map((r) => r.code_hash));
 }
 

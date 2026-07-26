@@ -38,10 +38,19 @@ const CODE = {
 };
 
 describe("journal", () => {
+  it("appendScanEvent writes exactly one event row and touches nothing else", async () => {
+    const exec = makeExec();
+    await appendScanEvent(exec, EVENT);
+    const events = await exec.all<{ verdict: string }>("SELECT verdict FROM scan_events_mirror");
+    expect(events).toHaveLength(1);
+    expect(events[0]!.verdict).toBe(EVENT.verdict);
+    expect(await loadCodeKeys(exec)).toEqual(new Set());
+  });
+
   it("records an accepted scan into both tables in one call", async () => {
     const exec = makeExec();
     await recordScan(exec, EVENT, CODE);
-    expect(await loadCodeKeys(exec, "s1")).toEqual(new Set([CODE.codeHash]));
+    expect(await loadCodeKeys(exec)).toEqual(new Set([CODE.codeHash]));
     const events = await exec.all<{ verdict: string }>("SELECT verdict FROM scan_events_mirror");
     expect(events).toHaveLength(1);
   });
@@ -49,12 +58,12 @@ describe("journal", () => {
   it("records a rejected scan as an event only", async () => {
     const exec = makeExec();
     await recordScan(exec, { ...EVENT, verdict: "invalid" }, null);
-    expect(await loadCodeKeys(exec, "s1")).toEqual(new Set());
+    expect(await loadCodeKeys(exec)).toEqual(new Set());
     const events = await exec.all<{ verdict: string }>("SELECT verdict FROM scan_events_mirror");
     expect(events[0]!.verdict).toBe("invalid");
   });
 
-  it("loads only the requested shift's keys", async () => {
+  it("loads keys device-wide, across shifts", async () => {
     const exec = makeExec();
     await recordScan(exec, EVENT, CODE);
     await recordScan(
@@ -62,7 +71,12 @@ describe("journal", () => {
       { ...EVENT, shiftId: "s2" },
       { ...CODE, codeHash: "other", shiftId: "s2" },
     );
-    expect(await loadCodeKeys(exec, "s1")).toEqual(new Set([CODE.codeHash]));
+    // codes_mirror.code_hash is a global primary key: a KM identifies one
+    // physical item, so a code accepted under a DIFFERENT shift on this same
+    // device must still show up as a duplicate. A shift-scoped set would let
+    // it pass validation here and then fail the codes_mirror insert instead,
+    // losing the journal entry and the operator's signal.
+    expect(await loadCodeKeys(exec)).toEqual(new Set([CODE.codeHash, "other"]));
   });
 
   it("reports when a code was first seen", async () => {
