@@ -49,7 +49,8 @@ describe("journal", () => {
 
   it("records an accepted scan into both tables in one call", async () => {
     const exec = makeExec();
-    await recordScan(exec, EVENT, CODE);
+    const result = await recordScan(exec, EVENT, CODE);
+    expect(result).toEqual({ storedCode: true, alreadyPresent: false });
     expect(await loadCodeKeys(exec)).toEqual(new Set([CODE.codeHash]));
     const events = await exec.all<{ verdict: string }>("SELECT verdict FROM scan_events_mirror");
     expect(events).toHaveLength(1);
@@ -57,7 +58,8 @@ describe("journal", () => {
 
   it("records a rejected scan as an event only", async () => {
     const exec = makeExec();
-    await recordScan(exec, { ...EVENT, verdict: "invalid" }, null);
+    const result = await recordScan(exec, { ...EVENT, verdict: "invalid" }, null);
+    expect(result).toEqual({ storedCode: false, alreadyPresent: false });
     expect(await loadCodeKeys(exec)).toEqual(new Set());
     const events = await exec.all<{ verdict: string }>("SELECT verdict FROM scan_events_mirror");
     expect(events[0]!.verdict).toBe("invalid");
@@ -86,11 +88,36 @@ describe("journal", () => {
     expect(await findFirstSeen(exec, "never-scanned")).toBeNull();
   });
 
-  it("rolls back both writes when the code insert fails", async () => {
+  // recordScan no longer uses a transaction (tauri-plugin-sql's pooled
+  // connections make multi-call BEGIN/COMMIT unsound — see the doc comment
+  // on recordScan). The primary-key constraint on codes_mirror.code_hash is
+  // the actual duplicate signal now, and the audit trail must survive it.
+  it("reports alreadyPresent on a second scan of the same code, without duplicating the code row", async () => {
     const exec = makeExec();
     await recordScan(exec, EVENT, CODE);
-    await expect(recordScan(exec, { ...EVENT, verdict: "ok" }, CODE)).rejects.toThrow();
+
+    const result = await recordScan(exec, { ...EVENT, verdict: "ok" }, CODE);
+
+    expect(result).toEqual({ storedCode: false, alreadyPresent: true });
+    // Still exactly one code row: the constraint violation prevented a second insert.
+    expect(await loadCodeKeys(exec)).toEqual(new Set([CODE.codeHash]));
+    // But BOTH scans are journalled: the event row no longer depends on a
+    // transaction to survive, and the audit trail is what makes the
+    // duplicate diagnosable later.
     const events = await exec.all<{ id: number }>("SELECT id FROM scan_events_mirror");
-    expect(events).toHaveLength(1); // the second event was rolled back with its code
+    expect(events).toHaveLength(2);
+  });
+
+  it("rethrows a non-constraint write failure instead of reporting a duplicate", async () => {
+    const exec = makeExec();
+    const boom = new Error("disk I/O error");
+    const failingExec: SqlExecutor = {
+      ...exec,
+      run: async (sql, params) => {
+        if (sql.startsWith("INSERT INTO codes_mirror")) throw boom;
+        return exec.run(sql, params);
+      },
+    };
+    await expect(recordScan(failingExec, EVENT, CODE)).rejects.toThrow(boom);
   });
 });

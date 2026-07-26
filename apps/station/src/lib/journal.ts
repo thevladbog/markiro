@@ -43,31 +43,88 @@ export async function appendScanEvent(exec: SqlExecutor, e: ScanEventRow): Promi
 }
 
 /**
- * Writes one scan: always an event, plus the code itself when accepted —
- * in a single transaction, so a failed code insert cannot leave a phantom
- * "accepted" event behind. Safe without extra locking because the scan
- * queue guarantees one scan is in flight at a time.
+ * True for SQLite's "UNIQUE constraint failed" (and the "PRIMARY KEY"
+ * phrasing some drivers use for the same conflict) — the signal that
+ * `codes_mirror.code_hash` already holds this row, i.e. this exact code was
+ * already accepted. Anything else is a genuine write failure and must not be
+ * mistaken for a duplicate.
+ */
+function isUniqueConstraintError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /unique constraint failed|primary key constraint/i.test(message);
+}
+
+/** What actually happened when recording one scan — see {@link recordScan}. */
+export interface RecordScanResult {
+  /** True when a code row was supplied and newly inserted into `codes_mirror`. */
+  storedCode: boolean;
+  /**
+   * True when a code was supplied but its insert failed because the row
+   * already exists — this code was already accepted, on this shift or
+   * another. The caller should treat the scan as a duplicate regardless of
+   * what the in-memory duplicate index said before the write was attempted.
+   */
+  alreadyPresent: boolean;
+}
+
+/**
+ * Writes one scan: the code row FIRST (only when accepted), the event row
+ * SECOND.
+ *
+ * Deliberately NOT wrapped in a transaction — do not reintroduce
+ * BEGIN/COMMIT/ROLLBACK here. `tauri-plugin-sql` opens SQLite through sqlx's
+ * `Pool::connect` (up to 10 connections, a FIFO idle queue), and hands a
+ * possibly DIFFERENT pooled connection to every `exec.run` call. A `BEGIN`
+ * sent on one call, the inserts on others, and a `COMMIT` on yet another are
+ * therefore not one transaction at all — multi-call transactions over this
+ * pool are simply unsound. On a real device, with the settings read racing
+ * migrations, the 250 ms shift-context poll overlapping `mirrorShiftBundle`,
+ * and `syncOperatorRoster` re-running on every `online` event mid-shift,
+ * `COMMIT` can fail with "no transaction is active": the `ROLLBACK` that used
+ * to follow would then discard the code row, `recordScan` would throw, and
+ * the scan queue's catch-and-log would swallow it — the scan would vanish
+ * with no signal to the operator, and the same code could be accepted again
+ * later. node:sqlite (a single synchronous connection) cannot reproduce this,
+ * which is why the unit tests alone never caught it.
+ *
+ * Instead this relies on `codes_mirror.code_hash` being the PRIMARY KEY. The
+ * code insert runs first because its failure is meaningful: a
+ * UNIQUE/PRIMARY KEY constraint violation means this exact code is already
+ * accepted — a duplicate — and is reported back as `alreadyPresent` instead
+ * of thrown, so the caller can correct its verdict. Any OTHER error from the
+ * code insert rethrows: an unknown write failure must never be silently
+ * reported as a duplicate.
+ *
+ * The event row is always attempted afterwards, even when the code turned
+ * out to already be present — the audit trail in `scan_events_mirror` is
+ * what makes a duplicate diagnosable later. If that insert fails, it throws:
+ * a code row without its audit row is strictly better than a lost code.
  */
 export async function recordScan(
   exec: SqlExecutor,
   e: ScanEventRow,
   code: AcceptedCode | null,
-): Promise<void> {
-  await exec.run("BEGIN");
-  try {
-    await appendScanEvent(exec, e);
-    if (code) {
+): Promise<RecordScanResult> {
+  let storedCode = false;
+  let alreadyPresent = false;
+
+  if (code) {
+    try {
       await exec.run(
         `INSERT INTO codes_mirror (code_hash, shift_id, gtin14, serial, scanned_at)
          VALUES (?,?,?,?,?)`,
         [code.codeHash, code.shiftId, code.gtin14, code.serial, code.scannedAt],
       );
+      storedCode = true;
+    } catch (err) {
+      if (!isUniqueConstraintError(err)) throw err;
+      alreadyPresent = true;
     }
-    await exec.run("COMMIT");
-  } catch (err) {
-    await exec.run("ROLLBACK");
-    throw err;
   }
+
+  await appendScanEvent(exec, e);
+
+  return { storedCode, alreadyPresent };
 }
 
 /** When this code was originally accepted, for the duplicate signal. */

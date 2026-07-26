@@ -75,21 +75,25 @@ const b = (v: boolean) => (v ? 1 : 0);
 /**
  * Idempotent upsert of a downloaded bundle into the local mirror tables.
  *
- * Wrapped in a transaction: after upserting the bundle's operators, every
- * `operators_mirror` row NOT present in the new bundle is deleted, so a
- * server-side removal (or a subsequent bundle with fewer/zero operators)
- * actually revokes offline PIN login instead of leaving stale rows behind
- * (`verifyOperatorPin` reads every active row in the mirror).
+ * NOT wrapped in a transaction. `tauri-plugin-sql` pools connections (sqlx
+ * `Pool::connect`, up to 10, FIFO idle queue) and can hand a different one to
+ * every `exec.run` call, so a `BEGIN`/`COMMIT`/`ROLLBACK` sent as separate
+ * calls does not actually group these statements — see `journal.ts`'s
+ * `recordScan` doc comment for the full story. These are therefore
+ * individual statements: the shift upsert, the product upsert, then (inside
+ * `replaceOperatorsMirror`) each operator upsert followed by the delete of
+ * every `operators_mirror` row NOT present in the new bundle. If one
+ * statement fails partway through, the mirror is left partially updated
+ * until the next successful sync repairs it. In particular, a failure
+ * between the operator upserts and that trailing DELETE can leave a stale
+ * operator row — one the server already removed or deactivated — able to
+ * authenticate offline (`verifyOperatorPin` reads every active row in the
+ * mirror) until the next successful sync. Closing that gap properly (e.g. a
+ * single multi-statement SQL script, or connection-affine execution) is
+ * deferred to the next slice — see the hardware acceptance checklist.
  */
 export async function upsertBundle(exec: SqlExecutor, bundle: StationBundle): Promise<void> {
-  await exec.run("BEGIN");
-  try {
-    await upsertBundleBody(exec, bundle);
-    await exec.run("COMMIT");
-  } catch (err) {
-    await exec.run("ROLLBACK");
-    throw err;
-  }
+  await upsertBundleBody(exec, bundle);
 }
 
 async function upsertBundleBody(exec: SqlExecutor, bundle: StationBundle): Promise<void> {
@@ -166,7 +170,13 @@ async function upsertBundleBody(exec: SqlExecutor, bundle: StationBundle): Promi
  * and deletes every mirrored operator not present in the new set (including the
  * empty case, which clears the table). Shared by the shift-bundle mirror and the
  * initialization roster sync so a removed/deactivated operator can never keep
- * authenticating offline from a stale row. The caller owns the transaction.
+ * authenticating offline from a stale row.
+ *
+ * Each upsert and the trailing delete are independent statements — neither
+ * this function nor its callers wrap them in a transaction, because
+ * `tauri-plugin-sql`'s connection pool makes multi-call BEGIN/COMMIT unsound
+ * (see `upsertBundle`'s doc comment). A failure partway through can leave a
+ * stale operator row until the next successful sync.
  */
 export async function replaceOperatorsMirror(
   exec: SqlExecutor,
