@@ -80,6 +80,21 @@ export function WorkScreen({
     };
   }, [exec]);
 
+  // `t`, `i18n.language` and `sound` all change over the life of one mounted
+  // WorkScreen (a language switch, a mute/volume change in setup), but the
+  // queue below must NOT be recreated when they do: `source.start(...)`
+  // (further down) is bound to one queue instance, and a fresh queue has its
+  // own buffer and `draining` flag — if the `useMemo` depended on these
+  // values, a change would leave the old queue's buffer (still fed by the
+  // bound source) draining concurrently with a brand new queue, breaking the
+  // "exactly one scan in flight" guarantee the whole pipeline rests on. So
+  // `process`/`onOutcome`/`onError` read the current values through this ref
+  // instead of closing over the props/hooks directly.
+  const live = useRef({ t, language: i18n.language, sound });
+  useEffect(() => {
+    live.current = { t, language: i18n.language, sound };
+  });
+
   const queue = useMemo(
     () =>
       createScanQueue({
@@ -123,31 +138,29 @@ export function WorkScreen({
           return { raw, verdict, firstSeen };
         },
         onOutcome(outcome) {
+          const { t: liveT, language, sound: liveSound } = live.current;
           const tone = toneOf(outcome.verdict);
           if (outcome.verdict.status === "ok") setAccepted((n) => n + 1);
           else setRejected((n) => n + 1);
 
           const title =
             outcome.verdict.status === "duplicate"
-              ? t("signal.duplicate")
+              ? liveT("signal.duplicate")
               : outcome.verdict.status === "wrong_gtin"
-                ? t("signal.wrongGtin")
+                ? liveT("signal.wrongGtin")
                 : outcome.verdict.status === "invalid"
-                  ? t("signal.wrongCode")
+                  ? liveT("signal.wrongCode")
                   : "";
           const detail =
             outcome.firstSeen === null
               ? undefined
-              : t("signal.firstSeen", {
-                  time: new Intl.DateTimeFormat(
-                    i18n.language.startsWith("ru") ? "ru-RU" : "en-US",
-                    {
-                      timeStyle: "medium",
-                    },
-                  ).format(new Date(outcome.firstSeen)),
+              : liveT("signal.firstSeen", {
+                  time: new Intl.DateTimeFormat(language.startsWith("ru") ? "ru-RU" : "en-US", {
+                    timeStyle: "medium",
+                  }).format(new Date(outcome.firstSeen)),
                 });
 
-          playSignalTone(tone, sound);
+          playSignalTone(tone, liveSound);
           setSignal({ tone, title, ...(detail === undefined ? {} : { detail }) });
           if (flashTimer.current) clearTimeout(flashTimer.current);
           flashTimer.current = setTimeout(() => setSignal(null), FLASH_MS[tone]);
@@ -159,13 +172,14 @@ export function WorkScreen({
           // rescan rather than assume the code was accepted.
           console.error("station: scan write failed", raw, err);
           setRejected((n) => n + 1);
-          playSignalTone("error", sound);
-          setSignal({ tone: "error", title: t("signal.systemError") });
+          const { t: liveT, sound: liveSound } = live.current;
+          playSignalTone("error", liveSound);
+          setSignal({ tone: "error", title: liveT("signal.systemError") });
           if (flashTimer.current) clearTimeout(flashTimer.current);
           flashTimer.current = setTimeout(() => setSignal(null), FLASH_MS.error);
         },
       }),
-    [exec, shiftId, terminalId, expectedGtin14, sound, t, i18n.language],
+    [exec, shiftId, terminalId, expectedGtin14],
   );
 
   useEffect(() => source.start((raw) => queue.enqueue(raw)), [source, queue]);
