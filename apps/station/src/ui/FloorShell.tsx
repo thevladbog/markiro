@@ -24,7 +24,11 @@ export function FloorShell({
   const { t } = useTranslation();
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-      <StatusBar online={online} scannerConnected={scannerConnected} printerConfigured={printerConfigured} />
+      <StatusBar
+        online={online}
+        scannerConnected={scannerConnected}
+        printerConfigured={printerConfigured}
+      />
       <nav aria-label={t("shell.tasks")} style={{ display: "flex", gap: 8, padding: "8px 16px" }}>
         {tasks.map((task) => (
           <button
