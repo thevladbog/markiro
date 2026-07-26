@@ -108,6 +108,27 @@ describe("journal", () => {
     expect(events).toHaveLength(2);
   });
 
+  // The stored verdict must reflect what actually happened, not what the
+  // caller predicted: the caller always passes "ok" for an accepted-looking
+  // scan, but when the code insert hits alreadyPresent the operator was
+  // shown a duplicate signal, and the mirror must agree — Plan 06's sync
+  // reads scan_events_mirror.verdict and would otherwise double-count accepts.
+  it("journals the second scan of an already-present code as duplicate, not the caller's ok", async () => {
+    const exec = makeExec();
+    await recordScan(exec, EVENT, CODE);
+    await recordScan(exec, { ...EVENT, verdict: "ok" }, CODE);
+
+    const events = await exec.all<{ verdict: string }>(
+      "SELECT verdict FROM scan_events_mirror ORDER BY id ASC",
+    );
+    expect(events).toHaveLength(2);
+    expect(events[0]!.verdict).toBe("ok");
+    expect(events[1]!.verdict).toBe("duplicate");
+    // Still exactly one codes_mirror row: the constraint violation prevented
+    // a second insert.
+    expect(await loadCodeKeys(exec)).toEqual(new Set([CODE.codeHash]));
+  });
+
   it("rethrows a non-constraint write failure instead of reporting a duplicate", async () => {
     const exec = makeExec();
     const boom = new Error("disk I/O error");

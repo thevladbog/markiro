@@ -30,10 +30,13 @@ export interface ScanQueue {
  * Processes scans strictly one at a time.
  *
  * An operator scans several codes per second. Concurrent processing would let
- * two scans both pass the duplicate check before either is written, and would
- * make them contend for tauri-plugin-sql's connection pool (its BEGIN/COMMIT
- * can otherwise land on different connections). Draining serially removes
- * both problems by construction and makes the loop deterministic in tests.
+ * two scans both pass the duplicate check before either is written — the
+ * in-memory index and the `codes_mirror` insert would both still be racing,
+ * so neither scan would see the other as a duplicate — and would let their
+ * journal writes land out of scan order. Draining serially keeps duplicate
+ * detection honest (one scan's write always completes before the next one's
+ * check runs) and keeps outcomes in scan order, and makes the loop
+ * deterministic in tests.
  *
  * A scan that arrives mid-flight is buffered, never dropped — dropping input
  * on a production line silently loses codes.

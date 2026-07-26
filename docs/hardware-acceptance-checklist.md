@@ -28,6 +28,13 @@ beside each item.
       this leaves (a failure between the operator upserts and the trailing
       delete can leave a stale operator row until the next successful sync)
       is acceptable, or close it properly in the next slice.
+- [ ] A `codes_mirror` primary-key violation surfaced through
+      `tauri-plugin-sql` on device contains the "UNIQUE constraint failed"
+      wording that `journal.ts`'s `isUniqueConstraintError` matches on (the
+      "PRIMARY KEY" phrasing is also accepted). Duplicate detection now
+      hinges on recognising this exact error text — if the on-device driver
+      phrases the conflict differently, duplicates would surface as hard
+      write errors instead of the `duplicate` verdict.
 
 ## Station lifecycle (plan 05a)
 

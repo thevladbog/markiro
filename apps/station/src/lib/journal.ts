@@ -97,8 +97,13 @@ export interface RecordScanResult {
  *
  * The event row is always attempted afterwards, even when the code turned
  * out to already be present — the audit trail in `scan_events_mirror` is
- * what makes a duplicate diagnosable later. If that insert fails, it throws:
- * a code row without its audit row is strictly better than a lost code.
+ * what makes a duplicate diagnosable later. Its `verdict` reflects what
+ * actually happened, not what the caller predicted: if the code insert hit
+ * `alreadyPresent`, the row is journalled as `"duplicate"` regardless of the
+ * verdict the caller passed in, so the mirror never claims a scan was
+ * accepted when the operator was shown a duplicate. If that insert fails, it
+ * throws: a code row without its audit row is strictly better than a lost
+ * code.
  */
 export async function recordScan(
   exec: SqlExecutor,
@@ -122,7 +127,7 @@ export async function recordScan(
     }
   }
 
-  await appendScanEvent(exec, e);
+  await appendScanEvent(exec, alreadyPresent ? { ...e, verdict: "duplicate" } : e);
 
   return { storedCode, alreadyPresent };
 }
