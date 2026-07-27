@@ -206,6 +206,16 @@ async function activeSlot(exec: SqlExecutor): Promise<RosterSlot> {
  * rejected refresh must not poison the queue for later callers. The
  * rejection is still delivered to the caller that issued that particular
  * refresh, via the `turn` promise returned below.
+ *
+ * Trade-off: because every publish now goes through this single chain, one
+ * `exec.run` call that never settles (a hung `plugin:sql|execute` invoke)
+ * stalls the chain forever and no roster refresh completes again for the
+ * rest of the process's life — before serialization, a hung call only ever
+ * blocked its own refresh. This is accepted: the alternative, letting
+ * refreshes race, can publish a roster that still contains an operator who
+ * was just removed server-side, which is the exact bug this file exists to
+ * close. It is also not expected to bite in practice — sqlx's pool-acquire
+ * fails with an error rather than hanging when it cannot get a connection.
  */
 let refreshChain: Promise<void> = Promise.resolve();
 
@@ -274,6 +284,17 @@ async function publishOperatorsMirror(
   // succeeded and the new roster is already live, so a failure clearing the
   // old one must NOT fail this publish — the next refresh's
   // delete-before-staging cleans it up regardless.
+  //
+  // New failure mode this introduces: `readOperatorsMirror` is not on
+  // `refreshChain`, so a sign-in that has just resolved the active slot can
+  // yield the event loop and have this DELETE land before its own SELECT
+  // runs, if a concurrent publish flips and then cleans up that same slot.
+  // The read then sees an empty roster and the sign-in fails with a
+  // spurious "wrong credentials". This is fail-closed (never authenticates
+  // against a removed operator) and self-corrects on the caller's next
+  // attempt, and it actually narrows the pre-existing stale-generation read
+  // window rather than widening it — but it is a new user-visible failure
+  // mode worth knowing about when triaging sign-in reports.
   try {
     await exec.run(`DELETE FROM ${SLOT_TABLES[otherSlot(target)]}`);
   } catch {
@@ -355,7 +376,8 @@ export async function readOperatorsMirror(exec: SqlExecutor): Promise<OperatorMi
     operatorId: r.operator_id,
     name: r.name,
     // Legacy rows (mirrored before the column existed) read as "", which never
-    // matches a real personnel number; the first roster sync overwrites them.
+    // matches a real personnel number; the first roster sync publishes them
+    // into the other slot with a real login and deletes this stale slot.
     login: r.login ?? "",
     role: r.role,
     pinHash: r.pin_hash,

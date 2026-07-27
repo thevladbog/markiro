@@ -36,6 +36,33 @@ describe("STATION_MIGRATIONS", () => {
     expect(names).toContain("scan_events_mirror");
   });
 
+  it("keeps operators_mirror and operators_mirror_b column-for-column identical", () => {
+    // apps/station/src/lib/mirror.ts alternates the active offline-roster
+    // slot between operators_mirror ("a") and operators_mirror_b ("b") and
+    // publishes into whichever is currently inactive. That only works if the
+    // two tables accept exactly the same writes. If one slot is stricter than
+    // the other (e.g. only one declares `login NOT NULL`), a payload that a
+    // server sends with a null login succeeds into the lenient slot and
+    // throws into the strict one. The active slot only flips on a successful
+    // publish, so the next refresh targets that same failing slot again —
+    // the roster freezes on one generation forever and server-side operator
+    // removals silently stop propagating to offline sign-in. If this test
+    // trips, fix the schema asymmetry; do not relax the assertion.
+    const db = migratedDb();
+    const columnsOf = (table: string) =>
+      (
+        db.prepare(`PRAGMA table_info(${table})`).all() as Array<{
+          name: string;
+          type: string;
+          notnull: number;
+          dflt_value: unknown;
+          pk: number;
+        }>
+      ).map(({ name, type, notnull, dflt_value, pk }) => ({ name, type, notnull, dflt_value, pk }));
+
+    expect(columnsOf("operators_mirror_b")).toEqual(columnsOf("operators_mirror"));
+  });
+
   it("round-trips an operators_mirror row with a nullable badge_hash", () => {
     const db = migratedDb();
     db.prepare(
