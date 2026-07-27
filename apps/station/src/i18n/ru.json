@@ -49,6 +49,8 @@
     "printer": "Принтер",
     "notConfigured": "Не настроено",
     "connected": "Подключён",
+    "scannerKeyboard": "Клавиатурный",
+    "scannerDisconnected": "Нет связи",
     "teammates": "Терминалы",
     "tasks": "Задачи"
   },

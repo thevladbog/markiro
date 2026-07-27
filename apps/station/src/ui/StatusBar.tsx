@@ -1,19 +1,31 @@
 import { useTranslation } from "react-i18next";
 import { StatusChip } from "@markiro/ui";
 
+/** What the station can honestly say about its scanner. */
+export type ScannerIndicator = "keyboard" | "connected" | "disconnected";
+
 export interface StatusBarProps {
   online: boolean;
-  scannerConnected: boolean;
+  scanner: ScannerIndicator;
   printerConfigured: boolean;
 }
 
 // Persistent floor status bar. Scanner/printer indicators reflect the live
 // hardware state passed in by App/FloorShell (05b) rather than the hardcoded
 // "not configured" placeholders from 05a.
-export function StatusBar({ online, scannerConnected, printerConfigured }: StatusBarProps) {
+export function StatusBar({ online, scanner, printerConfigured }: StatusBarProps) {
   const { t } = useTranslation();
   const notConfigured = t("shell.notConfigured");
   const connected = t("shell.connected");
+  // A keyboard wedge is indistinguishable from a keyboard, so "keyboard" is
+  // the honest label when no serial scanner is configured — it neither claims
+  // a device we cannot see nor implies nothing works.
+  const scannerLabel =
+    scanner === "connected"
+      ? connected
+      : scanner === "disconnected"
+        ? t("shell.scannerDisconnected")
+        : t("shell.scannerKeyboard");
   return (
     <header
       style={{
@@ -39,7 +51,7 @@ export function StatusBar({ online, scannerConnected, printerConfigured }: Statu
         {t("shell.agent")}: <span>{notConfigured}</span>
       </span>
       <span>
-        {t("shell.scanner")}: <span>{scannerConnected ? connected : notConfigured}</span>
+        {t("shell.scanner")}: <span>{scannerLabel}</span>
       </span>
       <span>
         {t("shell.printer")}: <span>{printerConfigured ? connected : notConfigured}</span>

@@ -199,7 +199,7 @@ export function App() {
     // with no scanner attached that everything is fine.
     <FloorShell
       online={online}
-      scannerConnected={false}
+      scanner="keyboard"
       printerConfigured={false}
       tasks={[]}
       activeTaskId=""

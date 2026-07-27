@@ -49,6 +49,8 @@
     "printer": "Printer",
     "notConfigured": "Not configured",
     "connected": "Connected",
+    "scannerKeyboard": "Keyboard",
+    "scannerDisconnected": "No signal",
     "teammates": "Terminals",
     "tasks": "Tasks"
   },
