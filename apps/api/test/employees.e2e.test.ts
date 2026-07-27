@@ -175,4 +175,26 @@ describe.skipIf(!ready)("employees e2e", () => {
 
     await agent.patch(`/employees/${randomUUID()}`).send({}).expect(404);
   });
+
+  // Routes carry no global prefix — only Better Auth's own `/api/auth/*` mount
+  // does — so these are `/station-devices` and `/employees`, matching the
+  // existing suites.
+  it("rejects a station api-key: employees are cabinet-only", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+
+    const device = await agent
+      .post("/station-devices")
+      .send({ name: "Line 1 terminal" })
+      .expect(201);
+    const apiKey = (device.body as { apiKey: string }).apiKey;
+
+    await request(app!.getHttpServer()).get("/employees").set("x-api-key", apiKey).expect(403);
+  });
+
+  it("still serves employees to a signed-in cabinet user", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+    await agent.get("/employees").expect(200);
+  });
 });
