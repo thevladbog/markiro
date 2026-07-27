@@ -3,14 +3,17 @@ import { useTranslation } from "react-i18next";
 import type { OperatorMirrorRecord } from "@markiro/db";
 import { isEnrolled, readConfig, type StationConfig } from "./lib/config.js";
 import { createStationClient } from "./lib/api-client.js";
-import { applyMigrations } from "./lib/mirror.js";
+import { applyMigrations, readShiftContext, type ShiftContextRow } from "./lib/mirror.js";
 import { mirrorShiftBundle } from "./lib/shift-bundle.js";
 import { syncOperatorRoster } from "./lib/roster-sync.js";
+import { createKeyboardWedgeSource } from "./lib/scan-source.js";
+import { loadSoundSettings, type SoundSettings } from "./lib/signal-sound.js";
 import { tauriExecutor } from "./lib/sqlite.js";
 import { Enrollment } from "./pages/Enrollment.js";
 import { OperatorLogin } from "./pages/OperatorLogin.js";
 import { ShiftSelection } from "./pages/ShiftSelection.js";
 import { NewShift } from "./pages/NewShift.js";
+import { WorkScreen } from "./pages/WorkScreen.js";
 import { FloorShell } from "./ui/FloorShell.js";
 
 interface ActiveShift {
@@ -47,6 +50,44 @@ export function App() {
   const [floorView, setFloorView] = useState<"select" | "new">("select");
   const [shift, setShift] = useState<ActiveShift | null>(null);
   const [online, setOnline] = useState(() => navigator.onLine);
+  const [sound, setSound] = useState<SoundSettings>({ muted: false, volume: 1 });
+  const [shiftContext, setShiftContext] = useState<ShiftContextRow | null>(null);
+
+  useEffect(() => {
+    void loadSoundSettings(tauriExecutor).then(setSound);
+  }, []);
+
+  // The keyboard wedge needs no setup: most USB scanners are HID keyboards.
+  // A serial scanner is opted into from the workstation setup screen.
+  const scanSource = useMemo(() => createKeyboardWedgeSource(), []);
+
+  useEffect(() => {
+    if (!shift) {
+      setShiftContext(null);
+      return;
+    }
+    let cancelled = false;
+    // mirrorShiftBundle writes in the background, so poll briefly until the
+    // product row lands rather than blocking shift entry on the network.
+    const tick = setInterval(() => {
+      void readShiftContext(tauriExecutor, shift.id)
+        .then((ctx) => {
+          if (cancelled || !ctx) return;
+          setShiftContext(ctx);
+          clearInterval(tick);
+        })
+        .catch((err) => {
+          // A transient SQLite lock while mirrorShiftBundle's transaction is
+          // in flight must not surface as an unhandled rejection on this
+          // tick; the poll keeps running and the next tick self-heals.
+          console.error("station: readShiftContext poll failed", err);
+        });
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearInterval(tick);
+    };
+  }, [shift]);
 
   useEffect(() => {
     let cancelled = false;
@@ -150,12 +191,37 @@ export function App() {
   }
 
   return (
-    <FloorShell online={online} tasks={[]} activeTaskId="" onSelectTask={() => {}}>
+    // Both indicators report only hardware we have actually verified. The
+    // keyboard wedge is indistinguishable from a keyboard, so a working
+    // wedge cannot be detected — and no serial scanner or printer is
+    // persisted yet (the workstation setup screen is not wired into the
+    // app in this slice). Claiming "connected" here would tell an operator
+    // with no scanner attached that everything is fine.
+    <FloorShell
+      online={online}
+      scannerConnected={false}
+      printerConfigured={false}
+      tasks={[]}
+      activeTaskId=""
+      onSelectTask={() => {}}
+    >
       {shift ? (
-        <main style={{ minHeight: "100%", display: "grid", placeItems: "center", padding: 32 }}>
-          <h1 style={{ fontSize: "2rem" }}>{t("shifts.active")}</h1>
-          <p>{shift.id}</p>
-        </main>
+        shiftContext ? (
+          <WorkScreen
+            exec={tauriExecutor}
+            shiftId={shift.id}
+            terminalId={config.deviceId ?? null}
+            expectedGtin14={shiftContext.gtin14}
+            productName={shiftContext.productName}
+            counterpartyName={shiftContext.counterpartyName}
+            source={scanSource}
+            sound={sound}
+          />
+        ) : (
+          <main style={{ minHeight: "100%", display: "grid", placeItems: "center" }}>
+            <h1 style={{ fontSize: "2rem" }}>{t("shifts.preparing")}</h1>
+          </main>
+        )
       ) : floorView === "select" ? (
         <ShiftSelection
           client={activeClient}

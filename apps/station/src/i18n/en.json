@@ -37,7 +37,8 @@
     "start": "Start",
     "actionFailed": "Action failed. Please try again.",
     "active": "Shift active",
-    "forCounterparty": "for:"
+    "forCounterparty": "for:",
+    "preparing": "Preparing the shift…"
   },
   "shell": {
     "online": "Online",
@@ -47,7 +48,38 @@
     "scanner": "Scanner",
     "printer": "Printer",
     "notConfigured": "Not configured",
+    "connected": "Connected",
     "teammates": "Terminals",
     "tasks": "Tasks"
+  },
+  "signal": {
+    "wrongCode": "WRONG CODE",
+    "wrongGtin": "WRONG GTIN",
+    "duplicate": "DUPLICATE",
+    "firstSeen": "First scanned at {{time}}",
+    "systemError": "WRITE FAILED"
+  },
+  "work": {
+    "accepted": "Accepted",
+    "rejected": "Rejected",
+    "waiting": "Waiting for a scan…"
+  },
+  "setup": {
+    "title": "Workstation setup",
+    "scanner": "Scanner",
+    "port": "Port",
+    "baud": "Baud rate",
+    "openScanner": "Connect scanner",
+    "testScanHint": "Scan any code to test the connection.",
+    "lastScan": "Last scan",
+    "printer": "Printer",
+    "host": "Printer address (leave empty for a serial printer)",
+    "printerPort": "Printer port",
+    "testPrint": "Test print",
+    "sound": "Sound",
+    "mute": "Mute",
+    "volume": "Volume",
+    "done": "Done",
+    "failed": "Action failed. Check the connection and try again."
   }
 }

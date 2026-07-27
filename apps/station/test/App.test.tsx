@@ -51,6 +51,8 @@ vi.mock("@tauri-apps/plugin-sql", () => {
 import i18n from "../src/i18n/index.js";
 import { App, nextStationView } from "../src/App.js";
 import type { StationConfig } from "../src/lib/config.js";
+import { readShiftContext } from "../src/lib/mirror.js";
+import { tauriExecutor } from "../src/lib/sqlite.js";
 import type { OperatorMirrorRecord } from "@markiro/db";
 
 beforeAll(async () => {
@@ -106,6 +108,10 @@ describe("App", () => {
       if (cmd === "read_config") return Promise.resolve({ machine_id: "m1" });
       if (cmd === "plugin:sql|load") return Promise.resolve("sqlite:station-mirror.db");
       if (cmd === "plugin:sql|execute") return Promise.resolve([0, 0]);
+      // App now loads sound settings unconditionally on mount (Task 12), which
+      // reads via `plugin:sql|select` -- without this branch it resolves
+      // `undefined` instead of `[]` and `loadSoundSettings` throws on `rows[0]`.
+      if (cmd === "plugin:sql|select") return Promise.resolve([]);
       return Promise.resolve(undefined);
     });
 
@@ -202,5 +208,14 @@ describe("App", () => {
         }),
       ),
     );
+  });
+
+  it("readShiftContext resolves null for a shift whose bundle has not been mirrored yet, so the 'preparing' branch is genuinely reachable", async () => {
+    invokeMock.mockImplementation((cmd: string): Promise<unknown> => {
+      if (cmd === "plugin:sql|select") return Promise.resolve([]);
+      return Promise.resolve(undefined);
+    });
+
+    await expect(readShiftContext(tauriExecutor, "shift-not-yet-mirrored")).resolves.toBeNull();
   });
 });

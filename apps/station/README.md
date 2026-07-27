@@ -74,6 +74,67 @@ cannot sign in until the next successful roster sync — a successful sync
 replaces the whole mirror, so a revoked or deactivated operator likewise
 stops authenticating offline as soon as the device reconnects.
 
+## Scan loop (validation)
+
+The floor screen (`WorkScreen`) is a pipeline: source → queue → domain
+verdict → journal → signal.
+
+- **Source** (`src/lib/scan-source.ts`) is a `ScanSource` seam with two
+  implementations: `createKeyboardWedgeSource`, the default, which
+  accumulates HID keydown events and flushes on Enter — most USB barcode
+  scanners are HID keyboards, so the station works with no configuration —
+  and `createHardwareScanSource`, which adapts the Tauri-backed
+  `HardwareContract`'s serial `onScan` event to the same seam.
+- **Queue** (`src/lib/scan-queue.ts`): `createScanQueue` processes exactly
+  one scan to completion before starting the next. This is what makes
+  duplicate detection honest (two scans processed concurrently could both
+  pass the check before either is written) and avoids contending for
+  `tauri-plugin-sql`'s connection pool across BEGIN/COMMIT. A scan that
+  arrives mid-flight is buffered, never dropped.
+- **Verdict**: each raw payload is classified and validated by
+  `@markiro/domain` (`classifyScan`, `validateShiftScan`) against the
+  shift's expected GTIN and an in-memory `Set` of accepted code keys.
+  That set is loaded once by `loadCodeKeys` (`src/lib/journal.ts`) from
+  `codes_mirror` and kept **device-wide, not shift-scoped**: `code_hash`
+  is a global primary key, and a KM identifies one physical item, so the
+  same code scanned under a different shift is still a duplicate.
+- **Journal** (`src/lib/journal.ts`): `recordScan` writes the code row to
+  `codes_mirror` FIRST — only for an accepted scan — then always appends the
+  event row to `scan_events_mirror` second. These are deliberately two
+  independent statements, not one transaction: `tauri-plugin-sql` hands a
+  possibly different pooled connection to every call, so a `BEGIN` on one
+  call and a `COMMIT` on another are not actually one transaction, and can
+  fail outright under real overlapping DB work. Instead, `codes_mirror`'s
+  `PRIMARY KEY` on `code_hash` is the real backstop: a constraint violation
+  on the code insert **is** the duplicate verdict (reported back as
+  `alreadyPresent`), not a write failure. The event row is always appended
+  regardless, and records the verdict the operator actually saw — journalled
+  as `"duplicate"` when the code insert hit `alreadyPresent`, even if the
+  caller predicted `"ok"`. Failure semantics: if the event write fails after
+  the code row already landed, the code stays accepted without its audit
+  row — deliberately preferred over losing the code itself.
+- **Signal** (`src/lib/signal-sound.ts` + `src/ui/SignalOverlay.tsx`): the
+  verdict drives a full-screen colored flash plus a tone synthesised with
+  WebAudio (no audio assets, nothing fetched from a CDN). Mute and volume
+  are persisted in `station_meta` (`loadSoundSettings`/`saveSoundSettings`).
+
+## Hardware
+
+`src/lib/hardware.ts` defines `HardwareContract` — scanner and printer
+operations shaped like the idento agent's contract, so an external agent
+process can provide it later without the UI knowing which implementation is
+behind it. Today it is backed by Tauri commands
+(`src-tauri/src/scanner.rs`, `printer.rs`); label bytes cross the Tauri IPC
+boundary base64-encoded, since that boundary is JSON. Printing transport is
+serial and TCP:9100 only — USB/spooler printing was deliberately deferred.
+`WorkstationSetup` (`src/pages/WorkstationSetup.tsx`) is where an operator
+picks the scanner/printer and proves both work with a test scan and a test
+print, and sets the sound level.
+
+Everything about this slice that real hardware — not CI — must confirm is
+consolidated in
+[`docs/hardware-acceptance-checklist.md`](../../docs/hardware-acceptance-checklist.md).
+
 ## Tests
 
 ```bash

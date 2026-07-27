@@ -1,5 +1,7 @@
 mod commands;
 mod config;
+mod printer;
+mod scanner;
 
 use tauri::Manager;
 
@@ -33,7 +35,11 @@ pub fn run() {
             commands::write_config,
             commands::enter_lockdown,
             commands::exit_lockdown,
-            commands::set_update_endpoint
+            commands::set_update_endpoint,
+            scanner::list_serial_ports,
+            scanner::open_scanner,
+            scanner::close_scanner,
+            printer::print_bytes,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Markiro station");

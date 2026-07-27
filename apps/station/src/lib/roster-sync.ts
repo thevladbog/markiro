@@ -13,6 +13,12 @@ import { replaceOperatorsMirror, type SqlExecutor } from "./mirror.js";
  * on the roster it already cached, so failures are logged, never rethrown. A
  * successful sync REPLACES the whole set, so an operator removed or deactivated
  * server-side stops authenticating offline.
+ *
+ * `replaceOperatorsMirror` is NOT wrapped in a transaction here: it does its
+ * own individual statements (see its doc comment), because `tauri-plugin-sql`'s
+ * pooled connections make a multi-call BEGIN/COMMIT unsound. If this sync fails
+ * partway through, the mirror is left partially updated until the next
+ * successful sync — same as the shift-bundle mirror.
  */
 export async function syncOperatorRoster(
   client: Pick<StationClient, "get">,
@@ -20,14 +26,7 @@ export async function syncOperatorRoster(
 ): Promise<void> {
   try {
     const { items } = await client.get<{ items: OperatorMirrorRecord[] }>("/station/operators");
-    await exec.run("BEGIN");
-    try {
-      await replaceOperatorsMirror(exec, items);
-      await exec.run("COMMIT");
-    } catch (err) {
-      await exec.run("ROLLBACK");
-      throw err;
-    }
+    await replaceOperatorsMirror(exec, items);
   } catch (err) {
     console.error("station: operator roster sync failed", err);
   }
