@@ -69,8 +69,14 @@ pub fn list_serial_ports() -> Result<Vec<String>, String> {
 const OPEN_ATTEMPTS: u32 = 10;
 const OPEN_RETRY_DELAY: Duration = Duration::from_millis(100);
 
+/// `async` so the Tauri IPC layer runs this off the UI/IPC thread: the retry
+/// loop below does up to `OPEN_ATTEMPTS` blocking `open()` calls with sleeps
+/// in between, and a mistyped or absent serial port — exactly what the setup
+/// screen's Connect button exists to catch — must not freeze the whole
+/// station for that long. Mirrors `printer.rs`'s `print_bytes`: the blocking
+/// work runs on a `spawn_blocking` thread and this command just awaits it.
 #[tauri::command]
-pub fn open_scanner(app: AppHandle, port: String, baud: u32) -> Result<(), String> {
+pub async fn open_scanner(app: AppHandle, port: String, baud: u32) -> Result<(), String> {
     // Open the port before touching GENERATION. If every attempt fails, the
     // previous session (if any) is left untouched — its thread, port handle
     // and "connected" status all stay valid. Advancing GENERATION first
@@ -83,33 +89,45 @@ pub fn open_scanner(app: AppHandle, port: String, baud: u32) -> Result<(), Strin
     // read times out, and serialport opens exclusively on every platform —
     // so an immediate close-then-open on the same port would otherwise fail
     // with a "port busy" error.
-    let mut last_err = None;
-    let mut opened = None;
-    for attempt in 0..OPEN_ATTEMPTS {
-        match serialport::new(&port, baud)
-            .timeout(Duration::from_millis(200))
-            .open()
-        {
-            Ok(handle) => {
-                opened = Some(handle);
-                break;
-            }
-            Err(e) => {
-                last_err = Some(e);
-                if attempt + 1 < OPEN_ATTEMPTS {
+    let mut handle = tauri::async_runtime::spawn_blocking(move || {
+        let mut attempt = 0;
+        loop {
+            match serialport::new(&port, baud)
+                .timeout(Duration::from_millis(200))
+                .open()
+            {
+                Ok(handle) => return Ok(handle),
+                // A missing port can never be fixed by waiting, so don't burn
+                // the retry window on it. Note this checks `Io(NotFound)`,
+                // not `ErrorKind::NoDevice`: on this crate (serialport 4.x),
+                // NoDevice is what a still-held handle reports (EBUSY from
+                // TIOCEXCL, or EWOULDBLOCK from flock, both mapped to
+                // NoDevice in `posix/error.rs` and `posix/flock.rs`) — i.e.
+                // exactly the retiring-reader-thread case the retry window
+                // exists for, so it must keep retrying. A path that simply
+                // does not exist surfaces as `ENOENT` -> `Io(NotFound)`
+                // instead, and that's the one worth failing fast on. (On
+                // Windows this crate folds `ERROR_ACCESS_DENIED` in with
+                // `ERROR_FILE_NOT_FOUND`/`ERROR_PATH_NOT_FOUND` under
+                // `NoDevice`, so this fast path simply won't trigger there —
+                // Windows keeps the old retry-everything behaviour.)
+                Err(e) if e.kind() == serialport::ErrorKind::Io(std::io::ErrorKind::NotFound) => {
+                    return Err(e.to_string());
+                }
+                Err(e) => {
+                    attempt += 1;
+                    if attempt >= OPEN_ATTEMPTS {
+                        // Return the error straight from the last attempt's
+                        // arm: nothing to `.expect()` after the fact.
+                        return Err(e.to_string());
+                    }
                     std::thread::sleep(OPEN_RETRY_DELAY);
                 }
             }
         }
-    }
-    let mut handle = match opened {
-        Some(handle) => handle,
-        None => {
-            return Err(last_err
-                .expect("loop records an error on every failed attempt")
-                .to_string())
-        }
-    };
+    })
+    .await
+    .map_err(|e| e.to_string())??;
 
     // Only now that the handle is in hand do we retire the previous session:
     // its thread sees a newer generation and exits. This is what lets the
@@ -140,10 +158,14 @@ pub fn open_scanner(app: AppHandle, port: String, baud: u32) -> Result<(), Strin
         // Known residual race (accepted, not closed): between the load above
         // and the emit below, a new session could advance GENERATION, open
         // its port and emit "connected" — this thread would then emit
-        // "disconnected" on top of it. The window is only a few instructions
-        // wide and requires preemption across a port open, so it's low
-        // probability; closing it would mean serializing the emit with the
-        // generation change, which isn't worth it for this window.
+        // "disconnected" on top of it. This is no longer just a
+        // narrow-instruction-window coincidence: `open_scanner`'s retry loop
+        // is designed to overlap a dying reader thread (still holding its
+        // handle until this loop's own read times out) with a fresh open on
+        // the same port, so hitting this window is an expected consequence
+        // of that design, not a rare preemption fluke. Closing it would mean
+        // serializing the emit with the generation change, which isn't worth
+        // it for this window.
         if session_should_run(generation, GENERATION.load(Ordering::SeqCst)) {
             let _ = app.emit(SCANNER_STATUS_EVENT, "disconnected");
         }
