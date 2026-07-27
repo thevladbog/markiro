@@ -200,11 +200,16 @@ describe("App", () => {
     window.dispatchEvent(new Event("online"));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    // A never-before-synced device has no `operators_slot` row, so
+    // `activeSlot` defaults to "a" and this first-ever publish targets its
+    // opposite, slot "b". Pinned with a word boundary so this only matches
+    // `operators_mirror_b`, not `operators_mirror` (a plain `stringContaining`
+    // would pass against either table and stop meaning anything).
     await waitFor(() =>
       expect(invokeMock).toHaveBeenCalledWith(
         "plugin:sql|execute",
         expect.objectContaining({
-          query: expect.stringContaining("INSERT INTO operators_mirror"),
+          query: expect.stringMatching(/INSERT INTO operators_mirror_b\b/),
         }),
       ),
     );

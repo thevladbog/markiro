@@ -22,7 +22,7 @@ export const STATION_MIGRATIONS: string[] = [
   `CREATE TABLE IF NOT EXISTS operators_mirror_b (
      operator_id TEXT PRIMARY KEY,
      name TEXT NOT NULL,
-     login TEXT NOT NULL,
+     login TEXT,
      role TEXT NOT NULL,
      pin_hash TEXT NOT NULL,
      badge_hash TEXT,

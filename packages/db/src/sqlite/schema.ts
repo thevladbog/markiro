@@ -34,7 +34,14 @@ export const operatorsMirror = sqliteTable("operators_mirror", {
 export const operatorsMirrorB = sqliteTable("operators_mirror_b", {
   operatorId: text("operator_id").primaryKey(),
   name: text("name").notNull(),
-  login: text("login").notNull(),
+  // Nullable to match operators_mirror: the two slots must be interchangeable
+  // for alternation to be sound (see replaceOperatorsMirror), and a NOT NULL
+  // asymmetry here buys nothing but a landmine — a null `login` from the
+  // server (roster-sync.ts takes the network payload on an unchecked type
+  // assertion) would succeed whenever this slot happens to be inactive and
+  // throw whenever it's the publish target, freezing the roster on whichever
+  // slot tolerates it. See readOperatorsMirror's `?? ""`.
+  login: text("login"),
   role: text("role").notNull(),
   pinHash: text("pin_hash").notNull(),
   badgeHash: text("badge_hash"),

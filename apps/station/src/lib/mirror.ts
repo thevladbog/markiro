@@ -165,21 +165,49 @@ const ACTIVE_SLOT_KEY = "operators_slot";
 const SLOT_TABLES = { a: "operators_mirror", b: "operators_mirror_b" } as const;
 type RosterSlot = keyof typeof SLOT_TABLES;
 
+function otherSlot(slot: RosterSlot): RosterSlot {
+  return slot === "a" ? "b" : "a";
+}
+
 /**
  * The slot currently serving offline sign-in. Absent means "a", so a device
  * enrolled before the second slot existed keeps its roster on upgrade.
+ *
+ * A genuine query failure here is NOT caught: it must propagate rather than
+ * fall back to "a". That fallback would be a confident wrong answer whenever
+ * "b" is actually active — the read path would authenticate against the
+ * previous generation, which by construction can still contain an operator
+ * removed or deactivated in the current one, and the write path would stage
+ * into the slot that is actually live.
  */
 async function activeSlot(exec: SqlExecutor): Promise<RosterSlot> {
-  try {
-    const rows = await exec.all<{ value: string | null }>(
-      "SELECT value FROM station_meta WHERE key = ?",
-      [ACTIVE_SLOT_KEY],
-    );
-    return rows[0]?.value === "b" ? "b" : "a";
-  } catch {
-    return "a";
-  }
+  const rows = await exec.all<{ value: string | null }>(
+    "SELECT value FROM station_meta WHERE key = ?",
+    [ACTIVE_SLOT_KEY],
+  );
+  return rows[0]?.value === "b" ? "b" : "a";
 }
+
+/**
+ * Serializes publishes so two overlapping refreshes can never both resolve
+ * the same INACTIVE slot as their target. `App.tsx` fires `syncOperatorRoster`
+ * unawaited on mount AND again on every `online` event, and `upsertBundle` is
+ * a third entry point (see `journal.ts`'s doc comment for the same kind of
+ * overlap observed on real devices). Without this, a second refresh that
+ * starts before the first has flipped `station_meta` would resolve the same
+ * target slot, race its DELETE/INSERT against the first's, and could end up
+ * inserting into what has since become the LIVE slot.
+ *
+ * Each call's actual work (`publishOperatorsMirror`) is chained onto
+ * `refreshChain`, so it does not even read `activeSlot()` until the previous
+ * call has fully settled — including its `station_meta` flip.
+ *
+ * `refreshChain` itself always resolves (the trailing `.then(noop, noop)`): a
+ * rejected refresh must not poison the queue for later callers. The
+ * rejection is still delivered to the caller that issued that particular
+ * refresh, via the `turn` promise returned below.
+ */
+let refreshChain: Promise<void> = Promise.resolve();
 
 /**
  * Publishes a complete roster atomically.
@@ -201,12 +229,27 @@ async function activeSlot(exec: SqlExecutor): Promise<RosterSlot> {
  * The table names are interpolated from `SLOT_TABLES`, a closed set of two
  * literals — never from a parameter — because SQLite has no placeholder for
  * an identifier.
+ *
+ * Calls are serialized by `refreshChain` (see its doc comment) so concurrent
+ * refreshes never race onto the same inactive slot.
  */
-export async function replaceOperatorsMirror(
+export function replaceOperatorsMirror(
   exec: SqlExecutor,
   operators: OperatorMirrorRecord[],
 ): Promise<void> {
-  const target: RosterSlot = (await activeSlot(exec)) === "a" ? "b" : "a";
+  const turn = refreshChain.then(() => publishOperatorsMirror(exec, operators));
+  refreshChain = turn.then(
+    () => undefined,
+    () => undefined,
+  );
+  return turn;
+}
+
+async function publishOperatorsMirror(
+  exec: SqlExecutor,
+  operators: OperatorMirrorRecord[],
+): Promise<void> {
+  const target: RosterSlot = otherSlot(await activeSlot(exec));
   const table = SLOT_TABLES[target];
 
   await exec.run(`DELETE FROM ${table}`);
@@ -224,6 +267,18 @@ export async function replaceOperatorsMirror(
      ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
     [ACTIVE_SLOT_KEY, target],
   );
+
+  // Best-effort: clear the generation that just went stale so a removed or
+  // deactivated operator's PIN/badge hashes don't linger in the unencrypted
+  // device DB for the whole inter-sync interval. The flip above already
+  // succeeded and the new roster is already live, so a failure clearing the
+  // old one must NOT fail this publish — the next refresh's
+  // delete-before-staging cleans it up regardless.
+  try {
+    await exec.run(`DELETE FROM ${SLOT_TABLES[otherSlot(target)]}`);
+  } catch {
+    // Swallowed intentionally: see comment above.
+  }
 }
 
 export async function readShiftMirror(
