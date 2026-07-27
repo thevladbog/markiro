@@ -46,15 +46,19 @@ export function StatusBar({ online, scanner, printerConfigured }: StatusBarProps
       {/* The value is wrapped in its own <span> (not just interpolated
           inline) so "Not configured" is one element's exact text content —
           Testing Library's getByText matches per-element, and a shared span
-          of "Agent: Not configured" would never equal the exact string. */}
+          of "Agent: Not configured" would never equal the exact string.
+          Each value span also carries a stable data-testid: several fields
+          can render the same words ("Connected", "Not configured") at once,
+          so a text-only query would be ambiguous across fields. */}
       <span>
-        {t("shell.agent")}: <span>{notConfigured}</span>
+        {t("shell.agent")}: <span data-testid="agent-status">{notConfigured}</span>
       </span>
       <span>
-        {t("shell.scanner")}: <span>{scannerLabel}</span>
+        {t("shell.scanner")}: <span data-testid="scanner-status">{scannerLabel}</span>
       </span>
       <span>
-        {t("shell.printer")}: <span>{printerConfigured ? connected : notConfigured}</span>
+        {t("shell.printer")}:{" "}
+        <span data-testid="printer-status">{printerConfigured ? connected : notConfigured}</span>
       </span>
       <span>{t("shell.teammates")}: +0</span>
     </header>
