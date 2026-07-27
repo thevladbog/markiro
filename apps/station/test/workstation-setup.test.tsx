@@ -215,6 +215,44 @@ describe("WorkstationSetup", () => {
     expect(runs.some(([sql]) => sql.includes("station_meta"))).toBe(true);
   });
 
+  it("keeps a serial printer's own baud rate when there is no scanner configured", async () => {
+    // A documented valid state: no scanner (keyboard wedge), serial printer
+    // previously saved at a non-default baud. Reopening Setup and pressing
+    // Done without touching anything must round-trip that baud unchanged.
+    const stored: HardwareConfig = {
+      scanner: null,
+      printer: { kind: "serial", port: "COM7", baud: 19200 },
+      printerLanguage: "zpl",
+    };
+    const exec: SqlExecutor = {
+      run: async () => {},
+      all: async <T,>() => [{ value: JSON.stringify(stored) }] as T[],
+    };
+    const onConfigChange = vi.fn();
+
+    render(
+      <WorkstationSetup
+        hw={hardware()}
+        exec={exec}
+        sound={{ muted: false, volume: 1 }}
+        onSoundChange={() => {}}
+        onConfigChange={onConfigChange}
+        onDone={() => {}}
+      />,
+    );
+
+    // Wait for the seed effect to populate the printer port before pressing Done.
+    await waitFor(() =>
+      expect((screen.getByLabelText("Printer port") as HTMLInputElement).value).toBe("COM7"),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+    await waitFor(() => expect(onConfigChange).toHaveBeenCalled());
+    const saved = onConfigChange.mock.calls.at(-1)![0] as HardwareConfig;
+    expect(saved.scanner).toBeNull();
+    expect(saved.printer).toEqual({ kind: "serial", port: "COM7", baud: 19200 });
+  });
+
   it("closes the current scanner before opening another port", async () => {
     const calls: string[] = [];
     const hw = hardware({

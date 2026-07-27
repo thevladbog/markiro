@@ -75,6 +75,7 @@
     "printer": "Printer",
     "host": "Printer address (leave empty for a serial printer)",
     "printerPort": "Printer port",
+    "printerBaud": "Printer baud rate",
     "printerLanguage": "Printer language",
     "languageZpl": "ZPL",
     "languageTspl": "TSPL",
@@ -83,7 +84,6 @@
     "mute": "Mute",
     "volume": "Volume",
     "done": "Done",
-    "saved": "Settings saved",
     "failed": "Action failed. Check the connection and try again."
   }
 }

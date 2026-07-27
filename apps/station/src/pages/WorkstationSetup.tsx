@@ -27,6 +27,10 @@ export interface WorkstationSetupProps {
 const DEFAULT_BAUD = 9600;
 const DEFAULT_PRINTER_PORT = 9100;
 
+function parseBaud(value: string): number {
+  return Number(value) || DEFAULT_BAUD;
+}
+
 /**
  * Workstation setup (design brief 04 §7): pick the scanner and printer once,
  * prove each works, set the sound level. Meant to be completed by a non-IT
@@ -47,6 +51,7 @@ export function WorkstationSetup({
   const [lastScan, setLastScan] = useState<string | null>(null);
   const [printerHost, setPrinterHost] = useState("");
   const [printerPort, setPrinterPort] = useState("");
+  const [printerBaud, setPrinterBaud] = useState(String(DEFAULT_BAUD));
   const [printerLanguage, setPrinterLanguage] = useState<PrinterLanguage>("zpl");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -67,7 +72,10 @@ export function WorkstationSetup({
         setBaud(String(config.scanner.baud));
       }
       if (config.printer?.kind === "tcp") setPrinterHost(config.printer.host);
-      if (config.printer?.kind === "serial") setPrinterPort(config.printer.port);
+      if (config.printer?.kind === "serial") {
+        setPrinterPort(config.printer.port);
+        setPrinterBaud(String(config.printer.baud));
+      }
       setPrinterLanguage(config.printerLanguage);
     });
   }, [exec]);
@@ -103,7 +111,7 @@ export function WorkstationSetup({
       // Retire any previous session first: without this a wrong port leaves
       // the scanner "already open" until the app restarts.
       await hw.closeScanner();
-      await hw.openScanner(port, Number(baud) || DEFAULT_BAUD);
+      await hw.openScanner(port, parseBaud(baud));
     } catch (err) {
       setError(err instanceof Error ? err.message : t("setup.failed"));
     } finally {
@@ -115,10 +123,10 @@ export function WorkstationSetup({
     const printer: PrintTarget | null = printerHost
       ? { kind: "tcp", host: printerHost, port: DEFAULT_PRINTER_PORT }
       : printerPort
-        ? { kind: "serial", port: printerPort, baud: Number(baud) || DEFAULT_BAUD }
+        ? { kind: "serial", port: printerPort, baud: parseBaud(printerBaud) }
         : null;
     return {
-      scanner: port ? { port, baud: Number(baud) || DEFAULT_BAUD } : null,
+      scanner: port ? { port, baud: parseBaud(baud) } : null,
       printer,
       printerLanguage,
     };
@@ -159,13 +167,14 @@ export function WorkstationSetup({
     const config = currentConfig();
     try {
       await saveHardwareConfig(exec, config);
-      onConfigChange(config);
-      onDone();
     } catch (err) {
       setError(err instanceof Error ? err.message : t("setup.failed"));
-    } finally {
       setBusy(false);
+      return;
     }
+    setBusy(false);
+    onConfigChange(config);
+    onDone();
   }
 
   async function changeSound(next: SoundSettings) {
@@ -225,6 +234,11 @@ export function WorkstationSetup({
           label={t("setup.printerPort")}
           value={printerPort}
           onChange={(e) => setPrinterPort(e.target.value)}
+        />
+        <Input
+          label={t("setup.printerBaud")}
+          value={printerBaud}
+          onChange={(e) => setPrinterBaud(e.target.value)}
         />
         <div style={{ display: "flex", gap: 12 }}>
           <span>{t("setup.printerLanguage")}</span>
