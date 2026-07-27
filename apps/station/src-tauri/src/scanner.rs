@@ -64,20 +64,59 @@ pub fn list_serial_ports() -> Result<Vec<String>, String> {
     Ok(ports.into_iter().map(|p| p.port_name).collect())
 }
 
+/// Bound on the open retry loop below: roughly a second total, which covers
+/// the setup screen's close-before-open without a new crate.
+const OPEN_ATTEMPTS: u32 = 10;
+const OPEN_RETRY_DELAY: Duration = Duration::from_millis(100);
+
 #[tauri::command]
 pub fn open_scanner(app: AppHandle, port: String, baud: u32) -> Result<(), String> {
-    // Starting a new session implicitly retires the previous one: its thread
-    // sees a newer generation and exits. This is what lets the setup screen
-    // recover from a wrong port without an app restart.
+    // Open the port before touching GENERATION. If every attempt fails, the
+    // previous session (if any) is left untouched — its thread, port handle
+    // and "connected" status all stay valid. Advancing GENERATION first
+    // would retire a working session for an open that never happens, which
+    // is exactly what used to leave the operator with a dead scanner and a
+    // status bar stuck on "connected".
+    //
+    // The retries matter for a real case: `close_scanner` only signals the
+    // reader thread, which keeps the OS handle until its current 200 ms
+    // read times out, and serialport opens exclusively on every platform —
+    // so an immediate close-then-open on the same port would otherwise fail
+    // with a "port busy" error.
+    let mut last_err = None;
+    let mut opened = None;
+    for attempt in 0..OPEN_ATTEMPTS {
+        match serialport::new(&port, baud)
+            .timeout(Duration::from_millis(200))
+            .open()
+        {
+            Ok(handle) => {
+                opened = Some(handle);
+                break;
+            }
+            Err(e) => {
+                last_err = Some(e);
+                if attempt + 1 < OPEN_ATTEMPTS {
+                    std::thread::sleep(OPEN_RETRY_DELAY);
+                }
+            }
+        }
+    }
+    let mut handle = match opened {
+        Some(handle) => handle,
+        None => {
+            return Err(last_err
+                .expect("loop records an error on every failed attempt")
+                .to_string())
+        }
+    };
+
+    // Only now that the handle is in hand do we retire the previous session:
+    // its thread sees a newer generation and exits. This is what lets the
+    // setup screen recover from a wrong port without an app restart.
     let generation = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
 
-    let mut handle = serialport::new(&port, baud)
-        .timeout(Duration::from_millis(200))
-        .open()
-        .map_err(|e| e.to_string())?;
-
     let _ = app.emit(SCANNER_STATUS_EVENT, "connected");
-    let app = app.clone();
     std::thread::spawn(move || {
         let mut buffer = String::new();
         let mut chunk = [0u8; 256];
@@ -85,16 +124,26 @@ pub fn open_scanner(app: AppHandle, port: String, baud: u32) -> Result<(), Strin
             match handle.read(&mut chunk) {
                 Ok(0) => continue,
                 Ok(n) => {
-                    for line in absorb_chunk(&mut buffer, &String::from_utf8_lossy(&chunk[..n])) {
+                    let received = String::from_utf8_lossy(&chunk[..n]);
+                    for line in absorb_chunk(&mut buffer, &received) {
                         let _ = app.emit(SCAN_EVENT, line);
                     }
                 }
+                // A read timeout is the normal idle case, not an error.
                 Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => continue,
                 Err(_) => break,
             }
         }
         // Only the session that is still current owns the status: a retired
         // thread exiting must not report a disconnect over its successor.
+        //
+        // Known residual race (accepted, not closed): between the load above
+        // and the emit below, a new session could advance GENERATION, open
+        // its port and emit "connected" — this thread would then emit
+        // "disconnected" on top of it. The window is only a few instructions
+        // wide and requires preemption across a port open, so it's low
+        // probability; closing it would mean serializing the emit with the
+        // generation change, which isn't worth it for this window.
         if session_should_run(generation, GENERATION.load(Ordering::SeqCst)) {
             let _ = app.emit(SCANNER_STATUS_EVENT, "disconnected");
         }

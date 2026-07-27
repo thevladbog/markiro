@@ -54,3 +54,7 @@ beside each item.
       the bare payload, or that prefix stripping is handled.
 - [ ] Printer over TCP 9100 and over serial; test print from the setup screen.
 - [ ] USB/spooler printing — out of the 05b-2 transport scope; decide whether it is needed.
+- [ ] Connect the scanner, then press Connect again on the same port: the working scanner keeps running and an error is shown (it is not silently killed).
+- [ ] Connect on one port, then connect on a different port: the first session stops and only the second delivers scans.
+- [ ] Unplug the scanner mid-shift: the status bar flips to "no signal".
+- [ ] Close and immediately reopen the same port (the setup screen's close-before-open): the reopen succeeds without restarting the app.
