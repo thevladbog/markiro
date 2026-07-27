@@ -1,14 +1,24 @@
 use std::io::Read;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
 /// Event name carrying one decoded scan payload to the webview.
 pub const SCAN_EVENT: &str = "station://scan";
 
-/// Set to false to ask the reader thread to stop.
-static SCANNING: AtomicBool = AtomicBool::new(false);
+/// Event carrying the scanner's connection state to the webview.
+pub const SCANNER_STATUS_EVENT: &str = "station://scanner-status";
+
+/// Monotonic session counter. Each reader thread captures the generation it
+/// was started with and exits as soon as the current one differs, so a fast
+/// close→open can never leave two readers alive — which is what makes
+/// close-before-open safe for the setup screen.
+static GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// A reader keeps running only while its own generation is still current.
+pub fn session_should_run(mine: u64, current: u64) -> bool {
+    mine == current
+}
 
 /// Upper bound on how much unterminated data we keep waiting on a line
 /// terminator. A barcode payload is at most a couple hundred bytes, so this
@@ -56,49 +66,68 @@ pub fn list_serial_ports() -> Result<Vec<String>, String> {
 
 #[tauri::command]
 pub fn open_scanner(app: AppHandle, port: String, baud: u32) -> Result<(), String> {
-    if SCANNING.swap(true, Ordering::SeqCst) {
-        return Err("Scanner already open".into());
-    }
+    // Starting a new session implicitly retires the previous one: its thread
+    // sees a newer generation and exits. This is what lets the setup screen
+    // recover from a wrong port without an app restart.
+    let generation = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+
     let mut handle = serialport::new(&port, baud)
         .timeout(Duration::from_millis(200))
         .open()
-        .map_err(|e| {
-            SCANNING.store(false, Ordering::SeqCst);
-            e.to_string()
-        })?;
+        .map_err(|e| e.to_string())?;
 
-    let app = Arc::new(app);
+    let _ = app.emit(SCANNER_STATUS_EVENT, "connected");
+    let app = app.clone();
     std::thread::spawn(move || {
         let mut buffer = String::new();
         let mut chunk = [0u8; 256];
-        while SCANNING.load(Ordering::SeqCst) {
+        while session_should_run(generation, GENERATION.load(Ordering::SeqCst)) {
             match handle.read(&mut chunk) {
                 Ok(0) => continue,
                 Ok(n) => {
-                    let received = String::from_utf8_lossy(&chunk[..n]);
-                    for line in absorb_chunk(&mut buffer, &received) {
+                    for line in absorb_chunk(&mut buffer, &String::from_utf8_lossy(&chunk[..n])) {
                         let _ = app.emit(SCAN_EVENT, line);
                     }
                 }
-                // A read timeout is the normal idle case, not an error.
                 Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => continue,
                 Err(_) => break,
             }
         }
-        SCANNING.store(false, Ordering::SeqCst);
+        // Only the session that is still current owns the status: a retired
+        // thread exiting must not report a disconnect over its successor.
+        if session_should_run(generation, GENERATION.load(Ordering::SeqCst)) {
+            let _ = app.emit(SCANNER_STATUS_EVENT, "disconnected");
+        }
     });
     Ok(())
 }
 
 #[tauri::command]
-pub fn close_scanner() -> Result<(), String> {
-    SCANNING.store(false, Ordering::SeqCst);
+pub fn close_scanner(app: AppHandle) -> Result<(), String> {
+    GENERATION.fetch_add(1, Ordering::SeqCst);
+    let _ = app.emit(SCANNER_STATUS_EVENT, "disconnected");
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use super::session_should_run;
     use super::{absorb_chunk, split_lines, MAX_BUFFER_BYTES};
+
+    #[test]
+    fn a_session_runs_while_it_is_the_current_generation() {
+        assert!(session_should_run(7, 7));
+    }
+
+    #[test]
+    fn a_session_stops_once_a_newer_generation_starts() {
+        assert!(!session_should_run(7, 8));
+    }
+
+    #[test]
+    fn a_stale_session_stops_even_if_the_counter_moved_far() {
+        assert!(!session_should_run(1, 42));
+    }
 
     #[test]
     fn extracts_complete_lines_and_keeps_the_tail() {
