@@ -17,6 +17,7 @@ function hardware(overrides: Partial<HardwareContract> = {}): HardwareContract {
     openScanner: async () => {},
     closeScanner: async () => {},
     onScan: async () => () => {},
+    onScannerStatus: async () => () => {},
     print: async () => {},
     ...overrides,
   };
