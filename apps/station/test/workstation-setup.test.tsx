@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import i18n from "../src/i18n/index.js";
+import type { HardwareConfig } from "../src/lib/hardware-config.js";
 import type { HardwareContract, PrintTarget } from "../src/lib/hardware.js";
 import type { SqlExecutor } from "../src/lib/mirror.js";
 import { WorkstationSetup } from "../src/pages/WorkstationSetup.js";
@@ -31,6 +32,7 @@ describe("WorkstationSetup", () => {
         exec={noopExec}
         sound={{ muted: false, volume: 1 }}
         onSoundChange={() => {}}
+        onConfigChange={() => {}}
         onDone={() => {}}
       />,
     );
@@ -51,6 +53,7 @@ describe("WorkstationSetup", () => {
         exec={noopExec}
         sound={{ muted: false, volume: 1 }}
         onSoundChange={() => {}}
+        onConfigChange={() => {}}
         onDone={() => {}}
       />,
     );
@@ -72,6 +75,7 @@ describe("WorkstationSetup", () => {
         exec={noopExec}
         sound={{ muted: false, volume: 1 }}
         onSoundChange={() => {}}
+        onConfigChange={() => {}}
         onDone={() => {}}
       />,
     );
@@ -90,6 +94,7 @@ describe("WorkstationSetup", () => {
         exec={noopExec}
         sound={{ muted: false, volume: 1 }}
         onSoundChange={() => {}}
+        onConfigChange={() => {}}
         onDone={() => {}}
       />,
     );
@@ -111,6 +116,7 @@ describe("WorkstationSetup", () => {
         exec={noopExec}
         sound={{ muted: false, volume: 1 }}
         onSoundChange={() => {}}
+        onConfigChange={() => {}}
         onDone={() => {}}
       />,
     );
@@ -139,6 +145,7 @@ describe("WorkstationSetup", () => {
         exec={exec}
         sound={{ muted: false, volume: 1 }}
         onSoundChange={onSoundChange}
+        onConfigChange={() => {}}
         onDone={() => {}}
       />,
     );
@@ -162,6 +169,7 @@ describe("WorkstationSetup", () => {
         exec={exec}
         sound={{ muted: false, volume: 1 }}
         onSoundChange={onSoundChange}
+        onConfigChange={() => {}}
         onDone={() => {}}
       />,
     );
@@ -169,5 +177,68 @@ describe("WorkstationSetup", () => {
     fireEvent.click(screen.getByLabelText("Mute"));
     expect(await screen.findByText(/database unavailable/)).toBeDefined();
     expect(onSoundChange).toHaveBeenCalledWith({ muted: true, volume: 1 });
+  });
+
+  it("saves the chosen scanner, printer and language", async () => {
+    const runs: [string, unknown[]][] = [];
+    const exec: SqlExecutor = {
+      run: async (sql, params = []) => {
+        runs.push([sql, params]);
+      },
+      all: async () => [],
+    };
+    const onConfigChange = vi.fn();
+
+    render(
+      <WorkstationSetup
+        hw={hardware()}
+        exec={exec}
+        sound={{ muted: false, volume: 1 }}
+        onSoundChange={() => {}}
+        onConfigChange={onConfigChange}
+        onDone={() => {}}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "COM3" }));
+    fireEvent.change(screen.getByLabelText("Printer address (leave empty for a serial printer)"), {
+      target: { value: "10.0.0.7" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "TSPL" }));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+    await waitFor(() => expect(onConfigChange).toHaveBeenCalled());
+    const saved = onConfigChange.mock.calls.at(-1)![0] as HardwareConfig;
+    expect(saved.scanner).toEqual({ port: "COM3", baud: 9600 });
+    expect(saved.printer).toEqual({ kind: "tcp", host: "10.0.0.7", port: 9100 });
+    expect(saved.printerLanguage).toBe("tspl");
+    expect(runs.some(([sql]) => sql.includes("station_meta"))).toBe(true);
+  });
+
+  it("closes the current scanner before opening another port", async () => {
+    const calls: string[] = [];
+    const hw = hardware({
+      closeScanner: async () => {
+        calls.push("close");
+      },
+      openScanner: async () => {
+        calls.push("open");
+      },
+    });
+
+    render(
+      <WorkstationSetup
+        hw={hw}
+        exec={{ run: async () => {}, all: async () => [] }}
+        sound={{ muted: false, volume: 1 }}
+        onSoundChange={() => {}}
+        onConfigChange={() => {}}
+        onDone={() => {}}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "COM3" }));
+    fireEvent.click(screen.getByRole("button", { name: "Connect scanner" }));
+    await waitFor(() => expect(calls).toEqual(["close", "open"]));
   });
 });

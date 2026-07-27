@@ -1,8 +1,17 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Input } from "@markiro/ui";
+import { sampleLabelData, type LabelTemplateSpec } from "@markiro/domain";
 import { saveSoundSettings, type SoundSettings } from "../lib/signal-sound.js";
 import type { HardwareContract, PrintTarget } from "../lib/hardware.js";
+import {
+  loadHardwareConfig,
+  saveHardwareConfig,
+  type HardwareConfig,
+  type PrinterLanguage,
+} from "../lib/hardware-config.js";
+import { renderLabelBytes } from "../lib/print-label.js";
+import { rasterizeText } from "../lib/rasterizer.js";
 import type { SqlExecutor } from "../lib/mirror.js";
 
 export interface WorkstationSetupProps {
@@ -10,6 +19,8 @@ export interface WorkstationSetupProps {
   exec: SqlExecutor;
   sound: SoundSettings;
   onSoundChange: (s: SoundSettings) => void;
+  /** Fired after the configuration is persisted, so the app can apply it. */
+  onConfigChange: (config: HardwareConfig) => void;
   onDone: () => void;
 }
 
@@ -26,6 +37,7 @@ export function WorkstationSetup({
   exec,
   sound,
   onSoundChange,
+  onConfigChange,
   onDone,
 }: WorkstationSetupProps) {
   const { t } = useTranslation();
@@ -35,6 +47,7 @@ export function WorkstationSetup({
   const [lastScan, setLastScan] = useState<string | null>(null);
   const [printerHost, setPrinterHost] = useState("");
   const [printerPort, setPrinterPort] = useState("");
+  const [printerLanguage, setPrinterLanguage] = useState<PrinterLanguage>("zpl");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -44,6 +57,20 @@ export function WorkstationSetup({
       .then(setPorts)
       .catch((err: unknown) => setError(err instanceof Error ? err.message : t("setup.failed")));
   }, [hw, t]);
+
+  // Seed every field from the stored configuration, so an operator reopening
+  // this screen sees what is actually configured rather than blank defaults.
+  useEffect(() => {
+    void loadHardwareConfig(exec).then((config) => {
+      if (config.scanner) {
+        setPort(config.scanner.port);
+        setBaud(String(config.scanner.baud));
+      }
+      if (config.printer?.kind === "tcp") setPrinterHost(config.printer.host);
+      if (config.printer?.kind === "serial") setPrinterPort(config.printer.port);
+      setPrinterLanguage(config.printerLanguage);
+    });
+  }, [exec]);
 
   // Live scans are shown for as long as this screen is open, so the operator
   // can confirm the scanner really works before leaving.
@@ -73,6 +100,9 @@ export function WorkstationSetup({
     setBusy(true);
     setError(null);
     try {
+      // Retire any previous session first: without this a wrong port leaves
+      // the scanner "already open" until the app restarts.
+      await hw.closeScanner();
       await hw.openScanner(port, Number(baud) || DEFAULT_BAUD);
     } catch (err) {
       setError(err instanceof Error ? err.message : t("setup.failed"));
@@ -81,16 +111,56 @@ export function WorkstationSetup({
     }
   }
 
+  function currentConfig(): HardwareConfig {
+    const printer: PrintTarget | null = printerHost
+      ? { kind: "tcp", host: printerHost, port: DEFAULT_PRINTER_PORT }
+      : printerPort
+        ? { kind: "serial", port: printerPort, baud: Number(baud) || DEFAULT_BAUD }
+        : null;
+    return {
+      scanner: port ? { port, baud: Number(baud) || DEFAULT_BAUD } : null,
+      printer,
+      printerLanguage,
+    };
+  }
+
   async function testPrint() {
     setBusy(true);
     setError(null);
     try {
-      const target: PrintTarget = printerHost
-        ? { kind: "tcp", host: printerHost, port: DEFAULT_PRINTER_PORT }
-        : { kind: "serial", port: printerPort, baud: Number(baud) || DEFAULT_BAUD };
-      // A minimal, printer-agnostic ZPL self-test: start, one line, end.
-      const zpl = "^XA^FO40,40^A0N,40,40^FDMarkiro^FS^XZ";
-      await hw.print(target, new TextEncoder().encode(zpl));
+      const config = currentConfig();
+      if (!config.printer) throw new Error(t("setup.failed"));
+      // A minimal spec: one line of text, rendered by the same code that will
+      // print real labels, in the language this workstation is configured for.
+      const spec: LabelTemplateSpec = {
+        widthMm: 58,
+        heightMm: 40,
+        dpi: 203,
+        language: config.printerLanguage,
+        elements: [{ id: "t", kind: "text", text: "Markiro", xMm: 4, yMm: 4, fontSizePt: 12 }],
+      };
+      const bytes = await renderLabelBytes(
+        spec,
+        sampleLabelData(),
+        config.printerLanguage,
+        rasterizeText,
+      );
+      await hw.print(config.printer, bytes);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("setup.failed"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function finish() {
+    setBusy(true);
+    setError(null);
+    const config = currentConfig();
+    try {
+      await saveHardwareConfig(exec, config);
+      onConfigChange(config);
+      onDone();
     } catch (err) {
       setError(err instanceof Error ? err.message : t("setup.failed"));
     } finally {
@@ -156,6 +226,25 @@ export function WorkstationSetup({
           value={printerPort}
           onChange={(e) => setPrinterPort(e.target.value)}
         />
+        <div style={{ display: "flex", gap: 12 }}>
+          <span>{t("setup.printerLanguage")}</span>
+          <Button
+            type="button"
+            variant={printerLanguage === "zpl" ? "primary" : "secondary"}
+            style={{ minHeight: 64 }}
+            onClick={() => setPrinterLanguage("zpl")}
+          >
+            {t("setup.languageZpl")}
+          </Button>
+          <Button
+            type="button"
+            variant={printerLanguage === "tspl" ? "primary" : "secondary"}
+            style={{ minHeight: 64 }}
+            onClick={() => setPrinterLanguage("tspl")}
+          >
+            {t("setup.languageTspl")}
+          </Button>
+        </div>
         <Button
           type="button"
           style={{ minHeight: 64 }}
@@ -191,7 +280,7 @@ export function WorkstationSetup({
 
       {error !== null && <p role="alert">{error}</p>}
 
-      <Button type="button" style={{ minHeight: 64 }} onClick={onDone}>
+      <Button type="button" style={{ minHeight: 64 }} disabled={busy} onClick={() => void finish()}>
         {t("setup.done")}
       </Button>
     </main>
