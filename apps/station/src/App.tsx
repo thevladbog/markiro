@@ -97,13 +97,38 @@ export function App() {
     void loadHardwareConfig(tauriExecutor).then(setHardwareConfig);
   }, []);
 
-  // Open a configured scanner at start so a set-up station comes up ready.
+  // Open a configured scanner at start so a set-up station comes up ready,
+  // and again whenever the configured scanner changes (e.g. from Setup).
+  // `scannerStatus` is reset to null up front so a scanner that has not (yet,
+  // or ever) opened successfully never keeps showing a stale "connected"
+  // left over from whatever was configured before -- `scannerIndicator`
+  // reads a null status as disconnected once a scanner is configured.
   useEffect(() => {
-    if (!hardwareConfig.scanner) return;
-    const { port, baud } = hardwareConfig.scanner;
-    void tauriHardware.openScanner(port, baud).catch((err: unknown) => {
-      console.error("station: opening the configured scanner failed", err);
+    let cancelled = false;
+    setScannerStatus(null);
+    void (async () => {
+      // Retire any previous session before evaluating the new configuration
+      // -- even when the new configuration has no scanner at all -- so
+      // clearing the port in Setup actually releases the OS handle instead
+      // of leaving the Rust session open and emitting `station://scan`
+      // until the app restarts. Order matters: await the close, then open;
+      // never fire both concurrently. This is the same close-before-open
+      // the setup screen's "Connect scanner" button already does -- the
+      // Rust `open_scanner` retry loop is what absorbs the up-to-200ms the
+      // retiring reader thread needs to release the port handle.
+      await tauriHardware.closeScanner();
+      if (cancelled || !hardwareConfig.scanner) return;
+      const { port, baud } = hardwareConfig.scanner;
+      await tauriHardware.openScanner(port, baud);
+    })().catch((err: unknown) => {
+      // A stale run's failure (superseded by a newer configuration, or the
+      // component already unmounted) must not be reported as if it were the
+      // current configuration's problem.
+      if (!cancelled) console.error("station: opening the configured scanner failed", err);
     });
+    return () => {
+      cancelled = true;
+    };
   }, [hardwareConfig.scanner?.port, hardwareConfig.scanner?.baud]);
 
   useEffect(() => {
@@ -260,8 +285,9 @@ export function App() {
   }
 
   return (
-    // Both indicators now come from the stored hardware configuration and the
-    // live scanner status, not hardcoded placeholders.
+    // The scanner reads green only once the Rust side has confirmed a port
+    // is actually open; the printer only reflects whether one is configured,
+    // since it cannot be proven alive without printing to it.
     <FloorShell
       online={online}
       scanner={scannerIndicator(hardwareConfig, scannerStatus)}

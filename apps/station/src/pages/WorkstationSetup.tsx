@@ -294,9 +294,27 @@ export function WorkstationSetup({
 
       {error !== null && <p role="alert">{error}</p>}
 
-      <Button type="button" style={{ minHeight: 64 }} disabled={busy} onClick={() => void finish()}>
-        {t("setup.done")}
-      </Button>
+      <div style={{ display: "flex", gap: 12 }}>
+        {/* Unconditional: unlike Done, this never depends on
+            `saveHardwareConfig` succeeding, so a SQLite write failure never
+            traps the operator on this screen with no way out. */}
+        <Button
+          type="button"
+          variant="secondary"
+          style={{ minHeight: 64 }}
+          onClick={() => onDone()}
+        >
+          {t("setup.back")}
+        </Button>
+        <Button
+          type="button"
+          style={{ minHeight: 64 }}
+          disabled={busy}
+          onClick={() => void finish()}
+        >
+          {t("setup.done")}
+        </Button>
+      </div>
     </main>
   );
 }

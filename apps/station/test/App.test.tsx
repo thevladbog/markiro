@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 // `@tauri-apps/plugin-sql`'s `Database.load`/`execute`/`select` are themselves
@@ -48,9 +48,42 @@ vi.mock("@tauri-apps/plugin-sql", () => {
   return { default: FakeDatabase };
 });
 
+// Hardware boundary mock (Finding 4, Task 8 review). `tauriHardware.onScannerStatus`
+// wraps `@tauri-apps/api/event`'s `listen`, which has no real transport under
+// jsdom -- unlike the SQLite bridge above, there is no lower-level `invoke`
+// call to intercept, so there is no way to fire a "connected"/"disconnected"
+// event from a test without mocking this module directly. Each method is
+// individually reconfigurable per test via `.mockImplementation`/
+// `.mockResolvedValue`/`.mockRejectedValue`; defaults are inert no-ops so
+// every OTHER existing test in this file (which never configures a serial
+// scanner) is unaffected by this mock's mere presence.
+// `vi.hoisted` (not a plain `const`): the object literal's initializer is not
+// itself a bare `vi.fn(...)` call, so Vitest's hoist analysis would not lift
+// a plain `const hardwareMock = { ... }` above the `vi.mock` factory below
+// that closes over it, leaving `hardwareMock` in the temporal dead zone.
+const hardwareMock = vi.hoisted(() => ({
+  listScannerPorts: vi.fn<() => Promise<string[]>>(async () => []),
+  openScanner: vi.fn<(port: string, baud: number) => Promise<void>>(async () => {}),
+  closeScanner: vi.fn<() => Promise<void>>(async () => {}),
+  onScan: vi.fn<(listener: (raw: string) => void) => Promise<() => void>>(async () => () => {}),
+  onScannerStatus: vi.fn<
+    (listener: (status: "connected" | "disconnected") => void) => Promise<() => void>
+  >(async () => () => {}),
+  print: vi.fn<(target: unknown, bytes: Uint8Array) => Promise<void>>(async () => {}),
+}));
+
+vi.mock("../src/lib/hardware.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof HardwareModule>();
+  return { ...actual, tauriHardware: hardwareMock };
+});
+
 import i18n from "../src/i18n/index.js";
 import { App, nextStationView, pickScanSource, scannerIndicator } from "../src/App.js";
 import type { StationConfig } from "../src/lib/config.js";
+import { hashSecret } from "../src/lib/crypto.js";
+import type { HardwareConfig } from "../src/lib/hardware-config.js";
+import type * as HardwareModule from "../src/lib/hardware.js";
+import type { ScannerStatus } from "../src/lib/hardware.js";
 import { readShiftContext } from "../src/lib/mirror.js";
 import { tauriExecutor } from "../src/lib/sqlite.js";
 import type { OperatorMirrorRecord } from "@markiro/db";
@@ -62,6 +95,12 @@ beforeAll(async () => {
 afterEach(() => {
   invokeMock.mockClear();
   vi.unstubAllGlobals();
+  hardwareMock.listScannerPorts.mockReset().mockResolvedValue([]);
+  hardwareMock.openScanner.mockReset().mockResolvedValue(undefined);
+  hardwareMock.closeScanner.mockReset().mockResolvedValue(undefined);
+  hardwareMock.onScan.mockReset().mockResolvedValue(() => {});
+  hardwareMock.onScannerStatus.mockReset().mockResolvedValue(() => {});
+  hardwareMock.print.mockReset().mockResolvedValue(undefined);
 });
 
 // No `tenantId` here on purpose: `Enrollment` never persists one (the
@@ -83,6 +122,77 @@ const operator: OperatorMirrorRecord = {
   badgeHash: null,
   active: true,
 };
+
+// -- Render-level floor-stage helpers (Finding 4) -----------------------
+
+const OPERATOR_LOGIN = "1001";
+const OPERATOR_PIN = "4242";
+
+/** Row shape `readOperatorsMirror` expects back from `plugin:sql|select`. */
+function operatorMirrorRow(pinHash: string) {
+  return {
+    operator_id: "op1",
+    name: "Ivan",
+    login: OPERATOR_LOGIN,
+    role: "operator",
+    pin_hash: pinHash,
+    badge_hash: null,
+    active: 1,
+  };
+}
+
+/**
+ * Wires `invokeMock` so the app can reach the floor stage: an enrolled
+ * config, the given hardware configuration under the `hardware_config`
+ * `station_meta` key, one active operator (verifiable with `OPERATOR_PIN`)
+ * behind `readOperatorsMirror`'s query, and empty defaults for everything
+ * else (`sound_settings`, `operators_slot`, migrations).
+ */
+function mockInvokeForFloor(pinHash: string, hardwareConfig: HardwareConfig) {
+  invokeMock.mockImplementation((cmd: string, payload?: unknown): Promise<unknown> => {
+    if (cmd === "read_config") {
+      return Promise.resolve({
+        machine_id: "m1",
+        api_key: "mk_key",
+        server_url: "http://localhost:3000",
+      });
+    }
+    if (cmd === "plugin:sql|load") return Promise.resolve("sqlite:station-mirror.db");
+    if (cmd === "plugin:sql|execute") return Promise.resolve([0, 0]);
+    if (cmd === "plugin:sql|select") {
+      const { query, values } = (payload ?? {}) as { query: string; values?: unknown[] };
+      if (query.includes("station_meta")) {
+        return Promise.resolve(
+          values?.[0] === "hardware_config" ? [{ value: JSON.stringify(hardwareConfig) }] : [],
+        );
+      }
+      // Word boundary so this matches `operators_mirror` only, not
+      // `operators_mirror_b` (the roster-sync's inactive slot) — see the F3
+      // test above for the same discipline.
+      if (/FROM operators_mirror\b/.test(query)) {
+        return Promise.resolve([operatorMirrorRow(pinHash)]);
+      }
+      return Promise.resolve([]);
+    }
+    return Promise.resolve(undefined);
+  });
+}
+
+function clickDigits(value: string) {
+  for (const ch of value) {
+    fireEvent.click(screen.getByRole("button", { name: ch }));
+  }
+}
+
+/** Drives the real OperatorLogin PIN-pad flow to reach the floor stage. */
+async function signInAsOperator() {
+  await waitFor(() => expect(screen.getByText("Operator sign-in")).toBeDefined());
+  clickDigits(OPERATOR_LOGIN);
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  clickDigits(OPERATOR_PIN);
+  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+  await waitFor(() => expect(screen.getByTestId("scanner-status")).toBeDefined());
+}
 
 describe("nextStationView", () => {
   it("routes to loading while config has not been read yet", () => {
@@ -250,5 +360,88 @@ describe("App", () => {
     expect(scannerIndicator(configured, null)).toBe("disconnected");
     expect(scannerIndicator(configured, "connected")).toBe("connected");
     expect(scannerIndicator(configured, "disconnected")).toBe("disconnected");
+  });
+
+  it("renders the disconnected copy for a stored serial scanner until 'connected' arrives, then the connected copy (render-level coverage for Finding 4)", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    mockInvokeForFloor(pinHash, {
+      scanner: { port: "COM3", baud: 9600 },
+      printer: null,
+      printerLanguage: "zpl",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ items: [] }), { status: 200 })),
+    );
+
+    let statusListener: ((status: ScannerStatus) => void) | null = null;
+    hardwareMock.onScannerStatus.mockImplementation((listener) => {
+      statusListener = listener;
+      return Promise.resolve(() => {
+        statusListener = null;
+      });
+    });
+
+    render(<App />);
+    await signInAsOperator();
+
+    // Nothing has confirmed the port is open yet -- must read disconnected,
+    // never green, however plausible "it's configured, so it's on" sounds.
+    expect(screen.getByTestId("scanner-status").textContent).toBe("No signal");
+
+    act(() => {
+      statusListener?.("connected");
+    });
+
+    await waitFor(() => expect(screen.getByTestId("scanner-status").textContent).toBe("Connected"));
+  });
+
+  it("regression (Finding 1): reconfiguring a connected scanner to a port whose open fails must not leave the status bar reading Connected", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    mockInvokeForFloor(pinHash, {
+      scanner: { port: "COM3", baud: 9600 },
+      printer: null,
+      printerLanguage: "zpl",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ items: [] }), { status: 200 })),
+    );
+
+    let statusListener: ((status: ScannerStatus) => void) | null = null;
+    hardwareMock.onScannerStatus.mockImplementation((listener) => {
+      statusListener = listener;
+      return Promise.resolve(() => {
+        statusListener = null;
+      });
+    });
+    // COM3 (the boot configuration) opens fine; COM9 (what Setup will be
+    // reconfigured to, below) fails -- mirroring the Rust `Io(NotFound)` fast
+    // path for a port that does not exist.
+    hardwareMock.openScanner.mockImplementation((port) => {
+      if (port === "COM9") return Promise.reject(new Error("No such file or directory"));
+      return Promise.resolve(undefined);
+    });
+    hardwareMock.listScannerPorts.mockResolvedValue(["COM9"]);
+
+    render(<App />);
+    await signInAsOperator();
+
+    // Establish the "connected" state the bug lets survive a reconfiguration.
+    act(() => {
+      statusListener?.("connected");
+    });
+    await waitFor(() => expect(screen.getByTestId("scanner-status").textContent).toBe("Connected"));
+
+    // Reach Setup and reconfigure to COM9, pressing only Done -- exactly the
+    // operator action from Finding 1 (no "Connect scanner" test-press first).
+    fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
+    fireEvent.click(await screen.findByRole("button", { name: "COM9" }));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+    await waitFor(() => expect(hardwareMock.openScanner).toHaveBeenCalledWith("COM9", 9600));
+    // The invariant this whole indicator exists for: never green for a
+    // scanner that did not actually open.
+    expect(screen.getByTestId("scanner-status").textContent).not.toBe("Connected");
   });
 });

@@ -86,6 +86,7 @@
     "sound": "Sound",
     "mute": "Mute",
     "volume": "Volume",
+    "back": "Back",
     "done": "Done",
     "failed": "Action failed. Check the connection and try again."
   }
