@@ -80,17 +80,13 @@ const b = (v: boolean) => (v ? 1 : 0);
  * every `exec.run` call, so a `BEGIN`/`COMMIT`/`ROLLBACK` sent as separate
  * calls does not actually group these statements — see `journal.ts`'s
  * `recordScan` doc comment for the full story. These are therefore
- * individual statements: the shift upsert, the product upsert, then (inside
- * `replaceOperatorsMirror`) each operator upsert followed by the delete of
- * every `operators_mirror` row NOT present in the new bundle. If one
- * statement fails partway through, the mirror is left partially updated
- * until the next successful sync repairs it. In particular, a failure
- * between the operator upserts and that trailing DELETE can leave a stale
- * operator row — one the server already removed or deactivated — able to
- * authenticate offline (`verifyOperatorPin` reads every active row in the
- * mirror) until the next successful sync. Closing that gap properly (e.g. a
- * single multi-statement SQL script, or connection-affine execution) is
- * deferred to the next slice — see the hardware acceptance checklist.
+ * individual statements: the shift upsert, then the product upsert, then
+ * `replaceOperatorsMirror`. A failure during the shift or product upsert
+ * leaves that half applied until the next successful sync repairs it.
+ * Operators no longer share that risk: `replaceOperatorsMirror` publishes
+ * the roster atomically on its own (see its doc comment), so a failure
+ * partway through it never exposes a removed or deactivated operator to
+ * offline sign-in.
  */
 export async function upsertBundle(exec: SqlExecutor, bundle: StationBundle): Promise<void> {
   await upsertBundleBody(exec, bundle);
@@ -165,42 +161,69 @@ async function upsertBundleBody(exec: SqlExecutor, bundle: StationBundle): Promi
   await replaceOperatorsMirror(exec, bundle.operators);
 }
 
+const ACTIVE_SLOT_KEY = "operators_slot";
+const SLOT_TABLES = { a: "operators_mirror", b: "operators_mirror_b" } as const;
+type RosterSlot = keyof typeof SLOT_TABLES;
+
 /**
- * Replaces the ENTIRE local operator set with `operators`: upserts each record
- * and deletes every mirrored operator not present in the new set (including the
- * empty case, which clears the table). Shared by the shift-bundle mirror and the
- * initialization roster sync so a removed/deactivated operator can never keep
- * authenticating offline from a stale row.
+ * The slot currently serving offline sign-in. Absent means "a", so a device
+ * enrolled before the second slot existed keeps its roster on upgrade.
+ */
+async function activeSlot(exec: SqlExecutor): Promise<RosterSlot> {
+  try {
+    const rows = await exec.all<{ value: string | null }>(
+      "SELECT value FROM station_meta WHERE key = ?",
+      [ACTIVE_SLOT_KEY],
+    );
+    return rows[0]?.value === "b" ? "b" : "a";
+  } catch {
+    return "a";
+  }
+}
+
+/**
+ * Publishes a complete roster atomically.
  *
- * Each upsert and the trailing delete are independent statements — neither
- * this function nor its callers wrap them in a transaction, because
- * `tauri-plugin-sql`'s connection pool makes multi-call BEGIN/COMMIT unsound
- * (see `upsertBundle`'s doc comment). A failure partway through can leave a
- * stale operator row until the next successful sync.
+ * The incoming operators are written into the INACTIVE slot, and only once
+ * every row has landed is the active slot flipped — a single statement, which
+ * is the only unit of atomicity `tauri-plugin-sql`'s connection pool gives us
+ * (multi-call BEGIN/COMMIT can land on different pooled connections; see
+ * `upsertBundle`). A refresh that fails partway is therefore never published:
+ * the device keeps authenticating against the last complete roster instead of
+ * a half-updated one, which previously left a removed or deactivated operator
+ * able to sign in offline.
+ *
+ * A generation column on a single table cannot do this: writing the new
+ * generation means upserting the operator's existing row, which moves it out
+ * of the still-active generation, so an interrupted refresh would drop the
+ * operators it had already rewritten.
+ *
+ * The table names are interpolated from `SLOT_TABLES`, a closed set of two
+ * literals — never from a parameter — because SQLite has no placeholder for
+ * an identifier.
  */
 export async function replaceOperatorsMirror(
   exec: SqlExecutor,
   operators: OperatorMirrorRecord[],
 ): Promise<void> {
+  const target: RosterSlot = (await activeSlot(exec)) === "a" ? "b" : "a";
+  const table = SLOT_TABLES[target];
+
+  await exec.run(`DELETE FROM ${table}`);
   for (const op of operators) {
     await exec.run(
-      `INSERT INTO operators_mirror (operator_id, name, login, role, pin_hash, badge_hash, active)
-       VALUES (?,?,?,?,?,?,?)
-       ON CONFLICT(operator_id) DO UPDATE SET
-         name=excluded.name, login=excluded.login, role=excluded.role,
-         pin_hash=excluded.pin_hash, badge_hash=excluded.badge_hash, active=excluded.active`,
+      `INSERT INTO ${table} (operator_id, name, login, role, pin_hash, badge_hash, active)
+       VALUES (?,?,?,?,?,?,?)`,
       [op.operatorId, op.name, op.login, op.role, op.pinHash, op.badgeHash, b(op.active)],
     );
   }
-  if (operators.length === 0) {
-    await exec.run("DELETE FROM operators_mirror");
-  } else {
-    const placeholders = operators.map(() => "?").join(",");
-    await exec.run(
-      `DELETE FROM operators_mirror WHERE operator_id NOT IN (${placeholders})`,
-      operators.map((op) => op.operatorId),
-    );
-  }
+
+  // The publish. Everything above this line is invisible to sign-in.
+  await exec.run(
+    `INSERT INTO station_meta (key, value) VALUES (?,?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    [ACTIVE_SLOT_KEY, target],
+  );
 }
 
 export async function readShiftMirror(
@@ -263,6 +286,7 @@ export async function readShiftContext(
 }
 
 export async function readOperatorsMirror(exec: SqlExecutor): Promise<OperatorMirrorRecord[]> {
+  const table = SLOT_TABLES[await activeSlot(exec)];
   const rows = await exec.all<{
     operator_id: string;
     name: string;
@@ -271,7 +295,7 @@ export async function readOperatorsMirror(exec: SqlExecutor): Promise<OperatorMi
     pin_hash: string;
     badge_hash: string | null;
     active: number;
-  }>("SELECT operator_id, name, login, role, pin_hash, badge_hash, active FROM operators_mirror");
+  }>(`SELECT operator_id, name, login, role, pin_hash, badge_hash, active FROM ${table}`);
   return rows.map((r) => ({
     operatorId: r.operator_id,
     name: r.name,

@@ -14,11 +14,10 @@ import { replaceOperatorsMirror, type SqlExecutor } from "./mirror.js";
  * successful sync REPLACES the whole set, so an operator removed or deactivated
  * server-side stops authenticating offline.
  *
- * `replaceOperatorsMirror` is NOT wrapped in a transaction here: it does its
- * own individual statements (see its doc comment), because `tauri-plugin-sql`'s
- * pooled connections make a multi-call BEGIN/COMMIT unsound. If this sync fails
- * partway through, the mirror is left partially updated until the next
- * successful sync — same as the shift-bundle mirror.
+ * `replaceOperatorsMirror` publishes atomically (see its doc comment): a sync
+ * that fails partway leaves the previously published roster active rather than
+ * a partially updated one, so an interrupted sync can never widen offline
+ * access.
  */
 export async function syncOperatorRoster(
   client: Pick<StationClient, "get">,

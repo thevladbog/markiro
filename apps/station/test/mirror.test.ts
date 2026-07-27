@@ -167,3 +167,60 @@ describe("mirror", () => {
     expect(op?.login).toBe("1042");
   });
 });
+
+const OPERATOR_A = {
+  operatorId: "op-a",
+  name: "A",
+  login: "1001",
+  role: "operator",
+  pinHash: "pbkdf2$sha256$100000$c2FsdHNhbHRzYWx0c2Ex$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGE=",
+  badgeHash: null,
+  active: true,
+};
+const OPERATOR_B = { ...OPERATOR_A, operatorId: "op-b", name: "B", login: "1002" };
+
+describe("roster publication is atomic", () => {
+  it("keeps the previous roster when a refresh fails midway", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    await replaceOperatorsMirror(exec, [OPERATOR_A, OPERATOR_B]);
+    expect((await readOperatorsMirror(exec)).map((o) => o.operatorId).sort()).toEqual([
+      "op-a",
+      "op-b",
+    ]);
+
+    // A refresh that removes B but dies before the publish. Only the flip
+    // writes to station_meta, so failing that statement models exactly the
+    // "everything staged, nothing published" case.
+    const failing: SqlExecutor = {
+      run: async (sql, params) => {
+        if (/station_meta/.test(sql)) throw new Error("write failed");
+        return exec.run(sql, params);
+      },
+      all: (sql, params) => exec.all(sql, params),
+    };
+    await expect(replaceOperatorsMirror(failing, [OPERATOR_A])).rejects.toThrow();
+
+    // The previous complete roster is still what authenticates.
+    expect((await readOperatorsMirror(exec)).map((o) => o.operatorId).sort()).toEqual([
+      "op-a",
+      "op-b",
+    ]);
+  });
+
+  it("publishes the new roster once the refresh completes", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    await replaceOperatorsMirror(exec, [OPERATOR_A, OPERATOR_B]);
+    await replaceOperatorsMirror(exec, [OPERATOR_A]);
+    expect((await readOperatorsMirror(exec)).map((o) => o.operatorId)).toEqual(["op-a"]);
+  });
+
+  it("clears the roster when a completed refresh contains nobody", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    await replaceOperatorsMirror(exec, [OPERATOR_A]);
+    await replaceOperatorsMirror(exec, []);
+    expect(await readOperatorsMirror(exec)).toEqual([]);
+  });
+});

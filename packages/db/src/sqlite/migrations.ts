@@ -19,6 +19,15 @@ export const STATION_MIGRATIONS: string[] = [
      badge_hash TEXT,
      active INTEGER NOT NULL DEFAULT 1
    );`,
+  `CREATE TABLE IF NOT EXISTS operators_mirror_b (
+     operator_id TEXT PRIMARY KEY,
+     name TEXT NOT NULL,
+     login TEXT NOT NULL,
+     role TEXT NOT NULL,
+     pin_hash TEXT NOT NULL,
+     badge_hash TEXT,
+     active INTEGER NOT NULL DEFAULT 1
+   );`,
   `CREATE TABLE IF NOT EXISTS shift_mirror (
      id TEXT PRIMARY KEY,
      status TEXT NOT NULL,
