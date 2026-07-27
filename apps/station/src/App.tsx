@@ -3,6 +3,12 @@ import { useTranslation } from "react-i18next";
 import type { OperatorMirrorRecord } from "@markiro/db";
 import { isEnrolled, readConfig, type StationConfig } from "./lib/config.js";
 import { createStationClient } from "./lib/api-client.js";
+import {
+  DEFAULT_HARDWARE_CONFIG,
+  loadHardwareConfig,
+  type HardwareConfig,
+} from "./lib/hardware-config.js";
+import { createHardwareScanSource, tauriHardware, type ScannerStatus } from "./lib/hardware.js";
 import { applyMigrations, readShiftContext, type ShiftContextRow } from "./lib/mirror.js";
 import { mirrorShiftBundle } from "./lib/shift-bundle.js";
 import { syncOperatorRoster } from "./lib/roster-sync.js";
@@ -14,7 +20,9 @@ import { OperatorLogin } from "./pages/OperatorLogin.js";
 import { ShiftSelection } from "./pages/ShiftSelection.js";
 import { NewShift } from "./pages/NewShift.js";
 import { WorkScreen } from "./pages/WorkScreen.js";
+import { WorkstationSetup } from "./pages/WorkstationSetup.js";
 import { FloorShell } from "./ui/FloorShell.js";
+import type { ScannerIndicator } from "./ui/StatusBar.js";
 
 interface ActiveShift {
   id: string;
@@ -43,6 +51,31 @@ export function nextStationView(
   return "floor";
 }
 
+/**
+ * Which scan source a configured station should use. The keyboard wedge is
+ * the default because most USB scanners are HID keyboards and need no setup;
+ * a serial scanner is opted into on the setup screen.
+ */
+export function pickScanSource(config: HardwareConfig): "wedge" | "hardware" {
+  return config.scanner ? "hardware" : "wedge";
+}
+
+/**
+ * What the status bar may honestly claim. Without a configured serial scanner
+ * the wedge is working but undetectable, so we say "keyboard" rather than
+ * claiming or denying a device. With one configured, the Rust status event is
+ * the only truth — and until it arrives we assume disconnected, because
+ * showing a green light for a scanner that never opened is the failure this
+ * indicator exists to prevent.
+ */
+export function scannerIndicator(
+  config: HardwareConfig,
+  status: ScannerStatus | null,
+): ScannerIndicator {
+  if (!config.scanner) return "keyboard";
+  return status === "connected" ? "connected" : "disconnected";
+}
+
 export function App() {
   const { t } = useTranslation();
   const [config, setConfig] = useState<StationConfig | null>(null);
@@ -52,14 +85,50 @@ export function App() {
   const [online, setOnline] = useState(() => navigator.onLine);
   const [sound, setSound] = useState<SoundSettings>({ muted: false, volume: 1 });
   const [shiftContext, setShiftContext] = useState<ShiftContextRow | null>(null);
+  const [hardwareConfig, setHardwareConfig] = useState<HardwareConfig>(DEFAULT_HARDWARE_CONFIG);
+  const [scannerStatus, setScannerStatus] = useState<ScannerStatus | null>(null);
+  const [showSetup, setShowSetup] = useState(false);
 
   useEffect(() => {
     void loadSoundSettings(tauriExecutor).then(setSound);
   }, []);
 
+  useEffect(() => {
+    void loadHardwareConfig(tauriExecutor).then(setHardwareConfig);
+  }, []);
+
+  // Open a configured scanner at start so a set-up station comes up ready.
+  useEffect(() => {
+    if (!hardwareConfig.scanner) return;
+    const { port, baud } = hardwareConfig.scanner;
+    void tauriHardware.openScanner(port, baud).catch((err: unknown) => {
+      console.error("station: opening the configured scanner failed", err);
+    });
+  }, [hardwareConfig.scanner?.port, hardwareConfig.scanner?.baud]);
+
+  useEffect(() => {
+    let unsubscribe: (() => void) | null = null;
+    let stopped = false;
+    void tauriHardware
+      .onScannerStatus(setScannerStatus)
+      .then((fn) => {
+        if (stopped) fn();
+        else unsubscribe = fn;
+      })
+      .catch((err: unknown) => {
+        console.error("station: scanner status subscription failed", err);
+      });
+    return () => {
+      stopped = true;
+      unsubscribe?.();
+    };
+  }, []);
+
   // The keyboard wedge needs no setup: most USB scanners are HID keyboards.
   // A serial scanner is opted into from the workstation setup screen.
-  const scanSource = useMemo(() => createKeyboardWedgeSource(), []);
+  const wedgeSource = useMemo(() => createKeyboardWedgeSource(), []);
+  const hardwareSource = useMemo(() => createHardwareScanSource(tauriHardware), []);
+  const scanSource = pickScanSource(hardwareConfig) === "hardware" ? hardwareSource : wedgeSource;
 
   useEffect(() => {
     if (!shift) {
@@ -191,21 +260,26 @@ export function App() {
   }
 
   return (
-    // Both indicators report only hardware we have actually verified. The
-    // keyboard wedge is indistinguishable from a keyboard, so a working
-    // wedge cannot be detected — and no serial scanner or printer is
-    // persisted yet (the workstation setup screen is not wired into the
-    // app in this slice). Claiming "connected" here would tell an operator
-    // with no scanner attached that everything is fine.
+    // Both indicators now come from the stored hardware configuration and the
+    // live scanner status, not hardcoded placeholders.
     <FloorShell
       online={online}
-      scanner="keyboard"
-      printerConfigured={false}
+      scanner={scannerIndicator(hardwareConfig, scannerStatus)}
+      printerConfigured={hardwareConfig.printer !== null}
       tasks={[]}
       activeTaskId=""
       onSelectTask={() => {}}
     >
-      {shift ? (
+      {showSetup ? (
+        <WorkstationSetup
+          hw={tauriHardware}
+          exec={tauriExecutor}
+          sound={sound}
+          onSoundChange={setSound}
+          onConfigChange={setHardwareConfig}
+          onDone={() => setShowSetup(false)}
+        />
+      ) : shift ? (
         shiftContext ? (
           <WorkScreen
             exec={tauriExecutor}
@@ -227,6 +301,7 @@ export function App() {
           client={activeClient}
           onSelected={handleShiftEntered}
           onNew={() => setFloorView("new")}
+          onSetup={() => setShowSetup(true)}
         />
       ) : (
         <NewShift

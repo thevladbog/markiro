@@ -49,7 +49,7 @@ vi.mock("@tauri-apps/plugin-sql", () => {
 });
 
 import i18n from "../src/i18n/index.js";
-import { App, nextStationView } from "../src/App.js";
+import { App, nextStationView, pickScanSource, scannerIndicator } from "../src/App.js";
 import type { StationConfig } from "../src/lib/config.js";
 import { readShiftContext } from "../src/lib/mirror.js";
 import { tauriExecutor } from "../src/lib/sqlite.js";
@@ -222,5 +222,33 @@ describe("App", () => {
     });
 
     await expect(readShiftContext(tauriExecutor, "shift-not-yet-mirrored")).resolves.toBeNull();
+  });
+
+  it("uses the keyboard wedge when no serial scanner is configured", () => {
+    expect(pickScanSource({ scanner: null, printer: null, printerLanguage: "zpl" })).toBe("wedge");
+  });
+
+  it("uses the hardware scanner once one is configured", () => {
+    expect(
+      pickScanSource({
+        scanner: { port: "COM3", baud: 9600 },
+        printer: null,
+        printerLanguage: "zpl",
+      }),
+    ).toBe("hardware");
+  });
+
+  it("shows the keyboard indicator until a configured scanner reports connected", () => {
+    expect(scannerIndicator({ scanner: null, printer: null, printerLanguage: "zpl" }, null)).toBe(
+      "keyboard",
+    );
+    const configured = {
+      scanner: { port: "COM3", baud: 9600 },
+      printer: null,
+      printerLanguage: "zpl" as const,
+    };
+    expect(scannerIndicator(configured, null)).toBe("disconnected");
+    expect(scannerIndicator(configured, "connected")).toBe("connected");
+    expect(scannerIndicator(configured, "disconnected")).toBe("disconnected");
   });
 });

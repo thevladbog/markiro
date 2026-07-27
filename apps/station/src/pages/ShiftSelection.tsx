@@ -16,9 +16,11 @@ export interface ShiftSelectionProps {
   client: StationClient;
   onSelected: (shift: { id: string; status: string; mode: string }) => void;
   onNew: () => void;
+  /** Opens the workstation setup screen; omitted where there is no way in. */
+  onSetup?: () => void;
 }
 
-export function ShiftSelection({ client, onSelected, onNew }: ShiftSelectionProps) {
+export function ShiftSelection({ client, onSelected, onNew, onSetup }: ShiftSelectionProps) {
   const { t } = useTranslation();
   const [items, setItems] = useState<ShiftListItem[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -86,9 +88,16 @@ export function ShiftSelection({ client, onSelected, onNew }: ShiftSelectionProp
               </Button>
             </Card>
           ))}
-        <Button style={{ minHeight: 64 }} onClick={onNew}>
-          {t("shifts.new")}
-        </Button>
+        <div style={{ display: "flex", gap: 16 }}>
+          <Button style={{ minHeight: 64 }} onClick={onNew}>
+            {t("shifts.new")}
+          </Button>
+          {onSetup ? (
+            <Button variant="secondary" style={{ minHeight: 64 }} onClick={onSetup}>
+              {t("shell.setup")}
+            </Button>
+          ) : null}
+        </div>
       </div>
     </main>
   );
