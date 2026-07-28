@@ -17,6 +17,8 @@ beforeAll(async () => {
 });
 
 const ORDER_NO = "ORD-26-0042";
+/** The one caveat an offline confirmation owes the worker. */
+const QUEUED_CHECK = "Сервер ещё проверит заявку — часть бутылок может в неё не попасть.";
 /** Distinctive enough that "is this on screen?" cannot pass by accident. */
 const RAW_KM = `010460068200001321KYC9X7MQ${String.fromCharCode(0x1d)}93Abcd`;
 
@@ -69,6 +71,37 @@ describe("Done", () => {
     expect(text()).not.toContain("№");
     // The confirmation itself is still there: this is a success, not a warning.
     expect(screen.getByText("Сообщите администратору — он оформит заявку")).toBeDefined();
+  });
+
+  /**
+   * The one thing a queued confirmation cannot say, and has to admit.
+   *
+   * `conflicts[]` is the server's, and offline there is no `result` at all — so
+   * every reason an item can be refused (over the day limit, a duplicate, a
+   * product this kiosk does not issue) renders as NOTHING. Online the same
+   * worker at least reads «Не приняли N шт». Offline, until this line, the
+   * kiosk said the handover succeeded and nobody ever told them otherwise.
+   */
+  it("admits that a queued order is still to be checked by the server", () => {
+    renderDone(null, 2);
+
+    expect(screen.getByText(QUEUED_CHECK)).toBeDefined();
+    // Still a confirmation, not a warning screen: the headline and the
+    // instruction that follows it are unchanged.
+    expect(screen.getByText("Заявка передана, номер появится после синхронизации")).toBeDefined();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("says nothing of the sort once the server has actually answered", () => {
+    renderDone(resultWith());
+
+    expect(text()).not.toContain(QUEUED_CHECK);
+  });
+
+  it("says nothing of the sort when the server refused the order outright", () => {
+    renderDone(resultWith({ orderNo: "", itemCount: 0, conflicts: [conflict("over_limit")] }));
+
+    expect(text()).not.toContain(QUEUED_CHECK);
   });
 
   it("returns the kiosk to the start on its own after ten seconds", () => {

@@ -3,13 +3,14 @@ import {
   cacheAge,
   flushQueue,
   refreshSnapshot,
+  snapshotAge,
   STALE_BLOCK_MS,
   STALE_WARN_MS,
 } from "../src/sync/worker.js";
 import { enqueueOrder, listQueue } from "../src/store/queue.js";
 import * as queueStore from "../src/store/queue.js";
 import * as journalStore from "../src/store/journal.js";
-import { readSnapshot, replaceSnapshot } from "../src/store/cache.js";
+import { readSnapshot, replaceSnapshot, type CachedSnapshot } from "../src/store/cache.js";
 import type { KioskBootstrapDto } from "../src/api/types.js";
 
 afterEach(() => {
@@ -279,6 +280,35 @@ const bootstrap = (generatedAt: string): KioskBootstrapDto => ({
   products: [],
   employees: [{ id: "e1", fullName: "A", role: null, badgeHash: null }],
   operators: [],
+});
+
+describe("snapshotAge", () => {
+  const snapshot = (generatedAt: string): CachedSnapshot => ({
+    bootstrap: bootstrap(generatedAt),
+    fetchedAt: "2026-07-28T00:00:00.000Z",
+  });
+
+  // The fail-closed half of the same rule `cacheAge` states for an unparseable
+  // stamp, and it lived in the shell's untested wiring until now: a paired
+  // device that has no dataset at all cannot say how old its data is, so it
+  // must not hand product out on it.
+  it("blocks when there is no snapshot at all", () => {
+    expect(snapshotAge(null, new Date("2026-07-28T00:00:00.000Z"))).toBe("blocked");
+  });
+
+  it("otherwise measures the snapshot's server stamp, exactly as cacheAge does", () => {
+    const base = "2026-07-28T00:00:00.000Z";
+    const at = (offsetMs: number): Date => new Date(Date.parse(base) + offsetMs);
+    expect(snapshotAge(snapshot(base), at(0))).toBe("fresh");
+    expect(snapshotAge(snapshot(base), at(STALE_WARN_MS))).toBe("warn");
+    expect(snapshotAge(snapshot(base), at(STALE_BLOCK_MS))).toBe("blocked");
+  });
+
+  it("blocks a snapshot whose stamp is unparseable, like the bare gate", () => {
+    expect(snapshotAge(snapshot("not-a-date"), new Date("2026-07-28T00:00:00.000Z"))).toBe(
+      "blocked",
+    );
+  });
 });
 
 describe("refreshSnapshot", () => {

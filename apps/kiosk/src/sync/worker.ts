@@ -1,5 +1,9 @@
 import type { KioskClient } from "../api/client.js";
-import { assertMeasurableGeneratedAt, replaceSnapshot } from "../store/cache.js";
+import {
+  assertMeasurableGeneratedAt,
+  replaceSnapshot,
+  type CachedSnapshot,
+} from "../store/cache.js";
 import { appendJournal } from "../store/journal.js";
 import { dequeueOrder, listQueue } from "../store/queue.js";
 
@@ -45,6 +49,25 @@ export function cacheAge(generatedAt: string, now: Date): CacheAge {
   if (ageMs >= STALE_BLOCK_MS) return "blocked";
   if (ageMs >= STALE_WARN_MS) return "warn";
   return "fresh";
+}
+
+/**
+ * The same gate, asked of what the device actually holds.
+ *
+ * NO SNAPSHOT IS `blocked`, and that is the second half of the fail-closed
+ * rule above: a paired device with nothing cached cannot say how old its data
+ * is, and a gate that cannot establish freshness must not assert it. The two
+ * halves belong together — one answers "the stamp is unreadable", the other
+ * "there is no stamp" — and both used to be true only for as long as an
+ * untested `snapshot ? … : "blocked"` in the shell's wiring kept saying so.
+ *
+ * `null` is the normal state of a device between pairing and its first
+ * bootstrap, which routes to the pairing screen anyway; this answer only
+ * matters for a device that IS paired and has somehow lost its dataset.
+ */
+export function snapshotAge(snapshot: CachedSnapshot | null, now: Date): CacheAge {
+  if (!snapshot) return "blocked";
+  return cacheAge(snapshot.bootstrap.generatedAt, now);
 }
 
 /**

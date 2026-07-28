@@ -4,8 +4,19 @@ import { deriveDigestB64, formatPhc, PHC_ITERATIONS } from "@markiro/domain";
 import { App } from "../src/App.js";
 import type { CreateOrderDto, KioskBootstrapDto } from "../src/api/types.js";
 import i18n from "../src/i18n/index.js";
+import type { SerialPort } from "../src/scanner/web-serial.js";
+import { SETTINGS_HOLD_MS } from "../src/screens/Idle.js";
 import { replaceSnapshot } from "../src/store/cache.js";
-import { readConfig, writeConfig, type KioskConfig } from "../src/store/config.js";
+// The namespace as well as the names, so one write can be made to fail under
+// the shell without stubbing the whole store — the shape `sync.test.ts` already
+// uses for `appendJournal`.
+import * as configStore from "../src/store/config.js";
+import {
+  readConfig,
+  writeConfig,
+  writeScannerSettings,
+  type KioskConfig,
+} from "../src/store/config.js";
 import { enqueueOrder, listQueue } from "../src/store/queue.js";
 import { REFRESH_INTERVAL_MS, STALE_BLOCK_MS } from "../src/sync/worker.js";
 
@@ -21,6 +32,11 @@ beforeAll(async () => {
 
 const SALT = "fwGrIt01vwgBxxDlhqLVRQ==";
 const BADGE = "BADGE-1";
+/** An OPERATOR's badge — the settings gate's credential, and deliberately not
+ * an employee's: the two rosters are separate and only this one opens setup. */
+const OPERATOR_BADGE = "OP-BADGE-1";
+const OPERATOR_LOGIN = "1001";
+const OPERATOR_PIN = "4821";
 const GS = String.fromCharCode(0x1d);
 /** Check-digit valid, and in the snapshot's product list. */
 const GTIN_MILK = "04600682000013";
@@ -33,6 +49,10 @@ const CART_TITLE = "Вы берёте";
 const SUBMIT = "Готово — передать администратору";
 const QUEUED_TITLE = "Заявка передана, номер появится после синхронизации";
 const OFFLINE = "Нет связи — киоск работает офлайн";
+const GATE_TITLE = "Вход в настройки";
+const SETUP_TITLE = "Настройка сканера";
+const SETUP_DONE = "Готово";
+const KEYBOARD_TRANSPORT = "Как клавиатура (HID)";
 
 /** The kiosk's own clock, frozen so staleness is arithmetic rather than luck. */
 const NOW = new Date("2026-07-28T12:00:00.000Z");
@@ -43,8 +63,14 @@ const NOW = new Date("2026-07-28T12:00:00.000Z");
  * never match and every session test would fail for the wrong reason.
  */
 let badgeHash = "";
+let operatorBadgeHash = "";
+let operatorPinHash = "";
 beforeAll(async () => {
-  badgeHash = formatPhc(PHC_ITERATIONS, SALT, await deriveDigestB64(BADGE, SALT, PHC_ITERATIONS));
+  const phc = async (raw: string) =>
+    formatPhc(PHC_ITERATIONS, SALT, await deriveDigestB64(raw, SALT, PHC_ITERATIONS));
+  badgeHash = await phc(BADGE);
+  operatorBadgeHash = await phc(OPERATOR_BADGE);
+  operatorPinHash = await phc(OPERATOR_PIN);
 });
 
 function bootstrapAt(generatedAt: string): KioskBootstrapDto {
@@ -57,7 +83,20 @@ function bootstrapAt(generatedAt: string): KioskBootstrapDto {
       { id: "p-milk", gtin14: GTIN_MILK, name: MILK, unitPrice: "89.90", egaisCode: null },
     ],
     employees: [{ id: EMPLOYEE.id, fullName: EMPLOYEE.fullName, role: null, badgeHash }],
-    operators: [],
+    // One operator, so the post-pairing settings gate has somebody who can
+    // actually open it — by badge or by personnel number and PIN, since the
+    // tests below need both entrances.
+    operators: [
+      {
+        employeeId: "op-1",
+        name: "Петрова Ольга",
+        login: OPERATOR_LOGIN,
+        role: "operator",
+        pinHash: operatorPinHash,
+        badgeHash: operatorBadgeHash,
+        active: true,
+      },
+    ],
   };
 }
 
@@ -114,6 +153,8 @@ afterEach(() => {
   vi.useRealTimers();
   globalThis.fetch = originalFetch;
   setOnLine(true);
+  setWebSerial(null);
+  vi.restoreAllMocks();
 });
 
 /** jsdom's `navigator.onLine` is a prototype getter; an own property shadows
@@ -148,9 +189,18 @@ const queuedOrder = (deviceSeq: number): CreateOrderDto => ({
 /**
  * Waits for the shell to settle on an assertion.
  *
- * `vi.waitFor` and NOT the Testing Library one: this one polls on REAL timers,
+ * `vi.waitFor` and NOT the Testing Library one: this one SCHEDULES its polls on
+ * real timers (`getSafeTimers()`, captured before the fakes are installed),
  * while the Testing Library version polls with the faked `setInterval` and
  * would simply hang here.
+ *
+ * It does not leave the kiosk's clock alone, though. Vitest 4.1.10 calls
+ * `vi.advanceTimersByTime(interval)` — 50 ms — before every poll while fake
+ * timers are active, so a `settle()` that runs its full budget advances the
+ * device's clock by up to the 2 s below. Nothing here depends on it today; the
+ * shortest thing this shell schedules is the wedge's 60 ms silence timeout and
+ * the assertions that care about it advance the clock themselves. Worth knowing
+ * before adding a test whose subject is shorter than a settle.
  *
  * And deliberately NOT inside `act()`, which is the natural thing to reach for
  * and is exactly wrong: an async `act` scope diverts every update React
@@ -160,9 +210,19 @@ const queuedOrder = (deviceSeq: number): CreateOrderDto => ({
  * continuation, so an assertion polling inside such a scope waits for a render
  * that cannot happen until it stops waiting, and every test here would time
  * out. Outside it, the continuations commit normally and the poll sees them.
+ *
+ * ONE act flush afterwards, though, and it is load-bearing. A poll can be
+ * satisfied by a COMMIT whose passive effects React has not run yet — and the
+ * subscription every screen here makes to the scanner lives in exactly such an
+ * effect. Without this flush, a `scan()` issued the moment a screen's title
+ * appears is delivered to a listener set that screen has not joined, and is
+ * simply lost; the next assertion then waits two seconds for something that
+ * already happened to nobody. It shows up as a rare failure on a loaded
+ * machine, which is the worst way for it to show up.
  */
 async function settle(assert: () => void | Promise<void>): Promise<void> {
   await vi.waitFor(assert, { timeout: 2_000 });
+  await act(async () => {});
 }
 
 /**
@@ -178,6 +238,102 @@ function scan(raw: string): void {
 }
 
 const said = () => document.body.textContent ?? "";
+
+/** The kiosk's on-screen pad — the gate's other entrance, for an operator whose
+ * scanner is exactly what they came to fix. */
+function typeDigits(digits: string): void {
+  for (const digit of digits) fireEvent.click(screen.getByRole("button", { name: digit }));
+}
+
+/**
+ * A press on the idle header, held for `ms` of the kiosk's clock and released.
+ *
+ * The element is captured BEFORE the press because a successful hold routes
+ * the screen away mid-gesture; the release then lands on a detached node,
+ * which is exactly what a real finger's `pointerup` does after the UI moved.
+ */
+async function holdIdleHeader(ms: number): Promise<void> {
+  const header = screen.getByText(IDLE_TITLE);
+  await act(async () => {
+    fireEvent.pointerDown(header);
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+  await act(async () => {
+    fireEvent.pointerUp(header);
+  });
+}
+
+/**
+ * A `SerialPort` whose readable stream this test drives, so a scan can be
+ * pushed through the REAL `createWebSerialSource`. Models the port's actual
+ * lifecycle — `open()` on a port that is not closed rejects, `readable` is null
+ * while closed, a cancelled stream is dropped so the next access vends a fresh
+ * one — mirroring `fakePort` in `test/scanner-setup.test.tsx`.
+ */
+function fakeSerialPort(): {
+  port: SerialPort;
+  scan: (raw: string) => void;
+  released: () => boolean;
+} {
+  let isOpen = false;
+  let stream: ReadableStream<Uint8Array> | null = null;
+  let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
+
+  const port: SerialPort = {
+    open: async () => {
+      if (isOpen) throw new DOMException("The port is already open.", "InvalidStateError");
+      isOpen = true;
+    },
+    close: async () => {
+      isOpen = false;
+      stream = null;
+      controller = null;
+    },
+    get readable() {
+      if (stream) return stream;
+      if (!isOpen) return null;
+      stream = new ReadableStream<Uint8Array>({
+        start: (c) => {
+          controller = c;
+        },
+        cancel: () => {
+          stream = null;
+          controller = null;
+        },
+      });
+      return stream;
+    },
+  };
+
+  return {
+    port,
+    scan: (raw) => {
+      void port.readable;
+      controller?.enqueue(new TextEncoder().encode(`${raw}\r\n`));
+    },
+    // Nobody is reading this port. A cancelled reader propagates upstream
+    // through the decoder pipe and drops the stream, exactly as a real port
+    // does — which makes "the old transport was torn down" observable without
+    // racing a PBKDF2 derivation to prove a negative in the DOM.
+    released: () => stream === null,
+  };
+}
+
+/** `isWebSerialSupported()` reads `"serial" in navigator`, so the capability is
+ * driven through its real input rather than by stubbing the module. */
+function setWebSerial(port: SerialPort | null): void {
+  if (port === null) {
+    delete (navigator as { serial?: unknown }).serial;
+    return;
+  }
+  Object.defineProperty(navigator, "serial", {
+    value: { requestPort: async () => port, getPorts: async () => [port] },
+    configurable: true,
+    writable: true,
+  });
+}
 
 /** Badge in, one bottle scanned, submit pressed — the whole worker's flow. */
 async function takeOneBottle(): Promise<void> {
@@ -220,7 +376,9 @@ describe("KioskShell", () => {
 
     render(<App />);
 
-    await settle(() => expect(screen.getByText("Киоск временно не выдаёт продукцию")).toBeDefined());
+    await settle(() =>
+      expect(screen.getByText("Киоск временно не выдаёт продукцию")).toBeDefined(),
+    );
     expect(said()).toContain("в очереди: 2");
   });
 
@@ -344,6 +502,53 @@ describe("KioskShell", () => {
     expect((await readConfig())?.nextDeviceSeq).toBe(6);
   });
 
+  /**
+   * The one failure a reused `deviceSeq` produces, and it is silent.
+   *
+   * `(tenantId, kioskId, deviceSeq)` is the server's idempotency key: filing a
+   * second order under a sequence the server has already seen does not create
+   * an order, it RETURNS the first one. So a counter that stayed behind after a
+   * durable order does not cost a duplicate — it costs the NEXT worker their
+   * whole cart, confirmed to them under somebody else's order number.
+   *
+   * A skipped sequence, by contrast, costs nothing at all: the server needs the
+   * numbers to be monotonic, not dense. That asymmetry is the entire reason the
+   * counter is written before the order, and it is what this test pins.
+   */
+  it("never files two orders under one device sequence when the counter write fails", async () => {
+    await pair();
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+
+    // The first worker submits into a config store that refuses exactly one
+    // write; every later write is the real one again.
+    const refused = vi
+      .spyOn(configStore, "writeConfig")
+      .mockRejectedValueOnce(new Error("the config store refused the write"));
+    await takeOneBottle();
+    await settle(() => expect(refused).toHaveBeenCalled());
+    await act(async () => {});
+    // Nothing was promised: no number, no confirmation, still their own cart.
+    expect(screen.getByText(CART_TITLE)).toBeDefined();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Не я" }));
+    });
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+
+    // Whatever DID become durable leaves on the ordinary interval, unattended.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(REFRESH_INTERVAL_MS);
+    });
+
+    // And now the next worker takes their own bottle.
+    await takeOneBottle();
+    await settle(() => expect(said()).toContain("ORD-"));
+
+    const seqs = server.orders.map((order) => order.deviceSeq);
+    expect(seqs.length).toBeGreaterThan(0);
+    expect(new Set(seqs).size).toBe(seqs.length);
+  });
+
   it("drains the queue when the device comes back online", async () => {
     await pair();
     await enqueueOrder(queuedOrder(3));
@@ -442,6 +647,139 @@ describe("KioskShell", () => {
     await settle(() => expect(screen.getByText(CART_TITLE)).toBeDefined());
     expect(screen.getByText("Пока пусто")).toBeDefined();
     expect(screen.queryByText(MILK)).toBeNull();
+  });
+
+  /**
+   * The way back into scanner setup once the kiosk is running.
+   *
+   * Before this existed, `scannerSetupRequested` could only be raised by the
+   * PAIRING screen — which is on screen only while the device is unpaired — so
+   * the whole post-pairing operator gate was unreachable, and a kiosk whose
+   * scanner died after commissioning could be recovered only by unbinding it
+   * from the cabinet. Design brief 07 §5 asks for a settings affordance on the
+   * running kiosk, and a deliberate long press rather than a visible control:
+   * this screen stands in a public room.
+   */
+  it("leaves the settings gate shut when the idle header is merely tapped", async () => {
+    await pair();
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+
+    await holdIdleHeader(200);
+    // And the clock runs on well past the hold: a press that was released must
+    // not open the gate late, behind whoever tapped it.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+
+    expect(screen.queryByText(GATE_TITLE)).toBeNull();
+    expect(screen.queryByText(SETUP_TITLE)).toBeNull();
+    expect(screen.getByText(IDLE_TITLE)).toBeDefined();
+  });
+
+  it("opens the operator sign-in gate on a deliberate long press of the idle header", async () => {
+    await pair();
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+
+    await holdIdleHeader(SETTINGS_HOLD_MS);
+
+    await settle(() => expect(screen.getByText(GATE_TITLE)).toBeDefined());
+    // The GATE, not the settings: this kiosk is paired, so the second access
+    // tier applies and the transport radios are not in the document at all.
+    expect(screen.queryByText(SETUP_TITLE)).toBeNull();
+  });
+
+  // The gate is worth nothing if it only shuts once. An unattended kiosk that
+  // stayed unlocked behind the idle screen is the whole reason it exists.
+  it("re-locks the settings gate when the kiosk returns to idle", async () => {
+    await pair();
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+    await holdIdleHeader(SETTINGS_HOLD_MS);
+    await settle(() => expect(screen.getByText(GATE_TITLE)).toBeDefined());
+
+    scan(OPERATOR_BADGE);
+    await settle(() => expect(screen.getByText(SETUP_TITLE)).toBeDefined());
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: SETUP_DONE }));
+    });
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+
+    await holdIdleHeader(SETTINGS_HOLD_MS);
+
+    await settle(() => expect(screen.getByText(GATE_TITLE)).toBeDefined());
+    expect(screen.queryByText(SETUP_TITLE)).toBeNull();
+  });
+
+  /**
+   * The transport swap, end to end and through the real `navigator.serial`.
+   *
+   * This kiosk boots on the port a previous visit granted (`getPorts()` is the
+   * only thing a boot can recover — `requestPort()` needs a gesture the shell
+   * never has), an operator moves it back to the keyboard wedge, and the screen
+   * the worker is standing at has to follow. Nothing before this exercised a
+   * `SerialPort`, a transport change, or the setup screen from the shell.
+   */
+  it("moves the idle screen onto the transport the setup screen settles on", async () => {
+    const scanner = fakeSerialPort();
+    setWebSerial(scanner.port);
+    await writeScannerSettings({ transport: "serial" });
+    await pair();
+    const added = vi.spyOn(window, "addEventListener");
+    const removed = vi.spyOn(window, "removeEventListener");
+    /** Wedge listeners still standing — the shell's, plus any screen's. */
+    const wedges = () =>
+      added.mock.calls.filter(([type]) => type === "keydown").length -
+      removed.mock.calls.filter(([type]) => type === "keydown").length;
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+
+    // The recovered grant takes over from the wedge the shell boots on, and a
+    // badge read off the port opens a session.
+    await settle(() => expect(wedges()).toBe(0));
+    scanner.scan(BADGE);
+    await settle(() => expect(screen.getByText(CART_TITLE)).toBeDefined());
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Не я" }));
+    });
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+
+    // An operator moves the kiosk back to the wedge. They sign in on the pad
+    // rather than with their badge: `createWebSerialSource` is a
+    // single-subscriber source, and the shell's has held this port since boot,
+    // so the setup screen's own listener on it reads nothing. That is why the
+    // gate takes a personnel number and a PIN as well as a badge.
+    await holdIdleHeader(SETTINGS_HOLD_MS);
+    await settle(() => expect(screen.getByText(GATE_TITLE)).toBeDefined());
+    typeDigits(OPERATOR_LOGIN);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Далее" }));
+    });
+    typeDigits(OPERATOR_PIN);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Войти" }));
+    });
+    await settle(() => expect(screen.getByText(SETUP_TITLE)).toBeDefined());
+    await act(async () => {
+      fireEvent.click(screen.getByRole("radio", { name: KEYBOARD_TRANSPORT }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: SETUP_DONE }));
+    });
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+
+    // The old transport is let go of — the port has no reader left — and the
+    // wedge is standing again.
+    await settle(() => expect(scanner.released()).toBe(true));
+    await settle(() => expect(wedges()).toBe(1));
+
+    // And it is the wedge the idle screen now answers.
+    scan(BADGE);
+    await settle(() => expect(screen.getByText(CART_TITLE)).toBeDefined());
+    expect(screen.getByText(EMPLOYEE.fullName)).toBeDefined();
+    added.mockRestore();
+    removed.mockRestore();
   });
 
   // `Done`'s "already reset" flag is a sticky ref, so a re-used instance would

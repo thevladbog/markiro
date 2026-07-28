@@ -1,8 +1,26 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, type AlertTone } from "@markiro/ui";
 import { classifyKioskScan } from "../domain-guard/classify.js";
 import type { ScanListener } from "../scanner/source.js";
+
+/**
+ * How long the header must be held to reach scanner setup.
+ *
+ * Two seconds is chosen against the wrong input, not the right one: a customer
+ * steadying themselves on the screen, a glove brushing the title, a child
+ * poking it. None of those survive two seconds, and an operator who has been
+ * told about the gesture does not find two seconds long.
+ */
+export const SETTINGS_HOLD_MS = 2_000;
+
+/**
+ * When the hold is acknowledged on screen. Late enough that an accidental
+ * touch never sees it, early enough that an operator holding on purpose is not
+ * left wondering whether the kiosk noticed — a gesture with no feedback at all
+ * is one nobody believes in and everybody gives up on halfway.
+ */
+const SETTINGS_HINT_MS = 600;
 
 /**
  * Why the last scan did not sign anyone in.
@@ -43,6 +61,16 @@ export interface IdleProps {
   resolveBadge: (raw: string) => Promise<string | null>;
   /** Exactly one call per session opened here, with the employee admitted. */
   onEmployee: (employeeId: string) => void;
+  /**
+   * The way into scanner setup on a RUNNING kiosk, raised by a deliberate long
+   * press on the header (design brief 07 §5). Optional so a caller with nowhere
+   * to go simply leaves the gesture inert.
+   *
+   * This screen only asks; it grants nothing. Everything behind it is still
+   * gated on operator credentials by `ScannerSetup` — the press is an entry
+   * path, not an authorisation.
+   */
+  onOpenSettings?: () => void;
 }
 
 /**
@@ -59,16 +87,23 @@ export interface IdleProps {
  * screen stands unattended in a public room; echoing it would hand it to
  * whoever is looking. `ScannerSetup`'s test scan follows the same rule.
  */
-export function Idle({ onScan, resolveBadge, onEmployee }: IdleProps): React.JSX.Element {
+export function Idle({
+  onScan,
+  resolveBadge,
+  onEmployee,
+  onOpenSettings,
+}: IdleProps): React.JSX.Element {
   const { t } = useTranslation();
   const [notice, setNotice] = useState<IdleNotice | null>(null);
+  /** Whether a press is currently being held long enough to be worth saying so. */
+  const [holding, setHolding] = useState(false);
 
   // The callbacks, held in a ref so the listener below can read the current
   // ones without listing them as dependencies. The `useRef` initializer already
   // carries the mount values, so the effect only maintains later ones.
-  const latest = useRef({ resolveBadge, onEmployee });
+  const latest = useRef({ resolveBadge, onEmployee, onOpenSettings });
   useEffect(() => {
-    latest.current = { resolveBadge, onEmployee };
+    latest.current = { resolveBadge, onEmployee, onOpenSettings };
   });
 
   /**
@@ -98,10 +133,6 @@ export function Idle({ onScan, resolveBadge, onEmployee }: IdleProps): React.JSX
    * — the shell would hold an `employeeId` behind the screen that replaced this
    * one, and drop the worker's successor into a cart belonging to someone who
    * has already walked away.
-   *
-   * This is also what makes remount-by-`key` a safe way to swap the scan
-   * transport under a mounted `Idle` (Task 14): the dying instance's pending
-   * promise can no longer reach the old `onEmployee`.
    */
   const live = useRef(true);
 
@@ -168,6 +199,51 @@ export function Idle({ onScan, resolveBadge, onEmployee }: IdleProps): React.JSX
     };
   }, []);
 
+  /**
+   * The settings gesture, as two timers on one press.
+   *
+   * NOT A BUTTON, and not focusable. Two reasons, and the second is the sharp
+   * one: this screen faces the public, and the kiosk's scanner is a keyboard
+   * wedge — it "types" a badge and finishes with Enter. Any focusable control
+   * standing on the idle screen is therefore one stray focus away from being
+   * activated by the next person who scans their badge.
+   *
+   * A press is cancelled by anything that is not a completed hold — a release,
+   * a finger sliding off the title, the browser taking the pointer away for a
+   * scroll or a context menu. Only the timer surviving all of that opens the
+   * gate.
+   */
+  const holdHint = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const holdOpen = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const endHold = useCallback(() => {
+    if (holdHint.current !== null) {
+      clearTimeout(holdHint.current);
+      holdHint.current = null;
+    }
+    if (holdOpen.current !== null) {
+      clearTimeout(holdOpen.current);
+      holdOpen.current = null;
+    }
+    setHolding(false);
+  }, []);
+
+  const beginHold = useCallback(() => {
+    // No caller for the gesture: leave the header inert rather than run a
+    // timer whose only outcome is showing a hint about a screen nobody opens.
+    if (!latest.current.onOpenSettings) return;
+    endHold();
+    holdHint.current = setTimeout(() => setHolding(true), SETTINGS_HINT_MS);
+    holdOpen.current = setTimeout(() => {
+      endHold();
+      latest.current.onOpenSettings?.();
+    }, SETTINGS_HOLD_MS);
+  }, [endHold]);
+
+  // A press in progress when this screen goes (a transport swap, a badge that
+  // resolved, the cache ageing out) must not fire into whatever replaced it.
+  useEffect(() => endHold, [endHold]);
+
   return (
     <main
       style={{
@@ -197,10 +273,35 @@ export function Idle({ onScan, resolveBadge, onEmployee }: IdleProps): React.JSX
           <rect x="26" y="42" width="8" height="8" fill="var(--ok-fg)" />
         </g>
       </svg>
-      <div style={{ display: "grid", gap: 10, justifyItems: "center" }}>
+      {/* The header, and the kiosk's only way back into scanner setup. The
+          handlers sit on the whole block rather than the title alone so a
+          gloved thumb has a target it can actually hold; `userSelect` stops the
+          press turning into a text selection on the way. */}
+      <header
+        onPointerDown={beginHold}
+        onPointerUp={endHold}
+        onPointerLeave={endHold}
+        onPointerCancel={endHold}
+        style={{
+          display: "grid",
+          gap: 10,
+          justifyItems: "center",
+          userSelect: "none",
+          WebkitUserSelect: "none",
+          touchAction: "manipulation",
+        }}
+      >
         <h1 style={{ margin: 0, fontSize: "2.5rem", lineHeight: 1.2 }}>{t("idle.title")}</h1>
         <p style={{ margin: 0, fontSize: "1.25rem", color: "var(--fg-2)" }}>{t("idle.subtitle")}</p>
-      </div>
+        {/* Only while a press is actually being held, and quiet: it tells the
+            operator the kiosk noticed, and says nothing a customer could act
+            on — the gate behind it still wants a badge or a PIN. */}
+        {holding ? (
+          <p style={{ margin: 0, fontSize: "1rem", color: "var(--fg-3)" }}>
+            {t("idle.settingsHold")}
+          </p>
+        ) : null}
+      </header>
       {/* A panel, not a button. The prototype's tap target exists only to fake
           a scan for the demo; on the real device the scanner is the only way
           in, and a control that does nothing under a gloved hand teaches the

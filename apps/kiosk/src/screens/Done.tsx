@@ -194,6 +194,17 @@ export function Done({ result, itemCount, onReset }: DoneProps): React.JSX.Eleme
             <>
               <span style={{ display: "block" }}>{t("done.subtitle")}</span>
               <span style={{ display: "block" }}>{t("done.subtitleTail")}</span>
+              {/* Queued only, and the honest half of this screen.
+                  `conflicts[]` is the SERVER's verdict, so offline there is
+                  none: an order over the day limit, a duplicate code, a product
+                  this kiosk does not issue — every one of them renders as
+                  nothing at all, while the same worker online would at least
+                  read «Не приняли N шт». One sentence, in the subtitle's own
+                  voice rather than an alert, because the handover did succeed
+                  and the confirmation must not become a warning screen. */}
+              {result === null ? (
+                <span style={{ display: "block" }}>{t("done.queuedCheck")}</span>
+              ) : null}
             </>
           )}
         </p>

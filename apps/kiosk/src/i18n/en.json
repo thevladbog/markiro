@@ -26,7 +26,8 @@
     "scanTarget": "on your badge",
     "hint": "The QR code is on the back of your badge. Hold it up to the scanner below the screen, then scan the marking codes on the bottles.",
     "badgeUnknown": "Badge not recognised. Scan it again, or ask an administrator.",
-    "notABadge": "Scan your badge first — you can scan the bottles right after that."
+    "notABadge": "Scan your badge first — you can scan the bottles right after that.",
+    "settingsHold": "Keep holding — the settings sign-in will open"
   },
   "cart": {
     "logo": "markiro · for yourself",
@@ -61,6 +62,7 @@
     "titleRefused": "The order was not accepted",
     "subtitle": "Tell the administrator — they will file the order",
     "subtitleTail": "and take the codes out of circulation.",
+    "queuedCheck": "The server still has to check the order — some bottles may not make it in.",
     "refusedHint": "Not one code went through. Put the bottles aside and ask an administrator.",
     "summary": "{{n}} pcs in the order",
     "reset": "Done",

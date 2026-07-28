@@ -22,9 +22,9 @@ import { readSnapshot, type CachedSnapshot } from "../store/cache.js";
 import { readConfig, readScannerSettings, writeConfig, type KioskConfig } from "../store/config.js";
 import { enqueueOrder, listQueue } from "../store/queue.js";
 import {
-  cacheAge,
   flushQueue,
   refreshSnapshot,
+  snapshotAge,
   REFRESH_INTERVAL_MS,
   type CacheAge,
 } from "../sync/worker.js";
@@ -59,18 +59,6 @@ interface SubmittedOrder {
   deviceSeq: number;
   result: CreateOrderResultDto | null;
   itemCount: number;
-}
-
-/**
- * The live scan transport. `port === null` is the keyboard wedge.
- *
- * `epoch` counts transport changes and is `Idle`'s `key`: that screen
- * subscribes at mount and deliberately ignores a later `onScan`, so a remount
- * is the only way a swap can reach it.
- */
-interface ScanTransport {
-  port: SerialPort | null;
-  epoch: number;
 }
 
 /**
@@ -118,7 +106,8 @@ export function KioskShell(): React.JSX.Element {
   const [scannerSetupRequested, setScannerSetupRequested] = useState(false);
   const [session, setSession] = useState<KioskSession | null>(null);
   const [submitted, setSubmitted] = useState<SubmittedOrder | null>(null);
-  const [transport, setTransport] = useState<ScanTransport>(() => ({ port: null, epoch: 0 }));
+  /** The live scan transport: `null` is the keyboard wedge, a port is Web Serial. */
+  const [scanPort, setScanPort] = useState<SerialPort | null>(null);
 
   /**
    * The config as the ASYNC work sees it. The refresh interval, the `online`
@@ -133,8 +122,9 @@ export function KioskShell(): React.JSX.Element {
   }, []);
 
   /**
-   * What the server answered for each order this shell submitted, recorded as
-   * the reply passes through the client on its way to `flushQueue`.
+   * The ONE order a worker is standing here waiting on, and what the server
+   * answered for it — recorded as the reply passes through the client on its
+   * way to `flushQueue`.
    *
    * `flushQueue` returns nothing — it journals the verdict and moves on, which
    * is right for a drain nobody is watching. But the worker standing here IS
@@ -143,8 +133,16 @@ export function KioskShell(): React.JSX.Element {
    * it out of the journal afterwards would recover the number but not the
    * server's accepted `itemCount`, and re-deriving that from the conflicts
    * would put the server's arithmetic on the device.
+   *
+   * ONE SLOT, not a map keyed by sequence. Every drain runs through this
+   * client, including the unattended ones on the refresh interval and the
+   * `online` handler, so a map would take an entry per order for the whole life
+   * of the process and nothing outside `submitCart` would ever remove them — a
+   * kiosk draining a long outage would accumulate one per queued order. Only
+   * the submit in flight has a reader, `submitCart` is not re-entrant (the
+   * `submitting` guard below), and every other answer is already journalled.
    */
-  const answers = useRef(new Map<number, CreateOrderResultDto>());
+  const awaited = useRef<{ deviceSeq: number; result: CreateOrderResultDto | null } | null>(null);
 
   /**
    * The API client, rebuilt per call because it holds nothing: `flushQueue` and
@@ -162,7 +160,11 @@ export function KioskShell(): React.JSX.Element {
       bootstrap: () => base.bootstrap(),
       submitOrder: async (body) => {
         const result = await base.submitOrder(body);
-        answers.current.set(body.deviceSeq, result);
+        // Only the order somebody is waiting on. Everything else the drain
+        // acknowledges is already in the journal, which is where a screen that
+        // was not there at the time is supposed to read it from.
+        const waiting = awaited.current;
+        if (waiting?.deviceSeq === body.deviceSeq) waiting.result = result;
         return result;
       },
     };
@@ -243,10 +245,10 @@ export function KioskShell(): React.JSX.Element {
     void (async () => {
       const port = await recoverGrantedPort();
       if (!alive) return;
-      // Only when a grant actually survived. Setting the state unconditionally
-      // would hand back a NEW object for the unchanged keyboard transport and
-      // rebuild the scan source under a screen that had already subscribed.
-      if (port) setTransport((prev) => ({ port, epoch: prev.epoch + 1 }));
+      // Only when a grant actually survived; `null` is already the state and
+      // re-setting it would rebuild the wedge under a screen that had
+      // already subscribed to it.
+      if (port) setScanPort(port);
       await reload();
       // Last, and deliberately after the reads: `configLoaded` is what ends the
       // loading screen, and flipping it early would flash the pairing screen at
@@ -268,14 +270,11 @@ export function KioskShell(): React.JSX.Element {
    * rather than `useMemo` because a memo is a cache React is allowed to drop,
    * and this identity is a contract.
    */
-  const sourceRef = useRef<{ transport: ScanTransport; source: ScanSource } | null>(null);
-  if (sourceRef.current === null || sourceRef.current.transport !== transport) {
+  const sourceRef = useRef<{ port: SerialPort | null; source: ScanSource } | null>(null);
+  if (sourceRef.current === null || sourceRef.current.port !== scanPort) {
     sourceRef.current = {
-      transport,
-      source:
-        transport.port === null
-          ? createKeyboardWedgeSource()
-          : createWebSerialSource(transport.port),
+      port: scanPort,
+      source: scanPort === null ? createKeyboardWedgeSource() : createWebSerialSource(scanPort),
     };
   }
   const scanSource = sourceRef.current.source;
@@ -290,6 +289,13 @@ export function KioskShell(): React.JSX.Element {
    * Idle→Cart handover, which happens while the worker is still holding the
    * badge they just scanned. The listener set makes a screen change a set
    * membership change instead, and leaves the transport itself untouched.
+   *
+   * It is also what makes a TRANSPORT change reach a screen that is already
+   * standing. `subscribe` is stable and the set is transport-independent, so
+   * swapping the source below re-points the fan-out under a mounted `Idle`
+   * without touching its subscription — no remount, and therefore no `key`.
+   * (An earlier revision carried an `epoch` on the transport for exactly that
+   * remount; it was doing nothing, and removing it broke no test.)
    *
    * Iterating a copy: a listener may unsubscribe (its screen may unmount)
    * during delivery, and mutating the set mid-walk would drop the next one.
@@ -385,26 +391,47 @@ export function KioskShell(): React.JSX.Element {
         createdAt: now().toISOString(),
       };
       try {
-        // DURABLE BEFORE ANY NETWORK ATTEMPT. The queue is what makes a pickup
-        // survive a crash, a reload or a battery pull between here and the
-        // server, and `flushQueue`'s acknowledge-then-remove is what makes the
-        // replay safe. Submitting first and queueing on failure would lose the
-        // order in exactly the window that matters.
-        await enqueueOrder(body);
-        // Then the counter, so the next order cannot reuse this idempotency key.
+        // THE COUNTER FIRST, and this ordering is load-bearing.
+        //
+        // The two writes can only be torn apart one way or the other, and the
+        // failure is ONE-SIDED. Burning a sequence nobody used costs nothing:
+        // `(tenantId, kioskId, deviceSeq)` is the server's idempotency key and
+        // it only has to be MONOTONIC, never dense, so a gap is invisible to
+        // everything downstream. Reusing one is catastrophic and silent: the
+        // server answers a repeated key by returning the FIRST order rather
+        // than filing a second, so the next worker's whole cart evaporates and
+        // `Done` confirms it to them under a stranger's order number.
+        //
+        // So the window this leaves — a config write that lands while the
+        // order behind it does not — loses an order that was never promised:
+        // nothing is queued, no confirmation is shown, and the worker is still
+        // standing at a cart they can submit again. The reverse window loses an
+        // order that WAS promised, to somebody who has already walked away.
         const advanced = { ...cfg, nextDeviceSeq: deviceSeq + 1 };
         await writeConfig(advanced);
         applyConfig(advanced);
+        // DURABLE BEFORE ANY NETWORK ATTEMPT, and still before any of it. The
+        // queue is what makes a pickup survive a crash, a reload or a battery
+        // pull between here and the server, and `flushQueue`'s
+        // acknowledge-then-remove is what makes the replay safe. Submitting
+        // first and queueing on failure would lose the order in exactly the
+        // window that matters.
+        await enqueueOrder(body);
+        // From here on the server's answer for THIS order is worth keeping.
+        awaited.current = { deviceSeq, result: null };
         await drain();
         // Delivered in that drain, or still queued. `null` is not a missing
         // number — it is the true statement that the server has not seen this
         // order, and `Done` says exactly that instead of inventing an «№ —».
-        const result = answers.current.get(deviceSeq) ?? null;
-        answers.current.clear();
+        const result = awaited.current.result;
+        awaited.current = null;
         setSubmitted({ deviceSeq, result, itemCount: body.items.length });
       } catch (err) {
-        // The store refused the order. Nothing was filed and nothing was
-        // promised, so the worker stays on their cart and can press again.
+        // The store refused. Nothing was promised, so the worker stays on their
+        // cart and can press again — under the SAME sequence if the counter
+        // write is the one that failed, under the next one if it succeeded and
+        // the queue write did not. Neither path can use a sequence twice.
+        awaited.current = null;
         console.error("kiosk: the order could not be filed", err);
       }
     },
@@ -427,9 +454,9 @@ export function KioskShell(): React.JSX.Element {
   );
 
   const paired = Boolean(config?.token);
-  /** No snapshot at all counts as blocked: a paired device that cannot say how
-   * old its dataset is must not hand product out on it. */
-  const age: CacheAge = snapshot ? cacheAge(snapshot.bootstrap.generatedAt, now()) : "blocked";
+  // Including "no snapshot at all is blocked", which is `snapshotAge`'s rule
+  // and is tested beside its NaN sibling in `sync/worker.ts` rather than here.
+  const age: CacheAge = snapshotAge(snapshot, now());
 
   const view = nextKioskView({
     paired,
@@ -454,10 +481,7 @@ export function KioskShell(): React.JSX.Element {
           // one: `requestPort()` needs transient user activation, which the
           // shell never has. Dropping it here would kill the grant the
           // installer just gave with the screen that asked for it.
-          setTransport((prev) => {
-            const nextPort = next === "serial" ? (port ?? null) : null;
-            return nextPort === prev.port ? prev : { port: nextPort, epoch: prev.epoch + 1 };
-          });
+          setScanPort(next === "serial" ? (port ?? null) : null);
         }}
         // Closing UNMOUNTS this screen — the views are exclusive — so the next
         // visit re-runs its `useState(!paired)` and the operator gate is shut
@@ -525,9 +549,6 @@ export function KioskShell(): React.JSX.Element {
     // screen that is safe to show a stranger.
     screen = (
       <Idle
-        // Remounted when the transport changes, because this screen subscribes
-        // at mount and deliberately ignores a later `onScan`.
-        key={transport.epoch}
         onScan={subscribe}
         resolveBadge={async (raw) => {
           if (!roster) return null;
@@ -547,6 +568,17 @@ export function KioskShell(): React.JSX.Element {
           sessions.current += 1;
           setSession({ id: sessions.current, ...admitted });
         }}
+        // The ONLY way back into scanner setup once a kiosk is running: the
+        // pairing screen's own entry is gone the moment the device is paired,
+        // and without this a kiosk whose scanner fails afterwards could be
+        // recovered only by unbinding it from the cabinet. Offered on IDLE and
+        // nowhere else — it is the screen an unattended kiosk rests on, and a
+        // worker mid-cart must not lose their cart to a stray press.
+        //
+        // This raises the request; it grants nothing. `ScannerSetup` still
+        // opens locked on a paired device (Task 11's second tier) and is
+        // unmounted on close, so returning to idle re-shuts the gate.
+        onOpenSettings={() => setScannerSetupRequested(true)}
       />
     );
   }
