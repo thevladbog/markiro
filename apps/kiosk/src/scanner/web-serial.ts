@@ -23,9 +23,11 @@ export interface SerialPort {
   readonly readable: ReadableStream<Uint8Array> | null;
 }
 
-/** `navigator.serial`, narrowed to the one call that hands out grants. */
+/** `navigator.serial`, narrowed to the call that hands out grants and the one
+ * that lists the grants already given. */
 interface SerialApi {
   requestPort(): Promise<SerialPort>;
+  getPorts(): Promise<SerialPort[]>;
 }
 
 /**
@@ -48,6 +50,25 @@ export async function requestSerialPort(): Promise<SerialPort> {
   const serial = (navigator as Navigator & { serial?: SerialApi }).serial;
   if (!serial) throw new Error("kiosk: this device has no Web Serial");
   return serial.requestPort();
+}
+
+/**
+ * The ports this origin has ALREADY been granted, which is the only serial
+ * transport a boot can recover: `requestPort()` needs transient user
+ * activation and the app shell mounts without a gesture, so a kiosk that has
+ * been power-cycled overnight has nothing to hand `createWebSerialSource` but
+ * whatever survives here.
+ *
+ * Returns an EMPTY LIST rather than throwing where Web Serial is absent (a
+ * tablet) or where the browser refuses the query. This is called on the boot
+ * path, and the caller's answer to "no grant" is the keyboard wedge either
+ * way — a rejection would only make the shell reimplement that fallback in a
+ * catch block.
+ */
+export async function listGrantedPorts(): Promise<SerialPort[]> {
+  const serial = (navigator as Navigator & { serial?: SerialApi }).serial;
+  if (!serial) return [];
+  return serial.getPorts();
 }
 
 const DEFAULT_BAUD_RATE = 9600;

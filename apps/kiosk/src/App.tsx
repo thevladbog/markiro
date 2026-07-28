@@ -1,4 +1,4 @@
-import { useTranslation } from "react-i18next";
+import { KioskShell } from "./ui/KioskShell.js";
 
 export type KioskView =
   "loading" | "pairing" | "scanner-setup" | "blocked" | "idle" | "cart" | "done";
@@ -29,7 +29,12 @@ export function nextKioskView(input: KioskViewInput): KioskView {
   return input.submitted ? "done" : "cart";
 }
 
+/**
+ * The composition root, and deliberately nothing else. `nextKioskView` above is
+ * the decision; `KioskShell` is the wiring that feeds it and renders what it
+ * picks. Keeping the two in separate files is what lets the decision be tested
+ * with no DOM, no IndexedDB and no scanner (`test/app-view.test.ts`).
+ */
 export function App(): React.JSX.Element {
-  const { t } = useTranslation();
-  return <main>{t("app.booting")}</main>;
+  return <KioskShell />;
 }
