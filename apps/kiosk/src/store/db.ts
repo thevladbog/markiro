@@ -6,11 +6,10 @@ export const STORE_SNAPSHOT = "snapshot";
 export const STORE_QUEUE = "queue";
 export const STORE_JOURNAL = "journal";
 
-// Exported (not just used internally by `withStore`) so `journal.ts` can run
-// its own cursor-driven transaction: `withStore`'s single-request wiring
-// below only captures one `onsuccess` result, but a "last N entries" read
-// needs `cursor.continue()` called repeatedly against the same transaction.
-export function open(): Promise<IDBDatabase> {
+// Module-private: every caller reaches the database through `withStore` or
+// `withCursor` below, which are the only two places that open a connection
+// and are therefore the only two places responsible for closing it.
+function open(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = () => {
@@ -42,8 +41,6 @@ export async function withStore<T>(
   return new Promise<T | undefined>((resolve, reject) => {
     const tx = db.transaction(name, mode);
     let result: T | undefined;
-    const request = run(tx.objectStore(name));
-    if (request) request.onsuccess = () => (result = request.result);
     tx.oncomplete = () => {
       db.close();
       resolve(result);
@@ -52,5 +49,60 @@ export async function withStore<T>(
       db.close();
       reject(tx.error ?? new Error("IndexedDB transaction failed"));
     };
+    try {
+      const request = run(tx.objectStore(name));
+      if (request) request.onsuccess = () => (result = request.result);
+    } catch (err) {
+      // `run` can throw synchronously (e.g. a write method called against a
+      // "readonly" transaction) before any request ever reaches `tx.onerror`
+      // or `tx.oncomplete` — close the handle explicitly here so it can't leak.
+      db.close();
+      reject(err instanceof Error ? err : new Error(String(err)));
+    }
+  });
+}
+
+/**
+ * Like `withStore`, but drives a cursor: `onCursor` fires once per step (most
+ * recent first with `direction: "prev"`), and its `stop` callback ends the
+ * walk by simply not calling `cursor.continue()` again. Every value the
+ * cursor visits before `stop()` is called is collected, in visit order, into
+ * the resolved array — this is the only place in `src/store/` allowed to
+ * drive a multi-step request against a single transaction, exactly as
+ * `withStore` is the only place allowed to drive a single-request one.
+ */
+export async function withCursor<T>(
+  name: string,
+  direction: IDBCursorDirection,
+  onCursor: (cursor: IDBCursorWithValue, stop: () => void) => void,
+): Promise<T[]> {
+  const db = await open();
+  return new Promise<T[]>((resolve, reject) => {
+    const tx = db.transaction(name, "readonly");
+    const results: T[] = [];
+    let stopped = false;
+    const stop = () => {
+      stopped = true;
+    };
+    tx.oncomplete = () => {
+      db.close();
+      resolve(results);
+    };
+    tx.onerror = () => {
+      db.close();
+      reject(tx.error ?? new Error("IndexedDB transaction failed"));
+    };
+    try {
+      const request = tx.objectStore(name).openCursor(null, direction);
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor || stopped) return;
+        results.push(cursor.value as T);
+        onCursor(cursor, stop);
+      };
+    } catch (err) {
+      db.close();
+      reject(err instanceof Error ? err : new Error(String(err)));
+    }
   });
 }
