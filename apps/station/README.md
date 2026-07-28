@@ -176,12 +176,12 @@ shows one of three states:
   anything else, or hasn't arrived yet.
 
 With a scanner configured, only an explicit `"connected"` event counts as
-connected. The effect that opens/closes the scanner session (keyed on
-`hardwareConfig.scanner`, right above the render logic that calls
-`scannerIndicator`) resets `scannerStatus` to `null` and closes the previous
-session before opening the newly configured one, specifically so a scanner
+connected. A React effect manages the scanner session lifecycle (keyed on
+`hardwareConfig.scanner`): it resets `scannerStatus` to `null` and closes the previous
+session before opening the newly configured one, ensuring a scanner
 that never actually opened cannot keep showing a stale `"connected"` left
-over from whatever was configured before. A green light for a scanner that
+over from whatever was configured before. The `scannerIndicator` component reads
+this status to show the three states. A green light for a scanner that
 never opened is exactly the failure this exists to prevent: an operator
 scans into what they believe is a working line and nothing happens.
 
