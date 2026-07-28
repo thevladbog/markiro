@@ -7,6 +7,7 @@ import {
   STALE_WARN_MS,
 } from "../src/sync/worker.js";
 import { enqueueOrder, listQueue } from "../src/store/queue.js";
+import * as queueStore from "../src/store/queue.js";
 import * as journalStore from "../src/store/journal.js";
 import { readSnapshot, replaceSnapshot } from "../src/store/cache.js";
 import type { KioskBootstrapDto } from "../src/api/types.js";
@@ -58,6 +59,15 @@ describe("cacheAge", () => {
     expect(cacheAge(base, at(-STALE_WARN_MS))).toBe("fresh");
     expect(cacheAge(base, at(-STALE_BLOCK_MS * 2))).toBe("fresh");
   });
+
+  it("blocks on an unparseable stamp — a gate that cannot establish freshness must never assert it", () => {
+    // Date.parse returns NaN and every comparison against NaN is false, so the
+    // naive form falls through to "fresh" forever: one edited character in a
+    // stolen tablet's IndexedDB would disable the seven-day lockout for good.
+    for (const stamp of ["not-a-date", "", "2026-07-28T99:99:99Z"]) {
+      expect(cacheAge(stamp, new Date(base))).toBe("blocked");
+    }
+  });
 });
 
 describe("flushQueue", () => {
@@ -101,7 +111,10 @@ describe("flushQueue", () => {
     expect((await listQueue()).map((q) => q.deviceSeq)).toEqual([1, 2]);
   });
 
-  it("journals the server's verdict and only then drops the order", async () => {
+  // Asserts both effects landed, not their order: the "acknowledge, then
+  // remove" guarantee is claimed only by the replay test below, which is what
+  // actually fails if the two writes are swapped.
+  it("journals the server's verdict, conflicts and all, and clears the order from the queue", async () => {
     await enqueueOrder({ deviceSeq: 4, badgeCode: "B", reason: "buy", items: [{ rawKm: "01…" }] });
     const client = {
       bootstrap: vi.fn(),
@@ -182,6 +195,80 @@ describe("flushQueue", () => {
     expect((await listQueue()).map((q) => q.deviceSeq)).toEqual([2, 3]);
     expect((await journalStore.readJournal(10)).map((e) => e.deviceSeq)).toEqual([1]);
   });
+
+  it("resolves even when the store itself fails, so no caller ever has to guard it", async () => {
+    // Task 14 drives this from a setInterval and an `online` handler, neither
+    // of which can catch a rejection that escapes here.
+    const listQueueSpy = vi
+      .spyOn(queueStore, "listQueue")
+      .mockRejectedValueOnce(new Error("indexeddb unavailable"));
+    const client = { bootstrap: vi.fn(), submitOrder: vi.fn() };
+
+    await expect(flushQueue(client as never, () => new Date())).resolves.toBeUndefined();
+
+    expect(listQueueSpy).toHaveBeenCalledTimes(1);
+    expect(client.submitOrder).not.toHaveBeenCalled();
+  });
+
+  it("resolves when the dequeue fails too, leaving the acknowledged order to replay", async () => {
+    await enqueueOrder({ deviceSeq: 1, badgeCode: "B", reason: "buy", items: [] });
+    vi.spyOn(queueStore, "dequeueOrder").mockRejectedValueOnce(new Error("indexeddb unavailable"));
+    const client = {
+      bootstrap: vi.fn(),
+      submitOrder: vi.fn(async () => ({
+        orderNo: "ORD-26-0001",
+        status: "pending",
+        itemCount: 0,
+        conflicts: [],
+      })),
+    };
+
+    await expect(flushQueue(client as never, () => new Date())).resolves.toBeUndefined();
+
+    // Documented cost of "acknowledge, then remove": the order survives and its
+    // verdict gets journalled a second time on replay. A duplicate log line is
+    // cheaper than a lost pickup.
+    expect((await listQueue()).map((q) => q.deviceSeq)).toEqual([1]);
+  });
+
+  it("ignores a second concurrent drain instead of submitting the same order twice", async () => {
+    for (const deviceSeq of [1, 2]) {
+      await enqueueOrder({ deviceSeq, badgeCode: "B", reason: "buy", items: [] });
+    }
+    let reachedSubmit!: () => void;
+    const submitStarted = new Promise<void>((resolve) => {
+      reachedSubmit = resolve;
+    });
+    let releaseSubmit!: () => void;
+    const submitGate = new Promise<void>((resolve) => {
+      releaseSubmit = resolve;
+    });
+    const client = {
+      bootstrap: vi.fn(),
+      submitOrder: vi.fn(async (body: { deviceSeq: number }) => {
+        reachedSubmit();
+        await submitGate;
+        return {
+          orderNo: `ORD-26-000${body.deviceSeq}`,
+          status: "pending",
+          itemCount: 0,
+          conflicts: [],
+        };
+      }),
+    };
+
+    const first = flushQueue(client as never, () => new Date());
+    // Hand off on a promise rather than a timer: once this resolves the first
+    // drain is provably parked inside submitOrder with order 1 still queued,
+    // which is exactly the window where a second drain would double-submit.
+    await submitStarted;
+    const second = flushQueue(client as never, () => new Date());
+    releaseSubmit();
+    await Promise.all([first, second]);
+
+    expect(client.submitOrder.mock.calls.map(([body]) => body.deviceSeq)).toEqual([1, 2]);
+    expect(await listQueue()).toEqual([]);
+  });
 });
 
 const bootstrap = (generatedAt: string): KioskBootstrapDto => ({
@@ -225,5 +312,24 @@ describe("refreshSnapshot", () => {
       bootstrap: cached,
       fetchedAt: "2026-07-28T06:00:01.000Z",
     });
+  });
+
+  it("refuses a bootstrap whose generatedAt is unparseable and keeps the cached snapshot byte-identical", async () => {
+    const cached = bootstrap("2026-07-28T06:00:00.000Z");
+    await replaceSnapshot(cached, new Date("2026-07-28T06:00:01.000Z"));
+    const before = JSON.stringify(await readSnapshot());
+    const client = {
+      bootstrap: vi.fn(async () => bootstrap("not-a-date")),
+      submitOrder: vi.fn(),
+    };
+
+    await expect(
+      refreshSnapshot(client as never, () => new Date("2026-07-28T07:00:00.000Z")),
+    ).rejects.toThrow(/generatedAt/);
+
+    // Same failure path as a dead network on purpose: the kiosk keeps its
+    // last-known-good dataset and ages fresh → warn → blocked over seven days,
+    // rather than persisting a stamp whose freshness can never be established.
+    expect(JSON.stringify(await readSnapshot())).toBe(before);
   });
 });
