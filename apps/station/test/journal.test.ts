@@ -384,4 +384,63 @@ describe("outbox", () => {
     // The unrelated code row survives: nothing was deleted for a rejected scan.
     expect(await loadCodeKeys(exec)).toEqual(new Set(["other-h"]));
   });
+
+  it("does not delete an already-present code when the outbox write fails", async () => {
+    const exec = makeExec();
+    const code = {
+      codeHash: "h1",
+      shiftId: "s1",
+      gtin14: "04600000000017",
+      serial: "AB1",
+      scannedAt: "2026-07-28T10:00:00.000Z",
+    };
+
+    // First scan: the code gets stored.
+    await recordScan(
+      exec,
+      {
+        shiftId: "s1",
+        terminalId: "t1",
+        raw: "RAW1",
+        verdict: "ok",
+        scannedAt: "2026-07-28T10:00:00.000Z",
+      },
+      code,
+    );
+
+    // Verify the code is in codes_mirror.
+    expect(await loadCodeKeys(exec)).toEqual(new Set(["h1"]));
+
+    // Second scan of the same code with a failing outbox executor.
+    const failing: SqlExecutor = {
+      run: async (sql, params) => {
+        if (/INTO outbox/i.test(sql)) throw new Error("disk full");
+        return exec.run(sql, params);
+      },
+      all: (sql, params) => exec.all(sql, params),
+    };
+
+    // The second scan hits the primary key (storedCode = false, alreadyPresent = true)
+    // and then the outbox insert fails.
+    await expect(
+      recordScan(
+        failing,
+        {
+          shiftId: "s1",
+          terminalId: "t1",
+          raw: "RAW1",
+          verdict: "ok",
+          scannedAt: "2026-07-28T10:00:05.000Z",
+        },
+        code,
+      ),
+    ).rejects.toThrow(/disk full/);
+
+    // The code must still be in codes_mirror: the compensating delete only runs
+    // when storedCode is true, but this second scan had storedCode = false because
+    // the code was already present. If the guard were loosened to just check
+    // 'code', the code would be incorrectly deleted, losing the first scan's
+    // payload forever.
+    expect(await loadCodeKeys(exec)).toEqual(new Set(["h1"]));
+  });
 });
