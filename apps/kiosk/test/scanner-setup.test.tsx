@@ -71,6 +71,40 @@ function fakeScanSource(): ScanSource & { emit: (raw: string) => void; listening
 }
 
 /**
+ * The shell's fan-out (`KioskShell`'s listener `Set`) over whatever transport
+ * the kiosk is CURRENTLY running — the seam the gate signs an operator in
+ * through, and a different one from `scanSource` on purpose.
+ *
+ * A fan-out rather than a second `ScanSource` because that is the shape of the
+ * real thing, and the shape is the fix: the shell subscribes to the transport
+ * once and hands out set membership, so a screen joining it takes nothing away
+ * from the screen behind it — which a second listener on a single-subscriber
+ * `createWebSerialSource` very much does.
+ */
+function fakeFanOut(): {
+  subscribe: (listener: ScanListener) => () => void;
+  emit: (raw: string) => void;
+  listeners: () => number;
+} {
+  const set = new Set<ScanListener>();
+  return {
+    subscribe: (listener) => {
+      set.add(listener);
+      return () => {
+        set.delete(listener);
+      };
+    },
+    emit: (raw) => act(() => set.forEach((listener) => listener(raw))),
+    listeners: () => set.size,
+  };
+}
+
+/** A fan-out nothing is ever pushed through, for the tests whose subject is the
+ * test scan — that one reads `scanSource`, never this. Module-level so it is
+ * referentially stable, as the prop requires. */
+const noFanOut = (): (() => void) => () => {};
+
+/**
  * A `SerialPort` whose readable stream this test drives, so a payload can be
  * pushed through the REAL `createWebSerialSource` reader loop.
  *
@@ -183,6 +217,7 @@ describe("ScannerSetup — transports offered", () => {
         paired={false}
         bootstrap={null}
         scanSource={fakeScanSource()}
+        subscribe={noFanOut}
         onClose={vi.fn()}
       />,
     );
@@ -200,6 +235,7 @@ describe("ScannerSetup — transports offered", () => {
         paired={false}
         bootstrap={null}
         scanSource={fakeScanSource()}
+        subscribe={noFanOut}
         onClose={vi.fn()}
       />,
     );
@@ -225,7 +261,13 @@ describe("ScannerSetup — the test scan", () => {
     it(`echoes ${what} as its own kind`, () => {
       const source = fakeScanSource();
       render(
-        <ScannerSetup paired={false} bootstrap={null} scanSource={source} onClose={vi.fn()} />,
+        <ScannerSetup
+          paired={false}
+          bootstrap={null}
+          scanSource={source}
+          subscribe={noFanOut}
+          onClose={vi.fn()}
+        />,
       );
 
       source.emit(raw);
@@ -239,7 +281,15 @@ describe("ScannerSetup — the test scan", () => {
     // the kiosk simply does not know, because only the first one is fixed by
     // switching to Web Serial.
     const source = fakeScanSource();
-    render(<ScannerSetup paired={false} bootstrap={null} scanSource={source} onClose={vi.fn()} />);
+    render(
+      <ScannerSetup
+        paired={false}
+        bootstrap={null}
+        scanSource={source}
+        subscribe={noFanOut}
+        onClose={vi.fn()}
+      />,
+    );
 
     source.emit(`01${GTIN}21KYC9X7MQ93Abcd`);
     const incomplete = status().textContent;
@@ -257,7 +307,15 @@ describe("ScannerSetup — the test scan", () => {
     // deliver — the actionable fix on such a device is the scanner's own
     // configuration, which can be told to transmit GS.
     const source = fakeScanSource();
-    render(<ScannerSetup paired={false} bootstrap={null} scanSource={source} onClose={vi.fn()} />);
+    render(
+      <ScannerSetup
+        paired={false}
+        bootstrap={null}
+        scanSource={source}
+        subscribe={noFanOut}
+        onClose={vi.fn()}
+      />,
+    );
 
     source.emit(`01${GTIN}21KYC9X7MQ93Abcd`);
 
@@ -270,7 +328,15 @@ describe("ScannerSetup — the test scan", () => {
   it("keeps the switch-to-Web-Serial advice where Web Serial actually exists", () => {
     setWebSerial(true);
     const source = fakeScanSource();
-    render(<ScannerSetup paired={false} bootstrap={null} scanSource={source} onClose={vi.fn()} />);
+    render(
+      <ScannerSetup
+        paired={false}
+        bootstrap={null}
+        scanSource={source}
+        subscribe={noFanOut}
+        onClose={vi.fn()}
+      />,
+    );
 
     source.emit(`01${GTIN}21KYC9X7MQ93Abcd`);
 
@@ -282,7 +348,13 @@ describe("ScannerSetup — the test scan", () => {
     try {
       const source = fakeScanSource();
       render(
-        <ScannerSetup paired={false} bootstrap={null} scanSource={source} onClose={vi.fn()} />,
+        <ScannerSetup
+          paired={false}
+          bootstrap={null}
+          scanSource={source}
+          subscribe={noFanOut}
+          onClose={vi.fn()}
+        />,
       );
 
       source.emit(`01${GTIN}21KYC9X7MQ93Abcd`);
@@ -302,6 +374,7 @@ describe("ScannerSetup — access before pairing", () => {
         paired={false}
         bootstrap={null}
         scanSource={fakeScanSource()}
+        subscribe={noFanOut}
         onClose={vi.fn()}
       />,
     );
@@ -316,7 +389,13 @@ describe("ScannerSetup — access after pairing", () => {
   it("keeps the settings out of the document entirely until an operator signs in", async () => {
     const bootstrap = await bootstrapWith([{ login: "1042", pin: "4821" }]);
     const { container } = render(
-      <ScannerSetup paired bootstrap={bootstrap} scanSource={fakeScanSource()} onClose={vi.fn()} />,
+      <ScannerSetup
+        paired
+        bootstrap={bootstrap}
+        scanSource={fakeScanSource()}
+        subscribe={noFanOut}
+        onClose={vi.fn()}
+      />,
     );
 
     // Absent, not merely hidden: a CSS-hidden settings pane would still be in
@@ -332,7 +411,13 @@ describe("ScannerSetup — access after pairing", () => {
   it("keeps it closed on a wrong PIN and says only that sign-in failed", async () => {
     const bootstrap = await bootstrapWith([{ login: "1042", pin: "4821" }]);
     const { container } = render(
-      <ScannerSetup paired bootstrap={bootstrap} scanSource={fakeScanSource()} onClose={vi.fn()} />,
+      <ScannerSetup
+        paired
+        bootstrap={bootstrap}
+        scanSource={fakeScanSource()}
+        subscribe={noFanOut}
+        onClose={vi.fn()}
+      />,
     );
 
     typeDigits("1042");
@@ -350,7 +435,13 @@ describe("ScannerSetup — access after pairing", () => {
     // enumerate personnel numbers, exactly as the station guards against.
     const bootstrap = await bootstrapWith([{ login: "1042", pin: "4821" }]);
     const first = render(
-      <ScannerSetup paired bootstrap={bootstrap} scanSource={fakeScanSource()} onClose={vi.fn()} />,
+      <ScannerSetup
+        paired
+        bootstrap={bootstrap}
+        scanSource={fakeScanSource()}
+        subscribe={noFanOut}
+        onClose={vi.fn()}
+      />,
     );
     typeDigits("1042");
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
@@ -361,7 +452,13 @@ describe("ScannerSetup — access after pairing", () => {
     first.unmount();
 
     render(
-      <ScannerSetup paired bootstrap={bootstrap} scanSource={fakeScanSource()} onClose={vi.fn()} />,
+      <ScannerSetup
+        paired
+        bootstrap={bootstrap}
+        scanSource={fakeScanSource()}
+        subscribe={noFanOut}
+        onClose={vi.fn()}
+      />,
     );
     typeDigits("7777");
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
@@ -375,7 +472,13 @@ describe("ScannerSetup — access after pairing", () => {
   it("opens on the right personnel number and PIN", async () => {
     const bootstrap = await bootstrapWith([{ login: "1042", pin: "4821" }]);
     render(
-      <ScannerSetup paired bootstrap={bootstrap} scanSource={fakeScanSource()} onClose={vi.fn()} />,
+      <ScannerSetup
+        paired
+        bootstrap={bootstrap}
+        scanSource={fakeScanSource()}
+        subscribe={noFanOut}
+        onClose={vi.fn()}
+      />,
     );
 
     typeDigits("1042");
@@ -389,10 +492,21 @@ describe("ScannerSetup — access after pairing", () => {
 
   it("opens on a badge scan of an active operator", async () => {
     const bootstrap = await bootstrapWith([{ login: "1042", pin: "4821", badge: "OPBADGE-7" }]);
-    const source = fakeScanSource();
-    render(<ScannerSetup paired bootstrap={bootstrap} scanSource={source} onClose={vi.fn()} />);
+    // Through the FAN-OUT, because that is where a badge presented at a
+    // running kiosk actually arrives — see the test below for why it cannot be
+    // the injected source.
+    const fanOut = fakeFanOut();
+    render(
+      <ScannerSetup
+        paired
+        bootstrap={bootstrap}
+        scanSource={fakeScanSource()}
+        subscribe={fanOut.subscribe}
+        onClose={vi.fn()}
+      />,
+    );
 
-    source.emit("OPBADGE-7");
+    fanOut.emit("OPBADGE-7");
 
     await waitFor(() => expect(transportGroup()).toBeTruthy());
   });
@@ -401,13 +515,114 @@ describe("ScannerSetup — access after pairing", () => {
     const bootstrap = await bootstrapWith([
       { login: "1042", pin: "4821", badge: "OPBADGE-7", active: false },
     ]);
-    const source = fakeScanSource();
-    render(<ScannerSetup paired bootstrap={bootstrap} scanSource={source} onClose={vi.fn()} />);
+    const fanOut = fakeFanOut();
+    render(
+      <ScannerSetup
+        paired
+        bootstrap={bootstrap}
+        scanSource={fakeScanSource()}
+        subscribe={fanOut.subscribe}
+        onClose={vi.fn()}
+      />,
+    );
 
-    source.emit("OPBADGE-7");
+    fanOut.emit("OPBADGE-7");
 
     await waitFor(() => expect(screen.getAllByRole("alert")).toHaveLength(1));
     expect(transportGroup()).toBeNull();
+  });
+
+  /**
+   * WHICH scanner the gate listens to, pinned in both directions.
+   *
+   * `createWebSerialSource` is single-subscriber — `port.readable` is locked by
+   * the first reader — and on a serial kiosk the shell has held that reader
+   * since boot. So a listener this screen starts on its own copy of the
+   * injected source reads NOTHING, and the badge tier of the gate is dead
+   * without a symptom: PIN sign-in still works, so nobody is locked out to
+   * report it, and Web Serial is the configuration this product recommends.
+   *
+   * The negative half is the half that rots. A gate wired back to `scanSource`
+   * still passes «opens on a badge scan» above if that test hands it the same
+   * seam it emits on — which is exactly how this shipped. Asserting that the
+   * injected source is never even STARTED while the gate is shut is what makes
+   * the wiring, not the test's own plumbing, the thing under test.
+   */
+  it("reads the gate's badge off the running transport and never off the injected source", async () => {
+    const bootstrap = await bootstrapWith([{ login: "1042", pin: "4821", badge: "OPBADGE-7" }]);
+    const injected = fakeScanSource();
+    const fanOut = fakeFanOut();
+    render(
+      <ScannerSetup
+        paired
+        bootstrap={bootstrap}
+        scanSource={injected}
+        subscribe={fanOut.subscribe}
+        onClose={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(fanOut.listeners()).toBe(1));
+    // Not merely "also subscribed to the fan-out": the injected source is not
+    // started at all, which is the only version of this the serial kiosk can
+    // actually honour.
+    expect(injected.listening()).toBe(false);
+
+    // A badge down the injected source is therefore not the gate's badge...
+    injected.emit("OPBADGE-7");
+    await act(async () => {});
+    expect(transportGroup()).toBeNull();
+
+    // ...and one down the transport the kiosk is running is.
+    fanOut.emit("OPBADGE-7");
+
+    await waitFor(() => expect(transportGroup()).toBeTruthy());
+  });
+
+  /**
+   * The handover, and the reason the two props are not one.
+   *
+   * Once the gate is open the same gesture means the opposite thing, and it has
+   * to be answered by the transport the INSTALLER PICKED rather than the one
+   * the shell is running — otherwise the test scan certifies whatever the
+   * kiosk happened to be on and the green light says nothing about the choice,
+   * which is the false green light Task 11's review caught. So the fan-out is
+   * handed back the moment the gate opens: exactly one of the two is ever
+   * listening, and a scan cannot be swallowed by the wrong one.
+   */
+  it("hands the fan-out back when the gate opens, and certifies the picked transport instead", async () => {
+    const bootstrap = await bootstrapWith([{ login: "1042", pin: "4821" }]);
+    const injected = fakeScanSource();
+    const fanOut = fakeFanOut();
+    render(
+      <ScannerSetup
+        paired
+        bootstrap={bootstrap}
+        scanSource={injected}
+        subscribe={fanOut.subscribe}
+        onClose={vi.fn()}
+      />,
+    );
+
+    typeDigits("1042");
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    typeDigits("4821");
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await waitFor(() => expect(transportGroup()).toBeTruthy());
+
+    // Left, not merely joined by a second listener: nothing this screen does
+    // from here on should reach the running kiosk's scanner.
+    await waitFor(() => expect(fanOut.listeners()).toBe(0));
+    expect(injected.listening()).toBe(true);
+
+    // So the running transport can no longer certify anything...
+    fanOut.emit(`01${GTIN}21KYC9X7MQ${GS}93Abcd`);
+    expect(status().textContent).toMatch(/waiting for a scan/i);
+
+    // ...and the verdict comes from the transport this screen settled on.
+    injected.emit(`01${GTIN}21KYC9X7MQ${GS}93Abcd`);
+
+    expect(status().textContent).toContain("Marking code");
   });
 
   it("carries the can't-sign-in recovery hint on the gate", async () => {
@@ -415,7 +630,13 @@ describe("ScannerSetup — access after pairing", () => {
     // no visible way out — re-pairing from the cabinet is that way out.
     const bootstrap = await bootstrapWith([]);
     render(
-      <ScannerSetup paired bootstrap={bootstrap} scanSource={fakeScanSource()} onClose={vi.fn()} />,
+      <ScannerSetup
+        paired
+        bootstrap={bootstrap}
+        scanSource={fakeScanSource()}
+        subscribe={noFanOut}
+        onClose={vi.fn()}
+      />,
     );
 
     const hint = screen.getByText(/unbind this kiosk/i);
@@ -432,6 +653,7 @@ describe("ScannerSetup — the chosen transport", () => {
         paired={false}
         bootstrap={null}
         scanSource={fakeScanSource()}
+        subscribe={noFanOut}
         onClose={vi.fn()}
       />,
     );
@@ -445,6 +667,7 @@ describe("ScannerSetup — the chosen transport", () => {
         paired={false}
         bootstrap={null}
         scanSource={fakeScanSource()}
+        subscribe={noFanOut}
         onClose={vi.fn()}
       />,
     );
@@ -470,6 +693,7 @@ describe("ScannerSetup — granting the serial port", () => {
         paired={false}
         bootstrap={null}
         scanSource={fakeScanSource()}
+        subscribe={noFanOut}
         onTransportChange={onTransportChange}
         onClose={vi.fn()}
       />,
@@ -495,7 +719,13 @@ describe("ScannerSetup — granting the serial port", () => {
     setWebSerial(true, async () => port);
     const injected = fakeScanSource();
     render(
-      <ScannerSetup paired={false} bootstrap={null} scanSource={injected} onClose={vi.fn()} />,
+      <ScannerSetup
+        paired={false}
+        bootstrap={null}
+        scanSource={injected}
+        subscribe={noFanOut}
+        onClose={vi.fn()}
+      />,
     );
 
     expect(injected.listening()).toBe(true);
@@ -527,6 +757,7 @@ describe("ScannerSetup — granting the serial port", () => {
         paired={false}
         bootstrap={null}
         scanSource={fakeScanSource()}
+        subscribe={noFanOut}
         onClose={vi.fn()}
       />,
     );
@@ -554,6 +785,7 @@ describe("ScannerSetup — granting the serial port", () => {
         paired={false}
         bootstrap={null}
         scanSource={fakeScanSource()}
+        subscribe={noFanOut}
         onTransportChange={onTransportChange}
         onClose={vi.fn()}
       />,
@@ -581,7 +813,13 @@ describe("ScannerSetup — the gate's entry", () => {
     // re-enter BOTH stages.
     const bootstrap = await bootstrapWith([{ login: "1042", pin: "4821" }]);
     render(
-      <ScannerSetup paired bootstrap={bootstrap} scanSource={fakeScanSource()} onClose={vi.fn()} />,
+      <ScannerSetup
+        paired
+        bootstrap={bootstrap}
+        scanSource={fakeScanSource()}
+        subscribe={noFanOut}
+        onClose={vi.fn()}
+      />,
     );
 
     typeDigits("1043");
@@ -603,7 +841,13 @@ describe("ScannerSetup — the gate's entry", () => {
   it("caps the entry so it cannot outgrow the letter-spaced display", async () => {
     const bootstrap = await bootstrapWith([{ login: "1042", pin: "4821" }]);
     render(
-      <ScannerSetup paired bootstrap={bootstrap} scanSource={fakeScanSource()} onClose={vi.fn()} />,
+      <ScannerSetup
+        paired
+        bootstrap={bootstrap}
+        scanSource={fakeScanSource()}
+        subscribe={noFanOut}
+        onClose={vi.fn()}
+      />,
     );
 
     typeDigits("1234567890123456789");
@@ -624,6 +868,7 @@ describe("ScannerSetup — what the store keeps", () => {
         paired={false}
         bootstrap={null}
         scanSource={fakeScanSource()}
+        subscribe={noFanOut}
         onClose={vi.fn()}
       />,
     );
@@ -646,12 +891,20 @@ describe("ScannerSetup — what the store keeps", () => {
 
   it("renders no verdict and persists nothing for a scan arriving while the gate is locked", async () => {
     const bootstrap = await bootstrapWith([{ login: "1042", pin: "4821", badge: "OPBADGE-7" }]);
-    const source = fakeScanSource();
+    const fanOut = fakeFanOut();
     const { container } = render(
-      <ScannerSetup paired bootstrap={bootstrap} scanSource={source} onClose={vi.fn()} />,
+      <ScannerSetup
+        paired
+        bootstrap={bootstrap}
+        scanSource={fakeScanSource()}
+        subscribe={fanOut.subscribe}
+        onClose={vi.fn()}
+      />,
     );
 
-    source.emit(`01${GTIN}21KYC9X7MQ${GS}93Abcd`);
+    // Down the RUNNING transport, which is the only way anything reaches a
+    // kiosk whose gate is shut.
+    fanOut.emit(`01${GTIN}21KYC9X7MQ${GS}93Abcd`);
 
     await waitFor(() => expect(screen.getAllByRole("alert")).toHaveLength(1));
     // The one live region is the entry display here, never a verdict: a scan

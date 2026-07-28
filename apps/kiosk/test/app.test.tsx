@@ -713,6 +713,47 @@ describe("KioskShell", () => {
   });
 
   /**
+   * The badge tier of the settings gate, on the transport this product is
+   * actually built around.
+   *
+   * Web Serial is the RECOMMENDED configuration — it is the whole reason the
+   * transport exists, because a DataMatrix marking code reads poorly through a
+   * keyboard wedge — so a badge sign-in that only works on the wedge is one
+   * that does not work where it matters. PIN sign-in kept anyone from being
+   * locked out, which is exactly why this could stay silently dead.
+   *
+   * `createWebSerialSource` is SINGLE-SUBSCRIBER: the shell has held this
+   * port's reader since boot, so a listener the setup screen starts on its own
+   * copy of that source reads nothing at all. The gate has to read the shell's
+   * fan-out — the same subscription `Idle` and `Cart` take.
+   */
+  it("signs an operator in at the settings gate on a badge read over Web Serial", async () => {
+    const scanner = fakeSerialPort();
+    setWebSerial(scanner.port);
+    await writeScannerSettings({ transport: "serial" });
+    await pair();
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+
+    // Proving the port is genuinely the SHELL's before the gate is ever
+    // opened: this scan is answered by the shell's own reader, which is the
+    // reader that then goes on holding the port under the setup screen.
+    scanner.scan(BADGE);
+    await settle(() => expect(screen.getByText(CART_TITLE)).toBeDefined());
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Не я" }));
+    });
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+
+    await holdIdleHeader(SETTINGS_HOLD_MS);
+    await settle(() => expect(screen.getByText(GATE_TITLE)).toBeDefined());
+
+    scanner.scan(OPERATOR_BADGE);
+
+    await settle(() => expect(screen.getByText(SETUP_TITLE)).toBeDefined());
+  });
+
+  /**
    * The transport swap, end to end and through the real `navigator.serial`.
    *
    * This kiosk boots on the port a previous visit granted (`getPorts()` is the
@@ -745,11 +786,10 @@ describe("KioskShell", () => {
     });
     await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
 
-    // An operator moves the kiosk back to the wedge. They sign in on the pad
-    // rather than with their badge: `createWebSerialSource` is a
-    // single-subscriber source, and the shell's has held this port since boot,
-    // so the setup screen's own listener on it reads nothing. That is why the
-    // gate takes a personnel number and a PIN as well as a badge.
+    // An operator moves the kiosk back to the wedge, signing in on the pad —
+    // the gate's OTHER entrance, and the one for an operator whose badge is
+    // not to hand (or whose scanner is the very thing they came to fix). The
+    // badge over this same held-open port is the test above.
     await holdIdleHeader(SETTINGS_HOLD_MS);
     await settle(() => expect(screen.getByText(GATE_TITLE)).toBeDefined());
     typeDigits(OPERATOR_LOGIN);

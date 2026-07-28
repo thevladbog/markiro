@@ -5,7 +5,7 @@ import type { KioskBootstrapDto } from "../api/types.js";
 import { verifyOperatorBadge, verifyOperatorPin } from "../credentials/operator.js";
 import { classifyKioskScan, type KioskScan } from "../domain-guard/classify.js";
 import { isWebSerialSupported } from "../scanner/keyboard.js";
-import type { ScanSource } from "../scanner/source.js";
+import type { ScanListener, ScanSource } from "../scanner/source.js";
 import {
   createWebSerialSource,
   requestSerialPort,
@@ -64,12 +64,25 @@ export interface ScannerSetupProps {
    * and by design needs none (see the access tiers below). */
   bootstrap: KioskBootstrapDto | null;
   /**
-   * The live source, so the test scan exercises the transport actually
-   * running rather than a freshly built one.
+   * THE TEST SCAN's transport, and deliberately NOT `subscribe` below.
    *
-   * MUST BE REFERENTIALLY STABLE across renders. The scan effect below lists
-   * it in its dependencies, so a source built inline in the parent's JSX is a
-   * different object on every render: the listener would be torn down and
+   * The two exist because this screen reads a scanner for two different
+   * reasons, and they want different answers:
+   *
+   *  - the test scan has to certify THE TRANSPORT THE INSTALLER JUST PICKED.
+   *    A port granted seconds ago is one the shell is not reading yet — its
+   *    fan-out would never deliver a byte of it — so this stays a raw
+   *    `ScanSource` the screen starts itself, and is replaced outright by a
+   *    source over the granted port the moment there is one (`activeSource`
+   *    below). Certifying through the fan-out instead would green-light
+   *    whatever the shell happened to be on, which is the exact
+   *    false-green-light Task 11's review caught;
+   *  - the gate is signing an operator in on the RUNNING kiosk, which is
+   *    `subscribe`'s job.
+   *
+   * MUST BE REFERENTIALLY STABLE across renders. The test-scan effect below
+   * lists it in its dependencies, so a source built inline in the parent's JSX
+   * is a different object on every render: the listener would be torn down and
    * re-subscribed each time. That is not merely wasteful — the keyboard wedge
    * accumulates the payload in the closure that teardown discards, so a
    * re-render landing mid-scan silently truncates it and the installer sees a
@@ -77,6 +90,23 @@ export interface ScannerSetupProps {
    * module-level singleton.
    */
   scanSource: ScanSource;
+  /**
+   * THE GATE's scanner: the shell's fan-out over the transport that is
+   * CURRENTLY RUNNING — the very subscription `Idle` and `Cart` take.
+   *
+   * NOT `scanSource.start`, and that is not a stylistic preference.
+   * `createWebSerialSource` is SINGLE-SUBSCRIBER (`port.readable` is locked by
+   * the first reader), and on a serial kiosk the shell has held the port open
+   * since boot — so a listener this screen starts on that same source reads
+   * nothing whatsoever and the gate's badge tier is silently dead. Silently,
+   * because PIN sign-in still works, so nobody is ever locked out to notice;
+   * and on Web Serial, which is the configuration this product recommends.
+   * Through the fan-out, the gate hears exactly what the running kiosk hears.
+   *
+   * MUST BE REFERENTIALLY STABLE for the same reason `scanSource` must: the
+   * gate effect lists it in its dependencies. Returns its own unsubscribe.
+   */
+  subscribe: (listener: ScanListener) => () => void;
   /**
    * Announces the settled transport, and for "serial" the port the installer
    * just granted.
@@ -115,6 +145,7 @@ export function ScannerSetup({
   paired,
   bootstrap,
   scanSource,
+  subscribe,
   onTransportChange,
   onClose,
 }: ScannerSetupProps): React.JSX.Element {
@@ -177,17 +208,23 @@ export function ScannerSetup({
     };
   }, [serialSupported]);
 
-  // One listener, two jobs, switched by the gate: while closed a scan is a
-  // badge sign-in attempt; once open it is the test scan. `unlocked` in the
-  // dependencies is what performs the handover — the source is torn down and
-  // resubscribed exactly once, when the gate opens.
+  /**
+   * WHILE THE GATE IS SHUT a scan is a sign-in attempt and nothing else, and
+   * it is read off the RUNNING transport through the shell's fan-out.
+   *
+   * Never off `scanSource`: on a serial kiosk the shell owns that port's only
+   * reader, so starting a second listener on it would read nothing at all and
+   * the badge would simply never open the gate (see the `subscribe` prop). The
+   * fan-out is a set membership change and takes nothing away from the screen
+   * standing behind this one.
+   *
+   * `unlocked` in the dependencies performs the handover: the moment the gate
+   * opens this unsubscribes and the test scan below takes over, so exactly one
+   * of the two is ever listening.
+   */
   useEffect(() => {
-    if (!activeSource.isAvailable()) return;
-    return activeSource.start((raw) => {
-      if (unlocked) {
-        setResult(classifyKioskScan(raw));
-        return;
-      }
+    if (unlocked) return;
+    return subscribe((raw) => {
       void (async () => {
         const operator = bootstrap ? await verifyOperatorBadge(raw, bootstrap) : null;
         if (operator) {
@@ -198,7 +235,15 @@ export function ScannerSetup({
         }
       })();
     });
-  }, [activeSource, unlocked, bootstrap]);
+  }, [subscribe, unlocked, bootstrap]);
+
+  // ONCE IT IS OPEN the same gesture means the opposite thing: not «let me
+  // in» but «tell me what you made of this», answered by the transport the
+  // installer picked rather than by the one the shell is running.
+  useEffect(() => {
+    if (!unlocked || !activeSource.isAvailable()) return;
+    return activeSource.start((raw) => setResult(classifyKioskScan(raw)));
+  }, [activeSource, unlocked]);
 
   /** Selection settled: apply it, remember it, announce it. */
   function commit(next: Transport, port?: SerialPort): void {

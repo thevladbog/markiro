@@ -475,7 +475,16 @@ export function KioskShell(): React.JSX.Element {
       <ScannerSetup
         paired={paired}
         bootstrap={snapshot?.bootstrap ?? null}
+        // BOTH, and they are not interchangeable — that screen's own prop docs
+        // say which is which. The raw source is for the TEST SCAN, because a
+        // port granted on that screen is one this shell is not reading yet and
+        // no fan-out could deliver it. The fan-out is for the GATE, because a
+        // badge sign-in is happening on the transport this kiosk is actually
+        // running — and on Web Serial that port's only reader is the effect
+        // above, so a second listener started on `scanSource` would read
+        // nothing and the badge would never open the gate.
         scanSource={scanSource}
+        subscribe={subscribe}
         onTransportChange={(next, port) => {
           // The port travels up because only that screen's radio can obtain
           // one: `requestPort()` needs transient user activation, which the
