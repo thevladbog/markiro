@@ -124,7 +124,7 @@ describe("StationScansService.applyBatch month cap (Finding 2)", () => {
     // The batch is already recorded (`onConflictDoNothing` returned no row
     // in this stub) -- this test only cares that the month cap itself did
     // not block a legitimate, small batch from reaching the transaction.
-    expect(result).toEqual({ applied: 0, alreadyApplied: true });
+    expect(result).toEqual({ applied: 0, alreadyApplied: true, conflicts: [] });
   });
 });
 

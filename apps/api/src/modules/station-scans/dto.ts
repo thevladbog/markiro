@@ -35,7 +35,20 @@ export const syncBatchSchema = z.object({
 export type ScanItemDto = z.infer<typeof scanItemSchema>;
 export type SyncBatchDto = z.infer<typeof syncBatchSchema>;
 
+/** A code in THIS batch that lost ownership to an earlier scan elsewhere. */
+export interface BatchConflictDto {
+  codeHash: string;
+  winningTerminalId: string | null;
+  winningScannedAt: string;
+}
+
 export interface SyncBatchResponseDto {
   applied: number;
   alreadyApplied: boolean;
+  /**
+   * Only this batch's OWN losses. A scan of ours that displaced someone
+   * else's is not here — that station's batch was acknowledged long ago and
+   * the cabinet is its backstop.
+   */
+  conflicts: BatchConflictDto[];
 }

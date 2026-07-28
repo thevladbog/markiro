@@ -2,7 +2,8 @@ import { BadRequestException, Inject, Injectable } from "@nestjs/common";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { ensurePartitions, schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
-import type { SyncBatchDto, SyncBatchResponseDto } from "./dto";
+import { resolveOwnership } from "./conflict-resolution";
+import type { BatchConflictDto, SyncBatchDto, SyncBatchResponseDto } from "./dto";
 
 /**
  * Upper bound on how many distinct calendar months a single batch's
@@ -190,8 +191,8 @@ export class StationScansService {
 
       // Someone already applied this batch — almost always this same device
       // retrying after a lost response. Report success so it acknowledges.
-      if (claimed.length === 0) return { applied: 0, alreadyApplied: true };
-      if (body.items.length === 0) return { applied: 0, alreadyApplied: false };
+      if (claimed.length === 0) return { applied: 0, alreadyApplied: true, conflicts: [] };
+      if (body.items.length === 0) return { applied: 0, alreadyApplied: false, conflicts: [] };
 
       const shiftIds = [...new Set(body.items.map((i) => i.shiftId))];
       const owned = await tx
@@ -237,6 +238,77 @@ export class StationScansService {
         })),
       );
 
+      // Ownership is settled last, on the codes this batch actually stored.
+      // One statement to read the incumbents, one to claim — never a query
+      // per code, and never against the partitioned tables.
+      const claimItems = coded.map((i) => ({
+        codeHash: i.code!.codeHash,
+        shiftId: i.shiftId,
+        terminalId: i.terminalId,
+        scannedAt: new Date(i.scannedAt),
+      }));
+
+      let batchConflicts: BatchConflictDto[] = [];
+      if (claimItems.length > 0) {
+        const hashes = [...new Set(claimItems.map((c) => c.codeHash))];
+        const owners = await tx
+          .select({
+            codeHash: schema.codeRegistry.codeHash,
+            shiftId: schema.codeRegistry.shiftId,
+            terminalId: schema.codeRegistry.terminalId,
+            scannedAt: schema.codeRegistry.scannedAt,
+          })
+          .from(schema.codeRegistry)
+          .where(
+            and(
+              eq(schema.codeRegistry.tenantId, tenantId),
+              inArray(schema.codeRegistry.codeHash, hashes),
+            ),
+          );
+
+        const resolution = resolveOwnership(claimItems, owners);
+
+        if (resolution.claims.length > 0) {
+          await tx
+            .insert(schema.codeRegistry)
+            .values(resolution.claims.map((c) => ({ tenantId, ...c })))
+            .onConflictDoUpdate({
+              target: [schema.codeRegistry.tenantId, schema.codeRegistry.codeHash],
+              set: {
+                shiftId: sql`excluded.shift_id`,
+                terminalId: sql`excluded.terminal_id`,
+                scannedAt: sql`excluded.scanned_at`,
+                updatedAt: sql`now()`,
+              },
+              // The rule lives in the statement, not in application ordering:
+              // ownership moves only for a strictly earlier scan, so two
+              // concurrent batches cannot leave it dependent on who ran first.
+              setWhere: sql`excluded.scanned_at < ${schema.codeRegistry.scannedAt}`,
+            });
+        }
+
+        if (resolution.conflicts.length > 0) {
+          await tx.insert(schema.codeConflicts).values(
+            resolution.conflicts.map((c) => ({
+              tenantId,
+              codeHash: c.codeHash,
+              losingShiftId: c.losing.shiftId,
+              losingTerminalId: c.losing.terminalId,
+              losingScannedAt: c.losing.scannedAt,
+              winningShiftId: c.winning.shiftId,
+              winningTerminalId: c.winning.terminalId,
+              winningScannedAt: c.winning.scannedAt,
+            })),
+          );
+        }
+
+        batchConflicts = resolution.lostByThisBatch.map((c) => ({
+          codeHash: c.codeHash,
+          winningTerminalId: c.winning.terminalId,
+          winningScannedAt: c.winning.scannedAt.toISOString(),
+        }));
+      }
+
       // Stamp only shifts that were already closed, and only the first time:
       // the badge marks the shift, it does not track the latest straggler.
       const closed = owned.filter((s) => s.status === "closed").map((s) => s.id);
@@ -253,7 +325,7 @@ export class StationScansService {
           );
       }
 
-      return { applied: body.items.length, alreadyApplied: false };
+      return { applied: body.items.length, alreadyApplied: false, conflicts: batchConflicts };
     });
   }
 }

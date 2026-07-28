@@ -558,4 +558,115 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       .send({ batchId: "machine-1:500", items: [] })
       .expect(401);
   });
+
+  it("gives an unowned code to the batch that sent it, with no conflict", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+    const apiKey = await deviceKey(agent);
+    const shiftId = await openShift(agent);
+
+    const res = await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send({ batchId: "m1:10", items: [item(shiftId, 1)] })
+      .expect(201);
+
+    expect((res.body as { conflicts: unknown[] }).conflicts).toEqual([]);
+  });
+
+  it("reports a later scan of an already-owned code back to the sender", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+    const apiKey = await deviceKey(agent);
+    const shiftId = await openShift(agent);
+
+    const first = item(shiftId, 1);
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send({ batchId: "m1:20", items: [{ ...first, terminalId: "t1" }] })
+      .expect(201);
+
+    const later = {
+      ...first,
+      terminalId: "t2",
+      scannedAt: new Date(Date.parse(first.scannedAt) + 5000).toISOString(),
+    };
+    const res = await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send({ batchId: "m1:21", items: [later] })
+      .expect(201);
+
+    const conflicts = (res.body as { conflicts: { codeHash: string; winningTerminalId: string }[] })
+      .conflicts;
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0]!.winningTerminalId).toBe("t1");
+  });
+
+  it("lets an earlier scan displace the incumbent, and does not report that to the sender", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+    const apiKey = await deviceKey(agent);
+    const shiftId = await openShift(agent);
+
+    const late = { ...item(shiftId, 1), terminalId: "t1" };
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send({ batchId: "m1:30", items: [late] })
+      .expect(201);
+
+    const earlier = {
+      ...late,
+      terminalId: "t2",
+      scannedAt: new Date(Date.parse(late.scannedAt) - 5000).toISOString(),
+    };
+    const res = await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send({ batchId: "m1:31", items: [earlier] })
+      .expect(201);
+
+    // The sender won, so nothing comes back to it — but a conflict exists.
+    expect((res.body as { conflicts: unknown[] }).conflicts).toEqual([]);
+  });
+
+  it("is idempotent: replaying a batch changes neither ownership nor conflict count", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+    const apiKey = await deviceKey(agent);
+    const shiftId = await openShift(agent);
+
+    const first = { ...item(shiftId, 1), terminalId: "t1" };
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send({ batchId: "m1:40", items: [first] })
+      .expect(201);
+
+    const body = {
+      batchId: "m1:41",
+      items: [
+        {
+          ...first,
+          terminalId: "t2",
+          scannedAt: new Date(Date.parse(first.scannedAt) + 5000).toISOString(),
+        },
+      ],
+    };
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send(body)
+      .expect(201);
+    const replay = await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send(body)
+      .expect(201);
+
+    expect((replay.body as { alreadyApplied: boolean }).alreadyApplied).toBe(true);
+    expect((replay.body as { conflicts: unknown[] }).conflicts).toEqual([]);
+  });
 });
