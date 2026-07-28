@@ -478,7 +478,8 @@
           "not_allowed": "product not available at this kiosk",
           "duplicate": "duplicate — code already in another order",
           "over_limit": "daily limit exceeded",
-          "unknown_badge": "badge not recognised"
+          "unknown_badge": "badge not recognised",
+          "unknown_reason": "write-off reason unavailable"
         }
       },
       "rejections": {

@@ -2,12 +2,13 @@ import { z } from "zod";
 import type { OrderConflict } from "../pickup-orders/dto";
 
 /**
- * The kiosk's own six refusal reasons plus `unknown_badge`, which only this
- * table can carry: it happens before any item is examined, so it can never
- * appear in `POST /kiosk/orders`' response and must not widen
- * `OrderConflict`.
+ * The kiosk's own six refusal reasons plus `unknown_badge` and
+ * `unknown_reason`, which only this table can carry: both fire before any
+ * item is examined (unrecognised badge at step 2, an unknown/archived
+ * writeoff reason at step 3), so neither can appear in `POST /kiosk/orders`'
+ * response and must not widen `OrderConflict`.
  */
-export type ScanRejectionReason = OrderConflict["reason"] | "unknown_badge";
+export type ScanRejectionReason = OrderConflict["reason"] | "unknown_badge" | "unknown_reason";
 
 export interface ScanRejectionCode {
   rawKm: string;

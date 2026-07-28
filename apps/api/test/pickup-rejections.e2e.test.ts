@@ -20,6 +20,7 @@ const GS = String.fromCharCode(0x1d);
 const REFUSED_KM = `01${GTIN_NOT_ALLOWED}21REJ1${GS}93Abcd`;
 const REFUSED_KM_2 = `01${GTIN_NOT_ALLOWED}21REJ2${GS}93Abcd`;
 const GOOD_KM = `01${GTIN}21REJ3${GS}93Abcd`;
+const WRITEOFF_KM = `01${GTIN}21REJ16${GS}93Abcd`;
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -233,6 +234,48 @@ describe.skipIf(!ready)("pickup scan rejections e2e", () => {
     }).expect(201);
 
     expect(await rejectionsFor(15)).toHaveLength(0);
+  });
+
+  // Step 3 (writeoffReasonId validation) fires before any item is examined --
+  // same offline-drift shape as the unrecognised badge, but for a reason the
+  // kiosk cached at bootstrap and the admin archived hours later.
+  it("records a writeoff sync whose reason is archived, and still 400s", async () => {
+    const archivedReasonId = randomUUID();
+    await db.insert(schema.pickupOrderReasons).values({
+      id: archivedReasonId,
+      tenantId,
+      name: "Списание (архивная)",
+      archived: true,
+    });
+
+    await postScan({
+      deviceSeq: 16,
+      badgeCode: BADGE,
+      reason: "writeoff",
+      writeoffReasonId: archivedReasonId,
+      items: [{ rawKm: WRITEOFF_KM }],
+    }).expect(400);
+
+    const rows = await rejectionsFor(16);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.employeeId).toBe(employeeId);
+    expect(rows[0]!.badgeCode).toBeNull();
+    expect(rows[0]!.orderId).toBeNull();
+    expect(rows[0]!.codes).toEqual([{ rawKm: WRITEOFF_KM, reason: "unknown_reason" }]);
+  });
+
+  // A heartbeat-shaped writeoff sync (no codes) lost no product and must not
+  // add noise, mirroring the unrecognised-badge item-less guard.
+  it("records nothing when a bad-reason writeoff sync carried no codes", async () => {
+    await postScan({
+      deviceSeq: 17,
+      badgeCode: BADGE,
+      reason: "writeoff",
+      writeoffReasonId: randomUUID(),
+      items: [],
+    }).expect(400);
+
+    expect(await rejectionsFor(17)).toHaveLength(0);
   });
 
   // A rejection consumes a device_seq without creating an order. If the

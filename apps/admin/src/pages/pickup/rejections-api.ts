@@ -17,7 +17,8 @@ export type ScanRejectionReason =
   | "not_allowed"
   | "duplicate"
   | "over_limit"
-  | "unknown_badge";
+  | "unknown_badge"
+  | "unknown_reason";
 
 export interface ScanRejectionCode {
   rawKm: string;

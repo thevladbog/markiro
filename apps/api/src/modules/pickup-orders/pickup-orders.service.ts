@@ -111,7 +111,33 @@ export class PickupOrdersService {
     }
 
     // 3. Writeoff orders require a non-archived reason belonging to this tenant.
-    const writeoffReasonId = await this.resolveWriteoffReasonId(tenantId, dto);
+    let writeoffReasonId: string | null;
+    try {
+      writeoffReasonId = await this.resolveWriteoffReasonId(tenantId, dto);
+    } catch (error) {
+      // Same offline-drift shape as the unrecognised badge above: the kiosk
+      // cached the reason list at bootstrap, the admin archived (or removed)
+      // it hours later, and this throws before a single item is examined --
+      // so without this the codes the worker walked off with leave no trace
+      // at all. Codes only: an item-less sync lost no product and must not
+      // add noise. The employee IS known here (step 2 already succeeded), so
+      // this is `badgeCode: null` -- the mirror image of the badge case.
+      // Rethrow unchanged: this call site must not alter the kiosk's
+      // response, whichever of `resolveWriteoffReasonId`'s two messages fired.
+      if (dto.items.length > 0) {
+        await this.recordScanRejection(this.db, {
+          tenantId,
+          kioskId,
+          employeeId,
+          badgeCode: null,
+          orderId: null,
+          deviceSeq: dto.deviceSeq,
+          codes: dto.items.map((item) => ({ rawKm: item.rawKm, reason: "unknown_reason" })),
+          scannedAt: dto.createdAt ? new Date(dto.createdAt) : new Date(),
+        });
+      }
+      throw error;
+    }
 
     // 4. Per-item KM validation, allowlist resolution and in-request dedup.
     const { conflicts, candidates } = await this.resolveItems(tenantId, kioskId, dto.items);
