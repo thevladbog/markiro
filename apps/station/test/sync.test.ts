@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DatabaseSync } from "node:sqlite";
+import { createStationClient, REQUEST_TIMEOUT_MS } from "../src/lib/api-client.js";
 import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
 import { BACKOFF_START_MS, BATCH_SIZE, createSyncEngine, STUCK_AFTER_MS } from "../src/lib/sync.js";
 
@@ -333,6 +334,63 @@ describe("sync engine", () => {
     engine.stop();
   });
 
+  // Finding 1: a bare `fetch` has no built-in timeout, so a connection that
+  // is accepted but whose response never arrives used to hang the drain's
+  // `await client.post(...)` forever -- `draining` never clears, so later
+  // nudges (a scan, the heartbeat, `online`) only set the "requested" flag
+  // and `publishState()` never runs again, freezing the indicator. Uses the
+  // REAL `createStationClient` (not a hand-rolled mock) so this proves the
+  // actual fix in api-client.ts, not just that the engine's own retry path
+  // works when handed an already-rejecting promise.
+  it(
+    "a stalled request (fetch that never settles on its own) rejects within the client's " +
+      "timeout deadline, and the drain treats it as an ordinary failed batch: queue intact, " +
+      "retry scheduled (Finding 1)",
+    async () => {
+      vi.useFakeTimers();
+      try {
+        const exec = await migratedExec();
+        await seed(exec, 2);
+        let capturedSignal: AbortSignal | undefined;
+        vi.spyOn(globalThis, "fetch").mockImplementation((_url, init?: RequestInit) => {
+          capturedSignal = init?.signal ?? undefined;
+          // Never resolves or rejects on its own -- only reacts to the abort
+          // the client's timeout is now responsible for triggering.
+          return new Promise((_resolve, reject) => {
+            capturedSignal?.addEventListener("abort", () => {
+              reject(new DOMException("The operation was aborted.", "AbortError"));
+            });
+          });
+        });
+        vi.spyOn(console, "error").mockImplementation(() => {});
+
+        const client = createStationClient({
+          machineId: "m1",
+          apiKey: "k",
+          serverUrl: "http://localhost:3000",
+        });
+        const engine = createSyncEngine({ exec, client, machineId: "m1", onState: () => {} });
+
+        engine.nudge();
+        // Let the stalled attempt sit until the client's own deadline, then
+        // let the resulting rejection propagate through the drain's catch
+        // (which schedules a retry and does not touch the queue) and settle.
+        await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS + 1_000);
+        await engine.idle();
+
+        expect(capturedSignal?.aborted).toBe(true);
+        // Queue intact -- nothing was acknowledged on the strength of a
+        // request that never actually got a response.
+        const rows = await exec.all<{ n: number }>("SELECT COUNT(*) AS n FROM outbox");
+        expect(rows[0]!.n).toBe(2);
+        engine.stop();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+    15_000,
+  );
+
   it("does not acknowledge a batch when the response does not match the sync contract", async () => {
     const exec = await migratedExec();
     await seed(exec, 2);
@@ -508,52 +566,104 @@ describe("sync engine", () => {
     engine.stop();
   });
 
-  it("after a success: reports stuck once nothing has synced for the threshold, measured on the injected clock", async () => {
-    const exec = await migratedExec();
-    await seed(exec, 1);
-    let clock = 1_000_000;
-    const post = vi
-      .fn()
-      .mockResolvedValueOnce({ applied: 1, alreadyApplied: false })
-      .mockRejectedValue(new Error("offline"));
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    const states: { pending: number; stuck: boolean }[] = [];
+  it(
+    "after a success: does NOT report stuck for a freshly queued scan whose upload fails, even " +
+      "once the injected clock has crossed the threshold since the last success (Finding 4)",
+    async () => {
+      const exec = await migratedExec();
+      await seed(exec, 1);
+      let clock = 1_000_000;
+      const post = vi
+        .fn()
+        .mockResolvedValueOnce({ applied: 1, alreadyApplied: false })
+        .mockRejectedValue(new Error("offline"));
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const states: { pending: number; stuck: boolean }[] = [];
 
-    const engine = createSyncEngine({
-      exec,
-      client: { post },
-      machineId: "m1",
-      now: () => clock,
-      onState: (s) => states.push({ pending: s.pending, stuck: s.stuck }),
-    });
-    engine.nudge();
-    await engine.idle();
-    expect(states.at(-1)).toMatchObject({ pending: 0, stuck: false });
-    expect(post).toHaveBeenCalledTimes(1);
+      const engine = createSyncEngine({
+        exec,
+        client: { post },
+        machineId: "m1",
+        now: () => clock,
+        onState: (s) => states.push({ pending: s.pending, stuck: s.stuck }),
+      });
+      engine.nudge();
+      await engine.idle();
+      expect(states.at(-1)).toMatchObject({ pending: 0, stuck: false });
+      expect(post).toHaveBeenCalledTimes(1);
 
-    // Queue fresh work (scanned "now" on the real clock, so a regression
-    // back to comparing wall-clock ages here could not accidentally pass)
-    // and make the next send fail.
-    await seed(exec, 1, new Date().toISOString());
-    engine.nudge();
-    await engine.idle();
-    expect(states.at(-1)).toMatchObject({ pending: 1, stuck: false });
+      // Queue fresh work (scanned "now" on the real clock) and make the next
+      // send fail — this is the exact Finding 4 trigger: `lastSuccessAt` is
+      // about to go stale purely because of an IDLE period, not because
+      // anything failed to move, and the queue was empty and healthy the
+      // whole time before this new scan arrived.
+      await seed(exec, 1, new Date().toISOString());
+      engine.nudge();
+      await engine.idle();
+      expect(states.at(-1)).toMatchObject({ pending: 1, stuck: false });
 
-    clock += STUCK_AFTER_MS + 1;
-    // The failed nudge above already scheduled a retry -- with the Finding 1
-    // backoff fix, `nudge()` itself now does nothing while that retry is
-    // pending (nudging again here would just restate the stale state), so
-    // waiting for the engine's OWN scheduled attempt (which will also fail,
-    // and re-publish state regardless) is what actually re-evaluates
-    // `stuck` against the now-advanced clock.
-    await new Promise((resolve) => setTimeout(resolve, BACKOFF_START_MS + 500));
-    await engine.idle();
-    // Flips only because the *injected* clock crossed the threshold since
-    // `lastSuccessAt`; a regression that dropped this branch (or compared
-    // the wrong clock) would leave this false forever.
-    expect(states.at(-1)).toMatchObject({ pending: 1, stuck: true });
-    engine.stop();
-  }, 10_000);
+      // Advance only the INJECTED clock (standing in for idle time passing
+      // with nothing queued) -- real wall-clock time barely moves, so the
+      // freshly-queued scan seeded above is nowhere near STUCK_AFTER_MS old
+      // on the wall clock. Before Finding 4's fix, `stuck` was driven solely
+      // by `now() - lastSuccessAt`, so this alone was enough to flip it true
+      // on the very first failed attempt against the new scan -- exactly the
+      // "cries wolf" behaviour this fix removes.
+      clock += STUCK_AFTER_MS + 1;
+      await new Promise((resolve) => setTimeout(resolve, BACKOFF_START_MS + 500));
+      await engine.idle();
+      expect(states.at(-1)).toMatchObject({ pending: 1, stuck: false });
+      engine.stop();
+    },
+    10_000,
+  );
+
+  it(
+    "after a success: reports stuck once an OLD queued scan (stale on the wall clock) has " +
+      "failed to move for the threshold on the injected clock too (Finding 4)",
+    async () => {
+      const exec = await migratedExec();
+      await seed(exec, 1);
+      let clock = 1_000_000;
+      const post = vi
+        .fn()
+        .mockResolvedValueOnce({ applied: 1, alreadyApplied: false })
+        .mockRejectedValue(new Error("offline"));
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const states: { pending: number; stuck: boolean }[] = [];
+
+      const engine = createSyncEngine({
+        exec,
+        client: { post },
+        machineId: "m1",
+        now: () => clock,
+        onState: (s) => states.push({ pending: s.pending, stuck: s.stuck }),
+      });
+      engine.nudge();
+      await engine.idle();
+      expect(states.at(-1)).toMatchObject({ pending: 0, stuck: false });
+      expect(post).toHaveBeenCalledTimes(1);
+
+      // This time the newly queued scan is already old on the REAL wall
+      // clock (e.g. a long-buffered backlog item), not merely idle time
+      // since the last success.
+      const staleScannedAt = new Date(Date.now() - STUCK_AFTER_MS - 60_000).toISOString();
+      await seed(exec, 1, staleScannedAt);
+      engine.nudge();
+      await engine.idle();
+      expect(states.at(-1)).toMatchObject({ pending: 1, stuck: false });
+
+      clock += STUCK_AFTER_MS + 1;
+      await new Promise((resolve) => setTimeout(resolve, BACKOFF_START_MS + 500));
+      await engine.idle();
+      // Both conditions now hold: the injected clock crossed the threshold
+      // since `lastSuccessAt`, AND the oldest queued scan is itself older
+      // than the threshold on the wall clock.
+      expect(states.at(-1)).toMatchObject({ pending: 1, stuck: true });
+      engine.stop();
+    },
+    10_000,
+  );
 
   it("is not stuck when the queue is empty, however long since the last sync", async () => {
     const exec = await migratedExec();

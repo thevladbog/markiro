@@ -45,6 +45,58 @@ import type { SyncBatchDto, SyncBatchResponseDto } from "./dto";
  */
 const MAX_DISTINCT_MONTHS_PER_BATCH = 24;
 
+/**
+ * Absolute bound on `scannedAt`, independent of (and in addition to)
+ * `MAX_DISTINCT_MONTHS_PER_BATCH` above. The per-batch month cap alone does
+ * not bound anything ACROSS requests: a device (or a hostile client holding
+ * a valid device key) could send request after request, each staying under
+ * the per-batch cap but introducing a handful of NEW distinct months every
+ * time, so the total number of months `ensurePartitions` is ever asked to
+ * create over the API's lifetime would have no ceiling. Anchoring every
+ * accepted `scannedAt` to a window around "now" fixes that: the entire
+ * universe of months this endpoint can EVER create partitions for is capped
+ * at roughly the window's width, no matter how many requests arrive over the
+ * life of the deployment. It also stops a corrupt or hostile `scannedAt`
+ * (e.g. a dead RTC reporting a wildly wrong date, or a crafted payload) from
+ * reaching the month-start computation at all.
+ *
+ * The window must sit far above any plausible offline backlog: rejecting a
+ * batch wedges that device's queue by design (the drain retries a rejected
+ * batch indefinitely rather than ever dropping data -- see sync.ts's doc
+ * comment on the device side), so this is a recorded owner decision, not a
+ * casual one. A real device's clock can be off by hours from a
+ * misconfigured timezone or unsynced NTP, and its queue can legitimately
+ * carry weeks-to-months of backlog after an extended outage, a warehoused
+ * spare unit being redeployed, or repeated dead-RTC reboots each contributing
+ * a wrong month (see MAX_DISTINCT_MONTHS_PER_BATCH's comment). WINDOW_PAST_MS
+ * (3 years) is dramatically wider than any such scenario, and also sits
+ * comfortably above MAX_DISTINCT_MONTHS_PER_BATCH's 24-month cap so the two
+ * bounds stay independently testable rather than one silently subsuming the
+ * other. WINDOW_FUTURE_MS (1 day) only needs to absorb ordinary clock skew --
+ * a scan legitimately timestamped meaningfully in the future cannot exist.
+ */
+const WINDOW_PAST_MS = 3 * 365 * 24 * 60 * 60 * 1000;
+const WINDOW_FUTURE_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Rejects the whole batch if ANY item's `scannedAt` falls outside the
+ * absolute window above. Pure computation, no DB access -- deliberately the
+ * very first thing `applyBatch` does with a non-empty batch, so a corrupt or
+ * hostile payload is rejected before even the shift-ownership guard query
+ * runs, let alone `ensurePartitions`.
+ */
+function assertScannedAtWithinWindow(items: SyncBatchDto["items"]): void {
+  const now = Date.now();
+  for (const item of items) {
+    const t = new Date(item.scannedAt).getTime();
+    if (!Number.isFinite(t) || t < now - WINDOW_PAST_MS || t > now + WINDOW_FUTURE_MS) {
+      throw new BadRequestException(
+        "Batch contains a scannedAt outside the acceptable window around now",
+      );
+    }
+  }
+}
+
 @Injectable()
 export class StationScansService {
   constructor(@Inject(DB) private readonly db: Db) {}
@@ -70,6 +122,28 @@ export class StationScansService {
     // ACCESS EXCLUSIVE lock on the parent, which would otherwise be held for
     // the whole batch insert and block concurrent ingest.
     if (body.items.length > 0) {
+      // Absolute window check FIRST (Finding 2): pure computation, so a
+      // corrupt/hostile batch is rejected before any DB access at all.
+      assertScannedAtWithinWindow(body.items);
+
+      // Tenant-scoped shift-ownership GUARD, before ensurePartitions
+      // (Finding 2): a batch full of nonexistent (or foreign-tenant) shift
+      // ids must be rejected without ever triggering the DDL below -- each
+      // `CREATE TABLE ... PARTITION OF` takes an ACCESS EXCLUSIVE lock on the
+      // shared `codes`/`scan_events` parents, global to every tenant, so
+      // letting garbage shift ids reach it degrades ingest for everyone. This
+      // is a GUARD, not a replacement for the authoritative tenant-scoped
+      // check inside the transaction below, which also covers a shift being
+      // reassigned or removed between this check and the insert.
+      const shiftIds = [...new Set(body.items.map((i) => i.shiftId))];
+      const ownedIds = await this.db
+        .select({ id: schema.shifts.id })
+        .from(schema.shifts)
+        .where(and(eq(schema.shifts.tenantId, tenantId), inArray(schema.shifts.id, shiftIds)));
+      if (ownedIds.length !== shiftIds.length) {
+        throw new BadRequestException("Unknown shift in batch");
+      }
+
       const monthStarts = new Set(
         body.items.map((i) => {
           const d = new Date(i.scannedAt);
@@ -82,7 +156,10 @@ export class StationScansService {
           // 23514 -- the exact 500 this partition-ahead-of-time fix exists to
           // prevent. setUTCFullYear has no such special case, so start from
           // the epoch (already zeroed to the first instant of the day) and
-          // only move year/month/date.
+          // only move year/month/date. (In practice `assertScannedAtWithinWindow`
+          // above already rejects any two-digit-year `scannedAt` -- such a
+          // value can never fall inside WINDOW_PAST_MS of "now" -- so this is
+          // now defense-in-depth rather than the only guard against it.)
           const monthStart = new Date(0);
           monthStart.setUTCFullYear(d.getUTCFullYear(), d.getUTCMonth(), 1);
           return monthStart.getTime();
@@ -124,7 +201,10 @@ export class StationScansService {
 
       // Tenant scoping is enforced in the statement above; anything missing
       // either does not exist or belongs to another tenant, and the caller
-      // must not be able to tell those apart.
+      // must not be able to tell those apart. The guard above already
+      // checked this once outside the transaction -- this is the
+      // AUTHORITATIVE check, not a replacement for it, since a shift could in
+      // principle have been reassigned between the two.
       if (owned.length !== shiftIds.length) {
         throw new BadRequestException("Unknown shift in batch");
       }

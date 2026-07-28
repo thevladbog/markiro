@@ -105,28 +105,47 @@ export interface RecordScanResult {
  * throws: a code row without its audit row is strictly better than a lost
  * code.
  *
- * The outbox insert runs LAST and, on failure, is compensated rather than
- * left to stand: if THIS call is the one that just stored a new code row
- * (`storedCode`), that row is best-effort deleted from `codes_mirror` before
- * the original error is rethrown. Throwing alone does not make the scan
- * recoverable — `codes_mirror.code_hash` is already committed by the time the
- * outbox insert can fail, so without the compensating delete the operator's
- * rescan of the same physical item hits the primary key, is reported as
- * `alreadyPresent`, and is journalled and (would-be) enqueued as
- * `"duplicate"` with no code payload, because that payload is gated on
- * `storedCode`. The accepted code would then never reach the server and never
- * could: the one path in this slice that loses data instead of duplicating
- * it. Deleting the just-stored row turns the rescan into a clean accept
- * instead. The compensating delete is itself best-effort: if it also fails,
- * that secondary error is swallowed and the ORIGINAL outbox error is rethrown
- * regardless, because that is what tells the operator to rescan, and a failed
- * cleanup leaves us no worse off than before this fix. Nothing is deleted
- * when `storedCode` is false — a scan that was already a duplicate, or one
- * with no code at all, has nothing of its own to undo, and deleting then
- * would erase a code an earlier scan legitimately stored. The
+ * The event write and the outbox insert that follows it are each
+ * compensated the same way on failure, rather than left to stand: if THIS
+ * call is the one that just stored a new code row (`storedCode`), that row
+ * is best-effort deleted from `codes_mirror` before the original error is
+ * rethrown. Throwing alone does not make the scan recoverable —
+ * `codes_mirror.code_hash` is already committed by the time either later
+ * write can fail, so without the compensating delete the operator's rescan
+ * of the same physical item hits the primary key, is reported as
+ * `alreadyPresent`, and is journalled (and, for the outbox case, would-be
+ * enqueued) as `"duplicate"` with no code payload, because that payload is
+ * gated on `storedCode`. The accepted code would then never reach the server
+ * and never could: the one path in this slice that loses data instead of
+ * duplicating it. This is exactly as true when `appendScanEvent` itself
+ * throws as when the outbox insert does — the code row was already
+ * committed either way — so both call sites share `compensateStoredCode`
+ * below rather than each growing their own copy of this logic and risking
+ * the two drifting apart. Deleting the just-stored row turns the rescan into
+ * a clean accept instead. The compensating delete is itself best-effort: if
+ * it also fails, that secondary error is swallowed and the ORIGINAL error is
+ * rethrown regardless, because that is what tells the operator to rescan,
+ * and a failed cleanup leaves us no worse off than before this fix. Nothing
+ * is deleted when `storedCode` is false — a scan that was already a
+ * duplicate, or one with no code at all, has nothing of its own to undo, and
+ * deleting then would erase a code an earlier scan legitimately stored. The
  * `scan_events_mirror` row is never touched by this compensation: it is the
  * audit trail and it honestly records that an attempt happened.
  */
+async function compensateStoredCode(
+  exec: SqlExecutor,
+  storedCode: boolean,
+  code: AcceptedCode | null,
+): Promise<void> {
+  if (!(storedCode && code)) return;
+  try {
+    await exec.run("DELETE FROM codes_mirror WHERE code_hash = ?", [code.codeHash]);
+  } catch {
+    // Best-effort: the caller's original error is what must reach the
+    // operator, and a failed cleanup leaves us no worse off than before this
+    // fix — the next sync attempt still has nothing new to send for this row.
+  }
+}
 export async function recordScan(
   exec: SqlExecutor,
   e: ScanEventRow,
@@ -150,7 +169,15 @@ export async function recordScan(
   }
 
   const journalled = alreadyPresent ? { ...e, verdict: "duplicate" } : e;
-  await appendScanEvent(exec, journalled);
+  // A failure here is exactly as dangerous as an outbox failure below: the
+  // code row (if any) is already committed, so it must be compensated away
+  // the same way before rethrowing. See the doc comment above (Finding 3).
+  try {
+    await appendScanEvent(exec, journalled);
+  } catch (eventErr) {
+    await compensateStoredCode(exec, storedCode, code);
+    throw eventErr;
+  }
 
   // Enqueued LAST. The verdict is not final until the code insert has either
   // succeeded or hit the primary key, so an earlier enqueue could queue "ok"
@@ -176,15 +203,7 @@ export async function recordScan(
       ],
     );
   } catch (outboxErr) {
-    if (storedCode && code) {
-      try {
-        await exec.run("DELETE FROM codes_mirror WHERE code_hash = ?", [code.codeHash]);
-      } catch {
-        // Best-effort: the original outbox error below is what must reach
-        // the operator, and a failed cleanup leaves us no worse off than
-        // before this fix — the next sync attempt still has nothing to send.
-      }
-    }
+    await compensateStoredCode(exec, storedCode, code);
     throw outboxErr;
   }
 

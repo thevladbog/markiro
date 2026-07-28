@@ -220,29 +220,36 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
     // Nothing queued is never "stuck", however long the link has been down.
     let stuck = false;
     if (pending > 0) {
-      // These two branches deliberately live in different time domains and
-      // must never be compared against each other — mixing them is exactly
-      // the bug this replaces. `lastSuccessAt` is stamped from the injected
-      // `now()`, so it is only meaningful measured against a later `now()`
-      // from that same source. Before this engine has ever seen a success
-      // there is no such stamp, so the only honest measure is the real age
-      // of the oldest queued scan: `scanned_at` is a wall-clock ISO
-      // timestamp, so it has to be measured against `Date.now()`, never
-      // against the injected clock.
-      //
+      // The two comparisons below deliberately live in different time
+      // domains and must never be compared against each other — mixing them
+      // is exactly the bug this replaces. `lastSuccessAt` is stamped from
+      // the injected `now()`, so it is only meaningful measured against a
+      // later `now()` from that same source. The oldest queued scan's age,
+      // by contrast, is always measured against `Date.now()`: `scanned_at`
+      // is a wall-clock ISO timestamp, never relative to the injected clock.
+      const oldest = await oldestQueuedAt(deps.exec);
+      const oldestMs = oldest === null ? NaN : Date.parse(oldest);
+      // A missing or unparseable timestamp must never masquerade as "very
+      // old" via NaN comparisons — treat it as not stuck rather than
+      // warning spuriously.
+      const oldestQueuedIsStale =
+        Number.isFinite(oldestMs) && Date.now() - oldestMs >= STUCK_AFTER_MS;
+
       // No false-alarm risk on a healthy restart: state is published only
       // after the drain loop completes, so a device that reconnects and
       // drains successfully already has `lastSuccessAt` set by the time
       // this runs.
       if (lastSuccessAt !== null) {
-        stuck = now() - lastSuccessAt >= STUCK_AFTER_MS;
+        // Finding 4: `lastSuccessAt` alone goes stale merely from IDLE time
+        // with an empty, healthy queue — it says nothing about how long any
+        // CURRENTLY queued scan has actually failed to move. Requiring the
+        // oldest queued scan to ALSO be stale on the wall clock is what
+        // stops the first newly recorded scan's first failed upload from
+        // being reported stuck immediately just because the device happened
+        // to sit idle for a while beforehand.
+        stuck = oldestQueuedIsStale && now() - lastSuccessAt >= STUCK_AFTER_MS;
       } else {
-        const oldest = await oldestQueuedAt(deps.exec);
-        const oldestMs = oldest === null ? NaN : Date.parse(oldest);
-        // A missing or unparseable timestamp must never masquerade as "very
-        // old" via NaN comparisons — treat it as not stuck rather than
-        // warning spuriously.
-        stuck = Number.isFinite(oldestMs) && Date.now() - oldestMs >= STUCK_AFTER_MS;
+        stuck = oldestQueuedIsStale;
       }
     }
     deps.onState({ pending, lastSuccessAt, stuck });

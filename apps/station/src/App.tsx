@@ -356,7 +356,15 @@ export function App() {
             source={scanSource}
             sound={sound}
             onScanRecorded={nudgeSync}
-            onExit={() => setShift(null)}
+            onExit={() => {
+              // Both cleared together: `floorView` is separate state that
+              // stays "new" when this shift was entered through NewShift, so
+              // clearing only `shift` would re-render NewShift instead of
+              // shift selection -- the opposite of what this exit control
+              // promises (Finding 5).
+              setShift(null);
+              setFloorView("select");
+            }}
             pendingSync={syncState.pending}
           />
         ) : (

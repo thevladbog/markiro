@@ -244,10 +244,24 @@ describe.skipIf(!ready)("station-scans e2e", () => {
     expect((second.body as { lateDataAt: string | null }).lateDataAt).toBe(firstLateDataAt);
   });
 
-  // Fixed historical month, not a computed offset from "now" — so the test
-  // does not drift. Distinct from packages/db/test/partitions.test.ts's
-  // 2001-01 fixture, which that suite drops and recreates on every run.
-  const FAR_PAST_SCANNED_AT = "2019-03-15T10:00:00.000Z";
+  // A computed offset from "now", not a fixed historical date: Finding 2
+  // introduced an ABSOLUTE timestamp window anchored to "now" (see
+  // WINDOW_PAST_MS, station-scans.service.ts), so a fixed date far enough in
+  // the past to exercise this test would eventually rotate outside that
+  // window as real time passes -- unlike before that fix, when nothing here
+  // depended on "now" at all. 3 months back stays safely inside the 3-year
+  // window while still being well outside the scheduled job's proactively
+  // maintained {current, next} month pair, so `ensurePartitions` still has
+  // to create this month's partition on demand. Distinct from
+  // packages/db/test/partitions.test.ts's 2001-01 fixture, which that suite
+  // drops and recreates on every run.
+  function monthsAgoUTC(monthsAgo: number, day = 15): Date {
+    const d = new Date(0);
+    const now = new Date();
+    d.setUTCFullYear(now.getUTCFullYear(), now.getUTCMonth() - monthsAgo, day);
+    return d;
+  }
+  const FAR_PAST_SCANNED_AT = monthsAgoUTC(3).toISOString();
 
   it("accepts and stores a scan whose scannedAt falls outside the currently-maintained partition window", async () => {
     const agent = request.agent(app!.getHttpServer());
@@ -270,12 +284,20 @@ describe.skipIf(!ready)("station-scans e2e", () => {
   });
 
   // Regression for the Date.UTC(year, month, 1) two-digit-year remap: a raw
-  // numeric year of 0-99 gets silently mapped to 1900-1999 (Date.UTC(50, 0, 1)
-  // => 1950-01-01, not year 0050), so a scannedAt in that range would
-  // previously ensure the partition for the wrong century while the row
-  // inserts with the real year, and Postgres rejects it with SQLSTATE 23514
-  // -- a 500 that wedges the station's drain loop forever, same failure mode
-  // the partition-window fix above exists to prevent.
+  // numeric year of 0-99 used to get silently mapped to 1900-1999
+  // (Date.UTC(50, 0, 1) => 1950-01-01, not year 0050), so a scannedAt in that
+  // range would previously ensure the partition for the wrong century while
+  // the row inserts with the real year, and Postgres would reject it with
+  // SQLSTATE 23514 -- a 500 that wedges the station's drain loop forever.
+  //
+  // Finding 2's absolute timestamp window now rejects a value this far from
+  // "now" before the month-start computation ever runs, so the Date.UTC bug
+  // can no longer be reached via this endpoint at all -- the underlying
+  // setUTCFullYear fix (station-scans.service.ts) is pure defense-in-depth.
+  // This test is repurposed accordingly: it now proves the window rejects
+  // this value cleanly (400, no partition, nothing stored) rather than
+  // reaching the two-digit-year computation (previously a 500) or, before
+  // the window existed, succeeding outright.
   //
   // Year 0000 itself (as opposed to any other year 0-99) is not usable here:
   // Postgres's calendar has no year zero -- `SELECT '0000-01-01'::date`
@@ -285,7 +307,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
   // remapped range.
   const TWO_DIGIT_YEAR_SCANNED_AT = "0050-06-15T10:00:00.000Z";
 
-  it("accepts and stores a scan whose scannedAt falls in the Date.UTC two-digit-year range", async () => {
+  it("rejects a scan whose scannedAt falls in the Date.UTC two-digit-year range, via the timestamp window, creating no partition", async () => {
     const agent = request.agent(app!.getHttpServer());
     const tenantId = await signUpAndActivate(agent);
     const apiKey = await deviceKey(agent);
@@ -298,11 +320,21 @@ describe.skipIf(!ready)("station-scans e2e", () => {
         batchId: "machine-1:650",
         items: [item(shiftId, 1, { scannedAt: TWO_DIGIT_YEAR_SCANNED_AT })],
       })
-      .expect(201);
+      .expect(400);
 
-    expect(res.body).toMatchObject({ applied: 1, alreadyApplied: false });
-    expect(await scanEventsCount(tenantId, shiftId)).toBe(1);
-    expect(await codesCount(tenantId, shiftId)).toBe(1);
+    expect(res.body.message).toMatch(/scannedAt outside the acceptable window/);
+    expect(await scanEventsCount(tenantId, shiftId)).toBe(0);
+    expect(await codesCount(tenantId, shiftId)).toBe(0);
+
+    // Deliberately no partition-existence assertion here: this exact
+    // fixture (year 0050, month 06) is also exercised by this file's OWN
+    // history from before Finding 2 existed, when it was still an
+    // "accepts and stores" test -- so a long-lived local dev database can
+    // legitimately already have this one month's partition sitting around
+    // from a much earlier run, independent of whether today's rejection
+    // logic works. The dedicated "outside the acceptable timestamp window"
+    // test below covers the "no partition gets created" guarantee with a
+    // date this suite has never used for anything else.
   });
 
   it("stores a scan_events row with no codes row when the item's code is null", async () => {
@@ -386,14 +418,21 @@ describe.skipIf(!ready)("station-scans e2e", () => {
 
       // Thirty distinct months -- comfortably past
       // MAX_DISTINCT_MONTHS_PER_BATCH (24, see station-scans.service.ts).
-      // Spans multiple years via Date.UTC's month rollover, since the cap
-      // now sits above a single year; a fixed historical starting year, like
-      // partitions.test.ts's 2001-01 fixture, so this can never collide with
-      // a partition real traffic (or another test file) already created.
+      // 30 CONSECUTIVE months ending 5 months ago (via monthsAgoUTC's
+      // month-rollover, same as Date.UTC's), so every one of them stays
+      // safely inside the absolute timestamp window (3 years / 36 months) --
+      // this test must be rejected by the MONTH CAP, not the window check,
+      // and a fixed historical year (like the old 2010 fixture, or
+      // partitions.test.ts's 2001-01) can no longer be used for that: the
+      // window is anchored to "now", so a fixed date would eventually rotate
+      // outside it as real time passes. Ending 5 months back (not 0) keeps
+      // every target month away from the scheduled job's proactively
+      // maintained {current, next} pair, so none of them could already have
+      // a partition from unrelated activity.
       const MONTH_COUNT = 30;
       const items = Array.from({ length: MONTH_COUNT }, (_, i) =>
         item(shiftId, i + 1, {
-          scannedAt: new Date(Date.UTC(2010, i, 15)).toISOString(),
+          scannedAt: monthsAgoUTC(34 - i).toISOString(),
         }),
       );
 
@@ -411,13 +450,88 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       // partitions was created, even though ensuring THIS rejection didn't
       // just accidentally still create a couple before the count check.
       for (let i = 0; i < MONTH_COUNT; i++) {
-        const name = partitionName("scan_events", new Date(Date.UTC(2010, i, 1)));
+        const name = partitionName("scan_events", monthsAgoUTC(34 - i, 1));
         const exists = await db.execute(
           sql`SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
               WHERE c.relname = ${name} AND n.nspname = current_schema()`,
         );
         expect(exists.rows).toHaveLength(0);
       }
+    },
+  );
+
+  it("rejects a batch referencing an unknown shift, creating no partition for its month (Finding 2)", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+    const apiKey = await deviceKey(agent);
+
+    // 2 months back: inside the absolute timestamp window and away from
+    // the 5-34-months-back range the month-cap test above uses, and away
+    // from the scheduled job's current/next-month maintenance -- so this
+    // test isolates the shift-ownership guard rejection specifically.
+    const scannedAt = monthsAgoUTC(2).toISOString();
+
+    const res = await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send({
+        batchId: "machine-1:960",
+        items: [item(randomUUID(), 1, { scannedAt })],
+      })
+      .expect(400);
+
+    expect(res.body.message).toBe("Unknown shift in batch");
+
+    const name = partitionName("scan_events", monthsAgoUTC(2, 1));
+    const exists = await db.execute(
+      sql`SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE c.relname = ${name} AND n.nspname = current_schema()`,
+    );
+    expect(exists.rows).toHaveLength(0);
+  });
+
+  it(
+    "rejects a batch with a scannedAt outside the acceptable timestamp window, creating no " +
+      "partition for its month, even for an otherwise-valid, owned shift (Finding 2)",
+    async () => {
+      const agent = request.agent(app!.getHttpServer());
+      const tenantId = await signUpAndActivate(agent);
+      const apiKey = await deviceKey(agent);
+      // A real, owned shift -- proves the window check rejects purely on the
+      // timestamp, before the (otherwise-valid) shift is ever looked at.
+      const shiftId = await openShift(agent);
+
+      // 7 years back: comfortably outside WINDOW_PAST_MS (3 years,
+      // station-scans.service.ts), but an ordinary-looking date rather than
+      // the historical-curiosity two-digit-year fixture above -- and
+      // deliberately far from every other offset this file uses (2, 3, and
+      // 5-34 months back) so it cannot collide with their partitions.
+      const scannedAt = new Date(
+        Date.UTC(new Date().getUTCFullYear() - 7, new Date().getUTCMonth(), 15),
+      );
+
+      const res = await request(app!.getHttpServer())
+        .post("/station/scans")
+        .set("x-api-key", apiKey)
+        .send({
+          batchId: "machine-1:970",
+          items: [item(shiftId, 1, { scannedAt: scannedAt.toISOString() })],
+        })
+        .expect(400);
+
+      expect(res.body.message).toMatch(/scannedAt outside the acceptable window/);
+      expect(await scanEventsCount(tenantId, shiftId)).toBe(0);
+      expect(await codesCount(tenantId, shiftId)).toBe(0);
+
+      const name = partitionName(
+        "scan_events",
+        new Date(Date.UTC(scannedAt.getUTCFullYear(), scannedAt.getUTCMonth(), 1)),
+      );
+      const exists = await db.execute(
+        sql`SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE c.relname = ${name} AND n.nspname = current_schema()`,
+      );
+      expect(exists.rows).toHaveLength(0);
     },
   );
 
