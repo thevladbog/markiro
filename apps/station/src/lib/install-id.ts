@@ -43,5 +43,12 @@ export async function getInstallId(exec: SqlExecutor): Promise<string> {
     "SELECT value FROM station_meta WHERE key = ?",
     [META_KEY],
   );
-  return after[0]!.value!;
+  // Fall back to the id THIS call generated rather than a non-null assertion
+  // on the read-back: an empty read-back (a device DB error surfacing as a
+  // 0-row result instead of a thrown one) would otherwise throw a confusing
+  // `TypeError` deep in a batch key, and a pre-existing row with a NULL
+  // value (schema allows it; nothing has ever written one, but nothing
+  // guarantees it either) would silently produce the literal string
+  // `"null"` as a batch-key component instead of an actual id.
+  return after[0]?.value ?? id;
 }

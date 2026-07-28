@@ -6,34 +6,44 @@ import type { SyncBatchDto, SyncBatchResponseDto } from "./dto";
 
 /**
  * Upper bound on how many distinct calendar months a single batch's
- * `scannedAt` values may span before `ensurePartitions` runs. Without this,
- * a batch (up to `items.max(500)`, see `dto.ts`) with 500 distinct months
- * would call `ensurePartitions` for up to 1000 partitions (`codes` and
- * `scan_events` each) -- and `CREATE TABLE ... PARTITION OF` takes an ACCESS
- * EXCLUSIVE lock on the shared parent, which is global to every tenant, so
- * that lock storm would degrade ingest for everyone, not just the batch's
- * own tenant.
+ * `scannedAt` values may span before `ensurePartitions` runs.
  *
- * A legitimate batch is contiguous in time: the outbox drains oldest-first
- * (`readBatch`'s `ORDER BY id` on the device), so within one batch
- * `scannedAt` only jumps around at all if the device's own clock jumped
- * mid-batch -- an NTP correction, or a dead RTC finally getting corrected --
- * and even then that is ONE discontinuity, not hundreds. A handful of months
- * comfortably covers a device that was offline across several month
- * boundaries, or one draining a long-stale backlog after a database
- * restore; this cap sits far above that, not tightly around it.
+ * The threat this defends against: a batch (up to `items.max(500)`, see
+ * `dto.ts`) with ~500 distinct months would call `ensurePartitions` for up
+ * to ~1000 partitions (`codes` and `scan_events` each), and
+ * `CREATE TABLE ... PARTITION OF` takes an ACCESS EXCLUSIVE lock on the
+ * shared parent -- global to every tenant -- so that lock storm would
+ * degrade ingest for everyone, not just the batch's own tenant.
+ * `ensurePartitions` already skips months whose partition exists, so the
+ * cost that matters here is strictly proportional to how many DISTINCT new
+ * months one batch can force into existence at once; nothing about defending
+ * against that needs a bound anywhere near the number of months a real
+ * device could plausibly carry in one batch. 24 caps the worst case at ~48
+ * `CREATE TABLE` statements -- real, but nowhere near the ~1000-partition
+ * lock storm this exists to prevent.
  *
- * That headroom is deliberate, not generous for its own sake: rejecting a
- * batch here throws before the transaction below, so this batch is retried
+ * The cap must stay far above any legitimate backlog, not tight around one,
+ * because tripping it wedges the station's queue permanently: rejecting a
+ * batch here throws before the transaction below, so the batch is retried
  * indefinitely and NEVER applied (see sync.ts's doc comment on the device
  * side for why the drain treats every error, including a 4xx, as retryable
- * rather than dropping data) -- a legitimate batch that hit a cap set too
- * low would wedge that station's queue forever. A batch actually reaching
- * this many distinct months is not a plausible legitimate shape; it is far
- * more likely a corrupt or hostile timestamp, which is exactly what this cap
- * exists to catch before it can turn into a shared-lock storm.
+ * rather than dropping data), and the ceiling that same finding pins on the
+ * device means the batch cannot even re-split itself smaller -- the queue
+ * is stuck until someone edits the device database by hand. A resend of an
+ * already-applied over-cap batch is rejected here too, BEFORE the
+ * `alreadyApplied` short-circuit below, so even data already safely on the
+ * server can wedge the device this way.
+ *
+ * A single low-volume or standby station can plausibly sit offline across
+ * far more than a handful of month boundaries with only a few scans each,
+ * and a device with a dead RTC and no NTP can reboot repeatedly while
+ * offline, each boot contributing its own distinct (wrong) month -- that is
+ * repeated discontinuities, not the one-correction case a tight cap might
+ * assume. 24 is chosen to sit far above any such plausible legitimate batch
+ * while still bounding the worst case to a few dozen DDL statements, not
+ * because 24 distinct months is itself an expected shape.
  */
-const MAX_DISTINCT_MONTHS_PER_BATCH = 6;
+const MAX_DISTINCT_MONTHS_PER_BATCH = 24;
 
 @Injectable()
 export class StationScansService {

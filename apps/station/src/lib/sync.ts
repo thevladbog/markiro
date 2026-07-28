@@ -74,6 +74,51 @@ function toPayload(items: OutboxItem[]) {
   }));
 }
 
+const CEILING_META_KEY = "sync_pending_ceiling";
+
+/**
+ * Reads back the in-flight batch's pinned ceiling (see `pendingCeiling`
+ * below), persisted in `station_meta` — the same key/value table
+ * `hardware_config`, the roster slot pointer, and the install id already
+ * use. This is what makes the ceiling survive not just the engine's own
+ * scheduled retry within one process, but an app restart, crash, or update:
+ * a brand-new engine, built over the same on-device database, seeds its
+ * in-memory ceiling from here instead of starting at `null` and reopening a
+ * plain fresh prefix read — see `createSyncEngine`'s doc comment for why
+ * that gap is exactly what let a resend duplicate data server-side.
+ */
+async function loadPersistedCeiling(exec: SqlExecutor): Promise<number | null> {
+  const rows = await exec.all<{ value: string | null }>(
+    "SELECT value FROM station_meta WHERE key = ?",
+    [CEILING_META_KEY],
+  );
+  const value = rows[0]?.value;
+  if (value == null) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * Single-statement upsert — the only atomic unit `tauri-plugin-sql`'s pooled
+ * connections actually give us (a device-side BEGIN/COMMIT spanning two
+ * calls is not a transaction; see `outbox.ts`'s `ackThrough` doc comment).
+ * Called BEFORE the batch is posted, so a crash between this write landing
+ * and the response arriving still leaves the ceiling pinned for whichever
+ * process resends next.
+ */
+async function savePersistedCeiling(exec: SqlExecutor, id: number): Promise<void> {
+  await exec.run(
+    `INSERT INTO station_meta (key, value) VALUES (?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    [CEILING_META_KEY, String(id)],
+  );
+}
+
+/** Single statement; called once the server has confirmed the batch. */
+async function clearPersistedCeiling(exec: SqlExecutor): Promise<void> {
+  await exec.run("DELETE FROM station_meta WHERE key = ?", [CEILING_META_KEY]);
+}
+
 /**
  * Drains the device outbox to the server, one batch at a time.
  *
@@ -92,15 +137,24 @@ function toPayload(items: OutboxItem[]) {
  *    replaced (Finding 3: without this, the outbox's id counter restarting
  *    at 1 in the fresh database would silently reproduce an old key, and the
  *    server's `alreadyApplied: true` for it would delete brand-new scans).
- * 2. The set of rows a key names cannot silently grow. `pendingCeiling`
- *    pins the batch currently awaiting acknowledgement to its original
- *    `maxId`: a retry — the engine's own scheduled backoff attempt, or one
- *    a later nudge triggers — re-reads exactly that range (`readBatch`'s
- *    `ceilingId`), never a fresh `ORDER BY id LIMIT` read. While the queue
- *    holds fewer rows than `BATCH_SIZE` — the ordinary state on a
- *    continuously-draining line — a fresh read would otherwise pick up rows
- *    enqueued since the failed attempt and post them under a NEW key the
- *    server has never seen, applying the original rows a second time.
+ * 2. The set of rows a key names cannot silently grow, including across a
+ *    restart. `pendingCeiling` pins the batch currently awaiting
+ *    acknowledgement to its original `maxId`: a retry — the engine's own
+ *    scheduled backoff attempt, one a later nudge triggers, or the very
+ *    first drain of a BRAND-NEW engine (an app restart, crash, or update) —
+ *    re-reads exactly that range (`readBatch`'s `ceilingId`), never a fresh
+ *    `ORDER BY id LIMIT` read. While the queue holds fewer rows than
+ *    `BATCH_SIZE` — the ordinary state on a continuously-draining line — a
+ *    fresh read would otherwise pick up rows enqueued since the failed
+ *    attempt and post them under a NEW key the server has never seen,
+ *    applying the original rows a second time. The ceiling is therefore not
+ *    just an in-memory guard: it is persisted in `station_meta` with a
+ *    single-statement upsert BEFORE the batch is sent, cleared with a single
+ *    statement once the server confirms, and reloaded from there by any
+ *    engine that starts with nothing in memory yet — see
+ *    `loadPersistedCeiling`/`savePersistedCeiling`/`clearPersistedCeiling`
+ *    above. That is what makes this survive not only the process's own
+ *    retries but a restart mid-batch.
  *
  * A random id per attempt (instead of both of the above) would silently turn
  * every lost response into duplicated data.
@@ -123,11 +177,20 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let idleResolvers: (() => void)[] = [];
   // The `maxId` of the batch currently awaiting acknowledgement, or `null`
-  // when no batch is in flight. Set right before the batch is posted, held
-  // across every retry of that SAME batch, and cleared only once the server
-  // has confirmed it — see the doc comment above and `readBatch`'s
+  // when no batch is in flight. Set right before the batch is posted (and
+  // persisted to `station_meta` at that same point — see
+  // `savePersistedCeiling`), held across every retry of that SAME batch,
+  // and cleared — in memory AND in `station_meta` — only once the server
+  // has confirmed it. See the doc comment above and `readBatch`'s
   // `ceilingId` parameter.
   let pendingCeiling: number | null = null;
+  // Whether `pendingCeiling` has been seeded from `station_meta` yet. A
+  // freshly constructed engine (a new process after a restart, crash, or
+  // update) starts with `pendingCeiling` unset in memory even though a
+  // previous process may have persisted one; this makes the FIRST drain
+  // load it before doing anything else, instead of every engine's first
+  // batch after a restart silently reopening a plain fresh prefix read.
+  let ceilingLoaded = false;
   // Resolved once per engine instance and cached: the install id never
   // changes for the life of a given local database, so there is no reason
   // to re-query `station_meta` for every batch.
@@ -136,6 +199,14 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
   async function ensureInstallId(): Promise<string> {
     if (installId === null) installId = await getInstallId(deps.exec);
     return installId;
+  }
+
+  async function ensurePendingCeiling(): Promise<number | null> {
+    if (!ceilingLoaded) {
+      pendingCeiling = await loadPersistedCeiling(deps.exec);
+      ceilingLoaded = true;
+    }
+    return pendingCeiling;
   }
 
   function settleIdle() {
@@ -183,25 +254,42 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
     try {
       for (;;) {
         if (stopped) break;
-        // A ceiling from a previous failed attempt on THIS batch re-reads
-        // exactly that range; otherwise this is a plain fresh prefix.
-        const batch = await readBatch(deps.exec, BATCH_SIZE, pendingCeiling);
+        // A ceiling from a previous failed attempt on THIS batch — whether
+        // pinned earlier in this same process or persisted by a process
+        // that pinned it and then never got to clear it — re-reads exactly
+        // that range; otherwise this is a plain fresh prefix.
+        const ceiling = await ensurePendingCeiling();
+        const batch = await readBatch(deps.exec, BATCH_SIZE, ceiling);
         if (batch.length === 0) {
-          // Only reachable with a stale ceiling if the rows it pinned were
-          // somehow removed without going through `ackThrough` below — not
-          // expected, but clearing it here avoids wedging every later drain
-          // on a ceiling that can never again be satisfied.
-          pendingCeiling = null;
+          if (ceiling !== null) {
+            // Only reachable with a stale ceiling if the rows it pinned were
+            // somehow removed without going through `ackThrough` below (or
+            // were already acknowledged by whichever process posted them,
+            // and this one never learned that) — not expected, but clearing
+            // it here (in memory and in `station_meta`) avoids wedging every
+            // later drain on a ceiling that can never again be satisfied.
+            // `continue`, not `break`: any rows queued above the (now
+            // cleared) ceiling must drain in this same pass, not wait for
+            // the next nudge or the 15-second heartbeat.
+            pendingCeiling = null;
+            await clearPersistedCeiling(deps.exec);
+            continue;
+          }
           break;
         }
 
         const maxId = batch[batch.length - 1]!.id;
-        // Pin BEFORE sending: if the post fails, every later attempt on this
-        // batch — the scheduled retry, or a nudge that lands while one is
-        // outstanding — must re-request exactly this id range, never a
-        // fresh read that could have grown past it.
+        // Pin BEFORE sending — in memory AND in `station_meta` (a single
+        // upsert; never a multi-statement transaction, see the module doc
+        // comment) — so that if the post fails, or the whole process dies
+        // before it completes, every later attempt on this batch — the
+        // scheduled retry, a nudge that lands while one is outstanding, or a
+        // brand-new engine's first drain after a restart — re-requests
+        // exactly this id range, never a fresh read that could have grown
+        // past it.
         pendingCeiling = maxId;
         try {
+          await savePersistedCeiling(deps.exec, maxId);
           const instId = await ensureInstallId();
           const res = await deps.client.post<BatchResponse>("/station/scans", {
             batchId: `${deps.machineId}:${instId}:${maxId}`,
@@ -218,6 +306,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
           // forever.
           await ackThrough(deps.exec, maxId);
           pendingCeiling = null;
+          await clearPersistedCeiling(deps.exec);
           lastSuccessAt = now();
           backoffMs = BACKOFF_START_MS;
         } catch (err) {

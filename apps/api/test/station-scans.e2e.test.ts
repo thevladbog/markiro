@@ -384,14 +384,16 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       const apiKey = await deviceKey(agent);
       const shiftId = await openShift(agent);
 
-      // Nine distinct months -- comfortably past
-      // MAX_DISTINCT_MONTHS_PER_BATCH (6, see station-scans.service.ts). A
-      // fixed historical year, like partitions.test.ts's 2001-01 fixture, so
-      // this can never collide with a partition real traffic (or another
-      // test file) already created.
-      const items = Array.from({ length: 9 }, (_, i) =>
+      // Thirty distinct months -- comfortably past
+      // MAX_DISTINCT_MONTHS_PER_BATCH (24, see station-scans.service.ts).
+      // Spans multiple years via Date.UTC's month rollover, since the cap
+      // now sits above a single year; a fixed historical starting year, like
+      // partitions.test.ts's 2001-01 fixture, so this can never collide with
+      // a partition real traffic (or another test file) already created.
+      const MONTH_COUNT = 30;
+      const items = Array.from({ length: MONTH_COUNT }, (_, i) =>
         item(shiftId, i + 1, {
-          scannedAt: `2010-${String(i + 1).padStart(2, "0")}-15T00:00:00.000Z`,
+          scannedAt: new Date(Date.UTC(2010, i, 15)).toISOString(),
         }),
       );
 
@@ -408,7 +410,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       // The stronger proof of "no lock storm": not one of these months' scan
       // partitions was created, even though ensuring THIS rejection didn't
       // just accidentally still create a couple before the count check.
-      for (let i = 0; i < 9; i++) {
+      for (let i = 0; i < MONTH_COUNT; i++) {
         const name = partitionName("scan_events", new Date(Date.UTC(2010, i, 1)));
         const exists = await db.execute(
           sql`SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace

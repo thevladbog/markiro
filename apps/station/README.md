@@ -163,15 +163,29 @@ that can lag arbitrarily far behind without blocking the floor.
   The `<highest outbox id in the batch>` component is pinned once a batch is
   posted (`pendingCeiling` in `sync.ts`) and held across every retry of that
   same batch — including one a later nudge triggers while the previous
-  attempt is still outstanding — rather than re-read fresh each time: while
+  attempt is still outstanding, AND one issued by a brand-new engine after an
+  app restart, crash, or update — rather than re-read fresh each time: while
   the queue holds fewer rows than `BATCH_SIZE` (the ordinary state on a
   continuously-draining line), a fresh read would otherwise pick up rows
   queued since the failed attempt and post them under a new key the server
-  has never seen, applying the original rows a second time. That is what
-  actually makes at-least-once delivery safe: a batch is acknowledged — and
-  its rows permanently deleted from the outbox — only once the server has
-  actually confirmed it, so a response lost in transit just means the same
-  batch, under the same key, gets resent. Before acknowledging, the engine
+  has never seen, applying the original rows a second time. The ceiling is
+  persisted in `station_meta` (the same key/value table `hardware_config`,
+  the roster slot pointer, and the install id already use) with a
+  single-statement upsert BEFORE the batch is sent, and cleared with a single
+  statement once the server confirms — never a multi-statement device-side
+  transaction, since `tauri-plugin-sql` pools connections and a `BEGIN`/
+  `COMMIT` sent as separate calls would not actually group them. A brand-new
+  engine — built by a fresh process, which starts with nothing in memory —
+  seeds its in-memory ceiling from that persisted value on its very first
+  drain, so the exact row range a dead process pinned survives the restart
+  intact; without that, the fresh engine would fall back to a plain prefix
+  read of whatever the queue holds by then, which is exactly the growth this
+  mechanism exists to prevent. That is what actually makes at-least-once
+  delivery safe: a batch is acknowledged — and its rows permanently deleted
+  from the outbox — only once the server has actually confirmed it, so a
+  response lost in transit just means the same batch, under the same key,
+  gets resent, whether that resend comes from the same process or a new one.
+  Before acknowledging, the engine
   also checks that the response actually has the shape
   `{ applied, alreadyApplied }` (number, boolean): a captive portal or other
   proxy on the plant network answering `200 {"status":"ok"}` parses as JSON
@@ -187,14 +201,21 @@ that can lag arbitrarily far behind without blocking the floor.
   a missing partition never surfaces as an uncaught 500. That ordering
   matters here specifically: every error from this endpoint is treated as
   retryable by the drain above, so a request that always fails the same way
-  would otherwise wedge that station's queue forever. The number of distinct
-  months one batch may span is capped (`MAX_DISTINCT_MONTHS_PER_BATCH`,
-  currently 6) well above anything a contiguous, oldest-first drain could
-  legitimately produce — a batch over that cap is rejected with a 400 before
-  a single partition is created, so a corrupt or hostile `scannedAt` cannot
-  turn into an ACCESS EXCLUSIVE-lock storm on the shared `codes`/`scan_events`
-  parents (those locks are global, so that storm would otherwise degrade
-  ingest for every tenant, not just the offending one).
+  would otherwise wedge that station's queue forever — and, with the
+  ceiling above now persisted across a restart, that station cannot even
+  escape the wedge by re-splitting the batch on its own. The number of
+  distinct months one batch may span is capped
+  (`MAX_DISTINCT_MONTHS_PER_BATCH`, currently 24) deliberately far above
+  anything a contiguous, oldest-first drain could legitimately produce — a
+  low-volume or standby station can plausibly sit offline across many month
+  boundaries with only a few scans each, and a device with a dead RTC and no
+  NTP can contribute one more distinct wrong month per reboot — while still
+  bounding the worst case to a few dozen `CREATE TABLE ... PARTITION OF`
+  statements. A batch over that cap is rejected with a 400 before a single
+  partition is created, so a corrupt or hostile `scannedAt` cannot turn into
+  an ACCESS EXCLUSIVE-lock storm on the shared `codes`/`scan_events` parents
+  (those locks are global, so that storm would otherwise degrade ingest for
+  every tenant, not just the offending one).
 - **Triggers**: the engine is nudged, never polled — once when it's built, on
   every scan `recordScan` finishes writing (whatever the verdict — a
   duplicate or a rejection queues an event row too), on every `online`

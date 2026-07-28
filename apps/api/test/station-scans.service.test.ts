@@ -47,11 +47,13 @@ describe("StationScansService.applyBatch month cap (Finding 2)", () => {
     } as unknown as Db;
     const service = new StationScansService(dbStub);
 
-    // One item per month across more months than the cap allows -- well
-    // within `items.max(500)` (dto.ts), exactly the shape Finding 2
-    // describes (up to 500 distinct months in a single request).
-    const items = Array.from({ length: 8 }, (_, i) =>
-      item(`2026-${String(i + 1).padStart(2, "0")}-15T00:00:00.000Z`),
+    // One item per month across more months than the cap (24) allows --
+    // well within `items.max(500)` (dto.ts), exactly the shape Finding 2
+    // describes (up to 500 distinct months in a single request). Spans
+    // multiple years via Date.UTC's month rollover rather than a single
+    // year's 12 months, since the cap itself now sits above a single year.
+    const items = Array.from({ length: 30 }, (_, i) =>
+      item(new Date(Date.UTC(2026, i, 15)).toISOString()),
     );
 
     await expect(

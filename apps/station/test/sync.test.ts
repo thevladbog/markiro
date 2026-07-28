@@ -145,6 +145,77 @@ describe("sync engine", () => {
   );
 
   it(
+    "persists the pending ceiling in station_meta, so a BRAND-NEW engine over the SAME " +
+      "on-device database -- standing in for an app restart, crash, or update -- resends the " +
+      "SAME pinned batch id and row count instead of reopening a fresh (and by then grown) " +
+      "prefix read (Finding 1)",
+    async () => {
+      const exec = await migratedExec();
+      await seedInstallId(exec, "install-1");
+      await seed(exec, 2);
+      const post1 = vi.fn().mockRejectedValue(new Error("offline"));
+      vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const engine1 = createSyncEngine({
+        exec,
+        client: { post: post1 },
+        machineId: "m1",
+        onState: () => {},
+      });
+      engine1.nudge();
+      await engine1.idle();
+      expect(post1).toHaveBeenCalledTimes(1);
+      const firstBody = post1.mock.calls[0]![1] as { batchId: string; items: unknown[] };
+      expect(firstBody.batchId).toBe("m1:install-1:2");
+      expect(firstBody.items).toHaveLength(2);
+
+      // A new scan arrives while the (never-fired) retry would still be
+      // pending -- standing in for the operator continuing to scan right up
+      // to the moment the app restarts.
+      await seed(exec, 1, "2026-07-28T10:05:00.000Z");
+
+      // The process dies here WITHOUT ever retrying: `stop()` discards the
+      // scheduled backoff timer outright, same as a crash or a shift-end
+      // restart would. An in-memory-only ceiling would die with it; the fix
+      // under test is that it does not, because the ceiling was persisted to
+      // `station_meta` BEFORE the failed post above, not just held in this
+      // (about to be destroyed) closure.
+      engine1.stop();
+
+      // A BRAND-NEW engine, over the SAME on-device database -- exactly what
+      // the app restarting builds. Nothing here shares any in-memory state
+      // with `engine1`.
+      const post2 = vi.fn().mockResolvedValue({ applied: 2, alreadyApplied: false });
+      const engine2 = createSyncEngine({
+        exec,
+        client: { post: post2 },
+        machineId: "m1",
+        onState: () => {},
+      });
+      engine2.nudge();
+      await engine2.idle();
+
+      // Without a persisted ceiling, this fresh engine has no memory of the
+      // first attempt and would read a plain fresh prefix -- all 3 queued
+      // rows -- and post them under a NEW key the server has never recorded,
+      // applying the original 2 rows a second time. With it, the very first
+      // post from the new engine is the SAME batch id and the SAME row count
+      // as the one the dead process pinned.
+      expect(post2).toHaveBeenCalledTimes(2);
+      const resumedBody = post2.mock.calls[0]![1] as { batchId: string; items: unknown[] };
+      expect(resumedBody.batchId).toBe(firstBody.batchId);
+      expect(resumedBody.items).toHaveLength(2);
+      // The same drain loop continues straight on to the 3rd row afterwards,
+      // under a fresh key -- it was deferred by the restart, not lost.
+      const freshBody = post2.mock.calls[1]![1] as { batchId: string; items: unknown[] };
+      expect(freshBody.batchId).not.toBe(firstBody.batchId);
+      expect(freshBody.items).toHaveLength(1);
+
+      engine2.stop();
+    },
+  );
+
+  it(
     "a nudge while a retry is already scheduled does not produce an extra post, so scan " +
       "load offline cannot bypass the exponential backoff (Finding 1)",
     async () => {

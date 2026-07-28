@@ -46,8 +46,14 @@ describe("useSyncEngine", () => {
       initialProps: { exec, client: { post }, machineId: "m1" },
     });
 
-    await waitFor(() => expect(result.current.state.pending).toBe(0));
-    expect(post).toHaveBeenCalledTimes(1);
+    // `state.pending` is already 0 in the hook's initial state, before the
+    // mount-time nudge's async drain has even started -- waiting for it to
+    // read 0 would pass on the very first check and prove nothing about the
+    // drain having actually finished. `post`'s call count is the observable
+    // that actually transitions (0 -> 1) once the seeded row drains, so wait
+    // on that instead.
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    expect(result.current.state.pending).toBe(0);
   });
 
   it("does not rebuild the engine when a dependency is unchanged across a re-render (same as App's client/machineId keying)", async () => {
@@ -110,9 +116,15 @@ describe("useSyncEngine", () => {
       // (post-double-invoke) live setup created, and the row drains. With
       // the split shape, the second setup's `nudge()` would have already
       // been a no-op on an engine `stop()` had permanently killed before
-      // this trigger ever ran, and this `waitFor` would time out.
-      await waitFor(() => expect(result.current.state.pending).toBe(0));
-      expect(post).toHaveBeenCalledTimes(1);
+      // this trigger ever ran, and `post` would never be called -- so THIS
+      // waitFor times out. A `pending === 0` check would not catch that: the
+      // seed goes straight to the device DB, never through this hook's
+      // state, so `state.pending` never actually leaves 0 in observable
+      // React state and a wait keyed on it would pass on its first check
+      // regardless of whether the row ever drained. `post`'s call count is
+      // the one observable that actually settles here.
+      await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+      expect(result.current.state.pending).toBe(0);
     },
   );
 });
