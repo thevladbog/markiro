@@ -2,7 +2,14 @@ import { classifyScan, validatePickupKm } from "@markiro/domain";
 
 export type KioskScan =
   | { kind: "badge"; raw: string }
-  | { kind: "km"; rawKm: string; gtin14: string; kmKey: string }
+  /**
+   * `serial` is carried, not re-derivable-by-convention: `validatePickupKm`
+   * has already parsed it, and without it every consumer that wants to show a
+   * worker *which* bottle this is would have to slice it back out of `kmKey`
+   * and so would have to know that the key is laid out `01<gtin14>21<serial>`.
+   * That layout is `@markiro/domain`'s business alone.
+   */
+  | { kind: "km"; rawKm: string; gtin14: string; serial: string; kmKey: string }
   | { kind: "incomplete"; raw: string } // GS dropped — ask for a re-scan
   | { kind: "unknown"; raw: string };
 
@@ -35,7 +42,15 @@ export function classifyKioskScan(raw: string): KioskScan {
   const result = validatePickupKm(raw);
   switch (result.status) {
     case "ok":
-      return { kind: "km", rawKm: raw, gtin14: result.km.gtin14, kmKey: result.key };
+      // Every field comes off the one parse `validatePickupKm` already did —
+      // nothing here re-reads the raw payload.
+      return {
+        kind: "km",
+        rawKm: raw,
+        gtin14: result.km.gtin14,
+        serial: result.km.serial,
+        kmKey: result.key,
+      };
     case "incomplete":
       // The GS separator (0x1D) was dropped — most likely a keyboard-wedge
       // scanner swallowing it. Never mis-parse this into a wrong serial /

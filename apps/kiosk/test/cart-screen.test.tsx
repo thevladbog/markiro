@@ -52,7 +52,12 @@ const SCAN_PROMPT = "Поднесите бутылку";
 const SUBMIT = "Готово — передать администратору";
 
 function bootstrapWith(
-  config: { dayLimitPerEmployee?: number; showPrices?: boolean } = {},
+  config: {
+    dayLimitPerEmployee?: number;
+    showPrices?: boolean;
+    /** Prices are per-product, so an unpriced item needs its own catalogue. */
+    products?: KioskBootstrapDto["products"];
+  } = {},
 ): KioskBootstrapDto {
   return {
     generatedAt: "2026-07-28T09:00:00.000Z",
@@ -65,7 +70,7 @@ function bootstrapWith(
       { id: "reason-defect", name: "Брак" },
       { id: "reason-gift", name: "Подарок" },
     ],
-    products: [
+    products: config.products ?? [
       { id: "p-milk", gtin14: GTIN_MILK, name: MILK, unitPrice: "89.90", egaisCode: null },
       { id: "p-bread", gtin14: GTIN_BREAD, name: BREAD, unitPrice: "45.00", egaisCode: null },
     ],
@@ -108,6 +113,17 @@ function renderCart(options: Options = {}) {
 
 /** The list's rows, as text — enough to assert on both content and length. */
 const rows = () => screen.queryAllByRole("listitem").map((li) => li.textContent ?? "");
+/**
+ * The footer's money, read off the row that pairs «N шт» with the total, so a
+ * price printed on a list row cannot be mistaken for the total (or hide its
+ * absence).
+ */
+const totalMoney = () => {
+  const label = screen.getByText(/^\d+ шт$/);
+  const row = label.parentElement;
+  if (!row) throw new Error("the total row is not laid out the way this test assumes");
+  return (row.textContent ?? "").slice((label.textContent ?? "").length);
+};
 const submitButton = () => screen.getByRole("button", { name: SUBMIT }) as HTMLButtonElement;
 const click = (name: string) => fireEvent.click(screen.getByRole("button", { name }));
 
@@ -173,6 +189,81 @@ describe("Cart", () => {
     scan(km(GTIN_MILK, "KYC9X7MQ"));
 
     expect(screen.getByText("Лимит 5 шт в день · осталось 3")).toBeDefined();
+  });
+
+  // The panel keys on "nothing left", and what the reducer refuses is "nothing
+  // left" — the two agree only because the number is clamped at zero. Left
+  // unclamped, an employee at or past their allowance gets a negative
+  // «осталось», the inviting scan prompt stays on screen, and every code they
+  // present is silently refused: a scanner that looks alive and is not.
+  it.each([
+    { dayLimitPerEmployee: 5, alreadyTakenToday: 5, what: "has taken exactly their allowance" },
+    { dayLimitPerEmployee: 5, alreadyTakenToday: 7, what: "is already past their allowance" },
+    { dayLimitPerEmployee: 0, alreadyTakenToday: 0, what: "has an allowance of zero" },
+  ])(
+    "blocks the scan zone before a worker who $what",
+    ({ dayLimitPerEmployee, alreadyTakenToday }) => {
+      renderCart({ bootstrap: bootstrapWith({ dayLimitPerEmployee }), alreadyTakenToday });
+
+      expect(screen.queryByText(SCAN_PROMPT)).toBeNull();
+      expect(screen.getByText(`Лимит на сегодня — ${dayLimitPerEmployee} шт`)).toBeDefined();
+      expect(screen.getByText(`Лимит ${dayLimitPerEmployee} шт в день · осталось 0`)).toBeDefined();
+    },
+  );
+
+  it("adds nothing for a worker already past their allowance, and keeps saying so", () => {
+    const { scan } = renderCart({
+      bootstrap: bootstrapWith({ dayLimitPerEmployee: 5 }),
+      alreadyTakenToday: 7,
+    });
+
+    scan(km(GTIN_MILK, "KYC9X7MQ"));
+
+    expect(rows()).toHaveLength(0);
+    expect(screen.queryByText(SCAN_PROMPT)).toBeNull();
+    expect(screen.getByText("Лимит 5 шт в день · осталось 0")).toBeDefined();
+  });
+
+  // An item with no price makes the whole total unknowable. Dropping it from
+  // the sum and printing the rest as if it were the answer understates what the
+  // administrator then charges against — the server's `computeTotalPrice`
+  // returns `null` in exactly this case, and the screen must not be braver.
+  it("prints no total at all when any item has no price", () => {
+    const { scan } = renderCart({
+      bootstrap: bootstrapWith({
+        products: [
+          { id: "p-milk", gtin14: GTIN_MILK, name: MILK, unitPrice: "89.90", egaisCode: null },
+          { id: "p-bread", gtin14: GTIN_BREAD, name: BREAD, unitPrice: null, egaisCode: null },
+        ],
+      }),
+    });
+
+    scan(km(GTIN_MILK, "AAAA1111"));
+    scan(km(GTIN_BREAD, "BBBB2222"));
+
+    expect(rows()).toHaveLength(2);
+    expect(totalMoney()).toBe("—");
+    // Not the priced item's price wearing the total's clothes.
+    expect(totalMoney()).not.toContain("89.90");
+  });
+
+  // `Number("89,90")` is `NaN`, and the trap the server's `toKopecks` exists to
+  // avoid: a price the kiosk cannot parse must never render as free.
+  it("does not silently zero a price it cannot parse", () => {
+    const { scan } = renderCart({
+      bootstrap: bootstrapWith({
+        products: [
+          { id: "p-milk", gtin14: GTIN_MILK, name: MILK, unitPrice: "89,90", egaisCode: null },
+        ],
+      }),
+    });
+
+    scan(km(GTIN_MILK, "KYC9X7MQ"));
+
+    expect(rows()).toHaveLength(1);
+    expect(rows().join("")).toContain("—");
+    expect(document.body.textContent ?? "").not.toContain("0.00");
+    expect(totalMoney()).toBe("—");
   });
 
   it("opens the red modal for a product this kiosk cannot issue, and dismissing it leaves the list alone", () => {
@@ -246,6 +337,7 @@ describe("Cart", () => {
           rawKm: `01${GTIN_MILK}21KYC9X7MQ${GS}93Abcd`,
           kmKey: `01${GTIN_MILK}21KYC9X7MQ`,
           gtin14: GTIN_MILK,
+          serial: "KYC9X7MQ",
           productId: "p-milk",
           name: MILK,
           unitPrice: "89.90",

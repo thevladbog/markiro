@@ -5,6 +5,7 @@ import {
   canSubmit,
   cartReducer,
   initialCartState,
+  remainingToday,
   type CartAction,
   type CartState,
 } from "../src/session/cart.js";
@@ -79,7 +80,11 @@ function run(ctx: Ctx, ...actions: CartAction[]): CartState {
 const scan = (s: KioskScan): CartAction => ({ type: "scan", scan: s });
 
 describe("cartReducer — scanning", () => {
-  it("appends a scanned KM with its product's id, name and price", () => {
+  // The serial is carried, not re-derived: it is the half of the item's
+  // identity a worker reads off the screen, and the classifier has already
+  // parsed it. Anything downstream that sliced it back out of `kmKey` would be
+  // re-implementing the GS1 layout in a place that has no business knowing it.
+  it("appends a scanned KM with its product's id, name, price and serial", () => {
     const state = run(ctxOf(5), scan(km(GTIN_MILK, "KYC9X7MQ")));
 
     expect(state.items).toEqual([
@@ -87,6 +92,7 @@ describe("cartReducer — scanning", () => {
         rawKm: `01${GTIN_MILK}21KYC9X7MQ${GS}93Abcd`,
         kmKey: `01${GTIN_MILK}21KYC9X7MQ`,
         gtin14: GTIN_MILK,
+        serial: "KYC9X7MQ",
         productId: "p-milk",
         name: "Молоко 3,2%",
         unitPrice: "89.90",
@@ -238,6 +244,44 @@ describe("initialCartState", () => {
   it("is frozen — `reset` hands this very object out, so a stray mutation would poison the app", () => {
     expect(Object.isFrozen(initialCartState)).toBe(true);
     expect(Object.isFrozen(initialCartState.items)).toBe(true);
+  });
+});
+
+// The screen has to print this number and has to decide when to replace the
+// scan prompt with the blocking panel. It lives here, next to the rule it
+// re-states, so the panel and the reducer cannot drift apart.
+describe("remainingToday", () => {
+  it("subtracts both the cart and what was taken earlier today", () => {
+    const ctx = ctxOf(5, 1);
+    expect(remainingToday(initialCartState, ctx)).toBe(4);
+    expect(remainingToday(run(ctx, scan(km(GTIN_MILK, "AAAA1111"))), ctx)).toBe(3);
+  });
+
+  // `alreadyTakenToday` comes from the server and can legitimately exceed the
+  // limit: an administrator lowering it mid-day, or items taken at another
+  // kiosk. Unclamped, «осталось −2» would print, and — worse — a screen that
+  // shows its scan prompt while `remaining` is merely non-zero would invite
+  // scans the reducer refuses one after another.
+  it("never goes negative for an employee already past their allowance", () => {
+    expect(remainingToday(initialCartState, ctxOf(5, 7))).toBe(0);
+    expect(remainingToday(initialCartState, ctxOf(5, 5))).toBe(0);
+    expect(remainingToday(initialCartState, ctxOf(0))).toBe(0);
+  });
+
+  it("hits zero exactly when the reducer starts refusing scans", () => {
+    for (const limit of [0, 1, 2, 5]) {
+      for (const taken of [0, 1, 2, 5, 7]) {
+        const ctx = ctxOf(limit, taken);
+        const refused =
+          cartReducer(initialCartState, scan(km(GTIN_MILK, "AAAA1111")), ctx).notice?.kind ===
+          "limit";
+        expect({ limit, taken, exhausted: remainingToday(initialCartState, ctx) === 0 }).toEqual({
+          limit,
+          taken,
+          exhausted: refused,
+        });
+      }
+    }
   });
 });
 

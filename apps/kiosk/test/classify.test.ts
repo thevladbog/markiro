@@ -13,6 +13,15 @@ describe("classifyKioskScan", () => {
     if (scan.kind === "km") expect(scan.kmKey).toBe(`01${GTIN}21KYC9X7MQ`);
   });
 
+  // `validatePickupKm` has already parsed the serial out. Carrying it means no
+  // consumer downstream has to recover it by slicing the dedup key back apart,
+  // which is the only reason any of them would need to know that the key is
+  // laid out as `01<gtin14>21<serial>`.
+  it("carries the serial it already parsed, rather than making consumers re-derive it", () => {
+    const scan = classifyKioskScan(`01${GTIN}21KYC9X7MQ${GS}93Abcd`);
+    expect(scan).toMatchObject({ kind: "km", serial: "KYC9X7MQ" });
+  });
+
   it("reports a marking code whose GS separator was dropped as incomplete, not as a badge", () => {
     // A keyboard wedge that swallows the separator produces exactly this.
     expect(classifyKioskScan(`01${GTIN}21KYC9X7MQ93Abcd`).kind).toBe("incomplete");

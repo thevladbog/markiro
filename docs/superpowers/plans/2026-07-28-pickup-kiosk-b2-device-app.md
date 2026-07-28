@@ -1266,7 +1266,8 @@ git commit -m "feat(kiosk): keyboard-wedge and Web Serial scan sources"
   ```ts
   export type KioskScan =
     | { kind: "badge"; raw: string }
-    | { kind: "km"; rawKm: string; gtin14: string; kmKey: string }
+    // `serial` was added during Task 13 review — see Task 8's `CartItem`.
+    | { kind: "km"; rawKm: string; gtin14: string; serial: string; kmKey: string }
     | { kind: "incomplete"; raw: string } // GS dropped — ask for a re-scan
     | { kind: "unknown"; raw: string };
   export function classifyKioskScan(raw: string): KioskScan;
@@ -1446,6 +1447,10 @@ export async function resolveBadge(
     rawKm: string;
     kmKey: string;
     gtin14: string;
+    // `serial` was added during Task 13 review: the cart screen was recovering
+    // it by slicing `kmKey` apart, which put the `01<gtin14>21<serial>` layout
+    // in a component; `classifyKioskScan` already parses it, so it is carried.
+    serial: string;
     productId: string | null;
     name: string;
     unitPrice: string | null;
@@ -1478,6 +1483,9 @@ export async function resolveBadge(
     ctx: { bootstrap: KioskBootstrapDto; alreadyTakenToday: number },
   ): CartState;
   export function canSubmit(state: CartState): boolean;
+  // Added during Task 13 review: the screen must decide when to replace the
+  // scan prompt with the limit panel, and that question is this module's.
+  export function remainingToday(state: CartState, ctx: CartContext): number;
   ```
 
 - [ ] **Step 1: Write the failing test** covering exactly the prototype's rules: a scanned KM whose GTIN is in `products` is added with its name and price; the **same `kmKey` twice** yields `notice: {kind:"duplicate"}` and does not grow the list; a GTIN absent from `products` yields `unknown-product`; scanning at `dayLimitPerEmployee` (counting `alreadyTakenToday`) yields `limit`; an `incomplete` scan yields `incomplete`; `canSubmit` is false with an empty list, false for `writeoff` without a sub-reason, and true otherwise.

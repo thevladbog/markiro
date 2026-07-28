@@ -8,6 +8,7 @@ import {
   canSubmit,
   cartReducer,
   initialCartState,
+  remainingToday,
   type CartAction,
   type CartItem,
   type CartNotice,
@@ -78,31 +79,76 @@ function initialsOf(fullName: string): string {
  * deliberately out of scope, so the name plus this tail are the whole identity:
  * the end of the GTIN and the serial, exactly as the prototype prints it.
  *
- * The serial is recovered from `kmKey` (`01<gtin14>21<serial>`, the canonical
- * dedup identity built by `@markiro/domain`'s `kmKey`) rather than re-parsed
- * from `rawKm` — this screen owns no GS1 parsing. The `startsWith` guard keeps
- * a future change to that shape from silently printing a mangled tail.
+ * Both halves are read straight off the item. This screen owns no GS1
+ * knowledge whatsoever — it does not know that `kmKey` is `01<gtin14>21<serial>`,
+ * so a change to that layout cannot reach it.
  */
 function codeTail(item: CartItem): string {
-  const prefix = `01${item.gtin14}21`;
-  const serial = item.kmKey.startsWith(prefix) ? item.kmKey.slice(prefix.length) : item.kmKey;
-  return `…${item.gtin14.slice(-6)}-${serial}`;
+  return `…${item.gtin14.slice(-6)}-${item.serial}`;
 }
 
 /**
- * Money in minor units. `unitPrice` arrives as a decimal string, and summing
- * those as floats drifts (0.1 + 0.2); a price the kiosk cannot parse counts as
- * nothing rather than as NaN, which would poison the whole total.
+ * Money in minor units, by the same convention the server files the order
+ * under. Replicated from `apps/api/src/pickup/total-price.ts` rather than
+ * imported: that module lives inside the Nest application, is not a package
+ * this device app depends on, and `toKopecks` is not exported from it — and the
+ * kiosk needs the integer for display arithmetic, not `computeTotalPrice`'s
+ * decimal string. If a third caller ever appears, this belongs in
+ * `@markiro/domain` and both should move there together.
+ *
+ * `Number(x) * 100` is the trap being avoided, twice over: it drifts on binary
+ * floats (`Number("1.005") * 100` is `100.4999…`) and it turns anything it
+ * cannot read — «89,90» with the decimal comma a Russian price list writes —
+ * into `NaN`, which the old code rounded to a confident, wrong `0.00 ₽`.
+ * `null` means "this kiosk cannot price it", never "it is free".
  */
-function kopecksOf(unitPrice: string | null): number {
-  if (unitPrice === null) return 0;
-  const value = Number(unitPrice);
-  return Number.isFinite(value) ? Math.round(value * 100) : 0;
+function toKopecks(value: string): number | null {
+  const m = /^(-?)(\d+)(?:\.(\d+))?$/.exec(value.trim());
+  if (!m) return null;
+  const sign = m[1] === "-" ? -1 : 1;
+  const digits = m[3] ?? "";
+  let kopecks = Number(m[2]) * 100 + Number(digits.slice(0, 2).padEnd(2, "0"));
+  if (digits.length > 2 && Number(digits[2]) >= 5) kopecks += 1; // round half up
+  return sign * kopecks;
+}
+
+/**
+ * The list's total, or `null` when it cannot be known — mirroring the server's
+ * `computeTotalPrice`, which returns `null` the moment ANY item is unpriced.
+ * Silently omitting an unpriced item and printing the rest would understate the
+ * very number the administrator charges against, and nothing on screen would
+ * say so.
+ *
+ * The one clause deliberately not mirrored is the empty list: the server
+ * returns `null` there because `pickupOrders.totalPrice` is nullable and "no
+ * order" has no total, whereas an empty cart at a kiosk genuinely costs
+ * nothing, and «—» sitting in the footer before the first scan reads as a
+ * broken screen.
+ */
+function totalKopecks(items: CartItem[]): number | null {
+  let sum = 0;
+  for (const item of items) {
+    if (item.unitPrice === null) return null;
+    const kopecks = toKopecks(item.unitPrice);
+    if (kopecks === null) return null;
+    sum += kopecks;
+  }
+  return sum;
 }
 
 function formatMoney(kopecks: number): string {
-  return (kopecks / 100).toFixed(2);
+  const sign = kopecks < 0 ? "-" : "";
+  const abs = Math.abs(kopecks);
+  return `${sign}${Math.trunc(abs / 100)}.${String(abs % 100).padStart(2, "0")}`;
 }
+
+/**
+ * Stands in for a price the kiosk cannot state. An em dash, not a dictionary
+ * entry: it is typography rather than copy, identical in every language, and a
+ * key for it would be one more thing for the RU/EN lockstep test to keep in
+ * step for no gain.
+ */
+const UNPRICED = "—";
 
 /**
  * The screen the worker actually uses: a pure projection of `session/cart.ts`.
@@ -116,11 +162,12 @@ function formatMoney(kopecks: number): string {
  * `bootstrap.products`, never compares a `kmKey`, and never asks whether
  * `writeoffReasonId` is set.
  *
- * The one number it does compute is `remaining`, and it is display only: the
- * footer has to print it either way, and the blocking panel simply appears
- * when it reaches zero. It gates nothing — a scan made while the panel is up
- * still travels through the reducer and still comes back refused by the
- * reducer's own limit check.
+ * The one number it shows beyond the list itself is `remaining`, and it does
+ * not compute that either: `remainingToday` is exported from the reducer
+ * module, and `applyScan` asks it the same question, so «осталось 0» and "the
+ * next scan is refused" are one expression rather than two that agree today.
+ * It gates nothing — a scan made while the blocking panel is up still travels
+ * through the reducer and still comes back refused there.
  */
 export function Cart({
   employee,
@@ -175,8 +222,8 @@ export function Cart({
   const limit = bootstrap.config.dayLimitPerEmployee;
   const showPrices = bootstrap.config.showPrices;
   const count = state.items.length;
-  const remaining = Math.max(0, limit - alreadyTakenToday - count);
-  const total = state.items.reduce((sum, item) => sum + kopecksOf(item.unitPrice), 0);
+  const remaining = remainingToday(state, { bootstrap, alreadyTakenToday });
+  const total = totalKopecks(state.items);
   const bannerKey = state.notice ? BANNER[state.notice.kind] : undefined;
   const submittable = canSubmit(state);
 
@@ -446,94 +493,99 @@ export function Cart({
               </div>
             ) : (
               <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-                {state.items.map((item) => (
-                  <li
-                    key={item.kmKey}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 14,
-                      padding: "12px 20px 12px 24px",
-                      borderBottom: "1px solid var(--line)",
-                    }}
-                  >
-                    {/* Product images are deliberately out of scope; the slot
-                        keeps the row's rhythm so adding them later is a swap. */}
-                    <span
-                      aria-hidden="true"
+                {state.items.map((item) => {
+                  const kopecks = item.unitPrice === null ? null : toKopecks(item.unitPrice);
+                  return (
+                    <li
+                      key={item.kmKey}
                       style={{
-                        width: 56,
-                        height: 56,
-                        flexShrink: 0,
-                        borderRadius: 8,
-                        background: "var(--surface-panel)",
-                      }}
-                    />
-                    <span
-                      style={{
-                        flex: 1,
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 3,
-                        minWidth: 0,
-                      }}
-                    >
-                      <span
-                        style={{
-                          font: "600 18px/24px var(--font-ui)",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {item.name}
-                      </span>
-                      <span
-                        style={{ font: "400 14px/18px var(--font-mono)", color: "var(--fg-3)" }}
-                      >
-                        {codeTail(item)}
-                      </span>
-                    </span>
-                    {showPrices && item.unitPrice !== null ? (
-                      <span
-                        style={{
-                          font: "600 19px/1 var(--font-mono)",
-                          fontVariantNumeric: "tabular-nums",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {t("cart.price", { value: formatMoney(kopecksOf(item.unitPrice)) })}
-                      </span>
-                    ) : null}
-                    <button
-                      type="button"
-                      aria-label={t("cart.remove", { name: item.name })}
-                      onClick={() => dispatch({ type: "remove", kmKey: item.kmKey })}
-                      style={{
-                        ...ghostButton,
-                        width: 56,
-                        height: 56,
-                        flexShrink: 0,
                         display: "flex",
                         alignItems: "center",
-                        justifyContent: "center",
+                        gap: 14,
+                        padding: "12px 20px 12px 24px",
+                        borderBottom: "1px solid var(--line)",
                       }}
                     >
-                      <svg
-                        width="22"
-                        height="22"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
+                      {/* Product images are deliberately out of scope; the slot
+                        keeps the row's rhythm so adding them later is a swap. */}
+                      <span
                         aria-hidden="true"
-                        focusable="false"
+                        style={{
+                          width: 56,
+                          height: 56,
+                          flexShrink: 0,
+                          borderRadius: 8,
+                          background: "var(--surface-panel)",
+                        }}
+                      />
+                      <span
+                        style={{
+                          flex: 1,
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 3,
+                          minWidth: 0,
+                        }}
                       >
-                        <path d="M6 6l12 12M18 6L6 18" />
-                      </svg>
-                    </button>
-                  </li>
-                ))}
+                        <span
+                          style={{
+                            font: "600 18px/24px var(--font-ui)",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {item.name}
+                        </span>
+                        <span
+                          style={{ font: "400 14px/18px var(--font-mono)", color: "var(--fg-3)" }}
+                        >
+                          {codeTail(item)}
+                        </span>
+                      </span>
+                      {showPrices && item.unitPrice !== null ? (
+                        <span
+                          style={{
+                            font: "600 19px/1 var(--font-mono)",
+                            fontVariantNumeric: "tabular-nums",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {kopecks === null
+                            ? UNPRICED
+                            : t("cart.price", { value: formatMoney(kopecks) })}
+                        </span>
+                      ) : null}
+                      <button
+                        type="button"
+                        aria-label={t("cart.remove", { name: item.name })}
+                        onClick={() => dispatch({ type: "remove", kmKey: item.kmKey })}
+                        style={{
+                          ...ghostButton,
+                          width: 56,
+                          height: 56,
+                          flexShrink: 0,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        <svg
+                          width="22"
+                          height="22"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          aria-hidden="true"
+                          focusable="false"
+                        >
+                          <path d="M6 6l12 12M18 6L6 18" />
+                        </svg>
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </div>
@@ -619,7 +671,9 @@ export function Cart({
                     fontVariantNumeric: "tabular-nums",
                   }}
                 >
-                  {t("cart.price", { value: formatMoney(total) })}
+                  {/* «—», not a sum with the unpriced items quietly left out:
+                      this is the number the administrator charges against. */}
+                  {total === null ? UNPRICED : t("cart.price", { value: formatMoney(total) })}
                 </span>
               ) : null}
             </div>

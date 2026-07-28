@@ -5,6 +5,13 @@ export interface CartItem {
   rawKm: string;
   kmKey: string;
   gtin14: string;
+  /**
+   * The KM's serial, as `classifyKioskScan` parsed it. Carried rather than
+   * left to be sliced back out of `kmKey`: it is half of what a worker reads
+   * to tell one bottle from the next, and recovering it downstream would put
+   * knowledge of the `01<gtin14>21<serial>` layout in a screen.
+   */
+  serial: string;
   productId: string | null;
   name: string;
   unitPrice: string | null;
@@ -140,19 +147,43 @@ function applyScan(state: CartState, scan: KioskScan, ctx: CartContext): CartSta
   // `count < dayLimit`, counting from the employee's items already taken
   // today. Zero is therefore a real limit that accepts nothing — it is not a
   // sentinel for "unlimited", and there is no unlimited branch to mirror.
-  if (ctx.alreadyTakenToday + state.items.length >= ctx.bootstrap.config.dayLimitPerEmployee) {
-    return { ...state, notice: { kind: "limit" } };
-  }
+  //
+  // Asked through `remainingToday` rather than re-stated as an inequality,
+  // because the screen has to ask the same question to decide whether to show
+  // a scan prompt at all: one expression, so the prompt and the refusal cannot
+  // drift into disagreeing.
+  if (remainingToday(state, ctx) === 0) return { ...state, notice: { kind: "limit" } };
 
   const item: CartItem = {
     rawKm: scan.rawKm,
     kmKey: scan.kmKey,
     gtin14: scan.gtin14,
+    serial: scan.serial,
     productId: product.id,
     name: product.name,
     unitPrice: product.unitPrice,
   };
   return { ...state, items: [...state.items, item], notice: null };
+}
+
+/**
+ * How many more items this employee may take today. The reducer's own limit
+ * rule read as a number instead of as a refusal — `remainingToday(…) === 0` is
+ * precisely when the next scan comes back `{ kind: "limit" }`, because
+ * `applyScan` above asks this very function.
+ *
+ * Clamped at zero, and that clamp is load-bearing twice over. `alreadyTakenToday`
+ * arrives from the server and can exceed the limit — an administrator lowering
+ * it mid-day, or items the worker took at another kiosk — so the raw difference
+ * goes negative. Negative is neither printable («осталось −2») nor, more
+ * importantly, equal to zero: a caller testing "is there anything left?" with
+ * the unclamped difference would answer "yes" for a worker who has none, put an
+ * inviting scan prompt in front of them, and let the reducer refuse every code
+ * they present.
+ */
+export function remainingToday(state: CartState, ctx: CartContext): number {
+  const taken = ctx.alreadyTakenToday + state.items.length;
+  return Math.max(0, ctx.bootstrap.config.dayLimitPerEmployee - taken);
 }
 
 /**
