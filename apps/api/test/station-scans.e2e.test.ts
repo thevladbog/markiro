@@ -165,9 +165,24 @@ describe.skipIf(!ready)("station-scans e2e", () => {
     return rows[0];
   }
 
-  async function conflictCount(tenantId: string, codeHash: string): Promise<number> {
-    const rows = await db
-      .select({ id: schema.codeConflicts.id })
+  // Returns the actual persisted CONTENT of every code_conflicts row for
+  // this code, not just how many there are: `rows.length` alone cannot catch
+  // a transposed losing/winning pair (e.g. `losingTerminalId:
+  // c.winning.terminalId`), which would leave every count-only assertion
+  // green while silently inverting who lost -- see the review that added
+  // this shape.
+  async function conflictRows(
+    tenantId: string,
+    codeHash: string,
+  ): Promise<
+    { losingTerminalId: string | null; winningTerminalId: string | null; losingScannedAt: Date }[]
+  > {
+    return db
+      .select({
+        losingTerminalId: schema.codeConflicts.losingTerminalId,
+        winningTerminalId: schema.codeConflicts.winningTerminalId,
+        losingScannedAt: schema.codeConflicts.losingScannedAt,
+      })
       .from(schema.codeConflicts)
       .where(
         and(
@@ -175,7 +190,6 @@ describe.skipIf(!ready)("station-scans e2e", () => {
           eq(schema.codeConflicts.codeHash, codeHash),
         ),
       );
-    return rows.length;
   }
 
   it("accepts a batch from a station api-key and stores codes and events", async () => {
@@ -632,8 +646,54 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       .send({ batchId: "m1:21", items: [later] })
       .expect(201);
 
-    const conflicts = (res.body as { conflicts: { codeHash: string; winningTerminalId: string }[] })
-      .conflicts;
+    const conflicts = (
+      res.body as {
+        conflicts: { codeHash: string; winningTerminalId: string; winningScannedAt: string }[];
+      }
+    ).conflicts;
+    expect(conflicts).toHaveLength(1);
+    // `codeHash` and `winningScannedAt` were previously never asserted here
+    // -- only `winningTerminalId` -- so a bug scrambling either field could
+    // pass unnoticed.
+    expect(conflicts[0]!.codeHash).toBe(first.code!.codeHash);
+    expect(conflicts[0]!.winningTerminalId).toBe("t1");
+    expect(conflicts[0]!.winningScannedAt).toBe(first.scannedAt);
+  });
+
+  it("keeps the incumbent when a later batch ties its scannedAt exactly", async () => {
+    // Regression for setWhere's strict "<" (station-scans.service.ts): a
+    // tied scannedAt must NOT beat the incumbent. If that comparison were
+    // ever loosened to "<=", the second (later-arriving) batch would take
+    // over ownership purely by matching the timestamp, and "the same two
+    // scans, replayed in either arrival order, converge on one stable
+    // owner" would no longer hold.
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const apiKey = await deviceKey(agent);
+    const shiftId = await openShift(agent);
+
+    const first = { ...item(shiftId, 1), terminalId: "t1" };
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send({ batchId: "m1:60", items: [first] })
+      .expect(201);
+
+    // Exact same scannedAt, a different terminal -- a genuine tie, not a
+    // duplicate resend of the same scan (terminalId differs).
+    const tied = { ...first, terminalId: "t2" };
+    const res = await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send({ batchId: "m1:61", items: [tied] })
+      .expect(201);
+
+    const owner = await registryOwner(tenantId, first.code!.codeHash);
+    expect(owner?.terminalId).toBe("t1");
+    expect(owner?.scannedAt.toISOString()).toBe(first.scannedAt);
+
+    // The tied claim lost, so its own sender is told.
+    const conflicts = (res.body as { conflicts: { winningTerminalId: string }[] }).conflicts;
     expect(conflicts).toHaveLength(1);
     expect(conflicts[0]!.winningTerminalId).toBe("t1");
   });
@@ -676,7 +736,15 @@ describe.skipIf(!ready)("station-scans e2e", () => {
 
     // The displaced scan (t1's) is deliberately never reported to any
     // sender — the cabinet (`code_conflicts`) must be the only record of it.
-    expect(await conflictCount(tenantId, earlier.code!.codeHash)).toBe(1);
+    // Asserting the row's actual CONTENT, not just its count: a transposed
+    // losing/winning pair in the service's mapping (e.g. `losingTerminalId:
+    // c.winning.terminalId`) would invert who lost while a count-only
+    // assertion stayed green.
+    const rows = await conflictRows(tenantId, earlier.code!.codeHash);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.losingTerminalId).toBe("t1");
+    expect(rows[0]!.winningTerminalId).toBe("t2");
+    expect(rows[0]!.losingScannedAt.toISOString()).toBe(late.scannedAt);
   });
 
   it("is idempotent: replaying a batch changes neither ownership nor conflict count", async () => {

@@ -123,6 +123,22 @@ describe("conflictsAgainstOwner", () => {
     );
     expect(rows.map((c) => c.codeHash)).toEqual([HASH]);
   });
+
+  it("reports a conflict when the same shift and terminal rescans a code at a different instant", () => {
+    // Regression for `sameScan` dropping `scannedAt` from its comparison:
+    // every OTHER case here matches shift, terminal, AND time simultaneously
+    // when asserting "is the owner", so a mutant that compares only shift and
+    // terminal would still pass all of them. Same (shiftId, terminalId) as
+    // the owner, but a genuinely different scannedAt, must still be reported
+    // as a loss -- it is a distinct scan, not the owner's own claim echoed
+    // back.
+    const ownerByHash = new Map([[HASH, owner(HASH, "t1", "2026-07-28T10:00:00.000Z")]]);
+    const rows = conflictsAgainstOwner([item(HASH, "t1", "2026-07-28T10:00:05.000Z")], ownerByHash);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.losing.terminalId).toBe("t1");
+    expect(rows[0]!.losing.scannedAt.toISOString()).toBe("2026-07-28T10:00:05.000Z");
+    expect(rows[0]!.winning.scannedAt.toISOString()).toBe("2026-07-28T10:00:00.000Z");
+  });
 });
 
 describe("displacedIncumbents", () => {
@@ -167,5 +183,23 @@ describe("displacedIncumbents", () => {
       new Map([[HASH, owner(HASH, "t1", "2026-07-28T10:00:00.000Z")]]),
     );
     expect(rows).toEqual([]);
+  });
+
+  it("reports a displacement when the winning claim shares the incumbent's shift and terminal but not its instant", () => {
+    // Same `sameScan` regression as conflictsAgainstOwner's analogous case,
+    // for the other direction: a claim from the SAME (shiftId, terminalId)
+    // as the prior incumbent, but at a genuinely different scannedAt, is a
+    // distinct scan and must still be recorded as a displacement -- dropping
+    // `scannedAt` from the comparison would wrongly treat this as "the
+    // incumbent is this batch's own claim" and swallow it.
+    const claim = item(HASH, "t1", "2026-07-28T10:00:00.000Z");
+    const rows = displacedIncumbents(
+      [claim],
+      new Set([HASH]),
+      new Map([[HASH, owner(HASH, "t1", "2026-07-28T10:00:05.000Z")]]),
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.losing.scannedAt.toISOString()).toBe("2026-07-28T10:00:05.000Z");
+    expect(rows[0]!.winning.scannedAt.toISOString()).toBe("2026-07-28T10:00:00.000Z");
   });
 });

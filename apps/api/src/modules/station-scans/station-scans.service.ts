@@ -254,7 +254,14 @@ export class StationScansService {
 
       let batchConflicts: BatchConflictDto[] = [];
       if (claimItems.length > 0) {
-        const hashes = [...new Set(claimItems.map((c) => c.codeHash))];
+        // Sorted here, once, as the single source of truth for lock/claim
+        // order: every statement below that inserts or locks more than one
+        // code_registry row iterates in THIS order, rather than `Set`
+        // insertion order or whatever a query planner happens to choose, so
+        // two overlapping batches sharing two-or-more codes -- in either
+        // relative arrival order -- acquire those rows in the SAME order and
+        // cannot deadlock (Postgres 40P01).
+        const hashes = [...new Set(claimItems.map((c) => c.codeHash))].sort();
         const registryColumns = {
           codeHash: schema.codeRegistry.codeHash,
           shiftId: schema.codeRegistry.shiftId,
@@ -262,22 +269,55 @@ export class StationScansService {
           scannedAt: schema.codeRegistry.scannedAt,
         };
 
-        // Sorted so two overlapping batches that share two or more codes,
-        // in opposite relative order, cannot lock those rows in opposite
-        // order and deadlock -- sorting makes the acquisition order
-        // deterministic across every batch, regardless of the order items
-        // arrived in.
-        const claims = collapseClaims(claimItems).sort((a, b) =>
-          a.codeHash < b.codeHash ? -1 : a.codeHash > b.codeHash ? 1 : 0,
-        );
+        // Postgres refuses an ON CONFLICT DO UPDATE whose VALUES name the
+        // same conflict key twice, so the batch must first be collapsed to
+        // one row per code (collapseClaims), then ordered to match `hashes`
+        // above -- not sorted independently, so the two can never drift.
+        const claimsByHash = new Map(collapseClaims(claimItems).map((c) => [c.codeHash, c]));
+        const claims = hashes.map((h) => claimsByHash.get(h)!);
 
-        // Locks any PRE-EXISTING incumbent for these codes for the rest of
-        // this transaction, so the value read here cannot change before the
-        // upsert below runs its own conflict check -- used ONLY to attribute
-        // a displacement (see displacedIncumbents' doc comment). It is
-        // NEVER used to decide who wins: that decision belongs entirely to
-        // the upsert's own `setWhere`, so it stays correct even where this
-        // read is racing another transaction (Finding 1).
+        // Precedes the lock-read below with a real write: INSERT ... ON
+        // CONFLICT DO NOTHING for every claim. A bare `SELECT ... FOR
+        // UPDATE` locks nothing for a row that does not yet exist
+        // committed-visible -- Postgres has no gap locking outside
+        // SERIALIZABLE -- so two terminals racing on a brand-new code could
+        // each see an empty pre-read and each conclude, wrongly, that
+        // nothing needs recording. This INSERT closes that gap: it waits on
+        // ANY concurrent transaction's speculative insertion of the same
+        // (tenant, codeHash) for as long as that transaction runs (Postgres's
+        // built-in ON CONFLICT arbitration), so by the time it returns, a
+        // COMMITTED row is provably present for every one of this batch's
+        // hashes -- either this statement placed it (no prior owner existed
+        // at all), or a concurrent transaction's row won the race to create
+        // it and is now committed. "Row absent" has become "row present and
+        // about to be locked" for the `FOR UPDATE` immediately below.
+        //
+        // A hash THIS statement inserted is a win outright: the row now
+        // holds exactly this batch's claim. The upsert further below will
+        // NOT return it in `won` -- `excluded.scanned_at` then equals the
+        // value this statement just wrote, and the strict `<` in `setWhere`
+        // does not fire on equality -- so those hashes are folded into
+        // `wonHashes` from here explicitly, not assumed to come from the
+        // upsert alone.
+        const freshlyClaimed = await tx
+          .insert(schema.codeRegistry)
+          .values(claims.map((c) => ({ tenantId, ...c })))
+          .onConflictDoNothing()
+          .returning({ codeHash: schema.codeRegistry.codeHash });
+        const freshHashes = new Set(freshlyClaimed.map((w) => w.codeHash));
+
+        // Every hash now provably has a committed row (see above), so this
+        // locks each one for the rest of the transaction -- used ONLY to
+        // attribute a displacement (see displacedIncumbents' doc comment).
+        // It is NEVER used to decide who wins: that decision belongs
+        // entirely to the upsert's own `setWhere`. Ordered to match
+        // `hashes`/`claims` for the same 40P01 reason as above.
+        //
+        // Cost, stated plainly: this locks up to `items.max(500)` (see
+        // dto.ts) PRE-EXISTING code_registry rows and holds every one of
+        // them until this transaction commits -- including rows this batch
+        // is about to LOSE, which sit locked purely for sharing a batch with
+        // a winner.
         const priorIncumbents = await tx
           .select(registryColumns)
           .from(schema.codeRegistry)
@@ -287,6 +327,7 @@ export class StationScansService {
               inArray(schema.codeRegistry.codeHash, hashes),
             ),
           )
+          .orderBy(schema.codeRegistry.codeHash)
           .for("update");
         const priorByHash = new Map<string, OwnerRow>(priorIncumbents.map((o) => [o.codeHash, o]));
 
@@ -307,23 +348,25 @@ export class StationScansService {
             setWhere: sql`excluded.scanned_at < ${schema.codeRegistry.scannedAt}`,
           })
           .returning({ codeHash: schema.codeRegistry.codeHash });
-        const wonHashes = new Set(won.map((w) => w.codeHash));
+        const wonHashes = new Set([...freshHashes, ...won.map((w) => w.codeHash)]);
 
-        // The authoritative post-upsert truth: for a code this batch won,
-        // this is this batch's own claim; for one it lost, this is whoever
-        // already held it, confirmed unchanged. Conflicts are derived from
-        // THIS, not from priorByHash above or from any pre-read -- see
-        // conflict-resolution.ts.
-        const postOwners = await tx
-          .select(registryColumns)
-          .from(schema.codeRegistry)
-          .where(
-            and(
-              eq(schema.codeRegistry.tenantId, tenantId),
-              inArray(schema.codeRegistry.codeHash, hashes),
-            ),
-          );
-        const ownerByHash = new Map<string, OwnerRow>(postOwners.map((o) => [o.codeHash, o]));
+        // The authoritative final owner for every hash, derived entirely
+        // from what is already in memory -- deliberately NOT a fresh
+        // re-read of code_registry. That re-read (`postOwners`) existed in
+        // an earlier version of this code; it is now redundant, because the
+        // `FOR UPDATE` above holds every one of these rows locked from that
+        // read through to here: for a hash this batch WON (`wonHashes`),
+        // either the fresh-insert above or the upsert just wrote this
+        // batch's own claim and nothing else could have touched the row
+        // since (the lock forbids it); for one it LOST, the same lock means
+        // nothing else could have touched `priorByHash`'s value either, and
+        // this batch's own upsert deliberately left it unchanged. A separate
+        // SELECT here would read back exactly one of these two maps and
+        // nothing else -- so build it directly instead of paying another
+        // round trip to confirm it.
+        const ownerByHash = new Map<string, OwnerRow>(
+          hashes.map((h) => [h, wonHashes.has(h) ? claimsByHash.get(h)! : priorByHash.get(h)!]),
+        );
 
         const ownLosses = conflictsAgainstOwner(claimItems, ownerByHash);
         const displaced = displacedIncumbents(claims, wonHashes, priorByHash);
