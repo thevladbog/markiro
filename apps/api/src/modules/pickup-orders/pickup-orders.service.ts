@@ -1010,6 +1010,23 @@ export class PickupOrdersService {
               })),
             );
           }
+          // Same transaction as the order on purpose: the kmKey-race retry
+          // below rolls this back with it, so a rejection row can never
+          // outlive the order attempt that produced it. `conflicts` is
+          // mutated by that retry before it loops, so on the attempt that
+          // finally commits it holds the complete set.
+          if (conflicts.length > 0) {
+            await this.recordScanRejection(tx, {
+              tenantId,
+              kioskId,
+              employeeId,
+              badgeCode: null,
+              orderId: order.id,
+              deviceSeq,
+              codes: conflicts,
+              scannedAt: when,
+            });
+          }
           return { orderNo: order.orderNo, itemCount: order.itemCount };
         });
       } catch (error) {

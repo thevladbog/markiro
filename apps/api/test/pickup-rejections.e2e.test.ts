@@ -189,4 +189,49 @@ describe.skipIf(!ready)("pickup scan rejections e2e", () => {
 
     expect(await rejectionsFor(13)).toHaveLength(0);
   });
+
+  // The unified log has to be a superset: an admin asking "what got refused
+  // today?" must not have to check two places. `sync_conflicts` keeps being
+  // written so the order card and `conflictCount` are untouched.
+  it("records a partial refusal linked to its order, without disturbing sync_conflicts", async () => {
+    const res = await postScan({
+      deviceSeq: 14,
+      badgeCode: BADGE,
+      reason: "buy",
+      items: [{ rawKm: GOOD_KM }, { rawKm: REFUSED_KM }],
+    }).expect(201);
+
+    expect(res.body.itemCount).toBe(1);
+
+    const rows = await rejectionsFor(14);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.orderId).not.toBeNull();
+    expect(rows[0]!.employeeId).toBe(employeeId);
+    expect(rows[0]!.codes).toEqual([
+      { rawKm: REFUSED_KM, reason: expect.stringMatching(/unknown_product|not_allowed/) },
+    ]);
+
+    const [order] = await db
+      .select({ syncConflicts: schema.pickupOrders.syncConflicts })
+      .from(schema.pickupOrders)
+      .where(
+        and(
+          eq(schema.pickupOrders.tenantId, tenantId),
+          eq(schema.pickupOrders.id, rows[0]!.orderId!),
+        ),
+      );
+    expect(order!.syncConflicts).toHaveLength(1);
+  });
+
+  it("records nothing for a clean order", async () => {
+    const good = `01${GTIN}21REJ9${GS}93Abcd`;
+    await postScan({
+      deviceSeq: 15,
+      badgeCode: BADGE,
+      reason: "buy",
+      items: [{ rawKm: good }],
+    }).expect(201);
+
+    expect(await rejectionsFor(15)).toHaveLength(0);
+  });
 });
