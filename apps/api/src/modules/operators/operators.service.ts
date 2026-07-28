@@ -162,6 +162,11 @@ export class OperatorsService {
     }));
   }
 
+  /** Badge verifiers for the given employees, hashed under the tenant salt. */
+  async badgeHashesFor(tenantId: string, employeeIds: string[]): Promise<Map<string, string>> {
+    return this.activeBadgeHashes(tenantId, employeeIds);
+  }
+
   /**
    * Badge hashes for the given roster employees only (never the whole
    * tenant's badge table — legacy tenants can carry thousands of unrelated

@@ -34,9 +34,18 @@ export interface CreateOrderResultDto {
   conflicts: OrderConflict[];
 }
 
-/** GET /kiosk/bootstrap response — everything a kiosk needs to work offline. */
+/**
+ * GET /kiosk/bootstrap — everything a kiosk needs to work offline.
+ *
+ * Credentials are PBKDF2 verifiers, never plaintext: an unattended tablet at
+ * a factory gate is the most theft-exposed node in the system, and a badge is
+ * the credential that authorises a pickup (see docs/device-key-surface.md).
+ * All badge verifiers share `badgeSalt` so the device derives once per scan
+ * and looks the digest up, instead of running PBKDF2 per employee.
+ */
 export interface KioskBootstrapDto {
   config: { dayLimitPerEmployee: number; showPrices: boolean };
+  badgeSalt: string; // base64; the salt every badgeHash below shares
   reasons: { id: string; name: string }[];
   products: {
     id: string;
@@ -45,7 +54,15 @@ export interface KioskBootstrapDto {
     unitPrice: string | null;
     egaisCode: string | null;
   }[];
-  employees: { id: string; fullName: string; role: string | null; badgeCodes: string[] }[];
+  employees: { id: string; fullName: string; role: string | null; badgeHash: string | null }[];
+  operators: {
+    employeeId: string;
+    name: string;
+    login: string;
+    role: string;
+    pinHash: string;
+    badgeHash: string | null;
+  }[];
 }
 
 const PICKUP_ORDER_STATUSES = ["pending", "punched", "writtenoff", "cancelled"] as const;

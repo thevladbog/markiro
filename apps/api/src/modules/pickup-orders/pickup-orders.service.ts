@@ -10,9 +10,11 @@ import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, sql, type SQL } from
 import { schema, type Db } from "@markiro/db";
 import { validatePickupKm } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
+import { getOrCreateBadgeSalt } from "../../lib/badge-salt";
 import { nextOrderNo } from "../../pickup/order-number";
 import { computeTotalPrice } from "../../pickup/total-price";
 import type { PickupSlipData } from "../../pickup/slip";
+import { OperatorsService } from "../operators/operators.service";
 import type {
   CreateOrderDto,
   CreateOrderResultDto,
@@ -42,7 +44,10 @@ type ParsedItem =
 
 @Injectable()
 export class PickupOrdersService {
-  constructor(@Inject(DB) private readonly db: Db) {}
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    private readonly operatorsService: OperatorsService,
+  ) {}
 
   /**
    * Authoritative kiosk create/sync path (brief's 7-step algorithm):
@@ -199,39 +204,43 @@ export class PickupOrdersService {
         and(eq(schema.kioskProducts.tenantId, tenantId), eq(schema.kioskProducts.kioskId, kioskId)),
       );
 
+    const badgeSalt = await getOrCreateBadgeSalt(this.db, tenantId);
+
     const employeeRows = await this.db
       .select()
       .from(schema.employees)
       .where(and(eq(schema.employees.tenantId, tenantId), eq(schema.employees.status, "active")))
       .orderBy(asc(schema.employees.fullName));
-    const badgeRows = await this.db
-      .select({
-        employeeId: schema.employeeBadges.employeeId,
-        badgeCode: schema.employeeBadges.badgeCode,
-      })
-      .from(schema.employeeBadges)
-      .where(
-        and(eq(schema.employeeBadges.tenantId, tenantId), isNull(schema.employeeBadges.revokedAt)),
-      );
-    const badgesByEmployee = new Map<string, string[]>();
-    for (const b of badgeRows) {
-      const list = badgesByEmployee.get(b.employeeId) ?? [];
-      list.push(b.badgeCode);
-      badgesByEmployee.set(b.employeeId, list);
-    }
+
+    // Reuses the roster builder's hashing/backfill path, so kiosk and station
+    // can never drift on how a badge verifier is produced.
+    const badgeHashes = await this.operatorsService.badgeHashesFor(
+      tenantId,
+      employeeRows.map((e) => e.id),
+    );
+    const operators = await this.operatorsService.buildRoster(tenantId);
 
     return {
       config: {
         dayLimitPerEmployee: kiosk?.dayLimitPerEmployee ?? 0,
         showPrices: kiosk?.showPrices ?? true,
       },
+      badgeSalt,
       reasons,
       products,
       employees: employeeRows.map((e) => ({
         id: e.id,
         fullName: e.fullName,
         role: e.role,
-        badgeCodes: badgesByEmployee.get(e.id) ?? [],
+        badgeHash: badgeHashes.get(e.id) ?? null,
+      })),
+      operators: operators.map((o) => ({
+        employeeId: o.operatorId,
+        name: o.name,
+        login: o.login,
+        role: o.role,
+        pinHash: o.pinHash,
+        badgeHash: o.badgeHash,
       })),
     };
   }

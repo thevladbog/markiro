@@ -5,6 +5,7 @@ import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
+import { verifyPhc } from "@markiro/domain";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
@@ -446,7 +447,7 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
     expect(ordersAfter.length).toBe(ordersBefore.length);
   });
 
-  it("bootstrap returns config, reasons, allowlist products and employees with badge codes", async () => {
+  it("bootstrap returns config, reasons, allowlist products and employees with badge hashes", async () => {
     const res = await request(app!.getHttpServer())
       .get("/kiosk/bootstrap")
       .set("x-kiosk-token", TOKEN)
@@ -458,7 +459,11 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
       true,
     );
     const employee = res.body.employees.find((e: { id: string }) => e.id === employeeId);
-    expect(employee.badgeCodes).toContain(BADGE);
+    // Task 4: the payload carries a PBKDF2 verifier, never the plaintext badge code.
+    expect(employee.badgeCodes).toBeUndefined();
+    expect(typeof employee.badgeHash).toBe("string");
+    await expect(verifyPhc(BADGE, employee.badgeHash)).resolves.toBe(true);
+    expect(JSON.stringify(res.body)).not.toContain(BADGE);
   });
 
   it("401s a kiosk token that is missing entirely", async () => {
