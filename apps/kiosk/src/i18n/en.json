@@ -26,7 +26,7 @@
     "scanTarget": "on your badge",
     "hint": "The QR code is on the back of your badge. Hold it up to the scanner below the screen, then scan the marking codes on the bottles.",
     "badgeUnknown": "Badge not recognised. Scan it again, or ask an administrator.",
-    "notABadge": "Scan your badge first — the kiosk will take the bottles' marking codes after that."
+    "notABadge": "Scan your badge first — you can scan the bottles right after that."
   },
   "scannerSetup": {
     "title": "Scanner setup",

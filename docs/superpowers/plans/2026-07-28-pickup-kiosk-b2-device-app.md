@@ -1645,7 +1645,12 @@ describe("Idle", () => {
     render(
       <Idle onEmployee={onEmployee} resolveBadge={resolveBadge} onScan={(cb) => cb("BADGE-1")} />,
     );
-    expect(await vi.waitFor(() => onEmployee.mock.calls.length)).toBe(1);
+    // Corrected during the Task 12 review: this read
+    // `expect(await vi.waitFor(() => onEmployee.mock.calls.length)).toBe(1)`,
+    // which can never pass — `vi.waitFor` resolves with the first non-throwing,
+    // non-thenable value its callback returns, always 0 here, and never retries
+    // (`vi.waitUntil` is the API that retries on a falsy value).
+    await vi.waitFor(() => expect(onEmployee).toHaveBeenCalledTimes(1));
     expect(onEmployee).toHaveBeenCalledWith("e1");
   });
 

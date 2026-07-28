@@ -69,7 +69,14 @@ describe("Idle", () => {
     const resolveBadge = vi.fn();
     const onEmployee = vi.fn();
     render(<Idle onEmployee={onEmployee} resolveBadge={resolveBadge} onScan={(cb) => cb(raw)} />);
-    expect(await screen.findByText(/Сначала отсканируйте бейдж/)).toBeDefined();
+    // Pinned as a whole sentence, not a prefix: the second clause is the half
+    // that tells the worker the bottles are not lost, only early, and a regex
+    // on the opening words would not notice it rotting.
+    expect(
+      await screen.findByText(
+        "Сначала отсканируйте бейдж — бутылки можно будет отсканировать сразу после этого.",
+      ),
+    ).toBeDefined();
     expect(resolveBadge).not.toHaveBeenCalled();
     expect(onEmployee).not.toHaveBeenCalled();
   });
@@ -145,5 +152,109 @@ describe("Idle", () => {
     } finally {
       failure.mockRestore();
     }
+  });
+
+  // The in-flight guard has to be released on EVERY exit, not just the happy
+  // one: a screen that swallows the one badge check it failed at is a kiosk
+  // that is dead until someone reboots it, which is the worst thing this
+  // screen can do. Both non-admitting outcomes are covered because they leave
+  // the guard through different paths — `catch` and an early `return`.
+  it.each([
+    ["the check itself failed", () => Promise.reject(new Error("crypto is unavailable"))],
+    ["the badge was not recognised", async () => null],
+  ])("still takes the next badge after %s", async (_what, firstAttempt) => {
+    const failure = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const onEmployee = vi.fn();
+      const resolveBadge = vi
+        .fn<(raw: string) => Promise<string | null>>()
+        .mockImplementationOnce(firstAttempt)
+        .mockImplementation(async () => "e2");
+      let emit!: ScanListener;
+      render(
+        <Idle
+          onEmployee={onEmployee}
+          resolveBadge={resolveBadge}
+          onScan={(cb) => {
+            emit = cb;
+          }}
+        />,
+      );
+
+      await act(async () => {
+        emit("BADGE-1");
+      });
+      expect(await screen.findByText(/Бейдж не распознан/)).toBeDefined();
+      expect(onEmployee).not.toHaveBeenCalled();
+
+      await act(async () => {
+        emit("BADGE-2");
+      });
+      await vi.waitFor(() => expect(onEmployee).toHaveBeenCalledTimes(1));
+      expect(onEmployee).toHaveBeenCalledWith("e2");
+    } finally {
+      failure.mockRestore();
+    }
+  });
+
+  // The check outlives the screen: a derivation started here can still be
+  // running when the shell swaps the kiosk to another view, and landing then
+  // would sign in a worker who has already walked away — behind whatever screen
+  // replaced this one, where nobody can see it happened.
+  it("admits nobody when the badge resolves after the screen is gone", async () => {
+    const onEmployee = vi.fn();
+    let release!: (employeeId: string | null) => void;
+    const pending = new Promise<string | null>((resolve) => {
+      release = resolve;
+    });
+    let emit!: ScanListener;
+    const { unmount } = render(
+      <Idle
+        onEmployee={onEmployee}
+        resolveBadge={() => pending}
+        onScan={(cb) => {
+          emit = cb;
+        }}
+      />,
+    );
+
+    act(() => {
+      emit("BADGE-1");
+    });
+    unmount();
+
+    await act(async () => {
+      release("e1");
+      await pending;
+    });
+    expect(onEmployee).not.toHaveBeenCalled();
+  });
+
+  // Admitted is admitted. A bottle waved at the scanner in the moment between
+  // the badge landing and the shell routing away must not answer the worker
+  // with «scan your badge first» — they just did, and it worked.
+  it("says nothing more once someone has been admitted", async () => {
+    const onEmployee = vi.fn();
+    let emit!: ScanListener;
+    render(
+      <Idle
+        onEmployee={onEmployee}
+        resolveBadge={async () => "e1"}
+        onScan={(cb) => {
+          emit = cb;
+        }}
+      />,
+    );
+
+    await act(async () => {
+      emit("BADGE-1");
+    });
+    await vi.waitFor(() => expect(onEmployee).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      emit(`01${GTIN}21KYC9X7MQ${GS}93Abcd`);
+    });
+    expect(screen.queryByText(/Сначала отсканируйте бейдж/)).toBeNull();
+    expect(onEmployee).toHaveBeenCalledTimes(1);
   });
 });

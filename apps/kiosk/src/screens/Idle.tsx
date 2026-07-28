@@ -90,6 +90,22 @@ export function Idle({ onScan, resolveBadge, onEmployee }: IdleProps): React.JSX
   const admitted = useRef(false);
 
   /**
+   * Whether this instance is still on screen. A badge check is a PBKDF2
+   * derivation and outlives the screen easily: the shell can swap the kiosk to
+   * `blocked` (a stale cache, a lost pairing) while one is still running, and
+   * the resolve then lands with `onEmployee` still callable. React 19 no longer
+   * even warns about the `setNotice` that follows, so the whole thing is silent
+   * — the shell would hold an `employeeId` behind the screen that replaced this
+   * one, and drop the worker's successor into a cart belonging to someone who
+   * has already walked away.
+   *
+   * This is also what makes remount-by-`key` a safe way to swap the scan
+   * transport under a mounted `Idle` (Task 14): the dying instance's pending
+   * promise can no longer reach the old `onEmployee`.
+   */
+  const live = useRef(true);
+
+  /**
    * Held from the first render so the subscription can be mount-only.
    *
    * Subscribing once is load-bearing, not an optimisation. A parent that passes
@@ -104,25 +120,30 @@ export function Idle({ onScan, resolveBadge, onEmployee }: IdleProps): React.JSX
   const subscribe = useRef(onScan);
 
   useEffect(() => {
-    return subscribe.current((raw) => {
+    live.current = true;
+    const stop = subscribe.current((raw) => {
+      // Checked before the scan is even classified. Once someone is in, this
+      // screen has nothing left to say: answering a stray bottle with «scan
+      // your badge first» would contradict the badge that just worked, on a
+      // screen the worker is in the middle of leaving.
+      if (admitted.current) return;
       const scan = classifyKioskScan(raw);
       if (scan.kind !== "badge") {
         setNotice("not-a-badge");
         return;
       }
-      if (resolving.current || admitted.current) return;
+      if (resolving.current) return;
       resolving.current = true;
       void (async () => {
         try {
           const employeeId = await latest.current.resolveBadge(scan.raw);
+          // The screen may have gone while the derivation ran; nothing this
+          // instance learned afterwards belongs to whatever replaced it.
+          if (!live.current) return;
           if (employeeId === null) {
             setNotice("unknown-badge");
             return;
           }
-          // Re-checked AFTER the await as well: `resolving` only serialises the
-          // checks, so without this a second badge queued behind the first
-          // would still get its own turn once the first has admitted someone.
-          if (admitted.current) return;
           admitted.current = true;
           setNotice(null);
           latest.current.onEmployee(employeeId);
@@ -132,12 +153,19 @@ export function Idle({ onScan, resolveBadge, onEmployee }: IdleProps): React.JSX
           // rejected badge earns: nobody is admitted either way, and the kiosk
           // cannot honestly tell them which of the two happened.
           console.error("kiosk: the badge could not be checked", err);
-          setNotice("unknown-badge");
+          if (live.current) setNotice("unknown-badge");
         } finally {
+          // On EVERY exit, admitting or not. A guard left standing after a
+          // failed check is a kiosk that refuses every badge after the first
+          // one it could not read, until someone reboots it.
           resolving.current = false;
         }
       })();
     });
+    return () => {
+      live.current = false;
+      if (stop) stop();
+    };
   }, []);
 
   return (
