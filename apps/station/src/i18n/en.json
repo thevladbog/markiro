@@ -67,7 +67,11 @@
   "work": {
     "accepted": "Accepted",
     "rejected": "Rejected",
-    "waiting": "Waiting for a scan…"
+    "waiting": "Waiting for a scan…",
+    "exit": "Leave shift",
+    "exitPending": "{{count}} scans have not reached the server yet.",
+    "exitAnyway": "Leave anyway",
+    "stay": "Stay"
   },
   "setup": {
     "title": "Workstation setup",

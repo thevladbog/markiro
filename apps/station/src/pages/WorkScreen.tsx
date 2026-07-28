@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { classifyScan, kmKey, validateShiftScan, type ScanVerdict } from "@markiro/domain";
+import { Alert, Button } from "@markiro/ui";
 import { findFirstSeen, loadCodeKeys, recordScan } from "../lib/journal.js";
 import type { SqlExecutor } from "../lib/mirror.js";
 import { createScanQueue, type ScanOutcome } from "../lib/scan-queue.js";
@@ -20,6 +21,10 @@ export interface WorkScreenProps {
   /** Signals a scan was just written, so a queued outbox row does not have
    * to wait for the sync engine's 15s heartbeat before draining. */
   onScanRecorded?: () => void;
+  /** Return to shift selection. Does NOT close the shift — that is a cabinet action. */
+  onExit: () => void;
+  /** Scans still queued on this device, shown before the operator walks away. */
+  pendingSync: number;
 }
 
 /** How long each verdict's full-screen flash stays up (design brief 04). */
@@ -41,6 +46,8 @@ export function WorkScreen({
   source,
   sound,
   onScanRecorded,
+  onExit,
+  pendingSync,
 }: WorkScreenProps) {
   const { t, i18n } = useTranslation();
   const [accepted, setAccepted] = useState(0);
@@ -48,6 +55,12 @@ export function WorkScreen({
   const [signal, setSignal] = useState<{ tone: SignalTone; title: string; detail?: string } | null>(
     null,
   );
+  const [confirmExit, setConfirmExit] = useState(false);
+
+  function requestExit() {
+    if (pendingSync > 0) setConfirmExit(true);
+    else onExit();
+  }
 
   // The domain's isDuplicate(key) is synchronous, so the device's accepted keys
   // are held in memory and updated on every insert rather than queried per scan.
@@ -213,14 +226,36 @@ export function WorkScreen({
     <main
       style={{ minHeight: "100%", padding: 32, display: "flex", flexDirection: "column", gap: 24 }}
     >
-      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-        <span style={{ fontSize: "2rem", fontWeight: 700 }}>{productName}</span>
-        {counterpartyName ? (
-          <span style={{ fontSize: "1.25rem", opacity: 0.85 }}>
-            {t("shifts.forCounterparty")} {counterpartyName}
-          </span>
-        ) : null}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <span style={{ fontSize: "2rem", fontWeight: 700 }}>{productName}</span>
+          {counterpartyName ? (
+            <span style={{ fontSize: "1.25rem", opacity: 0.85 }}>
+              {t("shifts.forCounterparty")} {counterpartyName}
+            </span>
+          ) : null}
+        </div>
+        <Button type="button" variant="secondary" style={{ minHeight: 64 }} onClick={requestExit}>
+          {t("work.exit")}
+        </Button>
       </div>
+
+      {confirmExit ? (
+        <Alert tone="warn">
+          <p>{t("work.exitPending", { count: pendingSync })}</p>
+          <Button type="button" style={{ minHeight: 64 }} onClick={onExit}>
+            {t("work.exitAnyway")}
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            style={{ minHeight: 64 }}
+            onClick={() => setConfirmExit(false)}
+          >
+            {t("work.stay")}
+          </Button>
+        </Alert>
+      ) : null}
 
       <div style={{ display: "flex", gap: 48 }}>
         <div style={{ display: "flex", flexDirection: "column" }}>

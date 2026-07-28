@@ -356,6 +356,8 @@ export function App() {
             source={scanSource}
             sound={sound}
             onScanRecorded={nudgeSync}
+            onExit={() => setShift(null)}
+            pendingSync={syncState.pending}
           />
         ) : (
           <main style={{ minHeight: "100%", display: "grid", placeItems: "center" }}>
