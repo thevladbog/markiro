@@ -1,0 +1,40 @@
+import { Controller, Get, HttpCode, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { ApiTags } from "@nestjs/swagger";
+import { SessionOnlyGuard } from "../../tenancy/session-only.guard";
+import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
+import { ZodValidationPipe } from "../../zod.pipe";
+import {
+  listPickupRejectionsQuerySchema,
+  type ListPickupRejectionsQueryDto,
+  type ListPickupRejectionsResponseDto,
+  type PickupScanRejectionRowDto,
+} from "./dto";
+import { PickupRejectionsService } from "./pickup-rejections.service";
+
+// Cabinet-only: the kiosk device talks to /kiosk/* behind KioskDeviceGuard and
+// never needs this module, so no device key — station or kiosk — should reach
+// it (see docs/device-key-surface.md).
+@ApiTags("pickup-rejections")
+@Controller("pickup-rejections")
+@UseGuards(TenantGuard, SessionOnlyGuard)
+export class PickupRejectionsController {
+  constructor(private readonly pickupRejectionsService: PickupRejectionsService) {}
+
+  @Get()
+  async list(
+    @Req() req: RequestWithTenant,
+    @Query(new ZodValidationPipe(listPickupRejectionsQuerySchema))
+    query: ListPickupRejectionsQueryDto,
+  ): Promise<ListPickupRejectionsResponseDto> {
+    return this.pickupRejectionsService.list(req.tenantId!, query);
+  }
+
+  @Post(":id/acknowledge")
+  @HttpCode(200)
+  async acknowledge(
+    @Req() req: RequestWithTenant,
+    @Param("id") id: string,
+  ): Promise<PickupScanRejectionRowDto> {
+    return this.pickupRejectionsService.acknowledge(req.tenantId!, id, req.userId!);
+  }
+}

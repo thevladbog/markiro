@@ -263,4 +263,79 @@ describe.skipIf(!ready)("pickup scan rejections e2e", () => {
 
     expect(paired.body.nextDeviceSeq).toBe(78);
   });
+
+  it("lists rejections for the tenant with an open count", async () => {
+    const res = await agent.get("/pickup-rejections").expect(200);
+
+    expect(res.body.openCount).toBeGreaterThan(0);
+    const row = res.body.items.find(
+      (r: { deviceSeq: number; kioskId: string }) => r.deviceSeq === 10 && r.kioskId === kioskId,
+    );
+    expect(row.kind).toBe("items_refused");
+    expect(row.kioskName).toBe("Киоск-1");
+    expect(row.employeeName).toBe("Иван Иванов");
+    expect(row.orderNo).toBeNull();
+    expect(row.codes).toHaveLength(2);
+    expect(row.acknowledgedAt).toBeNull();
+  });
+
+  it("reports an unrecognised badge as its own kind", async () => {
+    const res = await agent.get("/pickup-rejections").expect(200);
+    const row = res.body.items.find((r: { deviceSeq: number }) => r.deviceSeq === 12);
+
+    expect(row.kind).toBe("unknown_badge");
+    expect(row.employeeName).toBeNull();
+    expect(row.badgeCode).toBe("badge-that-never-existed");
+  });
+
+  it("links a partial refusal to its order number", async () => {
+    const res = await agent.get("/pickup-rejections").expect(200);
+    const row = res.body.items.find((r: { deviceSeq: number }) => r.deviceSeq === 14);
+
+    expect(row.orderId).not.toBeNull();
+    expect(row.orderNo).toMatch(/^ORD-/);
+  });
+
+  it("acknowledges a rejection and drops it from the open count", async () => {
+    const before = await agent.get("/pickup-rejections?state=open").expect(200);
+    const target = before.body.items.find((r: { deviceSeq: number }) => r.deviceSeq === 10);
+    expect(target).toBeDefined();
+
+    const acked = await agent.post(`/pickup-rejections/${target.id}/acknowledge`).expect(200);
+    expect(acked.body.acknowledgedAt).not.toBeNull();
+
+    const after = await agent.get("/pickup-rejections?state=open").expect(200);
+    expect(after.body.openCount).toBe(before.body.openCount - 1);
+    expect(after.body.items.some((r: { id: string }) => r.id === target.id)).toBe(false);
+
+    const ackedOnly = await agent.get("/pickup-rejections?state=acknowledged").expect(200);
+    expect(ackedOnly.body.items.some((r: { id: string }) => r.id === target.id)).toBe(true);
+  });
+
+  it("filters by kiosk", async () => {
+    const res = await agent.get(`/pickup-rejections?kioskId=${kioskId}`).expect(200);
+    expect(res.body.items.every((r: { kioskId: string }) => r.kioskId === kioskId)).toBe(true);
+  });
+
+  it("404s acknowledging a rejection of another tenant", async () => {
+    const other = request.agent(app!.getHttpServer());
+    await signUpAndActivate(other);
+    const mine = await agent.get("/pickup-rejections").expect(200);
+
+    await other.post(`/pickup-rejections/${mine.body.items[0].id}/acknowledge`).expect(404);
+    const theirs = await other.get("/pickup-rejections").expect(200);
+    expect(theirs.body.items).toHaveLength(0);
+  });
+
+  // Cabinet-only surface: a device key must never reach it (docs/device-key-surface.md).
+  it("refuses a kiosk device token on both routes", async () => {
+    await request(app!.getHttpServer())
+      .get("/pickup-rejections")
+      .set("x-kiosk-token", TOKEN)
+      .expect(401);
+    await request(app!.getHttpServer())
+      .post(`/pickup-rejections/${randomUUID()}/acknowledge`)
+      .set("x-kiosk-token", TOKEN)
+      .expect(401);
+  });
 });
