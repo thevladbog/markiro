@@ -75,6 +75,21 @@ export const STATION_MIGRATIONS: string[] = [
      verdict TEXT NOT NULL,
      scanned_at TEXT NOT NULL
    );`,
+  // AUTOINCREMENT is load-bearing, not decoration: an ordinary SQLite rowid is
+  // reused after a delete, so once plan 09 purges rows a new scan could receive
+  // an id below one already acknowledged. The outbox must preserve order and
+  // never reuse ids, so every row must have a stable handle for the server.
+  `CREATE TABLE IF NOT EXISTS outbox (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     shift_id TEXT NOT NULL,
+     terminal_id TEXT,
+     raw TEXT NOT NULL,
+     verdict TEXT NOT NULL,
+     scanned_at TEXT NOT NULL,
+     code_hash TEXT,
+     gtin14 TEXT,
+     serial TEXT
+   );`,
   // Upgrade path for devices enrolled before operators had a personnel number.
   // SQLite has no `ADD COLUMN IF NOT EXISTS`, and applyMigrations re-runs every
   // statement on each boot, so this throws "duplicate column name" once the

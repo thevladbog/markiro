@@ -127,7 +127,29 @@ export async function recordScan(
     }
   }
 
-  await appendScanEvent(exec, alreadyPresent ? { ...e, verdict: "duplicate" } : e);
+  const journalled = alreadyPresent ? { ...e, verdict: "duplicate" } : e;
+  await appendScanEvent(exec, journalled);
+
+  // Enqueued LAST, and deliberately allowed to throw. The verdict is not
+  // final until the code insert has either succeeded or hit the primary key,
+  // so an earlier enqueue could queue "ok" for a scan the operator was shown
+  // as a duplicate. A failure here means the scan is journalled locally but
+  // never queued for the server, so it must reach the operator through the
+  // scan queue's error path rather than vanishing quietly.
+  await exec.run(
+    `INSERT INTO outbox (shift_id, terminal_id, raw, verdict, scanned_at, code_hash, gtin14, serial)
+       VALUES (?,?,?,?,?,?,?,?)`,
+    [
+      journalled.shiftId,
+      journalled.terminalId,
+      journalled.raw,
+      journalled.verdict,
+      journalled.scannedAt,
+      storedCode && code ? code.codeHash : null,
+      storedCode && code ? code.gtin14 : null,
+      storedCode && code ? code.serial : null,
+    ],
+  );
 
   return { storedCode, alreadyPresent };
 }

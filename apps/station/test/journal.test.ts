@@ -142,3 +142,121 @@ describe("journal", () => {
     await expect(recordScan(failingExec, EVENT, CODE)).rejects.toThrow(boom);
   });
 });
+
+describe("outbox", () => {
+  it("enqueues an accepted scan with its code payload", async () => {
+    const exec = makeExec();
+    await recordScan(
+      exec,
+      {
+        shiftId: "s1",
+        terminalId: "t1",
+        raw: "RAW1",
+        verdict: "ok",
+        scannedAt: "2026-07-28T10:00:00.000Z",
+      },
+      {
+        codeHash: "h1",
+        shiftId: "s1",
+        gtin14: "04600000000017",
+        serial: "AB1",
+        scannedAt: "2026-07-28T10:00:00.000Z",
+      },
+    );
+
+    const rows = await exec.all<{
+      shift_id: string;
+      verdict: string;
+      code_hash: string | null;
+      gtin14: string | null;
+      serial: string | null;
+    }>("SELECT shift_id, verdict, code_hash, gtin14, serial FROM outbox ORDER BY id");
+    expect(rows).toEqual([
+      { shift_id: "s1", verdict: "ok", code_hash: "h1", gtin14: "04600000000017", serial: "AB1" },
+    ]);
+  });
+
+  it("enqueues a rejected scan with no code payload", async () => {
+    const exec = makeExec();
+    await recordScan(
+      exec,
+      {
+        shiftId: "s1",
+        terminalId: null,
+        raw: "junk",
+        verdict: "invalid",
+        scannedAt: "2026-07-28T10:00:01.000Z",
+      },
+      null,
+    );
+
+    const rows = await exec.all<{ verdict: string; code_hash: string | null }>(
+      "SELECT verdict, code_hash FROM outbox",
+    );
+    expect(rows).toEqual([{ verdict: "invalid", code_hash: null }]);
+  });
+
+  it("enqueues the CORRECTED verdict and no code when the code was already present", async () => {
+    const exec = makeExec();
+    const code = {
+      codeHash: "h1",
+      shiftId: "s1",
+      gtin14: "04600000000017",
+      serial: "AB1",
+      scannedAt: "2026-07-28T10:00:00.000Z",
+    };
+    await recordScan(
+      exec,
+      { shiftId: "s1", terminalId: null, raw: "RAW1", verdict: "ok", scannedAt: code.scannedAt },
+      code,
+    );
+
+    // Same code again: the primary key rejects it, so the scan is a duplicate.
+    const result = await recordScan(
+      exec,
+      {
+        shiftId: "s1",
+        terminalId: null,
+        raw: "RAW1",
+        verdict: "ok",
+        scannedAt: "2026-07-28T10:00:05.000Z",
+      },
+      { ...code, scannedAt: "2026-07-28T10:00:05.000Z" },
+    );
+    expect(result.alreadyPresent).toBe(true);
+
+    const rows = await exec.all<{ verdict: string; code_hash: string | null }>(
+      "SELECT verdict, code_hash FROM outbox ORDER BY id",
+    );
+    // The second row must NOT carry a code: this device already queued it once,
+    // and sending it again would write a second server row for one physical item.
+    expect(rows).toEqual([
+      { verdict: "ok", code_hash: "h1" },
+      { verdict: "duplicate", code_hash: null },
+    ]);
+  });
+
+  it("throws when the outbox write fails, rather than losing the scan silently", async () => {
+    const exec = makeExec();
+    const failing: SqlExecutor = {
+      run: async (sql, params) => {
+        if (/INTO outbox/i.test(sql)) throw new Error("disk full");
+        return exec.run(sql, params);
+      },
+      all: (sql, params) => exec.all(sql, params),
+    };
+    await expect(
+      recordScan(
+        failing,
+        {
+          shiftId: "s1",
+          terminalId: null,
+          raw: "RAW1",
+          verdict: "invalid",
+          scannedAt: "2026-07-28T10:00:00.000Z",
+        },
+        null,
+      ),
+    ).rejects.toThrow(/disk full/);
+  });
+});
