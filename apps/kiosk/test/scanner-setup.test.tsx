@@ -72,31 +72,57 @@ function fakeScanSource(): ScanSource & { emit: (raw: string) => void; listening
 
 /**
  * A `SerialPort` whose readable stream this test drives, so a payload can be
- * pushed through the REAL `createWebSerialSource` reader loop — the same fake
- * shape `test/scanner.test.ts` uses, plus a controller kept around so bytes
- * can arrive after the screen has subscribed.
+ * pushed through the REAL `createWebSerialSource` reader loop.
+ *
+ * It models the port's actual lifecycle rather than a stub of it, because the
+ * transport can be picked more than once per visit: `open()` on a port that is
+ * not closed rejects with an `InvalidStateError`, `readable` is null while the
+ * port is closed, and a cancelled `readable` is dropped so the next access
+ * vends a fresh stream. A fake that shrugged at a second `open()` would let a
+ * source that cannot be restarted pass. Mirrors `restartablePort` in
+ * `test/scanner.test.ts`.
  */
 function fakePort(): { port: SerialPort; scan: (raw: string) => void; opened: () => boolean } {
-  let controller!: ReadableStreamDefaultController<Uint8Array>;
-  let opened = false;
-  const readable = new ReadableStream<Uint8Array>({
-    start(c) {
-      controller = c;
+  let isOpen = false;
+  let stream: ReadableStream<Uint8Array> | null = null;
+  let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
+
+  const port: SerialPort = {
+    open: async () => {
+      if (isOpen) throw new DOMException("The port is already open.", "InvalidStateError");
+      isOpen = true;
     },
-  });
+    close: async () => {
+      isOpen = false;
+      stream = null;
+      controller = null;
+    },
+    get readable() {
+      if (stream) return stream;
+      if (!isOpen) return null;
+      stream = new ReadableStream<Uint8Array>({
+        start(c) {
+          controller = c;
+        },
+        cancel() {
+          stream = null;
+          controller = null;
+        },
+      });
+      return stream;
+    },
+  };
+
   return {
-    port: {
-      open: async () => {
-        opened = true;
-      },
-      close: async () => {},
-      get readable() {
-        return readable;
-      },
+    port,
+    // Scanners terminate a scan with CR/LF; the source chunks on it. Touching
+    // the getter first vends the stream if the source has not reached it yet,
+    // exactly as a real port does.
+    scan: (raw) => {
+      void port.readable;
+      controller?.enqueue(new TextEncoder().encode(`${raw}\r\n`));
     },
-    // Scanners terminate a scan with CR/LF; the source chunks on it.
-    scan: (raw) => controller.enqueue(new TextEncoder().encode(`${raw}\r\n`)),
-    opened: () => opened,
+    opened: () => isOpen,
   };
 }
 
@@ -483,6 +509,37 @@ describe("ScannerSetup — granting the serial port", () => {
 
     // ...and the port the installer granted is what the verdict comes from.
     await waitFor(() => expect(opened()).toBe(true));
+    scan(`01${GTIN}21KYC9X7MQ${GS}93Abcd`);
+    await waitFor(() => expect(status().textContent).toContain("Marking code"));
+  });
+
+  it("still verifies the scanner after a Serial → Keyboard → Serial toggle", async () => {
+    // An installer comparing the two transports lands here, and this screen is
+    // the only place that can hand out a port grant at all. If the second pick
+    // left the source dead, the ONE screen whose purpose is verifying the
+    // scanner would sit on «waiting for a scan» forever with no hint that a
+    // reload is what it needs — failing closed, but a dead end for exactly the
+    // person it exists to serve.
+    const { port, scan, opened } = fakePort();
+    setWebSerial(true, async () => port);
+    render(
+      <ScannerSetup
+        paired={false}
+        bootstrap={null}
+        scanSource={fakeScanSource()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(radio(SERIAL));
+    await waitFor(() => expect(opened()).toBe(true));
+
+    fireEvent.click(radio(KEYBOARD));
+    await waitFor(() => expect(radio(KEYBOARD).checked).toBe(true));
+
+    fireEvent.click(radio(SERIAL));
+    await waitFor(() => expect(radio(SERIAL).checked).toBe(true));
+
     scan(`01${GTIN}21KYC9X7MQ${GS}93Abcd`);
     await waitFor(() => expect(status().textContent).toContain("Marking code"));
   });

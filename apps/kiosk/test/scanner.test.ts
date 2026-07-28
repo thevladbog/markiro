@@ -107,6 +107,68 @@ function bytes(text: string): Uint8Array {
   return new TextEncoder().encode(text);
 }
 
+/**
+ * A fake port with the lifecycle a REAL one has, which the fixture above
+ * deliberately does not model because the tests it serves never restart:
+ *
+ *  - `open()` on a port whose state is not "closed" rejects with an
+ *    `InvalidStateError` — that is the one and only thing Web Serial's
+ *    `open()` raises that error for;
+ *  - `readable` is null while the port is closed;
+ *  - a cancelled `readable` is dropped, so the NEXT access to the getter
+ *    vends a fresh stream. That last part is what makes reading a port twice
+ *    possible at all — a cancelled stream can never be read again.
+ */
+function restartablePort(): {
+  port: SerialPort;
+  scan: (raw: string) => void;
+  opens: () => number;
+} {
+  let isOpen = false;
+  let opens = 0;
+  let stream: ReadableStream<Uint8Array> | null = null;
+  let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
+
+  const port: SerialPort = {
+    open: async () => {
+      if (isOpen) throw new DOMException("The port is already open.", "InvalidStateError");
+      isOpen = true;
+      opens++;
+    },
+    close: async () => {
+      isOpen = false;
+      stream = null;
+      controller = null;
+    },
+    get readable() {
+      if (stream) return stream;
+      if (!isOpen) return null;
+      stream = new ReadableStream<Uint8Array>({
+        start(c) {
+          controller = c;
+        },
+        cancel() {
+          stream = null;
+          controller = null;
+        },
+      });
+      return stream;
+    },
+  };
+
+  return {
+    port,
+    scan: (raw) => {
+      // Touching the getter vends the stream if nothing has yet, exactly as a
+      // real port does — so a scan can be queued the moment the port is open,
+      // without the test having to guess when the reader attached.
+      void port.readable;
+      controller?.enqueue(bytes(`${raw}\r\n`));
+    },
+    opens: () => opens,
+  };
+}
+
 describe("web serial source", () => {
   it("delivers a line terminated by CR/LF, GS separator intact", async () => {
     const { port } = fakePort([bytes(`01046006820000132${GS}93Abcd\r\n`)]);
@@ -222,6 +284,39 @@ describe("web serial source", () => {
     expect(() => stop()).not.toThrow();
 
     consoleError.mockRestore();
+  });
+
+  it("delivers again after stop() and a second start() on the same port", async () => {
+    // The setup screen rebuilds this source whenever the transport changes, so
+    // an installer who toggles Serial → Keyboard → Serial within one visit
+    // starts the SAME granted port a second time. Without this the second
+    // start dies in `open()` (the port is still open from the first) and the
+    // screen whose entire purpose is verifying the scanner silently verifies
+    // nothing until the kiosk is reloaded.
+    const { port, scan, opens } = restartablePort();
+    const source = createWebSerialSource(port);
+
+    const first: string[] = [];
+    const stop = source.start((raw) => first.push(raw));
+    await vi.advanceTimersByTimeAsync(10);
+    scan("MARKIRO-BADGE-1");
+    await vi.waitFor(() => expect(first).toEqual(["MARKIRO-BADGE-1"]));
+
+    stop();
+    await vi.advanceTimersByTimeAsync(10);
+
+    const second: string[] = [];
+    source.start((raw) => second.push(raw));
+    await vi.advanceTimersByTimeAsync(10);
+    scan("MARKIRO-BADGE-2");
+    await vi.waitFor(() => expect(second).toEqual(["MARKIRO-BADGE-2"]));
+
+    // ...and the first listener stayed torn down: a restart re-attaches a
+    // reader, it does not accumulate them.
+    expect(first).toEqual(["MARKIRO-BADGE-1"]);
+    // The port is opened once and kept: `stop()` releases the READER, never
+    // the device (see the source's stop function for why).
+    expect(opens()).toBe(1);
   });
 
   it("reports availability from isWebSerialSupported, not just from having a port instance", () => {

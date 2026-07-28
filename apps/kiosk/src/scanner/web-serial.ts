@@ -14,6 +14,11 @@ export { isWebSerialSupported };
  */
 export interface SerialPort {
   open(options: { baudRate: number }): Promise<void>;
+  /**
+   * Kept in the shape although nothing here calls it: releasing the device is
+   * the port OWNER's business (the shell that holds the grant), never a
+   * subscriber's — see the stop function in `createWebSerialSource`.
+   */
   close(): Promise<void>;
   readonly readable: ReadableStream<Uint8Array> | null;
 }
@@ -63,6 +68,34 @@ const MAX_BUFFER = 4096;
 const LINE_TERMINATOR = /[\r\n]/;
 
 /**
+ * Opens the port unless it is already open, in which case there is nothing to
+ * do and reading can begin.
+ *
+ * A port is started more than once per session: the setup screen rebuilds its
+ * source whenever the transport changes, so an installer toggling Serial →
+ * Keyboard → Serial starts the same granted port twice. `stop()` deliberately
+ * leaves the port open (see below), so that second `start()` meets an
+ * already-open port.
+ *
+ * Web Serial rejects `open()` with an `InvalidStateError` for exactly one
+ * reason — the port's state is not "closed" — while a device that has gone
+ * away, or a grant that no longer holds, surfaces as a `NetworkError`. So
+ * swallowing this ONE error name is precisely the tolerance needed and hides
+ * nothing else: every other failure still reaches the caller's error log.
+ *
+ * The name is compared rather than `instanceof DOMException` because the
+ * rejection crosses a realm boundary in some embeddings, where `instanceof`
+ * quietly answers false and the restart would silently break again.
+ */
+async function openUnlessAlreadyOpen(port: SerialPort): Promise<void> {
+  try {
+    await port.open({ baudRate: DEFAULT_BAUD_RATE });
+  } catch (err) {
+    if ((err as { name?: string } | null)?.name !== "InvalidStateError") throw err;
+  }
+}
+
+/**
  * Web Serial is the preferred transport where it exists: it delivers raw
  * bytes, so the GS separator (0x1D) inside a Chestny ZNAK marking code
  * survives — a keyboard wedge frequently drops it, which is exactly what the
@@ -74,6 +107,18 @@ const LINE_TERMINATOR = /[\r\n]/;
  * `createHardwareScanSource` — a `stopped` flag is checked after every
  * await. Without it a `start()` immediately followed by `stop()` could leave
  * a reader subscribed after the caller believes the source is stopped.
+ *
+ * A source is START/STOP/START-able on the same port, because a transport can
+ * be picked more than once in a visit. The port is opened once and then kept:
+ * `stop()` releases the READER, not the device. That is the same split the
+ * station draws — there, `open_scanner`/`close_scanner` are commands the setup
+ * screen issues, while its `ScanSource` only subscribes and unsubscribes, and
+ * the port's lifetime is nobody's business but the owner's. Closing here
+ * instead would be worse than asymmetric: `stop()` is synchronous while
+ * `close()` is not, so a restart landing before the close settled would hit
+ * the very `InvalidStateError` this shape exists to avoid (the station needed
+ * a ten-attempt retry loop to make its close-before-open safe), and a port
+ * closed under one subscriber would kill any other reader of the same grant.
  */
 export function createWebSerialSource(port: SerialPort): ScanSource {
   return {
@@ -85,7 +130,7 @@ export function createWebSerialSource(port: SerialPort): ScanSource {
 
       void (async () => {
         try {
-          await port.open({ baudRate: DEFAULT_BAUD_RATE });
+          await openUnlessAlreadyOpen(port);
           if (stopped) return;
 
           const readable = port.readable;
@@ -140,6 +185,9 @@ export function createWebSerialSource(port: SerialPort): ScanSource {
 
       return () => {
         stopped = true;
+        // Cancelling is also what frees `port.readable` for the next start:
+        // the stream is dropped on cancel, so the following access to the
+        // getter vends a fresh one. The port itself stays open on purpose.
         void reader?.cancel().catch(() => {});
       };
     },
