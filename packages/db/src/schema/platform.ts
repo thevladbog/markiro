@@ -3,6 +3,7 @@ import {
   char,
   date,
   foreignKey,
+  index,
   integer,
   numeric,
   pgEnum,
@@ -164,6 +165,49 @@ export const syncBatches = pgTable(
     appliedAt: timestamp("applied_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.tenantId, t.batchId] })],
+);
+
+/**
+ * The scan that currently OWNS each code, across every terminal. Deliberately
+ * unpartitioned and keyed by the code alone: `codes` cannot enforce one row
+ * per code, because a unique index on a partitioned table must include the
+ * partition key and `scanned_at` is it. This table is the authority, probed
+ * by primary key so the ingest hot path never scans a partitioned table.
+ *
+ * Tenant-wide rather than shift-scoped, matching the device mirror: a KM
+ * identifies one physical item, so the same code in two shifts is also an
+ * error worth catching.
+ */
+export const codeRegistry = pgTable(
+  "code_registry",
+  {
+    tenantId: tenantId(),
+    codeHash: char("code_hash", { length: 64 }).notNull(),
+    shiftId: uuid("shift_id").notNull(),
+    terminalId: text("terminal_id"),
+    scannedAt: timestamp("scanned_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.codeHash] })],
+);
+
+/** One row per losing scan, in both directions — see conflict-resolution.ts. */
+export const codeConflicts = pgTable(
+  "code_conflicts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    codeHash: char("code_hash", { length: 64 }).notNull(),
+    losingShiftId: uuid("losing_shift_id").notNull(),
+    losingTerminalId: text("losing_terminal_id"),
+    losingScannedAt: timestamp("losing_scanned_at", { withTimezone: true }).notNull(),
+    winningShiftId: uuid("winning_shift_id").notNull(),
+    winningTerminalId: text("winning_terminal_id"),
+    winningScannedAt: timestamp("winning_scanned_at", { withTimezone: true }).notNull(),
+    detectedAt: timestamp("detected_at", { withTimezone: true }).notNull().defaultNow(),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+  },
+  (t) => [index("code_conflicts_shift_idx").on(t.tenantId, t.losingShiftId)],
 );
 
 export const stationDevices = pgTable(
