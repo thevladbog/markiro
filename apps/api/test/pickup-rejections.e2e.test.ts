@@ -234,4 +234,33 @@ describe.skipIf(!ready)("pickup scan rejections e2e", () => {
 
     expect(await rejectionsFor(15)).toHaveLength(0);
   });
+
+  // A rejection consumes a device_seq without creating an order. If the
+  // re-pair counter only looked at orders it would hand that number back,
+  // and the replacement device's first rejection would collide with the old
+  // one and vanish.
+  it("continues device_seq past a number consumed only by a rejection", async () => {
+    const pairKioskId = randomUUID();
+    await db
+      .insert(schema.kiosks)
+      .values({ id: pairKioskId, tenantId, name: "Киоск-2", dayLimitPerEmployee: 20 });
+    await db.insert(schema.pickupScanRejections).values({
+      tenantId,
+      kioskId: pairKioskId,
+      employeeId,
+      deviceSeq: 77,
+      codes: [{ rawKm: REFUSED_KM, reason: "not_allowed" }],
+      scannedAt: new Date(),
+    });
+
+    // Route, `.send({})` and status match apps/api/test/kiosk-pairing.e2e.test.ts,
+    // which is the reference for this flow.
+    const issued = await agent.post(`/kiosks/${pairKioskId}/pairing-code`).send({}).expect(201);
+    const paired = await request(app!.getHttpServer())
+      .post("/kiosk/pair")
+      .send({ code: issued.body.code })
+      .expect(201);
+
+    expect(paired.body.nextDeviceSeq).toBe(78);
+  });
 });

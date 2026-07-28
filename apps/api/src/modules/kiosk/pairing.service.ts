@@ -340,14 +340,33 @@ export class PairingService {
         .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, kioskId)))
         .for("update");
 
-      const [seq] = await tx
+      const [orderSeq] = await tx
         .select({ max: max(schema.pickupOrders.deviceSeq) })
         .from(schema.pickupOrders)
         .where(
           and(eq(schema.pickupOrders.tenantId, tenantId), eq(schema.pickupOrders.kioskId, kioskId)),
         );
 
-      return { kiosk, nextDeviceSeq: (seq?.max ?? -1) + 1 };
+      // Rejections share the order idempotency key space but create no
+      // order, so a MAX over orders alone would hand this device a seq a
+      // rejection already spent -- and its next rejection would be dropped
+      // as a replay. This read rides the kiosk row lock taken above; the
+      // rejection INSERT deliberately does not take that lock, so an
+      // in-flight one can still land after this read. That residual race
+      // costs at most one missing journal row, whereas for orders the same
+      // race would lose an order -- which is what the lock is there for.
+      const [rejectionSeq] = await tx
+        .select({ max: max(schema.pickupScanRejections.deviceSeq) })
+        .from(schema.pickupScanRejections)
+        .where(
+          and(
+            eq(schema.pickupScanRejections.tenantId, tenantId),
+            eq(schema.pickupScanRejections.kioskId, kioskId),
+          ),
+        );
+
+      const highest = Math.max(orderSeq?.max ?? -1, rejectionSeq?.max ?? -1);
+      return { kiosk, nextDeviceSeq: highest + 1 };
     });
 
     return {
