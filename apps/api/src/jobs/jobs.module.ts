@@ -107,13 +107,17 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
 
   /** Deletes `kiosk_pair_attempts` rows whose fixed window ended over an hour ago. */
   private async runPruneKioskPairAttempts(): Promise<void> {
-    const deleted = await this.db
+    // No `.returning()`: this is a maintenance job that only needs a count
+    // for the log line, so materialising every pruned row's id would be pure
+    // overhead. The node-postgres driver reports the row count directly on
+    // the query result (`rowCount`) without it.
+    const result = await this.db
       .delete(schema.kioskPairAttempts)
-      .where(sql`${schema.kioskPairAttempts.windowStartedAt} < now() - interval '1 hour'`)
-      .returning({ id: schema.kioskPairAttempts.id });
+      .where(sql`${schema.kioskPairAttempts.windowStartedAt} < now() - interval '1 hour'`);
+    const count = result.rowCount ?? 0;
     this.logger.log(
-      deleted.length > 0
-        ? `Pruned ${deleted.length} stale kiosk_pair_attempts row(s)`
+      count > 0
+        ? `Pruned ${count} stale kiosk_pair_attempts row(s)`
         : "No stale kiosk_pair_attempts rows to prune",
     );
   }

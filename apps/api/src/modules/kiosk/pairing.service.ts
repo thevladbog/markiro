@@ -1,5 +1,11 @@
 import { randomInt } from "node:crypto";
-import { Inject, Injectable, NotFoundException, UnauthorizedException } from "@nestjs/common";
+import {
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+  UnauthorizedException,
+} from "@nestjs/common";
 import { and, eq, gt, isNull, max, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
@@ -20,7 +26,10 @@ const MAX_ATTEMPTS = 5;
  * row, so nothing gets counted -- so this is the actual brute-force bound
  * on the one unauthenticated route in the system.
  */
-const PAIR_ATTEMPT_BUDGET = 10;
+// Exported (not just `const`) so tests can assert against the real budget/
+// window rather than duplicating these numbers as literals that could drift
+// out of sync with the implementation.
+export const PAIR_ATTEMPT_BUDGET = 10;
 /**
  * Global backstop budget, keyed by the literal source `"*"`. Every attempt
  * counts toward it regardless of source, so it bounds guessing distributed
@@ -30,11 +39,11 @@ const PAIR_ATTEMPT_BUDGET = 10;
  * caller must never be able to exhaust a budget that identifiable callers
  * share.
  */
-const GLOBAL_PAIR_ATTEMPT_BUDGET = 400;
+export const GLOBAL_PAIR_ATTEMPT_BUDGET = 400;
 /** The reserved source key for the global backstop bucket above. */
-const GLOBAL_PAIR_SOURCE = "*";
+export const GLOBAL_PAIR_SOURCE = "*";
 /** Fixed window size for the limiter; deliberately the same as the code TTL. */
-const PAIR_ATTEMPT_WINDOW_MS = TTL_MS;
+export const PAIR_ATTEMPT_WINDOW_MS = TTL_MS;
 
 // `hashDeviceToken` is a plain sha256, which an attacker holding a DB dump
 // could brute-force over the 10^8 code space. That is acceptable here and
@@ -49,6 +58,8 @@ export interface IssuePairingCodeResultDto {
 
 @Injectable()
 export class PairingService {
+  private readonly logger = new Logger(PairingService.name);
+
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly pickupOrdersService: PickupOrdersService,
@@ -147,7 +158,21 @@ export class PairingService {
     // check-then-record shape would leave open: N concurrent callers could
     // otherwise all read the same pre-increment count and all pass.
     await this.assertUnderPairRateLimit(source, windowStart);
-    return this.attemptRedeem(code, now);
+    const result = await this.attemptRedeem(code, now);
+    // Compensating decrement, reached only once `attemptRedeem` has fully
+    // resolved -- i.e. only after its internal transaction committed. Any
+    // throw above (wrong/expired/used/attempts-exhausted code, a lost claim
+    // race, a rolled-back transaction) skips this line entirely and the
+    // increment from `assertUnderPairRateLimit` stands. This nets the budget
+    // back down to bounding failures, undoing the cost a successful
+    // redemption itself charged -- see `recordPairAttempt` -- so a site
+    // provisioning more than `PAIR_ATTEMPT_BUDGET` kiosks in one window
+    // (every kiosk behind one NAT shares a source key) isn't capped by the
+    // brute-force limiter on its own happy path. It cannot be gamed: reaching
+    // it requires a valid, single-use, live code, exactly the thing the
+    // limiter exists to ration guessing at.
+    await this.refundPairAttempt(source, windowStart);
+    return result;
   }
 
   private async attemptRedeem(code: string, now: Date): Promise<PairKioskResultDto> {
@@ -276,18 +301,75 @@ export class PairingService {
    *  - global backstop (`GLOBAL_PAIR_ATTEMPT_BUDGET`, key `"*"`): bounds
    *    guessing distributed across many sources, and is the only budget an
    *    unattributable caller can consume.
-   * Both counters are recorded before the code lookup in `attemptRedeem`
-   * ever runs.
+   *
+   * The per-source verdict is rendered, and can throw, BEFORE the global
+   * counter is ever touched. That order is load-bearing: a caller that has
+   * already exhausted its own per-source budget must be turned away without
+   * charging the shared global bucket, or a single blocked source can keep
+   * burning the global budget on every subsequent request while denied --
+   * cheaply driving the global bucket past its own limit and taking down
+   * pairing for every tenant, not just the one source that tripped it. An
+   * unattributable source (empty/falsy) has no per-source bucket to trip, so
+   * it falls straight through to the global check, unchanged from before.
    */
   private async assertUnderPairRateLimit(source: string, windowStart: Date): Promise<void> {
-    let sourceAttempts = 0;
     if (source) {
-      sourceAttempts = await this.recordPairAttempt(normalizePairSource(source), windowStart);
+      const sourceAttempts = await this.recordPairAttempt(normalizePairSource(source), windowStart);
+      if (sourceAttempts > PAIR_ATTEMPT_BUDGET) {
+        // A tripped budget is a security event (sustained guessing) AND,
+        // for the global bucket, a platform-wide outage -- and previously
+        // left zero server-side signal, with the on-site technician seeing
+        // only a generic "invalid code". Never log the submitted code
+        // itself; the HTTP response stays an unchanged generic 401 so the
+        // caller can't learn which limit they hit.
+        this.logger.warn(
+          `kiosk pairing per-source budget exceeded: ${sourceAttempts} attempts in window`,
+        );
+        throw new UnauthorizedException();
+      }
     }
-    const globalAttempts = await this.recordPairAttempt(GLOBAL_PAIR_SOURCE, windowStart);
 
-    if (source && sourceAttempts > PAIR_ATTEMPT_BUDGET) throw new UnauthorizedException();
-    if (globalAttempts > GLOBAL_PAIR_ATTEMPT_BUDGET) throw new UnauthorizedException();
+    const globalAttempts = await this.recordPairAttempt(GLOBAL_PAIR_SOURCE, windowStart);
+    if (globalAttempts > GLOBAL_PAIR_ATTEMPT_BUDGET) {
+      this.logger.warn(
+        `kiosk pairing global budget exceeded: ${globalAttempts} attempts in window`,
+      );
+      throw new UnauthorizedException();
+    }
+  }
+
+  /**
+   * Compensating decrement for a successful redemption -- see the call site
+   * in `redeem` for why this exists and why it can't be gamed. Mirrors
+   * `assertUnderPairRateLimit`'s source handling: the per-source bucket is
+   * only touched when `source` is attributable, the global bucket always.
+   */
+  private async refundPairAttempt(source: string, windowStart: Date): Promise<void> {
+    if (source) {
+      await this.decrementPairAttempt(normalizePairSource(source), windowStart);
+    }
+    await this.decrementPairAttempt(GLOBAL_PAIR_SOURCE, windowStart);
+  }
+
+  /**
+   * Atomically decrements `(source, windowStart)`, floored at zero
+   * (`GREATEST(failures - 1, 0)`) so a refund can never push the counter
+   * negative regardless of ordering with a concurrent increment. Only ever
+   * called for a `(source, windowStart)` pair that `recordPairAttempt`
+   * already inserted earlier in the same request, so a plain UPDATE (no
+   * upsert) is sufficient -- there is nothing to refund if the row doesn't
+   * exist, and it always does by this point.
+   */
+  private async decrementPairAttempt(source: string, windowStart: Date): Promise<void> {
+    await this.db
+      .update(schema.kioskPairAttempts)
+      .set({ failures: sql`GREATEST(${schema.kioskPairAttempts.failures} - 1, 0)` })
+      .where(
+        and(
+          eq(schema.kioskPairAttempts.source, source),
+          eq(schema.kioskPairAttempts.windowStartedAt, windowStart),
+        ),
+      );
   }
 
   /**
@@ -299,10 +381,13 @@ export class PairingService {
    * `count + N` instead of bounding it. `RETURNING` closes that race by
    * making the increment and the value used to decide in the same statement.
    *
-   * The `failures` column name is unchanged (no new migration needed), but
-   * as of this fix it counts every attempt through this path -- a successful
-   * redemption included -- not only failed ones; that is intended at these
-   * budget sizes.
+   * The `failures` column name is unchanged (no new migration needed). It
+   * counts every attempt through this path up front, a successful redemption
+   * included -- `redeem` issues a compensating `decrementPairAttempt` once a
+   * redemption actually succeeds (see there), so the column's steady-state
+   * value bounds net failures again: a site provisioning many kiosks behind
+   * one NAT nets back down to ~0 as each one pairs, while a run of wrong
+   * guesses stays charged.
    */
   private async recordPairAttempt(source: string, windowStart: Date): Promise<number> {
     const [row] = await this.db

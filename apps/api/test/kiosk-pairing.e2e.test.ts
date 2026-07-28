@@ -10,14 +10,17 @@ import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { hashDeviceToken } from "../src/pickup/device-token";
 import { normalizePairSource } from "../src/modules/kiosk/pair-source";
+import {
+  GLOBAL_PAIR_SOURCE,
+  PAIR_ATTEMPT_BUDGET,
+  PAIR_ATTEMPT_WINDOW_MS,
+} from "../src/modules/kiosk/pairing.service";
 import { schema, type Db } from "@markiro/db";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
 );
 
-const PAIR_ATTEMPT_WINDOW_MS = 15 * 60_000;
-const GLOBAL_PAIR_SOURCE = "*";
 // Every request in this file resolves through the same local loopback
 // socket -- this suite never sets TRUST_PROXY_HOPS, so it defaults to 0 and
 // Express `trust proxy` stays disabled, meaning `@Ip()` always reports the
@@ -62,6 +65,30 @@ async function clearPairAttemptBudget(db: Db): Promise<void> {
         ]),
       ),
     );
+}
+
+/**
+ * Seeds `kiosk_pair_attempts` directly with `failures` for every loopback
+ * source this file's requests can produce, in the CURRENT fixed window.
+ * Deterministic and exact, unlike driving a loop of real requests: a loop
+ * can straddle a 15-minute window boundary (~0.05% of runs), splitting
+ * attempts across two counters so neither trips the budget and a wrong-guess
+ * loop's final assertion fails. Seeding removes the wall clock from the test
+ * entirely. Scoped to `LOOPBACK_PAIR_SOURCES` only (not the global `"*"`
+ * bucket), matching what a real run of attempts from this file's own client
+ * would have written through the per-source path.
+ */
+async function seedPairAttemptFailures(db: Db, failures: number): Promise<void> {
+  const windowStart = pairAttemptWindowStart(Date.now());
+  for (const source of LOOPBACK_PAIR_SOURCES) {
+    await db
+      .insert(schema.kioskPairAttempts)
+      .values({ source, windowStartedAt: windowStart, failures })
+      .onConflictDoUpdate({
+        target: [schema.kioskPairAttempts.source, schema.kioskPairAttempts.windowStartedAt],
+        set: { failures },
+      });
+  }
 }
 
 describe.skipIf(!ready)("kiosk pairing e2e", () => {
@@ -324,24 +351,36 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
   // `trust proxy` stays disabled and `@Ip()` reports the test client's real
   // socket address for every request in this file regardless of any forged
   // X-Forwarded-For header -- there is no way to fake a distinct source from
-  // here. All the calls below land in the same fixed window as a result;
-  // `clearPairAttemptBudget` (also run in the shared `beforeEach`) is what
-  // keeps that from bleeding into this file's other tests or a concurrent
-  // run's rows on the shared Postgres instance.
+  // here. These two tests seed `kiosk_pair_attempts` directly (via
+  // `seedPairAttemptFailures`) rather than driving a loop of real requests,
+  // so they're exact and can't straddle a window boundary; see that
+  // function's comment for why the old loop-based version was flaky.
   it("keeps a per-source limiter that a valid code cannot bypass", async () => {
     try {
-      for (let i = 0; i < 11; i++) {
-        await request(app!.getHttpServer())
-          .post("/kiosk/pair")
-          .send({ code: "00000000" })
-          .expect(401);
-      }
+      await seedPairAttemptFailures(db, PAIR_ATTEMPT_BUDGET);
 
       const issued = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
       await request(app!.getHttpServer())
         .post("/kiosk/pair")
         .send({ code: issued.body.code })
         .expect(401);
+    } finally {
+      await clearPairAttemptBudget(db);
+    }
+  });
+
+  // Pins the limiter's `>` (not `>=`) comparison: with the budget one short
+  // of tripped, the next attempt through this route must still be processed
+  // rather than refused -- a valid code presented here redeems successfully.
+  it("still processes one more attempt exactly at the budget boundary", async () => {
+    try {
+      await seedPairAttemptFailures(db, PAIR_ATTEMPT_BUDGET - 1);
+
+      const issued = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+      await request(app!.getHttpServer())
+        .post("/kiosk/pair")
+        .send({ code: issued.body.code })
+        .expect(201);
     } finally {
       await clearPairAttemptBudget(db);
     }

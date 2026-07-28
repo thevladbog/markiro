@@ -25,10 +25,20 @@ export function normalizePairSource(source: string): string {
   return `${hextets.slice(0, 4).join(":")}::/64`;
 }
 
-/** Expands `::` shorthand into 8 explicit (still-hex-string) hextets. */
+/**
+ * Expands `::` shorthand into 8 explicit hextets, each canonicalised
+ * (leading zeros stripped, e.g. `"0db8"` -> `"db8"`) so two textually
+ * different-but-equal addresses in the same /64 -- e.g. `2001:0db8::1` and
+ * `2001:db8::1` -- collapse to the same rate-limiter key. Unreachable via
+ * this module's own callers today (Node's `req.ip` always emits canonical
+ * addresses), but cheap to harden.
+ */
 function expandIPv6(address: string): string[] {
-  if (!address.includes("::")) return address.split(":");
+  const hextets = address.includes("::") ? expandShorthand(address) : address.split(":");
+  return hextets.map((hextet) => parseInt(hextet, 16).toString(16));
+}
 
+function expandShorthand(address: string): string[] {
   const [head, tail] = address.split("::");
   const headParts = head ? head.split(":") : [];
   const tailParts = tail ? tail.split(":") : [];

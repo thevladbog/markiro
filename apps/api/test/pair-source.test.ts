@@ -43,4 +43,8 @@ describe("normalizePairSource", () => {
   it("tolerates an already-CIDR'd input", () => {
     expect(normalizePairSource("2001:db8:1234:5678::1/64")).toBe("2001:db8:1234:5678::/64");
   });
+
+  it("canonicalizes non-canonical hextets so equal addresses share a key", () => {
+    expect(normalizePairSource("2001:0db8:0000:0000::1")).toBe(normalizePairSource("2001:db8::1"));
+  });
 });

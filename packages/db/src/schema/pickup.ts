@@ -319,9 +319,13 @@ export const kioskPairingCodes = pgTable(
  *
  * `failures` is written by an atomic `INSERT ... ON CONFLICT DO UPDATE ...
  * RETURNING` (record-then-check, not check-then-record — the column is kept
- * under its original name to avoid another migration, but as of that fix it
- * counts every attempt through the route, successes included, not only
- * failed ones).
+ * under its original name to avoid another migration, but it counts every
+ * attempt through the route up front, successes included, not only failed
+ * ones). A successful redemption then issues a compensating atomic
+ * decrement (floored at zero), so the column's steady-state value bounds
+ * net failures again rather than capping legitimate high-volume
+ * provisioning -- see `PairingService.redeem`/`refundPairAttempt` in the
+ * API.
  */
 export const kioskPairAttempts = pgTable(
   "kiosk_pair_attempts",
