@@ -32,6 +32,21 @@ export interface PickupOrderRowDto {
   totalPrice: string | null;
   status: PickupOrderStatus;
   createdAt: string;
+  conflictCount: number;
+}
+
+/**
+ * A single scanned code the kiosk sent at sync time that the server refused
+ * to accept into the order -- mirrors `apps/api/src/modules/pickup-orders/
+ * dto.ts`'s `SyncConflict` (Task 7). `reason` explains why: `not_km` (the
+ * scan wasn't a marking code at all), `incomplete` (truncated read),
+ * `unknown_product`/`not_allowed` (not in the catalog / not on this kiosk),
+ * `duplicate` (already claimed by another open order), or `over_limit` (the
+ * employee's daily cap).
+ */
+export interface SyncConflict {
+  rawKm: string;
+  reason: "not_km" | "incomplete" | "unknown_product" | "not_allowed" | "duplicate" | "over_limit";
 }
 
 /** Mirrors `apps/api/src/modules/pickup-orders/dto.ts`'s `PickupOrderItemDto`. */
@@ -50,6 +65,7 @@ export interface PickupOrderDetailDto extends PickupOrderRowDto {
   items: PickupOrderItemDto[];
   receiptNo: string | null;
   actNo: string | null;
+  syncConflicts: SyncConflict[];
 }
 
 export interface ListPickupOrdersParams {
