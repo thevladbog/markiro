@@ -181,6 +181,49 @@ describe("web serial source", () => {
     expect(seen).toEqual([]);
   });
 
+  it("logs and swallows a failed port.open() instead of leaking an unhandled rejection", async () => {
+    // Opening a serial port fails routinely (wrong permissions, port already
+    // in use, device unplugged between selection and open — the station's
+    // Rust `open_scanner` has a ten-attempt retry loop for exactly this).
+    // `start()` must stay synchronous-safe and the rejection must be caught,
+    // not left to escape the fire-and-forget async IIFE.
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    let readableAccessed = false;
+    const port: SerialPort = {
+      open: async () => {
+        throw new Error("port already in use");
+      },
+      close: async () => {},
+      get readable() {
+        readableAccessed = true;
+        return null;
+      },
+    };
+
+    const seen: string[] = [];
+    let stop!: () => void;
+    expect(() => {
+      stop = createWebSerialSource(port).start((raw) => seen.push(raw));
+    }).not.toThrow();
+
+    // Pump the microtask queue so the rejected open() settles. If it were
+    // unhandled, this is where a real runtime would report it; here the
+    // proof is that console.error was reached instead.
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(consoleError).toHaveBeenCalledWith(
+      "kiosk: web serial scan source failed",
+      expect.any(Error),
+    );
+    expect(readableAccessed).toBe(false);
+    expect(seen).toEqual([]);
+
+    // The stop function must still be safe to call after a failed open.
+    expect(() => stop()).not.toThrow();
+
+    consoleError.mockRestore();
+  });
+
   it("reports availability from isWebSerialSupported, not just from having a port instance", () => {
     vi.stubGlobal("navigator", {});
     const { port } = fakePort([]);

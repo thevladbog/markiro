@@ -57,28 +57,28 @@ export function createWebSerialSource(port: SerialPort): ScanSource {
       let buffer = "";
 
       void (async () => {
-        await port.open({ baudRate: DEFAULT_BAUD_RATE });
-        if (stopped) return;
-
-        const readable = port.readable;
-        if (!readable) return;
-
-        // `TextDecoderStream.writable` is typed as `WritableStream<BufferSource>`,
-        // which lib.dom.d.ts's `pipeThrough` doesn't consider assignable to the
-        // narrower `WritableStream<Uint8Array<ArrayBufferLike>>` it infers from
-        // `readable` — a known typings mismatch (a `Uint8Array` is always a
-        // valid `BufferSource`), not a real incompatibility. `as` (rather than
-        // a plain annotation) is needed because the two `ArrayBufferLike`
-        // shapes don't overlap enough for a direct assignment either.
-        const bytes = readable as unknown as ReadableStream<BufferSource>;
-        reader = bytes.pipeThrough(new TextDecoderStream()).getReader();
-        if (stopped) {
-          await reader.cancel().catch(() => {});
-          reader = null;
-          return;
-        }
-
         try {
+          await port.open({ baudRate: DEFAULT_BAUD_RATE });
+          if (stopped) return;
+
+          const readable = port.readable;
+          if (!readable) return;
+
+          // `TextDecoderStream.writable` is typed as `WritableStream<BufferSource>`,
+          // which lib.dom.d.ts's `pipeThrough` doesn't consider assignable to the
+          // narrower `WritableStream<Uint8Array<ArrayBufferLike>>` it infers from
+          // `readable` — a known typings mismatch (a `Uint8Array` is always a
+          // valid `BufferSource`), not a real incompatibility. `as` (rather than
+          // a plain annotation) is needed because the two `ArrayBufferLike`
+          // shapes don't overlap enough for a direct assignment either.
+          const bytes = readable as unknown as ReadableStream<BufferSource>;
+          reader = bytes.pipeThrough(new TextDecoderStream()).getReader();
+          if (stopped) {
+            await reader.cancel().catch(() => {});
+            reader = null;
+            return;
+          }
+
           while (!stopped) {
             const { value, done } = await reader.read();
             if (stopped || done) break;
@@ -100,7 +100,12 @@ export function createWebSerialSource(port: SerialPort): ScanSource {
             }
           }
         } catch (err) {
-          if (!stopped) console.error("kiosk: web serial read failed", err);
+          // Covers a failed `port.open()` (wrong permissions, port already
+          // in use, device unplugged between selection and open — all
+          // routine, per the station's own `open_scanner` retry loop) as
+          // well as a failed read, so this must not become an unhandled
+          // rejection either way.
+          if (!stopped) console.error("kiosk: web serial scan source failed", err);
         } finally {
           reader = null;
         }
