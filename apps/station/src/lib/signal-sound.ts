@@ -1,5 +1,5 @@
+import type { SignalTone } from "@markiro/ui";
 import type { SqlExecutor } from "./mirror.js";
-import type { SignalTone } from "../ui/SignalOverlay.js";
 
 export interface SoundSettings {
   muted: boolean;

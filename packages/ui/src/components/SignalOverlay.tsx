@@ -11,9 +11,10 @@ export interface SignalOverlayProps {
 // WorkScreen's signal system (flash timing in FLASH_MS, sound in
 // playSignalTone). Color is paired with the title text per the
 // color-blind-safety rule (no color-only signal).
-// Uses the same status token family as @markiro/ui (--ok-solid / --err-solid /
-// --warn-solid, per Input/StatusChip) with literal hex fallbacks so the
-// overlay still renders correctly even if a token is absent.
+// Uses the same status token family as the rest of this package
+// (--ok-solid / --err-solid / --warn-solid, per Input/StatusChip) with
+// literal hex fallbacks so the overlay still renders correctly even if a
+// token is absent.
 const TONE_BG: Record<SignalTone, string> = {
   ok: "var(--ok-solid, #1f8a4c)",
   error: "var(--err-solid, #b3261e)",

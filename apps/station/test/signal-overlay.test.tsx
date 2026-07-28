@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
+import { SignalOverlay } from "@markiro/ui";
 import { beforeAll, describe, expect, it } from "vitest";
 import i18n from "../src/i18n/index.js";
-import { SignalOverlay } from "../src/ui/SignalOverlay.js";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");

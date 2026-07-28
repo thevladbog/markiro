@@ -1,10 +1,9 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Alert, Button } from "@markiro/ui";
+import { Alert, Button, PinPad } from "@markiro/ui";
 import type { OperatorMirrorRecord } from "@markiro/db";
 import type { SqlExecutor } from "../lib/mirror.js";
 import { verifyOperatorPin } from "../lib/auth.js";
-import { PinPad } from "../ui/PinPad.js";
 
 export interface OperatorLoginProps {
   exec: SqlExecutor;
