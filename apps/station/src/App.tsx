@@ -15,6 +15,7 @@ import { syncOperatorRoster } from "./lib/roster-sync.js";
 import { createKeyboardWedgeSource } from "./lib/scan-source.js";
 import { loadSoundSettings, type SoundSettings } from "./lib/signal-sound.js";
 import { tauriExecutor } from "./lib/sqlite.js";
+import { createSyncEngine, type SyncState } from "./lib/sync.js";
 import { Enrollment } from "./pages/Enrollment.js";
 import { OperatorLogin } from "./pages/OperatorLogin.js";
 import { ShiftSelection } from "./pages/ShiftSelection.js";
@@ -235,6 +236,36 @@ export function App() {
     [config?.apiKey, config?.serverUrl],
   );
 
+  const [syncState, setSyncState] = useState<SyncState>({
+    pending: 0,
+    lastSuccessAt: null,
+    stuck: false,
+  });
+
+  // One engine for the life of the app: the outbox belongs to the DEVICE, not
+  // to a shift or an operator, so entering or leaving a shift must never stop
+  // the drain. Built only once a client exists — before enrollment there is
+  // nowhere to send.
+  const syncEngine = useMemo(() => {
+    if (!client || !config) return null;
+    return createSyncEngine({
+      exec: tauriExecutor,
+      client,
+      machineId: config.machineId,
+      onState: setSyncState,
+    });
+  }, [client, config?.machineId]);
+
+  useEffect(() => {
+    if (!syncEngine) return;
+    syncEngine.nudge();
+    const heartbeat = setInterval(() => syncEngine.nudge(), 15_000);
+    return () => {
+      clearInterval(heartbeat);
+      syncEngine.stop();
+    };
+  }, [syncEngine]);
+
   // Initialization sync: as soon as the device has a credential — right after
   // enrollment, and on every later start — pull the operator roster so the
   // sign-in screen has someone to authenticate. Without this a freshly
@@ -248,13 +279,18 @@ export function App() {
   // briefly offline at that moment would otherwise strand the operator at a
   // PIN pad no PIN can satisfy until the app is restarted. Re-running on
   // every `online` event is a cheap one-shot retry (`syncOperatorRoster`
-  // never throws), not a polling loop.
+  // never throws), not a polling loop. The sync engine's queue drain is a
+  // second, independent consumer of the same event — one listener, two
+  // reasons to nudge.
   useEffect(() => {
     if (!client) return;
-    const retrySync = () => void syncOperatorRoster(client, tauriExecutor);
+    const retrySync = () => {
+      void syncOperatorRoster(client, tauriExecutor);
+      syncEngine?.nudge();
+    };
     window.addEventListener("online", retrySync);
     return () => window.removeEventListener("online", retrySync);
-  }, [client]);
+  }, [client, syncEngine]);
 
   async function refreshConfig() {
     setConfig(await readConfig());
@@ -302,8 +338,8 @@ export function App() {
       online={online}
       scanner={scannerIndicator(hardwareConfig, scannerStatus)}
       printerConfigured={hardwareConfig.printer !== null}
-      syncPending={0}
-      syncStuck={false}
+      syncPending={syncState.pending}
+      syncStuck={syncState.stuck}
       tasks={[]}
       activeTaskId=""
       onSelectTask={() => {}}
@@ -336,6 +372,7 @@ export function App() {
             counterpartyName={shiftContext.counterpartyName}
             source={scanSource}
             sound={sound}
+            onScanRecorded={() => syncEngine?.nudge()}
           />
         ) : (
           <main style={{ minHeight: "100%", display: "grid", placeItems: "center" }}>

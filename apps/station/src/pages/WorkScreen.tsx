@@ -17,6 +17,9 @@ export interface WorkScreenProps {
   counterpartyName?: string | null;
   source: ScanSource;
   sound: SoundSettings;
+  /** Signals a scan was just written, so a queued outbox row does not have
+   * to wait for the sync engine's 15s heartbeat before draining. */
+  onScanRecorded?: () => void;
 }
 
 /** How long each verdict's full-screen flash stays up (design brief 04). */
@@ -37,6 +40,7 @@ export function WorkScreen({
   counterpartyName,
   source,
   sound,
+  onScanRecorded,
 }: WorkScreenProps) {
   const { t, i18n } = useTranslation();
   const [accepted, setAccepted] = useState(0);
@@ -80,8 +84,9 @@ export function WorkScreen({
     };
   }, [exec]);
 
-  // `t`, `i18n.language` and `sound` all change over the life of one mounted
-  // WorkScreen (a language switch, a mute/volume change in setup), but the
+  // `t`, `i18n.language`, `sound` and `onScanRecorded` all change over the
+  // life of one mounted WorkScreen (a language switch, a mute/volume change
+  // in setup, a fresh callback identity from App on every render), but the
   // queue below must NOT be recreated when they do: `source.start(...)`
   // (further down) is bound to one queue instance, and a fresh queue has its
   // own buffer and `draining` flag — if the `useMemo` depended on these
@@ -90,9 +95,9 @@ export function WorkScreen({
   // "exactly one scan in flight" guarantee the whole pipeline rests on. So
   // `process`/`onOutcome`/`onError` read the current values through this ref
   // instead of closing over the props/hooks directly.
-  const live = useRef({ t, language: i18n.language, sound });
+  const live = useRef({ t, language: i18n.language, sound, onScanRecorded });
   useEffect(() => {
-    live.current = { t, language: i18n.language, sound };
+    live.current = { t, language: i18n.language, sound, onScanRecorded };
   });
 
   const queue = useMemo(
@@ -138,10 +143,19 @@ export function WorkScreen({
           return { raw, verdict, firstSeen };
         },
         onOutcome(outcome) {
-          const { t: liveT, language, sound: liveSound } = live.current;
+          const {
+            t: liveT,
+            language,
+            sound: liveSound,
+            onScanRecorded: liveOnScanRecorded,
+          } = live.current;
           const tone = toneOf(outcome.verdict);
           if (outcome.verdict.status === "ok") setAccepted((n) => n + 1);
           else setRejected((n) => n + 1);
+          // `process()` above already wrote this outcome's outbox row (every
+          // branch calls `recordScan`, whatever the verdict) by the time
+          // `onOutcome` runs, so the sync engine has real work to nudge for.
+          liveOnScanRecorded?.();
 
           const title =
             outcome.verdict.status === "duplicate"
