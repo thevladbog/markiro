@@ -6,9 +6,10 @@ tenant-guarded route is reachable by a device unless it also carries
 `SessionOnlyGuard`**. A floor device is the most theft-exposed credential in
 the system, so this list is deliberately explicit.
 
-This document is **not** a claim that the whole API has been triaged — see
-"Not yet triaged" below for tenant-guarded surfaces a device key can still
-reach that this pass deliberately left alone.
+This document is the source of truth for the `TenantGuard`-guarded surface:
+every such route in the API is expected to appear in one of the two tables
+below. See "Rule for new routes" for how it stays that way as routes are
+added.
 
 ## Reachable by a device key
 
@@ -31,33 +32,16 @@ reach that this pass deliberately left alone.
 | `org-profile` (all routes)                                                             | the station never calls this module; the org's own GS1/GLN identity is a back-office concern                                                                                                                                                               |
 | `GET /shifts/:id`, `PATCH /shifts/:id`, `DELETE /shifts/:id`, `POST /shifts/:id/close` | the station only lists, creates, opens and bundles shifts (see above) — reading/editing an arbitrary shift by id, deleting it, or closing it from the floor is a back-office action; closing a shift from the station is deliberately not a station action |
 | `GET /products/:id`, `POST /products`, `PATCH /products/:id`, `DELETE /products/:id`   | the station only lists/searches products and does a gtin-check (see above) — get-by-id and every catalog mutation are a back-office action                                                                                                                 |
-
-## Not yet triaged
-
-These modules are `TenantGuard`-only today — reachable by a device key — and
-were deliberately **left alone** by this pass. They belong to the
-pickup-kiosk workstream (a parallel branch), which owns `kiosk-device.guard.ts`
-and is expected to classify them (as station-reachable, kiosk-reachable, or
-cabinet-only) as part of its own work:
-
-| Module           | Notes                                     |
-| ---------------- | ----------------------------------------- |
-| `kiosks`         | pickup-kiosk device enrollment/management |
-| `pickup-orders`  | pickup-kiosk order flow                   |
-| `pickup-reasons` | pickup-kiosk reason codes                 |
-
-**A reader must not treat the two tables above as an exhaustive account of
-the device-key surface** — the modules in this section are also reachable by
-a device key (a station's own, since `TenantGuard` does not distinguish
-between a station's key and a future kiosk device's key) until the
-pickup-kiosk workstream triages them.
+| `kiosks`                                                                               | device management and pairing-code issue — a stolen device must not be able to enrol or re-pair another                                                                                                                                                    |
+| `pickup-orders`                                                                        | the admin's order resolution flow; the kiosk uses `/kiosk/*` behind `KioskDeviceGuard`                                                                                                                                                                     |
+| `pickup-reasons`                                                                       | the reason list is edited in the cabinet; the kiosk receives it in its bootstrap payload                                                                                                                                                                   |
 
 ## Rule for new routes
 
-This document, and the three sections above, are about `TenantGuard`-guarded
+This document, and the two sections above, are about `TenantGuard`-guarded
 routes — the ones a station's `x-api-key` resolves a tenant through. Not
 every route in the API is one of those, and a route that isn't doesn't
-belong in any of the three sections:
+belong in either section:
 
 - `GET /health` (`apps/api/src/health.controller.ts`) carries **no guard at
   all** — an intentionally unauthenticated liveness check, not a triage gap.
@@ -65,21 +49,19 @@ belong in any of the three sections:
   `apps/api/src/modules/kiosk/kiosk.controller.ts` (singular) authenticate via
   `x-kiosk-token` through `KioskDeviceGuard`, a different device secret
   entirely (looked up against `kiosks.deviceTokenHash`, not an api-key). **A
-  reader must not conclude from "Not yet triaged" that all kiosk surface is
-  `TenantGuard`-only**: that section's `kiosks` row is the plural
-  `kiosks.controller.ts` (admin management of kiosk devices, still
-  `TenantGuard`-only and genuinely untriaged); this singular
-  `kiosk.controller.ts` already has its own guard and was never in scope for
-  this document.
+  reader must not confuse this with the `kiosks` row in the Cabinet-only
+  table above**: that row is the plural `kiosks.controller.ts` (admin
+  management of kiosk devices, `TenantGuard` + `SessionOnlyGuard`); this
+  singular `kiosk.controller.ts` already has its own guard and was never in
+  scope for this document.
+- `POST /kiosk/pair` (`apps/api/src/modules/kiosk/kiosk-pair.controller.ts`) carries
+  **no guard** — a device has no credential until it succeeds. Brute force is
+  bounded by a per-code attempt lockout, not by a guard.
 
 Anything a station does not demonstrably need gets `SessionOnlyGuard`. When
-adding a `TenantGuard`-guarded route, decide which of the three sections
-above it belongs in (reachable, cabinet-only, or — only if it is explicitly
-out of scope for this triage, e.g. a pickup-kiosk route — not yet triaged)
-and add it there in the same change. "Not yet triaged" is not a resting
-place for new station or cabinet routes; it exists solely for the
-pickup-kiosk workstream's own `TenantGuard`-only modules until they classify
-them. A route guarded by something other than `TenantGuard`/`SessionOnlyGuard`
+adding a `TenantGuard`-guarded route, decide which of the two sections above
+it belongs in (reachable or cabinet-only) and add it there in the same
+change. A route guarded by something other than `TenantGuard`/`SessionOnlyGuard`
 (no guard, or a bespoke device guard like `KioskDeviceGuard`) is out of scope
 for this document by construction — but note it here anyway, as above, so
 this list of exceptions doesn't silently go stale.

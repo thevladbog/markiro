@@ -11,6 +11,7 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
+import { SessionOnlyGuard } from "../../tenancy/session-only.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
@@ -23,9 +24,12 @@ import {
 } from "./dto";
 import { PickupReasonsService } from "./pickup-reasons.service";
 
+// Cabinet-only: the kiosk device talks to /kiosk/* behind KioskDeviceGuard and
+// never needs this module, so no device key — station or kiosk — should reach
+// it (see docs/device-key-surface.md).
 @ApiTags("pickup-reasons")
 @Controller("pickup-reasons")
-@UseGuards(TenantGuard)
+@UseGuards(TenantGuard, SessionOnlyGuard)
 export class PickupReasonsController {
   constructor(private readonly pickupReasonsService: PickupReasonsService) {}
 
