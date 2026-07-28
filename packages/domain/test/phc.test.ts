@@ -6,7 +6,6 @@ import {
   PHC_ITERATIONS,
   verifyPhc,
 } from "../src/crypto/phc.js";
-import { hashSecret as stationHash } from "../../../apps/station/src/lib/crypto.js";
 
 // A structurally valid 16-byte salt, borrowed from the station's DUMMY_PHC
 // constant (apps/station/src/lib/auth.ts). Its plaintext is deliberately
@@ -55,10 +54,19 @@ describe("deriveDigestB64 / verifyPhc", () => {
   });
 });
 
-describe("interop with the station verifier", () => {
-  it("verifies a PHC string minted by apps/station/src/lib/crypto.ts", async () => {
-    const phc = await stationHash("1234");
-    await expect(verifyPhc("1234", phc)).resolves.toBe(true);
-    await expect(verifyPhc("4321", phc)).resolves.toBe(false);
+describe("known-answer interop", () => {
+  it("verifies a known-answer vector computed with the contract's parameters", async () => {
+    // Known-answer test, computed independently with node:crypto:
+    //   pbkdf2Sync("735519", base64decode(KNOWN_SALT_B64), 100000, 32, "sha256")
+    // "735519" is the secret apps/station/test/crypto.test.ts hashes, so this
+    // pins THIS module to the same PBKDF2 parameters the station uses. If the
+    // iteration count, digest, key length or base64 padding ever drift, this
+    // fails — which is the whole point of a hardcoded vector.
+    const phc =
+      "pbkdf2$sha256$100000$fwGrIt01vwgBxxDlhqLVRQ==$PgepXwOPCgYDtXjghPhCfde+aOxZvagqdzi1WbEVZBo=";
+
+    expect(parsePhc(phc)!.iterations).toBe(100000);
+    await expect(verifyPhc("735519", phc)).resolves.toBe(true);
+    await expect(verifyPhc("735518", phc)).resolves.toBe(false);
   });
 });
