@@ -113,6 +113,7 @@
   "conflicts": {
     "title": "Codes claimed elsewhere",
     "empty": "No conflicts",
+    "readFailed": "Could not read the conflict list",
     "wonBy": "Kept by {{terminal}} at {{time}}",
     "back": "Back",
     "unknownItem": "Item no longer on this device"

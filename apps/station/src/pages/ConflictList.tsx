@@ -19,6 +19,13 @@ export interface ConflictListProps {
 export function ConflictList({ exec, onBack }: ConflictListProps) {
   const { t, i18n } = useTranslation();
   const [conflicts, setConflicts] = useState<DeviceConflict[]>([]);
+  // Distinct from "conflicts is still []" -- a genuine local read failure
+  // must not be told to the operator as "no conflicts", which may directly
+  // contradict the nonzero count they just tapped to investigate. This
+  // screen is not the verdict area (design brief 04's floor rule is about
+  // scan verdicts, not this reviewable list), so a calm, honest line here
+  // competes with nothing; the Back button stays live either way.
+  const [readFailed, setReadFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -27,10 +34,8 @@ export function ConflictList({ exec, onBack }: ConflictListProps) {
         if (!cancelled) setConflicts(rows);
       })
       .catch((err: unknown) => {
-        // A read failure must not strand the operator on a blank screen with
-        // no way back -- it just shows as "no conflicts" (the safe, quiet
-        // default) with the Back button still live.
         console.error("station: readConflicts failed", err);
+        if (!cancelled) setReadFailed(true);
       });
     return () => {
       cancelled = true;
@@ -45,7 +50,9 @@ export function ConflictList({ exec, onBack }: ConflictListProps) {
   return (
     <main style={{ padding: 32, display: "flex", flexDirection: "column", gap: 24 }}>
       <h1 style={{ fontSize: "2rem" }}>{t("conflicts.title")}</h1>
-      {conflicts.length === 0 ? (
+      {readFailed ? (
+        <p>{t("conflicts.readFailed")}</p>
+      ) : conflicts.length === 0 ? (
         <p>{t("conflicts.empty")}</p>
       ) : (
         <div style={{ display: "grid", gap: 16 }}>
@@ -72,7 +79,7 @@ export function ConflictList({ exec, onBack }: ConflictListProps) {
           ))}
         </div>
       )}
-      <Button style={{ minHeight: 64 }} onClick={onBack}>
+      <Button variant="secondary" style={{ minHeight: 64 }} onClick={onBack}>
         {t("conflicts.back")}
       </Button>
     </main>

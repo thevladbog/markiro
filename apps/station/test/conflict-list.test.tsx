@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { render, screen } from "@testing-library/react";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import i18n from "../src/i18n/index.js";
 import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
 import { recordConflicts } from "../src/lib/conflicts.js";
@@ -58,5 +58,31 @@ describe("ConflictList", () => {
   it("says so when there is nothing to review", async () => {
     render(<ConflictList exec={await migratedExec()} onBack={() => {}} />);
     expect(await screen.findByText("No conflicts")).toBeDefined();
+  });
+
+  it("says the list could not be read when readConflicts throws, not that there are no conflicts (Finding 3)", async () => {
+    // The read failure below is expected and asserted on via the UI copy,
+    // not left to print a stack trace into otherwise-pristine test output.
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const failingExec: SqlExecutor = {
+        async run() {},
+        async all() {
+          throw new Error("device DB is locked");
+        },
+      };
+
+      render(<ConflictList exec={failingExec} onBack={() => {}} />);
+
+      expect(await screen.findByText("Could not read the conflict list")).toBeDefined();
+      // The failure-safe empty-state copy must never appear alongside it --
+      // that would be the exact confusion this finding is about (a genuine
+      // read failure indistinguishable from "no conflicts").
+      expect(screen.queryByText("No conflicts")).toBeNull();
+      // Calm, not an alarm: the Back button stays live.
+      expect(screen.getByRole("button", { name: "Back" })).toBeDefined();
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
   });
 });
