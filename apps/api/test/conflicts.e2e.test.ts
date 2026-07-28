@@ -88,15 +88,19 @@ describe.skipIf(!ready)("conflicts e2e", () => {
     return (product.body as { id: string }).id;
   }
 
-  async function openShift(agent: ReturnType<typeof request.agent>): Promise<string> {
-    const pid = await createActiveProduct(agent);
-    const shift = await agent
-      .post("/shifts")
-      .send({ productId: pid, mode: "validation" })
-      .expect(201);
+  async function openShiftForProduct(
+    agent: ReturnType<typeof request.agent>,
+    productId: string,
+  ): Promise<string> {
+    const shift = await agent.post("/shifts").send({ productId, mode: "validation" }).expect(201);
     const id = (shift.body as { id: string }).id;
     await agent.post(`/shifts/${id}/open`).expect(200);
     return id;
+  }
+
+  async function openShift(agent: ReturnType<typeof request.agent>): Promise<string> {
+    const pid = await createActiveProduct(agent);
+    return openShiftForProduct(agent, pid);
   }
 
   function item(shiftId: string, n: number, overrides: Partial<ScanItemDto> = {}): ScanItemDto {
@@ -156,6 +160,73 @@ describe.skipIf(!ready)("conflicts e2e", () => {
     expect(relistedItems[0]!.reviewedAt).toBe((reviewed.body as { reviewedAt: string }).reviewedAt);
   });
 
+  // Guards `ConflictsService.listConflicts`'s `shiftId` predicate itself: two
+  // shifts in the *same* tenant, each with its own conflict, so that
+  // scoping to shift A only reads as correct if shift B's conflict is
+  // actually excluded -- a single-shift tenant (as in the test above) would
+  // pass this assertion even with the predicate deleted entirely, since
+  // there'd be nothing else in the tenant to wrongly include.
+  it("scopes the list to the given shift, excluding another shift's conflict in the same tenant", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+    const apiKey = await deviceKey(agent);
+    const productId = await createActiveProduct(agent);
+    const shiftA = await openShiftForProduct(agent, productId);
+    const shiftB = await openShiftForProduct(agent, productId);
+
+    const firstA = { ...item(shiftA, 2), terminalId: "t1" };
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send({ batchId: "m1:60", items: [firstA] })
+      .expect(201);
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send({
+        batchId: "m1:61",
+        items: [
+          {
+            ...firstA,
+            terminalId: "t2",
+            scannedAt: new Date(Date.parse(firstA.scannedAt) + 5000).toISOString(),
+          },
+        ],
+      })
+      .expect(201);
+
+    const firstB = { ...item(shiftB, 3), terminalId: "t1" };
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send({ batchId: "m1:62", items: [firstB] })
+      .expect(201);
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send({
+        batchId: "m1:63",
+        items: [
+          {
+            ...firstB,
+            terminalId: "t2",
+            scannedAt: new Date(Date.parse(firstB.scannedAt) + 5000).toISOString(),
+          },
+        ],
+      })
+      .expect(201);
+
+    const scopedToA = await agent.get(`/conflicts?shiftId=${shiftA}`).expect(200);
+    const itemsA = (scopedToA.body as { items: { losingShiftId: string }[] }).items;
+    expect(itemsA).toHaveLength(1);
+    expect(itemsA[0]!.losingShiftId).toBe(shiftA);
+
+    const scopedToB = await agent.get(`/conflicts?shiftId=${shiftB}`).expect(200);
+    const itemsB = (scopedToB.body as { items: { losingShiftId: string }[] }).items;
+    expect(itemsB).toHaveLength(1);
+    expect(itemsB[0]!.losingShiftId).toBe(shiftB);
+  });
+
   it("filters the list by reviewed status", async () => {
     const agent = request.agent(app!.getHttpServer());
     await signUpAndActivate(agent);
@@ -213,6 +284,48 @@ describe.skipIf(!ready)("conflicts e2e", () => {
     const apiKey = await deviceKey(agent);
 
     await request(app!.getHttpServer()).get("/conflicts").set("x-api-key", apiKey).expect(403);
+  });
+
+  // `TenantGuard`+`SessionOnlyGuard` are applied at the controller (class)
+  // level, so today one `@UseGuards` protects both routes -- but that's an
+  // implementation detail, not a guarantee. Without this test, a refactor to
+  // per-method guards that dropped `SessionOnlyGuard` from just the review
+  // route would leave the GET-only test above green while silently opening
+  // a manager-only mutation to any station device.
+  it("rejects a station api-key on the review route too: conflicts are cabinet-only", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+    const apiKey = await deviceKey(agent);
+    const shiftId = await openShift(agent);
+
+    const first = { ...item(shiftId, 1), terminalId: "t1" };
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send({ batchId: "m1:90", items: [first] })
+      .expect(201);
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send({
+        batchId: "m1:91",
+        items: [
+          {
+            ...first,
+            terminalId: "t2",
+            scannedAt: new Date(Date.parse(first.scannedAt) + 5000).toISOString(),
+          },
+        ],
+      })
+      .expect(201);
+
+    const list = await agent.get(`/conflicts?shiftId=${shiftId}`).expect(200);
+    const conflictId = (list.body as { items: { id: string }[] }).items[0]!.id;
+
+    await request(app!.getHttpServer())
+      .post(`/conflicts/${conflictId}/review`)
+      .set("x-api-key", apiKey)
+      .expect(403);
   });
 
   it("does not expose another tenant's conflicts", async () => {

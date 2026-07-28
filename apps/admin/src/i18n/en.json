@@ -381,8 +381,14 @@
       "empty": "No conflicts",
       "review": "Mark reviewed",
       "reviewed": "Reviewed",
+      "filters": {
+        "shiftLabel": "Shift",
+        "shiftAll": "All shifts",
+        "shiftHint": "Shows conflicts where this shift's scan was the one displaced, not every conflict touching this shift"
+      },
       "table": {
         "code": "Code",
+        "shift": "Shift",
         "losing": "Losing terminal",
         "winning": "Winning terminal",
         "detected": "Detected",

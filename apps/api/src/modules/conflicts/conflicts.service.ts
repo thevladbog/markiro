@@ -19,6 +19,15 @@ export class ConflictsService {
     query: ListConflictsQueryDto,
   ): Promise<ListConflictsResponseDto> {
     const conditions = [eq(schema.codeConflicts.tenantId, tenantId)];
+    // Deliberately matches only the *losing* shift, via the
+    // (tenantId, losingShiftId) index from 06b Task 1 -- the cheap, indexed
+    // path. `code_conflicts` is tenant-wide, not shift-scoped, and
+    // cross-shift conflicts are expected: a shift that *won* a code taken
+    // from another shift will never show up when filtered by its own id.
+    // Accepted, because this list exists for the manager closing the
+    // *losing* shift (the one the station is never told about), not as a
+    // general "everything involving shift X" view -- see the admin
+    // conflicts page's shift filter, whose copy says exactly this.
     if (query.shiftId) conditions.push(eq(schema.codeConflicts.losingShiftId, query.shiftId));
     if (query.reviewed !== undefined) {
       conditions.push(
