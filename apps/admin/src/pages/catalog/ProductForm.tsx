@@ -178,6 +178,7 @@ export function ProductForm({
     // gtinCheckMutation is a fresh object every render (per TanStack Query) --
     // deliberately left out of the deps array so only gtinValue/open
     // re-trigger this effect (mutate is called via the latest closure).
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- see above; `getValues` is a stable react-hook-form reference, and depending on the mutation object would re-fire the lookup every render.
   }, [gtinValue, open]);
 
   const submit = handleSubmit(async (values) => {
