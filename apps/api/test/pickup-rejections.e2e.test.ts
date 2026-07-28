@@ -10,6 +10,7 @@ import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { hashDeviceToken } from "../src/pickup/device-token";
 import { schema, type Db } from "@markiro/db";
+import { listenOnLoopback } from "./support/listen-loopback";
 
 /** Check-digit VALID GTINs. GTIN is allowlisted on the kiosk; GTIN_NOT_ALLOWED is not. */
 const GTIN = "04600682000013";
@@ -53,6 +54,7 @@ describe.skipIf(!ready)("pickup scan rejections e2e", () => {
     mountAuth(server, setup.auth);
     server.use(express.json());
     await app.init();
+    await listenOnLoopback(app);
 
     agent = request.agent(app!.getHttpServer());
     tenantId = await signUpAndActivate(agent);
