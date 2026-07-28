@@ -107,6 +107,24 @@ export const scanEventsMirror = sqliteTable("scan_events_mirror", {
 });
 
 /**
+ * Device-local transport queue: one row per scan, drained to the server and
+ * deleted on acknowledgement. Deliberately separate from `codes_mirror` —
+ * that table serves duplicate detection and will be purged on a retention
+ * schedule, and transport state must not be governed by retention.
+ */
+export const outbox = sqliteTable("outbox", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  shiftId: text("shift_id").notNull(),
+  terminalId: text("terminal_id"),
+  raw: text("raw").notNull(),
+  verdict: text("verdict").notNull(),
+  scannedAt: text("scanned_at").notNull(),
+  codeHash: text("code_hash"),
+  gtin14: text("gtin14"),
+  serial: text("serial"),
+});
+
+/**
  * A local operator record after offline hydration. `pinHash`/`badgeHash` are
  * PBKDF2 PHC verifiers (see the credential-hash contract). This is the exact
  * shape the server station-bundle `operators` field will carry in 05b — in

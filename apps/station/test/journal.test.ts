@@ -142,3 +142,431 @@ describe("journal", () => {
     await expect(recordScan(failingExec, EVENT, CODE)).rejects.toThrow(boom);
   });
 });
+
+describe("outbox", () => {
+  it("enqueues an accepted scan with its code payload", async () => {
+    const exec = makeExec();
+    await recordScan(
+      exec,
+      {
+        shiftId: "s1",
+        terminalId: "t1",
+        raw: "RAW1",
+        verdict: "ok",
+        scannedAt: "2026-07-28T10:00:00.000Z",
+      },
+      {
+        codeHash: "h1",
+        shiftId: "s1",
+        gtin14: "04600000000017",
+        serial: "AB1",
+        scannedAt: "2026-07-28T10:00:00.000Z",
+      },
+    );
+
+    const rows = await exec.all<{
+      shift_id: string;
+      verdict: string;
+      code_hash: string | null;
+      gtin14: string | null;
+      serial: string | null;
+    }>("SELECT shift_id, verdict, code_hash, gtin14, serial FROM outbox ORDER BY id");
+    expect(rows).toEqual([
+      { shift_id: "s1", verdict: "ok", code_hash: "h1", gtin14: "04600000000017", serial: "AB1" },
+    ]);
+  });
+
+  it("enqueues a rejected scan with no code payload", async () => {
+    const exec = makeExec();
+    await recordScan(
+      exec,
+      {
+        shiftId: "s1",
+        terminalId: null,
+        raw: "junk",
+        verdict: "invalid",
+        scannedAt: "2026-07-28T10:00:01.000Z",
+      },
+      null,
+    );
+
+    const rows = await exec.all<{ verdict: string; code_hash: string | null }>(
+      "SELECT verdict, code_hash FROM outbox",
+    );
+    expect(rows).toEqual([{ verdict: "invalid", code_hash: null }]);
+  });
+
+  it("enqueues the CORRECTED verdict and no code when the code was already present", async () => {
+    const exec = makeExec();
+    const code = {
+      codeHash: "h1",
+      shiftId: "s1",
+      gtin14: "04600000000017",
+      serial: "AB1",
+      scannedAt: "2026-07-28T10:00:00.000Z",
+    };
+    await recordScan(
+      exec,
+      { shiftId: "s1", terminalId: null, raw: "RAW1", verdict: "ok", scannedAt: code.scannedAt },
+      code,
+    );
+
+    // Same code again: the primary key rejects it, so the scan is a duplicate.
+    const result = await recordScan(
+      exec,
+      {
+        shiftId: "s1",
+        terminalId: null,
+        raw: "RAW1",
+        verdict: "ok",
+        scannedAt: "2026-07-28T10:00:05.000Z",
+      },
+      { ...code, scannedAt: "2026-07-28T10:00:05.000Z" },
+    );
+    expect(result.alreadyPresent).toBe(true);
+
+    const rows = await exec.all<{ verdict: string; code_hash: string | null }>(
+      "SELECT verdict, code_hash FROM outbox ORDER BY id",
+    );
+    // The second row must NOT carry a code: this device already queued it once,
+    // and sending it again would write a second server row for one physical item.
+    expect(rows).toEqual([
+      { verdict: "ok", code_hash: "h1" },
+      { verdict: "duplicate", code_hash: null },
+    ]);
+  });
+
+  it("throws when the outbox write fails, rather than losing the scan silently", async () => {
+    const exec = makeExec();
+    const failing: SqlExecutor = {
+      run: async (sql, params) => {
+        if (/INTO outbox/i.test(sql)) throw new Error("disk full");
+        return exec.run(sql, params);
+      },
+      all: (sql, params) => exec.all(sql, params),
+    };
+    await expect(
+      recordScan(
+        failing,
+        {
+          shiftId: "s1",
+          terminalId: null,
+          raw: "RAW1",
+          verdict: "invalid",
+          scannedAt: "2026-07-28T10:00:00.000Z",
+        },
+        null,
+      ),
+    ).rejects.toThrow(/disk full/);
+  });
+
+  // The finding this closes: an outbox failure used to leave the just-stored
+  // code row in place, so the operator's rescan of the same physical item hit
+  // the primary key, was reported as alreadyPresent, and was enqueued as
+  // "duplicate" with no code payload -- the code could then never reach the
+  // server. Compensating the codes_mirror insert away makes the rescan a
+  // clean accept instead.
+  it("compensates the code row on outbox failure so a rescan is a fresh accept, not a phantom duplicate", async () => {
+    const exec = makeExec();
+    const failing: SqlExecutor = {
+      run: async (sql, params) => {
+        if (/INTO outbox/i.test(sql)) throw new Error("disk full");
+        return exec.run(sql, params);
+      },
+      all: (sql, params) => exec.all(sql, params),
+    };
+    const event = {
+      shiftId: "s1",
+      terminalId: "t1",
+      raw: "RAW1",
+      verdict: "ok",
+      scannedAt: "2026-07-28T10:00:00.000Z",
+    };
+    const code = {
+      codeHash: "h1",
+      shiftId: "s1",
+      gtin14: "04600000000017",
+      serial: "AB1",
+      scannedAt: "2026-07-28T10:00:00.000Z",
+    };
+
+    await expect(recordScan(failing, event, code)).rejects.toThrow(/disk full/);
+
+    // The compensating delete undid the codes_mirror insert.
+    expect(await loadCodeKeys(exec)).toEqual(new Set());
+
+    // The rescan (against the real, non-failing executor) is a fresh accept,
+    // not a phantom duplicate, and DOES enqueue the code payload this time.
+    const rescan = await recordScan(
+      exec,
+      { ...event, scannedAt: "2026-07-28T10:00:05.000Z" },
+      { ...code, scannedAt: "2026-07-28T10:00:05.000Z" },
+    );
+    expect(rescan).toEqual({ storedCode: true, alreadyPresent: false });
+
+    const rows = await exec.all<{ verdict: string; code_hash: string | null }>(
+      "SELECT verdict, code_hash FROM outbox ORDER BY id",
+    );
+    expect(rows).toEqual([{ verdict: "ok", code_hash: "h1" }]);
+  });
+
+  // Finding 3: `appendScanEvent` (the event write, immediately above the
+  // outbox insert in `recordScan`) used to be unguarded. If it threw, the
+  // just-stored `codes_mirror` row was left behind with no outbox row -- the
+  // operator's rescan would then hit the code primary key, be journalled as
+  // a duplicate with no code payload, and that accepted physical code could
+  // never reach the server. Same failure the outbox-failure compensation
+  // above exists to prevent, reachable through the other write.
+  it("compensates the code row when the EVENT write fails, so a rescan is a fresh accept, not a phantom duplicate", async () => {
+    const exec = makeExec();
+    const failing: SqlExecutor = {
+      run: async (sql, params) => {
+        if (/INTO scan_events_mirror/i.test(sql)) throw new Error("disk full");
+        return exec.run(sql, params);
+      },
+      all: (sql, params) => exec.all(sql, params),
+    };
+    const event = {
+      shiftId: "s1",
+      terminalId: "t1",
+      raw: "RAW1",
+      verdict: "ok",
+      scannedAt: "2026-07-28T10:00:00.000Z",
+    };
+    const code = {
+      codeHash: "h1",
+      shiftId: "s1",
+      gtin14: "04600000000017",
+      serial: "AB1",
+      scannedAt: "2026-07-28T10:00:00.000Z",
+    };
+
+    await expect(recordScan(failing, event, code)).rejects.toThrow(/disk full/);
+
+    // The compensating delete undid the codes_mirror insert.
+    expect(await loadCodeKeys(exec)).toEqual(new Set());
+
+    // Nothing was ever enqueued for this attempt -- the event write failed
+    // before the outbox insert was even attempted.
+    const outboxRows = await exec.all<{ id: number }>("SELECT id FROM outbox");
+    expect(outboxRows).toHaveLength(0);
+
+    // The rescan (against the real, non-failing executor) is a fresh accept,
+    // not a phantom duplicate.
+    const rescan = await recordScan(
+      exec,
+      { ...event, scannedAt: "2026-07-28T10:00:05.000Z" },
+      { ...code, scannedAt: "2026-07-28T10:00:05.000Z" },
+    );
+    expect(rescan).toEqual({ storedCode: true, alreadyPresent: false });
+  });
+
+  it("rethrows the original event error even when the compensating delete also fails", async () => {
+    const exec = makeExec();
+    const failing: SqlExecutor = {
+      run: async (sql, params) => {
+        if (/INTO scan_events_mirror/i.test(sql)) throw new Error("disk full");
+        if (/DELETE FROM codes_mirror/i.test(sql)) throw new Error("delete also failed");
+        return exec.run(sql, params);
+      },
+      all: (sql, params) => exec.all(sql, params),
+    };
+    const event = {
+      shiftId: "s1",
+      terminalId: "t1",
+      raw: "RAW1",
+      verdict: "ok",
+      scannedAt: "2026-07-28T10:00:00.000Z",
+    };
+    const code = {
+      codeHash: "h1",
+      shiftId: "s1",
+      gtin14: "04600000000017",
+      serial: "AB1",
+      scannedAt: "2026-07-28T10:00:00.000Z",
+    };
+
+    await expect(recordScan(failing, event, code)).rejects.toThrow(/disk full/);
+  });
+
+  it("does not touch codes_mirror when the event write fails for a scan with no code", async () => {
+    const exec = makeExec();
+    // Seed an unrelated code row that must survive untouched.
+    await recordScan(
+      exec,
+      {
+        shiftId: "s1",
+        terminalId: "t1",
+        raw: "OTHER",
+        verdict: "ok",
+        scannedAt: "2026-07-28T09:00:00.000Z",
+      },
+      {
+        codeHash: "other-h",
+        shiftId: "s1",
+        gtin14: "04600000000017",
+        serial: "OTHER1",
+        scannedAt: "2026-07-28T09:00:00.000Z",
+      },
+    );
+
+    const failing: SqlExecutor = {
+      run: async (sql, params) => {
+        if (/INTO scan_events_mirror/i.test(sql)) throw new Error("disk full");
+        return exec.run(sql, params);
+      },
+      all: (sql, params) => exec.all(sql, params),
+    };
+
+    await expect(
+      recordScan(
+        failing,
+        {
+          shiftId: "s1",
+          terminalId: null,
+          raw: "junk",
+          verdict: "invalid",
+          scannedAt: "2026-07-28T10:00:01.000Z",
+        },
+        null,
+      ),
+    ).rejects.toThrow(/disk full/);
+
+    // The unrelated code row survives: nothing was deleted for a rejected scan.
+    expect(await loadCodeKeys(exec)).toEqual(new Set(["other-h"]));
+  });
+
+  it("rethrows the original outbox error even when the compensating delete also fails", async () => {
+    const exec = makeExec();
+    const failing: SqlExecutor = {
+      run: async (sql, params) => {
+        if (/INTO outbox/i.test(sql)) throw new Error("disk full");
+        if (/DELETE FROM codes_mirror/i.test(sql)) throw new Error("delete also failed");
+        return exec.run(sql, params);
+      },
+      all: (sql, params) => exec.all(sql, params),
+    };
+    const event = {
+      shiftId: "s1",
+      terminalId: "t1",
+      raw: "RAW1",
+      verdict: "ok",
+      scannedAt: "2026-07-28T10:00:00.000Z",
+    };
+    const code = {
+      codeHash: "h1",
+      shiftId: "s1",
+      gtin14: "04600000000017",
+      serial: "AB1",
+      scannedAt: "2026-07-28T10:00:00.000Z",
+    };
+
+    await expect(recordScan(failing, event, code)).rejects.toThrow(/disk full/);
+  });
+
+  it("does not touch codes_mirror on outbox failure for a scan with no code", async () => {
+    const exec = makeExec();
+    // Seed an unrelated code row that must survive untouched.
+    await recordScan(
+      exec,
+      {
+        shiftId: "s1",
+        terminalId: "t1",
+        raw: "OTHER",
+        verdict: "ok",
+        scannedAt: "2026-07-28T09:00:00.000Z",
+      },
+      {
+        codeHash: "other-h",
+        shiftId: "s1",
+        gtin14: "04600000000017",
+        serial: "OTHER1",
+        scannedAt: "2026-07-28T09:00:00.000Z",
+      },
+    );
+
+    const failing: SqlExecutor = {
+      run: async (sql, params) => {
+        if (/INTO outbox/i.test(sql)) throw new Error("disk full");
+        return exec.run(sql, params);
+      },
+      all: (sql, params) => exec.all(sql, params),
+    };
+
+    await expect(
+      recordScan(
+        failing,
+        {
+          shiftId: "s1",
+          terminalId: null,
+          raw: "junk",
+          verdict: "invalid",
+          scannedAt: "2026-07-28T10:00:01.000Z",
+        },
+        null,
+      ),
+    ).rejects.toThrow(/disk full/);
+
+    // The unrelated code row survives: nothing was deleted for a rejected scan.
+    expect(await loadCodeKeys(exec)).toEqual(new Set(["other-h"]));
+  });
+
+  it("does not delete an already-present code when the outbox write fails", async () => {
+    const exec = makeExec();
+    const code = {
+      codeHash: "h1",
+      shiftId: "s1",
+      gtin14: "04600000000017",
+      serial: "AB1",
+      scannedAt: "2026-07-28T10:00:00.000Z",
+    };
+
+    // First scan: the code gets stored.
+    await recordScan(
+      exec,
+      {
+        shiftId: "s1",
+        terminalId: "t1",
+        raw: "RAW1",
+        verdict: "ok",
+        scannedAt: "2026-07-28T10:00:00.000Z",
+      },
+      code,
+    );
+
+    // Verify the code is in codes_mirror.
+    expect(await loadCodeKeys(exec)).toEqual(new Set(["h1"]));
+
+    // Second scan of the same code with a failing outbox executor.
+    const failing: SqlExecutor = {
+      run: async (sql, params) => {
+        if (/INTO outbox/i.test(sql)) throw new Error("disk full");
+        return exec.run(sql, params);
+      },
+      all: (sql, params) => exec.all(sql, params),
+    };
+
+    // The second scan hits the primary key (storedCode = false, alreadyPresent = true)
+    // and then the outbox insert fails.
+    await expect(
+      recordScan(
+        failing,
+        {
+          shiftId: "s1",
+          terminalId: "t1",
+          raw: "RAW1",
+          verdict: "ok",
+          scannedAt: "2026-07-28T10:00:05.000Z",
+        },
+        code,
+      ),
+    ).rejects.toThrow(/disk full/);
+
+    // The code must still be in codes_mirror: the compensating delete only runs
+    // when storedCode is true, but this second scan had storedCode = false because
+    // the code was already present. If the guard were loosened to just check
+    // 'code', the code would be incorrectly deleted, losing the first scan's
+    // payload forever.
+    expect(await loadCodeKeys(exec)).toEqual(new Set(["h1"]));
+  });
+});

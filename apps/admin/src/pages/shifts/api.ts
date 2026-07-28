@@ -40,6 +40,7 @@ export interface ShiftDto {
   createdFrom: ShiftOrigin;
   openedAt: string | null;
   closedAt: string | null;
+  lateDataAt: string | null;
   closeReason: string | null;
   createdAt: string;
 }

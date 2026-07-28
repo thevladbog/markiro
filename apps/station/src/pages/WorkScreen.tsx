@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { classifyScan, kmKey, validateShiftScan, type ScanVerdict } from "@markiro/domain";
+import { Alert, Button } from "@markiro/ui";
 import { findFirstSeen, loadCodeKeys, recordScan } from "../lib/journal.js";
 import type { SqlExecutor } from "../lib/mirror.js";
 import { createScanQueue, type ScanOutcome } from "../lib/scan-queue.js";
@@ -17,6 +18,13 @@ export interface WorkScreenProps {
   counterpartyName?: string | null;
   source: ScanSource;
   sound: SoundSettings;
+  /** Signals a scan was just written, so a queued outbox row does not have
+   * to wait for the sync engine's 15s heartbeat before draining. */
+  onScanRecorded?: () => void;
+  /** Return to shift selection. Does NOT close the shift — that is a cabinet action. */
+  onExit: () => void;
+  /** Scans still queued on this device, shown before the operator walks away. */
+  pendingSync: number;
 }
 
 /** How long each verdict's full-screen flash stays up (design brief 04). */
@@ -37,6 +45,9 @@ export function WorkScreen({
   counterpartyName,
   source,
   sound,
+  onScanRecorded,
+  onExit,
+  pendingSync,
 }: WorkScreenProps) {
   const { t, i18n } = useTranslation();
   const [accepted, setAccepted] = useState(0);
@@ -44,6 +55,12 @@ export function WorkScreen({
   const [signal, setSignal] = useState<{ tone: SignalTone; title: string; detail?: string } | null>(
     null,
   );
+  const [confirmExit, setConfirmExit] = useState(false);
+
+  function requestExit() {
+    if (pendingSync > 0) setConfirmExit(true);
+    else onExit();
+  }
 
   // The domain's isDuplicate(key) is synchronous, so the device's accepted keys
   // are held in memory and updated on every insert rather than queried per scan.
@@ -80,8 +97,9 @@ export function WorkScreen({
     };
   }, [exec]);
 
-  // `t`, `i18n.language` and `sound` all change over the life of one mounted
-  // WorkScreen (a language switch, a mute/volume change in setup), but the
+  // `t`, `i18n.language`, `sound` and `onScanRecorded` all change over the
+  // life of one mounted WorkScreen (a language switch, a mute/volume change
+  // in setup, a fresh callback identity from App on every render), but the
   // queue below must NOT be recreated when they do: `source.start(...)`
   // (further down) is bound to one queue instance, and a fresh queue has its
   // own buffer and `draining` flag — if the `useMemo` depended on these
@@ -90,9 +108,9 @@ export function WorkScreen({
   // "exactly one scan in flight" guarantee the whole pipeline rests on. So
   // `process`/`onOutcome`/`onError` read the current values through this ref
   // instead of closing over the props/hooks directly.
-  const live = useRef({ t, language: i18n.language, sound });
+  const live = useRef({ t, language: i18n.language, sound, onScanRecorded });
   useEffect(() => {
-    live.current = { t, language: i18n.language, sound };
+    live.current = { t, language: i18n.language, sound, onScanRecorded };
   });
 
   const queue = useMemo(
@@ -138,7 +156,12 @@ export function WorkScreen({
           return { raw, verdict, firstSeen };
         },
         onOutcome(outcome) {
-          const { t: liveT, language, sound: liveSound } = live.current;
+          const {
+            t: liveT,
+            language,
+            sound: liveSound,
+            onScanRecorded: liveOnScanRecorded,
+          } = live.current;
           const tone = toneOf(outcome.verdict);
           if (outcome.verdict.status === "ok") setAccepted((n) => n + 1);
           else setRejected((n) => n + 1);
@@ -164,6 +187,14 @@ export function WorkScreen({
           setSignal({ tone, title, ...(detail === undefined ? {} : { detail }) });
           if (flashTimer.current) clearTimeout(flashTimer.current);
           flashTimer.current = setTimeout(() => setSignal(null), FLASH_MS[tone]);
+
+          // Nudged last, strictly after the operator-visible signal is
+          // rendered: `process()` above already wrote this outcome's outbox
+          // row (every branch calls `recordScan`, whatever the verdict), so
+          // the sync engine has real work to nudge for either way, and
+          // `nudge()` cannot throw synchronously -- but the operator's
+          // feedback must stay ahead of background sync work regardless.
+          liveOnScanRecorded?.();
         },
         onError(raw, err) {
           // A throw from process() (e.g. the journal write) must never leave
@@ -195,14 +226,69 @@ export function WorkScreen({
     <main
       style={{ minHeight: "100%", padding: 32, display: "flex", flexDirection: "column", gap: 24 }}
     >
-      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-        <span style={{ fontSize: "2rem", fontWeight: 700 }}>{productName}</span>
-        {counterpartyName ? (
-          <span style={{ fontSize: "1.25rem", opacity: 0.85 }}>
-            {t("shifts.forCounterparty")} {counterpartyName}
-          </span>
-        ) : null}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <span style={{ fontSize: "2rem", fontWeight: 700 }}>{productName}</span>
+          {counterpartyName ? (
+            <span style={{ fontSize: "1.25rem", opacity: 0.85 }}>
+              {t("shifts.forCounterparty")} {counterpartyName}
+            </span>
+          ) : null}
+        </div>
+        <Button
+          type="button"
+          variant="secondary"
+          style={{ minHeight: 64 }}
+          onClick={(event) => {
+            requestExit();
+            // A tap leaves this button focused in Chromium-based webviews.
+            // Left focused, the terminating Enter of the operator's next
+            // scan would fire a native click on it (see scan-source.ts) --
+            // possibly re-running requestExit() with the queue since
+            // drained and exiting with no operator decision. Blur it so no
+            // control holds focus while scanning continues.
+            event.currentTarget.blur();
+          }}
+        >
+          {t("work.exit")}
+        </Button>
       </div>
+
+      {confirmExit ? (
+        // Given a higher stacking context (not just later JSX) than
+        // SignalOverlay: SignalOverlay is `position: fixed`, so it is a
+        // positioned box that paints after this alert's normal-flow content
+        // regardless of DOM order (CSS painting order puts non-positioned
+        // in-flow content before positioned descendants). An explicit
+        // z-index here -- but not on SignalOverlay -- lifts this whole
+        // block, including its buttons, above the fixed flash so the
+        // confirmation stays reachable while a verdict is still showing,
+        // without touching the flash's own full-screen visibility.
+        <Alert tone="warn" style={{ position: "relative", zIndex: 1 }}>
+          <p>{t("work.exitPending", { count: pendingSync })}</p>
+          <Button
+            type="button"
+            style={{ minHeight: 64 }}
+            onClick={(event) => {
+              onExit();
+              event.currentTarget.blur();
+            }}
+          >
+            {t("work.exitAnyway")}
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            style={{ minHeight: 64 }}
+            onClick={(event) => {
+              setConfirmExit(false);
+              event.currentTarget.blur();
+            }}
+          >
+            {t("work.stay")}
+          </Button>
+        </Alert>
+      ) : null}
 
       <div style={{ display: "flex", gap: 48 }}>
         <div style={{ display: "flex", flexDirection: "column" }}>

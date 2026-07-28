@@ -145,6 +145,7 @@ export function ShiftsPage() {
                 {row.closeReason}
               </span>
             )}
+            {row.lateDataAt && <Badge tone="warn">{t("pages.shifts.table.lateData")}</Badge>}
           </div>
         ),
       },

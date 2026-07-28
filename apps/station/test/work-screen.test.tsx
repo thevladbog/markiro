@@ -1,10 +1,11 @@
 import { DatabaseSync } from "node:sqlite";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { STATION_MIGRATIONS } from "@markiro/db";
 import i18n from "../src/i18n/index.js";
 import type { SqlExecutor } from "../src/lib/mirror.js";
 import type { ScanListener, ScanSource } from "../src/lib/scan-source.js";
+import type { SoundSettings } from "../src/lib/signal-sound.js";
 import { WorkScreen } from "../src/pages/WorkScreen.js";
 
 beforeAll(async () => {
@@ -100,16 +101,45 @@ function manualSource(): ScanSource & { emit: ScanListener } {
 // A valid KM for GTIN 04600000000015 (check digit verified) with serial "5Ab1".
 const KM = "0104600000000015215Ab1";
 
-function renderScreen(source: ScanSource, exec: SqlExecutor) {
+interface RenderWorkScreenOverrides {
+  exec?: SqlExecutor;
+  shiftId?: string;
+  terminalId?: string | null;
+  expectedGtin14?: string;
+  productName?: string;
+  counterpartyName?: string | null;
+  source?: ScanSource;
+  sound?: SoundSettings;
+  onExit?: () => void;
+  pendingSync?: number;
+}
+
+function renderWorkScreen(overrides: RenderWorkScreenOverrides = {}) {
+  const {
+    exec = makeExec(),
+    shiftId = "s1",
+    terminalId = "dev-1",
+    expectedGtin14 = "04600000000015",
+    productName = "Water 0.5",
+    counterpartyName = null,
+    source = manualSource(),
+    sound = { muted: true, volume: 1 },
+    onExit = () => {},
+    pendingSync = 0,
+  } = overrides;
+
   return render(
     <WorkScreen
       exec={exec}
-      shiftId="s1"
-      terminalId="dev-1"
-      expectedGtin14="04600000000015"
-      productName="Water 0.5"
+      shiftId={shiftId}
+      terminalId={terminalId}
+      expectedGtin14={expectedGtin14}
+      productName={productName}
+      counterpartyName={counterpartyName}
       source={source}
-      sound={{ muted: true, volume: 1 }}
+      sound={sound}
+      onExit={onExit}
+      pendingSync={pendingSync}
     />,
   );
 }
@@ -118,7 +148,7 @@ describe("WorkScreen", () => {
   it("accepts a valid code, counts it and journals it", async () => {
     const source = manualSource();
     const exec = makeExec();
-    renderScreen(source, exec);
+    renderWorkScreen({ source, exec });
 
     source.emit(KM);
 
@@ -132,7 +162,7 @@ describe("WorkScreen", () => {
   it("flags the second scan of the same code as a duplicate", async () => {
     const source = manualSource();
     const exec = makeExec();
-    renderScreen(source, exec);
+    renderWorkScreen({ source, exec });
 
     source.emit(KM);
     await screen.findByText("1");
@@ -153,7 +183,7 @@ describe("WorkScreen", () => {
   it("rejects a code belonging to another product", async () => {
     const source = manualSource();
     const exec = makeExec();
-    renderScreen(source, exec);
+    renderWorkScreen({ source, exec });
 
     source.emit("0104600000000022215Ab1"); // different GTIN
     const alert = await screen.findByRole("alert");
@@ -169,7 +199,7 @@ describe("WorkScreen", () => {
   it("rejects unparseable input", async () => {
     const source = manualSource();
     const exec = makeExec();
-    renderScreen(source, exec);
+    renderWorkScreen({ source, exec });
 
     source.emit("not-a-code");
     const alert = await screen.findByRole("alert");
@@ -187,7 +217,7 @@ describe("WorkScreen", () => {
       [KM, "earlier-shift", "04600000000015", "5Ab1", new Date(0).toISOString()],
     );
 
-    renderScreen(source, exec);
+    renderWorkScreen({ source, exec });
     // Emitted synchronously right after mount, before the async loadCodeKeys()
     // round trip can resolve — exactly the window in which the bug validated
     // against an empty in-memory index and silently dropped the scan.
@@ -208,18 +238,7 @@ describe("WorkScreen", () => {
 
   it("shows the shift's product and the tolling customer", async () => {
     const source = manualSource();
-    render(
-      <WorkScreen
-        exec={makeExec()}
-        shiftId="s1"
-        terminalId="dev-1"
-        expectedGtin14="04600000000015"
-        productName="Water 0.5"
-        counterpartyName="Plant X"
-        source={source}
-        sound={{ muted: true, volume: 1 }}
-      />,
-    );
+    renderWorkScreen({ source, counterpartyName: "Plant X" });
     expect(screen.getByText("Water 0.5")).toBeDefined();
     expect(screen.getByText(/Plant X/)).toBeDefined();
   });
@@ -229,7 +248,7 @@ describe("WorkScreen", () => {
     const exec = makeThrowingRunExec();
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    renderScreen(source, exec);
+    renderWorkScreen({ source, exec });
     source.emit(KM);
 
     const alert = await screen.findByRole("alert");
@@ -246,7 +265,7 @@ describe("WorkScreen", () => {
     const exec = makeFailFirstAllExec();
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    renderScreen(source, exec);
+    renderWorkScreen({ source, exec });
     source.emit(KM);
 
     await waitFor(async () => {
@@ -257,5 +276,61 @@ describe("WorkScreen", () => {
 
     expect(consoleError).toHaveBeenCalled();
     consoleError.mockRestore();
+  });
+
+  it("leaves the shift immediately when nothing is queued", async () => {
+    const onExit = vi.fn();
+    renderWorkScreen({ onExit, pendingSync: 0 });
+
+    fireEvent.click(screen.getByRole("button", { name: "Leave shift" }));
+    expect(onExit).toHaveBeenCalledTimes(1);
+  });
+
+  it("warns about queued scans before leaving, and leaves anyway on confirm", async () => {
+    const onExit = vi.fn();
+    renderWorkScreen({ onExit, pendingSync: 12 });
+
+    fireEvent.click(screen.getByRole("button", { name: "Leave shift" }));
+    expect(onExit).not.toHaveBeenCalled();
+    expect(screen.getByText("12 scans have not reached the server yet.")).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Leave anyway" }));
+    expect(onExit).toHaveBeenCalledTimes(1);
+  });
+
+  it("stays on the shift when the operator cancels", async () => {
+    const onExit = vi.fn();
+    renderWorkScreen({ onExit, pendingSync: 12 });
+
+    fireEvent.click(screen.getByRole("button", { name: "Leave shift" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stay" }));
+    expect(onExit).not.toHaveBeenCalled();
+  });
+
+  it("blurs the leave-shift control after activation, so it cannot hold focus while scanning continues", async () => {
+    // A tap leaves a native <button> focused in Chromium-based webviews. If it
+    // stayed focused here, the terminating Enter of the operator's NEXT scan
+    // (which the keyboard wedge cannot tell apart from any other keydown)
+    // would fire a native click on this still-focused button while the
+    // confirmation is up — re-running requestExit() with the queue possibly
+    // now drained and exiting with no operator decision.
+    const onExit = vi.fn();
+    renderWorkScreen({ onExit, pendingSync: 12 });
+
+    const exitButton = screen.getByRole("button", { name: "Leave shift" });
+    exitButton.focus();
+    expect(document.activeElement).toBe(exitButton);
+
+    fireEvent.click(exitButton);
+
+    expect(document.activeElement).not.toBe(exitButton);
+  });
+
+  it("uses the singular pending-scan copy when exactly one scan is queued", async () => {
+    const onExit = vi.fn();
+    renderWorkScreen({ onExit, pendingSync: 1 });
+
+    fireEvent.click(screen.getByRole("button", { name: "Leave shift" }));
+    expect(screen.getByText("1 scan has not reached the server yet.")).toBeDefined();
   });
 });

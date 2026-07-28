@@ -86,6 +86,8 @@ export interface ShiftDto {
   openedAt: Date | null;
   closedAt: Date | null;
   closeReason: string | null;
+  /** When scans first arrived after this shift was closed; null if never. */
+  lateDataAt: Date | null;
   createdAt: Date;
 }
 

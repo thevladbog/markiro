@@ -15,6 +15,7 @@ import { syncOperatorRoster } from "./lib/roster-sync.js";
 import { createKeyboardWedgeSource } from "./lib/scan-source.js";
 import { loadSoundSettings, type SoundSettings } from "./lib/signal-sound.js";
 import { tauriExecutor } from "./lib/sqlite.js";
+import { useSyncEngine } from "./lib/use-sync-engine.js";
 import { Enrollment } from "./pages/Enrollment.js";
 import { OperatorLogin } from "./pages/OperatorLogin.js";
 import { ShiftSelection } from "./pages/ShiftSelection.js";
@@ -235,6 +236,19 @@ export function App() {
     [config?.apiKey, config?.serverUrl],
   );
 
+  // One engine for the life of the app: the outbox belongs to the DEVICE, not
+  // to a shift or an operator, so entering or leaving a shift must never stop
+  // the drain. Built only once a client exists — before enrollment there is
+  // nowhere to send. See `useSyncEngine`'s doc comment for why construction
+  // and teardown are paired inside one effect there (a StrictMode hazard) and
+  // for why `nudge` below is safe to call from anywhere without needing the
+  // engine's identity as a dependency.
+  const { state: syncState, nudge: nudgeSync } = useSyncEngine({
+    exec: tauriExecutor,
+    client,
+    machineId: config?.machineId,
+  });
+
   // Initialization sync: as soon as the device has a credential — right after
   // enrollment, and on every later start — pull the operator roster so the
   // sign-in screen has someone to authenticate. Without this a freshly
@@ -248,13 +262,18 @@ export function App() {
   // briefly offline at that moment would otherwise strand the operator at a
   // PIN pad no PIN can satisfy until the app is restarted. Re-running on
   // every `online` event is a cheap one-shot retry (`syncOperatorRoster`
-  // never throws), not a polling loop.
+  // never throws), not a polling loop. The sync engine's queue drain is a
+  // second, independent consumer of the same event — one listener, two
+  // reasons to nudge.
   useEffect(() => {
     if (!client) return;
-    const retrySync = () => void syncOperatorRoster(client, tauriExecutor);
+    const retrySync = () => {
+      void syncOperatorRoster(client, tauriExecutor);
+      nudgeSync();
+    };
     window.addEventListener("online", retrySync);
     return () => window.removeEventListener("online", retrySync);
-  }, [client]);
+  }, [client, nudgeSync]);
 
   async function refreshConfig() {
     setConfig(await readConfig());
@@ -302,6 +321,8 @@ export function App() {
       online={online}
       scanner={scannerIndicator(hardwareConfig, scannerStatus)}
       printerConfigured={hardwareConfig.printer !== null}
+      syncPending={syncState.pending}
+      syncStuck={syncState.stuck}
       tasks={[]}
       activeTaskId=""
       onSelectTask={() => {}}
@@ -334,6 +355,17 @@ export function App() {
             counterpartyName={shiftContext.counterpartyName}
             source={scanSource}
             sound={sound}
+            onScanRecorded={nudgeSync}
+            onExit={() => {
+              // Both cleared together: `floorView` is separate state that
+              // stays "new" when this shift was entered through NewShift, so
+              // clearing only `shift` would re-render NewShift instead of
+              // shift selection -- the opposite of what this exit control
+              // promises (Finding 5).
+              setShift(null);
+              setFloorView("select");
+            }}
+            pendingSync={syncState.pending}
           />
         ) : (
           <main style={{ minHeight: "100%", display: "grid", placeItems: "center" }}>
