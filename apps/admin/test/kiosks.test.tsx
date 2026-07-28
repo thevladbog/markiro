@@ -243,8 +243,14 @@ describe("KiosksPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Код привязки" }));
 
     // The barcode is lazy-loaded (bwip-js stays out of the main bundle), so it
-    // resolves a tick after the dialog itself.
-    const barcode = await screen.findByRole("img", { name: /12345678/ });
+    // resolves well after the dialog itself: the dynamic import has to fetch
+    // and evaluate a ~1 MB chunk, measured at ~300ms even on an idle dev
+    // machine. Testing Library's default 1000ms wait left too thin a margin and
+    // timed out on CI's 2-core runner under parallel workers, so this one query
+    // gets an explicit budget (same escape hatch as `shifts.test.tsx`). Kept
+    // under vitest's 5000ms per-test default, which would otherwise fire first
+    // and turn a slow import into a less legible test-level timeout.
+    const barcode = await screen.findByRole("img", { name: /12345678/ }, { timeout: 3000 });
     await waitFor(() => expect(barcode.querySelector("svg")).not.toBeNull());
   });
 
