@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 // `@tauri-apps/plugin-sql`'s `Database.load`/`execute`/`select` are themselves
@@ -86,6 +87,7 @@ import type * as HardwareModule from "../src/lib/hardware.js";
 import type { ScannerStatus } from "../src/lib/hardware.js";
 import { readShiftContext } from "../src/lib/mirror.js";
 import { tauriExecutor } from "../src/lib/sqlite.js";
+import { BACKOFF_START_MS } from "../src/lib/sync.js";
 import type { OperatorMirrorRecord } from "@markiro/db";
 
 beforeAll(async () => {
@@ -141,14 +143,52 @@ function operatorMirrorRow(pinHash: string) {
   };
 }
 
+/** Row shape `readBatch` (sync.ts) expects back from `plugin:sql|select`. */
+interface OutboxSeedRow {
+  id: number;
+  shift_id: string;
+  terminal_id: string | null;
+  raw: string;
+  verdict: string;
+  scanned_at: string;
+  code_hash: string | null;
+  gtin14: string | null;
+  serial: string | null;
+}
+
+function outboxRow(id: number): OutboxSeedRow {
+  return {
+    id,
+    shift_id: "shift-1",
+    terminal_id: "t1",
+    raw: `RAW${id}`,
+    verdict: "ok",
+    scanned_at: new Date().toISOString(),
+    code_hash: `hash${id}`,
+    gtin14: "04600000000017",
+    serial: `S${id}`,
+  };
+}
+
 /**
  * Wires `invokeMock` so the app can reach the floor stage: an enrolled
  * config, the given hardware configuration under the `hardware_config`
- * `station_meta` key, one active operator (verifiable with `OPERATOR_PIN`)
- * behind `readOperatorsMirror`'s query, and empty defaults for everything
- * else (`sound_settings`, `operators_slot`, migrations).
+ * `station_meta` key, a fixed `install_id` (the sync engine's per-
+ * installation batch key component, Finding 3 — its exact value is never
+ * asserted by anything in this file), one active operator (verifiable with
+ * `OPERATOR_PIN`) behind `readOperatorsMirror`'s query, `outboxRows` behind
+ * the outbox queries the sync engine issues (mutated on ack, so a drained
+ * queue actually reads back empty rather than looping forever — and
+ * returned, so a test can push more rows into it later to simulate a new
+ * scan), and empty defaults for everything else (`sound_settings`,
+ * `operators_slot`, migrations).
  */
-function mockInvokeForFloor(pinHash: string, hardwareConfig: HardwareConfig) {
+function mockInvokeForFloor(
+  pinHash: string,
+  hardwareConfig: HardwareConfig,
+  outboxRows: OutboxSeedRow[] = [],
+): OutboxSeedRow[] {
+  const outbox = [...outboxRows];
   invokeMock.mockImplementation((cmd: string, payload?: unknown): Promise<unknown> => {
     if (cmd === "read_config") {
       return Promise.resolve({
@@ -158,9 +198,31 @@ function mockInvokeForFloor(pinHash: string, hardwareConfig: HardwareConfig) {
       });
     }
     if (cmd === "plugin:sql|load") return Promise.resolve("sqlite:station-mirror.db");
-    if (cmd === "plugin:sql|execute") return Promise.resolve([0, 0]);
+    if (cmd === "plugin:sql|execute") {
+      const { query, values } = (payload ?? {}) as { query: string; values?: unknown[] };
+      // Mirrors `ackThrough` (outbox.ts): drops every seeded row up to and
+      // including the acknowledged id, so a subsequent `readBatch` genuinely
+      // sees an empty queue instead of resending the same batch forever.
+      if (query.includes("DELETE FROM outbox")) {
+        const maxId = values?.[0] as number;
+        for (let i = outbox.length - 1; i >= 0; i--) {
+          if (outbox[i]!.id <= maxId) outbox.splice(i, 1);
+        }
+      }
+      return Promise.resolve([0, 0]);
+    }
     if (cmd === "plugin:sql|select") {
       const { query, values } = (payload ?? {}) as { query: string; values?: unknown[] };
+      // Checked before every other branch: none of the other queries below
+      // reference the outbox table, so matching on it first is just the
+      // narrowest check, not a correctness requirement.
+      if (query.includes("FROM outbox")) {
+        if (query.startsWith("SELECT COUNT(*)")) return Promise.resolve([{ n: outbox.length }]);
+        if (query.startsWith("SELECT scanned_at")) {
+          return Promise.resolve(outbox.length ? [{ scanned_at: outbox[0]!.scanned_at }] : []);
+        }
+        return Promise.resolve(outbox);
+      }
       // Checked BEFORE the `station_meta` branch below: `readOperatorsMirror`
       // resolves the active slot and reads its rows in one statement (see
       // mirror.ts), so its query text references `station_meta` too (a
@@ -175,14 +237,22 @@ function mockInvokeForFloor(pinHash: string, hardwareConfig: HardwareConfig) {
         return Promise.resolve([operatorMirrorRow(pinHash)]);
       }
       if (query.includes("station_meta")) {
-        return Promise.resolve(
-          values?.[0] === "hardware_config" ? [{ value: JSON.stringify(hardwareConfig) }] : [],
-        );
+        if (values?.[0] === "hardware_config") {
+          return Promise.resolve([{ value: JSON.stringify(hardwareConfig) }]);
+        }
+        // The sync engine's install id (Finding 3): answered as already
+        // persisted so `getInstallId` returns on its first SELECT and never
+        // needs the INSERT round-trip this ad hoc mock does not actually
+        // persist. No test in this file cares about the exact value, only
+        // that a batchId gets built at all.
+        if (values?.[0] === "install_id") return Promise.resolve([{ value: "test-install-id" }]);
+        return Promise.resolve([]);
       }
       return Promise.resolve([]);
     }
     return Promise.resolve(undefined);
   });
+  return outbox;
 }
 
 function clickDigits(value: string) {
@@ -199,6 +269,71 @@ async function signInAsOperator() {
   clickDigits(OPERATOR_PIN);
   fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
   await waitFor(() => expect(screen.getByTestId("scanner-status")).toBeDefined());
+}
+
+/**
+ * Reaches the floor stage (enrolled config + signed-in operator, no serial
+ * scanner configured) with one outbox row already queued, and a `fetch` stub
+ * that answers every request the sync engine and the roster sync make.
+ * Returns the mutable outbox array (`mockInvokeForFloor`'s), so a test can
+ * push more rows into it later to simulate a fresh scan.
+ *
+ * The first `/station/scans` attempt deliberately fails (mirroring the F3
+ * roster-retry test above), which schedules the engine's own backoff retry.
+ *
+ * IMPORTANT coupling with `BACKOFF_START_MS` (sync.ts): since `nudge()` no
+ * longer starts a fresh drain while a retry is already scheduled (the
+ * Finding 1 backoff fix — a nudge racing that window used to be the ONLY way
+ * to prove the `online` listener actually calls `nudge()`, rather than
+ * merely restating that the engine retries on its own), a test that wants to
+ * prove the listener wiring works must first wait past this window — until
+ * the engine's own retry has fired and settled the queue — before doing
+ * anything that depends on a nudge starting a NEW drain. See the "nudges the
+ * sync engine when the device comes back online" test below.
+ */
+async function renderAtFloorStage(
+  opts: { onPost?: (path: string, body: unknown) => void; strictMode?: boolean } = {},
+) {
+  const pinHash = await hashSecret(OPERATOR_PIN);
+  const outbox = mockInvokeForFloor(
+    pinHash,
+    { scanner: null, printer: null, printerLanguage: "zpl" },
+    [outboxRow(1)],
+  );
+
+  let scansAttempts = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method !== "POST") {
+        return new Response(JSON.stringify({ items: [] }), { status: 200 });
+      }
+      const path = new URL(url).pathname;
+      const body: unknown = init.body ? JSON.parse(init.body as string) : undefined;
+      opts.onPost?.(path, body);
+      if (path === "/station/scans") {
+        scansAttempts += 1;
+        if (scansAttempts === 1) throw new Error("station: simulated network blip");
+        const items = (body as { items: unknown[] }).items;
+        return new Response(JSON.stringify({ applied: items.length, alreadyApplied: false }), {
+          status: 200,
+        });
+      }
+      return new Response("{}", { status: 200 });
+    }),
+  );
+
+  render(
+    opts.strictMode ? (
+      <StrictMode>
+        <App />
+      </StrictMode>
+    ) : (
+      <App />
+    ),
+  );
+  await signInAsOperator();
+  return outbox;
 }
 
 describe("nextStationView", () => {
@@ -577,6 +712,246 @@ describe("App", () => {
       // The invariant this whole indicator exists for: never green for a
       // scanner that did not actually open.
       expect(screen.getByTestId("scanner-status").textContent).not.toBe("Connected");
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it("drains queued scans once the app reaches the floor", async () => {
+    // The first attempt is made to fail by `renderAtFloorStage` (see its doc
+    // comment), which the sync engine logs via `console.error` and retries --
+    // expected, and silenced the same way the other failure-inducing tests
+    // in this file are.
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      // Arrange the app the way the existing floor-stage tests do, with one
+      // outbox row already queued, then assert the ingest call went out.
+      const posts: { path: string; body: unknown }[] = [];
+      await renderAtFloorStage({ onPost: (path, body) => posts.push({ path, body }) });
+
+      await waitFor(() => expect(posts.some((p) => p.path === "/station/scans")).toBe(true));
+
+      // Honest to the test's name (Finding 3): the assertion above is
+      // satisfied by the deliberately-FAILED first attempt alone, so nothing
+      // yet covers the acknowledge path. The engine's own backoff retry (no
+      // `online` needed) is what drives the second, successful attempt --
+      // wait long enough for it to fire, then assert the batch was actually
+      // accepted: a second `/station/scans` post landed and the device's
+      // queue -- reflected by the status bar's pending count -- reached
+      // zero.
+      await waitFor(
+        () => expect(posts.filter((p) => p.path === "/station/scans").length).toBeGreaterThan(1),
+        { timeout: BACKOFF_START_MS + 2_000 },
+      );
+      await waitFor(() => expect(screen.getByTestId("sync-status").textContent).toBe("0"));
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it("nudges the sync engine when the device comes back online", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const posts: { path: string; body: unknown }[] = [];
+      const outbox = await renderAtFloorStage({
+        onPost: (path, body) => posts.push({ path, body }),
+      });
+
+      // Let the mount-time drain's deliberate first failure AND the engine's
+      // own scheduled backoff retry fully play out, so no retry is left
+      // pending. With the Finding 1 backoff fix, `nudge()` does nothing while
+      // a retry is scheduled, so racing that window (what this test used to
+      // do) can no longer discriminate the `online` listener from the
+      // engine's own retry -- waiting for the queue to actually settle is
+      // what makes the next `nudge()` unambiguously attributable to the
+      // listener.
+      await waitFor(() => expect(screen.getByTestId("sync-status").textContent).toBe("0"), {
+        timeout: BACKOFF_START_MS + 2_000,
+      });
+      const before = posts.length;
+
+      // New work queued directly -- standing in for another scan -- with no
+      // retry scheduled: only the `online` listener's own `nudge()` can now
+      // be the cause of a further post.
+      outbox.push(outboxRow(2));
+
+      act(() => {
+        window.dispatchEvent(new Event("online"));
+      });
+
+      await waitFor(() => expect(posts.length).toBeGreaterThan(before));
+      expect(posts.at(-1)?.path).toBe("/station/scans");
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it("the online-listener-nudges-engine wiring still works when the real App is rendered under StrictMode", async () => {
+    // General StrictMode-compatibility smoke coverage for the real App: it
+    // does NOT, by itself, discriminate the exact race Finding 1 identified
+    // (see the dedicated regression test below for that, and its doc comment
+    // for why this one structurally can't) -- `App`'s own `config` state
+    // starts `null` and is only populated by an inherently async
+    // `readConfig()` call, so the sync engine's real creation always lands on
+    // a later UPDATE commit, never on the fiber's literal first commit where
+    // React's StrictMode double-invoke of effects actually applies. This
+    // test still earns its place: it confirms nothing about rendering the
+    // real App under StrictMode (double-mounted unrelated effects included)
+    // breaks the `online` -> nudge wiring.
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const posts: { path: string; body: unknown }[] = [];
+      const outbox = await renderAtFloorStage({
+        onPost: (path, body) => posts.push({ path, body }),
+        strictMode: true,
+      });
+
+      // Mount-time drain (its first attempt deliberately failed) and its own
+      // scheduled retry have both settled -- see the non-StrictMode "nudges
+      // ... online" test above for why this replaces racing the backoff
+      // window now that a nudge no longer bypasses a scheduled retry
+      // (Finding 1).
+      await waitFor(() => expect(screen.getByTestId("sync-status").textContent).toBe("0"), {
+        timeout: BACKOFF_START_MS + 2_000,
+      });
+      const before = posts.length;
+
+      outbox.push(outboxRow(2));
+      act(() => {
+        window.dispatchEvent(new Event("online"));
+      });
+
+      await waitFor(() => expect(posts.length).toBeGreaterThan(before));
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  // Finding 5: `onExit={() => setShift(null)}` used to clear only the shift,
+  // leaving `floorView` (separate state) at whatever NewShift's own path left
+  // it at. A shift entered through NewShift sets floorView to "new" and
+  // nothing ever reset it back to "select", so exiting such a shift
+  // re-rendered NewShift instead of shift selection -- the opposite of what
+  // the exit control promises ("return to shift selection").
+  it("returns to shift selection, not the new-shift form, after exiting a shift entered via NewShift (Finding 5)", async () => {
+    // mirrorShiftBundle's own download (GET /shifts/:id/bundle) is not
+    // meaningfully mocked below, so it fails and logs -- expected and
+    // harmless (see shift-bundle.ts's doc comment on why that path is
+    // best-effort), silenced the same way other failure-inducing tests here
+    // silence it.
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const pinHash = await hashSecret(OPERATOR_PIN);
+      invokeMock.mockImplementation((cmd: string, payload?: unknown): Promise<unknown> => {
+        if (cmd === "read_config") {
+          return Promise.resolve({
+            machine_id: "m1",
+            api_key: "mk_key",
+            server_url: "http://localhost:3000",
+          });
+        }
+        if (cmd === "plugin:sql|load") return Promise.resolve("sqlite:station-mirror.db");
+        if (cmd === "plugin:sql|execute") return Promise.resolve([0, 0]);
+        if (cmd === "plugin:sql|select") {
+          const { query, values } = (payload ?? {}) as { query: string; values?: unknown[] };
+          if (query.includes("FROM outbox")) {
+            if (query.startsWith("SELECT COUNT(*)")) return Promise.resolve([{ n: 0 }]);
+            return Promise.resolve([]);
+          }
+          if (/FROM operators_mirror\b/.test(query)) {
+            return Promise.resolve([operatorMirrorRow(pinHash)]);
+          }
+          // readShiftContext's join (mirror.ts) -- answered with a fixed
+          // product row for whatever shift id NewShift's own flow creates
+          // below (`s9`), so WorkScreen actually renders instead of getting
+          // stuck on "Preparing the shift…" forever.
+          if (query.includes("shift_mirror")) {
+            return Promise.resolve([
+              { gtin14: "04600000000015", name: "Cola", counterparty_name: null },
+            ]);
+          }
+          if (query.includes("station_meta")) {
+            if (values?.[0] === "hardware_config") {
+              return Promise.resolve([
+                {
+                  value: JSON.stringify({ scanner: null, printer: null, printerLanguage: "zpl" }),
+                },
+              ]);
+            }
+            if (values?.[0] === "install_id") {
+              return Promise.resolve([{ value: "test-install-id" }]);
+            }
+            return Promise.resolve([]);
+          }
+          return Promise.resolve([]);
+        }
+        return Promise.resolve(undefined);
+      });
+
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string, init?: RequestInit) => {
+          const path = new URL(url).pathname;
+          const method = init?.method ?? "GET";
+          if (path === "/products/gtin-check" && method === "POST") {
+            return new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), {
+              status: 200,
+            });
+          }
+          if (path === "/products" && method === "GET") {
+            return new Response(
+              JSON.stringify({
+                items: [{ id: "p1", gtin14: "04600000000015", name: "Cola", boxCapacity: null }],
+              }),
+              { status: 200 },
+            );
+          }
+          if (path === "/shifts" && method === "POST") {
+            return new Response(
+              JSON.stringify({ id: "s9", status: "planned", mode: "validation" }),
+              { status: 201 },
+            );
+          }
+          if (path === "/shifts/s9/open" && method === "POST") {
+            return new Response(
+              JSON.stringify({ id: "s9", status: "active", mode: "validation" }),
+              { status: 200 },
+            );
+          }
+          // Roster sync, ShiftSelection's own listing, mirrorShiftBundle's
+          // bundle download, and the sync engine's drain (empty outbox here,
+          // so /station/scans should not actually be hit) -- a harmless
+          // empty body for anything else.
+          return new Response(JSON.stringify({ items: [] }), { status: 200 });
+        }),
+      );
+
+      render(<App />);
+      await signInAsOperator();
+
+      fireEvent.click(screen.getByRole("button", { name: "New shift" }));
+      await waitFor(() => expect(screen.getByLabelText("Type or scan a GTIN")).toBeDefined());
+
+      fireEvent.change(screen.getByLabelText("Type or scan a GTIN"), {
+        target: { value: "4600000000015" },
+      });
+      fireEvent.submit(screen.getByLabelText("Type or scan a GTIN").closest("form")!);
+      await waitFor(() => expect(screen.getByText("Cola")).toBeDefined());
+      fireEvent.click(screen.getByRole("button", { name: "Start" }));
+
+      // Reached the floor via NewShift's own path -- floorView is "new" here.
+      // WorkScreen's exit button reads "Leave shift" (work.exit, en.json);
+      // waiting for it also proves shiftContext landed.
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Leave shift" })).toBeDefined(),
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Leave shift" }));
+
+      // No scans were queued for this shift, so Exit leaves immediately
+      // without the pending-sync confirmation step.
+      await waitFor(() => expect(screen.getByText("Shifts")).toBeDefined());
+      expect(screen.queryByLabelText("Type or scan a GTIN")).toBeNull();
     } finally {
       consoleErrorSpy.mockRestore();
     }

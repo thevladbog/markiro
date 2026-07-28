@@ -17,11 +17,12 @@ import { ApiRequestError } from "../../api/client.js";
 import { toast } from "../../lib/toast.js";
 import { useProducts } from "../catalog/api.js";
 import { KioskForm, type KioskFormValues } from "./KioskForm.js";
+import { PairingCodeModal } from "./PairingCodeModal.js";
 import { ReasonsEditor } from "./ReasonsEditor.js";
 import {
   useArchiveKiosk,
   useCreateKiosk,
-  useEnrollKiosk,
+  useIssueKioskPairingCode,
   useKiosks,
   useSetKioskProducts,
   useUpdateKiosk,
@@ -31,6 +32,13 @@ import {
 } from "./api.js";
 
 type FormModalState = { mode: "create" } | { mode: "edit"; kiosk: KioskDto } | null;
+
+/**
+ * The live pairing reveal. Holds the plaintext code, which the server returns
+ * exactly once and stores only as a hash -- dropping this state is what makes
+ * the reveal one-time, so nothing else may cache it.
+ */
+type PairingState = { kiosk: KioskDto; code: string; expiresAt: string } | null;
 
 /** A kiosk is considered "online" if it has phoned home within this window. */
 const ONLINE_THRESHOLD_MS = 2 * 60 * 1000;
@@ -42,7 +50,7 @@ function isKioskOnline(lastSeenAt: string | null): boolean {
 
 /**
  * Admin kiosk settings screen -- Plan A Task 17
- * (list/create/edit/archive/enroll + product allowlist + embedded write-off
+ * (list/create/edit/pair/archive + product allowlist + embedded write-off
  * reasons editor). Mirrors `../employees/index.tsx`'s active/archived +
  * confirm-modal pattern (Task 16) for the kiosk lifecycle, and
  * `../shifts/ShiftForm.tsx`'s "pass the already-fetched catalog list down as
@@ -57,11 +65,11 @@ export function KiosksPage() {
   const updateMutation = useUpdateKiosk();
   const archiveMutation = useArchiveKiosk();
   const setProductsMutation = useSetKioskProducts();
-  const enrollMutation = useEnrollKiosk();
+  const pairingMutation = useIssueKioskPairingCode();
 
   const [formState, setFormState] = useState<FormModalState>(null);
   const [archiveTarget, setArchiveTarget] = useState<KioskDto | null>(null);
-  const [tokenModal, setTokenModal] = useState<{ token: string } | null>(null);
+  const [pairing, setPairing] = useState<PairingState>(null);
 
   const items = data ?? [];
   const activeProducts = productsData ?? [];
@@ -119,9 +127,9 @@ export function KiosksPage() {
                 type="button"
                 size="compact"
                 variant="secondary"
-                onClick={() => void handleEnroll(row)}
+                onClick={() => void handleIssuePairingCode(row)}
               >
-                {t("pages.kiosks.enroll.action")}
+                {t("pages.kiosks.pairing.action")}
               </Button>
             )}
             {row.status === "active" && (
@@ -199,24 +207,21 @@ export function KiosksPage() {
     }
   };
 
-  const handleEnroll = async (kiosk: KioskDto) => {
+  /**
+   * Also serves the modal's "regenerate": the endpoint retires whatever code
+   * was live for the kiosk, so re-issuing is the same call and simply replaces
+   * the revealed code in place.
+   */
+  const handleIssuePairingCode = async (kiosk: KioskDto) => {
     try {
-      const result = await enrollMutation.mutateAsync(kiosk.id);
-      setTokenModal({ token: result.token });
-      toast("ok", t("pages.kiosks.toasts.enrollSuccess"));
+      const result = await pairingMutation.mutateAsync(kiosk.id);
+      setPairing({ kiosk, code: result.code, expiresAt: result.expiresAt });
+      toast("ok", t("pages.kiosks.toasts.pairingSuccess"));
     } catch (error) {
       toast(
         "error",
-        error instanceof ApiRequestError ? error.message : t("pages.kiosks.toasts.enrollError"),
+        error instanceof ApiRequestError ? error.message : t("pages.kiosks.toasts.pairingError"),
       );
-    }
-  };
-
-  const handleCopyToken = async (token: string) => {
-    try {
-      await navigator.clipboard.writeText(token);
-    } catch {
-      toast("error", t("pages.kiosks.enroll.copyError"));
     }
   };
 
@@ -294,45 +299,16 @@ export function KiosksPage() {
         )}
       </Modal>
 
-      <Modal
-        open={tokenModal !== null}
-        onClose={() => setTokenModal(null)}
-        closeLabel={t("common.close")}
-        title={t("pages.kiosks.enroll.modalTitle")}
-        footer={
-          <Button type="button" onClick={() => setTokenModal(null)}>
-            {t("common.close")}
-          </Button>
-        }
-      >
-        {tokenModal && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <p style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>
-              {t("pages.kiosks.enroll.hint")}
-            </p>
-            <p
-              style={{
-                font: "var(--text-code)",
-                color: "var(--fg-1)",
-                wordBreak: "break-all",
-                padding: "8px 12px",
-                background: "var(--surface-panel)",
-                border: "1px solid var(--line)",
-                borderRadius: "var(--r-2)",
-              }}
-            >
-              {tokenModal.token}
-            </p>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => void handleCopyToken(tokenModal.token)}
-            >
-              {t("pages.kiosks.enroll.copyAction")}
-            </Button>
-          </div>
-        )}
-      </Modal>
+      {pairing && (
+        <PairingCodeModal
+          kioskName={pairing.kiosk.name}
+          code={pairing.code}
+          expiresAt={pairing.expiresAt}
+          regenerating={pairingMutation.isPending}
+          onRegenerate={() => void handleIssuePairingCode(pairing.kiosk)}
+          onClose={() => setPairing(null)}
+        />
+      )}
     </div>
   );
 }

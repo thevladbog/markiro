@@ -104,6 +104,7 @@ const PLANNED_SHIFT = {
   createdFrom: "admin",
   openedAt: null,
   closedAt: null,
+  lateDataAt: null,
   closeReason: null,
   createdAt: "2026-07-20T00:00:00.000Z",
 };
@@ -169,6 +170,34 @@ describe("ShiftsPage", () => {
     expect(table.getByText("Закрыта")).toBeDefined();
     expect(table.getByText("Брак линии")).toBeDefined();
     expect(fetchMock).toHaveBeenCalledWith("/api/shifts", expect.any(Object));
+  });
+
+  it("marks a shift that received data after it was closed", async () => {
+    const lateDataShift = { ...CLOSED_SHIFT, id: "s4", lateDataAt: "2026-07-28T19:30:00.000Z" };
+    const fetchMock = vi.fn(async (url: string) => {
+      const path = String(url);
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [lateDataShift] });
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+
+    expect(await screen.findByText("Данные после закрытия")).toBeDefined();
+  });
+
+  it("does not mark a shift that received nothing late", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      const path = String(url);
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [CLOSED_SHIFT] });
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+
+    await screen.findByText("Молоко 1л");
+    expect(screen.queryByText("Данные после закрытия")).toBeNull();
   });
 
   it("shows a spinner (not EmptyState) while the list request is still pending", async () => {

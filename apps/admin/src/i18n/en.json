@@ -317,6 +317,7 @@
         "mode": "Mode",
         "plannedQty": "Plan, units",
         "status": "Status",
+        "lateData": "Data after close",
         "actions": "Actions"
       },
       "mode": {
@@ -665,12 +666,18 @@
           "dayLimitInvalid": "Enter a positive whole number"
         }
       },
-      "enroll": {
-        "action": "Issue token",
-        "modalTitle": "Kiosk enrollment token",
-        "hint": "Copy the token and enter it on the kiosk during first-time setup. The token is shown only once.",
+      "pairing": {
+        "action": "Pairing code",
+        "modalTitle": "Kiosk pairing code",
+        "hint": "Enter the code on kiosk “{{name}}” or scan the barcode. The code is shown once and works once.",
+        "barcodeLabel": "Barcode for pairing code {{code}}",
+        "barcodeLoading": "Loading the barcode…",
+        "expiresIn": "Valid for another {{time}}",
+        "expired": "The code has expired. Issue a new one.",
+        "regenerateAction": "Issue a new code",
+        "doneAction": "Done",
         "copyAction": "Copy",
-        "copyError": "Could not copy the token"
+        "copyError": "Could not copy the code"
       },
       "reasons": {
         "title": "Write-off reasons",
@@ -693,8 +700,8 @@
         "archiveError": "Could not archive the kiosk",
         "setProductsSuccess": "Product list updated",
         "setProductsError": "Could not update the product list",
-        "enrollSuccess": "Token issued",
-        "enrollError": "Could not issue the token",
+        "pairingSuccess": "Pairing code issued",
+        "pairingError": "Could not issue the pairing code",
         "reasonCreateSuccess": "Reason added",
         "reasonCreateError": "Could not add the reason",
         "reasonUpdateSuccess": "Reason updated",

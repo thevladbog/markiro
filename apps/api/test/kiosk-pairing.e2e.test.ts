@@ -1,5 +1,6 @@
 import * as nodeCrypto from "node:crypto";
 import { randomUUID } from "node:crypto";
+import type { Server } from "node:http";
 import express from "express";
 import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
@@ -140,6 +141,28 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
     mountAuth(server, setup.auth);
     server.use(express.json());
     await app.init();
+
+    // Bind ONE port for the whole file, on the exact address supertest dials.
+    // `app.init()` alone never listens, so supertest's `Test.serverAddress`
+    // binds a fresh ephemeral port per request (`app.listen(0)`) and closes it
+    // again in `end()` -- ~200 binds per run of this file. `listen(0)` with no
+    // host binds the `::` wildcard, and Node sets SO_REUSEADDR on listeners, so
+    // such a bind silently SUCCEEDS on a port some unrelated local process
+    // already holds on `127.0.0.1`; the kernel then routes supertest's
+    // connection to that more specific socket and the reply is a stranger's
+    // protocol ("Parse Error: Expected HTTP/, RTSP/ or ICE/"), a stray 404, or
+    // a hang -- observed against a browser's localhost HTTP/2 servers. Binding
+    // `127.0.0.1` explicitly makes the kernel pick a port that is free on that
+    // very address, so the collision cannot happen, and binding once up front
+    // means the lottery is drawn once per file instead of once per request.
+    await new Promise<void>((resolve, reject) => {
+      const httpServer = app!.getHttpServer() as Server;
+      httpServer.once("error", reject);
+      httpServer.listen(0, "127.0.0.1", () => {
+        httpServer.off("error", reject);
+        resolve();
+      });
+    });
   });
 
   afterAll(async () => {
