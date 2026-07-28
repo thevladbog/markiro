@@ -7,6 +7,14 @@ import type { KioskBootstrapDto } from "../api/types.js";
  * value, then a lookup. Verifying per employee instead would run PBKDF2
  * (100000 iterations) once per row — seconds on a full staff roster, on a
  * screen where a scan must feel instant.
+ *
+ * The map assumes each digest maps to at most one employeeId within a tenant.
+ * This holds because the server enforces a unique constraint on active
+ * `badge_code` per tenant (`employee_badges_tenant_code_active_uq`), and the
+ * bootstrap payload ships only active badges; digests derive deterministically
+ * from (badge_code, badgeSalt), so distinct codes yield distinct digests.
+ * Thus last-write-wins here is unreachable rather than tolerated — if this
+ * constraint is ever relaxed server-side, this map would need a duplicate guard.
  */
 export function buildBadgeIndex(bootstrap: KioskBootstrapDto): Map<string, string> {
   const index = new Map<string, string>();

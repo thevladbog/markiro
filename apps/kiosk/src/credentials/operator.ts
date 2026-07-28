@@ -48,6 +48,13 @@ export async function verifyOperatorPin(
  * derivation and a lookup, never PBKDF2 per operator. Inactive operators and
  * operators without a badge are left out of the index, not merely filtered
  * after a match, so a disabled operator's old badge can never resolve.
+ *
+ * Like `buildBadgeIndex`, this map assumes each digest maps to at most one
+ * operator within a tenant, enforced by the server's unique constraint on
+ * active `badge_code` per tenant (`employee_badges_tenant_code_active_uq`).
+ * Bootstrap ships only active badges, and digests derive deterministically
+ * from (badge_code, badgeSalt). Last-write-wins is thus unreachable — if the
+ * server constraint is ever relaxed, this map would need a duplicate guard.
  */
 function buildOperatorBadgeIndex(bootstrap: KioskBootstrapDto): Map<string, Operator> {
   const index = new Map<string, Operator>();
