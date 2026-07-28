@@ -186,4 +186,42 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     await signUpAndActivate(a2);
     await a2.get(`/shifts/${created.body.id}/bundle`).expect(404);
   });
+
+  // Regression guard (Task 9): open + bundle are two of the station's four
+  // routes (list, create, open, bundle -- verified against
+  // apps/station/src/lib/shift-bundle.ts and pages/ShiftSelection.tsx) and
+  // must stay reachable by a station api-key even after SessionOnlyGuard was
+  // added elsewhere on this controller. Routes carry no global prefix, so
+  // these are `/station-devices` and `/shifts`, matching employees.e2e.test.ts.
+  it("a station api-key can open a shift and fetch its bundle", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      productGroup: "Beverages",
+      boxCapacity: 12,
+      palletCapacity: 48,
+    });
+    const created = await agent.post("/shifts").send({ productId, mode: "validation" }).expect(201);
+    const id = created.body.id as string;
+
+    const device = await agent
+      .post("/station-devices")
+      .send({ name: "Line 1 terminal" })
+      .expect(201);
+    const apiKey = (device.body as { apiKey: string }).apiKey;
+    const server = app!.getHttpServer();
+
+    const opened = await request(server)
+      .post(`/shifts/${id}/open`)
+      .set("x-api-key", apiKey)
+      .expect(200);
+    expect(opened.body).toMatchObject({ id, status: "active" });
+
+    const bundle = await request(server)
+      .get(`/shifts/${id}/bundle`)
+      .set("x-api-key", apiKey)
+      .expect(200);
+    expect(bundle.body.shift).toMatchObject({ id, productId });
+  });
 });

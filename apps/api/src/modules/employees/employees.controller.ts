@@ -13,6 +13,7 @@ import {
 } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
+import { SessionOnlyGuard } from "../../tenancy/session-only.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
   createEmployeeSchema,
@@ -30,7 +31,12 @@ import { EmployeesService } from "./employees.service";
 
 @ApiTags("employees")
 @Controller("employees")
-@UseGuards(TenantGuard)
+// Station never calls this module, and `EmployeeDto` carries plaintext badge
+// codes — exactly what shipping only PBKDF2 hashes to devices (see the
+// station roster mirror) is meant to prevent. SessionOnlyGuard keeps a
+// station api-key out even though TenantGuard accepts it for tenant
+// resolution.
+@UseGuards(TenantGuard, SessionOnlyGuard)
 export class EmployeesController {
   constructor(private readonly employeesService: EmployeesService) {}
 

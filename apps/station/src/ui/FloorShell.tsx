@@ -1,10 +1,10 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { StatusBar } from "./StatusBar.js";
+import { StatusBar, type ScannerIndicator } from "./StatusBar.js";
 
 export interface FloorShellProps {
   online: boolean;
-  scannerConnected: boolean;
+  scanner: ScannerIndicator;
   printerConfigured: boolean;
   tasks: Array<{ id: string; label: string }>;
   activeTaskId: string;
@@ -14,7 +14,7 @@ export interface FloorShellProps {
 
 export function FloorShell({
   online,
-  scannerConnected,
+  scanner,
   printerConfigured,
   tasks,
   activeTaskId,
@@ -24,11 +24,7 @@ export function FloorShell({
   const { t } = useTranslation();
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-      <StatusBar
-        online={online}
-        scannerConnected={scannerConnected}
-        printerConfigured={printerConfigured}
-      />
+      <StatusBar online={online} scanner={scanner} printerConfigured={printerConfigured} />
       <nav aria-label={t("shell.tasks")} style={{ display: "flex", gap: 8, padding: "8px 16px" }}>
         {tasks.map((task) => (
           <button

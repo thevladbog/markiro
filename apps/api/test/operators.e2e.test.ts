@@ -183,6 +183,9 @@ describe.skipIf(!ready)("operators e2e", () => {
     await expect(verifySecret(oldCode, entry!.badgeHash!)).resolves.toBe(false);
   });
 
+  // Device-key surface: `GET /station/operators` is the station's offline
+  // sign-in roster sync (see docs/device-key-surface.md) and must stay
+  // reachable by a station api-key -- this test is what guarantees that.
   it("serves the roster to a station api-key and refuses admin routes to it", async () => {
     const agent = request.agent(app!.getHttpServer());
     await signUpAndActivate(agent);

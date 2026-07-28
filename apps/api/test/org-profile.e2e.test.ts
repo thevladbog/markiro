@@ -196,4 +196,35 @@ describe.skipIf(!ready)("org profile e2e", () => {
     const res = await agent2.get("/org/profile").expect(200);
     expect(res.body).toEqual({ gln: null, gs1Prefixes: [], inn: null });
   });
+
+  // Routes carry no global prefix -- only Better Auth's own `/api/auth/*`
+  // mount does -- so these are `/station-devices` and `/org/profile`,
+  // matching the existing suites (see employees.e2e.test.ts).
+  it("rejects a station api-key: org profile is cabinet-only", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpWithInactiveOrg(agent);
+    await agent
+      .post("/api/auth/organization/set-active")
+      .send({ organizationId: orgId })
+      .expect(200);
+
+    const device = await agent
+      .post("/station-devices")
+      .send({ name: "Line 1 terminal" })
+      .expect(201);
+    const apiKey = (device.body as { apiKey: string }).apiKey;
+
+    await request(app!.getHttpServer()).get("/org/profile").set("x-api-key", apiKey).expect(403);
+  });
+
+  it("still serves org profile to a signed-in cabinet user", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpWithInactiveOrg(agent);
+    await agent
+      .post("/api/auth/organization/set-active")
+      .send({ organizationId: orgId })
+      .expect(200);
+
+    await agent.get("/org/profile").expect(200);
+  });
 });

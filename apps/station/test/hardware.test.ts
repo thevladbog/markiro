@@ -27,6 +27,7 @@ describe("hardware scan source", () => {
         emit = listener;
         return unsubscribe;
       },
+      onScannerStatus: async () => () => {},
       print: async () => {},
     };
 
@@ -39,5 +40,32 @@ describe("hardware scan source", () => {
 
     stop();
     await vi.waitFor(() => expect(unsubscribe).toHaveBeenCalled());
+  });
+});
+
+describe("scanner status subscription", () => {
+  it("delivers status updates and unsubscribes on stop", async () => {
+    const unsubscribe = vi.fn();
+    let emit: (s: "connected" | "disconnected") => void = () => {};
+    const hw: HardwareContract = {
+      listScannerPorts: async () => [],
+      openScanner: async () => {},
+      closeScanner: async () => {},
+      onScan: async () => () => {},
+      onScannerStatus: async (listener) => {
+        emit = listener;
+        return unsubscribe;
+      },
+      print: async () => {},
+    };
+
+    const seen: string[] = [];
+    const stop = await hw.onScannerStatus((s) => seen.push(s));
+    emit("connected");
+    emit("disconnected");
+    expect(seen).toEqual(["connected", "disconnected"]);
+
+    stop();
+    expect(unsubscribe).toHaveBeenCalled();
   });
 });

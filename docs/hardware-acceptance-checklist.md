@@ -41,7 +41,7 @@ beside each item.
 - [ ] Updater endpoint reachable; the `{{target}}` placeholder allowlist works.
 - [ ] Kiosk lockdown is actually invoked and cannot trap an operator.
 
-## Scanner and printer (plan 05b-2)
+## Scanner and printer (plans 05b-2, 05b-3)
 
 - [ ] Serial scanner: real device, baud negotiation, payload terminators.
 - [ ] Keyboard-wedge fallback works with a HID scanner and no setup.
@@ -52,5 +52,37 @@ beside each item.
       `classifyScan` as invalid — this can burn an hour on the floor before
       anyone thinks to check it. Confirm the scanner is configured to send
       the bare payload, or that prefix stripping is handled.
+- [ ] Connect the scanner, then in Setup type a nonexistent or wrong port
+      and press Connect: the status bar drops to "No signal", an error is
+      shown, and the scanner stops delivering scans (closing the previous
+      session before the open is attempted is what produces this, not a
+      crash — the close-before-open trade this slice makes).
+- [ ] Recover from that without restarting the app: select the correct
+      port and press Connect, or just press Done — either reopens the
+      session and the bar returns to green.
+- [ ] Leave Setup via Done or Back with the scanner configuration
+      unchanged: the session still closes and reopens (the `sessionEpoch`
+      reconcile), so a session left in a bad state by Setup's own Connect
+      button never survives leaving the screen.
+- [ ] Connect on one port, then connect on a different port: the first session
+      stops and only the second delivers scans.
+- [ ] Rapidly reconnect to a different port several times in a row while the
+      scanner is actively delivering scans (connect A, immediately connect B,
+      immediately connect A again, ...): the status bar settles on
+      "connected" and stays there — it must never end up stuck on "no
+      signal" from a retiring session's disconnect landing after its
+      successor's connect (the generation-and-status lock in `scanner.rs`
+      is what this proves).
+- [ ] Unplug the scanner mid-shift: the status bar flips to "no signal".
+- [ ] Close and immediately reopen the same port (the setup screen's
+      close-before-open): the reopen succeeds without restarting the app.
 - [ ] Printer over TCP 9100 and over serial; test print from the setup screen.
 - [ ] USB/spooler printing — out of the 05b-2 transport scope; decide whether it is needed.
+- [ ] A ZPL template prints correctly on a TSPL printer and vice versa (the
+      configured language wins): `renderLabelBytes` picks the emitter from
+      `hardware_config.printerLanguage`, not the template's own `language`
+      field, so this is what actually needs proving on real printers.
+- [ ] The setup screen's test print produces the same output as a real
+      label print: today `WorkstationSetup` is the only call site for
+      `renderLabelBytes`/`hw.print`, so confirm any later per-shift printing
+      renders through the same path rather than a divergent one.

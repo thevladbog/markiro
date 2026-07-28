@@ -5,6 +5,9 @@ import type { ScanSource } from "./scan-source.js";
 export type PrintTarget =
   { kind: "serial"; port: string; baud: number } | { kind: "tcp"; host: string; port: number };
 
+/** Whether a configured serial scanner is currently open. */
+export type ScannerStatus = "connected" | "disconnected";
+
 /**
  * The station's hardware surface, shaped like the idento agent's contract so
  * an external agent process can later provide it instead of Tauri — without
@@ -16,6 +19,8 @@ export interface HardwareContract {
   closeScanner(): Promise<void>;
   /** Subscribes to decoded scans; resolves to the unsubscribe function. */
   onScan(listener: (raw: string) => void): Promise<() => void>;
+  /** Subscribes to scanner connection changes; resolves to the unsubscribe function. */
+  onScannerStatus(listener: (status: ScannerStatus) => void): Promise<() => void>;
   print(target: PrintTarget, bytes: Uint8Array): Promise<void>;
 }
 
@@ -32,6 +37,9 @@ export const tauriHardware: HardwareContract = {
   closeScanner: () => invoke<void>("close_scanner"),
   async onScan(listener) {
     return listen<string>("station://scan", (event) => listener(event.payload));
+  },
+  async onScannerStatus(listener) {
+    return listen<ScannerStatus>("station://scanner-status", (event) => listener(event.payload));
   },
   print: (target, bytes) =>
     invoke<void>("print_bytes", { target, payloadBase64: bytesToBase64(bytes) }),

@@ -13,6 +13,7 @@ import {
 } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
+import { SessionOnlyGuard } from "../../tenancy/session-only.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
   closeShiftSchema,
@@ -43,7 +44,11 @@ export class ShiftsController {
     return this.shiftsService.listShifts(req.tenantId!, query);
   }
 
+  // Session-only: not one of the station's four routes (list, create, open,
+  // bundle) below. A device reading an arbitrary shift by id has no
+  // legitimate use once it can already list/open/bundle its own.
   @Get(":id")
+  @UseGuards(SessionOnlyGuard)
   async getShift(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<ShiftDto> {
     return this.shiftsService.getShift(req.tenantId!, id);
   }
@@ -57,6 +62,7 @@ export class ShiftsController {
   }
 
   @Patch(":id")
+  @UseGuards(SessionOnlyGuard)
   async updateShift(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
@@ -67,12 +73,16 @@ export class ShiftsController {
 
   @Delete(":id")
   @HttpCode(204)
+  @UseGuards(SessionOnlyGuard)
   async deleteShift(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<void> {
     return this.shiftsService.deleteShift(req.tenantId!, id);
   }
 
+  // Session-only: closing a shift from the station is deliberately not a
+  // station action (see docs/device-key-surface.md).
   @Post(":id/close")
   @HttpCode(200)
+  @UseGuards(SessionOnlyGuard)
   async closeShift(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,

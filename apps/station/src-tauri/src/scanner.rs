@@ -1,14 +1,34 @@
 use std::io::Read;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
 /// Event name carrying one decoded scan payload to the webview.
 pub const SCAN_EVENT: &str = "station://scan";
 
-/// Set to false to ask the reader thread to stop.
-static SCANNING: AtomicBool = AtomicBool::new(false);
+/// Event carrying the scanner's connection state to the webview.
+pub const SCANNER_STATUS_EVENT: &str = "station://scanner-status";
+
+/// Monotonic session counter, guarded by a mutex rather than a bare atomic so
+/// that a generation transition and the status emit announcing it are one
+/// atomic step. Each reader thread captures the generation it was started
+/// with and exits as soon as the current one differs, so a fast close→open
+/// can never leave two readers alive — which is what makes close-before-open
+/// safe for the setup screen.
+///
+/// The mutex is what closes the status race that used to be documented here
+/// as an accepted residual: `open_scanner`/`close_scanner` bump the
+/// generation and emit their status under one held lock, and a retiring
+/// reader thread's exit guard checks-and-emits under that same lock (see the
+/// end of the reader thread spawned in `open_scanner`). Since the two
+/// critical sections can't interleave, a retiring session can never publish
+/// "disconnected" after a newer session has already published "connected".
+static GENERATION: Mutex<u64> = Mutex::new(0);
+
+/// A reader keeps running only while its own generation is still current.
+pub fn session_should_run(mine: u64, current: u64) -> bool {
+    mine == current
+}
 
 /// Upper bound on how much unterminated data we keep waiting on a line
 /// terminator. A barcode payload is at most a couple hundred bytes, so this
@@ -54,24 +74,100 @@ pub fn list_serial_ports() -> Result<Vec<String>, String> {
     Ok(ports.into_iter().map(|p| p.port_name).collect())
 }
 
-#[tauri::command]
-pub fn open_scanner(app: AppHandle, port: String, baud: u32) -> Result<(), String> {
-    if SCANNING.swap(true, Ordering::SeqCst) {
-        return Err("Scanner already open".into());
-    }
-    let mut handle = serialport::new(&port, baud)
-        .timeout(Duration::from_millis(200))
-        .open()
-        .map_err(|e| {
-            SCANNING.store(false, Ordering::SeqCst);
-            e.to_string()
-        })?;
+/// Bound on the open retry loop below: roughly a second total, which covers
+/// the setup screen's close-before-open without a new crate.
+const OPEN_ATTEMPTS: u32 = 10;
+const OPEN_RETRY_DELAY: Duration = Duration::from_millis(100);
 
-    let app = Arc::new(app);
+/// `async` so the Tauri IPC layer runs this off the UI/IPC thread: the retry
+/// loop below does up to `OPEN_ATTEMPTS` blocking `open()` calls with sleeps
+/// in between, and a mistyped or absent serial port — exactly what the setup
+/// screen's Connect button exists to catch — must not freeze the whole
+/// station for that long. Mirrors `printer.rs`'s `print_bytes`: the blocking
+/// work runs on a `spawn_blocking` thread and this command just awaits it.
+#[tauri::command]
+pub async fn open_scanner(app: AppHandle, port: String, baud: u32) -> Result<(), String> {
+    // Open the port before touching GENERATION. If every attempt fails, the
+    // previous session (if any) is left untouched — its thread, port handle
+    // and "connected" status all stay valid. Advancing GENERATION first
+    // would retire a working session for an open that never happens, which
+    // is exactly what used to leave the operator with a dead scanner and a
+    // status bar stuck on "connected".
+    //
+    // The retries matter for a real case: `close_scanner` only signals the
+    // reader thread, which keeps the OS handle until its current 200 ms
+    // read times out, and serialport opens exclusively on every platform —
+    // so an immediate close-then-open on the same port would otherwise fail
+    // with a "port busy" error.
+    let mut handle = tauri::async_runtime::spawn_blocking(move || {
+        let mut attempt = 0;
+        loop {
+            match serialport::new(&port, baud)
+                .timeout(Duration::from_millis(200))
+                .open()
+            {
+                Ok(handle) => return Ok(handle),
+                // A missing port can never be fixed by waiting, so don't burn
+                // the retry window on it. Note this checks `Io(NotFound)`,
+                // not `ErrorKind::NoDevice`: on this crate (serialport 4.x),
+                // NoDevice is what a still-held handle reports (EBUSY from
+                // TIOCEXCL, or EWOULDBLOCK from flock, both mapped to
+                // NoDevice in `posix/error.rs` and `posix/flock.rs`) — i.e.
+                // exactly the retiring-reader-thread case the retry window
+                // exists for, so it must keep retrying. A path that simply
+                // does not exist surfaces as `ENOENT` -> `Io(NotFound)`
+                // instead, and that's the one worth failing fast on. (On
+                // Windows this crate folds `ERROR_ACCESS_DENIED` in with
+                // `ERROR_FILE_NOT_FOUND`/`ERROR_PATH_NOT_FOUND` under
+                // `NoDevice`, so this fast path simply won't trigger there —
+                // Windows keeps the old retry-everything behaviour.)
+                Err(e) if e.kind() == serialport::ErrorKind::Io(std::io::ErrorKind::NotFound) => {
+                    return Err(e.to_string());
+                }
+                Err(e) => {
+                    attempt += 1;
+                    if attempt >= OPEN_ATTEMPTS {
+                        // Return the error straight from the last attempt's
+                        // arm: nothing to `.expect()` after the fact.
+                        return Err(e.to_string());
+                    }
+                    std::thread::sleep(OPEN_RETRY_DELAY);
+                }
+            }
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    // Only now that the handle is in hand do we retire the previous session:
+    // its thread sees a newer generation and exits. This is what lets the
+    // setup screen recover from a wrong port without an app restart.
+    //
+    // The increment and the "connected" emit happen under one held lock, so
+    // no retiring reader thread's exit guard (which checks-and-emits under
+    // the same lock) can observe the old generation and publish
+    // "disconnected" after this "connected" has already gone out.
+    let generation = {
+        let mut guard = GENERATION.lock().unwrap_or_else(|e| e.into_inner());
+        *guard += 1;
+        let _ = app.emit(SCANNER_STATUS_EVENT, "connected");
+        *guard
+    };
+
     std::thread::spawn(move || {
         let mut buffer = String::new();
         let mut chunk = [0u8; 256];
-        while SCANNING.load(Ordering::SeqCst) {
+        loop {
+            // Lock only long enough to compare, then release before the
+            // blocking `read()` below. Holding the lock across the read
+            // would serialize every other session operation (a competing
+            // open/close) against this thread for up to the read timeout.
+            {
+                let current = *GENERATION.lock().unwrap_or_else(|e| e.into_inner());
+                if !session_should_run(generation, current) {
+                    break;
+                }
+            }
             match handle.read(&mut chunk) {
                 Ok(0) => continue,
                 Ok(n) => {
@@ -85,20 +181,54 @@ pub fn open_scanner(app: AppHandle, port: String, baud: u32) -> Result<(), Strin
                 Err(_) => break,
             }
         }
-        SCANNING.store(false, Ordering::SeqCst);
+        // Only the session that is still current owns the status: a retired
+        // thread exiting must not report a disconnect over its successor.
+        //
+        // This check-and-emit happens under the same lock that
+        // `open_scanner`/`close_scanner` hold across their own generation
+        // bump and status emit. That's the invariant that closes the race
+        // this comment used to document as an accepted residual: status is
+        // always published under the same lock that owns the generation, so
+        // this thread can never land its "disconnected" between a newer
+        // session's generation bump and its "connected" — either this read
+        // happens before that critical section (and sees the old
+        // generation, so it still owns the status) or after it (and sees
+        // the new generation, so it stays silent).
+        let guard = GENERATION.lock().unwrap_or_else(|e| e.into_inner());
+        if session_should_run(generation, *guard) {
+            let _ = app.emit(SCANNER_STATUS_EVENT, "disconnected");
+        }
     });
     Ok(())
 }
 
 #[tauri::command]
-pub fn close_scanner() -> Result<(), String> {
-    SCANNING.store(false, Ordering::SeqCst);
+pub fn close_scanner(app: AppHandle) -> Result<(), String> {
+    let mut guard = GENERATION.lock().unwrap_or_else(|e| e.into_inner());
+    *guard += 1;
+    let _ = app.emit(SCANNER_STATUS_EVENT, "disconnected");
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use super::session_should_run;
     use super::{absorb_chunk, split_lines, MAX_BUFFER_BYTES};
+
+    #[test]
+    fn a_session_runs_while_it_is_the_current_generation() {
+        assert!(session_should_run(7, 7));
+    }
+
+    #[test]
+    fn a_session_stops_once_a_newer_generation_starts() {
+        assert!(!session_should_run(7, 8));
+    }
+
+    #[test]
+    fn a_stale_session_stops_even_if_the_counter_moved_far() {
+        assert!(!session_should_run(1, 42));
+    }
 
     #[test]
     fn extracts_complete_lines_and_keeps_the_tail() {

@@ -14,6 +14,7 @@ import {
 } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
+import { SessionOnlyGuard } from "../../tenancy/session-only.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
   createProductSchema,
@@ -53,12 +54,17 @@ export class ProductsController {
     return this.productsService.checkGtinOwner(req.tenantId!, body.gtin);
   }
 
+  // Session-only: not one of the station's two routes (list, gtin-check)
+  // above. The station resolves a scanned GTIN via search on the list
+  // endpoint, so it never needs get-by-id or any of the catalog mutations.
   @Get(":id")
+  @UseGuards(SessionOnlyGuard)
   async getProduct(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<ProductDto> {
     return this.productsService.getProduct(req.tenantId!, id);
   }
 
   @Post()
+  @UseGuards(SessionOnlyGuard)
   async createProduct(
     @Req() req: RequestWithTenant,
     @Body(new ZodValidationPipe(createProductSchema)) body: CreateProductDto,
@@ -67,6 +73,7 @@ export class ProductsController {
   }
 
   @Patch(":id")
+  @UseGuards(SessionOnlyGuard)
   async updateProduct(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
@@ -77,6 +84,7 @@ export class ProductsController {
 
   @Delete(":id")
   @HttpCode(204)
+  @UseGuards(SessionOnlyGuard)
   async deleteProduct(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<void> {
     return this.productsService.deleteProduct(req.tenantId!, id);
   }

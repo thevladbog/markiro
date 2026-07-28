@@ -6,3 +6,7 @@ docs/design-briefs/design_handoff_markiro/
 .superpowers/
 **/migrations/meta/
 .worktrees/
+# Rust build output; these are gitignored in apps/station/src-tauri/.gitignore,
+# but Prettier only reads the root .gitignore, so we list them here to prevent CI failures.
+apps/station/src-tauri/target/
+apps/station/src-tauri/gen/schemas/

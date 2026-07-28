@@ -80,17 +80,13 @@ const b = (v: boolean) => (v ? 1 : 0);
  * every `exec.run` call, so a `BEGIN`/`COMMIT`/`ROLLBACK` sent as separate
  * calls does not actually group these statements — see `journal.ts`'s
  * `recordScan` doc comment for the full story. These are therefore
- * individual statements: the shift upsert, the product upsert, then (inside
- * `replaceOperatorsMirror`) each operator upsert followed by the delete of
- * every `operators_mirror` row NOT present in the new bundle. If one
- * statement fails partway through, the mirror is left partially updated
- * until the next successful sync repairs it. In particular, a failure
- * between the operator upserts and that trailing DELETE can leave a stale
- * operator row — one the server already removed or deactivated — able to
- * authenticate offline (`verifyOperatorPin` reads every active row in the
- * mirror) until the next successful sync. Closing that gap properly (e.g. a
- * single multi-statement SQL script, or connection-affine execution) is
- * deferred to the next slice — see the hardware acceptance checklist.
+ * individual statements: the shift upsert, then the product upsert, then
+ * `replaceOperatorsMirror`. A failure during the shift or product upsert
+ * leaves that half applied until the next successful sync repairs it.
+ * Operators no longer share that risk: `replaceOperatorsMirror` publishes
+ * the roster atomically on its own (see its doc comment), so a failure
+ * partway through it never exposes a removed or deactivated operator to
+ * offline sign-in.
  */
 export async function upsertBundle(exec: SqlExecutor, bundle: StationBundle): Promise<void> {
   await upsertBundleBody(exec, bundle);
@@ -165,41 +161,149 @@ async function upsertBundleBody(exec: SqlExecutor, bundle: StationBundle): Promi
   await replaceOperatorsMirror(exec, bundle.operators);
 }
 
+const ACTIVE_SLOT_KEY = "operators_slot";
+const SLOT_TABLES = { a: "operators_mirror", b: "operators_mirror_b" } as const;
+type RosterSlot = keyof typeof SLOT_TABLES;
+
+function otherSlot(slot: RosterSlot): RosterSlot {
+  return slot === "a" ? "b" : "a";
+}
+
 /**
- * Replaces the ENTIRE local operator set with `operators`: upserts each record
- * and deletes every mirrored operator not present in the new set (including the
- * empty case, which clears the table). Shared by the shift-bundle mirror and the
- * initialization roster sync so a removed/deactivated operator can never keep
- * authenticating offline from a stale row.
+ * The slot currently serving offline sign-in. Absent means "a", so a device
+ * enrolled before the second slot existed keeps its roster on upgrade.
  *
- * Each upsert and the trailing delete are independent statements — neither
- * this function nor its callers wrap them in a transaction, because
- * `tauri-plugin-sql`'s connection pool makes multi-call BEGIN/COMMIT unsound
- * (see `upsertBundle`'s doc comment). A failure partway through can leave a
- * stale operator row until the next successful sync.
+ * A genuine query failure here is NOT caught: it must propagate rather than
+ * fall back to "a". That fallback would be a confident wrong answer whenever
+ * "b" is actually active — the read path would authenticate against the
+ * previous generation, which by construction can still contain an operator
+ * removed or deactivated in the current one, and the write path would stage
+ * into the slot that is actually live.
  */
-export async function replaceOperatorsMirror(
+async function activeSlot(exec: SqlExecutor): Promise<RosterSlot> {
+  const rows = await exec.all<{ value: string | null }>(
+    "SELECT value FROM station_meta WHERE key = ?",
+    [ACTIVE_SLOT_KEY],
+  );
+  return rows[0]?.value === "b" ? "b" : "a";
+}
+
+/**
+ * Serializes publishes so two overlapping refreshes can never both resolve
+ * the same INACTIVE slot as their target. `App.tsx` fires `syncOperatorRoster`
+ * unawaited on mount AND again on every `online` event, and `upsertBundle` is
+ * a third entry point (see `journal.ts`'s doc comment for the same kind of
+ * overlap observed on real devices). Without this, a second refresh that
+ * starts before the first has flipped `station_meta` would resolve the same
+ * target slot, race its DELETE/INSERT against the first's, and could end up
+ * inserting into what has since become the LIVE slot.
+ *
+ * Each call's actual work (`publishOperatorsMirror`) is chained onto
+ * `refreshChain`, so it does not even read `activeSlot()` until the previous
+ * call has fully settled — including its `station_meta` flip.
+ *
+ * `refreshChain` itself always resolves (the trailing `.then(noop, noop)`): a
+ * rejected refresh must not poison the queue for later callers. The
+ * rejection is still delivered to the caller that issued that particular
+ * refresh, via the `turn` promise returned below.
+ *
+ * Trade-off: because every publish now goes through this single chain, one
+ * `exec.run` call that never settles (a hung `plugin:sql|execute` invoke)
+ * stalls the chain forever and no roster refresh completes again for the
+ * rest of the process's life — before serialization, a hung call only ever
+ * blocked its own refresh. This is accepted: the alternative, letting
+ * refreshes race, can publish a roster that still contains an operator who
+ * was just removed server-side, which is the exact bug this file exists to
+ * close. It is also not expected to bite in practice — sqlx's pool-acquire
+ * fails with an error rather than hanging when it cannot get a connection.
+ */
+let refreshChain: Promise<void> = Promise.resolve();
+
+/**
+ * Publishes a complete roster atomically.
+ *
+ * The incoming operators are written into the INACTIVE slot, and only once
+ * every row has landed is the active slot flipped — a single statement, which
+ * is the only unit of atomicity `tauri-plugin-sql`'s connection pool gives us
+ * (multi-call BEGIN/COMMIT can land on different pooled connections; see
+ * `upsertBundle`). A refresh that fails partway is therefore never published:
+ * the device keeps authenticating against the last complete roster instead of
+ * a half-updated one, which previously left a removed or deactivated operator
+ * able to sign in offline.
+ *
+ * A generation column on a single table cannot do this: writing the new
+ * generation means upserting the operator's existing row, which moves it out
+ * of the still-active generation, so an interrupted refresh would drop the
+ * operators it had already rewritten.
+ *
+ * The table names are interpolated from `SLOT_TABLES`, a closed set of two
+ * literals — never from a parameter — because SQLite has no placeholder for
+ * an identifier.
+ *
+ * Calls are serialized by `refreshChain` (see its doc comment) so concurrent
+ * refreshes never race onto the same inactive slot.
+ */
+export function replaceOperatorsMirror(
   exec: SqlExecutor,
   operators: OperatorMirrorRecord[],
 ): Promise<void> {
+  const turn = refreshChain.then(() => publishOperatorsMirror(exec, operators));
+  refreshChain = turn.then(
+    () => undefined,
+    () => undefined,
+  );
+  return turn;
+}
+
+async function publishOperatorsMirror(
+  exec: SqlExecutor,
+  operators: OperatorMirrorRecord[],
+): Promise<void> {
+  const target: RosterSlot = otherSlot(await activeSlot(exec));
+  const table = SLOT_TABLES[target];
+
+  await exec.run(`DELETE FROM ${table}`);
   for (const op of operators) {
     await exec.run(
-      `INSERT INTO operators_mirror (operator_id, name, login, role, pin_hash, badge_hash, active)
-       VALUES (?,?,?,?,?,?,?)
-       ON CONFLICT(operator_id) DO UPDATE SET
-         name=excluded.name, login=excluded.login, role=excluded.role,
-         pin_hash=excluded.pin_hash, badge_hash=excluded.badge_hash, active=excluded.active`,
+      `INSERT INTO ${table} (operator_id, name, login, role, pin_hash, badge_hash, active)
+       VALUES (?,?,?,?,?,?,?)`,
       [op.operatorId, op.name, op.login, op.role, op.pinHash, op.badgeHash, b(op.active)],
     );
   }
-  if (operators.length === 0) {
-    await exec.run("DELETE FROM operators_mirror");
-  } else {
-    const placeholders = operators.map(() => "?").join(",");
-    await exec.run(
-      `DELETE FROM operators_mirror WHERE operator_id NOT IN (${placeholders})`,
-      operators.map((op) => op.operatorId),
-    );
+
+  // The publish. Everything above this line is invisible to sign-in.
+  await exec.run(
+    `INSERT INTO station_meta (key, value) VALUES (?,?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    [ACTIVE_SLOT_KEY, target],
+  );
+
+  // Best-effort: clear the generation that just went stale so a removed or
+  // deactivated operator's PIN/badge hashes don't linger in the unencrypted
+  // device DB for the whole inter-sync interval. The flip above already
+  // succeeded and the new roster is already live, so a failure clearing the
+  // old one must NOT fail this publish — the next refresh's
+  // delete-before-staging cleans it up regardless.
+  //
+  // Safe to run right after the flip, with no coordination with concurrent
+  // reads, only because `readOperatorsMirror` resolves the pointer and reads
+  // the roster in ONE statement (see its doc comment). This DELETE itself
+  // *is* on `refreshChain` -- it's the last `await` inside this call's turn,
+  // same as everything else in `publishOperatorsMirror`. What is NOT on any
+  // chain is the reader: `readOperatorsMirror` issues its own direct query,
+  // independent of `refreshChain` entirely, so it can run concurrently with
+  // this DELETE (or with any other step of this turn) while a sign-in is in
+  // flight. There is no longer a JS gap in the reader for that to matter:
+  // whichever slot the reader's single statement finds active, that is the
+  // slot this DELETE has not yet touched (it only ever clears the INACTIVE
+  // one). Before that fix, this DELETE could race a reader that had already
+  // resolved the active slot via a separate round trip and land before the
+  // reader's own SELECT — emptying the exact table the reader was about to
+  // read.
+  try {
+    await exec.run(`DELETE FROM ${SLOT_TABLES[otherSlot(target)]}`);
+  } catch {
+    // Swallowed intentionally: see comment above.
   }
 }
 
@@ -262,6 +366,42 @@ export async function readShiftContext(
   };
 }
 
+/**
+ * Reads the currently active roster.
+ *
+ * Deliberately does NOT call `activeSlot` and then issue a second query
+ * against the resolved table — that shape is two round trips with a JS gap
+ * between them, and a publish (`publishOperatorsMirror`) can flip
+ * `station_meta.operators_slot` in that gap. A sign-in that resolved slot "a"
+ * before the flip would then read table "a" after it, which by construction
+ * still holds the previous generation (an operator just removed or
+ * deactivated server-side would authenticate anyway) — or, once the
+ * post-flip cleanup below has also run, an empty table. Both are the exact
+ * failure the two-slot design exists to prevent.
+ *
+ * Instead, the pointer lookup and the row read are ONE statement: a
+ * `UNION ALL` where each branch is gated on the same `station_meta` lookup,
+ * evaluated by SQLite as a single read. A single statement is always
+ * evaluated against one consistent snapshot — that is what makes this safe
+ * even though `tauri-plugin-sql` pools connections and cannot give us a
+ * multi-statement transaction (see `upsertBundle`'s doc comment): there is
+ * only one statement here, sent to whichever connection the pool hands it,
+ * so there is no gap for a concurrent publish to land in.
+ *
+ * `COALESCE(..., 'a')` reproduces `activeSlot`'s absent-key-means-"a"
+ * fallback, so a device that upgraded with rows already in `operators_mirror`
+ * and no pointer row yet still reads them -- but only once migrations have
+ * created `operators_mirror_b`: this single statement references both slot
+ * tables unconditionally (the `UNION ALL`'s second branch, even though its
+ * `WHERE` never matches on such a device), so it hard-requires
+ * `operators_mirror_b` to exist regardless of which branch actually returns
+ * rows. That is fail-closed — the query throws rather than silently reading
+ * only "a" — and is already handled by the sign-in screen's existing error
+ * handling; it is called out here only so a future reader does not assume
+ * this upgrade path works before migrations have run. The table names come
+ * from `SLOT_TABLES`, the same closed set of two literals `activeSlot` and
+ * `publishOperatorsMirror` use — never caller input.
+ */
 export async function readOperatorsMirror(exec: SqlExecutor): Promise<OperatorMirrorRecord[]> {
   const rows = await exec.all<{
     operator_id: string;
@@ -271,12 +411,22 @@ export async function readOperatorsMirror(exec: SqlExecutor): Promise<OperatorMi
     pin_hash: string;
     badge_hash: string | null;
     active: number;
-  }>("SELECT operator_id, name, login, role, pin_hash, badge_hash, active FROM operators_mirror");
+  }>(
+    `SELECT operator_id, name, login, role, pin_hash, badge_hash, active
+       FROM ${SLOT_TABLES.a}
+      WHERE COALESCE((SELECT value FROM station_meta WHERE key = ?), 'a') <> 'b'
+     UNION ALL
+     SELECT operator_id, name, login, role, pin_hash, badge_hash, active
+       FROM ${SLOT_TABLES.b}
+      WHERE COALESCE((SELECT value FROM station_meta WHERE key = ?), 'a') = 'b'`,
+    [ACTIVE_SLOT_KEY, ACTIVE_SLOT_KEY],
+  );
   return rows.map((r) => ({
     operatorId: r.operator_id,
     name: r.name,
     // Legacy rows (mirrored before the column existed) read as "", which never
-    // matches a real personnel number; the first roster sync overwrites them.
+    // matches a real personnel number; the first roster sync publishes them
+    // into the other slot with a real login and deletes this stale slot.
     login: r.login ?? "",
     role: r.role,
     pinHash: r.pin_hash,

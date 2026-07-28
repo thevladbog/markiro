@@ -12,6 +12,7 @@ import {
 } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
+import { SessionOnlyGuard } from "../../tenancy/session-only.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
   createLineSchema,
@@ -25,7 +26,9 @@ import { LinesService } from "./lines.service";
 
 @ApiTags("lines")
 @Controller("lines")
-@UseGuards(TenantGuard)
+// The station never calls this module. SessionOnlyGuard keeps a station
+// api-key out even though TenantGuard accepts it for tenant resolution.
+@UseGuards(TenantGuard, SessionOnlyGuard)
 export class LinesController {
   constructor(private readonly linesService: LinesService) {}
 

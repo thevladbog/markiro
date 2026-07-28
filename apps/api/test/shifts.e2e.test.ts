@@ -647,4 +647,77 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
 
     expect(byRange.body.items.some((i: { id: string }) => i.id === shift3.body.id)).toBe(false);
   });
+
+  // ---------------------------------------------------------------------
+  // Device-key surface (Task 9): lines are cabinet-only; shifts is a mix --
+  // the station's own four routes (list, create, open, bundle -- covered by
+  // station-auth.e2e.test.ts, shifts-bundle.e2e.test.ts) stay reachable, but
+  // get-by-id/patch/delete/close are cabinet-only since the station never
+  // calls them (verified against apps/station/src). Routes carry no global
+  // prefix -- only Better Auth's own `/api/auth/*` mount does -- so these are
+  // `/station-devices`, `/lines`, `/shifts`, matching employees.e2e.test.ts.
+  // ---------------------------------------------------------------------
+
+  it("rejects a station api-key: lines are cabinet-only", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+
+    const device = await agent
+      .post("/station-devices")
+      .send({ name: "Line 1 terminal" })
+      .expect(201);
+    const apiKey = (device.body as { apiKey: string }).apiKey;
+
+    await request(app!.getHttpServer()).get("/lines").set("x-api-key", apiKey).expect(403);
+  });
+
+  it("still serves lines to a signed-in cabinet user", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+    await agent.get("/lines").expect(200);
+  });
+
+  it("rejects a station api-key on shifts routes the station does not use, while keeping GET/POST /shifts reachable", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      productGroup: "Beverages",
+      boxCapacity: 12,
+      palletCapacity: 48,
+    });
+    const created = await agent.post("/shifts").send({ productId, mode: "validation" }).expect(201);
+    const id = created.body.id as string;
+
+    const device = await agent
+      .post("/station-devices")
+      .send({ name: "Line 1 terminal" })
+      .expect(201);
+    const apiKey = (device.body as { apiKey: string }).apiKey;
+    const server = app!.getHttpServer();
+
+    // Session-only: not part of the station's four routes.
+    await request(server).get(`/shifts/${id}`).set("x-api-key", apiKey).expect(403);
+    await request(server)
+      .patch(`/shifts/${id}`)
+      .set("x-api-key", apiKey)
+      .send({ plannedQty: 5 })
+      .expect(403);
+    await request(server)
+      .post(`/shifts/${id}/close`)
+      .set("x-api-key", apiKey)
+      .send({ reason: "station attempt" })
+      .expect(403);
+    await request(server).delete(`/shifts/${id}`).set("x-api-key", apiKey).expect(403);
+
+    // Regression guard: the station's own routes stay reachable by the same key.
+    await request(server).get("/shifts").set("x-api-key", apiKey).expect(200);
+    const stationCreated = await request(server)
+      .post("/shifts")
+      .set("x-api-key", apiKey)
+      .send({ productId, mode: "validation" })
+      .expect(201);
+    expect(stationCreated.body.productId).toBe(productId);
+  });
 });

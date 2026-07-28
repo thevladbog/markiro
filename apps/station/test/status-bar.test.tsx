@@ -8,13 +8,28 @@ beforeAll(async () => {
 });
 
 describe("StatusBar", () => {
-  it("reports a connected scanner", () => {
-    render(<StatusBar online scannerConnected printerConfigured={false} />);
-    expect(screen.getByText("Connected")).toBeDefined();
+  it("reports the keyboard wedge when no serial scanner is configured", () => {
+    render(<StatusBar online scanner="keyboard" printerConfigured={false} />);
+    expect(screen.getByTestId("scanner-status").textContent).toBe("Keyboard");
   });
 
-  it("reports hardware that is not set up yet", () => {
-    render(<StatusBar online={false} scannerConnected={false} printerConfigured={false} />);
-    expect(screen.getAllByText("Not configured")).toHaveLength(3);
+  it("reports a connected serial scanner", () => {
+    render(<StatusBar online scanner="connected" printerConfigured />);
+    expect(screen.getByTestId("scanner-status").textContent).toBe("Connected");
+  });
+
+  it("raises the alarm when a configured scanner drops", () => {
+    render(<StatusBar online scanner="disconnected" printerConfigured />);
+    expect(screen.getByTestId("scanner-status").textContent).toBe("No signal");
+  });
+
+  it("reports a printer that is not configured", () => {
+    render(<StatusBar online scanner="keyboard" printerConfigured={false} />);
+    expect(screen.getByTestId("printer-status").textContent).toBe("Not configured");
+  });
+
+  it("reports a configured printer as configured, not connected (a printer cannot be proven alive without printing)", () => {
+    render(<StatusBar online scanner="keyboard" printerConfigured />);
+    expect(screen.getByTestId("printer-status").textContent).toBe("Configured");
   });
 });

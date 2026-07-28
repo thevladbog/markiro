@@ -25,6 +25,29 @@ export const operatorsMirror = sqliteTable("operators_mirror", {
   active: integer("active", { mode: "boolean" }).notNull().default(true),
 });
 
+/**
+ * The second roster slot. `operators_mirror` and this table hold alternating
+ * generations of the same roster; `station_meta.operators_slot` names the
+ * active one. See `replaceOperatorsMirror` for why publication needs two
+ * tables rather than a generation column.
+ */
+export const operatorsMirrorB = sqliteTable("operators_mirror_b", {
+  operatorId: text("operator_id").primaryKey(),
+  name: text("name").notNull(),
+  // Nullable to match operators_mirror: the two slots must be interchangeable
+  // for alternation to be sound (see replaceOperatorsMirror), and a NOT NULL
+  // asymmetry here buys nothing but a landmine — a null `login` from the
+  // server (roster-sync.ts takes the network payload on an unchecked type
+  // assertion) would succeed whenever this slot happens to be inactive and
+  // throw whenever it's the publish target, freezing the roster on whichever
+  // slot tolerates it. See readOperatorsMirror's `?? ""`.
+  login: text("login"),
+  role: text("role").notNull(),
+  pinHash: text("pin_hash").notNull(),
+  badgeHash: text("badge_hash"),
+  active: integer("active", { mode: "boolean" }).notNull().default(true),
+});
+
 /** Local mirror of the downloaded shift, incl. the label template spec json. */
 export const shiftMirror = sqliteTable("shift_mirror", {
   id: text("id").primaryKey(),
