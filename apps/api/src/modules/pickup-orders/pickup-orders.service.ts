@@ -324,6 +324,7 @@ export class PickupOrdersService {
       })),
       receiptNo: row.receiptNo,
       actNo: row.actNo,
+      syncConflicts: (row.syncConflicts as OrderConflict[] | null) ?? [],
     };
   }
 
@@ -628,6 +629,7 @@ export class PickupOrdersService {
       totalPrice: schema.pickupOrders.totalPrice,
       status: schema.pickupOrders.status,
       createdAt: schema.pickupOrders.createdAt,
+      syncConflicts: schema.pickupOrders.syncConflicts,
     };
   }
 
@@ -642,6 +644,7 @@ export class PickupOrdersService {
     totalPrice: string | null;
     status: "pending" | "punched" | "writtenoff" | "cancelled";
     createdAt: Date;
+    syncConflicts: { rawKm: string; reason: string }[] | null;
   }): PickupOrderRowDto {
     return {
       id: row.id,
@@ -654,6 +657,7 @@ export class PickupOrdersService {
       totalPrice: row.totalPrice,
       status: row.status,
       createdAt: row.createdAt,
+      conflictCount: row.syncConflicts?.length ?? 0,
     };
   }
 
@@ -900,6 +904,7 @@ export class PickupOrdersService {
               totalPrice: computeTotalPrice(remaining),
               deviceSeq,
               createdAt: when,
+              syncConflicts: conflicts.length > 0 ? conflicts : null,
             })
             .returning();
           if (!order) throw new Error("Failed to insert pickup order");

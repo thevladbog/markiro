@@ -118,6 +118,8 @@ export interface PickupOrderRowDto {
   totalPrice: string | null;
   status: PickupOrderStatus;
   createdAt: Date;
+  /** How many scanned codes the server refused when this order synced. */
+  conflictCount: number;
 }
 
 /** GET /pickup-orders response. */
@@ -141,6 +143,7 @@ export interface PickupOrderDetailDto extends PickupOrderRowDto {
   items: PickupOrderItemDto[];
   receiptNo: string | null;
   actNo: string | null;
+  syncConflicts: OrderConflict[];
 }
 
 /** POST /pickup-orders/export body. */
