@@ -581,4 +581,68 @@ describe.skipIf(!ready)("products e2e", () => {
       externalRef: "ext-ref-001",
     });
   });
+
+  // ---------------------------------------------------------------------
+  // Device-key surface (Task 9): the station only ever calls GET /products
+  // (search) and POST /products/gtin-check (see
+  // apps/station/src/pages/NewShift.tsx) -- get-by-id and every mutation are
+  // cabinet-only. Routes carry no global prefix -- only Better Auth's own
+  // `/api/auth/*` mount does -- so these are `/station-devices` and
+  // `/products`, matching employees.e2e.test.ts.
+  // ---------------------------------------------------------------------
+
+  it("rejects a station api-key on product routes the station does not use, while keeping GET/gtin-check reachable", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+
+    const createRes = await agent
+      .post("/products")
+      .send({ gtin: EAN13_CANONICAL, name: "Device Surface Widget" })
+      .expect(201);
+    const id = createRes.body.id as string;
+
+    const device = await agent
+      .post("/station-devices")
+      .send({ name: "Line 1 terminal" })
+      .expect(201);
+    const apiKey = (device.body as { apiKey: string }).apiKey;
+    const server = app!.getHttpServer();
+
+    // Session-only: not part of the station's two routes.
+    await request(server).get(`/products/${id}`).set("x-api-key", apiKey).expect(403);
+    await request(server)
+      .post("/products")
+      .set("x-api-key", apiKey)
+      .send({ gtin: EAN13_WIDGET_A, name: "Should Not Create" })
+      .expect(403);
+    await request(server)
+      .patch(`/products/${id}`)
+      .set("x-api-key", apiKey)
+      .send({ name: "Hijacked" })
+      .expect(403);
+    await request(server).delete(`/products/${id}`).set("x-api-key", apiKey).expect(403);
+
+    // Regression guard: the station's own routes stay reachable by the same key.
+    await request(server).get("/products").set("x-api-key", apiKey).expect(200);
+    const gtinCheck = await request(server)
+      .post("/products/gtin-check")
+      .set("x-api-key", apiKey)
+      .send({ gtin: EAN13_CANONICAL })
+      .expect(200);
+    expect(gtinCheck.body).toMatchObject({ gtin14: GTIN14_CANONICAL });
+  });
+
+  it("still serves the full products CRUD to a signed-in cabinet user", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+
+    const createRes = await agent
+      .post("/products")
+      .send({ gtin: EAN13_CANONICAL, name: "Cabinet Widget" })
+      .expect(201);
+    const id = createRes.body.id as string;
+    await agent.get(`/products/${id}`).expect(200);
+    await agent.patch(`/products/${id}`).send({ name: "Cabinet Widget 2" }).expect(200);
+    await agent.delete(`/products/${id}`).expect(204);
+  });
 });

@@ -12,6 +12,7 @@ import {
 } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
+import { SessionOnlyGuard } from "../../tenancy/session-only.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
   createLabelTemplateSchema,
@@ -25,7 +26,9 @@ import { LabelTemplatesService } from "./label-templates.service";
 
 @ApiTags("label-templates")
 @Controller("label-templates")
-@UseGuards(TenantGuard)
+// The station never calls this module. SessionOnlyGuard keeps a station
+// api-key out even though TenantGuard accepts it for tenant resolution.
+@UseGuards(TenantGuard, SessionOnlyGuard)
 export class LabelTemplatesController {
   constructor(private readonly labelTemplatesService: LabelTemplatesService) {}
 

@@ -12,6 +12,7 @@ import {
 } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
+import { SessionOnlyGuard } from "../../tenancy/session-only.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
   createCounterpartySchema,
@@ -25,7 +26,9 @@ import { CounterpartiesService } from "./counterparties.service";
 
 @ApiTags("counterparties")
 @Controller("counterparties")
-@UseGuards(TenantGuard)
+// The station never calls this module. SessionOnlyGuard keeps a station
+// api-key out even though TenantGuard accepts it for tenant resolution.
+@UseGuards(TenantGuard, SessionOnlyGuard)
 export class CounterpartiesController {
   constructor(private readonly counterpartiesService: CounterpartiesService) {}
 

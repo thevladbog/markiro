@@ -396,4 +396,35 @@ describe.skipIf(!ready)("counterparties e2e", () => {
       notes: "Notes",
     });
   });
+
+  // Routes carry no global prefix -- only Better Auth's own `/api/auth/*`
+  // mount does -- so these are `/station-devices` and `/counterparties`,
+  // matching the existing suites (see employees.e2e.test.ts).
+  it("rejects a station api-key: counterparties are cabinet-only", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpWithInactiveOrg(agent);
+    await agent
+      .post("/api/auth/organization/set-active")
+      .send({ organizationId: orgId })
+      .expect(200);
+
+    const device = await agent
+      .post("/station-devices")
+      .send({ name: "Line 1 terminal" })
+      .expect(201);
+    const apiKey = (device.body as { apiKey: string }).apiKey;
+
+    await request(app!.getHttpServer()).get("/counterparties").set("x-api-key", apiKey).expect(403);
+  });
+
+  it("still serves counterparties to a signed-in cabinet user", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpWithInactiveOrg(agent);
+    await agent
+      .post("/api/auth/organization/set-active")
+      .send({ organizationId: orgId })
+      .expect(200);
+
+    await agent.get("/counterparties").expect(200);
+  });
 });
