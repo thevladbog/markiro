@@ -5,13 +5,14 @@
     "prompt": "Enter the eight-digit pairing code from the admin panel",
     "submit": "Connect",
     "clear": "Clear",
-    "scan": "Scan the code",
-    "scanWaiting": "Waiting for a scan…",
+    "scanHint": "Or scan the code with the scanner",
+    "scanRejected": "Not a pairing code: eight digits are required",
     "scannerSetup": "Set up the scanner",
     "serverToggle": "Change the server address",
     "server": "Server address",
     "invalidCode": "Wrong or expired code",
     "connectionFailed": "No connection to the server. Check the network and try again.",
+    "badBundle": "The server sent unusable data. Ask the administrator for a new code.",
     "retry": "Retry"
   }
 }

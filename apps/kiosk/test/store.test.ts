@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readSnapshot, replaceSnapshot } from "../src/store/cache.js";
+import { readSnapshot, replaceSnapshot, UnusableBootstrapError } from "../src/store/cache.js";
 import { dequeueOrder, enqueueOrder, listQueue } from "../src/store/queue.js";
 import { readConfig, writeConfig } from "../src/store/config.js";
 import type { KioskBootstrapDto } from "../src/api/types.js";
@@ -35,6 +35,17 @@ describe("cache", () => {
     const stored = await readSnapshot();
     expect(stored!.bootstrap.employees.map((e) => e.id)).toEqual(["e1"]);
     expect(stored!.fetchedAt).toBe("2026-07-28T06:05:00.000Z");
+  });
+
+  it("refuses an unmeasurable generatedAt at the write itself, not only at the call sites", async () => {
+    // The guard used to live entirely in the callers, so the next write path
+    // added would bypass it exactly as this test could. A stamp `cacheAge`
+    // cannot measure reads `fresh` forever and disables the seven-day lockout,
+    // so the store — the thing that owns the invariant — enforces it.
+    await expect(
+      replaceSnapshot({ ...snapshot([]), generatedAt: "not-a-date" }, new Date()),
+    ).rejects.toBeInstanceOf(UnusableBootstrapError);
+    await expect(readSnapshot()).resolves.toBeNull();
   });
 });
 
