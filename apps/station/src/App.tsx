@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { OperatorMirrorRecord } from "@markiro/db";
 import { isEnrolled, readConfig, type StationConfig } from "./lib/config.js";
@@ -15,7 +15,7 @@ import { syncOperatorRoster } from "./lib/roster-sync.js";
 import { createKeyboardWedgeSource } from "./lib/scan-source.js";
 import { loadSoundSettings, type SoundSettings } from "./lib/signal-sound.js";
 import { tauriExecutor } from "./lib/sqlite.js";
-import { createSyncEngine, type SyncState } from "./lib/sync.js";
+import { createSyncEngine, type SyncEngine, type SyncState } from "./lib/sync.js";
 import { Enrollment } from "./pages/Enrollment.js";
 import { OperatorLogin } from "./pages/OperatorLogin.js";
 import { ShiftSelection } from "./pages/ShiftSelection.js";
@@ -246,25 +246,50 @@ export function App() {
   // to a shift or an operator, so entering or leaving a shift must never stop
   // the drain. Built only once a client exists — before enrollment there is
   // nowhere to send.
-  const syncEngine = useMemo(() => {
-    if (!client || !config) return null;
-    return createSyncEngine({
+  //
+  // Created AND torn down inside this one effect, rather than a `useMemo`
+  // paired with a separate cleanup effect, so construction and teardown are
+  // pinned to the same lifecycle event. That pairing matters because React's
+  // StrictMode dev double-invoke runs an effect's setup -> cleanup -> setup
+  // again without a re-render: if the engine were built by a memo instead,
+  // both setups would receive the SAME memoized engine, so the second setup's
+  // `nudge()` calls would land on the object the first cleanup just
+  // permanently `stop()`ped (`stopped` in sync.ts has no restart path) --
+  // every later nudge (a scan, `online`, the 15s heartbeat) would then be a
+  // silent no-op for the rest of the dev session, with the status bar frozen
+  // at whatever the first publish reported. Here, each cleanup only ever
+  // stops the engine ITS OWN setup created, so the second setup's fresh
+  // engine is unaffected.
+  //
+  // The call sites below (`onScanRecorded`, the `online` listener) reach the
+  // current engine through `syncEngineRef` instead of a `syncEngine` variable
+  // from this scope, precisely so they do not need this effect's identity as
+  // a dependency and keep working across a StrictMode remount.
+  const syncEngineRef = useRef<SyncEngine | null>(null);
+
+  useEffect(() => {
+    if (!client || !config) {
+      syncEngineRef.current = null;
+      return;
+    }
+    const engine = createSyncEngine({
       exec: tauriExecutor,
       client,
       machineId: config.machineId,
       onState: setSyncState,
     });
-  }, [client, config?.machineId]);
-
-  useEffect(() => {
-    if (!syncEngine) return;
-    syncEngine.nudge();
-    const heartbeat = setInterval(() => syncEngine.nudge(), 15_000);
+    syncEngineRef.current = engine;
+    engine.nudge();
+    const heartbeat = setInterval(() => engine.nudge(), 15_000);
     return () => {
       clearInterval(heartbeat);
-      syncEngine.stop();
+      engine.stop();
+      // React always runs a cleanup before the next setup, so the ref can
+      // never point at a newer engine here -- this guard just keeps that
+      // invariant explicit instead of assumed.
+      if (syncEngineRef.current === engine) syncEngineRef.current = null;
     };
-  }, [syncEngine]);
+  }, [client, config?.machineId]);
 
   // Initialization sync: as soon as the device has a credential — right after
   // enrollment, and on every later start — pull the operator roster so the
@@ -286,11 +311,11 @@ export function App() {
     if (!client) return;
     const retrySync = () => {
       void syncOperatorRoster(client, tauriExecutor);
-      syncEngine?.nudge();
+      syncEngineRef.current?.nudge();
     };
     window.addEventListener("online", retrySync);
     return () => window.removeEventListener("online", retrySync);
-  }, [client, syncEngine]);
+  }, [client]);
 
   async function refreshConfig() {
     setConfig(await readConfig());
@@ -372,7 +397,7 @@ export function App() {
             counterpartyName={shiftContext.counterpartyName}
             source={scanSource}
             sound={sound}
-            onScanRecorded={() => syncEngine?.nudge()}
+            onScanRecorded={() => syncEngineRef.current?.nudge()}
           />
         ) : (
           <main style={{ minHeight: "100%", display: "grid", placeItems: "center" }}>

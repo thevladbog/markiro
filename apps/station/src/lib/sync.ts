@@ -6,7 +6,14 @@ import { ackThrough, oldestQueuedAt, outboxDepth, readBatch, type OutboxItem } f
 export const BATCH_SIZE = 200;
 /** How long a non-empty queue may stop moving before the operator is warned. */
 export const STUCK_AFTER_MS = 15 * 60 * 1000;
-const BACKOFF_START_MS = 2_000;
+/**
+ * Exported so tests that deliberately fail a batch (to exercise a listener
+ * rather than the engine's own retry) can prove their assertion resolved
+ * strictly before this much time elapsed — the only way the retry can be
+ * ruled out as the actual cause, see `App.test.tsx`'s "nudges ... online"
+ * test.
+ */
+export const BACKOFF_START_MS = 2_000;
 const BACKOFF_CAP_MS = 60_000;
 
 export interface SyncState {

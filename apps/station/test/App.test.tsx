@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { StrictMode, useEffect, useMemo, useRef } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 // `@tauri-apps/plugin-sql`'s `Database.load`/`execute`/`select` are themselves
@@ -79,6 +80,7 @@ vi.mock("../src/lib/hardware.js", async (importOriginal) => {
 
 import i18n from "../src/i18n/index.js";
 import { App, nextStationView, pickScanSource, scannerIndicator } from "../src/App.js";
+import { createStationClient, type StationClient } from "../src/lib/api-client.js";
 import type { StationConfig } from "../src/lib/config.js";
 import { hashSecret } from "../src/lib/crypto.js";
 import type { HardwareConfig } from "../src/lib/hardware-config.js";
@@ -86,6 +88,7 @@ import type * as HardwareModule from "../src/lib/hardware.js";
 import type { ScannerStatus } from "../src/lib/hardware.js";
 import { readShiftContext } from "../src/lib/mirror.js";
 import { tauriExecutor } from "../src/lib/sqlite.js";
+import { BACKOFF_START_MS, createSyncEngine, type SyncEngine } from "../src/lib/sync.js";
 import type { OperatorMirrorRecord } from "@markiro/db";
 
 beforeAll(async () => {
@@ -270,8 +273,20 @@ async function signInAsOperator() {
  * the second, successful attempt — not leftover work from the first drain.
  * Every attempt is reported through `onPost` before its outcome is decided,
  * so a failed attempt still counts as "the ingest call went out".
+ *
+ * IMPORTANT coupling with `BACKOFF_START_MS` (sync.ts): that first failure
+ * also schedules the engine's OWN retry at `BACKOFF_START_MS` from now.
+ * Any test that dispatches `online` to prove the LISTENER nudges the engine
+ * (rather than merely restating that the engine retries on its own) must
+ * make sure its assertion can only be satisfied within that window, or the
+ * retry timer alone — with the listener wiring silently broken — would
+ * satisfy the same `waitFor` and the test would stop meaning anything. See
+ * the "nudges the sync engine when the device comes back online" test below
+ * for how that is made explicit rather than incidental.
  */
-async function renderAtFloorStage(opts: { onPost?: (path: string, body: unknown) => void } = {}) {
+async function renderAtFloorStage(
+  opts: { onPost?: (path: string, body: unknown) => void; strictMode?: boolean } = {},
+) {
   const pinHash = await hashSecret(OPERATOR_PIN);
   mockInvokeForFloor(pinHash, { scanner: null, printer: null, printerLanguage: "zpl" }, [
     outboxRow(1),
@@ -299,7 +314,15 @@ async function renderAtFloorStage(opts: { onPost?: (path: string, body: unknown)
     }),
   );
 
-  render(<App />);
+  render(
+    opts.strictMode ? (
+      <StrictMode>
+        <App />
+      </StrictMode>
+    ) : (
+      <App />
+    ),
+  );
   await signInAsOperator();
 }
 
@@ -697,6 +720,20 @@ describe("App", () => {
       await renderAtFloorStage({ onPost: (path, body) => posts.push({ path, body }) });
 
       await waitFor(() => expect(posts.some((p) => p.path === "/station/scans")).toBe(true));
+
+      // Honest to the test's name (Finding 3): the assertion above is
+      // satisfied by the deliberately-FAILED first attempt alone, so nothing
+      // yet covers the acknowledge path. The engine's own backoff retry (no
+      // `online` needed) is what drives the second, successful attempt --
+      // wait long enough for it to fire, then assert the batch was actually
+      // accepted: a second `/station/scans` post landed and the device's
+      // queue -- reflected by the status bar's pending count -- reached
+      // zero.
+      await waitFor(
+        () => expect(posts.filter((p) => p.path === "/station/scans").length).toBeGreaterThan(1),
+        { timeout: BACKOFF_START_MS + 2_000 },
+      );
+      await waitFor(() => expect(screen.getByTestId("sync-status").textContent).toBe("0"));
     } finally {
       consoleErrorSpy.mockRestore();
     }
@@ -709,6 +746,54 @@ describe("App", () => {
       await renderAtFloorStage({ onPost: (path, body) => posts.push({ path, body }) });
       await waitFor(() => expect(posts.length).toBeGreaterThan(0));
       const before = posts.length;
+      // Reference point for the Finding 2 guard below: the mount-time drain's
+      // deliberate first failure (which just satisfied the `waitFor` above)
+      // is also what scheduled the engine's OWN retry, `BACKOFF_START_MS`
+      // from about now.
+      const firstFailureAt = Date.now();
+
+      act(() => {
+        window.dispatchEvent(new Event("online"));
+      });
+
+      await waitFor(() => expect(posts.length).toBeGreaterThan(before));
+      // Without this, the assertion above is satisfiable two ways: the
+      // `online` listener's nudge (what this test is meant to exercise), or
+      // the engine's own backoff retry firing on its own schedule, with the
+      // listener wiring silently broken. The retry cannot fire before
+      // `BACKOFF_START_MS` has elapsed (`setTimeout` never fires early), so
+      // landing well inside that window rules out the retry as the cause --
+      // margined so ordinary test overhead can't trip it, but tight enough
+      // that only the retry (not the listener) could ever satisfy it.
+      expect(Date.now() - firstFailureAt).toBeLessThan(BACKOFF_START_MS - 500);
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it("the online-listener-nudges-engine wiring still works when the real App is rendered under StrictMode", async () => {
+    // General StrictMode-compatibility smoke coverage for the real App: it
+    // does NOT, by itself, discriminate the exact race Finding 1 identified
+    // (see the dedicated regression test below for that, and its doc comment
+    // for why this one structurally can't) -- `App`'s own `config` state
+    // starts `null` and is only populated by an inherently async
+    // `readConfig()` call, so the sync engine's real creation always lands on
+    // a later UPDATE commit, never on the fiber's literal first commit where
+    // React's StrictMode double-invoke of effects actually applies. This
+    // test still earns its place: it confirms nothing about rendering the
+    // real App under StrictMode (double-mounted unrelated effects included)
+    // breaks the `online` -> nudge wiring.
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const posts: { path: string; body: unknown }[] = [];
+      await renderAtFloorStage({
+        onPost: (path, body) => posts.push({ path, body }),
+        strictMode: true,
+      });
+
+      // Mount-time drain (its first attempt deliberately failed) has run.
+      await waitFor(() => expect(posts.length).toBeGreaterThan(0));
+      const before = posts.length;
 
       act(() => {
         window.dispatchEvent(new Event("online"));
@@ -718,5 +803,214 @@ describe("App", () => {
     } finally {
       consoleErrorSpy.mockRestore();
     }
+  });
+
+  describe("sync engine paired create/destroy under StrictMode (regression for Finding 1)", () => {
+    /**
+     * Why this is a standalone harness rather than a test that renders the
+     * real `<App/>`: verified directly (instrumenting `createSyncEngine` and
+     * re-running the "online" test above against pre-fix `App.tsx`) that
+     * React's StrictMode double-invoke of an effect (mount -> cleanup ->
+     * mount, with NO re-render in between) runs entirely SYNCHRONOUSLY,
+     * finishing before any microtask -- including the `await readConfig()`
+     * chain that populates `config` -- ever gets to run. Because `App`'s
+     * `config` state starts `null`, the sync engine's real creation can only
+     * ever happen on a later, plain UPDATE commit, and React does not
+     * re-stress an update the way it stresses a mount. So the engine's
+     * effect, as wired into the real `App`, can never actually land inside
+     * the double-invoke window -- true for BOTH the old (`useMemo` +
+     * separate cleanup effect) and the new (paired ref + single effect)
+     * code, which is exactly why the "online" test above cannot tell them
+     * apart.
+     *
+     * To still exercise the real risk Finding 1 identified, using the real
+     * `createSyncEngine` from `sync.ts`, this harness mirrors the two
+     * competing hook shapes with `client`/`machineId` supplied as plain
+     * props already available on the very first render -- so engine
+     * creation genuinely IS part of the initial commit, and StrictMode's
+     * double-invoke genuinely applies to it, the same way it would to
+     * App.tsx's own effect if `config` were ever available synchronously
+     * (e.g. a future synchronous config cache).
+     */
+    function BuggyHost({
+      client,
+      machineId,
+    }: {
+      client: Pick<StationClient, "post">;
+      machineId: string;
+    }) {
+      // The pre-fix App.tsx shape: `useMemo` creates, a SEPARATE effect
+      // destroys -- so both halves of StrictMode's double-invoke close over
+      // the one memoized engine.
+      const engine = useMemo(
+        () => createSyncEngine({ exec: tauriExecutor, client, machineId, onState: () => {} }),
+        [client, machineId],
+      );
+      useEffect(() => {
+        engine.nudge();
+        return () => engine.stop();
+      }, [engine]);
+      return null;
+    }
+
+    function FixedHost({
+      client,
+      machineId,
+    }: {
+      client: Pick<StationClient, "post">;
+      machineId: string;
+    }) {
+      // The fixed App.tsx shape: creation and teardown paired inside ONE
+      // effect via a ref, so each setup invocation stops only the engine
+      // ITS OWN setup created.
+      const ref = useRef<SyncEngine | null>(null);
+      useEffect(() => {
+        const engine = createSyncEngine({
+          exec: tauriExecutor,
+          client,
+          machineId,
+          onState: () => {},
+        });
+        ref.current = engine;
+        engine.nudge();
+        return () => {
+          engine.stop();
+          if (ref.current === engine) ref.current = null;
+        };
+      }, [client, machineId]);
+      return null;
+    }
+
+    /**
+     * One outbox row, made to fail its first `/station/scans` attempt (like
+     * `renderAtFloorStage` does) so recovering it takes a SECOND, genuinely
+     * independent attempt -- exactly what distinguishes a permanently-killed
+     * engine (stuck forever after the one failure) from a working one (its
+     * StrictMode remount's fresh engine retries and succeeds). Returns a
+     * getter for how many `/station/scans` attempts have landed so far.
+     */
+    function seedOneFailThenSucceed(): { attemptCount(): number } {
+      const outbox = [
+        {
+          id: 1,
+          shift_id: "shift-1",
+          terminal_id: "t1",
+          raw: "RAW1",
+          verdict: "ok",
+          scanned_at: new Date().toISOString(),
+          code_hash: "hash1",
+          gtin14: "04600000000017",
+          serial: "S1",
+        },
+      ];
+      invokeMock.mockImplementation((cmd: string, payload?: unknown): Promise<unknown> => {
+        if (cmd === "plugin:sql|load") return Promise.resolve("sqlite:station-mirror.db");
+        if (cmd === "plugin:sql|execute") {
+          const { query, values } = (payload ?? {}) as { query: string; values?: unknown[] };
+          if (query.includes("DELETE FROM outbox")) {
+            const maxId = values?.[0] as number;
+            for (let i = outbox.length - 1; i >= 0; i--) {
+              if (outbox[i]!.id <= maxId) outbox.splice(i, 1);
+            }
+          }
+          return Promise.resolve([0, 0]);
+        }
+        if (cmd === "plugin:sql|select") {
+          const { query } = (payload ?? {}) as { query: string };
+          if (query.includes("FROM outbox")) {
+            if (query.startsWith("SELECT COUNT(*)")) return Promise.resolve([{ n: outbox.length }]);
+            if (query.startsWith("SELECT scanned_at")) {
+              return Promise.resolve(outbox.length ? [{ scanned_at: outbox[0]!.scanned_at }] : []);
+            }
+            return Promise.resolve(outbox);
+          }
+          return Promise.resolve([]);
+        }
+        return Promise.resolve(undefined);
+      });
+      let attempts = 0;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string, init?: RequestInit) => {
+          const path = new URL(url).pathname;
+          if (init?.method === "POST" && path === "/station/scans") {
+            attempts += 1;
+            if (attempts === 1) throw new Error("station: simulated network blip");
+            return new Response(JSON.stringify({ applied: 1, alreadyApplied: false }), {
+              status: 200,
+            });
+          }
+          return new Response("{}", { status: 200 });
+        }),
+      );
+      return { attemptCount: () => attempts };
+    }
+
+    it(
+      "BuggyHost's engine is permanently killed by StrictMode's double-invoke (control case, proves the harness reproduces Finding 1)",
+      async () => {
+        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        try {
+          const { attemptCount } = seedOneFailThenSucceed();
+          const client = createStationClient({
+            apiKey: "mk_key",
+            serverUrl: "http://localhost:3000",
+          });
+
+          render(
+            <StrictMode>
+              <BuggyHost client={client} machineId="m1" />
+            </StrictMode>,
+          );
+
+          // The one failed attempt (from the double-invoke's FIRST setup) is
+          // all this engine ever gets.
+          await waitFor(() => expect(attemptCount()).toBe(1));
+
+          // `stop()` (called by the cleanup, synchronously, before the failed
+          // fetch's rejection is even observed) clears the retry
+          // `scheduleRetry()` would otherwise have armed, and the second
+          // setup's `nudge()` on that same, now-stopped engine is a no-op.
+          // Wait past `BACKOFF_START_MS` -- long enough for a WORKING engine
+          // to have retried and succeeded -- and confirm nothing more ever
+          // happens: the row is never recovered.
+          await new Promise((resolve) => setTimeout(resolve, BACKOFF_START_MS + 500));
+          expect(attemptCount()).toBe(1);
+        } finally {
+          consoleErrorSpy.mockRestore();
+        }
+      },
+      BACKOFF_START_MS + 2_000,
+    );
+
+    it("FixedHost's engine survives StrictMode's double-invoke and drains the row", async () => {
+      const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        seedOneFailThenSucceed();
+        const client = createStationClient({
+          apiKey: "mk_key",
+          serverUrl: "http://localhost:3000",
+        });
+
+        render(
+          <StrictMode>
+            <FixedHost client={client} machineId="m1" />
+          </StrictMode>,
+        );
+
+        // The double-invoke's SECOND setup builds its OWN fresh engine
+        // (paired teardown only ever stops the engine its own setup made),
+        // so that engine's nudge() genuinely retries and drains the row --
+        // proving the ack actually lands, not just that a POST was attempted.
+        await waitFor(() =>
+          expect(invokeMock).toHaveBeenCalledWith(
+            "plugin:sql|execute",
+            expect.objectContaining({ query: expect.stringContaining("DELETE FROM outbox") }),
+          ),
+        );
+      } finally {
+        consoleErrorSpy.mockRestore();
+      }
+    });
   });
 });

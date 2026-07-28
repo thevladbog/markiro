@@ -152,10 +152,6 @@ export function WorkScreen({
           const tone = toneOf(outcome.verdict);
           if (outcome.verdict.status === "ok") setAccepted((n) => n + 1);
           else setRejected((n) => n + 1);
-          // `process()` above already wrote this outcome's outbox row (every
-          // branch calls `recordScan`, whatever the verdict) by the time
-          // `onOutcome` runs, so the sync engine has real work to nudge for.
-          liveOnScanRecorded?.();
 
           const title =
             outcome.verdict.status === "duplicate"
@@ -178,6 +174,14 @@ export function WorkScreen({
           setSignal({ tone, title, ...(detail === undefined ? {} : { detail }) });
           if (flashTimer.current) clearTimeout(flashTimer.current);
           flashTimer.current = setTimeout(() => setSignal(null), FLASH_MS[tone]);
+
+          // Nudged last, strictly after the operator-visible signal is
+          // rendered: `process()` above already wrote this outcome's outbox
+          // row (every branch calls `recordScan`, whatever the verdict), so
+          // the sync engine has real work to nudge for either way, and
+          // `nudge()` cannot throw synchronously -- but the operator's
+          // feedback must stay ahead of background sync work regardless.
+          liveOnScanRecorded?.();
         },
         onError(raw, err) {
           // A throw from process() (e.g. the journal write) must never leave
