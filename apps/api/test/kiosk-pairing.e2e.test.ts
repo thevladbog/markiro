@@ -4,7 +4,7 @@ import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
@@ -21,6 +21,7 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
   let db: Db;
   let agent: ReturnType<typeof request.agent>;
   let otherAgent: ReturnType<typeof request.agent>;
+  let tenantId: string;
   let kioskId: string;
 
   beforeAll(async () => {
@@ -75,7 +76,7 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
   // shared across concurrent test runs, so every test scopes its own rows.
   beforeEach(async () => {
     agent = request.agent(app!.getHttpServer());
-    await signUpAndActivate(agent);
+    tenantId = await signUpAndActivate(agent);
     const kiosk = await agent
       .post("/kiosks")
       .send({ name: `Киоск ${randomUUID()}` })
@@ -134,5 +135,25 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
       .set("x-api-key", apiKey)
       .send({})
       .expect(403);
+  });
+
+  it("leaves at most one live code when two issue requests race", async () => {
+    const [a, b] = await Promise.all([
+      agent.post(`/kiosks/${kioskId}/pairing-code`).send({}),
+      agent.post(`/kiosks/${kioskId}/pairing-code`).send({}),
+    ]);
+    expect([a.status, b.status]).toEqual([201, 201]);
+
+    const live = await db
+      .select()
+      .from(schema.kioskPairingCodes)
+      .where(
+        and(
+          eq(schema.kioskPairingCodes.tenantId, tenantId),
+          eq(schema.kioskPairingCodes.kioskId, kioskId),
+          isNull(schema.kioskPairingCodes.usedAt),
+        ),
+      );
+    expect(live).toHaveLength(1);
   });
 });

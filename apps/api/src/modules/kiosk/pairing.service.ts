@@ -68,11 +68,39 @@ export class PairingService {
         );
       if (clash) continue;
 
-      await this.db
-        .insert(schema.kioskPairingCodes)
-        .values({ tenantId, kioskId, codeHash, expiresAt });
+      try {
+        await this.db
+          .insert(schema.kioskPairingCodes)
+          .values({ tenantId, kioskId, codeHash, expiresAt });
+      } catch (error) {
+        if (!this.isOneLiveCodeViolation(error)) throw error;
+        // A concurrent caller inserted its own live code between our retire
+        // UPDATE and our INSERT. Retire it too, then retry the insert once --
+        // if it still fails, propagate rather than loop indefinitely.
+        await this.db
+          .update(schema.kioskPairingCodes)
+          .set({ usedAt: new Date() })
+          .where(
+            and(
+              eq(schema.kioskPairingCodes.tenantId, tenantId),
+              eq(schema.kioskPairingCodes.kioskId, kioskId),
+              isNull(schema.kioskPairingCodes.usedAt),
+            ),
+          );
+        await this.db
+          .insert(schema.kioskPairingCodes)
+          .values({ tenantId, kioskId, codeHash, expiresAt });
+      }
       return { code, expiresAt };
     }
     throw new Error("Could not mint a unique pairing code");
+  }
+
+  private isOneLiveCodeViolation(error: unknown): boolean {
+    const err = error as Error & { code?: string; constraint?: string; cause?: unknown };
+    const cause = err?.cause as { code?: string; constraint?: string } | undefined;
+    const errorCode = err?.code || cause?.code;
+    const constraint = err?.constraint || cause?.constraint;
+    return errorCode === "23505" && constraint === "kiosk_pairing_codes_one_live_uq";
   }
 }

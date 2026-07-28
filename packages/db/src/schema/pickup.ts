@@ -295,5 +295,12 @@ export const kioskPairingCodes = pgTable(
       columns: [t.tenantId, t.kioskId],
       foreignColumns: [kiosks.tenantId, kiosks.id],
     }),
+    // At most one live code per kiosk. The retire-then-insert in
+    // PairingService is two statements, so without this a double-submit
+    // could leave two codes redeemable at once — the invariant has to be
+    // enforced by the database, not by statement ordering.
+    uniqueIndex("kiosk_pairing_codes_one_live_uq")
+      .on(t.tenantId, t.kioskId)
+      .where(sql`used_at is null`),
   ],
 );

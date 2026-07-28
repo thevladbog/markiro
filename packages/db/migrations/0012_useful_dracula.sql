@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "kiosk_pairing_codes_one_live_uq" ON "kiosk_pairing_codes" USING btree ("tenant_id","kiosk_id") WHERE used_at is null;
