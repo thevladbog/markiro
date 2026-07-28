@@ -7,6 +7,7 @@ import {
   numeric,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   unique,
@@ -112,6 +113,13 @@ export const shifts = pgTable(
     openedAt: timestamp("opened_at", { withTimezone: true }),
     closedAt: timestamp("closed_at", { withTimezone: true }),
     closeReason: text("close_reason"),
+    /**
+     * When scans first arrived for this shift AFTER it was closed. Set once
+     * and never overwritten, so it marks the shift rather than tracking the
+     * most recent straggler. The cabinet shows it, because a manager who has
+     * already reported on a closed shift must find out that its totals moved.
+     */
+    lateDataAt: timestamp("late_data_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -142,6 +150,20 @@ export const shifts = pgTable(
       foreignColumns: [labelTemplates.tenantId, labelTemplates.id],
     }),
   ],
+);
+
+/**
+ * Idempotency keys for station sync batches. A batch is applied and its key
+ * recorded in ONE transaction, so a retried batch is a no-op in its entirety.
+ */
+export const syncBatches = pgTable(
+  "sync_batches",
+  {
+    tenantId: text("tenant_id").notNull(),
+    batchId: text("batch_id").notNull(),
+    appliedAt: timestamp("applied_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.batchId] })],
 );
 
 export const stationDevices = pgTable(
