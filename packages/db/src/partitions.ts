@@ -18,8 +18,19 @@ export function pgCode(error: unknown): string | undefined {
 }
 
 function monthBounds(month: Date): [string, string] {
-  const from = new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth(), 1));
-  const to = new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth() + 1, 1));
+  // Do NOT derive these via Date.UTC(month.getUTCFullYear(), ...): Date.UTC
+  // applies JS's legacy two-digit-year mapping, silently remapping a raw
+  // numeric year of 0-99 into 1900-1999 (Date.UTC(0, 0, 1) => 1900-01-01, not
+  // year 0000). A caller passing a correctly-derived year-0-99 month start
+  // (see station-scans.service.ts) would otherwise get a partition created
+  // with bounds for the wrong century, and Postgres would then reject the
+  // real row with SQLSTATE 23514 even though a "partition" nominally exists.
+  // setUTCFullYear has no such special case; it also normalizes a month of
+  // 12 into January of the following year, same as Date.UTC's overflow.
+  const from = new Date(0);
+  from.setUTCFullYear(month.getUTCFullYear(), month.getUTCMonth(), 1);
+  const to = new Date(0);
+  to.setUTCFullYear(month.getUTCFullYear(), month.getUTCMonth() + 1, 1);
   return [from.toISOString(), to.toISOString()];
 }
 

@@ -32,7 +32,19 @@ export class StationScansService {
       const monthStarts = new Set(
         body.items.map((i) => {
           const d = new Date(i.scannedAt);
-          return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
+          // Do NOT derive this via Date.UTC(d.getUTCFullYear(), ...): Date.UTC
+          // applies JS's legacy two-digit-year mapping, silently remapping a
+          // raw numeric year of 0-99 into 1900-1999 (Date.UTC(0, 0, 1) =>
+          // 1900-01-01, not year 0000). A scannedAt in that range would then
+          // ensure the partition for the wrong century while the row inserts
+          // with its real year, and Postgres would reject it with SQLSTATE
+          // 23514 -- the exact 500 this partition-ahead-of-time fix exists to
+          // prevent. setUTCFullYear has no such special case, so start from
+          // the epoch (already zeroed to the first instant of the day) and
+          // only move year/month/date.
+          const monthStart = new Date(0);
+          monthStart.setUTCFullYear(d.getUTCFullYear(), d.getUTCMonth(), 1);
+          return monthStart.getTime();
         }),
       );
       await ensurePartitions(

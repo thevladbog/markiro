@@ -269,6 +269,42 @@ describe.skipIf(!ready)("station-scans e2e", () => {
     expect(await codesCount(tenantId, shiftId)).toBe(1);
   });
 
+  // Regression for the Date.UTC(year, month, 1) two-digit-year remap: a raw
+  // numeric year of 0-99 gets silently mapped to 1900-1999 (Date.UTC(50, 0, 1)
+  // => 1950-01-01, not year 0050), so a scannedAt in that range would
+  // previously ensure the partition for the wrong century while the row
+  // inserts with the real year, and Postgres rejects it with SQLSTATE 23514
+  // -- a 500 that wedges the station's drain loop forever, same failure mode
+  // the partition-window fix above exists to prevent.
+  //
+  // Year 0000 itself (as opposed to any other year 0-99) is not usable here:
+  // Postgres's calendar has no year zero -- `SELECT '0000-01-01'::date`
+  // fails with 22008 "date/time field value out of range" independent of
+  // partitioning -- so this fixture uses year 0050, which both zod's
+  // `.datetime()` and Postgres accept, and which still falls in the
+  // remapped range.
+  const TWO_DIGIT_YEAR_SCANNED_AT = "0050-06-15T10:00:00.000Z";
+
+  it("accepts and stores a scan whose scannedAt falls in the Date.UTC two-digit-year range", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const apiKey = await deviceKey(agent);
+    const shiftId = await openShift(agent);
+
+    const res = await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send({
+        batchId: "machine-1:650",
+        items: [item(shiftId, 1, { scannedAt: TWO_DIGIT_YEAR_SCANNED_AT })],
+      })
+      .expect(201);
+
+    expect(res.body).toMatchObject({ applied: 1, alreadyApplied: false });
+    expect(await scanEventsCount(tenantId, shiftId)).toBe(1);
+    expect(await codesCount(tenantId, shiftId)).toBe(1);
+  });
+
   it("stores a scan_events row with no codes row when the item's code is null", async () => {
     // Real traffic: the station writes a NULL code for every scan it judged
     // a duplicate (see the outbox/journal writer), so this is not
