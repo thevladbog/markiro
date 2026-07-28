@@ -12,11 +12,11 @@ reach that this pass deliberately left alone.
 
 ## Reachable by a device key
 
-| Route                                                                            | Why the station needs it                                       |
-| -------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| `GET /station/operators`                                                         | the offline sign-in roster (hashes only)                       |
-| `GET /shifts`, `POST /shifts`, `GET /shifts/:id/bundle`, `POST /shifts/:id/open` | shift selection, ad-hoc shift creation, and the offline bundle |
-| `GET /products`, `POST /products/gtin-check`                                     | resolving a scanned GTIN when creating a shift                 |
+| Route                                                                            | Why the station needs it                                                                                                                                                                                                                                                                                  |
+| -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /station/operators`                                                         | the offline sign-in roster (hashes only)                                                                                                                                                                                                                                                                  |
+| `GET /shifts`, `POST /shifts`, `GET /shifts/:id/bundle`, `POST /shifts/:id/open` | shift selection, ad-hoc shift creation, and the offline bundle — `GET /shifts` is also the enrollment reachability probe (`whoami()` in `apps/station/src/lib/api-client.ts`, called by `Enrollment.tsx`), so it can never be moved behind `SessionOnlyGuard` without making device enrollment impossible |
+| `GET /products`, `POST /products/gtin-check`                                     | resolving a scanned GTIN when creating a shift                                                                                                                                                                                                                                                            |
 
 ## Cabinet-only (`SessionOnlyGuard`)
 
@@ -54,10 +54,32 @@ pickup-kiosk workstream triages them.
 
 ## Rule for new routes
 
+This document, and the three sections above, are about `TenantGuard`-guarded
+routes — the ones a station's `x-api-key` resolves a tenant through. Not
+every route in the API is one of those, and a route that isn't doesn't
+belong in any of the three sections:
+
+- `GET /health` (`apps/api/src/health.controller.ts`) carries **no guard at
+  all** — an intentionally unauthenticated liveness check, not a triage gap.
+- The kiosk device-facing routes in
+  `apps/api/src/modules/kiosk/kiosk.controller.ts` (singular) authenticate via
+  `x-kiosk-token` through `KioskDeviceGuard`, a different device secret
+  entirely (looked up against `kiosks.deviceTokenHash`, not an api-key). **A
+  reader must not conclude from "Not yet triaged" that all kiosk surface is
+  `TenantGuard`-only**: that section's `kiosks` row is the plural
+  `kiosks.controller.ts` (admin management of kiosk devices, still
+  `TenantGuard`-only and genuinely untriaged); this singular
+  `kiosk.controller.ts` already has its own guard and was never in scope for
+  this document.
+
 Anything a station does not demonstrably need gets `SessionOnlyGuard`. When
-adding a tenant-guarded route, decide which of the three sections above it
-belongs in (reachable, cabinet-only, or — only if it is explicitly out of
-scope for this triage, e.g. a pickup-kiosk route — not yet triaged) and add
-it there in the same change. "Not yet triaged" is not a resting place for new
-station or cabinet routes; it exists solely for the pickup-kiosk workstream's
-own modules until they classify them.
+adding a `TenantGuard`-guarded route, decide which of the three sections
+above it belongs in (reachable, cabinet-only, or — only if it is explicitly
+out of scope for this triage, e.g. a pickup-kiosk route — not yet triaged)
+and add it there in the same change. "Not yet triaged" is not a resting
+place for new station or cabinet routes; it exists solely for the
+pickup-kiosk workstream's own `TenantGuard`-only modules until they classify
+them. A route guarded by something other than `TenantGuard`/`SessionOnlyGuard`
+(no guard, or a bespoke device guard like `KioskDeviceGuard`) is out of scope
+for this document by construction — but note it here anyway, as above, so
+this list of exceptions doesn't silently go stale.

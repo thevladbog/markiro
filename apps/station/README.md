@@ -135,6 +135,90 @@ Everything about this slice that real hardware — not CI — must confirm is
 consolidated in
 [`docs/hardware-acceptance-checklist.md`](../../docs/hardware-acceptance-checklist.md).
 
+## Workstation configuration
+
+`WorkstationSetup` persists everything an operator configures once into a
+single `hardware_config` entry in `station_meta`
+(`src/lib/hardware-config.ts`): the scanner's serial port and baud, the
+printer target (serial port + its own baud, or TCP host:port), and the
+printer's command language (`zpl` | `tspl`). The serial printer's baud is
+independent of the scanner's — they are two separate serial devices, and
+nothing ties their rates together.
+
+### Printing renders in the configured language, not the template's
+
+A label template's `spec` is language-neutral geometry; `generateZpl` and
+`generateTspl` (`@markiro/domain`) both consume the same spec. The station
+never calls either emitter directly for a real print — `renderLabelBytes`
+(`src/lib/print-label.ts`) picks the emitter from
+`hardware_config.printerLanguage`, i.e. the workstation's own configuration,
+and ignores the template's `language` field entirely. That field only
+decides what the admin editor previews and downloads. This is deliberate: it
+lets a plant run mixed printers off one set of templates, and it means a ZPL
+template prints correctly on a TSPL printer (and vice versa) as long as the
+workstation is configured for whatever printer is actually attached.
+Re-deriving the emitter from the template's `language` instead of the
+workstation's configured one is the most likely way this gets
+re-implemented wrongly later.
+
+### Scanner: three honest states, generation-counted sessions
+
+The status bar's scanner indicator (`scannerIndicator` in `src/App.tsx`)
+shows one of three states:
+
+- `"keyboard"` — no serial scanner is configured; the keyboard-wedge source
+  is the default and needs no configuration, but it also can't be detected,
+  so this is a statement of "nothing to check", not a claim that a scanner
+  is present.
+- `"connected"` — a serial scanner is configured **and** the Rust
+  `station://scanner-status` event most recently said `"connected"`.
+- `"disconnected"` — a serial scanner is configured but the event has said
+  anything else, or hasn't arrived yet.
+
+With a scanner configured, only an explicit `"connected"` event counts as
+connected. The effect that opens/closes the scanner session (keyed on
+`hardwareConfig.scanner`, right above the render logic that calls
+`scannerIndicator`) resets `scannerStatus` to `null` and closes the previous
+session before opening the newly configured one, specifically so a scanner
+that never actually opened cannot keep showing a stale `"connected"` left
+over from whatever was configured before. A green light for a scanner that
+never opened is exactly the failure this exists to prevent: an operator
+scans into what they believe is a working line and nothing happens.
+
+Sessions themselves (`src-tauri/src/scanner.rs`) are tracked with a
+monotonic generation counter. `open_scanner` opens the port and starts its
+reader thread **before** advancing the generation — with a bounded retry
+(`OPEN_ATTEMPTS` × `OPEN_RETRY_DELAY`, roughly a second total, absorbing the
+OS's port-busy window right after a close) — so a failed open never retires
+a working session: the previous session's thread, port handle and
+"connected" status all stay untouched until a new open actually succeeds.
+Only then does the generation advance, and only then does the previous
+reader thread see a newer generation and exit.
+
+### Operator roster: atomic publish via two alternating slots
+
+`replaceOperatorsMirror` (`src/lib/mirror.ts`) publishes an incoming roster
+into whichever of `operators_mirror` / `operators_mirror_b` is currently
+INACTIVE — named by `station_meta.operators_slot` — and only once every row
+has landed does it flip `operators_slot` to point at the slot it just
+filled: a single `INSERT ... ON CONFLICT` statement, the only unit of
+atomicity `tauri-plugin-sql`'s pooled connections actually give us. A
+refresh that fails partway is therefore never visible: sign-in keeps
+reading the last complete roster instead of a half-written one. A
+generation column on a single table cannot do this: writing a new
+generation means upserting each operator's existing row in place, which
+moves that row out of the still-active generation the moment it's
+rewritten, so an interrupted refresh would drop exactly the operators it
+had already processed. Two alternating tables have no such window — the
+live table is never touched until the new one is complete. Refreshes are
+serialized through a promise chain (`refreshChain`) so two overlapping
+syncs (the initial roster pull, the `online` retry, and a shift bundle
+download can all trigger one) can never both resolve the same inactive slot
+as their target.
+
+See [`docs/device-key-surface.md`](../../docs/device-key-surface.md) for
+what a station's device api-key may reach on the server.
+
 ## Tests
 
 ```bash

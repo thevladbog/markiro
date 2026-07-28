@@ -622,8 +622,18 @@ describe.skipIf(!ready)("products e2e", () => {
       .expect(403);
     await request(server).delete(`/products/${id}`).set("x-api-key", apiKey).expect(403);
 
-    // Regression guard: the station's own routes stay reachable by the same key.
-    await request(server).get("/products").set("x-api-key", apiKey).expect(200);
+    // Regression guard: the station's own routes stay reachable by the same
+    // key. The station never calls a bare `GET /products` -- `NewShift.tsx`
+    // always searches by the scanned gtin14 (`/products?search=<gtin14>`) --
+    // so assert the actual call shape, not just an unfiltered list.
+    const search = await request(server)
+      .get("/products")
+      .query({ search: GTIN14_CANONICAL })
+      .set("x-api-key", apiKey)
+      .expect(200);
+    expect(search.body.items).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id, gtin14: GTIN14_CANONICAL })]),
+    );
     const gtinCheck = await request(server)
       .post("/products/gtin-check")
       .set("x-api-key", apiKey)

@@ -41,7 +41,7 @@ beside each item.
 - [ ] Updater endpoint reachable; the `{{target}}` placeholder allowlist works.
 - [ ] Kiosk lockdown is actually invoked and cannot trap an operator.
 
-## Scanner and printer (plan 05b-2)
+## Scanner and printer (plans 05b-2, 05b-3)
 
 - [ ] Serial scanner: real device, baud negotiation, payload terminators.
 - [ ] Keyboard-wedge fallback works with a HID scanner and no setup.
@@ -62,3 +62,11 @@ beside each item.
       close-before-open): the reopen succeeds without restarting the app.
 - [ ] Printer over TCP 9100 and over serial; test print from the setup screen.
 - [ ] USB/spooler printing — out of the 05b-2 transport scope; decide whether it is needed.
+- [ ] A ZPL template prints correctly on a TSPL printer and vice versa (the
+      configured language wins): `renderLabelBytes` picks the emitter from
+      `hardware_config.printerLanguage`, not the template's own `language`
+      field, so this is what actually needs proving on real printers.
+- [ ] The setup screen's test print produces the same output as a real
+      label print: today `WorkstationSetup` is the only call site for
+      `renderLabelBytes`/`hw.print`, so confirm any later per-shift printing
+      renders through the same path rather than a divergent one.
