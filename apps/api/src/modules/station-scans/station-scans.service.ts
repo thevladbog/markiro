@@ -1,6 +1,6 @@
 import { BadRequestException, Inject, Injectable } from "@nestjs/common";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
-import { schema, type Db } from "@markiro/db";
+import { ensurePartitions, schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
 import type { SyncBatchDto, SyncBatchResponseDto } from "./dto";
 
@@ -16,6 +16,31 @@ export class StationScansService {
    * all-or-nothing.
    */
   async applyBatch(tenantId: string, body: SyncBatchDto): Promise<SyncBatchResponseDto> {
+    // Ensure the months this batch actually needs have partitions BEFORE
+    // opening the transaction below. Only the scheduled job (JobsModule)
+    // proactively maintains current+next month; a device offline across a
+    // month boundary, with a dead RTC, or delivering after a database
+    // restore can carry a scannedAt outside that window. Without this, the
+    // insert below raises SQLSTATE 23514 ("no partition of relation found
+    // for row") uncaught -> 500, and the device's drain loop treats every
+    // error as retryable, wedging the station's queue forever -- exactly
+    // what this slice exists to prevent. Doing it here rather than inside
+    // the transaction matters: CREATE TABLE ... PARTITION OF takes an
+    // ACCESS EXCLUSIVE lock on the parent, which would otherwise be held for
+    // the whole batch insert and block concurrent ingest.
+    if (body.items.length > 0) {
+      const monthStarts = new Set(
+        body.items.map((i) => {
+          const d = new Date(i.scannedAt);
+          return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
+        }),
+      );
+      await ensurePartitions(
+        this.db,
+        [...monthStarts].map((t) => new Date(t)),
+      );
+    }
+
     return this.db.transaction(async (tx) => {
       const claimed = await tx
         .insert(schema.syncBatches)
