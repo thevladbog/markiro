@@ -399,17 +399,26 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
   it("insertOrderWithRetry's kiosk-row lock blocks a concurrent holder", async () => {
     const pickupOrdersService = app!.get(PickupOrdersService);
     const HOLD_MS = 250;
+    let lockAcquired!: () => void;
+    const holderOwnsLock = new Promise<void>((resolve) => {
+      lockAcquired = resolve;
+    });
     const holderDone = db.transaction(async (tx) => {
       await tx
         .select({ id: schema.kiosks.id })
         .from(schema.kiosks)
         .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, kioskId)))
         .for("update");
+      lockAcquired();
       await new Promise((resolve) => setTimeout(resolve, HOLD_MS));
     });
 
-    // Give the holder a head start so it acquires the lock first.
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    // Deterministic handoff: start the order only once the holder actually
+    // owns the row lock. A fixed head-start delay would be a race -- on a
+    // slow or contended run the order could begin first, sail through
+    // unblocked, and fail the timing assertion below for a reason that has
+    // nothing to do with the lock this test exists to prove.
+    await holderOwnsLock;
 
     const start = Date.now();
     const result = await pickupOrdersService.createFromKiosk(tenantId, kioskId, {

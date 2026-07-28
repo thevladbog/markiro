@@ -3,6 +3,7 @@ import {
   ConflictException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
   UnauthorizedException,
 } from "@nestjs/common";
@@ -44,6 +45,8 @@ type ParsedItem =
 
 @Injectable()
 export class PickupOrdersService {
+  private readonly logger = new Logger(PickupOrdersService.name);
+
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly operatorsService: OperatorsService,
@@ -137,6 +140,16 @@ export class PickupOrdersService {
           conflicts: [],
         };
       }
+      // No order row is created here, so `syncConflicts` has nowhere to live:
+      // the kiosk gets these conflicts in its response, but the cabinet would
+      // otherwise never learn that a worker's ENTIRE scan session was refused
+      // — the same blind spot `syncConflicts` exists to close, in its worst
+      // case. Log it so the event is at least observable to operations.
+      // A durable, admin-visible record needs a surface of its own (there is
+      // no order to hang it on) and is tracked separately.
+      this.logger.warn(
+        `kiosk ${kioskId}: all ${dto.items.length} scanned code(s) refused for employee ${employeeId} — ${conflicts.map((c) => c.reason).join(", ")}`,
+      );
       return { orderNo: "", status: "pending", itemCount: 0, conflicts };
     }
 
