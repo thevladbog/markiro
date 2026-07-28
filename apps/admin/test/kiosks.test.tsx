@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { KiosksPage } from "../src/pages/kiosks/index.js";
@@ -7,6 +7,7 @@ import { KiosksPage } from "../src/pages/kiosks/index.js";
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 /** Minimal Response stand-in -- only what apps/admin/src/api/client.ts reads. */
@@ -32,6 +33,13 @@ function renderPage() {
 // A few seconds in the past -- well within the ~2 minute online window, and
 // not timing-flaky (see the task brief's note on avoiding a fixed clock).
 const RECENT_LAST_SEEN = new Date(Date.now() - 5_000).toISOString();
+
+/**
+ * Mirrors `TTL_MS` in `apps/api/src/modules/kiosk/pairing.service.ts` -- the
+ * stub has to hand back the same 15-minute window the real endpoint does, so
+ * the countdown assertions below reflect production behaviour.
+ */
+const PAIRING_TTL_MS = 15 * 60_000;
 
 const ONLINE_KIOSK = {
   id: "k1",
@@ -178,13 +186,16 @@ describe("KiosksPage", () => {
     expect(body.name).toBe("Новый киоск");
   });
 
-  it('clicking "Выдать токен" POSTs /api/kiosks/:id/enroll and shows the one-time token in a modal', async () => {
+  it('clicking "Код привязки" POSTs /api/kiosks/:id/pairing-code and reveals the code once', async () => {
     vi.stubGlobal("navigator", { clipboard: { writeText: vi.fn() } });
     const fetchMock = stubFetch({
       kiosks: [ONLINE_KIOSK],
       onPost: (path, init) => {
-        if (path === "/api/kiosks/k1/enroll" && init?.method === "POST") {
-          return jsonResponse(200, { token: "one-time-token-abc123" });
+        if (path === "/api/kiosks/k1/pairing-code" && init?.method === "POST") {
+          return jsonResponse(201, {
+            code: "12345678",
+            expiresAt: new Date(Date.now() + PAIRING_TTL_MS).toISOString(),
+          });
         }
         return undefined;
       },
@@ -193,27 +204,170 @@ describe("KiosksPage", () => {
     renderPage();
     await screen.findByText("Касса у входа");
 
-    fireEvent.click(screen.getByRole("button", { name: "Выдать токен" }));
+    fireEvent.click(screen.getByRole("button", { name: "Код привязки" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/kiosks/k1/enroll",
+        "/api/kiosks/k1/pairing-code",
         expect.objectContaining({ method: "POST" }),
       );
     });
 
-    expect(await screen.findByText("one-time-token-abc123")).toBeDefined();
-    expect(screen.getByText("Токен подключения киоска")).toBeDefined();
+    const dialog = within(await screen.findByRole("dialog"));
+    // Grouped for readability per design brief 07 §"States & constraints".
+    expect(dialog.getByText("1234 5678")).toBeDefined();
+    expect(screen.getByText("Код привязки киоска")).toBeDefined();
+
+    // Copying hands over the bare digits -- the display grouping is presentation
+    // only, and a space pasted into the kiosk's numeric keypad would not match.
+    fireEvent.click(dialog.getByRole("button", { name: "Скопировать" }));
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith("12345678");
   });
 
-  it("hides the enroll and archive row actions for an archived kiosk", async () => {
+  it("renders the pairing code as a scannable barcode", async () => {
+    stubFetch({
+      kiosks: [ONLINE_KIOSK],
+      onPost: (path, init) => {
+        if (path === "/api/kiosks/k1/pairing-code" && init?.method === "POST") {
+          return jsonResponse(201, {
+            code: "12345678",
+            expiresAt: new Date(Date.now() + PAIRING_TTL_MS).toISOString(),
+          });
+        }
+        return undefined;
+      },
+    });
+
+    renderPage();
+    await screen.findByText("Касса у входа");
+    fireEvent.click(screen.getByRole("button", { name: "Код привязки" }));
+
+    // The barcode is lazy-loaded (bwip-js stays out of the main bundle), so it
+    // resolves well after the dialog itself: the dynamic import has to fetch
+    // and evaluate a ~1 MB chunk, measured at ~300ms even on an idle dev
+    // machine. Testing Library's default 1000ms wait left too thin a margin and
+    // timed out on CI's 2-core runner under parallel workers, so this one query
+    // gets an explicit budget (same escape hatch as `shifts.test.tsx`). Kept
+    // under vitest's 5000ms per-test default, which would otherwise fire first
+    // and turn a slow import into a less legible test-level timeout.
+    const barcode = await screen.findByRole("img", { name: /12345678/ }, { timeout: 3000 });
+    await waitFor(() => expect(barcode.querySelector("svg")).not.toBeNull());
+  });
+
+  it("counts the TTL down and drops into an expired state once it elapses", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    stubFetch({
+      kiosks: [ONLINE_KIOSK],
+      onPost: (path, init) => {
+        if (path === "/api/kiosks/k1/pairing-code" && init?.method === "POST") {
+          return jsonResponse(201, {
+            code: "12345678",
+            expiresAt: new Date(Date.now() + PAIRING_TTL_MS).toISOString(),
+          });
+        }
+        return undefined;
+      },
+    });
+
+    renderPage();
+    await screen.findByText("Касса у входа");
+    fireEvent.click(screen.getByRole("button", { name: "Код привязки" }));
+
+    const dialog = within(await screen.findByRole("dialog"));
+    expect(dialog.getByText("Действителен ещё 15:00")).toBeDefined();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(dialog.getByText("Действителен ещё 14:00")).toBeDefined();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PAIRING_TTL_MS);
+    });
+    expect(dialog.getByText("Срок действия кода истёк. Сформируйте новый код.")).toBeDefined();
+    expect(dialog.queryByText("1234 5678")).toBeNull();
+  });
+
+  it("regenerates the code, replacing the revealed one with the freshly issued code", async () => {
+    let issued = 0;
+    const codes = ["12345678", "87654321"];
+    const fetchMock = stubFetch({
+      kiosks: [ONLINE_KIOSK],
+      onPost: (path, init) => {
+        if (path === "/api/kiosks/k1/pairing-code" && init?.method === "POST") {
+          const code = codes[issued++]!;
+          return jsonResponse(201, {
+            code,
+            expiresAt: new Date(Date.now() + PAIRING_TTL_MS).toISOString(),
+          });
+        }
+        return undefined;
+      },
+    });
+
+    renderPage();
+    await screen.findByText("Касса у входа");
+    fireEvent.click(screen.getByRole("button", { name: "Код привязки" }));
+
+    const dialog = within(await screen.findByRole("dialog"));
+    await dialog.findByText("1234 5678");
+
+    fireEvent.click(dialog.getByRole("button", { name: "Сформировать новый" }));
+
+    expect(await dialog.findByText("8765 4321")).toBeDefined();
+    expect(dialog.queryByText("1234 5678")).toBeNull();
+    expect(
+      fetchMock.mock.calls.filter(
+        (call) => call[0] === "/api/kiosks/k1/pairing-code" && call[1]?.method === "POST",
+      ),
+    ).toHaveLength(2);
+  });
+
+  it("closing the modal discards the code so it can never be revealed twice", async () => {
+    stubFetch({
+      kiosks: [ONLINE_KIOSK],
+      onPost: (path, init) => {
+        if (path === "/api/kiosks/k1/pairing-code" && init?.method === "POST") {
+          return jsonResponse(201, {
+            code: "12345678",
+            expiresAt: new Date(Date.now() + PAIRING_TTL_MS).toISOString(),
+          });
+        }
+        return undefined;
+      },
+    });
+
+    renderPage();
+    await screen.findByText("Касса у входа");
+    fireEvent.click(screen.getByRole("button", { name: "Код привязки" }));
+
+    const dialog = await screen.findByRole("dialog");
+    await within(dialog).findByText("1234 5678");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Готово" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.queryByText("1234 5678")).toBeNull();
+  });
+
+  it("no longer offers the raw-token enroll action", async () => {
+    stubFetch({ kiosks: [ONLINE_KIOSK], products: [] });
+
+    renderPage();
+    await screen.findByText("Касса у входа");
+
+    // Pairing replaced enrollment outright: the cabinet must not expose a
+    // second provisioning path that reveals a device token in plaintext.
+    expect(screen.queryByRole("button", { name: "Выдать токен" })).toBeNull();
+  });
+
+  it("hides the pairing and archive row actions for an archived kiosk", async () => {
     stubFetch({ kiosks: [ARCHIVED_KIOSK], products: [] });
 
     renderPage();
     await screen.findByText("Архивный киоск");
 
     // Both lifecycle actions are meaningless once archived -- only Edit remains.
-    expect(screen.queryByRole("button", { name: "Выдать токен" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Код привязки" })).toBeNull();
     expect(screen.queryByRole("button", { name: "В архив" })).toBeNull();
     expect(screen.getByRole("button", { name: "Изменить" })).toBeDefined();
   });
