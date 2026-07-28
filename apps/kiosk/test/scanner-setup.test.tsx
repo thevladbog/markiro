@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "../src/i18n/index.js";
 import type { KioskBootstrapDto } from "../src/api/types.js";
-import type { ScanListener, ScanSource } from "../src/scanner/source.js";
+import type { ScanListener } from "../src/scanner/source.js";
 import type { SerialPort } from "../src/scanner/web-serial.js";
 import { readConfig, readScannerSettings, writeConfig } from "../src/store/config.js";
 import { ScannerSetup } from "../src/screens/ScannerSetup.js";
@@ -48,38 +48,22 @@ async function bootstrapWith(seeds: OperatorSeed[]): Promise<KioskBootstrapDto> 
   };
 }
 
-/** A `ScanSource` whose `start` captures the listener, so a test can push a
- * payload through the same seam the keyboard wedge uses. `listening` exposes
- * whether it is currently subscribed, which is how a test proves the screen
- * handed the test scan over to another transport instead of quietly keeping
- * this one. */
-function fakeScanSource(): ScanSource & { emit: (raw: string) => void; listening: () => boolean } {
-  let listener: ScanListener | null = null;
-  return {
-    isAvailable: () => true,
-    start(next) {
-      listener = next;
-      return () => {
-        listener = null;
-      };
-    },
-    emit(raw) {
-      act(() => listener?.(raw));
-    },
-    listening: () => listener !== null,
-  };
-}
-
 /**
  * The shell's fan-out (`KioskShell`'s listener `Set`) over whatever transport
- * the kiosk is CURRENTLY running — the seam the gate signs an operator in
- * through, and a different one from `scanSource` on purpose.
+ * the kiosk is CURRENTLY running — and this screen's ONLY seam onto a scanner,
+ * for the gate's badge and for the test scan alike.
  *
- * A fan-out rather than a second `ScanSource` because that is the shape of the
- * real thing, and the shape is the fix: the shell subscribes to the transport
- * once and hands out set membership, so a screen joining it takes nothing away
- * from the screen behind it — which a second listener on a single-subscriber
- * `createWebSerialSource` very much does.
+ * A fan-out rather than a `ScanSource` because that is the shape of the real
+ * thing, and the shape is the fix: the shell subscribes to the transport once
+ * and hands out set membership, so a screen joining it takes nothing away from
+ * the screen behind it — which a second listener on a single-subscriber
+ * `createWebSerialSource` very much does. There is deliberately no way to hand
+ * this screen a source of its own; that the prop does not exist is what stops
+ * the bug coming back.
+ *
+ * `listeners` is what pins the handover between this screen's two readers: the
+ * gate and the test scan mean opposite things by the same gesture, so exactly
+ * one of them may ever hold a place in the set.
  */
 function fakeFanOut(): {
   subscribe: (listener: ScanListener) => () => void;
@@ -99,64 +83,33 @@ function fakeFanOut(): {
   };
 }
 
-/** A fan-out nothing is ever pushed through, for the tests whose subject is the
- * test scan — that one reads `scanSource`, never this. Module-level so it is
- * referentially stable, as the prop requires. */
+/** A fan-out nothing is ever pushed through, for the tests that are not about a
+ * scan at all. Module-level so it is referentially stable, as the prop
+ * requires. */
 const noFanOut = (): (() => void) => () => {};
 
 /**
- * A `SerialPort` whose readable stream this test drives, so a payload can be
- * pushed through the REAL `createWebSerialSource` reader loop.
+ * The object `navigator.serial.requestPort()` hands back, and deliberately an
+ * INERT one.
  *
- * It models the port's actual lifecycle rather than a stub of it, because the
- * transport can be picked more than once per visit: `open()` on a port that is
- * not closed rejects with an `InvalidStateError`, `readable` is null while the
- * port is closed, and a cancelled `readable` is dropped so the next access
- * vends a fresh stream. A fake that shrugged at a second `open()` would let a
- * source that cannot be restarted pass. Mirrors `restartablePort` in
- * `test/scanner.test.ts`.
+ * This screen obtains the grant — it is the only place in the whole flow that
+ * can, since `requestPort()` needs transient user activation — and then hands
+ * it straight to the shell. It never opens the port, never reads it and never
+ * closes it: one owner holds the transport, and this is not the owner. So the
+ * port is here to be passed along and identified, and modelling a lifecycle
+ * this screen does not drive would only imply it does.
+ *
+ * The lifecycle IS modelled where it is genuinely exercised — `restartablePort`
+ * in `test/scanner.test.ts` for the source itself, and `fakeSerialPort` in
+ * `test/app.test.tsx` for the shell that owns it.
  */
-function fakePort(): { port: SerialPort; scan: (raw: string) => void; opened: () => boolean } {
-  let isOpen = false;
-  let stream: ReadableStream<Uint8Array> | null = null;
-  let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
-
-  const port: SerialPort = {
-    open: async () => {
-      if (isOpen) throw new DOMException("The port is already open.", "InvalidStateError");
-      isOpen = true;
-    },
-    close: async () => {
-      isOpen = false;
-      stream = null;
-      controller = null;
-    },
-    get readable() {
-      if (stream) return stream;
-      if (!isOpen) return null;
-      stream = new ReadableStream<Uint8Array>({
-        start(c) {
-          controller = c;
-        },
-        cancel() {
-          stream = null;
-          controller = null;
-        },
-      });
-      return stream;
-    },
-  };
-
+function fakePort(): { port: SerialPort } {
   return {
-    port,
-    // Scanners terminate a scan with CR/LF; the source chunks on it. Touching
-    // the getter first vends the stream if the source has not reached it yet,
-    // exactly as a real port does.
-    scan: (raw) => {
-      void port.readable;
-      controller?.enqueue(new TextEncoder().encode(`${raw}\r\n`));
+    port: {
+      open: async () => {},
+      close: async () => {},
+      readable: null,
     },
-    opened: () => isOpen,
   };
 }
 
@@ -212,15 +165,7 @@ afterEach(() => {
 
 describe("ScannerSetup — transports offered", () => {
   it("offers only the keyboard wedge when the device has no Web Serial", () => {
-    render(
-      <ScannerSetup
-        paired={false}
-        bootstrap={null}
-        scanSource={fakeScanSource()}
-        subscribe={noFanOut}
-        onClose={vi.fn()}
-      />,
-    );
+    render(<ScannerSetup paired={false} bootstrap={null} subscribe={noFanOut} onClose={vi.fn()} />);
 
     // A tablet must never be shown a port picker it cannot use.
     expect(screen.getAllByRole("radio")).toHaveLength(1);
@@ -230,15 +175,7 @@ describe("ScannerSetup — transports offered", () => {
 
   it("offers both transports when navigator.serial exists", () => {
     setWebSerial(true);
-    render(
-      <ScannerSetup
-        paired={false}
-        bootstrap={null}
-        scanSource={fakeScanSource()}
-        subscribe={noFanOut}
-        onClose={vi.fn()}
-      />,
-    );
+    render(<ScannerSetup paired={false} bootstrap={null} subscribe={noFanOut} onClose={vi.fn()} />);
 
     expect(screen.getAllByRole("radio")).toHaveLength(2);
     expect(radio(SERIAL)).toBeTruthy();
@@ -259,18 +196,17 @@ describe("ScannerSetup — the test scan", () => {
 
   for (const { what, raw, label } of cases) {
     it(`echoes ${what} as its own kind`, () => {
-      const source = fakeScanSource();
+      const scanner = fakeFanOut();
       render(
         <ScannerSetup
           paired={false}
           bootstrap={null}
-          scanSource={source}
-          subscribe={noFanOut}
+          subscribe={scanner.subscribe}
           onClose={vi.fn()}
         />,
       );
 
-      source.emit(raw);
+      scanner.emit(raw);
       expect(status().textContent).toContain(label);
     });
   }
@@ -280,20 +216,19 @@ describe("ScannerSetup — the test scan", () => {
     // keyboard wedge swallows GS must be able to tell that apart from a code
     // the kiosk simply does not know, because only the first one is fixed by
     // switching to Web Serial.
-    const source = fakeScanSource();
+    const scanner = fakeFanOut();
     render(
       <ScannerSetup
         paired={false}
         bootstrap={null}
-        scanSource={source}
-        subscribe={noFanOut}
+        subscribe={scanner.subscribe}
         onClose={vi.fn()}
       />,
     );
 
-    source.emit(`01${GTIN}21KYC9X7MQ93Abcd`);
+    scanner.emit(`01${GTIN}21KYC9X7MQ93Abcd`);
     const incomplete = status().textContent;
-    source.emit(GTIN);
+    scanner.emit(GTIN);
     const unknown = status().textContent;
 
     expect(incomplete).not.toEqual(unknown);
@@ -306,18 +241,17 @@ describe("ScannerSetup — the test scan", () => {
     // dead-end the installer on the ONE diagnostic this screen exists to
     // deliver — the actionable fix on such a device is the scanner's own
     // configuration, which can be told to transmit GS.
-    const source = fakeScanSource();
+    const scanner = fakeFanOut();
     render(
       <ScannerSetup
         paired={false}
         bootstrap={null}
-        scanSource={source}
-        subscribe={noFanOut}
+        subscribe={scanner.subscribe}
         onClose={vi.fn()}
       />,
     );
 
-    source.emit(`01${GTIN}21KYC9X7MQ93Abcd`);
+    scanner.emit(`01${GTIN}21KYC9X7MQ93Abcd`);
 
     const advice = status().textContent ?? "";
     expect(advice).toContain("GS");
@@ -327,18 +261,17 @@ describe("ScannerSetup — the test scan", () => {
 
   it("keeps the switch-to-Web-Serial advice where Web Serial actually exists", () => {
     setWebSerial(true);
-    const source = fakeScanSource();
+    const scanner = fakeFanOut();
     render(
       <ScannerSetup
         paired={false}
         bootstrap={null}
-        scanSource={source}
-        subscribe={noFanOut}
+        subscribe={scanner.subscribe}
         onClose={vi.fn()}
       />,
     );
 
-    source.emit(`01${GTIN}21KYC9X7MQ93Abcd`);
+    scanner.emit(`01${GTIN}21KYC9X7MQ93Abcd`);
 
     expect(status().textContent).toMatch(/switch to web serial/i);
   });
@@ -346,20 +279,19 @@ describe("ScannerSetup — the test scan", () => {
   it("names the dropped separator in the primary language too", async () => {
     await i18n.changeLanguage("ru");
     try {
-      const source = fakeScanSource();
+      const scanner = fakeFanOut();
       render(
         <ScannerSetup
           paired={false}
           bootstrap={null}
-          scanSource={source}
-          subscribe={noFanOut}
+          subscribe={scanner.subscribe}
           onClose={vi.fn()}
         />,
       );
 
-      source.emit(`01${GTIN}21KYC9X7MQ93Abcd`);
+      scanner.emit(`01${GTIN}21KYC9X7MQ93Abcd`);
       expect(status().textContent).toContain("разделителя GS");
-      source.emit(GTIN);
+      scanner.emit(GTIN);
       expect(status().textContent).toContain("Не распознано");
     } finally {
       await i18n.changeLanguage("en");
@@ -369,15 +301,7 @@ describe("ScannerSetup — the test scan", () => {
 
 describe("ScannerSetup — access before pairing", () => {
   it("opens with no credential at all, because the scanner is what reads the pairing code", () => {
-    render(
-      <ScannerSetup
-        paired={false}
-        bootstrap={null}
-        scanSource={fakeScanSource()}
-        subscribe={noFanOut}
-        onClose={vi.fn()}
-      />,
-    );
+    render(<ScannerSetup paired={false} bootstrap={null} subscribe={noFanOut} onClose={vi.fn()} />);
 
     expect(transportGroup()).toBeTruthy();
     expect(screen.getByText(TEST_SCAN)).toBeTruthy();
@@ -389,13 +313,7 @@ describe("ScannerSetup — access after pairing", () => {
   it("keeps the settings out of the document entirely until an operator signs in", async () => {
     const bootstrap = await bootstrapWith([{ login: "1042", pin: "4821" }]);
     const { container } = render(
-      <ScannerSetup
-        paired
-        bootstrap={bootstrap}
-        scanSource={fakeScanSource()}
-        subscribe={noFanOut}
-        onClose={vi.fn()}
-      />,
+      <ScannerSetup paired bootstrap={bootstrap} subscribe={noFanOut} onClose={vi.fn()} />,
     );
 
     // Absent, not merely hidden: a CSS-hidden settings pane would still be in
@@ -411,13 +329,7 @@ describe("ScannerSetup — access after pairing", () => {
   it("keeps it closed on a wrong PIN and says only that sign-in failed", async () => {
     const bootstrap = await bootstrapWith([{ login: "1042", pin: "4821" }]);
     const { container } = render(
-      <ScannerSetup
-        paired
-        bootstrap={bootstrap}
-        scanSource={fakeScanSource()}
-        subscribe={noFanOut}
-        onClose={vi.fn()}
-      />,
+      <ScannerSetup paired bootstrap={bootstrap} subscribe={noFanOut} onClose={vi.fn()} />,
     );
 
     typeDigits("1042");
@@ -435,13 +347,7 @@ describe("ScannerSetup — access after pairing", () => {
     // enumerate personnel numbers, exactly as the station guards against.
     const bootstrap = await bootstrapWith([{ login: "1042", pin: "4821" }]);
     const first = render(
-      <ScannerSetup
-        paired
-        bootstrap={bootstrap}
-        scanSource={fakeScanSource()}
-        subscribe={noFanOut}
-        onClose={vi.fn()}
-      />,
+      <ScannerSetup paired bootstrap={bootstrap} subscribe={noFanOut} onClose={vi.fn()} />,
     );
     typeDigits("1042");
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
@@ -451,15 +357,7 @@ describe("ScannerSetup — access after pairing", () => {
     const wrongPin = screen.getByRole("alert").textContent;
     first.unmount();
 
-    render(
-      <ScannerSetup
-        paired
-        bootstrap={bootstrap}
-        scanSource={fakeScanSource()}
-        subscribe={noFanOut}
-        onClose={vi.fn()}
-      />,
-    );
+    render(<ScannerSetup paired bootstrap={bootstrap} subscribe={noFanOut} onClose={vi.fn()} />);
     typeDigits("7777");
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     typeDigits("4821");
@@ -471,15 +369,7 @@ describe("ScannerSetup — access after pairing", () => {
 
   it("opens on the right personnel number and PIN", async () => {
     const bootstrap = await bootstrapWith([{ login: "1042", pin: "4821" }]);
-    render(
-      <ScannerSetup
-        paired
-        bootstrap={bootstrap}
-        scanSource={fakeScanSource()}
-        subscribe={noFanOut}
-        onClose={vi.fn()}
-      />,
-    );
+    render(<ScannerSetup paired bootstrap={bootstrap} subscribe={noFanOut} onClose={vi.fn()} />);
 
     typeDigits("1042");
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
@@ -493,17 +383,11 @@ describe("ScannerSetup — access after pairing", () => {
   it("opens on a badge scan of an active operator", async () => {
     const bootstrap = await bootstrapWith([{ login: "1042", pin: "4821", badge: "OPBADGE-7" }]);
     // Through the FAN-OUT, because that is where a badge presented at a
-    // running kiosk actually arrives — see the test below for why it cannot be
-    // the injected source.
+    // running kiosk actually arrives — and, since the shell owns the transport,
+    // the only place it can arrive at all.
     const fanOut = fakeFanOut();
     render(
-      <ScannerSetup
-        paired
-        bootstrap={bootstrap}
-        scanSource={fakeScanSource()}
-        subscribe={fanOut.subscribe}
-        onClose={vi.fn()}
-      />,
+      <ScannerSetup paired bootstrap={bootstrap} subscribe={fanOut.subscribe} onClose={vi.fn()} />,
     );
 
     fanOut.emit("OPBADGE-7");
@@ -517,13 +401,7 @@ describe("ScannerSetup — access after pairing", () => {
     ]);
     const fanOut = fakeFanOut();
     render(
-      <ScannerSetup
-        paired
-        bootstrap={bootstrap}
-        scanSource={fakeScanSource()}
-        subscribe={fanOut.subscribe}
-        onClose={vi.fn()}
-      />,
+      <ScannerSetup paired bootstrap={bootstrap} subscribe={fanOut.subscribe} onClose={vi.fn()} />,
     );
 
     fanOut.emit("OPBADGE-7");
@@ -533,76 +411,69 @@ describe("ScannerSetup — access after pairing", () => {
   });
 
   /**
-   * WHICH scanner the gate listens to, pinned in both directions.
+   * WHICH scanner the gate listens to — the device's, and only ever ONE
+   * subscription to it.
    *
-   * `createWebSerialSource` is single-subscriber — `port.readable` is locked by
-   * the first reader — and on a serial kiosk the shell has held that reader
-   * since boot. So a listener this screen starts on its own copy of the
-   * injected source reads NOTHING, and the badge tier of the gate is dead
-   * without a symptom: PIN sign-in still works, so nobody is locked out to
-   * report it, and Web Serial is the configuration this product recommends.
+   * `createWebSerialSource` is single-subscriber (`port.readable` is locked by
+   * the first reader) and on a serial kiosk the shell has held that reader
+   * since boot, so a listener this screen started on a source of its own would
+   * read NOTHING and the badge tier of the gate would be dead without a
+   * symptom: PIN sign-in still works, so nobody is locked out to report it, and
+   * Web Serial is the configuration this product recommends.
    *
-   * The negative half is the half that rots. A gate wired back to `scanSource`
-   * still passes «opens on a badge scan» above if that test hands it the same
-   * seam it emits on — which is exactly how this shipped. Asserting that the
-   * injected source is never even STARTED while the gate is shut is what makes
-   * the wiring, not the test's own plumbing, the thing under test.
+   * The prop that made that possible is gone — a screen can no longer be handed
+   * a source at all — so what is left to pin is the count: the gate joins the
+   * device's scanner exactly once, and takes nothing away from the screen
+   * standing behind it. (The end-to-end half of this, over a real
+   * `SerialPort` the shell is holding, is `test/app.test.tsx`'s «signs an
+   * operator in at the settings gate on a badge read over Web Serial».)
    */
-  it("reads the gate's badge off the running transport and never off the injected source", async () => {
+  it("reads the gate's badge off the running transport, joining it exactly once", async () => {
     const bootstrap = await bootstrapWith([{ login: "1042", pin: "4821", badge: "OPBADGE-7" }]);
-    const injected = fakeScanSource();
     const fanOut = fakeFanOut();
     render(
-      <ScannerSetup
-        paired
-        bootstrap={bootstrap}
-        scanSource={injected}
-        subscribe={fanOut.subscribe}
-        onClose={vi.fn()}
-      />,
+      <ScannerSetup paired bootstrap={bootstrap} subscribe={fanOut.subscribe} onClose={vi.fn()} />,
     );
 
     await waitFor(() => expect(fanOut.listeners()).toBe(1));
-    // Not merely "also subscribed to the fan-out": the injected source is not
-    // started at all, which is the only version of this the serial kiosk can
-    // actually honour.
-    expect(injected.listening()).toBe(false);
 
-    // A badge down the injected source is therefore not the gate's badge...
-    injected.emit("OPBADGE-7");
-    await act(async () => {});
-    expect(transportGroup()).toBeNull();
-
-    // ...and one down the transport the kiosk is running is.
     fanOut.emit("OPBADGE-7");
 
     await waitFor(() => expect(transportGroup()).toBeTruthy());
+    // Still one: opening the gate hands the place over to the test scan, it
+    // does not add a second reader beside the first.
+    expect(fanOut.listeners()).toBe(1);
   });
 
   /**
-   * The handover, and the reason the two props are not one.
+   * The handover between this screen's two readers.
    *
-   * Once the gate is open the same gesture means the opposite thing, and it has
-   * to be answered by the transport the INSTALLER PICKED rather than the one
-   * the shell is running — otherwise the test scan certifies whatever the
-   * kiosk happened to be on and the green light says nothing about the choice,
-   * which is the false green light Task 11's review caught. So the fan-out is
-   * handed back the moment the gate opens: exactly one of the two is ever
-   * listening, and a scan cannot be swallowed by the wrong one.
+   * The same gesture means opposite things on either side of the gate — «let me
+   * in», then «tell me what you made of this» — so exactly one of the two may
+   * ever hold a place in the fan-out. Two at once would answer one scan twice:
+   * a badge presented at the still-locked gate would be echoed as a verdict on
+   * a screen the operator has not been admitted to.
+   *
+   * That the verdict belongs to the transport the INSTALLER PICKED — the false
+   * green light Task 11's review caught — is no longer arranged here at all. It
+   * is arranged by ownership: picking a transport swaps what the shell reads,
+   * so this seam IS the picked transport. `test/app.test.tsx`'s «moves the test
+   * scan onto the transport just picked, and off the one before it» pins that
+   * end to end, through the real swap rather than a stand-in for it.
    */
-  it("hands the fan-out back when the gate opens, and certifies the picked transport instead", async () => {
+  it("hands its place in the fan-out from the gate to the test scan, never holding both", async () => {
     const bootstrap = await bootstrapWith([{ login: "1042", pin: "4821" }]);
-    const injected = fakeScanSource();
     const fanOut = fakeFanOut();
     render(
-      <ScannerSetup
-        paired
-        bootstrap={bootstrap}
-        scanSource={injected}
-        subscribe={fanOut.subscribe}
-        onClose={vi.fn()}
-      />,
+      <ScannerSetup paired bootstrap={bootstrap} subscribe={fanOut.subscribe} onClose={vi.fn()} />,
     );
+
+    // Shut: a scan is a sign-in attempt, and nothing else. It is refused and
+    // NOT echoed as a verdict on a screen nobody has been admitted to.
+    await waitFor(() => expect(fanOut.listeners()).toBe(1));
+    fanOut.emit(`01${GTIN}21KYC9X7MQ${GS}93Abcd`);
+    await waitFor(() => expect(screen.getAllByRole("alert")).toHaveLength(1));
+    expect(status().textContent).toBe("");
 
     typeDigits("1042");
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
@@ -610,17 +481,10 @@ describe("ScannerSetup — access after pairing", () => {
     fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
     await waitFor(() => expect(transportGroup()).toBeTruthy());
 
-    // Left, not merely joined by a second listener: nothing this screen does
-    // from here on should reach the running kiosk's scanner.
-    await waitFor(() => expect(fanOut.listeners()).toBe(0));
-    expect(injected.listening()).toBe(true);
-
-    // So the running transport can no longer certify anything...
+    // Open: one place still, now held by the other reader — and the very same
+    // scan means the opposite thing.
+    await waitFor(() => expect(fanOut.listeners()).toBe(1));
     fanOut.emit(`01${GTIN}21KYC9X7MQ${GS}93Abcd`);
-    expect(status().textContent).toMatch(/waiting for a scan/i);
-
-    // ...and the verdict comes from the transport this screen settled on.
-    injected.emit(`01${GTIN}21KYC9X7MQ${GS}93Abcd`);
 
     expect(status().textContent).toContain("Marking code");
   });
@@ -629,15 +493,7 @@ describe("ScannerSetup — access after pairing", () => {
     // Without it a kiosk whose roster is empty or unreachable is bricked with
     // no visible way out — re-pairing from the cabinet is that way out.
     const bootstrap = await bootstrapWith([]);
-    render(
-      <ScannerSetup
-        paired
-        bootstrap={bootstrap}
-        scanSource={fakeScanSource()}
-        subscribe={noFanOut}
-        onClose={vi.fn()}
-      />,
-    );
+    render(<ScannerSetup paired bootstrap={bootstrap} subscribe={noFanOut} onClose={vi.fn()} />);
 
     const hint = screen.getByText(/unbind this kiosk/i);
     expect(hint.textContent).toMatch(/new code/i);
@@ -649,28 +505,14 @@ describe("ScannerSetup — the chosen transport", () => {
     const { port } = fakePort();
     setWebSerial(true, async () => port);
     const first = render(
-      <ScannerSetup
-        paired={false}
-        bootstrap={null}
-        scanSource={fakeScanSource()}
-        subscribe={noFanOut}
-        onClose={vi.fn()}
-      />,
+      <ScannerSetup paired={false} bootstrap={null} subscribe={noFanOut} onClose={vi.fn()} />,
     );
 
     fireEvent.click(radio(SERIAL));
     await waitFor(async () => expect((await readScannerSettings())?.transport).toBe("serial"));
     first.unmount();
 
-    render(
-      <ScannerSetup
-        paired={false}
-        bootstrap={null}
-        scanSource={fakeScanSource()}
-        subscribe={noFanOut}
-        onClose={vi.fn()}
-      />,
-    );
+    render(<ScannerSetup paired={false} bootstrap={null} subscribe={noFanOut} onClose={vi.fn()} />);
 
     await waitFor(() => expect(radio(SERIAL).checked).toBe(true));
     expect(radio(KEYBOARD).checked).toBe(false);
@@ -692,7 +534,6 @@ describe("ScannerSetup — granting the serial port", () => {
       <ScannerSetup
         paired={false}
         bootstrap={null}
-        scanSource={fakeScanSource()}
         subscribe={noFanOut}
         onTransportChange={onTransportChange}
         onClose={vi.fn()}
@@ -709,61 +550,43 @@ describe("ScannerSetup — granting the serial port", () => {
     expect(onTransportChange).toHaveBeenCalledWith("serial", port);
   });
 
-  it("routes the test scan through the GRANTED port instead of the injected source", async () => {
-    // The whole reason this screen exists is the diagnostic. Certifying the
-    // installer's choice by running the test scan over the keyboard wedge the
-    // parent happened to inject would green-light a transport that was never
-    // exercised — and GS handling, the one thing the two transports disagree
-    // about, is exactly what the verdict reports.
-    const { port, scan, opened } = fakePort();
+  /**
+   * EVERY pick is announced, including a repeat of one already made — and the
+   * grant travels with each one.
+   *
+   * This is the screen's whole half of the swap. It opens no port and reads no
+   * bytes: it obtains the grant (the only place in the flow that can) and hands
+   * it over, and the shell moving what it reads is what puts the test scan on
+   * the picked transport. So a pick that is silently not announced is a green
+   * light for the transport it replaced.
+   *
+   * The Serial → Keyboard → Serial path is the one an installer comparing the
+   * two takes, and its second «serial» is the one most easily dropped — the
+   * radio is already showing what the store already says, so a screen that only
+   * announced CHANGES it noticed would leave the kiosk on the wedge while the
+   * radio claims Web Serial. The port has to travel with it too: the shell
+   * cannot rebuild a source from the mode alone.
+   *
+   * That the transport really does follow all three times is pinned end to end
+   * in `test/app.test.tsx` («holds exactly one transport subscription across a
+   * swap…», which finishes on a real scan through the twice-picked port).
+   */
+  it("announces every pick, and carries the grant with each serial one", async () => {
+    const { port } = fakePort();
     setWebSerial(true, async () => port);
-    const injected = fakeScanSource();
+    const onTransportChange = vi.fn();
     render(
       <ScannerSetup
         paired={false}
         bootstrap={null}
-        scanSource={injected}
         subscribe={noFanOut}
+        onTransportChange={onTransportChange}
         onClose={vi.fn()}
       />,
     );
 
-    expect(injected.listening()).toBe(true);
     fireEvent.click(radio(SERIAL));
     await waitFor(() => expect(radio(SERIAL).checked).toBe(true));
-
-    // The wedge is torn down, so it can no longer certify anything...
-    await waitFor(() => expect(injected.listening()).toBe(false));
-    injected.emit(`01${GTIN}21KYC9X7MQ${GS}93Abcd`);
-    expect(status().textContent).toMatch(/waiting for a scan/i);
-
-    // ...and the port the installer granted is what the verdict comes from.
-    await waitFor(() => expect(opened()).toBe(true));
-    scan(`01${GTIN}21KYC9X7MQ${GS}93Abcd`);
-    await waitFor(() => expect(status().textContent).toContain("Marking code"));
-  });
-
-  it("still verifies the scanner after a Serial → Keyboard → Serial toggle", async () => {
-    // An installer comparing the two transports lands here, and this screen is
-    // the only place that can hand out a port grant at all. If the second pick
-    // left the source dead, the ONE screen whose purpose is verifying the
-    // scanner would sit on «waiting for a scan» forever with no hint that a
-    // reload is what it needs — failing closed, but a dead end for exactly the
-    // person it exists to serve.
-    const { port, scan, opened } = fakePort();
-    setWebSerial(true, async () => port);
-    render(
-      <ScannerSetup
-        paired={false}
-        bootstrap={null}
-        scanSource={fakeScanSource()}
-        subscribe={noFanOut}
-        onClose={vi.fn()}
-      />,
-    );
-
-    fireEvent.click(radio(SERIAL));
-    await waitFor(() => expect(opened()).toBe(true));
 
     fireEvent.click(radio(KEYBOARD));
     await waitFor(() => expect(radio(KEYBOARD).checked).toBe(true));
@@ -771,8 +594,12 @@ describe("ScannerSetup — granting the serial port", () => {
     fireEvent.click(radio(SERIAL));
     await waitFor(() => expect(radio(SERIAL).checked).toBe(true));
 
-    scan(`01${GTIN}21KYC9X7MQ${GS}93Abcd`);
-    await waitFor(() => expect(status().textContent).toContain("Marking code"));
+    await waitFor(() => expect(onTransportChange).toHaveBeenCalledTimes(3));
+    expect(onTransportChange.mock.calls).toEqual([
+      ["serial", port],
+      ["keyboard", undefined],
+      ["serial", port],
+    ]);
   });
 
   it("stays on the keyboard, stores nothing and says so when the picker is dismissed", async () => {
@@ -784,7 +611,6 @@ describe("ScannerSetup — granting the serial port", () => {
       <ScannerSetup
         paired={false}
         bootstrap={null}
-        scanSource={fakeScanSource()}
         subscribe={noFanOut}
         onTransportChange={onTransportChange}
         onClose={vi.fn()}
@@ -812,15 +638,7 @@ describe("ScannerSetup — the gate's entry", () => {
     // only way out is to submit, absorb the deliberately generic error, and
     // re-enter BOTH stages.
     const bootstrap = await bootstrapWith([{ login: "1042", pin: "4821" }]);
-    render(
-      <ScannerSetup
-        paired
-        bootstrap={bootstrap}
-        scanSource={fakeScanSource()}
-        subscribe={noFanOut}
-        onClose={vi.fn()}
-      />,
-    );
+    render(<ScannerSetup paired bootstrap={bootstrap} subscribe={noFanOut} onClose={vi.fn()} />);
 
     typeDigits("1043");
     expect(status().textContent).toBe("1043");
@@ -840,15 +658,7 @@ describe("ScannerSetup — the gate's entry", () => {
 
   it("caps the entry so it cannot outgrow the letter-spaced display", async () => {
     const bootstrap = await bootstrapWith([{ login: "1042", pin: "4821" }]);
-    render(
-      <ScannerSetup
-        paired
-        bootstrap={bootstrap}
-        scanSource={fakeScanSource()}
-        subscribe={noFanOut}
-        onClose={vi.fn()}
-      />,
-    );
+    render(<ScannerSetup paired bootstrap={bootstrap} subscribe={noFanOut} onClose={vi.fn()} />);
 
     typeDigits("1234567890123456789");
 
@@ -864,13 +674,7 @@ describe("ScannerSetup — what the store keeps", () => {
     const { port } = fakePort();
     setWebSerial(true, async () => port);
     const first = render(
-      <ScannerSetup
-        paired={false}
-        bootstrap={null}
-        scanSource={fakeScanSource()}
-        subscribe={noFanOut}
-        onClose={vi.fn()}
-      />,
+      <ScannerSetup paired={false} bootstrap={null} subscribe={noFanOut} onClose={vi.fn()} />,
     );
     fireEvent.click(radio(SERIAL));
     await waitFor(async () => expect((await readScannerSettings())?.transport).toBe("serial"));
@@ -893,13 +697,7 @@ describe("ScannerSetup — what the store keeps", () => {
     const bootstrap = await bootstrapWith([{ login: "1042", pin: "4821", badge: "OPBADGE-7" }]);
     const fanOut = fakeFanOut();
     const { container } = render(
-      <ScannerSetup
-        paired
-        bootstrap={bootstrap}
-        scanSource={fakeScanSource()}
-        subscribe={fanOut.subscribe}
-        onClose={vi.fn()}
-      />,
+      <ScannerSetup paired bootstrap={bootstrap} subscribe={fanOut.subscribe} onClose={vi.fn()} />,
     );
 
     // Down the RUNNING transport, which is the only way anything reaches a

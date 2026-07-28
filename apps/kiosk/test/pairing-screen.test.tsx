@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "../src/i18n/index.js";
 import type { KioskBootstrapDto, PairKioskResultDto } from "../src/api/types.js";
-import type { ScanListener, ScanSource } from "../src/scanner/source.js";
+import type { ScanListener } from "../src/scanner/source.js";
 import type * as CacheModule from "../src/store/cache.js";
 import type * as ConfigModule from "../src/store/config.js";
 import { readSnapshot } from "../src/store/cache.js";
@@ -75,31 +75,48 @@ function errorResponse(status: number, message: string): Response {
   } as unknown as Response;
 }
 
-/** A `ScanSource` whose `start` captures the listener, so a test can push a
- * payload through the same seam the keyboard wedge uses. */
-function fakeScanSource(): ScanSource & {
+/**
+ * The shell's fan-out (`KioskShell`'s listener `Set`) over whatever transport
+ * the kiosk is running — this screen's only seam onto a scanner.
+ *
+ * Not a `ScanSource` it starts for itself, and the distinction is the reason
+ * this screen works at all on the transport the commissioning order actually
+ * produces. Design brief 07 §5 puts scanner setup BEFORE pairing precisely so
+ * the pairing barcode can be scanned, so an installer following it arrives here
+ * on Web Serial — where `createWebSerialSource` is single-subscriber and the
+ * shell has held the port's reader since boot. A source started here would read
+ * nothing whatsoever.
+ *
+ * `joins`/`leaves` count subscriptions rather than transport starts, because
+ * that is now what this screen does to a scanner: it takes a place in the set
+ * and gives it back. Pausing means LEAVING the set — the device's scanner keeps
+ * running, as it must, since no screen may stop the transport under the others.
+ */
+function fakeFanOut(): {
+  subscribe: (listener: ScanListener) => () => void;
   emit: (raw: string) => void;
-  started: () => number;
-  stopped: () => number;
+  joins: () => number;
+  leaves: () => number;
+  listeners: () => number;
 } {
-  let listener: ScanListener | null = null;
-  let starts = 0;
-  let stops = 0;
+  const set = new Set<ScanListener>();
+  let joins = 0;
+  let leaves = 0;
   return {
-    isAvailable: () => true,
-    start(next) {
-      listener = next;
-      starts += 1;
+    subscribe(listener) {
+      set.add(listener);
+      joins += 1;
       return () => {
-        stops += 1;
-        listener = null;
+        leaves += 1;
+        set.delete(listener);
       };
     },
     emit(raw) {
-      act(() => listener?.(raw));
+      act(() => set.forEach((listener) => listener(raw)));
     },
-    started: () => starts,
-    stopped: () => stops,
+    joins: () => joins,
+    leaves: () => leaves,
+    listeners: () => set.size,
   };
 }
 
@@ -147,7 +164,7 @@ describe("Pairing", () => {
     render(
       <Pairing
         defaultServerUrl={SERVER}
-        scanSource={fakeScanSource()}
+        subscribe={fakeFanOut().subscribe}
         onPaired={vi.fn()}
         onConfigureScanner={vi.fn()}
       />,
@@ -167,7 +184,7 @@ describe("Pairing", () => {
     render(
       <Pairing
         defaultServerUrl={SERVER}
-        scanSource={fakeScanSource()}
+        subscribe={fakeFanOut().subscribe}
         onPaired={onPaired}
         onConfigureScanner={vi.fn()}
       />,
@@ -212,7 +229,7 @@ describe("Pairing", () => {
     render(
       <Pairing
         defaultServerUrl={SERVER}
-        scanSource={fakeScanSource()}
+        subscribe={fakeFanOut().subscribe}
         onPaired={onPaired}
         onConfigureScanner={vi.fn()}
       />,
@@ -240,7 +257,7 @@ describe("Pairing", () => {
     render(
       <Pairing
         defaultServerUrl={SERVER}
-        scanSource={fakeScanSource()}
+        subscribe={fakeFanOut().subscribe}
         onPaired={onPaired}
         onConfigureScanner={vi.fn()}
       />,
@@ -279,7 +296,7 @@ describe("Pairing", () => {
     const first = render(
       <Pairing
         defaultServerUrl={SERVER}
-        scanSource={fakeScanSource()}
+        subscribe={fakeFanOut().subscribe}
         onPaired={vi.fn()}
         onConfigureScanner={vi.fn()}
       />,
@@ -295,7 +312,7 @@ describe("Pairing", () => {
     render(
       <Pairing
         defaultServerUrl={SERVER}
-        scanSource={fakeScanSource()}
+        subscribe={fakeFanOut().subscribe}
         onPaired={onPaired}
         onConfigureScanner={vi.fn()}
       />,
@@ -330,7 +347,7 @@ describe("Pairing", () => {
     render(
       <Pairing
         defaultServerUrl={SERVER}
-        scanSource={fakeScanSource()}
+        subscribe={fakeFanOut().subscribe}
         onPaired={onPaired}
         onConfigureScanner={vi.fn()}
       />,
@@ -356,7 +373,7 @@ describe("Pairing", () => {
     const rejected = render(
       <Pairing
         defaultServerUrl={SERVER}
-        scanSource={fakeScanSource()}
+        subscribe={fakeFanOut().subscribe}
         onPaired={vi.fn()}
         onConfigureScanner={vi.fn()}
       />,
@@ -378,7 +395,7 @@ describe("Pairing", () => {
     render(
       <Pairing
         defaultServerUrl={SERVER}
-        scanSource={fakeScanSource()}
+        subscribe={fakeFanOut().subscribe}
         onPaired={vi.fn()}
         onConfigureScanner={vi.fn()}
       />,
@@ -397,7 +414,7 @@ describe("Pairing", () => {
     render(
       <Pairing
         defaultServerUrl={SERVER}
-        scanSource={fakeScanSource()}
+        subscribe={fakeFanOut().subscribe}
         onPaired={onPaired}
         onConfigureScanner={vi.fn()}
       />,
@@ -425,7 +442,7 @@ describe("Pairing", () => {
     render(
       <Pairing
         defaultServerUrl={SERVER}
-        scanSource={fakeScanSource()}
+        subscribe={fakeFanOut().subscribe}
         onPaired={vi.fn()}
         onConfigureScanner={onConfigureScanner}
       />,
@@ -443,7 +460,7 @@ describe("Pairing", () => {
     render(
       <Pairing
         defaultServerUrl={SERVER}
-        scanSource={fakeScanSource()}
+        subscribe={fakeFanOut().subscribe}
         onPaired={onPaired}
         onConfigureScanner={onConfigureScanner}
       />,
@@ -466,26 +483,28 @@ describe("Pairing", () => {
     // the worker to scan it; at an unattended kiosk the instinct is to scan
     // first and read the screen second. A listener armed by a button press
     // would silently drop exactly that scan.
-    const source = fakeScanSource();
+    const scanner = fakeFanOut();
     const view = render(
       <Pairing
         defaultServerUrl={SERVER}
-        scanSource={source}
+        subscribe={scanner.subscribe}
         onPaired={vi.fn()}
         onConfigureScanner={vi.fn()}
       />,
     );
 
-    expect(source.started()).toBe(1);
-    source.emit(" 12345678 ");
+    expect(scanner.joins()).toBe(1);
+    scanner.emit(" 12345678 ");
 
     expect(codeDisplay().textContent).toBe("12345678");
     expect(submitButton().disabled).toBe(false);
-    // Started once and stopped once: a window-level keydown handler left
-    // subscribed after this screen goes away would eat the idle screen's scans.
+    // Joined once and left once: a subscription left standing after this screen
+    // goes away would go on setting a pairing code behind the idle screen that
+    // replaced it, out of the very same scans that screen is reading.
     view.unmount();
-    expect(source.started()).toBe(1);
-    expect(source.stopped()).toBe(1);
+    expect(scanner.joins()).toBe(1);
+    expect(scanner.leaves()).toBe(1);
+    expect(scanner.listeners()).toBe(0);
   });
 
   it("offers the large scan button, and pressing it announces that a scan is awaited", () => {
@@ -494,11 +513,11 @@ describe("Pairing", () => {
     // read at arm's length in floor mode, where a small hint line does not
     // carry "you can scan this" at all. Pressing it commits the screen to a
     // visible waiting state instead of doing nothing.
-    const source = fakeScanSource();
+    const scanner = fakeFanOut();
     render(
       <Pairing
         defaultServerUrl={SERVER}
-        scanSource={source}
+        subscribe={scanner.subscribe}
         onPaired={vi.fn()}
         onConfigureScanner={vi.fn()}
       />,
@@ -517,7 +536,7 @@ describe("Pairing", () => {
     expect(screen.queryByText("Waiting for the scan")).toBeNull();
 
     fireEvent.click(scanButton());
-    source.emit(" 12345678 ");
+    scanner.emit(" 12345678 ");
     expect(codeDisplay().textContent).toBe("12345678");
     // ...and it ends when what it waited for arrives.
     expect(screen.queryByText("Waiting for the scan")).toBeNull();
@@ -527,18 +546,18 @@ describe("Pairing", () => {
     // The property that matters: restoring the button must not turn it back
     // into the arming switch it used to be. A worker who walks up and scans,
     // pressing nothing, still pairs.
-    const source = fakeScanSource();
+    const scanner = fakeFanOut();
     render(
       <Pairing
         defaultServerUrl={SERVER}
-        scanSource={source}
+        subscribe={scanner.subscribe}
         onPaired={vi.fn()}
         onConfigureScanner={vi.fn()}
       />,
     );
 
     expect(scanButton()).toBeDefined();
-    source.emit(" 12345678 ");
+    scanner.emit(" 12345678 ");
 
     expect(codeDisplay().textContent).toBe("12345678");
     expect(submitButton().disabled).toBe(false);
@@ -554,7 +573,7 @@ describe("Pairing", () => {
     render(
       <Pairing
         defaultServerUrl={SERVER}
-        scanSource={fakeScanSource()}
+        subscribe={fakeFanOut().subscribe}
         onPaired={onPaired}
         onConfigureScanner={vi.fn()}
       />,
@@ -575,52 +594,58 @@ describe("Pairing", () => {
   });
 
   it("refuses a scan that is not exactly eight digits, says so, and keeps listening", () => {
-    const source = fakeScanSource();
+    const scanner = fakeFanOut();
     render(
       <Pairing
         defaultServerUrl={SERVER}
-        scanSource={source}
+        subscribe={scanner.subscribe}
         onPaired={vi.fn()}
         onConfigureScanner={vi.fn()}
       />,
     );
 
-    source.emit("123");
+    scanner.emit("123");
     expect(screen.getByText("Not a pairing code: eight digits are required")).toBeDefined();
     expect(codeDisplay().textContent).toBe("");
 
     // A marking code scanned by mistake is REFUSED, not truncated to its first
     // eight digits and offered for submission as if the worker had meant it.
-    source.emit("0104600682000013");
+    scanner.emit("0104600682000013");
     expect(codeDisplay().textContent).toBe("");
     expect(submitButton().disabled).toBe(true);
 
     // Still listening: the real code lands without anything being pressed.
-    source.emit(" 12345678 ");
+    scanner.emit(" 12345678 ");
     expect(codeDisplay().textContent).toBe("12345678");
     expect(screen.queryByRole("alert")).toBeNull();
     expect(submitButton().disabled).toBe(false);
   });
 
   it("pauses the scan listener while the server field is open — the wedge would eat what is typed", () => {
-    const source = fakeScanSource();
+    const scanner = fakeFanOut();
     render(
       <Pairing
         defaultServerUrl={SERVER}
-        scanSource={source}
+        subscribe={scanner.subscribe}
         onPaired={vi.fn()}
         onConfigureScanner={vi.fn()}
       />,
     );
 
     fireEvent.click(serverToggle());
-    source.emit("12345678");
+    scanner.emit("12345678");
     expect(codeDisplay().textContent).toBe("");
+    // Paused by LEAVING the fan-out, and by nothing more. The device's scanner
+    // is not this screen's to stop — the shell owns the transport, and a screen
+    // that switched it off to protect its own text field would take the scanner
+    // away from whatever stands here next.
+    expect(scanner.listeners()).toBe(0);
 
     fireEvent.click(serverToggle());
-    source.emit("12345678");
+    scanner.emit("12345678");
     expect(codeDisplay().textContent).toBe("12345678");
-    expect(source.started()).toBe(2);
+    expect(scanner.joins()).toBe(2);
+    expect(scanner.listeners()).toBe(1);
   });
 
   it("refuses a bundle whose generatedAt is unparseable, and does not half-pair the device", async () => {
@@ -632,7 +657,7 @@ describe("Pairing", () => {
     render(
       <Pairing
         defaultServerUrl={SERVER}
-        scanSource={fakeScanSource()}
+        subscribe={fakeFanOut().subscribe}
         onPaired={onPaired}
         onConfigureScanner={vi.fn()}
       />,
@@ -658,7 +683,7 @@ describe("Pairing", () => {
     render(
       <Pairing
         defaultServerUrl={SERVER}
-        scanSource={fakeScanSource()}
+        subscribe={fakeFanOut().subscribe}
         onPaired={vi.fn()}
         onConfigureScanner={vi.fn()}
       />,

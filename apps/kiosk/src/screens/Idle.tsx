@@ -144,9 +144,9 @@ export function Idle({
    * gives a new function identity on every render, so a dependency on it would
    * tear the source down and resubscribe after each state change — and a source
    * that replays or delivers synchronously would then re-deliver the very scan
-   * whose notice caused the render, looping. `ScannerSetup` solves the same
-   * problem the other way, by demanding a referentially stable `scanSource`;
-   * here the screen simply refuses to care.
+   * whose notice caused the render, looping. `ScannerSetup` and `Pairing` solve
+   * the same problem the other way, by demanding a referentially stable
+   * `subscribe`; here the screen simply refuses to care.
    */
   const subscribe = useRef(onScan);
 

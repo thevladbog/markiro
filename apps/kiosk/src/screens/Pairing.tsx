@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, Input, PinPad, Spinner } from "@markiro/ui";
 import { KioskApiError, pairKiosk } from "../api/client.js";
-import type { ScanSource } from "../scanner/source.js";
+import type { ScanListener } from "../scanner/source.js";
 import {
   assertMeasurableGeneratedAt,
   replaceSnapshot,
@@ -15,7 +15,23 @@ const CODE_LENGTH = 8;
 
 export interface PairingProps {
   defaultServerUrl: string;
-  scanSource: ScanSource;
+  /**
+   * The device's scanner, as the shell's fan-out over whatever transport it is
+   * running — the same subscription `Idle`, `Cart` and `ScannerSetup` take, and
+   * never a `ScanSource` this screen starts for itself.
+   *
+   * Design brief 07 §5 puts scanner setup BEFORE pairing precisely so the
+   * pairing barcode can be scanned, which means the installer who follows the
+   * prescribed order arrives here on Web Serial. `createWebSerialSource` is
+   * single-subscriber — `port.readable` is locked by the first reader, and the
+   * shell has held that reader since boot — so a source started here reads
+   * nothing at all, and the one flow the transport was configured for is the
+   * one flow it cannot serve.
+   *
+   * MUST BE REFERENTIALLY STABLE: the effect below lists it in its
+   * dependencies. Returns its own unsubscribe.
+   */
+  subscribe: (listener: ScanListener) => () => void;
   onPaired: () => void;
   onConfigureScanner: () => void;
 }
@@ -55,7 +71,7 @@ const MESSAGE_KEY: Record<PairingError, string> = {
  */
 export function Pairing({
   defaultServerUrl,
-  scanSource,
+  subscribe,
   onPaired,
   onConfigureScanner,
 }: PairingProps): React.JSX.Element {
@@ -78,13 +94,16 @@ export function Pairing({
   // that has to be armed first drops exactly that scan.
   //
   // It PAUSES while the server-address field is open, and only then: the
-  // keyboard wedge is a window-level `keydown` handler, so it would otherwise
-  // swallow every character typed into that field. `serverOpen` is the whole
-  // reason this effect has a dependency other than the source; both are stable
-  // across renders, so the listener is torn down once, when it must be.
+  // keyboard wedge is a window-level `keydown` handler, so what is typed into
+  // that field would otherwise arrive here as a scan. LEAVING THE FAN-OUT is
+  // what pauses it — the shell's transport keeps running, as it must, since a
+  // screen has no business stopping the device's scanner; it simply stops
+  // being delivered here. `serverOpen` is the whole reason this effect has a
+  // dependency other than `subscribe`; both are stable across renders, so the
+  // subscription is dropped once, when it must be.
   useEffect(() => {
-    if (serverOpen || !scanSource.isAvailable()) return;
-    return scanSource.start((raw) => {
+    if (serverOpen) return;
+    return subscribe((raw) => {
       // A wedge payload can arrive with framing characters around the digits.
       // What survives must be EXACTLY eight, and nothing else is accepted:
       // truncating a longer one would submit the first eight digits of a
@@ -103,7 +122,7 @@ export function Pairing({
       // the worker is still meant to scan.
       setAwaitingScan(false);
     });
-  }, [scanSource, serverOpen]);
+  }, [subscribe, serverOpen]);
 
   async function submit(): Promise<void> {
     if (busy || code.length !== CODE_LENGTH) return;
@@ -234,9 +253,13 @@ export function Pairing({
           (`awaitingScan` is presentation only). What it does is announce the
           capability at a size that is legible across a room, and put the screen
           into the waiting state so the worker knows the scan will be taken.
-          Hidden exactly when scanning cannot work: no scan source, or the
-          server field holding the keyboard the wedge listens on. */}
-      {scanSource.isAvailable() && !serverOpen ? (
+          Hidden exactly when scanning cannot work, which is now one case and
+          not two: the server field is holding the keyboard the wedge listens
+          on, so this screen has left the fan-out. There is no second case —
+          the shell always runs a transport (the wedge is available everywhere,
+          and a serial source exists only where a port was granted), so a
+          «scanning is impossible» state cannot be reached. */}
+      {!serverOpen ? (
         <div style={{ display: "grid", justifyItems: "center", gap: 12 }}>
           <Button
             variant="secondary"

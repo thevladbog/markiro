@@ -92,11 +92,11 @@ const LINE_TERMINATOR = /[\r\n]/;
  * Opens the port unless it is already open, in which case there is nothing to
  * do and reading can begin.
  *
- * A port is started more than once per session: the setup screen rebuilds its
- * source whenever the transport changes, so an installer toggling Serial →
- * Keyboard → Serial starts the same granted port twice. `stop()` deliberately
- * leaves the port open (see below), so that second `start()` meets an
- * already-open port.
+ * A port is started more than once per session: the app shell — the single
+ * owner of the transport — rebuilds its source whenever the transport changes,
+ * so an installer toggling Serial → Keyboard → Serial through scanner setup
+ * starts the same granted port twice. `stop()` deliberately leaves the port
+ * open (see below), so that second `start()` meets an already-open port.
  *
  * Web Serial rejects `open()` with an `InvalidStateError` for exactly one
  * reason — the port's state is not "closed" — while a device that has gone

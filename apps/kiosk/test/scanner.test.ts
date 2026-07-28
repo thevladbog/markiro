@@ -287,12 +287,13 @@ describe("web serial source", () => {
   });
 
   it("delivers again after stop() and a second start() on the same port", async () => {
-    // The setup screen rebuilds this source whenever the transport changes, so
-    // an installer who toggles Serial → Keyboard → Serial within one visit
-    // starts the SAME granted port a second time. Without this the second
-    // start dies in `open()` (the port is still open from the first) and the
-    // screen whose entire purpose is verifying the scanner silently verifies
-    // nothing until the kiosk is reloaded.
+    // The app shell — the single owner of the transport — rebuilds this source
+    // whenever the transport changes, so an installer who toggles Serial →
+    // Keyboard → Serial within one visit to scanner setup starts the SAME
+    // granted port a second time. Without this the second start dies in
+    // `open()` (the port is still open from the first) and the screen whose
+    // entire purpose is verifying the scanner silently verifies nothing until
+    // the kiosk is reloaded.
     const { port, scan, opens } = restartablePort();
     const source = createWebSerialSource(port);
 

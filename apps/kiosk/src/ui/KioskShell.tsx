@@ -261,14 +261,21 @@ export function KioskShell(): React.JSX.Element {
   }, [reload]);
 
   /**
-   * ONE `ScanSource` per transport, held rather than rebuilt.
+   * ONE `ScanSource` per transport, held rather than rebuilt, and OWNED HERE.
    *
-   * `ScannerSetup` lists its source in an effect's dependencies, and the
-   * keyboard wedge accumulates the payload in the closure that a teardown
-   * discards — so a source rebuilt on a re-render truncates whatever is being
-   * scanned at that moment and a good scanner reports «не распознано». A ref
-   * rather than `useMemo` because a memo is a cache React is allowed to drop,
-   * and this identity is a contract.
+   * This shell is the single owner of the device's scanner. No screen builds a
+   * source, starts one, or is handed one — `createWebSerialSource` is
+   * single-subscriber (`port.readable` is locked by the first reader), so a
+   * second start on the running transport reads nothing at all, and reads it
+   * silently: the screen sees no error, only a scanner that never speaks. Three
+   * screens learned that the hard way, one symptom at a time.
+   *
+   * The identity is a contract, not an optimisation: subscribers list the
+   * fan-out in effect dependencies, and the keyboard wedge accumulates the
+   * payload in the closure a teardown discards — so a source rebuilt on a
+   * re-render truncates whatever is being scanned at that moment and a good
+   * scanner reports «не распознано». A ref rather than `useMemo` because a memo
+   * is a cache React is allowed to drop.
    */
   const sourceRef = useRef<{ port: SerialPort | null; source: ScanSource } | null>(null);
   if (sourceRef.current === null || sourceRef.current.port !== scanPort) {
@@ -281,14 +288,15 @@ export function KioskShell(): React.JSX.Element {
 
   /**
    * The scanner, subscribed ONCE for the life of a transport and fanned out to
-   * whichever screen is standing.
+   * whichever screens are standing.
    *
-   * `Idle` and `Cart` each subscribe at mount and unsubscribe at unmount, so
-   * handing them `scanSource.start` directly would tear the wedge's window
-   * listener down and put it back on every screen change — including the
-   * Idle→Cart handover, which happens while the worker is still holding the
-   * badge they just scanned. The listener set makes a screen change a set
-   * membership change instead, and leaves the transport itself untouched.
+   * Every screen subscribes at mount and unsubscribes at unmount, so handing
+   * one `scanSource.start` directly would tear the wedge's window listener down
+   * and put it back on every screen change — including the Idle→Cart handover,
+   * which happens while the worker is still holding the badge they just
+   * scanned — and on Web Serial would not work at all. The listener set makes a
+   * screen change a set membership change instead, and leaves the transport
+   * itself untouched.
    *
    * It is also what makes a TRANSPORT change reach a screen that is already
    * standing. `subscribe` is stable and the set is transport-independent, so
@@ -296,6 +304,11 @@ export function KioskShell(): React.JSX.Element {
    * without touching its subscription — no remount, and therefore no `key`.
    * (An earlier revision carried an `epoch` on the transport for exactly that
    * remount; it was doing nothing, and removing it broke no test.)
+   *
+   * That same property is what lets `ScannerSetup`'s test scan certify the
+   * transport an installer picked without holding a source of its own: the pick
+   * swaps what this fan-out reads, so reading the fan-out afterwards IS reading
+   * the new transport.
    *
    * Iterating a copy: a listener may unsubscribe (its screen may unmount)
    * during delivery, and mutating the set mid-walk would drop the next one.
@@ -308,6 +321,13 @@ export function KioskShell(): React.JSX.Element {
     };
   }, []);
 
+  /**
+   * The swap: React tears the OLD source down before starting the new one, and
+   * the listener set is untouched by either — so a transport change is a change
+   * of what the fan-out reads and nothing else. Stopping the old one is not
+   * housekeeping: an abandoned Web Serial reader keeps `port.readable` locked,
+   * and the next start of that same port would read nothing.
+   */
   useEffect(() => {
     if (!scanSource.isAvailable()) return;
     return scanSource.start((raw) => {
@@ -475,21 +495,18 @@ export function KioskShell(): React.JSX.Element {
       <ScannerSetup
         paired={paired}
         bootstrap={snapshot?.bootstrap ?? null}
-        // BOTH, and they are not interchangeable — that screen's own prop docs
-        // say which is which. The raw source is for the TEST SCAN, because a
-        // port granted on that screen is one this shell is not reading yet and
-        // no fan-out could deliver it. The fan-out is for the GATE, because a
-        // badge sign-in is happening on the transport this kiosk is actually
-        // running — and on Web Serial that port's only reader is the effect
-        // above, so a second listener started on `scanSource` would read
-        // nothing and the badge would never open the gate.
-        scanSource={scanSource}
+        // The fan-out, for both of that screen's readers — the gate's badge and
+        // the test scan alike. Neither is given a source to start: this shell
+        // owns the transport, and the swap below is what makes the test scan's
+        // verdict belong to the transport the installer picked.
         subscribe={subscribe}
         onTransportChange={(next, port) => {
+          // THE SWAP, and the whole reason that screen can certify anything.
           // The port travels up because only that screen's radio can obtain
           // one: `requestPort()` needs transient user activation, which the
           // shell never has. Dropping it here would kill the grant the
-          // installer just gave with the screen that asked for it.
+          // installer just gave with the screen that asked for it — and would
+          // leave the test scan certifying the transport the pick replaced.
           setScanPort(next === "serial" ? (port ?? null) : null);
         }}
         // Closing UNMOUNTS this screen — the views are exclusive — so the next
@@ -503,7 +520,11 @@ export function KioskShell(): React.JSX.Element {
     screen = (
       <Pairing
         defaultServerUrl={config?.serverUrl ?? DEFAULT_SERVER_URL}
-        scanSource={scanSource}
+        // The commissioning order is scanner setup FIRST, then pairing (design
+        // brief 07 §5), precisely so the pairing barcode can be scanned — so
+        // this screen is routinely the first consumer of a freshly granted
+        // serial port, and must read it through the fan-out like everyone else.
+        subscribe={subscribe}
         onPaired={() => void reload()}
         onConfigureScanner={() => setScannerSetupRequested(true)}
       />

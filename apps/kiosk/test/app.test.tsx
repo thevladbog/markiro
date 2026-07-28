@@ -4,6 +4,9 @@ import { deriveDigestB64, formatPhc, PHC_ITERATIONS } from "@markiro/domain";
 import { App } from "../src/App.js";
 import type { CreateOrderDto, KioskBootstrapDto } from "../src/api/types.js";
 import i18n from "../src/i18n/index.js";
+import type * as KeyboardModule from "../src/scanner/keyboard.js";
+import type { ScanSource } from "../src/scanner/source.js";
+import type * as WebSerialModule from "../src/scanner/web-serial.js";
 import type { SerialPort } from "../src/scanner/web-serial.js";
 import { SETTINGS_HOLD_MS } from "../src/screens/Idle.js";
 import { replaceSnapshot } from "../src/store/cache.js";
@@ -21,6 +24,71 @@ import { enqueueOrder, listQueue } from "../src/store/queue.js";
 import { REFRESH_INTERVAL_MS, STALE_BLOCK_MS } from "../src/sync/worker.js";
 
 afterEach(cleanup);
+
+/**
+ * Every transport the device ever STARTS, in order, and every one it STOPS.
+ *
+ * The shell is the only thing that builds a `ScanSource` — these two factories
+ * are the only way one comes into existence — so wrapping them counts the
+ * subscriptions the device actually holds. That is the property a transport
+ * swap breaks silently: a fan-out re-pointed at a new source without stopping
+ * the old one leaves two live subscriptions, and on Web Serial the abandoned
+ * one goes on holding the port's reader, so the port cannot be read again.
+ * A screen that starts a source of its own shows up here as an extra start
+ * against a transport nobody swapped to.
+ *
+ * The wrappers call straight through, so no other test in this file behaves
+ * differently for their presence.
+ */
+const transports = vi.hoisted(() => {
+  const starts: string[] = [];
+  const stops: string[] = [];
+  return {
+    starts,
+    stops,
+    /** Subscriptions standing right now. One transport, one reader — always. */
+    live: () => starts.length - stops.length,
+    reset: () => {
+      starts.length = 0;
+      stops.length = 0;
+    },
+    count: (kind: string, source: ScanSource): ScanSource => ({
+      isAvailable: () => source.isAvailable(),
+      start(listener) {
+        starts.push(kind);
+        const stop = source.start(listener);
+        let counted = false;
+        return () => {
+          // Counted ONCE however often the teardown is called: a double count
+          // would cancel a genuine leak out on paper.
+          if (!counted) {
+            counted = true;
+            stops.push(kind);
+          }
+          stop();
+        };
+      },
+    }),
+  };
+});
+
+vi.mock("../src/scanner/keyboard.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof KeyboardModule>();
+  return {
+    ...actual,
+    createKeyboardWedgeSource: (opts?: Parameters<typeof actual.createKeyboardWedgeSource>[0]) =>
+      transports.count("keyboard", actual.createKeyboardWedgeSource(opts)),
+  };
+});
+
+vi.mock("../src/scanner/web-serial.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof WebSerialModule>();
+  return {
+    ...actual,
+    createWebSerialSource: (port: SerialPort) =>
+      transports.count("serial", actual.createWebSerialSource(port)),
+  };
+});
 
 // The i18next instance is a module singleton and the sibling screen tests
 // switch it to English. Today Vitest's per-file module isolation keeps that out
@@ -53,6 +121,12 @@ const GATE_TITLE = "Вход в настройки";
 const SETUP_TITLE = "Настройка сканера";
 const SETUP_DONE = "Готово";
 const KEYBOARD_TRANSPORT = "Как клавиатура (HID)";
+const SERIAL_TRANSPORT = "Web Serial (COM-порт)";
+const PAIRING_TITLE = "Подключение киоска";
+/** The setup screen's test-scan verdicts, as an installer reads them. */
+const VERDICT_KM = "Код маркировки";
+const VERDICT_BADGE = "Бейдж";
+const VERDICT_UNKNOWN = "Не распознано";
 
 /** The kiosk's own clock, frozen so staleness is arithmetic rather than luck. */
 const NOW = new Date("2026-07-28T12:00:00.000Z");
@@ -127,6 +201,7 @@ beforeEach(() => {
     toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"],
   });
   vi.setSystemTime(NOW);
+  transports.reset();
   server = { reachable: true, generatedAt: NOW.toISOString(), bootstraps: 0, orders: [] };
   globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -243,6 +318,37 @@ const said = () => document.body.textContent ?? "";
  * scanner is exactly what they came to fix. */
 function typeDigits(digits: string): void {
   for (const digit of digits) fireEvent.click(screen.getByRole("button", { name: digit }));
+}
+
+/**
+ * The gate's OTHER entrance: personnel number, then PIN.
+ *
+ * The one an operator uses when their badge is not to hand — or when the
+ * scanner is the very thing they came to fix — and therefore the entrance every
+ * test whose subject is the SETTINGS rather than the gate signs in through.
+ */
+async function signInWithPin(): Promise<void> {
+  typeDigits(OPERATOR_LOGIN);
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Далее" }));
+  });
+  typeDigits(OPERATOR_PIN);
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Войти" }));
+  });
+}
+
+/** The setup screen's single live region — its test-scan verdict. The status
+ * strip is not mounted on that view, so there is exactly one. */
+const verdict = () => screen.getByRole("status").textContent;
+
+const transportRadio = (name: string) => screen.getByRole("radio", { name }) as HTMLInputElement;
+
+async function pickTransport(name: string): Promise<void> {
+  await act(async () => {
+    fireEvent.click(transportRadio(name));
+  });
+  await settle(() => expect(transportRadio(name).checked).toBe(true));
 }
 
 /**
@@ -751,6 +857,168 @@ describe("KioskShell", () => {
     scanner.scan(OPERATOR_BADGE);
 
     await settle(() => expect(screen.getByText(SETUP_TITLE)).toBeDefined());
+  });
+
+  /**
+   * PAIRING, on a serial kiosk — and the commissioning order the brief actually
+   * prescribes (design brief 07 §5): configure the scanner FIRST, precisely so
+   * the pairing code can be scanned off the admin panel rather than typed.
+   *
+   * An installer who follows it lands here: Web Serial configured, the grant
+   * surviving into the next boot, and a pairing screen that has to read the
+   * code off that port. The shell has held the port's only reader since boot,
+   * so a pairing screen starting a reader of its own on the same transport
+   * reads nothing at all — and the one flow the transport was configured for
+   * is the one flow it cannot serve.
+   */
+  it("takes the pairing code off the serial scanner the installer configured first", async () => {
+    const scanner = fakeSerialPort();
+    setWebSerial(scanner.port);
+    // What scanner setup leaves behind on an as-yet unpaired device, which is
+    // exactly the state the prescribed order puts this device in.
+    await writeScannerSettings({ transport: "serial" });
+
+    render(<App />);
+
+    await settle(() => expect(screen.getByText(PAIRING_TITLE)).toBeDefined());
+    // The recovered grant, not the wedge: this screen is being read over the
+    // port before a single byte is pushed through it.
+    await settle(() => expect(transports.starts).toContain("serial"));
+
+    scanner.scan("12345678");
+
+    await settle(() => expect(screen.getByRole("status").textContent).toBe("12345678"));
+    expect((screen.getByRole("button", { name: "Подключить" }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+  });
+
+  /**
+   * The TEST SCAN on a serial kiosk, reached the way an operator actually
+   * reaches it: a long press and a PIN, with no transport re-picked.
+   *
+   * Nothing about that visit changes the transport — the kiosk is already on
+   * the port it was commissioned with — so the screen whose entire purpose is
+   * proving the scanner works has to read the transport the shell is running.
+   * Reading a source of its own over the same port reads nothing, and the
+   * installer is left on «Ждём сканирование…» in front of a scanner that is
+   * working perfectly.
+   */
+  it("verifies the scanner after a PIN sign-in on a serial kiosk, with nothing re-picked", async () => {
+    const scanner = fakeSerialPort();
+    setWebSerial(scanner.port);
+    await writeScannerSettings({ transport: "serial" });
+    await pair();
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+
+    await holdIdleHeader(SETTINGS_HOLD_MS);
+    await settle(() => expect(screen.getByText(GATE_TITLE)).toBeDefined());
+    await signInWithPin();
+    await settle(() => expect(screen.getByText(SETUP_TITLE)).toBeDefined());
+
+    scanner.scan(KM);
+
+    await settle(() => expect(verdict()).toBe(VERDICT_KM));
+  });
+
+  /**
+   * THE GREEN LIGHT MUST BELONG TO THE TRANSPORT THE INSTALLER PICKED.
+   *
+   * Task 11's review caught the opposite: a test scan certifying whatever the
+   * kiosk happened to be running, so an installer picks Web Serial, the wedge
+   * answers, and the verdict says nothing about the port. GS handling is the
+   * one thing the two transports disagree about and is exactly what the verdict
+   * reports, so a green light against the wrong transport is worse than none.
+   *
+   * The property is kept here by OWNERSHIP rather than by a second, competing
+   * subscription: the pick swaps the shell's transport, so reading the device's
+   * scanner IS reading what was picked. Both halves are pinned — the old
+   * transport goes quiet, and the new one is what answers.
+   */
+  it("moves the test scan onto the transport just picked, and off the one before it", async () => {
+    const scanner = fakeSerialPort();
+    // Web Serial exists and the picker will hand this port over — but nothing
+    // is stored, so this kiosk boots on the wedge.
+    setWebSerial(scanner.port);
+    await pair();
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+    await holdIdleHeader(SETTINGS_HOLD_MS);
+    await settle(() => expect(screen.getByText(GATE_TITLE)).toBeDefined());
+    await signInWithPin();
+    await settle(() => expect(screen.getByText(SETUP_TITLE)).toBeDefined());
+
+    // On the wedge, the wedge certifies.
+    scan(BADGE);
+    await settle(() => expect(verdict()).toBe(VERDICT_BADGE));
+
+    await pickTransport(SERIAL_TRANSPORT);
+
+    // The wedge is not this kiosk's transport any more, so it certifies
+    // nothing: this payload would read «Не распознано» if it still arrived.
+    scan(GTIN_MILK);
+    await act(async () => {});
+    expect(verdict()).not.toBe(VERDICT_UNKNOWN);
+    expect(verdict()).toBe(VERDICT_BADGE);
+
+    // ...and the verdict now comes from the port that was picked.
+    scanner.scan(KM);
+    await settle(() => expect(verdict()).toBe(VERDICT_KM));
+  });
+
+  /**
+   * ONE TRANSPORT, ONE SUBSCRIPTION — across every swap in a visit.
+   *
+   * A swap that starts the new transport without stopping the old leaves two
+   * readers running. On Web Serial that is not merely untidy: the abandoned
+   * reader keeps `port.readable` locked, so the NEXT start of that same port
+   * reads nothing and the kiosk needs a reload to scan again. Counting starts
+   * and stops is what makes the leak visible before the symptom does — a screen
+   * that quietly opens a transport of its own appears here as a start nobody
+   * swapped to.
+   *
+   * It ends on a real scan through the twice-picked port, so "one subscription"
+   * means a working scanner and not just a tidy ledger.
+   */
+  it("holds exactly one transport subscription across a swap, and lets go of the one it left", async () => {
+    const scanner = fakeSerialPort();
+    setWebSerial(scanner.port);
+    await writeScannerSettings({ transport: "serial" });
+    await pair();
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+
+    // Boot: the wedge stands until the recovered grant replaces it — and is
+    // stopped when it does, not merely forgotten.
+    await settle(() => expect(transports.starts).toEqual(["keyboard", "serial"]));
+    expect(transports.stops).toEqual(["keyboard"]);
+    expect(transports.live()).toBe(1);
+
+    await holdIdleHeader(SETTINGS_HOLD_MS);
+    await settle(() => expect(screen.getByText(GATE_TITLE)).toBeDefined());
+    await signInWithPin();
+    await settle(() => expect(screen.getByText(SETUP_TITLE)).toBeDefined());
+    // Opening the settings subscribes a SCREEN, never a transport.
+    expect(transports.starts).toEqual(["keyboard", "serial"]);
+
+    await pickTransport(KEYBOARD_TRANSPORT);
+    await settle(() => expect(transports.stops).toEqual(["keyboard", "serial"]));
+    expect(transports.starts).toEqual(["keyboard", "serial", "keyboard"]);
+    expect(transports.live()).toBe(1);
+    // The device itself is let go of, not only our reader's bookkeeping.
+    await settle(() => expect(scanner.released()).toBe(true));
+
+    await pickTransport(SERIAL_TRANSPORT);
+    await settle(() =>
+      expect(transports.starts).toEqual(["keyboard", "serial", "keyboard", "serial"]),
+    );
+    expect(transports.stops).toEqual(["keyboard", "serial", "keyboard"]);
+    expect(transports.live()).toBe(1);
+
+    // And the port picked for the second time still delivers.
+    scanner.scan(KM);
+    await settle(() => expect(verdict()).toBe(VERDICT_KM));
   });
 
   /**
