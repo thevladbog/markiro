@@ -69,7 +69,10 @@
     "rejected": "Отклонено",
     "waiting": "Ожидание скана…",
     "exit": "Выйти из смены",
-    "exitPending": "{{count}} сканов ещё не дошли до сервера.",
+    "exitPending_one": "{{count}} скан ещё не дошёл до сервера.",
+    "exitPending_few": "{{count}} скана ещё не дошли до сервера.",
+    "exitPending_many": "{{count}} сканов ещё не дошли до сервера.",
+    "exitPending_other": "{{count}} скана ещё не дошли до сервера.",
     "exitAnyway": "Всё равно выйти",
     "stay": "Остаться"
   },

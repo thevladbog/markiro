@@ -306,4 +306,31 @@ describe("WorkScreen", () => {
     fireEvent.click(screen.getByRole("button", { name: "Stay" }));
     expect(onExit).not.toHaveBeenCalled();
   });
+
+  it("blurs the leave-shift control after activation, so it cannot hold focus while scanning continues", async () => {
+    // A tap leaves a native <button> focused in Chromium-based webviews. If it
+    // stayed focused here, the terminating Enter of the operator's NEXT scan
+    // (which the keyboard wedge cannot tell apart from any other keydown)
+    // would fire a native click on this still-focused button while the
+    // confirmation is up — re-running requestExit() with the queue possibly
+    // now drained and exiting with no operator decision.
+    const onExit = vi.fn();
+    renderWorkScreen({ onExit, pendingSync: 12 });
+
+    const exitButton = screen.getByRole("button", { name: "Leave shift" });
+    exitButton.focus();
+    expect(document.activeElement).toBe(exitButton);
+
+    fireEvent.click(exitButton);
+
+    expect(document.activeElement).not.toBe(exitButton);
+  });
+
+  it("uses the singular pending-scan copy when exactly one scan is queued", async () => {
+    const onExit = vi.fn();
+    renderWorkScreen({ onExit, pendingSync: 1 });
+
+    fireEvent.click(screen.getByRole("button", { name: "Leave shift" }));
+    expect(screen.getByText("1 scan has not reached the server yet.")).toBeDefined();
+  });
 });

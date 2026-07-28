@@ -59,4 +59,23 @@ describe("keyboard wedge scan source", () => {
     press("Enter");
     expect(scans).toEqual([]);
   });
+
+  it("prevents the default action on the terminating Enter", () => {
+    // A wedge scanner types into whatever element happens to hold DOM focus.
+    // If a focused native <button> is left free to run its own Enter-activates
+    // default action, the terminating Enter of a scan would ALSO fire a click
+    // on that button. `dispatchEvent` returns false when some listener called
+    // `preventDefault()` on a cancelable event, so this is a direct check that
+    // the wedge suppresses that default action rather than only reading data.
+    const scans: string[] = [];
+    const stop = createKeyboardWedgeSource().start((raw) => scans.push(raw));
+
+    for (const ch of "42") press(ch);
+    const enterEvent = new KeyboardEvent("keydown", { key: "Enter", cancelable: true });
+    const notPrevented = window.dispatchEvent(enterEvent);
+
+    expect(notPrevented).toBe(false);
+    expect(scans).toEqual(["42"]);
+    stop();
+  });
 });

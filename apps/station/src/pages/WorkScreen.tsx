@@ -235,22 +235,55 @@ export function WorkScreen({
             </span>
           ) : null}
         </div>
-        <Button type="button" variant="secondary" style={{ minHeight: 64 }} onClick={requestExit}>
+        <Button
+          type="button"
+          variant="secondary"
+          style={{ minHeight: 64 }}
+          onClick={(event) => {
+            requestExit();
+            // A tap leaves this button focused in Chromium-based webviews.
+            // Left focused, the terminating Enter of the operator's next
+            // scan would fire a native click on it (see scan-source.ts) --
+            // possibly re-running requestExit() with the queue since
+            // drained and exiting with no operator decision. Blur it so no
+            // control holds focus while scanning continues.
+            event.currentTarget.blur();
+          }}
+        >
           {t("work.exit")}
         </Button>
       </div>
 
       {confirmExit ? (
-        <Alert tone="warn">
+        // Given a higher stacking context (not just later JSX) than
+        // SignalOverlay: SignalOverlay is `position: fixed`, so it is a
+        // positioned box that paints after this alert's normal-flow content
+        // regardless of DOM order (CSS painting order puts non-positioned
+        // in-flow content before positioned descendants). An explicit
+        // z-index here -- but not on SignalOverlay -- lifts this whole
+        // block, including its buttons, above the fixed flash so the
+        // confirmation stays reachable while a verdict is still showing,
+        // without touching the flash's own full-screen visibility.
+        <Alert tone="warn" style={{ position: "relative", zIndex: 1 }}>
           <p>{t("work.exitPending", { count: pendingSync })}</p>
-          <Button type="button" style={{ minHeight: 64 }} onClick={onExit}>
+          <Button
+            type="button"
+            style={{ minHeight: 64 }}
+            onClick={(event) => {
+              onExit();
+              event.currentTarget.blur();
+            }}
+          >
             {t("work.exitAnyway")}
           </Button>
           <Button
             type="button"
             variant="secondary"
             style={{ minHeight: 64 }}
-            onClick={() => setConfirmExit(false)}
+            onClick={(event) => {
+              setConfirmExit(false);
+              event.currentTarget.blur();
+            }}
           >
             {t("work.stay")}
           </Button>

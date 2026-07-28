@@ -69,7 +69,10 @@
     "rejected": "Rejected",
     "waiting": "Waiting for a scan…",
     "exit": "Leave shift",
-    "exitPending": "{{count}} scans have not reached the server yet.",
+    "exitPending_one": "{{count}} scan has not reached the server yet.",
+    "exitPending_few": "{{count}} scans have not reached the server yet.",
+    "exitPending_many": "{{count}} scans have not reached the server yet.",
+    "exitPending_other": "{{count}} scans have not reached the server yet.",
     "exitAnyway": "Leave anyway",
     "stay": "Stay"
   },
