@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 
 /**
  * Kiosk device enrollment token support (plan-05, consumed later by
@@ -16,4 +16,23 @@ export function generateDeviceToken(): string {
 /** Deterministic sha256 hex digest of a device token, for storage/lookup. */
 export function hashDeviceToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
+}
+
+/**
+ * Keyed digest for the 8-digit kiosk pairing code
+ * (`kiosk_pairing_codes.code_hash`). Unlike `hashDeviceToken` above, this
+ * MUST be keyed: the device token is 192 bits of entropy, so an unkeyed
+ * digest is fine there, but the pairing code is drawn from a 10^8 space,
+ * which is trivially brute-forceable offline from a leaked DB dump with a
+ * plain digest -- recovering every still-live code and letting it be
+ * redeemed directly, bypassing the HTTP rate limiter entirely. HMAC with a
+ * server-held pepper (`PAIRING_CODE_PEPPER`, never persisted) turns that
+ * from seconds of offline GPU time into infeasible without the key.
+ *
+ * Used identically for both issuance (`PairingService.issueCode`) and
+ * redemption lookup (`PairingService.attemptRedeem`) so the two paths can
+ * never diverge onto different digests for the same code.
+ */
+export function hashPairingCode(code: string, pepper: string): string {
+  return createHmac("sha256", pepper).update(code).digest("hex");
 }

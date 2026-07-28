@@ -56,6 +56,8 @@ const ORDER = {
   items: [ITEM_A, ITEM_B],
   receiptNo: null,
   actNo: null,
+  conflictCount: 0,
+  syncConflicts: [],
 };
 
 const REASONS = { items: [{ id: "r1", name: "Маркетинг", sortOrder: 0 }] };
@@ -104,6 +106,44 @@ describe("OrderDetailPage", () => {
     expect(screen.getByText("Сыр Российский")).toBeDefined();
     expect(screen.getByText(ITEM_A.rawKm)).toBeDefined();
     expect(screen.getByText(ITEM_B.rawKm)).toBeDefined();
+  });
+
+  it("shows what the kiosk lost at sync time", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      const path = String(url);
+      if (path === "/api/pickup-orders/o1") {
+        return jsonResponse(200, {
+          ...ORDER,
+          conflictCount: 2,
+          syncConflicts: [
+            { rawKm: "0104600682000013215AAA", reason: "duplicate" },
+            { rawKm: "0104600682000013215BBB", reason: "over_limit" },
+          ],
+        });
+      }
+      if (path === "/api/pickup-reasons") return jsonResponse(200, REASONS);
+      throw new Error(`unexpected fetch: ${path}`);
+    });
+    renderPage(fetchMock);
+
+    expect(await screen.findByText(/Отклонено при синхронизации: 2/)).toBeDefined();
+    expect(screen.getByText(/дубль/i)).toBeDefined();
+    expect(screen.getByText(/лимит/i)).toBeDefined();
+  });
+
+  it("renders no conflicts plaque for a clean order", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      const path = String(url);
+      if (path === "/api/pickup-orders/o1") {
+        return jsonResponse(200, { ...ORDER, conflictCount: 0, syncConflicts: [] });
+      }
+      if (path === "/api/pickup-reasons") return jsonResponse(200, REASONS);
+      throw new Error(`unexpected fetch: ${path}`);
+    });
+    renderPage(fetchMock);
+
+    expect(await screen.findByText(ORDER.orderNo)).toBeDefined();
+    expect(screen.queryByText(/Отклонено при синхронизации/)).toBeNull();
   });
 
   it("opens the receipt modal on 'Пробита на кассе' and POSTs resolve with action punch + receiptNo", async () => {

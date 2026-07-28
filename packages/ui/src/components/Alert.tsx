@@ -76,7 +76,10 @@ export function Alert({
           <span style={{ font: "600 14px/20px var(--font-ui)", color: config.fg }}>{title}</span>
         )}
         {children && (
-          <span style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>{children}</span>
+          // `div`, not `span`: children are often block content (e.g. the
+          // pickup order detail page's conflict list), and phrasing content
+          // (span) cannot contain a list -- that's invalid HTML.
+          <div style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>{children}</div>
         )}
       </div>
       {action}

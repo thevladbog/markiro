@@ -3,6 +3,7 @@ import {
   ConflictException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
   UnauthorizedException,
 } from "@nestjs/common";
@@ -10,9 +11,11 @@ import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, sql, type SQL } from
 import { schema, type Db } from "@markiro/db";
 import { validatePickupKm } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
+import { getOrCreateBadgeSalt } from "../../lib/badge-salt";
 import { nextOrderNo } from "../../pickup/order-number";
 import { computeTotalPrice } from "../../pickup/total-price";
 import type { PickupSlipData } from "../../pickup/slip";
+import { OperatorsService } from "../operators/operators.service";
 import type {
   CreateOrderDto,
   CreateOrderResultDto,
@@ -42,7 +45,12 @@ type ParsedItem =
 
 @Injectable()
 export class PickupOrdersService {
-  constructor(@Inject(DB) private readonly db: Db) {}
+  private readonly logger = new Logger(PickupOrdersService.name);
+
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    private readonly operatorsService: OperatorsService,
+  ) {}
 
   /**
    * Authoritative kiosk create/sync path (brief's 7-step algorithm):
@@ -132,6 +140,16 @@ export class PickupOrdersService {
           conflicts: [],
         };
       }
+      // No order row is created here, so `syncConflicts` has nowhere to live:
+      // the kiosk gets these conflicts in its response, but the cabinet would
+      // otherwise never learn that a worker's ENTIRE scan session was refused
+      // — the same blind spot `syncConflicts` exists to close, in its worst
+      // case. Log it so the event is at least observable to operations.
+      // A durable, admin-visible record needs a surface of its own (there is
+      // no order to hang it on) and is tracked separately.
+      this.logger.warn(
+        `kiosk ${kioskId}: all ${dto.items.length} scanned code(s) refused for employee ${employeeId} — ${conflicts.map((c) => c.reason).join(", ")}`,
+      );
       return { orderNo: "", status: "pending", itemCount: 0, conflicts };
     }
 
@@ -199,39 +217,49 @@ export class PickupOrdersService {
         and(eq(schema.kioskProducts.tenantId, tenantId), eq(schema.kioskProducts.kioskId, kioskId)),
       );
 
+    const badgeSalt = await getOrCreateBadgeSalt(this.db, tenantId);
+
     const employeeRows = await this.db
       .select()
       .from(schema.employees)
       .where(and(eq(schema.employees.tenantId, tenantId), eq(schema.employees.status, "active")))
       .orderBy(asc(schema.employees.fullName));
-    const badgeRows = await this.db
-      .select({
-        employeeId: schema.employeeBadges.employeeId,
-        badgeCode: schema.employeeBadges.badgeCode,
-      })
-      .from(schema.employeeBadges)
-      .where(
-        and(eq(schema.employeeBadges.tenantId, tenantId), isNull(schema.employeeBadges.revokedAt)),
-      );
-    const badgesByEmployee = new Map<string, string[]>();
-    for (const b of badgeRows) {
-      const list = badgesByEmployee.get(b.employeeId) ?? [];
-      list.push(b.badgeCode);
-      badgesByEmployee.set(b.employeeId, list);
-    }
+
+    // Reuses the roster builder's hashing/backfill path, so kiosk and station
+    // can never drift on how a badge verifier is produced.
+    const badgeHashes = await this.operatorsService.badgeHashesFor(
+      tenantId,
+      employeeRows.map((e) => e.id),
+    );
+    const operators = await this.operatorsService.buildRoster(tenantId);
 
     return {
+      generatedAt: new Date().toISOString(),
       config: {
         dayLimitPerEmployee: kiosk?.dayLimitPerEmployee ?? 0,
         showPrices: kiosk?.showPrices ?? true,
       },
+      badgeSalt,
       reasons,
       products,
       employees: employeeRows.map((e) => ({
         id: e.id,
         fullName: e.fullName,
         role: e.role,
-        badgeCodes: badgesByEmployee.get(e.id) ?? [],
+        badgeHash: badgeHashes.get(e.id) ?? null,
+      })),
+      operators: operators.map((o) => ({
+        employeeId: o.operatorId,
+        name: o.name,
+        login: o.login,
+        role: o.role,
+        pinHash: o.pinHash,
+        badgeHash: o.badgeHash,
+        // From the roster record, not hardcoded -- `buildRoster` only
+        // returns active operators today so this is always `true`, but the
+        // field must reflect the record, not an assumption baked into this
+        // mapping.
+        active: o.active,
       })),
     };
   }
@@ -315,6 +343,7 @@ export class PickupOrdersService {
       })),
       receiptNo: row.receiptNo,
       actNo: row.actNo,
+      syncConflicts: (row.syncConflicts as OrderConflict[] | null) ?? [],
     };
   }
 
@@ -619,6 +648,7 @@ export class PickupOrdersService {
       totalPrice: schema.pickupOrders.totalPrice,
       status: schema.pickupOrders.status,
       createdAt: schema.pickupOrders.createdAt,
+      syncConflicts: schema.pickupOrders.syncConflicts,
     };
   }
 
@@ -633,6 +663,7 @@ export class PickupOrdersService {
     totalPrice: string | null;
     status: "pending" | "punched" | "writtenoff" | "cancelled";
     createdAt: Date;
+    syncConflicts: { rawKm: string; reason: string }[] | null;
   }): PickupOrderRowDto {
     return {
       id: row.id,
@@ -645,6 +676,7 @@ export class PickupOrdersService {
       totalPrice: row.totalPrice,
       status: row.status,
       createdAt: row.createdAt,
+      conflictCount: row.syncConflicts?.length ?? 0,
     };
   }
 
@@ -868,6 +900,21 @@ export class PickupOrdersService {
     for (;;) {
       try {
         return await this.db.transaction(async (tx) => {
+          // Lock the kiosk row before inserting. `PairingService.attemptRedeem`
+          // takes this SAME row lock before it computes nextDeviceSeq during a
+          // re-pair, so the two paths can never interleave: a device that is
+          // already past `KioskDeviceGuard` and mid-flight here, inserting its
+          // own order, must be accounted for by that MAX(device_seq) read, not
+          // raced by it. See the comment at that call site for the full
+          // failure this closes -- a replacement device silently losing its
+          // first genuine order to a false idempotency-key replay. Scoped to
+          // just this one row, for only the remainder of this transaction.
+          await tx
+            .select({ id: schema.kiosks.id })
+            .from(schema.kiosks)
+            .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, kioskId)))
+            .for("update");
+
           // nextOrderNo's `tx` param is deliberately loosely typed (Task 7) so it
           // doesn't have to import drizzle's transaction type; adapt the real
           // transaction handle's `execute` to that shape at the call site instead
@@ -891,6 +938,7 @@ export class PickupOrdersService {
               totalPrice: computeTotalPrice(remaining),
               deviceSeq,
               createdAt: when,
+              syncConflicts: conflicts.length > 0 ? conflicts : null,
             })
             .returning();
           if (!order) throw new Error("Failed to insert pickup order");

@@ -236,6 +236,21 @@ export function OrderDetailPage() {
         </div>
       </Card>
 
+      {order.syncConflicts.length > 0 && (
+        <Alert
+          tone="warn"
+          title={t("pages.pickup.conflicts.title", { count: order.syncConflicts.length })}
+        >
+          <ul style={{ margin: 0, paddingInlineStart: "var(--sp-5)" }}>
+            {order.syncConflicts.map((c, i) => (
+              <li key={`${c.rawKm}:${i}`} style={{ font: "var(--text-code)" }}>
+                {c.rawKm} — {t(`pages.pickup.conflicts.reason.${c.reason}`)}
+              </li>
+            ))}
+          </ul>
+        </Alert>
+      )}
+
       <Card title={t("pages.pickup.detail.itemsTitle")}>
         <Table columns={itemColumns} rows={order.items} />
       </Card>

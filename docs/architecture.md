@@ -135,6 +135,27 @@ registry, `save-exact`, `engine-strict`, `minimum-release-age=10080`
 - CI: GitHub Actions — lint/test/build, DB migrations, Docker images,
   Tauri Windows installer build + signing, release channels for the updater.
 - Future on-prem = the same compose bundle.
+- The API needs `TRUST_PROXY_HOPS=1` behind Caddy (it defaults to 0, i.e.
+  untrusted, for direct exposure and for dev/tests) — otherwise Express's
+  `req.ip` resolves to Caddy's own address for every request. IP-keyed rate
+  limiting belongs in Caddy itself as the primary layer (it sees the real
+  client address unconditionally and can shed load before it reaches the
+  app); the API's own DB-backed limiter (currently just kiosk pairing) is a
+  backstop for when that layer is missing or misconfigured, not a
+  replacement for it.
+- **Deployment checklist item:** the API container must run with both
+  `NODE_ENV=production` **and** `TRUST_PROXY_HOPS` set to the number of
+  reverse proxies that append to `X-Forwarded-For` (`1` behind the single
+  Caddy hop above). Both matter together: `main.ts`'s only safety net for
+  this misconfiguration — a startup `Logger.warn` — fires only when
+  `NODE_ENV=production`, so leaving `NODE_ENV` unset makes that warning
+  silent in exactly the deployment it exists to protect. Get either
+  variable wrong and every caller's `req.ip` collapses to the same
+  socket-peer/proxy address, so the kiosk-pairing limiter's per-source
+  budget covers all callers combined instead of one each — one blocked
+  source then keeps charging the shared bucket on every subsequent
+  request, taking down kiosk pairing for every tenant for the rest of the
+  window.
 
 ## Open items (tracked for later phases)
 

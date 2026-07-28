@@ -12,6 +12,7 @@ import {
 } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import type { Response } from "express";
+import { SessionOnlyGuard } from "../../tenancy/session-only.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { renderPickupSlipHtml } from "../../pickup/slip";
 import { ZodValidationPipe } from "../../zod.pipe";
@@ -29,9 +30,12 @@ import {
 import { PickupOrdersService } from "./pickup-orders.service";
 
 /** Admin/office routes under `/pickup-orders`, authenticated via the Better Auth session cookie. */
+// Cabinet-only: the kiosk device talks to /kiosk/* behind KioskDeviceGuard and
+// never needs this module, so no device key — station or kiosk — should reach
+// it (see docs/device-key-surface.md).
 @ApiTags("pickup-orders")
 @Controller("pickup-orders")
-@UseGuards(TenantGuard)
+@UseGuards(TenantGuard, SessionOnlyGuard)
 export class PickupOrdersController {
   constructor(private readonly pickupOrdersService: PickupOrdersService) {}
 

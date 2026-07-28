@@ -1,6 +1,6 @@
 {
-  "id": "1f500b97-8114-4a71-8246-123263d2edd9",
-  "prevId": "c68fe8bb-eb59-4119-bdf9-6746ddd885b1",
+  "id": "00404e3d-103b-408e-9f7c-07d3956e08b1",
+  "prevId": "1f500b97-8114-4a71-8246-123263d2edd9",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1908,6 +1908,28 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "kiosk_pairing_codes_one_live_uq": {
+          "name": "kiosk_pairing_codes_one_live_uq",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "kiosk_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "used_at is null",
           "concurrently": false,
           "method": "btree",
           "with": {}

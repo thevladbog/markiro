@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { OperatorsModule } from "../operators/operators.module";
 import { PickupOrdersController } from "./pickup-orders.controller";
 import { PickupOrdersService } from "./pickup-orders.service";
 
@@ -9,8 +10,13 @@ import { PickupOrdersService } from "./pickup-orders.service";
  * `PickupOrdersModule` directly in `AppModule` activates that controller;
  * NestJS keeps a single module instance across both import sites, so
  * `PickupOrdersService` stays a shared singleton.
+ *
+ * Imports `OperatorsModule` so `bootstrap()` can reuse `OperatorsService`'s
+ * badge-hashing/backfill path and roster builder (Task 4) instead of
+ * duplicating them.
  */
 @Module({
+  imports: [OperatorsModule],
   controllers: [PickupOrdersController],
   providers: [PickupOrdersService],
   exports: [PickupOrdersService],

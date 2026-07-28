@@ -1,6 +1,6 @@
 {
-  "id": "1f500b97-8114-4a71-8246-123263d2edd9",
-  "prevId": "c68fe8bb-eb59-4119-bdf9-6746ddd885b1",
+  "id": "eb6dffdb-87fa-482d-8d86-3bf45c53703b",
+  "prevId": "00404e3d-103b-408e-9f7c-07d3956e08b1",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1840,6 +1840,54 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.kiosk_pair_attempts": {
+      "name": "kiosk_pair_attempts",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "window_started_at": {
+          "name": "window_started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "failures": {
+          "name": "failures",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "kiosk_pair_attempts_source_window_uq": {
+          "name": "kiosk_pair_attempts_source_window_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "source",
+            "window_started_at"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.kiosk_pairing_codes": {
       "name": "kiosk_pairing_codes",
       "schema": "",
@@ -1908,6 +1956,28 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "kiosk_pairing_codes_one_live_uq": {
+          "name": "kiosk_pairing_codes_one_live_uq",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "kiosk_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "used_at is null",
           "concurrently": false,
           "method": "btree",
           "with": {}
