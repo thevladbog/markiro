@@ -66,6 +66,13 @@ beside each item.
       button never survives leaving the screen.
 - [ ] Connect on one port, then connect on a different port: the first session
       stops and only the second delivers scans.
+- [ ] Rapidly reconnect to a different port several times in a row while the
+      scanner is actively delivering scans (connect A, immediately connect B,
+      immediately connect A again, ...): the status bar settles on
+      "connected" and stays there — it must never end up stuck on "no
+      signal" from a retiring session's disconnect landing after its
+      successor's connect (the generation-and-status lock in `scanner.rs`
+      is what this proves).
 - [ ] Unplug the scanner mid-shift: the status bar flips to "no signal".
 - [ ] Close and immediately reopen the same port (the setup screen's
       close-before-open): the reopen succeeds without restarting the app.

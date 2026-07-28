@@ -1,5 +1,5 @@
 use std::io::Read;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
@@ -9,11 +9,21 @@ pub const SCAN_EVENT: &str = "station://scan";
 /// Event carrying the scanner's connection state to the webview.
 pub const SCANNER_STATUS_EVENT: &str = "station://scanner-status";
 
-/// Monotonic session counter. Each reader thread captures the generation it
-/// was started with and exits as soon as the current one differs, so a fast
-/// close→open can never leave two readers alive — which is what makes
-/// close-before-open safe for the setup screen.
-static GENERATION: AtomicU64 = AtomicU64::new(0);
+/// Monotonic session counter, guarded by a mutex rather than a bare atomic so
+/// that a generation transition and the status emit announcing it are one
+/// atomic step. Each reader thread captures the generation it was started
+/// with and exits as soon as the current one differs, so a fast close→open
+/// can never leave two readers alive — which is what makes close-before-open
+/// safe for the setup screen.
+///
+/// The mutex is what closes the status race that used to be documented here
+/// as an accepted residual: `open_scanner`/`close_scanner` bump the
+/// generation and emit their status under one held lock, and a retiring
+/// reader thread's exit guard checks-and-emits under that same lock (see the
+/// end of the reader thread spawned in `open_scanner`). Since the two
+/// critical sections can't interleave, a retiring session can never publish
+/// "disconnected" after a newer session has already published "connected".
+static GENERATION: Mutex<u64> = Mutex::new(0);
 
 /// A reader keeps running only while its own generation is still current.
 pub fn session_should_run(mine: u64, current: u64) -> bool {
@@ -132,13 +142,32 @@ pub async fn open_scanner(app: AppHandle, port: String, baud: u32) -> Result<(),
     // Only now that the handle is in hand do we retire the previous session:
     // its thread sees a newer generation and exits. This is what lets the
     // setup screen recover from a wrong port without an app restart.
-    let generation = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+    //
+    // The increment and the "connected" emit happen under one held lock, so
+    // no retiring reader thread's exit guard (which checks-and-emits under
+    // the same lock) can observe the old generation and publish
+    // "disconnected" after this "connected" has already gone out.
+    let generation = {
+        let mut guard = GENERATION.lock().unwrap_or_else(|e| e.into_inner());
+        *guard += 1;
+        let _ = app.emit(SCANNER_STATUS_EVENT, "connected");
+        *guard
+    };
 
-    let _ = app.emit(SCANNER_STATUS_EVENT, "connected");
     std::thread::spawn(move || {
         let mut buffer = String::new();
         let mut chunk = [0u8; 256];
-        while session_should_run(generation, GENERATION.load(Ordering::SeqCst)) {
+        loop {
+            // Lock only long enough to compare, then release before the
+            // blocking `read()` below. Holding the lock across the read
+            // would serialize every other session operation (a competing
+            // open/close) against this thread for up to the read timeout.
+            {
+                let current = *GENERATION.lock().unwrap_or_else(|e| e.into_inner());
+                if !session_should_run(generation, current) {
+                    break;
+                }
+            }
             match handle.read(&mut chunk) {
                 Ok(0) => continue,
                 Ok(n) => {
@@ -155,18 +184,18 @@ pub async fn open_scanner(app: AppHandle, port: String, baud: u32) -> Result<(),
         // Only the session that is still current owns the status: a retired
         // thread exiting must not report a disconnect over its successor.
         //
-        // Known residual race (accepted, not closed): between the load above
-        // and the emit below, a new session could advance GENERATION, open
-        // its port and emit "connected" — this thread would then emit
-        // "disconnected" on top of it. This is no longer just a
-        // narrow-instruction-window coincidence: `open_scanner`'s retry loop
-        // is designed to overlap a dying reader thread (still holding its
-        // handle until this loop's own read times out) with a fresh open on
-        // the same port, so hitting this window is an expected consequence
-        // of that design, not a rare preemption fluke. Closing it would mean
-        // serializing the emit with the generation change, which isn't worth
-        // it for this window.
-        if session_should_run(generation, GENERATION.load(Ordering::SeqCst)) {
+        // This check-and-emit happens under the same lock that
+        // `open_scanner`/`close_scanner` hold across their own generation
+        // bump and status emit. That's the invariant that closes the race
+        // this comment used to document as an accepted residual: status is
+        // always published under the same lock that owns the generation, so
+        // this thread can never land its "disconnected" between a newer
+        // session's generation bump and its "connected" — either this read
+        // happens before that critical section (and sees the old
+        // generation, so it still owns the status) or after it (and sees
+        // the new generation, so it stays silent).
+        let guard = GENERATION.lock().unwrap_or_else(|e| e.into_inner());
+        if session_should_run(generation, *guard) {
             let _ = app.emit(SCANNER_STATUS_EVENT, "disconnected");
         }
     });
@@ -175,7 +204,8 @@ pub async fn open_scanner(app: AppHandle, port: String, baud: u32) -> Result<(),
 
 #[tauri::command]
 pub fn close_scanner(app: AppHandle) -> Result<(), String> {
-    GENERATION.fetch_add(1, Ordering::SeqCst);
+    let mut guard = GENERATION.lock().unwrap_or_else(|e| e.into_inner());
+    *guard += 1;
     let _ = app.emit(SCANNER_STATUS_EVENT, "disconnected");
     Ok(())
 }
