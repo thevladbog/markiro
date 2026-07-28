@@ -23,6 +23,7 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
   let otherAgent: ReturnType<typeof request.agent>;
   let tenantId: string;
   let kioskId: string;
+  let seededOrder: string;
 
   beforeAll(async () => {
     const env = loadEnv();
@@ -82,6 +83,38 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
       .send({ name: `Киоск ${randomUUID()}` })
       .expect(201);
     kioskId = kiosk.body.id as string;
+
+    // A product on the kiosk's allowlist, so the paired bundle's dataset is
+    // non-empty (the pairing screen needs a real product to scan).
+    const productId = randomUUID();
+    await db.insert(schema.products).values({
+      id: productId,
+      tenantId,
+      gtin14: "04600682000013",
+      name: "Товар",
+      unitPrice: "99.90",
+    });
+    await db.insert(schema.kioskProducts).values({ tenantId, kioskId, productId });
+
+    // An order that already existed before pairing, with no deviceSeq (as an
+    // admin-created row would have -- see schema comment on
+    // pickup_orders_kiosk_device_seq_uq). Its NULL deviceSeq must not affect
+    // the "no orders yet" case; tests that care about continuation give it a
+    // real deviceSeq explicitly.
+    const employeeId = randomUUID();
+    await db.insert(schema.employees).values({ id: employeeId, tenantId, fullName: "Сотрудник" });
+    seededOrder = randomUUID();
+    await db.insert(schema.pickupOrders).values({
+      id: seededOrder,
+      tenantId,
+      orderNo: `ORD-SEED-${randomUUID().slice(0, 8)}`,
+      kioskId,
+      employeeId,
+      reason: "buy",
+      status: "pending",
+      itemCount: 1,
+      deviceSeq: null,
+    });
 
     otherAgent = request.agent(app!.getHttpServer());
     await signUpAndActivate(otherAgent);
@@ -155,5 +188,76 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
         ),
       );
     expect(live).toHaveLength(1);
+  });
+
+  it("exchanges a code for a working token and the initial dataset", async () => {
+    const issued = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+
+    const paired = await request(app!.getHttpServer())
+      .post("/kiosk/pair")
+      .send({ code: issued.body.code })
+      .expect(201);
+
+    expect(paired.body.device.kioskId).toBe(kioskId);
+    expect(paired.body.nextDeviceSeq).toBe(0);
+    expect(paired.body.bootstrap.products.length).toBeGreaterThan(0);
+
+    // the token works straight away
+    await request(app!.getHttpServer())
+      .get("/kiosk/bootstrap")
+      .set("x-kiosk-token", paired.body.token)
+      .expect(200);
+  });
+
+  it("refuses a second redemption of the same code", async () => {
+    const issued = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    await request(app!.getHttpServer())
+      .post("/kiosk/pair")
+      .send({ code: issued.body.code })
+      .expect(201);
+    await request(app!.getHttpServer())
+      .post("/kiosk/pair")
+      .send({ code: issued.body.code })
+      .expect(401);
+  });
+
+  it("refuses an expired code", async () => {
+    const issued = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    await db
+      .update(schema.kioskPairingCodes)
+      .set({ expiresAt: new Date(Date.now() - 1000) })
+      .where(eq(schema.kioskPairingCodes.codeHash, hashDeviceToken(issued.body.code)));
+    await request(app!.getHttpServer())
+      .post("/kiosk/pair")
+      .send({ code: issued.body.code })
+      .expect(401);
+  });
+
+  it("locks a code out after 5 wrong attempts", async () => {
+    const issued = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    const codeHash = hashDeviceToken(issued.body.code);
+    await db
+      .update(schema.kioskPairingCodes)
+      .set({ attempts: 5 })
+      .where(eq(schema.kioskPairingCodes.codeHash, codeHash));
+    await request(app!.getHttpServer())
+      .post("/kiosk/pair")
+      .send({ code: issued.body.code })
+      .expect(401);
+  });
+
+  it("continues deviceSeq after a re-pair so the first order is not mistaken for a replay", async () => {
+    await db
+      .update(schema.pickupOrders)
+      .set({ deviceSeq: 7 })
+      .where(
+        and(eq(schema.pickupOrders.tenantId, tenantId), eq(schema.pickupOrders.id, seededOrder)),
+      );
+    const issued = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    const paired = await request(app!.getHttpServer())
+      .post("/kiosk/pair")
+      .send({ code: issued.body.code })
+      .expect(201);
+    expect(paired.body.nextDeviceSeq).toBe(8);
   });
 });

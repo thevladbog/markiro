@@ -1,14 +1,18 @@
 import { randomInt } from "node:crypto";
-import { Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, eq, gt, isNull } from "drizzle-orm";
+import { Inject, Injectable, NotFoundException, UnauthorizedException } from "@nestjs/common";
+import { and, eq, gt, isNull, max } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
-import { hashDeviceToken } from "../../pickup/device-token";
+import { generateDeviceToken, hashDeviceToken } from "../../pickup/device-token";
+import { PickupOrdersService } from "../pickup-orders/pickup-orders.service";
+import type { PairKioskResultDto } from "../pickup-orders/dto";
 
 const CODE_DIGITS = 8;
 const TTL_MS = 15 * 60_000;
 /** Bounded retries so a live-code hash collision can never be minted. */
 const MINT_ATTEMPTS = 5;
+/** Per-code attempt lockout: bounds brute force on the one unauthenticated kiosk route. */
+const MAX_ATTEMPTS = 5;
 
 // `hashDeviceToken` is a plain sha256, which an attacker holding a DB dump
 // could brute-force over the 10^8 code space. That is acceptable here and
@@ -23,7 +27,10 @@ export interface IssuePairingCodeResultDto {
 
 @Injectable()
 export class PairingService {
-  constructor(@Inject(DB) private readonly db: Db) {}
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    private readonly pickupOrdersService: PickupOrdersService,
+  ) {}
 
   /**
    * A single-use 8-digit code for `kioskId`. Only its hash is stored; the
@@ -94,6 +101,63 @@ export class PairingService {
       return { code, expiresAt };
     }
     throw new Error("Could not mint a unique pairing code");
+  }
+
+  /**
+   * Exchanges a plaintext code for a device credential plus the initial
+   * dataset. Redemption is atomic: the row is claimed by a conditional
+   * UPDATE, so two devices racing on the same code cannot both win.
+   */
+  async redeem(code: string): Promise<PairKioskResultDto> {
+    const codeHash = hashDeviceToken(code);
+    const [candidate] = await this.db
+      .select()
+      .from(schema.kioskPairingCodes)
+      .where(eq(schema.kioskPairingCodes.codeHash, codeHash));
+
+    // A wrong code matches nothing — there is no row to count attempts on, so
+    // the lockout necessarily applies per issued code, exactly as designed.
+    if (!candidate) throw new UnauthorizedException();
+    if (candidate.attempts >= MAX_ATTEMPTS) throw new UnauthorizedException();
+    if (candidate.usedAt || candidate.expiresAt.getTime() <= Date.now()) {
+      await this.db
+        .update(schema.kioskPairingCodes)
+        .set({ attempts: candidate.attempts + 1 })
+        .where(eq(schema.kioskPairingCodes.id, candidate.id));
+      throw new UnauthorizedException();
+    }
+
+    const [claimed] = await this.db
+      .update(schema.kioskPairingCodes)
+      .set({ usedAt: new Date() })
+      .where(
+        and(eq(schema.kioskPairingCodes.id, candidate.id), isNull(schema.kioskPairingCodes.usedAt)),
+      )
+      .returning({ id: schema.kioskPairingCodes.id });
+    if (!claimed) throw new UnauthorizedException();
+
+    const { tenantId, kioskId } = candidate;
+    const token = generateDeviceToken();
+    const [kiosk] = await this.db
+      .update(schema.kiosks)
+      .set({ deviceTokenHash: hashDeviceToken(token) })
+      .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, kioskId)))
+      .returning({ name: schema.kiosks.name, location: schema.kiosks.location });
+    if (!kiosk) throw new UnauthorizedException();
+
+    const [seq] = await this.db
+      .select({ max: max(schema.pickupOrders.deviceSeq) })
+      .from(schema.pickupOrders)
+      .where(
+        and(eq(schema.pickupOrders.tenantId, tenantId), eq(schema.pickupOrders.kioskId, kioskId)),
+      );
+
+    return {
+      device: { kioskId, kioskName: kiosk.name, place: kiosk.location },
+      token,
+      nextDeviceSeq: (seq?.max ?? -1) + 1,
+      bootstrap: await this.pickupOrdersService.bootstrap(tenantId, kioskId),
+    };
   }
 
   private isOneLiveCodeViolation(error: unknown): boolean {

@@ -1,5 +1,9 @@
 import { z } from "zod";
 
+/** POST /kiosk/pair body — the 8-digit code shown on the kiosk cabinet. */
+export const pairKioskSchema = z.object({ code: z.string().regex(/^\d{8}$/) });
+export type PairKioskDto = z.infer<typeof pairKioskSchema>;
+
 /** POST /kiosk/orders — one raw scan from the kiosk's scanner. */
 export const createOrderItemSchema = z.object({ rawKm: z.string().min(1) });
 export type CreateOrderItemInput = z.infer<typeof createOrderItemSchema>;
@@ -63,6 +67,19 @@ export interface KioskBootstrapDto {
     pinHash: string;
     badgeHash: string | null;
   }[];
+}
+
+/**
+ * POST /kiosk/pair response — the contract Plan B-2's pairing screen calls.
+ * `nextDeviceSeq` is `MAX(deviceSeq) + 1` for this kiosk (0 if it has no
+ * orders yet), so a re-paired device continues its idempotency-key counter
+ * instead of restarting at 0 and colliding with its own past orders.
+ */
+export interface PairKioskResultDto {
+  device: { kioskId: string; kioskName: string; place: string | null };
+  token: string; // the x-kiosk-token
+  nextDeviceSeq: number;
+  bootstrap: KioskBootstrapDto;
 }
 
 const PICKUP_ORDER_STATUSES = ["pending", "punched", "writtenoff", "cancelled"] as const;

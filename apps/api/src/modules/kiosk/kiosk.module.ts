@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { PickupOrdersModule } from "../pickup-orders/pickup-orders.module";
 import { KioskController } from "./kiosk.controller";
+import { KioskPairController } from "./kiosk-pair.controller";
 import { PairingService } from "./pairing.service";
 
 /**
@@ -11,7 +12,7 @@ import { PairingService } from "./pairing.service";
  */
 @Module({
   imports: [PickupOrdersModule],
-  controllers: [KioskController],
+  controllers: [KioskController, KioskPairController],
   providers: [PairingService],
   exports: [PairingService],
 })
