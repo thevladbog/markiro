@@ -88,6 +88,56 @@ describe.skipIf(!url)("pickup B1 schema (badge salts, pairing codes, sync confli
     ).rejects.toMatchObject({ cause: { code: "23503" } });
   });
 
+  // F3 regression: `kiosk_pairing_codes_code_hash_live_uq` (migration
+  // 0014) is the DB-enforced backstop for `PairingService.issueCode`'s
+  // SELECT-then-INSERT clash check, which has its own race window. Partial
+  // on `used_at is null`, mirroring `kiosk_pairing_codes_one_live_uq`'s own
+  // pattern -- a FULL unique index would permanently block ever reissuing a
+  // hash again once its code is spent, which this asserts against directly.
+  it("allows only one live row per code hash, but frees it once retired", async () => {
+    const hash = `hash-${randomUUID()}`;
+    await db.insert(schema.kioskPairingCodes).values({
+      tenantId: org.id,
+      kioskId,
+      codeHash: hash,
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+
+    // A second live row sharing this hash collides -- even across tenants
+    // and kiosks, since the exchange looks a device up by hash alone with
+    // no tenant context yet.
+    await expect(
+      db.insert(schema.kioskPairingCodes).values({
+        tenantId: foreignOrg.id,
+        kioskId: foreignKioskId,
+        codeHash: hash,
+        expiresAt: new Date(Date.now() + 60_000),
+      }),
+    ).rejects.toMatchObject({
+      cause: { code: "23505", constraint: "kiosk_pairing_codes_code_hash_live_uq" },
+    });
+
+    // Retiring the first row (used_at set) frees the hash for reuse.
+    await db
+      .update(schema.kioskPairingCodes)
+      .set({ usedAt: new Date() })
+      .where(
+        and(
+          eq(schema.kioskPairingCodes.tenantId, org.id),
+          eq(schema.kioskPairingCodes.codeHash, hash),
+        ),
+      );
+
+    await expect(
+      db.insert(schema.kioskPairingCodes).values({
+        tenantId: foreignOrg.id,
+        kioskId: foreignKioskId,
+        codeHash: hash,
+        expiresAt: new Date(Date.now() + 60_000),
+      }),
+    ).resolves.not.toThrow();
+  });
+
   it("round-trips sync conflicts as JSON on the order", async () => {
     await db
       .update(schema.pickupOrders)

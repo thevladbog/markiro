@@ -71,10 +71,22 @@ export class PairingService {
    * code retires any code still live for that kiosk.
    */
   async issueCode(tenantId: string, kioskId: string): Promise<IssuePairingCodeResultDto> {
+    // Restricted to an active kiosk, mirroring `attemptRedeem`'s own
+    // `status = 'active'` guard on the exchange: an archived kiosk can never
+    // redeem a code, so issuing one would show the cabinet a code that is
+    // guaranteed to come back as a generic 401 with no way to tell why. A 404
+    // here matches how the rest of this service treats a kiosk it will not
+    // act on.
     const [kiosk] = await this.db
       .select({ id: schema.kiosks.id })
       .from(schema.kiosks)
-      .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, kioskId)));
+      .where(
+        and(
+          eq(schema.kiosks.tenantId, tenantId),
+          eq(schema.kiosks.id, kioskId),
+          eq(schema.kiosks.status, "active"),
+        ),
+      );
     if (!kiosk) throw new NotFoundException();
 
     // Retire the kiosk's live codes first: a device must never face two
@@ -96,6 +108,11 @@ export class PairingService {
       const codeHash = hashDeviceToken(code);
       // The exchange looks a device up by hash alone, so a hash shared by two
       // simultaneously-live codes would be ambiguous. Mint a different one.
+      // This is a best-effort SELECT-then-INSERT check with its own race
+      // window (closed for real by `kiosk_pairing_codes_code_hash_live_uq`
+      // below, a partial unique index on `code_hash WHERE used_at is null`) --
+      // kept because it avoids paying for that race on the common,
+      // non-colliding path.
       const [clash] = await this.db
         .select({ id: schema.kioskPairingCodes.id })
         .from(schema.kioskPairingCodes)
@@ -113,6 +130,7 @@ export class PairingService {
           .insert(schema.kioskPairingCodes)
           .values({ tenantId, kioskId, codeHash, expiresAt });
       } catch (error) {
+        if (this.isHashCollision(error)) continue; // another live code (any tenant) already has this hash -- mint a different one
         if (!this.isOneLiveCodeViolation(error)) throw error;
         // A concurrent caller inserted its own live code between our retire
         // UPDATE and our INSERT. Retire it too, then retry the insert once --
@@ -127,9 +145,14 @@ export class PairingService {
               isNull(schema.kioskPairingCodes.usedAt),
             ),
           );
-        await this.db
-          .insert(schema.kioskPairingCodes)
-          .values({ tenantId, kioskId, codeHash, expiresAt });
+        try {
+          await this.db
+            .insert(schema.kioskPairingCodes)
+            .values({ tenantId, kioskId, codeHash, expiresAt });
+        } catch (retryError) {
+          if (this.isHashCollision(retryError)) continue;
+          throw retryError;
+        }
       }
       return { code, expiresAt };
     }
@@ -266,10 +289,13 @@ export class PairingService {
             eq(schema.kioskPairingCodes.id, candidate.id),
             isNull(schema.kioskPairingCodes.usedAt),
             // Re-assert expiry at claim time, symmetric with the usedAt
-            // re-check above: `now` was captured before this transaction
-            // started, so a code that expired in the interim must not be
-            // claimable just because it was still live when first read.
-            gt(schema.kioskPairingCodes.expiresAt, now),
+            // re-check above -- but against the DATABASE's clock, not the
+            // JS `now` captured at the top of `redeem`: `bootstrap()` above
+            // runs between that capture and this statement and can take
+            // seconds on a large tenant (badge re-hashing), so a code that
+            // expires during bootstrap must not still be claimable just
+            // because it was live when `now` was captured.
+            gt(schema.kioskPairingCodes.expiresAt, sql`now()`),
           ),
         )
         .returning({ id: schema.kioskPairingCodes.id });
@@ -287,6 +313,26 @@ export class PairingService {
         )
         .returning({ name: schema.kiosks.name, location: schema.kiosks.location });
       if (!kiosk) throw new UnauthorizedException();
+
+      // Lock the kiosk row before computing nextDeviceSeq. The previously
+      // paired device can be past `KioskDeviceGuard` and still mid-flight,
+      // inserting its own order, when this re-pair runs -- `createFromKiosk`
+      // (`insertOrderWithRetry` in pickup-orders.service.ts) takes this SAME
+      // row lock before it inserts, so the two paths can never interleave
+      // around this read. That makes the MAX below unable to miss an order
+      // that is already committing: whichever of the two transactions asks
+      // for the lock first now runs to completion before the other
+      // proceeds, instead of the MAX read racing a commit that lands right
+      // after it -- which, since (tenant, kiosk, deviceSeq) is the order
+      // idempotency key, would otherwise hand this replacement device a
+      // deviceSeq the late order already used and silently discard its
+      // first genuine order as a false replay. Scoped to just this one row,
+      // for only the remainder of this transaction.
+      await tx
+        .select({ id: schema.kiosks.id })
+        .from(schema.kiosks)
+        .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, kioskId)))
+        .for("update");
 
       const [seq] = await tx
         .select({ max: max(schema.pickupOrders.deviceSeq) })
@@ -332,8 +378,26 @@ export class PairingService {
    * pairing for every tenant, not just the one source that tripped it. An
    * unattributable source (empty/falsy) has no per-source bucket to trip, so
    * it falls straight through to the global check, unchanged from before.
+   *
+   * Symmetrically, a read-only pre-check runs FIRST, before either budget is
+   * touched: once the global budget is already exhausted, a request from a
+   * source that has never been seen before must still be turned away
+   * WITHOUT allocating it a fresh `kiosk_pair_attempts` row. Without this, an
+   * attacker rotating sources (exactly the distributed case the global
+   * backstop exists to bound) grows the table without bound and keeps
+   * writing to the DB long after pairing is already globally locked out. This
+   * pre-check is a plain SELECT specifically so it never itself allocates a
+   * row; it only needs to be conservative (skip when in doubt), not exact --
+   * the atomic `RETURNING` increment below is still what actually decides
+   * and charges a genuine transition past the budget, so a concurrent race
+   * straddling the limit is still resolved correctly there.
    */
   private async assertUnderPairRateLimit(source: string, windowStart: Date): Promise<void> {
+    const globalSoFar = await this.currentPairAttempts(GLOBAL_PAIR_SOURCE, windowStart);
+    if (globalSoFar > GLOBAL_PAIR_ATTEMPT_BUDGET) {
+      throw new UnauthorizedException();
+    }
+
     if (source) {
       const normalizedSource = normalizePairSource(source);
       const sourceAttempts = await this.recordPairAttempt(normalizedSource, windowStart);
@@ -407,6 +471,27 @@ export class PairingService {
   }
 
   /**
+   * Read-only lookup of the current `failures` count for `(source,
+   * windowStart)` -- no write, unlike `recordPairAttempt`. Used only for the
+   * global pre-check in `assertUnderPairRateLimit` above, so an already-
+   * exhausted global budget can be detected and turned away without
+   * allocating a row for a source seen for the first time. Zero when no row
+   * exists yet for this window (nothing recorded, so nothing to bound).
+   */
+  private async currentPairAttempts(source: string, windowStart: Date): Promise<number> {
+    const [row] = await this.db
+      .select({ failures: schema.kioskPairAttempts.failures })
+      .from(schema.kioskPairAttempts)
+      .where(
+        and(
+          eq(schema.kioskPairAttempts.source, source),
+          eq(schema.kioskPairAttempts.windowStartedAt, windowStart),
+        ),
+      );
+    return row?.failures ?? 0;
+  }
+
+  /**
    * Atomically records one attempt against `(source, windowStart)` and
    * returns the post-increment count, in a single upsert -- record-then-check,
    * not check-then-record. The previous shape ran a SELECT, decided, and only
@@ -441,5 +526,21 @@ export class PairingService {
     const errorCode = err?.code || cause?.code;
     const constraint = err?.constraint || cause?.constraint;
     return errorCode === "23505" && constraint === "kiosk_pairing_codes_one_live_uq";
+  }
+
+  /**
+   * 23505 on `kiosk_pairing_codes_code_hash_live_uq` -- the DB-enforced
+   * backstop for the SELECT-then-INSERT clash check above: another live code
+   * (this kiosk's retried insert above, or any other tenant's) already has
+   * this exact hash. Bounded by the same `MINT_ATTEMPTS` loop as an ordinary
+   * clash, never surfaced to the caller -- a hash collision must re-mint, not
+   * fail the whole issuance.
+   */
+  private isHashCollision(error: unknown): boolean {
+    const err = error as Error & { code?: string; constraint?: string; cause?: unknown };
+    const cause = err?.cause as { code?: string; constraint?: string } | undefined;
+    const errorCode = err?.code || cause?.code;
+    const constraint = err?.constraint || cause?.constraint;
+    return errorCode === "23505" && constraint === "kiosk_pairing_codes_code_hash_live_uq";
   }
 }

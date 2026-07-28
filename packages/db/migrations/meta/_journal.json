@@ -99,6 +99,13 @@
       "when": 1785226090362,
       "tag": "0013_sparkling_dragon_man",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1785236521998,
+      "tag": "0014_outstanding_rogue",
+      "breakpoints": true
     }
   ]
 }

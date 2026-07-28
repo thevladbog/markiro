@@ -302,6 +302,19 @@ export const kioskPairingCodes = pgTable(
     uniqueIndex("kiosk_pairing_codes_one_live_uq")
       .on(t.tenantId, t.kioskId)
       .where(sql`used_at is null`),
+    // At most one LIVE row per code_hash, across every tenant. The exchange
+    // (`attemptRedeem`) looks a device up by hash alone with no tenant
+    // context yet, so two simultaneously-live codes sharing a hash would be
+    // ambiguous — today it refuses both rather than guess, which would
+    // permanently 401 a legitimately issued code with no diagnosable cause.
+    // `issueCode`'s SELECT-then-INSERT clash check races on this same
+    // invariant; this is the DB-enforced backstop that actually closes it.
+    // Partial (`WHERE used_at is null`) so a hash CAN be reused once its
+    // live code is spent/retired — a full unique index would permanently
+    // block ever reissuing that hash again.
+    uniqueIndex("kiosk_pairing_codes_code_hash_live_uq")
+      .on(t.codeHash)
+      .where(sql`used_at is null`),
   ],
 );
 

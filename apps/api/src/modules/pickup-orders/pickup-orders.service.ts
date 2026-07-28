@@ -887,6 +887,21 @@ export class PickupOrdersService {
     for (;;) {
       try {
         return await this.db.transaction(async (tx) => {
+          // Lock the kiosk row before inserting. `PairingService.attemptRedeem`
+          // takes this SAME row lock before it computes nextDeviceSeq during a
+          // re-pair, so the two paths can never interleave: a device that is
+          // already past `KioskDeviceGuard` and mid-flight here, inserting its
+          // own order, must be accounted for by that MAX(device_seq) read, not
+          // raced by it. See the comment at that call site for the full
+          // failure this closes -- a replacement device silently losing its
+          // first genuine order to a false idempotency-key replay. Scoped to
+          // just this one row, for only the remainder of this transaction.
+          await tx
+            .select({ id: schema.kiosks.id })
+            .from(schema.kiosks)
+            .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, kioskId)))
+            .for("update");
+
           // nextOrderNo's `tx` param is deliberately loosely typed (Task 7) so it
           // doesn't have to import drizzle's transaction type; adapt the real
           // transaction handle's `execute` to that shape at the call site instead

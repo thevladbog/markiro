@@ -1,9 +1,10 @@
+import * as nodeCrypto from "node:crypto";
 import { randomUUID } from "node:crypto";
 import express from "express";
 import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
@@ -11,11 +12,21 @@ import { loadEnv } from "../src/env";
 import { hashDeviceToken } from "../src/pickup/device-token";
 import { normalizePairSource } from "../src/modules/kiosk/pair-source";
 import {
+  GLOBAL_PAIR_ATTEMPT_BUDGET,
   GLOBAL_PAIR_SOURCE,
   PAIR_ATTEMPT_BUDGET,
   PAIR_ATTEMPT_WINDOW_MS,
 } from "../src/modules/kiosk/pairing.service";
+import { PickupOrdersService } from "../src/modules/pickup-orders/pickup-orders.service";
 import { schema, type Db } from "@markiro/db";
+
+// Only `randomInt` is ever mocked (F3 below, one call, one test) -- every
+// other export (including `randomUUID`, used throughout this file) passes
+// through to the real implementation unchanged.
+vi.mock("node:crypto", async (importOriginal) => {
+  const actual = await importOriginal<typeof nodeCrypto>();
+  return { ...actual, randomInt: vi.fn(actual.randomInt) };
+});
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -399,5 +410,194 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
       .send({ code: issued.body.code })
       .expect(201);
     expect(paired.body.nextDeviceSeq).toBe(8);
+  });
+
+  // F1 regression: a previously-paired device can be past `KioskDeviceGuard`
+  // and still mid-transaction, inserting its own order, when a replacement
+  // pairs. This simulates that order transaction -- it takes the SAME
+  // kiosk-row lock `insertOrderWithRetry` takes before its insert
+  // (pickup-orders.service.ts), and holds it open deliberately -- concurrently
+  // with a real re-pair, and asserts the two never interleave around the
+  // MAX(device_seq) read: `attemptRedeem` now takes the same lock before that
+  // read, so it can never land in between this order's start and its commit
+  // and miss it -- which, since (tenant, kiosk, deviceSeq) is the order
+  // idempotency key, would otherwise hand the new device a deviceSeq the
+  // late order already used and silently discard its first genuine order as
+  // a false replay of this one.
+  it("does not let a re-pair's deviceSeq allocation miss an order still mid-transaction", async () => {
+    const raceEmployeeId = randomUUID();
+    await db
+      .insert(schema.employees)
+      .values({ id: raceEmployeeId, tenantId, fullName: "Ночная смена" });
+
+    const orderTxDone = db.transaction(async (tx) => {
+      await tx
+        .select({ id: schema.kiosks.id })
+        .from(schema.kiosks)
+        .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, kioskId)))
+        .for("update");
+      await tx.insert(schema.pickupOrders).values({
+        tenantId,
+        orderNo: `ORD-RACE-${randomUUID().slice(0, 8)}`,
+        kioskId,
+        employeeId: raceEmployeeId,
+        reason: "buy",
+        status: "pending",
+        itemCount: 0,
+        deviceSeq: 7,
+      });
+      // Hold the lock open long enough to overlap with the re-pair below.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    });
+
+    // Give the in-flight order a head start so it takes the lock first.
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    const issued = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    const pairPromise = request(app!.getHttpServer())
+      .post("/kiosk/pair")
+      .send({ code: issued.body.code });
+
+    const [, paired] = await Promise.all([orderTxDone, pairPromise]);
+    expect(paired.status).toBe(201);
+    // One past 7, not a stale value that would collide with it -- proves the
+    // MAX read waited on the lock rather than racing the order's commit.
+    expect(paired.body.nextDeviceSeq).toBe(8);
+  });
+
+  // F2 regression: once the global backstop is already exhausted, a request
+  // from a source with no row of its own yet (standing in for an attacker
+  // rotating source addresses) must be turned away WITHOUT allocating one --
+  // otherwise the table grows without bound from sources that are, by
+  // definition, never going to be let through anyway. End-to-end this can
+  // only be asserted from the DB side (this suite has exactly one real
+  // source -- see `LOOPBACK_PAIR_SOURCES` above), so this seeds the global
+  // bucket directly and checks no per-source row appears.
+  it("short-circuits an already-exhausted global budget without allocating a fresh per-source row", async () => {
+    try {
+      const windowStart = pairAttemptWindowStart(Date.now());
+      await db.insert(schema.kioskPairAttempts).values({
+        source: GLOBAL_PAIR_SOURCE,
+        windowStartedAt: windowStart,
+        failures: GLOBAL_PAIR_ATTEMPT_BUDGET + 1,
+      });
+
+      await request(app!.getHttpServer())
+        .post("/kiosk/pair")
+        .send({ code: "00000000" })
+        .expect(401);
+
+      const sourceRows = await db
+        .select()
+        .from(schema.kioskPairAttempts)
+        .where(
+          and(
+            inArray(schema.kioskPairAttempts.source, LOOPBACK_PAIR_SOURCES),
+            eq(schema.kioskPairAttempts.windowStartedAt, windowStart),
+          ),
+        );
+      expect(sourceRows).toHaveLength(0);
+
+      const [globalRow] = await db
+        .select()
+        .from(schema.kioskPairAttempts)
+        .where(
+          and(
+            eq(schema.kioskPairAttempts.source, GLOBAL_PAIR_SOURCE),
+            eq(schema.kioskPairAttempts.windowStartedAt, windowStart),
+          ),
+        );
+      // The pre-check is read-only -- untouched by it, not incremented again.
+      expect(globalRow!.failures).toBe(GLOBAL_PAIR_ATTEMPT_BUDGET + 1);
+    } finally {
+      await clearPairAttemptBudget(db);
+    }
+  });
+
+  // F3 regression: `kiosk_pairing_codes_code_hash_live_uq` is the DB-enforced
+  // backstop for `issueCode`'s SELECT-then-INSERT clash check, which only
+  // ever considers a hash a clash when the existing row is BOTH unused AND
+  // unexpired. An unused-but-EXPIRED row (never explicitly retired because
+  // it belongs to a different kiosk, whose own `issueCode` never ran to
+  // retire it) is invisible to that check yet still collides with the
+  // constraint (partial on `used_at is null` only, matching
+  // `kiosk_pairing_codes_one_live_uq`'s own pattern -- expiry can't appear in
+  // a partial index predicate, since it isn't immutable). This seeds exactly
+  // that row for a DIFFERENT kiosk, forces `issueCode`'s first random draw to
+  // reproduce its hash, and asserts the mint retries instead of failing.
+  it("re-mints instead of failing when a hash collides with an expired-but-unretired code (F3)", async () => {
+    const otherKioskId = randomUUID();
+    await db.insert(schema.kiosks).values({ id: otherKioskId, tenantId, name: "Другой киоск" });
+
+    // Freshly drawn per run (rather than a fixed literal) so a row this test
+    // leaves behind -- expired but never retired, by design -- can never
+    // collide with a future run of this same test.
+    const collidingCode = String(nodeCrypto.randomInt(10_000_000, 100_000_000));
+    try {
+      await db.insert(schema.kioskPairingCodes).values({
+        tenantId,
+        kioskId: otherKioskId,
+        codeHash: hashDeviceToken(collidingCode),
+        expiresAt: new Date(Date.now() - 60_000),
+      });
+
+      vi.mocked(nodeCrypto.randomInt).mockImplementationOnce(() => Number(collidingCode));
+
+      const res = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+      expect(res.body.code).toMatch(/^\d{8}$/);
+      expect(res.body.code).not.toBe(collidingCode);
+    } finally {
+      await db
+        .delete(schema.kioskPairingCodes)
+        .where(eq(schema.kioskPairingCodes.codeHash, hashDeviceToken(collidingCode)));
+    }
+  });
+
+  // F4 regression: `now` is captured in `redeem` before `bootstrap()` runs,
+  // which can take seconds on a large tenant (badge re-hashing). Simulates
+  // that slowness directly on the shared `PickupOrdersService` singleton so
+  // the code's TTL reliably lapses WHILE bootstrap is in flight -- after
+  // `redeem`'s JS `now` was captured (so the pre-bootstrap checks still see
+  // it as live) but before the claim's WHERE clause is evaluated in the DB.
+  it("judges expiry against the DB's own clock rather than a stale JS timestamp (F4)", async () => {
+    const pickupOrdersService = app!.get(PickupOrdersService);
+    const originalBootstrap = pickupOrdersService.bootstrap.bind(pickupOrdersService);
+    const bootstrapSpy = vi
+      .spyOn(pickupOrdersService, "bootstrap")
+      .mockImplementationOnce(async (tid: string, kid: string) => {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        return originalBootstrap(tid, kid);
+      });
+
+    try {
+      const issued = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+      // Still live when `redeem` captures `now` (well after this UPDATE
+      // commits), but expires long before the artificially slow bootstrap
+      // above returns and the transaction's claim actually runs.
+      await db
+        .update(schema.kioskPairingCodes)
+        .set({ expiresAt: new Date(Date.now() + 200) })
+        .where(
+          and(
+            eq(schema.kioskPairingCodes.tenantId, tenantId),
+            eq(schema.kioskPairingCodes.codeHash, hashDeviceToken(issued.body.code)),
+          ),
+        );
+
+      await request(app!.getHttpServer())
+        .post("/kiosk/pair")
+        .send({ code: issued.body.code })
+        .expect(401);
+    } finally {
+      bootstrapSpy.mockRestore();
+    }
+  });
+
+  // F5 regression: issuance didn't check kiosk status, but redemption
+  // requires `status = 'active'` -- an admin could be shown a code for an
+  // archived kiosk that would always come back a generic, undiagnosable 401.
+  it("404s issuing a pairing code for an archived kiosk (F5)", async () => {
+    await agent.delete(`/kiosks/${kioskId}`).expect(204);
+    await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(404);
   });
 });

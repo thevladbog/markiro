@@ -10,6 +10,7 @@ import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { hashDeviceToken } from "../src/pickup/device-token";
+import { PickupOrdersService } from "../src/modules/pickup-orders/pickup-orders.service";
 import { schema, type Db } from "@markiro/db";
 
 /**
@@ -376,6 +377,55 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
         ),
       );
     expect(orders).toHaveLength(1);
+  });
+
+  // F1 regression (the other side of the fix -- see kiosk-pairing.e2e.test.ts
+  // for the pairing side): `insertOrderWithRetry` takes an explicit
+  // `SELECT ... FOR UPDATE` on the kiosk row before it inserts, the SAME lock
+  // a re-pair takes before computing `nextDeviceSeq`, so the two paths can
+  // never interleave around either read. (In practice `pickup_orders`' own
+  // FK to `kiosks` already makes the INSERT statement take an implicit lock
+  // on that row too -- this explicit lock makes the invariant load-bearing
+  // and self-documenting instead of an incidental side effect of the FK,
+  // which a future schema change could silently weaken.) Proven here by
+  // timing: a concurrent holder of that lock (standing in for a re-pair in
+  // progress) must make an in-flight order visibly wait, not proceed
+  // immediately. Calls `PickupOrdersService.createFromKiosk` directly rather
+  // than through `POST /kiosk/orders`, deliberately bypassing
+  // `KioskDeviceGuard` -- its own per-request `last_seen_at` UPDATE also
+  // touches the kiosk row and would otherwise block on the same holder for
+  // an unrelated reason, making the timing measure the guard instead of the
+  // lock this test actually targets.
+  it("insertOrderWithRetry's kiosk-row lock blocks a concurrent holder", async () => {
+    const pickupOrdersService = app!.get(PickupOrdersService);
+    const HOLD_MS = 250;
+    const holderDone = db.transaction(async (tx) => {
+      await tx
+        .select({ id: schema.kiosks.id })
+        .from(schema.kiosks)
+        .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, kioskId)))
+        .for("update");
+      await new Promise((resolve) => setTimeout(resolve, HOLD_MS));
+    });
+
+    // Give the holder a head start so it acquires the lock first.
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    const start = Date.now();
+    const result = await pickupOrdersService.createFromKiosk(tenantId, kioskId, {
+      deviceSeq: 40,
+      badgeCode: BADGE,
+      reason: "buy",
+      items: [],
+    });
+    const elapsed = Date.now() - start;
+
+    await holderDone;
+    expect(result.orderNo).toMatch(/^ORD-/);
+    // Generous margin below HOLD_MS: proves the insert was blocked on the
+    // lock rather than served immediately, without being a flaky exact-time
+    // assertion.
+    expect(elapsed).toBeGreaterThanOrEqual(HOLD_MS - 100);
   });
 
   it("day-limit accepts up to dayLimitPerEmployee and marks the overflow over_limit", async () => {
