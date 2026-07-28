@@ -35,6 +35,7 @@ added.
 | `kiosks`                                                                               | device management and pairing-code issue — a stolen device must not be able to enrol or re-pair another                                                                                                                                                    |
 | `pickup-orders`                                                                        | the admin's order resolution flow; the kiosk uses `/kiosk/*` behind `KioskDeviceGuard`                                                                                                                                                                     |
 | `pickup-reasons`                                                                       | the reason list is edited in the cabinet; the kiosk receives it in its bootstrap payload                                                                                                                                                                   |
+| `pickup-rejections`                                                                    | the admin's audit surface for refused scans; exposes **raw marking and badge codes**, which is exactly what shipping only hashes to devices is meant to prevent                                                                                            |
 
 ## Rule for new routes
 
