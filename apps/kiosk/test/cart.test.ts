@@ -10,9 +10,11 @@ import {
 } from "../src/session/cart.js";
 
 const GS = String.fromCharCode(0x1d);
-// Check-digit-valid GTIN-14s. The `km()` helper below runs every fixture
-// through the real classifier, which throws on a bad check digit — so a
-// mistyped GTIN here fails loudly instead of silently degrading to "unknown".
+// Check-digit-valid GTIN-14s. The classifier does not throw on a bad check
+// digit — it swallows the parse error and degrades to "unknown" — so the `km()`
+// helper below throws itself whenever a fixture comes back as anything but
+// "km". That is what makes a mistyped GTIN here fail loudly instead of quietly
+// turning a KM test into a not-a-marking-code test.
 const GTIN_MILK = "04600682000013";
 const GTIN_BREAD = "04600682000020";
 const GTIN_ABSENT = "04600682000037"; // valid code, deliberately not in `products`
@@ -32,6 +34,20 @@ function km(gtin14: string, serial: string): KioskScan {
 function incompleteScan(): KioskScan {
   const scan = classifyKioskScan(`01${GTIN_MILK}21KYC9X7MQ93Abcd`);
   if (scan.kind !== "incomplete") throw new Error(`fixture classified as ${scan.kind}`);
+  return scan;
+}
+
+/** The bare EAN printed next to the DataMatrix — the likeliest mis-scan here. */
+function bareProductBarcode(): KioskScan {
+  const scan = classifyKioskScan(GTIN_MILK);
+  if (scan.kind !== "unknown") throw new Error(`fixture classified as ${scan.kind}`);
+  return scan;
+}
+
+/** An opaque payload with no GS1 structure — what a staff badge looks like. */
+function badgeScan(): KioskScan {
+  const scan = classifyKioskScan("BADGE-7F3A21C0");
+  if (scan.kind !== "badge") throw new Error(`fixture classified as ${scan.kind}`);
   return scan;
 }
 
@@ -146,6 +162,24 @@ describe("cartReducer — scanning", () => {
     expect(state.items).toHaveLength(0);
   });
 
+  it("tells the worker a bare product barcode is not a marking code", () => {
+    const state = run(ctxOf(5), scan(bareProductBarcode()));
+
+    expect(state.notice).toEqual({ kind: "not-a-code" });
+    expect(state.items).toHaveLength(0);
+  });
+
+  it("leaves the cart entirely alone on a badge scan — identification is not cart input", () => {
+    const ctx = ctxOf(5);
+    const stocked = run(ctx, scan(km(GTIN_MILK, "AAAA1111")), scan(km(GTIN_MILK, "AAAA1111")));
+    expect(stocked.notice).toEqual({ kind: "duplicate" });
+
+    const state = cartReducer(stocked, scan(badgeScan()), ctx);
+
+    expect(state.items).toEqual(stocked.items);
+    expect(state.notice).toEqual({ kind: "duplicate" });
+  });
+
   it("never mutates the state it was given", () => {
     const ctx = ctxOf(5);
     const before = cartReducer(initialCartState, scan(km(GTIN_MILK, "AAAA1111")), ctx);
@@ -168,6 +202,17 @@ describe("cartReducer — plain actions", () => {
     expect(state.items.map((i) => i.kmKey)).toEqual([`01${GTIN_BREAD}21BBBB2222`]);
   });
 
+  it("clears a stale notice on remove — emptying the cart un-does the limit", () => {
+    const ctx = ctxOf(1);
+    const full = run(ctx, scan(km(GTIN_MILK, "AAAA1111")), scan(km(GTIN_BREAD, "BBBB2222")));
+    expect(full.notice).toEqual({ kind: "limit" });
+
+    const state = cartReducer(full, { type: "remove", kmKey: `01${GTIN_MILK}21AAAA1111` }, ctx);
+
+    expect(state.items).toHaveLength(0);
+    expect(state.notice).toBeNull();
+  });
+
   it("clears the notice on dismissNotice without touching the items", () => {
     const repeated = km(GTIN_MILK, "KYC9X7MQ");
     const state = run(ctxOf(5), scan(repeated), scan(repeated), { type: "dismissNotice" });
@@ -186,6 +231,13 @@ describe("cartReducer — plain actions", () => {
     );
 
     expect(state).toEqual(initialCartState);
+  });
+});
+
+describe("initialCartState", () => {
+  it("is frozen — `reset` hands this very object out, so a stray mutation would poison the app", () => {
+    expect(Object.isFrozen(initialCartState)).toBe(true);
+    expect(Object.isFrozen(initialCartState.items)).toBe(true);
   });
 });
 

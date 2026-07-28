@@ -17,9 +17,23 @@ export interface CartState {
   notice: CartNotice | null;
 }
 
-/** Why the last scan was refused. `null` means "the last scan was accepted". */
+/**
+ * Why the last scan was refused. `null` means "the last scan was accepted".
+ *
+ * `unknown-product` and `not-a-code` are deliberately separate and must stay
+ * so: `unknown-product` means "a real marking code, for something this kiosk
+ * does not stock" — nothing the worker can fix by re-scanning, they need an
+ * administrator. `not-a-code` means "that barcode is not a marking code at
+ * all" — almost always the plain EAN printed next to the DataMatrix, which the
+ * worker fixes on the spot by scanning the right symbol. The server's
+ * equivalent verdict is `not_km`.
+ */
 export type CartNotice =
-  { kind: "duplicate" } | { kind: "limit" } | { kind: "unknown-product" } | { kind: "incomplete" };
+  | { kind: "duplicate" }
+  | { kind: "limit" }
+  | { kind: "unknown-product" }
+  | { kind: "incomplete" }
+  | { kind: "not-a-code" };
 
 export type CartAction =
   | { type: "scan"; scan: KioskScan }
@@ -35,12 +49,20 @@ export interface CartContext {
   alreadyTakenToday: number;
 }
 
-export const initialCartState: CartState = {
-  items: [],
+// Frozen because `reset` hands this very object straight back out and it is
+// the module's only singleton: one stray mutation in any consumer would poison
+// every cart the app opens afterwards. The empty array is frozen too — it is
+// the sole reachable nested value, and `push` is the mutation worth stopping.
+// The reducer itself never mutates: every branch below builds new objects.
+const noItems: CartItem[] = [];
+Object.freeze(noItems);
+
+export const initialCartState: CartState = Object.freeze({
+  items: noItems,
   reason: "buy",
   writeoffReasonId: null,
   notice: null,
-};
+});
 
 /**
  * The whole cart, as one pure function: same inputs, same output, never a
@@ -63,7 +85,15 @@ export function cartReducer(state: CartState, action: CartAction, ctx: CartConte
     case "scan":
       return applyScan(state, action.scan, ctx);
     case "remove":
-      return { ...state, items: state.items.filter((item) => item.kmKey !== action.kmKey) };
+      // Clearing the notice matters: at `dayLimitPerEmployee: 1` a full cart
+      // refuses the next scan with `limit`, and removing the item is exactly
+      // how the worker resolves that. Leaving the banner up would tell them
+      // they are still blocked when the slot they just freed is theirs again.
+      return {
+        ...state,
+        items: state.items.filter((item) => item.kmKey !== action.kmKey),
+        notice: null,
+      };
     case "reason":
       return { ...state, reason: action.reason };
     case "writeoffReason":
@@ -87,8 +117,16 @@ function applyScan(state: CartState, scan: KioskScan, ctx: CartContext): CartSta
   // The GS separator was dropped, so the serial (and the dedup key with it) is
   // untrustworthy — ask for a re-scan rather than guess.
   if (scan.kind === "incomplete") return { ...state, notice: { kind: "incomplete" } };
-  // `badge` and `unknown` payloads are not cart input: identification and
-  // unrecognised codes are the surrounding screen's business, not the cart's.
+  // A bare GTIN or SSCC — the worker scanned the plain product barcode next to
+  // the DataMatrix, the commonest mis-scan at a kiosk. Say so: silence here
+  // (and, worse, an identical state object with nothing to re-render on) makes
+  // a working scanner look dead. Placed with the other non-`km` kinds rather
+  // than in the refusal ladder below because the order cannot be observed: a
+  // scan is `unknown` xor `km`, so it can never also be a duplicate, an
+  // unstocked product or a limit case.
+  if (scan.kind === "unknown") return { ...state, notice: { kind: "not-a-code" } };
+  // A `badge` payload is not cart input at all: mid-cart identification is the
+  // surrounding screen's business, so leave both items and notice untouched.
   if (scan.kind !== "km") return state;
 
   const product = ctx.bootstrap.products.find((p) => p.gtin14 === scan.gtin14);

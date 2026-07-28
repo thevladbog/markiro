@@ -1456,11 +1456,15 @@ export async function resolveBadge(
     writeoffReasonId: string | null;
     notice: CartNotice | null;
   }
+  // `not-a-code` was added during Task 8 review: `classifyKioskScan` returns
+  // `unknown` for a bare GTIN/SSCC, so without it a worker who scans the plain
+  // product barcode instead of the DataMatrix gets no notice at all.
   export type CartNotice =
     | { kind: "duplicate" }
     | { kind: "limit" }
     | { kind: "unknown-product" }
-    | { kind: "incomplete" };
+    | { kind: "incomplete" }
+    | { kind: "not-a-code" };
   export type CartAction =
     | { type: "scan"; scan: KioskScan }
     | { type: "remove"; kmKey: string }
