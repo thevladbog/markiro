@@ -278,6 +278,25 @@ describe.skipIf(!ready)("pickup scan rejections e2e", () => {
     expect(await rejectionsFor(17)).toHaveLength(0);
   });
 
+  // `resolveWriteoffReasonId`'s OTHER throw site: a kiosk build that forgot to
+  // send `writeoffReasonId` at all (as opposed to the archived-reason case
+  // above, which sends a stale one). Same offline-drift durability applies.
+  it("records a writeoff sync missing writeoffReasonId entirely, and still 400s", async () => {
+    await postScan({
+      deviceSeq: 18,
+      badgeCode: BADGE,
+      reason: "writeoff",
+      items: [{ rawKm: WRITEOFF_KM }],
+    }).expect(400);
+
+    const rows = await rejectionsFor(18);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.employeeId).toBe(employeeId);
+    expect(rows[0]!.badgeCode).toBeNull();
+    expect(rows[0]!.orderId).toBeNull();
+    expect(rows[0]!.codes).toEqual([{ rawKm: WRITEOFF_KM, reason: "unknown_reason" }]);
+  });
+
   // A rejection consumes a device_seq without creating an order. If the
   // re-pair counter only looked at orders it would hand that number back,
   // and the replacement device's first rejection would collide with the old
