@@ -12,6 +12,7 @@ import { loadEnv } from "../src/env";
 import { hashDeviceToken } from "../src/pickup/device-token";
 import { PickupOrdersService } from "../src/modules/pickup-orders/pickup-orders.service";
 import { schema, type Db } from "@markiro/db";
+import { listenOnLoopback } from "./support/listen-loopback";
 
 /**
  * GTIN test vectors (check-digit VALID — computed with node + gs1CheckDigit,
@@ -61,6 +62,7 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
     mountAuth(server, setup.auth);
     server.use(express.json());
     await app.init();
+    await listenOnLoopback(app);
 
     const agent = request.agent(app!.getHttpServer());
     tenantId = await signUpAndActivate(agent);

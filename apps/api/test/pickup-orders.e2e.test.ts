@@ -10,6 +10,7 @@ import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { hashDeviceToken } from "../src/pickup/device-token";
 import { schema, type Db } from "@markiro/db";
+import { listenOnLoopback } from "./support/listen-loopback";
 
 /** GTIN test vector (check-digit VALID). See kiosk-orders.e2e.test.ts for the full rationale. */
 const GTIN = "04600682000013";
@@ -48,6 +49,7 @@ describe.skipIf(!ready)("pickup orders admin e2e", () => {
     mountAuth(server, setup.auth);
     server.use(express.json());
     await app.init();
+    await listenOnLoopback(app);
 
     agent = request.agent(app!.getHttpServer());
     tenantId = await signUpAndActivate(agent);

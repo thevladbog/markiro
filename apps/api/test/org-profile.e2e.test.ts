@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
+import { listenOnLoopback } from "./support/listen-loopback";
 
 /**
  * Same env-gating as auth.e2e.test.ts -- requires a reachable Postgres with
@@ -34,6 +35,7 @@ describe.skipIf(!ready)("org profile e2e", () => {
     mountAuth(server, setup.auth);
     server.use(express.json());
     await app.init();
+    await listenOnLoopback(app);
   });
 
   afterAll(async () => {

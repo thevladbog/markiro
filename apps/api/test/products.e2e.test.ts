@@ -8,6 +8,7 @@ import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { schema, type Db } from "@markiro/db";
+import { listenOnLoopback } from "./support/listen-loopback";
 
 /**
  * GTIN test vectors. Computed with node + @markiro/domain's gs1CheckDigit
@@ -94,6 +95,7 @@ describe.skipIf(!ready)("products e2e", () => {
     mountAuth(server, setup.auth);
     server.use(express.json());
     await app.init();
+    await listenOnLoopback(app);
   });
 
   afterAll(async () => {

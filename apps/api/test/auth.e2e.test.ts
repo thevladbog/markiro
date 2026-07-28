@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
+import { listenOnLoopback } from "./support/listen-loopback";
 
 /**
  * Requires a reachable Postgres with the Better Auth + platform schema
@@ -39,6 +40,7 @@ describe.skipIf(!ready)("auth e2e", () => {
     mountAuth(server, setup.auth);
     server.use(express.json());
     await app.init();
+    await listenOnLoopback(app);
   });
 
   // app.close() runs Nest's onModuleDestroy lifecycle, which now closes
