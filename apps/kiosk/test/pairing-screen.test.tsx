@@ -108,6 +108,7 @@ function typeDigits(digits: string): void {
 }
 
 const submitButton = () => screen.getByRole("button", { name: "Connect" }) as HTMLButtonElement;
+const scanButton = () => screen.getByRole("button", { name: "Scan code" }) as HTMLButtonElement;
 const scannerSetupButton = () =>
   screen.getByRole("button", { name: "Set up the scanner" }) as HTMLButtonElement;
 const serverToggle = () => screen.getByRole("button", { name: "Change the server address" });
@@ -248,7 +249,19 @@ describe("Pairing", () => {
     typeDigits("12345678");
     fireEvent.click(submitButton());
 
-    await waitFor(() => expect(screen.getByText("Wrong or expired code")).toBeDefined());
+    // The copy names the lockout too, and deliberately does not promise which
+    // of the three it was: the server answers a rate-limit lockout with the
+    // same bare 401 as a wrong guess (`assertUnderPairRateLimit`,
+    // `apps/api/src/modules/kiosk/pairing.service.ts:401`), so a message
+    // saying only "wrong or expired" would send a locked-out technician back
+    // to a keypad that cannot let them in no matter what they type.
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          "The code is wrong, expired, or there have been too many attempts. Get a new code from the admin panel.",
+        ),
+      ).toBeDefined(),
+    );
     // Asserted at the writes, not only at the reads: an empty store proves
     // nothing was *kept*, these prove nothing was *attempted* — which is what
     // stays true if a delete path is ever added.
@@ -350,7 +363,13 @@ describe("Pairing", () => {
     );
     typeDigits("12345678");
     fireEvent.click(submitButton());
-    await waitFor(() => expect(screen.getByText("Wrong or expired code")).toBeDefined());
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          "The code is wrong, expired, or there have been too many attempts. Get a new code from the admin panel.",
+        ),
+      ).toBeDefined(),
+    );
     expect(codeDisplay().textContent).toBe("");
     expect(submitButton().disabled).toBe(true);
     rejected.unmount();
@@ -467,6 +486,92 @@ describe("Pairing", () => {
     view.unmount();
     expect(source.started()).toBe(1);
     expect(source.stopped()).toBe(1);
+  });
+
+  it("offers the large scan button, and pressing it announces that a scan is awaited", () => {
+    // The button is not the only way in (the listener is always armed), but it
+    // is the affordance the brief mandates beside the keypad: this screen is
+    // read at arm's length in floor mode, where a small hint line does not
+    // carry "you can scan this" at all. Pressing it commits the screen to a
+    // visible waiting state instead of doing nothing.
+    const source = fakeScanSource();
+    render(
+      <Pairing
+        defaultServerUrl={SERVER}
+        scanSource={source}
+        onPaired={vi.fn()}
+        onConfigureScanner={vi.fn()}
+      />,
+    );
+
+    expect(scanButton().disabled).toBe(false);
+    expect(screen.queryByText("Waiting for the scan")).toBeNull();
+
+    fireEvent.click(scanButton());
+    expect(screen.getByText("Waiting for the scan")).toBeDefined();
+    expect(scanButton().getAttribute("aria-pressed")).toBe("true");
+
+    // Choosing the keypad after all ends the state — the screen must not go on
+    // claiming it is waiting for a scan while the worker types the digits.
+    typeDigits("1");
+    expect(screen.queryByText("Waiting for the scan")).toBeNull();
+
+    fireEvent.click(scanButton());
+    source.emit(" 12345678 ");
+    expect(codeDisplay().textContent).toBe("12345678");
+    // ...and it ends when what it waited for arrives.
+    expect(screen.queryByText("Waiting for the scan")).toBeNull();
+  });
+
+  it("takes a scan although the scan button was never pressed — the button only announces", () => {
+    // The property that matters: restoring the button must not turn it back
+    // into the arming switch it used to be. A worker who walks up and scans,
+    // pressing nothing, still pairs.
+    const source = fakeScanSource();
+    render(
+      <Pairing
+        defaultServerUrl={SERVER}
+        scanSource={source}
+        onPaired={vi.fn()}
+        onConfigureScanner={vi.fn()}
+      />,
+    );
+
+    expect(scanButton()).toBeDefined();
+    source.emit(" 12345678 ");
+
+    expect(codeDisplay().textContent).toBe("12345678");
+    expect(submitButton().disabled).toBe(false);
+  });
+
+  it("names what is being downloaded while the pair is in flight", async () => {
+    // A bare disabled button says nothing about a redeem that also pulls the
+    // whole dataset down; on a slow gate link that wait is long enough for a
+    // worker to conclude the device is dead and start pressing things.
+    let release!: (res: Response) => void;
+    stubFetch(() => new Promise<Response>((resolve) => (release = resolve)));
+    const onPaired = vi.fn();
+    render(
+      <Pairing
+        defaultServerUrl={SERVER}
+        scanSource={fakeScanSource()}
+        onPaired={onPaired}
+        onConfigureScanner={vi.fn()}
+      />,
+    );
+
+    typeDigits("12345678");
+    fireEvent.click(submitButton());
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("Binding the device… downloading settings and operators"),
+      ).toBeDefined(),
+    );
+
+    release(okResponse(bundle()));
+    await waitFor(() => expect(onPaired).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText("Binding the device… downloading settings and operators")).toBeNull();
   });
 
   it("refuses a scan that is not exactly eight digits, says so, and keeps listening", () => {
