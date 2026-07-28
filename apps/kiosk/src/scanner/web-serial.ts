@@ -18,6 +18,33 @@ export interface SerialPort {
   readonly readable: ReadableStream<Uint8Array> | null;
 }
 
+/** `navigator.serial`, narrowed to the one call that hands out grants. */
+interface SerialApi {
+  requestPort(): Promise<SerialPort>;
+}
+
+/**
+ * Show the browser's port picker and return what the installer granted.
+ *
+ * This is the ONLY way a `SerialPort` can come into existence. `getPorts()`
+ * lists grants that already happened, so an app that never calls this has no
+ * serial transport at all, whatever transport its store says it is on — the
+ * list stays empty forever.
+ *
+ * The browser requires TRANSIENT USER ACTIVATION here, which is why the call
+ * belongs to a gesture handler (the scanner-setup radio) and not to the app
+ * shell: the shell mounts on boot, with no gesture, and can only ever recover
+ * an existing grant via `getPorts()`.
+ *
+ * Rejects when the picker is dismissed. That is a refusal, not a fault — the
+ * caller is expected to stay on its previous transport and say so.
+ */
+export async function requestSerialPort(): Promise<SerialPort> {
+  const serial = (navigator as Navigator & { serial?: SerialApi }).serial;
+  if (!serial) throw new Error("kiosk: this device has no Web Serial");
+  return serial.requestPort();
+}
+
 const DEFAULT_BAUD_RATE = 9600;
 
 /**
