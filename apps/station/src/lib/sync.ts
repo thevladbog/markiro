@@ -38,6 +38,21 @@ interface BatchResponse {
   alreadyApplied: boolean;
 }
 
+/**
+ * Guards against acknowledging (and permanently deleting) a batch on the
+ * strength of a response that merely parsed as JSON but isn't actually this
+ * endpoint's contract — e.g. a captive portal or maintenance shim on the
+ * plant network answering `200 {"status":"ok"}` instead of the server.
+ */
+function isBatchResponse(value: unknown): value is BatchResponse {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { applied?: unknown }).applied === "number" &&
+    typeof (value as { alreadyApplied?: unknown }).alreadyApplied === "boolean"
+  );
+}
+
 function toPayload(items: OutboxItem[]) {
   return items.map((i) => ({
     shiftId: i.shiftId,
@@ -115,36 +130,70 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
     if (draining || stopped) return;
     draining = true;
     try {
-      for (;;) {
-        if (stopped) break;
-        const batch = await readBatch(deps.exec, BATCH_SIZE);
-        if (batch.length === 0) break;
+      try {
+        for (;;) {
+          if (stopped) break;
+          const batch = await readBatch(deps.exec, BATCH_SIZE);
+          if (batch.length === 0) break;
 
-        const maxId = batch[batch.length - 1]!.id;
+          const maxId = batch[batch.length - 1]!.id;
+          try {
+            const res = await deps.client.post<BatchResponse>("/station/scans", {
+              batchId: `${deps.machineId}:${maxId}`,
+              items: toPayload(batch),
+            });
+            if (!isBatchResponse(res)) {
+              // Parsed fine but isn't this endpoint's contract — could be a
+              // proxy/captive portal on the plant network. Fall into the
+              // same failure path as a network error: do not ack.
+              throw new Error("station: unexpected /station/scans response shape");
+            }
+            // `alreadyApplied` is a success: this exact batch is on the
+            // server already, so holding on to it would wedge the queue
+            // forever.
+            await ackThrough(deps.exec, maxId);
+            lastSuccessAt = now();
+            backoffMs = BACKOFF_START_MS;
+          } catch (err) {
+            // Every failure here — network error, non-2xx, bad JSON, wrong
+            // shape, or a terminal 4xx the server will never accept (e.g. a
+            // shift it no longer owns, or a device re-enrolled into a
+            // different tenant) — is retried indefinitely. This is
+            // deliberate: a batch is never quarantined or dropped, because
+            // losing scan data is worse than a stalled queue. That means a
+            // permanently-rejected batch wedges the queue by design; the
+            // `stuck` indicator below is what surfaces that to an operator.
+            console.error("station: sync batch failed", err);
+            scheduleRetry();
+            break;
+          }
+        }
+        await publishState();
+      } catch (err) {
+        // readBatch/ackThrough/publishState sit outside the POST's own
+        // try/catch above and touch the device database directly. A
+        // failure here (e.g. the device DB is locked or corrupt) must not
+        // escape as an unhandled rejection — every call site launches the
+        // drain with a discarded promise, so an uncaught rejection would
+        // silently kill sync with the indicator frozen at its last value.
+        // Catch it, get back on the same retry/backoff path as a failed
+        // POST, and still try to publish state so the indicator isn't left
+        // stale.
+        console.error("station: sync drain failed", err);
+        scheduleRetry();
         try {
-          const res = await deps.client.post<BatchResponse>("/station/scans", {
-            batchId: `${deps.machineId}:${maxId}`,
-            items: toPayload(batch),
-          });
-          // `alreadyApplied` is a success: this exact batch is on the server
-          // already, so holding on to it would wedge the queue forever.
-          void res;
-          await ackThrough(deps.exec, maxId);
-          lastSuccessAt = now();
-          backoffMs = BACKOFF_START_MS;
-        } catch (err) {
-          console.error("station: sync batch failed", err);
-          scheduleRetry();
-          break;
+          await publishState();
+        } catch (publishErr) {
+          console.error("station: sync state publish failed", publishErr);
         }
       }
-      await publishState();
     } finally {
       draining = false;
-      settleIdle();
       if (requested && !stopped) {
         requested = false;
         void drain();
+      } else {
+        settleIdle();
       }
     }
   }

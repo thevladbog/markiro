@@ -1,7 +1,15 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { DatabaseSync } from "node:sqlite";
 import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
 import { BATCH_SIZE, createSyncEngine, STUCK_AFTER_MS } from "../src/lib/sync.js";
+
+// Several tests below deliberately fail the POST (or the device DB) to
+// exercise the retry path, which logs through `console.error` by design.
+// Silence it only for those tests (each spies explicitly) and always
+// restore afterwards, so unexpected errors elsewhere still print.
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 async function migratedExec(): Promise<SqlExecutor> {
   const db = new DatabaseSync(":memory:");
@@ -86,6 +94,7 @@ describe("sync engine", () => {
     const exec = await migratedExec();
     await seed(exec, 2);
     const post = vi.fn().mockRejectedValue(new Error("offline"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
 
     const engine = createSyncEngine({ exec, client: { post }, machineId: "m1", onState: () => {} });
     engine.nudge();
@@ -94,6 +103,65 @@ describe("sync engine", () => {
     const rows = await exec.all<{ n: number }>("SELECT COUNT(*) AS n FROM outbox");
     expect(rows[0]!.n).toBe(2);
     engine.stop();
+  });
+
+  it("does not acknowledge a batch when the response does not match the sync contract", async () => {
+    const exec = await migratedExec();
+    await seed(exec, 2);
+    // A 2xx body that parses as JSON but isn't this endpoint's contract —
+    // e.g. a captive portal or maintenance shim on the plant network
+    // answering instead of the server.
+    const post = vi.fn().mockResolvedValue({ status: "ok" });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const engine = createSyncEngine({ exec, client: { post }, machineId: "m1", onState: () => {} });
+    engine.nudge();
+    await engine.idle();
+
+    // Must be treated exactly like a failed send: rows stay queued, nothing
+    // is permanently deleted on the strength of an unrecognized body.
+    const rows = await exec.all<{ n: number }>("SELECT COUNT(*) AS n FROM outbox");
+    expect(rows[0]!.n).toBe(2);
+    engine.stop();
+  });
+
+  it("keeps the drain from becoming an unhandled rejection when the device database throws", async () => {
+    const exec = await migratedExec();
+    await seed(exec, 1);
+    // Simulates the device DB being locked or corrupt: every read/write
+    // rejects, including the very first `readBatch` call inside `drain()`,
+    // which sits outside the POST's own try/catch.
+    const brokenExec: SqlExecutor = {
+      run: exec.run,
+      all: async () => {
+        throw new Error("database is locked");
+      },
+    };
+    const post = vi.fn();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const rejections: unknown[] = [];
+    const onRejection = (reason: unknown) => rejections.push(reason);
+    process.on("unhandledRejection", onRejection);
+
+    try {
+      const engine = createSyncEngine({
+        exec: brokenExec,
+        client: { post },
+        machineId: "m1",
+        onState: () => {},
+      });
+      engine.nudge();
+      await engine.idle();
+      // Give any unhandled-rejection event queued by the (buggy) behaviour
+      // this test guards against a chance to actually surface.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(post).not.toHaveBeenCalled();
+      expect(rejections).toHaveLength(0);
+      engine.stop();
+    } finally {
+      process.off("unhandledRejection", onRejection);
+    }
   });
 
   it("runs one drain at a time even when nudged concurrently", async () => {
@@ -146,6 +214,7 @@ describe("sync engine", () => {
     const staleScannedAt = new Date(Date.now() - STUCK_AFTER_MS - 60_000).toISOString();
     await seed(exec, 1, staleScannedAt);
     const post = vi.fn().mockRejectedValue(new Error("offline"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
     const states: { stuck: boolean }[] = [];
 
     const engine = createSyncEngine({
@@ -169,6 +238,7 @@ describe("sync engine", () => {
     const exec = await migratedExec();
     await seed(exec, 1, new Date().toISOString());
     const post = vi.fn().mockRejectedValue(new Error("offline"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
     const states: { stuck: boolean }[] = [];
 
     const engine = createSyncEngine({
@@ -186,6 +256,30 @@ describe("sync engine", () => {
     engine.stop();
   });
 
+  it("before any success: is not stuck when the oldest queued scan has an unparseable timestamp", async () => {
+    const exec = await migratedExec();
+    // An unparseable `scanned_at` makes `Date.parse` yield `NaN`. A NaN
+    // comparison against the threshold is always `false`, so without the
+    // explicit `Number.isFinite` guard this could read as "very old" only
+    // by accident of how the comparison is written — assert it explicitly.
+    await seed(exec, 1, "not-a-real-timestamp");
+    const post = vi.fn().mockRejectedValue(new Error("offline"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const states: { stuck: boolean }[] = [];
+
+    const engine = createSyncEngine({
+      exec,
+      client: { post },
+      machineId: "m1",
+      onState: (s) => states.push({ stuck: s.stuck }),
+    });
+    engine.nudge();
+    await engine.idle();
+
+    expect(states.at(-1)).toMatchObject({ stuck: false });
+    engine.stop();
+  });
+
   it("after a success: reports stuck once nothing has synced for the threshold, measured on the injected clock", async () => {
     const exec = await migratedExec();
     await seed(exec, 1);
@@ -194,6 +288,7 @@ describe("sync engine", () => {
       .fn()
       .mockResolvedValueOnce({ applied: 1, alreadyApplied: false })
       .mockRejectedValue(new Error("offline"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
     const states: { pending: number; stuck: boolean }[] = [];
 
     const engine = createSyncEngine({
