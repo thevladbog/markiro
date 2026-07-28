@@ -1,7 +1,9 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { parsePhc } from "@markiro/domain";
 import { schema, type Db, type OperatorMirrorRecord } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
+import { getOrCreateBadgeSalt, hashBadgeWithSalt } from "../../lib/badge-salt";
 import { hashSecret } from "../../lib/pin-hash";
 import type {
   GrantStationAccessDto,
@@ -192,12 +194,18 @@ export class OperatorsService {
       )
       .orderBy(asc(schema.employeeBadges.issuedAt), asc(schema.employeeBadges.id));
 
-    // Backfill missing hashes concurrently; each write stays tenant-scoped.
-    const needsHash = rows.filter((b) => !b.badgeHash);
+    // A badge needs (re)hashing when it has no verifier yet, or when its
+    // verifier still carries a legacy per-row salt. Both cases converge on
+    // the tenant salt so the kiosk's one-derivation lookup works.
+    const tenantSalt = await getOrCreateBadgeSalt(this.db, tenantId);
+    const needsHash = rows.filter((b) => {
+      if (!b.badgeHash) return true;
+      return parsePhc(b.badgeHash)?.saltB64 !== tenantSalt;
+    });
     const backfilled = new Map<string, string>();
     await Promise.all(
       needsHash.map(async (b) => {
-        const hash = await hashSecret(b.badgeCode);
+        const hash = await hashBadgeWithSalt(b.badgeCode, tenantSalt);
         backfilled.set(b.id, hash);
         await this.db
           .update(schema.employeeBadges)
@@ -210,7 +218,7 @@ export class OperatorsService {
 
     const map = new Map<string, string>();
     for (const b of rows) {
-      map.set(b.employeeId, b.badgeHash ?? backfilled.get(b.id)!);
+      map.set(b.employeeId, backfilled.get(b.id) ?? b.badgeHash!);
     }
     return map;
   }
