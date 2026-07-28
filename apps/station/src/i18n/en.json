@@ -44,6 +44,7 @@
     "online": "Online",
     "offline": "Offline",
     "sync": "Sync",
+    "syncStuck": "Not syncing",
     "agent": "Agent",
     "scanner": "Scanner",
     "printer": "Printer",

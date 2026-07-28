@@ -302,6 +302,8 @@ export function App() {
       online={online}
       scanner={scannerIndicator(hardwareConfig, scannerStatus)}
       printerConfigured={hardwareConfig.printer !== null}
+      syncPending={0}
+      syncStuck={false}
       tasks={[]}
       activeTaskId=""
       onSelectTask={() => {}}
