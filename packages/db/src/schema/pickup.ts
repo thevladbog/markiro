@@ -1,5 +1,6 @@
 import {
   boolean,
+  check,
   foreignKey,
   index,
   integer,
@@ -349,4 +350,85 @@ export const kioskPairAttempts = pgTable(
     failures: integer("failures").notNull().default(0),
   },
   (t) => [unique("kiosk_pair_attempts_source_window_uq").on(t.source, t.windowStartedAt)],
+);
+
+/**
+ * Every scanned code the server refused, in one place.
+ *
+ * `pickup_orders.sync_conflicts` covers only the partial case: it hangs off
+ * an order, and a scan whose codes are ALL refused deliberately creates no
+ * order (a 0-item pending row would clutter the свод and could never be
+ * resolved). That worst case -- a worker walks off with product and the
+ * cabinet learns nothing -- is exactly what this table exists to record.
+ * It matters most for offline kiosks, where the sync lands hours later and
+ * the worker is long gone.
+ *
+ * `order_id` is what distinguishes the two: NULL means no order was created
+ * (whole session refused, or the badge was no longer recognised), set means
+ * a partial refusal on that order. `sync_conflicts` keeps being written for
+ * the partial case -- this table is a superset, not a replacement.
+ *
+ * `scanned_at` and `synced_at` are both stored on purpose: the gap between
+ * them IS the offline problem, and an admin should see it rather than
+ * compute it.
+ */
+export const pickupScanRejections = pgTable(
+  "pickup_scan_rejections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    kioskId: uuid("kiosk_id").notNull(),
+    // NULL <=> the badge was not recognised at sync time. Mutually exclusive
+    // with `badgeCode` -- see the check constraint below.
+    employeeId: uuid("employee_id"),
+    // Only set when the badge was NOT recognised, so the admin can still tell
+    // whose badge was used once the employee is gone from the roster. Stored
+    // plaintext, exactly as `employee_badges.badge_code` already is; the
+    // paired `badge_hash` exists only because bootstrap ships to an untrusted
+    // tablet (see docs/device-key-surface.md).
+    badgeCode: text("badge_code"),
+    orderId: uuid("order_id"),
+    deviceSeq: integer("device_seq").notNull(),
+    codes: jsonb("codes").$type<{ rawKm: string; reason: string }[]>().notNull(),
+    scannedAt: timestamp("scanned_at", { withTimezone: true }).notNull(),
+    syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
+    acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
+    acknowledgedByUserId: text("acknowledged_by_user_id"),
+  },
+  (t) => [
+    unique("pickup_scan_rejections_tenant_id_uq").on(t.tenantId, t.id),
+    // The SAME idempotency key `pickup_orders` uses. A replayed sync (lost
+    // response, or a kiosk retrying a 401 forever) must record once, not
+    // once per attempt -- the writers pair this with onConflictDoNothing().
+    unique("pickup_scan_rejections_kiosk_device_seq_uq").on(t.tenantId, t.kioskId, t.deviceSeq),
+    foreignKey({
+      name: "pickup_scan_rejections_tenant_kiosk_fk",
+      columns: [t.tenantId, t.kioskId],
+      foreignColumns: [kiosks.tenantId, kiosks.id],
+    }),
+    // Nullable columns are exempt under MATCH SIMPLE, so an unrecognised-badge
+    // row (employeeId NULL) and a no-order row (orderId NULL) both pass --
+    // the same arrangement `pickup_orders.writeoff_reason_id` relies on.
+    foreignKey({
+      name: "pickup_scan_rejections_tenant_employee_fk",
+      columns: [t.tenantId, t.employeeId],
+      foreignColumns: [employees.tenantId, employees.id],
+    }),
+    foreignKey({
+      name: "pickup_scan_rejections_tenant_order_fk",
+      columns: [t.tenantId, t.orderId],
+      foreignColumns: [pickupOrders.tenantId, pickupOrders.id],
+    }),
+    // `kind` (items_refused / unknown_badge) is derived in the DTO from
+    // `employee_id IS NULL` rather than stored, so the database has to
+    // guarantee the two columns can never disagree.
+    check(
+      "pickup_scan_rejections_badge_xor_employee",
+      sql`(employee_id is null) = (badge_code is not null)`,
+    ),
+    // Drives the свод banner's count.
+    index("pickup_scan_rejections_open_idx")
+      .on(t.tenantId, t.syncedAt)
+      .where(sql`acknowledged_at is null`),
+  ],
 );
