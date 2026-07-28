@@ -9,7 +9,8 @@ import {
 import { and, asc, desc, eq, gt, isNull, max, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
-import { generateDeviceToken, hashDeviceToken } from "../../pickup/device-token";
+import { loadEnv } from "../../env";
+import { generateDeviceToken, hashDeviceToken, hashPairingCode } from "../../pickup/device-token";
 import { PickupOrdersService } from "../pickup-orders/pickup-orders.service";
 import type { PairKioskResultDto } from "../pickup-orders/dto";
 import { normalizePairSource } from "./pair-source";
@@ -45,11 +46,15 @@ export const GLOBAL_PAIR_SOURCE = "*";
 /** Fixed window size for the limiter; deliberately the same as the code TTL. */
 export const PAIR_ATTEMPT_WINDOW_MS = TTL_MS;
 
-// `hashDeviceToken` is a plain sha256, which an attacker holding a DB dump
-// could brute-force over the 10^8 code space. That is acceptable here and
-// deliberately not PBKDF2: the value is single-use, expires in 15 minutes,
-// and the exchange must stay a single indexed hash probe for a device that
-// has no credential yet. It is not a password.
+// The pairing code is hashed with `hashPairingCode` (HMAC-SHA256 keyed by
+// the server-held `PAIRING_CODE_PEPPER`), never `hashDeviceToken`'s plain
+// sha256: an unkeyed digest over the 10^8 code space is trivially
+// brute-forceable offline from a DB dump, which would let a leak recover
+// every still-live code and redeem it directly, bypassing the HTTP rate
+// limiter entirely. Deliberately not PBKDF2/bcrypt beyond that, though: the
+// value is single-use, expires in 15 minutes, and the exchange must stay a
+// single indexed hash probe for a device that has no credential yet. It is
+// not a password.
 
 export interface IssuePairingCodeResultDto {
   code: string;
@@ -103,9 +108,10 @@ export class PairingService {
       );
 
     const expiresAt = new Date(Date.now() + TTL_MS);
+    const pepper = loadEnv().PAIRING_CODE_PEPPER;
     for (let attempt = 0; attempt < MINT_ATTEMPTS; attempt++) {
       const code = String(randomInt(0, 10 ** CODE_DIGITS)).padStart(CODE_DIGITS, "0");
-      const codeHash = hashDeviceToken(code);
+      const codeHash = hashPairingCode(code, pepper);
       // The exchange looks a device up by hash alone, so a hash shared by two
       // simultaneously-live codes would be ambiguous. Mint a different one.
       // This is a best-effort SELECT-then-INSERT check with its own race
@@ -214,7 +220,7 @@ export class PairingService {
   }
 
   private async attemptRedeem(code: string, now: Date): Promise<PairKioskResultDto> {
-    const codeHash = hashDeviceToken(code);
+    const codeHash = hashPairingCode(code, loadEnv().PAIRING_CODE_PEPPER);
     const rows = await this.db
       .select()
       .from(schema.kioskPairingCodes)

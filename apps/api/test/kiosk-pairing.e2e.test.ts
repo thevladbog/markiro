@@ -9,7 +9,7 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
-import { hashDeviceToken } from "../src/pickup/device-token";
+import { hashPairingCode } from "../src/pickup/device-token";
 import { normalizePairSource } from "../src/modules/kiosk/pair-source";
 import {
   GLOBAL_PAIR_ATTEMPT_BUDGET,
@@ -111,11 +111,25 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
   let tenantId: string;
   let kioskId: string;
   let seededOrder: string;
+  let pairingCodePepper: string;
+
+  /**
+   * This suite's own stand-in for `PairingService`'s real `hashPairingCode`
+   * call sites -- keyed by the SAME pepper the app under test loads from
+   * `.env` (via `loadEnv()` in `beforeAll` below), so assertions against
+   * `kiosk_pairing_codes.code_hash` exercise the real keyed digest rather
+   * than a plain, unkeyed one that could pass even if the app silently
+   * stopped keying the hash.
+   */
+  function codeHashOf(code: string): string {
+    return hashPairingCode(code, pairingCodePepper);
+  }
 
   beforeAll(async () => {
     const env = loadEnv();
     setup = setupAuth(env);
     db = setup.db;
+    pairingCodePepper = env.PAIRING_CODE_PEPPER;
 
     const ref = await Test.createTestingModule({
       imports: [AppModule.forRoot({ ...setup, databaseUrl: env.DATABASE_URL })],
@@ -229,7 +243,7 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
       .from(schema.kioskPairingCodes)
       .where(eq(schema.kioskPairingCodes.kioskId, kioskId));
     expect(rows.some((r) => r.codeHash === res.body.code)).toBe(false);
-    expect(rows.some((r) => r.codeHash === hashDeviceToken(res.body.code))).toBe(true);
+    expect(rows.some((r) => r.codeHash === codeHashOf(res.body.code))).toBe(true);
   });
 
   it("invalidates the previous code when a new one is issued", async () => {
@@ -238,7 +252,7 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
     const [old] = await db
       .select()
       .from(schema.kioskPairingCodes)
-      .where(eq(schema.kioskPairingCodes.codeHash, hashDeviceToken(first.body.code)));
+      .where(eq(schema.kioskPairingCodes.codeHash, codeHashOf(first.body.code)));
     expect(old!.usedAt).not.toBeNull();
   });
 
@@ -323,7 +337,7 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
       .where(
         and(
           eq(schema.kioskPairingCodes.tenantId, tenantId),
-          eq(schema.kioskPairingCodes.codeHash, hashDeviceToken(issued.body.code)),
+          eq(schema.kioskPairingCodes.codeHash, codeHashOf(issued.body.code)),
         ),
       );
     await request(app!.getHttpServer())
@@ -334,7 +348,7 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
 
   it("refuses a code whose attempt budget is exhausted", async () => {
     const issued = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
-    const codeHash = hashDeviceToken(issued.body.code);
+    const codeHash = codeHashOf(issued.body.code);
     await db
       .update(schema.kioskPairingCodes)
       .set({ attempts: 5 })
@@ -537,7 +551,7 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
       await db.insert(schema.kioskPairingCodes).values({
         tenantId,
         kioskId: otherKioskId,
-        codeHash: hashDeviceToken(collidingCode),
+        codeHash: codeHashOf(collidingCode),
         expiresAt: new Date(Date.now() - 60_000),
       });
 
@@ -549,7 +563,7 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
     } finally {
       await db
         .delete(schema.kioskPairingCodes)
-        .where(eq(schema.kioskPairingCodes.codeHash, hashDeviceToken(collidingCode)));
+        .where(eq(schema.kioskPairingCodes.codeHash, codeHashOf(collidingCode)));
     }
   });
 
@@ -580,7 +594,7 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
         .where(
           and(
             eq(schema.kioskPairingCodes.tenantId, tenantId),
-            eq(schema.kioskPairingCodes.codeHash, hashDeviceToken(issued.body.code)),
+            eq(schema.kioskPairingCodes.codeHash, codeHashOf(issued.body.code)),
           ),
         );
 
@@ -599,5 +613,25 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
   it("404s issuing a pairing code for an archived kiosk (F5)", async () => {
     await agent.delete(`/kiosks/${kioskId}`).expect(204);
     await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(404);
+  });
+
+  // Pepper regression: proves `PAIRING_CODE_PEPPER` is actually load-bearing
+  // end-to-end, not just accepted and ignored. Recomputes the digest for the
+  // real issued code with a DIFFERENT pepper and asserts it does NOT match
+  // what the running app actually persisted -- so a future refactor that
+  // silently drops the key (e.g. reverting `hashPairingCode` to a plain,
+  // unkeyed digest, or hardcoding a fixed pepper) fails this test, even
+  // though every other assertion in this file (which all hash through this
+  // same suite's OWN pepper via `codeHashOf`) would not by itself catch that.
+  it("keys the pairing-code digest to the pepper -- a different pepper never matches what was persisted", async () => {
+    const issued = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    const [row] = await db
+      .select()
+      .from(schema.kioskPairingCodes)
+      .where(eq(schema.kioskPairingCodes.codeHash, codeHashOf(issued.body.code)));
+    expect(row).toBeDefined();
+
+    const wrongPepperHash = hashPairingCode(issued.body.code, "a-completely-different-pepper!!");
+    expect(wrongPepperHash).not.toBe(row!.codeHash);
   });
 });
