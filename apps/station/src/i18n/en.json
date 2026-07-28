@@ -81,6 +81,7 @@
     "lastScan": "Last scan",
     "printer": "Printer",
     "printerTransport": "Printer connection",
+    "transportNone": "No printer",
     "transportTcp": "Network (TCP)",
     "transportSerial": "Serial (COM port)",
     "host": "Printer address",
@@ -97,6 +98,7 @@
     "back": "Back",
     "done": "Done",
     "invalidNumber": "Enter a valid number in the allowed range.",
+    "printerFieldRequired": "Enter the required printer connection details, or choose \"No printer\".",
     "failed": "Action failed. Check the connection and try again."
   }
 }

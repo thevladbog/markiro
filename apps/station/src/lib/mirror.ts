@@ -287,14 +287,19 @@ async function publishOperatorsMirror(
   //
   // Safe to run right after the flip, with no coordination with concurrent
   // reads, only because `readOperatorsMirror` resolves the pointer and reads
-  // the roster in ONE statement (see its doc comment). This DELETE is not on
-  // `refreshChain` and can therefore land while a sign-in is in flight, but
-  // there is no longer a JS gap in the reader for it to land in: whichever
-  // slot the reader's single statement finds active, that is the slot this
-  // DELETE has not yet touched (it only ever clears the INACTIVE one). Before
-  // that fix, this DELETE could race a reader that had already resolved the
-  // active slot via a separate round trip and land before the reader's own
-  // SELECT — emptying the exact table the reader was about to read.
+  // the roster in ONE statement (see its doc comment). This DELETE itself
+  // *is* on `refreshChain` -- it's the last `await` inside this call's turn,
+  // same as everything else in `publishOperatorsMirror`. What is NOT on any
+  // chain is the reader: `readOperatorsMirror` issues its own direct query,
+  // independent of `refreshChain` entirely, so it can run concurrently with
+  // this DELETE (or with any other step of this turn) while a sign-in is in
+  // flight. There is no longer a JS gap in the reader for that to matter:
+  // whichever slot the reader's single statement finds active, that is the
+  // slot this DELETE has not yet touched (it only ever clears the INACTIVE
+  // one). Before that fix, this DELETE could race a reader that had already
+  // resolved the active slot via a separate round trip and land before the
+  // reader's own SELECT — emptying the exact table the reader was about to
+  // read.
   try {
     await exec.run(`DELETE FROM ${SLOT_TABLES[otherSlot(target)]}`);
   } catch {
@@ -385,8 +390,16 @@ export async function readShiftContext(
  *
  * `COALESCE(..., 'a')` reproduces `activeSlot`'s absent-key-means-"a"
  * fallback, so a device that upgraded with rows already in `operators_mirror`
- * and no pointer row yet still reads them. The table names come from
- * `SLOT_TABLES`, the same closed set of two literals `activeSlot` and
+ * and no pointer row yet still reads them -- but only once migrations have
+ * created `operators_mirror_b`: this single statement references both slot
+ * tables unconditionally (the `UNION ALL`'s second branch, even though its
+ * `WHERE` never matches on such a device), so it hard-requires
+ * `operators_mirror_b` to exist regardless of which branch actually returns
+ * rows. That is fail-closed — the query throws rather than silently reading
+ * only "a" — and is already handled by the sign-in screen's existing error
+ * handling; it is called out here only so a future reader does not assume
+ * this upgrade path works before migrations have run. The table names come
+ * from `SLOT_TABLES`, the same closed set of two literals `activeSlot` and
  * `publishOperatorsMirror` use — never caller input.
  */
 export async function readOperatorsMirror(exec: SqlExecutor): Promise<OperatorMirrorRecord[]> {

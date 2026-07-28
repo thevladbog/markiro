@@ -31,18 +31,25 @@ const DEFAULT_PRINTER_PORT = 9100;
 const MAX_BAUD = 4294967295;
 
 /**
- * Accepts only a finite non-negative integer within u32 range, used for both
- * the scanner and the serial printer baud rate. Rust deserializes each into a
+ * Accepts only a finite positive integer within u32 range, used for both the
+ * scanner and the serial printer baud rate. Rust deserializes each into a
  * `u32`, so a value like `-1`, `1.5`, or `Infinity` must be rejected here
  * rather than silently coerced to a default: a bad value that reaches
  * `station_meta` breaks every scanner open or print attempt on this
  * workstation until someone reopens Setup and happens to notice.
+ *
+ * `0` is rejected too, not just negatives: `open_scanner(port, 0)` sets
+ * POSIX B0 on the serial line, which does not fail to open, so a stored baud
+ * of 0 would show the status bar as connected while the scanner never
+ * delivers a scan. The lower bound matches `parseTcpPort` below -- both
+ * reject their zero value for the same reason, a "rate/port of zero" is not
+ * a configuration, it's a mistake.
  */
 function parseBaud(value: string): number | null {
   const trimmed = value.trim();
   if (trimmed === "") return null;
   const n = Number(trimmed);
-  if (!Number.isInteger(n) || n < 0 || n > MAX_BAUD) return null;
+  if (!Number.isInteger(n) || n < 1 || n > MAX_BAUD) return null;
   return n;
 }
 
@@ -93,7 +100,14 @@ export function WorkstationSetup({
   // be non-empty (`printerHost ? tcp : serial`), so a workstation with a
   // stored TCP printer would keep sending the stale TCP target the moment an
   // operator typed a serial port, because the host field was still populated.
-  const [printerTransport, setPrinterTransport] = useState<PrintTarget["kind"]>("tcp");
+  //
+  // `"none"` is a third, explicit state alongside the two real transports --
+  // the printer counterpart to the scanner's "no serial scanner" button
+  // above. It is what `buildConfig()` treats as "genuinely unconfigured";
+  // selecting "tcp" or "serial" instead commits to that transport needing
+  // its field filled in (see `buildConfig`), so a transport switch can never
+  // silently persist `printer: null` the way an empty field used to.
+  const [printerTransport, setPrinterTransport] = useState<PrintTarget["kind"] | "none">("none");
   const [printerLanguage, setPrinterLanguage] = useState<PrinterLanguage>("zpl");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -115,29 +129,60 @@ export function WorkstationSetup({
 
   // Seed every field from the stored configuration, so an operator reopening
   // this screen sees what is actually configured rather than blank defaults.
-  // `loading` stays true until this resolves (see its declaration above), so
+  // `loading` stays true until this settles (see its declaration above), so
   // nothing here can be raced by an operator interacting with the form.
+  //
+  // `loadHardwareConfig` never rejects -- it swallows every internal error
+  // and resolves with `DEFAULT_HARDWARE_CONFIG` instead (see its doc
+  // comment), which is the only reason the `.catch` below is not load-bearing
+  // today. It is here anyway so a future change to that contract can't turn
+  // this effect into a permanent lock: without it, a genuinely rejected read
+  // would leave `loading` true forever, and the form would stay disabled
+  // behind the loading message with Back as the only way out and no error
+  // shown for why.
+  //
+  // That never-reject contract is also a hazard this `loading` gate does
+  // NOT close, only documented here: a real read failure inside
+  // `loadHardwareConfig` resolves with defaults indistinguishably from
+  // "nothing has ever been saved on this station", so `loading` clears
+  // normally, every field shows blank, and pressing Done persists
+  // `{scanner:null, printer:null, printerLanguage:"zpl"}` over whatever was
+  // actually stored -- silently erasing it. The gate only closes the
+  // *timing* race against an in-flight read; it cannot tell a genuine blank
+  // apart from a swallowed read error, and `loadHardwareConfig` must keep
+  // its never-reject contract regardless (it also runs at boot, where a
+  // station that cannot read a preference must still come up and validate
+  // codes).
   useEffect(() => {
-    void loadHardwareConfig(exec).then((config) => {
-      if (config.scanner) {
-        setPort(config.scanner.port);
-        setStoredPort(config.scanner.port);
-        setBaud(String(config.scanner.baud));
-      }
-      if (config.printer?.kind === "tcp") {
-        setPrinterTransport("tcp");
-        setPrinterHost(config.printer.host);
-        setPrinterTcpPort(String(config.printer.port));
-      }
-      if (config.printer?.kind === "serial") {
-        setPrinterTransport("serial");
-        setPrinterPort(config.printer.port);
-        setPrinterBaud(String(config.printer.baud));
-      }
-      setPrinterLanguage(config.printerLanguage);
-      setLoading(false);
-    });
-  }, [exec]);
+    void loadHardwareConfig(exec)
+      .then((config) => {
+        if (config.scanner) {
+          setPort(config.scanner.port);
+          setStoredPort(config.scanner.port);
+          setBaud(String(config.scanner.baud));
+        }
+        if (config.printer?.kind === "tcp") {
+          setPrinterTransport("tcp");
+          setPrinterHost(config.printer.host);
+          setPrinterTcpPort(String(config.printer.port));
+        } else if (config.printer?.kind === "serial") {
+          setPrinterTransport("serial");
+          setPrinterPort(config.printer.port);
+          setPrinterBaud(String(config.printer.baud));
+        } else {
+          // Genuinely unconfigured: show the explicit "no printer" state
+          // rather than leaving whichever transport happened to be selected
+          // before this load resolved.
+          setPrinterTransport("none");
+        }
+        setPrinterLanguage(config.printerLanguage);
+        setLoading(false);
+      })
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : t("setup.failed"));
+        setLoading(false);
+      });
+  }, [exec, t]);
 
   // Live scans are shown for as long as this screen is open, so the operator
   // can confirm the scanner really works before leaving.
@@ -199,6 +244,13 @@ export function WorkstationSetup({
    * kind is built, so switching it always fully replaces the printer target
    * instead of leaving a stale host/port from the previously-selected
    * transport in play.
+   *
+   * `printerTransport === "none"` is the only way to build `printer: null`.
+   * Selecting "tcp" or "serial" commits to that transport needing its
+   * required field (host, or port) filled in -- an empty required field is
+   * an error, not a silent `null`, so switching a workstation with a stored
+   * printer to the other transport and pressing Done without typing
+   * anything can never wipe out the configured printer unnoticed.
    */
   function buildConfig(): ConfigResult {
     let scanner: HardwareConfig["scanner"] = null;
@@ -210,12 +262,12 @@ export function WorkstationSetup({
 
     let printer: PrintTarget | null = null;
     if (printerTransport === "tcp") {
-      if (printerHost !== "") {
-        const tcpPort = parseTcpPort(printerTcpPort);
-        if (tcpPort === null) return { ok: false, error: t("setup.invalidNumber") };
-        printer = { kind: "tcp", host: printerHost, port: tcpPort };
-      }
-    } else if (printerPort !== "") {
+      if (printerHost === "") return { ok: false, error: t("setup.printerFieldRequired") };
+      const tcpPort = parseTcpPort(printerTcpPort);
+      if (tcpPort === null) return { ok: false, error: t("setup.invalidNumber") };
+      printer = { kind: "tcp", host: printerHost, port: tcpPort };
+    } else if (printerTransport === "serial") {
+      if (printerPort === "") return { ok: false, error: t("setup.printerFieldRequired") };
       const serialBaud = parseBaud(printerBaud);
       if (serialBaud === null) return { ok: false, error: t("setup.invalidNumber") };
       printer = { kind: "serial", port: printerPort, baud: serialBaud };
@@ -384,7 +436,24 @@ export function WorkstationSetup({
               populated. Only the fields for the selected transport render
               below, so there is never an ambiguous "both filled in" state,
               and switching transports doesn't require clearing anything by
-              hand for it to take effect. */}
+              hand for it to take effect.
+
+              "No printer" is the explicit third option -- the printer
+              counterpart to the scanner's "no serial scanner" button above.
+              It is the only selection `buildConfig()` treats as "genuinely
+              unconfigured"; picking "tcp" or "serial" instead commits to
+              that transport's required field being filled in before Done
+              can save, so switching transports can never silently persist
+              `printer: null` over a stored printer. */}
+          <Button
+            type="button"
+            variant={printerTransport === "none" ? "primary" : "secondary"}
+            style={{ minHeight: 64 }}
+            disabled={loading}
+            onClick={() => setPrinterTransport("none")}
+          >
+            {t("setup.transportNone")}
+          </Button>
           <Button
             type="button"
             variant={printerTransport === "tcp" ? "primary" : "secondary"}
@@ -404,7 +473,7 @@ export function WorkstationSetup({
             {t("setup.transportSerial")}
           </Button>
         </div>
-        {printerTransport === "tcp" ? (
+        {printerTransport === "tcp" && (
           <>
             <Input
               label={t("setup.host")}
@@ -419,7 +488,8 @@ export function WorkstationSetup({
               onChange={(e) => setPrinterTcpPort(e.target.value)}
             />
           </>
-        ) : (
+        )}
+        {printerTransport === "serial" && (
           <>
             <Input
               label={t("setup.printerPort")}
@@ -462,6 +532,7 @@ export function WorkstationSetup({
           disabled={
             busy ||
             loading ||
+            printerTransport === "none" ||
             (printerTransport === "tcp" ? printerHost.length === 0 : printerPort.length === 0)
           }
           onClick={() => void testPrint()}
@@ -503,9 +574,14 @@ export function WorkstationSetup({
             screen while an abandoned `openScanner()` was still resolving,
             the app's saved-config reconciliation could race that open and an
             unsaved test port could win and replace the persisted scanner.
-            `busy` always clears in a `finally` above, so this is never
-            disabled for longer than that operation's own retry budget --
-            Back can never strand the operator here. */}
+            `busy` always clears in a `finally` above, so this assumes the
+            underlying IPC call always eventually settles -- as long as it
+            does, Back is never disabled longer than that operation's own
+            retry budget. That assumption is bounded in practice (Tauri's
+            `invoke` does not hang indefinitely), but it IS an assumption:
+            the previous, unconditional Back button existed precisely as a
+            no-assumptions escape hatch, and this comment should not claim
+            more certainty than that trade-off actually bought back. */}
         <Button
           type="button"
           variant="secondary"

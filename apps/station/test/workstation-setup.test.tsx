@@ -207,8 +207,7 @@ describe("WorkstationSetup", () => {
     );
 
     fireEvent.click(await screen.findByRole("button", { name: "COM3" }));
-    // TCP is the default transport, but select it explicitly so this test
-    // does not depend on that default.
+    // "No printer" is the default transport; select TCP explicitly.
     fireEvent.click(screen.getByRole("button", { name: "Network (TCP)" }));
     fireEvent.change(screen.getByLabelText("Printer address"), {
       target: { value: "10.0.0.7" },
@@ -488,6 +487,9 @@ describe("WorkstationSetup", () => {
     );
 
     await screen.findByText("COM3");
+    // "No printer" is the default transport now (Finding 2, PR12 round 2),
+    // so TCP must be selected explicitly before its fields render.
+    fireEvent.click(screen.getByRole("button", { name: "Network (TCP)" }));
     fireEvent.change(screen.getByLabelText("Printer address"), {
       target: { value: "10.0.0.7" },
     });
@@ -654,5 +656,73 @@ describe("WorkstationSetup", () => {
     await waitFor(() => expect(onConfigChange).toHaveBeenCalled());
     const saved = onConfigChange.mock.calls.at(-1)![0] as HardwareConfig;
     expect(saved).toEqual(stored);
+  });
+
+  it("rejects a baud of 0 instead of persisting it as a working scanner baud (PR12 round 2, Finding 1)", async () => {
+    // Before the fix, `parseBaud` only rejected `n < 0`, so 0 slipped through
+    // as "valid" and got persisted. `open_scanner(port, 0)` sets POSIX B0,
+    // which does not fail to open -- the status bar would show connected
+    // while the scanner never delivers a scan.
+    const onConfigChange = vi.fn();
+    const exec: SqlExecutor = { run: async () => {}, all: async () => [] };
+
+    render(
+      <WorkstationSetup
+        hw={hardware()}
+        exec={exec}
+        sound={{ muted: false, volume: 1 }}
+        onSoundChange={() => {}}
+        onConfigChange={onConfigChange}
+        onDone={() => {}}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "COM3" }));
+    fireEvent.change(screen.getByLabelText("Baud rate"), { target: { value: "0" } });
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+    expect(await screen.findByText("Enter a valid number in the allowed range.")).toBeDefined();
+    expect(onConfigChange).not.toHaveBeenCalled();
+  });
+
+  it("shows an error instead of silently clearing a stored printer when the newly selected transport's field is left empty (PR12 round 2, Finding 2)", async () => {
+    // Before the fix, switching from a stored TCP printer to Serial and
+    // pressing Done without typing a port persisted `printer: null` with no
+    // warning -- the configured printer was silently gone.
+    const stored: HardwareConfig = {
+      scanner: null,
+      printer: { kind: "tcp", host: "10.0.0.9", port: 9200 },
+      printerLanguage: "zpl",
+    };
+    const exec: SqlExecutor = {
+      run: async () => {},
+      all: async <T,>() => [{ value: JSON.stringify(stored) }] as T[],
+    };
+    const onConfigChange = vi.fn();
+
+    render(
+      <WorkstationSetup
+        hw={hardware()}
+        exec={exec}
+        sound={{ muted: false, volume: 1 }}
+        onSoundChange={() => {}}
+        onConfigChange={onConfigChange}
+        onDone={() => {}}
+      />,
+    );
+
+    await waitFor(() =>
+      expect((screen.getByLabelText("Printer address") as HTMLInputElement).value).toBe("10.0.0.9"),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Serial (COM port)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+    expect(
+      await screen.findByText(
+        'Enter the required printer connection details, or choose "No printer".',
+      ),
+    ).toBeDefined();
+    expect(onConfigChange).not.toHaveBeenCalled();
   });
 });
