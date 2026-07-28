@@ -16,6 +16,7 @@ describe("StatusBar", () => {
         printerConfigured={false}
         syncPending={0}
         syncStuck={false}
+        conflicts={0}
       />,
     );
     expect(screen.getByTestId("scanner-status").textContent).toBe("Keyboard");
@@ -23,7 +24,14 @@ describe("StatusBar", () => {
 
   it("reports a connected serial scanner", () => {
     render(
-      <StatusBar online scanner="connected" printerConfigured syncPending={0} syncStuck={false} />,
+      <StatusBar
+        online
+        scanner="connected"
+        printerConfigured
+        syncPending={0}
+        syncStuck={false}
+        conflicts={0}
+      />,
     );
     expect(screen.getByTestId("scanner-status").textContent).toBe("Connected");
   });
@@ -36,6 +44,7 @@ describe("StatusBar", () => {
         printerConfigured
         syncPending={0}
         syncStuck={false}
+        conflicts={0}
       />,
     );
     expect(screen.getByTestId("scanner-status").textContent).toBe("No signal");
@@ -49,6 +58,7 @@ describe("StatusBar", () => {
         printerConfigured={false}
         syncPending={0}
         syncStuck={false}
+        conflicts={0}
       />,
     );
     expect(screen.getByTestId("printer-status").textContent).toBe("Not configured");
@@ -56,7 +66,14 @@ describe("StatusBar", () => {
 
   it("reports a configured printer as configured, not connected (a printer cannot be proven alive without printing)", () => {
     render(
-      <StatusBar online scanner="keyboard" printerConfigured syncPending={0} syncStuck={false} />,
+      <StatusBar
+        online
+        scanner="keyboard"
+        printerConfigured
+        syncPending={0}
+        syncStuck={false}
+        conflicts={0}
+      />,
     );
     expect(screen.getByTestId("printer-status").textContent).toBe("Configured");
   });
@@ -69,6 +86,7 @@ describe("StatusBar", () => {
         printerConfigured={false}
         syncPending={42}
         syncStuck={false}
+        conflicts={0}
       />,
     );
     expect(screen.getByTestId("sync-status").textContent).toBe("42");
@@ -82,6 +100,7 @@ describe("StatusBar", () => {
         printerConfigured={false}
         syncPending={0}
         syncStuck={false}
+        conflicts={0}
       />,
     );
     expect(screen.getByTestId("sync-status").textContent).toBe("0");
@@ -89,8 +108,43 @@ describe("StatusBar", () => {
 
   it("warns when the queue has stopped moving", () => {
     render(
-      <StatusBar online scanner="keyboard" printerConfigured={false} syncPending={7} syncStuck />,
+      <StatusBar
+        online
+        scanner="keyboard"
+        printerConfigured={false}
+        syncPending={7}
+        syncStuck
+        conflicts={0}
+      />,
     );
     expect(screen.getByTestId("sync-status").textContent).toBe("7 — Not syncing");
+  });
+
+  it("shows the conflict count in the status bar", () => {
+    render(
+      <StatusBar
+        online
+        scanner="keyboard"
+        printerConfigured={false}
+        syncPending={0}
+        syncStuck={false}
+        conflicts={3}
+      />,
+    );
+    expect(screen.getByTestId("conflicts-status").textContent).toBe("3");
+  });
+
+  it("shows nothing to worry about at zero", () => {
+    render(
+      <StatusBar
+        online
+        scanner="keyboard"
+        printerConfigured={false}
+        syncPending={0}
+        syncStuck={false}
+        conflicts={0}
+      />,
+    );
+    expect(screen.getByTestId("conflicts-status").textContent).toBe("0");
   });
 });

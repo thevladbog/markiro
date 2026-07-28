@@ -8,6 +8,7 @@ export interface FloorShellProps {
   printerConfigured: boolean;
   syncPending: number;
   syncStuck: boolean;
+  conflicts: number;
   tasks: Array<{ id: string; label: string }>;
   activeTaskId: string;
   onSelectTask: (id: string) => void;
@@ -20,6 +21,7 @@ export function FloorShell({
   printerConfigured,
   syncPending,
   syncStuck,
+  conflicts,
   tasks,
   activeTaskId,
   onSelectTask,
@@ -34,6 +36,7 @@ export function FloorShell({
         printerConfigured={printerConfigured}
         syncPending={syncPending}
         syncStuck={syncStuck}
+        conflicts={conflicts}
       />
       <nav aria-label={t("shell.tasks")} style={{ display: "flex", gap: 8, padding: "8px 16px" }}>
         {tasks.map((task) => (
