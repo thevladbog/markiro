@@ -147,18 +147,36 @@ that can lag arbitrarily far behind without blocking the floor.
 - **Drain** (`src/lib/sync.ts`, `createSyncEngine`) reads the oldest
   `BATCH_SIZE` (200) queued scans and posts them to `POST /station/scans` as
   one batch — small enough to survive a flaky plant network link and cheap to
-  retry. The batch id is deterministic —
-  `<machineId>:<highest outbox id in the batch>`, not random — so a retry
-  after a lost response and a resend after an app restart both carry the
-  exact same key. That determinism is what makes at-least-once delivery
-  safe: a batch is acknowledged — and its rows permanently deleted from the
-  outbox — only once the server has actually confirmed it, so a response
-  lost in transit just means the same batch gets resent. Before
-  acknowledging, the engine also checks that the response actually has the
-  shape `{ applied, alreadyApplied }` (number, boolean): a captive portal or
-  other proxy on the plant network answering `200 {"status":"ok"}` parses as
-  JSON but isn't this endpoint's contract, and acknowledging on the strength
-  of that would destroy scans the server never saw.
+  retry. The batch id is
+  `<machineId>:<installId>:<highest outbox id in the batch>`, not random.
+  `installId` (`src/lib/install-id.ts`) is a random identifier generated once
+  and persisted in `station_meta`, read back on every later call rather than
+  regenerated per process — it survives an app restart but NOT
+  `station-mirror.db` being deleted and recreated, since it is itself a row
+  in that database. That is deliberate: `station.json` (which holds
+  `machineId`) and the mirror database are separate files, so a support
+  action that deletes only the corrupt local database would otherwise keep
+  `machineId` while the outbox's ids restart at 1, reproducing a batch key
+  the server had already recorded and silently deleting brand-new scans (the
+  server would answer `alreadyApplied: true` for a batch it had genuinely
+  never seen) — `installId` gives a fresh database a fresh keyspace instead.
+  The `<highest outbox id in the batch>` component is pinned once a batch is
+  posted (`pendingCeiling` in `sync.ts`) and held across every retry of that
+  same batch — including one a later nudge triggers while the previous
+  attempt is still outstanding — rather than re-read fresh each time: while
+  the queue holds fewer rows than `BATCH_SIZE` (the ordinary state on a
+  continuously-draining line), a fresh read would otherwise pick up rows
+  queued since the failed attempt and post them under a new key the server
+  has never seen, applying the original rows a second time. That is what
+  actually makes at-least-once delivery safe: a batch is acknowledged — and
+  its rows permanently deleted from the outbox — only once the server has
+  actually confirmed it, so a response lost in transit just means the same
+  batch, under the same key, gets resent. Before acknowledging, the engine
+  also checks that the response actually has the shape
+  `{ applied, alreadyApplied }` (number, boolean): a captive portal or other
+  proxy on the plant network answering `200 {"status":"ok"}` parses as JSON
+  but isn't this endpoint's contract, and acknowledging on the strength of
+  that would destroy scans the server never saw.
 - **Server side**
   (`apps/api/src/modules/station-scans/station-scans.service.ts`) applies a
   batch and records its idempotency key in a single Postgres transaction, so
@@ -169,7 +187,14 @@ that can lag arbitrarily far behind without blocking the floor.
   a missing partition never surfaces as an uncaught 500. That ordering
   matters here specifically: every error from this endpoint is treated as
   retryable by the drain above, so a request that always fails the same way
-  would otherwise wedge that station's queue forever.
+  would otherwise wedge that station's queue forever. The number of distinct
+  months one batch may span is capped (`MAX_DISTINCT_MONTHS_PER_BATCH`,
+  currently 6) well above anything a contiguous, oldest-first drain could
+  legitimately produce — a batch over that cap is rejected with a 400 before
+  a single partition is created, so a corrupt or hostile `scannedAt` cannot
+  turn into an ACCESS EXCLUSIVE-lock storm on the shared `codes`/`scan_events`
+  parents (those locks are global, so that storm would otherwise degrade
+  ingest for every tenant, not just the offending one).
 - **Triggers**: the engine is nudged, never polled — once when it's built, on
   every scan `recordScan` finishes writing (whatever the verdict — a
   duplicate or a rejection queues an event row too), on every `online`
@@ -177,7 +202,9 @@ that can lag arbitrarily far behind without blocking the floor.
   that catches a connection recovering silently (e.g. a captive portal
   clearing with no `online` event). Exactly one drain runs at a time; a
   nudge that arrives mid-drain just requests one more pass once the current
-  one finishes.
+  one finishes — unless a retry is already scheduled (see Backoff below), in
+  which case the nudge does nothing and the scheduled attempt is left to run
+  on its own timing.
 - **Backoff**: a failed batch — network error, non-2xx, or an unrecognized
   response shape — is retried with exponential backoff starting at 2s and
   doubling up to a 60s cap. This also covers a batch the server permanently
@@ -185,7 +212,12 @@ that can lag arbitrarily far behind without blocking the floor.
   will," and the owner's decision, recorded in `sync.ts`, is that losing scan
   data is worse than a stalled queue — so a permanently-rejected batch wedges
   that station's queue by design, and the stuck indicator below is what
-  surfaces that to an operator instead of the queue failing silently.
+  surfaces that to an operator instead of the queue failing silently. A
+  nudge that arrives while a retry is already scheduled — a scan recorded
+  offline, the `online` listener, the heartbeat — never starts a second,
+  immediate attempt: doing so would turn the backoff into one POST per nudge
+  under scan load. The queued nudge is simply dropped, since the scheduled
+  attempt drains whatever is queued by the time it fires anyway.
 - **Stuck warning**: the status bar's sync indicator turns "stuck" once the
   queue is non-empty and has gone `STUCK_AFTER_MS` (15 minutes) without a
   success. The rule spans two time domains that are deliberately never

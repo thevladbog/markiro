@@ -16,9 +16,16 @@ const scanItemSchema = z.object({
 });
 
 export const syncBatchSchema = z.object({
-  // Device-generated and deterministic: "<machineId>:<highest outbox id>".
-  // Stable across a retry AND across an app restart, which is what makes the
-  // server's idempotency key actually protect a resend.
+  // Device-generated: "<machineId>:<per-installation id>:<highest outbox id
+  // in the batch>" (see apps/station/src/lib/sync.ts and install-id.ts).
+  // Stable across a retry of that same batch -- including one triggered by a
+  // later nudge while the previous attempt is still outstanding -- which is
+  // what makes this key actually protect a resend: the device pins the row
+  // range it resends rather than re-reading a fresh (potentially larger)
+  // prefix. The per-installation component changes only when the device's
+  // local database is recreated, so a device that lost just its local
+  // database (but kept its enrollment) cannot collide with a key already
+  // recorded for the database it replaced.
   batchId: z.string().min(1).max(200),
   // Bounded so a buggy or hostile device cannot submit an unbounded payload;
   // the station's own batch size is 200.

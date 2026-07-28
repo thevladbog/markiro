@@ -173,18 +173,21 @@ function outboxRow(id: number): OutboxSeedRow {
 /**
  * Wires `invokeMock` so the app can reach the floor stage: an enrolled
  * config, the given hardware configuration under the `hardware_config`
- * `station_meta` key, one active operator (verifiable with `OPERATOR_PIN`)
- * behind `readOperatorsMirror`'s query, `outboxRows` behind the outbox
- * queries the sync engine issues (mutated on ack, so a drained queue
- * actually reads back empty rather than looping forever), and empty
- * defaults for everything else (`sound_settings`, `operators_slot`,
- * migrations).
+ * `station_meta` key, a fixed `install_id` (the sync engine's per-
+ * installation batch key component, Finding 3 — its exact value is never
+ * asserted by anything in this file), one active operator (verifiable with
+ * `OPERATOR_PIN`) behind `readOperatorsMirror`'s query, `outboxRows` behind
+ * the outbox queries the sync engine issues (mutated on ack, so a drained
+ * queue actually reads back empty rather than looping forever — and
+ * returned, so a test can push more rows into it later to simulate a new
+ * scan), and empty defaults for everything else (`sound_settings`,
+ * `operators_slot`, migrations).
  */
 function mockInvokeForFloor(
   pinHash: string,
   hardwareConfig: HardwareConfig,
   outboxRows: OutboxSeedRow[] = [],
-) {
+): OutboxSeedRow[] {
   const outbox = [...outboxRows];
   invokeMock.mockImplementation((cmd: string, payload?: unknown): Promise<unknown> => {
     if (cmd === "read_config") {
@@ -234,14 +237,22 @@ function mockInvokeForFloor(
         return Promise.resolve([operatorMirrorRow(pinHash)]);
       }
       if (query.includes("station_meta")) {
-        return Promise.resolve(
-          values?.[0] === "hardware_config" ? [{ value: JSON.stringify(hardwareConfig) }] : [],
-        );
+        if (values?.[0] === "hardware_config") {
+          return Promise.resolve([{ value: JSON.stringify(hardwareConfig) }]);
+        }
+        // The sync engine's install id (Finding 3): answered as already
+        // persisted so `getInstallId` returns on its first SELECT and never
+        // needs the INSERT round-trip this ad hoc mock does not actually
+        // persist. No test in this file cares about the exact value, only
+        // that a batchId gets built at all.
+        if (values?.[0] === "install_id") return Promise.resolve([{ value: "test-install-id" }]);
+        return Promise.resolve([]);
       }
       return Promise.resolve([]);
     }
     return Promise.resolve(undefined);
   });
+  return outbox;
 }
 
 function clickDigits(value: string) {
@@ -264,32 +275,31 @@ async function signInAsOperator() {
  * Reaches the floor stage (enrolled config + signed-in operator, no serial
  * scanner configured) with one outbox row already queued, and a `fetch` stub
  * that answers every request the sync engine and the roster sync make.
+ * Returns the mutable outbox array (`mockInvokeForFloor`'s), so a test can
+ * push more rows into it later to simulate a fresh scan.
  *
  * The first `/station/scans` attempt deliberately fails (mirroring the F3
- * roster-retry test above): the engine's own drain has already finished
- * (queue still non-empty, a retry backoff scheduled) by the time a test
- * dispatches `online`, so that event's `syncEngine?.nudge()` is what drives
- * the second, successful attempt — not leftover work from the first drain.
- * Every attempt is reported through `onPost` before its outcome is decided,
- * so a failed attempt still counts as "the ingest call went out".
+ * roster-retry test above), which schedules the engine's own backoff retry.
  *
- * IMPORTANT coupling with `BACKOFF_START_MS` (sync.ts): that first failure
- * also schedules the engine's OWN retry at `BACKOFF_START_MS` from now.
- * Any test that dispatches `online` to prove the LISTENER nudges the engine
- * (rather than merely restating that the engine retries on its own) must
- * make sure its assertion can only be satisfied within that window, or the
- * retry timer alone — with the listener wiring silently broken — would
- * satisfy the same `waitFor` and the test would stop meaning anything. See
- * the "nudges the sync engine when the device comes back online" test below
- * for how that is made explicit rather than incidental.
+ * IMPORTANT coupling with `BACKOFF_START_MS` (sync.ts): since `nudge()` no
+ * longer starts a fresh drain while a retry is already scheduled (the
+ * Finding 1 backoff fix — a nudge racing that window used to be the ONLY way
+ * to prove the `online` listener actually calls `nudge()`, rather than
+ * merely restating that the engine retries on its own), a test that wants to
+ * prove the listener wiring works must first wait past this window — until
+ * the engine's own retry has fired and settled the queue — before doing
+ * anything that depends on a nudge starting a NEW drain. See the "nudges the
+ * sync engine when the device comes back online" test below.
  */
 async function renderAtFloorStage(
   opts: { onPost?: (path: string, body: unknown) => void; strictMode?: boolean } = {},
 ) {
   const pinHash = await hashSecret(OPERATOR_PIN);
-  mockInvokeForFloor(pinHash, { scanner: null, printer: null, printerLanguage: "zpl" }, [
-    outboxRow(1),
-  ]);
+  const outbox = mockInvokeForFloor(
+    pinHash,
+    { scanner: null, printer: null, printerLanguage: "zpl" },
+    [outboxRow(1)],
+  );
 
   let scansAttempts = 0;
   vi.stubGlobal(
@@ -323,6 +333,7 @@ async function renderAtFloorStage(
     ),
   );
   await signInAsOperator();
+  return outbox;
 }
 
 describe("nextStationView", () => {
@@ -742,29 +753,34 @@ describe("App", () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       const posts: { path: string; body: unknown }[] = [];
-      await renderAtFloorStage({ onPost: (path, body) => posts.push({ path, body }) });
-      await waitFor(() => expect(posts.length).toBeGreaterThan(0));
+      const outbox = await renderAtFloorStage({
+        onPost: (path, body) => posts.push({ path, body }),
+      });
+
+      // Let the mount-time drain's deliberate first failure AND the engine's
+      // own scheduled backoff retry fully play out, so no retry is left
+      // pending. With the Finding 1 backoff fix, `nudge()` does nothing while
+      // a retry is scheduled, so racing that window (what this test used to
+      // do) can no longer discriminate the `online` listener from the
+      // engine's own retry -- waiting for the queue to actually settle is
+      // what makes the next `nudge()` unambiguously attributable to the
+      // listener.
+      await waitFor(() => expect(screen.getByTestId("sync-status").textContent).toBe("0"), {
+        timeout: BACKOFF_START_MS + 2_000,
+      });
       const before = posts.length;
-      // Reference point for the Finding 2 guard below: the mount-time drain's
-      // deliberate first failure (which just satisfied the `waitFor` above)
-      // is also what scheduled the engine's OWN retry, `BACKOFF_START_MS`
-      // from about now.
-      const firstFailureAt = Date.now();
+
+      // New work queued directly -- standing in for another scan -- with no
+      // retry scheduled: only the `online` listener's own `nudge()` can now
+      // be the cause of a further post.
+      outbox.push(outboxRow(2));
 
       act(() => {
         window.dispatchEvent(new Event("online"));
       });
 
       await waitFor(() => expect(posts.length).toBeGreaterThan(before));
-      // Without this, the assertion above is satisfiable two ways: the
-      // `online` listener's nudge (what this test is meant to exercise), or
-      // the engine's own backoff retry firing on its own schedule, with the
-      // listener wiring silently broken. The retry cannot fire before
-      // `BACKOFF_START_MS` has elapsed (`setTimeout` never fires early), so
-      // landing well inside that window rules out the retry as the cause --
-      // margined so ordinary test overhead can't trip it, but tight enough
-      // that only the retry (not the listener) could ever satisfy it.
-      expect(Date.now() - firstFailureAt).toBeLessThan(BACKOFF_START_MS - 500);
+      expect(posts.at(-1)?.path).toBe("/station/scans");
     } finally {
       consoleErrorSpy.mockRestore();
     }
@@ -785,15 +801,22 @@ describe("App", () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       const posts: { path: string; body: unknown }[] = [];
-      await renderAtFloorStage({
+      const outbox = await renderAtFloorStage({
         onPost: (path, body) => posts.push({ path, body }),
         strictMode: true,
       });
 
-      // Mount-time drain (its first attempt deliberately failed) has run.
-      await waitFor(() => expect(posts.length).toBeGreaterThan(0));
+      // Mount-time drain (its first attempt deliberately failed) and its own
+      // scheduled retry have both settled -- see the non-StrictMode "nudges
+      // ... online" test above for why this replaces racing the backoff
+      // window now that a nudge no longer bypasses a scheduled retry
+      // (Finding 1).
+      await waitFor(() => expect(screen.getByTestId("sync-status").textContent).toBe("0"), {
+        timeout: BACKOFF_START_MS + 2_000,
+      });
       const before = posts.length;
 
+      outbox.push(outboxRow(2));
       act(() => {
         window.dispatchEvent(new Event("online"));
       });

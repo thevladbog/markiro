@@ -4,11 +4,11 @@ import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
-import { schema, type Db } from "@markiro/db";
+import { partitionName, schema, type Db } from "@markiro/db";
 import type { ScanItemDto } from "../src/modules/station-scans/dto";
 
 const ready = Boolean(
@@ -374,6 +374,50 @@ describe.skipIf(!ready)("station-scans e2e", () => {
 
     expect(res.body.message).toBe("Unknown shift in batch");
   });
+
+  it(
+    "rejects a batch spanning more distinct months than the cap, creating no partitions " +
+      "and storing nothing (Finding 2)",
+    async () => {
+      const agent = request.agent(app!.getHttpServer());
+      const tenantId = await signUpAndActivate(agent);
+      const apiKey = await deviceKey(agent);
+      const shiftId = await openShift(agent);
+
+      // Nine distinct months -- comfortably past
+      // MAX_DISTINCT_MONTHS_PER_BATCH (6, see station-scans.service.ts). A
+      // fixed historical year, like partitions.test.ts's 2001-01 fixture, so
+      // this can never collide with a partition real traffic (or another
+      // test file) already created.
+      const items = Array.from({ length: 9 }, (_, i) =>
+        item(shiftId, i + 1, {
+          scannedAt: `2010-${String(i + 1).padStart(2, "0")}-15T00:00:00.000Z`,
+        }),
+      );
+
+      const res = await request(app!.getHttpServer())
+        .post("/station/scans")
+        .set("x-api-key", apiKey)
+        .send({ batchId: "machine-1:950", items })
+        .expect(400);
+
+      expect(res.body.message).toMatch(/distinct months/);
+      expect(await scanEventsCount(tenantId, shiftId)).toBe(0);
+      expect(await codesCount(tenantId, shiftId)).toBe(0);
+
+      // The stronger proof of "no lock storm": not one of these months' scan
+      // partitions was created, even though ensuring THIS rejection didn't
+      // just accidentally still create a couple before the count check.
+      for (let i = 0; i < 9; i++) {
+        const name = partitionName("scan_events", new Date(Date.UTC(2010, i, 1)));
+        const exists = await db.execute(
+          sql`SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+              WHERE c.relname = ${name} AND n.nspname = current_schema()`,
+        );
+        expect(exists.rows).toHaveLength(0);
+      }
+    },
+  );
 
   // Device-key surface regression guard: see docs/device-key-surface.md.
   // If a future hardening pass makes this session-only, every station stops

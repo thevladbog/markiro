@@ -4,6 +4,37 @@ import { ensurePartitions, schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
 import type { SyncBatchDto, SyncBatchResponseDto } from "./dto";
 
+/**
+ * Upper bound on how many distinct calendar months a single batch's
+ * `scannedAt` values may span before `ensurePartitions` runs. Without this,
+ * a batch (up to `items.max(500)`, see `dto.ts`) with 500 distinct months
+ * would call `ensurePartitions` for up to 1000 partitions (`codes` and
+ * `scan_events` each) -- and `CREATE TABLE ... PARTITION OF` takes an ACCESS
+ * EXCLUSIVE lock on the shared parent, which is global to every tenant, so
+ * that lock storm would degrade ingest for everyone, not just the batch's
+ * own tenant.
+ *
+ * A legitimate batch is contiguous in time: the outbox drains oldest-first
+ * (`readBatch`'s `ORDER BY id` on the device), so within one batch
+ * `scannedAt` only jumps around at all if the device's own clock jumped
+ * mid-batch -- an NTP correction, or a dead RTC finally getting corrected --
+ * and even then that is ONE discontinuity, not hundreds. A handful of months
+ * comfortably covers a device that was offline across several month
+ * boundaries, or one draining a long-stale backlog after a database
+ * restore; this cap sits far above that, not tightly around it.
+ *
+ * That headroom is deliberate, not generous for its own sake: rejecting a
+ * batch here throws before the transaction below, so this batch is retried
+ * indefinitely and NEVER applied (see sync.ts's doc comment on the device
+ * side for why the drain treats every error, including a 4xx, as retryable
+ * rather than dropping data) -- a legitimate batch that hit a cap set too
+ * low would wedge that station's queue forever. A batch actually reaching
+ * this many distinct months is not a plausible legitimate shape; it is far
+ * more likely a corrupt or hostile timestamp, which is exactly what this cap
+ * exists to catch before it can turn into a shared-lock storm.
+ */
+const MAX_DISTINCT_MONTHS_PER_BATCH = 6;
+
 @Injectable()
 export class StationScansService {
   constructor(@Inject(DB) private readonly db: Db) {}
@@ -47,6 +78,16 @@ export class StationScansService {
           return monthStart.getTime();
         }),
       );
+      // Reject BEFORE calling ensurePartitions: an over-cap batch must never
+      // get even one partition created for it (see MAX_DISTINCT_MONTHS_PER_
+      // BATCH's doc comment for why the cap itself is set high enough that
+      // this can only fire for a corrupt/hostile timestamp, never a
+      // legitimate one).
+      if (monthStarts.size > MAX_DISTINCT_MONTHS_PER_BATCH) {
+        throw new BadRequestException(
+          `Batch spans ${monthStarts.size} distinct months, more than the ${MAX_DISTINCT_MONTHS_PER_BATCH} allowed in one batch`,
+        );
+      }
       await ensurePartitions(
         this.db,
         [...monthStarts].map((t) => new Date(t)),

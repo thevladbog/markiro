@@ -28,13 +28,34 @@ interface OutboxRow {
  * The oldest `limit` queued scans, in insertion order. Order matters: the
  * acknowledgement deletes a contiguous range by id, so a batch must always be
  * a prefix of the queue.
+ *
+ * `ceilingId`, when given, additionally requires `id <= ceilingId`. This is
+ * how a retry (whether the engine's own scheduled backoff attempt or a
+ * nudge that lands while one is outstanding) re-reads the EXACT row range a
+ * still-unacknowledged batch already chose, instead of a fresh
+ * `ORDER BY id LIMIT` read that could have grown to include rows enqueued
+ * since — see `sync.ts`'s `pendingCeiling` and its doc comment for why that
+ * growth is exactly what let a resend duplicate data server-side. Omitted
+ * (or `null`), this is a plain "first `limit` rows" read, used only when no
+ * batch is currently in flight.
  */
-export async function readBatch(exec: SqlExecutor, limit: number): Promise<OutboxItem[]> {
-  const rows = await exec.all<OutboxRow>(
-    `SELECT id, shift_id, terminal_id, raw, verdict, scanned_at, code_hash, gtin14, serial
-       FROM outbox ORDER BY id LIMIT ?`,
-    [limit],
-  );
+export async function readBatch(
+  exec: SqlExecutor,
+  limit: number,
+  ceilingId?: number | null,
+): Promise<OutboxItem[]> {
+  const rows =
+    ceilingId != null
+      ? await exec.all<OutboxRow>(
+          `SELECT id, shift_id, terminal_id, raw, verdict, scanned_at, code_hash, gtin14, serial
+             FROM outbox WHERE id <= ? ORDER BY id LIMIT ?`,
+          [ceilingId, limit],
+        )
+      : await exec.all<OutboxRow>(
+          `SELECT id, shift_id, terminal_id, raw, verdict, scanned_at, code_hash, gtin14, serial
+             FROM outbox ORDER BY id LIMIT ?`,
+          [limit],
+        );
   return rows.map((r) => ({
     id: r.id,
     shiftId: r.shift_id,

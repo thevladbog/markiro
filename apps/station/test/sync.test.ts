@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DatabaseSync } from "node:sqlite";
 import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
-import { BATCH_SIZE, createSyncEngine, STUCK_AFTER_MS } from "../src/lib/sync.js";
+import { BACKOFF_START_MS, BATCH_SIZE, createSyncEngine, STUCK_AFTER_MS } from "../src/lib/sync.js";
 
 // Several tests below deliberately fail the POST (or the device DB) to
 // exercise the retry path, which logs through `console.error` by design.
@@ -39,6 +39,11 @@ async function seed(
   }
 }
 
+/** Seeds a fixed, known `install_id` so a test can assert an exact batchId. */
+async function seedInstallId(exec: SqlExecutor, id: string): Promise<void> {
+  await exec.run("INSERT INTO station_meta (key, value) VALUES (?, ?)", ["install_id", id]);
+}
+
 describe("sync engine", () => {
   it("drains the queue and acknowledges what the server accepted", async () => {
     const exec = await migratedExec();
@@ -65,6 +70,7 @@ describe("sync engine", () => {
 
   it("uses a deterministic batch id so a resend is the same key", async () => {
     const exec = await migratedExec();
+    await seedInstallId(exec, "install-1");
     await seed(exec, 2);
     const post = vi.fn().mockResolvedValue({ applied: 2, alreadyApplied: false });
 
@@ -72,9 +78,160 @@ describe("sync engine", () => {
     engine.nudge();
     await engine.idle();
 
-    expect((post.mock.calls[0]![1] as { batchId: string }).batchId).toBe("m1:2");
+    expect((post.mock.calls[0]![1] as { batchId: string }).batchId).toBe("m1:install-1:2");
     engine.stop();
   });
+
+  it(
+    "pins a failed batch to its original row range, so a later attempt (the engine's own " +
+      "retry, or one a nudge triggers) resends the SAME batch id and the SAME row count " +
+      "instead of folding in rows queued during the backoff window (Finding 1)",
+    async () => {
+      const exec = await migratedExec();
+      await seedInstallId(exec, "install-1");
+      await seed(exec, 2);
+      const post = vi
+        .fn()
+        .mockRejectedValueOnce(new Error("offline"))
+        .mockResolvedValue({ applied: 2, alreadyApplied: false });
+      vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const engine = createSyncEngine({
+        exec,
+        client: { post },
+        machineId: "m1",
+        onState: () => {},
+      });
+      engine.nudge();
+      await engine.idle();
+      expect(post).toHaveBeenCalledTimes(1);
+      const firstBody = post.mock.calls[0]![1] as { batchId: string; items: unknown[] };
+      expect(firstBody.batchId).toBe("m1:install-1:2");
+      expect(firstBody.items).toHaveLength(2);
+
+      // A new scan arrives while the retry backoff is still pending -- the
+      // exact Finding 1 trigger. Without a pinned ceiling, the next read
+      // would pick up this row too and post all 3 under a FRESH key
+      // (`m1:install-1:3`) the server has never recorded, applying the
+      // original 2 rows a second time.
+      await seed(exec, 1, "2026-07-28T10:05:00.000Z");
+      engine.nudge();
+
+      // Whether this nudge did anything immediately (old, buggy behaviour)
+      // or nothing at all (fixed behaviour -- see the dedicated backoff test
+      // below), the batch that eventually goes out as the "second attempt"
+      // must be the pinned one: wait past the scheduled backoff so the
+      // engine's own retry has certainly fired, then let anything in flight
+      // settle.
+      await new Promise((resolve) => setTimeout(resolve, BACKOFF_START_MS + 500));
+      await engine.idle();
+
+      // Once the pinned (2-row) batch is acknowledged, the SAME drain loop
+      // continues straight on to the 3rd row -- it was deferred, not lost --
+      // so by the time the engine goes idle both posts have already
+      // happened: the resend of the pinned batch, then a fresh one for the
+      // row that arrived during the backoff.
+      expect(post).toHaveBeenCalledTimes(3);
+      const secondBody = post.mock.calls[1]![1] as { batchId: string; items: unknown[] };
+      expect(secondBody.batchId).toBe(firstBody.batchId);
+      expect(secondBody.items).toHaveLength(2);
+      const thirdBody = post.mock.calls[2]![1] as { batchId: string; items: unknown[] };
+      expect(thirdBody.batchId).not.toBe(firstBody.batchId);
+      expect(thirdBody.items).toHaveLength(1);
+
+      engine.stop();
+    },
+    10_000,
+  );
+
+  it(
+    "a nudge while a retry is already scheduled does not produce an extra post, so scan " +
+      "load offline cannot bypass the exponential backoff (Finding 1)",
+    async () => {
+      const exec = await migratedExec();
+      await seedInstallId(exec, "install-1");
+      await seed(exec, 2);
+      // Keeps failing throughout -- this test only cares that a NUDGE never
+      // triggers an extra attempt while one is already scheduled, not about
+      // eventually succeeding.
+      const post = vi.fn().mockRejectedValue(new Error("offline"));
+      vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const engine = createSyncEngine({
+        exec,
+        client: { post },
+        machineId: "m1",
+        onState: () => {},
+      });
+      engine.nudge();
+      await engine.idle();
+      expect(post).toHaveBeenCalledTimes(1); // first attempt failed, retry scheduled
+
+      // Several nudges while that retry is still pending -- standing in for
+      // scans arriving while the device is offline. None of these may start
+      // a new drain: that is exactly the backoff this finding protects.
+      engine.nudge();
+      engine.nudge();
+      await engine.idle();
+
+      expect(post).toHaveBeenCalledTimes(1);
+      // Stop before the real backoff timer (BACKOFF_START_MS) can fire and
+      // add a legitimate-but-unrelated attempt after this assertion already
+      // ran.
+      engine.stop();
+    },
+  );
+
+  it(
+    "keys the batch to this installation, not just the machine id, so a device that lost " +
+      "only its local database cannot collide with a batch key the server already " +
+      "recorded (Finding 3)",
+    async () => {
+      // Two separate on-device databases sharing the same machineId -- the
+      // "deleted only station-mirror.db, kept station.json" scenario Finding
+      // 3 describes: outbox ids restart at 1 in the fresh database, but the
+      // machineId half of the key stays the same.
+      const execOld = await migratedExec();
+      const execNew = await migratedExec();
+      await seed(execOld, 1);
+      await seed(execNew, 1);
+
+      const postOld = vi.fn().mockResolvedValue({ applied: 1, alreadyApplied: false });
+      const postNew = vi.fn().mockResolvedValue({ applied: 1, alreadyApplied: false });
+
+      const engineOld = createSyncEngine({
+        exec: execOld,
+        client: { post: postOld },
+        machineId: "m1",
+        onState: () => {},
+      });
+      engineOld.nudge();
+      await engineOld.idle();
+
+      const engineNew = createSyncEngine({
+        exec: execNew,
+        client: { post: postNew },
+        machineId: "m1",
+        onState: () => {},
+      });
+      engineNew.nudge();
+      await engineNew.idle();
+
+      const oldBatchId = (postOld.mock.calls[0]![1] as { batchId: string }).batchId;
+      const newBatchId = (postNew.mock.calls[0]![1] as { batchId: string }).batchId;
+
+      // Same machineId, same (single) outbox id in each queue -- without a
+      // per-installation component these would be the IDENTICAL key, and the
+      // server (having already recorded the old database's key) would
+      // answer `alreadyApplied: true` for a scan it has never actually seen.
+      expect(oldBatchId.startsWith("m1:")).toBe(true);
+      expect(newBatchId.startsWith("m1:")).toBe(true);
+      expect(newBatchId).not.toBe(oldBatchId);
+
+      engineOld.stop();
+      engineNew.stop();
+    },
+  );
 
   it("acknowledges an already-applied batch, so a lost response cannot wedge the queue", async () => {
     const exec = await migratedExec();
@@ -312,14 +469,20 @@ describe("sync engine", () => {
     expect(states.at(-1)).toMatchObject({ pending: 1, stuck: false });
 
     clock += STUCK_AFTER_MS + 1;
-    engine.nudge();
+    // The failed nudge above already scheduled a retry -- with the Finding 1
+    // backoff fix, `nudge()` itself now does nothing while that retry is
+    // pending (nudging again here would just restate the stale state), so
+    // waiting for the engine's OWN scheduled attempt (which will also fail,
+    // and re-publish state regardless) is what actually re-evaluates
+    // `stuck` against the now-advanced clock.
+    await new Promise((resolve) => setTimeout(resolve, BACKOFF_START_MS + 500));
     await engine.idle();
     // Flips only because the *injected* clock crossed the threshold since
     // `lastSuccessAt`; a regression that dropped this branch (or compared
     // the wrong clock) would leave this false forever.
     expect(states.at(-1)).toMatchObject({ pending: 1, stuck: true });
     engine.stop();
-  });
+  }, 10_000);
 
   it("is not stuck when the queue is empty, however long since the last sync", async () => {
     const exec = await migratedExec();

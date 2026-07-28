@@ -1,4 +1,5 @@
 import type { StationClient } from "./api-client.js";
+import { getInstallId } from "./install-id.js";
 import type { SqlExecutor } from "./mirror.js";
 import { ackThrough, oldestQueuedAt, outboxDepth, readBatch, type OutboxItem } from "./outbox.js";
 
@@ -7,11 +8,13 @@ export const BATCH_SIZE = 200;
 /** How long a non-empty queue may stop moving before the operator is warned. */
 export const STUCK_AFTER_MS = 15 * 60 * 1000;
 /**
- * Exported so tests that deliberately fail a batch (to exercise a listener
- * rather than the engine's own retry) can prove their assertion resolved
- * strictly before this much time elapsed — the only way the retry can be
- * ruled out as the actual cause, see `App.test.tsx`'s "nudges ... online"
- * test.
+ * Exported so tests that deliberately fail a batch can wait out the
+ * engine's own scheduled retry (rather than guessing a delay) before
+ * exercising something that depends on no retry being pending — e.g. proving
+ * a `nudge()` from elsewhere (the `online` listener, `App.test.tsx`'s
+ * "nudges ... online" test) actually starts a drain, which it only does once
+ * the backoff-respecting `nudge()` (Finding 1) has nothing scheduled to
+ * defer to.
  */
 export const BACKOFF_START_MS = 2_000;
 const BACKOFF_CAP_MS = 60_000;
@@ -75,14 +78,40 @@ function toPayload(items: OutboxItem[]) {
  * Drains the device outbox to the server, one batch at a time.
  *
  * Delivery is at-least-once: a batch is acknowledged locally only after the
- * server confirms it, so a lost response resends. That is safe because the
- * batch id is deterministic — `<machineId>:<highest id in the batch>` — and
- * the server records it, so the resend is a no-op there. A random id per
- * attempt would silently turn every lost response into duplicated data.
+ * server confirms it, so a lost response resends. Two things make that
+ * actually safe, not just apparently safe:
+ *
+ * 1. The batch id — `<machineId>:<installId>:<highest outbox id in the
+ *    batch>` — is deterministic for a GIVEN set of rows, and the server
+ *    records it, so resending those exact rows is a no-op there. `installId`
+ *    (`install-id.ts`) is a random identifier persisted in `station_meta`: it
+ *    changes only when `station-mirror.db` itself is recreated, which is
+ *    what keeps a device that lost just its local database — but kept
+ *    `machineId`, which lives in `station.json` instead — from colliding
+ *    with a batch key the server already recorded for the database it
+ *    replaced (Finding 3: without this, the outbox's id counter restarting
+ *    at 1 in the fresh database would silently reproduce an old key, and the
+ *    server's `alreadyApplied: true` for it would delete brand-new scans).
+ * 2. The set of rows a key names cannot silently grow. `pendingCeiling`
+ *    pins the batch currently awaiting acknowledgement to its original
+ *    `maxId`: a retry — the engine's own scheduled backoff attempt, or one
+ *    a later nudge triggers — re-reads exactly that range (`readBatch`'s
+ *    `ceilingId`), never a fresh `ORDER BY id LIMIT` read. While the queue
+ *    holds fewer rows than `BATCH_SIZE` — the ordinary state on a
+ *    continuously-draining line — a fresh read would otherwise pick up rows
+ *    enqueued since the failed attempt and post them under a NEW key the
+ *    server has never seen, applying the original rows a second time.
+ *
+ * A random id per attempt (instead of both of the above) would silently turn
+ * every lost response into duplicated data.
  *
  * Exactly one drain runs at a time; `draining` is set synchronously before
  * the first await, the same discipline `createScanQueue` uses, because two
  * drains would read overlapping batches and race their acknowledgements.
+ * `nudge()` also never starts a fresh drain while a retry is already
+ * scheduled, so a scan arriving while the link is down cannot turn the
+ * documented 2s→60s backoff into one POST attempt per scan — see its own
+ * comment.
  */
 export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
   const now = deps.now ?? (() => Date.now());
@@ -93,6 +122,21 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
   let backoffMs = BACKOFF_START_MS;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let idleResolvers: (() => void)[] = [];
+  // The `maxId` of the batch currently awaiting acknowledgement, or `null`
+  // when no batch is in flight. Set right before the batch is posted, held
+  // across every retry of that SAME batch, and cleared only once the server
+  // has confirmed it — see the doc comment above and `readBatch`'s
+  // `ceilingId` parameter.
+  let pendingCeiling: number | null = null;
+  // Resolved once per engine instance and cached: the install id never
+  // changes for the life of a given local database, so there is no reason
+  // to re-query `station_meta` for every batch.
+  let installId: string | null = null;
+
+  async function ensureInstallId(): Promise<string> {
+    if (installId === null) installId = await getInstallId(deps.exec);
+    return installId;
+  }
 
   function settleIdle() {
     const resolvers = idleResolvers;
@@ -139,13 +183,28 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
     try {
       for (;;) {
         if (stopped) break;
-        const batch = await readBatch(deps.exec, BATCH_SIZE);
-        if (batch.length === 0) break;
+        // A ceiling from a previous failed attempt on THIS batch re-reads
+        // exactly that range; otherwise this is a plain fresh prefix.
+        const batch = await readBatch(deps.exec, BATCH_SIZE, pendingCeiling);
+        if (batch.length === 0) {
+          // Only reachable with a stale ceiling if the rows it pinned were
+          // somehow removed without going through `ackThrough` below — not
+          // expected, but clearing it here avoids wedging every later drain
+          // on a ceiling that can never again be satisfied.
+          pendingCeiling = null;
+          break;
+        }
 
         const maxId = batch[batch.length - 1]!.id;
+        // Pin BEFORE sending: if the post fails, every later attempt on this
+        // batch — the scheduled retry, or a nudge that lands while one is
+        // outstanding — must re-request exactly this id range, never a
+        // fresh read that could have grown past it.
+        pendingCeiling = maxId;
         try {
+          const instId = await ensureInstallId();
           const res = await deps.client.post<BatchResponse>("/station/scans", {
-            batchId: `${deps.machineId}:${maxId}`,
+            batchId: `${deps.machineId}:${instId}:${maxId}`,
             items: toPayload(batch),
           });
           if (!isBatchResponse(res)) {
@@ -158,6 +217,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
           // server already, so holding on to it would wedge the queue
           // forever.
           await ackThrough(deps.exec, maxId);
+          pendingCeiling = null;
           lastSuccessAt = now();
           backoffMs = BACKOFF_START_MS;
         } catch (err) {
@@ -177,8 +237,9 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
     } catch (err) {
       // readBatch can fail (e.g. device DB is locked or corrupt). ackThrough
       // failures are handled by the inner catch above and are safe: the batch
-      // was already accepted, so the next drain resends the same deterministic
-      // batch id and the server no-ops it. This catch handles readBatch errors
+      // was already accepted, so the next drain resends the exact same
+      // (ceiling-pinned) batch id and the server no-ops it. This catch
+      // handles readBatch errors
       // and other device-database errors that must not escape as unhandled
       // rejections — every call site launches the drain with a discarded
       // promise, so an uncaught rejection would silently kill sync with the
@@ -202,8 +263,18 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
       }
 
       draining = false;
-      if (requested && !stopped) {
-        requested = false;
+      // Only continue immediately when nothing scheduled a retry during this
+      // drain. If the last attempt failed, `retryTimer` is already set (by
+      // `scheduleRetry` above) by the time this runs — continuing anyway
+      // here would be exactly the backoff bypass `nudge()` also guards
+      // against, just reached from the opposite direction (a nudge that
+      // arrived WHILE this drain was running, rather than one that arrives
+      // after it). Dropping a stale `requested` in that case is safe: the
+      // scheduled retry performs a full drain of whatever is queued by the
+      // time it fires, so no request is actually lost, only its timing.
+      const shouldContinue = requested && !stopped && retryTimer === null;
+      requested = false;
+      if (shouldContinue) {
         void drain();
       } else {
         settleIdle();
@@ -224,8 +295,18 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
   return {
     nudge() {
       if (stopped) return;
-      if (draining) requested = true;
-      else void drain();
+      if (draining) {
+        requested = true;
+        return;
+      }
+      // A retry is already scheduled: let the backoff run its course
+      // instead of hammering the server with one attempt per nudge (a scan,
+      // the `online` listener, the heartbeat) while the link is down. The
+      // scheduled attempt drains whatever is queued by the time it fires, so
+      // nothing queued now is lost — only sent later than this particular
+      // nudge asked for.
+      if (retryTimer !== null) return;
+      void drain();
     },
     stop() {
       stopped = true;

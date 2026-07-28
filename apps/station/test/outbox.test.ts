@@ -77,4 +77,41 @@ describe("outbox", () => {
     await readBatch(exec, 4);
     expect(await outboxDepth(exec)).toBe(4);
   });
+
+  /** A single extra row with a raw value distinct from `seed`'s RAW1/RAW2/... */
+  async function seedExtraRow(exec: SqlExecutor, raw: string): Promise<void> {
+    await exec.run(
+      `INSERT INTO outbox (shift_id, terminal_id, raw, verdict, scanned_at, code_hash, gtin14, serial)
+       VALUES (?,?,?,?,?,?,?,?)`,
+      ["s1", "t1", raw, "ok", "2026-07-28T10:05:00.000Z", "hx", "04600000000017", "Sx"],
+    );
+  }
+
+  it(
+    "caps the read at a given ceiling id even when more rows have since been queued " +
+      "(Finding 1: this is what lets a retry re-request the exact same batch)",
+    async () => {
+      const exec = await migratedExec();
+      await seed(exec, 2);
+      const batch = await readBatch(exec, 200);
+      const ceiling = batch[batch.length - 1]!.id;
+
+      // More work arrives after the ceiling was chosen -- exactly what a
+      // scan queued during a retry's backoff window looks like.
+      await seedExtraRow(exec, "RAW-NEW");
+
+      const resent = await readBatch(exec, 200, ceiling);
+      expect(resent.map((i) => i.raw)).toEqual(["RAW1", "RAW2"]);
+    },
+  );
+
+  it("reads a plain fresh prefix when no ceiling is given, picking up newly queued rows", async () => {
+    const exec = await migratedExec();
+    await seed(exec, 2);
+    await readBatch(exec, 200);
+    await seedExtraRow(exec, "RAW-NEW");
+
+    const fresh = await readBatch(exec, 200);
+    expect(fresh.map((i) => i.raw)).toEqual(["RAW1", "RAW2", "RAW-NEW"]);
+  });
 });
