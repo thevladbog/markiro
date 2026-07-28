@@ -394,6 +394,7 @@ export class ShiftsService {
       openedAt: schema.shifts.openedAt,
       closedAt: schema.shifts.closedAt,
       closeReason: schema.shifts.closeReason,
+      lateDataAt: schema.shifts.lateDataAt,
       createdAt: schema.shifts.createdAt,
     };
   }
