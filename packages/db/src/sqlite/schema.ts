@@ -125,6 +125,21 @@ export const outbox = sqliteTable("outbox", {
 });
 
 /**
+ * Device-local mirror of conflicts the server reported for this terminal's
+ * own losing scans (the earlier `scannedAt` elsewhere wins). Keyed by
+ * `codeHash` so re-reporting the same conflict is idempotent — one
+ * statement, no device transaction. `winningTerminalId`/`winningScannedAt`
+ * come straight off the server's `BatchConflictDto`; `detectedAt` is when
+ * this device recorded it, for sorting the operator's list newest-first.
+ */
+export const conflictsMirror = sqliteTable("conflicts_mirror", {
+  codeHash: text("code_hash").primaryKey(),
+  winningTerminalId: text("winning_terminal_id"),
+  winningScannedAt: text("winning_scanned_at").notNull(),
+  detectedAt: text("detected_at").notNull(),
+});
+
+/**
  * A local operator record after offline hydration. `pinHash`/`badgeHash` are
  * PBKDF2 PHC verifiers (see the credential-hash contract). This is the exact
  * shape the server station-bundle `operators` field will carry in 05b — in

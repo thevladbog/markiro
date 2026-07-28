@@ -90,6 +90,12 @@ export const STATION_MIGRATIONS: string[] = [
      gtin14 TEXT,
      serial TEXT
    );`,
+  `CREATE TABLE IF NOT EXISTS conflicts_mirror (
+     code_hash TEXT PRIMARY KEY,
+     winning_terminal_id TEXT,
+     winning_scanned_at TEXT NOT NULL,
+     detected_at TEXT NOT NULL
+   );`,
   // Upgrade path for devices enrolled before operators had a personnel number.
   // SQLite has no `ADD COLUMN IF NOT EXISTS`, and applyMigrations re-runs every
   // statement on each boot, so this throws "duplicate column name" once the
