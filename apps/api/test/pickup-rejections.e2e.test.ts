@@ -379,6 +379,10 @@ describe.skipIf(!ready)("pickup scan rejections e2e", () => {
     expect(res.body.items.every((r: { kioskId: string }) => r.kioskId === kioskId)).toBe(true);
   });
 
+  it("400s acknowledging a malformed id instead of reaching Postgres", async () => {
+    await agent.post("/pickup-rejections/not-a-uuid/acknowledge").expect(400);
+  });
+
   it("404s acknowledging a rejection of another tenant", async () => {
     const other = request.agent(app!.getHttpServer());
     await signUpAndActivate(other);

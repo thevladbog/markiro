@@ -101,10 +101,19 @@ describe("rejections page", () => {
     expect(screen.getByText("без заявки")).toBeDefined();
     expect(screen.queryByText(/0104600682000020215X/)).toBeNull();
 
+    // The codes column shows the count inline, without needing to expand.
+    expect(screen.getByText("1")).toBeDefined();
+
     fireEvent.click(screen.getByRole("button", { name: "Показать коды" }));
 
     expect(screen.getByText(/0104600682000020215X/)).toBeDefined();
     expect(screen.getByText(/товар недоступен на киоске/)).toBeDefined();
+
+    // The expanded panel's title carries the row's own identity (kiosk +
+    // employee), so it stays tied to its scan even with several rows expanded.
+    expect(
+      screen.getByText("Киоск-1 · Иван Иванов · Отклонено при синхронизации: 1"),
+    ).toBeDefined();
   });
 
   it("labels a scan whose badge was not recognised", async () => {
@@ -117,6 +126,11 @@ describe("rejections page", () => {
 
     await waitFor(() => expect(screen.getByText("Бейдж не опознан")).toBeDefined());
     expect(screen.getByText("Бейдж: badge-gone")).toBeDefined();
+
+    // Unrecognised-badge rows have no employeeName, so the expanded panel's
+    // identity falls back to the badge code instead.
+    fireEvent.click(screen.getByRole("button", { name: "Показать коды" }));
+    expect(screen.getByText("Киоск-1 · badge-gone · Отклонено при синхронизации: 1")).toBeDefined();
   });
 
   it("acknowledges a rejection", async () => {

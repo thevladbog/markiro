@@ -116,16 +116,19 @@ export function RejectionsPage() {
       align: "right",
       mono: true,
       render: (row) => (
-        <Button
-          type="button"
-          variant="secondary"
-          size="compact"
-          onClick={() => toggleExpanded(row.id)}
-        >
-          {expanded.has(row.id)
-            ? t("pages.pickup.rejections.hideCodes")
-            : t("pages.pickup.rejections.showCodes")}
-        </Button>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8 }}>
+          <span>{row.codes.length}</span>
+          <Button
+            type="button"
+            variant="secondary"
+            size="compact"
+            onClick={() => toggleExpanded(row.id)}
+          >
+            {expanded.has(row.id)
+              ? t("pages.pickup.rejections.hideCodes")
+              : t("pages.pickup.rejections.showCodes")}
+          </Button>
+        </div>
       ),
     },
     {
@@ -238,7 +241,7 @@ export function RejectionsPage() {
               <Alert
                 key={row.id}
                 tone="warn"
-                title={t("pages.pickup.conflicts.title", { count: row.codes.length })}
+                title={`${row.kioskName} · ${row.employeeName ?? row.badgeCode} · ${t("pages.pickup.conflicts.title", { count: row.codes.length })}`}
               >
                 <ul style={{ margin: 0, paddingInlineStart: "var(--sp-5)" }}>
                   {row.codes.map((code, index) => (

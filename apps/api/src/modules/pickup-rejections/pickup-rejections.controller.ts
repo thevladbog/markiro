@@ -1,4 +1,14 @@
-import { Controller, Get, HttpCode, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
+import {
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { SessionOnlyGuard } from "../../tenancy/session-only.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
@@ -33,7 +43,7 @@ export class PickupRejectionsController {
   @HttpCode(200)
   async acknowledge(
     @Req() req: RequestWithTenant,
-    @Param("id") id: string,
+    @Param("id", new ParseUUIDPipe()) id: string,
   ): Promise<PickupScanRejectionRowDto> {
     return this.pickupRejectionsService.acknowledge(req.tenantId!, id, req.userId!);
   }
