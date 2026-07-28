@@ -317,6 +317,7 @@
         "mode": "Mode",
         "plannedQty": "Plan, units",
         "status": "Status",
+        "lateData": "Data after close",
         "actions": "Actions"
       },
       "mode": {
