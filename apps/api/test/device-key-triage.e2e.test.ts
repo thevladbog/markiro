@@ -90,6 +90,13 @@ describe.skipIf(!ready)("device key surface triage e2e", () => {
       .expect(403);
   });
 
+  it("refuses a station api-key on pickup rejections", async () => {
+    await request(app!.getHttpServer())
+      .get("/pickup-rejections")
+      .set("x-api-key", stationKey)
+      .expect(403);
+  });
+
   it("still serves a cabinet session", async () => {
     await agent.get("/kiosks").expect(200);
     await agent.get("/pickup-orders").expect(200);

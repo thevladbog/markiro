@@ -328,6 +328,9 @@ describe.skipIf(!ready)("pickup scan rejections e2e", () => {
   });
 
   // Cabinet-only surface: a device key must never reach it (docs/device-key-surface.md).
+  // `x-kiosk-token` isn't a credential TenantGuard recognises at all, so this
+  // only proves TenantGuard's own 401 -- it can't tell us SessionOnlyGuard is
+  // wired up. See the next test for that.
   it("refuses a kiosk device token on both routes", async () => {
     await request(app!.getHttpServer())
       .get("/pickup-rejections")
@@ -337,5 +340,21 @@ describe.skipIf(!ready)("pickup scan rejections e2e", () => {
       .post(`/pickup-rejections/${randomUUID()}/acknowledge`)
       .set("x-kiosk-token", TOKEN)
       .expect(401);
+  });
+
+  // A station api-key DOES pass TenantGuard, so this is the credential
+  // SessionOnlyGuard exists to refuse -- with 403, not 401.
+  it("refuses a station api-key on both routes", async () => {
+    const enroll = await agent.post("/station-devices").send({ name: "Terminal" }).expect(201);
+    const stationKey = enroll.body.apiKey as string;
+
+    await request(app!.getHttpServer())
+      .get("/pickup-rejections")
+      .set("x-api-key", stationKey)
+      .expect(403);
+    await request(app!.getHttpServer())
+      .post(`/pickup-rejections/${randomUUID()}/acknowledge`)
+      .set("x-api-key", stationKey)
+      .expect(403);
   });
 });

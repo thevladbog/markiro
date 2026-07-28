@@ -163,7 +163,7 @@ export function RejectionsPage() {
           <Button
             type="button"
             size="compact"
-            loading={acknowledge.isPending}
+            loading={acknowledge.isPending && acknowledge.variables === row.id}
             onClick={() => void handleAcknowledge(row.id)}
           >
             {t("pages.pickup.rejections.acknowledgeAction")}
