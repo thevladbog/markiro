@@ -80,6 +80,11 @@ describe("WorkstationSetup", () => {
       />,
     );
 
+    // Wait for the config-load effect to settle (Finding 4 disables every
+    // field, including the transport selector, until it does) before
+    // switching to the serial transport to reveal "Printer port".
+    await screen.findByText("COM3");
+    fireEvent.click(screen.getByRole("button", { name: "Serial (COM port)" }));
     fireEvent.change(screen.getByLabelText("Printer port"), { target: { value: "COM5" } });
     fireEvent.click(screen.getByRole("button", { name: "Test print" }));
     expect(await screen.findByText(/printer offline/)).toBeDefined();
@@ -101,6 +106,7 @@ describe("WorkstationSetup", () => {
 
     // Pick a scanner port — this must NOT end up in the print target.
     fireEvent.click(await screen.findByText("COM3"));
+    fireEvent.click(screen.getByRole("button", { name: "Serial (COM port)" }));
     fireEvent.change(screen.getByLabelText("Printer port"), { target: { value: "COM9" } });
     fireEvent.click(screen.getByRole("button", { name: "Test print" }));
 
@@ -201,7 +207,10 @@ describe("WorkstationSetup", () => {
     );
 
     fireEvent.click(await screen.findByRole("button", { name: "COM3" }));
-    fireEvent.change(screen.getByLabelText("Printer address (leave empty for a serial printer)"), {
+    // TCP is the default transport, but select it explicitly so this test
+    // does not depend on that default.
+    fireEvent.click(screen.getByRole("button", { name: "Network (TCP)" }));
+    fireEvent.change(screen.getByLabelText("Printer address"), {
       target: { value: "10.0.0.7" },
     });
     fireEvent.click(screen.getByRole("button", { name: "TSPL" }));
@@ -251,6 +260,44 @@ describe("WorkstationSetup", () => {
     const saved = onConfigChange.mock.calls.at(-1)![0] as HardwareConfig;
     expect(saved.scanner).toBeNull();
     expect(saved.printer).toEqual({ kind: "serial", port: "COM7", baud: 19200 });
+  });
+
+  it("round-trips a stored serial scanner's own baud rate unchanged when Done is pressed without changes", async () => {
+    // The fourth documented valid state alongside the two above: a serial
+    // scanner previously saved at a non-default baud, no printer configured.
+    // Reopening Setup and pressing Done without touching anything must
+    // round-trip that baud unchanged.
+    const stored: HardwareConfig = {
+      scanner: { port: "COM3", baud: 19200 },
+      printer: null,
+      printerLanguage: "zpl",
+    };
+    const exec: SqlExecutor = {
+      run: async () => {},
+      all: async <T,>() => [{ value: JSON.stringify(stored) }] as T[],
+    };
+    const onConfigChange = vi.fn();
+
+    render(
+      <WorkstationSetup
+        hw={hardware()}
+        exec={exec}
+        sound={{ muted: false, volume: 1 }}
+        onSoundChange={() => {}}
+        onConfigChange={onConfigChange}
+        onDone={() => {}}
+      />,
+    );
+
+    // Wait for the seed effect to populate the scanner baud before pressing Done.
+    await waitFor(() =>
+      expect((screen.getByLabelText("Baud rate") as HTMLInputElement).value).toBe("19200"),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+    await waitFor(() => expect(onConfigChange).toHaveBeenCalled());
+    const saved = onConfigChange.mock.calls.at(-1)![0] as HardwareConfig;
+    expect(saved).toEqual(stored);
   });
 
   it("renders the no-scanner option even when the discovered port list is empty (Finding 1)", async () => {
@@ -417,5 +464,195 @@ describe("WorkstationSetup", () => {
     fireEvent.click(await screen.findByRole("button", { name: "COM3" }));
     fireEvent.click(screen.getByRole("button", { name: "Connect scanner" }));
     await waitFor(() => expect(calls).toEqual(["close", "open"]));
+  });
+
+  it("rejects an out-of-range TCP printer port instead of persisting it (Finding 1)", async () => {
+    const runs: string[] = [];
+    const exec: SqlExecutor = {
+      run: async (sql) => {
+        runs.push(sql);
+      },
+      all: async () => [],
+    };
+    const onConfigChange = vi.fn();
+
+    render(
+      <WorkstationSetup
+        hw={hardware()}
+        exec={exec}
+        sound={{ muted: false, volume: 1 }}
+        onSoundChange={() => {}}
+        onConfigChange={onConfigChange}
+        onDone={() => {}}
+      />,
+    );
+
+    await screen.findByText("COM3");
+    fireEvent.change(screen.getByLabelText("Printer address"), {
+      target: { value: "10.0.0.7" },
+    });
+    // 70000 is above u16::MAX (65535) -- Rust's `print_bytes` cannot
+    // deserialize it, so it must never reach `station_meta`.
+    fireEvent.change(screen.getByLabelText("Printer TCP port"), {
+      target: { value: "70000" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+    expect(await screen.findByText("Enter a valid number in the allowed range.")).toBeDefined();
+    expect(onConfigChange).not.toHaveBeenCalled();
+    expect(runs.some((sql) => sql.includes("station_meta"))).toBe(false);
+  });
+
+  it("rejects a negative, fractional, or infinite scanner baud instead of persisting it (Finding 1)", async () => {
+    const onConfigChange = vi.fn();
+    const exec: SqlExecutor = { run: async () => {}, all: async () => [] };
+
+    render(
+      <WorkstationSetup
+        hw={hardware()}
+        exec={exec}
+        sound={{ muted: false, volume: 1 }}
+        onSoundChange={() => {}}
+        onConfigChange={onConfigChange}
+        onDone={() => {}}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "COM3" }));
+
+    for (const bad of ["-1", "1.5", "Infinity"]) {
+      fireEvent.change(screen.getByLabelText("Baud rate"), { target: { value: bad } });
+      fireEvent.click(screen.getByRole("button", { name: "Done" }));
+      expect(await screen.findByText("Enter a valid number in the allowed range.")).toBeDefined();
+    }
+    expect(onConfigChange).not.toHaveBeenCalled();
+  });
+
+  it("disables Back while a scanner open is pending, and re-enables it once settled (Finding 2)", async () => {
+    let resolveOpen: () => void = () => {};
+    const hw = hardware({
+      openScanner: () =>
+        new Promise<void>((resolve) => {
+          resolveOpen = resolve;
+        }),
+    });
+
+    render(
+      <WorkstationSetup
+        hw={hw}
+        exec={noopExec}
+        sound={{ muted: false, volume: 1 }}
+        onSoundChange={() => {}}
+        onConfigChange={() => {}}
+        onDone={() => {}}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "COM3" }));
+    fireEvent.click(screen.getByRole("button", { name: "Connect scanner" }));
+
+    // The open is still in flight: Back must not be available, or an
+    // operator leaving now could race the app's saved-config reconciliation
+    // against this abandoned open.
+    await waitFor(() =>
+      expect((screen.getByRole("button", { name: "Back" }) as HTMLButtonElement).disabled).toBe(
+        true,
+      ),
+    );
+
+    resolveOpen();
+
+    // Once the open settles, Back must be available again -- an operator is
+    // never stranded here.
+    await waitFor(() =>
+      expect((screen.getByRole("button", { name: "Back" }) as HTMLButtonElement).disabled).toBe(
+        false,
+      ),
+    );
+  });
+
+  it("switching a stored TCP printer's transport to serial persists a serial target, not the stale TCP one (Finding 3)", async () => {
+    const stored: HardwareConfig = {
+      scanner: null,
+      printer: { kind: "tcp", host: "10.0.0.9", port: 9200 },
+      printerLanguage: "zpl",
+    };
+    const exec: SqlExecutor = {
+      run: async () => {},
+      all: async <T,>() => [{ value: JSON.stringify(stored) }] as T[],
+    };
+    const onConfigChange = vi.fn();
+
+    render(
+      <WorkstationSetup
+        hw={hardware()}
+        exec={exec}
+        sound={{ muted: false, volume: 1 }}
+        onSoundChange={() => {}}
+        onConfigChange={onConfigChange}
+        onDone={() => {}}
+      />,
+    );
+
+    // Wait for the seed effect to restore the stored TCP printer before
+    // switching transports.
+    await waitFor(() =>
+      expect((screen.getByLabelText("Printer address") as HTMLInputElement).value).toBe("10.0.0.9"),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Serial (COM port)" }));
+    fireEvent.change(screen.getByLabelText("Printer port"), { target: { value: "COM7" } });
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+    await waitFor(() => expect(onConfigChange).toHaveBeenCalled());
+    const saved = onConfigChange.mock.calls.at(-1)![0] as HardwareConfig;
+    expect(saved.printer).toEqual({ kind: "serial", port: "COM7", baud: 9600 });
+  });
+
+  it("pressing Done before the stored configuration has loaded does not erase it (Finding 4)", async () => {
+    const stored: HardwareConfig = {
+      scanner: { port: "COM9", baud: 19200 },
+      printer: { kind: "serial", port: "COM7", baud: 19200 },
+      printerLanguage: "tspl",
+    };
+    let resolveAll: (rows: unknown[]) => void = () => {};
+    const exec: SqlExecutor = {
+      run: async () => {},
+      all: <T,>() =>
+        new Promise<T[]>((resolve) => {
+          resolveAll = resolve as (rows: unknown[]) => void;
+        }),
+    };
+    const onConfigChange = vi.fn();
+
+    render(
+      <WorkstationSetup
+        hw={hardware()}
+        exec={exec}
+        sound={{ muted: false, volume: 1 }}
+        onSoundChange={() => {}}
+        onConfigChange={onConfigChange}
+        onDone={() => {}}
+      />,
+    );
+
+    // The stored configuration has not resolved yet -- Done must be
+    // disabled, so pressing it now must do nothing (rather than persisting
+    // the blank defaults this screen starts with and erasing what is
+    // actually stored).
+    const doneButton = screen.getByRole("button", { name: "Done" }) as HTMLButtonElement;
+    expect(doneButton.disabled).toBe(true);
+    fireEvent.click(doneButton);
+    expect(onConfigChange).not.toHaveBeenCalled();
+
+    // Now let the stored configuration load, and confirm Done persists the
+    // actual stored values, not the blank defaults the screen started with.
+    resolveAll([{ value: JSON.stringify(stored) }]);
+    await waitFor(() => expect(doneButton.disabled).toBe(false));
+    fireEvent.click(doneButton);
+
+    await waitFor(() => expect(onConfigChange).toHaveBeenCalled());
+    const saved = onConfigChange.mock.calls.at(-1)![0] as HardwareConfig;
+    expect(saved).toEqual(stored);
   });
 });

@@ -27,12 +27,37 @@ export interface WorkstationSetupProps {
 const DEFAULT_BAUD = 9600;
 const DEFAULT_PRINTER_PORT = 9100;
 
-function parseBaud(value: string): number {
-  return Number(value) || DEFAULT_BAUD;
+/** u32::MAX -- the ceiling Rust's scanner-open/serial-print baud accepts. */
+const MAX_BAUD = 4294967295;
+
+/**
+ * Accepts only a finite non-negative integer within u32 range, used for both
+ * the scanner and the serial printer baud rate. Rust deserializes each into a
+ * `u32`, so a value like `-1`, `1.5`, or `Infinity` must be rejected here
+ * rather than silently coerced to a default: a bad value that reaches
+ * `station_meta` breaks every scanner open or print attempt on this
+ * workstation until someone reopens Setup and happens to notice.
+ */
+function parseBaud(value: string): number | null {
+  const trimmed = value.trim();
+  if (trimmed === "") return null;
+  const n = Number(trimmed);
+  if (!Number.isInteger(n) || n < 0 || n > MAX_BAUD) return null;
+  return n;
 }
 
-function parsePort(value: string): number {
-  return Number(value) || DEFAULT_PRINTER_PORT;
+/**
+ * Accepts only a finite integer within the valid TCP port range. Rust
+ * deserializes the TCP printer port into a `u16`, so anything outside
+ * `1..=65535` must be rejected rather than silently coerced (see
+ * `parseBaud`).
+ */
+function parseTcpPort(value: string): number | null {
+  const trimmed = value.trim();
+  if (trimmed === "") return null;
+  const n = Number(trimmed);
+  if (!Number.isInteger(n) || n < 1 || n > 65535) return null;
+  return n;
 }
 
 /**
@@ -63,9 +88,23 @@ export function WorkstationSetup({
   const [printerTcpPort, setPrinterTcpPort] = useState(String(DEFAULT_PRINTER_PORT));
   const [printerPort, setPrinterPort] = useState("");
   const [printerBaud, setPrinterBaud] = useState(String(DEFAULT_BAUD));
+  // Single source of truth for which printer target `buildConfig()` builds.
+  // Without this, the transport was inferred from which fields happened to
+  // be non-empty (`printerHost ? tcp : serial`), so a workstation with a
+  // stored TCP printer would keep sending the stale TCP target the moment an
+  // operator typed a serial port, because the host field was still populated.
+  const [printerTransport, setPrinterTransport] = useState<PrintTarget["kind"]>("tcp");
   const [printerLanguage, setPrinterLanguage] = useState<PrinterLanguage>("zpl");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // True until the stored configuration has seeded every field below. While
+  // true, every control that can change or persist the configuration stays
+  // disabled: the seed effect is async, so without this an operator could
+  // select a device or press Done against the blank/default values this
+  // screen starts with -- after which the seed effect would either silently
+  // overwrite that choice, or (if Done ran first) persist the defaults and
+  // erase the scanner/printer configuration that was actually stored.
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     void hw
@@ -76,6 +115,8 @@ export function WorkstationSetup({
 
   // Seed every field from the stored configuration, so an operator reopening
   // this screen sees what is actually configured rather than blank defaults.
+  // `loading` stays true until this resolves (see its declaration above), so
+  // nothing here can be raced by an operator interacting with the form.
   useEffect(() => {
     void loadHardwareConfig(exec).then((config) => {
       if (config.scanner) {
@@ -84,14 +125,17 @@ export function WorkstationSetup({
         setBaud(String(config.scanner.baud));
       }
       if (config.printer?.kind === "tcp") {
+        setPrinterTransport("tcp");
         setPrinterHost(config.printer.host);
         setPrinterTcpPort(String(config.printer.port));
       }
       if (config.printer?.kind === "serial") {
+        setPrinterTransport("serial");
         setPrinterPort(config.printer.port);
         setPrinterBaud(String(config.printer.baud));
       }
       setPrinterLanguage(config.printerLanguage);
+      setLoading(false);
     });
   }, [exec]);
 
@@ -120,13 +164,18 @@ export function WorkstationSetup({
   }, [hw, t]);
 
   async function openScanner() {
+    const baudValue = parseBaud(baud);
+    if (baudValue === null) {
+      setError(t("setup.invalidNumber"));
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
       // Retire any previous session first: without this a wrong port leaves
       // the scanner "already open" until the app restarts.
       await hw.closeScanner();
-      await hw.openScanner(port, parseBaud(baud));
+      await hw.openScanner(port, baudValue);
     } catch (err) {
       setError(err instanceof Error ? err.message : t("setup.failed"));
     } finally {
@@ -134,24 +183,57 @@ export function WorkstationSetup({
     }
   }
 
-  function currentConfig(): HardwareConfig {
-    const printer: PrintTarget | null = printerHost
-      ? { kind: "tcp", host: printerHost, port: parsePort(printerTcpPort) }
-      : printerPort
-        ? { kind: "serial", port: printerPort, baud: parseBaud(printerBaud) }
-        : null;
-    return {
-      scanner: port ? { port, baud: parseBaud(baud) } : null,
-      printer,
-      printerLanguage,
-    };
+  type ConfigResult = { ok: true; config: HardwareConfig } | { ok: false; error: string };
+
+  /**
+   * Validates and assembles the configuration from the current form state.
+   * Returns an error instead of a config when a numeric field is out of
+   * range, so an invalid baud or port can never reach `saveHardwareConfig` --
+   * Rust cannot deserialize it into a `u32`/`u16`, and the resulting failure
+   * would otherwise surface far away from (and long after) the field the
+   * operator actually typed into.
+   *
+   * The printer transport is read from `printerTransport`, the explicit
+   * selector below -- not inferred from which fields happen to be
+   * non-empty. That selector is the single source of truth for which target
+   * kind is built, so switching it always fully replaces the printer target
+   * instead of leaving a stale host/port from the previously-selected
+   * transport in play.
+   */
+  function buildConfig(): ConfigResult {
+    let scanner: HardwareConfig["scanner"] = null;
+    if (port !== "") {
+      const baudValue = parseBaud(baud);
+      if (baudValue === null) return { ok: false, error: t("setup.invalidNumber") };
+      scanner = { port, baud: baudValue };
+    }
+
+    let printer: PrintTarget | null = null;
+    if (printerTransport === "tcp") {
+      if (printerHost !== "") {
+        const tcpPort = parseTcpPort(printerTcpPort);
+        if (tcpPort === null) return { ok: false, error: t("setup.invalidNumber") };
+        printer = { kind: "tcp", host: printerHost, port: tcpPort };
+      }
+    } else if (printerPort !== "") {
+      const serialBaud = parseBaud(printerBaud);
+      if (serialBaud === null) return { ok: false, error: t("setup.invalidNumber") };
+      printer = { kind: "serial", port: printerPort, baud: serialBaud };
+    }
+
+    return { ok: true, config: { scanner, printer, printerLanguage } };
   }
 
   async function testPrint() {
+    const result = buildConfig();
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
-      const config = currentConfig();
+      const { config } = result;
       if (!config.printer) throw new Error(t("setup.failed"));
       // A minimal spec: one line of text, rendered by the same code that will
       // print real labels, in the language this workstation is configured for.
@@ -177,9 +259,14 @@ export function WorkstationSetup({
   }
 
   async function finish() {
+    const result = buildConfig();
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
     setBusy(true);
     setError(null);
-    const config = currentConfig();
+    const { config } = result;
     try {
       await saveHardwareConfig(exec, config);
     } catch (err) {
@@ -206,6 +293,10 @@ export function WorkstationSetup({
   return (
     <main style={{ padding: 32, display: "flex", flexDirection: "column", gap: 32 }}>
       <h1 style={{ fontSize: "2rem" }}>{t("setup.title")}</h1>
+      {/* Visible for as long as the stored configuration is still loading, so
+          the screen doesn't just look unresponsive while every control below
+          is disabled. */}
+      {loading && <p role="status">{t("setup.loading")}</p>}
 
       <section style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <h2 style={{ fontSize: "1.5rem" }}>{t("setup.scanner")}</h2>
@@ -215,12 +306,13 @@ export function WorkstationSetup({
                 scanner that has been unplugged and replaced with a USB HID
                 one must still be de-selectable, and the discovered port list
                 being empty is exactly that case. Clearing `port` makes
-                `currentConfig()` emit `scanner: null`, which is what lets
+                `buildConfig()` emit `scanner: null`, which is what lets
                 `pickScanSource` fall back to the keyboard wedge. */}
             <Button
               type="button"
               variant={port === "" ? "primary" : "secondary"}
               style={{ minHeight: 64 }}
+              disabled={loading}
               onClick={() => setPort("")}
             >
               {t("setup.noScanner")}
@@ -240,6 +332,7 @@ export function WorkstationSetup({
                 type="button"
                 variant={port === storedPort ? "primary" : "secondary"}
                 style={{ minHeight: 64 }}
+                disabled={loading}
                 onClick={() => setPort(storedPort)}
               >
                 {t("setup.portNotDetected", { port: storedPort })}
@@ -252,6 +345,7 @@ export function WorkstationSetup({
                 type="button"
                 variant={p === port ? "primary" : "secondary"}
                 style={{ minHeight: 64 }}
+                disabled={loading}
                 onClick={() => setPort(p)}
               >
                 {p}
@@ -259,11 +353,16 @@ export function WorkstationSetup({
             </li>
           ))}
         </ul>
-        <Input label={t("setup.baud")} value={baud} onChange={(e) => setBaud(e.target.value)} />
+        <Input
+          label={t("setup.baud")}
+          value={baud}
+          disabled={loading}
+          onChange={(e) => setBaud(e.target.value)}
+        />
         <Button
           type="button"
           style={{ minHeight: 64 }}
-          disabled={busy || port.length === 0}
+          disabled={busy || loading || port.length === 0}
           onClick={() => void openScanner()}
         >
           {t("setup.openScanner")}
@@ -276,32 +375,73 @@ export function WorkstationSetup({
 
       <section style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <h2 style={{ fontSize: "1.5rem" }}>{t("setup.printer")}</h2>
-        <Input
-          label={t("setup.host")}
-          value={printerHost}
-          onChange={(e) => setPrinterHost(e.target.value)}
-        />
-        <Input
-          label={t("setup.printerTcpPort")}
-          value={printerTcpPort}
-          onChange={(e) => setPrinterTcpPort(e.target.value)}
-        />
-        <Input
-          label={t("setup.printerPort")}
-          value={printerPort}
-          onChange={(e) => setPrinterPort(e.target.value)}
-        />
-        <Input
-          label={t("setup.printerBaud")}
-          value={printerBaud}
-          onChange={(e) => setPrinterBaud(e.target.value)}
-        />
+        <div style={{ display: "flex", gap: 12 }}>
+          <span>{t("setup.printerTransport")}</span>
+          {/* Explicit and mutually exclusive: replaces the old
+              `printerHost ? tcp : serial` inference, which kept building a
+              stale TCP target after an operator typed a serial port because
+              the host field from a previously-stored TCP printer was still
+              populated. Only the fields for the selected transport render
+              below, so there is never an ambiguous "both filled in" state,
+              and switching transports doesn't require clearing anything by
+              hand for it to take effect. */}
+          <Button
+            type="button"
+            variant={printerTransport === "tcp" ? "primary" : "secondary"}
+            style={{ minHeight: 64 }}
+            disabled={loading}
+            onClick={() => setPrinterTransport("tcp")}
+          >
+            {t("setup.transportTcp")}
+          </Button>
+          <Button
+            type="button"
+            variant={printerTransport === "serial" ? "primary" : "secondary"}
+            style={{ minHeight: 64 }}
+            disabled={loading}
+            onClick={() => setPrinterTransport("serial")}
+          >
+            {t("setup.transportSerial")}
+          </Button>
+        </div>
+        {printerTransport === "tcp" ? (
+          <>
+            <Input
+              label={t("setup.host")}
+              value={printerHost}
+              disabled={loading}
+              onChange={(e) => setPrinterHost(e.target.value)}
+            />
+            <Input
+              label={t("setup.printerTcpPort")}
+              value={printerTcpPort}
+              disabled={loading}
+              onChange={(e) => setPrinterTcpPort(e.target.value)}
+            />
+          </>
+        ) : (
+          <>
+            <Input
+              label={t("setup.printerPort")}
+              value={printerPort}
+              disabled={loading}
+              onChange={(e) => setPrinterPort(e.target.value)}
+            />
+            <Input
+              label={t("setup.printerBaud")}
+              value={printerBaud}
+              disabled={loading}
+              onChange={(e) => setPrinterBaud(e.target.value)}
+            />
+          </>
+        )}
         <div style={{ display: "flex", gap: 12 }}>
           <span>{t("setup.printerLanguage")}</span>
           <Button
             type="button"
             variant={printerLanguage === "zpl" ? "primary" : "secondary"}
             style={{ minHeight: 64 }}
+            disabled={loading}
             onClick={() => setPrinterLanguage("zpl")}
           >
             {t("setup.languageZpl")}
@@ -310,6 +450,7 @@ export function WorkstationSetup({
             type="button"
             variant={printerLanguage === "tspl" ? "primary" : "secondary"}
             style={{ minHeight: 64 }}
+            disabled={loading}
             onClick={() => setPrinterLanguage("tspl")}
           >
             {t("setup.languageTspl")}
@@ -318,7 +459,11 @@ export function WorkstationSetup({
         <Button
           type="button"
           style={{ minHeight: 64 }}
-          disabled={busy || (printerHost.length === 0 && printerPort.length === 0)}
+          disabled={
+            busy ||
+            loading ||
+            (printerTransport === "tcp" ? printerHost.length === 0 : printerPort.length === 0)
+          }
           onClick={() => void testPrint()}
         >
           {t("setup.testPrint")}
@@ -351,13 +496,21 @@ export function WorkstationSetup({
       {error !== null && <p role="alert">{error}</p>}
 
       <div style={{ display: "flex", gap: 12 }}>
-        {/* Unconditional: unlike Done, this never depends on
-            `saveHardwareConfig` succeeding, so a SQLite write failure never
-            traps the operator on this screen with no way out. */}
+        {/* Never depends on `saveHardwareConfig` succeeding, so a SQLite
+            write failure never traps the operator on this screen with no way
+            out. Disabled only while `busy` -- a hardware operation (scanner
+            open, test print, or save) is in flight: if Back unmounted this
+            screen while an abandoned `openScanner()` was still resolving,
+            the app's saved-config reconciliation could race that open and an
+            unsaved test port could win and replace the persisted scanner.
+            `busy` always clears in a `finally` above, so this is never
+            disabled for longer than that operation's own retry budget --
+            Back can never strand the operator here. */}
         <Button
           type="button"
           variant="secondary"
           style={{ minHeight: 64 }}
+          disabled={busy}
           onClick={() => onDone()}
         >
           {t("setup.back")}
@@ -365,7 +518,7 @@ export function WorkstationSetup({
         <Button
           type="button"
           style={{ minHeight: 64 }}
-          disabled={busy}
+          disabled={busy || loading}
           onClick={() => void finish()}
         >
           {t("setup.done")}
