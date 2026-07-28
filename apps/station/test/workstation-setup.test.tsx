@@ -526,8 +526,8 @@ describe("WorkstationSetup", () => {
       fireEvent.change(screen.getByLabelText("Baud rate"), { target: { value: bad } });
       fireEvent.click(screen.getByRole("button", { name: "Done" }));
       expect(await screen.findByText("Enter a valid number in the allowed range.")).toBeDefined();
+      await waitFor(() => expect(onConfigChange).not.toHaveBeenCalled());
     }
-    expect(onConfigChange).not.toHaveBeenCalled();
   });
 
   it("disables Back while a scanner open is pending, and re-enables it once settled (Finding 2)", async () => {
