@@ -161,16 +161,23 @@ function mockInvokeForFloor(pinHash: string, hardwareConfig: HardwareConfig) {
     if (cmd === "plugin:sql|execute") return Promise.resolve([0, 0]);
     if (cmd === "plugin:sql|select") {
       const { query, values } = (payload ?? {}) as { query: string; values?: unknown[] };
+      // Checked BEFORE the `station_meta` branch below: `readOperatorsMirror`
+      // resolves the active slot and reads its rows in one statement (see
+      // mirror.ts), so its query text references `station_meta` too (a
+      // correlated subquery gating each `UNION ALL` branch) alongside the
+      // `operators_mirror` columns. A `station_meta`-first check would
+      // misroute that single statement into the branch below and answer it
+      // with `[]`, never reaching the operator row. Word boundary so this
+      // matches `operators_mirror` only, not `operators_mirror_b` (the
+      // roster-sync's inactive slot) — see the F3 test above for the same
+      // discipline.
+      if (/FROM operators_mirror\b/.test(query)) {
+        return Promise.resolve([operatorMirrorRow(pinHash)]);
+      }
       if (query.includes("station_meta")) {
         return Promise.resolve(
           values?.[0] === "hardware_config" ? [{ value: JSON.stringify(hardwareConfig) }] : [],
         );
-      }
-      // Word boundary so this matches `operators_mirror` only, not
-      // `operators_mirror_b` (the roster-sync's inactive slot) — see the F3
-      // test above for the same discipline.
-      if (/FROM operators_mirror\b/.test(query)) {
-        return Promise.resolve([operatorMirrorRow(pinHash)]);
       }
       return Promise.resolve([]);
     }

@@ -178,6 +178,7 @@ const OPERATOR_A = {
   active: true,
 };
 const OPERATOR_B = { ...OPERATOR_A, operatorId: "op-b", name: "B", login: "1002" };
+const OPERATOR_C = { ...OPERATOR_A, operatorId: "op-c", name: "C", login: "1003" };
 
 describe("roster publication is atomic", () => {
   it("keeps the previous roster when a refresh fails midway", async () => {
@@ -312,5 +313,56 @@ describe("roster publication is atomic", () => {
     // Both published successfully in strict sequence, each into its own
     // alternating slot -- refresh 2's roster (the later one) is what's live.
     expect((await readOperatorsMirror(exec)).map((o) => o.operatorId)).toEqual(["op-b"]);
+  });
+
+  it("a read cannot straddle a concurrent publish (regression: two-round-trip read racing the pointer flip)", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+
+    // Slot "b" is active and holds A+B.
+    await replaceOperatorsMirror(exec, [OPERATOR_A, OPERATOR_B]);
+    expect((await readOperatorsMirror(exec)).map((o) => o.operatorId).sort()).toEqual([
+      "op-a",
+      "op-b",
+    ]);
+
+    // Delays the roster-rows query specifically (its SQL starts with
+    // "SELECT operator_id", unlike the old two-query read's pointer lookup,
+    // "SELECT value FROM station_meta ..."). Under the current single-
+    // statement read this is its one and only query; under the old
+    // two-query shape it is the second one, fired only after the pointer has
+    // already been resolved -- exactly the point a sign-in can straddle a
+    // publish.
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const delayedRead: SqlExecutor = {
+      run: (sql, params) => exec.run(sql, params),
+      all: async (sql, params) => {
+        if (/^SELECT operator_id/.test(sql.trim())) await gate;
+        return exec.all(sql, params);
+      },
+    };
+
+    // A sign-in starts reading the roster, but its row query is parked on
+    // `gate` before it can run.
+    const readPromise = readOperatorsMirror(delayedRead);
+
+    // While that read is parked, a full refresh publishes a brand-new roster
+    // (C only) into slot "a", flips the pointer, and cleans up the
+    // now-superseded slot "b" -- all the way to completion.
+    await replaceOperatorsMirror(exec, [OPERATOR_C]);
+
+    // Now let the parked read's row query actually run.
+    release?.();
+    const ops = await readPromise;
+
+    // Must be exactly the new, complete generation: never the pre-flip
+    // roster (A+B) that was active when the read started, and never empty
+    // (which is what the superseded-slot cleanup -- having already deleted
+    // slot "b" -- would produce from a read still targeting the stale
+    // resolved slot).
+    expect(ops.map((o) => o.operatorId)).toEqual(["op-c"]);
   });
 });

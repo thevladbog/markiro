@@ -285,16 +285,16 @@ async function publishOperatorsMirror(
   // old one must NOT fail this publish — the next refresh's
   // delete-before-staging cleans it up regardless.
   //
-  // New failure mode this introduces: `readOperatorsMirror` is not on
-  // `refreshChain`, so a sign-in that has just resolved the active slot can
-  // yield the event loop and have this DELETE land before its own SELECT
-  // runs, if a concurrent publish flips and then cleans up that same slot.
-  // The read then sees an empty roster and the sign-in fails with a
-  // spurious "wrong credentials". This is fail-closed (never authenticates
-  // against a removed operator) and self-corrects on the caller's next
-  // attempt, and it actually narrows the pre-existing stale-generation read
-  // window rather than widening it — but it is a new user-visible failure
-  // mode worth knowing about when triaging sign-in reports.
+  // Safe to run right after the flip, with no coordination with concurrent
+  // reads, only because `readOperatorsMirror` resolves the pointer and reads
+  // the roster in ONE statement (see its doc comment). This DELETE is not on
+  // `refreshChain` and can therefore land while a sign-in is in flight, but
+  // there is no longer a JS gap in the reader for it to land in: whichever
+  // slot the reader's single statement finds active, that is the slot this
+  // DELETE has not yet touched (it only ever clears the INACTIVE one). Before
+  // that fix, this DELETE could race a reader that had already resolved the
+  // active slot via a separate round trip and land before the reader's own
+  // SELECT — emptying the exact table the reader was about to read.
   try {
     await exec.run(`DELETE FROM ${SLOT_TABLES[otherSlot(target)]}`);
   } catch {
@@ -361,8 +361,35 @@ export async function readShiftContext(
   };
 }
 
+/**
+ * Reads the currently active roster.
+ *
+ * Deliberately does NOT call `activeSlot` and then issue a second query
+ * against the resolved table — that shape is two round trips with a JS gap
+ * between them, and a publish (`publishOperatorsMirror`) can flip
+ * `station_meta.operators_slot` in that gap. A sign-in that resolved slot "a"
+ * before the flip would then read table "a" after it, which by construction
+ * still holds the previous generation (an operator just removed or
+ * deactivated server-side would authenticate anyway) — or, once the
+ * post-flip cleanup below has also run, an empty table. Both are the exact
+ * failure the two-slot design exists to prevent.
+ *
+ * Instead, the pointer lookup and the row read are ONE statement: a
+ * `UNION ALL` where each branch is gated on the same `station_meta` lookup,
+ * evaluated by SQLite as a single read. A single statement is always
+ * evaluated against one consistent snapshot — that is what makes this safe
+ * even though `tauri-plugin-sql` pools connections and cannot give us a
+ * multi-statement transaction (see `upsertBundle`'s doc comment): there is
+ * only one statement here, sent to whichever connection the pool hands it,
+ * so there is no gap for a concurrent publish to land in.
+ *
+ * `COALESCE(..., 'a')` reproduces `activeSlot`'s absent-key-means-"a"
+ * fallback, so a device that upgraded with rows already in `operators_mirror`
+ * and no pointer row yet still reads them. The table names come from
+ * `SLOT_TABLES`, the same closed set of two literals `activeSlot` and
+ * `publishOperatorsMirror` use — never caller input.
+ */
 export async function readOperatorsMirror(exec: SqlExecutor): Promise<OperatorMirrorRecord[]> {
-  const table = SLOT_TABLES[await activeSlot(exec)];
   const rows = await exec.all<{
     operator_id: string;
     name: string;
@@ -371,7 +398,16 @@ export async function readOperatorsMirror(exec: SqlExecutor): Promise<OperatorMi
     pin_hash: string;
     badge_hash: string | null;
     active: number;
-  }>(`SELECT operator_id, name, login, role, pin_hash, badge_hash, active FROM ${table}`);
+  }>(
+    `SELECT operator_id, name, login, role, pin_hash, badge_hash, active
+       FROM ${SLOT_TABLES.a}
+      WHERE COALESCE((SELECT value FROM station_meta WHERE key = ?), 'a') <> 'b'
+     UNION ALL
+     SELECT operator_id, name, login, role, pin_hash, badge_hash, active
+       FROM ${SLOT_TABLES.b}
+      WHERE COALESCE((SELECT value FROM station_meta WHERE key = ?), 'a') = 'b'`,
+    [ACTIVE_SLOT_KEY, ACTIVE_SLOT_KEY],
+  );
   return rows.map((r) => ({
     operatorId: r.operator_id,
     name: r.name,

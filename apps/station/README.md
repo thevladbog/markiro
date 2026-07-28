@@ -230,6 +230,19 @@ syncs (the initial roster pull, the `online` retry, and a shift bundle
 download can all trigger one) can never both resolve the same inactive slot
 as their target.
 
+The read side needs the same discipline. `readOperatorsMirror` resolves
+which slot is active and reads that slot's rows in a **single SQL
+statement** (a `UNION ALL` gated on `station_meta.operators_slot` in a
+correlated subquery), not a pointer lookup followed by a separate row query.
+The two-query shape has a JS gap between resolving the pointer and reading
+the rows, and a publish's flip can land in that gap: a sign-in that resolved
+slot "a" before the flip would then read table "a" after it, which by
+construction still holds the previous generation — an operator just removed
+or deactivated server-side would authenticate anyway. A single statement
+closes that gap because SQLite evaluates it against one consistent snapshot,
+so the pointer and the rows it names can never come from two different
+publishes.
+
 See [`docs/device-key-surface.md`](../../docs/device-key-surface.md) for
 what a station's device api-key may reach on the server.
 

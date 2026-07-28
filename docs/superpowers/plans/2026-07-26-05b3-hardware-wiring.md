@@ -815,11 +815,10 @@ export async function replaceOperatorsMirror(
 }
 ```
 
-Read from the active slot in `readOperatorsMirror` — only the table name and the added `activeSlot` call change:
+**Correction (found in PR #12 review, after this plan shipped):** the snippet below this note originally read the active slot with `const table = SLOT_TABLES[await activeSlot(exec)]` followed by a second `exec.all` against that resolved table — two round trips with a JS gap between them. A publish can flip `station_meta.operators_slot` in that gap: a sign-in that resolved slot "a" before the flip would then read table "a" after it, which by construction still holds the previous generation (an operator just removed or deactivated server-side would authenticate anyway), or — once `publishOperatorsMirror`'s post-flip cleanup has also run — an empty table. Do not implement it that way. Resolve the pointer and read the rows in ONE statement instead, so SQLite evaluates both against a single consistent snapshot and there is no gap for a concurrent publish to land in:
 
 ```ts
 export async function readOperatorsMirror(exec: SqlExecutor): Promise<OperatorMirrorRecord[]> {
-  const table = SLOT_TABLES[await activeSlot(exec)];
   const rows = await exec.all<{
     operator_id: string;
     name: string;
@@ -828,7 +827,16 @@ export async function readOperatorsMirror(exec: SqlExecutor): Promise<OperatorMi
     pin_hash: string;
     badge_hash: string | null;
     active: number;
-  }>(`SELECT operator_id, name, login, role, pin_hash, badge_hash, active FROM ${table}`);
+  }>(
+    `SELECT operator_id, name, login, role, pin_hash, badge_hash, active
+       FROM ${SLOT_TABLES.a}
+      WHERE COALESCE((SELECT value FROM station_meta WHERE key = ?), 'a') <> 'b'
+     UNION ALL
+     SELECT operator_id, name, login, role, pin_hash, badge_hash, active
+       FROM ${SLOT_TABLES.b}
+      WHERE COALESCE((SELECT value FROM station_meta WHERE key = ?), 'a') = 'b'`,
+    [ACTIVE_SLOT_KEY, ACTIVE_SLOT_KEY],
+  );
   return rows.map((r) => ({
     operatorId: r.operator_id,
     name: r.name,
@@ -842,6 +850,8 @@ export async function readOperatorsMirror(exec: SqlExecutor): Promise<OperatorMi
   }));
 }
 ```
+
+The `COALESCE(..., 'a')` in each branch reproduces `activeSlot`'s absent-key-means-"a" fallback, so a device upgrading with rows already in `operators_mirror` and no pointer row yet still reads them. `${SLOT_TABLES.a}` / `${SLOT_TABLES.b}` are still the same closed set of two literals used everywhere else in this file — never caller input.
 
 - [ ] **Step 5: Correct the now-false doc comment in `roster-sync.ts`**
 
