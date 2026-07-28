@@ -1,5 +1,5 @@
 import type { KioskClient } from "../api/client.js";
-import { replaceSnapshot } from "../store/cache.js";
+import { assertMeasurableGeneratedAt, replaceSnapshot } from "../store/cache.js";
 import { appendJournal } from "../store/journal.js";
 import { dequeueOrder, listQueue } from "../store/queue.js";
 
@@ -35,9 +35,9 @@ export type CacheAge = "fresh" | "warn" | "blocked";
  * against NaN is false — so without the guard below this returns `fresh`
  * forever, and one edited character in a stolen tablet's IndexedDB disables
  * the seven-day lockout permanently. A gate that cannot establish freshness
- * must not assert it. `refreshSnapshot` already refuses to persist such a
- * stamp, so this branch is defence in depth for one that reached the store by
- * another route (a future pairing path also writes a snapshot).
+ * must not assert it. `assertMeasurableGeneratedAt` already refuses to persist
+ * such a stamp on both write paths (this refresh and pairing), so this branch
+ * is defence in depth for one that reached the store by another route.
  */
 export function cacheAge(generatedAt: string, now: Date): CacheAge {
   const ageMs = now.getTime() - Date.parse(generatedAt);
@@ -143,11 +143,10 @@ export async function flushQueue(client: KioskClient, now: () => Date): Promise<
  * still holds. Callers must handle the rejection.
  *
  * A bootstrap whose `generatedAt` cannot be parsed is refused rather than
- * stored, down the same path as a dead network — so the device keeps its
- * last-known-good snapshot and ages fresh → warn → blocked over seven days
- * (a six-day warning window) instead of locking out on the spot. Persisting it
- * is the one thing that must not happen: `cacheAge` cannot measure such a
- * stamp, and a gate that cannot establish freshness has to fail closed.
+ * stored (`assertMeasurableGeneratedAt`, shared with the pairing screen, which
+ * writes a snapshot too), down the same path as a dead network — so the device
+ * keeps its last-known-good snapshot and ages fresh → warn → blocked over seven
+ * days (a six-day warning window) instead of locking out on the spot.
  *
  * Only `generatedAt` is checked, not the whole payload. `zod` is a declared
  * dependency but nothing in `src/` validates responses yet; full response
@@ -155,10 +154,6 @@ export async function flushQueue(client: KioskClient, now: () => Date): Promise<
  */
 export async function refreshSnapshot(client: KioskClient, now: () => Date): Promise<void> {
   const bootstrap = await client.bootstrap();
-  if (Number.isNaN(Date.parse(bootstrap.generatedAt))) {
-    throw new Error(
-      `bootstrap has an unparseable generatedAt: ${JSON.stringify(bootstrap.generatedAt)}`,
-    );
-  }
+  assertMeasurableGeneratedAt(bootstrap);
   await replaceSnapshot(bootstrap, now());
 }

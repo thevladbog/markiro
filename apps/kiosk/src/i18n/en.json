@@ -1,3 +1,17 @@
 {
-  "app": { "title": "Markiro — Kiosk", "booting": "Starting the kiosk…" }
+  "app": { "title": "Markiro — Kiosk", "booting": "Starting the kiosk…" },
+  "pairing": {
+    "title": "Connect this kiosk",
+    "prompt": "Enter the eight-digit pairing code from the admin panel",
+    "submit": "Connect",
+    "clear": "Clear",
+    "scan": "Scan the code",
+    "scanWaiting": "Waiting for a scan…",
+    "scannerSetup": "Set up the scanner",
+    "serverToggle": "Change the server address",
+    "server": "Server address",
+    "invalidCode": "Wrong or expired code",
+    "connectionFailed": "No connection to the server. Check the network and try again.",
+    "retry": "Retry"
+  }
 }
