@@ -253,6 +253,102 @@ describe("WorkstationSetup", () => {
     expect(saved.printer).toEqual({ kind: "serial", port: "COM7", baud: 19200 });
   });
 
+  it("renders the no-scanner option even when the discovered port list is empty (Finding 1)", async () => {
+    const hw = hardware({ listScannerPorts: async () => [] });
+    render(
+      <WorkstationSetup
+        hw={hw}
+        exec={noopExec}
+        sound={{ muted: false, volume: 1 }}
+        onSoundChange={() => {}}
+        onConfigChange={() => {}}
+        onDone={() => {}}
+      />,
+    );
+
+    const button = await screen.findByRole("button", {
+      name: "No serial scanner (keyboard-wedge)",
+    });
+    expect(button).toBeDefined();
+    // No port is selected by default, so this option shows as chosen, the
+    // same way a selected port button would (`variant="primary"`).
+    expect(button.className).toContain("mk-btn--primary");
+  });
+
+  it("saves scanner: null after choosing the no-scanner option with a stored serial config (Finding 1)", async () => {
+    const stored: HardwareConfig = {
+      scanner: { port: "COM3", baud: 9600 },
+      printer: null,
+      printerLanguage: "zpl",
+    };
+    const exec: SqlExecutor = {
+      run: async () => {},
+      all: async <T,>() => [{ value: JSON.stringify(stored) }] as T[],
+    };
+    const onConfigChange = vi.fn();
+
+    render(
+      <WorkstationSetup
+        hw={hardware()}
+        exec={exec}
+        sound={{ muted: false, volume: 1 }}
+        onSoundChange={() => {}}
+        onConfigChange={onConfigChange}
+        onDone={() => {}}
+      />,
+    );
+
+    // Wait for the seed effect to restore the stored port (shown selected,
+    // i.e. rendered with the primary variant) before deselecting it.
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "COM3" }).className).toContain("mk-btn--primary"),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "No serial scanner (keyboard-wedge)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+    await waitFor(() => expect(onConfigChange).toHaveBeenCalled());
+    const saved = onConfigChange.mock.calls.at(-1)![0] as HardwareConfig;
+    expect(saved.scanner).toBeNull();
+  });
+
+  it("keeps a TCP printer's own port when there is no scanner configured (Finding 6)", async () => {
+    // A documented valid state: no scanner (keyboard wedge), TCP printer
+    // previously saved at a non-default port. Reopening Setup and pressing
+    // Done without touching anything must round-trip that port unchanged.
+    const stored: HardwareConfig = {
+      scanner: null,
+      printer: { kind: "tcp", host: "10.0.0.9", port: 9200 },
+      printerLanguage: "zpl",
+    };
+    const exec: SqlExecutor = {
+      run: async () => {},
+      all: async <T,>() => [{ value: JSON.stringify(stored) }] as T[],
+    };
+    const onConfigChange = vi.fn();
+
+    render(
+      <WorkstationSetup
+        hw={hardware()}
+        exec={exec}
+        sound={{ muted: false, volume: 1 }}
+        onSoundChange={() => {}}
+        onConfigChange={onConfigChange}
+        onDone={() => {}}
+      />,
+    );
+
+    // Wait for the seed effect to populate the TCP port before pressing Done.
+    await waitFor(() =>
+      expect((screen.getByLabelText("Printer TCP port") as HTMLInputElement).value).toBe("9200"),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+    await waitFor(() => expect(onConfigChange).toHaveBeenCalled());
+    const saved = onConfigChange.mock.calls.at(-1)![0] as HardwareConfig;
+    expect(saved.scanner).toBeNull();
+    expect(saved.printer).toEqual({ kind: "tcp", host: "10.0.0.9", port: 9200 });
+  });
+
   it("closes the current scanner before opening another port", async () => {
     const calls: string[] = [];
     const hw = hardware({

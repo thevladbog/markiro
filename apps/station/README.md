@@ -180,20 +180,22 @@ connected. A React effect manages the scanner session lifecycle (keyed on
 `hardwareConfig.scanner`): it resets `scannerStatus` to `null` and closes the previous
 session before opening the newly configured one, ensuring a scanner
 that never actually opened cannot keep showing a stale `"connected"` left
-over from whatever was configured before. The `scannerIndicator` component reads
-this status to show the three states. A green light for a scanner that
-never opened is exactly the failure this exists to prevent: an operator
-scans into what they believe is a working line and nothing happens.
+over from whatever was configured before. The `scannerIndicator` function
+(exported from `src/App.tsx`, not a component — it renders nothing itself)
+reads this status to show the three states. A green light for a scanner
+that never opened is exactly the failure this exists to prevent: an
+operator scans into what they believe is a working line and nothing
+happens.
 
 Sessions themselves (`src-tauri/src/scanner.rs`) are tracked with a
-monotonic generation counter. `open_scanner` opens the port and starts its
-reader thread **before** advancing the generation — with a bounded retry
-(`OPEN_ATTEMPTS` × `OPEN_RETRY_DELAY`, roughly a second total, absorbing the
-OS's port-busy window right after a close) — so a failed open never retires
-a working session: the previous session's thread, port handle and
-"connected" status all stay untouched until a new open actually succeeds.
-Only then does the generation advance, and only then does the previous
-reader thread see a newer generation and exit.
+monotonic generation counter. `open_scanner` opens the port first — with a
+bounded retry (`OPEN_ATTEMPTS` × `OPEN_RETRY_DELAY`, roughly a second total,
+absorbing the OS's port-busy window right after a close) — so a failed open
+never retires a working session: the previous session's thread, port handle
+and "connected" status all stay untouched until a new open actually
+succeeds. Only once the open succeeds does the generation advance; only
+then is the new reader thread spawned, so the previous reader thread (still
+running under the old generation) sees the newer generation and exits.
 
 ### Operator roster: atomic publish via two alternating slots
 

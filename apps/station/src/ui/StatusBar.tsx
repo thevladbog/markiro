@@ -17,6 +17,10 @@ export function StatusBar({ online, scanner, printerConfigured }: StatusBarProps
   const { t } = useTranslation();
   const notConfigured = t("shell.notConfigured");
   const connected = t("shell.connected");
+  // A printer cannot be proven alive without printing to it, so it gets its
+  // own "configured" label rather than borrowing the scanner's "Connected" --
+  // which IS confirmed, by the Rust-side `station://scanner-status` event.
+  const printerConfiguredLabel = t("shell.printerConfigured");
   // A keyboard wedge is indistinguishable from a keyboard, so "keyboard" is
   // the honest label when no serial scanner is configured — it neither claims
   // a device we cannot see nor implies nothing works.
@@ -58,7 +62,9 @@ export function StatusBar({ online, scanner, printerConfigured }: StatusBarProps
       </span>
       <span>
         {t("shell.printer")}:{" "}
-        <span data-testid="printer-status">{printerConfigured ? connected : notConfigured}</span>
+        <span data-testid="printer-status">
+          {printerConfigured ? printerConfiguredLabel : notConfigured}
+        </span>
       </span>
       <span>{t("shell.teammates")}: +0</span>
     </header>

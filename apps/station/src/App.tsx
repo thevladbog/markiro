@@ -88,6 +88,16 @@ export function App() {
   const [hardwareConfig, setHardwareConfig] = useState<HardwareConfig>(DEFAULT_HARDWARE_CONFIG);
   const [scannerStatus, setScannerStatus] = useState<ScannerStatus | null>(null);
   const [showSetup, setShowSetup] = useState(false);
+  // Bumped every time the operator leaves the setup screen (Done or Back),
+  // so the scanner-session effect below re-runs even when the saved
+  // `hardwareConfig.scanner` port/baud are unchanged -- e.g. Setup's own
+  // "Connect scanner" button opened a different port that failed, or a
+  // manual test-connect was never saved. Without this, saving an identical
+  // configuration only changes the config object's identity, not the
+  // port/baud values the effect is keyed on, so it would never re-run and
+  // the station would be left with whatever session Setup's own buttons put
+  // it in.
+  const [sessionEpoch, setSessionEpoch] = useState(0);
 
   useEffect(() => {
     void loadSoundSettings(tauriExecutor).then(setSound);
@@ -129,7 +139,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [hardwareConfig.scanner?.port, hardwareConfig.scanner?.baud]);
+  }, [hardwareConfig.scanner?.port, hardwareConfig.scanner?.baud, sessionEpoch]);
 
   useEffect(() => {
     let unsubscribe: (() => void) | null = null;
@@ -303,7 +313,15 @@ export function App() {
           sound={sound}
           onSoundChange={setSound}
           onConfigChange={setHardwareConfig}
-          onDone={() => setShowSetup(false)}
+          onDone={() => {
+            setShowSetup(false);
+            // Covers both exits from Setup with one line: `finish()` calls
+            // `onConfigChange` then `onDone`, and Back calls only `onDone` --
+            // either way, whatever session Setup's own "Connect scanner"
+            // button left running (possibly on a port that was never saved)
+            // must be reconciled against the actually-persisted config.
+            setSessionEpoch((epoch) => epoch + 1);
+          }}
         />
       ) : shift ? (
         shiftContext ? (

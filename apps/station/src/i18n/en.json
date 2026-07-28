@@ -49,6 +49,7 @@
     "printer": "Printer",
     "notConfigured": "Not configured",
     "connected": "Connected",
+    "printerConfigured": "Configured",
     "scannerKeyboard": "Keyboard",
     "scannerDisconnected": "No signal",
     "teammates": "Terminals",
@@ -70,6 +71,7 @@
   "setup": {
     "title": "Workstation setup",
     "scanner": "Scanner",
+    "noScanner": "No serial scanner (keyboard-wedge)",
     "port": "Port",
     "baud": "Baud rate",
     "openScanner": "Connect scanner",
@@ -77,6 +79,7 @@
     "lastScan": "Last scan",
     "printer": "Printer",
     "host": "Printer address (leave empty for a serial printer)",
+    "printerTcpPort": "Printer TCP port",
     "printerPort": "Printer port",
     "printerBaud": "Printer baud rate",
     "printerLanguage": "Printer language",

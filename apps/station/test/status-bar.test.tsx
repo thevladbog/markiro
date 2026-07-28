@@ -28,8 +28,8 @@ describe("StatusBar", () => {
     expect(screen.getByTestId("printer-status").textContent).toBe("Not configured");
   });
 
-  it("reports a configured printer as connected", () => {
+  it("reports a configured printer as configured, not connected (a printer cannot be proven alive without printing)", () => {
     render(<StatusBar online scanner="keyboard" printerConfigured />);
-    expect(screen.getByTestId("printer-status").textContent).toBe("Connected");
+    expect(screen.getByTestId("printer-status").textContent).toBe("Configured");
   });
 });

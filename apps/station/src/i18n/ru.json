@@ -49,6 +49,7 @@
     "printer": "Принтер",
     "notConfigured": "Не настроено",
     "connected": "Подключён",
+    "printerConfigured": "Настроен",
     "scannerKeyboard": "Клавиатурный",
     "scannerDisconnected": "Нет связи",
     "teammates": "Терминалы",
@@ -70,6 +71,7 @@
   "setup": {
     "title": "Настройка рабочего места",
     "scanner": "Сканер",
+    "noScanner": "Без последовательного сканера (клавиатурный)",
     "port": "Порт",
     "baud": "Скорость (бод)",
     "openScanner": "Подключить сканер",
@@ -77,6 +79,7 @@
     "lastScan": "Последний скан",
     "printer": "Принтер",
     "host": "Адрес принтера (пусто — принтер на COM-порту)",
+    "printerTcpPort": "TCP-порт принтера",
     "printerPort": "Порт принтера",
     "printerBaud": "Скорость принтера (бод)",
     "printerLanguage": "Язык принтера",

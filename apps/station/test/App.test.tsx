@@ -396,6 +396,106 @@ describe("App", () => {
     await waitFor(() => expect(screen.getByTestId("scanner-status").textContent).toBe("Connected"));
   });
 
+  it("closes the scanner session before opening it (Finding 2 ordering the reconciliation effect depends on)", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const calls: string[] = [];
+    hardwareMock.closeScanner.mockImplementation(async () => {
+      calls.push("close");
+    });
+    hardwareMock.openScanner.mockImplementation(async () => {
+      calls.push("open");
+    });
+    mockInvokeForFloor(pinHash, {
+      scanner: { port: "COM3", baud: 9600 },
+      printer: null,
+      printerLanguage: "zpl",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ items: [] }), { status: 200 })),
+    );
+
+    render(<App />);
+    await signInAsOperator();
+
+    // Boot also runs this effect once against the default (no-scanner)
+    // config before the persisted one loads, so more than one close can
+    // precede the eventual open -- what matters is that the close that
+    // retires whatever session came before always precedes the open, never
+    // the reverse.
+    await waitFor(() => expect(calls).toContain("open"));
+    expect(calls.indexOf("close")).toBeLessThan(calls.indexOf("open"));
+  });
+
+  it("regression (Finding 2): leaving Setup with an unchanged scanner configuration reopens the session", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    mockInvokeForFloor(pinHash, {
+      scanner: { port: "COM3", baud: 9600 },
+      printer: null,
+      printerLanguage: "zpl",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ items: [] }), { status: 200 })),
+    );
+    hardwareMock.listScannerPorts.mockResolvedValue(["COM3"]);
+
+    render(<App />);
+    await signInAsOperator();
+
+    await waitFor(() => expect(hardwareMock.openScanner).toHaveBeenCalledWith("COM3", 9600));
+    const openCallsBeforeSetup = hardwareMock.openScanner.mock.calls.length;
+
+    // Open Setup, re-pick the SAME port (already selected) and press Done
+    // without changing anything -- an identical `HardwareConfig` value, but a
+    // fresh object reference from `currentConfig()`, exactly the scenario
+    // where the open effect's dependency array (keyed on port/baud) alone
+    // would never re-run.
+    fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
+    fireEvent.click(await screen.findByRole("button", { name: "COM3" }));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+    await waitFor(() =>
+      expect(hardwareMock.openScanner.mock.calls.length).toBeGreaterThan(openCallsBeforeSetup),
+    );
+  });
+
+  it("regression (Finding 2, Back): leaving Setup via Back after a manual test-connect retires that session without saving it", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    mockInvokeForFloor(pinHash, {
+      scanner: { port: "COM3", baud: 9600 },
+      printer: null,
+      printerLanguage: "zpl",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ items: [] }), { status: 200 })),
+    );
+    hardwareMock.listScannerPorts.mockResolvedValue(["COM3", "COM9"]);
+
+    render(<App />);
+    await signInAsOperator();
+    await waitFor(() => expect(hardwareMock.openScanner).toHaveBeenCalledWith("COM3", 9600));
+
+    // Reach Setup, manually connect a different port with the screen's own
+    // "Connect scanner" button (not Done), then leave via Back -- the config
+    // is never saved, so `hardwareConfig` is untouched, but the session Back
+    // leaves running must still be retired and the still-configured COM3
+    // session reopened, without an app restart.
+    fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
+    fireEvent.click(await screen.findByRole("button", { name: "COM9" }));
+    fireEvent.click(screen.getByRole("button", { name: "Connect scanner" }));
+    await waitFor(() => expect(hardwareMock.openScanner).toHaveBeenCalledWith("COM9", 9600));
+
+    const openCallsBeforeBack = hardwareMock.openScanner.mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+
+    await waitFor(() =>
+      expect(hardwareMock.openScanner.mock.calls.length).toBeGreaterThan(openCallsBeforeBack),
+    );
+    expect(hardwareMock.openScanner).toHaveBeenLastCalledWith("COM3", 9600);
+  });
+
   it("regression (Finding 1): reconfiguring a connected scanner to a port whose open fails must not leave the status bar reading Connected", async () => {
     const pinHash = await hashSecret(OPERATOR_PIN);
     mockInvokeForFloor(pinHash, {

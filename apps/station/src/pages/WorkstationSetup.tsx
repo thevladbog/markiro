@@ -31,6 +31,10 @@ function parseBaud(value: string): number {
   return Number(value) || DEFAULT_BAUD;
 }
 
+function parsePort(value: string): number {
+  return Number(value) || DEFAULT_PRINTER_PORT;
+}
+
 /**
  * Workstation setup (design brief 04 §7): pick the scanner and printer once,
  * prove each works, set the sound level. Meant to be completed by a non-IT
@@ -50,6 +54,7 @@ export function WorkstationSetup({
   const [baud, setBaud] = useState(String(DEFAULT_BAUD));
   const [lastScan, setLastScan] = useState<string | null>(null);
   const [printerHost, setPrinterHost] = useState("");
+  const [printerTcpPort, setPrinterTcpPort] = useState(String(DEFAULT_PRINTER_PORT));
   const [printerPort, setPrinterPort] = useState("");
   const [printerBaud, setPrinterBaud] = useState(String(DEFAULT_BAUD));
   const [printerLanguage, setPrinterLanguage] = useState<PrinterLanguage>("zpl");
@@ -71,7 +76,10 @@ export function WorkstationSetup({
         setPort(config.scanner.port);
         setBaud(String(config.scanner.baud));
       }
-      if (config.printer?.kind === "tcp") setPrinterHost(config.printer.host);
+      if (config.printer?.kind === "tcp") {
+        setPrinterHost(config.printer.host);
+        setPrinterTcpPort(String(config.printer.port));
+      }
       if (config.printer?.kind === "serial") {
         setPrinterPort(config.printer.port);
         setPrinterBaud(String(config.printer.baud));
@@ -121,7 +129,7 @@ export function WorkstationSetup({
 
   function currentConfig(): HardwareConfig {
     const printer: PrintTarget | null = printerHost
-      ? { kind: "tcp", host: printerHost, port: DEFAULT_PRINTER_PORT }
+      ? { kind: "tcp", host: printerHost, port: parsePort(printerTcpPort) }
       : printerPort
         ? { kind: "serial", port: printerPort, baud: parseBaud(printerBaud) }
         : null;
@@ -195,6 +203,22 @@ export function WorkstationSetup({
       <section style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <h2 style={{ fontSize: "1.5rem" }}>{t("setup.scanner")}</h2>
         <ul style={{ listStyle: "none", padding: 0, display: "flex", gap: 12 }}>
+          <li>
+            {/* Renders even when `ports` is empty (Finding 1): a serial
+                scanner that has been unplugged and replaced with a USB HID
+                one must still be de-selectable, and the discovered port list
+                being empty is exactly that case. Clearing `port` makes
+                `currentConfig()` emit `scanner: null`, which is what lets
+                `pickScanSource` fall back to the keyboard wedge. */}
+            <Button
+              type="button"
+              variant={port === "" ? "primary" : "secondary"}
+              style={{ minHeight: 64 }}
+              onClick={() => setPort("")}
+            >
+              {t("setup.noScanner")}
+            </Button>
+          </li>
           {ports.map((p) => (
             <li key={p}>
               <Button
@@ -229,6 +253,11 @@ export function WorkstationSetup({
           label={t("setup.host")}
           value={printerHost}
           onChange={(e) => setPrinterHost(e.target.value)}
+        />
+        <Input
+          label={t("setup.printerTcpPort")}
+          value={printerTcpPort}
+          onChange={(e) => setPrinterTcpPort(e.target.value)}
         />
         <Input
           label={t("setup.printerPort")}
