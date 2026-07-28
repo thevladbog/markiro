@@ -51,6 +51,12 @@ export function WorkstationSetup({
   const { t } = useTranslation();
   const [ports, setPorts] = useState<string[]>([]);
   const [port, setPort] = useState("");
+  // The port loaded from storage, captured once and never reassigned after
+  // that (see the config-seeding effect below). Needed because `port` itself
+  // moves as the operator clicks buttons on this screen, but the "configured,
+  // not detected" button (Finding 4) has to keep pointing at the originally
+  // stored value even after the operator has clicked something else.
+  const [storedPort, setStoredPort] = useState("");
   const [baud, setBaud] = useState(String(DEFAULT_BAUD));
   const [lastScan, setLastScan] = useState<string | null>(null);
   const [printerHost, setPrinterHost] = useState("");
@@ -74,6 +80,7 @@ export function WorkstationSetup({
     void loadHardwareConfig(exec).then((config) => {
       if (config.scanner) {
         setPort(config.scanner.port);
+        setStoredPort(config.scanner.port);
         setBaud(String(config.scanner.baud));
       }
       if (config.printer?.kind === "tcp") {
@@ -219,6 +226,26 @@ export function WorkstationSetup({
               {t("setup.noScanner")}
             </Button>
           </li>
+          {/* Finding 4: a port stored in configuration but absent from the
+              discovered list (e.g. a serial scanner unplugged and replaced by
+              a USB HID wedge, so `listScannerPorts()` no longer reports it)
+              must still render as a selectable, visibly-selected button.
+              Without this, an operator sees no button matching what is
+              actually configured, mistakes the (unrelated) "no scanner"
+              button's unselected look for "nothing is configured", and
+              re-saves the stale port by pressing Done. */}
+          {storedPort !== "" && !ports.includes(storedPort) && (
+            <li>
+              <Button
+                type="button"
+                variant={port === storedPort ? "primary" : "secondary"}
+                style={{ minHeight: 64 }}
+                onClick={() => setPort(storedPort)}
+              >
+                {t("setup.portNotDetected", { port: storedPort })}
+              </Button>
+            </li>
+          )}
           {ports.map((p) => (
             <li key={p}>
               <Button

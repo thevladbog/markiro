@@ -52,9 +52,18 @@ beside each item.
       `classifyScan` as invalid — this can burn an hour on the floor before
       anyone thinks to check it. Confirm the scanner is configured to send
       the bare payload, or that prefix stripping is handled.
-- [ ] Connect the scanner, then press Connect again pointed at a nonexistent
-      or wrong port: the working scanner keeps running, the status bar stays
-      green, and an error is shown (it is not silently killed).
+- [ ] Connect the scanner, then in Setup type a nonexistent or wrong port
+      and press Connect: the status bar drops to "No signal", an error is
+      shown, and the scanner stops delivering scans (closing the previous
+      session before the open is attempted is what produces this, not a
+      crash — the close-before-open trade this slice makes).
+- [ ] Recover from that without restarting the app: select the correct
+      port and press Connect, or just press Done — either reopens the
+      session and the bar returns to green.
+- [ ] Leave Setup via Done or Back with the scanner configuration
+      unchanged: the session still closes and reopens (the `sessionEpoch`
+      reconcile), so a session left in a bad state by Setup's own Connect
+      button never survives leaving the screen.
 - [ ] Connect on one port, then connect on a different port: the first session
       stops and only the second delivers scans.
 - [ ] Unplug the scanner mid-shift: the status bar flips to "no signal".

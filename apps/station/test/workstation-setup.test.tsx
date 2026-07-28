@@ -349,6 +349,49 @@ describe("WorkstationSetup", () => {
     expect(saved.printer).toEqual({ kind: "tcp", host: "10.0.0.9", port: 9200 });
   });
 
+  it("shows a stored scanner port as selected when listScannerPorts() no longer reports it, and lets the operator switch away from it (Finding 4)", async () => {
+    const stored: HardwareConfig = {
+      scanner: { port: "COM3", baud: 9600 },
+      printer: null,
+      printerLanguage: "zpl",
+    };
+    const exec: SqlExecutor = {
+      run: async () => {},
+      all: async <T,>() => [{ value: JSON.stringify(stored) }] as T[],
+    };
+    const onConfigChange = vi.fn();
+    // COM3 is configured but no longer discovered -- e.g. the serial
+    // scanner was replaced by a USB HID wedge, exactly the scenario the
+    // no-scanner button (Finding 1) was added for.
+    const hw = hardware({ listScannerPorts: async () => ["COM9"] });
+
+    render(
+      <WorkstationSetup
+        hw={hw}
+        exec={exec}
+        sound={{ muted: false, volume: 1 }}
+        onSoundChange={() => {}}
+        onConfigChange={onConfigChange}
+        onDone={() => {}}
+      />,
+    );
+
+    // The stored, undetected port must render as its own selected button --
+    // not silently absent, and not confusable with the unrelated "no
+    // scanner" option, which would otherwise be the only thing on screen.
+    const staleButton = await screen.findByRole("button", {
+      name: "COM3 (configured, not detected)",
+    });
+    expect(staleButton.className).toContain("mk-btn--primary");
+
+    fireEvent.click(screen.getByRole("button", { name: "No serial scanner (keyboard-wedge)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+    await waitFor(() => expect(onConfigChange).toHaveBeenCalled());
+    const saved = onConfigChange.mock.calls.at(-1)![0] as HardwareConfig;
+    expect(saved.scanner).toBeNull();
+  });
+
   it("closes the current scanner before opening another port", async () => {
     const calls: string[] = [];
     const hw = hardware({

@@ -176,16 +176,28 @@ shows one of three states:
   anything else, or hasn't arrived yet.
 
 With a scanner configured, only an explicit `"connected"` event counts as
-connected. A React effect manages the scanner session lifecycle (keyed on
-`hardwareConfig.scanner`): it resets `scannerStatus` to `null` and closes the previous
-session before opening the newly configured one, ensuring a scanner
-that never actually opened cannot keep showing a stale `"connected"` left
-over from whatever was configured before. The `scannerIndicator` function
-(exported from `src/App.tsx`, not a component — it renders nothing itself)
-reads this status to show the three states. A green light for a scanner
-that never opened is exactly the failure this exists to prevent: an
-operator scans into what they believe is a working line and nothing
-happens.
+connected. A React effect manages the scanner session lifecycle, keyed on
+`hardwareConfig.scanner?.port`, `?.baud`, and a `sessionEpoch` counter: it
+resets `scannerStatus` to `null` and closes the previous session before
+opening the newly configured one, ensuring a scanner that never actually
+opened cannot keep showing a stale `"connected"` left over from whatever
+was configured before. The `scannerIndicator` function (exported from
+`src/App.tsx`, not a component — it renders nothing itself) reads this
+status to show the three states. A green light for a scanner that never
+opened is exactly the failure this exists to prevent: an operator scans
+into what they believe is a working line and nothing happens.
+
+`sessionEpoch` is bumped whenever the operator leaves the setup screen, via
+either Done or Back, which re-runs the effect and closes-then-reopens the
+session even when `hardwareConfig.scanner`'s port/baud come out unchanged.
+This matters because the effect's dependency array alone cannot see the
+difference: the setup screen's own "Connect scanner" button can leave a
+different, unsaved port open (a manual test-connect, or a failed attempt
+at a nonexistent port), and that session — not the persisted configuration
+— is whatever the station is left running when the operator leaves.
+Without the epoch bump, pressing Done on an unchanged configuration would
+never re-run the effect and would leave the station stuck on that session
+until the app is restarted.
 
 Sessions themselves (`src-tauri/src/scanner.rs`) are tracked with a
 monotonic generation counter. `open_scanner` opens the port first — with a

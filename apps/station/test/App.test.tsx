@@ -414,17 +414,31 @@ describe("App", () => {
       "fetch",
       vi.fn(async () => new Response(JSON.stringify({ items: [] }), { status: 200 })),
     );
+    hardwareMock.listScannerPorts.mockResolvedValue(["COM3"]);
 
     render(<App />);
     await signInAsOperator();
-
-    // Boot also runs this effect once against the default (no-scanner)
-    // config before the persisted one loads, so more than one close can
-    // precede the eventual open -- what matters is that the close that
-    // retires whatever session came before always precedes the open, never
-    // the reverse.
     await waitFor(() => expect(calls).toContain("open"));
-    expect(calls.indexOf("close")).toBeLessThan(calls.indexOf("open"));
+
+    // The boot run's own close(es)-then-open pair is done settling by now --
+    // clear it so what follows reflects ONLY the second, reconciling run
+    // that leaving Setup triggers. Without this reset, the boot run
+    // unconditionally pushes "close" at index 0 before its own "no scanner
+    // configured yet" early return, so `calls.indexOf("close")` is always 0
+    // and `< calls.indexOf("open")` can never fail -- even an implementation
+    // that opened before closing in the RECONCILING run would still pass,
+    // because the boot run's leading close always wins the index race.
+    calls.length = 0;
+
+    // Leave Setup with the scanner configuration unchanged -- the
+    // `sessionEpoch` bump this triggers re-runs the effect even though
+    // port/baud did not change, and that reconciling run is what must
+    // close before it opens.
+    fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Done" }));
+
+    await waitFor(() => expect(calls).toContain("open"));
+    expect(calls).toEqual(["close", "open"]);
   });
 
   it("regression (Finding 2): leaving Setup with an unchanged scanner configuration reopens the session", async () => {
@@ -497,51 +511,67 @@ describe("App", () => {
   });
 
   it("regression (Finding 1): reconfiguring a connected scanner to a port whose open fails must not leave the status bar reading Connected", async () => {
-    const pinHash = await hashSecret(OPERATOR_PIN);
-    mockInvokeForFloor(pinHash, {
-      scanner: { port: "COM3", baud: 9600 },
-      printer: null,
-      printerLanguage: "zpl",
-    });
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => new Response(JSON.stringify({ items: [] }), { status: 200 })),
-    );
-
-    let statusListener: ((status: ScannerStatus) => void) | null = null;
-    hardwareMock.onScannerStatus.mockImplementation((listener) => {
-      statusListener = listener;
-      return Promise.resolve(() => {
-        statusListener = null;
+    // This test deliberately makes `openScanner` reject, which the App.tsx
+    // reconciliation effect logs via `console.error` (Finding 5) -- expected,
+    // and already covered by the assertions below, so it is silenced here
+    // rather than left to print a stack trace into otherwise-pristine test
+    // output. Spied (not globally suppressed) and restored in `finally` so
+    // every other test's `console.error` calls still surface normally, and
+    // so a genuinely unexpected error logged by this test would still show
+    // up if this spy were removed.
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const pinHash = await hashSecret(OPERATOR_PIN);
+      mockInvokeForFloor(pinHash, {
+        scanner: { port: "COM3", baud: 9600 },
+        printer: null,
+        printerLanguage: "zpl",
       });
-    });
-    // COM3 (the boot configuration) opens fine; COM9 (what Setup will be
-    // reconfigured to, below) fails -- mirroring the Rust `Io(NotFound)` fast
-    // path for a port that does not exist.
-    hardwareMock.openScanner.mockImplementation((port) => {
-      if (port === "COM9") return Promise.reject(new Error("No such file or directory"));
-      return Promise.resolve(undefined);
-    });
-    hardwareMock.listScannerPorts.mockResolvedValue(["COM9"]);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => new Response(JSON.stringify({ items: [] }), { status: 200 })),
+      );
 
-    render(<App />);
-    await signInAsOperator();
+      let statusListener: ((status: ScannerStatus) => void) | null = null;
+      hardwareMock.onScannerStatus.mockImplementation((listener) => {
+        statusListener = listener;
+        return Promise.resolve(() => {
+          statusListener = null;
+        });
+      });
+      // COM3 (the boot configuration) opens fine; COM9 (what Setup will be
+      // reconfigured to, below) fails -- mirroring the Rust `Io(NotFound)`
+      // fast path for a port that does not exist.
+      hardwareMock.openScanner.mockImplementation((port) => {
+        if (port === "COM9") return Promise.reject(new Error("No such file or directory"));
+        return Promise.resolve(undefined);
+      });
+      hardwareMock.listScannerPorts.mockResolvedValue(["COM9"]);
 
-    // Establish the "connected" state the bug lets survive a reconfiguration.
-    act(() => {
-      statusListener?.("connected");
-    });
-    await waitFor(() => expect(screen.getByTestId("scanner-status").textContent).toBe("Connected"));
+      render(<App />);
+      await signInAsOperator();
 
-    // Reach Setup and reconfigure to COM9, pressing only Done -- exactly the
-    // operator action from Finding 1 (no "Connect scanner" test-press first).
-    fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
-    fireEvent.click(await screen.findByRole("button", { name: "COM9" }));
-    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+      // Establish the "connected" state the bug lets survive a reconfiguration.
+      act(() => {
+        statusListener?.("connected");
+      });
+      await waitFor(() =>
+        expect(screen.getByTestId("scanner-status").textContent).toBe("Connected"),
+      );
 
-    await waitFor(() => expect(hardwareMock.openScanner).toHaveBeenCalledWith("COM9", 9600));
-    // The invariant this whole indicator exists for: never green for a
-    // scanner that did not actually open.
-    expect(screen.getByTestId("scanner-status").textContent).not.toBe("Connected");
+      // Reach Setup and reconfigure to COM9, pressing only Done -- exactly
+      // the operator action from Finding 1 (no "Connect scanner" test-press
+      // first).
+      fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
+      fireEvent.click(await screen.findByRole("button", { name: "COM9" }));
+      fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+      await waitFor(() => expect(hardwareMock.openScanner).toHaveBeenCalledWith("COM9", 9600));
+      // The invariant this whole indicator exists for: never green for a
+      // scanner that did not actually open.
+      expect(screen.getByTestId("scanner-status").textContent).not.toBe("Connected");
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
   });
 });
