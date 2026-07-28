@@ -104,6 +104,28 @@ export interface RecordScanResult {
  * accepted when the operator was shown a duplicate. If that insert fails, it
  * throws: a code row without its audit row is strictly better than a lost
  * code.
+ *
+ * The outbox insert runs LAST and, on failure, is compensated rather than
+ * left to stand: if THIS call is the one that just stored a new code row
+ * (`storedCode`), that row is best-effort deleted from `codes_mirror` before
+ * the original error is rethrown. Throwing alone does not make the scan
+ * recoverable — `codes_mirror.code_hash` is already committed by the time the
+ * outbox insert can fail, so without the compensating delete the operator's
+ * rescan of the same physical item hits the primary key, is reported as
+ * `alreadyPresent`, and is journalled and (would-be) enqueued as
+ * `"duplicate"` with no code payload, because that payload is gated on
+ * `storedCode`. The accepted code would then never reach the server and never
+ * could: the one path in this slice that loses data instead of duplicating
+ * it. Deleting the just-stored row turns the rescan into a clean accept
+ * instead. The compensating delete is itself best-effort: if it also fails,
+ * that secondary error is swallowed and the ORIGINAL outbox error is rethrown
+ * regardless, because that is what tells the operator to rescan, and a failed
+ * cleanup leaves us no worse off than before this fix. Nothing is deleted
+ * when `storedCode` is false — a scan that was already a duplicate, or one
+ * with no code at all, has nothing of its own to undo, and deleting then
+ * would erase a code an earlier scan legitimately stored. The
+ * `scan_events_mirror` row is never touched by this compensation: it is the
+ * audit trail and it honestly records that an attempt happened.
  */
 export async function recordScan(
   exec: SqlExecutor,
@@ -130,26 +152,41 @@ export async function recordScan(
   const journalled = alreadyPresent ? { ...e, verdict: "duplicate" } : e;
   await appendScanEvent(exec, journalled);
 
-  // Enqueued LAST, and deliberately allowed to throw. The verdict is not
-  // final until the code insert has either succeeded or hit the primary key,
-  // so an earlier enqueue could queue "ok" for a scan the operator was shown
-  // as a duplicate. A failure here means the scan is journalled locally but
-  // never queued for the server, so it must reach the operator through the
-  // scan queue's error path rather than vanishing quietly.
-  await exec.run(
-    `INSERT INTO outbox (shift_id, terminal_id, raw, verdict, scanned_at, code_hash, gtin14, serial)
-       VALUES (?,?,?,?,?,?,?,?)`,
-    [
-      journalled.shiftId,
-      journalled.terminalId,
-      journalled.raw,
-      journalled.verdict,
-      journalled.scannedAt,
-      storedCode && code ? code.codeHash : null,
-      storedCode && code ? code.gtin14 : null,
-      storedCode && code ? code.serial : null,
-    ],
-  );
+  // Enqueued LAST. The verdict is not final until the code insert has either
+  // succeeded or hit the primary key, so an earlier enqueue could queue "ok"
+  // for a scan the operator was shown as a duplicate. A failure here still
+  // rethrows — it must reach the operator through the scan queue's error path
+  // rather than vanishing quietly — but first, if THIS call stored a new code
+  // row, that row is compensated away so the rescan the operator is about to
+  // do lands as a fresh accept instead of a phantom duplicate. See the doc
+  // comment above for the full story.
+  try {
+    await exec.run(
+      `INSERT INTO outbox (shift_id, terminal_id, raw, verdict, scanned_at, code_hash, gtin14, serial)
+         VALUES (?,?,?,?,?,?,?,?)`,
+      [
+        journalled.shiftId,
+        journalled.terminalId,
+        journalled.raw,
+        journalled.verdict,
+        journalled.scannedAt,
+        storedCode && code ? code.codeHash : null,
+        storedCode && code ? code.gtin14 : null,
+        storedCode && code ? code.serial : null,
+      ],
+    );
+  } catch (outboxErr) {
+    if (storedCode && code) {
+      try {
+        await exec.run("DELETE FROM codes_mirror WHERE code_hash = ?", [code.codeHash]);
+      } catch {
+        // Best-effort: the original outbox error below is what must reach
+        // the operator, and a failed cleanup leaves us no worse off than
+        // before this fix — the next sync attempt still has nothing to send.
+      }
+    }
+    throw outboxErr;
+  }
 
   return { storedCode, alreadyPresent };
 }

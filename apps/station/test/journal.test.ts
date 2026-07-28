@@ -259,4 +259,129 @@ describe("outbox", () => {
       ),
     ).rejects.toThrow(/disk full/);
   });
+
+  // The finding this closes: an outbox failure used to leave the just-stored
+  // code row in place, so the operator's rescan of the same physical item hit
+  // the primary key, was reported as alreadyPresent, and was enqueued as
+  // "duplicate" with no code payload -- the code could then never reach the
+  // server. Compensating the codes_mirror insert away makes the rescan a
+  // clean accept instead.
+  it("compensates the code row on outbox failure so a rescan is a fresh accept, not a phantom duplicate", async () => {
+    const exec = makeExec();
+    const failing: SqlExecutor = {
+      run: async (sql, params) => {
+        if (/INTO outbox/i.test(sql)) throw new Error("disk full");
+        return exec.run(sql, params);
+      },
+      all: (sql, params) => exec.all(sql, params),
+    };
+    const event = {
+      shiftId: "s1",
+      terminalId: "t1",
+      raw: "RAW1",
+      verdict: "ok",
+      scannedAt: "2026-07-28T10:00:00.000Z",
+    };
+    const code = {
+      codeHash: "h1",
+      shiftId: "s1",
+      gtin14: "04600000000017",
+      serial: "AB1",
+      scannedAt: "2026-07-28T10:00:00.000Z",
+    };
+
+    await expect(recordScan(failing, event, code)).rejects.toThrow(/disk full/);
+
+    // The compensating delete undid the codes_mirror insert.
+    expect(await loadCodeKeys(exec)).toEqual(new Set());
+
+    // The rescan (against the real, non-failing executor) is a fresh accept,
+    // not a phantom duplicate, and DOES enqueue the code payload this time.
+    const rescan = await recordScan(
+      exec,
+      { ...event, scannedAt: "2026-07-28T10:00:05.000Z" },
+      { ...code, scannedAt: "2026-07-28T10:00:05.000Z" },
+    );
+    expect(rescan).toEqual({ storedCode: true, alreadyPresent: false });
+
+    const rows = await exec.all<{ verdict: string; code_hash: string | null }>(
+      "SELECT verdict, code_hash FROM outbox ORDER BY id",
+    );
+    expect(rows).toEqual([{ verdict: "ok", code_hash: "h1" }]);
+  });
+
+  it("rethrows the original outbox error even when the compensating delete also fails", async () => {
+    const exec = makeExec();
+    const failing: SqlExecutor = {
+      run: async (sql, params) => {
+        if (/INTO outbox/i.test(sql)) throw new Error("disk full");
+        if (/DELETE FROM codes_mirror/i.test(sql)) throw new Error("delete also failed");
+        return exec.run(sql, params);
+      },
+      all: (sql, params) => exec.all(sql, params),
+    };
+    const event = {
+      shiftId: "s1",
+      terminalId: "t1",
+      raw: "RAW1",
+      verdict: "ok",
+      scannedAt: "2026-07-28T10:00:00.000Z",
+    };
+    const code = {
+      codeHash: "h1",
+      shiftId: "s1",
+      gtin14: "04600000000017",
+      serial: "AB1",
+      scannedAt: "2026-07-28T10:00:00.000Z",
+    };
+
+    await expect(recordScan(failing, event, code)).rejects.toThrow(/disk full/);
+  });
+
+  it("does not touch codes_mirror on outbox failure for a scan with no code", async () => {
+    const exec = makeExec();
+    // Seed an unrelated code row that must survive untouched.
+    await recordScan(
+      exec,
+      {
+        shiftId: "s1",
+        terminalId: "t1",
+        raw: "OTHER",
+        verdict: "ok",
+        scannedAt: "2026-07-28T09:00:00.000Z",
+      },
+      {
+        codeHash: "other-h",
+        shiftId: "s1",
+        gtin14: "04600000000017",
+        serial: "OTHER1",
+        scannedAt: "2026-07-28T09:00:00.000Z",
+      },
+    );
+
+    const failing: SqlExecutor = {
+      run: async (sql, params) => {
+        if (/INTO outbox/i.test(sql)) throw new Error("disk full");
+        return exec.run(sql, params);
+      },
+      all: (sql, params) => exec.all(sql, params),
+    };
+
+    await expect(
+      recordScan(
+        failing,
+        {
+          shiftId: "s1",
+          terminalId: null,
+          raw: "junk",
+          verdict: "invalid",
+          scannedAt: "2026-07-28T10:00:01.000Z",
+        },
+        null,
+      ),
+    ).rejects.toThrow(/disk full/);
+
+    // The unrelated code row survives: nothing was deleted for a rejected scan.
+    expect(await loadCodeKeys(exec)).toEqual(new Set(["other-h"]));
+  });
 });
