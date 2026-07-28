@@ -1,4 +1,4 @@
-import { validatePickupKm } from "@markiro/domain";
+import { classifyScan, validatePickupKm } from "@markiro/domain";
 
 export type KioskScan =
   | { kind: "badge"; raw: string }
@@ -22,6 +22,14 @@ export type KioskScan =
  * that ran before the KM check would happily swallow a malformed or
  * GS-dropped marking code. That would silently sign the worker in as
  * nobody instead of asking them to re-scan.
+ *
+ * When `not_km`, further distinguish product codes (GTIN, SSCC) from opaque
+ * badge payloads by consulting `classifyScan`: GTINs and SSCCs are valid
+ * logistics/product codes, not badges. A product barcode is NOT a badge
+ * candidate, even if it fails KM parsing — the kiosk should report it as
+ * an unknown code, not attempt badge resolution. Only structurally
+ * unrecognized strings (opaque payloads with no valid GS1 form) become
+ * badge candidates.
  */
 export function classifyKioskScan(raw: string): KioskScan {
   const result = validatePickupKm(raw);
@@ -36,8 +44,14 @@ export function classifyKioskScan(raw: string): KioskScan {
     case "not_km": {
       const trimmed = raw.trim();
       if (trimmed.length === 0) return { kind: "unknown", raw };
-      // Not a marking code at all (by structure) — the only remaining
-      // possibility the kiosk understands is an opaque badge payload.
+      // Not a marking code at all (by structure). Further distinguish product
+      // codes (GTIN, SSCC) from opaque badge payloads: product codes are valid
+      // logistics codes and not badge candidates.
+      const classified = classifyScan(raw);
+      if (classified.kind === "gtin" || classified.kind === "sscc") {
+        return { kind: "unknown", raw };
+      }
+      // Opaque payload — try badge resolution.
       return { kind: "badge", raw };
     }
   }
