@@ -115,9 +115,11 @@ import {
   verifyPhc,
 } from "../src/crypto/phc.js";
 
-// The interop vector: this exact string is verified by BOTH
-// apps/api/src/lib/pin-hash.ts and apps/station/src/lib/crypto.ts.
-// It is `hashSecret("1234")` from apps/station/test/crypto.test.ts's contract.
+// A structurally valid 16-byte salt, borrowed from the station's DUMMY_PHC
+// constant (apps/station/src/lib/auth.ts). Its plaintext is deliberately
+// unknown — DUMMY_PHC exists only to equalise verification timing — so use
+// this value ONLY for structural assertions, never to assert that some
+// particular secret verifies against it.
 const KNOWN_SALT_B64 = "fwGrIt01vwgBxxDlhqLVRQ==";
 
 describe("parsePhc", () => {
@@ -304,13 +306,19 @@ Run: `pnpm --filter @markiro/domain exec vitest run phc`
 Expected: PASS. If the cross-package import cannot resolve (domain has no path mapping to `apps/`), delete this `describe` block and instead paste the station's known vector inline:
 
 ```ts
-it("verifies the station's known vector", async () => {
+it("verifies a known-answer vector computed with the contract's parameters", async () => {
+  // Known-answer test, computed independently with node:crypto:
+  //   pbkdf2Sync("735519", base64decode(KNOWN_SALT_B64), 100000, 32, "sha256")
+  // "735519" is the secret apps/station/test/crypto.test.ts hashes, so this
+  // pins THIS module to the same PBKDF2 parameters the station uses. If the
+  // iteration count, digest, key length or base64 padding ever drift, this
+  // fails — which is the whole point of a hardcoded vector.
   const phc =
-    "pbkdf2$sha256$100000$fwGrIt01vwgBxxDlhqLVRQ==$PGnhdQA2lW09CcvuOhCmvp0z4HbztWXaYIq7+dqmLoQ=";
-  // The plaintext behind this vector lives in apps/station/test/crypto.test.ts.
-  // Whatever it is, an unrelated secret must not verify against it.
-  await expect(verifyPhc("definitely-not-the-secret", phc)).resolves.toBe(false);
-  expect(parsePhc(phc)?.iterations).toBe(100000);
+    "pbkdf2$sha256$100000$fwGrIt01vwgBxxDlhqLVRQ==$PgepXwOPCgYDtXjghPhCfde+aOxZvagqdzi1WbEVZBo=";
+
+  expect(parsePhc(phc)!.iterations).toBe(100000);
+  await expect(verifyPhc("735519", phc)).resolves.toBe(true);
+  await expect(verifyPhc("735518", phc)).resolves.toBe(false);
 });
 ```
 
