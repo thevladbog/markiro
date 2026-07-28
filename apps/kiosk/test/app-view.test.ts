@@ -19,6 +19,10 @@ describe("nextKioskView", () => {
     expect(nextKioskView({ ...base, paired: false })).toBe("pairing");
   });
 
+  it("sends an unpaired device to pairing even when its cache is stale — it cannot refresh until it pairs, so blocking first would be a dead end", () => {
+    expect(nextKioskView({ ...base, paired: false, cacheStale: true })).toBe("pairing");
+  });
+
   it("lets scanner setup be reached from the pairing screen — the scanner is often needed to scan the pairing code itself", () => {
     expect(nextKioskView({ ...base, paired: false, scannerSetupRequested: true })).toBe(
       "scanner-setup",
