@@ -17,6 +17,7 @@ import type { SelectOption, TableColumn } from "@markiro/ui";
 
 import { formatCreatedAt } from "../../lib/datetime.js";
 import { toast } from "../../lib/toast.js";
+import { useKiosks } from "../kiosks/api.js";
 import {
   useAcknowledgeRejection,
   usePickupRejections,
@@ -33,19 +34,28 @@ import {
 export function RejectionsPage() {
   const { t, i18n } = useTranslation();
 
+  const [kioskId, setKioskId] = useState("all");
   const [stateFilter, setStateFilter] = useState<RejectionState>("all");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
+  const { data: kiosks } = useKiosks();
+
   const { data, isPending, isError } = usePickupRejections({
     state: stateFilter,
+    ...(kioskId !== "all" ? { kioskId } : {}),
     ...(fromDate ? { from: fromDate } : {}),
     ...(toDate ? { to: toDate } : {}),
   });
   const acknowledge = useAcknowledgeRejection();
 
   const items = data?.items ?? [];
+
+  const kioskOptions: SelectOption[] = [
+    { value: "all", label: t("pages.pickup.rejections.filters.kioskAll") },
+    ...(kiosks ?? []).map((kiosk) => ({ value: kiosk.id, label: kiosk.name })),
+  ];
 
   const stateOptions: SelectOption[] = [
     { value: "all", label: t("pages.pickup.rejections.filters.state.all") },
@@ -174,6 +184,14 @@ export function RejectionsPage() {
       />
 
       <div style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
+        <div style={{ width: 200 }}>
+          <Select
+            label={t("pages.pickup.rejections.filters.kioskLabel")}
+            options={kioskOptions}
+            value={kioskId}
+            onChange={(value) => setKioskId(value)}
+          />
+        </div>
         <div style={{ width: 200 }}>
           <Select
             label={t("pages.pickup.rejections.filters.stateLabel")}

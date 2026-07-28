@@ -120,17 +120,35 @@ describe("rejections page", () => {
   });
 
   it("acknowledges a rejection", async () => {
+    // Stateful GET so the test actually proves the acknowledge mutation's
+    // cache invalidation: before the POST it answers with the unacknowledged
+    // row, after the POST it answers with the acknowledged one, exactly like
+    // the real server would once the list is refetched.
+    let acknowledged = false;
     const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      if (String(input).includes("/kiosks")) {
+        return jsonResponse(200, { items: [] });
+      }
       if (init?.method === "POST") {
+        acknowledged = true;
         return jsonResponse(200, { ...REJECTION, acknowledgedAt: "2026-07-28T10:00:00.000Z" });
       }
-      return jsonResponse(200, { items: [REJECTION], openCount: 1 });
+      return jsonResponse(200, {
+        items: [
+          {
+            ...REJECTION,
+            acknowledgedAt: acknowledged ? "2026-07-28T10:00:00.000Z" : null,
+          },
+        ],
+        openCount: acknowledged ? 0 : 1,
+      });
     });
     vi.stubGlobal("fetch", fetchMock);
 
     renderWith(<RejectionsPage />);
 
     await waitFor(() => expect(screen.getByText("Иван Иванов")).toBeDefined());
+    expect(screen.getByText("Не отработан")).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Отработано" }));
 
     await waitFor(() =>
@@ -142,6 +160,12 @@ describe("rejections page", () => {
         ),
       ).toBe(true),
     );
+
+    // Proves the invalidation actually refetched the list: the row's state
+    // chip flips to "Отработан" and its "Отработано" button disappears --
+    // both only happen once the refetched row's `acknowledgedAt` is non-null.
+    await waitFor(() => expect(screen.getByText("Отработан")).toBeDefined());
+    expect(screen.queryByRole("button", { name: "Отработано" })).toBeNull();
   });
 
   it("shows the empty state when there is nothing to review", async () => {
@@ -153,6 +177,39 @@ describe("rejections page", () => {
     renderWith(<RejectionsPage />);
 
     await waitFor(() => expect(screen.getByText("Отклонённых сканов нет")).toBeDefined());
+  });
+
+  it("filters by kiosk", async () => {
+    const KIOSKS = [
+      { id: "k-1", name: "Киоск-1" },
+      { id: "k-2", name: "Киоск-2" },
+    ];
+    const fetchMock = vi.fn(async (input: string) => {
+      if (String(input).includes("/kiosks")) {
+        return jsonResponse(200, { items: KIOSKS });
+      }
+      return jsonResponse(200, { items: [REJECTION], openCount: 1 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWith(<RejectionsPage />);
+
+    await waitFor(() => expect(screen.getByText("Иван Иванов")).toBeDefined());
+    // Wait for the kiosk options to actually be in the DOM before selecting
+    // one -- otherwise fireEvent.change on a <select> with no matching
+    // <option> yet leaves its value empty instead of "k-2".
+    await waitFor(() => expect(screen.getByText("Киоск-2")).toBeDefined());
+
+    fireEvent.change(screen.getByLabelText("Киоск"), { target: { value: "k-2" } });
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([url]) =>
+            String(url).includes("/pickup-rejections") && String(url).includes("kioskId=k-2"),
+        ),
+      ).toBe(true),
+    );
   });
 });
 
