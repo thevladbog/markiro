@@ -52,14 +52,14 @@ describe("cache", () => {
 describe("queue", () => {
   it("drains in deviceSeq order regardless of insertion order", async () => {
     for (const deviceSeq of [3, 1, 2]) {
-      await enqueueOrder({ deviceSeq, badgeCode: "B", reason: "buy", items: [] });
+      await enqueueOrder({ deviceSeq, badgeCode: "B", reason: "buy", items: [] }, "e1");
     }
     expect((await listQueue()).map((q) => q.deviceSeq)).toEqual([1, 2, 3]);
   });
 
   it("removes only the acknowledged order", async () => {
-    await enqueueOrder({ deviceSeq: 1, badgeCode: "B", reason: "buy", items: [] });
-    await enqueueOrder({ deviceSeq: 2, badgeCode: "B", reason: "buy", items: [] });
+    await enqueueOrder({ deviceSeq: 1, badgeCode: "B", reason: "buy", items: [] }, "e1");
+    await enqueueOrder({ deviceSeq: 2, badgeCode: "B", reason: "buy", items: [] }, "e1");
     await dequeueOrder(1);
     expect((await listQueue()).map((q) => q.deviceSeq)).toEqual([2]);
   });

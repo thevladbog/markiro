@@ -1,4 +1,13 @@
 const DB_NAME = "markiro-kiosk";
+/**
+ * Bumped only when the SHAPE below changes — a new store, a new index, a
+ * different `keyPath`. Adding a field to a stored RECORD is not such a change
+ * and must not bump it: `onupgradeneeded` would have nothing to do, while
+ * every device would still be holding records written by older versions. The
+ * reader that needs the new field is the one that has to cope, which is what
+ * `countTakenToday` does with an entry from before the journal carried an
+ * employee.
+ */
 const DB_VERSION = 1;
 
 export const STORE_CONFIG = "config";

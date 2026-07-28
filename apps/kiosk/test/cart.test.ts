@@ -257,9 +257,10 @@ describe("remainingToday", () => {
     expect(remainingToday(run(ctx, scan(km(GTIN_MILK, "AAAA1111"))), ctx)).toBe(3);
   });
 
-  // `alreadyTakenToday` comes from the server and can legitimately exceed the
-  // limit: an administrator lowering it mid-day, or items taken at another
-  // kiosk. Unclamped, «осталось −2» would print, and — worse — a screen that
+  // `alreadyTakenToday` is counted off the device's own journal and can
+  // legitimately exceed the limit: an administrator lowering it mid-day, or a
+  // snapshot older than the orders it is compared against. Unclamped,
+  // «осталось −2» would print, and — worse — a screen that
   // shows its scan prompt while `remaining` is merely non-zero would invite
   // scans the reducer refuses one after another.
   it("never goes negative for an employee already past their allowance", () => {

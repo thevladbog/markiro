@@ -20,6 +20,7 @@ import {
   writeScannerSettings,
   type KioskConfig,
 } from "../src/store/config.js";
+import { appendJournal, type JournalEntry } from "../src/store/journal.js";
 import { enqueueOrder, listQueue } from "../src/store/queue.js";
 import { REFRESH_INTERVAL_MS, STALE_BLOCK_MS } from "../src/sync/worker.js";
 
@@ -476,8 +477,8 @@ describe("KioskShell", () => {
   // not a zero the shell never refreshed.
   it("stops handing product out past the block threshold, and still counts the queue", async () => {
     await pair(new Date(NOW.getTime() - STALE_BLOCK_MS - 1_000).toISOString());
-    await enqueueOrder(queuedOrder(3));
-    await enqueueOrder(queuedOrder(4));
+    await enqueueOrder(queuedOrder(3), EMPLOYEE.id);
+    await enqueueOrder(queuedOrder(4), EMPLOYEE.id);
     server.reachable = false;
 
     render(<App />);
@@ -503,6 +504,81 @@ describe("KioskShell", () => {
     });
 
     await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+  });
+
+  /**
+   * The day limit across sessions, which is the only place it means anything:
+   * within one cart the reducer's own arithmetic covers it, and a limit that
+   * resets every time the worker badges out is not a day limit at all.
+   *
+   * The device answers this from its OWN journal — best effort, never the
+   * decision (`POST /kiosk/orders` re-decides it against live data), which is
+   * exactly what makes it safe to be incomplete.
+   */
+  it("counts what this device already handed the worker today against their limit", async () => {
+    await pair();
+    await appendJournal({
+      at: NOW.toISOString(),
+      createdAt: NOW.toISOString(),
+      deviceSeq: 3,
+      orderNo: "ORD-26-0003",
+      conflicts: [],
+      employeeId: EMPLOYEE.id,
+      acceptedCount: 2,
+    });
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+
+    scan(BADGE);
+
+    await settle(() => expect(screen.getByText(CART_TITLE)).toBeDefined());
+    await settle(() => expect(screen.getByText("Лимит 5 шт в день · осталось 3")).toBeDefined());
+  });
+
+  // An order the worker just placed but that has not synced still counts
+  // against them: they walked away with the bottle either way, and the server
+  // will count it the moment the queue drains.
+  it("counts an order that is still sitting in the offline queue", async () => {
+    await pair();
+    server.reachable = false;
+    setOnLine(false);
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+
+    await takeOneBottle();
+    await settle(() => expect(screen.getByText(QUEUED_TITLE)).toBeDefined());
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Готово" }));
+    });
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+
+    scan(BADGE);
+
+    await settle(() => expect(screen.getByText(CART_TITLE)).toBeDefined());
+    await settle(() => expect(screen.getByText("Лимит 5 шт в день · осталось 4")).toBeDefined());
+  });
+
+  /**
+   * The upgrade path. A device that has been running since before the journal
+   * carried an employee holds entries nothing can attribute — they must be
+   * skipped, not crash the cart and not be read as an anonymous withdrawal
+   * charged to whoever badges in next.
+   */
+  it("opens the cart on a device whose journal predates the day count", async () => {
+    await pair();
+    await appendJournal({
+      at: NOW.toISOString(),
+      deviceSeq: 3,
+      orderNo: "ORD-26-0003",
+      conflicts: [{ rawKm: KM, reason: "duplicate" }],
+    } as unknown as JournalEntry);
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+
+    scan(BADGE);
+
+    await settle(() => expect(screen.getByText(CART_TITLE)).toBeDefined());
+    await settle(() => expect(screen.getByText("Лимит 5 шт в день · осталось 5")).toBeDefined());
   });
 
   it("submits online and shows the number the server gave back", async () => {
@@ -657,7 +733,7 @@ describe("KioskShell", () => {
 
   it("drains the queue when the device comes back online", async () => {
     await pair();
-    await enqueueOrder(queuedOrder(3));
+    await enqueueOrder(queuedOrder(3), EMPLOYEE.id);
     server.reachable = false;
     setOnLine(false);
     render(<App />);

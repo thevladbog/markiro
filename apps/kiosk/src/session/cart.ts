@@ -173,9 +173,10 @@ function applyScan(state: CartState, scan: KioskScan, ctx: CartContext): CartSta
  * `applyScan` above asks this very function.
  *
  * Clamped at zero, and that clamp is load-bearing twice over. `alreadyTakenToday`
- * arrives from the server and can exceed the limit — an administrator lowering
- * it mid-day, or items the worker took at another kiosk — so the raw difference
- * goes negative. Negative is neither printable («осталось −2») nor, more
+ * is counted off the device's own order journal (`session/day-count.ts`) and can
+ * exceed the limit — an administrator lowering it mid-day, or a snapshot older
+ * than the orders it is being compared against — so the raw difference goes
+ * negative. Negative is neither printable («осталось −2») nor, more
  * importantly, equal to zero: a caller testing "is there anything left?" with
  * the unclamped difference would answer "yes" for a worker who has none, put an
  * inviting scan prompt in front of them, and let the reducer refuse every code

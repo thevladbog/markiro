@@ -74,7 +74,7 @@ describe("cacheAge", () => {
 describe("flushQueue", () => {
   it("submits in deviceSeq order and drops each order only after the server acknowledges it", async () => {
     for (const deviceSeq of [1, 2]) {
-      await enqueueOrder({ deviceSeq, badgeCode: "B", reason: "buy", items: [] });
+      await enqueueOrder({ deviceSeq, badgeCode: "B", reason: "buy", items: [] }, "e1");
     }
     const seen: number[] = [];
     const client = {
@@ -98,7 +98,7 @@ describe("flushQueue", () => {
 
   it("stops at the first failure and keeps the rest queued, so ordering is never broken", async () => {
     for (const deviceSeq of [1, 2]) {
-      await enqueueOrder({ deviceSeq, badgeCode: "B", reason: "buy", items: [] });
+      await enqueueOrder({ deviceSeq, badgeCode: "B", reason: "buy", items: [] }, "e1");
     }
     const client = {
       bootstrap: vi.fn(),
@@ -116,14 +116,23 @@ describe("flushQueue", () => {
   // remove" guarantee is claimed only by the replay test below, which is what
   // actually fails if the two writes are swapped.
   it("journals the server's verdict, conflicts and all, and clears the order from the queue", async () => {
-    await enqueueOrder({ deviceSeq: 4, badgeCode: "B", reason: "buy", items: [{ rawKm: "01…" }] });
+    await enqueueOrder(
+      {
+        deviceSeq: 4,
+        badgeCode: "B",
+        reason: "buy",
+        items: [{ rawKm: "01…" }, { rawKm: "01…dup" }],
+        createdAt: "2026-07-27T21:30:00.000Z",
+      },
+      "e1",
+    );
     const client = {
       bootstrap: vi.fn(),
       submitOrder: vi.fn(async () => ({
         orderNo: "ORD-26-0004",
         status: "pending",
-        itemCount: 0,
-        conflicts: [{ rawKm: "01…", reason: "duplicate" }],
+        itemCount: 1,
+        conflicts: [{ rawKm: "01…dup", reason: "duplicate" }],
       })),
     };
 
@@ -132,16 +141,47 @@ describe("flushQueue", () => {
     expect(await journalStore.readJournal(10)).toEqual([
       {
         at: "2026-07-28T07:00:00.000Z",
+        // The order's own scan time, not the sync stamp above: this order was
+        // taken the previous evening and waited out an outage, and it is the
+        // day it was TAKEN that the server counts it against.
+        createdAt: "2026-07-27T21:30:00.000Z",
         deviceSeq: 4,
         orderNo: "ORD-26-0004",
-        conflicts: [{ rawKm: "01…", reason: "duplicate" }],
+        employeeId: "e1",
+        // What the server accepted — one of the two scanned codes. The refused
+        // one never counted against the worker server-side.
+        acceptedCount: 1,
+        conflicts: [{ rawKm: "01…dup", reason: "duplicate" }],
       },
     ]);
     expect(await listQueue()).toEqual([]);
   });
 
+  // With no `createdAt` in the body the server stamps the order as it arrives
+  // (`when = dto.createdAt ?? new Date()`), so the device journals that same
+  // moment rather than leaving the day count with nothing to place it by.
+  it("falls back to the sync moment for an order that carries no scan time", async () => {
+    await enqueueOrder({ deviceSeq: 9, badgeCode: "B", reason: "buy", items: [] }, "e1");
+    const client = {
+      bootstrap: vi.fn(),
+      submitOrder: vi.fn(async () => ({
+        orderNo: "ORD-26-0009",
+        status: "pending",
+        itemCount: 0,
+        conflicts: [],
+      })),
+    };
+
+    await flushQueue(client as never, () => new Date("2026-07-28T07:00:00.000Z"));
+
+    expect((await journalStore.readJournal(10))[0]).toMatchObject({
+      at: "2026-07-28T07:00:00.000Z",
+      createdAt: "2026-07-28T07:00:00.000Z",
+    });
+  });
+
   it("keeps the order queued when journalling fails, so a crash mid-flight replays instead of losing it", async () => {
-    await enqueueOrder({ deviceSeq: 1, badgeCode: "B", reason: "buy", items: [] });
+    await enqueueOrder({ deviceSeq: 1, badgeCode: "B", reason: "buy", items: [] }, "e1");
     const client = {
       bootstrap: vi.fn(),
       submitOrder: vi.fn(async () => ({
@@ -174,7 +214,7 @@ describe("flushQueue", () => {
 
   it("aborts the whole drain at the failing order, leaving it and everything after it queued in order", async () => {
     for (const deviceSeq of [1, 2, 3]) {
-      await enqueueOrder({ deviceSeq, badgeCode: "B", reason: "buy", items: [] });
+      await enqueueOrder({ deviceSeq, badgeCode: "B", reason: "buy", items: [] }, "e1");
     }
     const client = {
       bootstrap: vi.fn(),
@@ -212,7 +252,7 @@ describe("flushQueue", () => {
   });
 
   it("resolves when the dequeue fails too, leaving the acknowledged order to replay", async () => {
-    await enqueueOrder({ deviceSeq: 1, badgeCode: "B", reason: "buy", items: [] });
+    await enqueueOrder({ deviceSeq: 1, badgeCode: "B", reason: "buy", items: [] }, "e1");
     vi.spyOn(queueStore, "dequeueOrder").mockRejectedValueOnce(new Error("indexeddb unavailable"));
     const client = {
       bootstrap: vi.fn(),
@@ -234,7 +274,7 @@ describe("flushQueue", () => {
 
   it("ignores a second concurrent drain instead of submitting the same order twice", async () => {
     for (const deviceSeq of [1, 2]) {
-      await enqueueOrder({ deviceSeq, badgeCode: "B", reason: "buy", items: [] });
+      await enqueueOrder({ deviceSeq, badgeCode: "B", reason: "buy", items: [] }, "e1");
     }
     let reachedSubmit!: () => void;
     const submitStarted = new Promise<void>((resolve) => {

@@ -34,7 +34,13 @@ export interface CartProps {
   /** Who the badge admitted. Shown in the header so the wrong person notices. */
   employee: { id: string; fullName: string };
   bootstrap: KioskBootstrapDto;
-  /** What this employee has already taken today, counted against the limit. */
+  /**
+   * What this employee has already taken today AS FAR AS THIS DEVICE KNOWS —
+   * counted by `session/day-count.ts` off the kiosk's own journal and queue,
+   * not asked of the server. It can be short (another kiosk, or history older
+   * than the journal keeps), which is why the number this screen prints is a
+   * courtesy and `POST /kiosk/orders` remains the authority.
+   */
   alreadyTakenToday: number;
   /**
    * Subscribes `cb` to the device's scans and MAY return a teardown, which

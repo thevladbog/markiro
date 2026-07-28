@@ -128,10 +128,25 @@ export async function flushQueue(client: KioskClient, now: () => Date): Promise<
     for (const order of queued) {
       try {
         const result = await client.submitOrder(order.body);
+        const at = now().toISOString();
         await appendJournal({
-          at: now().toISOString(),
+          at,
+          // The order's own scan time, which is what the server files it under
+          // (`createFromKiosk`: `when = dto.createdAt ?? new Date()`). The
+          // fallback mirrors that second branch — with no `createdAt` in the
+          // body the server stamps the order as it arrives, which is this
+          // moment. Journalling the sync time instead would move an order
+          // queued through an outage into the wrong day for the day count.
+          createdAt: order.body.createdAt ?? at,
           deviceSeq: order.deviceSeq,
           orderNo: result.orderNo,
+          // Whom the DEVICE opened the session for; the server re-resolves the
+          // badge and may disagree, which is one of several reasons the local
+          // day count is best-effort.
+          employeeId: order.employeeId,
+          // What the server ACCEPTED. A refused item never counted against the
+          // worker server-side, so it must not count against them here.
+          acceptedCount: result.itemCount,
           conflicts: result.conflicts,
         });
       } catch {

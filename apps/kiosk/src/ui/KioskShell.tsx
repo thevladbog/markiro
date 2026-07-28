@@ -18,8 +18,10 @@ import { Idle } from "../screens/Idle.js";
 import { Pairing } from "../screens/Pairing.js";
 import { ScannerSetup } from "../screens/ScannerSetup.js";
 import type { CartState } from "../session/cart.js";
+import { countTakenToday, startOfUtcDay, utcDayOf } from "../session/day-count.js";
 import { readSnapshot, type CachedSnapshot } from "../store/cache.js";
 import { readConfig, readScannerSettings, writeConfig, type KioskConfig } from "../store/config.js";
+import { readJournalSince } from "../store/journal.js";
 import { enqueueOrder, listQueue } from "../store/queue.js";
 import {
   flushQueue,
@@ -108,6 +110,17 @@ export function KioskShell(): React.JSX.Element {
   const [submitted, setSubmitted] = useState<SubmittedOrder | null>(null);
   /** The live scan transport: `null` is the keyboard wedge, a port is Web Serial. */
   const [scanPort, setScanPort] = useState<SerialPort | null>(null);
+  /**
+   * What the signed-in worker has already taken today, counted off this
+   * device's own history — and WHOSE session it was counted for.
+   *
+   * The session id is carried with the number because the read is async: an
+   * answer that arrives late must not be spent by the next worker, and a
+   * stale count belonging to the previous one is exactly the mis-attribution
+   * this whole feature exists to avoid. Mismatched, it reads as zero, and a
+   * zero here is the safe direction — see `countTakenToday`.
+   */
+  const [takenToday, setTakenToday] = useState<{ sessionId: number; count: number } | null>(null);
 
   /**
    * The config as the ASYNC work sees it. The refresh interval, the `online`
@@ -366,6 +379,48 @@ export function KioskShell(): React.JSX.Element {
   }, [sync]);
 
   /**
+   * The day limit, answered from local history the moment a badge opens a
+   * session — the journal's delivered orders plus whatever is still queued.
+   *
+   * Read HERE rather than in `Cart`, which owns no store access and is a
+   * projection of `CartState`; the decision itself is `countTakenToday`'s, and
+   * this is only the wiring that feeds it.
+   *
+   * ONCE PER SESSION is enough. Nothing this device can see changes a worker's
+   * spent allowance while they stand at the cart except the cart itself, and
+   * `remainingToday` already subtracts that.
+   *
+   * A failed read leaves the count where it was — at zero for a fresh session
+   * — rather than refusing to open the cart. Guessing low costs a conflict on
+   * an order the server refuses; guessing high turns a worker away at an
+   * unattended machine with nobody to overrule it.
+   */
+  useEffect(() => {
+    if (!session) return;
+    const { id: sessionId, employeeId } = session;
+    let alive = true;
+    void (async () => {
+      try {
+        const at = now();
+        const [journal, queued] = await Promise.all([
+          readJournalSince(startOfUtcDay(at)),
+          listQueue(),
+        ]);
+        if (!alive) return;
+        setTakenToday({
+          sessionId,
+          count: countTakenToday({ employeeId, today: utcDayOf(at), journal, queued }),
+        });
+      } catch (err) {
+        console.error("kiosk: could not count what this worker has taken today", err);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [session]);
+
+  /**
    * The badge that opened the session, stashed by the resolver at the moment it
    * matched. `Idle.onEmployee` carries only the employee id — by design, it has
    * no business handling the credential — but `CreateOrderDto.badgeCode` is the
@@ -436,7 +491,12 @@ export function KioskShell(): React.JSX.Element {
         // acknowledge-then-remove is what makes the replay safe. Submitting
         // first and queueing on failure would lose the order in exactly the
         // window that matters.
-        await enqueueOrder(body);
+        // The employee id travels with the record but NOT in the body: the
+        // server re-resolves `badgeCode` and files the order under its own
+        // answer, so this is device-local bookkeeping — it is what lets the
+        // day count charge an order that has not synced yet to the worker who
+        // took it, and what `flushQueue` copies into the journal.
+        await enqueueOrder(body, active.employeeId);
         // From here on the server's answer for THIS order is worth keeping.
         awaited.current = { deviceSeq, result: null };
         await drain();
@@ -556,12 +616,17 @@ export function KioskShell(): React.JSX.Element {
         key={session.id}
         employee={{ id: session.employeeId, fullName: session.fullName }}
         bootstrap={snapshot.bootstrap}
-        // Zero, honestly: the bootstrap carries no per-employee count of what
-        // has already been taken today, so the device cannot know it. The
-        // local limit therefore only counts this cart, which is all the local
-        // pass ever claims to be — `POST /kiosk/orders` re-decides the day
-        // limit against live data and its `conflicts[]` are authoritative.
-        alreadyTakenToday={0}
+        // Counted off this device's own order journal and its unsynced queue,
+        // which is what the design asks for: the local day limit is
+        // «best-effort по локальному журналу заявок киоска (сервер остаётся
+        // авторитетом)» (design 2026-07-24 §7). It can only MISS withdrawals —
+        // another kiosk's, or history older than the journal keeps — never
+        // invent one, and missing them is the safe direction because
+        // `POST /kiosk/orders` re-decides the limit against live data and its
+        // `conflicts[]` are authoritative either way.
+        //
+        // Zero until the read lands (and if it fails), for the same reason.
+        alreadyTakenToday={takenToday?.sessionId === session.id ? takenToday.count : 0}
         onScan={subscribe}
         onSubmit={(state) => {
           if (submitting.current) return;
