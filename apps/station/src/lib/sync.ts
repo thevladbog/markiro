@@ -1,6 +1,6 @@
 import type { StationClient } from "./api-client.js";
 import type { SqlExecutor } from "./mirror.js";
-import { ackThrough, outboxDepth, readBatch, type OutboxItem } from "./outbox.js";
+import { ackThrough, oldestQueuedAt, outboxDepth, readBatch, type OutboxItem } from "./outbox.js";
 
 /** Scans per request. Small enough to survive a flaky link and to retry cheaply. */
 export const BATCH_SIZE = 200;
@@ -68,10 +68,6 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
   let stopped = false;
   let requested = false;
   let lastSuccessAt: number | null = null;
-  // First `now()` at which the queue was observed non-empty with no success
-  // yet to measure from. Cleared whenever the queue empties, so a later
-  // backlog starts its own grace period rather than inheriting a stale one.
-  let unsyncedSince: number | null = null;
   let backoffMs = BACKOFF_START_MS;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let idleResolvers: (() => void)[] = [];
@@ -87,15 +83,30 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
     // Nothing queued is never "stuck", however long the link has been down.
     let stuck = false;
     if (pending > 0) {
-      // On a device that has never synced there is no last-success time to
-      // measure from, so the grace period starts the first time this engine
-      // notices the backlog — otherwise a station that never once synced
-      // would report stuck immediately.
-      if (lastSuccessAt === null && unsyncedSince === null) unsyncedSince = now();
-      const since = lastSuccessAt ?? unsyncedSince!;
-      stuck = now() - since >= STUCK_AFTER_MS;
-    } else {
-      unsyncedSince = null;
+      // These two branches deliberately live in different time domains and
+      // must never be compared against each other — mixing them is exactly
+      // the bug this replaces. `lastSuccessAt` is stamped from the injected
+      // `now()`, so it is only meaningful measured against a later `now()`
+      // from that same source. Before this engine has ever seen a success
+      // there is no such stamp, so the only honest measure is the real age
+      // of the oldest queued scan: `scanned_at` is a wall-clock ISO
+      // timestamp, so it has to be measured against `Date.now()`, never
+      // against the injected clock.
+      //
+      // No false-alarm risk on a healthy restart: state is published only
+      // after the drain loop completes, so a device that reconnects and
+      // drains successfully already has `lastSuccessAt` set by the time
+      // this runs.
+      if (lastSuccessAt !== null) {
+        stuck = now() - lastSuccessAt >= STUCK_AFTER_MS;
+      } else {
+        const oldest = await oldestQueuedAt(deps.exec);
+        const oldestMs = oldest === null ? NaN : Date.parse(oldest);
+        // A missing or unparseable timestamp must never masquerade as "very
+        // old" via NaN comparisons — treat it as not stuck rather than
+        // warning spuriously.
+        stuck = Number.isFinite(oldestMs) && Date.now() - oldestMs >= STUCK_AFTER_MS;
+      }
     }
     deps.onState({ pending, lastSuccessAt, stuck });
   }

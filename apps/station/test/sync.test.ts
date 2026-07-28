@@ -17,12 +17,16 @@ async function migratedExec(): Promise<SqlExecutor> {
   return exec;
 }
 
-async function seed(exec: SqlExecutor, n: number): Promise<void> {
+async function seed(
+  exec: SqlExecutor,
+  n: number,
+  scannedAt = "2026-07-28T10:00:00.000Z",
+): Promise<void> {
   for (let i = 1; i <= n; i++) {
     await exec.run(
       `INSERT INTO outbox (shift_id, terminal_id, raw, verdict, scanned_at, code_hash, gtin14, serial)
        VALUES (?,?,?,?,?,?,?,?)`,
-      ["s1", "t1", `RAW${i}`, "ok", "2026-07-28T10:00:00.000Z", `h${i}`, "04600000000017", `S${i}`],
+      ["s1", "t1", `RAW${i}`, "ok", scannedAt, `h${i}`, "04600000000017", `S${i}`],
     );
   }
 }
@@ -133,12 +137,64 @@ describe("sync engine", () => {
     engine.stop();
   });
 
-  it("reports stuck once nothing has synced for the threshold while work is queued", async () => {
+  it("before any success: is stuck when the oldest queued scan is already older than the threshold on the wall clock", async () => {
+    const exec = await migratedExec();
+    // Real ISO timestamp, well past the threshold on the actual wall clock.
+    // No `now` override here: before any success, the code must measure
+    // against `Date.now()`/`Date.parse`, never the injected clock, so this
+    // test only proves something if it runs without one.
+    const staleScannedAt = new Date(Date.now() - STUCK_AFTER_MS - 60_000).toISOString();
+    await seed(exec, 1, staleScannedAt);
+    const post = vi.fn().mockRejectedValue(new Error("offline"));
+    const states: { stuck: boolean }[] = [];
+
+    const engine = createSyncEngine({
+      exec,
+      client: { post },
+      machineId: "m1",
+      onState: (s) => states.push({ stuck: s.stuck }),
+    });
+    engine.nudge();
+    await engine.idle();
+
+    // This is the behaviour the original in-memory-only fix dropped: a
+    // never-synced device with a stale backlog must warn immediately, not
+    // fifteen minutes after this process happened to start. A regression to
+    // "measure from first observation" would report false here.
+    expect(states.at(-1)).toMatchObject({ stuck: true });
+    engine.stop();
+  });
+
+  it("before any success: is not stuck when the oldest queued scan is fresh", async () => {
+    const exec = await migratedExec();
+    await seed(exec, 1, new Date().toISOString());
+    const post = vi.fn().mockRejectedValue(new Error("offline"));
+    const states: { stuck: boolean }[] = [];
+
+    const engine = createSyncEngine({
+      exec,
+      client: { post },
+      machineId: "m1",
+      onState: (s) => states.push({ stuck: s.stuck }),
+    });
+    engine.nudge();
+    await engine.idle();
+
+    // Proves the branch actually compares ages rather than always reporting
+    // stuck once any pre-success backlog exists.
+    expect(states.at(-1)).toMatchObject({ stuck: false });
+    engine.stop();
+  });
+
+  it("after a success: reports stuck once nothing has synced for the threshold, measured on the injected clock", async () => {
     const exec = await migratedExec();
     await seed(exec, 1);
-    const post = vi.fn().mockRejectedValue(new Error("offline"));
-    const states: { pending: number; stuck: boolean }[] = [];
     let clock = 1_000_000;
+    const post = vi
+      .fn()
+      .mockResolvedValueOnce({ applied: 1, alreadyApplied: false })
+      .mockRejectedValue(new Error("offline"));
+    const states: { pending: number; stuck: boolean }[] = [];
 
     const engine = createSyncEngine({
       exec,
@@ -149,11 +205,23 @@ describe("sync engine", () => {
     });
     engine.nudge();
     await engine.idle();
+    expect(states.at(-1)).toMatchObject({ pending: 0, stuck: false });
+    expect(post).toHaveBeenCalledTimes(1);
+
+    // Queue fresh work (scanned "now" on the real clock, so a regression
+    // back to comparing wall-clock ages here could not accidentally pass)
+    // and make the next send fail.
+    await seed(exec, 1, new Date().toISOString());
+    engine.nudge();
+    await engine.idle();
     expect(states.at(-1)).toMatchObject({ pending: 1, stuck: false });
 
     clock += STUCK_AFTER_MS + 1;
     engine.nudge();
     await engine.idle();
+    // Flips only because the *injected* clock crossed the threshold since
+    // `lastSuccessAt`; a regression that dropped this branch (or compared
+    // the wrong clock) would leave this false forever.
     expect(states.at(-1)).toMatchObject({ pending: 1, stuck: true });
     engine.stop();
   });
