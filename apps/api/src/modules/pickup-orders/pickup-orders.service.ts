@@ -89,7 +89,26 @@ export class PickupOrdersService {
 
     // 2. Badge -> active employee (badge's revoked_at is null). Unknown -> 401 ("bad badge" on the kiosk).
     const employeeId = await this.resolveActiveEmployeeId(tenantId, dto.badgeCode);
-    if (!employeeId) throw new UnauthorizedException("Unknown badge");
+    if (!employeeId) {
+      // An offline sync lands hours after the scan, so the badge may have
+      // been revoked in between -- and this 401 fires before a single item
+      // is examined, so without this the codes the worker walked off with
+      // leave no trace at all. Codes only: an item-less badge heartbeat
+      // lost nothing and must not add noise here.
+      if (dto.items.length > 0) {
+        await this.recordScanRejection(this.db, {
+          tenantId,
+          kioskId,
+          employeeId: null,
+          badgeCode: dto.badgeCode,
+          orderId: null,
+          deviceSeq: dto.deviceSeq,
+          codes: dto.items.map((item) => ({ rawKm: item.rawKm, reason: "unknown_badge" })),
+          scannedAt: dto.createdAt ? new Date(dto.createdAt) : new Date(),
+        });
+      }
+      throw new UnauthorizedException("Unknown badge");
+    }
 
     // 3. Writeoff orders require a non-archived reason belonging to this tenant.
     const writeoffReasonId = await this.resolveWriteoffReasonId(tenantId, dto);
@@ -140,13 +159,21 @@ export class PickupOrdersService {
           conflicts: [],
         };
       }
-      // No order row is created here, so `syncConflicts` has nowhere to live:
-      // the kiosk gets these conflicts in its response, but the cabinet would
-      // otherwise never learn that a worker's ENTIRE scan session was refused
-      // — the same blind spot `syncConflicts` exists to close, in its worst
-      // case. Log it so the event is at least observable to operations.
-      // A durable, admin-visible record needs a surface of its own (there is
-      // no order to hang it on) and is tracked separately.
+      // No order row is created here, so `syncConflicts` has nowhere to live.
+      // `pickup_scan_rejections` is that home: the cabinet would otherwise
+      // never learn that a worker's ENTIRE scan session was refused -- the
+      // same blind spot `syncConflicts` exists to close, in its worst case.
+      await this.recordScanRejection(this.db, {
+        tenantId,
+        kioskId,
+        employeeId,
+        badgeCode: null,
+        orderId: null,
+        deviceSeq: dto.deviceSeq,
+        codes: conflicts,
+        scannedAt: when,
+      });
+      // Kept alongside the durable row: cheap, and ops alerting may key on it.
       this.logger.warn(
         `kiosk ${kioskId}: all ${dto.items.length} scanned code(s) refused for employee ${employeeId} — ${conflicts.map((c) => c.reason).join(", ")}`,
       );
@@ -678,6 +705,32 @@ export class PickupOrdersService {
       createdAt: row.createdAt,
       conflictCount: row.syncConflicts?.length ?? 0,
     };
+  }
+
+  /**
+   * Persist refused codes so the cabinet can see them. Idempotent on
+   * `(tenant, kiosk, deviceSeq)` -- the same key `pickup_orders` uses -- so a
+   * replayed sync (a lost response, or a kiosk that keeps retrying a 401)
+   * records once rather than once per attempt.
+   *
+   * `db` is loosely typed so both `this.db` and a transaction handle satisfy
+   * it: the partial-refusal call site MUST enlist in the order's own
+   * transaction, or a kmKey-race rollback would leave an orphan row.
+   */
+  private async recordScanRejection(
+    db: Pick<Db, "insert">,
+    row: {
+      tenantId: string;
+      kioskId: string;
+      employeeId: string | null;
+      badgeCode: string | null;
+      orderId: string | null;
+      deviceSeq: number;
+      codes: { rawKm: string; reason: string }[];
+      scannedAt: Date;
+    },
+  ): Promise<void> {
+    await db.insert(schema.pickupScanRejections).values(row).onConflictDoNothing();
   }
 
   private async resolveActiveEmployeeId(
