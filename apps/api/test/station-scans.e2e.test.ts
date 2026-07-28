@@ -375,6 +375,21 @@ describe.skipIf(!ready)("station-scans e2e", () => {
     expect(res.body.message).toBe("Unknown shift in batch");
   });
 
+  // Device-key surface regression guard: see docs/device-key-surface.md.
+  // If a future hardening pass makes this session-only, every station stops
+  // being able to deliver its scans at all.
+  it("stays reachable by a station api-key", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+    const apiKey = await deviceKey(agent);
+
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send({ batchId: "machine-1:900", items: [] })
+      .expect(201);
+  });
+
   it("rejects an unauthenticated caller", async () => {
     await request(app!.getHttpServer())
       .post("/station/scans")

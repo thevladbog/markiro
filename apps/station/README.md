@@ -100,23 +100,116 @@ verdict → journal → signal.
   same code scanned under a different shift is still a duplicate.
 - **Journal** (`src/lib/journal.ts`): `recordScan` writes the code row to
   `codes_mirror` FIRST — only for an accepted scan — then always appends the
-  event row to `scan_events_mirror` second. These are deliberately two
-  independent statements, not one transaction: `tauri-plugin-sql` hands a
-  possibly different pooled connection to every call, so a `BEGIN` on one
-  call and a `COMMIT` on another are not actually one transaction, and can
-  fail outright under real overlapping DB work. Instead, `codes_mirror`'s
-  `PRIMARY KEY` on `code_hash` is the real backstop: a constraint violation
-  on the code insert **is** the duplicate verdict (reported back as
-  `alreadyPresent`), not a write failure. The event row is always appended
-  regardless, and records the verdict the operator actually saw — journalled
-  as `"duplicate"` when the code insert hit `alreadyPresent`, even if the
-  caller predicted `"ok"`. Failure semantics: if the event write fails after
-  the code row already landed, the code stays accepted without its audit
-  row — deliberately preferred over losing the code itself.
+  event row to `scan_events_mirror` second, then enqueues the scan into the
+  outbox third (see "Sync" below). These are deliberately independent
+  statements, not one transaction: `tauri-plugin-sql` hands a possibly
+  different pooled connection to every call, so a `BEGIN` on one call and a
+  `COMMIT` on another are not actually one transaction, and can fail outright
+  under real overlapping DB work. Instead, `codes_mirror`'s `PRIMARY KEY` on
+  `code_hash` is the real backstop: a constraint violation on the code insert
+  **is** the duplicate verdict (reported back as `alreadyPresent`), not a
+  write failure. The event row is always appended regardless, and records the
+  verdict the operator actually saw — journalled as `"duplicate"` when the
+  code insert hit `alreadyPresent`, even if the caller predicted `"ok"`.
+  Failure semantics: if the event write fails after the code row already
+  landed, the code stays accepted without its audit row — deliberately
+  preferred over losing the code itself. If the outbox insert then fails,
+  `recordScan` still rethrows so the operator sees it — but first, if this
+  call is the one that just stored a new code row, that row is best-effort
+  deleted from `codes_mirror`, so the operator's rescan lands as a clean
+  accept instead of a phantom duplicate that can never reach the server (the
+  code would otherwise be stuck "accepted" locally with nothing queued to
+  send it).
 - **Signal** (`src/lib/signal-sound.ts` + `src/ui/SignalOverlay.tsx`): the
   verdict drives a full-screen colored flash plus a tone synthesised with
   WebAudio (no audio assets, nothing fetched from a CDN). Mute and volume
   are persisted in `station_meta` (`loadSoundSettings`/`saveSoundSettings`).
+
+## Sync
+
+Every scan `recordScan` journals is also enqueued into the outbox, and a
+separate engine drains that queue to the server. The two halves are
+deliberately decoupled: a scan is accepted or rejected locally, instantly,
+with no network involved, and delivery to the server is a background concern
+that can lag arbitrarily far behind without blocking the floor.
+
+- **Outbox** (`src/lib/outbox.ts`, the `outbox` table) is a device-local
+  transport queue, separate from `codes_mirror` on purpose: `codes_mirror`
+  exists for offline duplicate detection and will be purged on a retention
+  schedule, while the outbox holds transport state that must survive until
+  the server has actually confirmed a scan. If delivery state lived in
+  `codes_mirror` instead, a retention purge could silently discard a scan
+  that was never delivered. Its `id` is `INTEGER PRIMARY KEY AUTOINCREMENT`,
+  not a bare `INTEGER PRIMARY KEY`, for the same reason: an ordinary SQLite
+  rowid is reused after a delete, so once purges start, a plain rowid could
+  let a new scan take an id at or below one the server already acknowledged;
+  `AUTOINCREMENT` guarantees ids are never reused.
+- **Drain** (`src/lib/sync.ts`, `createSyncEngine`) reads the oldest
+  `BATCH_SIZE` (200) queued scans and posts them to `POST /station/scans` as
+  one batch — small enough to survive a flaky plant network link and cheap to
+  retry. The batch id is deterministic —
+  `<machineId>:<highest outbox id in the batch>`, not random — so a retry
+  after a lost response and a resend after an app restart both carry the
+  exact same key. That determinism is what makes at-least-once delivery
+  safe: a batch is acknowledged — and its rows permanently deleted from the
+  outbox — only once the server has actually confirmed it, so a response
+  lost in transit just means the same batch gets resent. Before
+  acknowledging, the engine also checks that the response actually has the
+  shape `{ applied, alreadyApplied }` (number, boolean): a captive portal or
+  other proxy on the plant network answering `200 {"status":"ok"}` parses as
+  JSON but isn't this endpoint's contract, and acknowledging on the strength
+  of that would destroy scans the server never saw.
+- **Server side**
+  (`apps/api/src/modules/station-scans/station-scans.service.ts`) applies a
+  batch and records its idempotency key in a single Postgres transaction, so
+  a resent batch is either fully applied or a no-op, never applied twice and
+  never partially applied. Before opening that transaction it ensures the
+  Postgres partitions the batch's `scanned_at` values need actually exist —
+  a device can be offline across a month boundary, or have a dead clock — so
+  a missing partition never surfaces as an uncaught 500. That ordering
+  matters here specifically: every error from this endpoint is treated as
+  retryable by the drain above, so a request that always fails the same way
+  would otherwise wedge that station's queue forever.
+- **Triggers**: the engine is nudged, never polled — once when it's built, on
+  every scan `recordScan` finishes writing (whatever the verdict — a
+  duplicate or a rejection queues an event row too), on every `online`
+  browser event, and by a 15-second heartbeat (`src/lib/use-sync-engine.ts`)
+  that catches a connection recovering silently (e.g. a captive portal
+  clearing with no `online` event). Exactly one drain runs at a time; a
+  nudge that arrives mid-drain just requests one more pass once the current
+  one finishes.
+- **Backoff**: a failed batch — network error, non-2xx, or an unrecognized
+  response shape — is retried with exponential backoff starting at 2s and
+  doubling up to a 60s cap. This also covers a batch the server permanently
+  rejects (a 4xx): the engine cannot tell "will succeed on retry" from "never
+  will," and the owner's decision, recorded in `sync.ts`, is that losing scan
+  data is worse than a stalled queue — so a permanently-rejected batch wedges
+  that station's queue by design, and the stuck indicator below is what
+  surfaces that to an operator instead of the queue failing silently.
+- **Stuck warning**: the status bar's sync indicator turns "stuck" once the
+  queue is non-empty and has gone `STUCK_AFTER_MS` (15 minutes) without a
+  success. The rule spans two time domains that are deliberately never
+  compared against each other: once the engine has seen at least one
+  success, it measures `now() - lastSuccessAt`; before it has ever seen one
+  (e.g. right after an app restart facing a long-queued backlog), there is no
+  `lastSuccessAt` yet, so it falls back to the real wall-clock age of the
+  oldest still-queued scan instead.
+- **Engine lifecycle** (`src/lib/use-sync-engine.ts`) owns building and
+  tearing down the engine for the life of the app, as a single paired effect
+  rather than a memo plus a separate cleanup effect — that pairing is what
+  keeps React StrictMode's dev double-invoke from handing a second setup an
+  engine the first cleanup already permanently stopped.
+- **Shift boundaries**: the outbox belongs to the device, not to a shift or
+  an operator. Leaving a shift does not stop the drain and does not close the
+  shift — closing a shift from the floor is deliberately not a station action
+  (see `docs/device-key-surface.md`). A device that leaves a shift mid-queue
+  keeps draining exactly as before.
+- **Late data**: the server accepts a batch for a shift that is already
+  closed rather than rejecting it — a device can go offline before its
+  operator closes the shift on the cabinet side, or take a while to drain a
+  backlog after reconnecting. The first such batch stamps
+  `shifts.late_data_at` once (a second late batch for an already-stamped
+  shift does not move it), and the admin shift list surfaces it as a badge.
 
 ## Hardware
 
