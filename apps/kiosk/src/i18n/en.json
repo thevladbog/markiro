@@ -18,5 +18,31 @@
     "connectionFailed": "No connection to the server. Check the network and try again.",
     "badBundle": "The server sent unusable data. Ask the administrator for a new code.",
     "retry": "Retry"
+  },
+  "scannerSetup": {
+    "title": "Scanner setup",
+    "done": "Done",
+    "cancel": "Cancel",
+    "transportTitle": "How the scanner is connected",
+    "transportKeyboard": "Keyboard wedge (HID)",
+    "transportKeyboardHint": "Works on any device: the scanner types the code as if it were a keyboard.",
+    "transportSerial": "Web Serial (COM port)",
+    "transportSerialHint": "More reliable: the GS separator inside a marking code survives.",
+    "transportSerialUnavailable": "Web Serial is not available on this device, so only the keyboard mode is offered.",
+    "testTitle": "Test scan",
+    "testPrompt": "Scan any code — the kiosk will show what it recognised.",
+    "testWaiting": "Waiting for a scan…",
+    "resultKm": "Marking code",
+    "resultBadge": "Badge",
+    "resultIncomplete": "A marking code without the GS separator — the scanner dropped it. Switch to Web Serial.",
+    "resultUnknown": "Not recognised",
+    "gateTitle": "Sign in to the settings",
+    "gatePrompt": "Scan your badge, or enter your personnel number and PIN.",
+    "gateLogin": "Personnel number",
+    "gatePin": "PIN",
+    "gateNext": "Next",
+    "gateSubmit": "Sign in",
+    "gateError": "Could not sign in. Check the personnel number and the PIN.",
+    "gateRecovery": "Can't sign in? Unbind this kiosk in the admin panel and pair it again with a new code — until it is paired, scanner setup opens without a sign-in."
   }
 }
