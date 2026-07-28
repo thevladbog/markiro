@@ -40,3 +40,8 @@ export interface ListKiosksResponseDto {
 export interface EnrollKioskResponseDto {
   token: string;
 }
+
+// Re-exported so the controller can import every route DTO from this one
+// module; `PairingService` (../kiosk/pairing.service.ts) stays the single
+// source of truth for the shape.
+export type { IssuePairingCodeResultDto } from "../kiosk/pairing.service";

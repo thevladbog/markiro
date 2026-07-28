@@ -12,6 +12,8 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
+import { PairingService } from "../kiosk/pairing.service";
+import { SessionOnlyGuard } from "../../tenancy/session-only.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
@@ -20,6 +22,7 @@ import {
   updateKioskSchema,
   type CreateKioskDto,
   type EnrollKioskResponseDto,
+  type IssuePairingCodeResultDto,
   type KioskDto,
   type ListKiosksResponseDto,
   type SetKioskProductsDto,
@@ -31,7 +34,10 @@ import { KiosksService } from "./kiosks.service";
 @Controller("kiosks")
 @UseGuards(TenantGuard)
 export class KiosksController {
-  constructor(private readonly kiosksService: KiosksService) {}
+  constructor(
+    private readonly kiosksService: KiosksService,
+    private readonly pairingService: PairingService,
+  ) {}
 
   @Get()
   async listKiosks(@Req() req: RequestWithTenant): Promise<ListKiosksResponseDto> {
@@ -78,5 +84,15 @@ export class KiosksController {
     @Param("id") id: string,
   ): Promise<EnrollKioskResponseDto> {
     return this.kiosksService.enroll(req.tenantId!, id);
+  }
+
+  /** Session-only: a stolen device must not be able to mint pairing codes. */
+  @Post(":id/pairing-code")
+  @UseGuards(SessionOnlyGuard)
+  async issuePairingCode(
+    @Req() req: RequestWithTenant,
+    @Param("id") id: string,
+  ): Promise<IssuePairingCodeResultDto> {
+    return this.pairingService.issueCode(req.tenantId!, id);
   }
 }
