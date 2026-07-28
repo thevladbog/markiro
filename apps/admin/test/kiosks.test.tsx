@@ -252,6 +252,14 @@ describe("KiosksPage", () => {
     // and turn a slow import into a less legible test-level timeout.
     const barcode = await screen.findByRole("img", { name: /12345678/ }, { timeout: 3000 });
     await waitFor(() => expect(barcode.querySelector("svg")).not.toBeNull());
+
+    // bwip-js emits an `<svg>` with a `viewBox` but no width/height, which
+    // collapses to 0x0 inside the panel's fit-content column flex -- the box
+    // has to stay pinned for the symbol to be visible at all, and to match the
+    // placeholder that held its place. jsdom cannot lay this out, so the guard
+    // is on the declared size rather than a measured one.
+    expect(barcode.style.width).toBe("158px");
+    expect(barcode.style.height).toBe("74px");
   });
 
   it("counts the TTL down and drops into an expired state once it elapses", async () => {
