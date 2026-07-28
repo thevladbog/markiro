@@ -66,7 +66,11 @@ interface BatchResponse {
 function isBatchConflict(value: unknown): value is BatchConflict {
   if (typeof value !== "object" || value === null) return false;
   const c = value as Record<string, unknown>;
-  return typeof c.codeHash === "string" && typeof c.winningScannedAt === "string";
+  return (
+    typeof c.codeHash === "string" &&
+    (typeof c.winningTerminalId === "string" || c.winningTerminalId === null) &&
+    typeof c.winningScannedAt === "string"
+  );
 }
 
 /**
@@ -337,6 +341,14 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
             // same failure path as a network error: do not ack.
             throw new Error("station: unexpected /station/scans response shape");
           }
+          // Filtered element-by-element, not all-or-nothing: dropping only
+          // the malformed entry (Finding 2) keeps the rest of this batch's
+          // conflicts intact. That matters more here than it would somewhere
+          // safety-critical — this is a courtesy count, not delivery — and
+          // discarding the whole array over one bad element would
+          // under-report further than a single malformed field warrants;
+          // nothing about one malformed entry says anything about the
+          // others in the same response.
           const reported = Array.isArray(res.conflicts)
             ? res.conflicts.filter(isBatchConflict)
             : [];
@@ -354,7 +366,28 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
             // were the only local record a conflict existed for that batch,
             // and the resend that would have carried them again never
             // happens because the server no-ops an already-applied batch.
-            await recordConflicts(deps.exec, reported, new Date(now()).toISOString());
+            //
+            // Isolated in its own try/catch, separate from the network/shape
+            // catch below (Finding 1): a failure here has nothing to do with
+            // whether the server received the batch — it already did,
+            // durably, before this response ever arrived — so retrying
+            // protects nothing and would instead wedge every subsequent scan
+            // on this terminal behind a batch that can never ack. The floor
+            // rule (design brief 04) is that nothing competes with scan
+            // delivery, and a courtesy count is exactly the kind of thing
+            // that must not. The accepted trade: a failed recording loses
+            // those conflicts on this device permanently — a resend of an
+            // already-applied batch reports `conflicts: []` (the server
+            // decides conflicts at ingest and never recomputes them for a
+            // retry), so there is no second chance on this device. A
+            // silently under-reported courtesy count beats a terminal that
+            // cannot deliver scans, and the cabinet remains the
+            // authoritative record either way.
+            try {
+              await recordConflicts(deps.exec, reported, new Date(now()).toISOString());
+            } catch (err) {
+              console.error("station: recording conflicts failed", err);
+            }
           }
           // `alreadyApplied` is a success: this exact batch is on the
           // server already, so holding on to it would wedge the queue
