@@ -1500,7 +1500,21 @@
         }
       },
       "indexes": {},
-      "foreignKeys": {},
+      "foreignKeys": {
+        "sync_batches_tenant_id_organization_id_fk": {
+          "name": "sync_batches_tenant_id_organization_id_fk",
+          "tableFrom": "sync_batches",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {
         "sync_batches_tenant_id_batch_id_pk": {
           "name": "sync_batches_tenant_id_batch_id_pk",

@@ -159,7 +159,7 @@ export const shifts = pgTable(
 export const syncBatches = pgTable(
   "sync_batches",
   {
-    tenantId: text("tenant_id").notNull(),
+    tenantId: tenantId(),
     batchId: text("batch_id").notNull(),
     appliedAt: timestamp("applied_at", { withTimezone: true }).notNull().defaultNow(),
   },
