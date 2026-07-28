@@ -54,20 +54,42 @@ export function resolveOwnership(items: ClaimItem[], owners: OwnerRow[]): Resolu
   const lostByThisBatch: ConflictRow[] = [];
 
   // Postgres refuses an ON CONFLICT DO UPDATE whose values name the same
-  // conflict key twice, so the batch is collapsed first. The earliest scan
-  // wins here for exactly the same reason it wins against an incumbent.
-  const best = new Map<string, ClaimItem>();
+  // conflict key twice, so the batch is collapsed first. This runs in two
+  // passes rather than a single pairwise fold: folding compares each item
+  // only against the *current* running winner, so with three or more
+  // duplicates an early loser could get recorded as losing to an
+  // intermediate value that a still-earlier duplicate later beats. Instead,
+  // the earliest scan per code is found first, then every other item in
+  // that group is recorded as losing to THAT earliest — so the winner named
+  // in every emitted conflict is always the batch's true earliest,
+  // regardless of array order. On an exact tie within the batch, the first
+  // item in array order wins, deterministically, rather than depending on
+  // sort stability.
+  const groups = new Map<string, ClaimItem[]>();
   for (const item of items) {
-    const held = best.get(item.codeHash);
-    if (!held) {
-      best.set(item.codeHash, item);
-      continue;
+    const group = groups.get(item.codeHash);
+    if (group) {
+      group.push(item);
+    } else {
+      groups.set(item.codeHash, [item]);
     }
-    const [winner, loser] = item.scannedAt < held.scannedAt ? [item, held] : [held, item];
-    best.set(item.codeHash, winner);
-    const row = { codeHash: item.codeHash, losing: sideOf(loser), winning: sideOf(winner) };
-    conflicts.push(row);
-    lostByThisBatch.push(row);
+  }
+
+  const best = new Map<string, ClaimItem>();
+  for (const [codeHash, group] of groups) {
+    let winner = group[0]!;
+    for (const candidate of group) {
+      if (candidate.scannedAt < winner.scannedAt) {
+        winner = candidate;
+      }
+    }
+    best.set(codeHash, winner);
+    for (const candidate of group) {
+      if (candidate === winner) continue;
+      const row = { codeHash, losing: sideOf(candidate), winning: sideOf(winner) };
+      conflicts.push(row);
+      lostByThisBatch.push(row);
+    }
   }
 
   const ownerByHash = new Map(owners.map((o) => [o.codeHash, o]));
