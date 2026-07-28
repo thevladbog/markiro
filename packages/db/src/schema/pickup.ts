@@ -304,3 +304,20 @@ export const kioskPairingCodes = pgTable(
       .where(sql`used_at is null`),
   ],
 );
+
+/**
+ * Failed `POST /kiosk/pair` attempts per source, in fixed windows. The
+ * per-code attempt counter cannot bound guessing (a wrong guess matches no
+ * code row, so there is nothing to count against), and this route is
+ * unauthenticated by design — so the only workable limiter is per-source.
+ */
+export const kioskPairAttempts = pgTable(
+  "kiosk_pair_attempts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    source: text("source").notNull(),
+    windowStartedAt: timestamp("window_started_at", { withTimezone: true }).notNull(),
+    failures: integer("failures").notNull().default(0),
+  },
+  (t) => [unique("kiosk_pair_attempts_source_window_uq").on(t.source, t.windowStartedAt)],
+);

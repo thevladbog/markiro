@@ -226,24 +226,70 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
     await db
       .update(schema.kioskPairingCodes)
       .set({ expiresAt: new Date(Date.now() - 1000) })
-      .where(eq(schema.kioskPairingCodes.codeHash, hashDeviceToken(issued.body.code)));
+      .where(
+        and(
+          eq(schema.kioskPairingCodes.tenantId, tenantId),
+          eq(schema.kioskPairingCodes.codeHash, hashDeviceToken(issued.body.code)),
+        ),
+      );
     await request(app!.getHttpServer())
       .post("/kiosk/pair")
       .send({ code: issued.body.code })
       .expect(401);
   });
 
-  it("locks a code out after 5 wrong attempts", async () => {
+  it("refuses a code whose attempt budget is exhausted", async () => {
     const issued = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
     const codeHash = hashDeviceToken(issued.body.code);
     await db
       .update(schema.kioskPairingCodes)
       .set({ attempts: 5 })
-      .where(eq(schema.kioskPairingCodes.codeHash, codeHash));
+      .where(
+        and(
+          eq(schema.kioskPairingCodes.tenantId, tenantId),
+          eq(schema.kioskPairingCodes.codeHash, codeHash),
+        ),
+      );
     await request(app!.getHttpServer())
       .post("/kiosk/pair")
       .send({ code: issued.body.code })
       .expect(401);
+  });
+
+  it("401s an unknown, never-issued code", async () => {
+    await request(app!.getHttpServer()).post("/kiosk/pair").send({ code: "99999999" }).expect(401);
+  });
+
+  it("400s a malformed code", async () => {
+    await request(app!.getHttpServer()).post("/kiosk/pair").send({ code: "1234" }).expect(400);
+  });
+
+  // The app does not configure Express's `trust proxy`, so `@Ip()` reports
+  // the test client's real socket address for every request in this file --
+  // there is no way to fake a distinct source from here. All the calls below
+  // land in the same fixed window as a result, so the cleanup below clears
+  // that window rather than scoping by source.
+  it("keeps a per-source limiter that a valid code cannot bypass", async () => {
+    const windowMs = 15 * 60_000;
+    const windowStart = new Date(Math.floor(Date.now() / windowMs) * windowMs);
+    try {
+      for (let i = 0; i < 11; i++) {
+        await request(app!.getHttpServer())
+          .post("/kiosk/pair")
+          .send({ code: "00000000" })
+          .expect(401);
+      }
+
+      const issued = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+      await request(app!.getHttpServer())
+        .post("/kiosk/pair")
+        .send({ code: issued.body.code })
+        .expect(401);
+    } finally {
+      await db
+        .delete(schema.kioskPairAttempts)
+        .where(eq(schema.kioskPairAttempts.windowStartedAt, windowStart));
+    }
   });
 
   it("continues deviceSeq after a re-pair so the first order is not mistaken for a replay", async () => {
