@@ -1,4 +1,5 @@
 import type { StationClient } from "./api-client.js";
+import { conflictCount, recordConflicts } from "./conflicts.js";
 import { getInstallId } from "./install-id.js";
 import type { SqlExecutor } from "./mirror.js";
 import { ackThrough, oldestQueuedAt, outboxDepth, readBatch, type OutboxItem } from "./outbox.js";
@@ -24,6 +25,12 @@ export interface SyncState {
   lastSuccessAt: number | null;
   /** The queue has work and has stopped moving — "the pipe is broken". */
   stuck: boolean;
+  /**
+   * How many of this device's own scans lost ownership to an earlier scan
+   * elsewhere. Not an alarm — the operator already saw a green verdict for
+   * each one — so this is a quiet count, never something that interrupts.
+   */
+  conflicts: number;
 }
 
 export interface SyncEngineDeps {
@@ -43,9 +50,23 @@ export interface SyncEngine {
   idle(): Promise<void>;
 }
 
+/** One of this device's scans that lost ownership, as the server reports it. */
+interface BatchConflict {
+  codeHash: string;
+  winningTerminalId: string | null;
+  winningScannedAt: string;
+}
+
 interface BatchResponse {
   applied: number;
   alreadyApplied: boolean;
+  conflicts?: BatchConflict[];
+}
+
+function isBatchConflict(value: unknown): value is BatchConflict {
+  if (typeof value !== "object" || value === null) return false;
+  const c = value as Record<string, unknown>;
+  return typeof c.codeHash === "string" && typeof c.winningScannedAt === "string";
 }
 
 /**
@@ -53,6 +74,13 @@ interface BatchResponse {
  * strength of a response that merely parsed as JSON but isn't actually this
  * endpoint's contract — e.g. a captive portal or maintenance shim on the
  * plant network answering `200 {"status":"ok"}` instead of the server.
+ *
+ * The two original fields stay REQUIRED: this guard is what stands between a
+ * captive portal's `200 {"status":"ok"}` and an acknowledgement that
+ * permanently deletes scans. `conflicts` is tolerated when absent or
+ * malformed — a server that cannot describe conflicts must not cost the
+ * device its delivery — and is filtered element-by-element where it is
+ * consumed, not validated here.
  */
 function isBatchResponse(value: unknown): value is BatchResponse {
   return (
@@ -252,7 +280,8 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
         stuck = oldestQueuedIsStale;
       }
     }
-    deps.onState({ pending, lastSuccessAt, stuck });
+    const conflicts = await conflictCount(deps.exec);
+    deps.onState({ pending, lastSuccessAt, stuck, conflicts });
   }
 
   async function drain(): Promise<void> {
@@ -307,6 +336,25 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
             // proxy/captive portal on the plant network. Fall into the
             // same failure path as a network error: do not ack.
             throw new Error("station: unexpected /station/scans response shape");
+          }
+          const reported = Array.isArray(res.conflicts)
+            ? res.conflicts.filter(isBatchConflict)
+            : [];
+          if (reported.length > 0) {
+            // Recorded BEFORE the ack, on purpose: `recordConflicts` and
+            // `ackThrough` are two separate device-side writes (this pool
+            // has no multi-call transaction — see the module doc comment),
+            // so a crash between them is possible either way. Persisting
+            // conflicts first means a crash there simply resends the batch;
+            // the server already applied it and answers `alreadyApplied`
+            // with an empty `conflicts` list, and the ones already stored
+            // locally are untouched (recordConflicts is an idempotent
+            // upsert). The other order would lose them: acking first and
+            // then crashing before this write deletes the outbox rows that
+            // were the only local record a conflict existed for that batch,
+            // and the resend that would have carried them again never
+            // happens because the server no-ops an already-applied batch.
+            await recordConflicts(deps.exec, reported, new Date(now()).toISOString());
           }
           // `alreadyApplied` is a success: this exact batch is on the
           // server already, so holding on to it would wedge the queue

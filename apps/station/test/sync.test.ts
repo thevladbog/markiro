@@ -665,6 +665,59 @@ describe("sync engine", () => {
     10_000,
   );
 
+  it("records conflicts the server reports and counts them in the state", async () => {
+    const exec = await migratedExec();
+    await seed(exec, 1);
+    const post = vi.fn().mockResolvedValue({
+      applied: 1,
+      alreadyApplied: false,
+      conflicts: [
+        { codeHash: "h1", winningTerminalId: "t9", winningScannedAt: "2026-07-28T10:00:00.000Z" },
+      ],
+    });
+    const states: { conflicts: number }[] = [];
+
+    const engine = createSyncEngine({
+      exec,
+      client: { post },
+      machineId: "m1",
+      onState: (s) => states.push({ conflicts: s.conflicts }),
+    });
+    engine.nudge();
+    await engine.idle();
+
+    expect(states.at(-1)!.conflicts).toBe(1);
+    engine.stop();
+  });
+
+  it("still acknowledges when the response carries no conflicts field", async () => {
+    const exec = await migratedExec();
+    await seed(exec, 1);
+    const post = vi.fn().mockResolvedValue({ applied: 1, alreadyApplied: false });
+
+    const engine = createSyncEngine({ exec, client: { post }, machineId: "m1", onState: () => {} });
+    engine.nudge();
+    await engine.idle();
+
+    const rows = await exec.all<{ n: number }>("SELECT COUNT(*) AS n FROM outbox");
+    expect(rows[0]!.n).toBe(0);
+    engine.stop();
+  });
+
+  it("does not acknowledge when the response is not this endpoint's shape", async () => {
+    const exec = await migratedExec();
+    await seed(exec, 1);
+    const post = vi.fn().mockResolvedValue({ status: "ok" });
+
+    const engine = createSyncEngine({ exec, client: { post }, machineId: "m1", onState: () => {} });
+    engine.nudge();
+    await engine.idle();
+
+    const rows = await exec.all<{ n: number }>("SELECT COUNT(*) AS n FROM outbox");
+    expect(rows[0]!.n).toBe(1);
+    engine.stop();
+  });
+
   it("is not stuck when the queue is empty, however long since the last sync", async () => {
     const exec = await migratedExec();
     const post = vi.fn();
