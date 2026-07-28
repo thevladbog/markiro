@@ -55,6 +55,38 @@
     "unknownDismiss": "Got it",
     "close": "Close"
   },
+  "done": {
+    "title": "Order {{order}} handed over",
+    "titleQueued": "Order handed over — its number appears once the kiosk syncs",
+    "titleRefused": "The order was not accepted",
+    "subtitle": "Tell the administrator — they will file the order",
+    "subtitleTail": "and take the codes out of circulation.",
+    "refusedHint": "Not one code went through. Put the bottles aside and ask an administrator.",
+    "summary": "{{n}} pcs in the order",
+    "reset": "Done",
+    "autoReset": "The screen returns to the start in {{seconds}} seconds",
+    "conflictsTitle": "{{n}} pcs were not accepted",
+    "conflictsHint": "Put those bottles aside and show them to an administrator — they did not make it into the order.",
+    "conflictReason": {
+      "not_km": "not a marking code",
+      "incomplete": "the code was read only partly",
+      "unknown_product": "the product is not in the catalogue",
+      "not_allowed": "this kiosk does not issue it",
+      "duplicate": "duplicate — the code is already in another order",
+      "over_limit": "the daily limit was exceeded"
+    }
+  },
+  "blocked": {
+    "title": "This kiosk is not issuing products right now",
+    "body": "Its data is out of date: it has not reached the server for over a week. Ask an administrator — the kiosk needs the internet.",
+    "queue": "Orders already taken are not lost — {{n}} in the queue. They will reach the server on their own as soon as the connection is back.",
+    "queueEmpty": "Every order already taken has reached the server — nothing is lost."
+  },
+  "status": {
+    "online": "Connected to the server",
+    "offline": "No connection — the kiosk is working offline",
+    "stale": "The data was last refreshed more than a day ago"
+  },
   "scannerSetup": {
     "title": "Scanner setup",
     "done": "Done",
