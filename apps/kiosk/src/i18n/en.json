@@ -19,6 +19,15 @@
     "badBundle": "The server sent unusable data. Ask the administrator for a new code.",
     "retry": "Retry"
   },
+  "idle": {
+    "title": "Take products for yourself",
+    "subtitle": "Checkout and payment happen at the administrator's till",
+    "scan": "Scan the QR code",
+    "scanTarget": "on your badge",
+    "hint": "The QR code is on the back of your badge. Hold it up to the scanner below the screen, then scan the marking codes on the bottles.",
+    "badgeUnknown": "Badge not recognised. Scan it again, or ask an administrator.",
+    "notABadge": "Scan your badge first — the kiosk will take the bottles' marking codes after that."
+  },
   "scannerSetup": {
     "title": "Scanner setup",
     "done": "Done",
