@@ -208,18 +208,31 @@ export class OperatorsService {
       return parsePhc(b.badgeHash)?.saltB64 !== tenantSalt;
     });
     const backfilled = new Map<string, string>();
-    await Promise.all(
-      needsHash.map(async (b) => {
-        const hash = await hashBadgeWithSalt(b.badgeCode, tenantSalt);
-        backfilled.set(b.id, hash);
-        await this.db
-          .update(schema.employeeBadges)
-          .set({ badgeHash: hash })
-          .where(
-            and(eq(schema.employeeBadges.tenantId, tenantId), eq(schema.employeeBadges.id, b.id)),
-          );
-      }),
-    );
+    // Bounded concurrency, on purpose: WebCrypto's PBKDF2 (`deriveBits`) runs
+    // on libuv's threadpool (default size 4), so an unbounded `Promise.all`
+    // over `needsHash` would saturate that pool and stall the whole
+    // process's async crypto/fs/DNS for roughly N * ~50ms / 4 -- every
+    // pre-existing badge in the tenant matches this filter on the first read
+    // after a migration to the tenant salt (not just the handful with no
+    // hash yet), so N can be the tenant's entire active roster. Chunking to
+    // 8 keeps only a handful of derivations in flight regardless of how many
+    // rows need a rehash. Do not "optimise" this back to one `Promise.all`.
+    const REHASH_CHUNK_SIZE = 8;
+    for (let i = 0; i < needsHash.length; i += REHASH_CHUNK_SIZE) {
+      const chunk = needsHash.slice(i, i + REHASH_CHUNK_SIZE);
+      await Promise.all(
+        chunk.map(async (b) => {
+          const hash = await hashBadgeWithSalt(b.badgeCode, tenantSalt);
+          backfilled.set(b.id, hash);
+          await this.db
+            .update(schema.employeeBadges)
+            .set({ badgeHash: hash })
+            .where(
+              and(eq(schema.employeeBadges.tenantId, tenantId), eq(schema.employeeBadges.id, b.id)),
+            );
+        }),
+      );
+    }
 
     const map = new Map<string, string>();
     for (const b of rows) {

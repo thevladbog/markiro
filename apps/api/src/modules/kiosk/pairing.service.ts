@@ -6,7 +6,7 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from "@nestjs/common";
-import { and, eq, gt, isNull, max, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, max, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
 import { generateDeviceToken, hashDeviceToken } from "../../pickup/device-token";
@@ -171,7 +171,22 @@ export class PairingService {
     // brute-force limiter on its own happy path. It cannot be gamed: reaching
     // it requires a valid, single-use, live code, exactly the thing the
     // limiter exists to ration guessing at.
-    await this.refundPairAttempt(source, windowStart);
+    //
+    // `.catch()`ed rather than awaited plain: this is bookkeeping AFTER a
+    // redemption has already committed (the code is spent, the kiosk's
+    // `device_token_hash` already replaced). If this UPDATE throws, the
+    // caller must still get its token back -- the alternative (letting the
+    // throw propagate) would give the caller a 500 while stranding the
+    // redemption exactly the way moving `bootstrap` before the transaction,
+    // above, was meant to prevent. The worst case of a swallowed refund is
+    // one unit of budget not returned.
+    await this.refundPairAttempt(source, windowStart).catch((error: unknown) => {
+      this.logger.warn(
+        `kiosk pairing refund failed after a committed redemption (budget not returned): ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    });
     return result;
   }
 
@@ -180,7 +195,13 @@ export class PairingService {
     const rows = await this.db
       .select()
       .from(schema.kioskPairingCodes)
-      .where(eq(schema.kioskPairingCodes.codeHash, codeHash));
+      .where(eq(schema.kioskPairingCodes.codeHash, codeHash))
+      // Deterministic order so that, when only dead rows share this hash
+      // (see `candidate` below), which row's `attempts` gets bumped is
+      // stable rather than whatever order Postgres happens to return --
+      // that row can belong to another tenant, so a non-deterministic pick
+      // would be a non-deterministic cross-tenant write.
+      .orderBy(desc(schema.kioskPairingCodes.createdAt), asc(schema.kioskPairingCodes.id));
 
     const liveRows = rows.filter((r) => r.usedAt === null && r.expiresAt.getTime() > now.getTime());
 
@@ -314,7 +335,8 @@ export class PairingService {
    */
   private async assertUnderPairRateLimit(source: string, windowStart: Date): Promise<void> {
     if (source) {
-      const sourceAttempts = await this.recordPairAttempt(normalizePairSource(source), windowStart);
+      const normalizedSource = normalizePairSource(source);
+      const sourceAttempts = await this.recordPairAttempt(normalizedSource, windowStart);
       if (sourceAttempts > PAIR_ATTEMPT_BUDGET) {
         // A tripped budget is a security event (sustained guessing) AND,
         // for the global bucket, a platform-wide outage -- and previously
@@ -322,18 +344,30 @@ export class PairingService {
         // only a generic "invalid code". Never log the submitted code
         // itself; the HTTP response stays an unchanged generic 401 so the
         // caller can't learn which limit they hit.
-        this.logger.warn(
-          `kiosk pairing per-source budget exceeded: ${sourceAttempts} attempts in window`,
-        );
+        //
+        // Logged only on the transition past the budget (count === budget +
+        // 1), so it fires exactly once per source per window -- this route
+        // is unauthenticated, so logging every rejected request would let
+        // sustained abuse turn request volume straight into unbounded log
+        // volume. The normalised source key (never the raw submitted code)
+        // is included so this line can drive an alert.
+        if (sourceAttempts === PAIR_ATTEMPT_BUDGET + 1) {
+          this.logger.warn(
+            `kiosk pairing per-source budget exceeded for source ${normalizedSource}: ${sourceAttempts} attempts in window`,
+          );
+        }
         throw new UnauthorizedException();
       }
     }
 
     const globalAttempts = await this.recordPairAttempt(GLOBAL_PAIR_SOURCE, windowStart);
     if (globalAttempts > GLOBAL_PAIR_ATTEMPT_BUDGET) {
-      this.logger.warn(
-        `kiosk pairing global budget exceeded: ${globalAttempts} attempts in window`,
-      );
+      // Same transition-only logging as the per-source branch above.
+      if (globalAttempts === GLOBAL_PAIR_ATTEMPT_BUDGET + 1) {
+        this.logger.warn(
+          `kiosk pairing global budget exceeded: ${globalAttempts} attempts in window`,
+        );
+      }
       throw new UnauthorizedException();
     }
   }

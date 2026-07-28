@@ -55,8 +55,13 @@ belong in either section:
   singular `kiosk.controller.ts` already has its own guard and was never in
   scope for this document.
 - `POST /kiosk/pair` (`apps/api/src/modules/kiosk/kiosk-pair.controller.ts`) carries
-  **no guard** — a device has no credential until it succeeds. Brute force is
-  bounded by a per-code attempt lockout, not by a guard.
+  **no guard** — a device has no credential until it succeeds. Brute force is bounded by
+  a fixed-window rate limiter — a per-source attempt budget plus a global backstop,
+  both recorded in `kiosk_pair_attempts` — not by a per-code lockout: a wrong guess
+  matches no row, so there is nothing for a per-code counter to count. The per-source
+  dimension only distinguishes callers when `TRUST_PROXY_HOPS` is set correctly behind
+  a proxy; misconfigured, every caller collapses onto the proxy's own address and only
+  the (much larger) global backstop bounds guessing.
 
 Anything a station does not demonstrably need gets `SessionOnlyGuard`. When
 adding a `TenantGuard`-guarded route, decide which of the two sections above

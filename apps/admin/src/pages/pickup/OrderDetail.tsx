@@ -242,8 +242,8 @@ export function OrderDetailPage() {
           title={t("pages.pickup.conflicts.title", { count: order.syncConflicts.length })}
         >
           <ul style={{ margin: 0, paddingInlineStart: "var(--sp-5)" }}>
-            {order.syncConflicts.map((c) => (
-              <li key={c.rawKm} style={{ font: "var(--text-code)" }}>
+            {order.syncConflicts.map((c, i) => (
+              <li key={`${c.rawKm}:${i}`} style={{ font: "var(--text-code)" }}>
                 {c.rawKm} — {t(`pages.pickup.conflicts.reason.${c.reason}`)}
               </li>
             ))}

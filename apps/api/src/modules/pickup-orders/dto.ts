@@ -46,8 +46,19 @@ export interface CreateOrderResultDto {
  * the credential that authorises a pickup (see docs/device-key-surface.md).
  * All badge verifiers share `badgeSalt` so the device derives once per scan
  * and looks the digest up, instead of running PBKDF2 per employee.
+ *
+ * `operators[]` is frozen to match the station's `OperatorMirrorRecord`
+ * shape (`{ employeeId, name, login, role, pinHash, badgeHash, active }`) —
+ * the device app (Plan B-2) hasn't been built against this yet, so this is
+ * the cheapest point to lock it in.
+ *
+ * `generatedAt` is stamped by the server (not left to the device's own
+ * receive clock) because the device's 24h-warning / 7d-block staleness gates
+ * need a timestamp trustworthy enough to gate on — an unattended tablet's
+ * own clock is the least trustworthy clock in the system.
  */
 export interface KioskBootstrapDto {
+  generatedAt: string; // ISO 8601, server time -- see doc comment above
   config: { dayLimitPerEmployee: number; showPrices: boolean };
   badgeSalt: string; // base64; the salt every badgeHash below shares
   reasons: { id: string; name: string }[];
@@ -66,6 +77,7 @@ export interface KioskBootstrapDto {
     role: string;
     pinHash: string;
     badgeHash: string | null;
+    active: boolean;
   }[];
 }
 

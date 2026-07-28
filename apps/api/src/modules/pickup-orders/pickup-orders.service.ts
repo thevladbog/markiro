@@ -221,6 +221,7 @@ export class PickupOrdersService {
     const operators = await this.operatorsService.buildRoster(tenantId);
 
     return {
+      generatedAt: new Date().toISOString(),
       config: {
         dayLimitPerEmployee: kiosk?.dayLimitPerEmployee ?? 0,
         showPrices: kiosk?.showPrices ?? true,
@@ -241,6 +242,11 @@ export class PickupOrdersService {
         role: o.role,
         pinHash: o.pinHash,
         badgeHash: o.badgeHash,
+        // From the roster record, not hardcoded -- `buildRoster` only
+        // returns active operators today so this is always `true`, but the
+        // field must reflect the record, not an assumption baked into this
+        // mapping.
+        active: o.active,
       })),
     };
   }
