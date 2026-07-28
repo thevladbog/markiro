@@ -135,6 +135,14 @@ registry, `save-exact`, `engine-strict`, `minimum-release-age=10080`
 - CI: GitHub Actions — lint/test/build, DB migrations, Docker images,
   Tauri Windows installer build + signing, release channels for the updater.
 - Future on-prem = the same compose bundle.
+- The API needs `TRUST_PROXY_HOPS=1` behind Caddy (it defaults to 0, i.e.
+  untrusted, for direct exposure and for dev/tests) — otherwise Express's
+  `req.ip` resolves to Caddy's own address for every request. IP-keyed rate
+  limiting belongs in Caddy itself as the primary layer (it sees the real
+  client address unconditionally and can shed load before it reaches the
+  app); the API's own DB-backed limiter (currently just kiosk pairing) is a
+  backstop for when that layer is missing or misconfigured, not a
+  replacement for it.
 
 ## Open items (tracked for later phases)
 

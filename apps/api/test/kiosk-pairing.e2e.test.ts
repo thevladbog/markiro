@@ -4,16 +4,65 @@ import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { hashDeviceToken } from "../src/pickup/device-token";
+import { normalizePairSource } from "../src/modules/kiosk/pair-source";
 import { schema, type Db } from "@markiro/db";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
 );
+
+const PAIR_ATTEMPT_WINDOW_MS = 15 * 60_000;
+const GLOBAL_PAIR_SOURCE = "*";
+// Every request in this file resolves through the same local loopback
+// socket -- this suite never sets TRUST_PROXY_HOPS, so it defaults to 0 and
+// Express `trust proxy` stays disabled, meaning `@Ip()` always reports the
+// test client's own connecting address, never a header. Depending on
+// whether the app's HTTP server bound dual-stack or IPv4-only, that address
+// is one of a small, known set of loopback forms. `normalizePairSource` --
+// the same function `PairingService` writes through -- folds each down to
+// the key actually persisted, so this is the exhaustive, deterministic set
+// of per-source keys this file's own requests can ever produce.
+const LOOPBACK_PAIR_SOURCES = Array.from(
+  new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"].map(normalizePairSource)),
+);
+
+function pairAttemptWindowStart(now: number): Date {
+  return new Date(Math.floor(now / PAIR_ATTEMPT_WINDOW_MS) * PAIR_ATTEMPT_WINDOW_MS);
+}
+
+/**
+ * Clears this file's own kiosk-pairing rate-limiter budget for the current
+ * AND previous fixed window, so every test starts with a clean slate no
+ * matter how many attempts earlier tests in this file burned (several
+ * non-limiter tests call `POST /kiosk/pair`, and every attempt now consumes
+ * budget -- see `PairingService.recordPairAttempt`). Scoped to the finite
+ * set of sources this file's own requests can produce (`LOOPBACK_PAIR_SOURCES`
+ * plus the global `"*"` backstop) rather than to every source in the
+ * window, so it never clears a concurrent run's rows on the shared Postgres
+ * instance. The window is re-derived from `Date.now()` on every call rather
+ * than reused from a value captured earlier, so a cleanup running near a
+ * window boundary still targets the row it actually wrote to.
+ */
+async function clearPairAttemptBudget(db: Db): Promise<void> {
+  const currentWindowStart = pairAttemptWindowStart(Date.now());
+  const previousWindowStart = new Date(currentWindowStart.getTime() - PAIR_ATTEMPT_WINDOW_MS);
+  await db
+    .delete(schema.kioskPairAttempts)
+    .where(
+      and(
+        inArray(schema.kioskPairAttempts.source, [...LOOPBACK_PAIR_SOURCES, GLOBAL_PAIR_SOURCE]),
+        inArray(schema.kioskPairAttempts.windowStartedAt, [
+          currentWindowStart,
+          previousWindowStart,
+        ]),
+      ),
+    );
+}
 
 describe.skipIf(!ready)("kiosk pairing e2e", () => {
   let app: INestApplication | undefined;
@@ -76,6 +125,13 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
   // Fresh tenant + kiosk per test, per repo convention -- this Postgres is
   // shared across concurrent test runs, so every test scopes its own rows.
   beforeEach(async () => {
+    // Every POST /kiosk/pair call in this file (including from tests that
+    // aren't "about" the limiter) consumes budget against the SAME
+    // loopback source and the global "*" backstop. Without resetting here,
+    // attempts accumulate across this file's own tests within the same
+    // 15-minute window and could push a later test past either budget.
+    await clearPairAttemptBudget(db);
+
     agent = request.agent(app!.getHttpServer());
     tenantId = await signUpAndActivate(agent);
     const kiosk = await agent
@@ -264,14 +320,15 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
     await request(app!.getHttpServer()).post("/kiosk/pair").send({ code: "1234" }).expect(400);
   });
 
-  // The app does not configure Express's `trust proxy`, so `@Ip()` reports
-  // the test client's real socket address for every request in this file --
-  // there is no way to fake a distinct source from here. All the calls below
-  // land in the same fixed window as a result, so the cleanup below clears
-  // that window rather than scoping by source.
+  // TRUST_PROXY_HOPS defaults to 0 and this suite never sets it, so Express
+  // `trust proxy` stays disabled and `@Ip()` reports the test client's real
+  // socket address for every request in this file regardless of any forged
+  // X-Forwarded-For header -- there is no way to fake a distinct source from
+  // here. All the calls below land in the same fixed window as a result;
+  // `clearPairAttemptBudget` (also run in the shared `beforeEach`) is what
+  // keeps that from bleeding into this file's other tests or a concurrent
+  // run's rows on the shared Postgres instance.
   it("keeps a per-source limiter that a valid code cannot bypass", async () => {
-    const windowMs = 15 * 60_000;
-    const windowStart = new Date(Math.floor(Date.now() / windowMs) * windowMs);
     try {
       for (let i = 0; i < 11; i++) {
         await request(app!.getHttpServer())
@@ -286,9 +343,7 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
         .send({ code: issued.body.code })
         .expect(401);
     } finally {
-      await db
-        .delete(schema.kioskPairAttempts)
-        .where(eq(schema.kioskPairAttempts.windowStartedAt, windowStart));
+      await clearPairAttemptBudget(db);
     }
   });
 

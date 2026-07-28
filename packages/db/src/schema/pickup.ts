@@ -306,10 +306,22 @@ export const kioskPairingCodes = pgTable(
 );
 
 /**
- * Failed `POST /kiosk/pair` attempts per source, in fixed windows. The
- * per-code attempt counter cannot bound guessing (a wrong guess matches no
- * code row, so there is nothing to count against), and this route is
- * unauthenticated by design — so the only workable limiter is per-source.
+ * `POST /kiosk/pair` attempts per source, in fixed windows. The per-code
+ * attempt counter cannot bound guessing (a wrong guess matches no code row,
+ * so there is nothing to count against), and this route is unauthenticated
+ * by design — so this table is the only workable limiter.
+ *
+ * One row per `(source, windowStartedAt)`. `source` is either the caller's
+ * resolved address (an IPv6 address normalised to its /64 prefix -- see
+ * `normalizePairSource` in the API) or the reserved literal `"*"` for the
+ * global backstop bucket that every attempt also counts toward, so it can
+ * never grow past the number of distinct sources seen in a window plus one.
+ *
+ * `failures` is written by an atomic `INSERT ... ON CONFLICT DO UPDATE ...
+ * RETURNING` (record-then-check, not check-then-record — the column is kept
+ * under its original name to avoid another migration, but as of that fix it
+ * counts every attempt through the route, successes included, not only
+ * failed ones).
  */
 export const kioskPairAttempts = pgTable(
   "kiosk_pair_attempts",
