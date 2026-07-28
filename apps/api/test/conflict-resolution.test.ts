@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  resolveOwnership,
+  collapseClaims,
+  conflictsAgainstOwner,
+  displacedIncumbents,
   type ClaimItem,
   type OwnerRow,
 } from "../src/modules/station-scans/conflict-resolution";
@@ -16,107 +18,154 @@ function owner(codeHash: string, terminalId: string, iso: string): OwnerRow {
   return { codeHash, shiftId: "s1", terminalId, scannedAt: at(iso) };
 }
 
-describe("resolveOwnership", () => {
-  it("claims an unowned code with no conflict", () => {
-    const r = resolveOwnership([item(HASH, "t1", "2026-07-28T10:00:00.000Z")], []);
-    expect(r.claims).toHaveLength(1);
-    expect(r.conflicts).toEqual([]);
-    expect(r.lostByThisBatch).toEqual([]);
-  });
-
-  it("loses to an earlier incumbent and reports it to the sender", () => {
-    const r = resolveOwnership(
-      [item(HASH, "t2", "2026-07-28T10:00:05.000Z")],
-      [owner(HASH, "t1", "2026-07-28T10:00:00.000Z")],
-    );
-    expect(r.claims).toEqual([]);
-    expect(r.conflicts).toHaveLength(1);
-    expect(r.conflicts[0]!.losing.terminalId).toBe("t2");
-    expect(r.conflicts[0]!.winning.terminalId).toBe("t1");
-    expect(r.lostByThisBatch).toEqual(r.conflicts);
-  });
-
-  it("displaces a later incumbent and does NOT report that to the sender", () => {
-    const r = resolveOwnership(
-      [item(HASH, "t2", "2026-07-28T10:00:00.000Z")],
-      [owner(HASH, "t1", "2026-07-28T10:00:05.000Z")],
-    );
-    expect(r.claims).toHaveLength(1);
-    expect(r.conflicts).toHaveLength(1);
-    expect(r.conflicts[0]!.losing.terminalId).toBe("t1");
-    expect(r.conflicts[0]!.winning.terminalId).toBe("t2");
-    // The sender won; it must not be told its own scan is in trouble.
-    expect(r.lostByThisBatch).toEqual([]);
-  });
-
-  it("leaves ownership with the incumbent on an exact tie", () => {
-    const r = resolveOwnership(
-      [item(HASH, "t2", "2026-07-28T10:00:00.000Z")],
-      [owner(HASH, "t1", "2026-07-28T10:00:00.000Z")],
-    );
-    expect(r.claims).toEqual([]);
-    expect(r.conflicts[0]!.winning.terminalId).toBe("t1");
+describe("collapseClaims", () => {
+  it("passes through a single unowned code untouched", () => {
+    const claims = collapseClaims([item(HASH, "t1", "2026-07-28T10:00:00.000Z")]);
+    expect(claims).toHaveLength(1);
+    expect(claims[0]!.terminalId).toBe("t1");
   });
 
   it("collapses a code appearing twice in one batch, keeping the earliest", () => {
-    const r = resolveOwnership(
-      [item(HASH, "t1", "2026-07-28T10:00:05.000Z"), item(HASH, "t1", "2026-07-28T10:00:00.000Z")],
-      [],
-    );
-    expect(r.claims).toHaveLength(1);
-    expect(r.claims[0]!.scannedAt.toISOString()).toBe("2026-07-28T10:00:00.000Z");
-    expect(r.conflicts).toHaveLength(1);
-    expect(r.conflicts[0]!.losing.scannedAt.toISOString()).toBe("2026-07-28T10:00:05.000Z");
+    const claims = collapseClaims([
+      item(HASH, "t1", "2026-07-28T10:00:05.000Z"),
+      item(HASH, "t1", "2026-07-28T10:00:00.000Z"),
+    ]);
+    expect(claims).toHaveLength(1);
+    expect(claims[0]!.scannedAt.toISOString()).toBe("2026-07-28T10:00:00.000Z");
   });
 
   it("handles several codes independently", () => {
-    const r = resolveOwnership(
-      [item(HASH, "t2", "2026-07-28T10:00:05.000Z"), item(OTHER, "t2", "2026-07-28T10:00:06.000Z")],
-      [owner(HASH, "t1", "2026-07-28T10:00:00.000Z")],
-    );
-    expect(r.claims.map((c) => c.codeHash)).toEqual([OTHER]);
-    expect(r.conflicts.map((c) => c.codeHash)).toEqual([HASH]);
+    const claims = collapseClaims([
+      item(HASH, "t2", "2026-07-28T10:00:05.000Z"),
+      item(OTHER, "t2", "2026-07-28T10:00:06.000Z"),
+    ]);
+    expect(claims.map((c) => c.codeHash).sort()).toEqual([HASH, OTHER].sort());
   });
 
-  it("collapses three in-batch duplicates so every conflict names the true earliest as winner", () => {
+  it("collapses three in-batch duplicates, keeping the true earliest regardless of position", () => {
     // Regression for a pairwise fold: comparing each item only against the
     // current running winner can make an early loser lose to an
     // intermediate value that a still-earlier duplicate later beats.
-    const r = resolveOwnership(
-      [
-        item(HASH, "ta", "2026-07-28T10:00:05.000Z"),
-        item(HASH, "tb", "2026-07-28T10:00:03.000Z"),
-        item(HASH, "tc", "2026-07-28T10:00:00.000Z"),
-      ],
-      [],
-    );
-
-    expect(r.claims).toHaveLength(1);
-    expect(r.claims[0]!.terminalId).toBe("tc");
-    expect(r.claims[0]!.scannedAt.toISOString()).toBe("2026-07-28T10:00:00.000Z");
-
-    expect(r.conflicts).toHaveLength(2);
-    for (const c of r.conflicts) {
-      expect(c.winning.terminalId).toBe("tc");
-    }
-    expect(r.conflicts.map((c) => c.losing.terminalId).sort()).toEqual(["ta", "tb"]);
+    const claims = collapseClaims([
+      item(HASH, "ta", "2026-07-28T10:00:05.000Z"),
+      item(HASH, "tb", "2026-07-28T10:00:03.000Z"),
+      item(HASH, "tc", "2026-07-28T10:00:00.000Z"),
+    ]);
+    expect(claims).toHaveLength(1);
+    expect(claims[0]!.terminalId).toBe("tc");
+    expect(claims[0]!.scannedAt.toISOString()).toBe("2026-07-28T10:00:00.000Z");
   });
 
-  it("produces the same claim and the same losing/winning pairs regardless of batch array order", () => {
+  it("produces the same claim regardless of batch array order", () => {
     const items = [
       item(HASH, "ta", "2026-07-28T10:00:05.000Z"),
       item(HASH, "tb", "2026-07-28T10:00:03.000Z"),
       item(HASH, "tc", "2026-07-28T10:00:00.000Z"),
     ];
-    const pairs = (r: ReturnType<typeof resolveOwnership>) =>
-      r.conflicts.map((c) => `${c.losing.terminalId}->${c.winning.terminalId}`).sort();
+    const descending = collapseClaims(items);
+    const ascending = collapseClaims([...items].reverse());
+    expect(descending.map((c) => c.terminalId)).toEqual(["tc"]);
+    expect(ascending.map((c) => c.terminalId)).toEqual(["tc"]);
+  });
 
-    const descending = resolveOwnership(items, []);
-    const ascending = resolveOwnership([...items].reverse(), []);
+  it("keeps the first item in array order on an exact tie", () => {
+    const claims = collapseClaims([
+      item(HASH, "ta", "2026-07-28T10:00:00.000Z"),
+      item(HASH, "tb", "2026-07-28T10:00:00.000Z"),
+    ]);
+    expect(claims[0]!.terminalId).toBe("ta");
+  });
+});
 
-    expect(descending.claims.map((c) => c.terminalId)).toEqual(["tc"]);
-    expect(ascending.claims.map((c) => c.terminalId)).toEqual(["tc"]);
-    expect(pairs(descending)).toEqual(pairs(ascending));
-    expect(pairs(descending)).toEqual(["ta->tc", "tb->tc"]);
+describe("conflictsAgainstOwner", () => {
+  it("reports no conflict for a scan that IS the owner", () => {
+    const ownerByHash = new Map([[HASH, owner(HASH, "t1", "2026-07-28T10:00:00.000Z")]]);
+    const rows = conflictsAgainstOwner([item(HASH, "t1", "2026-07-28T10:00:00.000Z")], ownerByHash);
+    expect(rows).toEqual([]);
+  });
+
+  it("reports a conflict for a scan that lost to the current owner", () => {
+    const ownerByHash = new Map([[HASH, owner(HASH, "t1", "2026-07-28T10:00:00.000Z")]]);
+    const rows = conflictsAgainstOwner([item(HASH, "t2", "2026-07-28T10:00:05.000Z")], ownerByHash);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.losing.terminalId).toBe("t2");
+    expect(rows[0]!.winning.terminalId).toBe("t1");
+  });
+
+  it("pairs every non-owner scan in the batch against the SAME true owner", () => {
+    // Three items for one code; only "tc" (the true owner, e.g. because it
+    // won the upsert) matches ownerByHash -- the other two must both be
+    // reported as losses to "tc", never to each other.
+    const ownerByHash = new Map([[HASH, owner(HASH, "tc", "2026-07-28T10:00:00.000Z")]]);
+    const rows = conflictsAgainstOwner(
+      [
+        item(HASH, "ta", "2026-07-28T10:00:05.000Z"),
+        item(HASH, "tb", "2026-07-28T10:00:03.000Z"),
+        item(HASH, "tc", "2026-07-28T10:00:00.000Z"),
+      ],
+      ownerByHash,
+    );
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row.winning.terminalId).toBe("tc");
+    }
+    expect(rows.map((r) => r.losing.terminalId).sort()).toEqual(["ta", "tb"]);
+  });
+
+  it("handles several codes independently", () => {
+    const ownerByHash = new Map([
+      [HASH, owner(HASH, "t1", "2026-07-28T10:00:00.000Z")],
+      [OTHER, owner(OTHER, "t2", "2026-07-28T10:00:06.000Z")],
+    ]);
+    const rows = conflictsAgainstOwner(
+      [item(HASH, "t2", "2026-07-28T10:00:05.000Z"), item(OTHER, "t2", "2026-07-28T10:00:06.000Z")],
+      ownerByHash,
+    );
+    expect(rows.map((c) => c.codeHash)).toEqual([HASH]);
+  });
+});
+
+describe("displacedIncumbents", () => {
+  it("reports nothing for a code this batch did not win", () => {
+    const rows = displacedIncumbents(
+      [item(HASH, "t2", "2026-07-28T10:00:05.000Z")],
+      new Set(),
+      new Map([[HASH, owner(HASH, "t1", "2026-07-28T10:00:00.000Z")]]),
+    );
+    expect(rows).toEqual([]);
+  });
+
+  it("reports nothing for a fresh claim with no prior incumbent", () => {
+    const rows = displacedIncumbents(
+      [item(HASH, "t1", "2026-07-28T10:00:00.000Z")],
+      new Set([HASH]),
+      new Map(),
+    );
+    expect(rows).toEqual([]);
+  });
+
+  it("reports the displaced incumbent for a code this batch won away from it", () => {
+    const claim = item(HASH, "t2", "2026-07-28T10:00:00.000Z");
+    const rows = displacedIncumbents(
+      [claim],
+      new Set([HASH]),
+      new Map([[HASH, owner(HASH, "t1", "2026-07-28T10:00:05.000Z")]]),
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.losing.terminalId).toBe("t1");
+    expect(rows[0]!.winning.terminalId).toBe("t2");
+  });
+
+  it("reports nothing when the prior incumbent IS this batch's own claim", () => {
+    // Defensive: should not arise in practice (a code whose incumbent is
+    // already exactly this claim would never pass setWhere's strict "<"),
+    // but must not fabricate a self-displacement if it ever did.
+    const claim = item(HASH, "t1", "2026-07-28T10:00:00.000Z");
+    const rows = displacedIncumbents(
+      [claim],
+      new Set([HASH]),
+      new Map([[HASH, owner(HASH, "t1", "2026-07-28T10:00:00.000Z")]]),
+    );
+    expect(rows).toEqual([]);
   });
 });

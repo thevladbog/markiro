@@ -2,7 +2,12 @@ import { BadRequestException, Inject, Injectable } from "@nestjs/common";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { ensurePartitions, schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
-import { resolveOwnership } from "./conflict-resolution";
+import {
+  collapseClaims,
+  conflictsAgainstOwner,
+  displacedIncumbents,
+  type OwnerRow,
+} from "./conflict-resolution";
 import type { BatchConflictDto, SyncBatchDto, SyncBatchResponseDto } from "./dto";
 
 /**
@@ -238,9 +243,8 @@ export class StationScansService {
         })),
       );
 
-      // Ownership is settled last, on the codes this batch actually stored.
-      // One statement to read the incumbents, one to claim — never a query
-      // per code, and never against the partitioned tables.
+      // Ownership is decided next, on the codes this batch actually stored --
+      // NOT last: the late-data stamp below still follows it.
       const claimItems = coded.map((i) => ({
         codeHash: i.code!.codeHash,
         shiftId: i.shiftId,
@@ -251,13 +255,67 @@ export class StationScansService {
       let batchConflicts: BatchConflictDto[] = [];
       if (claimItems.length > 0) {
         const hashes = [...new Set(claimItems.map((c) => c.codeHash))];
-        const owners = await tx
-          .select({
-            codeHash: schema.codeRegistry.codeHash,
-            shiftId: schema.codeRegistry.shiftId,
-            terminalId: schema.codeRegistry.terminalId,
-            scannedAt: schema.codeRegistry.scannedAt,
+        const registryColumns = {
+          codeHash: schema.codeRegistry.codeHash,
+          shiftId: schema.codeRegistry.shiftId,
+          terminalId: schema.codeRegistry.terminalId,
+          scannedAt: schema.codeRegistry.scannedAt,
+        };
+
+        // Sorted so two overlapping batches that share two or more codes,
+        // in opposite relative order, cannot lock those rows in opposite
+        // order and deadlock -- sorting makes the acquisition order
+        // deterministic across every batch, regardless of the order items
+        // arrived in.
+        const claims = collapseClaims(claimItems).sort((a, b) =>
+          a.codeHash < b.codeHash ? -1 : a.codeHash > b.codeHash ? 1 : 0,
+        );
+
+        // Locks any PRE-EXISTING incumbent for these codes for the rest of
+        // this transaction, so the value read here cannot change before the
+        // upsert below runs its own conflict check -- used ONLY to attribute
+        // a displacement (see displacedIncumbents' doc comment). It is
+        // NEVER used to decide who wins: that decision belongs entirely to
+        // the upsert's own `setWhere`, so it stays correct even where this
+        // read is racing another transaction (Finding 1).
+        const priorIncumbents = await tx
+          .select(registryColumns)
+          .from(schema.codeRegistry)
+          .where(
+            and(
+              eq(schema.codeRegistry.tenantId, tenantId),
+              inArray(schema.codeRegistry.codeHash, hashes),
+            ),
+          )
+          .for("update");
+        const priorByHash = new Map<string, OwnerRow>(priorIncumbents.map((o) => [o.codeHash, o]));
+
+        const won = await tx
+          .insert(schema.codeRegistry)
+          .values(claims.map((c) => ({ tenantId, ...c })))
+          .onConflictDoUpdate({
+            target: [schema.codeRegistry.tenantId, schema.codeRegistry.codeHash],
+            set: {
+              shiftId: sql`excluded.shift_id`,
+              terminalId: sql`excluded.terminal_id`,
+              scannedAt: sql`excluded.scanned_at`,
+              updatedAt: sql`now()`,
+            },
+            // The rule lives in the statement, not in application ordering:
+            // ownership moves only for a strictly earlier scan, so two
+            // concurrent batches cannot leave it dependent on who ran first.
+            setWhere: sql`excluded.scanned_at < ${schema.codeRegistry.scannedAt}`,
           })
+          .returning({ codeHash: schema.codeRegistry.codeHash });
+        const wonHashes = new Set(won.map((w) => w.codeHash));
+
+        // The authoritative post-upsert truth: for a code this batch won,
+        // this is this batch's own claim; for one it lost, this is whoever
+        // already held it, confirmed unchanged. Conflicts are derived from
+        // THIS, not from priorByHash above or from any pre-read -- see
+        // conflict-resolution.ts.
+        const postOwners = await tx
+          .select(registryColumns)
           .from(schema.codeRegistry)
           .where(
             and(
@@ -265,31 +323,15 @@ export class StationScansService {
               inArray(schema.codeRegistry.codeHash, hashes),
             ),
           );
+        const ownerByHash = new Map<string, OwnerRow>(postOwners.map((o) => [o.codeHash, o]));
 
-        const resolution = resolveOwnership(claimItems, owners);
+        const ownLosses = conflictsAgainstOwner(claimItems, ownerByHash);
+        const displaced = displacedIncumbents(claims, wonHashes, priorByHash);
+        const allConflicts = [...ownLosses, ...displaced];
 
-        if (resolution.claims.length > 0) {
-          await tx
-            .insert(schema.codeRegistry)
-            .values(resolution.claims.map((c) => ({ tenantId, ...c })))
-            .onConflictDoUpdate({
-              target: [schema.codeRegistry.tenantId, schema.codeRegistry.codeHash],
-              set: {
-                shiftId: sql`excluded.shift_id`,
-                terminalId: sql`excluded.terminal_id`,
-                scannedAt: sql`excluded.scanned_at`,
-                updatedAt: sql`now()`,
-              },
-              // The rule lives in the statement, not in application ordering:
-              // ownership moves only for a strictly earlier scan, so two
-              // concurrent batches cannot leave it dependent on who ran first.
-              setWhere: sql`excluded.scanned_at < ${schema.codeRegistry.scannedAt}`,
-            });
-        }
-
-        if (resolution.conflicts.length > 0) {
+        if (allConflicts.length > 0) {
           await tx.insert(schema.codeConflicts).values(
-            resolution.conflicts.map((c) => ({
+            allConflicts.map((c) => ({
               tenantId,
               codeHash: c.codeHash,
               losingShiftId: c.losing.shiftId,
@@ -302,7 +344,11 @@ export class StationScansService {
           );
         }
 
-        batchConflicts = resolution.lostByThisBatch.map((c) => ({
+        // Every item in `ownLosses` came from claimItems -- i.e. this
+        // batch's own scans -- so all of them, and only them, are this
+        // batch's own losses; `displaced` names a scan from a batch other
+        // than this one and must never be echoed back here.
+        batchConflicts = ownLosses.map((c) => ({
           codeHash: c.codeHash,
           winningTerminalId: c.winning.terminalId,
           winningScannedAt: c.winning.scannedAt.toISOString(),

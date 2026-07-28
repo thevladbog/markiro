@@ -144,6 +144,40 @@ describe.skipIf(!ready)("station-scans e2e", () => {
     return rows.length;
   }
 
+  // Reads `code_registry`'s actual current owner directly, tenant-scoped —
+  // the only way to prove ownership itself (not just the JSON response,
+  // which is computed in application code and can silently diverge from
+  // what the database holds; see Finding 1 / Finding 2 in the review that
+  // added this helper).
+  async function registryOwner(
+    tenantId: string,
+    codeHash: string,
+  ): Promise<{ terminalId: string | null; scannedAt: Date } | undefined> {
+    const rows = await db
+      .select({
+        terminalId: schema.codeRegistry.terminalId,
+        scannedAt: schema.codeRegistry.scannedAt,
+      })
+      .from(schema.codeRegistry)
+      .where(
+        and(eq(schema.codeRegistry.tenantId, tenantId), eq(schema.codeRegistry.codeHash, codeHash)),
+      );
+    return rows[0];
+  }
+
+  async function conflictCount(tenantId: string, codeHash: string): Promise<number> {
+    const rows = await db
+      .select({ id: schema.codeConflicts.id })
+      .from(schema.codeConflicts)
+      .where(
+        and(
+          eq(schema.codeConflicts.tenantId, tenantId),
+          eq(schema.codeConflicts.codeHash, codeHash),
+        ),
+      );
+    return rows.length;
+  }
+
   it("accepts a batch from a station api-key and stores codes and events", async () => {
     const agent = request.agent(app!.getHttpServer());
     const tenantId = await signUpAndActivate(agent);
@@ -606,7 +640,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
 
   it("lets an earlier scan displace the incumbent, and does not report that to the sender", async () => {
     const agent = request.agent(app!.getHttpServer());
-    await signUpAndActivate(agent);
+    const tenantId = await signUpAndActivate(agent);
     const apiKey = await deviceKey(agent);
     const shiftId = await openShift(agent);
 
@@ -630,6 +664,19 @@ describe.skipIf(!ready)("station-scans e2e", () => {
 
     // The sender won, so nothing comes back to it — but a conflict exists.
     expect((res.body as { conflicts: unknown[] }).conflicts).toEqual([]);
+
+    // The claim above is JSON computed by the server's application code and
+    // could pass even if ownership itself were never actually flipped (see
+    // Finding 2 in the review that added this block) — so assert the
+    // registry's actual post-state directly: the owner must now be the
+    // EARLIER terminal (t2), not the one that arrived first (t1).
+    const owner = await registryOwner(tenantId, earlier.code!.codeHash);
+    expect(owner?.terminalId).toBe("t2");
+    expect(owner?.scannedAt.toISOString()).toBe(earlier.scannedAt);
+
+    // The displaced scan (t1's) is deliberately never reported to any
+    // sender — the cabinet (`code_conflicts`) must be the only record of it.
+    expect(await conflictCount(tenantId, earlier.code!.codeHash)).toBe(1);
   });
 
   it("is idempotent: replaying a batch changes neither ownership nor conflict count", async () => {
