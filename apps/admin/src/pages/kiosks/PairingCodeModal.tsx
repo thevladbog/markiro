@@ -1,14 +1,20 @@
 import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Alert, Button, Modal } from "@markiro/ui";
+import { Alert, Button, Modal, Spinner } from "@markiro/ui";
 
 import { toast } from "../../lib/toast.js";
+import { pairingBarcodeBoxStyle } from "./pairingBarcodeBox.js";
 
 /**
  * Lazily loaded so bwip-js (reached through `@markiro/domain`'s Code 128
  * renderer) stays out of the main admin bundle and is fetched only when a
  * pairing code is actually issued. See `./PairingBarcode.tsx`.
+ *
+ * That chunk is ~254 kB gzipped and lands well after the digits above it
+ * (~300ms on an idle machine, seconds on a slow link), so the Suspense
+ * fallback reserves the barcode's exact box rather than rendering nothing --
+ * otherwise the panel visibly jumps once the symbol arrives.
  */
 const PairingBarcode = lazy(() => import("./PairingBarcode.js"));
 
@@ -139,7 +145,13 @@ export function PairingCodeModal({
               >
                 {groupDigits(code)}
               </span>
-              <Suspense fallback={null}>
+              <Suspense
+                fallback={
+                  <div style={pairingBarcodeBoxStyle} aria-busy="true">
+                    <Spinner label={t("pages.kiosks.pairing.barcodeLoading")} />
+                  </div>
+                }
+              >
                 <PairingBarcode
                   code={code}
                   label={t("pages.kiosks.pairing.barcodeLabel", { code })}

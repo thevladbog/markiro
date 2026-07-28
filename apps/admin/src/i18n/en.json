@@ -622,6 +622,7 @@
         "modalTitle": "Kiosk pairing code",
         "hint": "Enter the code on kiosk “{{name}}” or scan the barcode. The code is shown once and works once.",
         "barcodeLabel": "Barcode for pairing code {{code}}",
+        "barcodeLoading": "Loading the barcode…",
         "expiresIn": "Valid for another {{time}}",
         "expired": "The code has expired. Issue a new one.",
         "regenerateAction": "Issue a new code",

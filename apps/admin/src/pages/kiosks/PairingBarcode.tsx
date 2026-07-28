@@ -1,5 +1,7 @@
 import { renderCode128Svg } from "@markiro/domain";
 
+import { pairingBarcodeBoxStyle } from "./pairingBarcodeBox.js";
+
 /**
  * Renders a kiosk pairing code as a Code 128 barcode, so an operator can scan
  * it with the kiosk's own scanner instead of typing eight digits (design brief
@@ -16,6 +18,11 @@ import { renderCode128Svg } from "@markiro/domain";
  * it in via `React.lazy`, keeping bwip-js -- a heavy dependency reached
  * through `@markiro/domain`'s barcode renderers -- out of the main admin
  * bundle and in a chunk fetched only when a code is actually issued.
+ *
+ * The box is pinned to the symbol's intrinsic size and the `<svg>` stretched
+ * to fill it, because the generated markup carries only a `viewBox` and would
+ * otherwise collapse to 0x0 in the reveal panel -- see `./pairingBarcodeBox.ts`.
+ * Same arrangement as `../pickup/OrderDetail.tsx` uses for `ItemCode`.
  */
 export default function PairingBarcode({ code, label }: { code: string; label: string }) {
   let svg: string | null;
@@ -28,11 +35,15 @@ export default function PairingBarcode({ code, label }: { code: string; label: s
   if (!svg) return null;
 
   return (
-    <div
-      role="img"
-      aria-label={label}
-      style={{ display: "flex", justifyContent: "center", padding: "4px 0" }}
-      dangerouslySetInnerHTML={{ __html: svg }}
-    />
+    <>
+      <style>{".mk-pairing-barcode svg{width:100%;height:100%;display:block}"}</style>
+      <div
+        role="img"
+        aria-label={label}
+        className="mk-pairing-barcode"
+        style={pairingBarcodeBoxStyle}
+        dangerouslySetInnerHTML={{ __html: svg }}
+      />
+    </>
   );
 }
