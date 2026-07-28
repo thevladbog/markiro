@@ -146,6 +146,7 @@ export function KiosksPage() {
         ),
       },
     ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the row handlers close over setState setters and TanStack's stable `mutateAsync`, so the columns only need to be rebuilt when the labels change.
     [t],
   );
 

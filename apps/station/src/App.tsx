@@ -139,6 +139,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the scanner's port/baud rather than the object identity, so a re-read of the config that changed nothing does not close and reopen the port.
   }, [hardwareConfig.scanner?.port, hardwareConfig.scanner?.baud, sessionEpoch]);
 
   useEffect(() => {
@@ -232,6 +233,7 @@ export function App() {
   // respect the Rules of Hooks; it degrades to `null` until enrolled.
   const client = useMemo(
     () => (config?.apiKey && config.serverUrl ? createStationClient(config) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- see above; `createStationClient` reads only apiKey/serverUrl, so these deps cover everything the client is built from.
     [config?.apiKey, config?.serverUrl],
   );
 
