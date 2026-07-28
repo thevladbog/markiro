@@ -29,6 +29,7 @@ describe("env validation", () => {
     const env = loadEnv({
       DATABASE_URL: "postgres://user:pass@localhost/db",
       BETTER_AUTH_SECRET: "insecure-test-placeholder",
+      PAIRING_CODE_PEPPER: "insecure-test-pairing-pepper",
       BETTER_AUTH_URL: "http://localhost:3000",
     } as never);
     expect(env.PORT).toBe(3000);
@@ -39,6 +40,7 @@ describe("env validation", () => {
     const env = loadEnv({
       DATABASE_URL: "postgres://user:pass@localhost/db",
       BETTER_AUTH_SECRET: "insecure-test-placeholder",
+      PAIRING_CODE_PEPPER: "insecure-test-pairing-pepper",
       BETTER_AUTH_URL: "http://localhost:3000",
     } as never);
     expect(env.TRUST_PROXY_HOPS).toBe(0);
@@ -48,6 +50,7 @@ describe("env validation", () => {
     const env = loadEnv({
       DATABASE_URL: "postgres://user:pass@localhost/db",
       BETTER_AUTH_SECRET: "insecure-test-placeholder",
+      PAIRING_CODE_PEPPER: "insecure-test-pairing-pepper",
       BETTER_AUTH_URL: "http://localhost:3000",
       TRUST_PROXY_HOPS: "1",
     } as never);
@@ -59,6 +62,7 @@ describe("env validation", () => {
       loadEnv({
         DATABASE_URL: "postgres://user:pass@localhost/db",
         BETTER_AUTH_SECRET: "insecure-test-placeholder",
+        PAIRING_CODE_PEPPER: "insecure-test-pairing-pepper",
         BETTER_AUTH_URL: "http://localhost:3000",
         TRUST_PROXY_HOPS: "-1",
       } as never),
@@ -70,6 +74,7 @@ describe("env validation", () => {
       loadEnv({
         DATABASE_URL: "postgres://user:pass@localhost/db",
         BETTER_AUTH_SECRET: "insecure-test-placeholder",
+        PAIRING_CODE_PEPPER: "insecure-test-pairing-pepper",
         BETTER_AUTH_URL: "http://localhost:3000",
         PORT: "70000",
       } as never),
