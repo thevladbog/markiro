@@ -1,0 +1,20 @@
+# GitGuardian (ggshield) secret-scanning config.
+#
+# `Pw-${randomUUID()}!Aa1` trips the Generic Password detector across this
+# repo's API e2e suites (apps/api/test/*.e2e.test.ts). There is no secret
+# here: it's a template literal, and the actual sign-up password is a fresh
+# randomUUID() interpolated into it at test-run time, never a fixed value
+# committed to source. PR #10 introduced this exact pattern repo-wide,
+# replacing hardcoded test passwords, specifically so no literal credential
+# would ever sit in the codebase.
+#
+# Ignored by exact match text only -- NOT via `ignored_detectors` (that would
+# blind the Generic Password detector everywhere, including on a real
+# accidental hardcoded password) and NOT via `ignored_paths` (that would
+# exempt the entire test tree from all secret scanning). A real secret
+# dropped anywhere, test files included, still gets caught.
+version: 2
+secret:
+  ignored_matches:
+    - name: e2e-runtime-password-fixture
+      match: Pw-${randomUUID()}!Aa1

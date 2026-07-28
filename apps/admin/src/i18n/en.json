@@ -468,6 +468,18 @@
         "codeUnavailable": "Code unavailable",
         "loadError": "Could not load the order. Refresh the page or sign in again."
       },
+      "conflicts": {
+        "title": "Rejected at sync: {{count}}",
+        "badge": "{{count}} rejected",
+        "reason": {
+          "not_km": "not a marking code",
+          "incomplete": "code read incompletely",
+          "unknown_product": "product not in catalog",
+          "not_allowed": "product not available at this kiosk",
+          "duplicate": "duplicate — code already in another order",
+          "over_limit": "daily limit exceeded"
+        }
+      },
       "toasts": {
         "resolveSuccess": "Order resolved",
         "resolveError": "Could not resolve the order",

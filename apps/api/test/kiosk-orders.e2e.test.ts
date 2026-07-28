@@ -5,10 +5,12 @@ import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
+import { verifyPhc } from "@markiro/domain";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { hashDeviceToken } from "../src/pickup/device-token";
+import { PickupOrdersService } from "../src/modules/pickup-orders/pickup-orders.service";
 import { schema, type Db } from "@markiro/db";
 
 /**
@@ -377,6 +379,64 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
     expect(orders).toHaveLength(1);
   });
 
+  // F1 regression (the other side of the fix -- see kiosk-pairing.e2e.test.ts
+  // for the pairing side): `insertOrderWithRetry` takes an explicit
+  // `SELECT ... FOR UPDATE` on the kiosk row before it inserts, the SAME lock
+  // a re-pair takes before computing `nextDeviceSeq`, so the two paths can
+  // never interleave around either read. (In practice `pickup_orders`' own
+  // FK to `kiosks` already makes the INSERT statement take an implicit lock
+  // on that row too -- this explicit lock makes the invariant load-bearing
+  // and self-documenting instead of an incidental side effect of the FK,
+  // which a future schema change could silently weaken.) Proven here by
+  // timing: a concurrent holder of that lock (standing in for a re-pair in
+  // progress) must make an in-flight order visibly wait, not proceed
+  // immediately. Calls `PickupOrdersService.createFromKiosk` directly rather
+  // than through `POST /kiosk/orders`, deliberately bypassing
+  // `KioskDeviceGuard` -- its own per-request `last_seen_at` UPDATE also
+  // touches the kiosk row and would otherwise block on the same holder for
+  // an unrelated reason, making the timing measure the guard instead of the
+  // lock this test actually targets.
+  it("insertOrderWithRetry's kiosk-row lock blocks a concurrent holder", async () => {
+    const pickupOrdersService = app!.get(PickupOrdersService);
+    const HOLD_MS = 250;
+    let lockAcquired!: () => void;
+    const holderOwnsLock = new Promise<void>((resolve) => {
+      lockAcquired = resolve;
+    });
+    const holderDone = db.transaction(async (tx) => {
+      await tx
+        .select({ id: schema.kiosks.id })
+        .from(schema.kiosks)
+        .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, kioskId)))
+        .for("update");
+      lockAcquired();
+      await new Promise((resolve) => setTimeout(resolve, HOLD_MS));
+    });
+
+    // Deterministic handoff: start the order only once the holder actually
+    // owns the row lock. A fixed head-start delay would be a race -- on a
+    // slow or contended run the order could begin first, sail through
+    // unblocked, and fail the timing assertion below for a reason that has
+    // nothing to do with the lock this test exists to prove.
+    await holderOwnsLock;
+
+    const start = Date.now();
+    const result = await pickupOrdersService.createFromKiosk(tenantId, kioskId, {
+      deviceSeq: 40,
+      badgeCode: BADGE,
+      reason: "buy",
+      items: [],
+    });
+    const elapsed = Date.now() - start;
+
+    await holderDone;
+    expect(result.orderNo).toMatch(/^ORD-/);
+    // Generous margin below HOLD_MS: proves the insert was blocked on the
+    // lock rather than served immediately, without being a flaky exact-time
+    // assertion.
+    expect(elapsed).toBeGreaterThanOrEqual(HOLD_MS - 100);
+  });
+
   it("day-limit accepts up to dayLimitPerEmployee and marks the overflow over_limit", async () => {
     const limitKioskId = randomUUID();
     const limitBadge = `badge-limit-${randomUUID()}`;
@@ -446,7 +506,7 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
     expect(ordersAfter.length).toBe(ordersBefore.length);
   });
 
-  it("bootstrap returns config, reasons, allowlist products and employees with badge codes", async () => {
+  it("bootstrap returns config, reasons, allowlist products and employees with badge hashes", async () => {
     const res = await request(app!.getHttpServer())
       .get("/kiosk/bootstrap")
       .set("x-kiosk-token", TOKEN)
@@ -458,7 +518,11 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
       true,
     );
     const employee = res.body.employees.find((e: { id: string }) => e.id === employeeId);
-    expect(employee.badgeCodes).toContain(BADGE);
+    // Task 4: the payload carries a PBKDF2 verifier, never the plaintext badge code.
+    expect(employee.badgeCodes).toBeUndefined();
+    expect(typeof employee.badgeHash).toBe("string");
+    await expect(verifyPhc(BADGE, employee.badgeHash)).resolves.toBe(true);
+    expect(JSON.stringify(res.body)).not.toContain(BADGE);
   });
 
   it("401s a kiosk token that is missing entirely", async () => {

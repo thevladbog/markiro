@@ -1,11 +1,14 @@
 import "reflect-metadata";
 import express, { type Express } from "express";
+import { Logger } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { apiReference } from "@scalar/nestjs-api-reference";
 import { AppModule } from "./app.module";
 import { mountAuth, setupAuth } from "./auth/auth.setup";
 import { loadEnv } from "./env";
+
+const logger = new Logger("bootstrap");
 
 async function bootstrap() {
   const env = loadEnv();
@@ -22,6 +25,29 @@ async function bootstrap() {
   // stack and applies to /api/auth/* too, not just Nest-routed controllers.
   app.enableCors({ origin: [env.ADMIN_ORIGIN], credentials: true });
   const server = app.getHttpAdapter().getInstance() as Express;
+
+  // A numeric hop count, NEVER `true`. `true` makes Express trust the
+  // left-most entry of X-Forwarded-For, which an attacker fully controls --
+  // that both makes the kiosk-pairing limiter trivially bypassable by
+  // rotating a header value and turns `kiosk_pair_attempts.source` (an
+  // unbounded `text` column written from the one unauthenticated route in
+  // the system) into an attacker-controlled row-growth vector. A hop count
+  // counts inward from the right of X-Forwarded-For, which is the only end
+  // the reverse proxy itself authoritatively controls.
+  server.set("trust proxy", env.TRUST_PROXY_HOPS);
+  if (process.env.NODE_ENV === "production" && env.TRUST_PROXY_HOPS === 0) {
+    // Not a boot failure -- refusing to start over a rate-limiter
+    // degradation would be its own outage -- but this must never be a
+    // silent misconfiguration: every caller now resolves to the same
+    // socket-peer address, so the kiosk-pairing limiter's per-source budget
+    // collapses onto one bucket and only the global backstop still works.
+    logger.warn(
+      "TRUST_PROXY_HOPS=0 in production: req.ip is the socket peer, not the original " +
+        "client. Per-source kiosk-pairing rate limiting is degraded to the global " +
+        "backstop only -- set TRUST_PROXY_HOPS=1 behind a single reverse proxy such as Caddy.",
+    );
+  }
+
   mountAuth(server, setup.auth);
   server.use(express.json());
 

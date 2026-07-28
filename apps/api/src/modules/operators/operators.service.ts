@@ -1,7 +1,9 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { parsePhc } from "@markiro/domain";
 import { schema, type Db, type OperatorMirrorRecord } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
+import { getOrCreateBadgeSalt, hashBadgeWithSalt } from "../../lib/badge-salt";
 import { hashSecret } from "../../lib/pin-hash";
 import type {
   GrantStationAccessDto,
@@ -160,6 +162,11 @@ export class OperatorsService {
     }));
   }
 
+  /** Badge verifiers for the given employees, hashed under the tenant salt. */
+  async badgeHashesFor(tenantId: string, employeeIds: string[]): Promise<Map<string, string>> {
+    return this.activeBadgeHashes(tenantId, employeeIds);
+  }
+
   /**
    * Badge hashes for the given roster employees only (never the whole
    * tenant's badge table — legacy tenants can carry thousands of unrelated
@@ -192,25 +199,44 @@ export class OperatorsService {
       )
       .orderBy(asc(schema.employeeBadges.issuedAt), asc(schema.employeeBadges.id));
 
-    // Backfill missing hashes concurrently; each write stays tenant-scoped.
-    const needsHash = rows.filter((b) => !b.badgeHash);
+    // A badge needs (re)hashing when it has no verifier yet, or when its
+    // verifier still carries a legacy per-row salt. Both cases converge on
+    // the tenant salt so the kiosk's one-derivation lookup works.
+    const tenantSalt = await getOrCreateBadgeSalt(this.db, tenantId);
+    const needsHash = rows.filter((b) => {
+      if (!b.badgeHash) return true;
+      return parsePhc(b.badgeHash)?.saltB64 !== tenantSalt;
+    });
     const backfilled = new Map<string, string>();
-    await Promise.all(
-      needsHash.map(async (b) => {
-        const hash = await hashSecret(b.badgeCode);
-        backfilled.set(b.id, hash);
-        await this.db
-          .update(schema.employeeBadges)
-          .set({ badgeHash: hash })
-          .where(
-            and(eq(schema.employeeBadges.tenantId, tenantId), eq(schema.employeeBadges.id, b.id)),
-          );
-      }),
-    );
+    // Bounded concurrency, on purpose: WebCrypto's PBKDF2 (`deriveBits`) runs
+    // on libuv's threadpool (default size 4), so an unbounded `Promise.all`
+    // over `needsHash` would saturate that pool and stall the whole
+    // process's async crypto/fs/DNS for roughly N * ~50ms / 4 -- every
+    // pre-existing badge in the tenant matches this filter on the first read
+    // after a migration to the tenant salt (not just the handful with no
+    // hash yet), so N can be the tenant's entire active roster. Chunking to
+    // 8 keeps only a handful of derivations in flight regardless of how many
+    // rows need a rehash. Do not "optimise" this back to one `Promise.all`.
+    const REHASH_CHUNK_SIZE = 8;
+    for (let i = 0; i < needsHash.length; i += REHASH_CHUNK_SIZE) {
+      const chunk = needsHash.slice(i, i + REHASH_CHUNK_SIZE);
+      await Promise.all(
+        chunk.map(async (b) => {
+          const hash = await hashBadgeWithSalt(b.badgeCode, tenantSalt);
+          backfilled.set(b.id, hash);
+          await this.db
+            .update(schema.employeeBadges)
+            .set({ badgeHash: hash })
+            .where(
+              and(eq(schema.employeeBadges.tenantId, tenantId), eq(schema.employeeBadges.id, b.id)),
+            );
+        }),
+      );
+    }
 
     const map = new Map<string, string>();
     for (const b of rows) {
-      map.set(b.employeeId, b.badgeHash ?? backfilled.get(b.id)!);
+      map.set(b.employeeId, backfilled.get(b.id) ?? b.badgeHash!);
     }
     return map;
   }

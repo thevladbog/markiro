@@ -4,6 +4,7 @@ import { Link } from "react-router";
 
 import {
   Alert,
+  Badge,
   Button,
   EmptyState,
   Input,
@@ -151,10 +152,17 @@ export function PickupPage() {
       key: "status",
       title: t("pages.pickup.table.status"),
       render: (row) => (
-        <StatusChip
-          status={STATUS_TO_CHIP[row.status]}
-          label={t(`pages.pickup.status.${row.status}`)}
-        />
+        <div style={{ display: "flex", alignItems: "center", gap: "var(--sp-2)" }}>
+          <StatusChip
+            status={STATUS_TO_CHIP[row.status]}
+            label={t(`pages.pickup.status.${row.status}`)}
+          />
+          {row.conflictCount > 0 && (
+            <Badge tone="warn">
+              {t("pages.pickup.conflicts.badge", { count: row.conflictCount })}
+            </Badge>
+          )}
+        </div>
       ),
     },
   ];

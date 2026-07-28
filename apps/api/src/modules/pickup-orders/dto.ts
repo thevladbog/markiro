@@ -1,5 +1,9 @@
 import { z } from "zod";
 
+/** POST /kiosk/pair body — the 8-digit code shown on the kiosk cabinet. */
+export const pairKioskSchema = z.object({ code: z.string().regex(/^\d{8}$/) });
+export type PairKioskDto = z.infer<typeof pairKioskSchema>;
+
 /** POST /kiosk/orders — one raw scan from the kiosk's scanner. */
 export const createOrderItemSchema = z.object({ rawKm: z.string().min(1) });
 export type CreateOrderItemInput = z.infer<typeof createOrderItemSchema>;
@@ -34,9 +38,29 @@ export interface CreateOrderResultDto {
   conflicts: OrderConflict[];
 }
 
-/** GET /kiosk/bootstrap response — everything a kiosk needs to work offline. */
+/**
+ * GET /kiosk/bootstrap — everything a kiosk needs to work offline.
+ *
+ * Credentials are PBKDF2 verifiers, never plaintext: an unattended tablet at
+ * a factory gate is the most theft-exposed node in the system, and a badge is
+ * the credential that authorises a pickup (see docs/device-key-surface.md).
+ * All badge verifiers share `badgeSalt` so the device derives once per scan
+ * and looks the digest up, instead of running PBKDF2 per employee.
+ *
+ * `operators[]` is frozen to match the station's `OperatorMirrorRecord`
+ * shape (`{ employeeId, name, login, role, pinHash, badgeHash, active }`) —
+ * the device app (Plan B-2) hasn't been built against this yet, so this is
+ * the cheapest point to lock it in.
+ *
+ * `generatedAt` is stamped by the server (not left to the device's own
+ * receive clock) because the device's 24h-warning / 7d-block staleness gates
+ * need a timestamp trustworthy enough to gate on — an unattended tablet's
+ * own clock is the least trustworthy clock in the system.
+ */
 export interface KioskBootstrapDto {
+  generatedAt: string; // ISO 8601, server time -- see doc comment above
   config: { dayLimitPerEmployee: number; showPrices: boolean };
+  badgeSalt: string; // base64; the salt every badgeHash below shares
   reasons: { id: string; name: string }[];
   products: {
     id: string;
@@ -45,7 +69,29 @@ export interface KioskBootstrapDto {
     unitPrice: string | null;
     egaisCode: string | null;
   }[];
-  employees: { id: string; fullName: string; role: string | null; badgeCodes: string[] }[];
+  employees: { id: string; fullName: string; role: string | null; badgeHash: string | null }[];
+  operators: {
+    employeeId: string;
+    name: string;
+    login: string;
+    role: string;
+    pinHash: string;
+    badgeHash: string | null;
+    active: boolean;
+  }[];
+}
+
+/**
+ * POST /kiosk/pair response — the contract Plan B-2's pairing screen calls.
+ * `nextDeviceSeq` is `MAX(deviceSeq) + 1` for this kiosk (0 if it has no
+ * orders yet), so a re-paired device continues its idempotency-key counter
+ * instead of restarting at 0 and colliding with its own past orders.
+ */
+export interface PairKioskResultDto {
+  device: { kioskId: string; kioskName: string; place: string | null };
+  token: string; // the x-kiosk-token
+  nextDeviceSeq: number;
+  bootstrap: KioskBootstrapDto;
 }
 
 const PICKUP_ORDER_STATUSES = ["pending", "punched", "writtenoff", "cancelled"] as const;
@@ -84,6 +130,8 @@ export interface PickupOrderRowDto {
   totalPrice: string | null;
   status: PickupOrderStatus;
   createdAt: Date;
+  /** How many scanned codes the server refused when this order synced. */
+  conflictCount: number;
 }
 
 /** GET /pickup-orders response. */
@@ -107,6 +155,7 @@ export interface PickupOrderDetailDto extends PickupOrderRowDto {
   items: PickupOrderItemDto[];
   receiptNo: string | null;
   actNo: string | null;
+  syncConflicts: OrderConflict[];
 }
 
 /** POST /pickup-orders/export body. */

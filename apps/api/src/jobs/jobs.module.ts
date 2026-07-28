@@ -8,7 +8,8 @@ import {
   type OnModuleInit,
 } from "@nestjs/common";
 import { PgBoss } from "pg-boss";
-import { ensurePartitions, type Db } from "@markiro/db";
+import { sql } from "drizzle-orm";
+import { ensurePartitions, schema, type Db } from "@markiro/db";
 import { DB } from "../auth/auth.module";
 import { currentMonthUTC, nextMonthUTC } from "./months";
 
@@ -17,11 +18,24 @@ export const PG_CONNECTION_STRING = "JOBS_PG_CONNECTION_STRING";
 const QUEUE_NAME = "ensure-partitions";
 const QUEUE_CRON = "0 4 * * *";
 
+// Rows older than the kiosk-pairing rate limiter's 15-minute window are dead
+// weight -- nothing ever reads them again -- but they're deleted an hour
+// late rather than right at the window boundary so an in-flight request that
+// started just before the boundary can't race the prune and read a
+// half-deleted window.
+const PRUNE_PAIR_ATTEMPTS_QUEUE_NAME = "prune-kiosk-pair-attempts";
+const PRUNE_PAIR_ATTEMPTS_QUEUE_CRON = "0 * * * *";
+
 /**
  * Boots a dedicated pg-boss instance (its own `pgboss` schema, same
- * database as the app) and keeps the `codes`/`scan_events` monthly
- * partitions ahead of traffic: ensures the current + next month exist once
- * at startup, then again every day at 04:00 UTC via a pg-boss schedule.
+ * database as the app) and runs two independent schedules on it:
+ *  - keeps the `codes`/`scan_events` monthly partitions ahead of traffic:
+ *    ensures the current + next month exist once at startup, then again
+ *    every day at 04:00 UTC.
+ *  - prunes stale `kiosk_pair_attempts` rows (the kiosk-pairing rate
+ *    limiter's fixed-window counters) once at startup, then again every
+ *    hour, so an unauthenticated write path with no other cleanup doesn't
+ *    grow the table forever.
  *
  * pg-boss v12 requires a queue to be created (`createQueue`) before it can
  * be scheduled or worked -- scheduling against a queue that doesn't exist
@@ -57,10 +71,16 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
         await this.runEnsurePartitions();
       });
 
-      // Also run once immediately at boot so this month's and next month's
-      // partitions exist right away, instead of waiting for the first
-      // 04:00 UTC tick.
+      await boss.createQueue(PRUNE_PAIR_ATTEMPTS_QUEUE_NAME);
+      await boss.schedule(PRUNE_PAIR_ATTEMPTS_QUEUE_NAME, PRUNE_PAIR_ATTEMPTS_QUEUE_CRON);
+      await boss.work(PRUNE_PAIR_ATTEMPTS_QUEUE_NAME, async () => {
+        await this.runPruneKioskPairAttempts();
+      });
+
+      // Also run both once immediately at boot rather than waiting for the
+      // first tick of either schedule.
       await this.runEnsurePartitions();
+      await this.runPruneKioskPairAttempts();
     } catch (e) {
       // Bootstrap failed partway through: stop whatever pg-boss managed to
       // start so it doesn't leak a connection/maintenance loop, then
@@ -82,6 +102,23 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       created.length > 0
         ? `Ensured partitions: ${created.join(", ")}`
         : "Partitions already present for current and next month",
+    );
+  }
+
+  /** Deletes `kiosk_pair_attempts` rows whose fixed window ended over an hour ago. */
+  private async runPruneKioskPairAttempts(): Promise<void> {
+    // No `.returning()`: this is a maintenance job that only needs a count
+    // for the log line, so materialising every pruned row's id would be pure
+    // overhead. The node-postgres driver reports the row count directly on
+    // the query result (`rowCount`) without it.
+    const result = await this.db
+      .delete(schema.kioskPairAttempts)
+      .where(sql`${schema.kioskPairAttempts.windowStartedAt} < now() - interval '1 hour'`);
+    const count = result.rowCount ?? 0;
+    this.logger.log(
+      count > 0
+        ? `Pruned ${count} stale kiosk_pair_attempts row(s)`
+        : "No stale kiosk_pair_attempts rows to prune",
     );
   }
 }
