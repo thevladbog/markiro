@@ -12,6 +12,7 @@ import { KiosksPage } from "./pages/kiosks/index.js";
 import { LabelEditorPage } from "./pages/labels/editor/index.js";
 import { LabelTemplatesPage } from "./pages/labels/index.js";
 import { OrderDetailPage } from "./pages/pickup/OrderDetail.js";
+import { RejectionsPage } from "./pages/pickup/Rejections.js";
 import { PickupPage } from "./pages/pickup/index.js";
 import { SettingsPage } from "./pages/settings/index.js";
 import { ShiftsPage } from "./pages/shifts/index.js";
@@ -45,6 +46,7 @@ export function App() {
           <Route path="labels/new" element={<LabelEditorPage />} />
           <Route path="labels/:id" element={<LabelEditorPage />} />
           <Route path="pickup" element={<PickupPage />} />
+          <Route path="pickup/rejections" element={<RejectionsPage />} />
           <Route path="pickup/:id" element={<OrderDetailPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>

@@ -477,7 +477,54 @@
           "unknown_product": "товара нет в каталоге",
           "not_allowed": "товар недоступен на киоске",
           "duplicate": "дубль — код уже в другой заявке",
-          "over_limit": "превышен дневной лимит"
+          "over_limit": "превышен дневной лимит",
+          "unknown_badge": "бейдж не опознан"
+        }
+      },
+      "rejections": {
+        "title": "Отклонённые сканы",
+        "bannerTitle": "Отклонённые сканы: {{count}}",
+        "bannerKiosks": "Киоски: {{kiosks}}",
+        "bannerMore": "и ещё {{count}}",
+        "bannerAction": "Разобрать",
+        "backAction": "← Заявки",
+        "emptyTitle": "Отклонённых сканов нет",
+        "emptyHint": "Здесь появятся сканы, коды которых сервер не принял: например, товара нет в каталоге или бейдж уже отозван.",
+        "filters": {
+          "kioskLabel": "Киоск",
+          "kioskAll": "Все киоски",
+          "stateLabel": "Состояние",
+          "fromLabel": "С даты",
+          "toLabel": "По дату",
+          "state": {
+            "all": "Все",
+            "open": "Не отработаны",
+            "acknowledged": "Отработаны"
+          }
+        },
+        "table": {
+          "syncedAt": "Синхронизировано",
+          "scannedAt": "Сканировано",
+          "kioskName": "Киоск",
+          "employeeName": "Сотрудник",
+          "codeCount": "Кодов",
+          "order": "Заявка",
+          "state": "Состояние",
+          "actions": "Действия"
+        },
+        "unknownBadge": "Бейдж не опознан",
+        "badgeCodeLabel": "Бейдж: {{code}}",
+        "noOrder": "без заявки",
+        "state": {
+          "open": "Не отработан",
+          "acknowledged": "Отработан"
+        },
+        "acknowledgeAction": "Отработано",
+        "showCodes": "Показать коды",
+        "hideCodes": "Скрыть коды",
+        "toasts": {
+          "acknowledged": "Отмечено как отработанное",
+          "acknowledgeError": "Не удалось отметить. Обновите страницу."
         }
       },
       "toasts": {

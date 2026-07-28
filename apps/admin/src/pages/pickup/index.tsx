@@ -25,6 +25,7 @@ import {
   type PickupOrderRowDto,
   type PickupOrderStatus,
 } from "./api.js";
+import { useOpenRejectionSummary } from "./rejections-api.js";
 
 type StatusFilter = "all" | PickupOrderStatus;
 type ReasonFilter = "all" | PickupOrderReason;
@@ -62,6 +63,10 @@ export function PickupPage() {
     ...(toDate ? { to: toDate } : {}),
   });
   const exportMutation = useExportCodes();
+
+  const rejections = useOpenRejectionSummary();
+  const shownKiosks = rejections.kioskNames.slice(0, 3);
+  const hiddenKioskCount = rejections.kioskNames.length - shownKiosks.length;
 
   const items = data ?? [];
 
@@ -200,6 +205,23 @@ export function PickupPage() {
           </Button>
         }
       />
+
+      {rejections.openCount > 0 && (
+        <Alert
+          tone="warn"
+          title={t("pages.pickup.rejections.bannerTitle", { count: rejections.openCount })}
+          action={
+            <Link to="/pickup/rejections" style={{ color: "inherit" }}>
+              {t("pages.pickup.rejections.bannerAction")}
+            </Link>
+          }
+        >
+          {shownKiosks.length > 0 &&
+            t("pages.pickup.rejections.bannerKiosks", { kiosks: shownKiosks.join(", ") })}
+          {hiddenKioskCount > 0 &&
+            ` ${t("pages.pickup.rejections.bannerMore", { count: hiddenKioskCount })}`}
+        </Alert>
+      )}
 
       <div style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
         <div style={{ width: 200 }}>
