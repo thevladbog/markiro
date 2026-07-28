@@ -89,10 +89,55 @@ export class PickupOrdersService {
 
     // 2. Badge -> active employee (badge's revoked_at is null). Unknown -> 401 ("bad badge" on the kiosk).
     const employeeId = await this.resolveActiveEmployeeId(tenantId, dto.badgeCode);
-    if (!employeeId) throw new UnauthorizedException("Unknown badge");
+    if (!employeeId) {
+      // An offline sync lands hours after the scan, so the badge may have
+      // been revoked in between -- and this 401 fires before a single item
+      // is examined, so without this the codes the worker walked off with
+      // leave no trace at all. Codes only: an item-less badge heartbeat
+      // lost nothing and must not add noise here.
+      if (dto.items.length > 0) {
+        await this.recordScanRejection(this.db, {
+          tenantId,
+          kioskId,
+          employeeId: null,
+          badgeCode: dto.badgeCode,
+          orderId: null,
+          deviceSeq: dto.deviceSeq,
+          codes: dto.items.map((item) => ({ rawKm: item.rawKm, reason: "unknown_badge" })),
+          scannedAt: dto.createdAt ? new Date(dto.createdAt) : new Date(),
+        });
+      }
+      throw new UnauthorizedException("Unknown badge");
+    }
 
     // 3. Writeoff orders require a non-archived reason belonging to this tenant.
-    const writeoffReasonId = await this.resolveWriteoffReasonId(tenantId, dto);
+    let writeoffReasonId: string | null;
+    try {
+      writeoffReasonId = await this.resolveWriteoffReasonId(tenantId, dto);
+    } catch (error) {
+      // Same offline-drift shape as the unrecognised badge above: the kiosk
+      // cached the reason list at bootstrap, the admin archived (or removed)
+      // it hours later, and this throws before a single item is examined --
+      // so without this the codes the worker walked off with leave no trace
+      // at all. Codes only: an item-less sync lost no product and must not
+      // add noise. The employee IS known here (step 2 already succeeded), so
+      // this is `badgeCode: null` -- the mirror image of the badge case.
+      // Rethrow unchanged: this call site must not alter the kiosk's
+      // response, whichever of `resolveWriteoffReasonId`'s two messages fired.
+      if (dto.items.length > 0) {
+        await this.recordScanRejection(this.db, {
+          tenantId,
+          kioskId,
+          employeeId,
+          badgeCode: null,
+          orderId: null,
+          deviceSeq: dto.deviceSeq,
+          codes: dto.items.map((item) => ({ rawKm: item.rawKm, reason: "unknown_reason" })),
+          scannedAt: dto.createdAt ? new Date(dto.createdAt) : new Date(),
+        });
+      }
+      throw error;
+    }
 
     // 4. Per-item KM validation, allowlist resolution and in-request dedup.
     const { conflicts, candidates } = await this.resolveItems(tenantId, kioskId, dto.items);
@@ -140,13 +185,21 @@ export class PickupOrdersService {
           conflicts: [],
         };
       }
-      // No order row is created here, so `syncConflicts` has nowhere to live:
-      // the kiosk gets these conflicts in its response, but the cabinet would
-      // otherwise never learn that a worker's ENTIRE scan session was refused
-      // — the same blind spot `syncConflicts` exists to close, in its worst
-      // case. Log it so the event is at least observable to operations.
-      // A durable, admin-visible record needs a surface of its own (there is
-      // no order to hang it on) and is tracked separately.
+      // No order row is created here, so `syncConflicts` has nowhere to live.
+      // `pickup_scan_rejections` is that home: the cabinet would otherwise
+      // never learn that a worker's ENTIRE scan session was refused -- the
+      // same blind spot `syncConflicts` exists to close, in its worst case.
+      await this.recordScanRejection(this.db, {
+        tenantId,
+        kioskId,
+        employeeId,
+        badgeCode: null,
+        orderId: null,
+        deviceSeq: dto.deviceSeq,
+        codes: conflicts,
+        scannedAt: when,
+      });
+      // Kept alongside the durable row: cheap, and ops alerting may key on it.
       this.logger.warn(
         `kiosk ${kioskId}: all ${dto.items.length} scanned code(s) refused for employee ${employeeId} — ${conflicts.map((c) => c.reason).join(", ")}`,
       );
@@ -680,6 +733,32 @@ export class PickupOrdersService {
     };
   }
 
+  /**
+   * Persist refused codes so the cabinet can see them. Idempotent on
+   * `(tenant, kiosk, deviceSeq)` -- the same key `pickup_orders` uses -- so a
+   * replayed sync (a lost response, or a kiosk that keeps retrying a 401)
+   * records once rather than once per attempt.
+   *
+   * `db` is loosely typed so both `this.db` and a transaction handle satisfy
+   * it: the partial-refusal call site MUST enlist in the order's own
+   * transaction, or a kmKey-race rollback would leave an orphan row.
+   */
+  private async recordScanRejection(
+    db: Pick<Db, "insert">,
+    row: {
+      tenantId: string;
+      kioskId: string;
+      employeeId: string | null;
+      badgeCode: string | null;
+      orderId: string | null;
+      deviceSeq: number;
+      codes: { rawKm: string; reason: string }[];
+      scannedAt: Date;
+    },
+  ): Promise<void> {
+    await db.insert(schema.pickupScanRejections).values(row).onConflictDoNothing();
+  }
+
   private async resolveActiveEmployeeId(
     tenantId: string,
     badgeCode: string,
@@ -956,6 +1035,23 @@ export class PickupOrdersService {
                 scannedAt: when,
               })),
             );
+          }
+          // Same transaction as the order on purpose: the kmKey-race retry
+          // below rolls this back with it, so a rejection row can never
+          // outlive the order attempt that produced it. `conflicts` is
+          // mutated by that retry before it loops, so on the attempt that
+          // finally commits it holds the complete set.
+          if (conflicts.length > 0) {
+            await this.recordScanRejection(tx, {
+              tenantId,
+              kioskId,
+              employeeId,
+              badgeCode: null,
+              orderId: order.id,
+              deviceSeq,
+              codes: conflicts,
+              scannedAt: when,
+            });
           }
           return { orderNo: order.orderNo, itemCount: order.itemCount };
         });
