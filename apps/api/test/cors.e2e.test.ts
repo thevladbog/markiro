@@ -6,7 +6,7 @@ import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
-import { loadEnv } from "../src/env";
+import { allowedOrigins, loadEnv } from "../src/env";
 
 /**
  * Requires a reachable Postgres with the Better Auth + platform schema
@@ -18,13 +18,21 @@ const ready = Boolean(
 
 const FOREIGN_ORIGIN = "https://evil.example";
 
+/**
+ * Injected rather than read from `process.env.KIOSK_ORIGIN`: the variable is
+ * optional (see src/env.ts) and unset in a plain dev shell, so reading it
+ * would leave the kiosk cases below asserting nothing whenever it happens to
+ * be absent. A literal also keeps it provably distinct from ADMIN_ORIGIN.
+ */
+const KIOSK_ORIGIN = "https://kiosk.markiro.test";
+
 describe.skipIf(!ready)("cors e2e", () => {
   let app: INestApplication | undefined;
   let setup: AuthSetup;
   let adminOrigin: string;
 
   beforeAll(async () => {
-    const env = loadEnv();
+    const env = { ...loadEnv(), KIOSK_ORIGIN };
     adminOrigin = env.ADMIN_ORIGIN;
     setup = setupAuth(env);
 
@@ -36,7 +44,7 @@ describe.skipIf(!ready)("cors e2e", () => {
     // handler is mounted so preflight/actual responses on /api/auth/* also
     // carry the CORS headers (see main.ts for the full ordering rationale).
     app = ref.createNestApplication({ bodyParser: false });
-    app.enableCors({ origin: [adminOrigin], credentials: true });
+    app.enableCors({ origin: allowedOrigins(env), credentials: true });
     const server = app.getHttpAdapter().getInstance();
     mountAuth(server, setup.auth);
     server.use(express.json());
@@ -66,6 +74,54 @@ describe.skipIf(!ready)("cors e2e", () => {
       .expect(204);
 
     expect(res.headers["access-control-allow-origin"]).toBeUndefined();
+  });
+
+  // The kiosk is the only cross-origin caller that CANNOT fall back to a
+  // same-origin deployment: its pairing screen takes a server address, so an
+  // on-prem install routinely serves the PWA and the API from different
+  // hosts. Every /kiosk/* call also carries `x-kiosk-token`, which is not a
+  // safelisted request header, so this preflight happens before *every*
+  // bootstrap and order submission -- not just once.
+  it("OPTIONS preflight from KIOSK_ORIGIN on a /kiosk route is accepted", async () => {
+    const res = await request(app!.getHttpServer())
+      .options("/kiosk/bootstrap")
+      .set("Origin", KIOSK_ORIGIN)
+      .set("Access-Control-Request-Method", "GET")
+      .set("Access-Control-Request-Headers", "x-kiosk-token")
+      .expect(204);
+
+    expect(res.headers["access-control-allow-origin"]).toBe(KIOSK_ORIGIN);
+    expect(res.headers["access-control-allow-credentials"]).toBe("true");
+    // Echoed by `cors` because main.ts leaves `allowedHeaders` unset; without
+    // it the browser drops the request even though the origin was allowed.
+    expect(res.headers["access-control-allow-headers"]).toContain("x-kiosk-token");
+  });
+
+  it("OPTIONS preflight from an unlisted origin on a /kiosk route is refused", async () => {
+    const res = await request(app!.getHttpServer())
+      .options("/kiosk/bootstrap")
+      .set("Origin", FOREIGN_ORIGIN)
+      .set("Access-Control-Request-Method", "GET")
+      .set("Access-Control-Request-Headers", "x-kiosk-token")
+      .expect(204);
+
+    // ACAO's *absence* is the whole boundary. Do not also assert on
+    // `access-control-allow-credentials`: `cors` emits it unconditionally
+    // whenever `credentials: true` is configured, match or no match
+    // (verified — it is present with value "true" on this very response).
+    // That is harmless, because a browser rejects the response on the
+    // missing ACAO before credentials are ever considered.
+    expect(res.headers["access-control-allow-origin"]).toBeUndefined();
+  });
+
+  it("the admin origin stays allowed alongside the kiosk origin", async () => {
+    const res = await request(app!.getHttpServer())
+      .options("/kiosk/bootstrap")
+      .set("Origin", adminOrigin)
+      .set("Access-Control-Request-Method", "GET")
+      .expect(204);
+
+    expect(res.headers["access-control-allow-origin"]).toBe(adminOrigin);
   });
 
   it("sign-up POST with Origin: ADMIN_ORIGIN succeeds", async () => {

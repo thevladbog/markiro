@@ -14,6 +14,8 @@ apps/
   api/        NestJS 11 + Drizzle + Postgres — SaaS backend, public API
   admin/      React 19 + Vite 8 — admin panel (office mode)
   station/    Tauri 2 + React 19 — line station (floor mode), Windows MVP
+  kiosk/      React 19 + Vite 8 + IndexedDB — offline-first self-service
+              pickup kiosk (installable PWA), paired to the api by device token
   landing/    Astro 7 — marketing site
 packages/
   domain/     GS1 validation, SSCC, ZPL/TSPL generation, Cyrillic
@@ -132,6 +134,16 @@ registry, `save-exact`, `engine-strict`, `minimum-release-age=10080`
 
 - MVP: one Yandex Cloud VM + Docker Compose (api, admin, landing behind
   Caddy) + Managed Postgres + Object Storage. RF residency (152-ФЗ).
+- `KIOSK_ORIGIN` must be set whenever the pickup kiosk PWA is served from a
+  different origin than the API — which is the normal on-prem case, since the
+  kiosk's pairing screen takes a server address. It is optional (an
+  admin-only deployment leaves it unset and trusts no kiosk origin), and it
+  feeds both the CORS allowlist and Better Auth's `trustedOrigins` from one
+  place (`allowedOrigins` in `apps/api/src/env.ts`). Leaving it unset in a
+  split-origin install fails only in the browser: every `/kiosk/*` call sends
+  an `x-kiosk-token` header, so each is preceded by a preflight the API then
+  refuses. Dev never sees it — `apps/kiosk/vite.config.ts` proxies `/api`
+  same-origin.
 - CI: GitHub Actions — lint/test/build, DB migrations, Docker images,
   Tauri Windows installer build + signing, release channels for the updater.
 - Future on-prem = the same compose bundle.

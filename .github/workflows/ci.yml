@@ -31,6 +31,7 @@ jobs:
       BETTER_AUTH_SECRET: insecure-dummy-ci-placeholder-not-a-secret
       BETTER_AUTH_URL: http://localhost:3000
       ADMIN_ORIGIN: http://localhost:5173
+      KIOSK_ORIGIN: http://localhost:5373
       PAIRING_CODE_PEPPER: insecure-dummy-ci-pairing-pepper-not-a-secret
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

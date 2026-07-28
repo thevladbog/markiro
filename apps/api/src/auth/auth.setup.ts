@@ -1,7 +1,7 @@
 import { toNodeHandler } from "better-auth/node";
 import type { Express } from "express";
 import { buildAuth, createDb, type Auth } from "@markiro/db";
-import type { Env } from "../env";
+import { allowedOrigins, type Env } from "../env";
 
 // `DbConnection` re-uses createDb's own return type by reference (rather
 // than spelling out `NodePgDatabase`/`pg.Pool`, which live in @markiro/db's
@@ -17,7 +17,11 @@ export function setupAuth(env: Env): DbConnection & { auth: Auth } {
   const auth = buildAuth(db, {
     secret: env.BETTER_AUTH_SECRET,
     baseURL: env.BETTER_AUTH_URL,
-    trustedOrigins: [env.ADMIN_ORIGIN],
+    // Same list the CORS middleware gets in main.ts, on purpose -- see
+    // `allowedOrigins`. The kiosk itself calls no /api/auth/* route (it
+    // authenticates with a device token), but keeping one list means a
+    // future one cannot be half-allowed.
+    trustedOrigins: allowedOrigins(env),
   });
   return { db, pool, auth };
 }
