@@ -78,6 +78,13 @@
       "when": 1785001150399,
       "tag": "0010_material_ogun",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1785220198347,
+      "tag": "0011_unknown_lionheart",
+      "breakpoints": true
     }
   ]
 }

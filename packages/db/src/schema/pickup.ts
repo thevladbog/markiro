@@ -1,7 +1,9 @@
 import {
   boolean,
   foreignKey,
+  index,
   integer,
+  jsonb,
   numeric,
   pgEnum,
   pgTable,
@@ -185,6 +187,11 @@ export const pickupOrders = pgTable(
     receiptNo: text("receipt_no"),
     actNo: text("act_no"),
     deviceSeq: integer("device_seq"),
+    // Items the server refused at sync time (OrderConflict[]). An offline
+    // order can arrive hours late, so the admin must be able to see what was
+    // dropped; without this the conflicts only ever existed in the HTTP
+    // response the kiosk got.
+    syncConflicts: jsonb("sync_conflicts").$type<{ rawKm: string; reason: string }[]>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
     resolvedByUserId: text("resolved_by_user_id"),
@@ -243,6 +250,50 @@ export const pickupOrderItems = pgTable(
       name: "pickup_order_items_tenant_product_fk",
       columns: [t.tenantId, t.productId],
       foreignColumns: [products.tenantId, products.id],
+    }),
+  ],
+);
+
+/**
+ * One badge salt per tenant. Badge verifiers deliberately share a salt within
+ * a tenant so a kiosk can derive ONCE per scan and look the digest up in a
+ * map, instead of running PBKDF2 against every employee (that would take
+ * seconds on a full staff roster). PIN verifiers keep their per-row salt —
+ * a 4-digit PIN needs it.
+ */
+export const employeeBadgeSalts = pgTable("employee_badge_salts", {
+  tenantId: text("tenant_id")
+    .primaryKey()
+    .references(() => organization.id),
+  salt: text("salt").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Single-use device pairing codes. Only the hash is stored; the plaintext is
+ * revealed once in the cabinet. `attempts` drives the per-code lockout.
+ */
+export const kioskPairingCodes = pgTable(
+  "kiosk_pairing_codes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    kioskId: uuid("kiosk_id").notNull(),
+    codeHash: text("code_hash").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    attempts: integer("attempts").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("kiosk_pairing_codes_tenant_id_uq").on(t.tenantId, t.id),
+    // Lookup path for the unauthenticated exchange: the device presents only
+    // a code, so this index is what makes that a single hash probe.
+    index("kiosk_pairing_codes_hash_idx").on(t.codeHash),
+    foreignKey({
+      name: "kiosk_pairing_codes_tenant_kiosk_fk",
+      columns: [t.tenantId, t.kioskId],
+      foreignColumns: [kiosks.tenantId, kiosks.id],
     }),
   ],
 );
