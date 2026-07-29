@@ -25,13 +25,13 @@ An SSCC is 18 digits: extension digit (1) + issuer prefix (9) + serial (7) + che
 
 **The issuer may be the tenant or a counterparty.** A plant packing for an external client marks transport packaging with that client's numbers. `counterparties.gln` is already `NOT NULL`, so no new directory is needed.
 
-**The shift picks the issuer explicitly**, defaulting to the tenant's own organisation. It is *not* inferred from `shifts.counterparty_id`: that field answers "who is this for", while the issuer answers "whose numbers". Packing for a client under one's own SSCCs is both legal and common, and inferring one from the other would silently produce the wrong number — discovered at goods-in.
+**The shift picks the issuer explicitly**, defaulting to the tenant's own organisation. It is _not_ inferred from `shifts.counterparty_id`: that field answers "who is this for", while the issuer answers "whose numbers". Packing for a client under one's own SSCCs is both legal and common, and inferring one from the other would silently produce the wrong number — discovered at goods-in.
 
 **The extension digit separates the two levels.** GS1 assigns it no meaning; it exists to multiply capacity, and the company chooses it. The common practice — 0 for boxes, 1 for pallets — is adopted here as a convention, so box and pallet serials never interleave and 06d can add a pallet counter without touching serials already issued for boxes.
 
 **The counter is therefore keyed `(tenant, issuer, extension digit)`.** The starting serial belongs to the counter, not to a shift: it is edited on the organisation profile for the tenant's own numbers and on the counterparty card for a client's. Putting it on the shift would force re-entering it for every shift of the same client, with a fresh chance to get it wrong.
 
-The starting serial is what makes migration possible. A plant moving off another system that issued SSCCs **under the same prefix** must continue from where that system stopped, or it will re-issue numbers that already exist. Under a *different* prefix the space is fresh and zero is fine. The two settings are therefore shown together, because the starting serial is meaningless without knowing which prefix it counts within.
+The starting serial is what makes migration possible. A plant moving off another system that issued SSCCs **under the same prefix** must continue from where that system stopped, or it will re-issue numbers that already exist. Under a _different_ prefix the space is fresh and zero is fine. The two settings are therefore shown together, because the starting serial is meaningless without knowing which prefix it counts within.
 
 If `gs1Prefixes` is populated and does not contain the 9 digits derived from the GLN, the data contradicts itself; the cabinet says so rather than silently proceeding.
 

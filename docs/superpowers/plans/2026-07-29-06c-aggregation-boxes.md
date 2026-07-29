@@ -27,15 +27,18 @@
 ## File Structure
 
 **`packages/domain`**
+
 - `src/gs1/sscc.ts` (modify) — add `parseScannedSscc`; `buildSscc`/`isValidSscc`/`ssccSerialCapacity` stay untouched.
 - `src/labels/zpl.ts`, `src/labels/tspl.ts` (modify) — a GS1-128 path for a `code128` element bound to `sscc`.
 
 **`packages/db`**
+
 - `src/schema/platform.ts` (modify) — `ssccCounters`, `ssccBlocks`, `boxes`, `boxItems`; issuer columns on `shifts`.
 - `src/schema/codes.ts` (modify) — `scanEvents.operatorId` (query-only def; DDL in the migration).
 - `src/sqlite/migrations.ts`, `src/sqlite/schema.ts` (modify) — `sscc_pool`, `boxes_mirror`, `box_id` on `codes_mirror` and `outbox`.
 
 **`apps/api`**
+
 - `src/modules/sscc/sscc.service.ts` (create) — issuer resolution and block allocation. One responsibility: hand out serial ranges.
 - `src/modules/boxes/` (create) — cabinet-only read model for the box list.
 - `src/modules/station-scans/` (modify) — box ids, box rows, operator, displacement marking.
@@ -43,6 +46,7 @@
 - `src/modules/org-profile/`, `src/modules/counterparties/` (modify) — counter settings.
 
 **`apps/station`**
+
 - `src/lib/sscc-pool.ts` (create) — pool ranges and burning.
 - `src/lib/boxes.ts` (create) — open, current, close.
 - `src/lib/box-label.ts` (create) — assemble the field record and render.
@@ -50,6 +54,7 @@
 - `src/pages/WorkScreen.tsx` (modify), `src/ui/PrintVerification.tsx` (create).
 
 **`apps/admin`**
+
 - `src/pages/boxes/` (create), `src/pages/shifts/`, org-profile and counterparty forms (modify).
 
 ---
@@ -57,11 +62,13 @@
 ### Task 1: Parse a scanned SSCC
 
 **Files:**
+
 - Modify: `packages/domain/src/gs1/sscc.ts`
 - Modify: `packages/domain/src/index.ts`
 - Test: `packages/domain/test/sscc.test.ts`
 
 **Interfaces:**
+
 - Consumes: `isValidSscc(code: string): boolean` (already exported).
 - Produces: `parseScannedSscc(raw: string): string | null` — returns the bare 18 digits, or `null` when the payload is not an SSCC.
 
@@ -147,11 +154,13 @@ git commit -m "feat(domain): parse a scanned SSCC payload"
 ### Task 2: Emit a GS1-128 barcode
 
 **Files:**
+
 - Modify: `packages/domain/src/labels/zpl.ts`
 - Modify: `packages/domain/src/labels/tspl.ts`
 - Test: `packages/domain/test/zpl.test.ts`, `packages/domain/test/tspl.test.ts`
 
 **Interfaces:**
+
 - Consumes: the `code128` branch of each emitter's barcode switch.
 - Produces: no new export. A `code128` element whose `field` is `"sscc"` emits a GS1-128 carrying FNC1 + `00` + the 18 digits.
 
@@ -249,12 +258,14 @@ git commit -m "feat(domain): emit GS1-128 for an sscc-bound code128 element"
 ### Task 3: Server schema for counters, blocks and boxes
 
 **Files:**
+
 - Modify: `packages/db/src/schema/platform.ts`
 - Modify: `packages/db/src/schema/codes.ts`
 - Create: `packages/db/migrations/00NN_*.sql` (generated)
 - Test: `packages/db/test/schema.test.ts`
 
 **Interfaces:**
+
 - Produces: `ssccCounters`, `ssccBlocks`, `boxes`, `boxItems` tables; `shifts.ssccIssuerCounterpartyId`; `scanEvents.operatorId`.
 
 `scan_events` and `codes` are partitioned and their DDL lives in hand-written migrations — `packages/db/src/schema/codes.ts` says so at the top and is excluded from `drizzle.config.ts`'s `schema` list. So `scanEvents.operatorId` is added to the **query-only** def there and its DDL is written by hand into the generated migration file.
@@ -468,20 +479,33 @@ git commit -m "feat(db): sscc counters, blocks and the box hierarchy"
 ### Task 4: Issuer resolution and block allocation
 
 **Files:**
+
 - Create: `apps/api/src/modules/sscc/sscc.service.ts`
 - Create: `apps/api/src/modules/sscc/sscc.module.ts`
 - Modify: `apps/api/src/app.module.ts`
 - Test: `apps/api/test/sscc.e2e.test.ts`
 
 **Interfaces:**
+
 - Consumes: `ssccCounters`, `ssccBlocks` (Task 3); `buildSscc` from `@markiro/domain`.
 - Produces:
   ```ts
   export const BOX_EXTENSION_DIGIT = 0;
-  export interface SsccBlock { issuerGln: string; extensionDigit: number; fromSerial: number; toSerial: number; }
+  export interface SsccBlock {
+    issuerGln: string;
+    extensionDigit: number;
+    fromSerial: number;
+    toSerial: number;
+  }
   class SsccService {
     resolveIssuerGln(tenantId: string, shiftId: string): Promise<string>;
-    allocate(tenantId: string, issuerGln: string, extensionDigit: number, deviceId: string, size: number): Promise<SsccBlock>;
+    allocate(
+      tenantId: string,
+      issuerGln: string,
+      extensionDigit: number,
+      deviceId: string,
+      size: number,
+    ): Promise<SsccBlock>;
   }
   ```
 
@@ -687,6 +711,7 @@ git commit -m "feat(api): sscc issuer resolution and one-statement block allocat
 ### Task 5: Counter settings in the cabinet
 
 **Files:**
+
 - Modify: `apps/api/src/modules/org-profile/dto.ts`, `org-profile.service.ts`
 - Modify: `apps/api/src/modules/counterparties/dto.ts`, `counterparties.service.ts`
 - Modify: `apps/admin/src/pages/settings/OrgProfilePage.tsx`, `apps/admin/src/pages/counterparties/`
@@ -694,6 +719,7 @@ git commit -m "feat(api): sscc issuer resolution and one-statement block allocat
 - Test: `apps/api/test/sscc-settings.e2e.test.ts`, `apps/admin/test/org-profile.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `ssccCounters` (Task 3).
 - Produces: `GET/PUT` of `{ extensionDigit: number; nextSerial: number }` for the tenant's own counter and for a counterparty's, both `SessionOnlyGuard`.
 
@@ -705,7 +731,10 @@ Create `apps/api/test/sscc-settings.e2e.test.ts`:
 
 ```ts
 it("seeds the tenant's own box counter and reads it back", async () => {
-  await agent.put("/api/org-profile/sscc").send({ extensionDigit: 0, nextSerial: 45_000 }).expect(200);
+  await agent
+    .put("/api/org-profile/sscc")
+    .send({ extensionDigit: 0, nextSerial: 45_000 })
+    .expect(200);
   const res = await agent.get("/api/org-profile/sscc").expect(200);
   expect(res.body).toEqual({ extensionDigit: 0, nextSerial: 45_000 });
 });
@@ -782,12 +811,14 @@ git commit -m "feat(api,admin): sscc counter settings for the tenant and counter
 ### Task 6: The shift picks its issuer and box template
 
 **Files:**
+
 - Modify: `apps/api/src/modules/shifts/dto.ts`, `shifts.service.ts`
 - Modify: `apps/admin/src/pages/shifts/` (form + api)
 - Modify: `apps/admin/src/i18n/en.json`, `ru.json`
 - Test: `apps/api/test/shifts.e2e.test.ts`, `apps/admin/test/shifts.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `shifts.ssccIssuerCounterpartyId`, `shifts.boxLabelTemplateId` (Task 3).
 - Produces: both fields on the shift create/update DTO and on `ShiftDto`.
 
@@ -872,11 +903,13 @@ git commit -m "feat(api,admin): a shift picks its sscc issuer and box label temp
 ### Task 7: The bundle carries the issuer and a pool block
 
 **Files:**
+
 - Modify: `apps/api/src/modules/shifts/shifts.service.ts` (bundle assembly)
 - Modify: `apps/station/src/lib/mirror.ts` (`StationBundle`)
 - Test: `apps/api/test/shifts-bundle.e2e.test.ts`
 
 **Interfaces:**
+
 - Consumes: `SsccService.resolveIssuerGln`, `SsccService.allocate`, `BOX_EXTENSION_DIGIT` (Task 4).
 - Produces: `StationBundle.sscc: { issuerGln: string; extensionDigit: number; fromSerial: number; toSerial: number }`.
 
@@ -980,17 +1013,36 @@ git commit -m "feat(api): the shift bundle carries a box serial block"
 ### Task 8: The device's serial pool
 
 **Files:**
+
 - Modify: `packages/db/src/sqlite/migrations.ts`, `packages/db/src/sqlite/schema.ts`
 - Create: `apps/station/src/lib/sscc-pool.ts`
 - Test: `apps/station/test/sscc-pool.test.ts`, `packages/db/test/sqlite-schema.test.ts`
 
 **Interfaces:**
+
 - Produces:
   ```ts
-  export interface PoolRange { issuerGln: string; extensionDigit: number; fromSerial: number; toSerial: number; nextSerial: number }
-  export async function addRange(exec: SqlExecutor, r: Omit<PoolRange, "nextSerial">): Promise<void>;
-  export async function burnSerial(exec: SqlExecutor, issuerGln: string, extensionDigit: number): Promise<number | null>;
-  export async function remaining(exec: SqlExecutor, issuerGln: string, extensionDigit: number): Promise<number>;
+  export interface PoolRange {
+    issuerGln: string;
+    extensionDigit: number;
+    fromSerial: number;
+    toSerial: number;
+    nextSerial: number;
+  }
+  export async function addRange(
+    exec: SqlExecutor,
+    r: Omit<PoolRange, "nextSerial">,
+  ): Promise<void>;
+  export async function burnSerial(
+    exec: SqlExecutor,
+    issuerGln: string,
+    extensionDigit: number,
+  ): Promise<number | null>;
+  export async function remaining(
+    exec: SqlExecutor,
+    issuerGln: string,
+    extensionDigit: number,
+  ): Promise<number>;
   ```
 
 `burnSerial` returns the serial it consumed, or `null` when the pool is dry. **It must consume in one statement** — `tauri-plugin-sql` opens SQLite through a pool, so a select followed by an update can hand the same serial to two callers.
@@ -1105,10 +1157,7 @@ export interface PoolRange {
 }
 
 /** Idempotent: the primary key drops a block the device already holds. */
-export async function addRange(
-  exec: SqlExecutor,
-  r: Omit<PoolRange, "nextSerial">,
-): Promise<void> {
+export async function addRange(exec: SqlExecutor, r: Omit<PoolRange, "nextSerial">): Promise<void> {
   await exec.run(
     `INSERT INTO sscc_pool (issuer_gln, extension_digit, from_serial, to_serial, next_serial)
      VALUES (?,?,?,?,?)
@@ -1178,19 +1227,39 @@ git commit -m "feat(station): device-side sscc serial pool"
 ### Task 9: Boxes on the device
 
 **Files:**
+
 - Modify: `packages/db/src/sqlite/migrations.ts`, `packages/db/src/sqlite/schema.ts`
 - Create: `apps/station/src/lib/boxes.ts`
 - Modify: `apps/station/src/lib/journal.ts`
 - Test: `apps/station/test/boxes.test.ts`, `apps/station/test/journal.test.ts`
 
 **Interfaces:**
+
 - Consumes: `burnSerial` (Task 8); `AcceptedCode` and `recordScan` in `journal.ts`.
 - Produces:
   ```ts
-  export interface DeviceBox { boxId: string; shiftId: string; sscc: string | null; itemCount: number; openedAt: string; closedAt: string | null }
+  export interface DeviceBox {
+    boxId: string;
+    shiftId: string;
+    sscc: string | null;
+    itemCount: number;
+    openedAt: string;
+    closedAt: string | null;
+  }
   export async function currentBox(exec: SqlExecutor, shiftId: string): Promise<DeviceBox | null>;
-  export async function openBox(exec: SqlExecutor, shiftId: string, boxId: string, openedAt: string): Promise<void>;
-  export async function closeBox(exec: SqlExecutor, boxId: string, sscc: string, closedAt: string, operatorId: string | null): Promise<void>;
+  export async function openBox(
+    exec: SqlExecutor,
+    shiftId: string,
+    boxId: string,
+    openedAt: string,
+  ): Promise<void>;
+  export async function closeBox(
+    exec: SqlExecutor,
+    boxId: string,
+    sscc: string,
+    closedAt: string,
+    operatorId: string | null,
+  ): Promise<void>;
   ```
 - `AcceptedCode` gains `boxId: string | null`.
 
@@ -1222,7 +1291,9 @@ it("keeps a closed box's item count", async () => {
   await openBox(exec, "s1", "b1", "2026-07-29T10:00:00.000Z");
   await recordScan(exec, event("a"), code("aa", "b1"));
   await closeBox(exec, "b1", "004601234560000017", "2026-07-29T10:05:00.000Z", null);
-  const rows = await exec.all<{ sscc: string }>(`SELECT sscc FROM boxes_mirror WHERE box_id = ?`, ["b1"]);
+  const rows = await exec.all<{ sscc: string }>(`SELECT sscc FROM boxes_mirror WHERE box_id = ?`, [
+    "b1",
+  ]);
   expect(rows[0].sscc).toBe("004601234560000017");
 });
 
@@ -1293,11 +1364,11 @@ Create `apps/station/src/lib/boxes.ts` with `currentBox` (the one row for this s
 In `apps/station/src/lib/journal.ts`, add `boxId: string | null` to `AcceptedCode` and carry it into both inserts:
 
 ```ts
-      await exec.run(
-        `INSERT INTO codes_mirror (code_hash, shift_id, gtin14, serial, scanned_at, box_id)
+await exec.run(
+  `INSERT INTO codes_mirror (code_hash, shift_id, gtin14, serial, scanned_at, box_id)
          VALUES (?,?,?,?,?,?)`,
-        [code.codeHash, code.shiftId, code.gtin14, code.serial, code.scannedAt, code.boxId],
-      );
+  [code.codeHash, code.shiftId, code.gtin14, code.serial, code.scannedAt, code.boxId],
+);
 ```
 
 and, in the outbox insert, `storedCode && code ? code.boxId : null` alongside the other three code fields. The compensation path is untouched — it deletes the code row by hash, which now takes the box id with it.
@@ -1331,16 +1402,23 @@ git commit -m "feat(station): device box store and box membership on the code ro
 ### Task 10: Ingest records boxes and marks displaced items
 
 **Files:**
+
 - Modify: `apps/api/src/modules/station-scans/dto.ts`
 - Modify: `apps/api/src/modules/station-scans/station-scans.service.ts`
 - Create: `apps/api/src/modules/station-scans/box-membership.ts`
 - Test: `apps/api/test/station-scans.e2e.test.ts`, `apps/api/test/box-membership.test.ts`
 
 **Interfaces:**
+
 - Consumes: `boxes`, `boxItems` (Task 3); the existing ownership claim block and `code_registry`.
 - Produces:
   ```ts
-  export interface MembershipRow { boxId: string; codeHash: string; addedAt: Date; ownerIsThisScan: boolean }
+  export interface MembershipRow {
+    boxId: string;
+    codeHash: string;
+    addedAt: Date;
+    ownerIsThisScan: boolean;
+  }
   export function displacedHashes(rows: MembershipRow[]): string[];
   ```
   DTO: `scanItemSchema` gains `boxId: z.string().min(1).max(64).nullable()` and `operatorId: z.string().uuid().toLowerCase().nullable()`; a new `boxes` array on `syncBatchSchema` carries closures.
@@ -1524,6 +1602,7 @@ Expected: PASS.
 - [ ] **Step 7: Prove three mutations are caught**
 
 Apply each, run, name the failing test, restore, confirm green:
+
 1. Skip the displacement `UPDATE` entirely — the displacement test must fail.
 2. Drop `ON CONFLICT DO NOTHING` from the `box_items` insert — the idempotency test must fail.
 3. Write `operatorId` from the batch's first item instead of per item — the operator test must fail (add a second item with a different operator if it does not).
@@ -1540,11 +1619,13 @@ git commit -m "feat(api): record box membership and mark displaced items on inge
 ### Task 11: The sync engine carries pools and closures
 
 **Files:**
+
 - Modify: `apps/station/src/lib/sync.ts`
 - Modify: `apps/station/src/lib/shift-bundle.ts`
 - Test: `apps/station/test/sync.test.ts`
 
 **Interfaces:**
+
 - Consumes: `addRange`, `remaining` (Task 8); `currentBox`, `closeBox` (Task 9); the DTO from Task 10.
 - Produces: `SyncState` gains `serialsLeft: number`; the batch body gains `boxes` and per-item `boxId`/`operatorId`; the response's `ssccBlock` is applied.
 
@@ -1556,8 +1637,12 @@ Append to `apps/station/test/sync.test.ts`:
 
 ```ts
 it("applies a serial block carried by the sync response", async () => {
-  mockPost({ applied: 1, alreadyApplied: false, conflicts: [],
-    ssccBlock: { issuerGln: GLN, extensionDigit: 0, fromSerial: 5, toSerial: 9 } });
+  mockPost({
+    applied: 1,
+    alreadyApplied: false,
+    conflicts: [],
+    ssccBlock: { issuerGln: GLN, extensionDigit: 0, fromSerial: 5, toSerial: 9 },
+  });
   await drainOnce();
   expect(await remaining(exec, GLN, 0)).toBe(5);
 });
@@ -1587,14 +1672,21 @@ it("does not resend a box already acknowledged", async () => {
 
 it("still acknowledges when applying a serial block fails", async () => {
   const failing = failingExecOn(exec, /INSERT INTO sscc_pool/);
-  mockPost({ applied: 1, alreadyApplied: false, conflicts: [],
-    ssccBlock: { issuerGln: GLN, extensionDigit: 0, fromSerial: 5, toSerial: 9 } });
+  mockPost({
+    applied: 1,
+    alreadyApplied: false,
+    conflicts: [],
+    ssccBlock: { issuerGln: GLN, extensionDigit: 0, fromSerial: 5, toSerial: 9 },
+  });
   await drainOnce(failing);
   expect(await outboxCount(exec)).toBe(0);
 });
 
 it("still rejects a response that is not this endpoint's shape", async () => {
-  mockPost({ status: "ok", ssccBlock: { issuerGln: GLN, extensionDigit: 0, fromSerial: 5, toSerial: 9 } });
+  mockPost({
+    status: "ok",
+    ssccBlock: { issuerGln: GLN, extensionDigit: 0, fromSerial: 5, toSerial: 9 },
+  });
   await drainOnce();
   expect(await outboxCount(exec)).toBe(1);
   expect(await remaining(exec, GLN, 0)).toBe(0);
@@ -1604,8 +1696,11 @@ it("drops a lost code from the box that is still open", async () => {
   await openBox(exec, SHIFT, "b1", ISO);
   await recordScan(exec, event("a"), code("aa", "b1"));
   await recordScan(exec, event("b"), code("bb", "b1"));
-  mockPost({ applied: 2, alreadyApplied: false,
-    conflicts: [{ codeHash: "aa", winningTerminalId: "t1", winningScannedAt: ISO }] });
+  mockPost({
+    applied: 2,
+    alreadyApplied: false,
+    conflicts: [{ codeHash: "aa", winningTerminalId: "t1", winningScannedAt: ISO }],
+  });
   await drainOnce();
   expect((await currentBox(exec, SHIFT))?.itemCount).toBe(1);
 });
@@ -1614,11 +1709,16 @@ it("leaves a closed box alone when one of its codes is lost", async () => {
   await openBox(exec, SHIFT, "b1", ISO);
   await recordScan(exec, event("a"), code("aa", "b1"));
   await closeBox(exec, "b1", SSCC, ISO, null);
-  mockPost({ applied: 1, alreadyApplied: false,
-    conflicts: [{ codeHash: "aa", winningTerminalId: "t1", winningScannedAt: ISO }] });
+  mockPost({
+    applied: 1,
+    alreadyApplied: false,
+    conflicts: [{ codeHash: "aa", winningTerminalId: "t1", winningScannedAt: ISO }],
+  });
   await drainOnce();
   const rows = await exec.all<{ box_id: string }>(
-    `SELECT box_id FROM codes_mirror WHERE code_hash = ?`, ["aa"]);
+    `SELECT box_id FROM codes_mirror WHERE code_hash = ?`,
+    ["aa"],
+  );
   expect(rows[0].box_id).toBe("b1");
 });
 ```
@@ -1638,17 +1738,17 @@ In `sync.ts`:
 - After the validated response and **before** `ackThrough`, apply the block in its own `try`/`catch`:
 
 ```ts
-  if (res.ssccBlock) {
-    try {
-      await addRange(deps.exec, res.ssccBlock);
-    } catch (err) {
-      // A pool top-up that fails must not wedge delivery. The device simply
-      // runs on what it has; the next response carries another block. Losing
-      // one block costs at most some burnt numbers, and SSCCs need not be
-      // contiguous.
-      console.error("station: applying serial block failed", err);
-    }
+if (res.ssccBlock) {
+  try {
+    await addRange(deps.exec, res.ssccBlock);
+  } catch (err) {
+    // A pool top-up that fails must not wedge delivery. The device simply
+    // runs on what it has; the next response carries another block. Losing
+    // one block costs at most some burnt numbers, and SSCCs need not be
+    // contiguous.
+    console.error("station: applying serial block failed", err);
   }
+}
 ```
 
 - Mark the sent boxes acknowledged in the same place the outbox rows are acked.
@@ -1656,20 +1756,20 @@ In `sync.ts`:
 - Beside the existing `recordConflicts` call, clear the box id of every lost code whose box is **still open**, in one statement:
 
 ```ts
-      // A still-open box corrects itself: the operator simply scans one more
-      // item. A CLOSED box is taped and labelled, so it stays as printed and
-      // ends one position short — the cabinet is where that surfaces. This is
-      // the same trade the server makes when it marks a box item displaced
-      // rather than deleting it.
-      await deps.exec.run(
-        `UPDATE codes_mirror SET box_id = NULL
+// A still-open box corrects itself: the operator simply scans one more
+// item. A CLOSED box is taped and labelled, so it stays as printed and
+// ends one position short — the cabinet is where that surfaces. This is
+// the same trade the server makes when it marks a box item displaced
+// rather than deleting it.
+await deps.exec.run(
+  `UPDATE codes_mirror SET box_id = NULL
          WHERE code_hash = ?
            AND box_id IN (SELECT box_id FROM boxes_mirror WHERE closed_at IS NULL)`,
-        [c.codeHash],
-      );
+  [c.codeHash],
+);
 ```
 
-  inside the same `try`/`catch` that already isolates conflict recording from the ack, and for the same reason.
+inside the same `try`/`catch` that already isolates conflict recording from the ack, and for the same reason.
 
 In `shift-bundle.ts`, apply `bundle.sscc` through `addRange` when it is present.
 
@@ -1694,11 +1794,13 @@ git commit -m "feat(station): sync carries serial top-ups and closed boxes"
 ### Task 12: Closing a box and rendering its label
 
 **Files:**
+
 - Create: `apps/station/src/lib/box-label.ts`
 - Create: `apps/station/src/lib/close-box.ts`
 - Test: `apps/station/test/close-box.test.ts`
 
 **Interfaces:**
+
 - Consumes: `burnSerial` (Task 8); `currentBox`, `closeBox` (Task 9); `buildSscc` from `@markiro/domain`; `renderLabelBytes` from `print-label.ts`.
 - Produces:
   ```ts
@@ -1706,7 +1808,11 @@ git commit -m "feat(station): sync carries serial top-ups and closed boxes"
     | { status: "closed"; sscc: string; itemCount: number }
     | { status: "no-serials" }
     | { status: "empty" };
-  export async function closeCurrentBox(deps: CloseBoxDeps, shiftId: string, operatorId: string | null): Promise<CloseBoxResult>;
+  export async function closeCurrentBox(
+    deps: CloseBoxDeps,
+    shiftId: string,
+    operatorId: string | null,
+  ): Promise<CloseBoxResult>;
   export function boxLabelFields(input: BoxLabelInput): Record<LabelField, string>;
   ```
 
@@ -1745,15 +1851,29 @@ it("refuses to close an empty box, and burns nothing", async () => {
 });
 
 it("derives the prefix from the first nine digits of the issuer GLN", () => {
-  const fields = boxLabelFields({ sscc: SSCC, itemCount: 12, productName: "Кола", gtin14: GTIN,
-    operatorName: "Иванов", counterpartyName: "Клиент", closedAt: ISO });
+  const fields = boxLabelFields({
+    sscc: SSCC,
+    itemCount: 12,
+    productName: "Кола",
+    gtin14: GTIN,
+    operatorName: "Иванов",
+    counterpartyName: "Клиент",
+    closedAt: ISO,
+  });
   expect(fields.sscc).toBe(SSCC);
   expect(fields.qty).toBe("12");
 });
 
 it("puts no application identifier in the field record", () => {
-  const fields = boxLabelFields({ sscc: SSCC, itemCount: 1, productName: "", gtin14: GTIN,
-    operatorName: null, counterpartyName: null, closedAt: ISO });
+  const fields = boxLabelFields({
+    sscc: SSCC,
+    itemCount: 1,
+    productName: "",
+    gtin14: GTIN,
+    operatorName: null,
+    counterpartyName: null,
+    closedAt: ISO,
+  });
   expect(fields.sscc).toHaveLength(18);
   expect(fields.sscc.startsWith("00")).toBe(false);
 });
@@ -1822,6 +1942,7 @@ git commit -m "feat(station): close a box and render its label fields"
 ### Task 13: The box on screen, and verifying the print
 
 **Files:**
+
 - Modify: `apps/station/src/lib/hardware-config.ts`
 - Create: `apps/station/src/ui/PrintVerification.tsx`
 - Modify: `apps/station/src/pages/WorkScreen.tsx`, `apps/station/src/pages/WorkstationSetup.tsx`
@@ -1829,6 +1950,7 @@ git commit -m "feat(station): close a box and render its label fields"
 - Test: `apps/station/test/print-verification.test.tsx`, `apps/station/test/work-screen.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `closeCurrentBox`, `boxLabelFields` (Task 12); `parseScannedSscc` (Task 1); `renderLabelBytes`.
 - Produces: `HardwareConfig.verifyPrintedLabel: boolean` (default `false`); `<PrintVerification expected={...} onVerified={} onReprint={} onSkip={} />`.
 
@@ -1841,14 +1963,30 @@ Create `apps/station/test/print-verification.test.tsx`:
 ```tsx
 it("accepts a scan of the expected label", async () => {
   const onVerified = vi.fn();
-  render(<PrintVerification expected={SSCC} onVerified={onVerified} onReprint={vi.fn()} onSkip={vi.fn()} scanSource={source} />);
+  render(
+    <PrintVerification
+      expected={SSCC}
+      onVerified={onVerified}
+      onReprint={vi.fn()}
+      onSkip={vi.fn()}
+      scanSource={source}
+    />,
+  );
   act(() => source.emit(`]C100${SSCC}`));
   await waitFor(() => expect(onVerified).toHaveBeenCalledOnce());
 });
 
 it("does not accept a scan of a different label", async () => {
   const onVerified = vi.fn();
-  render(<PrintVerification expected={SSCC} onVerified={onVerified} onReprint={vi.fn()} onSkip={vi.fn()} scanSource={source} />);
+  render(
+    <PrintVerification
+      expected={SSCC}
+      onVerified={onVerified}
+      onReprint={vi.fn()}
+      onSkip={vi.fn()}
+      scanSource={source}
+    />,
+  );
   act(() => source.emit(`00${OTHER_SSCC}`));
   await waitFor(() => expect(screen.getByText("Это другая этикетка")).toBeDefined());
   expect(onVerified).not.toHaveBeenCalled();
@@ -1856,20 +1994,44 @@ it("does not accept a scan of a different label", async () => {
 
 it("ignores a scan that is not an SSCC at all", async () => {
   const onVerified = vi.fn();
-  render(<PrintVerification expected={SSCC} onVerified={onVerified} onReprint={vi.fn()} onSkip={vi.fn()} scanSource={source} />);
+  render(
+    <PrintVerification
+      expected={SSCC}
+      onVerified={onVerified}
+      onReprint={vi.fn()}
+      onSkip={vi.fn()}
+      scanSource={source}
+    />,
+  );
   act(() => source.emit("0104601234567890215Abc"));
   await waitFor(() => expect(screen.getByText("Это не групповой код")).toBeDefined());
   expect(onVerified).not.toHaveBeenCalled();
 });
 
 it("always offers a way out", () => {
-  render(<PrintVerification expected={SSCC} onVerified={vi.fn()} onReprint={vi.fn()} onSkip={vi.fn()} scanSource={source} />);
+  render(
+    <PrintVerification
+      expected={SSCC}
+      onVerified={vi.fn()}
+      onReprint={vi.fn()}
+      onSkip={vi.fn()}
+      scanSource={source}
+    />,
+  );
   expect(screen.getByRole("button", { name: "Печатать заново" })).toBeDefined();
   expect(screen.getByRole("button", { name: "Пропустить" })).toBeDefined();
 });
 
 it("gives both exits a 64px touch target", () => {
-  render(<PrintVerification expected={SSCC} onVerified={vi.fn()} onReprint={vi.fn()} onSkip={vi.fn()} scanSource={source} />);
+  render(
+    <PrintVerification
+      expected={SSCC}
+      onVerified={vi.fn()}
+      onReprint={vi.fn()}
+      onSkip={vi.fn()}
+      scanSource={source}
+    />,
+  );
   for (const name of ["Печатать заново", "Пропустить"]) {
     expect(screen.getByRole("button", { name }).style.minHeight).toBe("64px");
   }
@@ -1910,7 +2072,12 @@ it("says plainly that numbers have run out, and keeps accepting scans", async ()
 
 it("does not prompt for verification when the setting is off", async () => {
   const close = vi.fn().mockResolvedValue({ status: "closed", sscc: SSCC, itemCount: 10 });
-  renderWork({ boxCapacity: 10, boxItemCount: 9, closeCurrentBox: close, verifyPrintedLabel: false });
+  renderWork({
+    boxCapacity: 10,
+    boxItemCount: 9,
+    closeCurrentBox: close,
+    verifyPrintedLabel: false,
+  });
   act(() => scan(VALID_KM));
   await waitFor(() => expect(close).toHaveBeenCalled());
   expect(screen.queryByText("Отсканируйте распечатанную этикетку")).toBeNull();
@@ -1953,12 +2120,14 @@ git commit -m "feat(station): box progress, closing, printing and print verifica
 ### Task 14: The box list in the cabinet
 
 **Files:**
+
 - Create: `apps/api/src/modules/boxes/` (controller, service, dto, module)
 - Create: `apps/admin/src/pages/boxes/` (index, api)
 - Modify: `apps/api/src/app.module.ts`, `apps/admin` routing, `apps/admin/src/i18n/*`, `docs/device-key-surface.md`
 - Test: `apps/api/test/boxes.e2e.test.ts`, `apps/admin/test/boxes.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `boxes`, `boxItems` (Task 3).
 - Produces: `GET /boxes?shiftId=…` returning `BoxDto { id, sscc, terminalId, operatorId, itemCount, closedAt, contentsChangedAfterClose }`.
 
@@ -2030,6 +2199,7 @@ git commit -m "feat(api,admin): per-shift box list in the cabinet"
 ### Task 15: Documentation and full verification
 
 **Files:**
+
 - Modify: `apps/station/README.md`
 - Modify: `docs/superpowers/plans/2026-07-21-markiro-mvp-roadmap.md`
 - Modify: `docs/hardware-acceptance-checklist.md`
@@ -2080,4 +2250,3 @@ git commit -m "docs: document box aggregation and the sscc number space"
 - `pnpm --filter <pkg> test -- <name>` does **not** filter by file; use `pnpm --filter <pkg> exec vitest run <name>`.
 - Never run `prettier --write .` — it reaches into sibling worktrees. Format only the paths you touched.
 - Any new API e2e file must call `listenOnLoopback(app)` in `beforeAll`, or it will flake with `Parse Error: Expected HTTP/`.
-
