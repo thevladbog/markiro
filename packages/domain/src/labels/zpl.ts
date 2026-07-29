@@ -211,7 +211,14 @@ function renderBarcodeElement(
   switch (element.format) {
     case "code128": {
       const heightDots = mmToDots(element.sizeMm, dpi);
-      const { fh, data: escaped } = escapeFdData(value);
+      // A code128 bound to `sscc` is a GS1-128, not a plain Code 128: `>;`
+      // selects subset C and `>8` is Zebra's FNC1, which is what makes a
+      // scanner report `(00)…` and any GS1-aware system recognise an SSCC.
+      // The AI is added HERE and nowhere else — storage and transport carry
+      // the bare 18 digits. See `renderGs1DataMatrixTail` above for the
+      // datamatrix/km.code equivalent of this same field-gated decision.
+      const payload = field === "sscc" ? `>;>800${value}` : value;
+      const { fh, data: escaped } = escapeFdData(payload);
       return `^FO${x},${y}^BCN,${heightDots},N,N,N${fh}^FD${escaped}^FS`;
     }
     case "ean13": {
