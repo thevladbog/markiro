@@ -549,7 +549,7 @@ Expected: FAIL — `JournalService` не резолвится.
 import { Inject, Injectable } from "@nestjs/common";
 import { schema, type Db } from "@markiro/db";
 import { and, eq, lt } from "drizzle-orm";
-import { DB } from "../../db.provider";
+import { DB } from "../../auth/auth.module";
 import type { IntegrationChannelType } from "./channel-registry";
 
 /** Сводка по сеансу переживает спор с бухгалтерией. */
@@ -808,7 +808,7 @@ import {
 } from "@nestjs/common";
 import { schema, type Db } from "@markiro/db";
 import { and, desc, eq, inArray } from "drizzle-orm";
-import { DB } from "../../db.provider";
+import { DB } from "../../auth/auth.module";
 import { CHANNELS, describeChannel, type IntegrationChannelType } from "./channel-registry";
 import type { ChannelDetailDto, ChannelState, ChannelSummaryDto, JournalPageDto } from "./dto";
 
@@ -1882,10 +1882,36 @@ git commit -m "feat(api): public API keys as an integration channel"
 
 ```tsx
 // apps/admin/test/integrations.test.tsx
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { IntegrationsPage } from "../src/pages/integrations/index.js";
-import { renderWithProviders } from "./support/render.js";
+
+// Общего рендер-хелпера в этом репозитории НЕТ: каждый админ-тест объявляет
+// свой `renderPage` и глушит `fetch` — см. `apps/admin/test/counterparties.test.tsx`
+// строки 15-30. Повторить тот же приём здесь, а не заводить `test/support/`.
+function renderPage() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <IntegrationsPage />
+    </QueryClientProvider>,
+  );
+}
+
+/** Глушит `GET /integrations` ответом с переданными каналами. */
+function stubChannels(channels: unknown[]): void {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ channels }),
+    })),
+  );
+}
 
 describe("IntegrationsPage", () => {
   it("рисует недоступный канал как все остальные, а не прячет его", async () => {
@@ -1903,7 +1929,7 @@ describe("IntegrationsPage", () => {
         lastEventAt: null,
       },
     ]);
-    renderWithProviders(<IntegrationsPage />);
+    renderPage();
     expect(await screen.findByText("Обмен с 1С")).toBeDefined();
     expect(screen.getByText("Честный ЗНАК")).toBeDefined();
     expect(screen.getByText("Недоступно")).toBeDefined();
@@ -1918,7 +1944,7 @@ describe("IntegrationsPage", () => {
         lastEventAt: new Date(Date.now() - 2 * 3_600_000).toISOString(),
       },
     ]);
-    renderWithProviders(<IntegrationsPage />);
+    renderPage();
     expect(await screen.findByText(/2 ч назад/)).toBeDefined();
   });
 
@@ -1931,7 +1957,7 @@ describe("IntegrationsPage", () => {
         lastEventAt: new Date(Date.now() - 3 * 24 * 3_600_000).toISOString(),
       },
     ]);
-    renderWithProviders(<IntegrationsPage />);
+    renderPage();
     expect(await screen.findByText(/нет обмена/i)).toBeDefined();
   });
 
@@ -1944,7 +1970,7 @@ describe("IntegrationsPage", () => {
         lastEventAt: null,
       },
     ]);
-    renderWithProviders(<IntegrationsPage />);
+    renderPage();
     expect(await screen.findByText(/не настроен/i)).toBeDefined();
   });
 });
@@ -2055,6 +2081,8 @@ describe("ChannelPage", () => {
 });
 ```
 
+`renderChannel(type)`, `stubJournal(sessions)` и `patchSpy` — локальные хелперы этого файла, их надо написать самому по образцу `apps/admin/test/counterparties.test.tsx` (строки 15-30): свой `QueryClient` с выключенными ретраями, `render` в `QueryClientProvider`, `vi.stubGlobal("fetch", ...)` с разбором пути и метода. Общего `test/support/` в репозитории нет и заводить его не надо.
+
 - [ ] **Step 2: Запустить, убедиться что падает**
 
 Run: `pnpm --filter @markiro/admin exec vitest run integrations-channel`
@@ -2150,6 +2178,8 @@ describe("CandidatesQueue", () => {
 });
 ```
 
+`renderQueue`, `renderCatalog`, `renderProductCard`, `stubCandidates`, `stubCandidateCount`, `linkSpy`, `listSpy`, `unlinkSpy` — локальные хелперы этого файла, писать по образцу `apps/admin/test/counterparties.test.tsx` (строки 15-30). Общего `test/support/` в репозитории нет.
+
 - [ ] **Step 2: Запустить, убедиться что падает**
 
 Run: `pnpm --filter @markiro/admin exec vitest run integrations-candidates`
@@ -2214,6 +2244,8 @@ describe("ApiKeysPanel", () => {
   });
 });
 ```
+
+`renderPanel`, `stubKeys`, `revokeSpy`, `iso(hoursAgo)` — локальные хелперы этого файла, писать по образцу `apps/admin/test/counterparties.test.tsx` (строки 15-30). Общего `test/support/` в репозитории нет.
 
 - [ ] **Step 2: Запустить, убедиться что падает**
 
