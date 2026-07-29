@@ -477,6 +477,157 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
     ]);
   });
 
+  /**
+   * The device's `createdAt` decides which UTC day an order's items count
+   * against, so an unbounded one turns the day limit over to the least
+   * trustworthy clock in the system: roll an unattended tablet's date forward
+   * and its worker gets a fresh allowance, again and again, online or not.
+   * The server therefore honours the value only within a plausible window and
+   * otherwise files the order under its own clock.
+   *
+   * Each case gets its own kiosk (`dayLimitPerEmployee: 1`) and its own
+   * employee, so the counts below are exact rather than "whatever else this
+   * suite happened to leave behind for the shared badge".
+   */
+  describe("client-supplied createdAt", () => {
+    let clockKioskId: string;
+    let clockToken: string;
+    let seq = 0;
+
+    /** Distinct kmKey per call — an open duplicate would conflict for an unrelated reason. */
+    function scan(): string {
+      return `01${GTIN}21CLK${randomUUID().replace(/-/g, "").slice(0, 10).toUpperCase()}${GS}93Abcd`;
+    }
+
+    async function newEmployeeBadge(): Promise<string> {
+      const id = randomUUID();
+      const badge = `badge-clock-${randomUUID()}`;
+      await db.insert(schema.employees).values({ id, tenantId, fullName: "Часов Ч." });
+      await db.insert(schema.employeeBadges).values({ tenantId, employeeId: id, badgeCode: badge });
+      return badge;
+    }
+
+    async function post(badgeCode: string, createdAt?: string) {
+      seq += 1;
+      return request(app!.getHttpServer())
+        .post("/kiosk/orders")
+        .set("x-kiosk-token", clockToken)
+        .send({
+          deviceSeq: seq,
+          badgeCode,
+          reason: "buy",
+          items: [{ rawKm: scan() }],
+          ...(createdAt ? { createdAt } : {}),
+        })
+        .expect(201);
+    }
+
+    async function orderCreatedAt(orderNo: string): Promise<Date> {
+      const [row] = await db
+        .select({ createdAt: schema.pickupOrders.createdAt })
+        .from(schema.pickupOrders)
+        .where(
+          and(eq(schema.pickupOrders.tenantId, tenantId), eq(schema.pickupOrders.orderNo, orderNo)),
+        );
+      return row!.createdAt;
+    }
+
+    beforeAll(async () => {
+      clockKioskId = randomUUID();
+      clockToken = `kiosk-token-clock-${randomUUID()}`;
+      await db
+        .insert(schema.kiosks)
+        .values({ id: clockKioskId, tenantId, name: "Киоск-часы", dayLimitPerEmployee: 1 });
+      await db.insert(schema.kioskProducts).values({ tenantId, kioskId: clockKioskId, productId });
+      await db
+        .update(schema.kiosks)
+        .set({ deviceTokenHash: hashDeviceToken(clockToken) })
+        .where(eq(schema.kiosks.id, clockKioskId));
+    });
+
+    it("honours a plausible past createdAt, and counts that order against the day it names", async () => {
+      const badge = await newEmployeeBadge();
+      // 26h back: a genuine offline replay, comfortably inside the 7-day
+      // window and always a different UTC day from "now", whatever the hour.
+      const backdated = new Date(Date.now() - 26 * 60 * 60_000).toISOString();
+
+      const replayed = await post(badge, backdated);
+      expect(replayed.body.itemCount).toBe(1);
+      expect(await orderCreatedAt(replayed.body.orderNo)).toEqual(new Date(backdated));
+
+      // The teeth: today's allowance must still be untouched. If the server
+      // had silently overwritten the replayed order with its own clock, this
+      // second item would be the day's *second* and come back over_limit.
+      const today = await post(badge);
+      expect(today.body.itemCount).toBe(1);
+      expect(today.body.conflicts).toEqual([]);
+
+      // And the limit really is 1 — so the assertion above is not passing
+      // because everything is accepted.
+      const overflow = await post(badge);
+      expect(overflow.body.itemCount).toBe(0);
+      expect(overflow.body.conflicts).toEqual([
+        { rawKm: expect.stringContaining(`01${GTIN}21CLK`), reason: "over_limit" },
+      ]);
+    });
+
+    it("honours a small forward drift, which an unsynced tablet has normally", async () => {
+      const badge = await newEmployeeBadge();
+      const slightlyAhead = new Date(Date.now() + 60_000).toISOString();
+
+      const res = await post(badge, slightlyAhead);
+      expect(res.body.itemCount).toBe(1);
+      expect(await orderCreatedAt(res.body.orderNo)).toEqual(new Date(slightlyAhead));
+    });
+
+    it("refuses a far-future createdAt, so a rolled-forward clock cannot mint a fresh day allowance", async () => {
+      const badge = await newEmployeeBadge();
+
+      // Spend today's single-item allowance honestly.
+      const honest = await post(badge);
+      expect(honest.body.itemCount).toBe(1);
+
+      // Now the attack: the same device claims a scan two days from now. If
+      // the server believed it, this would be day N+2's first item and would
+      // be accepted — a fresh allowance on demand, repeatable forever.
+      const rolledForward = new Date(Date.now() + 2 * 24 * 60 * 60_000).toISOString();
+      const attempt = await post(badge, rolledForward);
+      expect(attempt.body.itemCount).toBe(0);
+      expect(attempt.body.conflicts).toEqual([
+        { rawKm: expect.stringContaining(`01${GTIN}21CLK`), reason: "over_limit" },
+      ]);
+
+      // Nothing from this device landed in the future either: the refused
+      // value is replaced everywhere `when` is used, including the row's own
+      // createdAt (and the year in its order number).
+      const rows = await db
+        .select({ createdAt: schema.pickupOrders.createdAt })
+        .from(schema.pickupOrders)
+        .where(
+          and(
+            eq(schema.pickupOrders.tenantId, tenantId),
+            eq(schema.pickupOrders.kioskId, clockKioskId),
+          ),
+        );
+      const horizon = Date.now() + 10 * 60_000;
+      expect(rows.every((r) => r.createdAt.getTime() < horizon)).toBe(true);
+    });
+
+    it("refuses a createdAt older than a device could honestly have queued", async () => {
+      const badge = await newEmployeeBadge();
+      // 30 days back. The device blocks itself after 7 days without a
+      // successful bootstrap, so it cannot have a backlog this old; a
+      // timestamp like this is a broken clock, and burying an order a month
+      // deep in the свод hides it from the operators who must resolve it.
+      const ancient = new Date(Date.now() - 30 * 24 * 60 * 60_000).toISOString();
+
+      const res = await post(badge, ancient);
+      expect(res.body.itemCount).toBe(1);
+      const stored = await orderCreatedAt(res.body.orderNo);
+      expect(stored.getTime()).toBeGreaterThan(Date.now() - 10 * 60_000);
+    });
+  });
+
   it("does not persist an empty order when a non-empty scan yields only conflicts", async () => {
     const rawKm = `01${GTIN_UNKNOWN}21NOORDER1${GS}93Abcd`;
     const ordersBefore = await db

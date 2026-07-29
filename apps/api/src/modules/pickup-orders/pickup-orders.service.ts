@@ -38,6 +38,29 @@ interface ResolvedItem {
   unitPrice: string | null;
 }
 
+/**
+ * How far AHEAD of server time a device-supplied `createdAt` may sit before
+ * the server stops believing it. Deliberately small: an unsynced tablet drifts
+ * by seconds to minutes, and the request itself adds only network latency, so
+ * five minutes covers every honest case. Everything past it is either a broken
+ * clock or the attack this bound exists for -- rolling a kiosk's date forward
+ * hands its worker a brand-new UTC day, and therefore a fresh daily allowance,
+ * as often as the date is rolled again.
+ */
+const CLIENT_CLOCK_AHEAD_TOLERANCE_MS = 5 * 60_000;
+
+/**
+ * How far BEHIND server time it may sit. Generous, because a legitimately old
+ * timestamp is the whole point of `createdAt`: an offline kiosk replays its
+ * queue with the original scan times. Bounded at seven days by an invariant
+ * the device already enforces -- it blocks itself after 7 days without a
+ * successful bootstrap (see `generatedAt` in ./dto.ts) -- so a device cannot
+ * honestly accumulate a longer backlog than this. Backdating is the weaker
+ * direction anyway: it spends an allowance on a day already past, it does not
+ * mint a new one.
+ */
+const CLIENT_CLOCK_BEHIND_TOLERANCE_MS = 7 * 24 * 60 * 60_000;
+
 /** One item classified against `validatePickupKm`, still pending allowlist resolution. */
 type ParsedItem =
   | { rawKm: string; ok: true; gtin14: string; serial: string; key: string }
@@ -98,7 +121,10 @@ export class PickupOrdersService {
     const { conflicts, candidates } = await this.resolveItems(tenantId, kioskId, dto.items);
 
     // 5. Day-limit: accept up to dayLimitPerEmployee, flag the rest as over_limit.
-    const when = dto.createdAt ? new Date(dto.createdAt) : new Date();
+    // `when` is the server's decision, not the device's claim (see
+    // `resolveScanTime`), and the SAME value then dates the order row below --
+    // so the limit is always counted against the day the order is filed under.
+    const when = this.resolveScanTime(dto.createdAt, kioskId);
     const { accepted, overflowConflicts } = await this.applyDayLimit(
       tenantId,
       kioskId,
@@ -823,6 +849,51 @@ export class PickupOrdersService {
       .from(schema.products)
       .where(and(eq(schema.products.tenantId, tenantId), inArray(schema.products.gtin14, gtins)));
     return new Set(rows.map((r) => r.gtin14));
+  }
+
+  /**
+   * Settles the one timestamp that dates an order: honours the device's
+   * `createdAt` only while it is plausible, otherwise falls back to server
+   * time.
+   *
+   * `createdAt` exists so an offline-queued order replays with its original
+   * scan time instead of the sync moment — a real requirement, so it cannot
+   * simply be ignored. But the value also decides which UTC day the order
+   * counts against for `applyDayLimit`, which makes an authoritative limit
+   * hinge on the least trustworthy clock in the system: an unattended tablet
+   * at a factory gate. Left unbounded, moving that tablet's date forward
+   * grants its worker a fresh daily allowance, repeatedly, and it works just
+   * as well online as offline.
+   *
+   * So bound it (see the two tolerances above) and clamp OUT of range to
+   * server time rather than rejecting the request: the device is offline-first
+   * and retries, so a 400 would strand a genuine scan in its sync queue
+   * forever over a clock the worker cannot fix. Filing it under server time
+   * is the conservative outcome — the order is kept, and the allowance it
+   * spends is today's.
+   */
+  private resolveScanTime(createdAt: string | undefined, kioskId: string): Date {
+    const now = new Date();
+    if (!createdAt) return now;
+
+    const claimed = new Date(createdAt);
+    const skewMs = claimed.getTime() - now.getTime();
+    // NaN is unreachable through the HTTP DTO (`z.string().datetime()` has
+    // already parsed it) but reachable via direct service calls, and NaN
+    // compares false against every bound — so test it explicitly rather than
+    // letting an Invalid Date through as "in range".
+    const implausible =
+      Number.isNaN(claimed.getTime()) ||
+      skewMs > CLIENT_CLOCK_AHEAD_TOLERANCE_MS ||
+      -skewMs > CLIENT_CLOCK_BEHIND_TOLERANCE_MS;
+    if (!implausible) return claimed;
+
+    this.logger.warn(
+      `kiosk ${kioskId}: refusing implausible client createdAt ${createdAt} ` +
+        `(${Math.round(skewMs / 60_000)} min from server time); filing the order under server time. ` +
+        `Check the device's clock.`,
+    );
+    return now;
   }
 
   /** Accepts up to `dayLimitPerEmployee` items for today (UTC), flagging the rest `over_limit`. */
