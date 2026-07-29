@@ -4,7 +4,13 @@ import { createStationClient, REQUEST_TIMEOUT_MS } from "../src/lib/api-client.j
 import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
 import { BACKOFF_START_MS, BATCH_SIZE, createSyncEngine, STUCK_AFTER_MS } from "../src/lib/sync.js";
 import { addRange, remaining } from "../src/lib/sscc-pool.js";
-import { closeBox, currentBox, openBox } from "../src/lib/boxes.js";
+import {
+  closeBox,
+  currentBox,
+  markPrintSkipped,
+  markPrintVerified,
+  openBox,
+} from "../src/lib/boxes.js";
 import { recordScan, type AcceptedCode, type ScanEventRow } from "../src/lib/journal.js";
 import { outboxDepth } from "../src/lib/outbox.js";
 
@@ -1027,6 +1033,51 @@ describe("sync engine: pools and closures", () => {
         sscc: SSCC,
         closedAt: ISO,
         operatorId: null,
+        printVerifiedAt: null,
+        printSkippedAt: null,
+      },
+    ]);
+  });
+
+  // Task 13 review, Finding 6: `boxes_mirror.print_verified_at`/
+  // `print_skipped_at` (Task 9's columns, idle until now) must actually
+  // reach the closure payload, not just exist on the device.
+  it("carries the print-verification outcome recorded on boxes_mirror into the closure payload", async () => {
+    await openBox(exec, SHIFT, "b1", ISO, TERMINAL);
+    await closeBox(exec, "b1", SSCC, ISO, null);
+    await markPrintVerified(exec, "b1", ISO);
+    await drainOnce();
+    const boxes = JSON.parse(lastBody()).boxes;
+    expect(boxes).toEqual([
+      {
+        boxId: "b1",
+        shiftId: SHIFT,
+        terminalId: TERMINAL,
+        sscc: SSCC,
+        closedAt: ISO,
+        operatorId: null,
+        printVerifiedAt: ISO,
+        printSkippedAt: null,
+      },
+    ]);
+  });
+
+  it("carries a skipped print verification into the closure payload", async () => {
+    await openBox(exec, SHIFT, "b1", ISO, TERMINAL);
+    await closeBox(exec, "b1", SSCC, ISO, null);
+    await markPrintSkipped(exec, "b1", ISO);
+    await drainOnce();
+    const boxes = JSON.parse(lastBody()).boxes;
+    expect(boxes).toEqual([
+      {
+        boxId: "b1",
+        shiftId: SHIFT,
+        terminalId: TERMINAL,
+        sscc: SSCC,
+        closedAt: ISO,
+        operatorId: null,
+        printVerifiedAt: null,
+        printSkippedAt: ISO,
       },
     ]);
   });
@@ -1080,6 +1131,8 @@ describe("sync engine: pools and closures", () => {
         sscc: SSCC,
         closedAt: ISO,
         operatorId: null,
+        printVerifiedAt: null,
+        printSkippedAt: null,
       },
     ]);
   });

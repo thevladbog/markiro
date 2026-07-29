@@ -127,6 +127,7 @@
     "printMismatch": "Это другая этикетка",
     "printNotSscc": "Это не групповой код",
     "printReprint": "Печатать заново",
-    "printSkip": "Пропустить"
+    "printSkip": "Пропустить",
+    "printNotAvailable": "Печать не выполнена — проверять нечего."
   }
 }

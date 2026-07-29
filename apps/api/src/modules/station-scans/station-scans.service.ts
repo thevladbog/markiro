@@ -748,6 +748,51 @@ export class StationScansService {
           // would be handed this same serial back as though unconsumed.
           await this.ssccService.recordConsumedSerial(tenantId, closure.sscc, tx);
 
+          // Late print-verification outcome (Task 13 review, Finding 6): a
+          // box is typically acked within seconds of closing -- long before
+          // the operator usually resolves the print-verification prompt --
+          // so the closure that first lands here usually carries both
+          // fields null. This SECOND, narrower write is what lets a LATER
+          // delivery of the SAME closure (one issued after the device has
+          // since recorded `print_verified_at`/`print_skipped_at` on its own
+          // `boxes_mirror` row) still land the outcome, even though the
+          // primary UPDATE above deliberately refuses to touch an
+          // already-closed row (`isNull(schema.boxes.closedAt)`). That
+          // refusal exists to stop a device that reused a deviceBoxId after
+          // losing its local database from clobbering an unrelated OLD box's
+          // sscc/closedAt/operatorId -- a real risk this write does not
+          // share: it is scoped by `sscc` equality IN ADDITION to the same
+          // four identity columns, so it can only ever match the box THIS
+          // closure's own sscc already names. A reused-id collision (a
+          // genuinely different physical box burning a NEW serial) has a
+          // different sscc and so matches nothing here, same as it already
+          // matches nothing above -- this write introduces no new risk to
+          // that case, it just stays a no-op for it. Run unconditionally
+          // (not only when the primary UPDATE found no row) so an ordinary,
+          // first-time closure that already happens to carry a resolved
+          // outcome also gets it written, in the same transaction.
+          if (closure.printVerifiedAt !== null || closure.printSkippedAt !== null) {
+            await tx
+              .update(schema.boxes)
+              .set({
+                ...(closure.printVerifiedAt !== null
+                  ? { printVerifiedAt: new Date(closure.printVerifiedAt) }
+                  : {}),
+                ...(closure.printSkippedAt !== null
+                  ? { printSkippedAt: new Date(closure.printSkippedAt) }
+                  : {}),
+              })
+              .where(
+                and(
+                  eq(schema.boxes.tenantId, tenantId),
+                  eq(schema.boxes.shiftId, closure.shiftId),
+                  terminalCondition,
+                  eq(schema.boxes.deviceBoxId, closure.boxId),
+                  eq(schema.boxes.sscc, closure.sscc),
+                ),
+              );
+          }
+
           // Zero rows is "nothing [more] to apply to the box row", not an
           // error. Two ordinary inputs land here, neither of them a bug: a
           // closure for a box that was never created at all (a box row is

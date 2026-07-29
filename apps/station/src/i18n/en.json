@@ -127,6 +127,7 @@
     "printMismatch": "This is a different label",
     "printNotSscc": "This is not a group code",
     "printReprint": "Print again",
-    "printSkip": "Skip"
+    "printSkip": "Skip",
+    "printNotAvailable": "Printing did not happen, so there is nothing to verify."
   }
 }

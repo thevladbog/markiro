@@ -1108,4 +1108,149 @@ describe("App", () => {
       consoleErrorSpy.mockRestore();
     }
   });
+
+  // Task 13 review, Finding 1: App.tsx used to hardcode `issuerPrefix={null}`
+  // and `boxCapacity={null}` into WorkScreen unconditionally, so the box UI
+  // (progress, close, printing, verification) was unreachable from a real
+  // shift no matter what the server actually returned. This proves the
+  // wiring reaches WorkScreen for real: `readShiftMirror`'s row (mocked
+  // below, standing in for what `upsertBundle` would have written from a
+  // bundle carrying a non-null `sscc` and `boxCapacity`) must surface as an
+  // actual box section, not the "no box UI at all" branch a null
+  // `issuerPrefix` renders instead.
+  it("reaches box progress and the close-box control for an aggregation-mode shift with a valid issuer prefix (Task 13 review, Finding 1)", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const pinHash = await hashSecret(OPERATOR_PIN);
+      invokeMock.mockImplementation((cmd: string, payload?: unknown): Promise<unknown> => {
+        if (cmd === "read_config") {
+          return Promise.resolve({
+            machine_id: "m1",
+            api_key: "mk_key",
+            server_url: "http://localhost:3000",
+          });
+        }
+        if (cmd === "plugin:sql|load") return Promise.resolve("sqlite:station-mirror.db");
+        if (cmd === "plugin:sql|execute") return Promise.resolve([0, 0]);
+        if (cmd === "plugin:sql|select") {
+          const { query, values } = (payload ?? {}) as { query: string; values?: unknown[] };
+          if (query.includes("FROM outbox")) {
+            if (query.startsWith("SELECT COUNT(*)")) return Promise.resolve([{ n: 0 }]);
+            return Promise.resolve([]);
+          }
+          if (/FROM operators_mirror\b/.test(query)) {
+            return Promise.resolve([operatorMirrorRow(pinHash)]);
+          }
+          // No box open yet for this shift -- WorkScreen's own box-loading
+          // effect opens a fresh one, exactly like a real first scan would.
+          if (query.includes("boxes_mirror")) return Promise.resolve([]);
+          // `readShiftContext`'s join (product_mirror) -- checked BEFORE the
+          // plain `readShiftMirror` branch below, since both queries'
+          // text contain "shift_mirror" and only this one also joins
+          // product_mirror.
+          if (query.includes("product_mirror")) {
+            return Promise.resolve([
+              { gtin14: "04600000000015", name: "Cola", counterparty_name: null },
+            ]);
+          }
+          // `readShiftMirror`'s own plain select -- this is what App.tsx now
+          // reads `boxCapacity`/`issuerPrefix` off (Finding 1). Standing in
+          // for what `upsertBundle` would have written from a bundle
+          // carrying a non-null `sscc` and the shift's own `boxCapacity`.
+          if (query.includes("shift_mirror")) {
+            return Promise.resolve([
+              {
+                id: "s9",
+                status: "active",
+                mode: "aggregation",
+                counterparty_gln: null,
+                label_template_spec: null,
+                box_capacity: 10,
+                issuer_prefix: "460123456",
+              },
+            ]);
+          }
+          if (query.includes("station_meta")) {
+            if (values?.[0] === "hardware_config") {
+              return Promise.resolve([
+                {
+                  value: JSON.stringify({
+                    scanner: null,
+                    printer: null,
+                    printerLanguage: "zpl",
+                    verifyPrintedLabel: false,
+                  }),
+                },
+              ]);
+            }
+            if (values?.[0] === "install_id") {
+              return Promise.resolve([{ value: "test-install-id" }]);
+            }
+            return Promise.resolve([]);
+          }
+          return Promise.resolve([]);
+        }
+        return Promise.resolve(undefined);
+      });
+
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string, init?: RequestInit) => {
+          const path = new URL(url).pathname;
+          const method = init?.method ?? "GET";
+          if (path === "/products/gtin-check" && method === "POST") {
+            return new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), {
+              status: 200,
+            });
+          }
+          if (path === "/products" && method === "GET") {
+            return new Response(
+              JSON.stringify({
+                items: [{ id: "p1", gtin14: "04600000000015", name: "Cola", boxCapacity: 10 }],
+              }),
+              { status: 200 },
+            );
+          }
+          if (path === "/shifts" && method === "POST") {
+            return new Response(
+              JSON.stringify({ id: "s9", status: "planned", mode: "aggregation" }),
+              { status: 201 },
+            );
+          }
+          if (path === "/shifts/s9/open" && method === "POST") {
+            return new Response(
+              JSON.stringify({ id: "s9", status: "active", mode: "aggregation" }),
+              { status: 200 },
+            );
+          }
+          // Roster sync, ShiftSelection's own listing, mirrorShiftBundle's
+          // bundle download, and the sync engine's drain -- a harmless empty
+          // body for anything else; the SELECT mocks above are what this
+          // test's assertions actually rest on, not a real bundle round-trip.
+          return new Response(JSON.stringify({ items: [] }), { status: 200 });
+        }),
+      );
+
+      render(<App />);
+      await signInAsOperator();
+
+      fireEvent.click(screen.getByRole("button", { name: "New shift" }));
+      await waitFor(() => expect(screen.getByLabelText("Type or scan a GTIN")).toBeDefined());
+
+      fireEvent.change(screen.getByLabelText("Type or scan a GTIN"), {
+        target: { value: "4600000000015" },
+      });
+      fireEvent.submit(screen.getByLabelText("Type or scan a GTIN").closest("form")!);
+      await waitFor(() => expect(screen.getByText("Cola")).toBeDefined());
+      fireEvent.click(screen.getByRole("button", { name: "Start" }));
+
+      // The box section renders at all -- unreachable before this fix, since
+      // `issuerPrefix` was hardcoded to `null` regardless of what the shift
+      // actually carried.
+      expect((await screen.findByTestId("box-progress")).textContent).toBe("0 / 10");
+      expect(screen.getByRole("button", { name: "Close box" })).toBeDefined(); // en.json's "box.close"
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
 });

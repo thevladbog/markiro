@@ -69,6 +69,9 @@ export const shiftMirror = sqliteTable("shift_mirror", {
   palletCapacity: integer("pallet_capacity"),
   palletsEnabled: integer("pallets_enabled", { mode: "boolean" }).notNull().default(false),
   openedAt: text("opened_at"),
+  // This device's box-SSCC issuer prefix (Task 13 review, plan 06c) -- see
+  // migrations.ts's ALTER for why this trails the rest of the table.
+  issuerPrefix: text("issuer_prefix"),
 });
 
 /** Local mirror of the shift's product (for ad-hoc GTIN resolution offline). */

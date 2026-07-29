@@ -60,6 +60,15 @@ export interface ShiftMirrorRow {
   mode: string;
   counterpartyGln: string | null;
   labelTemplateSpec: string | null;
+  /** The shift's box capacity (Task 13 review, Finding 1) -- null disables auto-close. */
+  boxCapacity: number | null;
+  /**
+   * This device's 9-digit GS1 issuer prefix for box SSCCs
+   * (`StationBundle.sscc.issuerPrefix`), mirrored onto `shift_mirror` at
+   * bundle time -- null for a validation-mode shift, or when the server
+   * could not resolve one for this device (see `upsertBundleBody`).
+   */
+  issuerPrefix: string | null;
 }
 
 /** True for SQLite's "duplicate column name: x" error from a re-run ALTER. */
@@ -110,8 +119,9 @@ async function upsertBundleBody(exec: SqlExecutor, bundle: StationBundle): Promi
        id, status, mode, product_id, product_name, line_id, line_name,
        counterparty_id, counterparty_name, counterparty_gln,
        label_template_id, label_template_name, label_template_spec,
-       planned_qty, planned_date, box_capacity, pallet_capacity, pallets_enabled, opened_at
-     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       planned_qty, planned_date, box_capacity, pallet_capacity, pallets_enabled, opened_at,
+       issuer_prefix
+     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
      ON CONFLICT(id) DO UPDATE SET
        status=excluded.status, mode=excluded.mode, product_id=excluded.product_id,
        product_name=excluded.product_name,
@@ -121,7 +131,8 @@ async function upsertBundleBody(exec: SqlExecutor, bundle: StationBundle): Promi
        label_template_name=excluded.label_template_name, label_template_spec=excluded.label_template_spec,
        planned_qty=excluded.planned_qty, planned_date=excluded.planned_date,
        box_capacity=excluded.box_capacity, pallet_capacity=excluded.pallet_capacity,
-       pallets_enabled=excluded.pallets_enabled, opened_at=excluded.opened_at`,
+       pallets_enabled=excluded.pallets_enabled, opened_at=excluded.opened_at,
+       issuer_prefix=excluded.issuer_prefix`,
     [
       s.id,
       s.status,
@@ -142,6 +153,11 @@ async function upsertBundleBody(exec: SqlExecutor, bundle: StationBundle): Promi
       s.palletCapacity,
       b(s.palletsEnabled),
       s.openedAt,
+      // Never a fallback: a validation-mode shift, or one the server could
+      // not resolve an issuer prefix for, mirrors null here too (Task 13
+      // review, Finding 1) -- exactly as `mirrorShiftBundle` already treats
+      // `bundle.sscc` itself.
+      bundle.sscc?.issuerPrefix ?? null,
     ],
   );
 
@@ -328,8 +344,11 @@ export async function readShiftMirror(
     mode: string;
     counterparty_gln: string | null;
     label_template_spec: string | null;
+    box_capacity: number | null;
+    issuer_prefix: string | null;
   }>(
-    "SELECT id, status, mode, counterparty_gln, label_template_spec FROM shift_mirror WHERE id = ?",
+    `SELECT id, status, mode, counterparty_gln, label_template_spec, box_capacity, issuer_prefix
+     FROM shift_mirror WHERE id = ?`,
     [id],
   );
   const r = rows[0];
@@ -340,6 +359,8 @@ export async function readShiftMirror(
     mode: r.mode,
     counterpartyGln: r.counterparty_gln,
     labelTemplateSpec: r.label_template_spec,
+    boxCapacity: r.box_capacity ?? null,
+    issuerPrefix: r.issuer_prefix ?? null,
   };
 }
 

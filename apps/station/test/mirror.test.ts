@@ -89,6 +89,38 @@ describe("mirror", () => {
     expect(ops[0]).toMatchObject({ operatorId: "op1", active: true });
   });
 
+  // Task 13 review, Finding 1: `boxCapacity` was already a `shift_mirror`
+  // column, simply absent from `readShiftMirror`'s SELECT; `issuerPrefix` had
+  // no durable home at all until this fix. Both must round-trip through
+  // `upsertBundle`/`readShiftMirror` -- this is what App.tsx now reads to
+  // wire WorkScreen's box UI.
+  it("round-trips boxCapacity and issuerPrefix for an aggregation-mode bundle", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    const aggregationBundle: StationBundle = {
+      ...bundle,
+      shift: { ...bundle.shift, mode: "aggregation", boxCapacity: 12 },
+      sscc: { issuerPrefix: "460123456", extensionDigit: 0, fromSerial: 1, toSerial: 5 },
+    };
+    await upsertBundle(exec, aggregationBundle);
+
+    const shift = await readShiftMirror(exec, "s1");
+    expect(shift?.boxCapacity).toBe(12);
+    expect(shift?.issuerPrefix).toBe("460123456");
+  });
+
+  // The validation-mode counterpart: `bundle.sscc` is null, and the stored
+  // value must be null too -- never an invented fallback prefix.
+  it("stores a null issuerPrefix for a validation-mode bundle (no sscc block)", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    await upsertBundle(exec, bundle);
+
+    const shift = await readShiftMirror(exec, "s1");
+    expect(shift?.issuerPrefix).toBeNull();
+    expect(shift?.boxCapacity).toBe(12);
+  });
+
   it("upserting the same shift twice does not duplicate rows", async () => {
     const exec = nodeExecutor();
     await applyMigrations(exec);

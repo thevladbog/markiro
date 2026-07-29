@@ -66,6 +66,14 @@ export const syncBatchSchema = z.object({
         sscc: z.string().length(18),
         closedAt: z.string().datetime(),
         operatorId: z.string().uuid().toLowerCase().nullable(),
+        // Whether the closed box's printed label was verified or explicitly
+        // skipped, as recorded on the device's own `boxes_mirror` row (Task
+        // 13 review, Finding 6). `.default(null)`, not `.optional()`: an
+        // older station build mid-rollout that has not yet learned to send
+        // these two fields must still be accepted -- their absence means
+        // exactly the same thing an explicit null does, "not yet resolved".
+        printVerifiedAt: z.string().datetime().nullable().default(null),
+        printSkippedAt: z.string().datetime().nullable().default(null),
       }),
     )
     .max(50)

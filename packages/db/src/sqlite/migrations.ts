@@ -152,4 +152,13 @@ export const STATION_MIGRATIONS: string[] = [
   // SQLite mirror, and a box can still be open when that happens. Same
   // re-runnable idempotency as the `login` ALTER above.
   `ALTER TABLE boxes_mirror ADD COLUMN terminal_id TEXT;`,
+  // Upgrade path for devices enrolled before the box UI existed (Task 13
+  // review, plan 06c): `StationBundle.sscc.issuerPrefix` is fetched with
+  // every bundle but, until this column, had no durable home -- the device
+  // only ever held it in memory for the lifetime of the download. Written
+  // by `upsertBundle` alongside `box_capacity` (null for a validation-mode
+  // shift, or when the server could not resolve this device an issuer
+  // prefix -- never a fallback), and read back by `readShiftMirror` the same
+  // way. Same re-runnable idempotency as the `login` ALTER above.
+  `ALTER TABLE shift_mirror ADD COLUMN issuer_prefix TEXT;`,
 ];

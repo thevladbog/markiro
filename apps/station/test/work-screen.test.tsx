@@ -2,12 +2,15 @@ import { DatabaseSync } from "node:sqlite";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { STATION_MIGRATIONS } from "@markiro/db";
-import { buildSscc } from "@markiro/domain";
+import { buildSscc, type LabelTemplateSpec } from "@markiro/domain";
 import i18n from "../src/i18n/index.js";
 import type { CloseBoxResult } from "../src/lib/close-box.js";
+import type { PrinterLanguage } from "../src/lib/hardware-config.js";
+import type { PrintTarget } from "../src/lib/hardware.js";
 import type { SqlExecutor } from "../src/lib/mirror.js";
 import type { ScanListener, ScanSource } from "../src/lib/scan-source.js";
 import type { SoundSettings } from "../src/lib/signal-sound.js";
+import { addRange } from "../src/lib/sscc-pool.js";
 import { WorkScreen } from "../src/pages/WorkScreen.js";
 
 beforeAll(async () => {
@@ -178,7 +181,55 @@ interface RenderWorkOverrides extends RenderWorkScreenOverrides {
   closeCurrentBox?: (shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>;
   onScan?: (raw: string) => void;
   verifyPrintedLabel?: boolean;
+  printing?: {
+    target: PrintTarget;
+    language: PrinterLanguage;
+    print: (target: PrintTarget, bytes: Uint8Array) => Promise<void>;
+  } | null;
 }
+
+// A label spec whose only element resolves to ASCII-only text (the box's
+// own sscc field, all digits): `renderTextLikeElement`'s native ZPL/TSPL
+// text path only calls the injectable `rasterizeText` for text containing a
+// non-ASCII character (see @markiro/domain's `needsImageRendering`), so this
+// spec renders successfully even under jsdom, which has no real 2D canvas
+// backend and makes the STATION'S real `rasterizeText` always reject (see
+// rasterizer.test.ts) -- exactly what a Cyrillic/CJK spec would hit here.
+const LABEL_SPEC: LabelTemplateSpec = {
+  widthMm: 58,
+  heightMm: 40,
+  dpi: 203,
+  language: "zpl",
+  elements: [{ id: "a", kind: "field", field: "sscc", xMm: 4, yMm: 4, fontSizePt: 10 }],
+};
+
+/** Seeds a minimal `shift_mirror` row carrying `LABEL_SPEC`, so WorkScreen's own label-geometry effect has something to load. */
+async function seedLabelSpec(exec: SqlExecutor, shiftId: string): Promise<void> {
+  await exec.run(
+    `INSERT INTO shift_mirror (id, status, mode, product_id, label_template_spec) VALUES (?,?,?,?,?)`,
+    [shiftId, "active", "aggregation", "p1", JSON.stringify(LABEL_SPEC)],
+  );
+}
+
+/**
+ * Lets WorkScreen's own label-geometry effect (an async `readShiftMirror`
+ * read, fired on mount) actually resolve and commit before a test's own
+ * scan reaches the box-closing path. On a real device this read finishes in
+ * milliseconds, long before an operator fills a box -- but these tests
+ * deliberately seed the box already one scan from capacity so a single scan
+ * closes it immediately, which can otherwise race ahead of that mount-time
+ * read and print with a still-null `labelSpec`. A real `setTimeout` (this
+ * suite uses real timers) inside `act` gives the event loop a full turn, so
+ * the effect's promise settles and React commits the resulting state update
+ * before the test proceeds.
+ */
+async function flushLabelSpecLoad(): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
+const PRINT_TARGET: PrintTarget = { kind: "tcp", host: "10.0.0.5", port: 9100 };
 
 /**
  * Renders `WorkScreen` with box aggregation enabled by default (a non-null
@@ -214,6 +265,7 @@ function renderWork(overrides: RenderWorkOverrides = {}) {
     closeCurrentBox,
     onScan,
     verifyPrintedLabel = false,
+    printing,
   } = overrides;
 
   // Seeded regardless of `issuerPrefix`: the "no sscc block" test needs a
@@ -260,6 +312,7 @@ function renderWork(overrides: RenderWorkOverrides = {}) {
       {...(closeCurrentBox ? { closeCurrentBox } : {})}
       {...(onScan ? { onScan } : {})}
       verifyPrintedLabel={verifyPrintedLabel}
+      {...(printing !== undefined ? { printing } : {})}
     />,
   );
 }
@@ -508,6 +561,37 @@ describe("WorkScreen box progress, closing and printing", () => {
     await waitFor(() => expect(close).toHaveBeenCalledOnce());
   });
 
+  // Task 13 review, Finding 2: a double-tap (or a tap racing an auto-close
+  // triggered by the same accepted scan) used to run `closeCurrentBox`
+  // twice before either finished -- both burn a serial and print, and the
+  // box's stored SSCC ends up as whichever write lands second.
+  it("guards the manual close button against a double-tap that would burn two serials", async () => {
+    let resolveClose: ((result: CloseBoxResult) => void) | undefined;
+    const close = vi.fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>(
+      () =>
+        new Promise<CloseBoxResult>((resolve) => {
+          resolveClose = resolve;
+        }),
+    );
+    renderWorkTracked({ boxCapacity: 10, boxItemCount: 3, closeCurrentBox: close });
+    const button = (await screen.findByRole("button", {
+      name: "Закрыть короб",
+    })) as HTMLButtonElement;
+
+    fireEvent.click(button);
+    // A second tap while the first close is still in flight.
+    fireEvent.click(button);
+
+    await waitFor(() => expect(button.disabled).toBe(true));
+    expect(close).toHaveBeenCalledTimes(1);
+
+    resolveClose?.({ status: "closed", sscc: SSCC, itemCount: 3 });
+    await waitFor(() => expect(button.disabled).toBe(false));
+    // Still just the one call, even after the in-flight close settles and
+    // the button re-enables.
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it("says plainly that numbers have run out, and keeps accepting scans", async () => {
     const close = vi
       .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
@@ -538,19 +622,214 @@ describe("WorkScreen box progress, closing and printing", () => {
   // Self-review addition: none of the brief's own tests ever set
   // `verifyPrintedLabel: true`, so the "on" branch of that setting was never
   // actually exercised -- only its negation was. This is the positive half.
-  it("prompts for print verification when the setting is on", async () => {
+  //
+  // A genuine print must actually happen for the prompt to open (Task 13
+  // review, Finding 3): `printing` is supplied and a label spec is seeded
+  // via `seedLabelSpec`, so `printAndMaybeVerify` really renders and sends a
+  // label before deciding to open the prompt, rather than opening it
+  // unconditionally whenever the setting is on.
+  it("prompts for print verification when the setting is on and a label was actually printed", async () => {
     const close = vi
       .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
       .mockResolvedValue({ status: "closed", sscc: SSCC, itemCount: 10 });
+    const exec = makeExec();
+    await seedLabelSpec(exec, "s1");
     renderWorkTracked({
+      exec,
       boxCapacity: 10,
       boxItemCount: 9,
       closeCurrentBox: close,
       verifyPrintedLabel: true,
+      printing: { target: PRINT_TARGET, language: "zpl", print: vi.fn(async () => {}) },
     });
+    await flushLabelSpecLoad();
     act(() => scan(KM));
     await waitFor(() => expect(close).toHaveBeenCalled());
     expect(await screen.findByText("Отсканируйте распечатанную этикетку")).toBeDefined();
+  });
+
+  // Task 13 review, Finding 3: opening the verification prompt when the
+  // setting is on used to depend on nothing but that setting -- reachable
+  // even when no printer is configured at all, which is exactly this test.
+  // With the fix, the operator is told plainly that nothing was printed
+  // instead of being handed a prompt to verify a label that never existed.
+  it("says printing did not happen instead of opening a verification prompt when no printer is configured", async () => {
+    const close = vi
+      .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
+      .mockResolvedValue({ status: "closed", sscc: SSCC, itemCount: 10 });
+    const exec = makeExec();
+    await seedLabelSpec(exec, "s1");
+    renderWorkTracked({
+      exec,
+      boxCapacity: 10,
+      boxItemCount: 9,
+      closeCurrentBox: close,
+      verifyPrintedLabel: true,
+      // No `printing` prop at all -- the "no printer configured" state.
+    });
+    act(() => scan(KM));
+    await waitFor(() => expect(close).toHaveBeenCalled());
+    expect(await screen.findByText(/печать не выполнена/i)).toBeDefined();
+    expect(screen.queryByText("Отсканируйте распечатанную этикетку")).toBeNull();
+  });
+
+  // Task 13 review, Finding 5: no existing test passed a real `printing`
+  // prop and asserted `printing.print` was actually called -- this fails if
+  // `await printing.print(...)` were deleted from `printAndMaybeVerify`.
+  it("actually sends the rendered label to the configured printer when a box closes", async () => {
+    const close = vi
+      .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
+      .mockResolvedValue({ status: "closed", sscc: SSCC, itemCount: 10 });
+    const print = vi.fn(async (_target: PrintTarget, _bytes: Uint8Array) => {});
+    const exec = makeExec();
+    await seedLabelSpec(exec, "s1");
+    renderWorkTracked({
+      exec,
+      boxCapacity: 10,
+      boxItemCount: 9,
+      closeCurrentBox: close,
+      printing: { target: PRINT_TARGET, language: "zpl", print },
+    });
+    await flushLabelSpecLoad();
+    act(() => scan(KM));
+    await waitFor(() => expect(print).toHaveBeenCalledOnce());
+    const [target, bytes] = print.mock.calls[0]!;
+    expect(target).toEqual(PRINT_TARGET);
+    expect(bytes).toBeInstanceOf(Uint8Array);
+    expect(bytes.length).toBeGreaterThan(0);
+  });
+
+  // Task 13 review, Finding 5: nothing previously asserted that choosing
+  // skip, or a matching scan, actually reaches `boxes_mirror` --
+  // `markPrintSkipped`/`markPrintVerified`'s whole reason for existing.
+  it("records a skip on boxes_mirror when the operator chooses skip", async () => {
+    const close = vi
+      .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
+      .mockResolvedValue({ status: "closed", sscc: SSCC, itemCount: 10 });
+    const exec = makeExec();
+    await seedLabelSpec(exec, "s1");
+    renderWorkTracked({
+      exec,
+      boxCapacity: 10,
+      boxItemCount: 9,
+      closeCurrentBox: close,
+      verifyPrintedLabel: true,
+      printing: { target: PRINT_TARGET, language: "zpl", print: vi.fn(async () => {}) },
+    });
+    await flushLabelSpecLoad();
+    act(() => scan(KM));
+    fireEvent.click(await screen.findByRole("button", { name: "Пропустить" }));
+
+    await waitFor(async () => {
+      const rows = await exec.all<{ print_skipped_at: string | null }>(
+        `SELECT print_skipped_at FROM boxes_mirror WHERE box_id = ?`,
+        [SEEDED_BOX_ID],
+      );
+      expect(rows[0]?.print_skipped_at).not.toBeNull();
+    });
+  });
+
+  it("records a verification on boxes_mirror when the printed label is scanned back", async () => {
+    const close = vi
+      .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
+      .mockResolvedValue({ status: "closed", sscc: SSCC, itemCount: 10 });
+    const exec = makeExec();
+    await seedLabelSpec(exec, "s1");
+    renderWorkTracked({
+      exec,
+      boxCapacity: 10,
+      boxItemCount: 9,
+      closeCurrentBox: close,
+      verifyPrintedLabel: true,
+      printing: { target: PRINT_TARGET, language: "zpl", print: vi.fn(async () => {}) },
+    });
+    await flushLabelSpecLoad();
+    act(() => scan(KM));
+    await screen.findByText("Отсканируйте распечатанную этикетку");
+    // The same scan source WorkScreen itself listens on -- PrintVerification
+    // takes it over entirely while the prompt is up (see its own doc
+    // comment). Same GS1 DataMatrix prefix `print-verification.test.tsx`'s
+    // own matching-scan fixture uses.
+    act(() => scan(`]C100${SSCC}`));
+
+    await waitFor(async () => {
+      const rows = await exec.all<{ print_verified_at: string | null }>(
+        `SELECT print_verified_at FROM boxes_mirror WHERE box_id = ?`,
+        [SEEDED_BOX_ID],
+      );
+      expect(rows[0]?.print_verified_at).not.toBeNull();
+    });
+  });
+
+  // Task 13 review, Finding 4: `closeTheBox` used to capture the box id for
+  // the verification/skip record from the `box` REACT STATE variable, which
+  // this file's own comments (on `boxRef`) already document as able to lag a
+  // `process()`-driven close. Two scans fired back-to-back, each closing its
+  // own (capacity-1) box, exercise exactly that lag: by the time the SECOND
+  // close runs, `box` state may not yet reflect the box the FIRST close just
+  // opened. The fix reads `boxRef.current` instead, which `updateBox` sets
+  // synchronously and is therefore never stale. `boxCapacity: 1` and no
+  // seeded item count keep the load path for both boxes as fast/simple as
+  // possible (a single `currentBox` query each), maximising the chance this
+  // reproduces the lag rather than merely asserting the happy path.
+  it("attributes the print-verification record to the box actually closed, not a stale one, across two back-to-back closes", async () => {
+    const exec = makeExec();
+    await seedLabelSpec(exec, "s1");
+    // Real serials to burn -- deliberately NOT injecting `closeCurrentBox`
+    // here (unlike every other test in this describe block): an injected
+    // mock never calls the real `closeBox` (close-box.ts), which is what
+    // actually writes `sscc`/`closed_at` onto `boxes_mirror`, and this test
+    // needs a REAL sscc on each closed row to identify which box a
+    // verification prompt belongs to.
+    await addRange(exec, {
+      issuerPrefix: TEST_ISSUER_PREFIX,
+      extensionDigit: 0,
+      fromSerial: 1,
+      toSerial: 5,
+    });
+    renderWorkTracked({
+      exec,
+      boxCapacity: 1,
+      boxItemCount: 0,
+      verifyPrintedLabel: true,
+      printing: { target: PRINT_TARGET, language: "zpl", print: vi.fn(async () => {}) },
+    });
+    await flushLabelSpecLoad();
+
+    // Two distinct codes, fired back-to-back in one synchronous batch:
+    // `boxCapacity: 1` means EACH closes its own box immediately, and the
+    // scan queue serializes their processing -- exactly the "two closes in
+    // quick succession" window `boxRef` (not `box` state) exists to survive.
+    act(() => {
+      scan(KM);
+      scan(OTHER_KM);
+    });
+    await waitFor(async () => {
+      const rows = await exec.all<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM boxes_mirror WHERE closed_at IS NOT NULL`,
+      );
+      expect(rows[0]?.n).toBe(2);
+    });
+
+    // Whichever of the two closes' verification prompts ends up showing
+    // (both call `setVerification`, so the second necessarily wins), read
+    // its OWN sscc back off the screen rather than assuming which one --
+    // the point is that the box id `printAndMaybeVerify` was given must
+    // match the SAME box this sscc actually belongs to.
+    const promptSscc = (await screen.findByText(/^\d{18}$/)).textContent;
+    fireEvent.click(screen.getByRole("button", { name: "Пропустить" }));
+
+    await waitFor(async () => {
+      const rows = await exec.all<{ print_skipped_at: string | null }>(
+        `SELECT print_skipped_at FROM boxes_mirror WHERE sscc = ?`,
+        [promptSscc],
+      );
+      // Exactly one box row carries this sscc (closeBox wrote it), and it
+      // must be the one the skip just recorded against -- not silently
+      // dropped (null boxId) and not misattributed to the OTHER box.
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.print_skipped_at).not.toBeNull();
+    });
   });
 
   // Self-review addition: pins the exact mutation named in this task's

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   classifyScan,
@@ -136,6 +136,33 @@ export function WorkScreen({
     bytes: Uint8Array | null;
     boxId: string | null;
   } | null>(null);
+  // Verification was requested (the workstation setting is on) but the box
+  // closed without a genuine print -- no label spec, no printer configured,
+  // or rendering/printing itself threw (Task 13 review, Finding 3). Told to
+  // the operator plainly rather than opening a prompt to verify a label that
+  // was never produced.
+  const [printUnavailable, setPrintUnavailable] = useState(false);
+  // Mirrors `verification` on every render (a plain assignment, not an
+  // effect, so it is already current by the time anything reads it after
+  // this commit) -- the same "read the latest value through a ref instead
+  // of closing over state" trick `live` below uses, needed here so
+  // `handleVerified` can have a STABLE identity across renders while still
+  // seeing the current box id.
+  const verificationRef = useRef(verification);
+  verificationRef.current = verification;
+
+  // Ref-based in-flight guard around `closeTheBox`, mirroring `boxRef` above:
+  // checked and set synchronously, before any `await`, so a double-tap of
+  // the manual close button -- or a tap racing an auto-close the very same
+  // accepted scan triggers via `refreshBoxAndMaybeClose` -- cannot run the
+  // close path twice concurrently. Without this, both calls burn a serial
+  // and print a label each, and the box's stored SSCC ends up as whichever
+  // write lands second (Task 13 review, Finding 2). `closing` (state, not
+  // the ref) exists only to disable the button visually -- a re-render
+  // lands too late to prevent the second call by itself, which is why the
+  // ref is what actually closes the race.
+  const closingRef = useRef(false);
+  const [closing, setClosing] = useState(false);
 
   function requestExit() {
     if (pendingSync > 0) setConfirmExit(true);
@@ -238,6 +265,16 @@ export function WorkScreen({
    * null in that case because no verification actually happened. Fired
    * WITHOUT being awaited by `closeTheBox` below: a slow printer must never
    * delay the next scan.
+   *
+   * The verification prompt opens ONLY when a print genuinely happened
+   * (Task 13 review, Finding 3): `labelSpec` may be absent (no template, or
+   * an unparsable one), `printing` may be null (no printer configured on
+   * this workstation), or `renderLabelBytes`/`printing.print` may throw.
+   * Opening a prompt to verify a label that was never produced -- and
+   * `bytes` would then be null or stale too, making "Печатать заново" a
+   * silent no-op -- is exactly the bug this fix removes. When the setting
+   * is on but nothing was printed, the operator is told plainly instead
+   * (`printUnavailable`).
    */
   async function printAndMaybeVerify(
     result: { sscc: string; itemCount: number },
@@ -253,21 +290,23 @@ export function WorkScreen({
       closedAt: new Date().toISOString(),
     });
     let bytes: Uint8Array | null = null;
-    if (labelSpec) {
+    let printed = false;
+    if (labelSpec && printing) {
       try {
-        bytes = await renderLabelBytes(
-          labelSpec,
-          fields,
-          printing?.language ?? "zpl",
-          rasterizeText,
-        );
-        if (printing) await printing.print(printing.target, bytes);
+        bytes = await renderLabelBytes(labelSpec, fields, printing.language, rasterizeText);
+        await printing.print(printing.target, bytes);
+        printed = true;
       } catch (err) {
         console.error("station: rendering or printing the box label failed", err);
+        bytes = null;
       }
     }
-    if (verifyPrintedLabel) {
+    if (!verifyPrintedLabel) return;
+    if (printed) {
+      setPrintUnavailable(false);
       setVerification({ sscc: result.sscc, bytes, boxId: closedBoxId });
+    } else {
+      setPrintUnavailable(true);
     }
   }
 
@@ -277,40 +316,65 @@ export function WorkScreen({
    * all the way down here too, not just at the button's render gate, so a
    * programmatic call can never silently invent a fallback prefix either
    * (Task 13's correction).
+   *
+   * Guarded by `closingRef` (Task 13 review, Finding 2), checked and set
+   * synchronously before the first `await`: the manual button is not
+   * otherwise serialized against an auto-close the very same accepted scan
+   * can trigger via `refreshBoxAndMaybeClose`, and a double-tap (or a tap
+   * racing that auto-close) could otherwise run this twice concurrently --
+   * both calls would burn a serial and print a label each, and the box's
+   * stored SSCC would end up as whichever write lands second.
    */
   async function closeTheBox(): Promise<void> {
     if (issuerPrefix === null) return;
-    const closingBoxId = box?.boxId ?? null;
-    const impl =
-      closeCurrentBoxProp ??
-      ((sid: string, operatorId: string | null) =>
-        closeCurrentBoxLib({ exec, issuerPrefix }, sid, operatorId));
-
-    let result: CloseBoxResult;
+    if (closingRef.current) return;
+    closingRef.current = true;
+    setClosing(true);
     try {
-      result = await impl(shiftId, null);
-    } catch (err) {
-      console.error("station: closeCurrentBox failed", err);
-      return;
-    }
+      // `boxRef.current`, not the `box` state variable: this file's own
+      // comments on `boxRef` document that `box` can lag a `process()`-driven
+      // close (a scan can update the ref before React has committed the
+      // matching state update), and this is exactly the situation that
+      // matters here -- reading a stale `box` would record the verification
+      // against the WRONG box id (or null), and the `if (boxId)` guard around
+      // `markPrintVerified`/`markPrintSkipped` would then silently drop the
+      // record entirely (Task 13 review, Finding 4).
+      const closingBoxId = boxRef.current?.boxId ?? null;
+      const impl =
+        closeCurrentBoxProp ??
+        ((sid: string, operatorId: string | null) =>
+          closeCurrentBoxLib({ exec, issuerPrefix }, sid, operatorId));
 
-    if (result.status === "empty") return;
-    if (result.status === "no-serials") {
-      setNoSerials(true);
-      return;
-    }
+      let result: CloseBoxResult;
+      try {
+        result = await impl(shiftId, null);
+      } catch (err) {
+        console.error("station: closeCurrentBox failed", err);
+        return;
+      }
 
-    setNoSerials(false);
-    const newBoxId = crypto.randomUUID();
-    try {
-      await openBox(exec, shiftId, newBoxId, new Date().toISOString(), terminalId);
-      updateBox({ boxId: newBoxId, itemCount: 0 });
-    } catch (err) {
-      console.error("station: failed to open the next box after closing", err);
-      updateBox(null);
-    }
+      if (result.status === "empty") return;
+      if (result.status === "no-serials") {
+        setNoSerials(true);
+        return;
+      }
 
-    void printAndMaybeVerify(result, closingBoxId);
+      setNoSerials(false);
+      setPrintUnavailable(false);
+      const newBoxId = crypto.randomUUID();
+      try {
+        await openBox(exec, shiftId, newBoxId, new Date().toISOString(), terminalId);
+        updateBox({ boxId: newBoxId, itemCount: 0 });
+      } catch (err) {
+        console.error("station: failed to open the next box after closing", err);
+        updateBox(null);
+      }
+
+      void printAndMaybeVerify(result, closingBoxId);
+    } finally {
+      closingRef.current = false;
+      setClosing(false);
+    }
   }
 
   /**
@@ -531,6 +595,20 @@ export function WorkScreen({
     [],
   );
 
+  // Stable across renders (Task 13 review, "also fix, cheap"): `PrintVerification`
+  // lists this in its own scan-subscription effect's deps, so a fresh arrow
+  // here on every unrelated re-render (a sync-drain tick, a signal flash
+  // timing out) would tear down and re-establish that subscription mid-
+  // verification, risking a lost scan during the async re-subscribe. Reads
+  // the current box id through `verificationRef` (see above) rather than
+  // closing over `verification` directly, which is what lets this have a
+  // stable identity in the first place.
+  const handleVerified = useCallback(() => {
+    const boxId = verificationRef.current?.boxId ?? null;
+    setVerification(null);
+    if (boxId) void markPrintVerified(exec, boxId, new Date().toISOString());
+  }, [exec]);
+
   return (
     <main
       style={{ minHeight: "100%", padding: 32, display: "flex", flexDirection: "column", gap: 24 }}
@@ -628,6 +706,7 @@ export function WorkScreen({
                 type="button"
                 variant="secondary"
                 style={{ minHeight: 64 }}
+                disabled={closing}
                 onClick={(event) => {
                   void closeTheBox();
                   event.currentTarget.blur();
@@ -638,6 +717,7 @@ export function WorkScreen({
             </div>
           ) : null}
           {noSerials ? <Alert tone="warn" title={t("box.noSerials")} /> : null}
+          {printUnavailable ? <Alert tone="warn" title={t("box.printNotAvailable")} /> : null}
         </div>
       ) : null}
 
@@ -652,11 +732,7 @@ export function WorkScreen({
       {verification ? (
         <PrintVerification
           expected={verification.sscc}
-          onVerified={() => {
-            const boxId = verification.boxId;
-            setVerification(null);
-            if (boxId) void markPrintVerified(exec, boxId, new Date().toISOString());
-          }}
+          onVerified={handleVerified}
           onReprint={() => {
             if (verification.bytes && printing)
               void printing.print(printing.target, verification.bytes);

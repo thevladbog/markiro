@@ -162,6 +162,19 @@ interface BoxClosureRow {
   sscc: string;
   closedAt: string;
   operatorId: string | null;
+  /**
+   * Whether the closed box's printed label has been scanned back and
+   * matched, or the operator explicitly chose to skip that (Task 13 review,
+   * Finding 6) -- read straight off `boxes_mirror`'s own `print_verified_at`/
+   * `print_skipped_at` columns (Task 9), which is where `PrintVerification`'s
+   * `onVerified`/`onSkip` paths write them. Null on either just means "not
+   * yet resolved" -- an ack can race the operator's decision (the box is
+   * typically acked within seconds of closing, often before the prompt is
+   * even answered), and that is fine: there is no requirement that the
+   * outcome reach the server before the ack, only that it eventually can.
+   */
+  printVerifiedAt: string | null;
+  printSkippedAt: string | null;
   /** SQLite's own rowid -- see `readClosedUnackedBoxes`'s doc comment. */
   rowid: number;
 }
@@ -193,9 +206,12 @@ async function readClosedUnackedBoxes(exec: SqlExecutor): Promise<BoxClosureRow[
     sscc: string;
     closed_at: string;
     closed_by: string | null;
+    print_verified_at: string | null;
+    print_skipped_at: string | null;
     rowid: number;
   }>(
-    `SELECT rowid, box_id, shift_id, terminal_id, sscc, closed_at, closed_by
+    `SELECT rowid, box_id, shift_id, terminal_id, sscc, closed_at, closed_by,
+            print_verified_at, print_skipped_at
        FROM boxes_mirror
       WHERE closed_at IS NOT NULL AND acked_at IS NULL
       ORDER BY rowid`,
@@ -207,6 +223,8 @@ async function readClosedUnackedBoxes(exec: SqlExecutor): Promise<BoxClosureRow[
     sscc: r.sscc,
     closedAt: r.closed_at,
     operatorId: r.closed_by,
+    printVerifiedAt: r.print_verified_at,
+    printSkippedAt: r.print_skipped_at,
     rowid: r.rowid,
   }));
 }
@@ -219,6 +237,8 @@ function toBoxPayload(boxes: BoxClosureRow[]) {
     sscc: b.sscc,
     closedAt: b.closedAt,
     operatorId: b.operatorId,
+    printVerifiedAt: b.printVerifiedAt,
+    printSkippedAt: b.printSkippedAt,
   }));
 }
 

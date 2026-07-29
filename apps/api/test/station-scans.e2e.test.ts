@@ -870,6 +870,12 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       sscc: string;
       closedAt: string;
       operatorId: string | null;
+      // Optional (Task 13 review, Finding 6): the DTO defaults an absent
+      // field to null, exactly like an older station build that has not
+      // learned to send these two fields yet -- so every closure fixture
+      // that predates this finding is still a valid payload unchanged.
+      printVerifiedAt?: string | null;
+      printSkippedAt?: string | null;
     }
 
     function batchBody(items: ScanItemDto[], boxes: ClosureFixture[] = []) {
@@ -1015,6 +1021,86 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       // asserted by nothing in this suite -- every closure test sent
       // `operatorId: null` (another cheap gap named in the review).
       expect(box!.operatorId).toBe(OPERATOR_ID);
+    });
+
+    // Task 13 review, Finding 6: the closure DTO now carries the device's own
+    // print-verification outcome (`boxes_mirror.print_verified_at`) through
+    // to the server's `boxes` row, in the SAME UPDATE that already sets
+    // sscc/closedAt/operatorId.
+    it("persists a non-null printVerifiedAt from the closure onto the server's boxes row", async () => {
+      await postBatch([scan("aa", { boxId: "b1" })]);
+      await postBatchWithBoxes(
+        [],
+        [
+          {
+            boxId: "b1",
+            shiftId,
+            terminalId: "t1",
+            sscc: SSCC,
+            closedAt: ISO,
+            operatorId: OPERATOR_ID,
+            printVerifiedAt: ISO,
+          },
+        ],
+      );
+      const [box] = await db.select().from(schema.boxes).where(eq(schema.boxes.tenantId, tenantId));
+      expect(box!.printVerifiedAt?.toISOString()).toBe(ISO);
+      expect(box!.printSkippedAt).toBeNull();
+    });
+
+    // The counterpart: a closure whose printVerifiedAt/printSkippedAt are
+    // both absent (the ordinary case -- the operator has usually not yet
+    // resolved the prompt by the time the closure is acked) must not
+    // manufacture either timestamp out of nothing.
+    it("leaves printVerifiedAt/printSkippedAt null when the closure carries neither", async () => {
+      await postBatch([scan("aa", { boxId: "b1" })]);
+      await postBatchWithBoxes(
+        [],
+        [{ boxId: "b1", shiftId, terminalId: "t1", sscc: SSCC, closedAt: ISO, operatorId: null }],
+      );
+      const [box] = await db.select().from(schema.boxes).where(eq(schema.boxes.tenantId, tenantId));
+      expect(box!.printVerifiedAt).toBeNull();
+      expect(box!.printSkippedAt).toBeNull();
+    });
+
+    // A later delivery of the SAME closure, now carrying a resolved outcome
+    // that was still unresolved the first time -- e.g. the device acked the
+    // closure before the operator answered the print-verification prompt.
+    // The primary sscc/closedAt/operatorId write deliberately refuses to
+    // touch an already-closed row, but the print-outcome fields must still
+    // be allowed to land (see the service's own comment on why this is
+    // scoped safely by sscc equality).
+    it("accepts a late-arriving printVerifiedAt for a box the closure already closed earlier", async () => {
+      await postBatch([scan("aa", { boxId: "b1" })]);
+      await postBatchWithBoxes(
+        [],
+        [{ boxId: "b1", shiftId, terminalId: "t1", sscc: SSCC, closedAt: ISO, operatorId: null }],
+      );
+      let [box] = await db.select().from(schema.boxes).where(eq(schema.boxes.tenantId, tenantId));
+      expect(box!.printVerifiedAt).toBeNull();
+
+      // Resent under a fresh batchId (a real device would not resend the
+      // very same batchId once it has moved on) with the SAME sscc, now
+      // carrying the resolved outcome.
+      await postBatchWithBoxes(
+        [],
+        [
+          {
+            boxId: "b1",
+            shiftId,
+            terminalId: "t1",
+            sscc: SSCC,
+            closedAt: ISO,
+            operatorId: null,
+            printVerifiedAt: ISO,
+          },
+        ],
+      );
+      [box] = await db.select().from(schema.boxes).where(eq(schema.boxes.tenantId, tenantId));
+      expect(box!.printVerifiedAt?.toISOString()).toBe(ISO);
+      // The original closure fields are untouched by this second delivery.
+      expect(box!.closedAt?.toISOString()).toBe(ISO);
+      expect(box!.sscc).toBe(SSCC);
     });
 
     it("records the operator on the scan event", async () => {
