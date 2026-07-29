@@ -1,0 +1,314 @@
+import { randomUUID } from "node:crypto";
+import express from "express";
+import request from "supertest";
+import { Test } from "@nestjs/testing";
+import type { INestApplication } from "@nestjs/common";
+import { describe, expect, it, beforeAll, afterAll } from "vitest";
+import { schema, type Db } from "@markiro/db";
+import { and, eq, like } from "drizzle-orm";
+import { AppModule } from "../src/app.module";
+import { loadEnv } from "../src/env";
+import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
+import { listenOnLoopback } from "./support/listen-loopback";
+import { signUpAndActivate } from "./support/auth";
+import { excludeExchangeRoute } from "../src/modules/exchange/exchange.module";
+import { IMPORT_BATCH_SIZE } from "../src/modules/exchange/exchange.controller";
+
+/** A minimal `<Каталог><Товары><Товар>` document -- one item, one name. */
+function catalogXmlFor(guid: string, name: string): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<КоммерческаяИнформация ВерсияСхемы="2.05">
+ <Каталог><Товары>
+  <Товар>
+   <Ид>${guid}</Ид>
+   <Наименование>${name}</Наименование>
+  </Товар>
+ </Товары></Каталог>
+</КоммерческаяИнформация>`;
+}
+
+/**
+ * A minimal `<ПакетПредложений><Предложения><Предложение>` document -- one
+ * offer, one price, the inline `<Представление>` label so the price type
+ * resolves without needing a `<ТипыЦен>` catalog (see parse.ts).
+ */
+function offersXmlFor(guid: string, price: string): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<КоммерческаяИнформация ВерсияСхемы="2.05">
+ <ПакетПредложений>
+  <Предложения>
+   <Предложение>
+    <Ид>${guid}</Ид>
+    <Цены>
+     <Цена>
+      <Представление>Розничная</Представление>
+      <ЦенаЗаЕдиницу>${price}</ЦенаЗаЕдиницу>
+      <Валюта>руб</Валюта>
+     </Цена>
+    </Цены>
+   </Предложение>
+  </Предложения>
+ </ПакетПредложений>
+</КоммерческаяИнформация>`;
+}
+
+describe("mode=import", () => {
+  let app: INestApplication | undefined;
+  let agent: ReturnType<typeof request.agent>;
+  let db: Db;
+  let login: string;
+  let secret: string;
+  let productId: string;
+  let tenantId: string;
+
+  beforeAll(async () => {
+    const env = loadEnv();
+    const setup: AuthSetup = setupAuth(env);
+    db = setup.db;
+    const ref = await Test.createTestingModule({
+      imports: [AppModule.forRoot({ ...setup, databaseUrl: env.DATABASE_URL })],
+    }).compile();
+    app = ref.createNestApplication({ bodyParser: false });
+    const server = app.getHttpAdapter().getInstance();
+    mountAuth(server, setup.auth);
+    server.use(excludeExchangeRoute(express.json()));
+    await app.init();
+    await listenOnLoopback(app);
+    agent = request.agent(app.getHttpServer());
+    tenantId = await signUpAndActivate(agent);
+
+    const issued = await agent.post("/integrations/commerceml/credentials").send({}).expect(201);
+    login = issued.body.login;
+    secret = issued.body.secret;
+
+    productId = randomUUID();
+    await db.insert(schema.products).values({
+      id: productId,
+      tenantId,
+      gtin14: "04600682000013",
+      name: "Исходное имя",
+      unitPrice: "50.00",
+      externalRef: "guid-1",
+    });
+  });
+
+  afterAll(async () => {
+    // The "не размножает кандидатов" tests below look up rows by the bare
+    // literal `externalRef` ("guid-new"), with no tenant filter -- that is
+    // the brief's own assertion, verbatim. Harmless within a single run (one
+    // tenant, one row), but this suite shares one real, persistent Postgres
+    // across runs (see exchange-protocol.e2e.test.ts's own afterAll for the
+    // same concern about `exchange_attempts`): a second run would create a
+    // SECOND tenant, insert a SECOND "guid-new" row, and the unscoped query
+    // would then see two rows and fail a test that changed nothing. Deleting
+    // this run's own candidate rows here keeps the suite repeatable without
+    // touching the brief's assertions themselves.
+    await db
+      .delete(schema.integrationCandidates)
+      .where(eq(schema.integrationCandidates.tenantId, tenantId));
+    await app?.close();
+  });
+
+  /** Repeats the checkauth exchange and turns its two body lines into a `Cookie` header value. */
+  async function checkauth(): Promise<{ cookie: string; value: string }> {
+    const res = await request(app!.getHttpServer())
+      .get("/1c_exchange?type=catalog&mode=checkauth")
+      .auth(login, secret)
+      .expect(200);
+    const [, name, value] = res.text.split("\n");
+    return { cookie: `${name}=${value}`, value: value! };
+  }
+
+  async function uploadFile(
+    auth: { cookie: string },
+    filename: string,
+    xml: string,
+  ): Promise<void> {
+    await request(app!.getHttpServer())
+      .post(`/1c_exchange?type=catalog&mode=file&filename=${filename}`)
+      .set("Cookie", auth.cookie)
+      .send(Buffer.from(xml, "utf8"))
+      .expect(200);
+  }
+
+  it("применяет цены сопоставленным товарам и отвечает success", async () => {
+    // товар с external_ref = guid-1 создан в beforeAll
+    const auth = await checkauth();
+    await uploadFile(auth, "offers.xml", offersXmlFor("guid-1", "77.50"));
+    const res = await request(app!.getHttpServer())
+      .get("/1c_exchange?type=catalog&mode=import&filename=offers.xml")
+      .set("Cookie", auth.cookie)
+      .expect(200);
+    expect(res.text.trim()).toBe("success");
+
+    const [product] = await db
+      .select({ unitPrice: schema.products.unitPrice })
+      .from(schema.products)
+      .where(eq(schema.products.id, productId));
+    expect(product!.unitPrice).toBe("77.50");
+  });
+
+  it("незнакомую номенклатуру кладёт в кандидаты, а каталог не трогает", async () => {
+    const auth = await checkauth();
+    await uploadFile(auth, "import.xml", catalogXmlFor("guid-new", "Новинка"));
+    await request(app!.getHttpServer())
+      .get("/1c_exchange?type=catalog&mode=import&filename=import.xml")
+      .set("Cookie", auth.cookie)
+      .expect(200);
+
+    const rows = await db
+      .select()
+      .from(schema.integrationCandidates)
+      .where(eq(schema.integrationCandidates.externalRef, "guid-new"));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.name).toBe("Новинка");
+  });
+
+  it("повторный import не размножает кандидатов", async () => {
+    const auth = await checkauth();
+    await uploadFile(auth, "import.xml", catalogXmlFor("guid-new", "Новинка"));
+    await request(app!.getHttpServer())
+      .get("/1c_exchange?type=catalog&mode=import&filename=import.xml")
+      .set("Cookie", auth.cookie)
+      .expect(200);
+
+    const rows = await db
+      .select()
+      .from(schema.integrationCandidates)
+      .where(eq(schema.integrationCandidates.externalRef, "guid-new"));
+    expect(rows).toHaveLength(1);
+  });
+
+  it("обмен не меняет ни имя, ни GTIN сопоставленного товара", async () => {
+    const before = await db
+      .select({ name: schema.products.name, gtin14: schema.products.gtin14 })
+      .from(schema.products)
+      .where(eq(schema.products.id, productId));
+    const auth = await checkauth();
+    await uploadFile(auth, "import.xml", catalogXmlFor("guid-1", "ДРУГОЕ ИМЯ"));
+    await request(app!.getHttpServer())
+      .get("/1c_exchange?type=catalog&mode=import&filename=import.xml")
+      .set("Cookie", auth.cookie)
+      .expect(200);
+    const after = await db
+      .select({ name: schema.products.name, gtin14: schema.products.gtin14 })
+      .from(schema.products)
+      .where(eq(schema.products.id, productId));
+    expect(after).toEqual(before);
+  });
+
+  it("пишет сводку сеанса в журнал", async () => {
+    const res = await agent.get("/integrations/commerceml/journal").expect(200);
+    const finished = res.body.sessions.find((s: { outcome: string | null }) => s.outcome === "ok");
+    expect(finished.summary).toMatchObject({ updated: expect.any(Number) });
+  });
+
+  // Beyond the brief's five: the prose requirements ("не теряйте молча",
+  // "большой каталог ... отвечает progress") aren't exercised by the five
+  // tests above, so pin them directly -- same convention as
+  // exchange-protocol.e2e.test.ts's own "Beyond the brief's five" section.
+
+  it("неоднозначный тип цены не применяется и уходит в журнал с перечнем пришедших типов", async () => {
+    const before = await db
+      .select({ unitPrice: schema.products.unitPrice })
+      .from(schema.products)
+      .where(eq(schema.products.id, productId));
+
+    const auth = await checkauth();
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<КоммерческаяИнформация ВерсияСхемы="2.05">
+ <ПакетПредложений>
+  <Предложения>
+   <Предложение>
+    <Ид>guid-1</Ид>
+    <Цены>
+     <Цена>
+      <Представление>Розничная</Представление>
+      <ЦенаЗаЕдиницу>111.00</ЦенаЗаЕдиницу>
+      <Валюта>руб</Валюта>
+     </Цена>
+     <Цена>
+      <Представление>Закупочная</Представление>
+      <ЦенаЗаЕдиницу>222.00</ЦенаЗаЕдиницу>
+      <Валюта>руб</Валюта>
+     </Цена>
+    </Цены>
+   </Предложение>
+  </Предложения>
+ </ПакетПредложений>
+</КоммерческаяИнформация>`;
+    await uploadFile(auth, "offers-ambiguous.xml", xml);
+    await request(app!.getHttpServer())
+      .get("/1c_exchange?type=catalog&mode=import&filename=offers-ambiguous.xml")
+      .set("Cookie", auth.cookie)
+      .expect(200);
+
+    const after = await db
+      .select({ unitPrice: schema.products.unitPrice })
+      .from(schema.products)
+      .where(eq(schema.products.id, productId));
+    expect(after).toEqual(before);
+
+    const journal = await agent.get("/integrations/commerceml/journal").expect(200);
+    const events = journal.body.sessions.flatMap(
+      (s: { events: { message: string; details: Record<string, unknown> | null }[] }) => s.events,
+    );
+    const skipEvent = events.find((e: { message: string }) =>
+      e.message.includes("ambiguous_price_type"),
+    );
+    expect(skipEvent).toBeDefined();
+    expect((skipEvent!.details as { priceTypes?: string[] } | null)?.priceTypes).toEqual(
+      expect.arrayContaining(["Розничная", "Закупочная"]),
+    );
+  });
+
+  it("предложение на товар без связи в каталоге не исчезает — фиксируется в журнале", async () => {
+    const auth = await checkauth();
+    await uploadFile(auth, "offers-unlinked.xml", offersXmlFor("guid-unlinked-zzz", "10.00"));
+    await request(app!.getHttpServer())
+      .get("/1c_exchange?type=catalog&mode=import&filename=offers-unlinked.xml")
+      .set("Cookie", auth.cookie)
+      .expect(200);
+
+    const journal = await agent.get("/integrations/commerceml/journal").expect(200);
+    const messages = journal.body.sessions.flatMap((s: { events: { message: string }[] }) =>
+      s.events.map((e) => e.message),
+    );
+    expect(messages.join(" ")).toMatch(/без связанного товара/);
+  });
+
+  it("большой каталог отвечает progress и дожимается повторным import с тем же filename", async () => {
+    const auth = await checkauth();
+    const guids = Array.from({ length: IMPORT_BATCH_SIZE + 1 }, (_, i) => `cand-batch-${i}`);
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<КоммерческаяИнформация ВерсияСхемы="2.05">
+ <Каталог><Товары>
+${guids.map((guid) => `  <Товар><Ид>${guid}</Ид><Наименование>Товар ${guid}</Наименование></Товар>`).join("\n")}
+ </Товары></Каталог>
+</КоммерческаяИнформация>`;
+    await uploadFile(auth, "big-catalog.xml", xml);
+
+    const first = await request(app!.getHttpServer())
+      .get("/1c_exchange?type=catalog&mode=import&filename=big-catalog.xml")
+      .set("Cookie", auth.cookie)
+      .expect(200);
+    expect(first.text.trim()).toBe("progress");
+
+    const second = await request(app!.getHttpServer())
+      .get("/1c_exchange?type=catalog&mode=import&filename=big-catalog.xml")
+      .set("Cookie", auth.cookie)
+      .expect(200);
+    expect(second.text.trim()).toBe("success");
+
+    const rows = await db
+      .select()
+      .from(schema.integrationCandidates)
+      .where(
+        and(
+          eq(schema.integrationCandidates.tenantId, tenantId),
+          like(schema.integrationCandidates.externalRef, "cand-batch-%"),
+        ),
+      );
+    expect(rows).toHaveLength(guids.length);
+  });
+});

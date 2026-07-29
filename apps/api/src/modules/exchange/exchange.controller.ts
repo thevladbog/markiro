@@ -12,11 +12,13 @@ import {
 } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { schema, type Db } from "@markiro/db";
-import { eq } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import type { Response } from "express";
 import { DB } from "../../auth/auth.module";
 import type { IntegrationChannelType } from "../integrations/channel-registry";
 import { JournalService } from "../integrations/journal.service";
+import { decideApplication, type KnownProduct } from "./commerceml/apply";
+import { parseCatalog, parseOffers } from "./commerceml/parse";
 import {
   assertUnderCheckauthLimit,
   checkauthWindowStart,
@@ -32,6 +34,28 @@ import {
   FILE_CHUNK_LIMIT,
   type ResolvedExchangeSession,
 } from "./exchange-session.service";
+
+/**
+ * Ceiling on how many planned rows (price updates, then candidate upserts)
+ * `mode=import` writes to the database in one HTTP round trip. A catalog
+ * bigger than this comes back as multiple `progress` replies instead of one
+ * long transaction-free write loop -- spec §4.4: "Большой каталог не грузим
+ * одной транзакцией". Not tuned against a real large file yet; picked as a
+ * number comfortably larger than any fixture in this test suite and small
+ * enough that one batch is a bounded amount of work.
+ */
+export const IMPORT_BATCH_SIZE = 500;
+
+/** One row of the plan this controller actually writes, in a fixed, stable order (see `handleImport`). */
+type ImportWorkItem =
+  | { kind: "price"; productId: string; unitPrice: string }
+  | {
+      kind: "candidate";
+      externalRef: string;
+      name: string;
+      article: string | null;
+      unit: string | null;
+    };
 
 /**
  * Constant address 1С's "Обмен с сайтом" client calls (спека §3):
@@ -106,6 +130,11 @@ export class ExchangeController {
       // and express.raw's `limit` in exchange.module.ts -- we declare it, so
       // all three read one constant rather than three independent numbers.
       this.text(res, [`zip=no`, `file_limit=${FILE_CHUNK_LIMIT}`].join("\n"));
+      return;
+    }
+
+    if (query.mode === "import") {
+      await this.import(session, query.filename, res);
       return;
     }
 
@@ -286,6 +315,217 @@ export class ExchangeController {
     });
 
     this.text(res, ["success", EXCHANGE_COOKIE_NAME, opened.cookie].join("\n"));
+  }
+
+  /**
+   * `mode=import`: assembles `filename`'s chunks (Task 6), parses them as
+   * BOTH a catalog and an offer pack (Task 7 -- whichever section a given
+   * file actually carries wins; the other simply comes back empty, so this
+   * never has to guess a file's kind from its name), decides what to apply
+   * (Task 8), then writes that decision to the database: prices only, and
+   * candidates by upsert. Never silent: every skipped offer and every offer
+   * for a product this connection hasn't linked yet is journaled, and the
+   * whole round's counts land in the session's summary via `finishSession`.
+   */
+  private async import(
+    session: ResolvedExchangeSession,
+    filename: string | undefined,
+    res: Response,
+  ): Promise<void> {
+    if (!filename) {
+      await this.journal.append({
+        tenantId: session.tenantId,
+        channelType: session.channelType,
+        sessionId: session.id,
+        direction: "in",
+        outcome: "error",
+        grain: "session",
+        message: "import: отсутствует имя файла",
+      });
+      this.fail(res, "missing filename");
+      return;
+    }
+
+    const bytes = await this.sessions.assemble(session.id, filename);
+
+    let items: ReturnType<typeof parseCatalog>["items"];
+    let offers: ReturnType<typeof parseOffers>["offers"];
+    try {
+      items = parseCatalog(bytes).items;
+      offers = parseOffers(bytes).offers;
+    } catch (cause) {
+      const detail = cause instanceof Error ? cause.message : String(cause);
+      await this.journal.append({
+        tenantId: session.tenantId,
+        channelType: session.channelType,
+        sessionId: session.id,
+        direction: "in",
+        outcome: "error",
+        grain: "session",
+        message: `import: ${detail}`,
+        details: { filename },
+      });
+      await this.journal.finishSession(session.tenantId, session.id, "error", {
+        error: detail,
+        filename,
+      });
+      this.fail(res, detail);
+      return;
+    }
+
+    const knownRows = await this.db
+      .select({ id: schema.products.id, externalRef: schema.products.externalRef })
+      .from(schema.products)
+      .where(
+        and(eq(schema.products.tenantId, session.tenantId), isNotNull(schema.products.externalRef)),
+      );
+    const known: KnownProduct[] = knownRows.map((row) => ({
+      id: row.id,
+      externalRef: row.externalRef!,
+    }));
+
+    const [channelRow] = await this.db
+      .select({ settings: schema.integrationChannels.settings })
+      .from(schema.integrationChannels)
+      .where(
+        and(
+          eq(schema.integrationChannels.tenantId, session.tenantId),
+          eq(schema.integrationChannels.type, session.channelType),
+        ),
+      );
+    const configuredPriceType = (channelRow?.settings as { priceType?: string } | undefined)
+      ?.priceType;
+
+    const plan = decideApplication({ known, items, offers, configuredPriceType });
+
+    // Offers decideApplication had nothing to do with at all: no known link
+    // to price, and offers carry no name/article/unit, so unlike catalog
+    // items they cannot become a candidate either (apply.ts). Not this
+    // connection's fault and not necessarily wrong -- the matching catalog
+    // item may simply not have arrived (or been linked) yet -- but it must
+    // not vanish without a trace either, per this task's brief.
+    const knownRefs = new Set(known.map((product) => product.externalRef));
+    const unmatchedOfferRefs = [
+      ...new Set(
+        offers.filter((offer) => !knownRefs.has(offer.externalRef)).map((o) => o.externalRef),
+      ),
+    ];
+
+    const worklist: ImportWorkItem[] = [
+      ...plan.priceUpdates.map((update): ImportWorkItem => ({
+        kind: "price",
+        productId: update.productId,
+        unitPrice: update.unitPrice,
+      })),
+      ...plan.candidates.map((item): ImportWorkItem => ({
+        kind: "candidate",
+        externalRef: item.externalRef,
+        name: item.name,
+        article: item.article,
+        unit: item.unit,
+      })),
+    ];
+
+    const offset = await this.sessions.readImportCursor(session.id, filename);
+    if (offset === 0) {
+      // Logged once, on the first batch of this import round -- decideApplication
+      // is a pure function of `known`/`items`/`offers`, which do not change
+      // between retries of the SAME filename, so a later `progress` retry
+      // would just be re-deriving (and re-journaling) an identical list.
+      for (const skip of plan.skipped) {
+        await this.journal.append({
+          tenantId: session.tenantId,
+          channelType: session.channelType,
+          sessionId: session.id,
+          direction: "in",
+          outcome: "warn",
+          grain: "item",
+          message: `цена не применена (${skip.reason}): ${skip.externalRef}`,
+          details: {
+            externalRef: skip.externalRef,
+            reason: skip.reason,
+            priceTypes: skip.priceTypes ?? null,
+          },
+        });
+      }
+      if (unmatchedOfferRefs.length > 0) {
+        await this.journal.append({
+          tenantId: session.tenantId,
+          channelType: session.channelType,
+          sessionId: session.id,
+          direction: "in",
+          outcome: "warn",
+          grain: "session",
+          message: `предложения без связанного товара: ${unmatchedOfferRefs.length}`,
+          details: { count: unmatchedOfferRefs.length, sample: unmatchedOfferRefs.slice(0, 20) },
+        });
+      }
+    }
+
+    const end = Math.min(offset + IMPORT_BATCH_SIZE, worklist.length);
+    for (let i = offset; i < end; i++) {
+      await this.applyWorkItem(session, worklist[i]!);
+    }
+
+    if (end < worklist.length) {
+      await this.sessions.writeImportCursor(session.id, filename, end);
+      this.text(res, "progress");
+      return;
+    }
+
+    await this.journal.finishSession(session.tenantId, session.id, "ok", {
+      updated: plan.priceUpdates.length,
+      candidates: plan.candidates.length,
+      skipped: plan.skipped.length,
+      unmatchedOffers: unmatchedOfferRefs.length,
+    });
+    this.text(res, "success");
+  }
+
+  /**
+   * Writes exactly one planned row. The one rule this whole route exists to
+   * hold literally: a price update touches `products.unit_price` and
+   * NOTHING else on the row -- name, GTIN, ЕГАИС code, label template and
+   * kiosk listing are never part of this `set()`, no matter what the
+   * incoming catalog said about them.
+   */
+  private async applyWorkItem(
+    session: ResolvedExchangeSession,
+    work: ImportWorkItem,
+  ): Promise<void> {
+    if (work.kind === "price") {
+      await this.db
+        .update(schema.products)
+        .set({ unitPrice: work.unitPrice })
+        .where(
+          and(
+            eq(schema.products.tenantId, session.tenantId),
+            eq(schema.products.id, work.productId),
+          ),
+        );
+      return;
+    }
+
+    const now = new Date();
+    await this.db
+      .insert(schema.integrationCandidates)
+      .values({
+        tenantId: session.tenantId,
+        channelType: session.channelType,
+        externalRef: work.externalRef,
+        name: work.name,
+        article: work.article,
+        unit: work.unit,
+        lastSeenAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [
+          schema.integrationCandidates.tenantId,
+          schema.integrationCandidates.channelType,
+          schema.integrationCandidates.externalRef,
+        ],
+        set: { name: work.name, article: work.article, unit: work.unit, lastSeenAt: now },
+      });
   }
 
   private async unknownMode(

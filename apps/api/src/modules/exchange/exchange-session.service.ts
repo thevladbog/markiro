@@ -174,6 +174,53 @@ export class ExchangeSessionService {
   }
 
   /**
+   * How many of `mode=import`'s planned rows (price updates, then candidate
+   * upserts, in that fixed order -- see `exchange.controller.ts`) already
+   * made it to the database for `filename` within `sessionId`. Zero when
+   * nothing has been recorded yet -- either the very first `mode=import`
+   * call for this filename, or a filename this session never touched.
+   *
+   * Piggybacks on `integrationSessions.summary` rather than a new column:
+   * that jsonb field is otherwise write-only until `JournalService.
+   * finishSession` sets the FINAL summary and closes the session for good.
+   * A live session (this method's only caller) and a finished one are
+   * mutually exclusive states of the same row -- `resolve()` already treats
+   * `finishedAt` as "gone" -- so scratch progress here can never be
+   * confused with, or overwritten by, the terminal summary.
+   */
+  async readImportCursor(sessionId: string, filename: string): Promise<number> {
+    const [row] = await this.db
+      .select({ summary: schema.integrationSessions.summary })
+      .from(schema.integrationSessions)
+      .where(eq(schema.integrationSessions.id, sessionId));
+    const cursors = row?.summary?.["importCursors"] as Record<string, number> | undefined;
+    return cursors?.[filename] ?? 0;
+  }
+
+  /**
+   * Records how far `mode=import` got for `filename` within `sessionId`, so
+   * the next `import` call for the SAME filename (1С repeats it verbatim
+   * after a `progress` reply) resumes instead of redoing already-applied
+   * rows. Merges into whatever scratch state is already there rather than
+   * overwriting `summary` wholesale -- a session could in principle be
+   * mid-import on more than one filename at once.
+   */
+  async writeImportCursor(sessionId: string, filename: string, offset: number): Promise<void> {
+    const [row] = await this.db
+      .select({ summary: schema.integrationSessions.summary })
+      .from(schema.integrationSessions)
+      .where(eq(schema.integrationSessions.id, sessionId));
+    const summary = { ...(row?.summary ?? {}) };
+    const cursors = { ...((summary["importCursors"] as Record<string, number>) ?? {}) };
+    cursors[filename] = offset;
+    summary["importCursors"] = cursors;
+    await this.db
+      .update(schema.integrationSessions)
+      .set({ summary })
+      .where(eq(schema.integrationSessions.id, sessionId));
+  }
+
+  /**
    * Deletes sessions abandoned mid-exchange, along with their chunks, so a
    * transfer that never finishes doesn't leave Postgres rows forever.
    * Targets `finishedAt is null AND expiresAt < now` -- a session that
