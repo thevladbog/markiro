@@ -99,6 +99,24 @@ export interface ScannerSetupProps {
    * below reads the result through `subscribe`.
    */
   onTransportChange?: (transport: Transport, port?: SerialPort) => void;
+  /**
+   * THE TRANSPORT THE SHELL IS ACTUALLY RUNNING, when it can say.
+   *
+   * The stored mode alone is not that, and the gap is not academic: the shell
+   * honours a stored "serial" only while the browser still holds the port grant
+   * (`recoverGrantedPort` in `KioskShell.tsx`), and falls back to the keyboard
+   * wedge when it does not — a reset profile, a different machine, a scanner
+   * that moved. Initialising the radio from the store in that state checks
+   * «Web Serial» over a kiosk running the wedge, and the test scan below then
+   * certifies the wedge under that label: the installer leaves with a green
+   * light and a saved configuration that misdescribes the device.
+   *
+   * So when this is given it WINS over the store, and the store is not read at
+   * all — the shell has already applied it and checked the grant behind it.
+   * Left out, the screen falls back to the stored mode, which is the old
+   * behaviour and the best a caller that cannot say has to offer.
+   */
+  activeTransport?: Transport;
   onClose: () => void;
 }
 
@@ -127,6 +145,7 @@ export function ScannerSetup({
   bootstrap,
   subscribe,
   onTransportChange,
+  activeTransport,
   onClose,
 }: ScannerSetupProps): React.JSX.Element {
   const { t } = useTranslation();
@@ -141,13 +160,31 @@ export function ScannerSetup({
   // kiosk enumerate personnel numbers a digit at a time.
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [transport, setTransport] = useState<Transport>("keyboard");
+  const [transport, setTransport] = useState<Transport>(activeTransport ?? "keyboard");
   const [portRefused, setPortRefused] = useState(false);
   const [result, setResult] = useState<KioskScan | null>(null);
 
   const serialSupported = isWebSerialSupported();
 
+  /**
+   * FOLLOW the shell, don't merely start from it. The boot-time recovery of a
+   * granted port is async (`recoverGrantedPort`), so on an unpaired device this
+   * screen can already be standing when the answer lands — and a radio seeded
+   * once at mount would then describe the transport the shell had before it
+   * settled. A local pick sets the same value on its way out through
+   * `onTransportChange`, so this never fights the installer.
+   */
   useEffect(() => {
+    if (activeTransport === undefined) return;
+    setTransport(activeTransport);
+  }, [activeTransport]);
+
+  useEffect(() => {
+    // Nothing to recover when the shell has already said what it is running:
+    // the store keeps the MODE a previous session chose, and says nothing about
+    // whether the port grant behind it survived — which is exactly the
+    // difference that made a stored "serial" a lie on this screen.
+    if (activeTransport !== undefined) return;
     let alive = true;
     void readScannerSettings()
       .then((saved) => {
@@ -163,7 +200,7 @@ export function ScannerSetup({
     return () => {
       alive = false;
     };
-  }, [serialSupported]);
+  }, [serialSupported, activeTransport]);
 
   /**
    * WHILE THE GATE IS SHUT a scan is a sign-in attempt and nothing else.
@@ -257,6 +294,23 @@ export function ScannerSetup({
     commit("keyboard");
   }
 
+  /**
+   * Back to the first stage, as the station does: the operator does not know
+   * which half we rejected, so re-entering both is the honest ask.
+   *
+   * ONE function for every rejection, and that is the point rather than tidying:
+   * the message it raises must be byte-identical whatever caused it — a wrong
+   * PIN, an unknown personnel number, or a check that could not run at all —
+   * or the difference between them becomes an oracle for enumerating personnel
+   * numbers from the outside of an unattended kiosk.
+   */
+  function rejectEntry(): void {
+    setFailed(true);
+    setLogin("");
+    setPin("");
+    setStage("login");
+  }
+
   async function submitPin(): Promise<void> {
     if (busy) return;
     setBusy(true);
@@ -267,12 +321,16 @@ export function ScannerSetup({
         setUnlocked(true);
         return;
       }
-      // Back to the first stage, as the station does: the operator does not
-      // know which half we rejected, so re-entering both is the honest ask.
-      setFailed(true);
-      setLogin("");
-      setPin("");
-      setStage("login");
+      rejectEntry();
+    } catch (err) {
+      // A crypto or store failure — `verifyPhc` reaches for `crypto.subtle`,
+      // which an insecure context does not have. Treated as a rejection, the
+      // way `Idle` treats a badge check that threw: nobody is admitted either
+      // way, and the alternative is a submit that visibly does nothing at all
+      // and an operator pressing it until they give up. Logged, because the
+      // screen deliberately cannot say on-screen which of the causes it was.
+      console.error("kiosk: the PIN could not be checked", err);
+      rejectEntry();
     } finally {
       setBusy(false);
     }

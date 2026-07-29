@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "@markiro/ui";
 import type { KioskBootstrapDto } from "../api/types.js";
@@ -142,10 +142,31 @@ function totalKopecks(items: CartItem[]): number | null {
   return sum;
 }
 
-function formatMoney(kopecks: number): string {
-  const sign = kopecks < 0 ? "-" : "";
-  const abs = Math.abs(kopecks);
-  return `${sign}${Math.trunc(abs / 100)}.${String(abs % 100).padStart(2, "0")}`;
+/**
+ * The money formatter for the language the kiosk is speaking.
+ *
+ * THE SEPARATOR IS NOT A CONSTANT. A dot was hard-coded here, so a Russian
+ * kiosk printed «89.90 ₽» at a worker who reads «89,90» — the very form the
+ * source price list is written in, and which `toKopecks` above refuses to parse
+ * for exactly that reason. `Intl` is asked instead of a second hard-coded
+ * comma, because the answer belongs to the locale and not to this file.
+ *
+ * Both fraction-digit bounds are pinned at 2: a price is minor units and shows
+ * them, so «45 ₽» for 4500 kopecks (`Intl`'s default for a whole number) and a
+ * third digit are both wrong here.
+ */
+function moneyFormat(language: string): Intl.NumberFormat {
+  return new Intl.NumberFormat(language, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/**
+ * `kopecks / 100` is safe where `Number(price) * 100` was not: the quotient of
+ * an integer by 100 is within a hair of the two-decimal value it stands for at
+ * every magnitude a kiosk can reach, and `Intl` rounds to those two digits — so
+ * nothing drifts, while the parse this replaces turned «89,90» into `NaN`.
+ */
+function formatMoney(kopecks: number, format: Intl.NumberFormat): string {
+  return format.format(kopecks / 100);
 }
 
 /**
@@ -183,7 +204,12 @@ export function Cart({
   onSubmit,
   onNotMe,
 }: CartProps): React.JSX.Element {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+
+  // Rebuilt only when the language does. `Intl.NumberFormat` is the expensive
+  // half of formatting a price, and this screen formats one per list row on
+  // every scan.
+  const money = useMemo(() => moneyFormat(i18n.language), [i18n.language]);
 
   // The reducer is rebuilt when its context changes so a dispatch always
   // decides against the current bootstrap; React reads the reducer from the
@@ -559,7 +585,7 @@ export function Cart({
                         >
                           {kopecks === null
                             ? UNPRICED
-                            : t("cart.price", { value: formatMoney(kopecks) })}
+                            : t("cart.price", { value: formatMoney(kopecks, money) })}
                         </span>
                       ) : null}
                       <button
@@ -679,7 +705,9 @@ export function Cart({
                 >
                   {/* «—», not a sum with the unpriced items quietly left out:
                       this is the number the administrator charges against. */}
-                  {total === null ? UNPRICED : t("cart.price", { value: formatMoney(total) })}
+                  {total === null
+                    ? UNPRICED
+                    : t("cart.price", { value: formatMoney(total, money) })}
                 </span>
               ) : null}
             </div>

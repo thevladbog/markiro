@@ -17,6 +17,7 @@
     "invalidCode": "The code is wrong, expired, or there have been too many attempts. Get a new code from the admin panel.",
     "connectionFailed": "No connection to the server. Check the network and try again.",
     "badBundle": "The server sent unusable data. Ask the administrator for a new code.",
+    "codeSpent": "The code has already been used, but the kiosk could not save the data. Ask the administrator for a new code.",
     "retry": "Retry"
   },
   "idle": {
@@ -75,7 +76,8 @@
       "unknown_product": "the product is not in the catalogue",
       "not_allowed": "this kiosk does not issue it",
       "duplicate": "duplicate — the code is already in another order",
-      "over_limit": "the daily limit was exceeded"
+      "over_limit": "the daily limit was exceeded",
+      "other": "the code was not accepted — ask the administrator why"
     }
   },
   "blocked": {

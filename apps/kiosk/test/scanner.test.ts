@@ -480,6 +480,43 @@ describe("web serial source", () => {
     consoleError.mockRestore();
   });
 
+  it("logs the outage once when an opened port exposes no readable stream, and keeps retrying", async () => {
+    // The one exit that used to leave no trace at all: `open()` resolves, the
+    // port hands back no stream, and the session returned before reaching the
+    // logging `catch` — so the reconnect loop below spun every five seconds
+    // for as long as the kiosk was on, with an empty console and a scanner
+    // that never spoke. Exactly the invisible failure this file is built to
+    // avoid, arrived at through the one door that skipped it.
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    let opens = 0;
+    const port: SerialPort = {
+      open: async () => {
+        opens++;
+      },
+      close: async () => {},
+      get readable() {
+        return null;
+      },
+    };
+
+    const stop = createWebSerialSource(port).start(() => {});
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    // Retrying, as it should — the stream may well be there next time.
+    expect(opens).toBeGreaterThan(5);
+    // But said ONCE for the whole outage, like every other failure here: a log
+    // that repeats every five seconds all night is one nobody reads in the
+    // morning.
+    expect(consoleError).toHaveBeenCalledTimes(1);
+    expect(consoleError).toHaveBeenCalledWith(
+      "kiosk: web serial scan source failed",
+      expect.any(Error),
+    );
+
+    stop();
+    consoleError.mockRestore();
+  });
+
   it("delivers again after stop() and a second start() on the same port", async () => {
     // The app shell — the single owner of the transport — rebuilds this source
     // whenever the transport changes, so an installer who toggles Serial →

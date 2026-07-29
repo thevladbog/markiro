@@ -205,7 +205,14 @@ export function createWebSerialSource(port: SerialPort): ScanSource {
           if (stopped) return;
 
           const readable = port.readable;
-          if (!readable) return;
+          // THROWN, not returned. An opened port with no `readable` is one more
+          // way the session cannot start, and it has to leave by the same door
+          // as the others: the `catch` below is what logs an outage, once, and
+          // an early return here would retry every five seconds forever with
+          // nothing in the console — the invisible failure this whole file is
+          // written to avoid. The `finally` still schedules the reconnect, so a
+          // port that vends a stream on the next attempt is picked straight up.
+          if (!readable) throw new Error("kiosk: the serial port exposed no readable stream");
 
           // `TextDecoderStream.writable` is typed as `WritableStream<BufferSource>`,
           // which lib.dom.d.ts's `pipeThrough` doesn't consider assignable to the

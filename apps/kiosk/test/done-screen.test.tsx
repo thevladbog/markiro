@@ -184,6 +184,29 @@ describe("Done", () => {
     expect(text()).not.toContain(reason);
   });
 
+  /**
+   * A reason this build has never heard of, which is not hypothetical: the DTO
+   * crosses the network unvalidated, so a reason added server-side reaches an
+   * un-updated kiosk exactly like this. The compile-time `Record` says nothing
+   * about it, and the missing i18n key throws in test mode — on the ONE screen
+   * where going blank costs the most, because the worker is already holding the
+   * product and this list is what tells them to put it back.
+   */
+  it("survives a conflict reason it has never heard of, and still counts it", () => {
+    const unknown = "quarantined" as OrderConflict["reason"];
+    renderDone(resultWith({ itemCount: 0, conflicts: [conflict("duplicate"), conflict(unknown)] }));
+
+    const alert = screen.getByRole("alert");
+    // Counted, listed, and named as a refusal — only the WHY is deferred, which
+    // is honest: at this point the kiosk genuinely does not know it.
+    expect(alert.textContent).toContain("Не приняли 2 шт");
+    expect(alert.textContent).toContain("дубль — код уже в другой заявке");
+    expect(alert.textContent).toContain("уточните у администратора");
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+    // Never the raw kind: «quarantined» on a kiosk screen is not copy.
+    expect(text()).not.toContain(unknown);
+  });
+
   // The server answers a submission it refused ENTIRELY with an empty orderNo
   // (`pickup-orders.service.ts`: `{ orderNo: "", itemCount: 0, conflicts }`).
   // «Заявка №  передана» with a hole where the number goes is the worst of

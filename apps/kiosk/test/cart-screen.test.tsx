@@ -137,7 +137,9 @@ describe("Cart", () => {
     const row = rows().join("");
     expect(row).toContain(MILK);
     expect(row).toContain("…000013-KYC9X7MQ");
-    expect(row).toContain("89.90 ₽");
+    // The decimal COMMA: this kiosk speaks Russian, the price list it is fed
+    // is written «89,90», and a dot here is the screen contradicting both.
+    expect(row).toContain("89,90 ₽");
   });
 
   it("adds up the prices of everything in the list", () => {
@@ -147,7 +149,26 @@ describe("Cart", () => {
     scan(km(GTIN_BREAD, "BBBB2222"));
 
     expect(rows()).toHaveLength(2);
-    expect(screen.getByText("134.90 ₽")).toBeDefined();
+    expect(screen.getByText("134,90 ₽")).toBeDefined();
+  });
+
+  /**
+   * The separator follows the LANGUAGE, and is not a second hard-coded
+   * character. Pinned from the other side so a future edit cannot satisfy the
+   * test above by swapping the dot for a comma and breaking the English build
+   * instead — `Intl` is what makes both true at once.
+   */
+  it("prints the same price with a dot when the kiosk is switched to English", async () => {
+    await i18n.changeLanguage("en");
+    try {
+      const { scan } = renderCart();
+
+      scan(km(GTIN_MILK, "KYC9X7MQ"));
+
+      expect(rows().join("")).toContain("89.90 ₽");
+    } finally {
+      await i18n.changeLanguage("ru");
+    }
   });
 
   it("answers a second scan of the same code with the duplicate banner, and does not grow the list", () => {
@@ -244,7 +265,7 @@ describe("Cart", () => {
     expect(rows()).toHaveLength(2);
     expect(totalMoney()).toBe("—");
     // Not the priced item's price wearing the total's clothes.
-    expect(totalMoney()).not.toContain("89.90");
+    expect(totalMoney()).not.toContain("89,90");
   });
 
   // `Number("89,90")` is `NaN`, and the trap the server's `toKopecks` exists to
@@ -262,7 +283,7 @@ describe("Cart", () => {
 
     expect(rows()).toHaveLength(1);
     expect(rows().join("")).toContain("—");
-    expect(document.body.textContent ?? "").not.toContain("0.00");
+    expect(document.body.textContent ?? "").not.toContain("0,00");
     expect(totalMoney()).toBe("—");
   });
 
@@ -309,9 +330,9 @@ describe("Cart", () => {
     expect(rows()).toHaveLength(2);
     expect(rows().join("")).toContain(MILK);
     const text = document.body.textContent ?? "";
-    expect(text).not.toContain("89.90");
-    expect(text).not.toContain("45.00");
-    expect(text).not.toContain("134.90");
+    expect(text).not.toContain("89,90");
+    expect(text).not.toContain("45,00");
+    expect(text).not.toContain("134,90");
     expect(text).not.toContain("₽");
   });
 

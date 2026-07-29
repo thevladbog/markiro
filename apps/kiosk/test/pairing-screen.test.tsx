@@ -215,7 +215,7 @@ describe("Pairing", () => {
     );
   });
 
-  it("leaves the device unpaired and retryable when the snapshot write itself fails", async () => {
+  it("leaves the device unpaired and recoverable when the snapshot write itself fails", async () => {
     // The store-shaped failure, not the payload-shaped one: `withStore` rejects
     // on an IndexedDB quota or transaction error. With the snapshot written
     // first, no token exists yet — so the device is still on this screen and a
@@ -240,16 +240,63 @@ describe("Pairing", () => {
 
     await waitFor(() => expect(screen.getByRole("alert")).toBeDefined());
     expect(await readConfig()).toBeNull();
+    expect(await readSnapshot()).toBeNull();
     expect(writes.writeConfig).not.toHaveBeenCalled();
     expect(onPaired).not.toHaveBeenCalled();
-
-    // ...and the proof that it is recoverable: the very same screen, still
-    // showing the code, pairs on the retry once the store is healthy again.
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-    await waitFor(() => expect(onPaired).toHaveBeenCalledTimes(1));
-    expect((await readConfig())?.token).toBe("tok-abc");
-    expect((await readSnapshot())?.bootstrap).toEqual(result.bootstrap);
+    // ...and the proof that it is recoverable: the screen the installer needs
+    // is still the one in front of them, with its keypad live.
+    expect(submitButton()).toBeDefined();
   });
+
+  /**
+   * The failure the ORDER of the writes cannot fix, and must therefore be told
+   * truthfully instead.
+   *
+   * `pairKiosk` came back 200, which means `attemptRedeem` has already stamped
+   * `usedAt` and rotated the device token: the entered code is spent from that
+   * line onwards, whatever the device manages to store afterwards. So a store
+   * failure here is NOT the network blink it resembles — a Retry offered on it
+   * can only ever be answered 401, and every press walks the installer further
+   * from the one thing that works, which is a new code.
+   *
+   * Both writes are exercised, because both live on the spent side of the
+   * redemption and the classification must not depend on which one broke.
+   */
+  it.each([
+    ["snapshot", writes.replaceSnapshot],
+    ["config", writes.writeConfig],
+  ] as const)(
+    "asks for a NEW code when the %s write fails after the code was already redeemed",
+    async (_which, write) => {
+      stubFetch(() => Promise.resolve(okResponse(bundle())));
+      write.mockRejectedValueOnce(new Error("QuotaExceededError"));
+      const onPaired = vi.fn();
+      render(
+        <Pairing
+          defaultServerUrl={SERVER}
+          subscribe={fakeFanOut().subscribe}
+          onPaired={onPaired}
+          onConfigureScanner={vi.fn()}
+        />,
+      );
+
+      typeDigits("12345678");
+      fireEvent.click(submitButton());
+
+      await waitFor(() =>
+        expect(
+          screen.getByText(
+            "The code has already been used, but the kiosk could not save the data. Ask the administrator for a new code.",
+          ),
+        ).toBeDefined(),
+      );
+      // The whole point: no button that can only fail.
+      expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+      // Unpaired either way — the token is the last write, so it never landed.
+      expect(await readConfig()).toBeNull();
+      expect(onPaired).not.toHaveBeenCalled();
+    },
+  );
 
   it("shows the invalid-code message on a 401 and issues no write at all", async () => {
     stubFetch(() => Promise.resolve(errorResponse(401, "invalid code")));

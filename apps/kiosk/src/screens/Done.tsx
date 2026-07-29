@@ -24,12 +24,31 @@ export interface DoneProps {
 }
 
 /**
+ * The line an unrecognised reason gets.
+ *
+ * The `Record` below is exhaustive over the DECLARED union, which is a
+ * compile-time property of this repo — and `CreateOrderResultDto` crosses the
+ * network unvalidated, so a reason added on the server reaches an un-updated
+ * kiosk as a string this map has never heard of. The lookup then yields
+ * `undefined`, and handing that to `t()` throws in test mode and renders
+ * nothing in production, on the ONE screen where a crash costs the most: the
+ * worker is already holding the product, and the conflict list is what tells
+ * them to put it back.
+ *
+ * So the unknown reason still counts, still shows up as a line, and still says
+ * the item was refused — only the WHY is deferred to the administrator, which
+ * is honest, because at that point the kiosk genuinely does not know it.
+ */
+const UNRECOGNISED_REASON = "done.conflictReason.other";
+
+/**
  * Words for every reason the DTO can carry.
  *
  * A `Record` keyed by the union rather than a template-literal lookup: adding
  * a reason to `OrderConflict` then fails the BUILD here, instead of reaching a
- * worker as a bare `over_limit` — or, in test mode, throwing on the missing
- * i18n key at the worst possible moment, after their order was submitted.
+ * worker as a bare `over_limit` — or falling through to the generic line above,
+ * which exists for the server this kiosk has not been rebuilt against and not
+ * as an excuse to skip the copy.
  */
 const CONFLICT_REASON: Record<OrderConflict["reason"], string> = {
   not_km: "done.conflictReason.not_km",
@@ -266,7 +285,7 @@ export function Done({ result, itemCount, onReset }: DoneProps): React.JSX.Eleme
               // means), so `rawKm` alone is not unique. Nothing here reorders,
               // so an index key is stable for this list's whole lifetime.
               <li key={`${item.rawKm}-${item.reason}-${index}`}>
-                {t(CONFLICT_REASON[item.reason])}
+                {t(CONFLICT_REASON[item.reason] ?? UNRECOGNISED_REASON)}
               </li>
             ))}
           </ul>

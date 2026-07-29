@@ -3,10 +3,34 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "../src/i18n/index.js";
 import type { KioskBootstrapDto } from "../src/api/types.js";
+import type * as OperatorModule from "../src/credentials/operator.js";
 import type { ScanListener } from "../src/scanner/source.js";
 import type { SerialPort } from "../src/scanner/web-serial.js";
 import { readConfig, readScannerSettings, writeConfig } from "../src/store/config.js";
 import { ScannerSetup } from "../src/screens/ScannerSetup.js";
+
+/**
+ * The one state a roster fixture cannot produce: a PIN check that THROWS.
+ *
+ * `verifyOperatorPin` reaches `crypto.subtle` through `verifyPhc`, which an
+ * insecure context (a kiosk opened over plain http) simply does not have, and
+ * the roster itself is read from IndexedDB — so «the check could not run» is a
+ * real state of a real device, and distinct from «the check said no». The
+ * module boundary is the only seam onto it; everything else passes straight
+ * through to the real verifiers, badge tier included.
+ */
+const verifier = vi.hoisted(() => ({ pinThrows: false }));
+
+vi.mock("../src/credentials/operator.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof OperatorModule>();
+  return {
+    ...actual,
+    verifyOperatorPin: async (login: string, pin: string, bootstrap: KioskBootstrapDto) => {
+      if (verifier.pinThrows) throw new Error("crypto.subtle is not available");
+      return actual.verifyOperatorPin(login, pin, bootstrap);
+    },
+  };
+});
 
 const SALT = "fwGrIt01vwgBxxDlhqLVRQ==";
 const GS = String.fromCharCode(0x1d);
@@ -157,6 +181,7 @@ beforeAll(async () => {
 
 beforeEach(() => {
   setWebSerial(false);
+  verifier.pinThrows = false;
 });
 
 afterEach(() => {
@@ -367,6 +392,55 @@ describe("ScannerSetup — access after pairing", () => {
     expect(screen.getByRole("alert").textContent).toEqual(wrongPin);
   });
 
+  /**
+   * A check that THREW is a rejection, said in the very same words.
+   *
+   * Two properties at once, and the second is the sharp one:
+   *
+   *  - the submit must not simply do nothing. `finally` cleared `busy` and
+   *    nothing else, so a crypto or store failure left the operator pressing a
+   *    button that visibly answered them with silence, with nothing in the
+   *    console either.
+   *  - the message must be BYTE-IDENTICAL to the one a wrong PIN earns. A
+   *    distinguishable failure is an oracle: it tells whoever is standing at an
+   *    unattended kiosk that this personnel number is worth more guesses.
+   */
+  it("answers a PIN check that throws exactly as it answers a wrong PIN", async () => {
+    const bootstrap = await bootstrapWith([{ login: "1042", pin: "4821" }]);
+    const rejected = render(
+      <ScannerSetup paired bootstrap={bootstrap} subscribe={noFanOut} onClose={vi.fn()} />,
+    );
+    typeDigits("1042");
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    typeDigits("9999");
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await waitFor(() => expect(screen.getAllByRole("alert")).toHaveLength(1));
+    const wrongPin = screen.getByRole("alert").textContent;
+    rejected.unmount();
+
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    verifier.pinThrows = true;
+    render(<ScannerSetup paired bootstrap={bootstrap} subscribe={noFanOut} onClose={vi.fn()} />);
+    // The RIGHT credentials this time: only the check itself is broken.
+    typeDigits("1042");
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    typeDigits("4821");
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await waitFor(() => expect(screen.getAllByRole("alert")).toHaveLength(1));
+    expect(wrongPin).toBeTruthy(); // the comparison below must not pass on ""
+    expect(screen.getByRole("alert").textContent).toEqual(wrongPin);
+    expect(transportGroup()).toBeNull();
+    // Both stages cleared and back at the first one, exactly as a rejection
+    // leaves them — the proof the failure was handled, not merely survived.
+    expect(screen.getByRole("button", { name: "Next" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Sign in" })).toBeNull();
+    expect(status().textContent).toBe("");
+    // Nothing on screen may say what happened, so the console has to.
+    expect(consoleError).toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
   it("opens on the right personnel number and PIN", async () => {
     const bootstrap = await bootstrapWith([{ login: "1042", pin: "4821" }]);
     render(<ScannerSetup paired bootstrap={bootstrap} subscribe={noFanOut} onClose={vi.fn()} />);
@@ -497,6 +571,71 @@ describe("ScannerSetup — access after pairing", () => {
 
     const hint = screen.getByText(/unbind this kiosk/i);
     expect(hint.textContent).toMatch(/new code/i);
+  });
+});
+
+/**
+ * WHAT THE RADIO CLAIMS has to be what the kiosk is running, and the store
+ * alone cannot say so.
+ *
+ * The shell honours a stored "serial" only while the browser still holds the
+ * port grant behind it (`recoverGrantedPort` in `KioskShell.tsx`) and falls
+ * back to the keyboard wedge when it does not — a reset profile, a different
+ * machine, a scanner that moved. Reading the store here in that state checks
+ * «Web Serial» over a kiosk running the wedge, and the test scan then certifies
+ * the wedge under that label: the installer leaves on a green light, with a
+ * saved configuration that misdescribes the device.
+ */
+describe("ScannerSetup — the transport the shell is actually running", () => {
+  it("checks what the shell recovered, not what the store remembers", async () => {
+    const { port } = fakePort();
+    setWebSerial(true, async () => port);
+    // A previous visit settled on Web Serial and stored it...
+    const first = render(
+      <ScannerSetup paired={false} bootstrap={null} subscribe={noFanOut} onClose={vi.fn()} />,
+    );
+    fireEvent.click(radio(SERIAL));
+    await waitFor(async () => expect((await readScannerSettings())?.transport).toBe("serial"));
+    first.unmount();
+
+    // ...but the grant is gone, so the shell came up on the keyboard wedge.
+    render(
+      <ScannerSetup
+        paired={false}
+        bootstrap={null}
+        subscribe={noFanOut}
+        activeTransport="keyboard"
+        onClose={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(radio(KEYBOARD).checked).toBe(true));
+    expect(radio(SERIAL).checked).toBe(false);
+    // And the store is left alone: back on the machine that holds the grant,
+    // the choice made there is still the choice.
+    expect((await readScannerSettings())?.transport).toBe("serial");
+  });
+
+  it("follows a shell that settles on Web Serial after this screen is already up", async () => {
+    // `recoverGrantedPort` is async and this screen opens without a credential
+    // on an unpaired device, so it can be standing before the shell knows what
+    // it ended up running. A radio seeded once at mount would go on describing
+    // the transport the shell had before it settled.
+    const { port } = fakePort();
+    setWebSerial(true, async () => port);
+    const props = {
+      paired: false as const,
+      bootstrap: null,
+      subscribe: noFanOut,
+      onClose: vi.fn(),
+    };
+    const view = render(<ScannerSetup {...props} activeTransport="keyboard" />);
+    expect(radio(KEYBOARD).checked).toBe(true);
+
+    view.rerender(<ScannerSetup {...props} activeTransport="serial" />);
+
+    await waitFor(() => expect(radio(SERIAL).checked).toBe(true));
+    expect(radio(KEYBOARD).checked).toBe(false);
   });
 });
 

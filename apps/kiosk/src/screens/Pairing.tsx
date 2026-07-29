@@ -51,12 +51,13 @@ export interface PairingProps {
  * and gives the one action that resolves either. Do not "fix" the missing
  * state by adding a distinguishing response.
  */
-type PairingError = "code" | "connection" | "bundle" | "scan";
+type PairingError = "code" | "connection" | "bundle" | "spent" | "scan";
 
 const MESSAGE_KEY: Record<PairingError, string> = {
   code: "pairing.invalidCode",
   connection: "pairing.connectionFailed",
   bundle: "pairing.badBundle",
+  spent: "pairing.codeSpent",
   scan: "pairing.scanRejected",
 };
 
@@ -129,8 +130,19 @@ export function Pairing({
     setBusy(true);
     setError(null);
     setAwaitingScan(false); // the code is in; nothing is being waited for now
+    /**
+     * Whether the code has been REDEEMED — the one fact that decides which
+     * failures are retryable, and it is not something the error can be asked
+     * about. `attemptRedeem` sets `usedAt` and rotates the device token the
+     * moment the server answers 200, so from this line onwards the entered code
+     * is spent and every retry with it can only ever come back 401. A failure
+     * after this point is therefore a spent-code failure however store-shaped
+     * or network-shaped it looks.
+     */
+    let redeemed = false;
     try {
       const result = await pairKiosk(serverUrl, code);
+      redeemed = true;
       // Checked BEFORE anything is persisted, so the screen can name this
       // failure for what it is (`bundle`, below) instead of discovering it
       // halfway through a write sequence. `replaceSnapshot` refuses it too.
@@ -159,18 +171,26 @@ export function Pairing({
       });
       onPaired();
     } catch (err) {
-      if (err instanceof KioskApiError && err.status === 401) {
-        setError("code");
-        setCode(""); // wrong code: the entry has to be redone anyway
-      } else if (err instanceof UnusableBootstrapError) {
+      if (err instanceof UnusableBootstrapError) {
         // Not a network blink, and it must not be dressed as one: the code was
         // SPENT redeeming this response, so retrying with it can only 401. The
         // only exit is a new code, which is what the message asks for — and why
         // this branch offers no Retry button.
         setError("bundle");
+      } else if (redeemed) {
+        // The response was good and the code is gone: what failed is one of the
+        // two local writes (an IndexedDB quota or transaction error). The device
+        // is still unpaired and still recoverable — the write order above sees
+        // to that — but NOT with this code, so calling it a connection blink and
+        // offering Retry would walk the installer through a guaranteed 401
+        // instead of sending them for a new code.
+        setError("spent");
+      } else if (err instanceof KioskApiError && err.status === 401) {
+        setError("code");
+        setCode(""); // wrong code: the entry has to be redone anyway
       } else {
-        // Transport, server, or a store that refused the write. The code itself
-        // is fine as far as we know, so it is KEPT and the retry can reuse it.
+        // The request never landed: transport or server, with the code still
+        // unspent. It is KEPT and the retry can reuse it.
         setError("connection");
       }
     } finally {
@@ -206,9 +226,11 @@ export function Pairing({
         <Alert
           tone="error"
           action={
-            // Retry is offered ONLY where retrying can work. A wrong code has to
-            // be retyped, and a code already spent on an unusable bundle cannot
-            // be redeemed twice — a button there would loop the worker forever.
+            // Retry is offered ONLY where retrying can work, which is the one
+            // case where the code was never redeemed. A wrong code has to be
+            // retyped, and a code already spent — on an unusable bundle, or on
+            // a response the store then refused to keep — cannot be redeemed
+            // twice, so a button there would loop the worker through 401s.
             error === "connection" ? (
               <Button style={{ minHeight: 56 }} disabled={busy} onClick={() => void submit()}>
                 {t("pairing.retry")}
