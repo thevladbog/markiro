@@ -6,7 +6,7 @@ import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { schema, type Db } from "@markiro/db";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { AppModule } from "../src/app.module";
 import { loadEnv } from "../src/env";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
@@ -47,6 +47,24 @@ describe("1c_exchange", () => {
   });
 
   afterAll(async () => {
+    // Fix 4: every failed/unrefunded `mode=checkauth` call in this file (plus
+    // exchange-credentials.e2e.test.ts's own real-loopback regression, run in
+    // the same `vitest run exchange-protocol exchange-credentials` invocation
+    // -- `fileParallelism: false` in vitest.config.ts means the two share one
+    // real-time 15-minute window) charges the SAME production rate limiter
+    // `assertUnderCheckauthLimit` enforces, keyed on the caller's actual
+    // address -- not a disposable per-test fixture the way `freshSource()` is
+    // in exchange-credentials.e2e.test.ts's unit tests. Three loopback forms
+    // because `checkauth`'s `source` (exchange.controller.ts) is used
+    // UNNORMALIZED, unlike kiosk pairing's `normalizePairSource` -- Node can
+    // report any of them for a loopback peer depending on the IPv4/IPv6 stack
+    // (same set `kiosk-pairing.e2e.test.ts` guards against for its own
+    // table). Without this, two or three runs inside one window exhaust
+    // `CHECKAUTH_BUDGET` and every later run starts failing with "too many
+    // attempts" until someone manually truncates `exchange_attempts`.
+    await db
+      .delete(schema.exchangeAttempts)
+      .where(inArray(schema.exchangeAttempts.source, ["127.0.0.1", "::1", "::ffff:127.0.0.1"]));
     await app?.close();
   });
 
@@ -228,6 +246,19 @@ describe("1c_exchange", () => {
         .expect(200);
       expect(res.headers["content-type"]).toMatch(/^text\/plain/);
       expect(res.text.startsWith("failure")).toBe(true);
+
+      // The response shape alone doesn't pin what this filter exists for:
+      // that the failure actually reached the journal, the same way the
+      // "неизвестный режим"/"превышенный кусок" regressions above check
+      // `lastOutcome` rather than stopping at the wire response.
+      // `ExchangeExceptionFilter.catch()` journals against `req.exchangeContext`,
+      // set right after `resolveSession` succeeds -- before the mocked
+      // `appendChunk` throws -- so the known tenant here is `login`'s own.
+      const [channel] = await db
+        .select()
+        .from(schema.integrationChannels)
+        .where(eq(schema.integrationChannels.credentialLogin, login));
+      expect(channel!.lastOutcome).toBe("error");
     } finally {
       spy.mockRestore();
     }

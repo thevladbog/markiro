@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   Module,
   RequestMethod,
   type MiddlewareConsumer,
@@ -83,6 +84,8 @@ function ensureContentType(req: Request, _res: Response, next: NextFunction): vo
  */
 @Injectable()
 class ExchangeChunkLimitMiddleware implements NestMiddleware {
+  private readonly logger = new Logger(ExchangeChunkLimitMiddleware.name);
+
   constructor(
     private readonly sessions: ExchangeSessionService,
     private readonly journal: JournalService,
@@ -99,18 +102,41 @@ class ExchangeChunkLimitMiddleware implements NestMiddleware {
       return;
     }
 
-    const cookie = extractExchangeCookie(req.headers.cookie);
-    const session = cookie ? await this.sessions.resolve(cookie) : null;
-    if (session) {
-      await this.journal.append({
-        tenantId: session.tenantId,
-        channelType: session.channelType,
-        sessionId: session.id,
-        direction: "in",
-        outcome: "error",
-        grain: "session",
-        message: `file: кусок превышает потолок (${contentLength} байт > ${FILE_CHUNK_LIMIT})`,
-      });
+    // Same "a DB outage must never become a bare 500" discipline as
+    // `ExchangeExceptionFilter`'s own `journal.append` try/catch, but for a
+    // different reason THIS one has to exist at all: this class is Express
+    // middleware bound in `configure()` below, running BEFORE
+    // `ExchangeController`'s pipeline -- `@UseFilters(ExchangeExceptionFilter)`
+    // on the controller never covers it, because Nest resolves a middleware's
+    // own exception filters off the middleware's metatype
+    // (`RouterExceptionFilters`, consulted by `RouterProxy.createProxy` in
+    // `@nestjs/core/router/router-proxy.js`), which this class carries none
+    // of. That does not mean an uncaught rejection here is swallowed --
+    // `RouterProxy.createProxy` wraps this entire `use()` in its own
+    // `try { await targetCallback(...) } catch`, and hands whatever escapes
+    // to Nest's OWN default handler, which answers with its own bare
+    // `{"statusCode":500,...}` JSON body -- exactly the shape this whole
+    // route exists to never produce.
+    try {
+      const cookie = extractExchangeCookie(req.headers.cookie);
+      const session = cookie ? await this.sessions.resolve(cookie) : null;
+      if (session) {
+        await this.journal.append({
+          tenantId: session.tenantId,
+          channelType: session.channelType,
+          sessionId: session.id,
+          direction: "in",
+          outcome: "error",
+          grain: "session",
+          message: `file: кусок превышает потолок (${contentLength} байт > ${FILE_CHUNK_LIMIT})`,
+        });
+      }
+    } catch (error) {
+      this.logger.error(
+        `failed to journal an oversized /1c_exchange chunk (responding failure anyway): ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     }
     res.status(200).type("text/plain").send("failure\nchunk too large");
   }
@@ -147,6 +173,7 @@ class ExchangeChunkLimitMiddleware implements NestMiddleware {
 @Injectable()
 class ExchangeRawBodyMiddleware implements NestMiddleware {
   private readonly parseRawBody = express.raw({ type: "*/*", limit: FILE_CHUNK_LIMIT });
+  private readonly logger = new Logger(ExchangeRawBodyMiddleware.name);
 
   constructor(
     private readonly sessions: ExchangeSessionService,
@@ -159,24 +186,63 @@ class ExchangeRawBodyMiddleware implements NestMiddleware {
         next();
         return;
       }
-      void this.reportOversized(req, res);
+      // `.catch()`ed here, not `void`-and-forgotten as before: this callback
+      // fires asynchronously, well AFTER `use()` has already returned to
+      // Nest's `RouterProxy` -- whose own `try/catch` around `use()` (see
+      // `ExchangeChunkLimitMiddleware`'s comment for what that catches)
+      // covers only the synchronous call and whatever it directly `await`s,
+      // NOT a promise created later inside this callback. A rejection out of
+      // `reportOversized` here is therefore not merely a bypass of
+      // `ExchangeExceptionFilter` -- it is a genuine Node-level unhandled
+      // rejection, and Node 24 crashes the whole process on one by default.
+      // There is no `process.on("unhandledRejection")` anywhere in this repo
+      // to catch it if this slips. `reportOversized` already guards its own
+      // DB calls (see its comment below) so this `.catch()` is a second,
+      // belt-and-suspenders net -- exactly the way `ExchangeExceptionFilter`
+      // keeps its own "Defensive only" `headersSent` check even though it
+      // argues that branch is unreachable.
+      this.reportOversized(req, res).catch((reportError: unknown) => {
+        this.logger.error(
+          `failed to report an oversized chunked /1c_exchange body (responding failure anyway): ${
+            reportError instanceof Error ? reportError.message : String(reportError)
+          }`,
+        );
+        if (!res.headersSent) {
+          res.status(200).type("text/plain").send("failure\nchunk too large");
+        }
+      });
     });
   }
 
-  /** Same response, and the same journal-if-resolvable discipline, as `ExchangeChunkLimitMiddleware`'s early check above. */
+  /**
+   * Same response, and the same journal-if-resolvable discipline, as
+   * `ExchangeChunkLimitMiddleware`'s early check above -- including the same
+   * try/catch around the DB calls, so a resolve/append failure here can
+   * never stop the `failure\n...`/200 response from going out, and never
+   * becomes the unhandled rejection this method's caller (`use()` above)
+   * exists to guard against.
+   */
   private async reportOversized(req: Request, res: Response): Promise<void> {
-    const cookie = extractExchangeCookie(req.headers.cookie);
-    const session = cookie ? await this.sessions.resolve(cookie) : null;
-    if (session) {
-      await this.journal.append({
-        tenantId: session.tenantId,
-        channelType: session.channelType,
-        sessionId: session.id,
-        direction: "in",
-        outcome: "error",
-        grain: "session",
-        message: `file: кусок превышает потолок (${FILE_CHUNK_LIMIT} байт, chunked без Content-Length)`,
-      });
+    try {
+      const cookie = extractExchangeCookie(req.headers.cookie);
+      const session = cookie ? await this.sessions.resolve(cookie) : null;
+      if (session) {
+        await this.journal.append({
+          tenantId: session.tenantId,
+          channelType: session.channelType,
+          sessionId: session.id,
+          direction: "in",
+          outcome: "error",
+          grain: "session",
+          message: `file: кусок превышает потолок (${FILE_CHUNK_LIMIT} байт, chunked без Content-Length)`,
+        });
+      }
+    } catch (error) {
+      this.logger.error(
+        `failed to journal an oversized chunked /1c_exchange body (responding failure anyway): ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     }
     res.status(200).type("text/plain").send("failure\nchunk too large");
   }
