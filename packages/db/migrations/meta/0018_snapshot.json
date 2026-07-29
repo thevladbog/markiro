@@ -1,5 +1,5 @@
 {
-  "id": "1c59a42e-862b-4d64-9cf9-17d1a347b3dc",
+  "id": "edf1fd63-fd09-4529-8c79-d8fe403dc083",
   "prevId": "8d019fe4-2b2c-4ccb-90a5-03a9b5bfc2a6",
   "version": "7",
   "dialect": "postgresql",
@@ -1978,6 +1978,12 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": true
+        },
+        "consumed_through_serial": {
+          "name": "consumed_through_serial",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
         },
         "issued_at": {
           "name": "issued_at",

@@ -318,6 +318,20 @@ export const ssccBlocks = pgTable(
     deviceId: uuid("device_id").notNull(),
     fromSerial: bigint("from_serial", { mode: "number" }).notNull(),
     toSerial: bigint("to_serial", { mode: "number" }).notNull(),
+    /**
+     * The highest serial in this range known to have been used, or null
+     * before any is. Set by `SsccService.recordConsumedSerial`, the moment a
+     * box closure at ingest names a real SSCC -- the only point the server
+     * ever learns a serial actually got printed rather than merely handed
+     * out. Without this, a device that loses its local database re-provisions
+     * from scratch, receives this same range back from the bundle, and
+     * restarts its cursor at `fromSerial`, reprinting serials already on
+     * boxes (caught only later, and only at ingest, by
+     * `boxes_tenant_sscc_uq`). The bundle uses it to hand back the
+     * unconsumed remainder instead of the whole range -- see
+     * `SsccService.allocateForBundle`.
+     */
+    consumedThroughSerial: bigint("consumed_through_serial", { mode: "number" }),
     issuedAt: timestamp("issued_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

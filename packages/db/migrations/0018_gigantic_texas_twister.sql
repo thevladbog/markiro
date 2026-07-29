@@ -32,6 +32,7 @@ CREATE TABLE "sscc_blocks" (
 	"device_id" uuid NOT NULL,
 	"from_serial" bigint NOT NULL,
 	"to_serial" bigint NOT NULL,
+	"consumed_through_serial" bigint,
 	"issued_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint

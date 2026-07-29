@@ -32,7 +32,7 @@ export const scanEvents = pgTable("scan_events", {
   // FK to employees(tenant_id, id) (scan_events_tenant_operator_fk),
   // enforcing that an operator_id belongs to the same tenant as the scan
   // event referencing it. Spelled by hand in
-  // migrations/0018_stiff_synch.sql, like the other scan_events FKs above,
+  // migrations/0018_gigantic_texas_twister.sql, like the other scan_events FKs above,
   // because this file is excluded from drizzle.config.ts's schema list (see
   // file header).
   operatorId: uuid("operator_id"),
