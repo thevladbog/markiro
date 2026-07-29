@@ -132,6 +132,54 @@ describe("boxes", () => {
       });
     });
 
+    // Task 13 review, Finding 1: the sync engine's box-closure query
+    // (`sync.ts`'s `readClosedUnackedBoxes`) is gated on `acked_at IS NULL`,
+    // and `ackBoxes` sets it on every successful drain -- typically within
+    // seconds of the box closing, well before the operator resolves this
+    // prompt. Without clearing it back here, the outcome just recorded would
+    // have no way off the device. `closed_at`/`sscc` -- everything else
+    // already acked about this box -- must stay exactly as they were; only
+    // `acked_at` un-gates the resend.
+    it("clears acked_at so a later drain resends this box, without disturbing closed_at or sscc", async () => {
+      await openBox(exec, "s1", "b1", "2026-07-29T10:00:00.000Z", "dev-1");
+      await closeBox(exec, "b1", "004601234560000017", "2026-07-29T10:05:00.000Z", null);
+      await exec.run(`UPDATE boxes_mirror SET acked_at = ? WHERE box_id = ?`, [
+        "2026-07-29T10:05:30.000Z",
+        "b1",
+      ]);
+
+      await markPrintVerified(exec, "b1", "2026-07-29T10:06:00.000Z");
+
+      const rows = await exec.all<{
+        acked_at: string | null;
+        closed_at: string | null;
+        sscc: string | null;
+      }>(`SELECT acked_at, closed_at, sscc FROM boxes_mirror WHERE box_id = ?`, ["b1"]);
+      expect(rows[0]).toEqual({
+        acked_at: null,
+        closed_at: "2026-07-29T10:05:00.000Z",
+        sscc: "004601234560000017",
+      });
+    });
+
+    // The skip counterpart of the test above.
+    it("clears acked_at on a skip too", async () => {
+      await openBox(exec, "s1", "b1", "2026-07-29T10:00:00.000Z", "dev-1");
+      await closeBox(exec, "b1", "004601234560000017", "2026-07-29T10:05:00.000Z", null);
+      await exec.run(`UPDATE boxes_mirror SET acked_at = ? WHERE box_id = ?`, [
+        "2026-07-29T10:05:30.000Z",
+        "b1",
+      ]);
+
+      await markPrintSkipped(exec, "b1", "2026-07-29T10:06:00.000Z");
+
+      const rows = await exec.all<{ acked_at: string | null }>(
+        `SELECT acked_at FROM boxes_mirror WHERE box_id = ?`,
+        ["b1"],
+      );
+      expect(rows[0]!.acked_at).toBeNull();
+    });
+
     // Self-review: a mutation swapping which box id `markPrintVerified` names
     // (e.g. naming the current box instead of the closed one) would pass
     // both tests above, since each only ever has one box. This pins that a

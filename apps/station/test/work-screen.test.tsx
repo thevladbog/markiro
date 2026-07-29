@@ -211,24 +211,6 @@ async function seedLabelSpec(exec: SqlExecutor, shiftId: string): Promise<void> 
   );
 }
 
-/**
- * Lets WorkScreen's own label-geometry effect (an async `readShiftMirror`
- * read, fired on mount) actually resolve and commit before a test's own
- * scan reaches the box-closing path. On a real device this read finishes in
- * milliseconds, long before an operator fills a box -- but these tests
- * deliberately seed the box already one scan from capacity so a single scan
- * closes it immediately, which can otherwise race ahead of that mount-time
- * read and print with a still-null `labelSpec`. A real `setTimeout` (this
- * suite uses real timers) inside `act` gives the event loop a full turn, so
- * the effect's promise settles and React commits the resulting state update
- * before the test proceeds.
- */
-async function flushLabelSpecLoad(): Promise<void> {
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  });
-}
-
 const PRINT_TARGET: PrintTarget = { kind: "tcp", host: "10.0.0.5", port: 9100 };
 
 /**
@@ -619,6 +601,30 @@ describe("WorkScreen box progress, closing and printing", () => {
     expect(screen.queryByText("Отсканируйте распечатанную этикетку")).toBeNull();
   });
 
+  // Task 13 review, Finding 3: opening the print-unavailable notice used to
+  // depend on `verifyPrintedLabel` being on -- so in the DEFAULT
+  // configuration (verification off), a box that closed with no printer
+  // configured burned a serial and printed nothing, with only a
+  // `console.error` to show for it. Whether printing happened at all must be
+  // visible regardless of whether a successful print would go on to be
+  // verified.
+  it("shows the print-unavailable notice even when the verification setting is off", async () => {
+    const close = vi
+      .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
+      .mockResolvedValue({ status: "closed", sscc: SSCC, itemCount: 10 });
+    renderWorkTracked({
+      boxCapacity: 10,
+      boxItemCount: 9,
+      closeCurrentBox: close,
+      verifyPrintedLabel: false,
+      // No `printing` prop at all -- the "no printer configured" state.
+    });
+    act(() => scan(KM));
+    await waitFor(() => expect(close).toHaveBeenCalled());
+    expect(await screen.findByText(/печать не выполнена/i)).toBeDefined();
+    expect(screen.queryByText("Отсканируйте распечатанную этикетку")).toBeNull();
+  });
+
   // Self-review addition: none of the brief's own tests ever set
   // `verifyPrintedLabel: true`, so the "on" branch of that setting was never
   // actually exercised -- only its negation was. This is the positive half.
@@ -642,7 +648,6 @@ describe("WorkScreen box progress, closing and printing", () => {
       verifyPrintedLabel: true,
       printing: { target: PRINT_TARGET, language: "zpl", print: vi.fn(async () => {}) },
     });
-    await flushLabelSpecLoad();
     act(() => scan(KM));
     await waitFor(() => expect(close).toHaveBeenCalled());
     expect(await screen.findByText("Отсканируйте распечатанную этикетку")).toBeDefined();
@@ -690,13 +695,63 @@ describe("WorkScreen box progress, closing and printing", () => {
       closeCurrentBox: close,
       printing: { target: PRINT_TARGET, language: "zpl", print },
     });
-    await flushLabelSpecLoad();
     act(() => scan(KM));
     await waitFor(() => expect(print).toHaveBeenCalledOnce());
     const [target, bytes] = print.mock.calls[0]!;
     expect(target).toEqual(PRINT_TARGET);
     expect(bytes).toBeInstanceOf(Uint8Array);
     expect(bytes.length).toBeGreaterThan(0);
+  });
+
+  // Task 13 review, Finding 4: `printAndMaybeVerify`'s decision of whether a
+  // print happened depends on the label spec having loaded, but nothing
+  // gated it against a box that closes before that mount-time
+  // `readShiftMirror` read resolves -- a very fast first box (capacity 1)
+  // reproduces this easily. This pins it directly: the label-spec read is
+  // held open with a controllable promise, a scan closes the box WHILE it is
+  // still unresolved, and printing must not have happened -- or been given
+  // up on -- until the read actually completes.
+  it("awaits the label geometry load before deciding whether to print, even when a scan closes the box immediately", async () => {
+    const close = vi
+      .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
+      .mockResolvedValue({ status: "closed", sscc: SSCC, itemCount: 1 });
+    const baseExec = makeExec();
+    await seedLabelSpec(baseExec, "s1");
+    let resolveShiftMirrorRead: (() => void) | undefined;
+    // Every query passes straight through to the real (synchronous)
+    // `makeExec`, EXCEPT `readShiftMirror`'s own plain select (`FROM
+    // shift_mirror`, distinguished from `readShiftContext`'s join by the
+    // absence of `product_mirror`) -- held open until the test releases it.
+    const gatedExec: SqlExecutor = {
+      run: baseExec.run,
+      all: async <T,>(sql: string, params: unknown[] = []) => {
+        if (sql.includes("FROM shift_mirror") && !sql.includes("product_mirror")) {
+          await new Promise<void>((resolve) => {
+            resolveShiftMirrorRead = resolve;
+          });
+        }
+        return baseExec.all<T>(sql, params);
+      },
+    };
+    const print = vi.fn(async () => {});
+    renderWorkTracked({
+      exec: gatedExec,
+      boxCapacity: 1,
+      boxItemCount: 0,
+      closeCurrentBox: close,
+      printing: { target: PRINT_TARGET, language: "zpl", print },
+    });
+
+    act(() => scan(KM));
+    await waitFor(() => expect(close).toHaveBeenCalled());
+    // The label-geometry read has not resolved yet -- printing must not have
+    // happened, nor been given up on (no "print not available" notice)
+    // either, since that would mean the gate let this proceed too early.
+    expect(print).not.toHaveBeenCalled();
+    expect(screen.queryByText(/печать не выполнена/i)).toBeNull();
+
+    resolveShiftMirrorRead?.();
+    await waitFor(() => expect(print).toHaveBeenCalledOnce());
   });
 
   // Task 13 review, Finding 5: nothing previously asserted that choosing
@@ -716,7 +771,6 @@ describe("WorkScreen box progress, closing and printing", () => {
       verifyPrintedLabel: true,
       printing: { target: PRINT_TARGET, language: "zpl", print: vi.fn(async () => {}) },
     });
-    await flushLabelSpecLoad();
     act(() => scan(KM));
     fireEvent.click(await screen.findByRole("button", { name: "Пропустить" }));
 
@@ -743,7 +797,6 @@ describe("WorkScreen box progress, closing and printing", () => {
       verifyPrintedLabel: true,
       printing: { target: PRINT_TARGET, language: "zpl", print: vi.fn(async () => {}) },
     });
-    await flushLabelSpecLoad();
     act(() => scan(KM));
     await screen.findByText("Отсканируйте распечатанную этикетку");
     // The same scan source WorkScreen itself listens on -- PrintVerification
@@ -794,7 +847,6 @@ describe("WorkScreen box progress, closing and printing", () => {
       verifyPrintedLabel: true,
       printing: { target: PRINT_TARGET, language: "zpl", print: vi.fn(async () => {}) },
     });
-    await flushLabelSpecLoad();
 
     // Two distinct codes, fired back-to-back in one synchronous batch:
     // `boxCapacity: 1` means EACH closes its own box immediately, and the

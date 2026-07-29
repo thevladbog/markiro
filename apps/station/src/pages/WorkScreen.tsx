@@ -130,7 +130,27 @@ export function WorkScreen({
   const boxReady = useRef<Promise<void> | null>(null);
 
   const [noSerials, setNoSerials] = useState(false);
-  const [labelSpec, setLabelSpec] = useState<LabelTemplateSpec | null>(null);
+  // The box label's geometry -- a plain ref, not React state, the same shape
+  // `keys` (above) already takes: nothing renders off this, and
+  // `printAndMaybeVerify` reads it from inside `closeTheBox`, which can
+  // itself run from `process()` -- a scan handler awaited well before React
+  // has necessarily re-rendered this component, so a value that only
+  // updated via `setState` could still read stale here regardless of
+  // `labelSpecReady` below (Task 13 review, Finding 4). Written
+  // synchronously inside the SAME `.then()` that resolves `labelSpecReady`,
+  // so awaiting that promise guarantees this ref already holds whatever the
+  // load produced, regardless of render timing.
+  const labelSpecRef = useRef<LabelTemplateSpec | null>(null);
+  // Resolves once this device's box-label geometry has been loaded (or
+  // decided there is none, with no `issuerPrefix`) -- the same `keysReady`/
+  // `boxReady` pattern this file already uses twice (Task 13 review, Finding
+  // 4). `printAndMaybeVerify` awaits this before deciding whether a print
+  // happened: without it, a box that closes before this mount-time
+  // `readShiftMirror` resolves (a very fast first box, e.g. `boxCapacity: 1`)
+  // would race a still-null `labelSpecRef`, silently skip printing, and --
+  // now that Finding 3 makes a non-print visible -- show "print unavailable"
+  // for a label that would have printed fine a moment later.
+  const labelSpecReady = useRef<Promise<void> | null>(null);
   const [verification, setVerification] = useState<{
     sscc: string;
     bytes: Uint8Array | null;
@@ -237,15 +257,26 @@ export function WorkScreen({
 
   // The box label's geometry -- only needed when this device can print a box
   // label at all. A missing or unparsable spec degrades to "skip printing"
-  // rather than a crash (see `printAndMaybeVerify` below).
+  // rather than a crash (see `printAndMaybeVerify` below). No `issuerPrefix`
+  // needs no gate at all: there is no box UI, so nothing will ever await
+  // `labelSpecReady` in the first place, but it is still resolved (to a
+  // no-op) for the same reason `boxReady` is -- a stray future await must
+  // never hang forever.
   useEffect(() => {
-    if (issuerPrefix === null) return;
+    if (issuerPrefix === null) {
+      labelSpecReady.current = Promise.resolve();
+      return;
+    }
     let cancelled = false;
-    void readShiftMirror(exec, shiftId)
+    labelSpecReady.current = readShiftMirror(exec, shiftId)
       .then((row) => {
         if (cancelled || !row?.labelTemplateSpec) return;
         try {
-          setLabelSpec(JSON.parse(row.labelTemplateSpec) as LabelTemplateSpec);
+          // Written synchronously, in the same tick this `.then()` runs, so
+          // `printAndMaybeVerify` sees it the instant `labelSpecReady`
+          // resolves rather than waiting on a React re-render (see
+          // `labelSpecRef`'s own doc comment).
+          labelSpecRef.current = JSON.parse(row.labelTemplateSpec) as LabelTemplateSpec;
         } catch (err) {
           console.error("station: failed to parse the box label template spec", err);
         }
@@ -266,20 +297,29 @@ export function WorkScreen({
    * WITHOUT being awaited by `closeTheBox` below: a slow printer must never
    * delay the next scan.
    *
-   * The verification prompt opens ONLY when a print genuinely happened
-   * (Task 13 review, Finding 3): `labelSpec` may be absent (no template, or
-   * an unparsable one), `printing` may be null (no printer configured on
-   * this workstation), or `renderLabelBytes`/`printing.print` may throw.
-   * Opening a prompt to verify a label that was never produced -- and
-   * `bytes` would then be null or stale too, making "Печатать заново" a
-   * silent no-op -- is exactly the bug this fix removes. When the setting
-   * is on but nothing was printed, the operator is told plainly instead
-   * (`printUnavailable`).
+   * Awaits `labelSpecReady` first (Task 13 review, Finding 4), the same
+   * `keysReady`/`boxReady` pattern this file already uses twice: without it,
+   * a box that closes before the mount-time `readShiftMirror` read resolves
+   * (a very fast first box, e.g. `boxCapacity: 1`) would race a still-null
+   * `labelSpecRef` and silently decide no print happened, even with a valid
+   * template and printer.
+   *
+   * Whether printing happened at all -- NOT whether it is being verified --
+   * decides `printUnavailable` (Task 13 review, Finding 3): `labelSpecRef`
+   * may be null (no template, or an unparsable one), `printing` may be null
+   * (no printer configured on this workstation), or `renderLabelBytes`/
+   * `printing.print` may throw. Previously this notice was reachable only
+   * when `verifyPrintedLabel` was ALSO on, so in the default (verification
+   * off) configuration a box could close, burn a serial, and print nothing,
+   * with only a `console.error` -- silent to the operator. Verification is
+   * the separate, opt-in question of whether a print that DID happen gets
+   * checked; it is not what makes a failed print visible.
    */
   async function printAndMaybeVerify(
     result: { sscc: string; itemCount: number },
     closedBoxId: string | null,
   ): Promise<void> {
+    await labelSpecReady.current;
     const fields = boxLabelFields({
       sscc: result.sscc,
       itemCount: result.itemCount,
@@ -291,9 +331,14 @@ export function WorkScreen({
     });
     let bytes: Uint8Array | null = null;
     let printed = false;
-    if (labelSpec && printing) {
+    if (labelSpecRef.current && printing) {
       try {
-        bytes = await renderLabelBytes(labelSpec, fields, printing.language, rasterizeText);
+        bytes = await renderLabelBytes(
+          labelSpecRef.current,
+          fields,
+          printing.language,
+          rasterizeText,
+        );
         await printing.print(printing.target, bytes);
         printed = true;
       } catch (err) {
@@ -301,13 +346,13 @@ export function WorkScreen({
         bytes = null;
       }
     }
-    if (!verifyPrintedLabel) return;
-    if (printed) {
-      setPrintUnavailable(false);
-      setVerification({ sscc: result.sscc, bytes, boxId: closedBoxId });
-    } else {
+    if (!printed) {
       setPrintUnavailable(true);
+      return;
     }
+    setPrintUnavailable(false);
+    if (!verifyPrintedLabel) return;
+    setVerification({ sscc: result.sscc, bytes, boxId: closedBoxId });
   }
 
   /**
@@ -606,7 +651,18 @@ export function WorkScreen({
   const handleVerified = useCallback(() => {
     const boxId = verificationRef.current?.boxId ?? null;
     setVerification(null);
-    if (boxId) void markPrintVerified(exec, boxId, new Date().toISOString());
+    // `.catch`, not a bare `void` (Task 13 review, "also fix, cheap"): a
+    // locked-DB write here would otherwise become an unhandled rejection,
+    // and unlike a rendering/printing failure (which the operator can see
+    // and retry), a failed verification record is silently dropped with
+    // nothing but a console trace to find it by -- the same discipline
+    // `hardware.ts`'s scan/status subscriptions already apply to their own
+    // fallible calls.
+    if (boxId) {
+      markPrintVerified(exec, boxId, new Date().toISOString()).catch((err: unknown) => {
+        console.error("station: recording print verification failed", err);
+      });
+    }
   }, [exec]);
 
   return (
@@ -734,13 +790,25 @@ export function WorkScreen({
           expected={verification.sscc}
           onVerified={handleVerified}
           onReprint={() => {
-            if (verification.bytes && printing)
-              void printing.print(printing.target, verification.bytes);
+            // `.catch`, not a bare `void` (Task 13 review, "also fix,
+            // cheap"): a rejected printer call must not become an unhandled
+            // rejection just because this handler cannot itself await it.
+            if (verification.bytes && printing) {
+              printing.print(printing.target, verification.bytes).catch((err: unknown) => {
+                console.error("station: reprinting the box label failed", err);
+              });
+            }
           }}
           onSkip={() => {
             const boxId = verification.boxId;
             setVerification(null);
-            if (boxId) void markPrintSkipped(exec, boxId, new Date().toISOString());
+            // `.catch`, not a bare `void` -- see `handleVerified` above for
+            // why.
+            if (boxId) {
+              markPrintSkipped(exec, boxId, new Date().toISOString()).catch((err: unknown) => {
+                console.error("station: recording print skip failed", err);
+              });
+            }
           }}
           scanSource={source}
         />

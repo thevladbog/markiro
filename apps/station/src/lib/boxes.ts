@@ -101,27 +101,45 @@ export async function closeBox(
 
 /**
  * Records that a closed box's printed label was scanned back and matched --
- * `PrintVerification`'s `onVerified` path. One column, the same shape as
- * `closeBox`'s own `closed_at`/`closed_by`.
+ * `PrintVerification`'s `onVerified` path. Also clears `acked_at` on the SAME
+ * row (Task 13 review, Finding 1): the sync engine's box-closure query
+ * (`sync.ts`'s `readClosedUnackedBoxes`) is gated on `acked_at IS NULL`, and
+ * `ackBoxes` sets it on every successful drain -- which typically happens
+ * within seconds of the box closing, well before the operator resolves this
+ * prompt. Without re-clearing it here, the outcome this write just recorded
+ * would have no way off the device: the closure was already acked, so it
+ * would never be read by `readClosedUnackedBoxes` again. Clearing it un-gates
+ * exactly one more resend of THIS box's closure, carrying the now-resolved
+ * outcome -- `closed_at`/`sscc`/every other already-acked column on this row
+ * is untouched, and the server's own late-update UPDATE only ever writes
+ * `print_verified_at`/`print_skipped_at` in response, so a resend here costs
+ * nothing beyond one extra (idempotent) closure in the next batch.
  */
 export async function markPrintVerified(
   exec: SqlExecutor,
   boxId: string,
   at: string,
 ): Promise<void> {
-  await exec.run(`UPDATE boxes_mirror SET print_verified_at = ? WHERE box_id = ?`, [at, boxId]);
+  await exec.run(
+    `UPDATE boxes_mirror SET print_verified_at = ?, acked_at = NULL WHERE box_id = ?`,
+    [at, boxId],
+  );
 }
 
 /**
  * Records that the operator explicitly chose NOT to verify a closed box's
  * printed label -- a disconnected scanner or a ruined label. A skip is
  * recorded, not silently dropped, which is exactly what this column (idle
- * since it was added in Task 9) exists for.
+ * since it was added in Task 9) exists for. Clears `acked_at` for the same
+ * reason `markPrintVerified` above does -- see its doc comment.
  */
 export async function markPrintSkipped(
   exec: SqlExecutor,
   boxId: string,
   at: string,
 ): Promise<void> {
-  await exec.run(`UPDATE boxes_mirror SET print_skipped_at = ? WHERE box_id = ?`, [at, boxId]);
+  await exec.run(`UPDATE boxes_mirror SET print_skipped_at = ?, acked_at = NULL WHERE box_id = ?`, [
+    at,
+    boxId,
+  ]);
 }

@@ -1109,6 +1109,135 @@ describe("App", () => {
     }
   });
 
+  // Task 13 review, Finding 2: `readShiftMirror` used to share the SAME
+  // `.catch` as `readShiftContext` inside one `Promise.all`, so a mirror-read
+  // failure -- including `applyMigrations` rethrowing a genuine (non-
+  // duplicate-column) migration error, plausible if a lock or transient error
+  // hits the `issuer_prefix` column or any ALTER before it -- rejected the
+  // WHOLE `Promise.all`. `setShiftContext` was then never called, stranding
+  // the operator on "Preparing the shift…" indefinitely. Before this task, a
+  // mirror-read failure only degraded the box feature to absent; it must not
+  // now be able to block shift entry entirely. This proves a rejected
+  // `readShiftMirror` alone still lets `shiftContext` land and the work
+  // screen render.
+  it("still reaches the work screen when readShiftMirror throws (Task 13 review, Finding 2)", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const pinHash = await hashSecret(OPERATOR_PIN);
+      invokeMock.mockImplementation((cmd: string, payload?: unknown): Promise<unknown> => {
+        if (cmd === "read_config") {
+          return Promise.resolve({
+            machine_id: "m1",
+            api_key: "mk_key",
+            server_url: "http://localhost:3000",
+          });
+        }
+        if (cmd === "plugin:sql|load") return Promise.resolve("sqlite:station-mirror.db");
+        if (cmd === "plugin:sql|execute") return Promise.resolve([0, 0]);
+        if (cmd === "plugin:sql|select") {
+          const { query, values } = (payload ?? {}) as { query: string; values?: unknown[] };
+          if (query.includes("FROM outbox")) {
+            if (query.startsWith("SELECT COUNT(*)")) return Promise.resolve([{ n: 0 }]);
+            return Promise.resolve([]);
+          }
+          if (/FROM operators_mirror\b/.test(query)) {
+            return Promise.resolve([operatorMirrorRow(pinHash)]);
+          }
+          // `readShiftContext`'s join (product_mirror) -- kept healthy, so
+          // `ctx` resolves non-null and the work screen appearing is
+          // genuinely down to `readShiftMirror`'s own rejection being
+          // tolerated, not to the poll never reaching `ctx` at all.
+          if (query.includes("product_mirror")) {
+            return Promise.resolve([
+              { gtin14: "04600000000015", name: "Cola", counterparty_name: null },
+            ]);
+          }
+          // `readShiftMirror`'s own plain select -- rejected outright, the
+          // exact failure this fix must tolerate.
+          if (query.includes("shift_mirror")) {
+            return Promise.reject(new Error("simulated shift_mirror read failure"));
+          }
+          if (query.includes("station_meta")) {
+            if (values?.[0] === "hardware_config") {
+              return Promise.resolve([
+                {
+                  value: JSON.stringify({
+                    scanner: null,
+                    printer: null,
+                    printerLanguage: "zpl",
+                    verifyPrintedLabel: false,
+                  }),
+                },
+              ]);
+            }
+            if (values?.[0] === "install_id") {
+              return Promise.resolve([{ value: "test-install-id" }]);
+            }
+            return Promise.resolve([]);
+          }
+          return Promise.resolve([]);
+        }
+        return Promise.resolve(undefined);
+      });
+
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string, init?: RequestInit) => {
+          const path = new URL(url).pathname;
+          const method = init?.method ?? "GET";
+          if (path === "/products/gtin-check" && method === "POST") {
+            return new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), {
+              status: 200,
+            });
+          }
+          if (path === "/products" && method === "GET") {
+            return new Response(
+              JSON.stringify({
+                items: [{ id: "p1", gtin14: "04600000000015", name: "Cola", boxCapacity: null }],
+              }),
+              { status: 200 },
+            );
+          }
+          if (path === "/shifts" && method === "POST") {
+            return new Response(
+              JSON.stringify({ id: "s9", status: "planned", mode: "validation" }),
+              { status: 201 },
+            );
+          }
+          if (path === "/shifts/s9/open" && method === "POST") {
+            return new Response(
+              JSON.stringify({ id: "s9", status: "active", mode: "validation" }),
+              { status: 200 },
+            );
+          }
+          return new Response(JSON.stringify({ items: [] }), { status: 200 });
+        }),
+      );
+
+      render(<App />);
+      await signInAsOperator();
+
+      fireEvent.click(screen.getByRole("button", { name: "New shift" }));
+      await waitFor(() => expect(screen.getByLabelText("Type or scan a GTIN")).toBeDefined());
+
+      fireEvent.change(screen.getByLabelText("Type or scan a GTIN"), {
+        target: { value: "4600000000015" },
+      });
+      fireEvent.submit(screen.getByLabelText("Type or scan a GTIN").closest("form")!);
+      await waitFor(() => expect(screen.getByText("Cola")).toBeDefined());
+      fireEvent.click(screen.getByRole("button", { name: "Start" }));
+
+      // Reaches the work screen despite `readShiftMirror`'s rejection --
+      // stuck on "Preparing the shift…" is exactly the bug this fix removes.
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Leave shift" })).toBeDefined(),
+      );
+      expect(screen.queryByText("Preparing the shift…")).toBeNull();
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
   // Task 13 review, Finding 1: App.tsx used to hardcode `issuerPrefix={null}`
   // and `boxCapacity={null}` into WorkScreen unconditionally, so the box UI
   // (progress, close, printing, verification) was unreachable from a real

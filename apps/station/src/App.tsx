@@ -197,10 +197,20 @@ export function App() {
     // `readShiftContext`'s join depends on (see `upsertBundleBody`), so by
     // the time `ctx` resolves non-null the mirror row is already there too --
     // gating this poll on `ctx` (rather than adding a second one) is enough.
+    // `readShiftMirror` carries its OWN `.catch(() => null)` (Task 13 review,
+    // Finding 2), separate from the `.catch` below that guards the whole
+    // `Promise.all`: without it, a mirror-read failure -- including
+    // `applyMigrations` rethrowing a genuine (non-duplicate-column) migration
+    // error, plausible if a lock or transient error hits the `issuer_prefix`
+    // column or any ALTER before it -- would reject the WHOLE `Promise.all`,
+    // so `ctx` is never reached and `setShiftContext` is never called,
+    // stranding the operator on "Preparing the shift..." indefinitely. Before
+    // this task, a mirror-read failure only degraded the box feature to
+    // absent; it must not now be able to block shift entry entirely.
     const tick = setInterval(() => {
       void Promise.all([
         readShiftContext(tauriExecutor, shift.id),
-        readShiftMirror(tauriExecutor, shift.id),
+        readShiftMirror(tauriExecutor, shift.id).catch(() => null),
       ])
         .then(([ctx, mirror]) => {
           if (cancelled || !ctx) return;

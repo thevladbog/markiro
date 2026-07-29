@@ -1110,6 +1110,90 @@ describe("sync engine: pools and closures", () => {
     expect(JSON.parse(lastBody()).boxes).toEqual([]);
   });
 
+  // Task 13 review, Finding 1: a box is typically acked within seconds of
+  // closing -- long before the operator usually resolves the print-
+  // verification prompt -- so `markPrintVerified`/`markPrintSkipped` must
+  // re-open the resend window that `ackBoxes` closed, or the outcome they
+  // just recorded has no way off the device (the closure never gets read by
+  // `readClosedUnackedBoxes` again). This resolves the outcome AFTER the
+  // first successful drain -- the dominant real-world ordering -- and pins
+  // that a second drain both sends the closure again AND carries the
+  // resolved field, not just an empty resend.
+  it("resends a closed box once its print-verification outcome resolves after the first ack", async () => {
+    await openBox(exec, SHIFT, "b1", ISO, TERMINAL);
+    await closeBox(exec, "b1", SSCC, ISO, null);
+    await drainOnce();
+    // The first drain's own closure carried both fields null -- the ordinary
+    // case, since the operator has not resolved the prompt yet.
+    expect(JSON.parse(lastBody()).boxes).toEqual([
+      {
+        boxId: "b1",
+        shiftId: SHIFT,
+        terminalId: TERMINAL,
+        sscc: SSCC,
+        closedAt: ISO,
+        operatorId: null,
+        printVerifiedAt: null,
+        printSkippedAt: null,
+      },
+    ]);
+
+    // The operator resolves the prompt only now, after the ack above.
+    await markPrintVerified(exec, "b1", ISO);
+
+    await drainOnce();
+    expect(JSON.parse(lastBody()).boxes).toEqual([
+      {
+        boxId: "b1",
+        shiftId: SHIFT,
+        terminalId: TERMINAL,
+        sscc: SSCC,
+        closedAt: ISO,
+        operatorId: null,
+        printVerifiedAt: ISO,
+        printSkippedAt: null,
+      },
+    ]);
+
+    // The server's own response acked the resend the same way it did the
+    // first send -- a THIRD drain must once again carry nothing for this
+    // box, proving the resend did not just repeat forever.
+    await drainOnce();
+    expect(JSON.parse(lastBody()).boxes).toEqual([]);
+  });
+
+  // The skip counterpart, and a check that this does not depend on the box
+  // still being the ONLY thing in the outbox: a fresh scan queued between
+  // the two drains gives the resend a real outbox maxId to key its batchId
+  // to (rather than the box-only rowid fallback), which is the ordinary
+  // shape a resend takes in practice -- the box closing rarely leaves the
+  // device with nothing else ever queued again before the operator responds.
+  it("resends a closed box once a print-verification skip resolves after the first ack, alongside a fresh scan", async () => {
+    await openBox(exec, SHIFT, "b1", ISO, TERMINAL);
+    await closeBox(exec, "b1", SSCC, ISO, null);
+    await drainOnce();
+    expect(JSON.parse(lastBody()).boxes).toMatchObject([{ boxId: "b1", printSkippedAt: null }]);
+
+    await markPrintSkipped(exec, "b1", ISO);
+    await recordScan(exec, event("a"), code("aa", "b1"));
+
+    await drainOnce();
+    const body = JSON.parse(lastBody());
+    expect(body.items).toHaveLength(1);
+    expect(body.boxes).toEqual([
+      {
+        boxId: "b1",
+        shiftId: SHIFT,
+        terminalId: TERMINAL,
+        sscc: SSCC,
+        closedAt: ISO,
+        operatorId: null,
+        printVerifiedAt: null,
+        printSkippedAt: ISO,
+      },
+    ]);
+  });
+
   // A box can close well after its last item was drained -- the shift's
   // last box, with nothing left queued behind it. This pins the path with
   // no outbox maxId at all (batch.length === 0, boxes.length > 0): the
