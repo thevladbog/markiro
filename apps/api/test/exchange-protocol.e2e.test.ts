@@ -13,6 +13,7 @@ import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { signUpAndActivate } from "./support/auth";
 import { excludeExchangeRoute } from "../src/modules/exchange/exchange.module";
+import { checkauthWindowStart } from "../src/modules/exchange/exchange-credentials";
 import {
   ExchangeSessionService,
   FILE_CHUNK_LIMIT,
@@ -25,6 +26,12 @@ describe("1c_exchange", () => {
   let db: Db;
   let login: string;
   let secret: string;
+  // Review fix (task-6): captured once, here, at suite collection time --
+  // not re-derived with `new Date()` down in `afterAll` -- so the cleanup
+  // below deletes exactly the checkauth window this suite's own attempts
+  // landed in, not whatever window happens to be current when the file
+  // finishes running.
+  const checkauthWindow = checkauthWindowStart(new Date());
 
   beforeAll(async () => {
     const env = loadEnv();
@@ -62,9 +69,24 @@ describe("1c_exchange", () => {
     // table). Without this, two or three runs inside one window exhaust
     // `CHECKAUTH_BUDGET` and every later run starts failing with "too many
     // attempts" until someone manually truncates `exchange_attempts`.
+    //
+    // Review fix (task-6): scoped to `checkauthWindow` (captured once, at
+    // suite start, above) -- deleting by source alone, across EVERY window,
+    // used to erase any other process's rate-limit history on the same
+    // loopback addresses too. This runs against a real, locally-shared
+    // Postgres, not a disposable per-test database: a dev server started by
+    // hand, a differently-grouped CI invocation, or another concurrent
+    // `vitest run` all point at the same table and the same three loopback
+    // source strings. Narrowing to this suite's own window means the delete
+    // can only ever remove rows this run itself could have written.
     await db
       .delete(schema.exchangeAttempts)
-      .where(inArray(schema.exchangeAttempts.source, ["127.0.0.1", "::1", "::ffff:127.0.0.1"]));
+      .where(
+        and(
+          inArray(schema.exchangeAttempts.source, ["127.0.0.1", "::1", "::ffff:127.0.0.1"]),
+          eq(schema.exchangeAttempts.windowStartedAt, checkauthWindow),
+        ),
+      );
     await app?.close();
   });
 

@@ -201,15 +201,27 @@ class ExchangeRawBodyMiddleware implements NestMiddleware {
       // belt-and-suspenders net -- exactly the way `ExchangeExceptionFilter`
       // keeps its own "Defensive only" `headersSent` check even though it
       // argues that branch is unreachable.
+      //
+      // Review fix: this callback used to retry the send itself
+      // (`if (!res.headersSent) res.status(200)...send(...)`), unguarded --
+      // the very same defect this whole pass exists to close, just one frame
+      // further in. By the time this `.catch()` runs, `reportOversized`'s OWN
+      // final `res.send()` (its only unguarded step -- see its comment below)
+      // has already thrown, on this SAME `res`, with the SAME arguments.
+      // Retrying is not recovering from something transient; it is repeating
+      // the exact call that just failed, on an object already known to be
+      // broken (a destroyed socket, headers flushed mid-error, etc.) --
+      // `!res.headersSent` does not cover every way that repeat could also
+      // fail, so it was itself a second, unobserved rejection waiting to
+      // happen. Logging and stopping here, rather than wrapping a second
+      // attempt in its own try/catch, is the smaller surface: nothing left in
+      // this callback can itself reject.
       this.reportOversized(req, res).catch((reportError: unknown) => {
         this.logger.error(
-          `failed to report an oversized chunked /1c_exchange body (responding failure anyway): ${
+          `failed to report an oversized chunked /1c_exchange body (already-broken response, not retried): ${
             reportError instanceof Error ? reportError.message : String(reportError)
           }`,
         );
-        if (!res.headersSent) {
-          res.status(200).type("text/plain").send("failure\nchunk too large");
-        }
       });
     });
   }

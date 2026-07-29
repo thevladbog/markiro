@@ -95,6 +95,25 @@ export class ExchangeExceptionFilter implements ExceptionFilter {
     // throws. Kept so this filter can never itself produce the
     // "headers already sent" crash on some future handler shape.
     if (res.headersSent) return;
-    res.status(200).type("text/plain").send("failure\ninternal error");
+
+    // Review fix: this final send used to sit outside any try/catch. Nest's
+    // `ExceptionsHandler.invokeCustomFilters` calls a custom filter's
+    // `catch()` and neither awaits nor attaches a rejection handler to what
+    // it returns, so a throw escaping this `async` method -- from THIS send,
+    // same as from `journal.append` above -- is a genuine, nobody-watching
+    // rejection, not merely a bypass of Nest's default handling the way an
+    // uncaught controller exception is. Same discipline as the
+    // `journal.append` try/catch above: the one thing this filter, of all
+    // places, must never do is let its OWN attempt at recovery throw
+    // somewhere unobserved.
+    try {
+      res.status(200).type("text/plain").send("failure\ninternal error");
+    } catch (sendError) {
+      this.logger.error(
+        `failed to send the /1c_exchange failure response itself: ${
+          sendError instanceof Error ? sendError.message : String(sendError)
+        }`,
+      );
+    }
   }
 }
