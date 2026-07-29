@@ -4,6 +4,7 @@ import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
+import { buildSscc } from "@markiro/domain";
 import { schema, type Db } from "@markiro/db";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
@@ -244,5 +245,148 @@ describe.skipIf(!ready)("sscc e2e", () => {
     // ext-0's own counter must be exactly where block0First left it --
     // undisturbed by the ext-1 allocation in between.
     expect(block0Second.fromSerial).toBe(block0First.toSerial + 1);
+  });
+
+  describe("recordConsumedSerial (Task 7 correction)", () => {
+    /** Reads back the one sscc_blocks row for this device -- tests below allocate exactly one. */
+    async function blockFor(deviceId: string) {
+      const [row] = await db
+        .select()
+        .from(schema.ssccBlocks)
+        .where(
+          and(eq(schema.ssccBlocks.tenantId, tenantId), eq(schema.ssccBlocks.deviceId, deviceId)),
+        );
+      return row;
+    }
+
+    it("advances the covering block's consumedThroughSerial", async () => {
+      const svc = app!.get(SsccService);
+      const prefix = "600000001";
+      const deviceId = await registerDevice("Consume device A");
+      const block = await svc.allocate(tenantId, prefix, 0, deviceId, 20);
+
+      const sscc = buildSscc(0, prefix, block.fromSerial + 3);
+      await svc.recordConsumedSerial(tenantId, sscc);
+
+      const row = await blockFor(deviceId);
+      expect(row!.consumedThroughSerial).toBe(block.fromSerial + 3);
+    });
+
+    it("never regresses the cursor when an earlier serial's closure arrives late", async () => {
+      const svc = app!.get(SsccService);
+      const prefix = "600000002";
+      const deviceId = await registerDevice("Consume device B");
+      const block = await svc.allocate(tenantId, prefix, 0, deviceId, 20);
+
+      await svc.recordConsumedSerial(tenantId, buildSscc(0, prefix, block.fromSerial + 5));
+      await svc.recordConsumedSerial(tenantId, buildSscc(0, prefix, block.fromSerial + 2));
+
+      const row = await blockFor(deviceId);
+      // A GREATEST-based advance, not an unconditional overwrite: an
+      // out-of-order arrival (offline batches, retried syncs) must not walk
+      // the cursor backwards.
+      expect(row!.consumedThroughSerial).toBe(block.fromSerial + 5);
+    });
+
+    it("is tenant-scoped: does not advance another tenant's block under the same prefix+serial", async () => {
+      const svc = app!.get(SsccService);
+      const prefix = "600000003";
+      const deviceId = await registerDevice("Consume device C");
+      const block = await svc.allocate(tenantId, prefix, 0, deviceId, 20);
+
+      // A second tenant, allocated the SAME prefix+extension-digit range
+      // (counters are independent per tenant, so both blocks cover serial
+      // block.fromSerial + 1) -- the only way to prove the update's tenantId
+      // clause, not just the range match, is what keeps the two apart.
+      const otherAgent = request.agent(app!.getHttpServer());
+      const otherTenantId = await signUpAndActivate(otherAgent);
+      const otherDeviceRes = await otherAgent
+        .post("/station-devices")
+        .send({ name: "Other tenant device" })
+        .expect(201);
+      const otherDeviceId = (otherDeviceRes.body as { deviceId: string }).deviceId;
+      await svc.allocate(otherTenantId, prefix, 0, otherDeviceId, 20);
+
+      const sscc = buildSscc(0, prefix, block.fromSerial + 1);
+      await svc.recordConsumedSerial(otherTenantId, sscc);
+
+      const mine = await blockFor(deviceId);
+      expect(mine!.consumedThroughSerial).toBeNull();
+    });
+
+    it("is a silent no-op for an sscc that matches no known block", async () => {
+      const svc = app!.get(SsccService);
+      // Well-formed but never allocated under this tenant.
+      const sscc = buildSscc(0, "609999999", 1);
+      await expect(svc.recordConsumedSerial(tenantId, sscc)).resolves.toBeUndefined();
+    });
+
+    it("is a silent no-op for a malformed sscc", async () => {
+      const svc = app!.get(SsccService);
+      await expect(svc.recordConsumedSerial(tenantId, "not-an-sscc")).resolves.toBeUndefined();
+    });
+  });
+
+  describe("allocateForBundle remainder (Task 7 correction)", () => {
+    it("hands back the whole range on a repeat call before anything is consumed", async () => {
+      const svc = app!.get(SsccService);
+      const prefix = "700000001";
+      const deviceId = await registerDevice("Remainder device A");
+
+      const first = await svc.allocateForBundle(tenantId, prefix, 0, deviceId, 20);
+      const second = await svc.allocateForBundle(tenantId, prefix, 0, deviceId, 20);
+
+      expect(second).toEqual(first);
+      const rows = await db
+        .select()
+        .from(schema.ssccBlocks)
+        .where(
+          and(eq(schema.ssccBlocks.tenantId, tenantId), eq(schema.ssccBlocks.deviceId, deviceId)),
+        );
+      expect(rows).toHaveLength(1);
+    });
+
+    it("hands back only the unconsumed remainder once part of the block is recorded consumed", async () => {
+      const svc = app!.get(SsccService);
+      const prefix = "700000002";
+      const deviceId = await registerDevice("Remainder device B");
+
+      const first = await svc.allocateForBundle(tenantId, prefix, 0, deviceId, 20);
+      const consumedUpTo = first.fromSerial + 6;
+      await svc.recordConsumedSerial(tenantId, buildSscc(0, prefix, consumedUpTo));
+
+      const remainder = await svc.allocateForBundle(tenantId, prefix, 0, deviceId, 20);
+      expect(remainder.fromSerial).toBe(consumedUpTo + 1);
+      expect(remainder.toSerial).toBe(first.toSerial);
+
+      // Still the SAME block, not a fresh one -- the row count must not grow.
+      const rows = await db
+        .select()
+        .from(schema.ssccBlocks)
+        .where(
+          and(eq(schema.ssccBlocks.tenantId, tenantId), eq(schema.ssccBlocks.deviceId, deviceId)),
+        );
+      expect(rows).toHaveLength(1);
+    });
+
+    it("cuts a fresh block once the held one is fully consumed, instead of handing back an exhausted range", async () => {
+      const svc = app!.get(SsccService);
+      const prefix = "700000003";
+      const deviceId = await registerDevice("Remainder device C");
+
+      const first = await svc.allocateForBundle(tenantId, prefix, 0, deviceId, 5);
+      await svc.recordConsumedSerial(tenantId, buildSscc(0, prefix, first.toSerial));
+
+      const next = await svc.allocateForBundle(tenantId, prefix, 0, deviceId, 5);
+      expect(next.fromSerial).toBe(first.toSerial + 1);
+
+      const rows = await db
+        .select()
+        .from(schema.ssccBlocks)
+        .where(
+          and(eq(schema.ssccBlocks.tenantId, tenantId), eq(schema.ssccBlocks.deviceId, deviceId)),
+        );
+      expect(rows).toHaveLength(2);
+    });
   });
 });

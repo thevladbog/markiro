@@ -377,9 +377,10 @@ export class ShiftsService {
 
   /**
    * Resolves the shift's issuer prefix and hands the device its block for
-   * the bundle (a fresh one the first time it's seen for this issuer, its
-   * existing one on every later fetch -- see `SsccService.allocateForBundle`
-   * for why).
+   * the bundle (a fresh one the first time it's seen for this issuer, the
+   * unconsumed remainder of its existing one on every later fetch, or
+   * another fresh one if that one is fully consumed -- see
+   * `SsccService.allocateForBundle` for why).
    *
    * `apps/station/src/lib/shift-bundle.ts` swallows a bundle download error
    * BY DESIGN, so a thrown 400 here would not just skip the serial block --

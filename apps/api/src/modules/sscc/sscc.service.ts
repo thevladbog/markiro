@@ -4,12 +4,16 @@ import {
   Injectable,
   InternalServerErrorException,
 } from "@nestjs/common";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
+import { parseSscc } from "@markiro/domain";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
 
 /** Boxes take extension digit 0; 1 is reserved for pallets (06d). */
 export const BOX_EXTENSION_DIGIT = 0;
+
+/** An issuer prefix is always the first 9 digits of a 13-digit GLN — see deriveIssuerPrefix. */
+const ISSUER_PREFIX_LENGTH = 9;
 
 export interface SsccBlock {
   issuerPrefix: string;
@@ -145,9 +149,10 @@ export class SsccService {
 
   /**
    * The bundle's entry point into allocation (Task 7 review, finding 3):
-   * cuts a fresh block only the FIRST time this device is seen for this
-   * (tenant, issuer prefix, extension digit) triple; every later call for
-   * the same triple hands back the block it already holds instead.
+   * hands back the device's own block for this (tenant, issuer prefix,
+   * extension digit) triple rather than cutting a fresh one on every fetch,
+   * UNLESS that block is fully consumed, in which case a fresh one is cut
+   * instead of handing back an exhausted range (Task 7 correction).
    *
    * The bundle is not a top-up channel. The station re-downloads it on
    * every shift entry, re-entry and app restart, and nothing else caps how
@@ -155,17 +160,19 @@ export class SsccService {
    * device would work through a 10-million-serial number space in about
    * 5000 fetches, mid-shift, with `buildSscc` then throwing SSCC_RANGE on
    * the factory floor. The bundle's actual job is narrower: guarantee a
-   * device numbers for an issuer it has NEVER held. A device already
-   * running low on its existing block gets topped up through the sync
-   * response instead (a later task) -- deliberately NOT here, so this
-   * method never even looks at how many serials of the existing block are
-   * left, only whether one exists at all.
+   * device numbers for an issuer it has NEVER held, and recover a device
+   * that lost its own record of what it already holds.
    *
-   * A repeat call deliberately returns the device's EXISTING block rather
-   * than signalling "nothing to do": the device may have lost its local
-   * database (a factory reset, a corrupted store) and be re-provisioning
-   * from scratch, in which case the range it already holds server-side is
-   * exactly what it needs handed back, not withheld.
+   * A repeat call returns the device's EXISTING block's UNCONSUMED
+   * REMAINDER, not the whole original range: the device may have lost its
+   * local database (a factory reset, a corrupted store) and be
+   * re-provisioning from scratch, in which case handing back serials
+   * `recordConsumedSerial` already knows were printed would let it restart
+   * its own cursor at `fromSerial` and reprint them -- caught only later,
+   * and only at ingest, by `boxes_tenant_sscc_uq`, after the labels are
+   * already on the boxes. `consumedThroughSerial` null (nothing recorded
+   * consumed yet) is treated as "remainder is the whole range", so an
+   * ordinary repeat fetch before any box has closed is unaffected.
    */
   async allocateForBundle(
     tenantId: string,
@@ -180,6 +187,7 @@ export class SsccService {
         extensionDigit: schema.ssccBlocks.extensionDigit,
         fromSerial: schema.ssccBlocks.fromSerial,
         toSerial: schema.ssccBlocks.toSerial,
+        consumedThroughSerial: schema.ssccBlocks.consumedThroughSerial,
       })
       .from(schema.ssccBlocks)
       .where(
@@ -193,7 +201,59 @@ export class SsccService {
       .orderBy(desc(schema.ssccBlocks.issuedAt))
       .limit(1);
 
-    if (existing) return existing;
+    if (existing && existing.consumedThroughSerial !== existing.toSerial) {
+      return {
+        issuerPrefix: existing.issuerPrefix,
+        extensionDigit: existing.extensionDigit,
+        fromSerial:
+          existing.consumedThroughSerial == null
+            ? existing.fromSerial
+            : existing.consumedThroughSerial + 1,
+        toSerial: existing.toSerial,
+      };
+    }
+    // No block at all yet, OR the held one is fully consumed -- either way,
+    // cut a fresh one rather than hand back a range with nothing left in it.
     return this.allocate(tenantId, issuerPrefix, extensionDigit, deviceId, size);
+  }
+
+  /**
+   * Advances `sscc_blocks.consumedThroughSerial` for the block that covers
+   * `sscc`'s serial, the moment the server first learns that serial was
+   * really used -- a box closure arriving at ingest, carrying the SSCC that
+   * went on the box. This is the ONLY thing that ever moves the cursor: the
+   * bundle's own allocation path never does, on purpose (see
+   * `allocateForBundle`'s doc comment) -- a handed-out serial is not a used
+   * one until a box closure says so.
+   *
+   * One statement, tenant-scoped, and monotonic (`GREATEST`): a batch of box
+   * closures can arrive out of order (offline devices, retried sync
+   * batches), and consumption must never regress to an earlier serial just
+   * because its closure happened to land after a later one's.
+   *
+   * Silently a no-op for an `sscc` this app didn't itself issue (fails
+   * `parseSscc`, or its serial falls outside every block on record) --
+   * `boxes.sscc` should never carry such a value given `buildSscc` is the
+   * only thing that produces one, but this method has no reason to blow up
+   * ingest over a value it can't attribute to a block.
+   */
+  async recordConsumedSerial(tenantId: string, sscc: string): Promise<void> {
+    const parsed = parseSscc(sscc, ISSUER_PREFIX_LENGTH);
+    if (!parsed) return;
+
+    await this.db
+      .update(schema.ssccBlocks)
+      .set({
+        consumedThroughSerial: sql`GREATEST(COALESCE(${schema.ssccBlocks.consumedThroughSerial}, -1), ${parsed.serial})`,
+      })
+      .where(
+        and(
+          eq(schema.ssccBlocks.tenantId, tenantId),
+          eq(schema.ssccBlocks.issuerPrefix, parsed.gs1Prefix),
+          eq(schema.ssccBlocks.extensionDigit, parsed.extensionDigit),
+          lte(schema.ssccBlocks.fromSerial, parsed.serial),
+          gte(schema.ssccBlocks.toSerial, parsed.serial),
+        ),
+      );
   }
 }
