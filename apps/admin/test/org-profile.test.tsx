@@ -71,14 +71,16 @@ describe("OrgProfilePage", () => {
     expect(screen.getByDisplayValue("45000")).toBeDefined();
   });
 
-  it("shows the prefix-unavailable hint and disables the counter save when no GLN is set yet", async () => {
-    vi.stubGlobal(
-      "fetch",
-      routeFetch({
-        profile: () => jsonResponse(200, EMPTY_PROFILE),
-        sscc: () => jsonResponse(200, { extensionDigit: 0, nextSerial: 0 }),
-      }),
-    );
+  it("shows the prefix-unavailable hint and disables the counter save, without ever requesting the counter, when no GLN is set yet", async () => {
+    // No `sscc` override: the real backend 400s `GET /org/profile/sscc` while
+    // there's no GLN to derive a prefix from ("organisation profile has no
+    // GLN"), so the query must not fire at all here -- if it did, routeFetch
+    // would still resolve it with the default 200 below, masking the bug
+    // this test exists to catch.
+    const fetchMock = routeFetch({
+      profile: () => jsonResponse(200, EMPTY_PROFILE),
+    });
+    vi.stubGlobal("fetch", fetchMock);
 
     renderPage();
 
@@ -90,6 +92,31 @@ describe("OrgProfilePage", () => {
       "disabled",
       true,
     );
+    expect(
+      screen.queryByText("Не удалось загрузить данные. Обновите страницу или войдите заново."),
+    ).toBeNull();
+    expect(fetchMock.mock.calls.some((call) => call[0] === "/api/org/profile/sscc")).toBe(false);
+  });
+
+  it("shows an error alert for the counter card when the counter request genuinely fails (a 500), distinct from the no-GLN case", async () => {
+    vi.stubGlobal(
+      "fetch",
+      routeFetch({
+        // Profile has a GLN (so a prefix IS derivable and the query fires),
+        // but the counter endpoint itself fails -- this must still surface
+        // as a real error, not be swallowed the way the no-GLN case is.
+        sscc: () => jsonResponse(500, { message: "boom" }),
+      }),
+    );
+
+    renderPage();
+
+    const ssccCard = await cardOf("Счётчик SSCC для коробов");
+    expect(
+      await within(ssccCard).findByText(
+        "Не удалось загрузить данные. Обновите страницу или войдите заново.",
+      ),
+    ).toBeDefined();
   });
 
   it("shows a spinner (not the form) while the profile request is still pending", async () => {
@@ -159,6 +186,43 @@ describe("OrgProfilePage", () => {
 
     // The derived prefix updates once the refetched profile lands.
     expect(await screen.findByDisplayValue("629104150")).toBeDefined();
+  });
+
+  it("invalidates the counter query too on a successful profile save, so it refetches without a window refocus or remount", async () => {
+    let didUpdate = false;
+    let ssccGetCount = 0;
+    const updatedProfile = { ...PROFILE, inn: "7709000000" };
+    const fetchMock = routeFetch({
+      profile: (init) => {
+        if (init?.method === "PUT") {
+          didUpdate = true;
+          return jsonResponse(200, updatedProfile);
+        }
+        return jsonResponse(200, didUpdate ? updatedProfile : PROFILE);
+      },
+      sscc: () => {
+        ssccGetCount += 1;
+        return jsonResponse(200, COUNTER);
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Профиль организации");
+    // The GLN is already set at mount, so the counter query fires once on its own.
+    await waitFor(() => expect(ssccGetCount).toBe(1));
+
+    const profileCard = await cardOf("Профиль организации");
+    fireEvent.click(within(profileCard).getByRole("button", { name: "Сохранить" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/org/profile",
+        expect.objectContaining({ method: "PUT" }),
+      );
+    });
+    // Without invalidating the counter query, ssccGetCount would stay at 1.
+    await waitFor(() => expect(ssccGetCount).toBeGreaterThanOrEqual(2));
   });
 
   it("shows a validation error for an invalid GLN check digit before submitting (no PUT)", async () => {

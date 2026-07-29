@@ -55,20 +55,44 @@ export function useOrgProfile(): UseQueryResult<OrgProfileDto> {
   return useQuery({ queryKey: ORG_PROFILE_QUERY_KEY, queryFn: fetchOrgProfile });
 }
 
-/** `PUT /org/profile`. Invalidates the profile query on success so it refetches. */
+/**
+ * `PUT /org/profile`. Invalidates the profile query on success so it
+ * refetches, and the counter query alongside it: setting a GLN for the first
+ * time is what lets `GET /org/profile/sscc` derive a prefix at all, and
+ * changing an existing GLN changes that prefix -- without this, the counter
+ * card below only picks up either change on a window refocus or a remount.
+ */
 export function useUpdateOrgProfile(): UseMutationResult<OrgProfileDto, Error, PutOrgProfileInput> {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: putOrgProfile,
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ORG_PROFILE_QUERY_KEY });
+      // Belt-and-suspenders alongside TanStack Query's default prefix-based
+      // invalidation (invalidating ["org-profile"] already matches
+      // ["org-profile", "sscc"] since the latter extends the former) --
+      // explicit here so the counter still refetches even if that matching
+      // behavior or either key ever changes.
+      void queryClient.invalidateQueries({ queryKey: ORG_PROFILE_SSCC_QUERY_KEY });
     },
   });
 }
 
-/** `GET /org/profile/sscc` -- the tenant's own box SSCC counter. */
-export function useOrgProfileSscc(): UseQueryResult<SsccCounterDto> {
-  return useQuery({ queryKey: ORG_PROFILE_SSCC_QUERY_KEY, queryFn: fetchOrgProfileSscc });
+/**
+ * `GET /org/profile/sscc` -- the tenant's own box SSCC counter. `gln` is
+ * nullable on `orgProfiles`, so every tenant starts with no GLN and thus no
+ * derivable prefix; in that state the server refuses this endpoint with a
+ * 400 ("organisation profile has no GLN"). `enabled` lets the caller gate
+ * this query on a prefix actually being derivable, so a first-run tenant
+ * gets the `prefixUnavailable` hint (see OrgProfilePage.tsx) instead of that
+ * 400 being surfaced as a generic load error.
+ */
+export function useOrgProfileSscc(options?: { enabled?: boolean }): UseQueryResult<SsccCounterDto> {
+  return useQuery({
+    queryKey: ORG_PROFILE_SSCC_QUERY_KEY,
+    queryFn: fetchOrgProfileSscc,
+    enabled: options?.enabled ?? true,
+  });
 }
 
 /** `PUT /org/profile/sscc`. Invalidates the counter query on success so it refetches. */

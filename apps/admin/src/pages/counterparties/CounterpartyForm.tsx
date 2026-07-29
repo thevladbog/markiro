@@ -305,7 +305,12 @@ function CounterpartySsccSection({
             {...register("nextSerial")}
           />
           <div>
-            <Button type="button" loading={updateSscc.isPending} onClick={() => void submit()}>
+            <Button
+              type="button"
+              loading={updateSscc.isPending}
+              disabled={!derivedPrefix}
+              onClick={() => void submit()}
+            >
               {t("pages.counterparties.form.sscc.save")}
             </Button>
           </div>

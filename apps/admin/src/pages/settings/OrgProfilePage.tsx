@@ -200,10 +200,21 @@ export function OrgProfilePage() {
  * the counter is a distinct resource (`GET/PUT /org/profile/sscc`) with its
  * own pending/error states, and saving it must not require re-validating the
  * GLN/prefixes fields above.
+ *
+ * `derivedPrefix` gates the query itself: `orgProfiles.gln` is nullable, so a
+ * first-run tenant has no GLN and thus no derivable prefix, and the server
+ * refuses `GET /org/profile/sscc` in that state with a 400 ("organisation
+ * profile has no GLN"). Firing the query anyway would surface that expected
+ * 400 as the generic `common.loadError` alert -- indistinguishable from a
+ * real failure (an expired session, a network fault) sitting right under a
+ * profile form that just loaded fine. Instead, while there's no prefix, the
+ * query never fires and the form below renders directly in its
+ * prefix-unavailable state (read-only hint, disabled save) rather than
+ * routing through the loading/error branches at all.
  */
 function OrgProfileSsccCard({ derivedPrefix }: { derivedPrefix: string | null }) {
   const { t } = useTranslation();
-  const ssccQuery = useOrgProfileSscc();
+  const ssccQuery = useOrgProfileSscc({ enabled: derivedPrefix !== null });
   const updateSscc = useUpdateOrgProfileSscc();
 
   const {
@@ -239,17 +250,25 @@ function OrgProfileSsccCard({ derivedPrefix }: { derivedPrefix: string | null })
     }
   });
 
+  // Once there's no prefix, the query above is disabled and never
+  // transitions out of TanStack Query's "pending" status on its own -- so
+  // these only reflect the query's real loading/error states while a prefix
+  // exists to fetch a counter for. With no prefix, neither is true and the
+  // form below renders straight into its prefix-unavailable state.
+  const isLoading = derivedPrefix !== null && ssccQuery.isPending;
+  const isError = derivedPrefix !== null && ssccQuery.isError;
+
   return (
     <Card title={t("pages.settings.sscc.cardTitle")}>
       <p style={{ font: "var(--text-body)", color: "var(--fg-2)", margin: "0 0 16px" }}>
         {t("pages.settings.sscc.description")}
       </p>
 
-      {ssccQuery.isPending ? (
+      {isLoading ? (
         <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
           <Spinner label={t("common.loading")} />
         </div>
-      ) : ssccQuery.isError ? (
+      ) : isError ? (
         <Alert tone="error">{t("common.loadError")}</Alert>
       ) : (
         <form

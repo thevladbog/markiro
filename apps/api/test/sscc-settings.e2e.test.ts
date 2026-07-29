@@ -106,6 +106,20 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
       .expect(400);
   });
 
+  it("rejects an extension digit outside 0..9 for a counterparty's counter", async () => {
+    await agent
+      .put(`/counterparties/${counterpartyId}/sscc`)
+      .send({ extensionDigit: 10, nextSerial: 0 })
+      .expect(400);
+  });
+
+  it("rejects a starting serial beyond the space a 9-digit prefix allows for a counterparty's counter", async () => {
+    await agent
+      .put(`/counterparties/${counterpartyId}/sscc`)
+      .send({ extensionDigit: 0, nextSerial: 10_000_000 })
+      .expect(400);
+  });
+
   it("rejects a station api-key: org profile's counter is cabinet-only", async () => {
     await request(app!.getHttpServer())
       .get("/org/profile/sscc")
