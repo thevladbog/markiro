@@ -98,3 +98,30 @@ export async function closeBox(
     [sscc, closedAt, operatorId, boxId],
   );
 }
+
+/**
+ * Records that a closed box's printed label was scanned back and matched --
+ * `PrintVerification`'s `onVerified` path. One column, the same shape as
+ * `closeBox`'s own `closed_at`/`closed_by`.
+ */
+export async function markPrintVerified(
+  exec: SqlExecutor,
+  boxId: string,
+  at: string,
+): Promise<void> {
+  await exec.run(`UPDATE boxes_mirror SET print_verified_at = ? WHERE box_id = ?`, [at, boxId]);
+}
+
+/**
+ * Records that the operator explicitly chose NOT to verify a closed box's
+ * printed label -- a disconnected scanner or a ruined label. A skip is
+ * recorded, not silently dropped, which is exactly what this column (idle
+ * since it was added in Task 9) exists for.
+ */
+export async function markPrintSkipped(
+  exec: SqlExecutor,
+  boxId: string,
+  at: string,
+): Promise<void> {
+  await exec.run(`UPDATE boxes_mirror SET print_skipped_at = ? WHERE box_id = ?`, [at, boxId]);
+}

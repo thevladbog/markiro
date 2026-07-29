@@ -337,7 +337,7 @@ async function renderAtFloorStage(
   const pinHash = await hashSecret(OPERATOR_PIN);
   const outbox = mockInvokeForFloor(
     pinHash,
-    { scanner: null, printer: null, printerLanguage: "zpl" },
+    { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
     [outboxRow(1)],
   );
 
@@ -517,7 +517,14 @@ describe("App", () => {
   });
 
   it("uses the keyboard wedge when no serial scanner is configured", () => {
-    expect(pickScanSource({ scanner: null, printer: null, printerLanguage: "zpl" })).toBe("wedge");
+    expect(
+      pickScanSource({
+        scanner: null,
+        printer: null,
+        printerLanguage: "zpl",
+        verifyPrintedLabel: false,
+      }),
+    ).toBe("wedge");
   });
 
   it("uses the hardware scanner once one is configured", () => {
@@ -526,18 +533,23 @@ describe("App", () => {
         scanner: { port: "COM3", baud: 9600 },
         printer: null,
         printerLanguage: "zpl",
+        verifyPrintedLabel: false,
       }),
     ).toBe("hardware");
   });
 
   it("shows the keyboard indicator until a configured scanner reports connected", () => {
-    expect(scannerIndicator({ scanner: null, printer: null, printerLanguage: "zpl" }, null)).toBe(
-      "keyboard",
-    );
+    expect(
+      scannerIndicator(
+        { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+        null,
+      ),
+    ).toBe("keyboard");
     const configured = {
       scanner: { port: "COM3", baud: 9600 },
       printer: null,
       printerLanguage: "zpl" as const,
+      verifyPrintedLabel: false,
     };
     expect(scannerIndicator(configured, null)).toBe("disconnected");
     expect(scannerIndicator(configured, "connected")).toBe("connected");
@@ -550,6 +562,7 @@ describe("App", () => {
       scanner: { port: "COM3", baud: 9600 },
       printer: null,
       printerLanguage: "zpl",
+      verifyPrintedLabel: false,
     });
     vi.stubGlobal(
       "fetch",
@@ -591,6 +604,7 @@ describe("App", () => {
       scanner: { port: "COM3", baud: 9600 },
       printer: null,
       printerLanguage: "zpl",
+      verifyPrintedLabel: false,
     });
     vi.stubGlobal(
       "fetch",
@@ -629,6 +643,7 @@ describe("App", () => {
       scanner: { port: "COM3", baud: 9600 },
       printer: null,
       printerLanguage: "zpl",
+      verifyPrintedLabel: false,
     });
     vi.stubGlobal(
       "fetch",
@@ -662,6 +677,7 @@ describe("App", () => {
       scanner: { port: "COM3", baud: 9600 },
       printer: null,
       printerLanguage: "zpl",
+      verifyPrintedLabel: false,
     });
     vi.stubGlobal(
       "fetch",
@@ -708,6 +724,7 @@ describe("App", () => {
         scanner: { port: "COM3", baud: 9600 },
         printer: null,
         printerLanguage: "zpl",
+        verifyPrintedLabel: false,
       });
       vi.stubGlobal(
         "fetch",
@@ -884,9 +901,11 @@ describe("App", () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       const pinHash = await hashSecret(OPERATOR_PIN);
-      mockInvokeForFloor(pinHash, { scanner: null, printer: null, printerLanguage: "zpl" }, [
-        outboxRow(1),
-      ]);
+      mockInvokeForFloor(
+        pinHash,
+        { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+        [outboxRow(1)],
+      );
 
       let scansAttempts = 0;
       vi.stubGlobal(
@@ -1002,7 +1021,12 @@ describe("App", () => {
             if (values?.[0] === "hardware_config") {
               return Promise.resolve([
                 {
-                  value: JSON.stringify({ scanner: null, printer: null, printerLanguage: "zpl" }),
+                  value: JSON.stringify({
+                    scanner: null,
+                    printer: null,
+                    printerLanguage: "zpl",
+                    verifyPrintedLabel: false,
+                  }),
                 },
               ]);
             }

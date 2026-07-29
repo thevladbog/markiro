@@ -1,8 +1,10 @@
 import { DatabaseSync } from "node:sqlite";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { STATION_MIGRATIONS } from "@markiro/db";
+import { buildSscc } from "@markiro/domain";
 import i18n from "../src/i18n/index.js";
+import type { CloseBoxResult } from "../src/lib/close-box.js";
 import type { SqlExecutor } from "../src/lib/mirror.js";
 import type { ScanListener, ScanSource } from "../src/lib/scan-source.js";
 import type { SoundSettings } from "../src/lib/signal-sound.js";
@@ -140,6 +142,124 @@ function renderWorkScreen(overrides: RenderWorkScreenOverrides = {}) {
       sound={sound}
       onExit={onExit}
       pendingSync={pendingSync}
+      // None of the tests in this file's outer `describe` care about boxes:
+      // `issuerPrefix: null` keeps the whole box section off, exactly like a
+      // validation-mode shift, so none of these pre-existing assertions
+      // change shape.
+      issuerPrefix={null}
+      boxCapacity={null}
+      verifyPrintedLabel={false}
+    />,
+  );
+}
+
+// A 9-digit GS1 issuer prefix (see sscc-pool.ts's doc comment for why the
+// pool is keyed by prefix rather than by GLN) -- the box tests' default,
+// standing in for `StationBundle.sscc.issuerPrefix`.
+const TEST_ISSUER_PREFIX = "460123456";
+const SEEDED_BOX_ID = "seeded-box";
+
+// A second valid KM for the SAME product, distinguished only by serial --
+// used where a test needs a fresh, non-duplicate accept after the first.
+const OTHER_KM = "0104600000000015215Ab2";
+
+const SSCC = buildSscc(0, TEST_ISSUER_PREFIX, 777);
+
+interface RenderWorkOverrides extends RenderWorkScreenOverrides {
+  issuerPrefix?: string | null;
+  boxCapacity?: number | null;
+  /**
+   * Test-only seeding: when given (together with a non-null `issuerPrefix`),
+   * a box is opened and this many already-accepted codes are named into it
+   * BEFORE the component mounts, so `currentBox` finds it already open at
+   * exactly this count instead of WorkScreen opening a fresh, empty one.
+   */
+  boxItemCount?: number;
+  closeCurrentBox?: (shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>;
+  onScan?: (raw: string) => void;
+  verifyPrintedLabel?: boolean;
+}
+
+/**
+ * Renders `WorkScreen` with box aggregation enabled by default (a non-null
+ * `issuerPrefix`), for the box-progress/closing/printing tests. Seeding runs
+ * through the SAME `exec` the component receives, straight `INSERT`s against
+ * `boxes_mirror`/`codes_mirror` -- not `openBox`/`recordScan` -- because the
+ * point is exactly the state those calls would produce, prepared before
+ * mount rather than by the component's own effects.
+ *
+ * Not awaited by callers (matching the brief's own snippets, which call this
+ * synchronously): `exec.run`'s underlying node:sqlite write is synchronous
+ * (only the Promise wrapper resolves later -- see `makeAsyncAllExec`'s doc
+ * comment above), so the seeded rows already exist by the time `render`
+ * mounts the component, and every assertion below reaches them through
+ * `findBy*`/`waitFor`, which retry rather than assume readiness on the first
+ * tick anyway.
+ */
+function renderWork(overrides: RenderWorkOverrides = {}) {
+  const {
+    exec = makeExec(),
+    shiftId = "s1",
+    terminalId = "dev-1",
+    expectedGtin14 = "04600000000015",
+    productName = "Water 0.5",
+    counterpartyName = null,
+    source = manualSource(),
+    sound = { muted: true, volume: 1 },
+    onExit = () => {},
+    pendingSync = 0,
+    issuerPrefix = TEST_ISSUER_PREFIX,
+    boxCapacity = null,
+    boxItemCount,
+    closeCurrentBox,
+    onScan,
+    verifyPrintedLabel = false,
+  } = overrides;
+
+  // Seeded regardless of `issuerPrefix`: the "no sscc block" test needs a
+  // box genuinely AT capacity so that a scan reaching it is what would call
+  // `closeCurrentBox` if WorkScreen's own `issuerPrefix === null` gating
+  // were ever removed -- if seeding here were ALSO gated on `issuerPrefix`,
+  // that test's box would never really be near capacity, and the assertion
+  // that `close` is never called would pass for the wrong reason.
+  if (boxItemCount !== undefined) {
+    void exec.run(
+      `INSERT INTO boxes_mirror (box_id, shift_id, terminal_id, opened_at) VALUES (?,?,?,?)`,
+      [SEEDED_BOX_ID, shiftId, terminalId, "2026-07-29T09:00:00.000Z"],
+    );
+    for (let i = 0; i < boxItemCount; i++) {
+      void exec.run(
+        `INSERT INTO codes_mirror (code_hash, shift_id, gtin14, serial, scanned_at, box_id)
+         VALUES (?,?,?,?,?,?)`,
+        [
+          `seed-${i}`,
+          shiftId,
+          expectedGtin14,
+          `seed${i}`,
+          "2026-07-29T09:00:00.000Z",
+          SEEDED_BOX_ID,
+        ],
+      );
+    }
+  }
+
+  return render(
+    <WorkScreen
+      exec={exec}
+      shiftId={shiftId}
+      terminalId={terminalId}
+      expectedGtin14={expectedGtin14}
+      productName={productName}
+      counterpartyName={counterpartyName}
+      source={source}
+      sound={sound}
+      onExit={onExit}
+      pendingSync={pendingSync}
+      issuerPrefix={issuerPrefix}
+      boxCapacity={boxCapacity}
+      {...(closeCurrentBox ? { closeCurrentBox } : {})}
+      {...(onScan ? { onScan } : {})}
+      verifyPrintedLabel={verifyPrintedLabel}
     />,
   );
 }
@@ -332,5 +452,126 @@ describe("WorkScreen", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Leave shift" }));
     expect(screen.getByText("1 scan has not reached the server yet.")).toBeDefined();
+  });
+});
+
+describe("WorkScreen box progress, closing and printing", () => {
+  // This whole block's copy is the box UI's -- Russian regardless of the
+  // outer describe's "en" (see the floor rule in Task 13's brief: "Copy is
+  // Russian"). i18n's own default is "ru" (src/i18n/index.ts), so switching
+  // here and back afterward is what makes these assertions meaningful
+  // without disturbing the outer block's English ones.
+  beforeAll(async () => {
+    await i18n.changeLanguage("ru");
+  });
+
+  afterAll(async () => {
+    await i18n.changeLanguage("en");
+  });
+
+  let activeSource: (ScanSource & { emit: ScanListener }) | null = null;
+
+  /** Emits on whichever source the most recent `renderWork` call is using. */
+  function scan(raw: string): void {
+    if (!activeSource) throw new Error("renderWork must be called before scan()");
+    activeSource.emit(raw);
+  }
+
+  function renderWorkTracked(overrides: RenderWorkOverrides = {}) {
+    const source = overrides.source ?? manualSource();
+    activeSource = source as ScanSource & { emit: ScanListener };
+    return renderWork({ ...overrides, source });
+  }
+
+  it("shows how full the open box is", async () => {
+    renderWorkTracked({ boxCapacity: 10, boxItemCount: 3 });
+    // No jest-dom matcher in this project's setup (see WorkstationSetup's
+    // own tests), so assert the DOM text directly.
+    expect((await screen.findByTestId("box-progress")).textContent).toBe("3 / 10");
+  });
+
+  it("closes the box automatically when it reaches capacity", async () => {
+    const close = vi
+      .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
+      .mockResolvedValue({ status: "closed", sscc: SSCC, itemCount: 10 });
+    renderWorkTracked({ boxCapacity: 10, boxItemCount: 9, closeCurrentBox: close });
+    act(() => scan(KM));
+    await waitFor(() => expect(close).toHaveBeenCalledOnce());
+  });
+
+  it("lets the operator close a partial box", async () => {
+    const close = vi
+      .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
+      .mockResolvedValue({ status: "closed", sscc: SSCC, itemCount: 3 });
+    renderWorkTracked({ boxCapacity: 10, boxItemCount: 3, closeCurrentBox: close });
+    fireEvent.click(await screen.findByRole("button", { name: "Закрыть короб" }));
+    await waitFor(() => expect(close).toHaveBeenCalledOnce());
+  });
+
+  it("says plainly that numbers have run out, and keeps accepting scans", async () => {
+    const close = vi
+      .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
+      .mockResolvedValue({ status: "no-serials" });
+    const onScan = vi.fn();
+    renderWorkTracked({ boxCapacity: 10, boxItemCount: 9, closeCurrentBox: close, onScan });
+    act(() => scan(KM));
+    await waitFor(() => expect(screen.getByText(/номера для коробов закончились/i)).toBeDefined());
+    act(() => scan(OTHER_KM));
+    await waitFor(() => expect(onScan).toHaveBeenCalledTimes(2));
+  });
+
+  it("does not prompt for verification when the setting is off", async () => {
+    const close = vi
+      .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
+      .mockResolvedValue({ status: "closed", sscc: SSCC, itemCount: 10 });
+    renderWorkTracked({
+      boxCapacity: 10,
+      boxItemCount: 9,
+      closeCurrentBox: close,
+      verifyPrintedLabel: false,
+    });
+    act(() => scan(KM));
+    await waitFor(() => expect(close).toHaveBeenCalled());
+    expect(screen.queryByText("Отсканируйте распечатанную этикетку")).toBeNull();
+  });
+
+  // Self-review addition: none of the brief's own tests ever set
+  // `verifyPrintedLabel: true`, so the "on" branch of that setting was never
+  // actually exercised -- only its negation was. This is the positive half.
+  it("prompts for print verification when the setting is on", async () => {
+    const close = vi
+      .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
+      .mockResolvedValue({ status: "closed", sscc: SSCC, itemCount: 10 });
+    renderWorkTracked({
+      boxCapacity: 10,
+      boxItemCount: 9,
+      closeCurrentBox: close,
+      verifyPrintedLabel: true,
+    });
+    act(() => scan(KM));
+    await waitFor(() => expect(close).toHaveBeenCalled());
+    expect(await screen.findByText("Отсканируйте распечатанную этикетку")).toBeDefined();
+  });
+
+  // Self-review addition: pins the exact mutation named in this task's
+  // dispatch -- "a validation-mode shift (no sscc block) attempting to
+  // close a box anyway". `issuerPrefix: null` is that shift; the box
+  // section must not render at all, and reaching capacity must never call
+  // `closeCurrentBox`, not even the injected double.
+  it("shows no box UI at all, and never attempts to close, when the shift has no sscc block", async () => {
+    const close = vi.fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>();
+    renderWorkTracked({
+      issuerPrefix: null,
+      boxCapacity: 10,
+      boxItemCount: 9,
+      closeCurrentBox: close,
+    });
+
+    expect(screen.queryByTestId("box-progress")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Закрыть короб" })).toBeNull();
+
+    act(() => scan(KM));
+    await waitFor(() => expect(screen.getByText("1")).toBeDefined());
+    expect(close).not.toHaveBeenCalled();
   });
 });

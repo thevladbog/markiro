@@ -373,6 +373,25 @@ export function App() {
               setFloorView("select");
             }}
             pendingSync={syncState.pending}
+            // `issuerPrefix`/`boxCapacity` are threaded through WorkScreen's
+            // box UI (Task 13, plan 06c) but this app does not yet carry
+            // either off the shift bundle into component state: box
+            // aggregation wiring end-to-end is a follow-up. Explicit `null`
+            // here, not an omitted prop, so that wiring is a deliberate
+            // addition later rather than a silent default -- the same
+            // pattern WorkScreen's own `operatorId: null` already follows.
+            issuerPrefix={null}
+            boxCapacity={null}
+            verifyPrintedLabel={hardwareConfig.verifyPrintedLabel}
+            printing={
+              hardwareConfig.printer
+                ? {
+                    target: hardwareConfig.printer,
+                    language: hardwareConfig.printerLanguage,
+                    print: (target, bytes) => tauriHardware.print(target, bytes),
+                  }
+                : null
+            }
           />
         ) : (
           <main style={{ minHeight: "100%", display: "grid", placeItems: "center" }}>

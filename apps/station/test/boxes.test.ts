@@ -2,7 +2,13 @@ import { DatabaseSync } from "node:sqlite";
 import { beforeEach, describe, expect, it } from "vitest";
 import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
 import { recordScan, type AcceptedCode, type ScanEventRow } from "../src/lib/journal.js";
-import { closeBox, currentBox, openBox } from "../src/lib/boxes.js";
+import {
+  closeBox,
+  currentBox,
+  markPrintSkipped,
+  markPrintVerified,
+  openBox,
+} from "../src/lib/boxes.js";
 import { makeExec } from "./support/sqlite-exec.js";
 
 /** One scan event, distinguished by `id` only in its raw payload. */
@@ -91,5 +97,57 @@ describe("boxes", () => {
     await openBox(exec, "s2", "b2", "2026-07-29T10:00:00.000Z", "dev-1");
     await recordScan(exec, event("z", "s2"), code("zz", "b2", "s2"));
     expect((await currentBox(exec, "s1"))?.itemCount).toBe(1);
+  });
+
+  describe("markPrintVerified / markPrintSkipped", () => {
+    it("records that a closed box's label was verified", async () => {
+      await openBox(exec, "s1", "b1", "2026-07-29T10:00:00.000Z", "dev-1");
+      await closeBox(exec, "b1", "004601234560000017", "2026-07-29T10:05:00.000Z", null);
+
+      await markPrintVerified(exec, "b1", "2026-07-29T10:06:00.000Z");
+
+      const rows = await exec.all<{
+        print_verified_at: string | null;
+        print_skipped_at: string | null;
+      }>(`SELECT print_verified_at, print_skipped_at FROM boxes_mirror WHERE box_id = ?`, ["b1"]);
+      expect(rows[0]).toEqual({
+        print_verified_at: "2026-07-29T10:06:00.000Z",
+        print_skipped_at: null,
+      });
+    });
+
+    it("records that the operator skipped verifying a closed box's label", async () => {
+      await openBox(exec, "s1", "b1", "2026-07-29T10:00:00.000Z", "dev-1");
+      await closeBox(exec, "b1", "004601234560000017", "2026-07-29T10:05:00.000Z", null);
+
+      await markPrintSkipped(exec, "b1", "2026-07-29T10:06:00.000Z");
+
+      const rows = await exec.all<{
+        print_verified_at: string | null;
+        print_skipped_at: string | null;
+      }>(`SELECT print_verified_at, print_skipped_at FROM boxes_mirror WHERE box_id = ?`, ["b1"]);
+      expect(rows[0]).toEqual({
+        print_verified_at: null,
+        print_skipped_at: "2026-07-29T10:06:00.000Z",
+      });
+    });
+
+    // Self-review: a mutation swapping which box id `markPrintVerified` names
+    // (e.g. naming the current box instead of the closed one) would pass
+    // both tests above, since each only ever has one box. This pins that a
+    // SECOND, still-open box is left untouched.
+    it("touches only the named box, not another open one", async () => {
+      await openBox(exec, "s1", "b1", "2026-07-29T10:00:00.000Z", "dev-1");
+      await closeBox(exec, "b1", "004601234560000017", "2026-07-29T10:05:00.000Z", null);
+      await openBox(exec, "s1", "b2", "2026-07-29T10:10:00.000Z", "dev-1");
+
+      await markPrintVerified(exec, "b1", "2026-07-29T10:06:00.000Z");
+
+      const rows = await exec.all<{ print_verified_at: string | null }>(
+        `SELECT print_verified_at FROM boxes_mirror WHERE box_id = ?`,
+        ["b2"],
+      );
+      expect(rows[0]!.print_verified_at).toBeNull();
+    });
   });
 });

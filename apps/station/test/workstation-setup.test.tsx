@@ -231,6 +231,7 @@ describe("WorkstationSetup", () => {
       scanner: null,
       printer: { kind: "serial", port: "COM7", baud: 19200 },
       printerLanguage: "zpl",
+      verifyPrintedLabel: false,
     };
     const exec: SqlExecutor = {
       run: async () => {},
@@ -270,6 +271,7 @@ describe("WorkstationSetup", () => {
       scanner: { port: "COM3", baud: 19200 },
       printer: null,
       printerLanguage: "zpl",
+      verifyPrintedLabel: false,
     };
     const exec: SqlExecutor = {
       run: async () => {},
@@ -326,6 +328,7 @@ describe("WorkstationSetup", () => {
       scanner: { port: "COM3", baud: 9600 },
       printer: null,
       printerLanguage: "zpl",
+      verifyPrintedLabel: false,
     };
     const exec: SqlExecutor = {
       run: async () => {},
@@ -365,6 +368,7 @@ describe("WorkstationSetup", () => {
       scanner: null,
       printer: { kind: "tcp", host: "10.0.0.9", port: 9200 },
       printerLanguage: "zpl",
+      verifyPrintedLabel: false,
     };
     const exec: SqlExecutor = {
       run: async () => {},
@@ -400,6 +404,7 @@ describe("WorkstationSetup", () => {
       scanner: { port: "COM3", baud: 9600 },
       printer: null,
       printerLanguage: "zpl",
+      verifyPrintedLabel: false,
     };
     const exec: SqlExecutor = {
       run: async () => {},
@@ -578,6 +583,7 @@ describe("WorkstationSetup", () => {
       scanner: null,
       printer: { kind: "tcp", host: "10.0.0.9", port: 9200 },
       printerLanguage: "zpl",
+      verifyPrintedLabel: false,
     };
     const exec: SqlExecutor = {
       run: async () => {},
@@ -616,6 +622,7 @@ describe("WorkstationSetup", () => {
       scanner: { port: "COM9", baud: 19200 },
       printer: { kind: "serial", port: "COM7", baud: 19200 },
       printerLanguage: "tspl",
+      verifyPrintedLabel: false,
     };
     let resolveAll: (rows: unknown[]) => void = () => {};
     const exec: SqlExecutor = {
@@ -693,6 +700,7 @@ describe("WorkstationSetup", () => {
       scanner: null,
       printer: { kind: "tcp", host: "10.0.0.9", port: 9200 },
       printerLanguage: "zpl",
+      verifyPrintedLabel: false,
     };
     const exec: SqlExecutor = {
       run: async () => {},

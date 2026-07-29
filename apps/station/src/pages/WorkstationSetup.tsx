@@ -109,6 +109,7 @@ export function WorkstationSetup({
   // silently persist `printer: null` the way an empty field used to.
   const [printerTransport, setPrinterTransport] = useState<PrintTarget["kind"] | "none">("none");
   const [printerLanguage, setPrinterLanguage] = useState<PrinterLanguage>("zpl");
+  const [verifyPrintedLabel, setVerifyPrintedLabel] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // True until the stored configuration has seeded every field below. While
@@ -176,6 +177,7 @@ export function WorkstationSetup({
           setPrinterTransport("none");
         }
         setPrinterLanguage(config.printerLanguage);
+        setVerifyPrintedLabel(config.verifyPrintedLabel);
         setLoading(false);
       })
       .catch((err: unknown) => {
@@ -273,7 +275,7 @@ export function WorkstationSetup({
       printer = { kind: "serial", port: printerPort, baud: serialBaud };
     }
 
-    return { ok: true, config: { scanner, printer, printerLanguage } };
+    return { ok: true, config: { scanner, printer, printerLanguage, verifyPrintedLabel } };
   }
 
   async function testPrint() {
@@ -526,6 +528,15 @@ export function WorkstationSetup({
             {t("setup.languageTspl")}
           </Button>
         </div>
+        <label style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          <input
+            type="checkbox"
+            checked={verifyPrintedLabel}
+            disabled={loading}
+            onChange={(e) => setVerifyPrintedLabel(e.target.checked)}
+          />
+          {t("setup.verifyPrintedLabel")}
+        </label>
         <Button
           type="button"
           style={{ minHeight: 64 }}
