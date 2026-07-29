@@ -52,15 +52,12 @@ function commercemlSettingsValuesOf(channel: ChannelDetailDto): CommercemlSettin
  * is saved here but only consumed by plan I-2 (per the task brief) -- this
  * task's job is just to persist it, not to act on it.
  *
- * NOTE on `silentAfterHours`: as of this task, submitting it is a silent
- * server-side no-op. `channel-registry.ts`'s `commercemlSettings` zod schema
- * has no `.passthrough()`, so `integrations.service.ts`'s `updateChannel`
- * strips the key out of `patch` during `safeParse` instead of erroring, and
- * that method only ever writes the parsed result to the `settings` json
- * column -- `silent_after_hours` is a separate top-level column it never
- * touches. Fixing that means changing server files, which are out of scope
- * for this task's file set; the field is added here anyway per the task
- * brief, with this gap called out rather than worked around.
+ * `silentAfterHours` submits alongside the two settings fields but is its
+ * own top-level column server-side (`silent_after_hours`, not a member of
+ * the channel's JSONB `settings`) -- `integrations.service.ts`'s
+ * `updateChannel` pulls it out of `patch` and validates/writes it
+ * independently before either of these settings ever reach
+ * `descriptor.settingsSchema`.
  *
  * `useForm`'s `defaultValues` are captured once at mount and never
  * resubscribe to `channel` on their own, but `channel` *does* change under

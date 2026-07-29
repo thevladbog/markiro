@@ -84,6 +84,44 @@ describe("integrations (cabinet)", () => {
     expect(res.body.silentAfterHours).toBe(5);
   });
 
+  // `updateChannel` раньше заменял JSONB `settings` целиком
+  // (`set: { settings: parsed.data }`). `commercemlSettings` объявляет
+  // `splitWriteoffDocument` с `.default(false)`, так что патч, несущий
+  // только `priceType`, всё равно проходил `safeParse` — но `parsed.data`
+  // при этом нёс подставленный дефолт `false` для поля, которого в запросе
+  // не было, и запись стирала им уже включённый `splitWriteoffDocument`.
+  it("патч только priceType не сбрасывает уже включённый splitWriteoffDocument", async () => {
+    await agent.patch("/integrations/commerceml").send({ splitWriteoffDocument: true }).expect(200);
+    let res = await agent.get("/integrations/commerceml").expect(200);
+    expect(res.body.settings.splitWriteoffDocument).toBe(true);
+
+    await agent.patch("/integrations/commerceml").send({ priceType: "Розничная 2" }).expect(200);
+    res = await agent.get("/integrations/commerceml").expect(200);
+    expect(res.body.settings.priceType).toBe("Розничная 2");
+    // Этот патч splitWriteoffDocument не упоминал вовсе -- должно остаться
+    // `true`, а не скатиться к дефолту схемы `false`.
+    expect(res.body.settings.splitWriteoffDocument).toBe(true);
+  });
+
+  // Симметричный случай: патч только splitWriteoffDocument не должен терять
+  // уже сохранённый priceType. Заодно проверяет, что поле остаётся
+  // ОСОЗНАННО сбрасываемым несмотря на слияние -- явный
+  // `splitWriteoffDocument: false` в патче реально перезаписывает
+  // сохранённый `true`, потому что слияние решает по тому, пришёл ли ключ в
+  // запросе, а не по тому, отличается ли значение от дефолта.
+  it("патч только splitWriteoffDocument не теряет уже сохранённый priceType", async () => {
+    await agent.patch("/integrations/commerceml").send({ priceType: "Розничная 3" }).expect(200);
+
+    await agent
+      .patch("/integrations/commerceml")
+      .send({ splitWriteoffDocument: false })
+      .expect(200);
+    const res = await agent.get("/integrations/commerceml").expect(200);
+    expect(res.body.settings.splitWriteoffDocument).toBe(false);
+    // Не тронуто этим патчем.
+    expect(res.body.settings.priceType).toBe("Розничная 3");
+  });
+
   it("silentAfterHours за пределами границ — 400, и сохранённое значение не трогает", async () => {
     await agent.patch("/integrations/commerceml").send({ silentAfterHours: 0 }).expect(400);
     await agent.patch("/integrations/commerceml").send({ silentAfterHours: -1 }).expect(400);

@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { schema, type Db } from "@markiro/db";
-import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { DB } from "../../auth/auth.module";
 import { generateExchangeCredentials, hashExchangeSecret } from "../exchange/exchange-credentials";
 import { CHANNELS, describeChannel, type IntegrationChannelType } from "./channel-registry";
@@ -109,7 +109,9 @@ export class IntegrationsService {
    * containing only `silentAfterHours` must not reset `settings` back to
    * schema defaults (most fields are optional/defaulted, so re-parsing `{}`
    * would silently blank them), and a patch containing only settings must
-   * not reset `silentAfterHours` back to 48.
+   * not reset `silentAfterHours` back to 48. The same "don't touch what
+   * wasn't sent" rule applies one level deeper, inside `settings` itself --
+   * see the comment right before it's built, below.
    */
   async updateChannel(
     tenantId: string,
@@ -131,7 +133,31 @@ export class IntegrationsService {
         // а не про состояние канала.
         throw new BadRequestException(parsed.error.message);
       }
-      settings = parsed.data;
+
+      // Только ключи, которые реально пришли в `settingsPatch` (а не все
+      // ключи `parsed.data`), уходят в запись. `parsed.data` несёт значение
+      // для КАЖДОГО поля схемы, включая то, которого в запросе не было --
+      // `.default()` в `commercemlSettings` (`splitWriteoffDocument`)
+      // подставляет его прямо внутри `safeParse`, а поля без default
+      // (`priceType`) `safeParse` тоже разворачивает по всей форме схемы.
+      // Если бы ниже писался весь `parsed.data`, патч, несущий только
+      // `priceType`, вернул бы уже сохранённый `splitWriteoffDocument: true`
+      // назад к дефолтному `false` — то же "поменял одно, молча потерял
+      // другое", от которого выше уже защищён `silentAfterHours`.
+      //
+      // Само слияние со старым значением — не отдельный SELECT, а один
+      // атомарный `settings || <это>` в SQL при записи (см. ниже): вторая
+      // конкурентная правка другого поля не потеряется из-за устаревшего
+      // прочитанного состояния.
+      //
+      // Поле остаётся осознанно сбрасываемым, несмотря на слияние: патч
+      // `{ splitWriteoffDocument: false }` всё равно перезапишет ранее
+      // сохранённый `true`, потому что решает "пришёл ли этот ключ в
+      // запросе", а не "отличается ли значение от дефолта".
+      settings = {};
+      for (const key of Object.keys(settingsPatch)) {
+        settings[key] = (parsed.data as Record<string, unknown>)[key];
+      }
     }
 
     let parsedSilentAfterHours: number | undefined;
@@ -164,7 +190,19 @@ export class IntegrationsService {
       .onConflictDoUpdate({
         target: [schema.integrationChannels.tenantId, schema.integrationChannels.type],
         set: {
-          ...(settings !== undefined ? { settings } : {}),
+          // `integration_channels.settings` on the left of `||` is the row's
+          // OLD value (Postgres resolves an unqualified/target-table column
+          // reference inside `ON CONFLICT ... DO UPDATE SET` to the
+          // pre-existing row, same as the `failures + 1` pattern in
+          // `exchange-credentials.ts`), not the freshly-proposed `values()`
+          // one -- the jsonb `||` merges the two objects, right side wins on
+          // shared keys, so this ships only the keys this patch actually
+          // sent while leaving every other saved key alone.
+          ...(settings !== undefined
+            ? {
+                settings: sql`${schema.integrationChannels.settings} || ${JSON.stringify(settings)}::jsonb`,
+              }
+            : {}),
           ...(parsedSilentAfterHours !== undefined
             ? { silentAfterHours: parsedSilentAfterHours }
             : {}),
