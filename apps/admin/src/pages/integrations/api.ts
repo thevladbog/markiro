@@ -174,18 +174,30 @@ export function useUpdateChannelSettings(
  * remount (without reissuing) still shows the persisted login; the secret
  * itself never touches the query cache -- the page keeps it only in its own
  * transient state, per the "shown once" rule.
+ *
+ * Deliberately NOT a `useMutation`: a `Mutation` extends `Removable` and only
+ * *schedules* its own removal once its last observer unsubscribes -- it does
+ * not clear `state.data` right away. With the default `gcTime` (five
+ * minutes) and `main.tsx`'s single app-lifetime `QueryClient`, a
+ * `useMutation`-based version of this call would leave the plaintext secret
+ * sitting in the `MutationCache` for up to five minutes after the page (and
+ * its local `issued` state) is gone -- and calling the mutation's own
+ * `reset()` doesn't help, because it only detaches *that* observer, it
+ * doesn't clear the underlying `Mutation`'s retained data either. A plain
+ * async wrapper creates no such cache entry: the secret exists only in
+ * whatever the caller does with the returned value.
  */
-export function useIssueCredentials(
-  type: string,
-): UseMutationResult<CredentialsIssuedDto, unknown, void> {
+export function useIssueCredentials(type: string): { issue: () => Promise<CredentialsIssuedDto> } {
   const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: () =>
-      apiFetch<CredentialsIssuedDto>(`/integrations/${type}/credentials`, { method: "POST" }),
-    onSuccess: (data) => {
+  return {
+    issue: async () => {
+      const data = await apiFetch<CredentialsIssuedDto>(`/integrations/${type}/credentials`, {
+        method: "POST",
+      });
       queryClient.setQueryData(channelDetailQueryKey(type), (old: ChannelDetailDto | undefined) =>
         old ? { ...old, credentialLogin: data.login } : old,
       );
+      return data;
     },
-  });
+  };
 }

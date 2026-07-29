@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router";
@@ -30,14 +30,46 @@ const STATE_STATUS: Record<ChannelState, StatusChipStatus> = {
 interface CommercemlSettingsValues {
   priceType: string;
   splitWriteoffDocument: boolean;
+  silentAfterHours: number;
+}
+
+/** Derives `useForm`'s values from the server's `ChannelDetailDto` -- shared by the initial `defaultValues` and by the resync effect below, so both read the same shape the same way. */
+function commercemlSettingsValuesOf(channel: ChannelDetailDto): CommercemlSettingsValues {
+  return {
+    priceType:
+      typeof channel.settings["priceType"] === "string" ? channel.settings["priceType"] : "",
+    splitWriteoffDocument: Boolean(channel.settings["splitWriteoffDocument"]),
+    silentAfterHours: channel.silentAfterHours,
+  };
 }
 
 /**
  * CommerceML's own settings form -- `priceType` and `splitWriteoffDocument`,
  * mirroring `apps/api/src/modules/integrations/channel-registry.ts`'s
- * `commercemlSettings` schema. `splitWriteoffDocument` is saved here but only
- * consumed by plan I-2 (per the task brief) -- this task's job is just to
- * persist it, not to act on it.
+ * `commercemlSettings` schema, plus `silentAfterHours` (brief 08: the silence
+ * threshold is a per-channel setting -- "у одного тенанта обмен раз в час, у
+ * другого раз в сутки, и общая константа соврёт обоим"). `splitWriteoffDocument`
+ * is saved here but only consumed by plan I-2 (per the task brief) -- this
+ * task's job is just to persist it, not to act on it.
+ *
+ * NOTE on `silentAfterHours`: as of this task, submitting it is a silent
+ * server-side no-op. `channel-registry.ts`'s `commercemlSettings` zod schema
+ * has no `.passthrough()`, so `integrations.service.ts`'s `updateChannel`
+ * strips the key out of `patch` during `safeParse` instead of erroring, and
+ * that method only ever writes the parsed result to the `settings` json
+ * column -- `silent_after_hours` is a separate top-level column it never
+ * touches. Fixing that means changing server files, which are out of scope
+ * for this task's file set; the field is added here anyway per the task
+ * brief, with this gap called out rather than worked around.
+ *
+ * `useForm`'s `defaultValues` are captured once at mount and never
+ * resubscribe to `channel` on their own, but `channel` *does* change under
+ * this form -- TanStack Query's default `refetchOnWindowFocus` means another
+ * admin's edit can arrive at any time. The effect below re-syncs the form
+ * whenever `channel` changes, but only while the operator hasn't started
+ * editing (`!isDirty`), so an in-progress edit is never clobbered by
+ * someone else's write; the same reasoning applies to the reset-after-save
+ * inside `submit` below.
  */
 function CommercemlSettingsForm({
   channel,
@@ -45,24 +77,45 @@ function CommercemlSettingsForm({
   saving,
 }: {
   channel: ChannelDetailDto;
-  onSave: (patch: Record<string, unknown>) => void | Promise<void>;
+  onSave: (patch: Record<string, unknown>) => Promise<void>;
   saving: boolean;
 }) {
   const { t } = useTranslation();
-  const { register, handleSubmit } = useForm<CommercemlSettingsValues>({
-    defaultValues: {
-      priceType:
-        typeof channel.settings["priceType"] === "string" ? channel.settings["priceType"] : "",
-      splitWriteoffDocument: Boolean(channel.settings["splitWriteoffDocument"]),
-    },
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { isDirty },
+  } = useForm<CommercemlSettingsValues>({
+    defaultValues: commercemlSettingsValuesOf(channel),
   });
+
+  useEffect(() => {
+    if (!isDirty) {
+      reset(commercemlSettingsValuesOf(channel));
+    }
+  }, [channel, isDirty, reset]);
 
   const submit = handleSubmit(async (values) => {
     const priceType = values.priceType.trim();
-    await onSave({
-      ...(priceType ? { priceType } : {}),
-      splitWriteoffDocument: values.splitWriteoffDocument,
-    });
+    try {
+      await onSave({
+        ...(priceType ? { priceType } : {}),
+        splitWriteoffDocument: values.splitWriteoffDocument,
+        silentAfterHours: values.silentAfterHours,
+      });
+      // Saved: this is the new clean baseline. Marking the form not-dirty
+      // lets the effect above resync again on the next external change --
+      // the query cache's own post-save data (set in `onSuccess`) settles
+      // any small discrepancy between these locally-submitted values and
+      // what the server actually persisted.
+      reset(values);
+    } catch {
+      // `onSave` already reported the failure via toast (see
+      // `handleSaveSettings`). Keep the operator's values and the dirty flag
+      // so their edit isn't lost and the resync effect doesn't overwrite it
+      // with now-stale server data.
+    }
   });
 
   return (
@@ -79,6 +132,13 @@ function CommercemlSettingsForm({
         <input type="checkbox" {...register("splitWriteoffDocument")} />
         {t("pages.integrations.channel.settings.splitWriteoffDocumentLabel")}
       </label>
+      <Input
+        type="number"
+        min={1}
+        label={t("pages.integrations.channel.settings.silentAfterHoursLabel")}
+        hint={t("pages.integrations.channel.settings.silentAfterHoursHint")}
+        {...register("silentAfterHours", { valueAsNumber: true, min: 1 })}
+      />
       <div>
         <Button type="submit" loading={saving}>
           {t("pages.integrations.channel.settings.saveAction")}
@@ -95,9 +155,12 @@ function CommercemlSettingsForm({
  * creation and never again, matching the device-pairing pattern in brief
  * 07"): the freshly issued secret lives only in `issued` (this component's
  * own transient state, cleared on unmount), never in the query cache and
- * never refetched. While `issued` is set, the persisted-login line is
- * hidden in favor of the one-time reveal panel below -- showing both at once
- * would render the login text twice, which is redundant, not just noisy.
+ * never refetched -- see `useIssueCredentials` in `api.ts` for why it's a
+ * plain async call rather than a `useMutation`, which is what makes "never
+ * in the query cache" actually true instead of true-for-five-minutes. While
+ * `issued` is set, the persisted-login line is hidden in favor of the
+ * one-time reveal panel below -- showing both at once would render the
+ * login text twice, which is redundant, not just noisy.
  */
 function CredentialsSection({
   channel,
@@ -182,6 +245,7 @@ export function ChannelPage() {
   const issueCredentials = useIssueCredentials(type);
 
   const [issued, setIssued] = useState<CredentialsIssuedDto | null>(null);
+  const [issuing, setIssuing] = useState(false);
 
   const handleSaveSettings = async (patch: Record<string, unknown>) => {
     try {
@@ -194,12 +258,17 @@ export function ChannelPage() {
           ? error.message
           : t("pages.integrations.channel.settings.saveError"),
       );
+      // Re-thrown so `CommercemlSettingsForm`'s `submit` can tell a failed
+      // save apart from a successful one -- it must keep the operator's
+      // (unsaved) values and dirty flag on failure instead of resetting them.
+      throw error;
     }
   };
 
   const handleIssueCredentials = async () => {
+    setIssuing(true);
     try {
-      const data = await issueCredentials.mutateAsync();
+      const data = await issueCredentials.issue();
       setIssued(data);
       toast("ok", t("pages.integrations.channel.credentials.issueSuccess"));
     } catch (error) {
@@ -209,6 +278,8 @@ export function ChannelPage() {
           ? error.message
           : t("pages.integrations.channel.credentials.issueError"),
       );
+    } finally {
+      setIssuing(false);
     }
   };
 
@@ -276,7 +347,7 @@ export function ChannelPage() {
         <CredentialsSection
           channel={channel}
           onIssue={() => void handleIssueCredentials()}
-          issuing={issueCredentials.isPending}
+          issuing={issuing}
           issued={issued}
         />
       </Card>

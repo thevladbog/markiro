@@ -1,11 +1,11 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ChannelPage } from "../src/pages/integrations/ChannelPage.js";
-import type { JournalSessionDto } from "../src/pages/integrations/api.js";
+import { channelDetailQueryKey, type JournalSessionDto } from "../src/pages/integrations/api.js";
 
 // Общего рендер-хелпера в этом репозитории НЕТ: каждый админ-тест объявляет
 // свой `renderPage`/`render*` и глушит `fetch` -- см.
@@ -64,7 +64,19 @@ function defaultDetail(type: string) {
   };
 }
 
-function createFetchMock(journalMode: "ok" | "pending" | "error") {
+/** Which branch each of the page's four requests should take for one test. */
+interface FetchMockOptions {
+  journalMode?: "ok" | "pending" | "error";
+  /** `GET /integrations/:type` -- the channel-detail request the page itself depends on. */
+  detailMode?: "ok" | "pending" | "error";
+  /** `PATCH /integrations/:type`. */
+  settingsMode?: "ok" | "error";
+  /** `POST /integrations/:type/credentials`. "network-error" throws instead of resolving a non-ok `Response`, to exercise the non-`ApiRequestError` fallback branch in `handleIssueCredentials`. */
+  issueMode?: "ok" | "error" | "network-error";
+}
+
+function createFetchMock(options: FetchMockOptions = {}) {
+  const { journalMode = "ok", detailMode = "ok", settingsMode = "ok", issueMode = "ok" } = options;
   return vi.fn(async (url: string, init?: RequestInit) => {
     const path = url.replace(/^\/api/, "");
     const method = init?.method ?? "GET";
@@ -75,26 +87,35 @@ function createFetchMock(journalMode: "ok" | "pending" | "error") {
       return jsonResponse(200, { sessions: journalSessions });
     }
     if (method === "POST" && /\/credentials$/.test(path)) {
+      if (issueMode === "network-error") throw new Error("network down");
+      if (issueMode === "error") {
+        return jsonResponse(500, { message: "Сбой выпуска учётных данных" });
+      }
       return jsonResponse(200, { login: ISSUED_LOGIN, secret: ISSUED_SECRET });
     }
     if (method === "PATCH") {
       const body = init?.body ? (JSON.parse(init.body as string) as Record<string, unknown>) : {};
       patchSpy(path, body);
+      if (settingsMode === "error") {
+        return jsonResponse(500, { message: "Сервер отклонил настройки" });
+      }
       const type = path.split("/").pop()!;
       return jsonResponse(200, { ...defaultDetail(type), settings: body });
     }
     // Plain `GET /integrations/:type` -- the channel-detail fallback.
+    if (detailMode === "pending") return new Promise<Response>(() => {});
+    if (detailMode === "error") return jsonResponse(500, { message: "Internal error" });
     const type = path.split("/").pop()!;
     return jsonResponse(200, defaultDetail(type));
   });
 }
 
-function renderChannel(type: string, options: { journalMode?: "pending" | "error" } = {}) {
-  vi.stubGlobal("fetch", createFetchMock(options.journalMode ?? "ok"));
+function renderChannel(type: string, options: FetchMockOptions = {}) {
+  vi.stubGlobal("fetch", createFetchMock(options));
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  return render(
+  const view = render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[`/integrations/${type}`]}>
         <Routes>
@@ -103,6 +124,10 @@ function renderChannel(type: string, options: { journalMode?: "pending" | "error
       </MemoryRouter>
     </QueryClientProvider>,
   );
+  // Most tests only need `screen`; the resync/mutation-cache tests below also
+  // need direct access to `queryClient` (to simulate an external update, or to
+  // inspect the mutation cache after `unmount()`).
+  return { ...view, queryClient };
 }
 
 describe("ChannelPage", () => {
@@ -197,5 +222,115 @@ describe("ChannelPage", () => {
     renderChannel("commerceml", { journalMode: "error" });
     expect(await screen.findByText(/не удалось загрузить журнал/i)).toBeDefined();
     expect(screen.queryByText(/обменов ещё не было/i)).toBeNull();
+  });
+
+  // Fix 1 (review, task 13 follow-up): `useIssueCredentials` used to be a
+  // `useMutation`. `Mutation` extends `Removable` and only *schedules* its own
+  // removal once its last observer unsubscribes (default `gcTime` five
+  // minutes) -- since `main.tsx`'s `QueryClient` lives for the app's whole
+  // session, the plaintext secret would still be sitting in the
+  // `MutationCache` well after this page unmounts. `useIssueCredentials` is
+  // now a plain async wrapper with no mutation cache entry at all -- assert
+  // that directly instead of asserting on a timer.
+  it("не оставляет секрет обмена в кэше мутаций после ухода со страницы", async () => {
+    const { queryClient, unmount } = renderChannel("commerceml");
+    await userEvent.click(await screen.findByRole("button", { name: /выпустить/i }));
+    await screen.findByText(/mk-1c-/);
+
+    unmount();
+
+    const leaked = queryClient
+      .getMutationCache()
+      .getAll()
+      .some((mutation) => JSON.stringify(mutation.state.data ?? null).includes(ISSUED_SECRET));
+    expect(leaked).toBe(false);
+  });
+
+  // Fix 2 (review, task 13 follow-up): `useForm`'s `defaultValues` used to be
+  // captured once at mount and never resynced, even though TanStack Query's
+  // default `refetchOnWindowFocus` means `channel` can change underneath this
+  // form any time another admin saves new settings. Simulate that arrival
+  // directly via `setQueryData` (indistinguishable, from the component's
+  // point of view, from an actual background refetch resolving).
+  it("пересинхронизирует форму настроек с чужим изменением и не отправляет старое значение", async () => {
+    const { queryClient } = renderChannel("commerceml");
+    const priceInput = (await screen.findByLabelText(/тип цены/i)) as HTMLInputElement;
+    expect(priceInput.value).toBe("");
+
+    await act(async () => {
+      queryClient.setQueryData(channelDetailQueryKey("commerceml"), {
+        ...defaultDetail("commerceml"),
+        settings: { priceType: "Оптовая", splitWriteoffDocument: false },
+      });
+    });
+    await screen.findByDisplayValue("Оптовая");
+
+    // The operator only ever touches the checkbox -- never retypes the price
+    // type -- so a broken resync would silently submit whatever `priceType`
+    // the form was mounted with, reverting the other admin's change.
+    await userEvent.click(screen.getByLabelText(/разделять документ списания/i));
+    await userEvent.click(screen.getByRole("button", { name: /сохранить/i }));
+
+    expect(patchSpy).toHaveBeenCalledWith(
+      "/integrations/commerceml",
+      expect.objectContaining({ priceType: "Оптовая", splitWriteoffDocument: true }),
+    );
+  });
+
+  it("не затирает уже набранное оператором, когда пришло чужое изменение", async () => {
+    const { queryClient } = renderChannel("commerceml");
+    const priceInput = (await screen.findByLabelText(/тип цены/i)) as HTMLInputElement;
+    await userEvent.type(priceInput, "Моя правка");
+
+    await act(async () => {
+      queryClient.setQueryData(channelDetailQueryKey("commerceml"), {
+        ...defaultDetail("commerceml"),
+        settings: { priceType: "Чужое значение", splitWriteoffDocument: false },
+      });
+    });
+
+    expect(priceInput.value).toBe("Моя правка");
+  });
+
+  // Fix 4 (review, task 13 follow-up): the page's own `isPending`/`isError`
+  // branches for the channel-detail request had no coverage.
+  it("показывает спиннер, пока карточка канала ещё не загрузилась", async () => {
+    // `@markiro/ui`'s toast viewport is a module-level singleton that
+    // outlives `cleanup()` (see the note above on the journal spinner test),
+    // so an earlier test's toast can still carry its own `role="status"` --
+    // scope the search to this render's own container instead of a bare
+    // `screen.findByRole("status")`.
+    const { container } = renderChannel("commerceml", { detailMode: "pending" });
+    expect(await within(container).findByRole("status")).toBeDefined();
+    expect(screen.queryByLabelText(/тип цены/i)).toBeNull();
+  });
+
+  it("показывает ошибку, когда запрос карточки канала не удался", async () => {
+    renderChannel("commerceml", { detailMode: "error" });
+    expect(await screen.findByText(/не удалось загрузить канал/i)).toBeDefined();
+    expect(screen.queryByLabelText(/тип цены/i)).toBeNull();
+  });
+
+  // Fix 4, continued: the failure path for saving settings and for issuing
+  // credentials was untested too.
+  it("показывает ошибку и сохраняет введённое значение, когда сохранение настроек не удалось", async () => {
+    renderChannel("commerceml", { settingsMode: "error" });
+    const priceInput = (await screen.findByLabelText(/тип цены/i)) as HTMLInputElement;
+    await userEvent.type(priceInput, "Розничная");
+    await userEvent.click(screen.getByRole("button", { name: /сохранить/i }));
+
+    expect(await screen.findByText(/сервер отклонил настройки/i)).toBeDefined();
+    // The failed save must not be silently discarded from the field, and the
+    // form must stay dirty (see Fix 2) so a later external update can't
+    // clobber it either.
+    expect(priceInput.value).toBe("Розничная");
+  });
+
+  it("показывает ошибку, когда выпуск учётных данных не удался", async () => {
+    renderChannel("commerceml", { issueMode: "network-error" });
+    await userEvent.click(await screen.findByRole("button", { name: /выпустить/i }));
+
+    expect(await screen.findByText(/не удалось выпустить учётные данные/i)).toBeDefined();
+    expect(screen.queryByText(/mk-1c-/)).toBeNull();
   });
 });

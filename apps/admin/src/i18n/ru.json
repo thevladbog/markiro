@@ -776,6 +776,8 @@
           "priceTypeLabel": "Тип цены",
           "priceTypeHint": "Какой тип цены 1С кладёт в цену товара. Пусто — решаем по присланному файлу.",
           "splitWriteoffDocumentLabel": "Разделять документ списания",
+          "silentAfterHoursLabel": "Порог молчания, часов",
+          "silentAfterHoursHint": "Через сколько часов без событий канал считается замолчавшим.",
           "saveAction": "Сохранить",
           "saveSuccess": "Настройки сохранены",
           "saveError": "Не удалось сохранить настройки",

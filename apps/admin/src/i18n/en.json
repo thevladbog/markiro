@@ -776,6 +776,8 @@
           "priceTypeLabel": "Price type",
           "priceTypeHint": "Which 1C price type fills the product price. Empty — decided by the file.",
           "splitWriteoffDocumentLabel": "Split off a separate write-off document",
+          "silentAfterHoursLabel": "Silence threshold, hours",
+          "silentAfterHoursHint": "How many hours without events before the channel counts as gone silent.",
           "saveAction": "Save",
           "saveSuccess": "Settings saved",
           "saveError": "Could not save the settings",
