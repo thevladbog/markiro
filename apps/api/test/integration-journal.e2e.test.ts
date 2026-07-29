@@ -1,0 +1,146 @@
+import { randomUUID } from "node:crypto";
+import express from "express";
+import { Test } from "@nestjs/testing";
+import type { INestApplication } from "@nestjs/common";
+import request from "supertest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { schema, type Db } from "@markiro/db";
+import { and, eq } from "drizzle-orm";
+import { AppModule } from "../src/app.module";
+import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
+import { loadEnv } from "../src/env";
+import { JournalService } from "../src/modules/integrations/journal.service";
+import { listenOnLoopback } from "./support/listen-loopback";
+import { signUpAndActivate } from "./support/auth";
+
+const ready = Boolean(
+  process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
+);
+
+// `integration_channels`/`integration_sessions`/`integration_events` all
+// carry a `tenant_id -> organization.id` FK (see
+// packages/db/src/schema/integrations.ts), so the journal can't be exercised
+// against a made-up tenant id -- the very first insert would fail the
+// foreign key. A real organization, created the same way every other e2e
+// spec in this directory does it (`signUpAndActivate`), is required instead.
+describe.skipIf(!ready)("journal", () => {
+  let app: INestApplication | undefined;
+  let setup: AuthSetup;
+  let db: Db;
+  let journal: JournalService;
+  let tenantId: string;
+
+  beforeAll(async () => {
+    const env = loadEnv();
+    setup = setupAuth(env);
+    db = setup.db;
+    journal = new JournalService(db);
+
+    const ref = await Test.createTestingModule({
+      imports: [AppModule.forRoot({ ...setup, databaseUrl: env.DATABASE_URL })],
+    }).compile();
+
+    app = ref.createNestApplication({ bodyParser: false });
+    const server = app.getHttpAdapter().getInstance();
+    mountAuth(server, setup.auth);
+    server.use(express.json());
+    await app.init();
+    await listenOnLoopback(app);
+
+    const agent = request.agent(app.getHttpServer());
+    tenantId = await signUpAndActivate(agent);
+  });
+
+  afterAll(async () => {
+    await app?.close();
+  });
+
+  it("открывает сеанс, копит события и закрывает его исходом", async () => {
+    const session = await journal.openSession(tenantId, "commerceml", {
+      cookieHash: `h-${randomUUID()}`,
+      expiresAt: new Date(Date.now() + 3_600_000),
+    });
+
+    await journal.append({
+      tenantId,
+      channelType: "commerceml",
+      sessionId: session.id,
+      direction: "in",
+      outcome: "ok",
+      grain: "session",
+      message: "Каталог принят",
+    });
+
+    await journal.finishSession(session.id, "ok", { updated: 12, candidates: 3 });
+
+    const [row] = await db
+      .select()
+      .from(schema.integrationSessions)
+      .where(eq(schema.integrationSessions.id, session.id));
+    expect(row!.outcome).toBe("ok");
+    expect(row!.finishedAt).not.toBeNull();
+    expect(row!.summary).toEqual({ updated: 12, candidates: 3 });
+  });
+
+  it("двигает состояние канала при каждом событии — карточка знает, когда он дышал", async () => {
+    await db
+      .insert(schema.integrationChannels)
+      .values({ tenantId, type: "commerceml" })
+      .onConflictDoNothing();
+
+    await journal.append({
+      tenantId,
+      channelType: "commerceml",
+      sessionId: null,
+      direction: "local",
+      outcome: "error",
+      grain: "session",
+      message: "Связь товара разорвана",
+    });
+
+    const [channel] = await db
+      .select()
+      .from(schema.integrationChannels)
+      .where(
+        and(
+          eq(schema.integrationChannels.tenantId, tenantId),
+          eq(schema.integrationChannels.type, "commerceml"),
+        ),
+      );
+    expect(channel!.lastOutcome).toBe("error");
+    expect(channel!.lastEventAt).not.toBeNull();
+  });
+
+  it("чистит построчную детализацию раньше сводок — она растёт быстрее", async () => {
+    const old = new Date(Date.now() - 30 * 24 * 3_600_000);
+    await db.insert(schema.integrationEvents).values([
+      {
+        tenantId,
+        channelType: "commerceml",
+        at: old,
+        direction: "in",
+        outcome: "warn",
+        grain: "item",
+        message: "Позиция в чужой валюте",
+      },
+      {
+        tenantId,
+        channelType: "commerceml",
+        at: old,
+        direction: "in",
+        outcome: "ok",
+        grain: "session",
+        message: "Сеанс завершён",
+      },
+    ]);
+
+    await journal.prune(new Date());
+
+    const rows = await db
+      .select({ grain: schema.integrationEvents.grain })
+      .from(schema.integrationEvents)
+      .where(eq(schema.integrationEvents.tenantId, tenantId));
+    expect(rows.some((r) => r.grain === "item")).toBe(false);
+    expect(rows.some((r) => r.grain === "session")).toBe(true);
+  });
+});
