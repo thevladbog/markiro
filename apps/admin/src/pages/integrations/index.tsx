@@ -12,6 +12,19 @@ import { useChannels, type ChannelState, type ChannelSummaryDto } from "./api.js
  * `not_configured`'s (`neutral`) so the two read as different diagnoses even
  * before the label text is read -- "we haven't built this yet" is not the
  * same story as "you haven't set this up yet".
+ *
+ * Review follow-up: `info`'s glyph (⟳, "Syncing" in `StatusChip.tsx`'s own
+ * default label) reads as "in progress", which is the wrong story for a
+ * channel with no adapter at all. It stays `info` anyway: `StatusChip`
+ * exposes exactly five tones (`ok`/`error`/`warn`/`info`/`neutral`), and
+ * `neutral` is already spoken for by `not_configured` above -- reusing it
+ * here would collapse the one distinction this map exists to draw ("not set
+ * up" vs. "not built yet"), which is the actual failure this comment is
+ * about, worse than a glyph that half-fits. Nothing between the two is on
+ * offer, so this is the least-wrong tone until `StatusChip` grows one
+ * (`t(\`integrations.state.${channel.state}\`)` carries the real meaning
+ * regardless -- color is never the only signal here, same rule
+ * `StatusChip.tsx` documents for its own `neutral`).
  */
 const STATE_STATUS: Record<ChannelState, StatusChipStatus> = {
   working: "ok",
@@ -20,6 +33,20 @@ const STATE_STATUS: Record<ChannelState, StatusChipStatus> = {
   not_configured: "neutral",
   unavailable: "info",
 };
+
+/**
+ * `ChannelSummaryDto` carries no field for "what this channel connects to"
+ * (brief 08's card anatomy: "name, what it connects to, state chip, last
+ * event") -- only `labelKey`, which the registry always sets to
+ * `integrations.channel.<name>` (see `apps/api/src/modules/integrations/
+ * channel-registry.ts`). Deriving the description key from that same string
+ * keeps it tied to channel identity without a second server field or a
+ * dependency on `channel.type`'s union -- `api.ts` already explains why
+ * `type` deliberately stays untyped on this side.
+ */
+function channelDescriptionKey(labelKey: string): string {
+  return labelKey.replace(".channel.", ".channelDescription.");
+}
 
 const RELATIVE_TIME_UNITS: ReadonlyArray<{ unit: Intl.RelativeTimeFormatUnit; ms: number }> = [
   { unit: "day", ms: 86_400_000 },
@@ -72,6 +99,9 @@ function ChannelCard({ channel }: { channel: ChannelSummaryDto }) {
             label={t(`integrations.state.${channel.state}`)}
           />
         </div>
+        <span style={{ font: "400 13px/18px var(--font-ui)", color: "var(--fg-3)" }}>
+          {t(channelDescriptionKey(channel.labelKey))}
+        </span>
         {channel.lastEventAt && (
           <span style={{ font: "400 13px/18px var(--font-ui)", color: "var(--fg-3)" }}>
             {t("integrations.lastEvent", {

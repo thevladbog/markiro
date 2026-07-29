@@ -74,6 +74,12 @@
       "gisMtFiles": "GIS MT files",
       "chestnyZnak": "Chestny ZNAK"
     },
+    "channelDescription": {
+      "commerceml": "Exchange with 1C via the website",
+      "publicApi": "External systems by API key",
+      "gisMtFiles": "File exports for GIS MT and 1C",
+      "chestnyZnak": "Direct connection to SUZ and GIS MT"
+    },
     "state": {
       "not_configured": "Not configured",
       "working": "Working",

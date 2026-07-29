@@ -1,12 +1,20 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { IntegrationsPage } from "../src/pages/integrations/index.js";
 
 // Общего рендер-хелпера в этом репозитории НЕТ: каждый админ-тест объявляет
 // свой `renderPage` и глушит `fetch` — см. `apps/admin/test/counterparties.test.tsx`
 // строки 15-30. Повторить тот же приём здесь, а не заводить `test/support/`.
+
+// `vitest.config.ts` не включает `test.globals`, поэтому Testing Library не
+// подчищает DOM между тестами сама -- без этого узлы от `render()` копятся в
+// `document.body`, и следующий `render()` дописывает поверх старого дерева, а
+// не заменяет его. Все остальные `*.test.tsx` в этой папке вызывают
+// `afterEach(cleanup)` по этой же причине (см. `kiosks-pairing-placeholder.test.tsx`).
+afterEach(cleanup);
+
 function renderPage() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -89,5 +97,49 @@ describe("IntegrationsPage", () => {
     ]);
     renderPage();
     expect(await screen.findByText(/не настроен/i)).toBeDefined();
+  });
+
+  // Тест выше кладёт в список один канал в состоянии `not_configured`, так что
+  // `channels.length` никогда не становится нулём -- он проверяет чип
+  // карточки, а не настоящую пустую секцию. Эти три теста покрывают три ветви
+  // рендера, которые компонент рисует, но которые до сих пор не выполнял ни
+  // один тест: пустой список, ещё не пришедший ответ и упавший запрос
+  // (см. брифа 08 "empty, loading, error and stale variants for every list").
+  it("рисует EmptyState, когда список каналов действительно пуст", async () => {
+    stubChannels([]);
+    renderPage();
+    expect(await screen.findByText("Каналы не настроены")).toBeDefined();
+    expect(
+      screen.getByText(
+        "Здесь появятся каналы обмена данными с внешними системами: 1С, ГИС МТ, Честный ЗНАК.",
+      ),
+    ).toBeDefined();
+  });
+
+  it("рисует спиннер, пока запрос списка каналов ещё не завершился", async () => {
+    // Никогда не резолвящийся fetch держит query в состоянии `isPending` вечно.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => new Promise<Response>(() => {})),
+    );
+    renderPage();
+    expect(await screen.findByRole("status")).toBeDefined();
+    expect(screen.queryByText("Каналы не настроены")).toBeNull();
+  });
+
+  it("рисует сообщение об ошибке, когда запрос списка каналов не удался", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 500,
+        json: async () => ({ message: "Internal error" }),
+      })),
+    );
+    renderPage();
+    expect(
+      await screen.findByText("Не удалось загрузить данные. Обновите страницу или войдите заново."),
+    ).toBeDefined();
+    expect(screen.queryByText("Каналы не настроены")).toBeNull();
   });
 });

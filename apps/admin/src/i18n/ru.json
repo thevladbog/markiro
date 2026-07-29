@@ -74,6 +74,12 @@
       "gisMtFiles": "Файлы ГИС МТ",
       "chestnyZnak": "Честный ЗНАК"
     },
+    "channelDescription": {
+      "commerceml": "Обмен с 1С через сайт",
+      "publicApi": "Внешние системы по ключу",
+      "gisMtFiles": "Файловые выгрузки для ГИС МТ и 1С",
+      "chestnyZnak": "Прямая работа с СУЗ и ГИС МТ"
+    },
     "state": {
       "not_configured": "Не настроен",
       "working": "Работает",
