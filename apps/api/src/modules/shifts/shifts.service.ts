@@ -112,6 +112,11 @@ export class ShiftsService {
           lineId: data.lineId ?? null,
           counterpartyId: counterpartyId ?? null,
           labelTemplateId: labelTemplateId ?? null,
+          // No product-level default exists for either field (unlike
+          // counterpartyId/labelTemplateId above) -- the issuer is always
+          // explicit, so an omitted value is simply null ("our organisation").
+          ssccIssuerCounterpartyId: data.ssccIssuerCounterpartyId ?? null,
+          boxLabelTemplateId: data.boxLabelTemplateId ?? null,
           mode: data.mode,
           plannedQty: data.plannedQty ?? null,
           plannedDate: data.plannedDate ?? null,
@@ -150,6 +155,12 @@ export class ShiftsService {
       data.counterpartyId !== undefined ? data.counterpartyId : current.counterpartyId;
     const labelTemplateId =
       data.labelTemplateId !== undefined ? data.labelTemplateId : current.labelTemplateId;
+    const ssccIssuerCounterpartyId =
+      data.ssccIssuerCounterpartyId !== undefined
+        ? data.ssccIssuerCounterpartyId
+        : current.ssccIssuerCounterpartyId;
+    const boxLabelTemplateId =
+      data.boxLabelTemplateId !== undefined ? data.boxLabelTemplateId : current.boxLabelTemplateId;
     const plannedQty = data.plannedQty !== undefined ? data.plannedQty : current.plannedQty;
     const plannedDate = data.plannedDate !== undefined ? data.plannedDate : current.plannedDate;
     const boxCapacity = data.boxCapacity !== undefined ? data.boxCapacity : current.boxCapacity;
@@ -168,6 +179,8 @@ export class ShiftsService {
           lineId,
           counterpartyId,
           labelTemplateId,
+          ssccIssuerCounterpartyId,
+          boxLabelTemplateId,
           plannedQty,
           plannedDate,
           boxCapacity,
@@ -385,6 +398,8 @@ export class ShiftsService {
       counterpartyName: schema.counterparties.name,
       labelTemplateId: schema.shifts.labelTemplateId,
       labelTemplateName: schema.labelTemplates.name,
+      ssccIssuerCounterpartyId: schema.shifts.ssccIssuerCounterpartyId,
+      boxLabelTemplateId: schema.shifts.boxLabelTemplateId,
       plannedQty: schema.shifts.plannedQty,
       plannedDate: schema.shifts.plannedDate,
       boxCapacity: schema.shifts.boxCapacity,
@@ -426,6 +441,12 @@ export class ShiftsService {
       }
       if (constraint === "shifts_tenant_label_template_fk") {
         throw new BadRequestException("Unknown label template for this organization");
+      }
+      if (constraint === "shifts_tenant_sscc_issuer_fk") {
+        throw new BadRequestException("Unknown sscc issuer counterparty for this organization");
+      }
+      if (constraint === "shifts_tenant_box_label_template_fk") {
+        throw new BadRequestException("Unknown box label template for this organization");
       }
       throw new BadRequestException(
         "Referenced entity does not belong to this organization or does not exist",

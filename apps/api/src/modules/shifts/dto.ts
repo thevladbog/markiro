@@ -27,6 +27,14 @@ export const createShiftSchema = z.object({
   lineId: z.string().uuid().nullable().optional(),
   counterpartyId: z.string().uuid().nullable().optional(),
   labelTemplateId: z.string().uuid().nullable().optional(),
+  /**
+   * Whose numbers this shift's boxes carry. Deliberately NOT derived from
+   * `counterpartyId` -- that field answers "who is this for", this one
+   * answers "whose numbers" -- see the field comment on the `shifts` table.
+   * Omitted/null means the tenant's own organisation.
+   */
+  ssccIssuerCounterpartyId: z.string().uuid().nullable().optional(),
+  boxLabelTemplateId: z.string().uuid().nullable().optional(),
   plannedQty: z.number().int().min(1).nullable().optional(),
   plannedDate: plannedDateSchema.nullable().optional(),
   boxCapacity: z.number().int().min(1).nullable().optional(),
@@ -41,6 +49,8 @@ export const updateShiftSchema = z.object({
   lineId: z.string().uuid().nullable().optional(),
   counterpartyId: z.string().uuid().nullable().optional(),
   labelTemplateId: z.string().uuid().nullable().optional(),
+  ssccIssuerCounterpartyId: z.string().uuid().nullable().optional(),
+  boxLabelTemplateId: z.string().uuid().nullable().optional(),
   plannedQty: z.number().int().min(1).nullable().optional(),
   plannedDate: plannedDateSchema.nullable().optional(),
   boxCapacity: z.number().int().min(1).nullable().optional(),
@@ -77,6 +87,9 @@ export interface ShiftDto {
   counterpartyName: string | null;
   labelTemplateId: string | null;
   labelTemplateName: string | null;
+  /** Whose numbers this shift's boxes carry; null means the tenant's own organisation. */
+  ssccIssuerCounterpartyId: string | null;
+  boxLabelTemplateId: string | null;
   plannedQty: number | null;
   plannedDate: string | null;
   boxCapacity: number | null;

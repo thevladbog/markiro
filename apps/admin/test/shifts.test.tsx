@@ -86,6 +86,29 @@ const LABEL_TEMPLATE = {
   updatedAt: "2026-01-01T00:00:00.000Z",
 };
 
+// Task 6: two distinct counterparties -- the buyer the goods are for, and a
+// brand owner whose SSCC numbers the boxes carry instead. They must be
+// settable independently, so fixtures for the two need distinct ids.
+const BUYER = {
+  id: "cp1",
+  name: "Buyer LLC",
+  gln: "6291041500213",
+  inn: null,
+  gs1Prefixes: [],
+  notes: null,
+  createdAt: "2026-01-01T00:00:00.000Z",
+};
+
+const BRAND_OWNER = {
+  id: "cp2",
+  name: "Brand Owner Co",
+  gln: "6291041500220",
+  inn: null,
+  gs1Prefixes: [],
+  notes: null,
+  createdAt: "2026-01-01T00:00:00.000Z",
+};
+
 const PLANNED_SHIFT = {
   id: "s1",
   status: "planned",
@@ -622,6 +645,59 @@ describe("ShiftsPage", () => {
         // counterpartyId and productId should NOT be in PATCH payloads at all
         expect(body).not.toHaveProperty("counterpartyId");
         expect(body).not.toHaveProperty("productId");
+        // Same "untouched -> omitted" contract for the new selects (Task 6):
+        // a mutation that sent them unconditionally would show up here.
+        expect(body).not.toHaveProperty("ssccIssuerCounterpartyId");
+        expect(body).not.toHaveProperty("boxLabelTemplateId");
+      },
+      { timeout: 3000 },
+    );
+  });
+
+  it("submits the sscc issuer separately from the counterparty", async () => {
+    const updated = {
+      ...PLANNED_SHIFT,
+      counterpartyId: BUYER.id,
+      ssccIssuerCounterpartyId: BRAND_OWNER.id,
+    };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/shifts/s1" && init?.method === "PATCH") {
+        return jsonResponse(200, updated);
+      }
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [PLANNED_SHIFT] });
+      if (path === "/api/counterparties") return jsonResponse(200, { items: [BUYER, BRAND_OWNER] });
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Молоко 1л");
+
+    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+    await screen.findByText("Изменить смену");
+
+    fireEvent.change(screen.getByLabelText("Для контрагента (толлинг)"), {
+      target: { value: BUYER.id },
+    });
+    fireEvent.change(screen.getByLabelText("Эмитент группового кода"), {
+      target: { value: BRAND_OWNER.id },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    await waitFor(
+      () => {
+        const patchCalls = fetchMock.mock.calls.filter(
+          (call) => call[0] === "/api/shifts/s1" && call[1]?.method === "PATCH",
+        );
+        expect(patchCalls.length).toBeGreaterThan(0);
+        const body = JSON.parse(patchCalls[0]![1]?.body as string);
+        // The two ids must land on their own distinct fields -- a swapped
+        // assignment (issuer id sent as counterpartyId or vice versa) would
+        // typecheck and look plausible, since both are plain uuid strings
+        // drawn from the same counterparties list.
+        expect(body.counterpartyId).toBe(BUYER.id);
+        expect(body.ssccIssuerCounterpartyId).toBe(BRAND_OWNER.id);
       },
       { timeout: 3000 },
     );
