@@ -9,7 +9,10 @@ import { and, eq } from "drizzle-orm";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
-import { JournalService } from "../src/modules/integrations/journal.service";
+import {
+  JournalService,
+  SESSION_RETENTION_DAYS,
+} from "../src/modules/integrations/journal.service";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { signUpAndActivate } from "./support/auth";
 
@@ -71,7 +74,7 @@ describe.skipIf(!ready)("journal", () => {
       message: "Каталог принят",
     });
 
-    await journal.finishSession(session.id, "ok", { updated: 12, candidates: 3 });
+    await journal.finishSession(tenantId, session.id, "ok", { updated: 12, candidates: 3 });
 
     const [row] = await db
       .select()
@@ -111,8 +114,13 @@ describe.skipIf(!ready)("journal", () => {
     expect(channel!.lastEventAt).not.toBeNull();
   });
 
-  it("чистит построчную детализацию раньше сводок — она растёт быстрее", async () => {
+  it("чистит построчную детализацию раньше сводок, а сводки — только после 90 дней", async () => {
     const old = new Date(Date.now() - 30 * 24 * 3_600_000);
+    const wayOld = new Date(Date.now() - (SESSION_RETENTION_DAYS + 10) * 24 * 3_600_000);
+    const itemMessage = `item-${randomUUID()}`;
+    const freshSessionMessage = `fresh-session-${randomUUID()}`;
+    const staleSessionMessage = `stale-session-${randomUUID()}`;
+
     await db.insert(schema.integrationEvents).values([
       {
         tenantId,
@@ -121,7 +129,7 @@ describe.skipIf(!ready)("journal", () => {
         direction: "in",
         outcome: "warn",
         grain: "item",
-        message: "Позиция в чужой валюте",
+        message: itemMessage,
       },
       {
         tenantId,
@@ -130,17 +138,61 @@ describe.skipIf(!ready)("journal", () => {
         direction: "in",
         outcome: "ok",
         grain: "session",
-        message: "Сеанс завершён",
+        message: freshSessionMessage,
+      },
+      // Внутри 90-дневного окна пруниться не должна — это доказательство,
+      // что вторая ветка `prune()` не чистит раньше срока.
+      {
+        tenantId,
+        channelType: "commerceml",
+        at: wayOld,
+        direction: "in",
+        outcome: "ok",
+        grain: "session",
+        message: staleSessionMessage,
       },
     ]);
 
     await journal.prune(new Date());
 
     const rows = await db
-      .select({ grain: schema.integrationEvents.grain })
+      .select({ message: schema.integrationEvents.message })
       .from(schema.integrationEvents)
       .where(eq(schema.integrationEvents.tenantId, tenantId));
-    expect(rows.some((r) => r.grain === "item")).toBe(false);
-    expect(rows.some((r) => r.grain === "session")).toBe(true);
+    const messages = rows.map((r) => r.message);
+    expect(messages).not.toContain(itemMessage);
+    expect(messages).toContain(freshSessionMessage);
+    // Без этой записи вторую ветку `delete` в `prune()` можно было бы
+    // выкинуть целиком, и тест всё равно прошёл бы.
+    expect(messages).not.toContain(staleSessionMessage);
+  });
+
+  it("чистит сеансы старше 90 дней, но не более свежие", async () => {
+    const recent = await journal.openSession(tenantId, "commerceml", {
+      cookieHash: `recent-${randomUUID()}`,
+      expiresAt: new Date(Date.now() + 3_600_000),
+    });
+
+    const wayOld = new Date(Date.now() - (SESSION_RETENTION_DAYS + 10) * 24 * 3_600_000);
+    const [stale] = await db
+      .insert(schema.integrationSessions)
+      .values({
+        tenantId,
+        channelType: "commerceml",
+        startedAt: wayOld,
+        cookieHash: `stale-${randomUUID()}`,
+        expiresAt: new Date(Date.now() + 3_600_000),
+      })
+      .returning({ id: schema.integrationSessions.id });
+
+    await journal.prune(new Date());
+
+    const rows = await db
+      .select({ id: schema.integrationSessions.id })
+      .from(schema.integrationSessions)
+      .where(eq(schema.integrationSessions.tenantId, tenantId));
+    const ids = rows.map((r) => r.id);
+    expect(ids).toContain(recent.id);
+    expect(ids).not.toContain(stale!.id);
   });
 });

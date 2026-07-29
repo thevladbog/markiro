@@ -42,23 +42,28 @@ export class JournalService {
    * Одним вызовом намеренно: карточка канала показывает «последнее событие N
    * назад», и если состояние обновлять отдельно, найдётся ветка, которая
    * событие запишет, а состояние забудет — карточка соврёт ровно тогда, когда
-   * на неё смотрят из-за поломки.
+   * на неё смотрят из-за поломки. Обе записи идут в одной транзакции: одного
+   * вызова недостаточно, если процесс падает МЕЖДУ вставкой и обновлением —
+   * именно этот сбой и обязан не допустить сам комментарий выше.
    */
   async append(input: AppendEventInput): Promise<void> {
     const at = new Date();
-    await this.db.insert(schema.integrationEvents).values({ ...input, at });
-    await this.db
-      .update(schema.integrationChannels)
-      .set({ lastEventAt: at, lastOutcome: input.outcome })
-      .where(
-        and(
-          eq(schema.integrationChannels.tenantId, input.tenantId),
-          eq(schema.integrationChannels.type, input.channelType),
-        ),
-      );
+    await this.db.transaction(async (tx) => {
+      await tx.insert(schema.integrationEvents).values({ ...input, at });
+      await tx
+        .update(schema.integrationChannels)
+        .set({ lastEventAt: at, lastOutcome: input.outcome })
+        .where(
+          and(
+            eq(schema.integrationChannels.tenantId, input.tenantId),
+            eq(schema.integrationChannels.type, input.channelType),
+          ),
+        );
+    });
   }
 
   async finishSession(
+    tenantId: string,
     sessionId: string,
     outcome: "ok" | "error",
     summary: Record<string, unknown>,
@@ -66,7 +71,12 @@ export class JournalService {
     await this.db
       .update(schema.integrationSessions)
       .set({ finishedAt: new Date(), outcome, summary })
-      .where(eq(schema.integrationSessions.id, sessionId));
+      .where(
+        and(
+          eq(schema.integrationSessions.tenantId, tenantId),
+          eq(schema.integrationSessions.id, sessionId),
+        ),
+      );
   }
 
   /** Ретенция по зерну. Вызывается плановой джобой (Task 16). */
@@ -85,5 +95,14 @@ export class JournalService {
     await this.db
       .delete(schema.integrationEvents)
       .where(lt(schema.integrationEvents.at, sessionsBefore));
+    // `integrationEvents.sessionId` ссылается на `integrationSessions.id` без
+    // FK (см. packages/db/src/schema/integrations.ts) -- ссылочная
+    // целостность на уровне БД её не защитит. Поэтому события чистятся
+    // ПЕРВЫМИ: если бы сеанс удалялся раньше, до своего собственного
+    // (более старого) удаления события бы на мгновение указывали на уже
+    // не существующий сеанс. Удаляя события сначала, такого окна не бывает.
+    await this.db
+      .delete(schema.integrationSessions)
+      .where(lt(schema.integrationSessions.startedAt, sessionsBefore));
   }
 }
