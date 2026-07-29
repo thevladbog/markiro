@@ -6,6 +6,8 @@ export interface FloorShellProps {
   online: boolean;
   scanner: ScannerIndicator;
   printerConfigured: boolean;
+  syncPending: number;
+  syncStuck: boolean;
   tasks: Array<{ id: string; label: string }>;
   activeTaskId: string;
   onSelectTask: (id: string) => void;
@@ -16,6 +18,8 @@ export function FloorShell({
   online,
   scanner,
   printerConfigured,
+  syncPending,
+  syncStuck,
   tasks,
   activeTaskId,
   onSelectTask,
@@ -24,7 +28,13 @@ export function FloorShell({
   const { t } = useTranslation();
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-      <StatusBar online={online} scanner={scanner} printerConfigured={printerConfigured} />
+      <StatusBar
+        online={online}
+        scanner={scanner}
+        printerConfigured={printerConfigured}
+        syncPending={syncPending}
+        syncStuck={syncStuck}
+      />
       <nav aria-label={t("shell.tasks")} style={{ display: "flex", gap: 8, padding: "8px 16px" }}>
         {tasks.map((task) => (
           <button

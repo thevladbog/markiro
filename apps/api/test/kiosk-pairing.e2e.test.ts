@@ -19,6 +19,7 @@ import {
 } from "../src/modules/kiosk/pairing.service";
 import { PickupOrdersService } from "../src/modules/pickup-orders/pickup-orders.service";
 import { schema, type Db } from "@markiro/db";
+import { listenOnLoopback } from "./support/listen-loopback";
 
 // Only `randomInt` is ever mocked (F3 below, one call, one test) -- every
 // other export (including `randomUUID`, used throughout this file) passes
@@ -140,6 +141,7 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
     mountAuth(server, setup.auth);
     server.use(express.json());
     await app.init();
+    await listenOnLoopback(app);
   });
 
   afterAll(async () => {

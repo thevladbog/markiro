@@ -8,12 +8,22 @@ export interface StatusBarProps {
   online: boolean;
   scanner: ScannerIndicator;
   printerConfigured: boolean;
+  /** Scans queued on this device, not yet accepted by the server. */
+  syncPending: number;
+  /** The queue has work and has stopped moving — see sync.ts's STUCK_AFTER_MS. */
+  syncStuck: boolean;
 }
 
 // Persistent floor status bar. Scanner/printer indicators reflect the live
 // hardware state passed in by App/FloorShell (05b) rather than the hardcoded
 // "not configured" placeholders from 05a.
-export function StatusBar({ online, scanner, printerConfigured }: StatusBarProps) {
+export function StatusBar({
+  online,
+  scanner,
+  printerConfigured,
+  syncPending,
+  syncStuck,
+}: StatusBarProps) {
   const { t } = useTranslation();
   const notConfigured = t("shell.notConfigured");
   const connected = t("shell.connected");
@@ -46,7 +56,15 @@ export function StatusBar({ online, scanner, printerConfigured }: StatusBarProps
         status={online ? "ok" : "warn"}
         label={online ? t("shell.online") : t("shell.offline")}
       />
-      <span>{t("shell.sync")}: 0</span>
+      <span>
+        {t("shell.sync")}:{" "}
+        {/* A rising number while offline is information, not a problem — the
+            station is offline-first. Only a queue that has STOPPED MOVING is
+            worth an operator's attention. */}
+        <span data-testid="sync-status">
+          {syncStuck ? `${syncPending} — ${t("shell.syncStuck")}` : String(syncPending)}
+        </span>
+      </span>
       {/* The value is wrapped in its own <span> (not just interpolated
           inline) so "Not configured" is one element's exact text content —
           Testing Library's getByText matches per-element, and a shared span

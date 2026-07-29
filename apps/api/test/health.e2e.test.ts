@@ -4,6 +4,7 @@ import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule } from "../src/app.module";
 import { loadEnv } from "../src/env";
+import { listenOnLoopback } from "./support/listen-loopback";
 
 describe("GET /health", () => {
   let app: INestApplication;
@@ -11,6 +12,7 @@ describe("GET /health", () => {
     const ref = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = ref.createNestApplication();
     await app.init();
+    await listenOnLoopback(app);
   });
   afterAll(() => app.close());
 

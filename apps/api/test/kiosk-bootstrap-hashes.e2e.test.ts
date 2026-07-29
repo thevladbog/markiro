@@ -12,6 +12,7 @@ import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { hashDeviceToken } from "../src/pickup/device-token";
 import { hashSecret } from "../src/lib/pin-hash";
+import { listenOnLoopback } from "./support/listen-loopback";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -43,6 +44,7 @@ describe.skipIf(!ready)("kiosk bootstrap hashes e2e", () => {
     mountAuth(server, setup.auth);
     server.use(express.json());
     await app.init();
+    await listenOnLoopback(app);
 
     const agent = request.agent(app!.getHttpServer());
     tenantId = await signUpAndActivate(agent);

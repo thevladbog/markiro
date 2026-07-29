@@ -317,6 +317,7 @@
         "mode": "Mode",
         "plannedQty": "Plan, units",
         "status": "Status",
+        "lateData": "Data after close",
         "actions": "Actions"
       },
       "mode": {
@@ -477,7 +478,55 @@
           "unknown_product": "product not in catalog",
           "not_allowed": "product not available at this kiosk",
           "duplicate": "duplicate — code already in another order",
-          "over_limit": "daily limit exceeded"
+          "over_limit": "daily limit exceeded",
+          "unknown_badge": "badge not recognised",
+          "unknown_reason": "write-off reason unavailable"
+        }
+      },
+      "rejections": {
+        "title": "Rejected scans",
+        "bannerTitle": "Rejected scans: {{count}}",
+        "bannerKiosks": "Kiosks: {{kiosks}}",
+        "bannerMore": "and {{count}} more",
+        "bannerAction": "Review",
+        "backAction": "← Orders",
+        "emptyTitle": "No rejected scans",
+        "emptyHint": "Scans whose codes the server refused will appear here — for example, a product missing from the catalogue or a badge already revoked.",
+        "filters": {
+          "kioskLabel": "Kiosk",
+          "kioskAll": "All kiosks",
+          "stateLabel": "State",
+          "fromLabel": "From",
+          "toLabel": "To",
+          "state": {
+            "all": "All",
+            "open": "Open",
+            "acknowledged": "Handled"
+          }
+        },
+        "table": {
+          "syncedAt": "Synced",
+          "scannedAt": "Scanned",
+          "kioskName": "Kiosk",
+          "employeeName": "Employee",
+          "codeCount": "Codes",
+          "order": "Order",
+          "state": "State",
+          "actions": "Actions"
+        },
+        "unknownBadge": "Badge not recognised",
+        "badgeCodeLabel": "Badge: {{code}}",
+        "noOrder": "no order",
+        "state": {
+          "open": "Open",
+          "acknowledged": "Handled"
+        },
+        "acknowledgeAction": "Handled",
+        "showCodes": "Show codes",
+        "hideCodes": "Hide codes",
+        "toasts": {
+          "acknowledged": "Marked as handled",
+          "acknowledgeError": "Could not mark it. Refresh the page."
         }
       },
       "toasts": {
@@ -622,6 +671,7 @@
         "modalTitle": "Kiosk pairing code",
         "hint": "Enter the code on kiosk “{{name}}” or scan the barcode. The code is shown once and works once.",
         "barcodeLabel": "Barcode for pairing code {{code}}",
+        "barcodeLoading": "Loading the barcode…",
         "expiresIn": "Valid for another {{time}}",
         "expired": "The code has expired. Issue a new one.",
         "regenerateAction": "Issue a new code",

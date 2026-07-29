@@ -10,6 +10,7 @@ import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { hashDeviceToken } from "../src/pickup/device-token";
+import { listenOnLoopback } from "./support/listen-loopback";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -40,6 +41,7 @@ describe.skipIf(!ready)("device key surface triage e2e", () => {
     mountAuth(server, setup.auth);
     server.use(express.json());
     await app.init();
+    await listenOnLoopback(app);
 
     agent = request.agent(app!.getHttpServer());
     const email = `t-${randomUUID()}@example.com`;
@@ -86,6 +88,13 @@ describe.skipIf(!ready)("device key surface triage e2e", () => {
   it("refuses a station api-key on pickup reasons", async () => {
     await request(app!.getHttpServer())
       .get("/pickup-reasons")
+      .set("x-api-key", stationKey)
+      .expect(403);
+  });
+
+  it("refuses a station api-key on pickup rejections", async () => {
+    await request(app!.getHttpServer())
+      .get("/pickup-rejections")
       .set("x-api-key", stationKey)
       .expect(403);
   });

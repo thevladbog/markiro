@@ -8,6 +8,7 @@ import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { corsDelegate } from "../src/cors";
 import { loadEnv } from "../src/env";
+import { listenOnLoopback } from "./support/listen-loopback";
 
 /**
  * Requires a reachable Postgres with the Better Auth + platform schema
@@ -50,6 +51,7 @@ describe.skipIf(!ready)("cors e2e", () => {
     mountAuth(server, setup.auth);
     server.use(express.json());
     await app.init();
+    await listenOnLoopback(app);
   });
 
   afterAll(async () => {

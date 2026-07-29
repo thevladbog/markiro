@@ -14,6 +14,7 @@ import { loadEnv } from "../src/env";
 import { OperatorsService } from "../src/modules/operators/operators.service";
 import { getOrCreateBadgeSalt, hashBadgeWithSalt } from "../src/lib/badge-salt";
 import { hashSecret } from "../src/lib/pin-hash";
+import { listenOnLoopback } from "./support/listen-loopback";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -38,6 +39,7 @@ describe.skipIf(!ready)("badge salt e2e", () => {
     mountAuth(server, setup.auth);
     server.use(express.json());
     await app.init();
+    await listenOnLoopback(app);
     db = moduleRef.get(DB);
     operatorsService = moduleRef.get(OperatorsService);
   });

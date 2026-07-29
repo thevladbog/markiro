@@ -4,3 +4,13 @@ packages:
 allowBuilds:
   esbuild: true
   "@scarf/scarf": false # telemetry postinstall — deliberately blocked
+overrides:
+  # GHSA-67mh-4wv8-2f99: esbuild <=0.24.2 lets any website talk to its dev
+  # server. Reached only through @esbuild-kit/*, which is deprecated upstream
+  # and pinned to esbuild ~0.18 -- drizzle-kit 0.31.10 (latest) still depends
+  # on it, so there is no parent bump to take. drizzle-kit's own direct
+  # dependency is already esbuild ^0.25.4, so this aligns the stale path with
+  # the version the rest of the tree resolves. Scoped rather than global so
+  # Vite keeps the esbuild it asks for. Drop this once drizzle-kit sheds
+  # @esbuild-kit.
+  "@esbuild-kit/core-utils>esbuild": "0.25.12"

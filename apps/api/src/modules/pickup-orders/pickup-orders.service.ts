@@ -110,6 +110,17 @@ export class PickupOrdersService {
       };
     }
 
+    // 1b. Settle the ONE timestamp this request is filed under, before any step
+    // that can throw. Every path below that persists something -- the two
+    // rejection rows thrown out of steps 2 and 3, the all-conflict rejection
+    // row, and the order itself -- must date it identically, and none of them
+    // may take `dto.createdAt` raw: the device's clock is untrusted, and
+    // `resolveScanTime` is the clamp that keeps a rolled-forward tablet from
+    // minting itself a fresh daily allowance (see its doc comment). Hoisted
+    // here rather than left at step 5 purely so the early-throw paths can
+    // share it.
+    const when = this.resolveScanTime(dto.createdAt, kioskId);
+
     // 2. Badge -> active employee (badge's revoked_at is null, employee active).
     //
     // 422, NOT 401, AND THE DIFFERENCE IS LOAD-BEARING. `badgeCode` is a field
@@ -138,19 +149,64 @@ export class PickupOrdersService {
     // unblocks the moment this ships, including on a device still running an
     // older bundle.
     const employeeId = await this.resolveActiveEmployeeId(tenantId, dto.badgeCode);
-    if (!employeeId) throw new UnprocessableEntityException("Unknown or inactive badge");
+    if (!employeeId) {
+      // An offline sync lands hours after the scan, so the badge may have
+      // been revoked in between -- and this 422 fires before a single item
+      // is examined, so without this the codes the worker walked off with
+      // leave no trace at all. Codes only: an item-less badge heartbeat
+      // lost nothing and must not add noise here.
+      if (dto.items.length > 0) {
+        await this.recordScanRejection(this.db, {
+          tenantId,
+          kioskId,
+          employeeId: null,
+          badgeCode: dto.badgeCode,
+          orderId: null,
+          deviceSeq: dto.deviceSeq,
+          codes: dto.items.map((item) => ({ rawKm: item.rawKm, reason: "unknown_badge" })),
+          scannedAt: when,
+        });
+      }
+      throw new UnprocessableEntityException("Unknown or inactive badge");
+    }
 
     // 3. Writeoff orders require a non-archived reason belonging to this tenant.
-    const writeoffReasonId = await this.resolveWriteoffReasonId(tenantId, dto);
+    let writeoffReasonId: string | null;
+    try {
+      writeoffReasonId = await this.resolveWriteoffReasonId(tenantId, dto);
+    } catch (error) {
+      // Same offline-drift shape as the unrecognised badge above: the kiosk
+      // cached the reason list at bootstrap, the admin archived (or removed)
+      // it hours later, and this throws before a single item is examined --
+      // so without this the codes the worker walked off with leave no trace
+      // at all. Codes only: an item-less sync lost no product and must not
+      // add noise. The employee IS known here (step 2 already succeeded), so
+      // this is `badgeCode: null` -- the mirror image of the badge case.
+      // Rethrow unchanged: this call site must not alter the kiosk's
+      // response, whichever of `resolveWriteoffReasonId`'s two messages fired.
+      if (dto.items.length > 0) {
+        await this.recordScanRejection(this.db, {
+          tenantId,
+          kioskId,
+          employeeId,
+          badgeCode: null,
+          orderId: null,
+          deviceSeq: dto.deviceSeq,
+          codes: dto.items.map((item) => ({ rawKm: item.rawKm, reason: "unknown_reason" })),
+          scannedAt: when,
+        });
+      }
+      throw error;
+    }
 
     // 4. Per-item KM validation, allowlist resolution and in-request dedup.
     const { conflicts, candidates } = await this.resolveItems(tenantId, kioskId, dto.items);
 
     // 5. Day-limit: accept up to dayLimitPerEmployee, flag the rest as over_limit.
     // `when` is the server's decision, not the device's claim (see
-    // `resolveScanTime`), and the SAME value then dates the order row below --
-    // so the limit is always counted against the day the order is filed under.
-    const when = this.resolveScanTime(dto.createdAt, kioskId);
+    // `resolveScanTime`, settled at step 1b), and the SAME value then dates the
+    // order row below -- so the limit is always counted against the day the
+    // order is filed under.
     const { accepted, overflowConflicts } = await this.applyDayLimit(
       tenantId,
       kioskId,
@@ -192,13 +248,21 @@ export class PickupOrdersService {
           conflicts: [],
         };
       }
-      // No order row is created here, so `syncConflicts` has nowhere to live:
-      // the kiosk gets these conflicts in its response, but the cabinet would
-      // otherwise never learn that a worker's ENTIRE scan session was refused
-      // — the same blind spot `syncConflicts` exists to close, in its worst
-      // case. Log it so the event is at least observable to operations.
-      // A durable, admin-visible record needs a surface of its own (there is
-      // no order to hang it on) and is tracked separately.
+      // No order row is created here, so `syncConflicts` has nowhere to live.
+      // `pickup_scan_rejections` is that home: the cabinet would otherwise
+      // never learn that a worker's ENTIRE scan session was refused -- the
+      // same blind spot `syncConflicts` exists to close, in its worst case.
+      await this.recordScanRejection(this.db, {
+        tenantId,
+        kioskId,
+        employeeId,
+        badgeCode: null,
+        orderId: null,
+        deviceSeq: dto.deviceSeq,
+        codes: conflicts,
+        scannedAt: when,
+      });
+      // Kept alongside the durable row: cheap, and ops alerting may key on it.
       this.logger.warn(
         `kiosk ${kioskId}: all ${dto.items.length} scanned code(s) refused for employee ${employeeId} — ${conflicts.map((c) => c.reason).join(", ")}`,
       );
@@ -732,6 +796,32 @@ export class PickupOrdersService {
     };
   }
 
+  /**
+   * Persist refused codes so the cabinet can see them. Idempotent on
+   * `(tenant, kiosk, deviceSeq)` -- the same key `pickup_orders` uses -- so a
+   * replayed sync (a lost response, or a kiosk that keeps retrying a 401)
+   * records once rather than once per attempt.
+   *
+   * `db` is loosely typed so both `this.db` and a transaction handle satisfy
+   * it: the partial-refusal call site MUST enlist in the order's own
+   * transaction, or a kmKey-race rollback would leave an orphan row.
+   */
+  private async recordScanRejection(
+    db: Pick<Db, "insert">,
+    row: {
+      tenantId: string;
+      kioskId: string;
+      employeeId: string | null;
+      badgeCode: string | null;
+      orderId: string | null;
+      deviceSeq: number;
+      codes: { rawKm: string; reason: string }[];
+      scannedAt: Date;
+    },
+  ): Promise<void> {
+    await db.insert(schema.pickupScanRejections).values(row).onConflictDoNothing();
+  }
+
   private async resolveActiveEmployeeId(
     tenantId: string,
     badgeCode: string,
@@ -1053,6 +1143,23 @@ export class PickupOrdersService {
                 scannedAt: when,
               })),
             );
+          }
+          // Same transaction as the order on purpose: the kmKey-race retry
+          // below rolls this back with it, so a rejection row can never
+          // outlive the order attempt that produced it. `conflicts` is
+          // mutated by that retry before it loops, so on the attempt that
+          // finally commits it holds the complete set.
+          if (conflicts.length > 0) {
+            await this.recordScanRejection(tx, {
+              tenantId,
+              kioskId,
+              employeeId,
+              badgeCode: null,
+              orderId: order.id,
+              deviceSeq,
+              codes: conflicts,
+              scannedAt: when,
+            });
           }
           return { orderNo: order.orderNo, itemCount: order.itemCount };
         });

@@ -86,9 +86,13 @@ export interface KioskBootstrapDto {
 
 /**
  * POST /kiosk/pair response — the contract Plan B-2's pairing screen calls.
- * `nextDeviceSeq` is `MAX(deviceSeq) + 1` for this kiosk (0 if it has no
- * orders yet), so a re-paired device continues its idempotency-key counter
- * instead of restarting at 0 and colliding with its own past orders.
+ * `nextDeviceSeq` is `MAX(deviceSeq) + 1` for this kiosk across BOTH
+ * `pickup_orders` and `pickup_scan_rejections` (0 if it has neither yet), so
+ * a re-paired device continues its idempotency-key counter instead of
+ * restarting at 0 and colliding with its own past orders. A rejection
+ * consumes a `device_seq` without creating an order, so an orders-only max
+ * would hand a re-paired device a number already spent, and its next
+ * rejection would be silently dropped as a replay.
  */
 export interface PairKioskResultDto {
   device: { kioskId: string; kioskName: string; place: string | null };

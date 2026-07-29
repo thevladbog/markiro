@@ -24,6 +24,16 @@ export function createKeyboardWedgeSource(target: KeyTarget = window): ScanSourc
       const onKeyDown = (event: Event) => {
         const { key } = event as KeyboardEvent;
         if (key === "Enter") {
+          // A wedge scanner "types" into whatever element happens to hold DOM
+          // focus, and native <button>s activate on Enter when focused. Left
+          // alone, the terminating Enter of a scan would ALSO fire a click on
+          // a focused button. preventDefault() here suppresses that default
+          // action. Do NOT instead filter on `event.target` -- the scan IS
+          // legitimately delivered to whatever is focused, so ignoring those
+          // events would silently DROP the scan, which is worse than a
+          // spurious click. Leave this comment so nobody "improves" it into
+          // target-filtering later.
+          event.preventDefault();
           if (payload.length > 0) listener(payload);
           payload = "";
           return;
