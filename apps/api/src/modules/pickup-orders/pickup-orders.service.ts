@@ -5,7 +5,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
-  UnauthorizedException,
+  UnprocessableEntityException,
 } from "@nestjs/common";
 import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, sql, type SQL } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
@@ -110,9 +110,35 @@ export class PickupOrdersService {
       };
     }
 
-    // 2. Badge -> active employee (badge's revoked_at is null). Unknown -> 401 ("bad badge" on the kiosk).
+    // 2. Badge -> active employee (badge's revoked_at is null, employee active).
+    //
+    // 422, NOT 401, AND THE DIFFERENCE IS LOAD-BEARING. `badgeCode` is a field
+    // of the ORDER, not the caller's credential: the device already
+    // authenticated (`KioskDeviceGuard`), and what failed is that a well-formed
+    // body names an employee no withdrawal can be filed against — which is
+    // exactly what 422 says and 401 does not.
+    //
+    // 401 on this route is RESERVED for the device token, because the kiosk
+    // cannot ask anything else. `POST /kiosk/orders` is the only route where a
+    // device meets both failures, and it holds nothing but a status code to
+    // tell them apart: 401 means the token is gone (archived kiosk, or a
+    // replacement device having redeemed a new one) and sends it back to
+    // pairing with its queue intact, so the sync worker deliberately excludes
+    // 401 from the statuses it quarantines on. While an unknown badge shared
+    // that 401, an order whose employee was deleted or archived server-side
+    // before it synced was UNDELIVERABLE AND UNQUARANTINABLE: it parked at the
+    // head of the offline queue forever and every later order sat behind it,
+    // while the kiosk went on accepting and confirming new ones.
+    //
+    // 403 would have been the same mistake in a different digit — it also
+    // speaks about the CALLER's authority, which is not what is wrong here, and
+    // this codebase already uses it that way (`TenantGuard`,
+    // `SessionOnlyGuard`). 422 is already in the kiosk's terminal allowlist
+    // (`TERMINAL_STATUSES`, apps/kiosk/src/sync/worker.ts), so the queue
+    // unblocks the moment this ships, including on a device still running an
+    // older bundle.
     const employeeId = await this.resolveActiveEmployeeId(tenantId, dto.badgeCode);
-    if (!employeeId) throw new UnauthorizedException("Unknown badge");
+    if (!employeeId) throw new UnprocessableEntityException("Unknown or inactive badge");
 
     // 3. Writeoff orders require a non-archived reason belonging to this tenant.
     const writeoffReasonId = await this.resolveWriteoffReasonId(tenantId, dto);

@@ -197,12 +197,47 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
     expect(res.body.conflicts[0].reason).toBe("not_allowed");
   });
 
-  it("rejects an unknown badge", async () => {
+  /**
+   * A BAD BADGE IS NOT A BAD DEVICE, and the status has to say so.
+   *
+   * `badgeCode` is a field of the ORDER, not the caller's credential: the
+   * device authenticated perfectly well (`KioskDeviceGuard` let the request
+   * through), it just named an employee the server cannot file a withdrawal
+   * against. 422 is that statement — well-formed content the server cannot
+   * process — and 401 is not.
+   *
+   * The device depends on the difference. It cannot quarantine on 401,
+   * because 401 is how a revoked kiosk is told to go back to pairing; so
+   * while an unknown badge answered 401, an order whose employee was deleted
+   * or archived server-side before it synced sat at the head of the offline
+   * queue forever and every later order sat behind it.
+   */
+  it("answers an unknown badge with 422, not the 401 that means a revoked device", async () => {
     await request(app!.getHttpServer())
       .post("/kiosk/orders")
       .set("x-kiosk-token", TOKEN)
       .send({ deviceSeq: 3, badgeCode: "NOPE", reason: "buy", items: [] })
-      .expect(401);
+      .expect(422);
+  });
+
+  it("answers a revoked badge with 422 too — the badge is gone, the device is not", async () => {
+    const revokedEmployeeId = randomUUID();
+    const revokedBadge = `badge-revoked-${randomUUID()}`;
+    await db
+      .insert(schema.employees)
+      .values({ id: revokedEmployeeId, tenantId, fullName: "Отозванов О." });
+    await db.insert(schema.employeeBadges).values({
+      tenantId,
+      employeeId: revokedEmployeeId,
+      badgeCode: revokedBadge,
+      revokedAt: new Date(),
+    });
+
+    await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", TOKEN)
+      .send({ deviceSeq: 13, badgeCode: revokedBadge, reason: "buy", items: [] })
+      .expect(422);
   });
 
   it("rejects a non-revoked badge belonging to an archived employee", async () => {
@@ -227,12 +262,13 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
       .set({ status: "archived" })
       .where(eq(schema.employees.id, archivedEmployeeId));
 
-    // The badge itself is still not revoked, but the employee behind it is archived -> unknown badge (401).
+    // The badge itself is still not revoked, but the employee behind it is
+    // archived -> the badge resolves to nobody the server may file for (422).
     await request(app!.getHttpServer())
       .post("/kiosk/orders")
       .set("x-kiosk-token", TOKEN)
       .send({ deviceSeq: 12, badgeCode: archivedBadge, reason: "buy", items: [] })
-      .expect(401);
+      .expect(422);
   });
 
   it("flags a not-a-KM scan and a KM missing its crypto tail (dropped GS) distinctly", async () => {
@@ -712,5 +748,49 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
       .set("x-kiosk-token", archivedToken)
       .send({ deviceSeq: 1, badgeCode: BADGE, reason: "buy", items: [] })
       .expect(401);
+  });
+
+  /**
+   * THE DISTINCTION ITSELF, asserted on ONE route in ONE test, because that is
+   * where it is actually needed: `POST /kiosk/orders` is the only place a
+   * device sees both failures, and a device holding only a status code has to
+   * be able to tell them apart. A revoked device must go back to pairing with
+   * its queue intact; a device carrying one unfileable order must set that
+   * order aside and deliver the rest.
+   *
+   * Written as a comparison rather than two separate `.expect(...)`s so it
+   * cannot be satisfied by both answers drifting onto the same status again —
+   * which is the bug, and which two independent literal assertions elsewhere in
+   * this file would keep passing right up until someone changed them together.
+   */
+  it("tells a bad device from a bad badge on POST /kiosk/orders", async () => {
+    const revokedKioskId = randomUUID();
+    const revokedToken = `kiosk-token-revoked-${randomUUID()}`;
+    await db
+      .insert(schema.kiosks)
+      .values({ id: revokedKioskId, tenantId, name: "Киоск-отозван", status: "archived" });
+    await db
+      .update(schema.kiosks)
+      .set({ deviceTokenHash: hashDeviceToken(revokedToken) })
+      .where(eq(schema.kiosks.id, revokedKioskId));
+
+    const order = { deviceSeq: 14, badgeCode: BADGE, reason: "buy", items: [] };
+
+    // Same route, same body: only the reason for the refusal differs.
+    const badDevice = await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", revokedToken)
+      .send(order);
+    const badBadge = await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", TOKEN)
+      .send({ ...order, badgeCode: "NOPE" });
+
+    expect(badDevice.status).toBe(401);
+    expect(badBadge.status).not.toBe(badDevice.status);
+    // And not merely different: 422 is the one the kiosk's sync worker treats
+    // as terminal (`TERMINAL_STATUSES` in apps/kiosk/src/sync/worker.ts), which
+    // is what actually unblocks the queue.
+    expect(badBadge.status).toBe(422);
   });
 });

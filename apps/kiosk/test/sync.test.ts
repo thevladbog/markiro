@@ -567,10 +567,78 @@ describe("flushQueue", () => {
   });
 
   /**
+   * THE SECOND WAY THE HEAD OF THE QUEUE GOES BAD, and the one that used to be
+   * unreachable from here: a badge the server can no longer resolve — the
+   * employee deleted or archived in the cabinet while the order sat in an
+   * offline queue. `createFromKiosk` answers 422 («Unknown or inactive badge»),
+   * every time, forever.
+   *
+   * It used to answer 401, and 401 is the one 4xx this drain must never
+   * quarantine on (see below), so that order was simultaneously undeliverable
+   * and unremovable and the whole queue stopped behind it. The fix is on the
+   * server — a bad badge is not a bad device — and this is the device half of
+   * it, pinned here so the pair cannot drift apart silently.
+   */
+  it("sets aside an order the server refuses for a bad badge (422) and drains the rest", async () => {
+    await enqueueOrder(
+      {
+        deviceSeq: 1,
+        badgeCode: "GONE",
+        reason: "buy",
+        items: [{ rawKm: "01…orphaned" }],
+        createdAt: "2026-07-27T20:00:00.000Z",
+      },
+      "e-deleted",
+    );
+    for (const deviceSeq of [2, 3]) {
+      await enqueueOrder({ deviceSeq, badgeCode: "B", reason: "buy", items: [] }, "e1");
+    }
+    const client = {
+      bootstrap: vi.fn(),
+      submitOrder: vi.fn(async (body: { deviceSeq: number }) => {
+        if (body.deviceSeq === 1) throw new KioskApiError(422, "Unknown or inactive badge");
+        return {
+          orderNo: `ORD-26-000${body.deviceSeq}`,
+          status: "pending",
+          itemCount: 0,
+          conflicts: [],
+        };
+      }),
+    };
+
+    await flushQueue(client as never, () => new Date("2026-07-28T07:00:00.000Z"));
+
+    // One pass, and the two orders behind the bad one are delivered rather than
+    // parked behind it for the life of the device.
+    expect(client.submitOrder.mock.calls.map(([body]) => body.deviceSeq)).toEqual([1, 2, 3]);
+    expect(await listQueue()).toEqual([]);
+    expect(await listQuarantine()).toEqual([
+      {
+        deviceSeq: 1,
+        employeeId: "e-deleted",
+        at: "2026-07-28T07:00:00.000Z",
+        status: 422,
+        message: "Unknown or inactive badge",
+        body: {
+          deviceSeq: 1,
+          badgeCode: "GONE",
+          reason: "buy",
+          items: [{ rawKm: "01…orphaned" }],
+          createdAt: "2026-07-27T20:00:00.000Z",
+        },
+      },
+    ]);
+  });
+
+  /**
    * 401 IS THE DEVICE, NOT THE ORDER. An archived kiosk answers every request
    * with it, so quarantining on a 401 would empty a whole queue on a
    * revocation — orders the device really did take — instead of leaving the
    * shell's refresh to notice and send the device back to pairing.
+   *
+   * This stays true now that a bad badge answers 422: the two failures are the
+   * server's to tell apart, and it does, which is the only reason this drain
+   * can keep treating every 401 it sees as "not this device".
    */
   it("never quarantines on a 401: that is a revoked device, not a bad order", async () => {
     for (const deviceSeq of [1, 2]) {

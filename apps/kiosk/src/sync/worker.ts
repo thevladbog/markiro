@@ -218,11 +218,27 @@ export function flushQueue(client: KioskClient, now: () => Date): Promise<void> 
  * it is offered — the only failures allowed to take an order out of the queue
  * without the server having filed it.
  *
- * The reachable one is a write-off queued offline whose reason an administrator
- * archives before the kiosk syncs: `resolveWriteoffReasonId` answers 400
- * («Unknown or archived writeoff reason»), forever, and without this the order
- * parks at the head of the queue and every later purchase sits behind it while
- * the kiosk goes on cheerfully accepting and confirming new ones.
+ * TWO ARE REACHABLE, and both are the same shape: something the cabinet
+ * changed while the order sat in an offline queue.
+ *
+ *  - 400 — a write-off whose reason an administrator archived before the kiosk
+ *    synced (`resolveWriteoffReasonId`, «Unknown or archived writeoff reason»);
+ *  - 422 — a badge that no longer resolves to an active employee, deleted or
+ *    archived server-side after the scan (`createFromKiosk` step 2, «Unknown or
+ *    inactive badge»).
+ *
+ * Without a quarantine either one parks at the head of the queue and every
+ * later purchase sits behind it while the kiosk goes on cheerfully accepting
+ * and confirming new ones.
+ *
+ * THE 422 IS THE SERVER'S HALF OF THIS RULE and was hard-won: an unknown badge
+ * used to answer 401, which is the one status this list must never contain, so
+ * that order was undeliverable AND unquarantinable and blocked the queue
+ * permanently. The device cannot repair that from here — a status is all it
+ * gets, and sniffing the message string would be worse — so the fix is that the
+ * server no longer describes a bad ORDER with the device's own credential
+ * status. Keep the two apart: adding 401 here to "handle" a bad badge would
+ * trade a stalled queue for an emptied one.
  *
  * DELIBERATELY AN ALLOWLIST, not "any 4xx". The two statuses that would be
  * catastrophic to include are both 4xx:
