@@ -52,6 +52,23 @@ export async function verifyExchangeSecret(secret: string, phc: string): Promise
 }
 
 /**
+ * A structurally valid PHC verifier used ONLY to equalize work when
+ * `checkauth`'s login lookup matches no row (or matches one with no
+ * `credentialHash` yet) -- its plaintext is irrelevant, the result is always
+ * discarded. Without this, a caller that skips `verifyExchangeSecret`
+ * entirely for an unknown login (a cheap `!row` check, no PBKDF2 derivation
+ * at all) would answer measurably faster than one for a known login with a
+ * wrong secret (a full derivation) -- a timing side channel that lets an
+ * attacker enumerate valid exchange logins without ever guessing a secret.
+ * 100000 iterations, matching `PHC_ITERATIONS` (`hashExchangeSecret`'s own
+ * cost), so the dummy path costs the same as the real one. Mirrors
+ * `DUMMY_PHC` in `apps/kiosk/src/credentials/operator.ts`, which guards the
+ * same property for the kiosk's own operator sign-in.
+ */
+export const DUMMY_EXCHANGE_PHC =
+  "pbkdf2$sha256$100000$fwGrIt01vwgBxxDlhqLVRQ==$PGnhdQA2lW09CcvuOhCmvp0z4HbztWXaYIq7+dqmLoQ=";
+
+/**
  * Счётчик неудачных `checkauth`, атомарный апсерт — форма один в один с
  * `recordPairAttempt` в `pairing.service.ts` (record-then-check upsert с
  * `RETURNING`, закрывающий ту же гонку N конкурентных вызовов). Это НЕ форма

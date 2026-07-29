@@ -1,17 +1,30 @@
-import { Controller, Get, Inject, Ip, Post, Query, Req, Res } from "@nestjs/common";
+import {
+  Controller,
+  Get,
+  Inject,
+  Ip,
+  Logger,
+  Post,
+  Query,
+  Req,
+  Res,
+  UseFilters,
+} from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { schema, type Db } from "@markiro/db";
 import { eq } from "drizzle-orm";
-import type { Request, Response } from "express";
+import type { Response } from "express";
 import { DB } from "../../auth/auth.module";
 import type { IntegrationChannelType } from "../integrations/channel-registry";
 import { JournalService } from "../integrations/journal.service";
 import {
   assertUnderCheckauthLimit,
   checkauthWindowStart,
+  DUMMY_EXCHANGE_PHC,
   refundCheckauthAttempt,
   verifyExchangeSecret,
 } from "./exchange-credentials";
+import { ExchangeExceptionFilter, type ExchangeRequest } from "./exchange-exception.filter";
 import {
   EXCHANGE_COOKIE_NAME,
   ExchangeSessionService,
@@ -43,7 +56,10 @@ import {
  */
 @ApiTags("exchange")
 @Controller()
+@UseFilters(ExchangeExceptionFilter)
 export class ExchangeController {
+  private readonly logger = new Logger(ExchangeController.name);
+
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly sessions: ExchangeSessionService,
@@ -53,7 +69,7 @@ export class ExchangeController {
   @Get("1c_exchange")
   async get(
     @Query() query: Record<string, string>,
-    @Req() req: Request,
+    @Req() req: ExchangeRequest,
     @Res() res: Response,
     @Ip() ip: string,
   ): Promise<void> {
@@ -67,6 +83,11 @@ export class ExchangeController {
       this.fail(res, "no session");
       return;
     }
+    req.exchangeContext = {
+      tenantId: session.tenantId,
+      channelType: session.channelType,
+      sessionId: session.id,
+    };
 
     if (query.mode === "init") {
       await this.journal.append({
@@ -95,7 +116,7 @@ export class ExchangeController {
   @Post("1c_exchange")
   async post(
     @Query() query: Record<string, string>,
-    @Req() req: Request,
+    @Req() req: ExchangeRequest,
     @Res() res: Response,
   ): Promise<void> {
     const session = await this.resolveSession(req);
@@ -103,6 +124,11 @@ export class ExchangeController {
       this.fail(res, "no session");
       return;
     }
+    req.exchangeContext = {
+      tenantId: session.tenantId,
+      channelType: session.channelType,
+      sessionId: session.id,
+    };
 
     if (query.mode === "file") {
       const filename = query.filename;
@@ -143,7 +169,7 @@ export class ExchangeController {
 
   private async checkauth(
     query: Record<string, string>,
-    req: Request,
+    req: ExchangeRequest,
     res: Response,
     ip: string,
   ): Promise<void> {
@@ -188,11 +214,19 @@ export class ExchangeController {
       .from(schema.integrationChannels)
       .where(eq(schema.integrationChannels.credentialLogin, credentials.login));
 
-    if (
-      !row ||
-      !row.credentialHash ||
-      !(await verifyExchangeSecret(credentials.secret, row.credentialHash))
-    ) {
+    // Always runs a full PBKDF2 verification, even when `row` (or its
+    // `credentialHash`) doesn't exist -- against `DUMMY_EXCHANGE_PHC` in that
+    // case, whose result is discarded either way. A short-circuited `!row ||
+    // ...` would skip `verifyExchangeSecret` entirely for an unknown login,
+    // answering measurably faster than a known login with a wrong secret --
+    // exactly the timing side channel `DUMMY_EXCHANGE_PHC`'s own comment
+    // guards against.
+    const validSecret = await verifyExchangeSecret(
+      credentials.secret,
+      row?.credentialHash ?? DUMMY_EXCHANGE_PHC,
+    );
+
+    if (!row || !row.credentialHash || !validSecret) {
       // A login that matches no row has no tenant to journal against --
       // there is nowhere to write the event, the same boundary the attempt
       // counter above already draws. A login that DOES match, with a wrong
@@ -212,10 +246,34 @@ export class ExchangeController {
       return;
     }
 
-    await refundCheckauthAttempt(this.db, source, windowStart);
-
     const channelType = row.type as IntegrationChannelType;
+    // Known from here on -- a genuine credential match -- so an unhandled
+    // throw below (e.g. `sessions.open` hitting a DB outage) can still be
+    // journaled against the right tenant by `ExchangeExceptionFilter`, even
+    // though the session itself hasn't opened yet (`sessionId: null`, same
+    // as the "неверный пароль" event above).
+    req.exchangeContext = { tenantId: row.tenantId, channelType, sessionId: null };
+
+    // `.catch()`ed rather than awaited plain: this runs AFTER the password
+    // has already been confirmed correct. If the refund itself throws (a DB
+    // hiccup on this one UPDATE), the caller has valid credentials and must
+    // still get its session and cookie -- not an exception -- while the
+    // checkauth budget simply stays one unit overcharged for the rest of
+    // this window. Mirrors `PairingService.redeem`'s own compensating
+    // refund (`pairing.service.ts:204-220`), which swallows exactly the same
+    // failure for exactly the same reason: the alternative would let a
+    // successful, correctly-credentialed login fail outright over pure
+    // bookkeeping.
+    await refundCheckauthAttempt(this.db, source, windowStart).catch((error: unknown) => {
+      this.logger.warn(
+        `exchange checkauth refund failed after verified credentials (budget stays overcharged): ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    });
+
     const opened = await this.sessions.open(row.tenantId, channelType);
+    req.exchangeContext = { tenantId: row.tenantId, channelType, sessionId: opened.id };
     await this.journal.append({
       tenantId: row.tenantId,
       channelType,
@@ -246,7 +304,7 @@ export class ExchangeController {
     });
   }
 
-  private async resolveSession(req: Request): Promise<ResolvedExchangeSession | null> {
+  private async resolveSession(req: ExchangeRequest): Promise<ResolvedExchangeSession | null> {
     const cookie = extractExchangeCookie(req.headers.cookie);
     if (!cookie) return null;
     return this.sessions.resolve(cookie);

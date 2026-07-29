@@ -1,8 +1,10 @@
+import * as http from "node:http";
+import type { AddressInfo } from "node:net";
 import express from "express";
 import request from "supertest";
 import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { schema, type Db } from "@markiro/db";
 import { and, eq } from "drizzle-orm";
 import { AppModule } from "../src/app.module";
@@ -10,7 +12,11 @@ import { loadEnv } from "../src/env";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { signUpAndActivate } from "./support/auth";
-import { FILE_CHUNK_LIMIT } from "../src/modules/exchange/exchange-session.service";
+import { excludeExchangeRoute } from "../src/modules/exchange/exchange.module";
+import {
+  ExchangeSessionService,
+  FILE_CHUNK_LIMIT,
+} from "../src/modules/exchange/exchange-session.service";
 import { hashDeviceToken } from "../src/pickup/device-token";
 
 describe("1c_exchange", () => {
@@ -30,7 +36,10 @@ describe("1c_exchange", () => {
     app = ref.createNestApplication({ bodyParser: false });
     const server = app.getHttpAdapter().getInstance();
     mountAuth(server, setup.auth);
-    server.use(express.json());
+    // Mirrors main.ts exactly: `/1c_exchange` must be excluded from the
+    // global JSON parser here too, or this suite would never have caught
+    // the bug `excludeExchangeRoute` fixes (see the regression test below).
+    server.use(excludeExchangeRoute(express.json()));
     await app.init();
     await listenOnLoopback(app);
     agent = request.agent(app.getHttpServer());
@@ -201,5 +210,89 @@ describe("1c_exchange", () => {
       .from(schema.integrationChannels)
       .where(eq(schema.integrationChannels.credentialLogin, login));
     expect(channel!.lastOutcome).toBe("error");
+  });
+
+  // Review fixes (task-6 follow-up): the four below each pin one finding.
+
+  it("необработанное исключение в обработчике всё равно отвечает text/plain 200 (Fix 1)", async () => {
+    const auth = await checkauth();
+    const sessions = app!.get(ExchangeSessionService);
+    const spy = vi
+      .spyOn(sessions, "appendChunk")
+      .mockRejectedValueOnce(new Error("boom: simulated db outage"));
+    try {
+      const res = await request(app!.getHttpServer())
+        .post("/1c_exchange?type=catalog&mode=file&filename=boom.xml")
+        .set("Cookie", auth.cookie)
+        .send(Buffer.from("x", "utf8"))
+        .expect(200);
+      expect(res.headers["content-type"]).toMatch(/^text\/plain/);
+      expect(res.text.startsWith("failure")).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("mode=file с чужим Content-Type (application/json) и невалидным телом остаётся text/plain 200, а не JSON-ошибкой парсера (Fix 3)", async () => {
+    const res = await request(app!.getHttpServer())
+      .post("/1c_exchange?type=catalog&mode=file&filename=mismatched.xml")
+      .set("Content-Type", "application/json")
+      .send("not json")
+      .expect(200);
+    expect(res.text.startsWith("failure")).toBe(true);
+  });
+
+  it("превышенный кусок БЕЗ Content-Length (chunked) тоже отвечает failure, а не 413-ом (Fix 4)", async () => {
+    const address = app!.getHttpServer().address() as AddressInfo;
+    const oversized = Buffer.alloc(FILE_CHUNK_LIMIT + 1, "a");
+
+    // Raw `http.request`, not supertest: this needs precise control over the
+    // wire (an explicit `Transfer-Encoding: chunked` with NO `Content-Length`
+    // header at all) to reproduce exactly the gap `ExchangeRawBodyMiddleware`
+    // closes -- the one case `ExchangeChunkLimitMiddleware`'s own
+    // `Content-Length` check cannot see coming.
+    const { status, body } = await new Promise<{ status: number; body: string }>(
+      (resolve, reject) => {
+        const req = http.request(
+          {
+            host: "127.0.0.1",
+            port: address.port,
+            path: "/1c_exchange?type=catalog&mode=file&filename=huge-chunked.xml",
+            method: "POST",
+            headers: {
+              "Transfer-Encoding": "chunked",
+              "Content-Type": "application/octet-stream",
+            },
+          },
+          (res) => {
+            let data = "";
+            res.on("data", (chunk: Buffer) => (data += chunk.toString("utf8")));
+            res.on("end", () => resolve({ status: res.statusCode!, body: data }));
+          },
+        );
+        req.on("error", reject);
+        req.end(oversized);
+      },
+    );
+
+    expect(status).toBe(200);
+    expect(body.startsWith("failure")).toBe(true);
+  });
+
+  it("checkauth выполняет полную проверку пароля даже для несуществующего логина (защита от тайминг-атаки, Fix 5)", async () => {
+    const spy = vi.spyOn(crypto.subtle, "deriveBits");
+    try {
+      const res = await request(app!.getHttpServer())
+        .get("/1c_exchange?type=catalog&mode=checkauth")
+        .auth("no-such-exchange-login-at-all", "whatever")
+        .expect(200);
+      expect(res.text.startsWith("failure")).toBe(true);
+      // A short-circuited `!row || ...` would return before ever deriving
+      // anything for an unknown login -- exactly the timing side channel
+      // `DUMMY_EXCHANGE_PHC` (exchange-credentials.ts) guards against.
+      expect(spy).toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

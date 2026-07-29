@@ -8,6 +8,7 @@ import { AppModule } from "./app.module";
 import { mountAuth, setupAuth } from "./auth/auth.setup";
 import { corsDelegate } from "./cors";
 import { loadEnv } from "./env";
+import { excludeExchangeRoute } from "./modules/exchange/exchange.module";
 
 const logger = new Logger("bootstrap");
 
@@ -54,7 +55,12 @@ async function bootstrap() {
   }
 
   mountAuth(server, setup.auth);
-  server.use(express.json());
+  // `/1c_exchange` is excluded here, not merely by relying on
+  // `ensureContentType` (exchange.module.ts) to run first: see
+  // `excludeExchangeRoute`'s own comment for why registration order alone
+  // cannot be trusted to keep a mismatched `Content-Type: application/json`
+  // request out of this parser.
+  server.use(excludeExchangeRoute(express.json()));
 
   // Without this, SIGINT/SIGTERM kill the process directly and Nest never
   // runs onModuleDestroy — so PgBossService.onModuleDestroy (boss.stop())

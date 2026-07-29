@@ -1,4 +1,5 @@
 import * as nodeCrypto from "node:crypto";
+import type * as ExchangeCredentialsModule from "../src/modules/exchange/exchange-credentials";
 import express from "express";
 import request from "supertest";
 import { Test } from "@nestjs/testing";
@@ -25,6 +26,15 @@ import {
 vi.mock("node:crypto", async (importOriginal) => {
   const actual = await importOriginal<typeof nodeCrypto>();
   return { ...actual, randomUUID: vi.fn(actual.randomUUID) };
+});
+
+// Same shape as the mock above: `refundCheckauthAttempt` is wrapped, not
+// replaced, so every test that doesn't touch it gets the real
+// implementation. Only the Fix 2 regression below overrides it, once, via
+// `mockRejectedValueOnce`.
+vi.mock("../src/modules/exchange/exchange-credentials", async (importOriginal) => {
+  const actual = await importOriginal<typeof ExchangeCredentialsModule>();
+  return { ...actual, refundCheckauthAttempt: vi.fn(actual.refundCheckauthAttempt) };
 });
 
 describe("exchange credentials", () => {
@@ -166,6 +176,30 @@ describe("integrations (cabinet) — issue exchange credentials", () => {
     expect(row?.credentialLogin).toBe(res.body.login);
     expect(row?.credentialHash).not.toContain(res.body.secret);
     expect(await verifyExchangeSecret(res.body.secret, row!.credentialHash!)).toBe(true);
+  });
+
+  // Fix 2 regression: `exchange.controller.ts:215` calls `refundCheckauthAttempt`
+  // right after a genuinely matched login+secret. If that call throws
+  // unguarded, a caller with VALID credentials would get an exception instead
+  // of its session -- the sample the review points at, `pairing.service.ts:
+  // 204-211`, avoids exactly this by wrapping its own compensating refund in
+  // `.catch()`. `refundCheckauthAttempt` is mocked (module-level, above) to
+  // reject once here; every other test in this file gets the real
+  // implementation untouched.
+  it("сбой возврата попытки после верных учётных данных не роняет успешную аутентификацию", async () => {
+    const issued = await agent.post("/integrations/commerceml/credentials").send({}).expect(201);
+
+    vi.mocked(refundCheckauthAttempt).mockRejectedValueOnce(new Error("refund boom"));
+
+    const res = await request(app!.getHttpServer())
+      .get("/1c_exchange?type=catalog&mode=checkauth")
+      .auth(issued.body.login, issued.body.secret)
+      .expect(200);
+
+    const lines = res.text.split("\n");
+    expect(lines[0]).toBe("success");
+    expect(lines[1]).toBeTruthy();
+    expect(lines[2]).toBeTruthy();
   });
 
   it("никогда не отдаёт секрет из карточки канала", async () => {
