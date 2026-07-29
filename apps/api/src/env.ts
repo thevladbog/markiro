@@ -37,11 +37,11 @@ const EnvSchema = z.object({
   DATABASE_URL: z.string().min(1),
   BETTER_AUTH_SECRET: z.string().min(16),
   BETTER_AUTH_URL: z.string().url(),
-  // Deliberately NOT run through `browserOriginSchema`: this variable is held
-  // at exactly its existing behaviour, so the admin allowlist stays
-  // byte-for-byte what it was. It has the same trailing-slash footgun and
-  // wants the same treatment, as a change of its own.
-  ADMIN_ORIGIN: z.string().url().default("http://localhost:5173"),
+  // The default is returned as written, not canonicalized: zod's `.default()`
+  // short-circuits parsing entirely when the input is undefined, so the
+  // transform above never sees it. Harmless only because the literal is
+  // already a bare origin -- keep it that way.
+  ADMIN_ORIGIN: browserOriginSchema.default("http://localhost:5173"),
   // Origin the pickup kiosk PWA (apps/kiosk) is served from, when it is
   // served from one at all. OPTIONAL, and deliberately WITHOUT a localhost
   // default, unlike ADMIN_ORIGIN:

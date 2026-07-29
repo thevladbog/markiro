@@ -118,3 +118,48 @@ describe("loadEnv KIOSK_ORIGIN", () => {
     expect(() => loadEnv({ ...BASE, KIOSK_ORIGIN: "ftp://kiosk.example.ru" })).toThrow();
   });
 });
+
+/**
+ * ADMIN_ORIGIN is canonicalized by the same schema, and for the same reason:
+ * it feeds both allowlists above, and a trailing slash or path there fails
+ * exactly as silently — every cross-origin admin request loses its preflight
+ * with nothing in the API log to say why.
+ *
+ * Host-lowercasing and port retention are not re-asserted here; they are one
+ * shared `browserOriginSchema`, already pinned in the KIOSK_ORIGIN block.
+ */
+describe("loadEnv ADMIN_ORIGIN", () => {
+  it("canonicalizes a trailing slash away", () => {
+    expect(loadEnv({ ...BASE, ADMIN_ORIGIN: "https://admin.example.ru/" }).ADMIN_ORIGIN).toBe(
+      "https://admin.example.ru",
+    );
+  });
+
+  it("canonicalizes a path-, query- and fragment-carrying URL down to its origin", () => {
+    expect(
+      loadEnv({ ...BASE, ADMIN_ORIGIN: "https://admin.example.ru:8443/app?a=1#x" }).ADMIN_ORIGIN,
+    ).toBe("https://admin.example.ru:8443");
+  });
+
+  it("carries the canonicalized value into both allowlists", () => {
+    // The transform has to reach the lists themselves, not just the parsed
+    // env: these are what `cors` and better-auth actually compare against.
+    const env = loadEnv({ ...BASE, ADMIN_ORIGIN: "https://admin.example.ru/app" });
+    expect(sessionAllowedOrigins(env)).toEqual(["https://admin.example.ru"]);
+    expect(kioskAllowedOrigins(env)).toEqual(["https://admin.example.ru"]);
+  });
+
+  it("still defaults to the dev admin origin when unset", () => {
+    // Zod 4's `.default()` short-circuits — the literal is returned without
+    // being run through the transform — so the default has to be canonical
+    // as written. It is; this pins that it stays so.
+    expect(loadEnv({ ...BASE, ADMIN_ORIGIN: undefined }).ADMIN_ORIGIN).toBe(
+      "http://localhost:5173",
+    );
+  });
+
+  it('rejects a non-HTTP(S) scheme instead of allowlisting the string "null"', () => {
+    expect(() => loadEnv({ ...BASE, ADMIN_ORIGIN: "mailto:ops@example.ru" })).toThrow();
+    expect(() => loadEnv({ ...BASE, ADMIN_ORIGIN: "ftp://admin.example.ru" })).toThrow();
+  });
+});
