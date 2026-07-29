@@ -19,6 +19,7 @@ import { KioskModule } from "./modules/kiosk/kiosk.module";
 import { PickupOrdersModule } from "./modules/pickup-orders/pickup-orders.module";
 import { ConflictsModule } from "./modules/conflicts/conflicts.module";
 import { PickupRejectionsModule } from "./modules/pickup-rejections/pickup-rejections.module";
+import { SsccModule } from "./modules/sscc/sscc.module";
 
 @Module({ controllers: [HealthController] })
 export class AppModule {
@@ -57,6 +58,7 @@ export class AppModule {
         PickupOrdersModule,
         ConflictsModule,
         PickupRejectionsModule,
+        SsccModule,
       ],
       controllers: [HealthController],
     };
