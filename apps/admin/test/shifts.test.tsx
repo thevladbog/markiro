@@ -677,10 +677,17 @@ describe("ShiftsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
     await screen.findByText("Изменить смену");
 
+    // The issuer select defaults to "our own organization", not "none" --
+    // it must read as a real choice with its own identity, not an absence.
+    const ssccIssuerSelect = screen.getByLabelText("Эмитент группового кода");
+    expect(
+      within(ssccIssuerSelect).getByRole("option", { name: "Наша организация" }),
+    ).toBeDefined();
+
     fireEvent.change(screen.getByLabelText("Для контрагента (толлинг)"), {
       target: { value: BUYER.id },
     });
-    fireEvent.change(screen.getByLabelText("Эмитент группового кода"), {
+    fireEvent.change(ssccIssuerSelect, {
       target: { value: BRAND_OWNER.id },
     });
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
