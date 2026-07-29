@@ -110,7 +110,7 @@ describe("loadEnv KIOSK_ORIGIN", () => {
     );
   });
 
-  it("rejects a non-HTTP(S) scheme instead of allowlisting the string \"null\"", () => {
+  it('rejects a non-HTTP(S) scheme instead of allowlisting the string "null"', () => {
     // `z.string().url()` accepts these; `new URL("mailto:a@b").origin` is the
     // literal "null", which is also what a browser sends for a sandboxed or
     // otherwise opaque origin — allowlisting it would trust all of them.
