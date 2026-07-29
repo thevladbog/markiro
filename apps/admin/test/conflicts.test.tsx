@@ -89,7 +89,16 @@ const SHIFT_S1 = {
   createdAt: "2026-07-28T09:00:00.000Z",
 };
 
-const SHIFT_S2 = { ...SHIFT_S1, id: "s2", productName: "Sprite", plannedDate: "2026-07-29" };
+// `createdAt` is overridden, not just `plannedDate`: the server orders shifts by
+// `createdAt` ascending, so a fixture that left both timestamps equal would not
+// actually model the oldest-first order the dropdown has to reverse.
+const SHIFT_S2 = {
+  ...SHIFT_S1,
+  id: "s2",
+  productName: "Sprite",
+  plannedDate: "2026-07-29",
+  createdAt: "2026-07-29T09:00:00.000Z",
+};
 
 function stubFetch(handlers: {
   conflicts?: unknown[];
