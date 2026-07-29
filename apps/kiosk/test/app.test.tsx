@@ -192,6 +192,18 @@ interface FakeServer {
    * `reachable: false`, the device is being ANSWERED.
    */
   revoked: boolean;
+  /**
+   * A GATEWAY IN FRONT OF AN API THAT IS NOT THERE — the Vite dev proxy's 502
+   * with the API stopped, and Caddy's in front of a production deployment
+   * (roadmap plan 08). `null` is a gateway simply passing requests through.
+   *
+   * Deliberately a RESOLVED response rather than a rejected `fetch`, and that is
+   * the whole point of it: `reachable: false` models a dropped connection, which
+   * is the only outage every test here modelled until a live smoke run found the
+   * other one. A gateway ANSWERS, from the wrong machine, and the device read
+   * that answer as proof of an application it had never reached.
+   */
+  gateway: number | null;
   generatedAt: string;
   bootstraps: number;
   orders: CreateOrderDto[];
@@ -227,6 +239,7 @@ beforeEach(() => {
   server = {
     reachable: true,
     revoked: false,
+    gateway: null,
     generatedAt: NOW.toISOString(),
     bootstraps: 0,
     orders: [],
@@ -234,6 +247,10 @@ beforeEach(() => {
   globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (!server.reachable) throw new TypeError("Failed to fetch");
+    // BEFORE the guard, and before any route: a proxy that cannot reach the
+    // application answers on its own behalf, so nothing behind it ever sees the
+    // request — not the device guard, not the order handler.
+    if (server.gateway !== null) return errorResponse(server.gateway, "Bad Gateway");
     // The guard sits in front of every `/kiosk` route but the pairing redeem,
     // so a revoked device is refused before anything looks at the request.
     if (server.revoked) return errorResponse(401, "Unauthorized");
@@ -879,6 +896,70 @@ describe("KioskShell", () => {
       await vi.advanceTimersByTimeAsync(RETRY_MAX_MS);
     });
 
+    await settle(() => expect(screen.getByText("Связь с сервером есть")).toBeDefined());
+    expect(server.orders.map((order) => order.deviceSeq)).toEqual([3]);
+    expect(await listQueue()).toEqual([]);
+  });
+
+  /**
+   * THE SAME LIE, TOLD BY A PROXY — and the one the rule above could not catch.
+   *
+   * Stopping the API in a live smoke run did not produce a dead `fetch` at all.
+   * The Vite dev proxy ANSWERED, `502 Bad Gateway`, and Caddy does the same in
+   * front of a production deployment (roadmap plan 08). So the device had a
+   * `KioskApiError` in its hands, read it as "the server answered", and went on
+   * showing «Связь с сервером есть» while every order queued underneath it.
+   *
+   * A gateway status is the one kind of answer that says the APPLICATION was
+   * never reached, which is exactly what the strip is reporting on. `fetch`
+   * RESOLVES here — that is the whole gap, and no test above had it.
+   */
+  it("stops claiming a connection when a gateway answers for an API it cannot reach", async () => {
+    await pair();
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+    // The boot sync went all the way through to the application, so this is true.
+    expect(screen.getByText("Связь с сервером есть")).toBeDefined();
+
+    // And now the API stops behind a proxy that is perfectly healthy: the link
+    // is up, the request is answered, and nothing on the device is told.
+    server.gateway = 502;
+
+    await takeOneBottle();
+
+    await settle(() => expect(screen.getByText(QUEUED_TITLE)).toBeDefined());
+    expect(screen.getByText(OFFLINE)).toBeDefined();
+    expect(screen.queryByText("Связь с сервером есть")).toBeNull();
+  });
+
+  /**
+   * And the queue behind that gateway must not wait out the refresh tick.
+   *
+   * The backoff is what delivers a worker's order promptly once the API is
+   * back, and it used to arm only for a failure carrying no status at all — so
+   * behind a proxy it never armed, and every queued order sat for up to five
+   * minutes after the outage had ended.
+   *
+   * The clock is advanced by less than a refresh interval on purpose: the ONLY
+   * thing that can deliver this order inside that window is the backoff.
+   */
+  it("arms the backoff behind a gateway, and delivers as soon as the API is back", async () => {
+    await pair();
+    await enqueueOrder(queuedOrder(3), EMPLOYEE.id);
+    server.gateway = 503;
+    // No browser event will help: the Wi-Fi never moved, so `online` never
+    // fires — the commonest shape of this outage and the reason it is silent.
+    setOnLine(false);
+    render(<App />);
+    await settle(() => expect(screen.getByText(OFFLINE)).toBeDefined());
+
+    // The API comes back up behind the same proxy.
+    server.gateway = null;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(RETRY_MAX_MS);
+    });
+
+    expect(RETRY_MAX_MS).toBeLessThan(REFRESH_INTERVAL_MS);
     await settle(() => expect(screen.getByText("Связь с сервером есть")).toBeDefined());
     expect(server.orders.map((order) => order.deviceSeq)).toEqual([3]);
     expect(await listQueue()).toEqual([]);

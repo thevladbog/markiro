@@ -856,6 +856,117 @@ describe("flushQueue backoff", () => {
   });
 
   /**
+   * THE OUTAGE THE BACKOFF USED TO SIT OUT: A GATEWAY.
+   *
+   * Every test above models an outage as a `fetch` that REJECTS, which is what
+   * a dropped connection looks like — and is the only shape any of them had.
+   * An API that is down behind a proxy that is up looks like the opposite: the
+   * request is ANSWERED, `502`, and the drain read that as "the application
+   * replied", armed nothing, and left a worker's order in the queue until the
+   * five-minute refresh tick. A live smoke run found it; nothing here could.
+   *
+   * Driven through the REAL client over a stubbed `fetch` that RESOLVES,
+   * because the status has to survive the trip through `fetchJson` for any of
+   * this to mean anything.
+   */
+  describe("behind a gateway that cannot reach the API", () => {
+    /** A proxy answering `statusNow()`, or passing the request through to an
+     * application that accepts it when that answer is `null`. */
+    function gatewayClient(statusNow: () => number | null) {
+      const at: number[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => {
+          at.push(Date.now());
+          const status = statusNow();
+          return status === null
+            ? ({
+                ok: true,
+                status: 201,
+                json: async () => ({
+                  orderNo: "ORD-26-0001",
+                  status: "pending",
+                  itemCount: 0,
+                  conflicts: [],
+                }),
+              } as Response)
+            : ({
+                ok: false,
+                status,
+                statusText: "Bad Gateway",
+                json: async () => ({ message: "no upstream available" }),
+              } as Response);
+        }),
+      );
+      return { at, client: createKioskClient({ token: "tok", serverUrl: "http://srv" }) };
+    }
+
+    it.each([502, 503, 504])("arms the backoff when the gateway answers %i", async (status) => {
+      useSyncFakeTimers();
+      queueOf(1);
+      const gateway = gatewayClient(() => status);
+
+      await flushQueue(gateway.client, () => new Date());
+
+      // Armed, and armed at the base — this is a fresh outage, not a struggling
+      // application asking to be left alone.
+      expect(vi.getTimerCount()).toBe(1);
+      await vi.advanceTimersByTimeAsync(RETRY_BASE_MS);
+      expect(gateway.at).toHaveLength(2);
+    });
+
+    it("resets the wait once the API returns from behind the gateway", async () => {
+      useSyncFakeTimers();
+      queueOf(1);
+      let down = true;
+      const gateway = gatewayClient(() => (down ? 502 : null));
+
+      await flushQueue(gateway.client, () => new Date());
+      await vi.advanceTimersByTimeAsync(1_000); // second attempt
+      await vi.advanceTimersByTimeAsync(2_000); // third — the wait is now 4 s
+      expect(gateway.at).toHaveLength(3);
+
+      // The application comes back up behind the same proxy.
+      down = false;
+      await vi.advanceTimersByTimeAsync(4_000);
+      expect(gateway.at).toHaveLength(4);
+      // Delivered, so nothing is owed and nothing is armed.
+      expect(vi.getTimerCount()).toBe(0);
+
+      // And the next outage starts from the base rather than resuming at the
+      // 8 s this one had climbed to.
+      down = true;
+      await flushQueue(gateway.client, () => new Date());
+      await vi.advanceTimersByTimeAsync(RETRY_BASE_MS - 1);
+      expect(gateway.at).toHaveLength(5);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(gateway.at).toHaveLength(6);
+    });
+
+    /**
+     * A 504 IS THE ONE THAT MAY ALREADY HAVE BEEN FILED — the gateway gave up
+     * waiting on an upstream that was answering it, not on one that was absent
+     * — so it is the same shape as `KioskTimeoutError`: no verdict on the
+     * order, and a replay that is safe only because the server is idempotent on
+     * `(tenantId, kioskId, deviceSeq)`. What it must never be is a verdict.
+     */
+    it.each([502, 503, 504])(
+      "never quarantines on a %i — a gateway judges nothing",
+      async (status) => {
+        useSyncFakeTimers();
+        const quarantined = vi.spyOn(queueStore, "quarantineOrder").mockResolvedValue(undefined);
+        queueOf(1);
+        const gateway = gatewayClient(() => status);
+
+        await flushQueue(gateway.client, () => new Date());
+
+        expect(quarantined).not.toHaveBeenCalled();
+        expect(queueStore.dequeueOrder).not.toHaveBeenCalled();
+      },
+    );
+  });
+
+  /**
    * NO TIMER MAY OUTLIVE THE SHELL. The retry holds the client the shell built,
    * and that client records the reply for the order `submitCart` is awaiting —
    * so a retry left armed past an unmount fires into a React tree that is gone.
@@ -921,7 +1032,7 @@ describe("isTerminalRejection", () => {
    * proxy that has lost the route — a kiosk pointed at the wrong host would
    * otherwise quarantine every order it ever took while the network is fine.
    */
-  it.each([401, 403, 404, 408, 429, 500, 503])("keeps %i retryable", (status) => {
+  it.each([401, 403, 404, 408, 429, 500, 502, 503, 504])("keeps %i retryable", (status) => {
     expect(isTerminalRejection(new KioskApiError(status, "refused"))).toBe(false);
   });
 

@@ -8,7 +8,7 @@ import { nextKioskView } from "../App.js";
 import {
   createKioskClient,
   isDeviceRevoked,
-  KioskApiError,
+  isUnreachable,
   type KioskClient,
 } from "../api/client.js";
 import type { CreateOrderDto, CreateOrderResultDto } from "../api/types.js";
@@ -235,13 +235,20 @@ export function KioskShell(): React.JSX.Element {
           // truth, so nothing was lost, but the strip is what a passing
           // administrator reads.
           //
-          // A STATUS IS NOT AN OUTAGE. `KioskApiError` means the server
-          // answered — 400, 500, even the 401 of a revoked device — so the link
-          // is demonstrably fine and saying otherwise would send an
-          // administrator after the network for a server-side problem. Only a
-          // failure carrying no answer at all (a dead `fetch`, an expired
-          // deadline) is «нет связи».
-          if (!(err instanceof KioskApiError)) setOnline(false);
+          // THE APPLICATION'S OWN STATUS IS NOT AN OUTAGE. 400, 500, even the
+          // 401 of a revoked device mean a handler ran, so the link is
+          // demonstrably fine and saying otherwise would send an administrator
+          // after the network for a server-side problem.
+          //
+          // A GATEWAY'S STATUS IS ONE, and that is the half this got wrong
+          // until a second smoke run: stop the API behind a proxy that is still
+          // up and the answer is `502`, not a dead `fetch` — so this read a
+          // `KioskApiError` and went on asserting «Связь с сервером есть» about
+          // an application nothing had reached. `isUnreachable` is the one
+          // place that distinction is drawn; the drain's backoff reads the same
+          // predicate, so the strip and the retry can never disagree about
+          // whether this device is talking to anything.
+          if (isUnreachable(err)) setOnline(false);
           throw err;
         }
       },

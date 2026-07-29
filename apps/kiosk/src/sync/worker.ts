@@ -1,4 +1,4 @@
-import { KioskApiError, type KioskClient } from "../api/client.js";
+import { isUnreachable, KioskApiError, type KioskClient } from "../api/client.js";
 import {
   assertMeasurableGeneratedAt,
   replaceSnapshot,
@@ -466,8 +466,10 @@ async function drainOnce(client: KioskClient, now: () => Date): Promise<void> {
   /** The server answered at least once in this pass — so the link works, and
    * whatever the backoff had climbed to describes an outage that is over. */
   let delivered = false;
-  /** This pass stopped on a failure carrying NO answer at all: the only kind a
-   * fast retry can fix, and the only kind that arms one. */
+  /** This pass stopped on a failure that never reached the APPLICATION — no
+   * answer at all, or a gateway answering for an upstream it could not talk to
+   * (`isUnreachable`). The only kind a fast retry can fix, and the only kind
+   * that arms one. */
   let unreachable = false;
   try {
     const queued = await listQueue(); // ascending deviceSeq
@@ -510,17 +512,24 @@ async function drainOnce(client: KioskClient, now: () => Date): Promise<void> {
         if (isTerminalRejection(err) && (await quarantine(order, err as KioskApiError, now))) {
           continue;
         }
-        // A STATUS IS AN ANSWER, AND AN ANSWER IS NOT AN OUTAGE. The backoff is
-        // for a link that carried nothing — a dead network, a deadline that
-        // expired — because that is the only failure a fast retry can fix. A
-        // 500 or a 429 has been reached, and hammering a struggling server
-        // every second is the opposite of back-pressure; a 401 is a revoked
-        // device, which the shell answers by returning to pairing and which no
-        // retry can repair. Those wait for the ordinary refresh tick, as they
-        // always did. And a failure raised AFTER the submit resolved is the
-        // journal's store, not the wire — the order is owed, but the network is
+        // AN ANSWER FROM THE APPLICATION IS NOT AN OUTAGE — BUT AN ANSWER FROM
+        // A GATEWAY IS. The backoff is for a link that carried nothing to the
+        // API, because that is the only failure a fast retry can fix. A 500 or
+        // a 429 has been reached, and hammering a struggling server every
+        // second is the opposite of back-pressure; a 401 is a revoked device,
+        // which the shell answers by returning to pairing and which no retry
+        // can repair. Those wait for the ordinary refresh tick, as they always
+        // did.
+        //
+        // A 502/503/504 is neither: the proxy is answering for an application
+        // it could not reach (`isUnreachable`), so the queue is stalled by an
+        // outage after all and used to wait out the full five-minute tick
+        // before trying again — the whole reason the backoff exists.
+        //
+        // And a failure raised AFTER the submit resolved is the journal's
+        // store, not the wire — the order is owed, but the network is
         // demonstrably fine.
-        unreachable = !answered && !(err instanceof KioskApiError);
+        unreachable = !answered && isUnreachable(err);
         // Offline, rejected, or the journal write failed — either way this
         // order is still owed. Stop here so the next drain retries it in place.
         return;

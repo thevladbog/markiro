@@ -3,6 +3,7 @@ import {
   BOOTSTRAP_TIMEOUT_MS,
   createKioskClient,
   isDeviceRevoked,
+  isUnreachable,
   KioskApiError,
   KioskTimeoutError,
   pairKiosk,
@@ -210,6 +211,59 @@ describe("request deadlines", () => {
   it("tolerates a slow bootstrap more than a slow submit, and both less than one refresh", () => {
     expect(SUBMIT_TIMEOUT_MS).toBeLessThan(BOOTSTRAP_TIMEOUT_MS);
     expect(BOOTSTRAP_TIMEOUT_MS).toBeLessThan(REFRESH_INTERVAL_MS / 2);
+  });
+});
+
+/**
+ * WHAT "REACHED THE SERVER" ACTUALLY MEANS, and the distinction a live smoke
+ * run showed the app had never drawn.
+ *
+ * Stopping the API produced no transport failure at all: the proxy in front of
+ * it answered `502 Bad Gateway`. The device therefore held a `KioskApiError`,
+ * which everything downstream read as "the application answered" — so the
+ * status strip went on asserting a link and the drain's backoff never armed.
+ *
+ * `502`/`503`/`504` are the statuses a GATEWAY raises about an upstream it
+ * could not reach; every other status is the application's own verdict on the
+ * request and keeps meaning exactly what it did.
+ */
+describe("isUnreachable", () => {
+  it.each([502, 503, 504])(
+    "reads a gateway's %i as never having reached the application",
+    async (status) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => jsonResponse(status, { message: "no upstream available" })),
+      );
+
+      const err = await createKioskClient({ token: "tok", serverUrl: "http://srv" })
+        .submitOrder({ deviceSeq: 1, badgeDigest: "B", reason: "buy", items: [] })
+        .catch((caught: unknown) => caught);
+
+      // Still the server's verdict as far as the transport is concerned — the
+      // status is not swallowed, only read for what it says about the upstream.
+      expect(err).toBeInstanceOf(KioskApiError);
+      expect(isUnreachable(err)).toBe(true);
+      // And never a revocation: a gateway holds no opinion about this device.
+      expect(isDeviceRevoked(err)).toBe(false);
+    },
+  );
+
+  /**
+   * The statuses the application itself produces, INCLUDING a genuine 500. A
+   * handler that threw has been reached, and telling a worker «нет связи» about
+   * a server-side bug would send an administrator after a network that is fine.
+   */
+  it.each([400, 401, 404, 409, 422, 429, 500])(
+    "reads %i as the application's own answer",
+    (status) => {
+      expect(isUnreachable(new KioskApiError(status, "answered"))).toBe(false);
+    },
+  );
+
+  it("reads a failure carrying no answer at all as never having reached anything", () => {
+    expect(isUnreachable(new TypeError("Failed to fetch"))).toBe(true);
+    expect(isUnreachable(new KioskTimeoutError(SUBMIT_TIMEOUT_MS))).toBe(true);
   });
 });
 
