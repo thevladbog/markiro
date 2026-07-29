@@ -12,7 +12,18 @@ import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { signUpAndActivate } from "./support/auth";
 
-describe("candidates", () => {
+const ready = Boolean(
+  process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
+);
+
+// `integration_candidates`/`products` both carry a `tenant_id ->
+// organization.id` FK, so this suite can't be exercised against a made-up
+// tenant id -- the very first insert would fail the foreign key. `loadEnv()`
+// in `beforeAll` also throws outright without DATABASE_URL/BETTER_AUTH_* set,
+// so without this guard the suite fails instead of skipping when the
+// environment isn't there -- mirrors `integration-journal.e2e.test.ts` and
+// every other e2e suite in this directory.
+describe.skipIf(!ready)("candidates", () => {
   let app: INestApplication | undefined;
   let agent: ReturnType<typeof request.agent>;
   let db: Db;

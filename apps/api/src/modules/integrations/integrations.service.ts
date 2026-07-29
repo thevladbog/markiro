@@ -28,6 +28,17 @@ import { JournalService } from "./journal.service";
  */
 const ISSUE_ATTEMPTS = 5;
 
+/**
+ * Page size for `readJournal`. Sessions and orphan events are fetched from
+ * two separate queries (real sessions vs. session-less events, see
+ * `readJournal` below) and each is capped at this same limit -- but the two
+ * are then merged into one combined, re-sorted feed. Without re-slicing
+ * AFTER the merge, the route could return up to twice this many records
+ * (50 sessions + 50 orphan events) instead of one page of this size; the
+ * cap has to apply to the merged result, not to each source independently.
+ */
+const JOURNAL_PAGE_SIZE = 50;
+
 @Injectable()
 export class IntegrationsService {
   constructor(
@@ -169,7 +180,7 @@ export class IntegrationsService {
         ),
       )
       .orderBy(desc(schema.integrationSessions.startedAt))
-      .limit(50);
+      .limit(JOURNAL_PAGE_SIZE);
 
     const events = sessions.length
       ? await this.db
@@ -202,7 +213,7 @@ export class IntegrationsService {
         ),
       )
       .orderBy(desc(schema.integrationEvents.at))
-      .limit(50);
+      .limit(JOURNAL_PAGE_SIZE);
 
     type SessionLike = {
       id: string;
@@ -245,8 +256,14 @@ export class IntegrationsService {
       ...merged.filter((s) => s.outcome !== "error"),
     ];
 
+    // Re-slice AFTER merging both sources (see JOURNAL_PAGE_SIZE above):
+    // each query above is already capped at JOURNAL_PAGE_SIZE on its own, but
+    // `ordered` combines both, so without this the route could hand back up
+    // to twice one page.
+    const page = ordered.slice(0, JOURNAL_PAGE_SIZE);
+
     return {
-      sessions: ordered.map((s) => ({
+      sessions: page.map((s) => ({
         id: s.id,
         startedAt: s.startedAt.toISOString(),
         finishedAt: s.finishedAt?.toISOString() ?? null,
@@ -323,7 +340,12 @@ export class IntegrationsService {
    * Проставляет `external_ref` товару из позиции очереди и убирает саму
    * позицию: она разрешена, очереди в ней больше нет места (бриф Task 10).
    * Товар с уже проставленным `external_ref` — 409: молча перезаписать связь
-   * значит увести цены другого товара на этот.
+   * значит увести цены другого товара на этот. Проверка "ещё не связан" и
+   * само связывание — один атомарный `UPDATE ... WHERE external_ref IS
+   * NULL` внутри транзакции (см. комментарий там), а не отдельный select
+   * до неё: `products.external_ref` не под уникальным индексом, так что
+   * только атомарность самого запроса, не порядок операторов, не даёт двум
+   * одновременным вызовам связать разных кандидатов с одним товаром.
    */
   async linkCandidate(
     tenantId: string,
@@ -346,19 +368,40 @@ export class IntegrationsService {
     if (!candidate) throw new NotFoundException("Unknown candidate");
 
     const [product] = await this.db
-      .select({ id: schema.products.id, externalRef: schema.products.externalRef })
+      .select({ id: schema.products.id })
       .from(schema.products)
       .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.id, productId)));
     if (!product) throw new NotFoundException("Unknown product");
-    if (product.externalRef !== null) {
-      throw new ConflictException("Product is already linked to an external item");
-    }
 
     await this.db.transaction(async (tx) => {
-      await tx
+      // Conditional, atomic UPDATE ... WHERE external_ref IS NULL, not a
+      // read-then-write: `products.external_ref` carries no unique index, so
+      // a plain "read externalRef, then UPDATE if it was null" (the previous
+      // shape) lets two concurrent linkCandidate calls both read `null`
+      // before either writes. Both would then pass the check, both delete
+      // their own candidate row in this same transaction, and only the last
+      // UPDATE's value survives on the product -- a silent overwrite of the
+      // other candidate's link, exactly what this 409 exists to prevent (a
+      // queue worked by two people hits this, not just in theory). Folding
+      // the "is it still unlinked" check into the UPDATE's WHERE clause makes
+      // it one statement Postgres cannot interleave: whichever transaction's
+      // UPDATE commits first wins the row, and the second's UPDATE matches
+      // zero rows instead of silently clobbering the first.
+      const [updated] = await tx
         .update(schema.products)
         .set({ externalRef: candidate.externalRef })
-        .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.id, productId)));
+        .where(
+          and(
+            eq(schema.products.tenantId, tenantId),
+            eq(schema.products.id, productId),
+            isNull(schema.products.externalRef),
+          ),
+        )
+        .returning({ id: schema.products.id });
+      if (!updated) {
+        throw new ConflictException("Product is already linked to an external item");
+      }
+
       await tx
         .delete(schema.integrationCandidates)
         .where(
@@ -420,6 +463,14 @@ export class IntegrationsService {
    * `products.external_ref` не хранит, через какой канал он был проставлен,
    * а сегодня единственный канал, который вообще умеет его проставлять, —
    * `commerceml`.
+   *
+   * 409, если `external_ref` уже пуст: рвать нечего. Без этой проверки
+   * update — пустой no-op, но событие журнала «Связь ... разорвана вручную»
+   * пишется всё равно, и через недели именно оно отвечает на вопрос «почему
+   * товар перестал получать цены» — неправдой, потому что связи не было и
+   * разрывать было нечего. Отказ вместо тихого no-op, а не просто пропуск
+   * записи журнала: так вызывающая сторона (и экран очереди) тоже видит
+   * разницу между «уже не связан» и «только что разорвали».
    */
   async unlinkProduct(tenantId: string, productId: string): Promise<void> {
     const [product] = await this.db
@@ -428,10 +479,20 @@ export class IntegrationsService {
       .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.id, productId)));
     if (!product) throw new NotFoundException("Unknown product");
 
-    await this.db
+    const [updated] = await this.db
       .update(schema.products)
       .set({ externalRef: null })
-      .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.id, productId)));
+      .where(
+        and(
+          eq(schema.products.tenantId, tenantId),
+          eq(schema.products.id, productId),
+          isNotNull(schema.products.externalRef),
+        ),
+      )
+      .returning({ id: schema.products.id });
+    if (!updated) {
+      throw new ConflictException("Product has no external link to remove");
+    }
 
     await this.journal.append({
       tenantId,
@@ -452,20 +513,34 @@ function normalizeForMatch(value: string): string {
 
 /**
  * Подсказка `suggestedProductId` для одной позиции очереди: сравнивает
- * нормализованное имя (и, если есть, артикул) кандидата с нормализованным
- * именем каждого ещё не связанного товара. Возвращает id, только если
- * ровно ОДИН товар совпал — двусмысленная подсказка хуже отсутствующей,
- * её примут не глядя (бриф Task 10).
+ * нормализованное имя кандидата с нормализованным именем каждого ещё не
+ * связанного товара. Возвращает id, только если ровно ОДИН товар совпал —
+ * двусмысленная подсказка хуже отсутствующей, её примут не глядя (бриф
+ * Task 10).
+ *
+ * Кандидатов артикул (`candidate.article`) НЕ участвует в сравнении: у
+ * `products` (packages/db/src/schema/platform.ts) нет ни артикула, ни SKU —
+ * сравнивать артикул попросту не с чем. Раньше он подмешивался в тот же
+ * набор ключей, что и имя, и сравнивался с ИМЕНЕМ товара — это было хуже,
+ * чем бесполезно: артикул кандидата, случайно совпавший по буквам с
+ * названием постороннего товара B, либо гасил верную подсказку по товару A
+ * (стало два совпадения вместо одного), либо, если имя вообще ни с чем не
+ * совпадало, выдавал B как единственную "однозначную" подсказку — уверенно
+ * неверный товар. Принятие такой подсказки увело бы цены на чужой товар,
+ * то есть ровно тот вред, от которого защищает 409 в linkCandidate, только
+ * в обход него. Когда у товара появится собственное поле артикула —
+ * сравнивать артикул с артикулом и имя с именем раздельно (каждое как
+ * самостоятельный критерий совпадения), а не сваливать оба в один набор
+ * ключей, как было здесь.
  */
 function suggestProductId(
-  candidate: { name: string; article: string | null },
+  candidate: { name: string },
   products: { id: string; name: string }[],
 ): string | null {
-  const keys = [normalizeForMatch(candidate.name)];
-  if (candidate.article) keys.push(normalizeForMatch(candidate.article));
+  const key = normalizeForMatch(candidate.name);
 
   const matches = new Set(
-    products.filter((product) => keys.includes(normalizeForMatch(product.name))).map((p) => p.id),
+    products.filter((product) => normalizeForMatch(product.name) === key).map((p) => p.id),
   );
   return matches.size === 1 ? [...matches][0]! : null;
 }
