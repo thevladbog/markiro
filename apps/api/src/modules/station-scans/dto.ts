@@ -21,6 +21,12 @@ const scanItemSchema = z.object({
       serial: z.string().min(1),
     })
     .nullable(),
+  // A null boxId is an ordinary scan not assigned to any box (06c's boxing
+  // is per-item, not a batch-wide setting).
+  boxId: z.string().min(1).max(64).nullable(),
+  // Per scan, not per batch: a drained batch can span a handover, and a
+  // per-batch attribution would credit one operator with another's work.
+  operatorId: z.string().uuid().toLowerCase().nullable(),
 });
 
 export const syncBatchSchema = z.object({
@@ -38,6 +44,22 @@ export const syncBatchSchema = z.object({
   // Bounded so a buggy or hostile device cannot submit an unbounded payload;
   // the station's own batch size is 200.
   items: z.array(scanItemSchema).max(500),
+  // Box closures carried by this batch. Independent of `items`: a box can
+  // close well after its last item was drained, in a batch carrying no
+  // items at all -- the drain is sequential, so the box row it refers to
+  // (created by an earlier item's arrival, see boxes' schema comment)
+  // already exists by the time its closure gets here.
+  boxes: z
+    .array(
+      z.object({
+        boxId: z.string().min(1).max(64),
+        sscc: z.string().length(18),
+        closedAt: z.string().datetime(),
+        operatorId: z.string().uuid().toLowerCase().nullable(),
+      }),
+    )
+    .max(50)
+    .default([]),
 });
 
 export type ScanItemDto = z.infer<typeof scanItemSchema>;

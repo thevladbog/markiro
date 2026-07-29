@@ -387,6 +387,83 @@ describe.skipIf(!ready)("sscc e2e", () => {
           and(eq(schema.ssccBlocks.tenantId, tenantId), eq(schema.ssccBlocks.deviceId, deviceId)),
         );
       expect(rows).toHaveLength(2);
+
+      // Task 10 fix: recordConsumedSerial's covering-range predicates
+      // (fromSerial <= serial <= toSerial) must scope the UPDATE to the
+      // block that actually covers the serial. Every OTHER test in this
+      // describe block uses a device holding exactly one block, so dropping
+      // those predicates would be undetectable there -- this fixture
+      // already holds two (the exhausted `first` and the fresh `next`), so
+      // recording a serial from the SECOND block must leave the FIRST
+      // block's cursor untouched rather than pushing it past a serial it
+      // never actually issued.
+      await svc.recordConsumedSerial(tenantId, buildSscc(0, prefix, next.fromSerial));
+      const afterRows = await db
+        .select()
+        .from(schema.ssccBlocks)
+        .where(
+          and(eq(schema.ssccBlocks.tenantId, tenantId), eq(schema.ssccBlocks.deviceId, deviceId)),
+        )
+        .orderBy(schema.ssccBlocks.fromSerial);
+      expect(afterRows).toHaveLength(2);
+      expect(afterRows[0]!.fromSerial).toBe(first.fromSerial);
+      expect(afterRows[0]!.consumedThroughSerial).toBe(first.toSerial);
+      expect(afterRows[1]!.fromSerial).toBe(next.fromSerial);
+      expect(afterRows[1]!.consumedThroughSerial).toBe(next.fromSerial);
+    });
+
+    it("starts the remainder one serial past a consumed fromSerial of 0 (Task 10 fix)", async () => {
+      const svc = app!.get(SsccService);
+      // A brand-new prefix, never allocated under before in this file, so
+      // this device's very first block starts at serial 0 -- the one value
+      // where "== null" (correct) and a falsy check (the regression this
+      // guards) diverge: 0 is falsy but not null/undefined.
+      const prefix = "700000005";
+      const deviceId = await registerDevice("Remainder device D");
+
+      const first = await svc.allocateForBundle(tenantId, prefix, 0, deviceId, 20);
+      expect(first.fromSerial).toBe(0);
+
+      await svc.recordConsumedSerial(tenantId, buildSscc(0, prefix, first.fromSerial));
+
+      const remainder = await svc.allocateForBundle(tenantId, prefix, 0, deviceId, 20);
+      expect(remainder.fromSerial).toBe(first.fromSerial + 1);
+      expect(remainder.toSerial).toBe(first.toSerial);
+
+      // Still the SAME block -- a falsy-check regression would ALSO have
+      // treated `consumedThroughSerial: 0` as "nothing consumed yet" and
+      // handed back fromSerial itself (not fromSerial + 1) rather than
+      // being uncovered as a fresh-block miscut; assert the row count stays
+      // 1 as an extra guard against that alternate failure shape.
+      const rows = await db
+        .select()
+        .from(schema.ssccBlocks)
+        .where(
+          and(eq(schema.ssccBlocks.tenantId, tenantId), eq(schema.ssccBlocks.deviceId, deviceId)),
+        );
+      expect(rows).toHaveLength(1);
+    });
+
+    it("cuts a fresh block instead of an inverted range if consumedThroughSerial ever exceeds toSerial (Task 10 fix)", async () => {
+      const svc = app!.get(SsccService);
+      const prefix = "700000006";
+      const deviceId = await registerDevice("Remainder device E");
+
+      const first = await svc.allocateForBundle(tenantId, prefix, 0, deviceId, 5);
+      // recordConsumedSerial's own covering-range predicates can never
+      // produce this -- it is a defensive scenario, simulated directly here
+      // -- but allocateForBundle must not read "!== toSerial" as "still has
+      // room" and hand back an inverted (fromSerial > toSerial) range.
+      await db
+        .update(schema.ssccBlocks)
+        .set({ consumedThroughSerial: first.toSerial + 1 })
+        .where(
+          and(eq(schema.ssccBlocks.tenantId, tenantId), eq(schema.ssccBlocks.deviceId, deviceId)),
+        );
+
+      const next = await svc.allocateForBundle(tenantId, prefix, 0, deviceId, 5);
+      expect(next.fromSerial).toBe(first.toSerial + 1);
+      expect(next.toSerial).toBeGreaterThanOrEqual(next.fromSerial);
     });
   });
 });

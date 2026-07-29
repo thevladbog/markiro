@@ -83,6 +83,8 @@ describe.skipIf(!ready)("conflicts e2e", () => {
       verdict: "ok",
       scannedAt: `2026-07-28T10:00:0${n}.000Z`,
       code: { codeHash: `h${n}`.padEnd(64, "0"), gtin14: VALID_GTIN14, serial: `S${n}` },
+      boxId: null,
+      operatorId: null,
       ...overrides,
     };
   }

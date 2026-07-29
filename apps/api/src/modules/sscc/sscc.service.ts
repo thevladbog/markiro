@@ -201,7 +201,18 @@ export class SsccService {
       .orderBy(desc(schema.ssccBlocks.issuedAt))
       .limit(1);
 
-    if (existing && existing.consumedThroughSerial !== existing.toSerial) {
+    // "< toSerial" (i.e. exhausted is ">=", not "==="): consumedThroughSerial
+    // can never legitimately exceed toSerial -- recordConsumedSerial's own
+    // covering-range predicates forbid it -- but if it somehow did (a
+    // defensive concern, not an expected path), the old "!== toSerial" test
+    // would still read that as "not yet fully consumed" and hand back an
+    // INVERTED, empty range (fromSerial > toSerial) as though it were
+    // usable, rather than recognising the block as exhausted and cutting a
+    // fresh one.
+    if (
+      existing &&
+      (existing.consumedThroughSerial == null || existing.consumedThroughSerial < existing.toSerial)
+    ) {
       return {
         issuerPrefix: existing.issuerPrefix,
         extensionDigit: existing.extensionDigit,
@@ -236,12 +247,22 @@ export class SsccService {
    * `boxes.sscc` should never carry such a value given `buildSscc` is the
    * only thing that produces one, but this method has no reason to blow up
    * ingest over a value it can't attribute to a block.
+   *
+   * `executor` defaults to `this.db` but accepts a transaction handle too
+   * (loosely typed, same as `PickupOrdersService.recordScanRejection`, so
+   * both satisfy it): station-scans.service.ts's ingest MUST call this in
+   * the SAME transaction as the box closure it derives the SSCC from, or a
+   * rollback of one would leave the other applied.
    */
-  async recordConsumedSerial(tenantId: string, sscc: string): Promise<void> {
+  async recordConsumedSerial(
+    tenantId: string,
+    sscc: string,
+    executor: Pick<Db, "update"> = this.db,
+  ): Promise<void> {
     const parsed = parseSscc(sscc, ISSUER_PREFIX_LENGTH);
     if (!parsed) return;
 
-    await this.db
+    await executor
       .update(schema.ssccBlocks)
       .set({
         consumedThroughSerial: sql`GREATEST(COALESCE(${schema.ssccBlocks.consumedThroughSerial}, -1), ${parsed.serial})`,
