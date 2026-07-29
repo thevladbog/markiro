@@ -766,7 +766,52 @@
     "integrations": {
       "title": "Integrations",
       "emptyTitle": "No channels configured",
-      "emptyHint": "Data-exchange channels with outside systems will appear here: 1C, GIS MT, Chestny ZNAK."
+      "emptyHint": "Data-exchange channels with outside systems will appear here: 1C, GIS MT, Chestny ZNAK.",
+      "channel": {
+        "backAction": "Back to integrations",
+        "loadError": "Could not load the channel. Refresh the page.",
+        "neverEvent": "No events yet",
+        "settings": {
+          "title": "Settings",
+          "priceTypeLabel": "Price type",
+          "priceTypeHint": "Which 1C price type fills the product price. Empty — decided by the file.",
+          "splitWriteoffDocumentLabel": "Split off a separate write-off document",
+          "saveAction": "Save",
+          "saveSuccess": "Settings saved",
+          "saveError": "Could not save the settings",
+          "noSettings": "This channel has no settings"
+        },
+        "credentials": {
+          "title": "Exchange credentials",
+          "notIssued": "Not issued yet",
+          "loginValue": "Login: {{login}}",
+          "issueAction": "Issue",
+          "issueSuccess": "Credentials issued",
+          "issueError": "Could not issue credentials",
+          "issuedTitle": "Exchange secret",
+          "issuedLogin": "Login: {{login}}",
+          "issuedSecret": "Secret: {{secret}}",
+          "issuedWarning": "It will not be shown again — save it now."
+        },
+        "journal": {
+          "title": "Journal",
+          "emptyTitle": "No exchanges yet",
+          "emptyHint": "The exchange history will appear here after the first session.",
+          "loadError": "Could not load the journal. Refresh the page.",
+          "detailsSummary": "Response sent into the exchange protocol",
+          "outcome": {
+            "ok": "OK",
+            "warn": "Has warnings",
+            "error": "Error",
+            "unknown": "Not finished"
+          },
+          "direction": {
+            "in": "Inbound",
+            "out": "Outbound",
+            "local": "Cabinet action"
+          }
+        }
+      }
     },
     "settings": {
       "title": "Settings",

@@ -9,6 +9,7 @@ import { ConflictsPage } from "./pages/conflicts/index.js";
 import { CounterpartiesPage } from "./pages/counterparties/index.js";
 import { DashboardPage } from "./pages/dashboard/index.js";
 import { EmployeesPage } from "./pages/employees/index.js";
+import { ChannelPage } from "./pages/integrations/ChannelPage.js";
 import { IntegrationsPage } from "./pages/integrations/index.js";
 import { KiosksPage } from "./pages/kiosks/index.js";
 import { LabelEditorPage } from "./pages/labels/editor/index.js";
@@ -46,6 +47,7 @@ export function App() {
           <Route path="employees" element={<EmployeesPage />} />
           <Route path="kiosks" element={<KiosksPage />} />
           <Route path="integrations" element={<IntegrationsPage />} />
+          <Route path="integrations/:type" element={<ChannelPage />} />
           <Route path="labels" element={<LabelTemplatesPage />} />
           <Route path="labels/new" element={<LabelEditorPage />} />
           <Route path="labels/:id" element={<LabelEditorPage />} />

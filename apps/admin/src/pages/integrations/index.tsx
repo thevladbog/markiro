@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router";
 
 import { Alert, Card, EmptyState, PageHeader, Spinner, StatusChip } from "@markiro/ui";
 import type { StatusChipStatus } from "@markiro/ui";
@@ -76,40 +77,61 @@ function formatRelativeTime(iso: string, locale: string, now: number): string {
  * are drawn identically regardless of kind; that uniformity is what lets
  * the section grow". An unavailable channel renders through this same
  * component, just with no `lastEventAt` to show.
+ *
+ * Task 13 gives every OTHER card a primary action: opening its channel page
+ * (`/integrations/:type`, header/settings/journal). An `unavailable` channel
+ * stays unlinked -- brief 08's "an unavailable channel is drawn like the
+ * rest... with no actions" -- opening it would land on a page with nothing
+ * real to configure yet.
  */
 function ChannelCard({ channel }: { channel: ChannelSummaryDto }) {
   const { t, i18n } = useTranslation();
 
-  return (
-    <Card>
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 12,
-          }}
-        >
-          <span style={{ font: "600 15px/20px var(--font-ui)", color: "var(--fg-1)" }}>
-            {t(channel.labelKey)}
-          </span>
-          <StatusChip
-            status={STATE_STATUS[channel.state]}
-            label={t(`integrations.state.${channel.state}`)}
-          />
-        </div>
-        <span style={{ font: "400 13px/18px var(--font-ui)", color: "var(--fg-3)" }}>
-          {t(channelDescriptionKey(channel.labelKey))}
+  const body = (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+        }}
+      >
+        <span style={{ font: "600 15px/20px var(--font-ui)", color: "var(--fg-1)" }}>
+          {t(channel.labelKey)}
         </span>
-        {channel.lastEventAt && (
-          <span style={{ font: "400 13px/18px var(--font-ui)", color: "var(--fg-3)" }}>
-            {t("integrations.lastEvent", {
-              time: formatRelativeTime(channel.lastEventAt, i18n.language, Date.now()),
-            })}
-          </span>
-        )}
+        <StatusChip
+          status={STATE_STATUS[channel.state]}
+          label={t(`integrations.state.${channel.state}`)}
+        />
       </div>
+      <span style={{ font: "400 13px/18px var(--font-ui)", color: "var(--fg-3)" }}>
+        {t(channelDescriptionKey(channel.labelKey))}
+      </span>
+      {channel.lastEventAt && (
+        <span style={{ font: "400 13px/18px var(--font-ui)", color: "var(--fg-3)" }}>
+          {t("integrations.lastEvent", {
+            time: formatRelativeTime(channel.lastEventAt, i18n.language, Date.now()),
+          })}
+        </span>
+      )}
+    </div>
+  );
+
+  if (channel.state === "unavailable") {
+    return <Card>{body}</Card>;
+  }
+
+  return (
+    // `padding={0}`: `Card`'s own body padding moves onto the `Link` below
+    // so the whole card -- not just its text -- is the click target.
+    <Card padding={0}>
+      <Link
+        to={`/integrations/${channel.type}`}
+        style={{ display: "block", padding: 20, textDecoration: "none", color: "inherit" }}
+      >
+        {body}
+      </Link>
     </Card>
   );
 }

@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { IntegrationsPage } from "../src/pages/integrations/index.js";
@@ -19,9 +20,15 @@ function renderPage() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+  // `ChannelCard` (Task 13) now links each available card to its channel
+  // page via `react-router`'s `Link`, which throws without a Router
+  // ancestor -- `MemoryRouter` supplies one; nothing here navigates, so no
+  // `Routes`/`Route` is needed.
   return render(
     <QueryClientProvider client={queryClient}>
-      <IntegrationsPage />
+      <MemoryRouter>
+        <IntegrationsPage />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
