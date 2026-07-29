@@ -27,7 +27,7 @@ CREATE TABLE "boxes" (
 CREATE TABLE "sscc_blocks" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tenant_id" text NOT NULL,
-	"issuer_gln" char(13) NOT NULL,
+	"issuer_prefix" char(9) NOT NULL,
 	"extension_digit" integer NOT NULL,
 	"device_id" uuid NOT NULL,
 	"from_serial" bigint NOT NULL,
@@ -37,11 +37,11 @@ CREATE TABLE "sscc_blocks" (
 --> statement-breakpoint
 CREATE TABLE "sscc_counters" (
 	"tenant_id" text NOT NULL,
-	"issuer_gln" char(13) NOT NULL,
+	"issuer_prefix" char(9) NOT NULL,
 	"extension_digit" integer NOT NULL,
 	"next_serial" bigint DEFAULT 0 NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "sscc_counters_tenant_id_issuer_gln_extension_digit_pk" PRIMARY KEY("tenant_id","issuer_gln","extension_digit")
+	CONSTRAINT "sscc_counters_tenant_id_issuer_prefix_extension_digit_pk" PRIMARY KEY("tenant_id","issuer_prefix","extension_digit")
 );
 --> statement-breakpoint
 ALTER TABLE "shifts" ADD COLUMN "sscc_issuer_counterparty_id" uuid;--> statement-breakpoint

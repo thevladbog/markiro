@@ -23,10 +23,10 @@ describe("platform schema", () => {
     expect(Object.keys(products)).toContain("gtin14");
   });
 
-  it("keys the sscc counter by tenant, issuer and extension digit", () => {
+  it("keys the sscc counter by tenant, issuer prefix and extension digit", () => {
     const cols = Object.keys(ssccCounters);
     expect(cols).toEqual(
-      expect.arrayContaining(["tenantId", "issuerGln", "extensionDigit", "nextSerial"]),
+      expect.arrayContaining(["tenantId", "issuerPrefix", "extensionDigit", "nextSerial"]),
     );
   });
 

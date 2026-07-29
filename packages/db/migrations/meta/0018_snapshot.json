@@ -1,5 +1,5 @@
 {
-  "id": "4f5906f7-9b5d-4dc6-981d-c5c19bf18d8f",
+  "id": "1c59a42e-862b-4d64-9cf9-17d1a347b3dc",
   "prevId": "8d019fe4-2b2c-4ccb-90a5-03a9b5bfc2a6",
   "version": "7",
   "dialect": "postgresql",
@@ -1949,9 +1949,9 @@
           "primaryKey": false,
           "notNull": true
         },
-        "issuer_gln": {
-          "name": "issuer_gln",
-          "type": "char(13)",
+        "issuer_prefix": {
+          "name": "issuer_prefix",
+          "type": "char(9)",
           "primaryKey": false,
           "notNull": true
         },
@@ -2034,9 +2034,9 @@
           "primaryKey": false,
           "notNull": true
         },
-        "issuer_gln": {
-          "name": "issuer_gln",
-          "type": "char(13)",
+        "issuer_prefix": {
+          "name": "issuer_prefix",
+          "type": "char(9)",
           "primaryKey": false,
           "notNull": true
         },
@@ -2078,11 +2078,11 @@
         }
       },
       "compositePrimaryKeys": {
-        "sscc_counters_tenant_id_issuer_gln_extension_digit_pk": {
-          "name": "sscc_counters_tenant_id_issuer_gln_extension_digit_pk",
+        "sscc_counters_tenant_id_issuer_prefix_extension_digit_pk": {
+          "name": "sscc_counters_tenant_id_issuer_prefix_extension_digit_pk",
           "columns": [
             "tenant_id",
-            "issuer_gln",
+            "issuer_prefix",
             "extension_digit"
           ]
         }

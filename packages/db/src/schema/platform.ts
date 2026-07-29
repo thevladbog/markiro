@@ -273,37 +273,47 @@ export const stationDevices = pgTable(
 );
 
 /**
- * One serial counter per (tenant, issuer, extension digit).
+ * One serial counter per (tenant, issuer prefix, extension digit).
  *
- * The issuer is identified by its GLN — the tenant's own or a counterparty's
- * — because the SSCC prefix is the GLN's first 9 digits, so the GLN IS the
- * number space's identity. `nextSerial` is what an administrator seeds when
- * migrating off another system that issued SSCCs under the same prefix.
- * Allocation is one statement; see SsccService.
+ * Keyed by the 9-digit issuer PREFIX, not the full 13-digit GLN, because the
+ * prefix — not the GLN — is the number space's identity: an SSCC's serial is
+ * unique only within (extension digit, issuer prefix), and one GS1 member
+ * commonly holds several GLNs (one per location) that share the same first 9
+ * digits and differ only in the location digits after it. Keying on the full
+ * GLN would give each of those GLNs its own counter, and two counters both
+ * handing out serial 100 under the same prefix produces the exact same
+ * SSCC — the collision this slice's one-statement allocation exists to
+ * prevent. `nextSerial` is what an administrator seeds when migrating off
+ * another system that issued SSCCs under the same prefix. Allocation is one
+ * statement; see SsccService.
  */
 export const ssccCounters = pgTable(
   "sscc_counters",
   {
     tenantId: tenantId(),
-    issuerGln: char("issuer_gln", { length: 13 }).notNull(),
+    issuerPrefix: char("issuer_prefix", { length: 9 }).notNull(),
     extensionDigit: integer("extension_digit").notNull(),
     nextSerial: bigint("next_serial", { mode: "number" }).notNull().default(0),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [primaryKey({ columns: [t.tenantId, t.issuerGln, t.extensionDigit] })],
+  (t) => [primaryKey({ columns: [t.tenantId, t.issuerPrefix, t.extensionDigit] })],
 );
 
 /**
  * Which device received which serial range. Not bookkeeping for its own sake:
  * a ten-million space per extension digit runs low only slowly, and when it
  * does the only way to find out where it went is to have written it down.
+ *
+ * Keyed by the same 9-digit issuer prefix as `ssccCounters` above, for the
+ * same reason: the prefix, not the GLN, identifies the number space a block
+ * was cut from, and several GLNs can share one prefix.
  */
 export const ssccBlocks = pgTable(
   "sscc_blocks",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     tenantId: tenantId(),
-    issuerGln: char("issuer_gln", { length: 13 }).notNull(),
+    issuerPrefix: char("issuer_prefix", { length: 9 }).notNull(),
     extensionDigit: integer("extension_digit").notNull(),
     deviceId: uuid("device_id").notNull(),
     fromSerial: bigint("from_serial", { mode: "number" }).notNull(),
