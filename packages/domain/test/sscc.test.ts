@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSscc, isValidSscc, ssccSerialCapacity } from "../src/gs1/sscc.js";
+import { buildSscc, isValidSscc, parseScannedSscc, ssccSerialCapacity } from "../src/gs1/sscc.js";
 
 describe("buildSscc", () => {
   it("builds ext+prefix+padded serial+check", () => {
@@ -59,5 +59,35 @@ describe("ssccSerialCapacity", () => {
     expect(() => ssccSerialCapacity("46006820000006820")).toThrowError(
       expect.objectContaining({ code: "SSCC_PREFIX" }),
     );
+  });
+});
+
+describe("parseScannedSscc", () => {
+  // buildSscc(0, "460123456", 1) — a real, check-digit-valid SSCC.
+  const sscc = buildSscc(0, "460123456", 1);
+
+  it("accepts the bare 18 digits", () => {
+    expect(parseScannedSscc(sscc)).toBe(sscc);
+  });
+
+  it("strips the (00) application identifier", () => {
+    expect(parseScannedSscc(`00${sscc}`)).toBe(sscc);
+  });
+
+  it("strips a leading AIM identifier and the application identifier", () => {
+    expect(parseScannedSscc(`]C100${sscc}`)).toBe(sscc);
+  });
+
+  it("rejects a payload with a bad check digit", () => {
+    const broken = sscc.slice(0, 17) + (sscc[17] === "0" ? "1" : "0");
+    expect(parseScannedSscc(broken)).toBeNull();
+  });
+
+  it("rejects a KM DataMatrix payload", () => {
+    expect(parseScannedSscc("0104601234567890215Abc")).toBeNull();
+  });
+
+  it("rejects an empty payload", () => {
+    expect(parseScannedSscc("")).toBeNull();
   });
 });

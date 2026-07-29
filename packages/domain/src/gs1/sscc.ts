@@ -25,3 +25,17 @@ export function buildSscc(extensionDigit: number, gs1Prefix: string, serial: num
 export function isValidSscc(code: string): boolean {
   return /^\d{18}$/.test(code) && hasValidCheckDigit(code);
 }
+
+/**
+ * Extracts the bare 18-digit SSCC from what a scanner hands back.
+ *
+ * A GS1-128 encodes `00` + the 18 digits, and many scanners prepend the AIM
+ * identifier `]C1`. Storage and transport carry the 18 digits alone, so this
+ * is the one place that knows about the wrapper. Returns null rather than
+ * throwing: a non-SSCC scan is an ordinary event here, not an error.
+ */
+export function parseScannedSscc(raw: string): string | null {
+  let rest = raw.startsWith("]C1") ? raw.slice(3) : raw;
+  if (rest.length === 20 && rest.startsWith("00")) rest = rest.slice(2);
+  return isValidSscc(rest) ? rest : null;
+}
