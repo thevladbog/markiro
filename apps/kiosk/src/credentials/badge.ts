@@ -26,6 +26,25 @@ export function buildBadgeIndex(bootstrap: KioskBootstrapDto): Map<string, strin
   return index;
 }
 
+/** A badge this device recognised: who it belongs to, and the derivation that
+ * matched. */
+export interface ResolvedBadge {
+  employeeId: string;
+  /**
+   * The digest the lookup was made with — carried out rather than discarded
+   * because it is also what the ORDER names the employee by
+   * (`CreateOrderDto.badgeDigest`).
+   *
+   * Returning it is what keeps the raw code out of the device's stores
+   * entirely: an order is written to IndexedDB before any network attempt, so
+   * whatever identifies the worker in that body is what an unattended tablet
+   * holds at rest, and this value is already in the snapshot the match was
+   * made against. The server rebuilds the same verifier around it to
+   * re-resolve the badge against live data at sync time.
+   */
+  digest: string;
+}
+
 /**
  * Resolves a raw badge scan to the employee it belongs to, or null when no
  * cached verifier matches. Costs exactly one PBKDF2 derivation regardless of
@@ -36,8 +55,9 @@ export async function resolveBadge(
   raw: string,
   bootstrap: KioskBootstrapDto,
   index: Map<string, string>,
-): Promise<string | null> {
+): Promise<ResolvedBadge | null> {
   if (!raw) return null;
   const digest = await deriveDigestB64(raw, bootstrap.badgeSalt, PHC_ITERATIONS);
-  return index.get(digest) ?? null;
+  const employeeId = index.get(digest);
+  return employeeId === undefined ? null : { employeeId, digest };
 }

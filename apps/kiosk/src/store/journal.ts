@@ -31,10 +31,10 @@ export interface JournalEntry {
   orderNo: string;
   /**
    * Which employee this device attributed the order to. Device-local: the
-   * order itself carries a `badgeCode` and the server re-resolves it, so this
-   * is what the KIOSK believed, never what the server filed. Held here rather
-   * than the badge code itself — a journal outlives the order by weeks, and a
-   * badge is the credential that authorises a pickup.
+   * order itself names the badge and the server re-resolves it, so this is
+   * what the KIOSK believed, never what the server filed. Held here rather
+   * than the badge itself — a journal outlives the order by weeks, and a badge
+   * is the credential that authorises a pickup.
    */
   employeeId: string;
   /**

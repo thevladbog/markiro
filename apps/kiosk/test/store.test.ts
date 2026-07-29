@@ -59,14 +59,14 @@ describe("cache", () => {
 describe("queue", () => {
   it("drains in deviceSeq order regardless of insertion order", async () => {
     for (const deviceSeq of [3, 1, 2]) {
-      await enqueueOrder({ deviceSeq, badgeCode: "B", reason: "buy", items: [] }, "e1");
+      await enqueueOrder({ deviceSeq, badgeDigest: "B", reason: "buy", items: [] }, "e1");
     }
     expect((await listQueue()).map((q) => q.deviceSeq)).toEqual([1, 2, 3]);
   });
 
   it("removes only the acknowledged order", async () => {
-    await enqueueOrder({ deviceSeq: 1, badgeCode: "B", reason: "buy", items: [] }, "e1");
-    await enqueueOrder({ deviceSeq: 2, badgeCode: "B", reason: "buy", items: [] }, "e1");
+    await enqueueOrder({ deviceSeq: 1, badgeDigest: "B", reason: "buy", items: [] }, "e1");
+    await enqueueOrder({ deviceSeq: 2, badgeDigest: "B", reason: "buy", items: [] }, "e1");
     await dequeueOrder(1);
     expect((await listQueue()).map((q) => q.deviceSeq)).toEqual([2]);
   });
@@ -76,7 +76,7 @@ describe("quarantine", () => {
   const order = (deviceSeq: number) => ({
     deviceSeq,
     employeeId: "e1",
-    body: { deviceSeq, badgeCode: "B", reason: "buy" as const, items: [{ rawKm: "01…" }] },
+    body: { deviceSeq, badgeDigest: "B", reason: "buy" as const, items: [{ rawKm: "01…" }] },
   });
 
   // Keyed by `deviceSeq`, so a drain that parked an order and then crashed

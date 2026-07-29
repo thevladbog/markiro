@@ -25,7 +25,7 @@ const queued = (
   employeeId: over.employeeId ?? ME,
   body: {
     deviceSeq: over.deviceSeq ?? 1,
-    badgeCode: "BADGE-1",
+    badgeDigest: "BADGE-1",
     reason: "buy",
     items: Array.from({ length: over.items ?? 1 }, (_, i) => ({ rawKm: `01…${i}` })),
     createdAt: over.createdAt ?? "2026-07-28T09:00:00.000Z",

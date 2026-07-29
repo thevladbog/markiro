@@ -139,12 +139,16 @@ const NOW = new Date("2026-07-28T12:00:00.000Z");
  * never match and every session test would fail for the wrong reason.
  */
 let badgeHash = "";
+/** The digest half of `badgeHash` — what an ORDER names the employee by, since
+ * the scanned code must never reach the device's stores. */
+let badgeDigest = "";
 let operatorBadgeHash = "";
 let operatorPinHash = "";
 beforeAll(async () => {
   const phc = async (raw: string) =>
     formatPhc(PHC_ITERATIONS, SALT, await deriveDigestB64(raw, SALT, PHC_ITERATIONS));
   badgeHash = await phc(BADGE);
+  badgeDigest = await deriveDigestB64(BADGE, SALT, PHC_ITERATIONS);
   operatorBadgeHash = await phc(OPERATOR_BADGE);
   operatorPinHash = await phc(OPERATOR_PIN);
 });
@@ -291,7 +295,7 @@ async function pair(generatedAt = NOW.toISOString(), over: Partial<KioskConfig> 
 
 const queuedOrder = (deviceSeq: number): CreateOrderDto => ({
   deviceSeq,
-  badgeCode: BADGE,
+  badgeDigest,
   reason: "buy",
   items: [{ rawKm: KM }],
   createdAt: NOW.toISOString(),
@@ -722,10 +726,13 @@ describe("KioskShell", () => {
     expect(server.orders).toHaveLength(1);
     expect(server.orders[0]).toMatchObject({
       deviceSeq: 5,
-      badgeCode: BADGE,
+      // The DIGEST of the badge that was scanned, never the badge itself — see
+      // the store-scrubbing test below for the property this protects.
+      badgeDigest,
       reason: "buy",
       items: [{ rawKm: KM }],
     });
+    expect(server.orders[0]).not.toHaveProperty("badgeCode");
     // Acknowledged, so it has left the queue — and the counter moved on, or the
     // next order would collide with this one's idempotency key.
     expect(await listQueue()).toEqual([]);
@@ -815,6 +822,43 @@ describe("KioskShell", () => {
     expect(said()).not.toContain("ORD-");
     expect((await listQueue()).map((entry) => entry.deviceSeq)).toEqual([5]);
     expect(screen.getByText(OFFLINE)).toBeDefined();
+  });
+
+  /**
+   * THE QUEUE MUST NOT BE A CREDENTIAL STORE.
+   *
+   * This is the whole point of `badgeDigest`. An order is written to IndexedDB
+   * before any network attempt — that is what makes a pickup survive a battery
+   * pull — so during an outage the device holds one record per worker who
+   * submitted, and it holds them until the queue drains. A permanently refused
+   * order goes to the quarantine store instead, which nothing prunes at all.
+   *
+   * A badge CODE in there is the one credential on this tablet that also works
+   * away from it: the same value opens a pickup at any kiosk, signs an operator
+   * in at the line station, and is printed on a card. So the assertion is
+   * deliberately about the whole serialised record rather than about one field
+   * — a future field carrying the code anywhere in it fails this too.
+   */
+  it("keeps the scanned badge code out of the queue an outage fills up", async () => {
+    await pair();
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+    server.reachable = false;
+    setOnLine(false);
+    await act(async () => {
+      window.dispatchEvent(new Event("offline"));
+    });
+
+    await takeOneBottle();
+    await settle(() => expect(screen.getByText(QUEUED_TITLE)).toBeDefined());
+
+    const queued = await listQueue();
+    expect(queued).toHaveLength(1);
+    expect(JSON.stringify(queued)).not.toContain(BADGE);
+    // And what IS there is the digest, so the order is still resolvable —
+    // scrubbing the code by simply dropping it would pass the line above and
+    // strand every queued pickup.
+    expect(queued[0]!.body.badgeDigest).toBe(badgeDigest);
   });
 
   // `Cart` has no busy prop, so both halves of a double tap reach the shell

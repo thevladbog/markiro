@@ -64,7 +64,7 @@ describe("createKioskClient", () => {
 
     await createKioskClient({ token: "tok", serverUrl: "http://srv" }).submitOrder({
       deviceSeq: 3,
-      badgeCode: "B-1",
+      badgeDigest: "B-1",
       reason: "buy",
       items: [{ rawKm: "01..." }],
       createdAt: "2026-07-28T06:00:00.000Z",
@@ -111,7 +111,7 @@ describe("request deadlines", () => {
 
     let settled = false;
     const submit = client
-      .submitOrder({ deviceSeq: 1, badgeCode: "B", reason: "buy", items: [] })
+      .submitOrder({ deviceSeq: 1, badgeDigest: "B", reason: "buy", items: [] })
       .catch((err: unknown) => {
         settled = true;
         return err;
@@ -152,7 +152,7 @@ describe("request deadlines", () => {
     const client = createKioskClient({ token: "tok", serverUrl: "http://srv" });
 
     const submit = client
-      .submitOrder({ deviceSeq: 1, badgeCode: "B", reason: "buy", items: [] })
+      .submitOrder({ deviceSeq: 1, badgeDigest: "B", reason: "buy", items: [] })
       .catch((err: unknown) => err);
     await vi.advanceTimersByTimeAsync(SUBMIT_TIMEOUT_MS);
 
@@ -171,7 +171,7 @@ describe("request deadlines", () => {
     const client = createKioskClient({ token: "tok", serverUrl: "http://srv" });
 
     const submit = client
-      .submitOrder({ deviceSeq: 1, badgeCode: "B", reason: "buy", items: [] })
+      .submitOrder({ deviceSeq: 1, badgeDigest: "B", reason: "buy", items: [] })
       .catch(() => {});
     const signal = (fetchMock.mock.calls[0]![1] as RequestInit).signal!;
     expect(signal.aborted).toBe(false);

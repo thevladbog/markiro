@@ -5,6 +5,7 @@ import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
+import { deriveDigestB64, PHC_ITERATIONS } from "@markiro/domain";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
@@ -180,6 +181,94 @@ describe.skipIf(!ready)("pickup scan rejections e2e", () => {
     expect(rows[0]!.badgeCode).toBe("badge-that-never-existed");
     expect(rows[0]!.orderId).toBeNull();
     expect(rows[0]!.codes).toEqual([{ rawKm: GOOD_KM, reason: "unknown_badge" }]);
+  });
+
+  /**
+   * THE PLAINTEXT CODE SURVIVES THE DEVICE NO LONGER SENDING ONE.
+   *
+   * The kiosk names the badge by digest — its queue is persisted on an
+   * unattended tablet, so it must not hold a reusable credential — but this
+   * column is what an admin reads to tell whose card was used once the
+   * employee is off the roster, and a base64 blob is no use for that.
+   *
+   * So the server recovers it: the digest is looked up across ALL of the
+   * tenant's badges, revoked included. That is exactly the population the
+   * column is about — a badge stops resolving because it was revoked or its
+   * holder archived, and neither deletes the row.
+   */
+  it("recovers the plaintext code for a revoked badge the device named only by digest", async () => {
+    const goneId = randomUUID();
+    const goneBadge = `badge-gone-${randomUUID()}`;
+    await db.insert(schema.employees).values({ id: goneId, tenantId, fullName: "Ушедшев У." });
+    await db
+      .insert(schema.employeeBadges)
+      .values({ tenantId, employeeId: goneId, badgeCode: goneBadge });
+
+    // The device derived this while the badge was live, which is the whole
+    // scenario: scanned offline, revoked in the cabinet, synced hours later.
+    const bootstrap = await request(app!.getHttpServer())
+      .get("/kiosk/bootstrap")
+      .set("x-kiosk-token", TOKEN)
+      .expect(200);
+    const badgeDigest = await deriveDigestB64(
+      goneBadge,
+      bootstrap.body.badgeSalt as string,
+      PHC_ITERATIONS,
+    );
+
+    await db
+      .update(schema.employeeBadges)
+      .set({ revokedAt: new Date() })
+      .where(
+        and(
+          eq(schema.employeeBadges.tenantId, tenantId),
+          eq(schema.employeeBadges.employeeId, goneId),
+        ),
+      );
+
+    await postScan({
+      deviceSeq: 30,
+      badgeDigest,
+      reason: "buy",
+      items: [{ rawKm: GOOD_KM }],
+    }).expect(422);
+
+    const rows = await rejectionsFor(30);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.employeeId).toBeNull();
+    // The card number, not the digest — recovered from the revoked row.
+    expect(rows[0]!.badgeCode).toBe(goneBadge);
+    expect(rows[0]!.codes).toEqual([{ rawKm: GOOD_KM, reason: "unknown_badge" }]);
+  });
+
+  /**
+   * The fallback, and it is deliberately not reachable from a kiosk: `Idle`
+   * refuses to open a session for a badge its cached roster cannot resolve, so
+   * every digest a device sends belonged to an active badge of this tenant
+   * when the snapshot was taken. A digest matching no row at all therefore
+   * means the caller is not a kiosk following that flow — and an opaque token
+   * is a truer record of what arrived than a guess would be. Non-null either
+   * way, because the table's `badge_xor_employee` check requires a value
+   * whenever `employee_id` is null.
+   */
+  it("records the digest itself when it matches no badge this tenant ever issued", async () => {
+    const stranger = await deriveDigestB64(
+      "a-badge-from-another-factory",
+      "fwGrIt01vwgBxxDlhqLVRQ==",
+      PHC_ITERATIONS,
+    );
+
+    await postScan({
+      deviceSeq: 31,
+      badgeDigest: stranger,
+      reason: "buy",
+      items: [{ rawKm: GOOD_KM }],
+    }).expect(422);
+
+    const rows = await rejectionsFor(31);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.employeeId).toBeNull();
+    expect(rows[0]!.badgeCode).toBe(stranger);
   });
 
   // A badge heartbeat carries no codes, so nothing was lost -- a row here

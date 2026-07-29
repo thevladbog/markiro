@@ -21,7 +21,29 @@ describe("resolveBadge", () => {
   it("finds the employee behind a scanned badge", async () => {
     const bootstrap = await bootstrapWith({ e1: "BADGE-1", e2: "BADGE-2" });
     const index = buildBadgeIndex(bootstrap);
-    await expect(resolveBadge("BADGE-2", bootstrap, index)).resolves.toBe("e2");
+    await expect(resolveBadge("BADGE-2", bootstrap, index)).resolves.toMatchObject({
+      employeeId: "e2",
+    });
+  });
+
+  /**
+   * The digest comes back out, because it is what the ORDER names the employee
+   * by (`CreateOrderDto.badgeDigest`). An order body is written to IndexedDB
+   * before it is ever sent, so the scanned code must not be what identifies
+   * the worker in it — and this is the one place that has both, so it is the
+   * one place that can hand the safe half onward.
+   */
+  it("returns the digest it matched on, so the caller never has to keep the scanned code", async () => {
+    const bootstrap = await bootstrapWith({ e1: "BADGE-1" });
+    const index = buildBadgeIndex(bootstrap);
+
+    const match = await resolveBadge("BADGE-1", bootstrap, index);
+
+    expect(match?.digest).toBe(await deriveDigestB64("BADGE-1", SALT, PHC_ITERATIONS));
+    // The verifier the roster shipped, with the same digest in it — which is
+    // what lets the server look this up without either end holding the code.
+    expect(index.get(match!.digest)).toBe("e1");
+    expect(match?.digest).not.toBe("BADGE-1");
   });
 
   it("returns null for an unknown badge", async () => {

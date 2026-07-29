@@ -16,10 +16,23 @@ export interface CreateOrderItemInput {
  * together with `(tenantId, kioskId)` it's the idempotency key for offline
  * sync retries. `createdAt` lets an offline-queued order replay with its
  * original scan time instead of the sync moment.
+ *
+ * `badgeDigest` is what `resolveBadge` already derived to admit the worker
+ * (`deriveDigestB64(raw, badgeSalt, PHC_ITERATIONS)`), and NOT the scanned
+ * code, because this body is written to IndexedDB before any network attempt
+ * and a permanently refused one is kept there for good. A badge code is the
+ * only credential on this device that also works away from it — the same value
+ * opens a pickup at any kiosk and signs an operator in at the station — while
+ * a digest is already in this device's own bootstrap and can be scanned
+ * nowhere. See `credentials/badge.ts` and the server's own `CreateOrderDto`.
+ *
+ * The server still accepts a legacy `badgeCode`, which is what lets an order
+ * queued by an older bundle drain instead of failing validation; today's app
+ * never writes one, and `store/scrub.ts` removes the ones it already wrote.
  */
 export interface CreateOrderDto {
   deviceSeq: number;
-  badgeCode: string;
+  badgeDigest: string;
   reason: "buy" | "writeoff";
   writeoffReasonId?: string | null;
   items: CreateOrderItemInput[];

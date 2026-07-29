@@ -65,6 +65,21 @@ export function formatPhc(iterations: number, saltB64: string, digestB64: string
   return `pbkdf2$sha256$${iterations}$${saltB64}$${digestB64}`;
 }
 
+/**
+ * Whether `value` is the canonical base64 of a digest this module produces —
+ * the same rule `parsePhc` applies to a verifier's last field, asked of a bare
+ * digest.
+ *
+ * Lives here rather than in a caller because the encoding is `deriveDigestB64`'s
+ * to define: the kiosk sends a digest over the wire (`CreateOrderDto.badgeDigest`)
+ * and the server rebuilds a PHC string around it to look up, so the two ends
+ * have to agree on the encoding down to the padding. A regex restated in a DTO
+ * would be that agreement written twice.
+ */
+export function isCanonicalDigestB64(value: string): boolean {
+  return decodeCanonical(value, KEY_BYTES) !== null;
+}
+
 export async function deriveDigestB64(
   secret: string,
   saltB64: string,
