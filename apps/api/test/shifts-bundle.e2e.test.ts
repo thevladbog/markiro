@@ -226,4 +226,90 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
       .expect(200);
     expect(bundle.body.shift).toMatchObject({ id, productId });
   });
+
+  describe("box serial block on the bundle (Task 7)", () => {
+    // Two distinct, check-digit-shaped GLNs so a bug that swapped the
+    // organisation's own issuer for the shift's explicit one (or vice versa)
+    // shows up as the WRONG prefix rather than an accidental match.
+    const orgGln = "4601112222005";
+    const counterpartyGln = "4609876543008";
+
+    let stationKey: string;
+    let shiftId: string;
+    let issuerShiftId: string;
+    let validationShiftId: string;
+
+    beforeAll(async () => {
+      const agent = request.agent(app!.getHttpServer());
+      const orgId = await signUpAndActivate(agent);
+
+      await agent.put("/org/profile").send({ gln: orgGln }).expect(200);
+
+      const counterparty = await agent
+        .post("/counterparties")
+        .send({ name: "Issuer Co", gln: counterpartyGln })
+        .expect(201);
+      const counterpartyId = (counterparty.body as { id: string }).id;
+
+      const productId = await seedProduct(orgId, {
+        status: "active",
+        productGroup: "Beverages",
+        boxCapacity: 12,
+        palletCapacity: 48,
+      });
+
+      // sscc_blocks.device_id carries a real FK to station_devices -- the
+      // block must be attributed to an actual enrolled device, not an
+      // invented uuid (see sscc.e2e.test.ts's registerDevice).
+      const device = await agent
+        .post("/station-devices")
+        .send({ name: "Box-block terminal" })
+        .expect(201);
+      stationKey = (device.body as { apiKey: string }).apiKey;
+
+      const plain = await agent
+        .post("/shifts")
+        .send({ productId, mode: "aggregation" })
+        .expect(201);
+      shiftId = (plain.body as { id: string }).id;
+
+      const issuer = await agent
+        .post("/shifts")
+        .send({ productId, mode: "aggregation", ssccIssuerCounterpartyId: counterpartyId })
+        .expect(201);
+      issuerShiftId = (issuer.body as { id: string }).id;
+
+      const validation = await agent
+        .post("/shifts")
+        .send({ productId, mode: "validation" })
+        .expect(201);
+      validationShiftId = (validation.body as { id: string }).id;
+    });
+
+    it("carries a box serial block for the shift's issuer", async () => {
+      const res = await request(app!.getHttpServer())
+        .get(`/shifts/${shiftId}/bundle`)
+        .set("x-api-key", stationKey)
+        .expect(200);
+      expect(res.body.sscc.issuerPrefix).toBe(orgGln.slice(0, 9));
+      expect(res.body.sscc.extensionDigit).toBe(0);
+      expect(res.body.sscc.toSerial).toBeGreaterThan(res.body.sscc.fromSerial);
+    });
+
+    it("carries the counterparty's numbers when the shift names an issuer", async () => {
+      const res = await request(app!.getHttpServer())
+        .get(`/shifts/${issuerShiftId}/bundle`)
+        .set("x-api-key", stationKey)
+        .expect(200);
+      expect(res.body.sscc.issuerPrefix).toBe(counterpartyGln.slice(0, 9));
+    });
+
+    it("does not allocate for a validation-mode shift", async () => {
+      const res = await request(app!.getHttpServer())
+        .get(`/shifts/${validationShiftId}/bundle`)
+        .set("x-api-key", stationKey)
+        .expect(200);
+      expect(res.body.sscc).toBeNull();
+    });
+  });
 });

@@ -55,6 +55,8 @@ const bundle: StationBundle = {
   // The server bundle returns `operators: []` in 05a — the server operators
   // table is a parallel 05b workstream (see plan decision #4).
   operators: [],
+  // validation-mode shift -- no box serial block (Task 7).
+  sscc: null,
 };
 
 describe("mirrorShiftBundle", () => {

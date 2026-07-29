@@ -70,6 +70,8 @@ const bundle: StationBundle = {
       active: true,
     },
   ],
+  // validation-mode shift -- no box serial block (Task 7).
+  sscc: null,
 };
 
 describe("mirror", () => {

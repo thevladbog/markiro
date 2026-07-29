@@ -13,6 +13,7 @@ import type { LabelTemplateSpec } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
 import { OperatorsService } from "../operators/operators.service";
 import type { ProductDto } from "../products/dto";
+import { BOX_EXTENSION_DIGIT, SsccService } from "../sscc/sscc.service";
 import type {
   CloseShiftDto,
   CreateShiftDto,
@@ -27,11 +28,19 @@ import type {
 type ShiftRow = typeof schema.shifts.$inferSelect;
 type ProductRow = typeof schema.products.$inferSelect;
 
+/**
+ * One block must outlast a shift even if the network drops at the worst
+ * moment. Ten million serials per extension digit make generosity free, and
+ * a burnt serial costs nothing — SSCCs need not be contiguous.
+ */
+const BOX_BLOCK_SIZE = 2000;
+
 @Injectable()
 export class ShiftsService {
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly operatorsService: OperatorsService,
+    private readonly sscc: SsccService,
   ) {}
 
   /** List a tenant's shifts, joined with product/line/counterparty names. */
@@ -289,8 +298,14 @@ export class ShiftsService {
    * tenant's active roster, from the same `OperatorsService.buildRoster`
    * query `GET /station/operators` uses -- one method, two consumers, so the
    * initialization sync and the per-shift refresh can never drift.
+   *
+   * `deviceId` is the calling station device's own id (from `TenantGuard`,
+   * resolved off its api-key -- see tenant.guard.ts), or `null` for a
+   * session-authenticated caller (admin/manager UI browsing a shift, not a
+   * device). It gates the box serial block below: `sscc_blocks.device_id`
+   * carries a NOT NULL FK, so a block can only ever be cut for a real device.
    */
-  async getBundle(tenantId: string, id: string): Promise<ShiftBundleDto> {
+  async getBundle(tenantId: string, id: string, deviceId: string | null): Promise<ShiftBundleDto> {
     const shift = await this.getShift(tenantId, id); // 404 if cross-tenant/missing
 
     const productRow = await this.findProductRow(tenantId, shift.productId);
@@ -345,7 +360,25 @@ export class ShiftsService {
     // refresh can never drift.
     const operators = await this.operatorsService.buildRoster(tenantId);
 
-    return { shift, product, labelTemplate, counterpartyGln, operators };
+    // Aggregation shifts, and only for an actual station device. A
+    // validation shift closes no boxes, so allocating for it would burn
+    // serials nothing will ever print; a session caller has no device row to
+    // attribute a block to (sscc_blocks.device_id is NOT NULL).
+    const sscc: ShiftBundleDto["sscc"] =
+      shift.mode === "aggregation" && deviceId
+        ? await (async () => {
+            const issuerPrefix = await this.sscc.resolveIssuerPrefix(tenantId, shift.id);
+            return this.sscc.allocate(
+              tenantId,
+              issuerPrefix,
+              BOX_EXTENSION_DIGIT,
+              deviceId,
+              BOX_BLOCK_SIZE,
+            );
+          })()
+        : null;
+
+    return { shift, product, labelTemplate, counterpartyGln, operators, sscc };
   }
 
   private async findRow(tenantId: string, id: string): Promise<ShiftRow | undefined> {

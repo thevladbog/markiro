@@ -41,6 +41,17 @@ export interface StationBundle {
   labelTemplate: { id: string; name: string; spec: unknown } | null;
   counterpartyGln: string | null;
   operators: OperatorMirrorRecord[];
+  /**
+   * The box serial block this device may print from -- aggregation shifts
+   * only, and only when this device fetched the bundle over its own
+   * api-key (see ShiftBundleDto.sscc in shifts/dto.ts on the server).
+   */
+  sscc: {
+    issuerPrefix: string;
+    extensionDigit: number;
+    fromSerial: number;
+    toSerial: number;
+  } | null;
 }
 
 export interface ShiftMirrorRow {

@@ -116,4 +116,16 @@ export interface ShiftBundleDto {
   labelTemplate: { id: string; name: string; spec: LabelTemplateSpec } | null;
   counterpartyGln: string | null;
   operators: OperatorMirrorRecord[];
+  /**
+   * The box serial block this device may print from -- aggregation shifts
+   * only (a validation shift closes no boxes, so allocating one would burn
+   * serials nothing will ever print), and only when the caller is an actual
+   * station device (no device to attribute a block to otherwise).
+   */
+  sscc: {
+    issuerPrefix: string;
+    extensionDigit: number;
+    fromSerial: number;
+    toSerial: number;
+  } | null;
 }
