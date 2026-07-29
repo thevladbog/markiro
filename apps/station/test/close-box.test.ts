@@ -1,0 +1,142 @@
+import { DatabaseSync } from "node:sqlite";
+import { buildSscc, isValidSscc } from "@markiro/domain";
+import { beforeEach, describe, expect, it } from "vitest";
+import { boxLabelFields } from "../src/lib/box-label.js";
+import { currentBox, openBox } from "../src/lib/boxes.js";
+import { closeCurrentBox, type CloseBoxDeps } from "../src/lib/close-box.js";
+import { recordScan, type AcceptedCode, type ScanEventRow } from "../src/lib/journal.js";
+import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
+import { addRange, remaining } from "../src/lib/sscc-pool.js";
+import { makeExec } from "./support/sqlite-exec.js";
+
+// A 9-digit GS1 issuer prefix -- see sscc-pool.ts's doc comment for why the
+// pool is keyed by prefix rather than by GLN.
+const ISSUER_PREFIX = "460123456";
+const SHIFT = "s1";
+const ISO = "2026-07-29T10:00:00.000Z";
+const GTIN = "04600682000013";
+const SSCC = "346006820000000014";
+
+/** One scan event, distinguished by `id` only in its raw payload. */
+function event(id: string, shiftId = SHIFT): ScanEventRow {
+  return {
+    shiftId,
+    terminalId: "dev-1",
+    raw: `RAW-${id}`,
+    verdict: "ok",
+    scannedAt: ISO,
+    operatorId: null,
+  };
+}
+
+/** One accepted code, named into `boxId` (or null for none). */
+function code(id: string, boxId: string | null, shiftId = SHIFT): AcceptedCode {
+  return {
+    codeHash: `hash-${id}`,
+    shiftId,
+    gtin14: GTIN,
+    serial: id,
+    scannedAt: ISO,
+    boxId,
+  };
+}
+
+describe("closeCurrentBox", () => {
+  let exec: SqlExecutor;
+  let deps: CloseBoxDeps;
+
+  beforeEach(async () => {
+    exec = makeExec(new DatabaseSync(":memory:"));
+    await applyMigrations(exec);
+    deps = { exec, issuerPrefix: ISSUER_PREFIX, now: () => new Date(ISO).getTime() };
+  });
+
+  it("burns a serial and builds a valid SSCC", async () => {
+    await addRange(exec, {
+      issuerPrefix: ISSUER_PREFIX,
+      extensionDigit: 0,
+      fromSerial: 7,
+      toSerial: 9,
+    });
+    await openBox(exec, SHIFT, "b1", ISO, "dev-1");
+    await recordScan(exec, event("a"), code("aa", "b1"));
+
+    const res = await closeCurrentBox(deps, SHIFT, null);
+
+    expect(res.status).toBe("closed");
+    if (res.status !== "closed") throw new Error("unreachable");
+    expect(isValidSscc(res.sscc)).toBe(true);
+    expect(res.sscc).toBe(buildSscc(0, ISSUER_PREFIX, 7));
+    expect(res.itemCount).toBe(1);
+  });
+
+  it("refuses to close when the pool is dry, and burns nothing", async () => {
+    await openBox(exec, SHIFT, "b1", ISO, "dev-1");
+    await recordScan(exec, event("a"), code("aa", "b1"));
+
+    expect((await closeCurrentBox(deps, SHIFT, null)).status).toBe("no-serials");
+
+    const box = await currentBox(exec, SHIFT);
+    expect(box?.sscc).toBeNull();
+    expect(box?.closedAt).toBeNull();
+  });
+
+  it("refuses to close an empty box, and burns nothing", async () => {
+    await addRange(exec, {
+      issuerPrefix: ISSUER_PREFIX,
+      extensionDigit: 0,
+      fromSerial: 7,
+      toSerial: 9,
+    });
+    await openBox(exec, SHIFT, "b1", ISO, "dev-1");
+
+    expect((await closeCurrentBox(deps, SHIFT, null)).status).toBe("empty");
+
+    expect(await remaining(exec, ISSUER_PREFIX, 0)).toBe(3);
+    const box = await currentBox(exec, SHIFT);
+    expect(box?.sscc).toBeNull();
+  });
+
+  it("refuses to close when no box is open at all, and burns nothing", async () => {
+    await addRange(exec, {
+      issuerPrefix: ISSUER_PREFIX,
+      extensionDigit: 0,
+      fromSerial: 7,
+      toSerial: 9,
+    });
+
+    expect((await closeCurrentBox(deps, SHIFT, null)).status).toBe("empty");
+
+    expect(await remaining(exec, ISSUER_PREFIX, 0)).toBe(3);
+  });
+});
+
+describe("boxLabelFields", () => {
+  it("carries the SSCC and item count straight through, with no derived shift/km fields", () => {
+    const fields = boxLabelFields({
+      sscc: SSCC,
+      itemCount: 12,
+      productName: "Кола",
+      gtin14: GTIN,
+      operatorName: "Иванов",
+      counterpartyName: "Клиент",
+      closedAt: ISO,
+    });
+    expect(fields.sscc).toBe(SSCC);
+    expect(fields.qty).toBe("12");
+  });
+
+  it("puts no application identifier in the field record", () => {
+    const fields = boxLabelFields({
+      sscc: SSCC,
+      itemCount: 1,
+      productName: "",
+      gtin14: GTIN,
+      operatorName: null,
+      counterpartyName: null,
+      closedAt: ISO,
+    });
+    expect(fields.sscc).toHaveLength(18);
+    expect(fields.sscc.startsWith("00")).toBe(false);
+  });
+});
