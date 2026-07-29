@@ -4,7 +4,7 @@ import {
   Injectable,
   InternalServerErrorException,
 } from "@nestjs/common";
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
 
@@ -141,5 +141,59 @@ export class SsccService {
 
       return block;
     });
+  }
+
+  /**
+   * The bundle's entry point into allocation (Task 7 review, finding 3):
+   * cuts a fresh block only the FIRST time this device is seen for this
+   * (tenant, issuer prefix, extension digit) triple; every later call for
+   * the same triple hands back the block it already holds instead.
+   *
+   * The bundle is not a top-up channel. The station re-downloads it on
+   * every shift entry, re-entry and app restart, and nothing else caps how
+   * often that happens -- if each fetch cut a fresh 2000-serial block, a
+   * device would work through a 10-million-serial number space in about
+   * 5000 fetches, mid-shift, with `buildSscc` then throwing SSCC_RANGE on
+   * the factory floor. The bundle's actual job is narrower: guarantee a
+   * device numbers for an issuer it has NEVER held. A device already
+   * running low on its existing block gets topped up through the sync
+   * response instead (a later task) -- deliberately NOT here, so this
+   * method never even looks at how many serials of the existing block are
+   * left, only whether one exists at all.
+   *
+   * A repeat call deliberately returns the device's EXISTING block rather
+   * than signalling "nothing to do": the device may have lost its local
+   * database (a factory reset, a corrupted store) and be re-provisioning
+   * from scratch, in which case the range it already holds server-side is
+   * exactly what it needs handed back, not withheld.
+   */
+  async allocateForBundle(
+    tenantId: string,
+    issuerPrefix: string,
+    extensionDigit: number,
+    deviceId: string,
+    size: number,
+  ): Promise<SsccBlock> {
+    const [existing] = await this.db
+      .select({
+        issuerPrefix: schema.ssccBlocks.issuerPrefix,
+        extensionDigit: schema.ssccBlocks.extensionDigit,
+        fromSerial: schema.ssccBlocks.fromSerial,
+        toSerial: schema.ssccBlocks.toSerial,
+      })
+      .from(schema.ssccBlocks)
+      .where(
+        and(
+          eq(schema.ssccBlocks.tenantId, tenantId),
+          eq(schema.ssccBlocks.issuerPrefix, issuerPrefix),
+          eq(schema.ssccBlocks.extensionDigit, extensionDigit),
+          eq(schema.ssccBlocks.deviceId, deviceId),
+        ),
+      )
+      .orderBy(desc(schema.ssccBlocks.issuedAt))
+      .limit(1);
+
+    if (existing) return existing;
+    return this.allocate(tenantId, issuerPrefix, extensionDigit, deviceId, size);
   }
 }

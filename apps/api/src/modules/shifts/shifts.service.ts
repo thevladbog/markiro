@@ -4,6 +4,7 @@ import {
   Inject,
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
   UnprocessableEntityException,
 } from "@nestjs/common";
@@ -37,6 +38,8 @@ const BOX_BLOCK_SIZE = 2000;
 
 @Injectable()
 export class ShiftsService {
+  private readonly logger = new Logger(ShiftsService.name);
+
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly operatorsService: OperatorsService,
@@ -366,19 +369,59 @@ export class ShiftsService {
     // attribute a block to (sscc_blocks.device_id is NOT NULL).
     const sscc: ShiftBundleDto["sscc"] =
       shift.mode === "aggregation" && deviceId
-        ? await (async () => {
-            const issuerPrefix = await this.sscc.resolveIssuerPrefix(tenantId, shift.id);
-            return this.sscc.allocate(
-              tenantId,
-              issuerPrefix,
-              BOX_EXTENSION_DIGIT,
-              deviceId,
-              BOX_BLOCK_SIZE,
-            );
-          })()
+        ? await this.bundleSscc(tenantId, shift.id, deviceId)
         : null;
 
     return { shift, product, labelTemplate, counterpartyGln, operators, sscc };
+  }
+
+  /**
+   * Resolves the shift's issuer prefix and hands the device its block for
+   * the bundle (a fresh one the first time it's seen for this issuer, its
+   * existing one on every later fetch -- see `SsccService.allocateForBundle`
+   * for why).
+   *
+   * `apps/station/src/lib/shift-bundle.ts` swallows a bundle download error
+   * BY DESIGN, so a thrown 400 here would not just skip the serial block --
+   * it would silently cost the operator the product, label template AND
+   * operator roster too, with nothing anywhere explaining why. A tenant that
+   * never filled in its organisation profile's GLN (that field is nullable,
+   * and a tenant may have no profile row at all) must not lose its whole
+   * offline mirror over it, so this degrades to `sscc: null` instead of
+   * letting `resolveIssuerPrefix`'s `BadRequestException` propagate.
+   * `resolveIssuerPrefix` itself must keep throwing for its OTHER callers
+   * (the org-profile/counterparty settings routes need that 400 to tell an
+   * admin what's wrong), so the degrade lives here, at this one call site,
+   * not in the shared method.
+   */
+  private async bundleSscc(
+    tenantId: string,
+    shiftId: string,
+    deviceId: string,
+  ): Promise<ShiftBundleDto["sscc"]> {
+    let issuerPrefix: string;
+    try {
+      issuerPrefix = await this.sscc.resolveIssuerPrefix(tenantId, shiftId);
+    } catch (error) {
+      if (!(error instanceof BadRequestException)) throw error;
+      // The station never sees this (the bundle just comes back with
+      // sscc: null, silently, by the design note above), so the server log
+      // is the ONLY place this is ever visible -- it must carry enough to
+      // act on: which tenant, which shift, and resolveIssuerPrefix's own
+      // reason (no org GLN, or no GLN on the shift's named sscc issuer
+      // counterparty).
+      this.logger.warn(
+        `Shift ${shiftId} (tenant ${tenantId}) bundle has no box serial block -- ${error.message}`,
+      );
+      return null;
+    }
+    return this.sscc.allocateForBundle(
+      tenantId,
+      issuerPrefix,
+      BOX_EXTENSION_DIGIT,
+      deviceId,
+      BOX_BLOCK_SIZE,
+    );
   }
 
   private async findRow(tenantId: string, id: string): Promise<ShiftRow | undefined> {
