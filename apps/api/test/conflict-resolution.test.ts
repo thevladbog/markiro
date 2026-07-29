@@ -206,4 +206,24 @@ describe("displacedIncumbents", () => {
     expect(rows[0]!.losing.scannedAt.toISOString()).toBe("2026-07-28T10:00:05.000Z");
     expect(rows[0]!.winning.scannedAt.toISOString()).toBe("2026-07-28T10:00:00.000Z");
   });
+
+  it("reports a displacement when the prior incumbent shares this claim's terminal and instant but not its shift", () => {
+    // The third dimension of the same regression: a station is fixed
+    // hardware, so the same physical terminal legitimately reports scans
+    // under different shiftId values across a shift handover -- terminalId
+    // alone (or terminalId + scannedAt) cannot stand in for "is this the
+    // same scan". Deleting `shiftId` from `sameScan` would leave only
+    // terminalId/scannedAt, which here agree, and would wrongly treat a
+    // different shift's incumbent as this batch's own claim, swallowing a
+    // real displacement.
+    const claim = { ...item(HASH, "t1", "2026-07-28T10:00:00.000Z"), shiftId: "s2" };
+    const rows = displacedIncumbents(
+      [claim],
+      new Set([HASH]),
+      new Map([[HASH, { ...owner(HASH, "t1", "2026-07-28T10:00:00.000Z"), shiftId: "s1" }]]),
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.losing.shiftId).toBe("s1");
+    expect(rows[0]!.winning.shiftId).toBe("s2");
+  });
 });
