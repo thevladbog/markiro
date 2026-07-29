@@ -31,4 +31,46 @@ describe("channel registry", () => {
   it("не знает неизвестного типа", () => {
     expect(() => describeChannel("nope" as never)).toThrow(/unknown channel/i);
   });
+
+  it("проверяет флаг inbound у входящего канала (commerceml)", () => {
+    expect(describeChannel("commerceml").inbound).toBe(true);
+  });
+
+  it("проверяет флаг inbound у невходящего канала (public_api)", () => {
+    expect(describeChannel("public_api").inbound).toBe(false);
+  });
+
+  it("схема другого канала принимает произвольные поля", () => {
+    const publicApiSchema = describeChannel("public_api").settingsSchema;
+    const arbitrary = publicApiSchema.safeParse({
+      unknownField: "anything",
+      anotherField: 42,
+      nested: { data: true },
+    });
+    expect(arbitrary.success).toBe(true);
+  });
+
+  it("commerceml схема требует minLength для priceType", () => {
+    const emptyPrice = describeChannel("commerceml").settingsSchema.safeParse({
+      priceType: "",
+    });
+    expect(emptyPrice.success).toBe(false);
+  });
+
+  it("commerceml схема делает priceType опциональным", () => {
+    const noPriceType = describeChannel("commerceml").settingsSchema.safeParse({});
+    expect(noPriceType.success).toBe(true);
+  });
+
+  it("commerceml схема применяет default(false) для splitWriteoffDocument", () => {
+    const noSplitDefault = describeChannel("commerceml").settingsSchema.safeParse({});
+    expect(noSplitDefault.success).toBe(true);
+    if (noSplitDefault.success) {
+      expect(noSplitDefault.data.splitWriteoffDocument).toBe(false);
+    }
+  });
+
+  it("public_api канал доступен", () => {
+    expect(describeChannel("public_api").available).toBe(true);
+  });
 });
