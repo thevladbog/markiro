@@ -23,5 +23,8 @@ CREATE TABLE "code_registry" (
 );
 --> statement-breakpoint
 ALTER TABLE "code_conflicts" ADD CONSTRAINT "code_conflicts_tenant_id_organization_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."organization"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "code_conflicts" ADD CONSTRAINT "code_conflicts_tenant_losing_shift_fk" FOREIGN KEY ("tenant_id","losing_shift_id") REFERENCES "public"."shifts"("tenant_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "code_conflicts" ADD CONSTRAINT "code_conflicts_tenant_winning_shift_fk" FOREIGN KEY ("tenant_id","winning_shift_id") REFERENCES "public"."shifts"("tenant_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "code_registry" ADD CONSTRAINT "code_registry_tenant_id_organization_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."organization"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "code_registry" ADD CONSTRAINT "code_registry_tenant_shift_fk" FOREIGN KEY ("tenant_id","shift_id") REFERENCES "public"."shifts"("tenant_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "code_conflicts_shift_idx" ON "code_conflicts" USING btree ("tenant_id","losing_shift_id");

@@ -188,7 +188,17 @@ export const codeRegistry = pgTable(
     scannedAt: timestamp("scanned_at", { withTimezone: true }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [primaryKey({ columns: [t.tenantId, t.codeHash] })],
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.codeHash] }),
+    // Composite FK: shift_id must belong to the same tenant as the
+    // registry row referencing it — same shape as shifts' own FKs to
+    // products/lines/counterparties above.
+    foreignKey({
+      name: "code_registry_tenant_shift_fk",
+      columns: [t.tenantId, t.shiftId],
+      foreignColumns: [shifts.tenantId, shifts.id],
+    }),
+  ],
 );
 
 /** One row per losing scan, in both directions — see conflict-resolution.ts. */
@@ -207,7 +217,22 @@ export const codeConflicts = pgTable(
     detectedAt: timestamp("detected_at", { withTimezone: true }).notNull().defaultNow(),
     reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
   },
-  (t) => [index("code_conflicts_shift_idx").on(t.tenantId, t.losingShiftId)],
+  (t) => [
+    index("code_conflicts_shift_idx").on(t.tenantId, t.losingShiftId),
+    // Composite FKs: both the losing and winning shift must belong to the
+    // same tenant as the conflict row itself — same shape as shifts' own
+    // FKs to products/lines/counterparties above.
+    foreignKey({
+      name: "code_conflicts_tenant_losing_shift_fk",
+      columns: [t.tenantId, t.losingShiftId],
+      foreignColumns: [shifts.tenantId, shifts.id],
+    }),
+    foreignKey({
+      name: "code_conflicts_tenant_winning_shift_fk",
+      columns: [t.tenantId, t.winningShiftId],
+      foreignColumns: [shifts.tenantId, shifts.id],
+    }),
+  ],
 );
 
 export const stationDevices = pgTable(

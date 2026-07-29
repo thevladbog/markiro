@@ -1,5 +1,5 @@
 {
-  "id": "4f463c0d-acbd-4021-9e6b-795b93950125",
+  "id": "8d019fe4-2b2c-4ccb-90a5-03a9b5bfc2a6",
   "prevId": "a28306d5-5bdf-4516-be7f-8d308d8c01dc",
   "version": "7",
   "dialect": "postgresql",
@@ -967,6 +967,36 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "code_conflicts_tenant_losing_shift_fk": {
+          "name": "code_conflicts_tenant_losing_shift_fk",
+          "tableFrom": "code_conflicts",
+          "tableTo": "shifts",
+          "columnsFrom": [
+            "tenant_id",
+            "losing_shift_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "code_conflicts_tenant_winning_shift_fk": {
+          "name": "code_conflicts_tenant_winning_shift_fk",
+          "tableFrom": "code_conflicts",
+          "tableTo": "shifts",
+          "columnsFrom": [
+            "tenant_id",
+            "winning_shift_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1027,6 +1057,21 @@
             "tenant_id"
           ],
           "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "code_registry_tenant_shift_fk": {
+          "name": "code_registry_tenant_shift_fk",
+          "tableFrom": "code_registry",
+          "tableTo": "shifts",
+          "columnsFrom": [
+            "tenant_id",
+            "shift_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
             "id"
           ],
           "onDelete": "no action",
