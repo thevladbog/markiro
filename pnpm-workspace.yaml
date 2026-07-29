@@ -14,3 +14,26 @@ overrides:
   # Vite keeps the esbuild it asks for. Drop this once drizzle-kit sheds
   # @esbuild-kit.
   "@esbuild-kit/core-utils>esbuild": "0.25.12"
+
+  # GHSA-mh99-v99m-4gvg: brace-expansion <=5.0.7 expands braces without an
+  # upper bound and can OOM the process. 5.0.8 is the *only* patched release
+  # in the package's history -- there is no 1.x or 2.x backport -- and it is a
+  # breaking change: the module went from `module.exports = expand` (callable)
+  # to a namespace object exporting `expand`. minimatch 3 and 5 call the module
+  # directly, so a global `brace-expansion: 5.0.8` pin makes every *braced*
+  # pattern throw "expand is not a function". Unbraced patterns take a fast
+  # path and still work, so that breakage hides from a green build until some
+  # pattern happens to use braces. Hence the scoped overrides below rather
+  # than one global pin. Drop them once the parents ship their own bumps.
+  #
+  # minimatch 10 already consumes the named export, so it takes 5.0.8 as-is.
+  # Pinning exactly is also what gets us 5.0.8 at all: minimum-release-age in
+  # .npmrc holds back anything published <7 days ago, and 5.0.8 is still
+  # inside that window, so a plain ^5 range resolves to the vulnerable 5.0.7.
+  "minimatch@10>brace-expansion": "5.0.8"
+
+  # ...and this moves the last brace-expansion 2.x consumer onto minimatch 10
+  # so it picks up that patched line too. filelist is reached only through
+  # vite-plugin-pwa -> workbox-build -> ejs -> jake, and calls exactly one
+  # minimatch API -- minimatch.match(), unchanged between 5 and 10.
+  "filelist>minimatch": "10.2.5"
