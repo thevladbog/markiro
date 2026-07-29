@@ -71,16 +71,21 @@ export function snapshotAge(snapshot: CachedSnapshot | null, now: Date): CacheAg
 }
 
 /**
- * Guards against overlapping drains. Task 14 triggers a flush from both a
- * periodic interval and an `online` handler, which can fire close enough
- * together that a second drain reads the queue before the first has dequeued
- * what it already submitted. Resubmitting is harmless on the server — it is
- * idempotent on `(tenantId, kioskId, deviceSeq)` — but the second acknowledgement
- * appends a duplicate journal entry to the service screen's log. The invariant
- * belongs here rather than in the caller: it is this module's, and every future
- * caller would otherwise have to rederive it.
+ * The drain currently owed — the tail of the chain, not merely a busy flag.
+ *
+ * Task 14 triggers a flush from both a periodic interval and an `online`
+ * handler, which can fire close enough together that a second drain reads the
+ * queue before the first has dequeued what it already submitted. Resubmitting
+ * is harmless on the server — it is idempotent on
+ * `(tenantId, kioskId, deviceSeq)` — but the second acknowledgement appends a
+ * duplicate journal entry to the service screen's log. The invariant belongs
+ * here rather than in the caller: it is this module's, and every future caller
+ * would otherwise have to rederive it.
+ *
+ * A PROMISE rather than a boolean, because a second caller must WAIT rather
+ * than be turned away — see `flushQueue`.
  */
-let draining = false;
+let draining: Promise<void> | null = null;
 
 /**
  * Drains the offline queue oldest-first. NEVER REJECTS — every failure, from
@@ -119,10 +124,51 @@ let draining = false;
  * journal write succeeded, the order replays and its verdict is journalled a
  * second time. The alternative loses the pickup entirely, so this stays. It
  * costs one duplicate line in a service-screen log that nothing computes from.
+ *
+ * CONCURRENT CALLERS ARE QUEUED, NOT TURNED AWAY, and the difference is a
+ * worker's confirmation. Two drains must never run at once (see `draining`
+ * above), but the interval and the `online` handler are not the only callers:
+ * `submitCart` awaits its own drain to learn whether THIS order reached the
+ * server, and «Заявка № … передана» is the whole point of the confirmation. An
+ * early return would resolve that await having done nothing, and the kiosk
+ * would tell an ONLINE worker their order is queued with no number — precisely
+ * during backlog recovery, when the `online` handler is draining an outage and
+ * workers are submitting again.
+ *
+ * Handing the second caller the promise already in flight would be simpler and
+ * is wrong for one reason: `listQueue` below is read ONCE, before the first
+ * submission, so a drain already running snapshotted a queue that this caller's
+ * order was never in. Awaiting it would resolve having delivered everything
+ * EXCEPT the one order somebody is standing there waiting on. So each call gets
+ * a drain of its own, chained behind whatever is already owed — which keeps the
+ * no-overlap invariant (the chain is sequential) and makes the resolution mean
+ * "the queue as of your call has been attempted".
+ *
+ * The chained drain uses the CLIENT ITS OWN CALLER PASSED, which the shell
+ * depends on: that client is the one recording the reply for the order being
+ * awaited.
  */
-export async function flushQueue(client: KioskClient, now: () => Date): Promise<void> {
-  if (draining) return;
-  draining = true;
+export function flushQueue(client: KioskClient, now: () => Date): Promise<void> {
+  // Started synchronously when nothing is in flight, so a lone caller reads the
+  // queue at call time exactly as it always did.
+  const run =
+    draining === null ? drainOnce(client, now) : draining.then(() => drainOnce(client, now));
+  // `drainOnce` never rejects, so the catch is unreachable today; it is here so
+  // that a future one could not poison every drain queued behind it. Clearing
+  // the tail when it is still ours keeps an idle device from holding a chain of
+  // settled promises.
+  const tail: Promise<void> = run
+    .catch(() => {})
+    .then(() => {
+      if (draining === tail) draining = null;
+    });
+  draining = tail;
+  return tail;
+}
+
+/** One pass over the queue. Never rejects, never overlaps another — the
+ * serialisation is `flushQueue`'s, which is the only caller. */
+async function drainOnce(client: KioskClient, now: () => Date): Promise<void> {
   try {
     const queued = await listQueue(); // ascending deviceSeq
     for (const order of queued) {
@@ -161,8 +207,6 @@ export async function flushQueue(client: KioskClient, now: () => Date): Promise<
     // an order only leaves the queue after a durable acknowledgement, so the
     // next drain picks up wherever this one stopped. Swallowed to keep the
     // never-rejects contract above true for the timer that drives it.
-  } finally {
-    draining = false;
   }
 }
 

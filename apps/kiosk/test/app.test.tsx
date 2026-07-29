@@ -731,6 +731,54 @@ describe("KioskShell", () => {
     expect(new Set(seqs).size).toBe(seqs.length);
   });
 
+  /**
+   * BACKLOG RECOVERY, which is the one moment this can go wrong — and exactly
+   * the moment the kiosk is busiest.
+   *
+   * The link comes back, the `online` handler starts draining an outage's
+   * worth of orders, and workers start submitting again into that same window.
+   * `submitCart` awaits its own drain to learn whether THIS order reached the
+   * server; a drain that answered "somebody else is already draining" would
+   * make it tell an online worker their order is queued with no number, and
+   * send them to an administrator with nothing to look the order up by.
+   */
+  it("shows the real order number for a submit that lands while a backlog drain is running", async () => {
+    await pair();
+    // What an outage left behind, and what the boot drain picks up first.
+    await enqueueOrder(queuedOrder(3), EMPLOYEE.id);
+    let deliver = () => {};
+    const held = new Promise<void>((resolve) => {
+      deliver = resolve;
+    });
+    let backlogPosted = false;
+    const respond = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/kiosk/orders")) {
+        const body = JSON.parse(String(init?.body)) as CreateOrderDto;
+        // Only the backlog order is held, so the drain the worker's submit
+        // lands beside is provably still in flight — and their own order is
+        // not slowed down by this fixture at all.
+        if (body.deviceSeq === 3) {
+          backlogPosted = true;
+          await held;
+        }
+      }
+      return respond(input, init);
+    }) as unknown as typeof fetch;
+
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+    await settle(() => expect(backlogPosted).toBe(true));
+
+    await takeOneBottle();
+    deliver();
+
+    await settle(() => expect(screen.getByText("Заявка № ORD-26-0005 передана")).toBeDefined());
+    expect(said()).not.toContain(QUEUED_TITLE);
+    expect(server.orders.map((order) => order.deviceSeq)).toEqual([3, 5]);
+    expect(await listQueue()).toEqual([]);
+  });
+
   it("drains the queue when the device comes back online", async () => {
     await pair();
     await enqueueOrder(queuedOrder(3), EMPLOYEE.id);

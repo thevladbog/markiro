@@ -117,6 +117,29 @@ async function openUnlessAlreadyOpen(port: SerialPort): Promise<void> {
 }
 
 /**
+ * The reconnect schedule: 250 ms, doubling, capped at five seconds.
+ *
+ * The floor is short because the common failure is a scanner power-cycled or
+ * knocked loose between two workers, and it should be back before the next one
+ * reaches the kiosk. The CAP is what keeps a device that is genuinely gone —
+ * unplugged overnight, or on a machine whose USB stack has given up — from
+ * spinning: one attempt every five seconds, indefinitely.
+ *
+ * INDEFINITELY, and that is deliberate. Giving up after N attempts would leave
+ * exactly the state this whole mechanism exists to avoid — a kiosk that looks
+ * normal with a dead input — and would put the recovery back where it was, on
+ * an installer re-picking the port through a settings gate that on a serial
+ * kiosk may itself want the scanner.
+ */
+export const RECONNECT_BASE_MS = 250;
+export const RECONNECT_MAX_MS = 5_000;
+
+/** `attempt` is 0 for the first retry after a healthy read. */
+function reconnectDelayMs(attempt: number): number {
+  return Math.min(RECONNECT_BASE_MS * 2 ** attempt, RECONNECT_MAX_MS);
+}
+
+/**
  * Web Serial is the preferred transport where it exists: it delivers raw
  * bytes, so the GS separator (0x1D) inside a Chestny ZNAK marking code
  * survives — a keyboard wedge frequently drops it, which is exactly what the
@@ -147,9 +170,36 @@ export function createWebSerialSource(port: SerialPort): ScanSource {
     start(listener: ScanListener) {
       let stopped = false;
       let reader: ReadableStreamDefaultReader<string> | null = null;
-      let buffer = "";
+      /** The pending reconnect, held so `stop()` can cancel it. */
+      let retry: ReturnType<typeof setTimeout> | null = null;
+      /**
+       * Consecutive failed attempts, and therefore where the backoff stands.
+       * Reset by a delivered chunk and by nothing else: a port that opens,
+       * reads nothing and drops again is still failing, and must keep backing
+       * off rather than restart at 250 ms forever.
+       */
+      let attempt = 0;
 
-      void (async () => {
+      const scheduleReconnect = (): void => {
+        if (stopped) return;
+        retry = setTimeout(() => {
+          retry = null;
+          // Re-checked inside the callback as well: `stop()` clears the timer,
+          // but a timer that has already fired cannot be taken back.
+          if (stopped) return;
+          attempt += 1;
+          void session();
+        }, reconnectDelayMs(attempt));
+      };
+
+      /**
+       * One attempt at the port: open it, read it until it ends. The buffer is
+       * per attempt on purpose — a half-received line from before a disconnect
+       * is not the head of the first line after it, and gluing the two together
+       * would deliver one scan that never happened in place of two that did.
+       */
+      const session = async (): Promise<void> => {
+        let buffer = "";
         try {
           await openUnlessAlreadyOpen(port);
           if (stopped) return;
@@ -175,6 +225,9 @@ export function createWebSerialSource(port: SerialPort): ScanSource {
           while (!stopped) {
             const { value, done } = await reader.read();
             if (stopped || done) break;
+            // Bytes arrived, so the link is healthy: the next drop starts its
+            // backoff from the floor rather than from wherever this one ended.
+            attempt = 0;
 
             buffer += value;
             let idx = buffer.search(LINE_TERMINATOR);
@@ -198,14 +251,36 @@ export function createWebSerialSource(port: SerialPort): ScanSource {
           // routine, per the station's own `open_scanner` retry loop) as
           // well as a failed read, so this must not become an unhandled
           // rejection either way.
-          if (!stopped) console.error("kiosk: web serial scan source failed", err);
+          //
+          // Logged once per outage rather than once per attempt: the retries
+          // below repeat every five seconds for as long as the scanner is
+          // away, and a log that fills overnight with the same line is one
+          // nobody reads the next morning.
+          if (!stopped && attempt === 0) console.error("kiosk: web serial scan source failed", err);
         } finally {
           reader = null;
+          // Every way out of the loop that is not a `stop()` is the device
+          // ending the session on us — a stream that errored (unplugged), one
+          // that closed (`done`), a port that would not open, or one with no
+          // `readable` to take. All of them are recoverable by re-opening, and
+          // none of them is visible to the worker standing in front of a kiosk
+          // that otherwise looks perfectly normal.
+          if (!stopped) scheduleReconnect();
         }
-      })();
+      };
+
+      void session();
 
       return () => {
         stopped = true;
+        // The pending reconnect dies with the subscription: a retry that
+        // outlived its `stop()` would re-open a port the owner deliberately
+        // let go of — and on a transport swap would take the device out from
+        // under the source that replaced this one.
+        if (retry !== null) {
+          clearTimeout(retry);
+          retry = null;
+        }
         // Cancelling is also what frees `port.readable` for the next start:
         // the stream is dropped on cancel, so the following access to the
         // getter vends a fresh one. The port itself stays open on purpose.

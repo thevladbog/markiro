@@ -169,6 +169,200 @@ function restartablePort(): {
   };
 }
 
+/**
+ * A port that can be UNPLUGGED, which `restartablePort` deliberately cannot:
+ * everything above restarts the source by hand, and the whole subject here is
+ * a device that goes away without anyone asking it to.
+ *
+ * Both halves of the disappearance are modelled, because both are what the
+ * source has to survive:
+ *
+ *  - the live stream ERRORS, exactly as a real port's does when the device is
+ *    pulled — that is what ends the read loop mid-flight;
+ *  - `open()` then rejects with a `NetworkError` while the device is absent,
+ *    which is the name Web Serial uses for a vanished device and is precisely
+ *    what makes `openUnlessAlreadyOpen`'s `InvalidStateError` tolerance safe:
+ *    the two failures are never confused for one another.
+ */
+function unpluggablePort(): {
+  port: SerialPort;
+  scan: (raw: string) => void;
+  unplug: () => void;
+  replug: () => void;
+  opens: () => number;
+  attemptsAt: () => number[];
+} {
+  let present = true;
+  let isOpen = false;
+  let opens = 0;
+  const attemptsAt: number[] = [];
+  let stream: ReadableStream<Uint8Array> | null = null;
+  let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
+
+  const port: SerialPort = {
+    open: async () => {
+      attemptsAt.push(Date.now());
+      if (isOpen) throw new DOMException("The port is already open.", "InvalidStateError");
+      if (!present) throw new DOMException("The device has been lost.", "NetworkError");
+      isOpen = true;
+      opens++;
+    },
+    close: async () => {
+      isOpen = false;
+      stream = null;
+      controller = null;
+    },
+    get readable() {
+      if (stream) return stream;
+      if (!isOpen) return null;
+      stream = new ReadableStream<Uint8Array>({
+        start(c) {
+          controller = c;
+        },
+        cancel() {
+          stream = null;
+          controller = null;
+        },
+      });
+      return stream;
+    },
+  };
+
+  return {
+    port,
+    scan: (raw) => {
+      void port.readable;
+      controller?.enqueue(bytes(`${raw}\r\n`));
+    },
+    unplug: () => {
+      present = false;
+      isOpen = false;
+      controller?.error(new DOMException("The device has been lost.", "NetworkError"));
+      stream = null;
+      controller = null;
+    },
+    replug: () => {
+      present = true;
+    },
+    opens: () => opens,
+    attemptsAt: () => [...attemptsAt],
+  };
+}
+
+/**
+ * AUTO-RECONNECT, which the design promises in as many words («авто-reconnect
+ * при обрыве», design 2026-07-24 §6) and which nothing enforced.
+ *
+ * Without it a scanner that is unplugged, power-cycled or knocked loose ends
+ * the read loop after one `console.error` and the kiosk goes on looking
+ * entirely normal with a dead input — recoverable only by an installer
+ * re-picking the port through a settings gate that, on a serial kiosk, may
+ * itself want the scanner.
+ *
+ * Every test here drives the clock with fake timers, never a wall-clock wait:
+ * a backoff proven by sleeping is a slow test that pins nothing.
+ */
+describe("web serial reconnect", () => {
+  it("comes back after the scanner is unplugged mid-stream, and delivers scans again", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { port, scan, unplug, replug, opens } = unpluggablePort();
+    const seen: string[] = [];
+    const stop = createWebSerialSource(port).start((raw) => seen.push(raw));
+    await vi.advanceTimersByTimeAsync(10);
+    scan("MARKIRO-BADGE-1");
+    await vi.waitFor(() => expect(seen).toEqual(["MARKIRO-BADGE-1"]));
+
+    // Pulled from the USB socket: the pending read rejects and the loop ends.
+    unplug();
+    await vi.advanceTimersByTimeAsync(1_000);
+    // …and plugged back in, which nothing on the device is told about.
+    replug();
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    // Re-opened by the source itself, with nobody asked to re-pick a port.
+    expect(opens()).toBe(2);
+    scan("MARKIRO-BADGE-2");
+    await vi.waitFor(() => expect(seen).toEqual(["MARKIRO-BADGE-1", "MARKIRO-BADGE-2"]));
+
+    stop();
+    consoleError.mockRestore();
+  });
+
+  it("backs off between attempts while the scanner stays away, and never retries faster than the cap", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { port, unplug, attemptsAt } = unpluggablePort();
+    // Absent before the source ever starts, so every attempt below is a retry
+    // and the first delay is measured from the first failure.
+    unplug();
+
+    const stop = createWebSerialSource(port).start(() => {});
+    await vi.advanceTimersByTimeAsync(30_000);
+    stop();
+
+    const attempts = attemptsAt();
+    let previous = attempts[0] ?? 0;
+    const gaps = attempts.slice(1).map((at) => {
+      const gap = at - previous;
+      previous = at;
+      return gap;
+    });
+    // 250 ms doubling to a five-second ceiling: fast enough that a scanner
+    // power-cycled between two workers is back before the second one reaches
+    // the kiosk, and bounded so a device left unplugged overnight costs one
+    // attempt every five seconds rather than a spin.
+    expect(gaps).toEqual([250, 500, 1000, 2000, 4000, 5000, 5000, 5000, 5000]);
+    consoleError.mockRestore();
+  });
+
+  it("cancels a pending retry on stop(), leaving neither a timer nor a reopened port behind", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { port, unplug, replug, opens } = unpluggablePort();
+    const stop = createWebSerialSource(port).start(() => {});
+    await vi.advanceTimersByTimeAsync(10);
+    expect(opens()).toBe(1);
+
+    unplug();
+    await vi.advanceTimersByTimeAsync(10);
+    // The read has failed and a reconnect is scheduled — the state a transport
+    // swap or an unmount actually lands in.
+    expect(vi.getTimerCount()).toBe(1);
+
+    stop();
+
+    // Nothing pending, and nothing that could open the device behind the
+    // caller's back once it comes back.
+    expect(vi.getTimerCount()).toBe(0);
+    replug();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(opens()).toBe(1);
+    consoleError.mockRestore();
+  });
+
+  it("never reconnects after an explicit stop(), whatever the port does afterwards", async () => {
+    const { port, scan, unplug, replug, opens } = unpluggablePort();
+    const seen: string[] = [];
+    const stop = createWebSerialSource(port).start((raw) => seen.push(raw));
+    await vi.advanceTimersByTimeAsync(10);
+    expect(opens()).toBe(1);
+
+    stop();
+    await vi.advanceTimersByTimeAsync(10);
+    // The device goes away and comes back while nobody is subscribed. A
+    // reconnect here would re-take a port the owner deliberately let go of —
+    // and on a transport swap, would read the device out from under the
+    // source that replaced this one.
+    unplug();
+    replug();
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(opens()).toBe(1);
+    expect(vi.getTimerCount()).toBe(0);
+    scan("MARKIRO-BADGE-1");
+    await vi.advanceTimersByTimeAsync(10);
+    expect(seen).toEqual([]);
+  });
+});
+
 describe("web serial source", () => {
   it("delivers a line terminated by CR/LF, GS separator intact", async () => {
     const { port } = fakePort([bytes(`01046006820000132${GS}93Abcd\r\n`)]);

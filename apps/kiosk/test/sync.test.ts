@@ -272,7 +272,20 @@ describe("flushQueue", () => {
     expect((await listQueue()).map((q) => q.deviceSeq)).toEqual([1]);
   });
 
-  it("ignores a second concurrent drain instead of submitting the same order twice", async () => {
+  /**
+   * The overlap invariant, unchanged in substance: two drains never run at the
+   * same time, and no order is submitted or journalled twice.
+   *
+   * What changed is how the second caller is kept out. It used to be TURNED
+   * AWAY — an early `return` that resolved at once — which is fine for the
+   * interval and the `online` handler, who are watching nothing, and wrong for
+   * `submitCart`, which awaits its own drain to learn whether the worker's
+   * order reached the server. The second call now WAITS for its turn instead,
+   * so what it resolves with is a fact about the queue rather than about who
+   * happened to be draining. The test below pins the half that turning away
+   * could never give.
+   */
+  it("serialises an overlapping drain instead of running two at once, and submits nothing twice", async () => {
     for (const deviceSeq of [1, 2]) {
       await enqueueOrder({ deviceSeq, badgeCode: "B", reason: "buy", items: [] }, "e1");
     }
@@ -284,11 +297,20 @@ describe("flushQueue", () => {
     const submitGate = new Promise<void>((resolve) => {
       releaseSubmit = resolve;
     });
+    // Two drains are overlapping the moment a second submission opens while
+    // the first is still in flight — that is the window where the second drain
+    // has read a queue still holding an order the first one already gave the
+    // server, and where the duplicate journal entry comes from.
+    let inFlight = 0;
+    let overlapped = false;
     const client = {
       bootstrap: vi.fn(),
       submitOrder: vi.fn(async (body: { deviceSeq: number }) => {
+        inFlight += 1;
+        if (inFlight > 1) overlapped = true;
         reachedSubmit();
         await submitGate;
+        inFlight -= 1;
         return {
           orderNo: `ORD-26-000${body.deviceSeq}`,
           status: "pending",
@@ -307,8 +329,68 @@ describe("flushQueue", () => {
     releaseSubmit();
     await Promise.all([first, second]);
 
+    expect(overlapped).toBe(false);
     expect(client.submitOrder.mock.calls.map(([body]) => body.deviceSeq)).toEqual([1, 2]);
+    // Most-recent-first, per `readJournal` — and one entry each, which is the
+    // duplicate the overlap guard exists to prevent.
+    expect((await journalStore.readJournal(10)).map((e) => e.deviceSeq)).toEqual([2, 1]);
     expect(await listQueue()).toEqual([]);
+  });
+
+  /**
+   * WHY THE SECOND CALLER CANNOT SIMPLY BE HANDED THE DRAIN IN FLIGHT.
+   *
+   * `flushQueue` reads the queue ONCE, before its first submission, so a drain
+   * already running snapshotted a queue that this caller's order was never in.
+   * Awaiting that promise would resolve the moment it finished — having
+   * delivered everything except the one order the caller is standing there
+   * waiting on — and `submitCart` would tell an online worker their order is
+   * queued with no number. The second call therefore has to run a drain of its
+   * OWN, chained behind the one in flight.
+   */
+  it("delivers the caller's own order even when it was enqueued after a running drain read the queue", async () => {
+    await enqueueOrder({ deviceSeq: 1, badgeCode: "B", reason: "buy", items: [] }, "e1");
+    let reachedSubmit!: () => void;
+    const submitStarted = new Promise<void>((resolve) => {
+      reachedSubmit = resolve;
+    });
+    let releaseSubmit!: () => void;
+    const submitGate = new Promise<void>((resolve) => {
+      releaseSubmit = resolve;
+    });
+    const client = {
+      bootstrap: vi.fn(),
+      submitOrder: vi.fn(async (body: { deviceSeq: number }) => {
+        if (body.deviceSeq === 1) {
+          reachedSubmit();
+          await submitGate;
+        }
+        return {
+          orderNo: `ORD-26-000${body.deviceSeq}`,
+          status: "pending",
+          itemCount: 0,
+          conflicts: [],
+        };
+      }),
+    };
+
+    // The backlog drain: parked inside its first submission, queue already read.
+    const background = flushQueue(client as never, () => new Date());
+    await submitStarted;
+    // The worker's order lands after that read — the backlog drain will never
+    // see it, whatever it goes on to do.
+    await enqueueOrder({ deviceSeq: 2, badgeCode: "B", reason: "buy", items: [] }, "e1");
+    const mine = flushQueue(client as never, () => new Date());
+    releaseSubmit();
+    await mine;
+
+    // The whole contract, in one assertion: when THIS call resolves, THIS
+    // caller's order has reached the server.
+    expect(client.submitOrder.mock.calls.map(([body]) => body.deviceSeq)).toEqual([1, 2]);
+    // Most-recent-first, per `readJournal`.
+    expect((await journalStore.readJournal(10)).map((e) => e.deviceSeq)).toEqual([2, 1]);
+    expect(await listQueue()).toEqual([]);
+    await background;
   });
 });
 
