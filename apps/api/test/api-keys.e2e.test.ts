@@ -1,10 +1,13 @@
+import { randomUUID } from "node:crypto";
 import express from "express";
 import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { schema, type Db } from "@markiro/db";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
+import { DB } from "../src/auth/auth.module";
 import { loadEnv } from "../src/env";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { signUpAndActivate } from "./support/auth";
@@ -12,6 +15,35 @@ import { signUpAndActivate } from "./support/auth";
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
 );
+
+/**
+ * Inserts a raw `apikey` row under the `public` config, bypassing
+ * `auth.api.createApiKey` entirely -- the only way to get a row with
+ * `configId: "public"` but metadata the plugin itself would never produce
+ * (missing, invalid JSON, or a foreign `kind`). Exercises the
+ * `metadata.kind === "public"` whitelist in `ApiKeysService.list`/`revoke`
+ * (see task-11-brief.md): the existing "ключ станции не виден" test only
+ * proves the `configId` SQL filter works, since a station key never shares
+ * `configId: "public"` to begin with.
+ */
+async function insertBrokenPublicKey(
+  db: Db,
+  tenantId: string,
+  metadata: string | null,
+): Promise<string> {
+  const id = randomUUID();
+  const now = new Date();
+  await db.insert(schema.apikey).values({
+    id,
+    configId: "public",
+    referenceId: tenantId,
+    key: `mk_broken_${id}`,
+    createdAt: now,
+    updatedAt: now,
+    metadata,
+  });
+  return id;
+}
 
 // `apikey` (Better Auth's own table) carries no tenant FK the way
 // `integration_channels` does, but `createApiKey`'s `organizationId` path
@@ -23,6 +55,8 @@ const ready = Boolean(
 describe.skipIf(!ready)("public api keys", () => {
   let app: INestApplication | undefined;
   let agent: ReturnType<typeof request.agent>;
+  let db: Db;
+  let tenantId: string;
 
   beforeAll(async () => {
     const env = loadEnv();
@@ -36,9 +70,10 @@ describe.skipIf(!ready)("public api keys", () => {
     server.use(express.json());
     await app.init();
     await listenOnLoopback(app);
+    db = ref.get(DB);
 
     agent = request.agent(app.getHttpServer());
-    await signUpAndActivate(agent);
+    tenantId = await signUpAndActivate(agent);
 
     // A station device shares the same `apikey` table (Task 6). Enrolling
     // one here makes "ключ станции не виден среди публичных" below an
@@ -88,5 +123,23 @@ describe.skipIf(!ready)("public api keys", () => {
   it("ключ станции не виден среди публичных", async () => {
     const list = await agent.get("/integrations/public_api/keys").expect(200);
     expect(list.body.keys.every((k: { kind: string }) => k.kind === "public")).toBe(true);
+  });
+
+  it("строка configId=public с испорченными метаданными не в списке и не отзывается", async () => {
+    const brokenIds = await Promise.all([
+      insertBrokenPublicKey(db, tenantId, null), // отсутствующие метаданные
+      insertBrokenPublicKey(db, tenantId, "{not-json"), // невалидный JSON
+      insertBrokenPublicKey(db, tenantId, JSON.stringify({ kind: "station" })), // посторонний kind
+    ]);
+
+    const list = await agent.get("/integrations/public_api/keys").expect(200);
+    const listedIds = list.body.keys.map((k: { id: string }) => k.id);
+    for (const id of brokenIds) {
+      expect(listedIds).not.toContain(id);
+    }
+
+    for (const id of brokenIds) {
+      await agent.delete(`/integrations/public_api/keys/${id}`).expect(404);
+    }
   });
 });

@@ -124,6 +124,18 @@ export class ApiKeysService {
    * `StationDevicesService.revoke`'s (a delete is either "found and gone
    * now" or "not found"), rather than inventing a second way to say "this
    * key isn't live" alongside the 404 that already covers it.
+   *
+   * The SELECT above and the DELETE below are two separate statements, not
+   * one transaction, so two concurrent revokes of the same id can both pass
+   * the SELECT before either commits its DELETE. That's harmless for the
+   * row itself (only one DELETE actually removes it), but it must not
+   * double-write the journal. `.returning()` on the DELETE is the gate:
+   * Postgres still serializes the two DELETEs against each other, so only
+   * the one that actually removes the row gets it back; the other matches
+   * zero rows (the row is already gone by the time it runs) and returns
+   * nothing. Journal only on an actual delete, so a race writes "ключ
+   * отозван" exactly once per key, no matter how many concurrent requests
+   * raced for it.
    */
   async revoke(tenantId: string, id: string): Promise<void> {
     const [row] = await this.db
@@ -140,7 +152,11 @@ export class ApiKeysService {
       throw new NotFoundException("Unknown public API key");
     }
 
-    await this.db.delete(schema.apikey).where(eq(schema.apikey.id, id));
+    const [deleted] = await this.db
+      .delete(schema.apikey)
+      .where(eq(schema.apikey.id, id))
+      .returning();
+    if (!deleted) return;
 
     await this.journal.append({
       tenantId,
