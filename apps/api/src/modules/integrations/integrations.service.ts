@@ -8,8 +8,15 @@ import {
 import { schema, type Db } from "@markiro/db";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { DB } from "../../auth/auth.module";
+import { generateExchangeCredentials, hashExchangeSecret } from "../exchange/exchange-credentials";
 import { CHANNELS, describeChannel, type IntegrationChannelType } from "./channel-registry";
-import type { ChannelDetailDto, ChannelState, ChannelSummaryDto, JournalPageDto } from "./dto";
+import type {
+  ChannelDetailDto,
+  ChannelState,
+  ChannelSummaryDto,
+  CredentialsIssuedDto,
+  JournalPageDto,
+} from "./dto";
 
 @Injectable()
 export class IntegrationsService {
@@ -83,6 +90,38 @@ export class IntegrationsService {
         target: [schema.integrationChannels.tenantId, schema.integrationChannels.type],
         set: { settings: parsed.data },
       });
+  }
+
+  /**
+   * Mints a fresh machine login+secret pair for `type` and persists the
+   * login plus the secret's hash on `integration_channels`. The secret
+   * itself is returned here and ONLY here -- `getChannel`/`ChannelDetailDto`
+   * never carries it. Issuing again for the same channel overwrites both
+   * the login and the hash, so the previous secret stops verifying the
+   * instant a new one is issued -- there is only ever one live credential
+   * per channel.
+   */
+  async issueCredentials(
+    tenantId: string,
+    type: IntegrationChannelType,
+  ): Promise<CredentialsIssuedDto> {
+    const descriptor = safeDescribeChannel(type);
+    if (!descriptor.available) {
+      throw new ConflictException("Channel is not available yet");
+    }
+
+    const { login, secret } = generateExchangeCredentials();
+    const credentialHash = await hashExchangeSecret(secret);
+
+    await this.db
+      .insert(schema.integrationChannels)
+      .values({ tenantId, type, credentialLogin: login, credentialHash })
+      .onConflictDoUpdate({
+        target: [schema.integrationChannels.tenantId, schema.integrationChannels.type],
+        set: { credentialLogin: login, credentialHash },
+      });
+
+    return { login, secret };
   }
 
   async readJournal(tenantId: string, type: IntegrationChannelType): Promise<JournalPageDto> {

@@ -38,5 +38,11 @@ export interface JournalPageDto {
   sessions: JournalSessionDto[];
 }
 
+/** Выпускается ровно один раз при `POST /integrations/:type/credentials`; в базе живёт только хэш секрета. */
+export interface CredentialsIssuedDto {
+  login: string;
+  secret: string;
+}
+
 export const updateChannelSchema = z.record(z.string(), z.unknown());
 export type UpdateChannelDto = z.infer<typeof updateChannelSchema>;
