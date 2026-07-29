@@ -251,22 +251,57 @@ describe("Blocked", () => {
 
 describe("StatusStrip", () => {
   it("says the kiosk is online, and says something different when it is not", () => {
-    const { rerender } = render(<StatusStrip online age="fresh" />);
+    const { rerender } = render(<StatusStrip online age="fresh" quarantined={0} />);
     expect(screen.getByText("Связь с сервером есть")).toBeDefined();
     expect(screen.queryByText("Нет связи — киоск работает офлайн")).toBeNull();
 
-    rerender(<StatusStrip online={false} age="fresh" />);
+    rerender(<StatusStrip online={false} age="fresh" quarantined={0} />);
 
     expect(screen.getByText("Нет связи — киоск работает офлайн")).toBeDefined();
     expect(screen.queryByText("Связь с сервером есть")).toBeNull();
   });
 
   it("warns once the snapshot is older than a day, and not before", () => {
-    const { rerender } = render(<StatusStrip online age="fresh" />);
+    const { rerender } = render(<StatusStrip online age="fresh" quarantined={0} />);
     expect(screen.queryByText("Данные обновлялись больше суток назад")).toBeNull();
 
-    rerender(<StatusStrip online age="warn" />);
+    rerender(<StatusStrip online age="warn" quarantined={0} />);
 
     expect(screen.getByText("Данные обновлялись больше суток назад")).toBeDefined();
+  });
+
+  /**
+   * A permanently refused order is invisible everywhere else: it has left the
+   * queue (so `Blocked`'s count no longer covers it), it will never be retried,
+   * and the worker it belonged to walked away long ago. Without a word here a
+   * kiosk can sit for weeks holding a pickup nobody will ever look at.
+   *
+   * It is stated only when there IS one: a permanent «отложено: 0» would train
+   * everyone who walks past the kiosk to read straight through the line on the
+   * day it finally says something.
+   */
+  it("says nothing about quarantine while nothing has been set aside", () => {
+    render(<StatusStrip online age="fresh" quarantined={0} />);
+
+    expect(text()).not.toContain("отклонил");
+    expect(text()).not.toContain("администратор");
+  });
+
+  /**
+   * And when there is one, it names the count and names WHOSE problem it is.
+   *
+   * The count so an administrator can reconcile it against the panel, the way
+   * `Blocked` states its queue; the administrator because nothing the worker
+   * standing here can do will clear it — a strip that merely went red would
+   * send them to fetch someone for a kiosk that is otherwise working perfectly.
+   */
+  it("names the orders the server refused for good, and whose problem they are", () => {
+    render(<StatusStrip online age="fresh" quarantined={2} />);
+
+    expect(text()).toContain("Сервер отклонил заявки: 2");
+    expect(text()).toContain("нужен администратор");
+    // Calm, not alarming: the kiosk is still online and still handing product
+    // out, and this must not read as a failure of the pickup in progress.
+    expect(screen.getByText("Связь с сервером есть")).toBeDefined();
   });
 });

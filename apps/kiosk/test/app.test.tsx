@@ -16,6 +16,7 @@ import { replaceSnapshot } from "../src/store/cache.js";
 import * as configStore from "../src/store/config.js";
 import {
   readConfig,
+  readScannerSettings,
   writeConfig,
   writeScannerSettings,
   type KioskConfig,
@@ -471,6 +472,24 @@ function setWebSerial(port: SerialPort | null): void {
   }
   Object.defineProperty(navigator, "serial", {
     value: { requestPort: async () => port, getPorts: async () => [port] },
+    configurable: true,
+    writable: true,
+  });
+}
+
+/**
+ * Web Serial exists and the picker would still hand this port over — but
+ * `getPorts()` answers empty, which is what a browser that no longer holds the
+ * grant says: a reset profile, a different machine, a scanner that moved.
+ *
+ * The distinction from `setWebSerial` is the whole point of the test below: a
+ * device in this state has a STORED transport of "serial" it cannot honour, so
+ * the shell falls back to the wedge — and the stored mode is then a description
+ * of a kiosk that no longer exists.
+ */
+function setWebSerialWithoutGrant(port: SerialPort): void {
+  Object.defineProperty(navigator, "serial", {
+    value: { requestPort: async () => port, getPorts: async () => [] },
     configurable: true,
     writable: true,
   });
@@ -1387,6 +1406,88 @@ describe("KioskShell", () => {
     expect(screen.getByText(EMPLOYEE.fullName)).toBeDefined();
     added.mockRestore();
     removed.mockRestore();
+  });
+
+  /**
+   * THE RADIO MUST DESCRIBE THE DEVICE, NOT THE STORE.
+   *
+   * Only the transport MODE is persisted — a `SerialPort` cannot be — so a
+   * stored "serial" is honoured by the shell only while the browser still holds
+   * the port grant behind it (`recoverGrantedPort`), and the kiosk falls back
+   * to the keyboard wedge when it does not. Seeded from the store, the settings
+   * screen then checks «Web Serial» over a kiosk running the wedge, and the
+   * test scan below it certifies the wedge under that label: the installer runs
+   * a successful scan through the wrong device, presses «Готово», and leaves
+   * with a saved configuration that misdescribes the kiosk.
+   *
+   * So the shell says what it is actually running, and that wins over the
+   * store.
+   */
+  it("shows the keyboard transport on a kiosk whose stored serial grant did not survive", async () => {
+    const scanner = fakeSerialPort();
+    setWebSerialWithoutGrant(scanner.port);
+    await writeScannerSettings({ transport: "serial" });
+    await pair();
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+    // The shell really did fall back: no serial transport was ever started, so
+    // the wedge is the device's only scanner.
+    expect(transports.starts).toEqual(["keyboard"]);
+
+    await holdIdleHeader(SETTINGS_HOLD_MS);
+    await settle(() => expect(screen.getByText(GATE_TITLE)).toBeDefined());
+    await signInWithPin();
+    await settle(() => expect(screen.getByText(SETUP_TITLE)).toBeDefined());
+    // A full store round trip, so the stored mode has had every chance to land
+    // on this screen. It must not be consulted at all — the shell has already
+    // read it AND checked the grant behind it.
+    await settle(async () => expect(await readScannerSettings()).toEqual({ transport: "serial" }));
+
+    expect(transportRadio(KEYBOARD_TRANSPORT).checked).toBe(true);
+    expect(transportRadio(SERIAL_TRANSPORT).checked).toBe(false);
+
+    // And the label is honest end to end: the wedge is what answers the test
+    // scan, which is the transport the screen is now naming.
+    scan(BADGE);
+    await settle(() => expect(verdict()).toBe(VERDICT_BADGE));
+  });
+
+  /**
+   * A QUARANTINED ORDER HAS TO BE VISIBLE SOMEWHERE, and this strip is the only
+   * candidate.
+   *
+   * A terminal per-order rejection (400/409/422) moves the order into the
+   * quarantine store so the drain can continue past it. That is right — one
+   * poisoned record must not hold a day's pickups — but it also removes the
+   * order from every other indication the device has: it has left the queue, so
+   * `Blocked`'s count no longer covers it; it will never be retried, so no
+   * later drain will mention it; and the worker it belonged to walked away
+   * days ago. Without a word here the kiosk sits indefinitely holding a pickup
+   * nobody will ever look at.
+   */
+  it("says on the strip when the server has refused an order for good", async () => {
+    await pair();
+    await enqueueOrder(queuedOrder(3), EMPLOYEE.id);
+    const respond = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      // A verdict on the ORDER, not on the device: the body is one the server
+      // will never take, however often it is offered.
+      if (String(input).endsWith("/kiosk/orders"))
+        return errorResponse(422, "Unprocessable Entity");
+      return respond(input, init);
+    }) as unknown as typeof fetch;
+
+    render(<App />);
+
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+    await settle(async () => expect(await listQuarantine()).toHaveLength(1));
+    await settle(() => expect(said()).toContain("Сервер отклонил заявки: 1"));
+    // Whose problem it is. Nothing the worker standing here can do clears it.
+    expect(said()).toContain("нужен администратор");
+    // And it is stated on a kiosk that is otherwise working — which is exactly
+    // why nothing else on this screen would ever mention the parked order.
+    expect(screen.getByText("Связь с сервером есть")).toBeDefined();
+    expect(await listQueue()).toEqual([]);
   });
 
   // `Done`'s "already reset" flag is a sticky ref, so a re-used instance would

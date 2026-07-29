@@ -22,7 +22,7 @@ import { countTakenToday, startOfUtcDay, utcDayOf } from "../session/day-count.j
 import { readSnapshot, type CachedSnapshot } from "../store/cache.js";
 import { readConfig, readScannerSettings, writeConfig, type KioskConfig } from "../store/config.js";
 import { readJournalSince } from "../store/journal.js";
-import { enqueueOrder, listQueue, quarantineQueue } from "../store/queue.js";
+import { enqueueOrder, listQuarantine, listQueue, quarantineQueue } from "../store/queue.js";
 import {
   flushQueue,
   refreshSnapshot,
@@ -106,6 +106,15 @@ export function KioskShell(): React.JSX.Element {
   const [snapshot, setSnapshot] = useState<CachedSnapshot | null>(null);
   const [online, setOnline] = useState(() => navigator.onLine);
   const [queuedCount, setQueuedCount] = useState(0);
+  /**
+   * Orders the server refused for good and the drain set aside.
+   *
+   * Counted for the STATUS STRIP rather than for any screen, because a
+   * quarantined order has no screen: it has left the queue (so `Blocked`'s
+   * count no longer covers it), it is never retried, and the worker it belonged
+   * to left days ago. The strip is the one thing a passing administrator reads.
+   */
+  const [quarantinedCount, setQuarantinedCount] = useState(0);
   const [scannerSetupRequested, setScannerSetupRequested] = useState(false);
   const [session, setSession] = useState<KioskSession | null>(null);
   const [submitted, setSubmitted] = useState<SubmittedOrder | null>(null);
@@ -197,15 +206,30 @@ export function KioskShell(): React.JSX.Element {
     };
   }, []);
 
-  /** `Blocked` states this number for an administrator to reconcile against the
-   * panel, so it is re-read after every drain rather than tracked by arithmetic
-   * here. A failed read keeps the last known count: zeroing it would tell a
-   * worker their orders had evaporated. */
-  const refreshQueuedCount = useCallback(async () => {
+  /**
+   * What the device is still holding, both kinds, re-read after every drain
+   * rather than tracked by arithmetic here — a drain can move an order from one
+   * of these stores to the other without this shell being told.
+   *
+   * `Blocked` states the queued number for an administrator to reconcile
+   * against the panel; the strip states the quarantined one for the same
+   * reason. A failed read keeps the last known count: zeroing it would tell a
+   * worker their orders had evaporated, and would hide a parked one.
+   *
+   * SEPARATELY guarded, so one unreadable store cannot silence the other. They
+   * are two independent facts and a shared `catch` would make a failure to
+   * count the queue also swallow the quarantine.
+   */
+  const refreshCounts = useCallback(async () => {
     try {
       setQueuedCount((await listQueue()).length);
     } catch (err) {
       console.error("kiosk: could not count the queued orders", err);
+    }
+    try {
+      setQuarantinedCount((await listQuarantine()).length);
+    } catch (err) {
+      console.error("kiosk: could not count the orders set aside", err);
     }
   }, []);
 
@@ -215,8 +239,8 @@ export function KioskShell(): React.JSX.Element {
     // explicit about it, and about the asymmetry with `refreshSnapshot`), so a
     // catch here would be dead code claiming otherwise.
     if (client) await flushQueue(client, now);
-    await refreshQueuedCount();
-  }, [clientFor, refreshQueuedCount]);
+    await refreshCounts();
+  }, [clientFor, refreshCounts]);
 
   /**
    * WHAT A REVOKED DEVICE DOES, and it is not "carry on offline".
@@ -268,8 +292,8 @@ export function KioskShell(): React.JSX.Element {
     } catch (err) {
       console.error("kiosk: the undeliverable queue could not be set aside", err);
     }
-    await refreshQueuedCount();
-  }, [applyConfig, refreshQueuedCount]);
+    await refreshCounts();
+  }, [applyConfig, refreshCounts]);
 
   /**
    * One heartbeat: pull the dataset, then push whatever is owed.
@@ -332,8 +356,8 @@ export function KioskShell(): React.JSX.Element {
       // pairing screen and a fresh code.
       console.error("kiosk: the device state could not be read", err);
     }
-    await refreshQueuedCount();
-  }, [applyConfig, applySnapshot, refreshQueuedCount]);
+    await refreshCounts();
+  }, [applyConfig, applySnapshot, refreshCounts]);
 
   useEffect(() => {
     let alive = true;
@@ -684,6 +708,21 @@ export function KioskShell(): React.JSX.Element {
         // owns the transport, and the swap below is what makes the test scan's
         // verdict belong to the transport the installer picked.
         subscribe={subscribe}
+        // WHAT THIS DEVICE IS ACTUALLY RUNNING, read off the state the source
+        // above is built from — `scanPort === null` IS the keyboard wedge, by
+        // the same expression `sourceRef` uses a few lines up. So the radio and
+        // the fan-out the test scan reads can never disagree: they are two
+        // renderings of one value.
+        //
+        // Deliberately NOT the stored mode, which is the only other candidate
+        // and is a different fact. The store keeps "serial" whether or not the
+        // browser still holds a port grant, and `recoverGrantedPort` falls back
+        // to the wedge when it does not — so on a device whose grant was
+        // cleared the store describes a kiosk that no longer exists. An
+        // installer reading «Web Serial» there runs a successful test scan
+        // through the wedge, presses «Готово», and leaves with a saved
+        // configuration that misdescribes the machine.
+        activeTransport={scanPort === null ? "keyboard" : "serial"}
         onTransportChange={(next, port) => {
           // THE SWAP, and the whole reason that screen can certify anything.
           // The port travels up because only that screen's radio can obtain
@@ -809,7 +848,7 @@ export function KioskShell(): React.JSX.Element {
           installer screens would only be reading a strip about a device that is
           not yet a kiosk. */}
       {view === "idle" || view === "cart" || view === "done" || view === "blocked" ? (
-        <StatusStrip online={online} age={age} />
+        <StatusStrip online={online} age={age} quarantined={quarantinedCount} />
       ) : null}
       {screen}
     </div>

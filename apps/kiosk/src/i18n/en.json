@@ -89,7 +89,8 @@
   "status": {
     "online": "Connected to the server",
     "offline": "No connection — the kiosk is working offline",
-    "stale": "The data was last refreshed more than a day ago"
+    "stale": "The data was last refreshed more than a day ago",
+    "quarantined": "Orders the server refused: {{n}} — an administrator is needed"
   },
   "scannerSetup": {
     "title": "Scanner setup",
