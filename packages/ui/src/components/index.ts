@@ -42,3 +42,9 @@ export type { PageHeaderProps } from "./PageHeader.js";
 
 export { toast } from "./Toast.js";
 export type { ToastTone } from "./Toast.js";
+
+export { PinPad } from "./PinPad.js";
+export type { PinPadProps } from "./PinPad.js";
+
+export { SignalOverlay } from "./SignalOverlay.js";
+export type { SignalOverlayProps, SignalTone } from "./SignalOverlay.js";

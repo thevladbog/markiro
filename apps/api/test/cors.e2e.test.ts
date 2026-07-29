@@ -6,6 +6,7 @@ import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
+import { corsDelegate } from "../src/cors";
 import { loadEnv } from "../src/env";
 import { listenOnLoopback } from "./support/listen-loopback";
 
@@ -19,13 +20,21 @@ const ready = Boolean(
 
 const FOREIGN_ORIGIN = "https://evil.example";
 
+/**
+ * Injected rather than read from `process.env.KIOSK_ORIGIN`: the variable is
+ * optional (see src/env.ts) and unset in a plain dev shell, so reading it
+ * would leave the kiosk cases below asserting nothing whenever it happens to
+ * be absent. A literal also keeps it provably distinct from ADMIN_ORIGIN.
+ */
+const KIOSK_ORIGIN = "https://kiosk.markiro.test";
+
 describe.skipIf(!ready)("cors e2e", () => {
   let app: INestApplication | undefined;
   let setup: AuthSetup;
   let adminOrigin: string;
 
   beforeAll(async () => {
-    const env = loadEnv();
+    const env = { ...loadEnv(), KIOSK_ORIGIN };
     adminOrigin = env.ADMIN_ORIGIN;
     setup = setupAuth(env);
 
@@ -37,7 +46,7 @@ describe.skipIf(!ready)("cors e2e", () => {
     // handler is mounted so preflight/actual responses on /api/auth/* also
     // carry the CORS headers (see main.ts for the full ordering rationale).
     app = ref.createNestApplication({ bodyParser: false });
-    app.enableCors({ origin: [adminOrigin], credentials: true });
+    app.enableCors(corsDelegate(env));
     const server = app.getHttpAdapter().getInstance();
     mountAuth(server, setup.auth);
     server.use(express.json());
@@ -68,6 +77,157 @@ describe.skipIf(!ready)("cors e2e", () => {
       .expect(204);
 
     expect(res.headers["access-control-allow-origin"]).toBeUndefined();
+  });
+
+  // The kiosk is the only cross-origin caller that CANNOT fall back to a
+  // same-origin deployment: its pairing screen takes a server address, so an
+  // on-prem install routinely serves the PWA and the API from different
+  // hosts. The token-bearing calls (`/kiosk/bootstrap`, `/kiosk/orders`)
+  // carry `x-kiosk-token`, which is not a safelisted request header, so this
+  // preflight happens before *every* one of them -- not just once.
+  it("OPTIONS preflight from KIOSK_ORIGIN on a /kiosk route is accepted", async () => {
+    const res = await request(app!.getHttpServer())
+      .options("/kiosk/bootstrap")
+      .set("Origin", KIOSK_ORIGIN)
+      .set("Access-Control-Request-Method", "GET")
+      .set("Access-Control-Request-Headers", "x-kiosk-token")
+      .expect(204);
+
+    expect(res.headers["access-control-allow-origin"]).toBe(KIOSK_ORIGIN);
+    expect(res.headers["access-control-allow-credentials"]).toBe("true");
+    // Echoed by `cors` because main.ts leaves `allowedHeaders` unset; without
+    // it the browser drops the request even though the origin was allowed.
+    expect(res.headers["access-control-allow-headers"]).toContain("x-kiosk-token");
+  });
+
+  it("OPTIONS preflight from an unlisted origin on a /kiosk route is refused", async () => {
+    const res = await request(app!.getHttpServer())
+      .options("/kiosk/bootstrap")
+      .set("Origin", FOREIGN_ORIGIN)
+      .set("Access-Control-Request-Method", "GET")
+      .set("Access-Control-Request-Headers", "x-kiosk-token")
+      .expect(204);
+
+    // ACAO's *absence* is the whole boundary. Do not also assert on
+    // `access-control-allow-credentials`: `cors` emits it unconditionally
+    // whenever `credentials: true` is configured, match or no match
+    // (verified — it is present with value "true" on this very response).
+    // That is harmless, because a browser rejects the response on the
+    // missing ACAO before credentials are ever considered.
+    expect(res.headers["access-control-allow-origin"]).toBeUndefined();
+  });
+
+  it("the admin origin stays allowed alongside the kiosk origin", async () => {
+    const res = await request(app!.getHttpServer())
+      .options("/kiosk/bootstrap")
+      .set("Origin", adminOrigin)
+      .set("Access-Control-Request-Method", "GET")
+      .expect(204);
+
+    expect(res.headers["access-control-allow-origin"]).toBe(adminOrigin);
+  });
+
+  // `/kiosk/pair` is the one route with no `x-kiosk-token` -- the device has
+  // no token until it succeeds -- but it is still preflighted, because its
+  // `Content-Type: application/json` is not a CORS-safelisted value. So it
+  // needs the kiosk origin allowed just as much as the guarded routes do.
+  it("OPTIONS preflight from KIOSK_ORIGIN on the unauthenticated /kiosk/pair is accepted", async () => {
+    const res = await request(app!.getHttpServer())
+      .options("/kiosk/pair")
+      .set("Origin", KIOSK_ORIGIN)
+      .set("Access-Control-Request-Method", "POST")
+      .set("Access-Control-Request-Headers", "content-type")
+      .expect(204);
+
+    expect(res.headers["access-control-allow-origin"]).toBe(KIOSK_ORIGIN);
+  });
+
+  /**
+   * The kiosk origin is scoped to `/kiosk/*`, not granted globally.
+   *
+   * A global credentialed allowlist would make KIOSK_ORIGIN a reader of every
+   * route's response. In the deployment this product ships -- kiosk and admin
+   * as sibling subdomains of one site -- script on the kiosk origin could then
+   * send an administrator's cookies with `credentials: "include"` and read
+   * back whatever a session-guarded route returned. The kiosk calls no such
+   * route (see apps/kiosk/src/api/client.ts), so scoping costs it nothing.
+   */
+  describe("the kiosk origin is scoped to /kiosk/*", () => {
+    // Each pair below is the same origin against a kiosk and a non-kiosk
+    // route: the "granted" half is what stops this from passing vacuously
+    // (a blanket deny would satisfy the "refused" half on its own).
+    it("is refused on a session-guarded route it never calls", async () => {
+      const granted = await request(app!.getHttpServer())
+        .options("/kiosk/orders")
+        .set("Origin", KIOSK_ORIGIN)
+        .set("Access-Control-Request-Method", "POST")
+        .expect(204);
+      expect(granted.headers["access-control-allow-origin"]).toBe(KIOSK_ORIGIN);
+
+      const refused = await request(app!.getHttpServer())
+        .options("/counterparties")
+        .set("Origin", KIOSK_ORIGIN)
+        .set("Access-Control-Request-Method", "GET")
+        .expect(204);
+      expect(refused.headers["access-control-allow-origin"]).toBeUndefined();
+    });
+
+    it("is refused on /api/auth/*, which the CORS middleware also fronts", async () => {
+      const res = await request(app!.getHttpServer())
+        .options("/api/auth/sign-in/email")
+        .set("Origin", KIOSK_ORIGIN)
+        .set("Access-Control-Request-Method", "POST")
+        .set("Access-Control-Request-Headers", "content-type")
+        .expect(204);
+      expect(res.headers["access-control-allow-origin"]).toBeUndefined();
+    });
+
+    it("is refused on an actual (non-preflight) response from a session-guarded route", async () => {
+      // Preflight is not the only place the boundary has to hold: a simple
+      // GET is sent without one, and it is the ACAO on THIS response that
+      // decides whether the caller may read the body.
+      const res = await request(app!.getHttpServer())
+        .get("/counterparties")
+        .set("Origin", KIOSK_ORIGIN);
+      expect(res.headers["access-control-allow-origin"]).toBeUndefined();
+    });
+
+    it("does not leak onto /kiosks, the session-guarded cabinet route", async () => {
+      // `/kiosks` shares a prefix with `/kiosk` but is an admin route behind
+      // a session — a `startsWith("/kiosk")` scope test would have let the
+      // kiosk origin read it.
+      const res = await request(app!.getHttpServer())
+        .options("/kiosks")
+        .set("Origin", KIOSK_ORIGIN)
+        .set("Access-Control-Request-Method", "GET")
+        .expect(204);
+      expect(res.headers["access-control-allow-origin"]).toBeUndefined();
+    });
+
+    it("leaves the admin origin allowed on both surfaces, exactly as before", async () => {
+      for (const path of ["/counterparties", "/kiosk/bootstrap", "/api/auth/sign-in/email"]) {
+        const res = await request(app!.getHttpServer())
+          .options(path)
+          .set("Origin", adminOrigin)
+          .set("Access-Control-Request-Method", "POST")
+          .expect(204);
+        expect({ path, acao: res.headers["access-control-allow-origin"] }).toEqual({
+          path,
+          acao: adminOrigin,
+        });
+      }
+    });
+  });
+
+  // better-auth's own origin check is a separate layer from the CORS headers
+  // above, and it is fed `sessionAllowedOrigins` -- which excludes the kiosk.
+  // Asserting on the configured value rather than on a request, because
+  // better-auth disables the check outright under a test runner (see the long
+  // note on the sign-up cases below), so no HTTP call here could observe it.
+  it("the kiosk origin is not one of better-auth's trustedOrigins", () => {
+    const trusted = setup.auth.options.trustedOrigins;
+    expect(trusted).toEqual([adminOrigin]);
+    expect(trusted).not.toContain(KIOSK_ORIGIN);
   });
 
   it("sign-up POST with Origin: ADMIN_ORIGIN succeeds", async () => {

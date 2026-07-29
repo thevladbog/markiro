@@ -18,6 +18,7 @@
         "BETTER_AUTH_SECRET",
         "BETTER_AUTH_URL",
         "ADMIN_ORIGIN",
+        "KIOSK_ORIGIN",
         "PAIRING_CODE_PEPPER"
       ]
     }

@@ -5,7 +5,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
-  UnauthorizedException,
+  UnprocessableEntityException,
 } from "@nestjs/common";
 import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, sql, type SQL } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
@@ -37,6 +37,29 @@ interface ResolvedItem {
   kmKey: string;
   unitPrice: string | null;
 }
+
+/**
+ * How far AHEAD of server time a device-supplied `createdAt` may sit before
+ * the server stops believing it. Deliberately small: an unsynced tablet drifts
+ * by seconds to minutes, and the request itself adds only network latency, so
+ * five minutes covers every honest case. Everything past it is either a broken
+ * clock or the attack this bound exists for -- rolling a kiosk's date forward
+ * hands its worker a brand-new UTC day, and therefore a fresh daily allowance,
+ * as often as the date is rolled again.
+ */
+const CLIENT_CLOCK_AHEAD_TOLERANCE_MS = 5 * 60_000;
+
+/**
+ * How far BEHIND server time it may sit. Generous, because a legitimately old
+ * timestamp is the whole point of `createdAt`: an offline kiosk replays its
+ * queue with the original scan times. Bounded at seven days by an invariant
+ * the device already enforces -- it blocks itself after 7 days without a
+ * successful bootstrap (see `generatedAt` in ./dto.ts) -- so a device cannot
+ * honestly accumulate a longer backlog than this. Backdating is the weaker
+ * direction anyway: it spends an allowance on a day already past, it does not
+ * mint a new one.
+ */
+const CLIENT_CLOCK_BEHIND_TOLERANCE_MS = 7 * 24 * 60 * 60_000;
 
 /** One item classified against `validatePickupKm`, still pending allowlist resolution. */
 type ParsedItem =
@@ -87,11 +110,48 @@ export class PickupOrdersService {
       };
     }
 
-    // 2. Badge -> active employee (badge's revoked_at is null). Unknown -> 401 ("bad badge" on the kiosk).
+    // 1b. Settle the ONE timestamp this request is filed under, before any step
+    // that can throw. Every path below that persists something -- the two
+    // rejection rows thrown out of steps 2 and 3, the all-conflict rejection
+    // row, and the order itself -- must date it identically, and none of them
+    // may take `dto.createdAt` raw: the device's clock is untrusted, and
+    // `resolveScanTime` is the clamp that keeps a rolled-forward tablet from
+    // minting itself a fresh daily allowance (see its doc comment). Hoisted
+    // here rather than left at step 5 purely so the early-throw paths can
+    // share it.
+    const when = this.resolveScanTime(dto.createdAt, kioskId);
+
+    // 2. Badge -> active employee (badge's revoked_at is null, employee active).
+    //
+    // 422, NOT 401, AND THE DIFFERENCE IS LOAD-BEARING. `badgeCode` is a field
+    // of the ORDER, not the caller's credential: the device already
+    // authenticated (`KioskDeviceGuard`), and what failed is that a well-formed
+    // body names an employee no withdrawal can be filed against — which is
+    // exactly what 422 says and 401 does not.
+    //
+    // 401 on this route is RESERVED for the device token, because the kiosk
+    // cannot ask anything else. `POST /kiosk/orders` is the only route where a
+    // device meets both failures, and it holds nothing but a status code to
+    // tell them apart: 401 means the token is gone (archived kiosk, or a
+    // replacement device having redeemed a new one) and sends it back to
+    // pairing with its queue intact, so the sync worker deliberately excludes
+    // 401 from the statuses it quarantines on. While an unknown badge shared
+    // that 401, an order whose employee was deleted or archived server-side
+    // before it synced was UNDELIVERABLE AND UNQUARANTINABLE: it parked at the
+    // head of the offline queue forever and every later order sat behind it,
+    // while the kiosk went on accepting and confirming new ones.
+    //
+    // 403 would have been the same mistake in a different digit — it also
+    // speaks about the CALLER's authority, which is not what is wrong here, and
+    // this codebase already uses it that way (`TenantGuard`,
+    // `SessionOnlyGuard`). 422 is already in the kiosk's terminal allowlist
+    // (`TERMINAL_STATUSES`, apps/kiosk/src/sync/worker.ts), so the queue
+    // unblocks the moment this ships, including on a device still running an
+    // older bundle.
     const employeeId = await this.resolveActiveEmployeeId(tenantId, dto.badgeCode);
     if (!employeeId) {
       // An offline sync lands hours after the scan, so the badge may have
-      // been revoked in between -- and this 401 fires before a single item
+      // been revoked in between -- and this 422 fires before a single item
       // is examined, so without this the codes the worker walked off with
       // leave no trace at all. Codes only: an item-less badge heartbeat
       // lost nothing and must not add noise here.
@@ -104,10 +164,10 @@ export class PickupOrdersService {
           orderId: null,
           deviceSeq: dto.deviceSeq,
           codes: dto.items.map((item) => ({ rawKm: item.rawKm, reason: "unknown_badge" })),
-          scannedAt: dto.createdAt ? new Date(dto.createdAt) : new Date(),
+          scannedAt: when,
         });
       }
-      throw new UnauthorizedException("Unknown badge");
+      throw new UnprocessableEntityException("Unknown or inactive badge");
     }
 
     // 3. Writeoff orders require a non-archived reason belonging to this tenant.
@@ -133,7 +193,7 @@ export class PickupOrdersService {
           orderId: null,
           deviceSeq: dto.deviceSeq,
           codes: dto.items.map((item) => ({ rawKm: item.rawKm, reason: "unknown_reason" })),
-          scannedAt: dto.createdAt ? new Date(dto.createdAt) : new Date(),
+          scannedAt: when,
         });
       }
       throw error;
@@ -143,7 +203,10 @@ export class PickupOrdersService {
     const { conflicts, candidates } = await this.resolveItems(tenantId, kioskId, dto.items);
 
     // 5. Day-limit: accept up to dayLimitPerEmployee, flag the rest as over_limit.
-    const when = dto.createdAt ? new Date(dto.createdAt) : new Date();
+    // `when` is the server's decision, not the device's claim (see
+    // `resolveScanTime`, settled at step 1b), and the SAME value then dates the
+    // order row below -- so the limit is always counted against the day the
+    // order is filed under.
     const { accepted, overflowConflicts } = await this.applyDayLimit(
       tenantId,
       kioskId,
@@ -902,6 +965,51 @@ export class PickupOrdersService {
       .from(schema.products)
       .where(and(eq(schema.products.tenantId, tenantId), inArray(schema.products.gtin14, gtins)));
     return new Set(rows.map((r) => r.gtin14));
+  }
+
+  /**
+   * Settles the one timestamp that dates an order: honours the device's
+   * `createdAt` only while it is plausible, otherwise falls back to server
+   * time.
+   *
+   * `createdAt` exists so an offline-queued order replays with its original
+   * scan time instead of the sync moment — a real requirement, so it cannot
+   * simply be ignored. But the value also decides which UTC day the order
+   * counts against for `applyDayLimit`, which makes an authoritative limit
+   * hinge on the least trustworthy clock in the system: an unattended tablet
+   * at a factory gate. Left unbounded, moving that tablet's date forward
+   * grants its worker a fresh daily allowance, repeatedly, and it works just
+   * as well online as offline.
+   *
+   * So bound it (see the two tolerances above) and clamp OUT of range to
+   * server time rather than rejecting the request: the device is offline-first
+   * and retries, so a 400 would strand a genuine scan in its sync queue
+   * forever over a clock the worker cannot fix. Filing it under server time
+   * is the conservative outcome — the order is kept, and the allowance it
+   * spends is today's.
+   */
+  private resolveScanTime(createdAt: string | undefined, kioskId: string): Date {
+    const now = new Date();
+    if (!createdAt) return now;
+
+    const claimed = new Date(createdAt);
+    const skewMs = claimed.getTime() - now.getTime();
+    // NaN is unreachable through the HTTP DTO (`z.string().datetime()` has
+    // already parsed it) but reachable via direct service calls, and NaN
+    // compares false against every bound — so test it explicitly rather than
+    // letting an Invalid Date through as "in range".
+    const implausible =
+      Number.isNaN(claimed.getTime()) ||
+      skewMs > CLIENT_CLOCK_AHEAD_TOLERANCE_MS ||
+      -skewMs > CLIENT_CLOCK_BEHIND_TOLERANCE_MS;
+    if (!implausible) return claimed;
+
+    this.logger.warn(
+      `kiosk ${kioskId}: refusing implausible client createdAt ${createdAt} ` +
+        `(${Math.round(skewMs / 60_000)} min from server time); filing the order under server time. ` +
+        `Check the device's clock.`,
+    );
+    return now;
   }
 
   /** Accepts up to `dayLimitPerEmployee` items for today (UTC), flagging the rest `over_limit`. */

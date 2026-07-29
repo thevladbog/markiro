@@ -49,6 +49,7 @@ Note: Database tests require `DATABASE_URL` environment variable; they skip if u
 apps/
   api/            NestJS backend + Better Auth + Scalar OpenAPI docs
   admin/          React + Vite admin panel (org profile, counterparties, catalog, shifts, label templates)
+  kiosk/          React + Vite self-service pickup kiosk, offline-first installable PWA (device-token pairing, cached bootstrap snapshot in IndexedDB, local badge resolution, queued orders)
 packages/
   domain/         GS1 validation, SSCC, ZPL/TSPL, Cyrillic rasterization
   db/             Drizzle schemas (Postgres + SQLite mirror)

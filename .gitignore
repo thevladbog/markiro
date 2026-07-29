@@ -5,3 +5,6 @@ dist/
 coverage/
 install.log
 .env
+
+# Sibling agent worktrees (also in .prettierignore)
+.worktrees/

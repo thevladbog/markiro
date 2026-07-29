@@ -1,13 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { classifyScan, kmKey, validateShiftScan, type ScanVerdict } from "@markiro/domain";
-import { Alert, Button } from "@markiro/ui";
+import { Alert, Button, SignalOverlay, type SignalTone } from "@markiro/ui";
 import { findFirstSeen, loadCodeKeys, recordScan } from "../lib/journal.js";
 import type { SqlExecutor } from "../lib/mirror.js";
 import { createScanQueue, type ScanOutcome } from "../lib/scan-queue.js";
 import type { ScanSource } from "../lib/scan-source.js";
 import { playSignalTone, type SoundSettings } from "../lib/signal-sound.js";
-import { SignalOverlay, type SignalTone } from "../ui/SignalOverlay.js";
 
 export interface WorkScreenProps {
   exec: SqlExecutor;

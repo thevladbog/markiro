@@ -12,7 +12,10 @@ export type CreateOrderItemInput = z.infer<typeof createOrderItemSchema>;
  * POST /kiosk/orders body. `deviceSeq` is the kiosk's own monotonic counter —
  * together with `(tenantId, kioskId)` it's the idempotency key for offline
  * sync retries. `createdAt` lets an offline-queued order replay with its
- * original scan time instead of the sync moment.
+ * original scan time instead of the sync moment — accepted only within a
+ * plausible window around server time, and otherwise replaced by it, because
+ * it also decides which day the order's items count against (see
+ * `PickupOrdersService.resolveScanTime`).
  */
 export const createOrderSchema = z.object({
   deviceSeq: z.number().int().nonnegative(),

@@ -199,12 +199,47 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
     expect(res.body.conflicts[0].reason).toBe("not_allowed");
   });
 
-  it("rejects an unknown badge", async () => {
+  /**
+   * A BAD BADGE IS NOT A BAD DEVICE, and the status has to say so.
+   *
+   * `badgeCode` is a field of the ORDER, not the caller's credential: the
+   * device authenticated perfectly well (`KioskDeviceGuard` let the request
+   * through), it just named an employee the server cannot file a withdrawal
+   * against. 422 is that statement — well-formed content the server cannot
+   * process — and 401 is not.
+   *
+   * The device depends on the difference. It cannot quarantine on 401,
+   * because 401 is how a revoked kiosk is told to go back to pairing; so
+   * while an unknown badge answered 401, an order whose employee was deleted
+   * or archived server-side before it synced sat at the head of the offline
+   * queue forever and every later order sat behind it.
+   */
+  it("answers an unknown badge with 422, not the 401 that means a revoked device", async () => {
     await request(app!.getHttpServer())
       .post("/kiosk/orders")
       .set("x-kiosk-token", TOKEN)
       .send({ deviceSeq: 3, badgeCode: "NOPE", reason: "buy", items: [] })
-      .expect(401);
+      .expect(422);
+  });
+
+  it("answers a revoked badge with 422 too — the badge is gone, the device is not", async () => {
+    const revokedEmployeeId = randomUUID();
+    const revokedBadge = `badge-revoked-${randomUUID()}`;
+    await db
+      .insert(schema.employees)
+      .values({ id: revokedEmployeeId, tenantId, fullName: "Отозванов О." });
+    await db.insert(schema.employeeBadges).values({
+      tenantId,
+      employeeId: revokedEmployeeId,
+      badgeCode: revokedBadge,
+      revokedAt: new Date(),
+    });
+
+    await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", TOKEN)
+      .send({ deviceSeq: 13, badgeCode: revokedBadge, reason: "buy", items: [] })
+      .expect(422);
   });
 
   it("rejects a non-revoked badge belonging to an archived employee", async () => {
@@ -229,12 +264,13 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
       .set({ status: "archived" })
       .where(eq(schema.employees.id, archivedEmployeeId));
 
-    // The badge itself is still not revoked, but the employee behind it is archived -> unknown badge (401).
+    // The badge itself is still not revoked, but the employee behind it is
+    // archived -> the badge resolves to nobody the server may file for (422).
     await request(app!.getHttpServer())
       .post("/kiosk/orders")
       .set("x-kiosk-token", TOKEN)
       .send({ deviceSeq: 12, badgeCode: archivedBadge, reason: "buy", items: [] })
-      .expect(401);
+      .expect(422);
   });
 
   it("flags a not-a-KM scan and a KM missing its crypto tail (dropped GS) distinctly", async () => {
@@ -479,6 +515,157 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
     ]);
   });
 
+  /**
+   * The device's `createdAt` decides which UTC day an order's items count
+   * against, so an unbounded one turns the day limit over to the least
+   * trustworthy clock in the system: roll an unattended tablet's date forward
+   * and its worker gets a fresh allowance, again and again, online or not.
+   * The server therefore honours the value only within a plausible window and
+   * otherwise files the order under its own clock.
+   *
+   * Each case gets its own kiosk (`dayLimitPerEmployee: 1`) and its own
+   * employee, so the counts below are exact rather than "whatever else this
+   * suite happened to leave behind for the shared badge".
+   */
+  describe("client-supplied createdAt", () => {
+    let clockKioskId: string;
+    let clockToken: string;
+    let seq = 0;
+
+    /** Distinct kmKey per call — an open duplicate would conflict for an unrelated reason. */
+    function scan(): string {
+      return `01${GTIN}21CLK${randomUUID().replace(/-/g, "").slice(0, 10).toUpperCase()}${GS}93Abcd`;
+    }
+
+    async function newEmployeeBadge(): Promise<string> {
+      const id = randomUUID();
+      const badge = `badge-clock-${randomUUID()}`;
+      await db.insert(schema.employees).values({ id, tenantId, fullName: "Часов Ч." });
+      await db.insert(schema.employeeBadges).values({ tenantId, employeeId: id, badgeCode: badge });
+      return badge;
+    }
+
+    async function post(badgeCode: string, createdAt?: string) {
+      seq += 1;
+      return request(app!.getHttpServer())
+        .post("/kiosk/orders")
+        .set("x-kiosk-token", clockToken)
+        .send({
+          deviceSeq: seq,
+          badgeCode,
+          reason: "buy",
+          items: [{ rawKm: scan() }],
+          ...(createdAt ? { createdAt } : {}),
+        })
+        .expect(201);
+    }
+
+    async function orderCreatedAt(orderNo: string): Promise<Date> {
+      const [row] = await db
+        .select({ createdAt: schema.pickupOrders.createdAt })
+        .from(schema.pickupOrders)
+        .where(
+          and(eq(schema.pickupOrders.tenantId, tenantId), eq(schema.pickupOrders.orderNo, orderNo)),
+        );
+      return row!.createdAt;
+    }
+
+    beforeAll(async () => {
+      clockKioskId = randomUUID();
+      clockToken = `kiosk-token-clock-${randomUUID()}`;
+      await db
+        .insert(schema.kiosks)
+        .values({ id: clockKioskId, tenantId, name: "Киоск-часы", dayLimitPerEmployee: 1 });
+      await db.insert(schema.kioskProducts).values({ tenantId, kioskId: clockKioskId, productId });
+      await db
+        .update(schema.kiosks)
+        .set({ deviceTokenHash: hashDeviceToken(clockToken) })
+        .where(eq(schema.kiosks.id, clockKioskId));
+    });
+
+    it("honours a plausible past createdAt, and counts that order against the day it names", async () => {
+      const badge = await newEmployeeBadge();
+      // 26h back: a genuine offline replay, comfortably inside the 7-day
+      // window and always a different UTC day from "now", whatever the hour.
+      const backdated = new Date(Date.now() - 26 * 60 * 60_000).toISOString();
+
+      const replayed = await post(badge, backdated);
+      expect(replayed.body.itemCount).toBe(1);
+      expect(await orderCreatedAt(replayed.body.orderNo)).toEqual(new Date(backdated));
+
+      // The teeth: today's allowance must still be untouched. If the server
+      // had silently overwritten the replayed order with its own clock, this
+      // second item would be the day's *second* and come back over_limit.
+      const today = await post(badge);
+      expect(today.body.itemCount).toBe(1);
+      expect(today.body.conflicts).toEqual([]);
+
+      // And the limit really is 1 — so the assertion above is not passing
+      // because everything is accepted.
+      const overflow = await post(badge);
+      expect(overflow.body.itemCount).toBe(0);
+      expect(overflow.body.conflicts).toEqual([
+        { rawKm: expect.stringContaining(`01${GTIN}21CLK`), reason: "over_limit" },
+      ]);
+    });
+
+    it("honours a small forward drift, which an unsynced tablet has normally", async () => {
+      const badge = await newEmployeeBadge();
+      const slightlyAhead = new Date(Date.now() + 60_000).toISOString();
+
+      const res = await post(badge, slightlyAhead);
+      expect(res.body.itemCount).toBe(1);
+      expect(await orderCreatedAt(res.body.orderNo)).toEqual(new Date(slightlyAhead));
+    });
+
+    it("refuses a far-future createdAt, so a rolled-forward clock cannot mint a fresh day allowance", async () => {
+      const badge = await newEmployeeBadge();
+
+      // Spend today's single-item allowance honestly.
+      const honest = await post(badge);
+      expect(honest.body.itemCount).toBe(1);
+
+      // Now the attack: the same device claims a scan two days from now. If
+      // the server believed it, this would be day N+2's first item and would
+      // be accepted — a fresh allowance on demand, repeatable forever.
+      const rolledForward = new Date(Date.now() + 2 * 24 * 60 * 60_000).toISOString();
+      const attempt = await post(badge, rolledForward);
+      expect(attempt.body.itemCount).toBe(0);
+      expect(attempt.body.conflicts).toEqual([
+        { rawKm: expect.stringContaining(`01${GTIN}21CLK`), reason: "over_limit" },
+      ]);
+
+      // Nothing from this device landed in the future either: the refused
+      // value is replaced everywhere `when` is used, including the row's own
+      // createdAt (and the year in its order number).
+      const rows = await db
+        .select({ createdAt: schema.pickupOrders.createdAt })
+        .from(schema.pickupOrders)
+        .where(
+          and(
+            eq(schema.pickupOrders.tenantId, tenantId),
+            eq(schema.pickupOrders.kioskId, clockKioskId),
+          ),
+        );
+      const horizon = Date.now() + 10 * 60_000;
+      expect(rows.every((r) => r.createdAt.getTime() < horizon)).toBe(true);
+    });
+
+    it("refuses a createdAt older than a device could honestly have queued", async () => {
+      const badge = await newEmployeeBadge();
+      // 30 days back. The device blocks itself after 7 days without a
+      // successful bootstrap, so it cannot have a backlog this old; a
+      // timestamp like this is a broken clock, and burying an order a month
+      // deep in the свод hides it from the operators who must resolve it.
+      const ancient = new Date(Date.now() - 30 * 24 * 60 * 60_000).toISOString();
+
+      const res = await post(badge, ancient);
+      expect(res.body.itemCount).toBe(1);
+      const stored = await orderCreatedAt(res.body.orderNo);
+      expect(stored.getTime()).toBeGreaterThan(Date.now() - 10 * 60_000);
+    });
+  });
+
   it("does not persist an empty order when a non-empty scan yields only conflicts", async () => {
     const rawKm = `01${GTIN_UNKNOWN}21NOORDER1${GS}93Abcd`;
     const ordersBefore = await db
@@ -563,5 +750,49 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
       .set("x-kiosk-token", archivedToken)
       .send({ deviceSeq: 1, badgeCode: BADGE, reason: "buy", items: [] })
       .expect(401);
+  });
+
+  /**
+   * THE DISTINCTION ITSELF, asserted on ONE route in ONE test, because that is
+   * where it is actually needed: `POST /kiosk/orders` is the only place a
+   * device sees both failures, and a device holding only a status code has to
+   * be able to tell them apart. A revoked device must go back to pairing with
+   * its queue intact; a device carrying one unfileable order must set that
+   * order aside and deliver the rest.
+   *
+   * Written as a comparison rather than two separate `.expect(...)`s so it
+   * cannot be satisfied by both answers drifting onto the same status again —
+   * which is the bug, and which two independent literal assertions elsewhere in
+   * this file would keep passing right up until someone changed them together.
+   */
+  it("tells a bad device from a bad badge on POST /kiosk/orders", async () => {
+    const revokedKioskId = randomUUID();
+    const revokedToken = `kiosk-token-revoked-${randomUUID()}`;
+    await db
+      .insert(schema.kiosks)
+      .values({ id: revokedKioskId, tenantId, name: "Киоск-отозван", status: "archived" });
+    await db
+      .update(schema.kiosks)
+      .set({ deviceTokenHash: hashDeviceToken(revokedToken) })
+      .where(eq(schema.kiosks.id, revokedKioskId));
+
+    const order = { deviceSeq: 14, badgeCode: BADGE, reason: "buy", items: [] };
+
+    // Same route, same body: only the reason for the refusal differs.
+    const badDevice = await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", revokedToken)
+      .send(order);
+    const badBadge = await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", TOKEN)
+      .send({ ...order, badgeCode: "NOPE" });
+
+    expect(badDevice.status).toBe(401);
+    expect(badBadge.status).not.toBe(badDevice.status);
+    // And not merely different: 422 is the one the kiosk's sync worker treats
+    // as terminal (`TERMINAL_STATUSES` in apps/kiosk/src/sync/worker.ts), which
+    // is what actually unblocks the queue.
+    expect(badBadge.status).toBe(422);
   });
 });

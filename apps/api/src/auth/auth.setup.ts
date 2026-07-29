@@ -1,7 +1,7 @@
 import { toNodeHandler } from "better-auth/node";
 import type { Express } from "express";
 import { buildAuth, createDb, type Auth } from "@markiro/db";
-import type { Env } from "../env";
+import { sessionAllowedOrigins, type Env } from "../env";
 
 // `DbConnection` re-uses createDb's own return type by reference (rather
 // than spelling out `NodePgDatabase`/`pg.Pool`, which live in @markiro/db's
@@ -17,7 +17,13 @@ export function setupAuth(env: Env): DbConnection & { auth: Auth } {
   const auth = buildAuth(db, {
     secret: env.BETTER_AUTH_SECRET,
     baseURL: env.BETTER_AUTH_URL,
-    trustedOrigins: [env.ADMIN_ORIGIN],
+    // Exactly the list the CORS middleware applies to non-kiosk routes, on
+    // purpose -- /api/auth/* is one of those routes, so the two describe the
+    // same surface and must not drift (see `sessionAllowedOrigins`).
+    // KIOSK_ORIGIN is NOT here: the kiosk calls no /api/auth/* route at all
+    // (it authenticates with a device token), so trusting it would only widen
+    // what an attacker on that origin can do with an admin's session.
+    trustedOrigins: sessionAllowedOrigins(env),
   });
   return { db, pool, auth };
 }

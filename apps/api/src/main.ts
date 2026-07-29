@@ -6,6 +6,7 @@ import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { apiReference } from "@scalar/nestjs-api-reference";
 import { AppModule } from "./app.module";
 import { mountAuth, setupAuth } from "./auth/auth.setup";
+import { corsDelegate } from "./cors";
 import { loadEnv } from "./env";
 
 const logger = new Logger("bootstrap");
@@ -23,7 +24,11 @@ async function bootstrap() {
   // Enabled before mountAuth below so the CORS middleware (registered here
   // via server.use()) sits ahead of the auth handler in Express's middleware
   // stack and applies to /api/auth/* too, not just Nest-routed controllers.
-  app.enableCors({ origin: [env.ADMIN_ORIGIN], credentials: true });
+  //
+  // A per-request delegate, not one static allowlist: KIOSK_ORIGIN is trusted
+  // on `/kiosk/*` only, while everything else stays limited to ADMIN_ORIGIN.
+  // See cors.ts for why that split matters and how the two lists differ.
+  app.enableCors(corsDelegate(env));
   const server = app.getHttpAdapter().getInstance() as Express;
 
   // A numeric hop count, NEVER `true`. `true` makes Express trust the

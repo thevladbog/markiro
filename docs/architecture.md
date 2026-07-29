@@ -14,6 +14,8 @@ apps/
   api/        NestJS 11 + Drizzle + Postgres — SaaS backend, public API
   admin/      React 19 + Vite 8 — admin panel (office mode)
   station/    Tauri 2 + React 19 — line station (floor mode), Windows MVP
+  kiosk/      React 19 + Vite 8 + IndexedDB — offline-first self-service
+              pickup kiosk (installable PWA), paired to the api by device token
   landing/    Astro 7 — marketing site
 packages/
   domain/     GS1 validation, SSCC, ZPL/TSPL generation, Cyrillic
@@ -132,6 +134,30 @@ registry, `save-exact`, `engine-strict`, `minimum-release-age=10080`
 
 - MVP: one Yandex Cloud VM + Docker Compose (api, admin, landing behind
   Caddy) + Managed Postgres + Object Storage. RF residency (152-ФЗ).
+- `KIOSK_ORIGIN` must be set whenever the pickup kiosk PWA is served from a
+  different origin than the API — which is the normal on-prem case, since the
+  kiosk's pairing screen takes a server address. It is optional (an
+  admin-only deployment leaves it unset and trusts no kiosk origin). It is
+  trusted **only on the `/kiosk/*` routes** (`corsDelegate` in
+  `apps/api/src/cors.ts`): the kiosk calls nothing else, and a global
+  credentialed allowlist would let anything running on that origin read every
+  session-guarded response using an administrator's cookies — a real exposure
+  when kiosk and admin are sibling subdomains of one site. For the same
+  reason it is **not** in Better Auth's `trustedOrigins`, which is fed the
+  non-kiosk list (`sessionAllowedOrigins`, `apps/api/src/env.ts`); the kiosk
+  authenticates with a device token and never calls `/api/auth/*`. The value
+  is canonicalized to a bare `scheme://host[:port]` on load, so a configured
+  trailing slash or path cannot silently match nothing.
+- Leaving it unset in a split-origin install fails only in the browser, and
+  every kiosk call is affected because every one of them is preflighted —
+  for two different reasons. `GET /kiosk/bootstrap` and `POST /kiosk/orders`
+  send an `x-kiosk-token` header, which is not a CORS-safelisted request
+  header. `POST /kiosk/pair` carries no token at all — a device has no
+  credential until it succeeds, so it is the one route outside
+  `KioskDeviceGuard` — but its `Content-Type: application/json` is not a
+  safelisted value, so it is preflighted too, and pairing itself fails
+  without this variable. Dev never sees any of it —
+  `apps/kiosk/vite.config.ts` proxies `/api` same-origin.
 - CI: GitHub Actions — lint/test/build, DB migrations, Docker images,
   Tauri Windows installer build + signing, release channels for the updater.
 - Future on-prem = the same compose bundle.

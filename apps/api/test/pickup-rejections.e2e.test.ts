@@ -163,13 +163,16 @@ describe.skipIf(!ready)("pickup scan rejections e2e", () => {
     expect(await rejectionsFor(11)).toHaveLength(1);
   });
 
-  it("records a sync whose badge is no longer recognised, and still 401s", async () => {
+  // 422, not 401: an unknown badge is a fact about the ORDER, and the kiosk
+  // quarantines on it (401 is reserved for a revoked device and sends it back
+  // to pairing with its queue intact). See `createFromKiosk` step 2.
+  it("records a sync whose badge is no longer recognised, and still 422s", async () => {
     await postScan({
       deviceSeq: 12,
       badgeCode: "badge-that-never-existed",
       reason: "buy",
       items: [{ rawKm: GOOD_KM }],
-    }).expect(401);
+    }).expect(422);
 
     const rows = await rejectionsFor(12);
     expect(rows).toHaveLength(1);
@@ -188,7 +191,7 @@ describe.skipIf(!ready)("pickup scan rejections e2e", () => {
       badgeCode: "badge-that-never-existed",
       reason: "buy",
       items: [],
-    }).expect(401);
+    }).expect(422);
 
     expect(await rejectionsFor(13)).toHaveLength(0);
   });
