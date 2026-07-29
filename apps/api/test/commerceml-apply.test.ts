@@ -44,7 +44,13 @@ describe("decideApplication", () => {
       configuredPriceType: undefined,
     });
     expect(plan.priceUpdates).toEqual([]);
-    expect(plan.skipped).toEqual([{ externalRef: "guid-1", reason: "ambiguous_price_type" }]);
+    expect(plan.skipped).toEqual([
+      {
+        externalRef: "guid-1",
+        reason: "ambiguous_price_type",
+        priceTypes: ["Розничная", "Закупочная"],
+      },
+    ]);
   });
 
   it("настроенный тип цены выбирает свою из нескольких", () => {
@@ -63,6 +69,47 @@ describe("decideApplication", () => {
       configuredPriceType: "Закупочная",
     });
     expect(plan.priceUpdates).toEqual([{ productId: "p-1", unitPrice: "54.10" }]);
+  });
+
+  it("настроенный тип цены побеждает единственную пришедшую цену другого типа", () => {
+    const plan = decideApplication({
+      known,
+      items: [],
+      offers: [
+        {
+          externalRef: "guid-1",
+          prices: [{ type: "Закупочная", value: "54.10", currency: "руб" }],
+        },
+      ],
+      configuredPriceType: "Розничная",
+    });
+    expect(plan.priceUpdates).toEqual([]);
+    expect(plan.skipped).toEqual([
+      {
+        externalRef: "guid-1",
+        reason: "configured_price_type_not_found",
+        priceTypes: ["Закупочная"],
+      },
+    ]);
+  });
+
+  it("несколько записей одного типа не считаются неоднозначностью", () => {
+    const plan = decideApplication({
+      known,
+      items: [],
+      offers: [
+        {
+          externalRef: "guid-1",
+          prices: [
+            { type: "Розничная", value: "89.90", currency: "руб" },
+            { type: "Розничная", value: "89.90", currency: "руб" },
+          ],
+        },
+      ],
+      configuredPriceType: undefined,
+    });
+    expect(plan.priceUpdates).toEqual([{ productId: "p-1", unitPrice: "89.90" }]);
+    expect(plan.skipped).toEqual([]);
   });
 
   it("не применяет цену в чужой валюте", () => {

@@ -31,6 +31,16 @@ export type SkipReason =
 export interface SkippedOffer {
   externalRef: string;
   reason: SkipReason;
+  /**
+   * The distinct price types (`ParsedOfferPrice.type`, in order of first
+   * appearance) that arrived on this offer. Per spec §4.3, the journal must
+   * say which types showed up whenever the price was ambiguous -- this is
+   * exactly what tells an administrator what to type into the connection's
+   * configured price type. Present only for the two "couldn't pick a price"
+   * reasons (`ambiguous_price_type`, `configured_price_type_not_found`);
+   * absent for `foreign_currency`, which isn't a type-selection problem.
+   */
+  priceTypes?: string[];
 }
 
 export interface ApplicationPlan {
@@ -52,7 +62,16 @@ export interface DecideApplicationInput {
 
 type PriceChoice =
   | { ok: true; price: ParsedOffer["prices"][number] }
-  | { ok: false; reason: "ambiguous_price_type" | "configured_price_type_not_found" };
+  | {
+      ok: false;
+      reason: "ambiguous_price_type" | "configured_price_type_not_found";
+      priceTypes: string[];
+    };
+
+/** The distinct `type` labels among `prices`, in order of first appearance. */
+function distinctPriceTypes(prices: ParsedOffer["prices"]): string[] {
+  return [...new Set(prices.map((price) => price.type))];
+}
 
 /**
  * Picks the one price to apply out of an offer's `prices`, or explains why
@@ -61,30 +80,44 @@ type PriceChoice =
  * price instead of retail, so ambiguity is a hard stop, not a "pick the
  * first one" fallback.
  *
+ * `configuredPriceType`, when set, always wins: every offer is searched for
+ * a price of that type, no matter how many prices it carries. A lone price
+ * of the *wrong* type is exactly the case the setting exists to catch --
+ * taking it anyway (as a size-1 shortcut once did) would silently hand
+ * `unit_price` a purchase price on a connection configured for retail. Only
+ * when no `configuredPriceType` was set at all does the "how many distinct
+ * types arrived" question take over: one distinct type (whether carried by
+ * one price record or several identical ones) is taken as-is, more than one
+ * is `ambiguous_price_type`.
+ *
  * `ParsedOfferPrice.type` is `""` both when the price carried an
  * `<ИдТипЦены>` that failed to resolve to a name (`typeRef` set) and when it
  * carried no type reference at all (`typeRef` undefined) -- see parse.ts.
  * This function deliberately does not distinguish the two: either way there
- * is no name to compare against `configuredPriceType`, and a single-price
- * offer is taken regardless of its (possibly empty) type. The `typeRef`
- * itself is a diagnostic detail for the journal (task 9's concern, once this
- * plan reaches persistence), not a selection input here.
+ * is no name to compare against `configuredPriceType`. The `typeRef` itself
+ * is a diagnostic detail for the journal (task 9's concern, once this plan
+ * reaches persistence), not a selection input here.
  */
 function choosePrice(
   prices: ParsedOffer["prices"],
   configuredPriceType: string | undefined,
 ): PriceChoice {
-  if (prices.length === 1) {
-    return { ok: true, price: prices[0]! };
+  if (configuredPriceType !== undefined) {
+    const match = prices.find((price) => price.type === configuredPriceType);
+    if (match === undefined) {
+      return {
+        ok: false,
+        reason: "configured_price_type_not_found",
+        priceTypes: distinctPriceTypes(prices),
+      };
+    }
+    return { ok: true, price: match };
   }
-  if (configuredPriceType === undefined) {
-    return { ok: false, reason: "ambiguous_price_type" };
+  const types = distinctPriceTypes(prices);
+  if (types.length > 1) {
+    return { ok: false, reason: "ambiguous_price_type", priceTypes: types };
   }
-  const match = prices.find((price) => price.type === configuredPriceType);
-  if (match === undefined) {
-    return { ok: false, reason: "configured_price_type_not_found" };
-  }
-  return { ok: true, price: match };
+  return { ok: true, price: prices[0]! };
 }
 
 /**
@@ -117,7 +150,11 @@ export function decideApplication(input: DecideApplicationInput): ApplicationPla
 
     const choice = choosePrice(offer.prices, configuredPriceType);
     if (!choice.ok) {
-      skipped.push({ externalRef: offer.externalRef, reason: choice.reason });
+      skipped.push({
+        externalRef: offer.externalRef,
+        reason: choice.reason,
+        priceTypes: choice.priceTypes,
+      });
       continue;
     }
     if (choice.price.currency !== HOME_CURRENCY) {
