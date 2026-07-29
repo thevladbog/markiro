@@ -66,9 +66,11 @@ export const SUBMIT_TIMEOUT_MS = 15_000;
  * the kiosk archived, or a replacement device having redeemed a new token.
  *
  * 401 is the only status `KioskDeviceGuard` produces, and it is definitive
- * rather than a network blink: the token cannot come back. Only worth asking of
- * a BOOTSTRAP failure — `POST /kiosk/orders` answers an unknown badge with a
- * 401 too, which says nothing about the device.
+ * rather than a network blink: the token cannot come back. The server keeps
+ * that meaning exclusive — an unknown or inactive BADGE on
+ * `POST /kiosk/orders` answers 422, not 401, precisely so a bad order cannot
+ * be mistaken for a bad device (a queued order whose employee was archived
+ * would otherwise look like revocation and strand the whole queue).
  */
 export function isDeviceRevoked(err: unknown): boolean {
   return err instanceof KioskApiError && err.status === 401;

@@ -320,8 +320,9 @@ export function KioskShell(): React.JSX.Element {
       } catch (err) {
         console.warn("kiosk: the snapshot could not be refreshed", err);
         // The device REACHED the server — it was answered, and the answer was
-        // "not you". Asked only of the bootstrap: `POST /kiosk/orders` returns
-        // 401 for an unknown BADGE too, which says nothing about the device.
+        // "not you". 401 means this and only this: a bad badge on
+        // `POST /kiosk/orders` answers 422, so it is quarantined as one bad
+        // order instead of being read as revocation.
         revoked = isDeviceRevoked(err);
       }
       setOnline(reached);
