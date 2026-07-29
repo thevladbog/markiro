@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import express from "express";
 import { Test } from "@nestjs/testing";
-import type { INestApplication } from "@nestjs/common";
+import { Logger, type INestApplication } from "@nestjs/common";
 import request from "supertest";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { buildSscc } from "@markiro/domain";
 import { AppModule } from "../src/app.module";
@@ -1277,20 +1277,30 @@ describe.skipIf(!ready)("station-scans e2e", () => {
     // nothing to update. That used to be indistinguishable from any other
     // row-count mismatch and threw; it must now be a no-op, not a 500.
     it("does not error when a closure arrives for a box that has no items", async () => {
-      await postBatchWithBoxes(
-        [],
-        [
-          {
-            boxId: "empty-box",
-            shiftId,
-            terminalId: "t1",
-            sscc: SSCC,
-            closedAt: ISO,
-            operatorId: null,
-          },
-        ],
-      );
-      expect(await boxCount(tenantId)).toBe(0);
+      // The warn log is the operator's ONLY signal that a real closure was
+      // dropped on the floor -- a 201 response alone (asserted below via
+      // postBatchWithBoxes) would stay green even if this logging silently
+      // stopped firing, so assert it directly.
+      const warnSpy = vi.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
+      try {
+        await postBatchWithBoxes(
+          [],
+          [
+            {
+              boxId: "empty-box",
+              shiftId,
+              terminalId: "t1",
+              sscc: SSCC,
+              closedAt: ISO,
+              operatorId: null,
+            },
+          ],
+        );
+        expect(await boxCount(tenantId)).toBe(0);
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("empty-box"));
+      } finally {
+        warnSpy.mockRestore();
+      }
     });
 
     // shiftId's presence in the closure match was previously undiscriminated
@@ -1429,6 +1439,176 @@ describe.skipIf(!ready)("station-scans e2e", () => {
         const byDevice = new Map(rows.map((r) => [r.deviceId, r.consumedThroughSerial]));
         expect(byDevice.get(deviceAId)).toBe(blockA.fromSerial + 3);
         expect(byDevice.get(deviceBId)).toBe(blockB.fromSerial + 7);
+      },
+    );
+
+    // Finding 17: `recordConsumedSerial` must run for EVERY closure this
+    // batch carries, matched to a box row or not -- a box closed with zero
+    // items is still a case where a PHYSICAL box was closed and a label
+    // carrying this serial was printed and applied; only the server's own
+    // bookkeeping (the box row) failed to find a match. Before the fix, the
+    // `continue` on the zero-row path skipped `recordConsumedSerial`
+    // entirely for this input, silently forgetting the consumption and
+    // reopening the reprint hazard that method exists to close.
+    it(
+      "advances the covering sscc_blocks row's consumedThroughSerial for a closure whose box " +
+        "row does not exist (Finding 17)",
+      async () => {
+        const device = await agent
+          .post("/station-devices")
+          .send({ name: "Ghost box device" })
+          .expect(201);
+        const deviceId = (device.body as { deviceId: string }).deviceId;
+
+        const prefix = "800000003";
+        const block = await app!.get(SsccService).allocate(tenantId, prefix, 0, deviceId, 20);
+        const sscc = buildSscc(0, prefix, block.fromSerial + 5);
+
+        // No items posted for "empty-box" at all -- its box row is never
+        // created (a box row is created from its FIRST item, never the
+        // closure -- see the box-upsert in station-scans.service.ts).
+        await postBatchWithBoxes(
+          [],
+          [
+            {
+              boxId: "empty-box",
+              shiftId,
+              terminalId: "t1",
+              sscc,
+              closedAt: ISO,
+              operatorId: null,
+            },
+          ],
+        );
+        expect(await boxCount(tenantId)).toBe(0);
+
+        const [row] = await db
+          .select({ consumedThroughSerial: schema.ssccBlocks.consumedThroughSerial })
+          .from(schema.ssccBlocks)
+          .where(
+            and(eq(schema.ssccBlocks.tenantId, tenantId), eq(schema.ssccBlocks.deviceId, deviceId)),
+          );
+        expect(row!.consumedThroughSerial).toBe(block.fromSerial + 5);
+      },
+    );
+
+    // Finding 18: `closedAt IS NULL` is back in the closure match. Without
+    // it, a second closure sharing the same box IDENTITY (tenant, shift,
+    // terminal, deviceBoxId) but carrying a DIFFERENT sscc would match the
+    // already-closed row and silently overwrite its serial -- an in-place
+    // UPDATE that `boxes_tenant_sscc_uq` cannot catch, since there is no
+    // second row to collide with. The reachable path: a device that lost its
+    // local database restarts its box counter at "b1" inside the SAME
+    // still-open shift and terminal; its box upsert earlier in the
+    // transaction no-ops onto this same old, already-closed row.
+    it(
+      "leaves the original serial intact when a second closure for the same box carries a " +
+        "different serial (Finding 18)",
+      async () => {
+        await postBatch([scan("aa", { boxId: "b1" })]);
+        await postBatchWithBoxes(
+          [],
+          [
+            {
+              boxId: "b1",
+              shiftId,
+              terminalId: "t1",
+              sscc: SSCC,
+              closedAt: ISO,
+              operatorId: OPERATOR_ID,
+            },
+          ],
+        );
+
+        // Same box identity, a DIFFERENT serial and a later closedAt/operator
+        // -- must be a no-op against the already-closed row, not a rewrite.
+        const differentSscc = "223456789012345670";
+        const laterIso = "2026-07-29T09:30:00.000Z";
+        await postBatchWithBoxes(
+          [],
+          [
+            {
+              boxId: "b1",
+              shiftId,
+              terminalId: "t1",
+              sscc: differentSscc,
+              closedAt: laterIso,
+              operatorId: OTHER_OPERATOR_ID,
+            },
+          ],
+        );
+
+        const rows = await db
+          .select()
+          .from(schema.boxes)
+          .where(eq(schema.boxes.tenantId, tenantId));
+        expect(rows).toHaveLength(1);
+        expect(rows[0]!.sscc).toBe(SSCC);
+        expect(rows[0]!.closedAt?.toISOString()).toBe(ISO);
+        expect(rows[0]!.operatorId).toBe(OPERATOR_ID);
+      },
+    );
+
+    // No test previously rolled a closure back, so dropping
+    // `recordConsumedSerial`'s `tx` argument (falling back to `this.db`,
+    // which would commit outside the ingest transaction) would leave this
+    // suite green. Forces a genuine mid-transaction failure AFTER a closure
+    // has already advanced a block's cursor, via a SECOND closure in the
+    // SAME batch that collides on `boxes_tenant_sscc_uq` (same tenant, same
+    // sscc, a DIFFERENT box row) -- and proves the cursor advance rolled
+    // back along with everything else.
+    it(
+      "rolls back a closure's consumedThroughSerial advance when a later statement in the " +
+        "same batch fails (transaction wiring)",
+      async () => {
+        const device = await agent
+          .post("/station-devices")
+          .send({ name: "Rollback device" })
+          .expect(201);
+        const deviceId = (device.body as { deviceId: string }).deviceId;
+        const prefix = "800000004";
+        const block = await app!.get(SsccService).allocate(tenantId, prefix, 0, deviceId, 20);
+        const sscc = buildSscc(0, prefix, block.fromSerial + 2);
+
+        await postBatch([scan("aa", { boxId: "b1" }), scan("bb", { boxId: "b2" })]);
+
+        // Sorted by boxId ("b1" then "b2"): b1's closure applies first
+        // within the transaction and advances the block's cursor; b2's
+        // closure then tries to write the SAME sscc to a DIFFERENT box row,
+        // which `boxes_tenant_sscc_uq` forbids -- raising a 23505 that must
+        // roll back the whole transaction, including b1's cursor advance.
+        await request(app!.getHttpServer())
+          .post("/station/scans")
+          .set("x-api-key", apiKey)
+          .send(
+            batchBody(
+              [],
+              [
+                { boxId: "b1", shiftId, terminalId: "t1", sscc, closedAt: ISO, operatorId: null },
+                { boxId: "b2", shiftId, terminalId: "t1", sscc, closedAt: ISO, operatorId: null },
+              ],
+            ),
+          )
+          .expect(500);
+
+        // b1 must still be OPEN -- if the transaction had committed anything
+        // at all, b1's closedAt would be set.
+        const [boxRow] = await db
+          .select({ closedAt: schema.boxes.closedAt })
+          .from(schema.boxes)
+          .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.deviceBoxId, "b1")));
+        expect(boxRow!.closedAt).toBeNull();
+
+        // The assertion that actually distinguishes `tx` from `this.db`: if
+        // `recordConsumedSerial` had used `this.db`, b1's advance would have
+        // committed immediately and survived b2's later rollback.
+        const [blockRow] = await db
+          .select({ consumedThroughSerial: schema.ssccBlocks.consumedThroughSerial })
+          .from(schema.ssccBlocks)
+          .where(
+            and(eq(schema.ssccBlocks.tenantId, tenantId), eq(schema.ssccBlocks.deviceId, deviceId)),
+          );
+        expect(blockRow!.consumedThroughSerial).toBeNull();
       },
     );
   });
