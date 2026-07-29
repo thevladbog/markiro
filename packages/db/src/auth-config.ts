@@ -53,6 +53,16 @@ function buildAuthImpl(
           // real line throughput in a later plan.
           rateLimit: { enabled: true, maxRequests: 600, timeWindow: 1000 * 60 },
         },
+        {
+          configId: "public",
+          defaultPrefix: "mk_",
+          references: "organization",
+          enableMetadata: true,
+          // Публичный ключ не обслуживает сканирующую линию, поэтому потолок
+          // станции (600/мин) здесь не нужен; оставляем плагинный дефолт, а жёстким
+          // выключателем остаётся отзыв.
+          rateLimit: { enabled: true, maxRequests: 60, timeWindow: 1000 * 60 },
+        },
       ]),
     ],
   });
