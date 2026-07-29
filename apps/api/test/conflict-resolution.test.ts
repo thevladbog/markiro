@@ -173,9 +173,13 @@ describe("displacedIncumbents", () => {
   });
 
   it("reports nothing when the prior incumbent IS this batch's own claim", () => {
-    // Defensive: should not arise in practice (a code whose incumbent is
-    // already exactly this claim would never pass setWhere's strict "<"),
-    // but must not fabricate a self-displacement if it ever did.
+    // Arises on EVERY brand-new code in a batch, not just defensively:
+    // `wonHashes` folds in `freshHashes` (station-scans.service.ts), so for a
+    // hash this batch inserted for the first time, `priorByHash`'s
+    // lock-read reads back the very row this batch's own fresh-insert just
+    // wrote -- i.e. the prior incumbent IS this claim. `sameScan` is the
+    // only thing standing between that and a fabricated self-displacement
+    // row; do not delete this guard.
     const claim = item(HASH, "t1", "2026-07-28T10:00:00.000Z");
     const rows = displacedIncumbents(
       [claim],

@@ -292,13 +292,14 @@ export class StationScansService {
         // it and is now committed. "Row absent" has become "row present and
         // about to be locked" for the `FOR UPDATE` immediately below.
         //
-        // A hash THIS statement inserted is a win outright: the row now
-        // holds exactly this batch's claim. The upsert further below will
-        // NOT return it in `won` -- `excluded.scanned_at` then equals the
-        // value this statement just wrote, and the strict `<` in `setWhere`
-        // does not fire on equality -- so those hashes are folded into
-        // `wonHashes` from here explicitly, not assumed to come from the
-        // upsert alone.
+        // `.returning()` names exactly the hashes THIS statement placed --
+        // a genuinely new code, no prior owner -- as opposed to ones ON
+        // CONFLICT DO NOTHING left untouched. Folded into `wonHashes` below
+        // to make it semantically complete ("every hash this batch now
+        // owns"), not because omitting them would change the computed
+        // owner: for one of these hashes, `ownerByHash`'s fallback to
+        // `priorByHash` reads back this same fresh insert, so the outcome
+        // is identical either way.
         const freshlyClaimed = await tx
           .insert(schema.codeRegistry)
           .values(claims.map((c) => ({ tenantId, ...c })))
