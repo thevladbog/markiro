@@ -1,5 +1,5 @@
 {
-  "id": "93035166-f2c3-44a8-9605-a65ffe62acc9",
+  "id": "cbb5d44a-fc9b-4d1b-8fb2-d051cd2dc96d",
   "prevId": "8d019fe4-2b2c-4ccb-90a5-03a9b5bfc2a6",
   "version": "7",
   "dialect": "postgresql",
@@ -3429,7 +3429,21 @@
         }
       },
       "indexes": {},
-      "foreignKeys": {},
+      "foreignKeys": {
+        "exchange_uploads_tenant_id_organization_id_fk": {
+          "name": "exchange_uploads_tenant_id_organization_id_fk",
+          "tableFrom": "exchange_uploads",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "exchange_uploads_part_uq": {
@@ -3549,7 +3563,21 @@
           "with": {}
         }
       },
-      "foreignKeys": {},
+      "foreignKeys": {
+        "integration_candidates_tenant_id_organization_id_fk": {
+          "name": "integration_candidates_tenant_id_organization_id_fk",
+          "tableFrom": "integration_candidates",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "integration_candidates_ref_uq": {
@@ -3646,7 +3674,21 @@
           "with": {}
         }
       },
-      "foreignKeys": {},
+      "foreignKeys": {
+        "integration_channels_tenant_id_organization_id_fk": {
+          "name": "integration_channels_tenant_id_organization_id_fk",
+          "tableFrom": "integration_channels",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {
         "integration_channels_tenant_id_type_pk": {
           "name": "integration_channels_tenant_id_type_pk",
@@ -3751,7 +3793,21 @@
           "with": {}
         }
       },
-      "foreignKeys": {},
+      "foreignKeys": {
+        "integration_events_tenant_id_organization_id_fk": {
+          "name": "integration_events_tenant_id_organization_id_fk",
+          "tableFrom": "integration_events",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -3857,7 +3913,21 @@
           "with": {}
         }
       },
-      "foreignKeys": {},
+      "foreignKeys": {
+        "integration_sessions_tenant_id_organization_id_fk": {
+          "name": "integration_sessions_tenant_id_organization_id_fk",
+          "tableFrom": "integration_sessions",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},

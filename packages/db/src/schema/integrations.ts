@@ -13,6 +13,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { organization } from "./auth.js";
 
 /** `bytea` — drizzle не экспортирует его готовым, а куски файла обмена
  * бинарные: перекодировать их в base64 значит раздуть хранение на треть
@@ -21,7 +22,10 @@ const bytea = customType<{ data: Buffer; driverData: Buffer }>({
   dataType: () => "bytea",
 });
 
-const tenantId = () => text("tenant_id").notNull();
+const tenantId = () =>
+  text("tenant_id")
+    .notNull()
+    .references(() => organization.id);
 
 /**
  * Настройки и состояние одного канала у одного тенанта.
@@ -138,7 +142,13 @@ export const exchangeUploads = pgTable(
   (t) => [unique("exchange_uploads_part_uq").on(t.sessionId, t.filename, t.chunk)],
 );
 
-/** Счётчик неудачных `checkauth` — форма один в один с `kiosk_pair_attempts`. */
+/**
+ * Счётчик неудачных `checkauth` — форма один в один с `kiosk_pair_attempts`
+ * (`pickup.ts:344-353`). Сознательно БЕЗ `tenant_id`: попытка считается ДО
+ * того, как тенант известен — логин ещё не проверен, — так что тенанта на
+ * момент записи попросту нет. Это осознанное исключение из общего правила
+ * «у каждой новой таблицы есть tenant_id», а не недосмотр.
+ */
 export const exchangeAttempts = pgTable(
   "exchange_attempts",
   {

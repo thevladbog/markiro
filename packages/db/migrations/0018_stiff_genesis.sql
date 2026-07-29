@@ -71,6 +71,11 @@ CREATE TABLE "integration_sessions" (
 	"summary" jsonb
 );
 --> statement-breakpoint
+ALTER TABLE "exchange_uploads" ADD CONSTRAINT "exchange_uploads_tenant_id_organization_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."organization"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "integration_candidates" ADD CONSTRAINT "integration_candidates_tenant_id_organization_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."organization"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "integration_channels" ADD CONSTRAINT "integration_channels_tenant_id_organization_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."organization"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "integration_events" ADD CONSTRAINT "integration_events_tenant_id_organization_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."organization"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "integration_sessions" ADD CONSTRAINT "integration_sessions_tenant_id_organization_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."organization"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "integration_candidates_tenant_hidden_idx" ON "integration_candidates" USING btree ("tenant_id","hidden_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "integration_channels_login_uq" ON "integration_channels" USING btree ("credential_login") WHERE credential_login is not null;--> statement-breakpoint
 CREATE INDEX "integration_events_tenant_at_idx" ON "integration_events" USING btree ("tenant_id","at");--> statement-breakpoint
