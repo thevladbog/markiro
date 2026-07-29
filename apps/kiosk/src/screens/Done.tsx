@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import type { CreateOrderResultDto, OrderConflict } from "../api/types.js";
+import type { CartState } from "../session/cart.js";
+import { formatMoney, moneyFormat, totalKopecks, UNPRICED } from "./money.js";
 
 /**
  * How long the confirmation stands before the kiosk returns to the idle
@@ -19,9 +21,43 @@ const AUTO_RESET_MS = 10_000;
 export interface DoneProps {
   /** The server's answer, or null when the order was queued offline. */
   result: CreateOrderResultDto | null;
-  itemCount: number;
+  /**
+   * WHERE THE SUMMARY'S NUMBERS COME FROM: the cart exactly as `Cart` handed it
+   * to `onSubmit`, carried through the shell untouched.
+   *
+   * It has to be this and cannot be anything else. `CreateOrderResultDto`
+   * carries a count and conflicts — no reason and no prices — and an order that
+   * is still queued has no `result` at all; the kiosk's own catalogue is a
+   * snapshot that a refresh can replace between the submit and this screen, so
+   * re-looking the items up by GTIN would price the order at whatever the
+   * device believes a moment later. The cart is the only record of what the
+   * worker actually handed over, at the prices they were shown while doing it.
+   *
+   * Narrowed to the two fields that are read: `notice` and `writeoffReasonId`
+   * are cart-screen business, and a confirmation with a `notice` in its props is
+   * a confirmation somebody will eventually render a banner on.
+   */
+  cart: Pick<CartState, "items" | "reason">;
+  /**
+   * `bootstrap.config.showPrices`. Money is hidden device-wide when it is
+   * false, and this screen must not be the one that leaks it back.
+   */
+  showPrices: boolean;
   onReset: () => void;
 }
+
+/** The words for the reason, borrowed from the screen the worker chose it on.
+ * Deliberately NOT a second pair of `done.*` keys saying the same thing: the
+ * chip here is a check against the button they pressed one screen ago, and two
+ * dictionary entries are how «Покупка» there becomes «Покупки» here. */
+const REASON: Record<CartState["reason"], string> = {
+  buy: "cart.reasonBuy",
+  writeoff: "cart.reasonWriteoff",
+};
+
+/** The summary's own separator, like `UNPRICED`: typography, identical in every
+ * language, and not worth a dictionary entry the lockstep test must police. */
+const DOT = " · ";
 
 /**
  * The line an unrecognised reason gets.
@@ -83,8 +119,8 @@ const CONFLICT_REASON: Record<OrderConflict["reason"], string> = {
  * order does not contain, and no screen ever said so. `rawKm` is not rendered:
  * a marking code is an item of value and this screen stands in a public room.
  */
-export function Done({ result, itemCount, onReset }: DoneProps): React.JSX.Element {
-  const { t } = useTranslation();
+export function Done({ result, cart, showPrices, onReset }: DoneProps): React.JSX.Element {
+  const { t, i18n } = useTranslation();
 
   // Held in a ref so the timer effect below can stay mount-only while still
   // calling the CURRENT callback — the shell composes `onReset` inline in JSX,
@@ -142,8 +178,37 @@ export function Done({ result, itemCount, onReset }: DoneProps): React.JSX.Eleme
   // With a result this is the server's ACCEPTED count (`remaining.length`
   // server-side); offline it is what the worker scanned. Both are honest
   // answers to «how much is in this order», which is what the chip asks.
-  const count = result ? result.itemCount : itemCount;
+  const count = result ? result.itemCount : cart.items.length;
   const conflicts = result?.conflicts ?? [];
+
+  const money = useMemo(() => moneyFormat(i18n.language), [i18n.language]);
+  /**
+   * The order's total — and `null` wherever the kiosk cannot honestly state one.
+   *
+   * TWO ways it goes unknown, and the second is this screen's own:
+   *
+   *  - an item this kiosk has no price for, which is `totalKopecks`' rule and
+   *    the same «—» the cart's footer prints. Understating the number the
+   *    administrator charges against is worse than not stating it;
+   *  - a PARTIAL acceptance. The count above is then the server's and the
+   *    prices are the device's, and nothing here says WHICH bottles the server
+   *    kept — `conflicts[]` names reasons, and matching them back to cart rows
+   *    would put the server's arithmetic on the device (the shell's `awaited`
+   *    ref exists precisely so that never happens). Multiplying the two out
+   *    would print a confident overstatement of what the worker owes.
+   *
+   * Offline (`result === null`) there are no conflicts to know about yet, and
+   * the cart IS the order — so the sum is exactly what the worker handed over.
+   */
+  const total = conflicts.length > 0 ? null : totalKopecks(cart.items);
+
+  // «Покупка · 3 шт · 269,70 ₽» — design 2026-07-24 §8.3's «сводка (причина ·
+  // штук · сумма)». The money half is simply absent, not blanked, on a kiosk
+  // configured to hide prices.
+  const summary = [t(REASON[cart.reason]), t("done.summary", { n: count })];
+  if (showPrices) {
+    summary.push(total === null ? UNPRICED : t("cart.price", { value: formatMoney(total, money) }));
+  }
 
   return (
     <main
@@ -245,7 +310,7 @@ export function Done({ result, itemCount, onReset }: DoneProps): React.JSX.Eleme
             fontVariantNumeric: "tabular-nums",
           }}
         >
-          {t("done.summary", { n: count })}
+          {summary.join(DOT)}
         </span>
       ) : null}
 

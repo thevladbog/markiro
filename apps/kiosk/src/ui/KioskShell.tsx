@@ -64,7 +64,16 @@ interface KioskSession {
 interface SubmittedOrder {
   deviceSeq: number;
   result: CreateOrderResultDto | null;
-  itemCount: number;
+  /**
+   * The cart that became this order, carried whole rather than reduced to a
+   * count. `Done` summarises the handover as «причина · штук · сумма» (design
+   * 2026-07-24 §8.3) and the server's answer holds none of that: no reason, no
+   * prices, and offline no answer at all. Keeping the submitted state is also
+   * what stops the summary drifting — a refresh landing between the submit and
+   * the confirmation would re-price the order under the worker if the items
+   * were looked up again.
+   */
+  cart: CartState;
 }
 
 /**
@@ -667,7 +676,7 @@ export function KioskShell(): React.JSX.Element {
         // order, and `Done` says exactly that instead of inventing an «№ —».
         const result = awaited.current.result;
         awaited.current = null;
-        setSubmitted({ deviceSeq, result, itemCount: body.items.length });
+        setSubmitted({ deviceSeq, result, cart: state });
       } catch (err) {
         // The store refused. Nothing was promised, so the worker stays on their
         // cart and can press again — under the SAME sequence if the counter
@@ -780,7 +789,12 @@ export function KioskShell(): React.JSX.Element {
         // different things to tell the worker, and that screen is where the
         // distinction is made.
         result={submitted.result}
-        itemCount={submitted.itemCount}
+        // What the worker actually handed over: the only record of the reason
+        // they chose and the prices they were shown while choosing it.
+        cart={submitted.cart}
+        // Hidden rather than defaulted-on if the snapshot is somehow gone: a
+        // kiosk that cannot read its own config must not invent a price.
+        showPrices={snapshot?.bootstrap.config.showPrices ?? false}
         onReset={() => {
           setSubmitted(null);
           setSession(null);

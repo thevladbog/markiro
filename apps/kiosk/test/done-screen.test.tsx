@@ -30,9 +30,40 @@ function resultWith(over: Partial<CreateOrderResultDto> = {}): CreateOrderResult
 
 const conflict = (reason: OrderConflict["reason"]): OrderConflict => ({ rawKm: RAW_KM, reason });
 
-function renderDone(result: CreateOrderResultDto | null, itemCount = 3) {
+/**
+ * The cart as `Cart` handed it to `onSubmit` — the only place the reason and
+ * the prices exist, since `CreateOrderResultDto` carries neither.
+ *
+ * One item per price, because the price is the only field the summary reads;
+ * everything else is what a real `CartItem` carries so the fixture cannot drift
+ * from the type.
+ */
+function cartOf(prices: (string | null)[], reason: "buy" | "writeoff" = "buy") {
+  return {
+    reason,
+    items: prices.map((unitPrice, index) => ({
+      rawKm: `raw-${index}`,
+      kmKey: `key-${index}`,
+      gtin14: "04600682000013",
+      serial: `S${index}`,
+      productId: "p-milk",
+      name: "Молоко 3,2%",
+      unitPrice,
+    })),
+  };
+}
+
+const THREE_BOTTLES = ["89.90", "89.90", "89.90"];
+
+function renderDone(
+  result: CreateOrderResultDto | null,
+  cart = cartOf(THREE_BOTTLES),
+  showPrices = true,
+) {
   const onReset = vi.fn();
-  const view = render(<Done result={result} itemCount={itemCount} onReset={onReset} />);
+  const view = render(
+    <Done result={result} cart={cart} showPrices={showPrices} onReset={onReset} />,
+  );
   return { ...view, onReset };
 }
 
@@ -63,7 +94,7 @@ describe("Done", () => {
   // that matches nothing; the administrator then has no way to find the order
   // the worker is standing there talking about.
   it("confirms the handover without a number when the order was queued offline", () => {
-    renderDone(null, 2);
+    renderDone(null, cartOf(["89.90", "89.90"]));
 
     expect(screen.getByText("Заявка передана, номер появится после синхронизации")).toBeDefined();
     // Neither the real prefix nor the «№» that would front a placeholder.
@@ -83,7 +114,7 @@ describe("Done", () => {
    * kiosk said the handover succeeded and nobody ever told them otherwise.
    */
   it("admits that a queued order is still to be checked by the server", () => {
-    renderDone(null, 2);
+    renderDone(null, cartOf(["89.90", "89.90"]));
 
     expect(screen.getByText(QUEUED_CHECK)).toBeDefined();
     // Still a confirmation, not a warning screen: the headline and the
@@ -224,6 +255,93 @@ describe("Done", () => {
     renderDone(resultWith());
 
     expect(screen.getByText("Экран вернётся к началу через 10 секунд")).toBeDefined();
+  });
+
+  /**
+   * THE SUMMARY, in the shape design 2026-07-24 §8.3 asks for: «сводка (причина
+   * · штук · сумма)». Until now this screen printed the count and nothing else,
+   * so the worker had no way to check that the thing they were about to walk
+   * away with was filed as a PURCHASE rather than a write-off.
+   */
+  it("summarises the order as reason · count · sum", () => {
+    renderDone(resultWith());
+
+    // The decimal COMMA: this kiosk speaks Russian and the price list it is fed
+    // is written «89,90». 3 × 8990 kopecks, added as integers.
+    expect(screen.getByText("Покупка · 3 шт · 269,70 ₽")).toBeDefined();
+  });
+
+  it("names a write-off as a write-off", () => {
+    renderDone(resultWith(), cartOf(THREE_BOTTLES, "writeoff"));
+
+    expect(screen.getByText("Списание · 3 шт · 269,70 ₽")).toBeDefined();
+  });
+
+  /**
+   * The separator follows the LANGUAGE and is not a second hard-coded
+   * character, exactly as on the cart it summarises — pinned from both sides so
+   * a future edit cannot satisfy one and break the other.
+   */
+  it("prints the same sum with a dot when the kiosk is switched to English", async () => {
+    await i18n.changeLanguage("en");
+    try {
+      renderDone(resultWith());
+
+      expect(screen.getByText("Purchase · 3 pcs · 269.70 ₽")).toBeDefined();
+    } finally {
+      await i18n.changeLanguage("ru");
+    }
+  });
+
+  /**
+   * «—», never a sum with the unpriced bottle quietly left out: this is the
+   * number the administrator charges against, and an understated one is worse
+   * than no number at all. The rule `Cart`'s footer already follows.
+   */
+  it("states no sum at all when one of the items has no price", () => {
+    renderDone(resultWith(), cartOf(["89.90", null, "89.90"]));
+
+    expect(screen.getByText("Покупка · 3 шт · —")).toBeDefined();
+    expect(text()).not.toContain("179,80");
+  });
+
+  it("does not silently zero a price it cannot parse", () => {
+    renderDone(resultWith(), cartOf(["89.90", "не число", "89.90"]));
+
+    expect(screen.getByText("Покупка · 3 шт · —")).toBeDefined();
+    expect(text()).not.toContain("0,00");
+  });
+
+  /**
+   * The device knows what the worker SCANNED, not which of it the server kept.
+   * With a partial acceptance the count is the server's and the prices are the
+   * kiosk's, so multiplying the two out would print a confident overstatement of
+   * an order the worker is about to be charged for.
+   */
+  it("states no sum for an order the server only partly accepted", () => {
+    renderDone(resultWith({ itemCount: 2, conflicts: [conflict("duplicate")] }));
+
+    expect(screen.getByText("Покупка · 2 шт · —")).toBeDefined();
+    expect(text()).not.toContain("269,70");
+  });
+
+  // `showPrices = false` hides money everywhere on this device, and a summary
+  // that leaked it here would be the one screen that did not honour it.
+  it("leaves the money out entirely when the kiosk hides prices", () => {
+    renderDone(resultWith(), cartOf(THREE_BOTTLES), false);
+
+    expect(screen.getByText("Покупка · 3 шт")).toBeDefined();
+    expect(text()).not.toContain("₽");
+    expect(text()).not.toContain("269,70");
+  });
+
+  // Nothing was accepted, the headline already says so, and «0 шт» under it is
+  // noise — as is a reason for an order that does not exist.
+  it("skips the summary entirely for an order the server refused outright", () => {
+    renderDone(resultWith({ orderNo: "", itemCount: 0, conflicts: [conflict("not_allowed")] }));
+
+    expect(text()).not.toContain("Покупка");
+    expect(text()).not.toContain("0 шт");
   });
 });
 

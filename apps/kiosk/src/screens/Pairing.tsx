@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, Input, PinPad, Spinner } from "@markiro/ui";
 import { KioskApiError, pairKiosk } from "../api/client.js";
@@ -12,6 +12,17 @@ import { writeConfig } from "../store/config.js";
 
 /** `POST /kiosk/pair` accepts `/^\d{8}$/` — the admin panel issues nothing else. */
 const CODE_LENGTH = 8;
+
+/**
+ * How long the success confirmation stands before the device goes to work.
+ *
+ * Long enough to be read at arm's length in floor mode, and short enough that
+ * an installer who has already walked away does not leave a kiosk parked on a
+ * screen nobody will press. Design 2026-07-24 §5.2 asks for the confirmation
+ * («Успех → „Киоск привязан к точке X“ → рабочий режим») but names no duration
+ * — unlike §8.2's banner, so this number is a judgement and not a quoted one.
+ */
+const HANDOFF_MS = 4_000;
 
 export interface PairingProps {
   defaultServerUrl: string;
@@ -88,6 +99,17 @@ export function Pairing({
   // which at arm's length in floor mode is the difference between an
   // affordance and a decoration.
   const [awaitingScan, setAwaitingScan] = useState(false);
+  /**
+   * WHICH KIOSK THIS DEVICE JUST BECAME — set once both writes are durable, and
+   * the whole of the success state.
+   *
+   * `null` means "still pairing". Anything else means the device is bound and
+   * this screen is showing the installer what it was bound TO, which is the one
+   * check that catches the commissioning mistake nothing else on the device
+   * can: a tablet redeemed against the wrong kiosk row. Both fields were
+   * already being written to `KioskConfig` and read by nothing at all.
+   */
+  const [bound, setBound] = useState<{ kioskName: string; place: string | null } | null>(null);
 
   // Listening starts at MOUNT rather than on a button press: the admin panel's
   // pairing modal renders the code as a barcode and tells the worker to scan
@@ -104,6 +126,10 @@ export function Pairing({
   // subscription is dropped once, when it must be.
   useEffect(() => {
     if (serverOpen) return;
+    // And it stops for good once the device is bound: the code field is gone
+    // from the screen, so a scan delivered here could only fill in something
+    // nobody can see or submit.
+    if (bound) return;
     return subscribe((raw) => {
       // A wedge payload can arrive with framing characters around the digits.
       // What survives must be EXACTLY eight, and nothing else is accepted:
@@ -123,7 +149,47 @@ export function Pairing({
       // the worker is still meant to scan.
       setAwaitingScan(false);
     });
-  }, [subscribe, serverOpen]);
+  }, [subscribe, serverOpen, bound]);
+
+  // Held in a ref so the countdown below can depend on `bound` alone while
+  // still calling the CURRENT callback — the shell composes `onPaired` inline
+  // in JSX, so a dependency on it would restart the four seconds on every
+  // re-render. Exactly the shape `Done` uses for its own auto-reset.
+  const latest = useRef(onPaired);
+  useEffect(() => {
+    latest.current = onPaired;
+  });
+
+  /**
+   * The handover, and it happens EXACTLY ONCE.
+   *
+   * A ref rather than state because the two halves of a double tap on an 88px
+   * button arrive in the same tick, before React has re-rendered. `onPaired`
+   * re-reads the whole device state in the shell and routes away from this
+   * screen; running it twice for one pairing would reload the store behind the
+   * idle screen that replaced this one.
+   */
+  const handedOver = useRef(false);
+  const handOver = useCallback(() => {
+    if (handedOver.current) return;
+    handedOver.current = true;
+    latest.current();
+  }, []);
+
+  /**
+   * ...and it happens on its own if nobody presses the button. An installer who
+   * has read the confirmation walks away from the tablet, and a kiosk parked on
+   * a success screen is a kiosk that never opens for business.
+   *
+   * Cleared on unmount, always — the shell unmounts this screen the moment the
+   * handover lands, and a timer surviving that would call back into a device
+   * that has already moved on.
+   */
+  useEffect(() => {
+    if (!bound) return;
+    const timer = setTimeout(handOver, HANDOFF_MS);
+    return () => clearTimeout(timer);
+  }, [bound, handOver]);
 
   async function submit(): Promise<void> {
     if (busy || code.length !== CODE_LENGTH) return;
@@ -169,7 +235,12 @@ export function Pairing({
         // device cannot collide with the idempotency keys of its own past orders.
         nextDeviceSeq: result.nextDeviceSeq,
       });
-      onPaired();
+      // AFTER both writes, and instead of handing over immediately: the device
+      // is bound, and §5.2 wants the installer told WHICH kiosk it is bound to
+      // before the working mode replaces this screen. Read off the response
+      // rather than back out of the store — it is the same pair of values, one
+      // read closer to the server that decided them.
+      setBound({ kioskName: result.device.kioskName, place: result.device.place });
     } catch (err) {
       if (err instanceof UnusableBootstrapError) {
         // Not a network blink, and it must not be dressed as one: the code was
@@ -196,6 +267,70 @@ export function Pairing({
     } finally {
       setBusy(false);
     }
+  }
+
+  /**
+   * The confirmation, and it REPLACES the form rather than sitting above it.
+   *
+   * A keypad left standing under a device that is already bound invites a
+   * second pairing attempt with a code that is now spent, and there is nothing
+   * left on this screen for a scan to fill in.
+   *
+   * `role="status"` and not `role="alert"`: this is a success, announced once,
+   * and the error `Alert` above is the screen's only assertive region. The
+   * point is named in the headline exactly as §5.2 words it, and the KIOSK is
+   * named on its own line — an installer at a gate is checking two facts, and
+   * folding them into one sentence is how the second one gets skipped.
+   */
+  if (bound) {
+    return (
+      <main
+        role="status"
+        style={{
+          minHeight: "100vh",
+          display: "grid",
+          placeItems: "center",
+          alignContent: "center",
+          gap: 20,
+          padding: 40,
+          textAlign: "center",
+        }}
+      >
+        {/* Decoration: the tick `Done` uses, in the same square. Hidden from
+            assistive tech — everything it signals is said in words below. */}
+        <svg
+          width="104"
+          height="104"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="var(--ok-solid)"
+          strokeWidth="2"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <rect x="2" y="2" width="20" height="20" />
+          <path d="M7 12.5l3.5 3.5L17 8.5" />
+        </svg>
+        <h1 style={{ fontSize: "2.25rem", margin: 0 }}>
+          {/* `place` is nullable — the server maps it from `kiosks.location`,
+              which an administrator need never fill in. «привязан к точке „“»
+              would read as a broken screen at the exact moment somebody is
+              checking the binding, so the empty case gets its own sentence. */}
+          {bound.place === null
+            ? t("pairing.boundNoPlace")
+            : t("pairing.bound", { place: bound.place })}
+        </h1>
+        <p style={{ fontSize: "1.75rem", margin: 0 }}>
+          {t("pairing.boundName", { name: bound.kioskName })}
+        </p>
+        <p style={{ fontSize: "1rem", margin: 0, color: "var(--fg-3)" }}>
+          {t("pairing.boundHint")}
+        </p>
+        <Button style={{ minHeight: 88, minWidth: 320, fontSize: "1.5rem" }} onClick={handOver}>
+          {t("pairing.boundContinue")}
+        </Button>
+      </main>
+    );
   }
 
   return (

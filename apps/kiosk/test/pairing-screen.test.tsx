@@ -124,7 +124,24 @@ function typeDigits(digits: string): void {
   for (const digit of digits) fireEvent.click(screen.getByRole("button", { name: digit }));
 }
 
+/** The confirmation §5.2 asks for, for the bundle above. */
+const BOUND = "Kiosk bound to “Проходная”";
+/** How long that confirmation stands before the shell is told to move on. */
+const HANDOFF_MS = 4_000;
+
+/**
+ * Pairing now ENDS in a confirmation the installer reads, so reaching the
+ * working mode is one step further than it used to be. Every test below whose
+ * subject is what got WRITTEN takes that step here and carries on.
+ */
+async function handOver(): Promise<void> {
+  await waitFor(() => expect(screen.getByText(BOUND)).toBeDefined());
+  fireEvent.click(startWorking());
+}
+
 const submitButton = () => screen.getByRole("button", { name: "Connect" }) as HTMLButtonElement;
+const startWorking = () =>
+  screen.getByRole("button", { name: "Start working" }) as HTMLButtonElement;
 const scanButton = () => screen.getByRole("button", { name: "Scan code" }) as HTMLButtonElement;
 const scannerSetupButton = () =>
   screen.getByRole("button", { name: "Set up the scanner" }) as HTMLButtonElement;
@@ -193,7 +210,8 @@ describe("Pairing", () => {
     typeDigits("12345678");
     fireEvent.click(submitButton());
 
-    await waitFor(() => expect(onPaired).toHaveBeenCalledTimes(1));
+    await handOver();
+    expect(onPaired).toHaveBeenCalledTimes(1);
     expect(await readConfig()).toEqual({
       serverUrl: SERVER,
       token: "tok-abc",
@@ -406,7 +424,8 @@ describe("Pairing", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
 
-    await waitFor(() => expect(onPaired).toHaveBeenCalledTimes(1));
+    await handOver();
+    expect(onPaired).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({ code: "12345678" });
     expect((await readConfig())?.token).toBe("tok-abc");
@@ -477,7 +496,8 @@ describe("Pairing", () => {
     typeDigits("12345678");
     fireEvent.click(submitButton());
 
-    await waitFor(() => expect(onPaired).toHaveBeenCalledTimes(1));
+    await handOver();
+    expect(onPaired).toHaveBeenCalledTimes(1);
     // The edited address is the one actually POSTed, and the one stored — a
     // default that quietly won here would make the field decorative.
     expect(fetchMock.mock.calls[0]?.[0]).toBe("http://kiosk.local:3000/kiosk/pair");
@@ -522,7 +542,8 @@ describe("Pairing", () => {
     expect(onConfigureScanner).not.toHaveBeenCalled();
 
     release(okResponse(bundle()));
-    await waitFor(() => expect(onPaired).toHaveBeenCalledTimes(1));
+    await handOver();
+    expect(onPaired).toHaveBeenCalledTimes(1);
   });
 
   it("listens from mount, so a scan arriving before anything is pressed is not dropped", () => {
@@ -636,7 +657,8 @@ describe("Pairing", () => {
     );
 
     release(okResponse(bundle()));
-    await waitFor(() => expect(onPaired).toHaveBeenCalledTimes(1));
+    await handOver();
+    expect(onPaired).toHaveBeenCalledTimes(1);
     expect(screen.queryByText("Binding the device… downloading settings and operators")).toBeNull();
   });
 
@@ -745,5 +767,121 @@ describe("Pairing", () => {
       ).toBeDefined(),
     );
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+
+  /**
+   * WHAT THE INSTALLER READS BEFORE THE KIOSK STARTS WORKING — design
+   * 2026-07-24 §5.2: «Успех → „Киоск привязан к точке X“ → рабочий режим».
+   *
+   * The pair used to jump straight to the idle screen, and `kioskName`/`place`
+   * were written to `KioskConfig` and then read by nothing at all. So the one
+   * mistake commissioning actually produces — a tablet bound to the wrong
+   * kiosk row, or to the right one at the wrong point — was invisible on the
+   * device until somebody reconciled orders days later.
+   */
+  it("names the kiosk and its point before it hands over to the working mode", async () => {
+    stubFetch(() => Promise.resolve(okResponse(bundle())));
+    const scanner = fakeFanOut();
+    const onPaired = vi.fn();
+    render(
+      <Pairing
+        defaultServerUrl={SERVER}
+        subscribe={scanner.subscribe}
+        onPaired={onPaired}
+        onConfigureScanner={vi.fn()}
+      />,
+    );
+
+    typeDigits("12345678");
+    fireEvent.click(submitButton());
+
+    await waitFor(() => expect(screen.getByText(BOUND)).toBeDefined());
+    expect(screen.getByText("This is “Склад №1”")).toBeDefined();
+    // The handover waits: telling the shell now would replace the confirmation
+    // with the idle screen before anybody could read it.
+    expect(onPaired).not.toHaveBeenCalled();
+    // The form it replaced is gone — there is nothing left to pair a second
+    // time, and no keypad standing under a device that is already bound.
+    expect(screen.queryByRole("button", { name: "Connect" })).toBeNull();
+    // ...and the scanner is let go with it: a code arriving now has no field to
+    // land in, and the screen this one is about to hand over to wants it.
+    expect(scanner.listeners()).toBe(0);
+
+    fireEvent.click(startWorking());
+    expect(onPaired).toHaveBeenCalledTimes(1);
+  });
+
+  it("still reads correctly for a kiosk the panel gave no point", async () => {
+    // `place` is nullable — the server maps it from `kiosks.location`, which an
+    // administrator need never fill in. «привязан к точке „“» would read as a
+    // broken screen at exactly the moment the installer is checking the binding.
+    const result = bundle();
+    result.device.place = null;
+    stubFetch(() => Promise.resolve(okResponse(result)));
+    render(
+      <Pairing
+        defaultServerUrl={SERVER}
+        subscribe={fakeFanOut().subscribe}
+        onPaired={vi.fn()}
+        onConfigureScanner={vi.fn()}
+      />,
+    );
+
+    typeDigits("12345678");
+    fireEvent.click(submitButton());
+
+    await waitFor(() => expect(screen.getByText("Kiosk bound — no point is set")).toBeDefined());
+    // The kiosk is still named, which is the half of the check that always works.
+    expect(screen.getByText("This is “Склад №1”")).toBeDefined();
+    const said = document.body.textContent ?? "";
+    expect(said).not.toContain("null");
+    expect(said).not.toContain("“”");
+  });
+
+  /**
+   * And it hands over on its own, because an installer who has read the
+   * confirmation walks away from the tablet. A kiosk left on a success screen
+   * until somebody presses a button is a kiosk that never opens for business.
+   */
+  it("hands over by itself after the confirmation has been up briefly, and only once", async () => {
+    // Only the timer functions: `fake-indexeddb` schedules every transaction
+    // step through `setImmediate`, so faking that would freeze both writes this
+    // screen makes and nothing would ever pair.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      stubFetch(() => Promise.resolve(okResponse(bundle())));
+      const onPaired = vi.fn();
+      render(
+        <Pairing
+          defaultServerUrl={SERVER}
+          subscribe={fakeFanOut().subscribe}
+          onPaired={onPaired}
+          onConfigureScanner={vi.fn()}
+        />,
+      );
+
+      typeDigits("12345678");
+      fireEvent.click(submitButton());
+
+      // `vi.waitFor` and NOT the Testing Library one: this one polls on the
+      // real timers it captured before the fakes were installed.
+      await vi.waitFor(() => expect(screen.getByText(BOUND)).toBeDefined(), { timeout: 2_000 });
+      await act(async () => {});
+      expect(onPaired).not.toHaveBeenCalled();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(HANDOFF_MS);
+      });
+      expect(onPaired).toHaveBeenCalledTimes(1);
+
+      // And the timer the button pre-empts must not fire behind it either: two
+      // handovers would reload the shell twice for one pairing.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(HANDOFF_MS * 3);
+      });
+      expect(onPaired).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
