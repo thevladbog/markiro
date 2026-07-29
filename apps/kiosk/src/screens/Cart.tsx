@@ -39,11 +39,15 @@ export interface CartProps {
   employee: { id: string; fullName: string };
   bootstrap: KioskBootstrapDto;
   /**
-   * What this employee has already taken today AS FAR AS THIS DEVICE KNOWS —
-   * counted by `session/day-count.ts` off the kiosk's own journal and queue,
-   * not asked of the server. It can be short (another kiosk, or history older
-   * than the journal keeps), which is why the number this screen prints is a
-   * courtesy and `POST /kiosk/orders` remains the authority.
+   * What this employee has already taken today, as far as the device can tell:
+   * the sum of the two disjoint halves `session/day-count.ts` owns — this
+   * kiosk's own journal and queue, plus the roster's `takenTodayElsewhere` for
+   * every OTHER kiosk. The caller adds them; this screen only prints and
+   * subtracts.
+   *
+   * It can still be short (history older than the journal keeps, a withdrawal
+   * made elsewhere since the last bootstrap), which is why the number this
+   * screen prints is a courtesy and `POST /kiosk/orders` remains the authority.
    */
   alreadyTakenToday: number;
   /**

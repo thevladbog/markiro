@@ -23,7 +23,12 @@ import { Idle } from "../screens/Idle.js";
 import { Pairing } from "../screens/Pairing.js";
 import { ScannerSetup } from "../screens/ScannerSetup.js";
 import type { CartState } from "../session/cart.js";
-import { countTakenToday, startOfUtcDay, utcDayOf } from "../session/day-count.js";
+import {
+  countTakenToday,
+  startOfUtcDay,
+  takenTodayElsewhere,
+  utcDayOf,
+} from "../session/day-count.js";
 import { readSnapshot, type CachedSnapshot } from "../store/cache.js";
 import { readConfig, readScannerSettings, writeConfig, type KioskConfig } from "../store/config.js";
 import { readJournalSince } from "../store/journal.js";
@@ -140,8 +145,9 @@ export function KioskShell(): React.JSX.Element {
   /** The live scan transport: `null` is the keyboard wedge, a port is Web Serial. */
   const [scanPort, setScanPort] = useState<SerialPort | null>(null);
   /**
-   * What the signed-in worker has already taken today, counted off this
-   * device's own history — and WHOSE session it was counted for.
+   * What the signed-in worker has already taken today — this device's own
+   * history PLUS what the roster says they took at other kiosks — and WHOSE
+   * session it was counted for.
    *
    * The session id is carried with the number because the read is async: an
    * answer that arrives late must not be spent by the next worker, and a
@@ -587,16 +593,29 @@ export function KioskShell(): React.JSX.Element {
   }, []);
 
   /**
-   * The day limit, answered from local history the moment a badge opens a
-   * session — the journal's delivered orders plus whatever is still queued.
+   * The day limit, answered the moment a badge opens a session, from BOTH
+   * sources it has: this device's own history — the journal's delivered orders
+   * plus whatever is still queued — and the roster's per-employee figure for
+   * every OTHER kiosk.
+   *
+   * THE SUM IS SAFE BECAUSE THE SPLIT IS BY SOURCE. `countTakenToday` sees
+   * exactly the orders this kiosk filed; `takenTodayElsewhere` is the server's
+   * count with this kiosk excluded. No order can be in both, so nothing here
+   * has to subtract this device's own contribution out of a total — no
+   * watermark, no clock comparison, and therefore no way to over-count. Both
+   * halves may still come up SHORT (a lost journal, a snapshot from before the
+   * worker's last trip to the other gate), which is the safe direction:
+   * `POST /kiosk/orders` re-decides the limit and its `conflicts[]` win.
    *
    * Read HERE rather than in `Cart`, which owns no store access and is a
-   * projection of `CartState`; the decision itself is `countTakenToday`'s, and
-   * this is only the wiring that feeds it.
+   * projection of `CartState`; the decisions themselves belong to
+   * `session/day-count.ts`, and this is only the wiring that feeds them.
    *
-   * ONCE PER SESSION is enough. Nothing this device can see changes a worker's
-   * spent allowance while they stand at the cart except the cart itself, and
-   * `remainingToday` already subtracts that.
+   * ONCE PER SESSION is enough. The only thing that moves while the worker
+   * stands at the cart is the cart itself, and `remainingToday` already
+   * subtracts that. A refresh landing mid-session can raise the elsewhere
+   * figure — that is not re-read, so this under-counts until the next badge,
+   * which is the direction that costs the worker nothing.
    *
    * A failed read leaves the count where it was — at zero for a fresh session
    * — rather than refusing to open the cart. Guessing low costs a conflict on
@@ -614,6 +633,10 @@ export function KioskShell(): React.JSX.Element {
         // server's — and a skewed tablet would answer zero for a worker who has
         // already spent their allowance.
         const at = scannedAt();
+        // Through the REF, like the clock above: the snapshot the count is read
+        // from must be the one current when the badge landed, not one captured
+        // by a render, and this effect deliberately does not restart on refresh.
+        const elsewhere = takenTodayElsewhere(snapshotRef.current?.bootstrap ?? null, employeeId);
         const [journal, queued] = await Promise.all([
           readJournalSince(startOfUtcDay(at)),
           listQueue(),
@@ -621,7 +644,7 @@ export function KioskShell(): React.JSX.Element {
         if (!alive) return;
         setTakenToday({
           sessionId,
-          count: countTakenToday({ employeeId, today: utcDayOf(at), journal, queued }),
+          count: countTakenToday({ employeeId, today: utcDayOf(at), journal, queued }) + elsewhere,
         });
       } catch (err) {
         console.error("kiosk: could not count what this worker has taken today", err);
@@ -870,14 +893,16 @@ export function KioskShell(): React.JSX.Element {
         key={session.id}
         employee={{ id: session.employeeId, fullName: session.fullName }}
         bootstrap={snapshot.bootstrap}
-        // Counted off this device's own order journal and its unsynced queue,
-        // which is what the design asks for: the local day limit is
-        // «best-effort по локальному журналу заявок киоска (сервер остаётся
-        // авторитетом)» (design 2026-07-24 §7). It can only MISS withdrawals —
-        // another kiosk's, or history older than the journal keeps — never
-        // invent one, and missing them is the safe direction because
-        // `POST /kiosk/orders` re-decides the limit against live data and its
-        // `conflicts[]` are authoritative either way.
+        // This kiosk's own journal and unsynced queue, PLUS the roster's count
+        // for every other kiosk — the two disjoint halves of the day, summed
+        // above. Still best-effort, which is what the design asks for: the
+        // local day limit is «best-effort по локальному журналу заявок киоска
+        // (сервер остаётся авторитетом)» (design 2026-07-24 §7). It can only
+        // MISS withdrawals — history older than the journal keeps, or a trip to
+        // the other gate made since this snapshot — never invent one, and
+        // missing them is the safe direction because `POST /kiosk/orders`
+        // re-decides the limit against live data and its `conflicts[]` are
+        // authoritative either way.
         //
         // Zero until the read lands (and if it fails), for the same reason.
         alreadyTakenToday={takenToday?.sessionId === session.id ? takenToday.count : 0}

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { countTakenToday, startOfUtcDay, utcDayOf } from "../src/session/day-count.js";
+import type { KioskBootstrapDto } from "../src/api/types.js";
+import {
+  countTakenToday,
+  startOfUtcDay,
+  takenTodayElsewhere,
+  utcDayOf,
+} from "../src/session/day-count.js";
 import type { JournalEntry } from "../src/store/journal.js";
 import type { QueuedOrder } from "../src/store/queue.js";
 
@@ -200,5 +206,68 @@ describe("countTakenToday", () => {
 
   it("skips a journal entry whose accepted count is not a number", () => {
     expect(count([journalled({ acceptedCount: "2" as unknown as number })])).toBe(0);
+  });
+});
+
+describe("takenTodayElsewhere", () => {
+  const bootstrap = (employees: unknown): KioskBootstrapDto =>
+    ({ employees }) as unknown as KioskBootstrapDto;
+
+  const roster = bootstrap([
+    { id: ME, fullName: "Я", role: null, badgeHash: null, takenTodayElsewhere: 3 },
+    { id: SOMEBODY_ELSE, fullName: "Не я", role: null, badgeHash: null, takenTodayElsewhere: 7 },
+  ]);
+
+  it("reads the employee's own figure off the snapshot", () => {
+    expect(takenTodayElsewhere(roster, ME)).toBe(3);
+    expect(takenTodayElsewhere(roster, SOMEBODY_ELSE)).toBe(7);
+  });
+
+  it("is zero for somebody the snapshot does not list, and with no snapshot at all", () => {
+    expect(takenTodayElsewhere(roster, "nobody")).toBe(0);
+    expect(takenTodayElsewhere(null, ME)).toBe(0);
+  });
+
+  /**
+   * THE UPGRADE PATH, and the reason this is a checked read rather than a
+   * property access. `KioskBootstrapDto` is a cast over `res.json()`, not a
+   * schema — nothing validates a bootstrap at runtime — so an older server, or
+   * a snapshot this device cached before the field existed, delivers a roster
+   * row without it. Zero, not `NaN` and not a crash: an unattended kiosk must
+   * keep handing out product, and under-counting is the safe direction (the
+   * server re-decides the limit and its `conflicts[]` win).
+   */
+  it("treats an older server's missing field as zero", () => {
+    const older = bootstrap([{ id: ME, fullName: "Я", role: null, badgeHash: null }]);
+    expect(takenTodayElsewhere(older, ME)).toBe(0);
+  });
+
+  /**
+   * Anything that is not a plain non-negative count reads as zero for the same
+   * reason. `count(*)` comes back from Postgres as bigint, which node-postgres
+   * renders as a STRING unless it is cast — so `"3"` is the shape a regression
+   * on the server would actually take, and `+"3"` would quietly paper over it.
+   */
+  it("refuses a figure that is not a real count", () => {
+    const rowWith = (value: unknown) =>
+      bootstrap([
+        { id: ME, fullName: "Я", role: null, badgeHash: null, takenTodayElsewhere: value },
+      ]);
+    expect(takenTodayElsewhere(rowWith("3"), ME)).toBe(0);
+    expect(takenTodayElsewhere(rowWith(null), ME)).toBe(0);
+    expect(takenTodayElsewhere(rowWith(Number.NaN), ME)).toBe(0);
+    expect(takenTodayElsewhere(rowWith(Number.POSITIVE_INFINITY), ME)).toBe(0);
+    expect(takenTodayElsewhere(rowWith(-2), ME)).toBe(0);
+    expect(takenTodayElsewhere(rowWith(1.5), ME)).toBe(0);
+  });
+
+  /**
+   * The whole point of the split. This number is what the worker took at OTHER
+   * kiosks; `countTakenToday` is what they took at this one. They come from
+   * disjoint sources, so they ADD — and no watermark is needed to keep them
+   * from overlapping, because neither can contain the other's orders.
+   */
+  it("adds to this device's own count rather than replacing it", () => {
+    expect(count([journalled({ acceptedCount: 2 })]) + takenTodayElsewhere(roster, ME)).toBe(5);
   });
 });

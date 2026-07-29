@@ -1048,7 +1048,7 @@ const bootstrap = (generatedAt: string): KioskBootstrapDto => ({
   badgeSalt: "c2FsdA==",
   reasons: [],
   products: [],
-  employees: [{ id: "e1", fullName: "A", role: null, badgeHash: null }],
+  employees: [{ id: "e1", fullName: "A", role: null, badgeHash: null, takenTodayElsewhere: 0 }],
   operators: [],
 });
 

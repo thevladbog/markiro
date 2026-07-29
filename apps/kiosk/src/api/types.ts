@@ -84,7 +84,32 @@ export interface KioskBootstrapDto {
     unitPrice: string | null;
     egaisCode: string | null;
   }[];
-  employees: { id: string; fullName: string; role: string | null; badgeHash: string | null }[];
+  employees: {
+    id: string;
+    fullName: string;
+    role: string | null;
+    badgeHash: string | null;
+    /**
+     * What this employee has taken today AT EVERY KIOSK BUT THIS ONE. Not a
+     * total, and reading it as one would break the very thing it fixes.
+     *
+     * This device counts its OWN kiosk's contribution from its journal and its
+     * unsynced queue (`session/day-count.ts`), and the limit is the SUM. The
+     * two halves are split by SOURCE, so an overlap is impossible by
+     * construction — no watermark, no clock comparison. Were this a total, the
+     * items this device filed would be counted twice and a worker would be
+     * refused product they are entitled to, at an unattended machine with
+     * nobody to overrule it.
+     *
+     * DECLARED REQUIRED, BUT READ AS UNTRUSTED. This interface describes what
+     * today's server sends; the app casts `res.json()` to it and validates
+     * nothing, and IndexedDB holds whatever snapshot any past server sent. So
+     * it is read through `takenTodayElsewhere()`, which answers zero for a
+     * payload that does not carry it — the same reason `day-count.ts` guards
+     * the journal it reads back.
+     */
+    takenTodayElsewhere: number;
+  }[];
   operators: {
     employeeId: string;
     name: string;

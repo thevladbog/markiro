@@ -29,13 +29,13 @@ describe("cache", () => {
   it("replaces the snapshot wholesale — an employee removed on the server disappears locally", async () => {
     await replaceSnapshot(
       snapshot([
-        { id: "e1", fullName: "A", role: null, badgeHash: null },
-        { id: "e2", fullName: "B", role: null, badgeHash: null },
+        { id: "e1", fullName: "A", role: null, badgeHash: null, takenTodayElsewhere: 0 },
+        { id: "e2", fullName: "B", role: null, badgeHash: null, takenTodayElsewhere: 0 },
       ]),
       new Date("2026-07-28T06:00:00.000Z"),
     );
     await replaceSnapshot(
-      snapshot([{ id: "e1", fullName: "A", role: null, badgeHash: null }]),
+      snapshot([{ id: "e1", fullName: "A", role: null, badgeHash: null, takenTodayElsewhere: 0 }]),
       new Date("2026-07-28T06:05:00.000Z"),
     );
 

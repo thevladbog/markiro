@@ -113,7 +113,33 @@ export interface KioskBootstrapDto {
     unitPrice: string | null;
     egaisCode: string | null;
   }[];
-  employees: { id: string; fullName: string; role: string | null; badgeHash: string | null }[];
+  employees: {
+    id: string;
+    fullName: string;
+    role: string | null;
+    badgeHash: string | null;
+    /**
+     * How many items this employee has already taken TODAY AT EVERY KIOSK BUT
+     * THE ONE ASKING. Not a total, and it must never become one.
+     *
+     * The device's own day count (`apps/kiosk/src/session/day-count.ts`) is
+     * computed from this kiosk's journal and its unsynced queue, and the limit
+     * check is the SUM of the two numbers. Split by SOURCE — this kiosk's
+     * orders here, every other kiosk's there — an overlap is impossible by
+     * construction, with no watermark and no clock comparison to get subtly
+     * wrong. Send a total instead and every item this device filed is counted
+     * twice, which refuses a worker product they are entitled to at an
+     * unattended machine with nobody present to overrule it. The opposite
+     * error, under-counting, is the safe one: `POST /kiosk/orders` re-decides
+     * the limit against live data and is still the gate.
+     *
+     * Counted exactly the way `PickupOrdersService.applyDayLimit` counts —
+     * non-voided items, on non-cancelled orders, whose order's
+     * `(created_at at time zone 'utc')::date` is today — so the number a device
+     * plans with and the number the server enforces cannot disagree.
+     */
+    takenTodayElsewhere: number;
+  }[];
   operators: {
     employeeId: string;
     name: string;

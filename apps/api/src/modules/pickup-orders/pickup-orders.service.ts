@@ -294,6 +294,11 @@ export class PickupOrdersService {
 
   /** Offline-cache payload: everything a kiosk needs to operate without a round-trip per scan. */
   async bootstrap(tenantId: string, kioskId: string): Promise<KioskBootstrapDto> {
+    // ONE reading of the clock for the whole payload, so `generatedAt` and the
+    // UTC day the per-employee counts below are taken over can never straddle
+    // a midnight between two `new Date()` calls.
+    const generatedAt = new Date();
+
     const [kiosk] = await this.db
       .select({
         dayLimitPerEmployee: schema.kiosks.dayLimitPerEmployee,
@@ -349,8 +354,13 @@ export class PickupOrdersService {
     );
     const operators = await this.operatorsService.buildRoster(tenantId);
 
+    // ONE grouped query for the entire roster, never one per employee: this
+    // runs on every bootstrap and every paired kiosk pulls one every five
+    // minutes.
+    const takenElsewhere = await this.takenTodayElsewhereByEmployee(tenantId, kioskId, generatedAt);
+
     return {
-      generatedAt: new Date().toISOString(),
+      generatedAt: generatedAt.toISOString(),
       config: {
         dayLimitPerEmployee: kiosk?.dayLimitPerEmployee ?? 0,
         showPrices: kiosk?.showPrices ?? true,
@@ -363,6 +373,10 @@ export class PickupOrdersService {
         fullName: e.fullName,
         role: e.role,
         badgeHash: badgeHashes.get(e.id) ?? null,
+        // Absent from the grouped result means this employee took nothing at
+        // another kiosk today, which is `0` and not a missing field: the device
+        // reads this per employee and adds it to its own count.
+        takenTodayElsewhere: takenElsewhere.get(e.id) ?? 0,
       })),
       operators: operators.map((o) => ({
         employeeId: o.operatorId,
@@ -1103,6 +1117,66 @@ export class PickupOrdersService {
         `Check the device's clock.`,
     );
     return now;
+  }
+
+  /**
+   * Per employee, how much of today's allowance they spent at EVERY KIOSK
+   * EXCEPT `kioskId` — the half of the day count the asking kiosk cannot see.
+   *
+   * WHY IT EXCLUDES THIS KIOSK, since a future reader will be tempted to
+   * "fix" it into a total: the device counts its own kiosk's contribution
+   * itself, off its journal and its unsynced queue, and adds the two. Split by
+   * SOURCE like this, the two halves cannot overlap — no watermark, no
+   * timestamp comparison, nothing that can be slightly wrong. A total would be
+   * added to a number that already contains it, and double-counting refuses a
+   * worker product they are entitled to at a machine with nobody to overrule
+   * it. (Under-counting, the other direction, merely defers the refusal to
+   * `POST /kiosk/orders`, which remains the authority.) See
+   * `KioskBootstrapDto.employees[].takenTodayElsewhere`.
+   *
+   * The predicates are `applyDayLimit`'s, deliberately identical, so what a
+   * device plans with and what the server enforces cannot drift: accepted
+   * (non-voided) items, on non-cancelled orders, whose order's
+   * `(created_at at time zone 'utc')::date` is `when`'s UTC day.
+   *
+   * ONE query for the whole roster — grouped, not looped: every paired kiosk
+   * bootstraps every five minutes, so a per-employee query here would multiply
+   * that by the size of the tenant's roster.
+   */
+  private async takenTodayElsewhereByEmployee(
+    tenantId: string,
+    kioskId: string,
+    when: Date,
+  ): Promise<Map<string, number>> {
+    const dateStr = when.toISOString().slice(0, 10);
+    const rows = await this.db
+      .select({
+        employeeId: schema.pickupOrders.employeeId,
+        // `::int` because Postgres `count()` is bigint, which node-postgres
+        // hands back as a STRING — and a string here would be JSON-encoded as
+        // one and silently fail the device's numeric guard, reading as zero.
+        taken: sql<number>`count(*)::int`,
+      })
+      .from(schema.pickupOrderItems)
+      .innerJoin(
+        schema.pickupOrders,
+        and(
+          eq(schema.pickupOrders.tenantId, schema.pickupOrderItems.tenantId),
+          eq(schema.pickupOrders.id, schema.pickupOrderItems.orderId),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.pickupOrderItems.tenantId, tenantId),
+          ne(schema.pickupOrders.kioskId, kioskId),
+          ne(schema.pickupOrders.status, "cancelled"),
+          eq(schema.pickupOrderItems.voided, false),
+          sql`(${schema.pickupOrders.createdAt} at time zone 'utc')::date = ${dateStr}`,
+        ),
+      )
+      .groupBy(schema.pickupOrders.employeeId);
+
+    return new Map(rows.map((row) => [row.employeeId, row.taken]));
   }
 
   /** Accepts up to `dayLimitPerEmployee` items for today (UTC), flagging the rest `over_limit`. */

@@ -162,7 +162,17 @@ function bootstrapAt(generatedAt: string): KioskBootstrapDto {
     products: [
       { id: "p-milk", gtin14: GTIN_MILK, name: MILK, unitPrice: "89.90", egaisCode: null },
     ],
-    employees: [{ id: EMPLOYEE.id, fullName: EMPLOYEE.fullName, role: null, badgeHash }],
+    employees: [
+      {
+        id: EMPLOYEE.id,
+        fullName: EMPLOYEE.fullName,
+        role: null,
+        badgeHash,
+        // What this worker took at the OTHER kiosks today, which is the one
+        // part of their day count this device cannot see for itself.
+        takenTodayElsewhere: server.takenTodayElsewhere,
+      },
+    ],
     // One operator, so the post-pairing settings gate has somebody who can
     // actually open it — by badge or by personnel number and PIN, since the
     // tests below need both entrances.
@@ -205,6 +215,13 @@ interface FakeServer {
    */
   gateway: number | null;
   generatedAt: string;
+  /**
+   * What the roster reports this employee took today AT EVERY OTHER KIOSK —
+   * `employees[].takenTodayElsewhere`, and deliberately never a total. The
+   * device adds it to what it counts off its own journal and queue, so the two
+   * halves come from disjoint sources and cannot overlap.
+   */
+  takenTodayElsewhere: number;
   bootstraps: number;
   orders: CreateOrderDto[];
 }
@@ -241,6 +258,7 @@ beforeEach(() => {
     revoked: false,
     gateway: null,
     generatedAt: NOW.toISOString(),
+    takenTodayElsewhere: 0,
     bootstraps: 0,
     orders: [],
   };
@@ -723,6 +741,86 @@ describe("KioskShell", () => {
       orderNo: "ORD-26-0003",
       conflicts: [{ rawKm: KM, reason: "duplicate" }],
     } as unknown as JournalEntry);
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+
+    scan(BADGE);
+
+    await settle(() => expect(screen.getByText(CART_TITLE)).toBeDefined());
+    await settle(() => expect(screen.getByText("Лимит 5 шт в день · осталось 5")).toBeDefined());
+  });
+
+  /**
+   * THE OTHER HALF OF THE DAY COUNT, and the failure it closes: a worker who
+   * spent their allowance at another gate used to be offered a fresh one here,
+   * scan a bottle, be told «Заявка передана», and walk off with it — the server
+   * refused the overflow, but on an offline submit nobody was there to hear it.
+   *
+   * The device cannot know about the other kiosk's orders, so the SERVER
+   * reports them, per employee, in the bootstrap roster.
+   */
+  it("counts what the worker took at another kiosk against their limit here", async () => {
+    server.takenTodayElsewhere = 2;
+    await pair();
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+
+    scan(BADGE);
+
+    await settle(() => expect(screen.getByText(CART_TITLE)).toBeDefined());
+    await settle(() => expect(screen.getByText("Лимит 5 шт в день · осталось 3")).toBeDefined());
+  });
+
+  /**
+   * The two halves ADD. They are split by SOURCE — this kiosk's orders come off
+   * this device's own journal, every other kiosk's off the roster — so they
+   * cannot overlap, and neither may replace the other. A snapshot figure that
+   * OVERWROTE the local count would forget the bottle this device just handed
+   * over; a local count that ignored the snapshot is the bug this test exists
+   * for.
+   */
+  it("adds another kiosk's items to this one's rather than replacing them", async () => {
+    server.takenTodayElsewhere = 2;
+    await pair();
+    await appendJournal({
+      at: NOW.toISOString(),
+      createdAt: NOW.toISOString(),
+      deviceSeq: 3,
+      orderNo: "ORD-26-0003",
+      conflicts: [],
+      employeeId: EMPLOYEE.id,
+      acceptedCount: 1,
+    });
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+
+    scan(BADGE);
+
+    await settle(() => expect(screen.getByText(CART_TITLE)).toBeDefined());
+    // 2 elsewhere + 1 here = 3 of 5.
+    await settle(() => expect(screen.getByText("Лимит 5 шт в день · осталось 2")).toBeDefined());
+  });
+
+  /**
+   * The upgrade path on the SERVER's side of the wire. Nothing validates a
+   * bootstrap at runtime — `KioskBootstrapDto` is a cast over `res.json()`, not
+   * a schema — so a device talking to an older API, or one still holding a
+   * snapshot it cached before this field existed, gets a roster row without it.
+   * That must read as zero: no `NaN` in «осталось», and no crash on the path
+   * that opens a worker's cart.
+   *
+   * Held offline deliberately, which is also how this arises in the field: the
+   * device upgraded its bundle, the cabinet did not, and the cached snapshot is
+   * the old shape until something replaces it.
+   */
+  it("opens the cart on a bootstrap that predates the cross-kiosk count", async () => {
+    const older = bootstrapAt(NOW.toISOString());
+    delete (older.employees[0] as Partial<KioskBootstrapDto["employees"][number]>)
+      .takenTodayElsewhere;
+    await replaceSnapshot(older, NOW);
+    await writeConfig(config());
+    server.reachable = false;
+    setOnLine(false);
     render(<App />);
     await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
 

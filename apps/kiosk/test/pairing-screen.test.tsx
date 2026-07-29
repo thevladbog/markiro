@@ -56,7 +56,9 @@ function bundle(generatedAt = "2026-07-28T07:00:00.000Z"): PairKioskResultDto {
       badgeSalt: "c2FsdA==",
       reasons: [{ id: "r1", name: "Брак" }],
       products: [],
-      employees: [{ id: "e1", fullName: "Иванов И.", role: null, badgeHash: null }],
+      employees: [
+        { id: "e1", fullName: "Иванов И.", role: null, badgeHash: null, takenTodayElsewhere: 0 },
+      ],
       operators: [],
     },
   };
