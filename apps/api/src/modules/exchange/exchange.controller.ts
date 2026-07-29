@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   Controller,
   Get,
@@ -18,7 +19,7 @@ import { DB } from "../../auth/auth.module";
 import type { IntegrationChannelType } from "../integrations/channel-registry";
 import { JournalService } from "../integrations/journal.service";
 import { decideApplication, type KnownProduct } from "./commerceml/apply";
-import { parseCatalog, parseOffers } from "./commerceml/parse";
+import { parseCommerceMl } from "./commerceml/parse";
 import {
   assertUnderCheckauthLimit,
   checkauthWindowStart,
@@ -56,6 +57,24 @@ type ImportWorkItem =
       article: string | null;
       unit: string | null;
     };
+
+/**
+ * Fingerprints a `mode=import` worklist -- its length plus a hash of its
+ * ordered keys (`productId` for a price row, `externalRef` for a candidate
+ * row) -- so a stored cursor (Fix 2, `ExchangeSessionService.ImportCursor`)
+ * can tell whether a later round's freshly rebuilt worklist is still the
+ * SAME list its `offset` was measured against. Length alone would miss a
+ * swap (one row replaced by another of the same overall count); hashing the
+ * keys in order catches that too, at the cost of one cheap hash per round --
+ * worklist itself is already rebuilt every round regardless.
+ */
+function fingerprintOf(worklist: ImportWorkItem[]): string {
+  const keys = worklist.map((item) =>
+    item.kind === "price" ? `p:${item.productId}` : `c:${item.externalRef}`,
+  );
+  const hash = createHash("sha256").update(keys.join(" ")).digest("hex");
+  return `${worklist.length}:${hash}`;
+}
 
 /**
  * Constant address 1С's "Обмен с сайтом" client calls (спека §3):
@@ -318,14 +337,20 @@ export class ExchangeController {
   }
 
   /**
-   * `mode=import`: assembles `filename`'s chunks (Task 6), parses them as
-   * BOTH a catalog and an offer pack (Task 7 -- whichever section a given
-   * file actually carries wins; the other simply comes back empty, so this
-   * never has to guess a file's kind from its name), decides what to apply
-   * (Task 8), then writes that decision to the database: prices only, and
-   * candidates by upsert. Never silent: every skipped offer and every offer
-   * for a product this connection hasn't linked yet is journaled, and the
-   * whole round's counts land in the session's summary via `finishSession`.
+   * `mode=import`: assembles `filename`'s chunks (Task 6), parses them ONCE
+   * as BOTH a catalog and an offer pack (Task 7 / Fix 3 -- whichever section
+   * a given file actually carries wins; the other simply comes back empty,
+   * so this never has to guess a file's kind from its name), decides what to
+   * apply (Task 8), then writes that decision to the database: prices only,
+   * and candidates by upsert. Never silent: every skipped offer and every
+   * offer for a product this connection hasn't linked yet is journaled, and
+   * each file's outcome lands as a journal event of its own (Fix 1) --
+   * NEVER by finishing the session. A real CommerceML exchange sends more
+   * than one file (nomenclature, then offers/prices) through the SAME
+   * `checkauth` session; ending the session the moment one file finishes
+   * would strand every file after the first with a cookie that now resolves
+   * to nothing. Only `ExchangeSessionService.sweepExpired` (TTL) ever
+   * finishes a session -- see its own comment.
    */
   private async import(
     session: ResolvedExchangeSession,
@@ -348,11 +373,16 @@ export class ExchangeController {
 
     const bytes = await this.sessions.assemble(session.id, filename);
 
-    let items: ReturnType<typeof parseCatalog>["items"];
-    let offers: ReturnType<typeof parseOffers>["offers"];
+    let items: ReturnType<typeof parseCommerceMl>["items"];
+    let offers: ReturnType<typeof parseCommerceMl>["offers"];
     try {
-      items = parseCatalog(bytes).items;
-      offers = parseOffers(bytes).offers;
+      // Fix 3: one `parseCommerceMl` call decodes and parses `bytes` exactly
+      // once and hands back both sections -- `parseCatalog`+`parseOffers`
+      // back-to-back used to pay for that decode+parse twice per round for
+      // no reason (neither call needs the other's section).
+      const parsed = parseCommerceMl(bytes);
+      items = parsed.items;
+      offers = parsed.offers;
     } catch (cause) {
       const detail = cause instanceof Error ? cause.message : String(cause);
       await this.journal.append({
@@ -365,10 +395,9 @@ export class ExchangeController {
         message: `import: ${detail}`,
         details: { filename },
       });
-      await this.journal.finishSession(session.tenantId, session.id, "error", {
-        error: detail,
-        filename,
-      });
+      // Fix 1: a broken FILE is not a broken EXCHANGE -- 1С may still retry
+      // this filename or move on to another one with the same cookie, so
+      // the session is left open rather than finished here.
       this.fail(res, detail);
       return;
     }
@@ -426,12 +455,42 @@ export class ExchangeController {
       })),
     ];
 
-    const offset = await this.sessions.readImportCursor(session.id, filename);
+    // Fix 2: `worklist` above was just rebuilt from scratch -- a fresh
+    // `known` query, a fresh `decideApplication` -- same as it is every
+    // round. A bare stored offset trusts that THIS round's worklist lines up
+    // row-for-row with whichever round wrote that offset; nothing guarantees
+    // that between two rounds of the SAME filename (1С resubmits `mode=
+    // import` verbatim after a `progress` reply), since an admin linking or
+    // unlinking a product in between shifts the filtered arrays. The
+    // fingerprint -- length plus a hash of ordered keys -- pins that down:
+    // matching fingerprints mean the stored offset still points at the same
+    // logical position; a mismatch means it doesn't, and continuing would
+    // silently apply the wrong rows (or skip some) with no trace, since the
+    // skip/unmatched journal below only fires at offset 0.
+    const fingerprint = fingerprintOf(worklist);
+    const stored = await this.sessions.readImportCursor(session.id, filename);
+    let offset = stored?.offset ?? 0;
+    if (stored && stored.fingerprint !== fingerprint) {
+      await this.journal.append({
+        tenantId: session.tenantId,
+        channelType: session.channelType,
+        sessionId: session.id,
+        direction: "in",
+        outcome: "warn",
+        grain: "session",
+        message: `import: список для «${filename}» изменился между кругами — файл начат заново`,
+        details: { filename, previousOffset: stored.offset },
+      });
+      offset = 0;
+    }
+
     if (offset === 0) {
-      // Logged once, on the first batch of this import round -- decideApplication
-      // is a pure function of `known`/`items`/`offers`, which do not change
-      // between retries of the SAME filename, so a later `progress` retry
-      // would just be re-deriving (and re-journaling) an identical list.
+      // Logged once, on the first batch of this import round (or again after
+      // a fingerprint-mismatch restart above) -- decideApplication is a pure
+      // function of `known`/`items`/`offers`, which do not change between
+      // retries of the SAME filename UNLESS that mismatch just fired, so an
+      // ordinary `progress` retry would just be re-deriving (and
+      // re-journaling) an identical list.
       for (const skip of plan.skipped) {
         await this.journal.append({
           tenantId: session.tenantId,
@@ -468,16 +527,31 @@ export class ExchangeController {
     }
 
     if (end < worklist.length) {
-      await this.sessions.writeImportCursor(session.id, filename, end);
+      await this.sessions.writeImportCursor(session.id, filename, { offset: end, fingerprint });
       this.text(res, "progress");
       return;
     }
 
-    await this.journal.finishSession(session.tenantId, session.id, "ok", {
-      updated: plan.priceUpdates.length,
-      candidates: plan.candidates.length,
-      skipped: plan.skipped.length,
-      unmatchedOffers: unmatchedOfferRefs.length,
+    // Fix 1: this FILE is done, but the exchange might not be -- 1С can still
+    // send another file (e.g. offers.xml after import.xml) against the SAME
+    // cookie, so the outcome is recorded as a journal event, not by finishing
+    // the session. Only `ExchangeSessionService.sweepExpired` (TTL) does that
+    // now, once the exchange itself has genuinely gone quiet.
+    await this.journal.append({
+      tenantId: session.tenantId,
+      channelType: session.channelType,
+      sessionId: session.id,
+      direction: "in",
+      outcome: "ok",
+      grain: "session",
+      message: `import: файл «${filename}» применён`,
+      details: {
+        filename,
+        updated: plan.priceUpdates.length,
+        candidates: plan.candidates.length,
+        skipped: plan.skipped.length,
+        unmatchedOffers: unmatchedOfferRefs.length,
+      },
     });
     this.text(res, "success");
   }

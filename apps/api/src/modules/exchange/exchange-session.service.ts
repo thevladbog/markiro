@@ -44,6 +44,27 @@ export interface ResolvedExchangeSession {
 }
 
 /**
+ * A `mode=import` progress marker for one `filename`: how many of its
+ * planned rows (price updates, then candidate upserts, in that fixed order --
+ * see `exchange.controller.ts`) already made it to the database, PLUS a
+ * `fingerprint` of the exact worklist `offset` was measured against.
+ *
+ * The fingerprint exists because `offset` alone is not enough (review fix):
+ * the worklist behind it is rebuilt from scratch every round (a fresh
+ * product query, a fresh `decideApplication`), and nothing stops an admin
+ * from linking or unlinking a product between two rounds of the SAME
+ * filename (1С resubmits `mode=import` verbatim after a `progress` reply).
+ * That reshuffles the filtered arrays in a way a bare numeric offset can't
+ * detect, so `exchange.controller.ts` compares the stored fingerprint
+ * against a freshly computed one every round and restarts the file, loudly,
+ * on a mismatch rather than resuming at a now-meaningless position.
+ */
+export interface ImportCursor {
+  offset: number;
+  fingerprint: string;
+}
+
+/**
  * Same discipline as `hashDeviceToken`: the cookie is 256 bits of randomness
  * from `randomBytes`, not a low-entropy secret a dump could brute force
  * offline, so a plain unkeyed sha256 is enough -- no salt/pepper needed.
@@ -101,12 +122,13 @@ export class ExchangeSessionService {
    * cases identically, on purpose -- a caller presenting a bad cookie must
    * not be able to distinguish "never existed" from "expired" from
    * "finished" by the response: no row, an expired `expiresAt`, and a
-   * non-null `finishedAt`. The last one matters even though nothing in this
-   * task ever sets it: `finishSession` (Task 3, used by later parsing tasks)
-   * is a terminal for the session's event stream -- an event appended after
-   * close can be pruned along with the session -- so a step running against
-   * an already-finished session would be building on a foundation retention
-   * is free to erase. Treat it as gone, the same as an unknown cookie.
+   * non-null `finishedAt`. The last one matters because `finishSession`
+   * (called only by `sweepExpired` below, since Fix 1 -- no route handler
+   * calls it any more) is a terminal for the session's event stream -- an
+   * event appended after close can be pruned along with the session -- so a
+   * step running against an already-finished session would be building on a
+   * foundation retention is free to erase. Treat it as gone, the same as an
+   * unknown cookie.
    */
   async resolve(cookie: string): Promise<ResolvedExchangeSession | null> {
     const cookieHash = hashExchangeCookie(cookie);
@@ -174,11 +196,9 @@ export class ExchangeSessionService {
   }
 
   /**
-   * How many of `mode=import`'s planned rows (price updates, then candidate
-   * upserts, in that fixed order -- see `exchange.controller.ts`) already
-   * made it to the database for `filename` within `sessionId`. Zero when
-   * nothing has been recorded yet -- either the very first `mode=import`
-   * call for this filename, or a filename this session never touched.
+   * Reads the cursor for `filename` within `sessionId`. `null` when nothing
+   * has been recorded yet -- either the very first `mode=import` call for
+   * this filename, or a filename this session never touched.
    *
    * Piggybacks on `integrationSessions.summary` rather than a new column:
    * that jsonb field is otherwise write-only until `JournalService.
@@ -188,13 +208,13 @@ export class ExchangeSessionService {
    * `finishedAt` as "gone" -- so scratch progress here can never be
    * confused with, or overwritten by, the terminal summary.
    */
-  async readImportCursor(sessionId: string, filename: string): Promise<number> {
+  async readImportCursor(sessionId: string, filename: string): Promise<ImportCursor | null> {
     const [row] = await this.db
       .select({ summary: schema.integrationSessions.summary })
       .from(schema.integrationSessions)
       .where(eq(schema.integrationSessions.id, sessionId));
-    const cursors = row?.summary?.["importCursors"] as Record<string, number> | undefined;
-    return cursors?.[filename] ?? 0;
+    const cursors = row?.summary?.["importCursors"] as Record<string, ImportCursor> | undefined;
+    return cursors?.[filename] ?? null;
   }
 
   /**
@@ -203,16 +223,22 @@ export class ExchangeSessionService {
    * after a `progress` reply) resumes instead of redoing already-applied
    * rows. Merges into whatever scratch state is already there rather than
    * overwriting `summary` wholesale -- a session could in principle be
-   * mid-import on more than one filename at once.
+   * mid-import on more than one filename at once (Fix 1 makes this the
+   * normal case: one `checkauth` session now carries every file 1С sends,
+   * not just the first).
    */
-  async writeImportCursor(sessionId: string, filename: string, offset: number): Promise<void> {
+  async writeImportCursor(
+    sessionId: string,
+    filename: string,
+    cursor: ImportCursor,
+  ): Promise<void> {
     const [row] = await this.db
       .select({ summary: schema.integrationSessions.summary })
       .from(schema.integrationSessions)
       .where(eq(schema.integrationSessions.id, sessionId));
     const summary = { ...(row?.summary ?? {}) };
-    const cursors = { ...((summary["importCursors"] as Record<string, number>) ?? {}) };
-    cursors[filename] = offset;
+    const cursors = { ...((summary["importCursors"] as Record<string, ImportCursor>) ?? {}) };
+    cursors[filename] = cursor;
     summary["importCursors"] = cursors;
     await this.db
       .update(schema.integrationSessions)
@@ -221,26 +247,44 @@ export class ExchangeSessionService {
   }
 
   /**
-   * Deletes sessions abandoned mid-exchange, along with their chunks, so a
-   * transfer that never finishes doesn't leave Postgres rows forever.
-   * Targets `finishedAt is null AND expiresAt < now` -- a session that
-   * finished normally is a different lifetime with a different owner
-   * (`JournalService.prune`'s 90-day summary retention), not this TTL; this
-   * TTL only answers "is this still a live, resumable upload", which stops
-   * mattering the moment the exchange actually finishes.
+   * Closes sessions whose TTL ran out, along with purging their chunks, so a
+   * transfer that never resumes doesn't leave large binary rows in Postgres
+   * forever. Targets `finishedAt is null AND expiresAt < now`.
    *
-   * Chunks are deleted BEFORE the session rows, same ordering discipline as
-   * `JournalService.prune`: `exchangeUploads.sessionId` carries no FK to
-   * `integrationSessions.id` (see packages/db/src/schema/integrations.ts),
-   * so deleting the session first would leave orphaned chunk rows pointing
-   * nowhere instead of merely rows that are momentarily both gone together.
+   * This is now (Fix 1) the ONLY place a session ever finishes. CommerceML's
+   * "Обмен с сайтом" protocol has no explicit goodbye (спека §3): 1С just
+   * stops calling once it has nothing left to send. `exchange.controller.ts`
+   * used to call `JournalService.finishSession` the moment any ONE file's
+   * `mode=import` finished -- which killed the cookie before a second file in
+   * the SAME exchange (offers.xml after import.xml is the common case) could
+   * ever be uploaded. A session must outlive each individual file; only
+   * running out of time (this method) or never having existed can end it.
+   *
+   * The outcome recorded is derived, not assumed: "error" if this session
+   * ever journaled an `outcome: "error"` event, "ok" otherwise. Plain silence
+   * -- no error, just no more files -- is the ordinary, successful end of an
+   * exchange under this protocol, not a failure, so it must not default to
+   * "error" just because nothing ever explicitly said "done".
+   *
+   * The session ROW itself is no longer deleted here -- only finished, same
+   * as any other completed session. `JournalService.prune`'s existing
+   * 90-day-from-`finishedAt` retention removes it later, exactly like every
+   * other session that ever finishes; a session that merely timed out has no
+   * reason to get a shorter, second retention rule of its own. Chunks
+   * (`exchangeUploads`) are still deleted unconditionally: they are the
+   * actual bytes this TTL exists to bound (see `SESSION_TTL_MS`'s own
+   * comment), and once a session is finished nothing will ever `assemble()`
+   * them again regardless of outcome.
    *
    * Not wired to a scheduled job by this task -- like `JournalService.prune`,
    * that's Task 16's job; this only needs to exist and be correct.
    */
   async sweepExpired(now: Date): Promise<void> {
     const expired = await this.db
-      .select({ id: schema.integrationSessions.id })
+      .select({
+        id: schema.integrationSessions.id,
+        tenantId: schema.integrationSessions.tenantId,
+      })
       .from(schema.integrationSessions)
       .where(
         and(
@@ -250,12 +294,25 @@ export class ExchangeSessionService {
       );
     if (expired.length === 0) return;
 
+    for (const session of expired) {
+      const [errorEvent] = await this.db
+        .select({ id: schema.integrationEvents.id })
+        .from(schema.integrationEvents)
+        .where(
+          and(
+            eq(schema.integrationEvents.sessionId, session.id),
+            eq(schema.integrationEvents.outcome, "error"),
+          ),
+        )
+        .limit(1);
+      await this.journal.finishSession(session.tenantId, session.id, errorEvent ? "error" : "ok", {
+        reason: "expired",
+      });
+    }
+
     const ids = expired.map((row) => row.id);
     await this.db
       .delete(schema.exchangeUploads)
       .where(inArray(schema.exchangeUploads.sessionId, ids));
-    await this.db
-      .delete(schema.integrationSessions)
-      .where(inArray(schema.integrationSessions.id, ids));
   }
 }

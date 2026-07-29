@@ -64,6 +64,13 @@ export interface ParsedOffers {
   priceTypes: Record<string, string>;
 }
 
+/** Both sections a CommerceML file can carry, read off ONE parsed tree -- see `parseCommerceMl`. */
+export interface ParsedCommerceMl {
+  items: ParsedItem[];
+  offers: ParsedOffer[];
+  priceTypes: Record<string, string>;
+}
+
 /**
  * Tags that repeat under their parent and must always come back as an array,
  * even when a file happens to carry exactly one. Without this, fast-xml-parser
@@ -139,12 +146,11 @@ function optionalTextOf(value: unknown): string | null {
   return text === "" ? null : text;
 }
 
-/** `parseCatalog(bytes)` -- reads `<Каталог><Товары><Товар>` entries. */
-export function parseCatalog(bytes: Buffer): ParsedCatalog {
-  const root = parseXml(bytes);
+/** Reads `<Каталог><Товары><Товар>` entries off an already-parsed tree. */
+function catalogItemsFrom(root: unknown): ParsedItem[] {
   const goods = dig(root, "КоммерческаяИнформация", "Каталог", "Товары");
   const rawItems = goods["Товар"];
-  const items = (Array.isArray(rawItems) ? rawItems : []).map((raw): ParsedItem => {
+  return (Array.isArray(rawItems) ? rawItems : []).map((raw): ParsedItem => {
     const item = asObject(raw);
     return {
       externalRef: textOf(item["Ид"]),
@@ -153,7 +159,11 @@ export function parseCatalog(bytes: Buffer): ParsedCatalog {
       unit: optionalTextOf(item["БазоваяЕдиница"]),
     };
   });
-  return { items };
+}
+
+/** `parseCatalog(bytes)` -- reads `<Каталог><Товары><Товар>` entries. */
+export function parseCatalog(bytes: Buffer): ParsedCatalog {
+  return { items: catalogItemsFrom(parseXml(bytes)) };
 }
 
 /**
@@ -174,13 +184,11 @@ function parsePriceTypes(root: unknown): Record<string, string> {
   return table;
 }
 
-/** `parseOffers(bytes)` -- reads `<ПакетПредложений><Предложения><Предложение>` entries. */
-export function parseOffers(bytes: Buffer): ParsedOffers {
-  const root = parseXml(bytes);
-  const priceTypes = parsePriceTypes(root);
+/** Reads `<ПакетПредложений><Предложения><Предложение>` entries off an already-parsed tree. */
+function offersFrom(root: unknown, priceTypes: Record<string, string>): ParsedOffer[] {
   const listing = dig(root, "КоммерческаяИнформация", "ПакетПредложений", "Предложения");
   const rawOffers = listing["Предложение"];
-  const offers = (Array.isArray(rawOffers) ? rawOffers : []).map((raw): ParsedOffer => {
+  return (Array.isArray(rawOffers) ? rawOffers : []).map((raw): ParsedOffer => {
     const offer = asObject(raw);
     const rawPrices = asObject(offer["Цены"])["Цена"];
     const prices = (Array.isArray(rawPrices) ? rawPrices : []).map((rawPrice): ParsedOfferPrice => {
@@ -204,5 +212,31 @@ export function parseOffers(bytes: Buffer): ParsedOffers {
     });
     return { externalRef: textOf(offer["Ид"]), prices };
   });
-  return { offers, priceTypes };
+}
+
+/** `parseOffers(bytes)` -- reads `<ПакетПредложений><Предложения><Предложение>` entries. */
+export function parseOffers(bytes: Buffer): ParsedOffers {
+  const root = parseXml(bytes);
+  const priceTypes = parsePriceTypes(root);
+  return { offers: offersFrom(root, priceTypes), priceTypes };
+}
+
+/**
+ * Parses `bytes` exactly ONCE and reads off both sections a CommerceML file
+ * can carry. `parseCatalog`/`parseOffers` each call `parseXml` themselves --
+ * fine for a caller that only wants one section, but `exchange.controller.ts`
+ * (`mode=import`) always wants both, since a given file's kind isn't known
+ * ahead of time (whichever section is absent just comes back empty either
+ * way). Calling them back-to-back there used to mean decoding and parsing the
+ * same buffer twice per round for no reason; this reuses the one tree for
+ * both.
+ */
+export function parseCommerceMl(bytes: Buffer): ParsedCommerceMl {
+  const root = parseXml(bytes);
+  const priceTypes = parsePriceTypes(root);
+  return {
+    items: catalogItemsFrom(root),
+    offers: offersFrom(root, priceTypes),
+    priceTypes,
+  };
 }

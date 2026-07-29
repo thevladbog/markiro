@@ -13,6 +13,8 @@ import { listenOnLoopback } from "./support/listen-loopback";
 import { signUpAndActivate } from "./support/auth";
 import { excludeExchangeRoute } from "../src/modules/exchange/exchange.module";
 import { IMPORT_BATCH_SIZE } from "../src/modules/exchange/exchange.controller";
+import { ExchangeSessionService } from "../src/modules/exchange/exchange-session.service";
+import { hashDeviceToken } from "../src/pickup/device-token";
 
 /** A minimal `<Каталог><Товары><Товар>` document -- one item, one name. */
 function catalogXmlFor(guid: string, name: string): string {
@@ -197,10 +199,71 @@ describe("mode=import", () => {
     expect(after).toEqual(before);
   });
 
-  it("пишет сводку сеанса в журнал", async () => {
-    const res = await agent.get("/integrations/commerceml/journal").expect(200);
-    const finished = res.body.sessions.find((s: { outcome: string | null }) => s.outcome === "ok");
-    expect(finished.summary).toMatchObject({ updated: expect.any(Number) });
+  // Review fix (Fix 1): a finished file used to close the whole session
+  // (`finishSession`) -- this test used to look for a session with
+  // `outcome === "ok"` and its summary there. Now a file's outcome is a
+  // journal event of its own, and the session it belongs to stays open (only
+  // `ExchangeSessionService.sweepExpired`, on TTL expiry, ever finishes a
+  // session) -- see that method's own comment for why.
+  it("пишет итог файла в журнал событием, а сеанс не завершает", async () => {
+    const auth = await checkauth();
+    await uploadFile(auth, "summary.xml", offersXmlFor("guid-1", "88.00"));
+    await request(app!.getHttpServer())
+      .get("/1c_exchange?type=catalog&mode=import&filename=summary.xml")
+      .set("Cookie", auth.cookie)
+      .expect(200);
+
+    const journal = await agent.get("/integrations/commerceml/journal").expect(200);
+    const session = journal.body.sessions.find((s: { events: { message: string }[] }) =>
+      s.events.some((e) => e.message.includes("summary.xml")),
+    );
+    expect(session).toBeDefined();
+    // Файл завершился успешно, но сеанс -- нет: обмен по протоколу без «до
+    // свидания» мог ещё не закончиться, следующий файл может прийти с той
+    // же cookie.
+    expect(session.finishedAt).toBeNull();
+    expect(session.outcome).toBeNull();
+
+    const fileEvent = session.events.find(
+      (e: { message: string; outcome: string }) =>
+        e.message.includes("summary.xml") && e.outcome === "ok",
+    );
+    expect(fileEvent).toBeDefined();
+    expect((fileEvent as { details: Record<string, unknown> }).details).toMatchObject({
+      updated: expect.any(Number),
+    });
+  });
+
+  it("sweepExpired закрывает сеанс по истечении TTL и проставляет исход, не удаляя строку", async () => {
+    const sessions = app!.get(ExchangeSessionService);
+    const auth = await checkauth();
+    const cookieHash = hashDeviceToken(auth.value);
+    const [session] = await db
+      .select()
+      .from(schema.integrationSessions)
+      .where(eq(schema.integrationSessions.cookieHash, cookieHash));
+    expect(session).toBeDefined();
+
+    // Состариваем именно этот сеанс, как будто его TTL истёк, не трогая
+    // ничего другого -- та же техника, что `exchange-protocol.e2e.test.ts`
+    // использует для резолва сеанса по cookie-хэшу.
+    await db
+      .update(schema.integrationSessions)
+      .set({ expiresAt: new Date(Date.now() - 1000) })
+      .where(eq(schema.integrationSessions.id, session!.id));
+
+    await sessions.sweepExpired(new Date());
+
+    const [after] = await db
+      .select()
+      .from(schema.integrationSessions)
+      .where(eq(schema.integrationSessions.id, session!.id));
+    expect(after).toBeDefined();
+    expect(after!.finishedAt).not.toBeNull();
+    // Единственное событие этого сеанса на момент истечения -- "checkauth:
+    // сеанс открыт" (outcome "ok"), поэтому закрывающий исход обязан быть
+    // "ok", а не молчаливым "error" по умолчанию.
+    expect(after!.outcome).toBe("ok");
   });
 
   // Beyond the brief's five: the prose requirements ("не теряйте молча",
@@ -310,5 +373,92 @@ ${guids.map((guid) => `  <Товар><Ид>${guid}</Ид><Наименовани
         ),
       );
     expect(rows).toHaveLength(guids.length);
+  });
+
+  // Review fix (Fix 1): the actual regression a real CommerceML "Обмен с
+  // сайтом" hits every time -- one `checkauth`, then номенклатура
+  // (import.xml, no prices) followed by предложения (offers.xml, the
+  // prices) in the SAME session. Before this fix, `mode=import` finished
+  // the session the instant the FIRST file completed, so this second
+  // `mode=import` call would have come back `failure\nno session` and the
+  // prices -- the entire point of the exchange -- would never have landed.
+  it("каталог, затем предложения в ОДНОМ сеансе (один checkauth) -- цены из второго файла применяются", async () => {
+    const auth = await checkauth();
+
+    // Файл 1: номенклатура. Ссылается на уже известный товар (guid-1), как
+    // 1С обычно и присылает -- каталог тут ничего не создаёт и не меняет.
+    await uploadFile(auth, "two-files-catalog.xml", catalogXmlFor("guid-1", "Имя из каталога"));
+    const catalogImport = await request(app!.getHttpServer())
+      .get("/1c_exchange?type=catalog&mode=import&filename=two-files-catalog.xml")
+      .set("Cookie", auth.cookie)
+      .expect(200);
+    expect(catalogImport.text.trim()).toBe("success");
+
+    // Файл 2, ТА ЖЕ cookie: до фикса сеанс уже был бы мёртв здесь.
+    await uploadFile(auth, "two-files-offers.xml", offersXmlFor("guid-1", "321.00"));
+    const offersImport = await request(app!.getHttpServer())
+      .get("/1c_exchange?type=catalog&mode=import&filename=two-files-offers.xml")
+      .set("Cookie", auth.cookie)
+      .expect(200);
+    expect(offersImport.text.trim()).toBe("success");
+
+    const [product] = await db
+      .select({ unitPrice: schema.products.unitPrice, name: schema.products.name })
+      .from(schema.products)
+      .where(eq(schema.products.id, productId));
+    expect(product!.unitPrice).toBe("321.00");
+    // Каталог по-прежнему не переименовывает сопоставленный товар -- пин
+    // повторён здесь, чтобы этот тест не мог случайно пройти, переименовав
+    // товар вместо (или вместе с) применения цены.
+    expect(product!.name).not.toBe("Имя из каталога");
+  });
+
+  // Review fix (Fix 2): a bare numeric cursor trusts that THIS round's
+  // freshly rebuilt worklist still lines up with the one an EARLIER round's
+  // offset was measured against -- untrue the moment a product gets linked
+  // or unlinked between two rounds of the SAME filename (1С resubmits
+  // `mode=import` verbatim after a `progress` reply). Rather than racing a
+  // real link/unlink against `IMPORT_BATCH_SIZE`-sized batches, this seeds a
+  // stale cursor directly through the same `writeImportCursor` the
+  // controller itself calls -- exactly the state an earlier round against a
+  // DIFFERENT worklist would have left behind -- and checks that `mode=
+  // import` refuses to resume blindly from it.
+  it("устаревший курсор (список изменился между кругами) не используется вслепую — файл начинается заново с предупреждением в журнале", async () => {
+    const auth = await checkauth();
+    await uploadFile(auth, "cursor-shift.xml", offersXmlFor("guid-1", "501.00"));
+
+    const sessions = app!.get(ExchangeSessionService);
+    const cookieHash = hashDeviceToken(auth.value);
+    const [session] = await db
+      .select()
+      .from(schema.integrationSessions)
+      .where(eq(schema.integrationSessions.cookieHash, cookieHash));
+
+    // `offset: 1` on a worklist that will actually turn out to hold exactly
+    // ONE row: if the stale offset were honoured as-is, the loop below would
+    // run zero iterations and the price would never be written at all --
+    // the silent-skip this fix exists to prevent.
+    await sessions.writeImportCursor(session!.id, "cursor-shift.xml", {
+      offset: 1,
+      fingerprint: "stale-fingerprint-from-a-different-worklist",
+    });
+
+    const res = await request(app!.getHttpServer())
+      .get("/1c_exchange?type=catalog&mode=import&filename=cursor-shift.xml")
+      .set("Cookie", auth.cookie)
+      .expect(200);
+    expect(res.text.trim()).toBe("success");
+
+    const journal = await agent.get("/integrations/commerceml/journal").expect(200);
+    const messages = journal.body.sessions.flatMap((s: { events: { message: string }[] }) =>
+      s.events.map((e) => e.message),
+    );
+    expect(messages.join(" ")).toMatch(/изменился между кругами/);
+
+    const [product] = await db
+      .select({ unitPrice: schema.products.unitPrice })
+      .from(schema.products)
+      .where(eq(schema.products.id, productId));
+    expect(product!.unitPrice).toBe("501.00");
   });
 });
