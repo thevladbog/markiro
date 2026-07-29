@@ -63,13 +63,26 @@ interface BatchResponse {
   conflicts?: BatchConflict[];
 }
 
+/**
+ * `winningScannedAt` must be a string AND parse to a real instant. A
+ * non-ISO string would otherwise ride through unchanged into
+ * `conflicts_mirror` and blow up `ConflictList`'s `Intl.DateTimeFormat` at
+ * render time (`new Date("garbage")` is an Invalid Date, and `.format()` on
+ * one throws a `RangeError`) -- taking the whole list down for one bad
+ * entry. `.filter(isBatchConflict)` already drops entries one at a time, so
+ * this costs only the malformed conflict, never its batch-mates. That cost
+ * is real, though: a dropped conflict is gone for good, since a resent
+ * already-applied batch answers `conflicts: []` (see the module doc
+ * comment above), so there is no second chance to record it.
+ */
 function isBatchConflict(value: unknown): value is BatchConflict {
   if (typeof value !== "object" || value === null) return false;
   const c = value as Record<string, unknown>;
   return (
     typeof c.codeHash === "string" &&
     (typeof c.winningTerminalId === "string" || c.winningTerminalId === null) &&
-    typeof c.winningScannedAt === "string"
+    typeof c.winningScannedAt === "string" &&
+    !Number.isNaN(Date.parse(c.winningScannedAt))
   );
 }
 

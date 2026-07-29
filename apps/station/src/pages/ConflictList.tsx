@@ -47,6 +47,25 @@ export function ConflictList({ exec, onBack }: ConflictListProps) {
     timeStyle: "medium",
   });
 
+  // `isBatchConflict` (lib/sync.ts) rejects a non-parsing `winningScannedAt`
+  // before it ever reaches `conflicts_mirror`, but this guard stays anyway:
+  // rows already stored before that check shipped, or written by any other
+  // path, must not be able to take the whole list down. `new Date("x")` is
+  // an Invalid Date, and `Intl.DateTimeFormat.format()` on one throws a
+  // `RangeError` -- one bad row must cost one row, never the screen.
+  //
+  // The fallback is the raw stored string, not a generic placeholder: this
+  // screen exists so the operator can find a physical item, and the exact
+  // win time is secondary to that -- but the raw value still tells rows
+  // apart from one another and may itself carry a clue (e.g. a
+  // differently-shaped but still-readable timestamp), which a blanket
+  // "unknown" would throw away.
+  function formatWinTime(raw: string): string {
+    const date = new Date(raw);
+    if (Number.isNaN(date.getTime())) return raw;
+    return timeFormat.format(date);
+  }
+
   return (
     <main style={{ padding: 32, display: "flex", flexDirection: "column", gap: 24 }}>
       <h1 style={{ fontSize: "2rem" }}>{t("conflicts.title")}</h1>
@@ -72,7 +91,7 @@ export function ConflictList({ exec, onBack }: ConflictListProps) {
               <div>
                 {t("conflicts.wonBy", {
                   terminal: c.winningTerminalId ?? "—",
-                  time: timeFormat.format(new Date(c.winningScannedAt)),
+                  time: formatWinTime(c.winningScannedAt),
                 })}
               </div>
             </Card>

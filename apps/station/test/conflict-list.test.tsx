@@ -60,6 +60,38 @@ describe("ConflictList", () => {
     expect(await screen.findByText("No conflicts")).toBeDefined();
   });
 
+  // Guards ConflictList's own render, independent of isBatchConflict's
+  // filter in lib/sync.ts (Finding 2): a row already in conflicts_mirror
+  // with an unparseable winningScannedAt -- from before that filter
+  // shipped, or from any other write path -- must degrade one row, not
+  // crash the screen. `new Date("garbage")` is an Invalid Date, and
+  // `Intl.DateTimeFormat.format()` on one throws a RangeError, which would
+  // otherwise take down every row below it, including Back.
+  it("renders a row with an unparseable winningScannedAt instead of crashing, and Back still works", async () => {
+    const exec = await migratedExec();
+    await exec.run(
+      `INSERT INTO codes_mirror (code_hash, shift_id, gtin14, serial, scanned_at) VALUES (?,?,?,?,?)`,
+      ["h1", "s1", "04600000000017", "AB1", "2026-07-28T10:00:00.000Z"],
+    );
+    // Bypasses recordConflicts' own parameter typing (which expects a real
+    // ISO string) to simulate a row already sitting in the mirror with data
+    // that predates or otherwise escaped the sync engine's own guard.
+    await exec.run(
+      `INSERT INTO conflicts_mirror (code_hash, winning_terminal_id, winning_scanned_at, detected_at)
+       VALUES (?,?,?,?)`,
+      ["h1", "t9", "garbage", "2026-07-28T10:00:09.000Z"],
+    );
+
+    render(<ConflictList exec={exec} onBack={() => {}} />);
+
+    // The row still renders -- item identity survives -- and falls back to
+    // the raw stored string rather than throwing or silently blanking it.
+    expect(await screen.findByText(/04600000000017/)).toBeDefined();
+    expect(screen.getByText(/garbage/)).toBeDefined();
+    // Calm, not a crash: Back stays live for this row same as any other.
+    expect(screen.getByRole("button", { name: "Back" })).toBeDefined();
+  });
+
   it("says the list could not be read when readConflicts throws, not that there are no conflicts (Finding 3)", async () => {
     // The read failure below is expected and asserted on via the UI copy,
     // not left to print a stack trace into otherwise-pristine test output.

@@ -742,6 +742,39 @@ describe("sync engine", () => {
   );
 
   it(
+    "drops a conflict entry whose winningScannedAt does not parse to a real instant, instead of " +
+      "letting it reach conflicts_mirror unchanged and crash ConflictList's date formatting later " +
+      "-- one bad entry is dropped on its own, not the whole batch's conflicts (Finding 2)",
+    async () => {
+      const exec = await migratedExec();
+      await seed(exec, 2);
+      const post = vi.fn().mockResolvedValue({
+        applied: 2,
+        alreadyApplied: false,
+        conflicts: [
+          { codeHash: "h1", winningTerminalId: "t9", winningScannedAt: "garbage" },
+          { codeHash: "h2", winningTerminalId: "t9", winningScannedAt: "2026-07-28T10:00:00.000Z" },
+        ],
+      });
+      const states: { conflicts: number }[] = [];
+
+      const engine = createSyncEngine({
+        exec,
+        client: { post },
+        machineId: "m1",
+        onState: (s) => states.push({ conflicts: s.conflicts }),
+      });
+      engine.nudge();
+      await engine.idle();
+
+      expect(states.at(-1)!.conflicts).toBe(1);
+      const rows = await exec.all<{ code_hash: string }>("SELECT code_hash FROM conflicts_mirror");
+      expect(rows.map((r) => r.code_hash)).toEqual(["h2"]);
+      engine.stop();
+    },
+  );
+
+  it(
     "records conflicts before acknowledging the batch, so a crash between the two device-side " +
       "writes never loses the only local record a conflict existed for that batch (Finding 4)",
     async () => {
