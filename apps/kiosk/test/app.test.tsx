@@ -21,7 +21,7 @@ import {
   type KioskConfig,
 } from "../src/store/config.js";
 import { appendJournal, type JournalEntry } from "../src/store/journal.js";
-import { enqueueOrder, listQueue } from "../src/store/queue.js";
+import { enqueueOrder, listQuarantine, listQueue } from "../src/store/queue.js";
 import { REFRESH_INTERVAL_MS, STALE_BLOCK_MS } from "../src/sync/worker.js";
 
 afterEach(cleanup);
@@ -180,6 +180,13 @@ function bootstrapAt(generatedAt: string): KioskBootstrapDto {
  * `fetch` that rejects, exactly as a dead network does. */
 interface FakeServer {
   reachable: boolean;
+  /**
+   * The server no longer knows this device — the kiosk archived, or a
+   * replacement device having redeemed a new token. `KioskDeviceGuard` answers
+   * every authenticated route with 401, and it is definitive: unlike
+   * `reachable: false`, the device is being ANSWERED.
+   */
+  revoked: boolean;
   generatedAt: string;
   bootstraps: number;
   orders: CreateOrderDto[];
@@ -188,6 +195,15 @@ let server: FakeServer;
 
 function jsonResponse(body: unknown): Response {
   return { ok: true, status: 200, json: () => Promise.resolve(body) } as unknown as Response;
+}
+
+function errorResponse(status: number, message: string): Response {
+  return {
+    ok: false,
+    status,
+    statusText: message,
+    json: () => Promise.resolve({ message }),
+  } as unknown as Response;
 }
 
 const originalFetch = globalThis.fetch;
@@ -203,10 +219,19 @@ beforeEach(() => {
   });
   vi.setSystemTime(NOW);
   transports.reset();
-  server = { reachable: true, generatedAt: NOW.toISOString(), bootstraps: 0, orders: [] };
+  server = {
+    reachable: true,
+    revoked: false,
+    generatedAt: NOW.toISOString(),
+    bootstraps: 0,
+    orders: [],
+  };
   globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (!server.reachable) throw new TypeError("Failed to fetch");
+    // The guard sits in front of every `/kiosk` route but the pairing redeem,
+    // so a revoked device is refused before anything looks at the request.
+    if (server.revoked) return errorResponse(401, "Unauthorized");
     if (url.endsWith("/kiosk/bootstrap")) {
       server.bootstraps += 1;
       return jsonResponse(bootstrapAt(server.generatedAt));
@@ -248,9 +273,18 @@ const config = (over: Partial<KioskConfig> = {}): KioskConfig => ({
   ...over,
 });
 
-/** Puts the device in the state a completed pairing leaves it in. */
+/**
+ * Puts the device in the state a completed pairing leaves it in.
+ *
+ * The snapshot is stamped as FETCHED when it was generated, which is what a
+ * real refresh does — the two are a round trip apart. Staleness is measured as
+ * elapsed time since that fetch (`serverNow`, so a skewed tablet clock cancels
+ * out), so a device that last synced a week ago is one whose snapshot was both
+ * generated and fetched a week ago; a bundle generated last week but received
+ * seconds ago says something about the SERVER, not about this device's age.
+ */
 async function pair(generatedAt = NOW.toISOString(), over: Partial<KioskConfig> = {}) {
-  await replaceSnapshot(bootstrapAt(generatedAt), NOW);
+  await replaceSnapshot(bootstrapAt(generatedAt), new Date(generatedAt));
   await writeConfig(config(over));
 }
 
@@ -489,6 +523,83 @@ describe("KioskShell", () => {
     expect(said()).toContain("в очереди: 2");
   });
 
+  /**
+   * A REVOKED DEVICE MUST STOP, and «нет связи» is not what happened.
+   *
+   * `GET /kiosk/bootstrap` answers 401 once the kiosk is archived or a
+   * replacement device has redeemed a new token. Read as an outage — which is
+   * what every other refresh failure is — the device keeps its cached roster
+   * and goes on admitting employees and confirming withdrawals for the seven
+   * days it takes that roster to age out, none of which can ever authenticate.
+   *
+   * Back to PAIRING rather than to `Blocked`, because the worker in front of it
+   * has to be told something true: `Blocked` says the data is stale and
+   * promises the queue will go out «как только появится связь», and on a
+   * revoked device both halves are false. Pairing states the device's actual
+   * condition and offers the one action that fixes it.
+   */
+  it("sends a device the server no longer knows back to pairing, and stops transacting", async () => {
+    await pair();
+    await enqueueOrder(queuedOrder(3), EMPLOYEE.id);
+    server.revoked = true;
+
+    render(<App />);
+
+    await settle(() => expect(screen.getByText(PAIRING_TITLE)).toBeDefined());
+    // The token is gone, which is what actually stops the device: there is no
+    // request left it could authenticate.
+    expect((await readConfig())?.token).toBeNull();
+    // Not the idle screen, and therefore no badge can open a session at all.
+    expect(screen.queryByText(IDLE_TITLE)).toBeNull();
+    // Nothing was posted with a credential the server has already refused.
+    expect(server.orders).toEqual([]);
+  });
+
+  /**
+   * AND THE QUEUE IS PARKED, NOT CARRIED ACROSS — which looks like tidying and
+   * is the difference between a re-paired kiosk and a silent data loss.
+   *
+   * Re-pairing redeems a code for a DIFFERENT kiosk row whose `nextDeviceSeq`
+   * starts again at 0, so old orders left in the queue would drain under
+   * sequences the new identity is about to hand out. The server answers a
+   * repeated `(tenantId, kioskId, deviceSeq)` by returning the FIRST order
+   * rather than filing a second, so some later worker's entire cart would
+   * evaporate and be confirmed to them under a stranger's order number.
+   *
+   * Parked, though — never dropped. Those are pickups a worker really walked
+   * away with, and they stay inspectable with the reason beside them.
+   */
+  it("sets the undeliverable queue aside on revocation instead of dropping or replaying it", async () => {
+    await pair();
+    await enqueueOrder(queuedOrder(3), EMPLOYEE.id);
+    await enqueueOrder(queuedOrder(4), EMPLOYEE.id);
+    server.revoked = true;
+
+    render(<App />);
+
+    await settle(() => expect(screen.getByText(PAIRING_TITLE)).toBeDefined());
+    await settle(async () => expect(await listQueue()).toEqual([]));
+    const parked = await listQuarantine();
+    expect(parked.map((order) => order.deviceSeq)).toEqual([3, 4]);
+    // No verdict on the ORDER: the server never refused it, the device simply
+    // lost the right to offer it — and the whole body survives either way.
+    expect(parked[0]!.status).toBe(0);
+    expect(parked[0]!.body.items).toEqual([{ rawKm: KM }]);
+  });
+
+  // A blink is not a revocation. Every other refresh failure has to go on
+  // meaning "offline", or the first flaky access point would unpair the estate.
+  it("keeps a paired device paired when the refresh merely fails", async () => {
+    await pair();
+    server.reachable = false;
+
+    render(<App />);
+
+    await settle(() => expect(screen.getByText(OFFLINE)).toBeDefined());
+    expect(screen.getByText(IDLE_TITLE)).toBeDefined();
+    expect((await readConfig())?.token).toBe("tok-abc");
+  });
+
   it("opens the cart for the badge it recognises, and closes it again on «Не я»", async () => {
     await pair();
     render(<App />);
@@ -600,6 +711,70 @@ describe("KioskShell", () => {
     // next order would collide with this one's idempotency key.
     expect(await listQueue()).toEqual([]);
     expect((await readConfig())?.nextDeviceSeq).toBe(6);
+  });
+
+  /**
+   * A FAST-FORWARDED TABLET MUST NOT BUY A FRESH DAILY ALLOWANCE.
+   *
+   * The server files an order under the `createdAt` the device sends, and its
+   * authoritative day limit counts that order against that stamp's UTC day. Read
+   * off the raw tablet clock, moving the device's date forward — which anyone
+   * standing at the kiosk can do from the tablet's own settings — dated the
+   * withdrawal into a day the worker had not spent yet, repeatedly, and even
+   * while online.
+   *
+   * The stamp now comes from the offset the last bootstrap established
+   * (`serverNow`): `generatedAt` is the server's own reading of the instant the
+   * device received it at `fetchedAt`, so the difference is this tablet's skew
+   * and subtracting it puts the order back on the server's calendar.
+   */
+  it("dates an order by the server's clock, not by a tablet whose date was moved forward", async () => {
+    const SKEW_MS = 3 * 24 * 60 * 60_000;
+    // Same instant, two clocks: the server calls it the 25th, this tablet calls
+    // it the 28th. Everything else about the kiosk is healthy.
+    server.generatedAt = new Date(NOW.getTime() - SKEW_MS).toISOString();
+    await replaceSnapshot(bootstrapAt(server.generatedAt), NOW);
+    await writeConfig(config());
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+
+    await takeOneBottle();
+
+    await settle(() => expect(said()).toContain("ORD-"));
+    const createdAt = server.orders[0]!.createdAt!;
+    expect(createdAt.slice(0, 10)).toBe("2026-07-25");
+    // Explicitly NOT the device's own day, which is the whole exploit.
+    expect(createdAt.slice(0, 10)).not.toBe(NOW.toISOString().slice(0, 10));
+    // And it is a correction, not a fixed stamp: within a few seconds of the
+    // server's own reading of "now", the settle loop's clock creep included.
+    expect(Math.abs(Date.parse(createdAt) - (NOW.getTime() - SKEW_MS))).toBeLessThan(10_000);
+  });
+
+  /**
+   * THE SAME SKEW, IN THE OTHER DIRECTION IT USED TO BREAK.
+   *
+   * Staleness was a subtraction of two absolute clocks, so a tablet more than
+   * `STALE_BLOCK_MS` fast read a bootstrap generated seconds ago as more than a
+   * week old. Every successful refresh then left a perfectly healthy kiosk on
+   * the Blocked screen, telling a worker its data was stale and an
+   * administrator to check a network that was working — with nothing on screen
+   * to suggest a clock.
+   *
+   * Measured through the offset, the age is elapsed time since the refresh —
+   * two readings of the SAME clock — so the skew cancels and the kiosk works.
+   */
+  it("keeps working when the tablet's clock is a fortnight fast but the kiosk is syncing", async () => {
+    server.generatedAt = new Date(NOW.getTime() - 2 * STALE_BLOCK_MS).toISOString();
+    await replaceSnapshot(bootstrapAt(server.generatedAt), NOW);
+    await writeConfig(config());
+
+    render(<App />);
+
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+    expect(screen.queryByText("Киоск временно не выдаёт продукцию")).toBeNull();
+    // And it really is handing product out, not merely showing the idle screen.
+    scan(BADGE);
+    await settle(() => expect(screen.getByText(CART_TITLE)).toBeDefined());
   });
 
   it("confirms an offline handover without a number and keeps the order queued", async () => {

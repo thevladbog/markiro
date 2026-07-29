@@ -8,12 +8,23 @@ const DB_NAME = "markiro-kiosk";
  * `countTakenToday` does with an entry from before the journal carried an
  * employee.
  */
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 export const STORE_CONFIG = "config";
 export const STORE_SNAPSHOT = "snapshot";
 export const STORE_QUEUE = "queue";
 export const STORE_JOURNAL = "journal";
+/**
+ * Where an order the server refused FOR GOOD goes — added in version 2, which
+ * is the shape change that bumped the number above.
+ *
+ * A store rather than a flag on the queue record: `listQueue` is read by the
+ * drain AND by the day count, and both want the same answer (a permanently
+ * refused order is neither owed to the server nor charged to the worker), so
+ * moving the record out of the queue answers both without either reader
+ * learning a new state.
+ */
+export const STORE_QUARANTINE = "quarantine";
 
 // Module-private: every caller reaches the database through `withStore` or
 // `withCursor` below, which are the only two places that open a connection
@@ -35,9 +46,22 @@ function open(): Promise<IDBDatabase> {
         db.createObjectStore(STORE_QUEUE, { keyPath: "deviceSeq" });
       if (!db.objectStoreNames.contains(STORE_JOURNAL))
         db.createObjectStore(STORE_JOURNAL, { autoIncrement: true });
+      // Keyed by `deviceSeq` like the queue it is fed from, so re-quarantining
+      // the same order (a drain that parked it but crashed before the dequeue)
+      // overwrites rather than duplicates.
+      if (!db.objectStoreNames.contains(STORE_QUARANTINE))
+        db.createObjectStore(STORE_QUARANTINE, { keyPath: "deviceSeq" });
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
+    // A version upgrade waits for every older connection to close, and while it
+    // waits this promise is simply pending — which on a kiosk looks exactly like
+    // the store having died. Every connection here is opened and closed around a
+    // single transaction, so this should be unreachable; it is logged rather
+    // than rejected because the wait usually does resolve, and a line in the
+    // console is the difference between a diagnosable stall and a silent one.
+    request.onblocked = () =>
+      console.warn("kiosk: the IndexedDB upgrade is waiting for another connection to close");
   });
 }
 

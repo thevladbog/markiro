@@ -1,11 +1,11 @@
-import type { KioskClient } from "../api/client.js";
+import { KioskApiError, type KioskClient } from "../api/client.js";
 import {
   assertMeasurableGeneratedAt,
   replaceSnapshot,
   type CachedSnapshot,
 } from "../store/cache.js";
 import { appendJournal } from "../store/journal.js";
-import { dequeueOrder, listQueue } from "../store/queue.js";
+import { dequeueOrder, listQueue, quarantineOrder, type QueuedOrder } from "../store/queue.js";
 
 /**
  * How often a paired kiosk pulls a fresh bootstrap. Every authenticated call
@@ -52,7 +52,54 @@ export function cacheAge(generatedAt: string, now: Date): CacheAge {
 }
 
 /**
+ * WHAT TIME THE SERVER THINKS IT IS, reconstructed on the device.
+ *
+ * The snapshot holds both halves of one instant: `generatedAt` is the SERVER's
+ * stamp for it, `fetchedAt` the DEVICE's stamp for receiving it. Their
+ * difference is this device's offset from the server's clock, established the
+ * last time the two were provably in contact, and adding it to the device
+ * clock cancels a constant skew out of everything downstream.
+ *
+ * TWO BUGS SHARE THIS ROOT, and both are fixed by measuring through the offset
+ * rather than by subtracting two absolute clocks:
+ *
+ *  - a tablet more than seven days FAST used to read a bootstrap generated
+ *    seconds ago as older than `STALE_BLOCK_MS`, so every successful refresh
+ *    left an otherwise healthy kiosk on the Blocked screen — «обратитесь к
+ *    администратору» about a network that is working perfectly;
+ *  - and the same skew, applied to an order's `createdAt`, moved the withdrawal
+ *    into a UTC day the worker had not spent yet, which is a fresh daily
+ *    allowance for anyone who can reach the tablet's date setting.
+ *
+ * An UNMEASURABLE offset yields an Invalid Date rather than the raw device
+ * clock, and every caller treats that as "cannot establish the time" — the same
+ * fail-closed rule `cacheAge` applies to an unparseable stamp. Falling back to
+ * the device's own clock would hand back exactly the trust this exists to
+ * remove.
+ */
+export function serverNow(snapshot: CachedSnapshot | null, now: Date): Date {
+  if (!snapshot) return new Date(Number.NaN);
+  const offsetMs = Date.parse(snapshot.bootstrap.generatedAt) - Date.parse(snapshot.fetchedAt);
+  if (Number.isNaN(offsetMs)) return new Date(Number.NaN);
+  return new Date(now.getTime() + offsetMs);
+}
+
+/**
  * The same gate, asked of what the device actually holds.
+ *
+ * Asked in SERVER time (`serverNow` above), which is what makes this measure
+ * how long ago the dataset was fetched rather than how far apart the two clocks
+ * are. The arithmetic reduces to `now - fetchedAt` — two readings of the SAME
+ * clock — so a device hours or years off the server's time still ages its
+ * snapshot at one second per second, and any successful refresh re-establishes
+ * the offset.
+ *
+ * That does not put the device's clock back in charge of the lockout. The
+ * measurement is a DIFFERENCE between two device readings, so a constant skew
+ * cancels; only a clock moved BACKWARDS between refreshes can shorten it, and
+ * that direction already read `fresh` when the age was measured against
+ * `generatedAt` (see the future-stamp rule above). What it removes is the
+ * failure in the other direction, where a fast clock bricked a working kiosk.
  *
  * NO SNAPSHOT IS `blocked`, and that is the second half of the fail-closed
  * rule above: a paired device with nothing cached cannot say how old its data
@@ -67,7 +114,11 @@ export function cacheAge(generatedAt: string, now: Date): CacheAge {
  */
 export function snapshotAge(snapshot: CachedSnapshot | null, now: Date): CacheAge {
   if (!snapshot) return "blocked";
-  return cacheAge(snapshot.bootstrap.generatedAt, now);
+  // An unmeasurable `fetchedAt` makes `serverNow` an Invalid Date, whose
+  // `getTime()` is NaN — so `cacheAge` blocks, exactly as it does for an
+  // unmeasurable `generatedAt`. Both halves of the offset must be readable for
+  // this gate to assert anything.
+  return cacheAge(snapshot.bootstrap.generatedAt, serverNow(snapshot, now));
 }
 
 /**
@@ -110,14 +161,10 @@ let draining: Promise<void> | null = null;
  *    reorder a worker's history and break the day-limit accounting that
  *    depends on it.
  *
- * KNOWN LIMITATION — head-of-line blocking on a permanent rejection. Every
- * failure is treated as retryable, so an order the server refuses for good
- * (a 4xx that will never succeed: a deleted kiosk, a malformed body from an
- * older app version) parks at the head of the queue and stalls every order
- * behind it forever. Fixing it needs a poison-queue policy that is out of this
- * plan's scope: distinguish a `KioskApiError` with a 4xx status from a
- * transport failure, move the former into a quarantine store for the service
- * screen to surface, and carry on draining the rest.
+ *    The one exception is an order the server refuses PERMANENTLY, which is
+ *    not "stuck" but "answered": see `isTerminalRejection` below. It is moved
+ *    aside so the drain can carry on, and moving it aside cannot reorder
+ *    anything, because it is never going to be filed at all.
  *
  * KNOWN LIMITATION — a double journal entry. "Acknowledge, then remove" is the
  * right trade in the other direction too: if `dequeueOrder` fails after the
@@ -166,6 +213,98 @@ export function flushQueue(client: KioskClient, now: () => Date): Promise<void> 
   return tail;
 }
 
+/**
+ * The statuses that mean THIS ORDER will never be accepted, however many times
+ * it is offered — the only failures allowed to take an order out of the queue
+ * without the server having filed it.
+ *
+ * The reachable one is a write-off queued offline whose reason an administrator
+ * archives before the kiosk syncs: `resolveWriteoffReasonId` answers 400
+ * («Unknown or archived writeoff reason»), forever, and without this the order
+ * parks at the head of the queue and every later purchase sits behind it while
+ * the kiosk goes on cheerfully accepting and confirming new ones.
+ *
+ * DELIBERATELY AN ALLOWLIST, not "any 4xx". The two statuses that would be
+ * catastrophic to include are both 4xx:
+ *
+ *  - 401 is the DEVICE's credential, not the order — a revoked or archived
+ *    kiosk answers every request with it, so quarantining on it would empty a
+ *    whole queue on a revocation instead of routing the device back to pairing
+ *    (`isDeviceRevoked`, handled in the shell's refresh);
+ *  - 404 is overwhelmingly a MISCONFIGURED SERVER URL or a reverse proxy that
+ *    has lost the route, and a kiosk pointed at the wrong host would otherwise
+ *    quarantine every order it ever took, one by one, while the network is
+ *    perfectly healthy.
+ *
+ * 408 and 429 are transport back-pressure and retry by definition. A status
+ * left off this list costs only a stalled queue that recovers; one wrongly on
+ * it costs orders that could have been delivered — so the list stays the three
+ * the server actually raises against a body it will never take.
+ */
+const TERMINAL_STATUSES: ReadonlySet<number> = new Set([400, 409, 422]);
+
+export function isTerminalRejection(err: unknown): boolean {
+  return err instanceof KioskApiError && TERMINAL_STATUSES.has(err.status);
+}
+
+/**
+ * Moves a permanently refused order aside. NOTHING IS DROPPED — the whole
+ * record, raw marking codes and all, goes to the quarantine store, which is
+ * never pruned, and the refusal is journalled where the service screen already
+ * reads verdicts from.
+ *
+ * CUSTODY BEFORE REMOVAL, the same invariant the success path keeps: the order
+ * leaves the queue only once its body is durable elsewhere. A crash in between
+ * replays the submit, collects the same refusal and re-parks it — harmless,
+ * because the quarantine store is keyed by `deviceSeq` and a second `put`
+ * overwrites the first.
+ *
+ * Answers whether the drain may CONTINUE. A store that refused the hand-over
+ * leaves the order exactly where it was, and the caller stops rather than
+ * skipping it — an order still in the queue must not be overtaken.
+ */
+async function quarantine(
+  order: QueuedOrder,
+  err: KioskApiError,
+  now: () => Date,
+): Promise<boolean> {
+  const at = now().toISOString();
+  try {
+    await quarantineOrder({ ...order, at, status: err.status, message: err.message });
+  } catch (storeErr) {
+    console.error("kiosk: a refused order could not be set aside", storeErr);
+    return false;
+  }
+  try {
+    await appendJournal({
+      at,
+      // The scan time, as on the success path: a refusal has to be readable
+      // beside the day it belongs to, not the day it was finally answered.
+      createdAt: order.body.createdAt ?? at,
+      deviceSeq: order.deviceSeq,
+      // The vocabulary `Done` already uses for an order the server refused
+      // outright, so the service screen needs no new state to read one.
+      orderNo: "",
+      employeeId: order.employeeId,
+      // Nothing was accepted, so nothing is charged to the worker — the same
+      // rule the success path applies to a refused ITEM, applied to the order.
+      acceptedCount: 0,
+      conflicts: [],
+    });
+  } catch (journalErr) {
+    // Best effort: the quarantine record is the custody, the journal is the
+    // log. Losing the log line must not put the order back in the queue.
+    console.warn("kiosk: a refused order could not be journalled", journalErr);
+  }
+  try {
+    await dequeueOrder(order.deviceSeq);
+  } catch (storeErr) {
+    console.error("kiosk: a refused order could not leave the queue", storeErr);
+    return false;
+  }
+  return true;
+}
+
 /** One pass over the queue. Never rejects, never overlaps another — the
  * serialisation is `flushQueue`'s, which is the only caller. */
 async function drainOnce(client: KioskClient, now: () => Date): Promise<void> {
@@ -195,7 +334,15 @@ async function drainOnce(client: KioskClient, now: () => Date): Promise<void> {
           acceptedCount: result.itemCount,
           conflicts: result.conflicts,
         });
-      } catch {
+      } catch (err) {
+        // A verdict the order can never come back from is not a stall: park it
+        // and carry on, so one poisoned record cannot hold a day's pickups.
+        // A timeout is deliberately NOT one of these — `KioskTimeoutError`
+        // carries no status, so an aborted request stays retryable and the
+        // order stays queued.
+        if (isTerminalRejection(err) && (await quarantine(order, err as KioskApiError, now))) {
+          continue;
+        }
         // Offline, rejected, or the journal write failed — either way this
         // order is still owed. Stop here so the next drain retries it in place.
         return;
@@ -223,6 +370,12 @@ async function drainOnce(client: KioskClient, now: () => Date): Promise<void> {
  * whereas a failed refresh is the one signal that tells the status strip the
  * device is offline and lets `cacheAge` start counting against the snapshot it
  * still holds. Callers must handle the rejection.
+ *
+ * AND MUST NOT READ EVERY REJECTION AS AN OUTAGE. A `KioskApiError` with status
+ * 401 (`isDeviceRevoked`) is the server ANSWERING — the kiosk archived, or a
+ * replacement device having redeemed a new token — and the device that treats
+ * it as a blink goes on admitting employees for the seven days its cached
+ * roster takes to age out. The shell's `revoke` handles it.
  *
  * A bootstrap whose `generatedAt` cannot be parsed is refused rather than
  * stored (`assertMeasurableGeneratedAt`, shared with the pairing screen, which

@@ -2,20 +2,41 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   cacheAge,
   flushQueue,
+  isTerminalRejection,
   refreshSnapshot,
+  serverNow,
   snapshotAge,
   STALE_BLOCK_MS,
   STALE_WARN_MS,
 } from "../src/sync/worker.js";
-import { enqueueOrder, listQueue } from "../src/store/queue.js";
+import { enqueueOrder, listQuarantine, listQueue } from "../src/store/queue.js";
 import * as queueStore from "../src/store/queue.js";
 import * as journalStore from "../src/store/journal.js";
 import { readSnapshot, replaceSnapshot, type CachedSnapshot } from "../src/store/cache.js";
+import {
+  createKioskClient,
+  KioskApiError,
+  KioskTimeoutError,
+  SUBMIT_TIMEOUT_MS,
+} from "../src/api/client.js";
 import type { KioskBootstrapDto } from "../src/api/types.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
+
+/** A client whose every submit fails the same way — the shape most of the
+ * failure tests below need, and the only thing they vary. */
+function refusingClient(err: unknown) {
+  return {
+    bootstrap: vi.fn(),
+    submitOrder: vi.fn(async () => {
+      throw err;
+    }),
+  };
+}
 
 describe("cacheAge", () => {
   const base = "2026-07-28T00:00:00.000Z";
@@ -392,6 +413,240 @@ describe("flushQueue", () => {
     expect(await listQueue()).toEqual([]);
     await background;
   });
+
+  /**
+   * THE STALL, END TO END — the real client over a `fetch` that never answers.
+   *
+   * A fake client that rejects proves nothing here: the failure being closed is
+   * a `fetch` that neither resolves NOR rejects, which on a half-open TCP
+   * connection or behind a captive portal is what really happens. Without a
+   * deadline this drain never settles, so `draining` is owed forever, the
+   * `submitCart` awaiting it never reaches the confirmation, and every later
+   * drain chains behind the same dead promise. The kiosk stops.
+   */
+  it("settles on a fetch that never answers, leaving the order queued for the next drain", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    await enqueueOrder({ deviceSeq: 1, badgeCode: "B", reason: "buy", items: [] }, "e1");
+    let requested!: () => void;
+    const posted = new Promise<void>((resolve) => {
+      requested = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(
+        (_input, init) =>
+          new Promise<Response>((_resolve, reject) => {
+            requested();
+            init?.signal?.addEventListener("abort", () =>
+              reject(new DOMException("The operation was aborted.", "AbortError")),
+            );
+          }),
+      ),
+    );
+    // The REAL client — the deadline lives there, and a hand-rolled fake would
+    // be testing the fake.
+    const client = createKioskClient({ token: "tok", serverUrl: "http://srv" });
+
+    let settled = false;
+    const drained = flushQueue(client, () => new Date()).then(() => {
+      settled = true;
+    });
+    // The drain reads the queue out of IndexedDB before it posts anything, and
+    // the deadline is only armed once the POST is under way — advancing the
+    // clock before that would move it past a timer that does not exist yet.
+    await posted;
+    await vi.advanceTimersByTimeAsync(SUBMIT_TIMEOUT_MS - 1);
+    expect(settled).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await drained;
+
+    expect(settled).toBe(true);
+    // Nothing was answered, so nothing may be assumed: the order is still owed
+    // and is still first in line — never quarantined, never dropped.
+    expect((await listQueue()).map((q) => q.deviceSeq)).toEqual([1]);
+    expect(await listQuarantine()).toEqual([]);
+    expect(await journalStore.readJournal(10)).toEqual([]);
+  });
+
+  /**
+   * HEAD-OF-LINE BLOCKING ON A PERMANENT REFUSAL, and the scenario that makes
+   * it reachable: a write-off queued offline whose reason an administrator
+   * archives before the kiosk syncs. `resolveWriteoffReasonId` then answers 400
+   * — every time, forever — and without a quarantine every later purchase sits
+   * behind it while the kiosk goes on accepting and confirming new ones.
+   */
+  it("sets a permanently refused order aside and carries on with the rest of the queue", async () => {
+    await enqueueOrder(
+      {
+        deviceSeq: 1,
+        badgeCode: "B",
+        reason: "writeoff",
+        writeoffReasonId: "r-archived",
+        items: [{ rawKm: "01…poison" }],
+        createdAt: "2026-07-27T20:00:00.000Z",
+      },
+      "e1",
+    );
+    for (const deviceSeq of [2, 3]) {
+      await enqueueOrder({ deviceSeq, badgeCode: "B", reason: "buy", items: [] }, "e1");
+    }
+    const client = {
+      bootstrap: vi.fn(),
+      submitOrder: vi.fn(async (body: { deviceSeq: number }) => {
+        if (body.deviceSeq === 1) {
+          throw new KioskApiError(400, "Unknown or archived writeoff reason");
+        }
+        return {
+          orderNo: `ORD-26-000${body.deviceSeq}`,
+          status: "pending",
+          itemCount: 0,
+          conflicts: [],
+        };
+      }),
+    };
+
+    await flushQueue(client as never, () => new Date("2026-07-28T07:00:00.000Z"));
+
+    // The drain got past it in ONE pass — the two behind it are delivered.
+    expect(client.submitOrder.mock.calls.map(([body]) => body.deviceSeq)).toEqual([1, 2, 3]);
+    expect(await listQueue()).toEqual([]);
+
+    // And nothing was dropped: the whole record is still inspectable, raw
+    // marking codes and all, with the server's own reason beside it.
+    expect(await listQuarantine()).toEqual([
+      {
+        deviceSeq: 1,
+        employeeId: "e1",
+        at: "2026-07-28T07:00:00.000Z",
+        status: 400,
+        message: "Unknown or archived writeoff reason",
+        body: {
+          deviceSeq: 1,
+          badgeCode: "B",
+          reason: "writeoff",
+          writeoffReasonId: "r-archived",
+          items: [{ rawKm: "01…poison" }],
+          createdAt: "2026-07-27T20:00:00.000Z",
+        },
+      },
+    ]);
+  });
+
+  // Surfaced, not merely stored: the journal is what the service screen reads,
+  // and `orderNo: ""` is the vocabulary it already has for an order the server
+  // refused outright. Nothing was accepted, so nothing is charged to the worker.
+  it("journals a quarantined order as a refusal, under the day it was taken", async () => {
+    await enqueueOrder(
+      {
+        deviceSeq: 1,
+        badgeCode: "B",
+        reason: "writeoff",
+        items: [{ rawKm: "01…" }],
+        createdAt: "2026-07-27T20:00:00.000Z",
+      },
+      "e1",
+    );
+
+    await flushQueue(
+      refusingClient(new KioskApiError(400, "Unknown or archived writeoff reason")) as never,
+      () => new Date("2026-07-28T07:00:00.000Z"),
+    );
+
+    expect(await journalStore.readJournal(10)).toEqual([
+      {
+        at: "2026-07-28T07:00:00.000Z",
+        createdAt: "2026-07-27T20:00:00.000Z",
+        deviceSeq: 1,
+        orderNo: "",
+        employeeId: "e1",
+        acceptedCount: 0,
+        conflicts: [],
+      },
+    ]);
+  });
+
+  /**
+   * 401 IS THE DEVICE, NOT THE ORDER. An archived kiosk answers every request
+   * with it, so quarantining on a 401 would empty a whole queue on a
+   * revocation — orders the device really did take — instead of leaving the
+   * shell's refresh to notice and send the device back to pairing.
+   */
+  it("never quarantines on a 401: that is a revoked device, not a bad order", async () => {
+    for (const deviceSeq of [1, 2]) {
+      await enqueueOrder({ deviceSeq, badgeCode: "B", reason: "buy", items: [] }, "e1");
+    }
+
+    await flushQueue(
+      refusingClient(new KioskApiError(401, "Unauthorized")) as never,
+      () => new Date(),
+    );
+
+    expect((await listQueue()).map((q) => q.deviceSeq)).toEqual([1, 2]);
+    expect(await listQuarantine()).toEqual([]);
+  });
+
+  // Everything that is not a per-order verdict stays retryable, and the drain
+  // stops in place rather than skipping ahead — the ordering guarantee is
+  // unchanged for every failure but the terminal one.
+  it.each([
+    ["a server fault", new KioskApiError(500, "boom")],
+    ["a lost route or a misconfigured server URL", new KioskApiError(404, "Not Found")],
+    ["back-pressure", new KioskApiError(429, "Too Many Requests")],
+    ["a dead network", new TypeError("Failed to fetch")],
+    ["a request that ran out of time", new KioskTimeoutError(SUBMIT_TIMEOUT_MS)],
+  ])("keeps the order queued on %s", async (_label, err) => {
+    for (const deviceSeq of [1, 2]) {
+      await enqueueOrder({ deviceSeq, badgeCode: "B", reason: "buy", items: [] }, "e1");
+    }
+    const client = refusingClient(err);
+
+    await flushQueue(client as never, () => new Date());
+
+    expect(client.submitOrder).toHaveBeenCalledTimes(1);
+    expect((await listQueue()).map((q) => q.deviceSeq)).toEqual([1, 2]);
+    expect(await listQuarantine()).toEqual([]);
+  });
+
+  // Custody before removal, the same invariant the success path keeps: an order
+  // may leave the queue only once its body is durable somewhere else.
+  it("leaves a refused order queued when it cannot be set aside", async () => {
+    await enqueueOrder({ deviceSeq: 1, badgeCode: "B", reason: "buy", items: [] }, "e1");
+    await enqueueOrder({ deviceSeq: 2, badgeCode: "B", reason: "buy", items: [] }, "e1");
+    vi.spyOn(queueStore, "quarantineOrder").mockRejectedValueOnce(new Error("indexeddb refused"));
+    const client = refusingClient(new KioskApiError(400, "bad body"));
+
+    await expect(flushQueue(client as never, () => new Date())).resolves.toBeUndefined();
+
+    expect((await listQueue()).map((q) => q.deviceSeq)).toEqual([1, 2]);
+    // Stopped rather than skipped: an order still in the queue must not be
+    // overtaken by the one behind it.
+    expect(client.submitOrder).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("isTerminalRejection", () => {
+  it.each([400, 409, 422])(
+    "treats %i as a verdict this order can never come back from",
+    (status) => {
+      expect(isTerminalRejection(new KioskApiError(status, "refused"))).toBe(true);
+    },
+  );
+
+  /**
+   * The allowlist is deliberately narrow. 401 is the device's credential rather
+   * than the order, and 404 is overwhelmingly a misconfigured server URL or a
+   * proxy that has lost the route — a kiosk pointed at the wrong host would
+   * otherwise quarantine every order it ever took while the network is fine.
+   */
+  it.each([401, 403, 404, 408, 429, 500, 503])("keeps %i retryable", (status) => {
+    expect(isTerminalRejection(new KioskApiError(status, "refused"))).toBe(false);
+  });
+
+  it("keeps a transport failure retryable — it carries no verdict at all", () => {
+    expect(isTerminalRejection(new TypeError("Failed to fetch"))).toBe(false);
+    expect(isTerminalRejection(new KioskTimeoutError(15_000))).toBe(false);
+  });
 });
 
 const bootstrap = (generatedAt: string): KioskBootstrapDto => ({
@@ -402,6 +657,64 @@ const bootstrap = (generatedAt: string): KioskBootstrapDto => ({
   products: [],
   employees: [{ id: "e1", fullName: "A", role: null, badgeHash: null }],
   operators: [],
+});
+
+/**
+ * THE DEVICE CLOCK IS NOT THE MEASUREMENT — the offset between the two clocks
+ * is, and it is established every time the device and the server are provably
+ * in contact.
+ *
+ * A snapshot holds both halves of one instant: `generatedAt` is what the server
+ * called it, `fetchedAt` what the device called it. Their difference is this
+ * tablet's skew, and adding it back cancels that skew out of everything the
+ * device dates — the staleness gate and an order's scan time alike.
+ */
+describe("serverNow", () => {
+  const SERVER = "2026-07-28T00:00:00.000Z";
+  const DAY = 24 * 60 * 60_000;
+  /** A device whose clock runs `skewMs` ahead of the server's, holding a
+   * snapshot it fetched `elapsedMs` (of its own clock) ago. */
+  const skewed = (skewMs: number, elapsedMs = 0): { snapshot: CachedSnapshot; now: Date } => ({
+    snapshot: {
+      bootstrap: bootstrap(SERVER),
+      fetchedAt: new Date(Date.parse(SERVER) + skewMs).toISOString(),
+    },
+    now: new Date(Date.parse(SERVER) + skewMs + elapsedMs),
+  });
+
+  it("hands back the device's own clock when the two agree", () => {
+    const { snapshot, now } = skewed(0, 90_000);
+    expect(serverNow(snapshot, now).toISOString()).toBe("2026-07-28T00:01:30.000Z");
+  });
+
+  it("subtracts a fast tablet's skew, however large", () => {
+    const { snapshot, now } = skewed(9 * DAY, 60_000);
+    expect(serverNow(snapshot, now).toISOString()).toBe("2026-07-28T00:01:00.000Z");
+  });
+
+  it("adds a slow tablet's skew, which is what a cold boot with no NTP looks like", () => {
+    const { snapshot, now } = skewed(-3 * DAY, 60_000);
+    expect(serverNow(snapshot, now).toISOString()).toBe("2026-07-28T00:01:00.000Z");
+  });
+
+  // Fail closed, both halves. Falling back to the raw device clock would hand
+  // back exactly the trust this exists to remove — and every caller reads an
+  // Invalid Date as "cannot establish the time".
+  it("refuses to guess when either half of the offset is unreadable", () => {
+    expect(serverNow(null, new Date(SERVER)).getTime()).toBeNaN();
+    expect(
+      serverNow(
+        { bootstrap: bootstrap("not-a-date"), fetchedAt: SERVER },
+        new Date(SERVER),
+      ).getTime(),
+    ).toBeNaN();
+    expect(
+      serverNow(
+        { bootstrap: bootstrap(SERVER), fetchedAt: "not-a-date" },
+        new Date(SERVER),
+      ).getTime(),
+    ).toBeNaN();
+  });
 });
 
 describe("snapshotAge", () => {
@@ -430,6 +743,59 @@ describe("snapshotAge", () => {
     expect(snapshotAge(snapshot("not-a-date"), new Date("2026-07-28T00:00:00.000Z"))).toBe(
       "blocked",
     );
+  });
+
+  // The other half of the offset. A `fetchedAt` that cannot be read leaves the
+  // elapsed time unmeasurable, and a gate that cannot establish freshness must
+  // not assert it — the same rule, applied to the other stamp.
+  it("blocks a snapshot whose fetch stamp is unparseable", () => {
+    expect(
+      snapshotAge(
+        { bootstrap: bootstrap("2026-07-28T00:00:00.000Z"), fetchedAt: "not-a-date" },
+        new Date("2026-07-28T00:00:00.000Z"),
+      ),
+    ).toBe("blocked");
+  });
+
+  /**
+   * THE SKEW MUST NOT BRICK A HEALTHY KIOSK.
+   *
+   * Subtracting two absolute clocks made a tablet more than a week fast read a
+   * bootstrap generated SECONDS ago as older than `STALE_BLOCK_MS`. Every
+   * successful refresh then left the device on the Blocked screen, telling a
+   * worker its data was a week old and telling an administrator to check a
+   * network that was working perfectly — with no hint that a clock was the
+   * cause, and no way out but to fix it.
+   */
+  it("stays fresh on a kiosk whose clock is years fast but which just synced", () => {
+    const server = "2026-07-28T00:00:00.000Z";
+    for (const skewMs of [STALE_BLOCK_MS + 1, 30 * STALE_BLOCK_MS, 1000 * STALE_BLOCK_MS]) {
+      const device = new Date(Date.parse(server) + skewMs);
+      expect(
+        snapshotAge({ bootstrap: bootstrap(server), fetchedAt: device.toISOString() }, device),
+      ).toBe("fresh");
+    }
+  });
+
+  /**
+   * And the lockout still bites. It is now measured as elapsed time since the
+   * refresh — two readings of the SAME clock, so the skew cancels — which means
+   * a device that really has been out of contact for a week is blocked whatever
+   * its clock says, and one that syncs is not.
+   */
+  it("still ages fresh → warn → blocked while a skewed device stays out of contact", () => {
+    const server = "2026-07-28T00:00:00.000Z";
+    const skewMs = 40 * STALE_BLOCK_MS;
+    const snap: CachedSnapshot = {
+      bootstrap: bootstrap(server),
+      fetchedAt: new Date(Date.parse(server) + skewMs).toISOString(),
+    };
+    const after = (elapsedMs: number) => new Date(Date.parse(server) + skewMs + elapsedMs);
+
+    expect(snapshotAge(snap, after(STALE_WARN_MS - 1))).toBe("fresh");
+    expect(snapshotAge(snap, after(STALE_WARN_MS))).toBe("warn");
+    expect(snapshotAge(snap, after(STALE_BLOCK_MS - 1))).toBe("warn");
+    expect(snapshotAge(snap, after(STALE_BLOCK_MS))).toBe("blocked");
   });
 });
 

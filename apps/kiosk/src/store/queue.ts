@@ -1,5 +1,5 @@
 import type { CreateOrderDto } from "../api/types.js";
-import { STORE_QUEUE, withStore } from "./db.js";
+import { STORE_QUARANTINE, STORE_QUEUE, withStore } from "./db.js";
 
 export interface QueuedOrder {
   deviceSeq: number;
@@ -34,4 +34,71 @@ export async function listQueue(): Promise<QueuedOrder[]> {
 
 export async function dequeueOrder(deviceSeq: number): Promise<void> {
   await withStore(STORE_QUEUE, "readwrite", (s) => s.delete(deviceSeq));
+}
+
+/**
+ * A queued order the server refused for good, kept aside rather than dropped.
+ *
+ * The whole `QueuedOrder` is carried, not a summary: the raw marking codes are
+ * the only way an administrator can tell which bottles a refused pickup was
+ * for, and re-deriving them from a journal line is impossible. Kept out of the
+ * `queue` store so the drain stops offering it and the day count stops charging
+ * it to the worker (the server never counted it), and out of the `journal`,
+ * which is pruned after two weeks and is a log rather than custody.
+ */
+export interface QuarantinedOrder extends QueuedOrder {
+  /** When the device set it aside, from the device's own clock. */
+  at: string;
+  /**
+   * The HTTP status the server refused it with — `0` when the order was parked
+   * without a verdict at all, which is what a revoked device does with a queue
+   * its token can no longer deliver.
+   */
+  status: number;
+  /** The server's own message, verbatim, so the reason survives the refusal. */
+  message: string;
+}
+
+/** Sets one order aside. Idempotent: `deviceSeq` is the store's `keyPath`, so
+ * a replay after a crash overwrites its own record instead of adding a second. */
+export async function quarantineOrder(order: QuarantinedOrder): Promise<void> {
+  await withStore(STORE_QUARANTINE, "readwrite", (s) => s.put(order));
+}
+
+/** Everything set aside, ascending by `deviceSeq` — nothing prunes this store:
+ * a refused pickup stays inspectable until somebody deals with it. */
+export async function listQuarantine(): Promise<QuarantinedOrder[]> {
+  const found = await withStore<QuarantinedOrder[]>(STORE_QUARANTINE, "readonly", (s) =>
+    s.getAll(),
+  );
+  return found ?? [];
+}
+
+/**
+ * Sets the WHOLE queue aside, for the one case where nothing in it can ever be
+ * delivered: the device's token has been revoked.
+ *
+ * Not merely tidy — leaving the queue in place is actively dangerous. Re-pairing
+ * a revoked device redeems a code for a DIFFERENT kiosk row, whose
+ * `nextDeviceSeq` starts at 0, so the old orders would drain under sequences the
+ * new identity is about to reuse. The server answers a repeated
+ * `(tenantId, kioskId, deviceSeq)` by returning the FIRST order rather than
+ * filing a second, so some later worker's whole cart would evaporate and be
+ * confirmed to them under a stranger's order number — the exact silent failure
+ * `submitCart`'s counter ordering exists to prevent.
+ *
+ * Custody before removal, one order at a time, so a failure part-way through
+ * leaves the rest queued rather than lost. Returns how many were parked.
+ */
+export async function quarantineQueue(at: Date, message: string): Promise<number> {
+  const stamp = at.toISOString();
+  let parked = 0;
+  for (const order of await listQueue()) {
+    // Status 0: there was no verdict on this ORDER at all. The server never
+    // refused it — the device simply lost the right to offer it.
+    await quarantineOrder({ ...order, at: stamp, status: 0, message });
+    await dequeueOrder(order.deviceSeq);
+    parked += 1;
+  }
+  return parked;
 }

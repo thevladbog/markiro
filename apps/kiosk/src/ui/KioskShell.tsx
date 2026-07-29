@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 // a hoisted function declaration and nothing here runs at module scope, so the
 // binding is initialised long before the component body can read it.
 import { nextKioskView } from "../App.js";
-import { createKioskClient, type KioskClient } from "../api/client.js";
+import { createKioskClient, isDeviceRevoked, type KioskClient } from "../api/client.js";
 import type { CreateOrderDto, CreateOrderResultDto } from "../api/types.js";
 import { buildBadgeIndex, resolveBadge } from "../credentials/badge.js";
 import { createKeyboardWedgeSource } from "../scanner/keyboard.js";
@@ -22,10 +22,11 @@ import { countTakenToday, startOfUtcDay, utcDayOf } from "../session/day-count.j
 import { readSnapshot, type CachedSnapshot } from "../store/cache.js";
 import { readConfig, readScannerSettings, writeConfig, type KioskConfig } from "../store/config.js";
 import { readJournalSince } from "../store/journal.js";
-import { enqueueOrder, listQueue } from "../store/queue.js";
+import { enqueueOrder, listQueue, quarantineQueue } from "../store/queue.js";
 import {
   flushQueue,
   refreshSnapshot,
+  serverNow,
   snapshotAge,
   REFRESH_INTERVAL_MS,
   type CacheAge,
@@ -135,6 +136,19 @@ export function KioskShell(): React.JSX.Element {
   }, []);
 
   /**
+   * The snapshot as the ASYNC work sees it, for the same reason as the config
+   * above — and for one more: it carries the server-time offset (`scannedAt`),
+   * which the submit path and the day count both read. Through the ref they can
+   * read the CURRENT offset without either of them being rebuilt every time a
+   * refresh lands, which would restart the day count mid-session.
+   */
+  const snapshotRef = useRef<CachedSnapshot | null>(null);
+  const applySnapshot = useCallback((next: CachedSnapshot | null) => {
+    snapshotRef.current = next;
+    setSnapshot(next);
+  }, []);
+
+  /**
    * The ONE order a worker is standing here waiting on, and what the server
    * answered for it — recorded as the reply passes through the client on its
    * way to `flushQueue`.
@@ -205,6 +219,59 @@ export function KioskShell(): React.JSX.Element {
   }, [clientFor, refreshQueuedCount]);
 
   /**
+   * WHAT A REVOKED DEVICE DOES, and it is not "carry on offline".
+   *
+   * `GET /kiosk/bootstrap` answers 401 when the kiosk was archived or a
+   * replacement device redeemed a new token. That is not a network blink — the
+   * token cannot come back — so treating it as an outage would leave this
+   * device admitting employees and confirming withdrawals for the seven days it
+   * takes the snapshot to age out, none of which can ever be authenticated.
+   *
+   * BACK TO PAIRING, not to `Blocked`, and the choice is about what is TRUE.
+   * `Blocked` says the data is stale and promises that «уже оформленные заявки
+   * … уйдут на сервер сами, как только появится связь» — and on a revoked
+   * device that promise is a lie in both halves: the connection is fine and the
+   * queue is undeliverable. The pairing screen states the device's actual
+   * condition (it is not bound to a kiosk) and is the only screen that offers
+   * the action that fixes it, with the scanner setup an installer needs beside
+   * it. The staleness block is also deliberately ranked BELOW pairing in
+   * `nextKioskView`, for the same reason a revoked device must not land there:
+   * a device that cannot pair cannot refresh, so blocking it first is a dead
+   * end.
+   *
+   * The queue is PARKED rather than carried across (`quarantineQueue` explains
+   * the sequence collision that carrying it would cause) and rather than
+   * deleted: those orders are pickups a worker really walked away with, and
+   * they stay inspectable.
+   */
+  const revoke = useCallback(async () => {
+    const cfg = configRef.current;
+    if (!cfg?.token) return;
+    console.warn("kiosk: the server no longer accepts this device's token — returning to pairing");
+    try {
+      // The token FIRST: this is what stops the device transacting. Until it is
+      // durable nothing else should be undone, because a failed write here
+      // leaves a working kiosk that simply retries on the next interval.
+      const unpaired = { ...cfg, token: null };
+      await writeConfig(unpaired);
+      applyConfig(unpaired);
+    } catch (err) {
+      console.error("kiosk: the revoked token could not be cleared", err);
+      return;
+    }
+    // Whoever was mid-cart loses it, which is right: nothing they submit now
+    // could be filed, and `Pairing` is about to replace the screen anyway.
+    setSession(null);
+    setSubmitted(null);
+    try {
+      await quarantineQueue(now(), "device token revoked by the server");
+    } catch (err) {
+      console.error("kiosk: the undeliverable queue could not be set aside", err);
+    }
+    await refreshQueuedCount();
+  }, [applyConfig, refreshQueuedCount]);
+
+  /**
    * One heartbeat: pull the dataset, then push whatever is owed.
    *
    * `refreshSnapshot` REJECTS on failure, and that rejection is the only signal
@@ -213,28 +280,43 @@ export function KioskShell(): React.JSX.Element {
    * status strip reports, and nothing more: a failed drain says nothing here,
    * because `flushQueue` swallows the difference between a dead network and a
    * refused order and the strip must not invent a diagnosis out of it.
+   *
+   * With ONE exception, and it is the one failure that is not about the
+   * network at all: a 401 is the server saying this device is no longer a
+   * kiosk. See `revoke`.
    */
   const sync = useCallback(async () => {
     const client = clientFor(configRef.current);
     if (client) {
       let reached = false;
+      let revoked = false;
       try {
         await refreshSnapshot(client, now);
         reached = true;
       } catch (err) {
         console.warn("kiosk: the snapshot could not be refreshed", err);
+        // The device REACHED the server — it was answered, and the answer was
+        // "not you". Asked only of the bootstrap: `POST /kiosk/orders` returns
+        // 401 for an unknown BADGE too, which says nothing about the device.
+        revoked = isDeviceRevoked(err);
       }
       setOnline(reached);
+      if (revoked) {
+        // Before the drain, and instead of it: there is nothing left to deliver
+        // and no credential to deliver it with.
+        await revoke();
+        return;
+      }
       if (reached) {
         try {
-          setSnapshot(await readSnapshot());
+          applySnapshot(await readSnapshot());
         } catch (err) {
           console.error("kiosk: the refreshed snapshot could not be read back", err);
         }
       }
     }
     await drain();
-  }, [clientFor, drain]);
+  }, [applySnapshot, clientFor, drain, revoke]);
 
   /** Re-reads everything the device persists. Used at boot and again the moment
    * pairing writes a token and a dataset. */
@@ -243,7 +325,7 @@ export function KioskShell(): React.JSX.Element {
       const cfg = await readConfig();
       const snap = await readSnapshot();
       applyConfig(cfg);
-      setSnapshot(snap);
+      applySnapshot(snap);
     } catch (err) {
       // Nothing is rendered from a half-read store, and the device is not
       // stuck: an unreadable config reads as unpaired, which routes to the
@@ -251,7 +333,7 @@ export function KioskShell(): React.JSX.Element {
       console.error("kiosk: the device state could not be read", err);
     }
     await refreshQueuedCount();
-  }, [applyConfig, refreshQueuedCount]);
+  }, [applyConfig, applySnapshot, refreshQueuedCount]);
 
   useEffect(() => {
     let alive = true;
@@ -379,6 +461,29 @@ export function KioskShell(): React.JSX.Element {
   }, [sync]);
 
   /**
+   * WHEN A SCAN HAPPENS, as the server would date it.
+   *
+   * The device clock corrected by the offset the last successful bootstrap
+   * established (`serverNow`), because the raw tablet clock decides two things
+   * it has no business deciding: the `createdAt` the server files an order
+   * under, and therefore the UTC day its authoritative day limit counts that
+   * order against. A tablet's date can be moved forward from the lock screen,
+   * and each move used to hand the same worker a fresh daily allowance —
+   * repeatedly, and even online. The same offset is what keeps `snapshotAge`
+   * from bricking a fast kiosk, so one mechanism answers both.
+   *
+   * The raw clock is the fallback ONLY where no offset can be established,
+   * which is unreachable from a cart: a snapshot whose stamps cannot be read
+   * makes `snapshotAge` `blocked`, and a blocked kiosk hands nothing out. It
+   * exists so this can never throw on an Invalid Date and lose an order over
+   * a clock.
+   */
+  const scannedAt = useCallback((): Date => {
+    const corrected = serverNow(snapshotRef.current, now());
+    return Number.isNaN(corrected.getTime()) ? now() : corrected;
+  }, []);
+
+  /**
    * The day limit, answered from local history the moment a badge opens a
    * session — the journal's delivered orders plus whatever is still queued.
    *
@@ -401,7 +506,11 @@ export function KioskShell(): React.JSX.Element {
     let alive = true;
     void (async () => {
       try {
-        const at = now();
+        // The SAME clock the orders below were stamped with, or the count would
+        // ask "what was taken on the device's today" of records dated in the
+        // server's — and a skewed tablet would answer zero for a worker who has
+        // already spent their allowance.
+        const at = scannedAt();
         const [journal, queued] = await Promise.all([
           readJournalSince(startOfUtcDay(at)),
           listQueue(),
@@ -418,7 +527,7 @@ export function KioskShell(): React.JSX.Element {
     return () => {
       alive = false;
     };
-  }, [session]);
+  }, [session, scannedAt]);
 
   /**
    * The badge that opened the session, stashed by the resolver at the moment it
@@ -447,6 +556,18 @@ export function KioskShell(): React.JSX.Element {
    * after that write — while the POST is still in flight, which on a gate link
    * is seconds — reads the advanced counter and would file a genuinely second
    * order for one worker's bottles.
+   *
+   * ASSUMED: ONE APP INSTANCE PER DEVICE, and this guard is why it has to be
+   * written down. It is a `useRef` in one React tree, and `nextDeviceSeq` below
+   * is read from `configRef` — both are process-local, so two contexts sharing
+   * this origin (a second PWA window, or the browser tab beside the installed
+   * app) would allocate the SAME sequence, and the later submission would be
+   * answered by the server's idempotency with the earlier one's order. The
+   * kiosk is a fullscreen PWA on a wall-mounted tablet with no way to open a
+   * second window, so this is deliberately not defended against here; making it
+   * safe needs the counter to be read-modify-written inside the same IndexedDB
+   * transaction as the enqueue, which is the fix if the device ever grows a
+   * second entry point (a service worker, a second display, a debug tab).
    */
   const submitting = useRef(false);
 
@@ -463,7 +584,10 @@ export function KioskShell(): React.JSX.Element {
         items: state.items.map((item) => ({ rawKm: item.rawKm })),
         // The scan time, not the sync time: an order queued through an outage
         // replays hours later and must still be filed under when it happened.
-        createdAt: now().toISOString(),
+        // Read off the SERVER's clock (`scannedAt`), because this stamp is what
+        // the server dates the order by and therefore which UTC day its day
+        // limit charges it to — a field the tablet's own date must not decide.
+        createdAt: scannedAt().toISOString(),
       };
       try {
         // THE COUNTER FIRST, and this ordering is load-bearing.
@@ -515,7 +639,7 @@ export function KioskShell(): React.JSX.Element {
         console.error("kiosk: the order could not be filed", err);
       }
     },
-    [applyConfig, drain],
+    [applyConfig, drain, scannedAt],
   );
 
   /**
