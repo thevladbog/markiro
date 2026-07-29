@@ -87,6 +87,10 @@ export const productMirror = sqliteTable("product_mirror", {
 /**
  * Local journal mirror of server `codes` (05b writes here; 05a only defines
  * the schema). Columns mirror packages/db/src/schema/codes.ts.
+ *
+ * `boxId` (Task 9, plan 06c) is the box this code was scanned into, if any --
+ * a plain column rather than a join table, so it rides the insert `recordScan`
+ * already makes here instead of widening its compensate-on-failure surface.
  */
 export const codesMirror = sqliteTable("codes_mirror", {
   codeHash: text("code_hash").primaryKey(),
@@ -94,9 +98,16 @@ export const codesMirror = sqliteTable("codes_mirror", {
   gtin14: text("gtin14").notNull(),
   serial: text("serial").notNull(),
   scannedAt: text("scanned_at").notNull(),
+  boxId: text("box_id"),
 });
 
-/** Local journal mirror of server `scan_events` (05b writes here). */
+/**
+ * Local journal mirror of server `scan_events` (05b writes here).
+ *
+ * `operatorId` (Task 9, plan 06c) attributes the scan to the operator signed
+ * in when it happened -- captured here because, unlike a report, an
+ * attribution never recorded cannot be recovered later.
+ */
 export const scanEventsMirror = sqliteTable("scan_events_mirror", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   shiftId: text("shift_id").notNull(),
@@ -104,6 +115,7 @@ export const scanEventsMirror = sqliteTable("scan_events_mirror", {
   raw: text("raw").notNull(),
   verdict: text("verdict").notNull(),
   scannedAt: text("scanned_at").notNull(),
+  operatorId: text("operator_id"),
 });
 
 /**
@@ -122,6 +134,31 @@ export const outbox = sqliteTable("outbox", {
   codeHash: text("code_hash"),
   gtin14: text("gtin14"),
   serial: text("serial"),
+  // Task 9, plan 06c: carried alongside the other code fields so the server
+  // can attribute a synced scan to its box and to the operator who made it.
+  boxId: text("box_id"),
+  operatorId: text("operator_id"),
+});
+
+/**
+ * The device's local mirror of transport boxes (Task 9, plan 06c): one row
+ * per box this device has opened, written by `apps/station/src/lib/boxes.ts`.
+ * Box membership of a scanned code is a column on `codes_mirror`
+ * (`codesMirror.boxId` above), not a join table — see `recordScan`'s doc
+ * comment in `journal.ts` for why a fourth write was rejected there.
+ * `ackedAt` is what stops a closed box being resent for the rest of the
+ * shift, set by the sync engine (Task 11) beside the outbox ack.
+ */
+export const boxesMirror = sqliteTable("boxes_mirror", {
+  boxId: text("box_id").primaryKey(),
+  shiftId: text("shift_id").notNull(),
+  sscc: text("sscc"),
+  openedAt: text("opened_at").notNull(),
+  closedAt: text("closed_at"),
+  closedBy: text("closed_by"),
+  ackedAt: text("acked_at"),
+  printVerifiedAt: text("print_verified_at"),
+  printSkippedAt: text("print_skipped_at"),
 });
 
 /**

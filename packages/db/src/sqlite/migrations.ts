@@ -110,9 +110,38 @@ export const STATION_MIGRATIONS: string[] = [
      next_serial INTEGER NOT NULL,
      PRIMARY KEY (issuer_prefix, extension_digit, from_serial)
    );`,
+  // The device's local mirror of transport boxes (Task 9, plan 06c): one row
+  // per box this device has opened, keyed by boxId so a replayed sync bundle
+  // stays idempotent. Membership of a scanned code in a box is a column on
+  // `codes_mirror` (see the ALTER below), not a join table -- see
+  // apps/station/src/lib/journal.ts's recordScan doc comment for why a
+  // fourth write was rejected in favour of riding the insert already there.
+  // `acked_at` is what stops a closed box being resent for the rest of the
+  // shift once the sync engine sets it (Task 11); `print_verified_at` and
+  // `print_skipped_at` are set once the label has been printed or the
+  // operator explicitly skipped printing.
+  `CREATE TABLE IF NOT EXISTS boxes_mirror (
+     box_id TEXT PRIMARY KEY,
+     shift_id TEXT NOT NULL,
+     sscc TEXT,
+     opened_at TEXT NOT NULL,
+     closed_at TEXT,
+     closed_by TEXT,
+     acked_at TEXT,
+     print_verified_at TEXT,
+     print_skipped_at TEXT
+   );`,
   // Upgrade path for devices enrolled before operators had a personnel number.
   // SQLite has no `ADD COLUMN IF NOT EXISTS`, and applyMigrations re-runs every
   // statement on each boot, so this throws "duplicate column name" once the
   // column exists — applyMigrations swallows exactly that error.
   `ALTER TABLE operators_mirror ADD COLUMN login TEXT;`,
+  // Upgrade path for devices enrolled before boxes existed (Task 9, plan
+  // 06c): box membership rides the code/outbox insert already there rather
+  // than a fourth write, and operator attribution threads through the same
+  // two rows. Same re-runnable idempotency as the `login` ALTER above.
+  `ALTER TABLE codes_mirror ADD COLUMN box_id TEXT;`,
+  `ALTER TABLE outbox ADD COLUMN box_id TEXT;`,
+  `ALTER TABLE outbox ADD COLUMN operator_id TEXT;`,
+  `ALTER TABLE scan_events_mirror ADD COLUMN operator_id TEXT;`,
 ];

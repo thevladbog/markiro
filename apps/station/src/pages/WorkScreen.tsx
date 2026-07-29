@@ -122,7 +122,20 @@ export function WorkScreen({
             isDuplicate: (key) => keys.current.has(key),
           });
           const scannedAt = new Date().toISOString();
-          const event = { shiftId, terminalId, raw, verdict: verdict.status, scannedAt };
+          // `operatorId` and `boxId` are threaded through recordScan's
+          // existing writes (Task 9, plan 06c) but this screen does not yet
+          // know either: operator attribution and box assignment are wired
+          // into the work screen in a later task. Explicit `null` here, not
+          // an omitted field, so that wiring is a deliberate addition later
+          // rather than a silent default.
+          const event = {
+            shiftId,
+            terminalId,
+            raw,
+            verdict: verdict.status,
+            scannedAt,
+            operatorId: null,
+          };
 
           if (verdict.status === "ok") {
             const scan = classifyScan(raw);
@@ -133,7 +146,14 @@ export function WorkScreen({
               exec,
               event,
               km && codeHash
-                ? { codeHash, shiftId, gtin14: km.gtin14, serial: km.serial, scannedAt }
+                ? {
+                    codeHash,
+                    shiftId,
+                    gtin14: km.gtin14,
+                    serial: km.serial,
+                    scannedAt,
+                    boxId: null,
+                  }
                 : null,
             );
             if (result.alreadyPresent && codeHash) {
