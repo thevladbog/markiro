@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router";
 
 import {
   Alert,
@@ -18,6 +19,7 @@ import type { SelectOption, TableColumn } from "@markiro/ui";
 import { ApiRequestError } from "../../api/client.js";
 import { toast } from "../../lib/toast.js";
 import { useCounterparties } from "../counterparties/api.js";
+import { useCandidates } from "../integrations/api.js";
 import { useLabelTemplates } from "../labels/api.js";
 import { ProductForm, type ProductFormValues } from "./ProductForm.js";
 import {
@@ -29,6 +31,17 @@ import {
   type ProductDto,
   type ProductStatus,
 } from "./api.js";
+
+/**
+ * The channel this plaque points into. Hardcoded rather than looped over
+ * every channel: `commerceml` is the only channel that produces
+ * `integration_candidates` rows today (see
+ * `apps/api/src/modules/integrations/integrations.service.ts`'s
+ * `unlinkProduct` doc comment, which hardcodes the same assumption on the
+ * server side) -- there is exactly one queue to point at, not several to
+ * pick from.
+ */
+const CANDIDATES_CHANNEL_TYPE = "commerceml";
 
 type FormModalState = { mode: "create" } | { mode: "edit"; product: ProductDto } | null;
 type StatusFilter = "all" | ProductStatus;
@@ -56,6 +69,11 @@ export function CatalogPage() {
   });
   const { data: counterpartiesData } = useCounterparties();
   const { data: labelTemplatesData } = useLabelTemplates();
+  // The unobtrusive plaque below, not a list of its own -- no dedicated
+  // loading/error rendering (brief 08's list-state rule governs the queue
+  // screen itself, `CandidatesQueue`, not this one-line nudge toward it).
+  const { data: candidatesData } = useCandidates(CANDIDATES_CHANNEL_TYPE, false);
+  const candidatesCount = candidatesData?.length ?? 0;
   const createMutation = useCreateProduct();
   const updateMutation = useUpdateProduct();
   const deleteMutation = useDeleteProduct();
@@ -195,6 +213,22 @@ export function CatalogPage() {
         }
       />
 
+      {candidatesCount > 0 && (
+        <Alert
+          tone="info"
+          action={
+            <Link
+              to={`/integrations/${CANDIDATES_CHANNEL_TYPE}`}
+              style={{ font: "600 13px/18px var(--font-ui)", color: "var(--info-fg)" }}
+            >
+              {t("pages.catalog.candidatesPlaque.action")}
+            </Link>
+          }
+        >
+          {t("pages.catalog.candidatesPlaque.text", { count: candidatesCount })}
+        </Alert>
+      )}
+
       <div style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
         <div style={{ flex: 1, maxWidth: 320 }}>
           <Input
@@ -239,6 +273,9 @@ export function CatalogPage() {
         mode={formState?.mode ?? "create"}
         {...(initialValues ? { initialValues } : {})}
         {...(editingProduct ? { productStatus: editingProduct.status } : {})}
+        {...(editingProduct
+          ? { productId: editingProduct.id, externalRef: editingProduct.externalRef }
+          : {})}
         counterparties={counterparties}
         labelTemplates={labelTemplates}
         submitting={createMutation.isPending || updateMutation.isPending}

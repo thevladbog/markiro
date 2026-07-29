@@ -9,11 +9,14 @@ import { isValidGtin } from "@markiro/domain";
 import { Alert, Button, Input, Modal, Select } from "@markiro/ui";
 import type { SelectOption } from "@markiro/ui";
 
+import { ApiRequestError } from "../../api/client.js";
 import { errorProp } from "../../lib/form-error.js";
+import { toast } from "../../lib/toast.js";
 import type { CounterpartyDto } from "../counterparties/api.js";
 import type { LabelTemplateSummaryDto } from "../labels/api.js";
 import {
   useGtinCheck,
+  useUnlinkProduct,
   type CreateProductInput,
   type GtinCheckResult,
   type ProductStatus,
@@ -76,6 +79,15 @@ export interface ProductFormProps {
   initialValues?: ProductFormValues;
   /** Only meaningful in edit mode -- drives the draft banner. */
   productStatus?: ProductStatus;
+  /** Only meaningful in edit mode -- the id the unlink action (below) targets. */
+  productId?: string;
+  /**
+   * Only meaningful in edit mode -- the product's current link to its 1С
+   * counterpart (`ProductDto.externalRef`), or `null`/absent if never
+   * linked. Task 14: "a linked product shows its link on its own card,
+   * with an unlink action" (brief 08) -- this is that section.
+   */
+  externalRef?: string | null;
   counterparties: CounterpartyDto[];
   labelTemplates: LabelTemplateSummaryDto[];
   submitting?: boolean;
@@ -107,6 +119,8 @@ export function ProductForm({
   mode,
   initialValues,
   productStatus,
+  productId,
+  externalRef,
   counterparties,
   labelTemplates,
   submitting = false,
@@ -115,8 +129,15 @@ export function ProductForm({
 }: ProductFormProps) {
   const { t } = useTranslation();
   const gtinCheckMutation = useGtinCheck();
+  const unlinkMutation = useUnlinkProduct();
   const [ownerHint, setOwnerHint] = useState<GtinCheckResult | null>(null);
   const lastCheckedGtinRef = useRef<string | null>(null);
+  // Local mirror of `externalRef`, not read from it directly: a successful
+  // unlink clears this immediately so the section disappears from the
+  // still-open modal, without waiting for `editingProduct` (a snapshot
+  // captured when the row's "Изменить" was clicked, per `CatalogPage`) to
+  // catch up with the invalidated query on its own.
+  const [linkedExternalRef, setLinkedExternalRef] = useState<string | null>(externalRef ?? null);
 
   const {
     register,
@@ -146,8 +167,25 @@ export function ProductForm({
       reset(seeded);
       setOwnerHint(null);
       lastCheckedGtinRef.current = seeded.gtin.trim() || null;
+      setLinkedExternalRef(externalRef ?? null);
     }
-  }, [open, initialValues, reset]);
+  }, [open, initialValues, externalRef, reset]);
+
+  const handleUnlink = async () => {
+    if (!productId) return;
+    try {
+      await unlinkMutation.mutateAsync(productId);
+      setLinkedExternalRef(null);
+      toast("ok", t("pages.catalog.form.externalLink.unlinkSuccess"));
+    } catch (error) {
+      toast(
+        "error",
+        error instanceof ApiRequestError
+          ? error.message
+          : t("pages.catalog.form.externalLink.unlinkError"),
+      );
+    }
+  };
 
   // GTIN owner hint (design brief 03): only ever calls the check for a
   // checksum-valid GTIN (`isValidGtin`, client-side, before any network
@@ -233,6 +271,25 @@ export function ProductForm({
       >
         {mode === "edit" && productStatus === "draft" && (
           <Alert tone="warn">{t("pages.catalog.form.draftBanner")}</Alert>
+        )}
+
+        {mode === "edit" && linkedExternalRef && (
+          <Alert
+            tone="info"
+            action={
+              <Button
+                type="button"
+                size="compact"
+                variant="secondary"
+                loading={unlinkMutation.isPending}
+                onClick={() => void handleUnlink()}
+              >
+                {t("pages.catalog.form.externalLink.unlinkAction")}
+              </Button>
+            }
+          >
+            {t("pages.catalog.form.externalLink.linkedText", { ref: linkedExternalRef })}
+          </Alert>
         )}
 
         <Input

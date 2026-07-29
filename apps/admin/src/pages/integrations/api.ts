@@ -201,3 +201,109 @@ export function useIssueCredentials(type: string): { issue: () => Promise<Creden
     },
   };
 }
+
+/**
+ * Mirrors `apps/api/src/modules/integrations/dto.ts`'s `CandidateDto` -- one
+ * position from the exchange the queue (Task 14) has not yet matched to the
+ * catalog. `suggestedProductId` is `null` whenever the server found no
+ * match *or* found more than one -- an ambiguous suggestion is worse than no
+ * suggestion (it gets accepted without a second look), so the server
+ * suppresses it entirely rather than sending a guess (see Task 10's
+ * `suggestProductId`).
+ */
+export interface CandidateDto {
+  id: string;
+  externalRef: string;
+  name: string;
+  article: string | null;
+  unit: string | null;
+  price: string | null;
+  priceType: string | null;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  hidden: boolean;
+  suggestedProductId: string | null;
+}
+
+interface CandidatesPageResponse {
+  candidates: CandidateDto[];
+}
+
+/**
+ * Cache key for one channel's candidates queue, split by `hidden` -- the
+ * working queue and the hidden view are two disjoint queries (never a
+ * single list filtered client-side), matching the server's own "two
+ * non-overlapping views, not a union" contract for this endpoint.
+ */
+export function candidatesQueryKey(
+  type: string,
+  hidden: boolean,
+): readonly [string, string, string, boolean] {
+  return ["integrations", type, "candidates", hidden] as const;
+}
+
+async function fetchCandidates(type: string, hidden: boolean): Promise<CandidateDto[]> {
+  const response = await apiFetch<CandidatesPageResponse>(
+    `/integrations/${type}/candidates?hidden=${hidden ? "true" : "false"}`,
+  );
+  return response.candidates;
+}
+
+/** `GET /integrations/:type/candidates?hidden=true|false` -- feeds `CandidatesQueue`. */
+export function useCandidates(type: string, hidden: boolean): UseQueryResult<CandidateDto[]> {
+  return useQuery({
+    queryKey: candidatesQueryKey(type, hidden),
+    queryFn: () => fetchCandidates(type, hidden),
+  });
+}
+
+export interface LinkCandidateInput {
+  candidateId: string;
+  productId: string;
+}
+
+/**
+ * `POST /integrations/:type/candidates/:id/link`. A 409 here means the
+ * chosen product already carries a different external link -- the caller
+ * (`CandidatesQueue`) surfaces the server's own message rather than a
+ * generic failure, per Task 14's "a 409 is an answer, not a crash".
+ * Invalidates both the working and hidden views: a link removes the row
+ * from whichever one it was in.
+ */
+export function useLinkCandidate(type: string): UseMutationResult<void, Error, LinkCandidateInput> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ candidateId, productId }) =>
+      apiFetch<void>(`/integrations/${type}/candidates/${candidateId}/link`, {
+        method: "POST",
+        body: JSON.stringify({ productId }),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["integrations", type, "candidates"] });
+    },
+  });
+}
+
+/** `POST /integrations/:type/candidates/:id/hide` -- moves a row out of the working queue into the hidden view. */
+export function useHideCandidate(type: string): UseMutationResult<void, Error, string> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (candidateId: string) =>
+      apiFetch<void>(`/integrations/${type}/candidates/${candidateId}/hide`, { method: "POST" }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["integrations", type, "candidates"] });
+    },
+  });
+}
+
+/** `POST /integrations/:type/candidates/:id/unhide` -- restores a hidden row back into the working queue. */
+export function useUnhideCandidate(type: string): UseMutationResult<void, Error, string> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (candidateId: string) =>
+      apiFetch<void>(`/integrations/${type}/candidates/${candidateId}/unhide`, { method: "POST" }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["integrations", type, "candidates"] });
+    },
+  });
+}

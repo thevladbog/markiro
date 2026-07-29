@@ -8,6 +8,7 @@ import type { StatusChipStatus } from "@markiro/ui";
 
 import { ApiRequestError } from "../../api/client.js";
 import { toast } from "../../lib/toast.js";
+import { CandidatesQueue } from "./CandidatesQueue.js";
 import { JournalList } from "./JournalList.js";
 import {
   useChannelDetail,
@@ -223,14 +224,15 @@ function CredentialsSection({
 }
 
 /**
- * Admin channel page -- Plan I-1 Task 13. One page per channel, three clean
- * regions per brief 08 ("Channel page"): header (identity/state/last event),
- * settings (the channel's own form plus its exchange credentials), and
- * journal (`JournalList`). Kept as three visually separate `Card`s rather
- * than one merged block deliberately -- the candidates queue and the public
- * API keys panel that later tasks add both slot in as additional areas on
- * this same page, and that only stays simple if today's three regions never
- * fused into one.
+ * Admin channel page -- Plan I-1 Task 13 (+ Task 14's candidates queue).
+ * One page per channel, regions per brief 08 ("Channel page"): header
+ * (identity/state/last event), settings (the channel's own form plus its
+ * exchange credentials), the candidates queue (only for channels that
+ * actually import data -- see `CandidatesQueue` below), and journal
+ * (`JournalList`). Kept as visually separate `Card`s rather than one merged
+ * block deliberately -- the public API keys panel a later task adds slots in
+ * as one more area on this same page, and that only stays simple if these
+ * regions never fuse into one.
  */
 export function ChannelPage() {
   const { type: typeParam } = useParams<{ type: string }>();
@@ -348,6 +350,14 @@ export function ChannelPage() {
           issued={issued}
         />
       </Card>
+
+      {/*
+       * Only `commerceml` produces `integration_candidates` rows today
+       * (see `integrations.service.ts`'s `unlinkProduct` doc comment) --
+       * gated the same way `CommercemlSettingsForm` above is, so a channel
+       * that imports nothing doesn't grow an always-empty queue card.
+       */}
+      {channel.type === "commerceml" && <CandidatesQueue type={type} />}
 
       <JournalList type={type} />
     </div>
