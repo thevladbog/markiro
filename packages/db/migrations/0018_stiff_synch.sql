@@ -59,4 +59,5 @@ ALTER TABLE "shifts" ADD CONSTRAINT "shifts_tenant_sscc_issuer_fk" FOREIGN KEY (
 ALTER TABLE "shifts" ADD CONSTRAINT "shifts_tenant_box_label_template_fk" FOREIGN KEY ("tenant_id","box_label_template_id") REFERENCES "public"."label_templates"("tenant_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 -- scan_events is hand-migrated (partitioned; excluded from drizzle-kit's
 -- schema list — see src/schema/codes.ts). Its DDL is appended here by hand.
-ALTER TABLE "scan_events" ADD COLUMN "operator_id" uuid;
+ALTER TABLE "scan_events" ADD COLUMN "operator_id" uuid;--> statement-breakpoint
+ALTER TABLE "scan_events" ADD CONSTRAINT "scan_events_tenant_operator_fk" FOREIGN KEY ("tenant_id","operator_id") REFERENCES "public"."employees"("tenant_id","id") ON DELETE no action ON UPDATE no action;

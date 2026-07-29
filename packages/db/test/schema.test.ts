@@ -43,10 +43,21 @@ describe("platform schema", () => {
   // config directly, so these assert on the constraints themselves.
   it("declares boxes' tenant-scoped unique constraints", () => {
     const { uniqueConstraints } = getTableConfig(boxes);
-    const names = uniqueConstraints.map((u) => u.getName());
-    expect(names).toEqual(
-      expect.arrayContaining(["boxes_tenant_id_uq", "boxes_tenant_sscc_uq", "boxes_device_box_uq"]),
-    );
+    const byName = new Map(uniqueConstraints.map((u) => [u.getName(), u]));
+    expect(byName.get("boxes_tenant_id_uq")?.columns.map((c) => c.name)).toEqual([
+      "tenant_id",
+      "id",
+    ]);
+    expect(byName.get("boxes_tenant_sscc_uq")?.columns.map((c) => c.name)).toEqual([
+      "tenant_id",
+      "sscc",
+    ]);
+    expect(byName.get("boxes_device_box_uq")?.columns.map((c) => c.name)).toEqual([
+      "tenant_id",
+      "shift_id",
+      "terminal_id",
+      "device_box_id",
+    ]);
   });
 
   it("gives boxes.operator_id a composite tenant FK to employees", () => {
