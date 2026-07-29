@@ -18,6 +18,13 @@ import type {
   JournalPageDto,
 } from "./dto";
 
+/**
+ * Bounded retries so a login collision on `integration_channels_login_uq`
+ * (global across every tenant and channel) can never fail the whole
+ * issuance -- mirrors `MINT_ATTEMPTS` in `pairing.service.ts`'s `issueCode`.
+ */
+const ISSUE_ATTEMPTS = 5;
+
 @Injectable()
 export class IntegrationsService {
   constructor(@Inject(DB) private readonly db: Db) {}
@@ -100,6 +107,16 @@ export class IntegrationsService {
    * the login and the hash, so the previous secret stops verifying the
    * instant a new one is issued -- there is only ever one live credential
    * per channel.
+   *
+   * `credentialLogin` is unique across every tenant and channel
+   * (`integration_channels_login_uq`), but `generateExchangeCredentials`
+   * mints only an 8 hex-char suffix, so a collision with some other row's
+   * login is rare but real. Left unhandled, that collision would surface as
+   * a raw 23505 -- an unhandled `Error`, not an `HttpException`, so Nest's
+   * default filter would turn it into a 500 for an unlucky tenant instead of
+   * simply minting a different login. Mirrors `issueCode` in
+   * `pairing.service.ts`: catch the unique violation, mint a fresh pair, and
+   * retry the insert a bounded number of times.
    */
   async issueCredentials(
     tenantId: string,
@@ -110,18 +127,28 @@ export class IntegrationsService {
       throw new ConflictException("Channel is not available yet");
     }
 
-    const { login, secret } = generateExchangeCredentials();
-    const credentialHash = await hashExchangeSecret(secret);
+    for (let attempt = 0; attempt < ISSUE_ATTEMPTS; attempt++) {
+      const { login, secret } = generateExchangeCredentials();
+      const credentialHash = await hashExchangeSecret(secret);
 
-    await this.db
-      .insert(schema.integrationChannels)
-      .values({ tenantId, type, credentialLogin: login, credentialHash })
-      .onConflictDoUpdate({
-        target: [schema.integrationChannels.tenantId, schema.integrationChannels.type],
-        set: { credentialLogin: login, credentialHash },
-      });
+      try {
+        await this.db
+          .insert(schema.integrationChannels)
+          .values({ tenantId, type, credentialLogin: login, credentialHash })
+          .onConflictDoUpdate({
+            target: [schema.integrationChannels.tenantId, schema.integrationChannels.type],
+            set: { credentialLogin: login, credentialHash },
+          });
+      } catch (error) {
+        // Another row (any tenant, any channel) already has this login --
+        // mint a different one rather than failing the whole issuance.
+        if (isLoginCollision(error)) continue;
+        throw error;
+      }
 
-    return { login, secret };
+      return { login, secret };
+    }
+    throw new Error("Could not mint a unique exchange login");
   }
 
   async readJournal(tenantId: string, type: IntegrationChannelType): Promise<JournalPageDto> {
@@ -217,4 +244,19 @@ function safeDescribeChannel(type: IntegrationChannelType) {
   } catch {
     throw new NotFoundException(`Unknown channel type: ${type}`);
   }
+}
+
+/**
+ * 23505 on `integration_channels_login_uq` -- the freshly minted login in
+ * `issueCredentials` already belongs to some other row (any tenant, any
+ * channel). Bounded by the same `ISSUE_ATTEMPTS` loop there, never surfaced
+ * to the caller -- a login collision must re-mint, not fail the whole
+ * issuance.
+ */
+function isLoginCollision(error: unknown): boolean {
+  const err = error as Error & { code?: string; constraint?: string; cause?: unknown };
+  const cause = err?.cause as { code?: string; constraint?: string } | undefined;
+  const errorCode = err?.code || cause?.code;
+  const constraint = err?.constraint || cause?.constraint;
+  return errorCode === "23505" && constraint === "integration_channels_login_uq";
 }

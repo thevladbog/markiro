@@ -40,7 +40,15 @@ export async function verifyExchangeSecret(secret: string, phc: string): Promise
 
 /**
  * Счётчик неудачных `checkauth`, атомарный апсерт — форма один в один с
- * `assertUnderPairRateLimit` в `pairing.service.ts`.
+ * `recordPairAttempt` в `pairing.service.ts` (record-then-check upsert с
+ * `RETURNING`, закрывающий ту же гонку N конкурентных вызовов). Это НЕ форма
+ * `assertUnderPairRateLimit` целиком: там два уровня — бюджет на источник ПЛЮС
+ * глобальный backstop (`GLOBAL_PAIR_ATTEMPT_BUDGET`, ключ `"*"`), — и
+ * read-only предварительная проверка (`currentPairAttempts`), которая не даёт
+ * атакующему безнаказанно раздувать таблицу попыток, перебирая значения
+ * `source`, когда глобальный бюджет уже исчерпан. Ни глобальный backstop, ни
+ * предварительная проверка сюда НЕ перенесены — это открытый вопрос для того,
+ * кто будет подключать этот счётчик к реальному `checkauth`.
  *
  * Считаются ПОПЫТКИ, а не промахи по строке: неверный логин не совпадает ни с
  * одним каналом, поэтому счётчик, инкрементируемый только при найденной

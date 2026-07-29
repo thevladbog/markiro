@@ -1,8 +1,9 @@
+import * as nodeCrypto from "node:crypto";
 import express from "express";
 import request from "supertest";
 import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { schema, type Db } from "@markiro/db";
 import { and, eq } from "drizzle-orm";
 import { AppModule } from "../src/app.module";
@@ -18,6 +19,13 @@ import {
   refundCheckauthAttempt,
   verifyExchangeSecret,
 } from "../src/modules/exchange/exchange-credentials";
+
+// Only `randomUUID` is ever mocked (the login-collision regression below,
+// one call, one test) -- every other export passes through unchanged.
+vi.mock("node:crypto", async (importOriginal) => {
+  const actual = await importOriginal<typeof nodeCrypto>();
+  return { ...actual, randomUUID: vi.fn(actual.randomUUID) };
+});
 
 describe("exchange credentials", () => {
   it("выдаёт логин и секрет, и секрет не выводится из логина", () => {
@@ -206,5 +214,66 @@ describe("integrations (cabinet) — issue exchange credentials", () => {
       .set("x-api-key", stationKey)
       .send({})
       .expect(403);
+  });
+
+  // Regression: `credentialLogin` is unique across EVERY tenant and channel
+  // (`integration_channels_login_uq`), but `generateExchangeCredentials`
+  // mints only an 8 hex-char suffix -- a collision is rare but real. Forces
+  // the very first random draw to reproduce an already-taken login (seeded on
+  // a DIFFERENT channel of the SAME tenant, so the primary-key upsert target
+  // never masks it) and asserts `issueCredentials` re-mints instead of
+  // surfacing the raw 23505 as a 500.
+  it("коллизия логина перегенерирует пару, а не роняет выпуск в 500", async () => {
+    const collidingLogin = "mk-1c-abcdef12";
+    const otherHash = await hashExchangeSecret("unrelated-secret-not-checked");
+
+    await db.insert(schema.integrationChannels).values({
+      tenantId,
+      type: "public_api",
+      credentialLogin: collidingLogin,
+      credentialHash: otherHash,
+    });
+
+    try {
+      vi.mocked(nodeCrypto.randomUUID).mockImplementationOnce(
+        () => "abcdef12-0000-4000-8000-000000000000" as ReturnType<typeof nodeCrypto.randomUUID>,
+      );
+
+      const res = await agent.post("/integrations/commerceml/credentials").send({}).expect(201);
+      expect(res.body.login).not.toBe(collidingLogin);
+
+      const [row] = await db
+        .select()
+        .from(schema.integrationChannels)
+        .where(
+          and(
+            eq(schema.integrationChannels.tenantId, tenantId),
+            eq(schema.integrationChannels.type, "commerceml"),
+          ),
+        );
+      expect(row?.credentialLogin).toBe(res.body.login);
+      expect(await verifyExchangeSecret(res.body.secret, row!.credentialHash!)).toBe(true);
+
+      // The seeded row on the other channel is untouched by the retry.
+      const [otherRow] = await db
+        .select()
+        .from(schema.integrationChannels)
+        .where(
+          and(
+            eq(schema.integrationChannels.tenantId, tenantId),
+            eq(schema.integrationChannels.type, "public_api"),
+          ),
+        );
+      expect(otherRow?.credentialLogin).toBe(collidingLogin);
+    } finally {
+      await db
+        .delete(schema.integrationChannels)
+        .where(
+          and(
+            eq(schema.integrationChannels.tenantId, tenantId),
+            eq(schema.integrationChannels.type, "public_api"),
+          ),
+        );
+    }
   });
 });
