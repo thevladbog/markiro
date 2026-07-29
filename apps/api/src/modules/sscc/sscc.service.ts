@@ -21,6 +21,24 @@ export interface SsccBlock {
 /** A GS1 GLN is always exactly 13 digits; the issuer prefix is its first 9. */
 const GLN_PATTERN = /^\d{13}$/;
 
+/**
+ * Derives the 9-digit issuer prefix from a 13-digit GLN. Exported (rather
+ * than kept private to `resolveIssuerPrefix` below) so the org-profile and
+ * counterparties counter-settings endpoints (Task 5) can compute the SAME
+ * prefix a shift's box allocation would use, without duplicating the format
+ * check or re-deriving the slicing rule in three places.
+ *
+ * `ownerLabel` only shapes the error message (e.g. "organisation profile",
+ * "sscc issuer counterparty", "counterparty") -- the validation itself is
+ * identical regardless of who owns the GLN.
+ */
+export function deriveIssuerPrefix(gln: string, ownerLabel: string): string {
+  if (!GLN_PATTERN.test(gln)) {
+    throw new BadRequestException(`${ownerLabel}'s GLN must be exactly 13 digits`);
+  }
+  return gln.slice(0, 9);
+}
+
 @Injectable()
 export class SsccService {
   constructor(@Inject(DB) private readonly db: Db) {}
@@ -56,10 +74,7 @@ export class SsccService {
           ),
         );
       if (!cp?.gln) throw new BadRequestException("sscc issuer counterparty has no GLN");
-      if (!GLN_PATTERN.test(cp.gln)) {
-        throw new BadRequestException("sscc issuer counterparty's GLN must be exactly 13 digits");
-      }
-      return cp.gln.slice(0, 9);
+      return deriveIssuerPrefix(cp.gln, "sscc issuer counterparty");
     }
 
     const [profile] = await this.db
@@ -67,10 +82,7 @@ export class SsccService {
       .from(schema.orgProfiles)
       .where(eq(schema.orgProfiles.tenantId, tenantId));
     if (!profile?.gln) throw new BadRequestException("organisation profile has no GLN");
-    if (!GLN_PATTERN.test(profile.gln)) {
-      throw new BadRequestException("organisation profile's GLN must be exactly 13 digits");
-    }
-    return profile.gln.slice(0, 9);
+    return deriveIssuerPrefix(profile.gln, "organisation profile");
   }
 
   /**

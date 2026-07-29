@@ -178,6 +178,20 @@
           "glnFormat": "GLN must be exactly 13 digits",
           "glnCheckDigit": "Invalid GLN check digit",
           "gs1PrefixesFormat": "Each prefix must be 4-12 digits"
+        },
+        "sscc": {
+          "cardTitle": "Box SSCC counter",
+          "description": "The starting serial counts within the prefix below. Set it when migrating box numbers already issued by another system under this GLN.",
+          "prefixLabel": "Derived prefix",
+          "nextSerialLabel": "Starting serial",
+          "save": "Save",
+          "errors": {
+            "nextSerialInvalid": "Enter a whole number from 0 to 9,999,999"
+          },
+          "toasts": {
+            "updateSuccess": "Counter saved",
+            "updateError": "Could not save the counter"
+          }
         }
       },
       "toasts": {
@@ -742,8 +756,38 @@
     },
     "settings": {
       "title": "Settings",
-      "emptyTitle": "Organization settings",
-      "emptyHint": "Organization profile, GLN and GS1 prefixes will appear here."
+      "profile": {
+        "cardTitle": "Organisation profile",
+        "glnLabel": "GLN",
+        "innLabel": "Tax ID",
+        "prefixesLabel": "GS1 prefixes",
+        "prefixesHint": "Comma-separated, e.g. 4600000, 4600001",
+        "save": "Save",
+        "errors": {
+          "glnFormat": "GLN must be exactly 13 digits",
+          "glnCheckDigit": "Invalid GLN check digit",
+          "gs1PrefixesFormat": "Each prefix must be 4-12 digits"
+        },
+        "toasts": {
+          "updateSuccess": "Profile saved",
+          "updateError": "Could not save the profile"
+        }
+      },
+      "sscc": {
+        "cardTitle": "Box SSCC counter",
+        "description": "The starting serial counts within the prefix below. Set it when migrating box numbers already issued by another system under this GLN.",
+        "prefixLabel": "Derived prefix",
+        "prefixUnavailable": "Set the GLN above to see the derived prefix",
+        "nextSerialLabel": "Starting serial",
+        "save": "Save",
+        "errors": {
+          "nextSerialInvalid": "Enter a whole number from 0 to 9,999,999"
+        },
+        "toasts": {
+          "updateSuccess": "Counter saved",
+          "updateError": "Could not save the counter"
+        }
+      }
     }
   }
 }

@@ -5,13 +5,15 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from "@nestjs/common";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
+import { BOX_EXTENSION_DIGIT, deriveIssuerPrefix } from "../sscc/sscc.service";
 import type {
   CounterpartyDto,
   CreateCounterpartyDto,
   ListCounterpartiesResponseDto,
+  SsccCounterDto,
   UpdateCounterpartyDto,
 } from "./dto";
 
@@ -114,6 +116,56 @@ export class CounterpartiesService {
       }
       throw error;
     }
+  }
+
+  /**
+   * A counterparty's box SSCC counter (Task 5) -- kept separate from the
+   * tenant's own counter (org-profile.service.ts's getSscc) because it's
+   * keyed by the counterparty's own GLN-derived prefix, which is ordinarily
+   * a different number space entirely. `getCounterparty` both 404s a
+   * cross-tenant id and tenant-scopes the lookup in one place.
+   */
+  async getSscc(tenantId: string, id: string): Promise<SsccCounterDto> {
+    const issuerPrefix = await this.counterpartyIssuerPrefix(tenantId, id);
+    const [row] = await this.db
+      .select({ nextSerial: schema.ssccCounters.nextSerial })
+      .from(schema.ssccCounters)
+      .where(
+        and(
+          eq(schema.ssccCounters.tenantId, tenantId),
+          eq(schema.ssccCounters.issuerPrefix, issuerPrefix),
+          eq(schema.ssccCounters.extensionDigit, BOX_EXTENSION_DIGIT),
+        ),
+      );
+    return { extensionDigit: BOX_EXTENSION_DIGIT, nextSerial: row ? Number(row.nextSerial) : 0 };
+  }
+
+  /** Seeds (or reseeds) a counterparty's box counter. See getSscc's doc comment. */
+  async putSscc(tenantId: string, id: string, dto: SsccCounterDto): Promise<SsccCounterDto> {
+    const issuerPrefix = await this.counterpartyIssuerPrefix(tenantId, id);
+    await this.db
+      .insert(schema.ssccCounters)
+      .values({
+        tenantId,
+        issuerPrefix,
+        extensionDigit: dto.extensionDigit,
+        nextSerial: dto.nextSerial,
+      })
+      .onConflictDoUpdate({
+        target: [
+          schema.ssccCounters.tenantId,
+          schema.ssccCounters.issuerPrefix,
+          schema.ssccCounters.extensionDigit,
+        ],
+        set: { nextSerial: dto.nextSerial, updatedAt: sql`now()` },
+      });
+    return { extensionDigit: dto.extensionDigit, nextSerial: dto.nextSerial };
+  }
+
+  /** The 9-digit prefix derived from this counterparty's own GLN; 404s if the id isn't this tenant's. */
+  private async counterpartyIssuerPrefix(tenantId: string, id: string): Promise<string> {
+    const counterparty = await this.getCounterparty(tenantId, id);
+    return deriveIssuerPrefix(counterparty.gln, "counterparty");
   }
 
   private rowToDto(row: typeof schema.counterparties.$inferSelect): CounterpartyDto {

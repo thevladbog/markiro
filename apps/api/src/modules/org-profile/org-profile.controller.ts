@@ -3,7 +3,13 @@ import { ApiTags } from "@nestjs/swagger";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { SessionOnlyGuard } from "../../tenancy/session-only.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
-import { putOrgProfileSchema, type OrgProfileDto, type PutOrgProfileDto } from "./dto";
+import {
+  putOrgProfileSchema,
+  ssccCounterSchema,
+  type OrgProfileDto,
+  type PutOrgProfileDto,
+  type SsccCounterDto,
+} from "./dto";
 import { OrgProfileService } from "./org-profile.service";
 
 @ApiTags("org-profile")
@@ -26,5 +32,18 @@ export class OrgProfileController {
     @Body(new ZodValidationPipe(putOrgProfileSchema)) body: PutOrgProfileDto,
   ): Promise<OrgProfileDto> {
     return this.orgProfileService.upsertProfile(req.tenantId!, body);
+  }
+
+  @Get("sscc")
+  async getSscc(@Req() req: RequestWithTenant): Promise<SsccCounterDto> {
+    return this.orgProfileService.getSscc(req.tenantId!);
+  }
+
+  @Put("sscc")
+  async putSscc(
+    @Req() req: RequestWithTenant,
+    @Body(new ZodValidationPipe(ssccCounterSchema)) body: SsccCounterDto,
+  ): Promise<SsccCounterDto> {
+    return this.orgProfileService.putSscc(req.tenantId!, body);
   }
 }

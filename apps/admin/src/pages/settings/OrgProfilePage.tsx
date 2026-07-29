@@ -1,0 +1,283 @@
+import { zodResolver } from "@hookform/resolvers/zod";
+import type { TFunction } from "i18next";
+import { useEffect } from "react";
+import { useForm } from "react-hook-form";
+import { useTranslation } from "react-i18next";
+import { z } from "zod";
+
+import { hasValidCheckDigit } from "@markiro/domain";
+import { Alert, Button, Card, Input, PageHeader, Spinner } from "@markiro/ui";
+
+import { ApiRequestError } from "../../api/client.js";
+import { errorProp } from "../../lib/form-error.js";
+import { toast } from "../../lib/toast.js";
+import {
+  useOrgProfile,
+  useOrgProfileSscc,
+  useUpdateOrgProfile,
+  useUpdateOrgProfileSscc,
+  type PutOrgProfileInput,
+} from "./api.js";
+
+/**
+ * Boxes take extension digit 0; 1 is reserved for pallets (06d) -- see
+ * `apps/api/src/modules/sscc/sscc.service.ts`'s `BOX_EXTENSION_DIGIT`. This
+ * page only ever edits the box counter, so the digit is fixed here rather
+ * than exposed as an editable field: `GET /org/profile/sscc` always reads
+ * extension digit 0, so a form that let the digit drift would silently stop
+ * reflecting whatever it just saved.
+ */
+const BOX_EXTENSION_DIGIT = 0;
+
+/** A GS1 GLN is always exactly 13 digits; the issuer prefix is its first 9 -- mirrors the server's `deriveIssuerPrefix`. */
+const GLN_PATTERN = /^\d{13}$/;
+
+function derivePrefix(gln: string | null | undefined): string | null {
+  if (!gln || !GLN_PATTERN.test(gln)) return null;
+  return gln.slice(0, 9);
+}
+
+/**
+ * Client-side mirror of the server's zod schema
+ * (apps/api/src/modules/org-profile/dto.ts): gln optional-but-13-digits with
+ * a valid GS1 check digit, gs1Prefixes entries 4-12 digits each -- same
+ * convention as `pages/counterparties/CounterpartyForm.tsx`.
+ */
+const profileFormSchema = z.object({
+  gln: z
+    .string()
+    .trim()
+    .optional()
+    .refine((v) => !v || /^\d{13}$/.test(v), "pages.settings.profile.errors.glnFormat")
+    .refine((v) => !v || hasValidCheckDigit(v), "pages.settings.profile.errors.glnCheckDigit"),
+  inn: z.string().trim().optional(),
+  gs1Prefixes: z
+    .string()
+    .trim()
+    .optional()
+    .refine(
+      (v) => !v || v.split(",").every((entry) => /^\d{4,12}$/.test(entry.trim())),
+      "pages.settings.profile.errors.gs1PrefixesFormat",
+    ),
+});
+type ProfileFormValues = z.infer<typeof profileFormSchema>;
+
+const EMPTY_PROFILE_VALUES: ProfileFormValues = { gln: "", inn: "", gs1Prefixes: "" };
+
+/**
+ * Mirrors `apps/api/src/modules/org-profile/dto.ts`'s `ssccCounterSchema`
+ * (`nextSerial`: 0..9_999_999 -- a 9-digit prefix leaves a 7-digit serial).
+ * Kept as a string in form state (like `ProductForm.tsx`'s capacity fields)
+ * so an empty/in-progress value doesn't fight the numeric input.
+ */
+const ssccFormSchema = z.object({
+  nextSerial: z
+    .string()
+    .trim()
+    .refine((v) => /^\d+$/.test(v), "pages.settings.sscc.errors.nextSerialInvalid")
+    .refine((v) => Number(v) <= 9_999_999, "pages.settings.sscc.errors.nextSerialInvalid"),
+});
+type SsccFormValues = z.infer<typeof ssccFormSchema>;
+
+/** Converts a possibly-undefined zod issue message (an i18n key) into translated text. */
+function translateFieldError(t: TFunction, message: string | undefined): string | undefined {
+  return message ? t(message) : undefined;
+}
+
+function toProfileInput(values: ProfileFormValues): PutOrgProfileInput {
+  const gln = values.gln?.trim();
+  const inn = values.inn?.trim();
+  return {
+    gln: gln ? gln : null,
+    inn: inn ? inn : null,
+    gs1Prefixes: values.gs1Prefixes
+      ? values.gs1Prefixes
+          .split(",")
+          .map((entry) => entry.trim())
+          .filter(Boolean)
+      : [],
+  };
+}
+
+/**
+ * The tenant's own organisation profile (GLN, tax id, GS1 prefixes) plus its
+ * box SSCC counter (06c Task 5) -- what a plant migrating off another system
+ * sets so it continues issuing SSCCs under the same GLN-derived prefix
+ * instead of re-handing-out serials that system already used.
+ */
+export function OrgProfilePage() {
+  const { t } = useTranslation();
+  const profileQuery = useOrgProfile();
+  const updateProfile = useUpdateOrgProfile();
+
+  const {
+    register: registerProfile,
+    handleSubmit: handleProfileSubmit,
+    reset: resetProfile,
+    formState: { errors: profileErrors },
+  } = useForm<ProfileFormValues>({
+    resolver: zodResolver(profileFormSchema),
+    defaultValues: EMPTY_PROFILE_VALUES,
+  });
+
+  useEffect(() => {
+    if (profileQuery.data) {
+      resetProfile({
+        gln: profileQuery.data.gln ?? "",
+        inn: profileQuery.data.inn ?? "",
+        gs1Prefixes: profileQuery.data.gs1Prefixes.join(", "),
+      });
+    }
+  }, [profileQuery.data, resetProfile]);
+
+  const submitProfile = handleProfileSubmit(async (values) => {
+    try {
+      await updateProfile.mutateAsync(toProfileInput(values));
+      toast("ok", t("pages.settings.profile.toasts.updateSuccess"));
+    } catch (error) {
+      toast(
+        "error",
+        error instanceof ApiRequestError
+          ? error.message
+          : t("pages.settings.profile.toasts.updateError"),
+      );
+    }
+  });
+
+  return (
+    <div style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: 20 }}>
+      <PageHeader title={t("pages.settings.title")} />
+
+      {profileQuery.isPending ? (
+        <div style={{ display: "flex", justifyContent: "center", padding: 48 }}>
+          <Spinner label={t("common.loading")} />
+        </div>
+      ) : profileQuery.isError ? (
+        <Alert tone="error">{t("common.loadError")}</Alert>
+      ) : (
+        <>
+          <Card title={t("pages.settings.profile.cardTitle")}>
+            <form
+              onSubmit={(event) => void submitProfile(event)}
+              noValidate
+              style={{ display: "flex", flexDirection: "column", gap: 16 }}
+            >
+              <Input
+                label={t("pages.settings.profile.glnLabel")}
+                mono
+                {...errorProp(translateFieldError(t, profileErrors.gln?.message))}
+                {...registerProfile("gln")}
+              />
+              <Input
+                label={t("pages.settings.profile.innLabel")}
+                mono
+                {...errorProp(translateFieldError(t, profileErrors.inn?.message))}
+                {...registerProfile("inn")}
+              />
+              <Input
+                label={t("pages.settings.profile.prefixesLabel")}
+                hint={t("pages.settings.profile.prefixesHint")}
+                {...errorProp(translateFieldError(t, profileErrors.gs1Prefixes?.message))}
+                {...registerProfile("gs1Prefixes")}
+              />
+              <div>
+                <Button type="submit" loading={updateProfile.isPending}>
+                  {t("pages.settings.profile.save")}
+                </Button>
+              </div>
+            </form>
+          </Card>
+
+          <OrgProfileSsccCard derivedPrefix={derivePrefix(profileQuery.data.gln)} />
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Separate from the profile form above (its own query, its own save button):
+ * the counter is a distinct resource (`GET/PUT /org/profile/sscc`) with its
+ * own pending/error states, and saving it must not require re-validating the
+ * GLN/prefixes fields above.
+ */
+function OrgProfileSsccCard({ derivedPrefix }: { derivedPrefix: string | null }) {
+  const { t } = useTranslation();
+  const ssccQuery = useOrgProfileSscc();
+  const updateSscc = useUpdateOrgProfileSscc();
+
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors },
+  } = useForm<SsccFormValues>({
+    resolver: zodResolver(ssccFormSchema),
+    defaultValues: { nextSerial: "0" },
+  });
+
+  useEffect(() => {
+    if (ssccQuery.data) {
+      reset({ nextSerial: String(ssccQuery.data.nextSerial) });
+    }
+  }, [ssccQuery.data, reset]);
+
+  const submit = handleSubmit(async (values) => {
+    try {
+      await updateSscc.mutateAsync({
+        extensionDigit: BOX_EXTENSION_DIGIT,
+        nextSerial: Number(values.nextSerial),
+      });
+      toast("ok", t("pages.settings.sscc.toasts.updateSuccess"));
+    } catch (error) {
+      toast(
+        "error",
+        error instanceof ApiRequestError
+          ? error.message
+          : t("pages.settings.sscc.toasts.updateError"),
+      );
+    }
+  });
+
+  return (
+    <Card title={t("pages.settings.sscc.cardTitle")}>
+      <p style={{ font: "var(--text-body)", color: "var(--fg-2)", margin: "0 0 16px" }}>
+        {t("pages.settings.sscc.description")}
+      </p>
+
+      {ssccQuery.isPending ? (
+        <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
+          <Spinner label={t("common.loading")} />
+        </div>
+      ) : ssccQuery.isError ? (
+        <Alert tone="error">{t("common.loadError")}</Alert>
+      ) : (
+        <form
+          onSubmit={(event) => void submit(event)}
+          noValidate
+          style={{ display: "flex", flexDirection: "column", gap: 16 }}
+        >
+          <Input
+            label={t("pages.settings.sscc.prefixLabel")}
+            mono
+            readOnly
+            disabled
+            value={derivedPrefix ?? t("pages.settings.sscc.prefixUnavailable")}
+          />
+          <Input
+            label={t("pages.settings.sscc.nextSerialLabel")}
+            mono
+            inputMode="numeric"
+            {...errorProp(translateFieldError(t, errors.nextSerial?.message))}
+            {...register("nextSerial")}
+          />
+          <div>
+            <Button type="submit" loading={updateSscc.isPending} disabled={!derivedPrefix}>
+              {t("pages.settings.sscc.save")}
+            </Button>
+          </div>
+        </form>
+      )}
+    </Card>
+  );
+}

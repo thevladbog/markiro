@@ -1,8 +1,9 @@
-import { Inject, Injectable } from "@nestjs/common";
-import { eq } from "drizzle-orm";
+import { BadRequestException, Inject, Injectable } from "@nestjs/common";
+import { and, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
-import type { OrgProfileDto, PutOrgProfileDto } from "./dto";
+import { BOX_EXTENSION_DIGIT, deriveIssuerPrefix } from "../sscc/sscc.service";
+import type { OrgProfileDto, PutOrgProfileDto, SsccCounterDto } from "./dto";
 
 const EMPTY_PROFILE: OrgProfileDto = { gln: null, gs1Prefixes: [], inn: null };
 
@@ -52,5 +53,62 @@ export class OrgProfileService {
   async getPrefixes(tenantId: string): Promise<string[]> {
     const profile = await this.getProfile(tenantId);
     return profile.gs1Prefixes;
+  }
+
+  /**
+   * The tenant's own box SSCC counter (Task 5). Always reads
+   * `BOX_EXTENSION_DIGIT` -- 06c only has boxes; 06d's pallets (extension
+   * digit 1) will need their own read path once that counter exists.
+   * Returns `nextSerial: 0` if no row has been seeded yet, same convention
+   * as `getProfile`'s `EMPTY_PROFILE` fallback.
+   */
+  async getSscc(tenantId: string): Promise<SsccCounterDto> {
+    const issuerPrefix = await this.ownIssuerPrefix(tenantId);
+    const [row] = await this.db
+      .select({ nextSerial: schema.ssccCounters.nextSerial })
+      .from(schema.ssccCounters)
+      .where(
+        and(
+          eq(schema.ssccCounters.tenantId, tenantId),
+          eq(schema.ssccCounters.issuerPrefix, issuerPrefix),
+          eq(schema.ssccCounters.extensionDigit, BOX_EXTENSION_DIGIT),
+        ),
+      );
+    return { extensionDigit: BOX_EXTENSION_DIGIT, nextSerial: row ? Number(row.nextSerial) : 0 };
+  }
+
+  /**
+   * Seeds (or reseeds) the tenant's own box counter -- how a plant migrating
+   * off another system continues issuing SSCCs under the same prefix
+   * without re-handing-out serials that system already used. Keyed by the
+   * prefix derived from the org's own GLN, not the GLN itself (see
+   * `deriveIssuerPrefix`'s doc comment).
+   */
+  async putSscc(tenantId: string, dto: SsccCounterDto): Promise<SsccCounterDto> {
+    const issuerPrefix = await this.ownIssuerPrefix(tenantId);
+    await this.db
+      .insert(schema.ssccCounters)
+      .values({
+        tenantId,
+        issuerPrefix,
+        extensionDigit: dto.extensionDigit,
+        nextSerial: dto.nextSerial,
+      })
+      .onConflictDoUpdate({
+        target: [
+          schema.ssccCounters.tenantId,
+          schema.ssccCounters.issuerPrefix,
+          schema.ssccCounters.extensionDigit,
+        ],
+        set: { nextSerial: dto.nextSerial, updatedAt: sql`now()` },
+      });
+    return { extensionDigit: dto.extensionDigit, nextSerial: dto.nextSerial };
+  }
+
+  /** The 9-digit prefix derived from the tenant's own GLN; 400s if none is set yet. */
+  private async ownIssuerPrefix(tenantId: string): Promise<string> {
+    const profile = await this.getProfile(tenantId);
+    if (!profile.gln) throw new BadRequestException("organisation profile has no GLN");
+    return deriveIssuerPrefix(profile.gln, "organisation profile");
   }
 }

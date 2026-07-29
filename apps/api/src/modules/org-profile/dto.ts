@@ -22,3 +22,18 @@ export interface OrgProfileDto {
   gs1Prefixes: string[];
   inn: string | null;
 }
+
+/**
+ * A 9-digit issuer prefix leaves a 7-digit serial, so the space is
+ * 0..9_999_999 per extension digit. Seeding beyond it cannot produce a valid
+ * SSCC, so it is refused at the boundary rather than at the first close.
+ *
+ * Shared by both the org-profile and counterparties controllers (Task 5) --
+ * one tenant's own counter and each counterparty's counter carry the exact
+ * same shape, so the schema is defined once here and imported by the other.
+ */
+export const ssccCounterSchema = z.object({
+  extensionDigit: z.number().int().min(0).max(9),
+  nextSerial: z.number().int().min(0).max(9_999_999),
+});
+export type SsccCounterDto = z.infer<typeof ssccCounterSchema>;
