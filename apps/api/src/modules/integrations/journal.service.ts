@@ -1,6 +1,6 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { schema, type Db } from "@markiro/db";
-import { and, eq, lt } from "drizzle-orm";
+import { and, eq, lt, sql } from "drizzle-orm";
 import { DB } from "../../auth/auth.module";
 import type { IntegrationChannelType } from "./channel-registry";
 
@@ -98,11 +98,23 @@ export class JournalService {
     // `integrationEvents.sessionId` ссылается на `integrationSessions.id` без
     // FK (см. packages/db/src/schema/integrations.ts) -- ссылочная
     // целостность на уровне БД её не защитит. Поэтому события чистятся
-    // ПЕРВЫМИ: если бы сеанс удалялся раньше, до своего собственного
-    // (более старого) удаления события бы на мгновение указывали на уже
-    // не существующий сеанс. Удаляя события сначала, такого окна не бывает.
+    // ПЕРВЫМИ: если бы сеанс удалялся раньше своего события, событие осталось
+    // бы указывать в никуда. Раньше это обоснование опиралось на то, что
+    // строка сеанса и её событие стареют вместе, но это верно только для
+    // коротких сеансов, где `startedAt` события совпадает по возрасту со
+    // `startedAt` строки. Сеанс, закрытый спустя долгое время после начала,
+    // ломает это допущение: его сводное событие свежее, чем `startedAt`
+    // сеанса, — событие переживает обе чистки выше, а строка удалялась бы по
+    // давнему `startedAt` и превращала это самое событие в сироту навсегда,
+    // а не на мгновение. Поэтому строка сеанса теперь прунится по моменту,
+    // который и определяет актуальность сводки: `finishedAt`, если сеанс
+    // закрыт (а сводное событие пишется в `finishSession`/`append` примерно
+    // тогда же), и откат на `startedAt` для тех, что так и не закрылись, —
+    // иного ориентира для брошенных сеансов просто нет.
     await this.db
       .delete(schema.integrationSessions)
-      .where(lt(schema.integrationSessions.startedAt, sessionsBefore));
+      .where(
+        sql`coalesce(${schema.integrationSessions.finishedAt}, ${schema.integrationSessions.startedAt}) < ${sessionsBefore}`,
+      );
   }
 }

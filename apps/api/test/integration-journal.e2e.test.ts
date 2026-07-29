@@ -195,4 +195,55 @@ describe.skipIf(!ready)("journal", () => {
     expect(ids).toContain(recent.id);
     expect(ids).not.toContain(stale!.id);
   });
+
+  it("хранит сеанс и его сводку 90 дней от завершения, а не от начала", async () => {
+    const startedLongAgo = new Date(Date.now() - (SESSION_RETENTION_DAYS + 5) * 24 * 3_600_000);
+    const finishedRecently = new Date(Date.now() - 2 * 24 * 3_600_000);
+    const summaryMessage = `settled-session-${randomUUID()}`;
+
+    const [settled] = await db
+      .insert(schema.integrationSessions)
+      .values({
+        tenantId,
+        channelType: "commerceml",
+        startedAt: startedLongAgo,
+        finishedAt: finishedRecently,
+        outcome: "ok",
+        cookieHash: `settled-${randomUUID()}`,
+        expiresAt: new Date(Date.now() + 3_600_000),
+        summary: { updated: 7 },
+      })
+      .returning({ id: schema.integrationSessions.id });
+
+    // Событие обмена пишется примерно тогда же, когда сеанс закрывается —
+    // задолго после того, как он был открыт.
+    await db.insert(schema.integrationEvents).values({
+      tenantId,
+      channelType: "commerceml",
+      sessionId: settled!.id,
+      at: finishedRecently,
+      direction: "in",
+      outcome: "ok",
+      grain: "session",
+      message: summaryMessage,
+    });
+
+    await journal.prune(new Date());
+
+    const [sessionRow] = await db
+      .select({ id: schema.integrationSessions.id })
+      .from(schema.integrationSessions)
+      .where(eq(schema.integrationSessions.id, settled!.id));
+    expect(sessionRow).toBeDefined();
+
+    const eventRows = await db
+      .select({ sessionId: schema.integrationEvents.sessionId })
+      .from(schema.integrationEvents)
+      .where(eq(schema.integrationEvents.message, summaryMessage));
+    expect(eventRows).toHaveLength(1);
+    // Сводка не должна пережить сеанс: если бы строку сеанса чистили по
+    // старому `startedAt`, эта проверка провалилась бы — `sessionId`
+    // указывал бы в никуда.
+    expect(eventRows[0]!.sessionId).toBe(settled!.id);
+  });
 });
