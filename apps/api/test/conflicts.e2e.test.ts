@@ -227,6 +227,65 @@ describe.skipIf(!ready)("conflicts e2e", () => {
     expect(itemsB[0]!.losingShiftId).toBe(shiftB);
   });
 
+  // Every conflict elsewhere in this file is entirely within one shift
+  // (same shiftId on both the losing and winning side), so a service-side
+  // mapping bug that transposed losingShiftId/winningShiftId would pass
+  // every other test in this file silently -- see station-scans.service.ts's
+  // code_conflicts insert. This is the one case the spec calls out
+  // explicitly: two DIFFERENT shifts racing the same code, so the two
+  // fields can be told apart by more than which one happens to equal the
+  // other.
+  it("attributes a cross-shift conflict to the correct shift on each side", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+    const apiKey = await deviceKey(agent);
+    const productId = await createActiveProduct(agent);
+    const shift1 = await openShiftForProduct(agent, productId);
+    const shift2 = await openShiftForProduct(agent, productId);
+
+    // Terminal A, shift 1, arrives first but scanned LATER.
+    const scanA = { ...item(shift1, 5), terminalId: "A" };
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send({ batchId: "m1:110", items: [scanA] })
+      .expect(201);
+
+    // Terminal B, shift 2, same code, scanned EARLIER -- displaces A's scan.
+    // The earlier scannedAt wins regardless of arrival order, and A's
+    // station is never told (see the module's report), so the cabinet is
+    // the only place this shows up.
+    const scanB = {
+      ...scanA,
+      terminalId: "B",
+      shiftId: shift2,
+      scannedAt: new Date(Date.parse(scanA.scannedAt) - 5000).toISOString(),
+    };
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send({ batchId: "m1:111", items: [scanB] })
+      .expect(201);
+
+    const list = await agent.get(`/conflicts?shiftId=${shift1}`).expect(200);
+    const items = (
+      list.body as {
+        items: {
+          losingShiftId: string;
+          losingTerminalId: string;
+          winningShiftId: string;
+          winningTerminalId: string;
+        }[];
+      }
+    ).items;
+    expect(items).toHaveLength(1);
+    expect(items[0]!.losingShiftId).toBe(shift1);
+    expect(items[0]!.winningShiftId).toBe(shift2);
+    expect(items[0]!.losingShiftId).not.toBe(items[0]!.winningShiftId);
+    expect(items[0]!.losingTerminalId).toBe("A");
+    expect(items[0]!.winningTerminalId).toBe("B");
+  });
+
   it("filters the list by reviewed status", async () => {
     const agent = request.agent(app!.getHttpServer());
     await signUpAndActivate(agent);
