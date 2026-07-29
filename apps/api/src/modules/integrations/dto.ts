@@ -47,6 +47,36 @@ export interface CredentialsIssuedDto {
 export const updateChannelSchema = z.record(z.string(), z.unknown());
 export type UpdateChannelDto = z.infer<typeof updateChannelSchema>;
 
+/**
+ * Bounds for `silentAfterHours` (brief 08: the silence threshold is a
+ * per-channel setting -- "у одного тенанта обмен раз в час, у другого раз в
+ * сутки, и общая константа соврёт обоим"). It is a whole number of hours
+ * because that's the column's own unit (`silent_after_hours` integer, see
+ * packages/db/src/schema/integrations.ts) and the granularity `stateOf` in
+ * integrations.service.ts actually compares against.
+ *
+ * Lower bound is 1, not 0: a zero-hour threshold would make the channel read
+ * as "silent" from the instant its very first event lands (nothing can ever
+ * be *less* than zero hours old), so the state could never mean anything
+ * else -- it's not a stricter setting, it's a permanently tripped one.
+ *
+ * Upper bound is 720 (24 * 30 -- thirty days): generous enough to cover every
+ * exchange cadence the brief names (hourly, daily) with a wide safety
+ * margin, but still low enough that a channel that has genuinely gone quiet
+ * surfaces that within a month instead of never. An unbounded-in-practice
+ * threshold is the mirror image of the zero-hour case: "silent" would exist
+ * as a state but be unreachable, which is just as useless as it always
+ * being true.
+ */
+export const SILENT_AFTER_HOURS_MIN = 1;
+export const SILENT_AFTER_HOURS_MAX = 24 * 30;
+
+export const silentAfterHoursSchema = z
+  .number()
+  .int()
+  .min(SILENT_AFTER_HOURS_MIN)
+  .max(SILENT_AFTER_HOURS_MAX);
+
 /** Позиция внешней системы, ещё не сопоставленная с каталогом (Task 9's queue). */
 export interface CandidateDto {
   id: string;

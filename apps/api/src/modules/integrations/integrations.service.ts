@@ -10,6 +10,7 @@ import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { DB } from "../../auth/auth.module";
 import { generateExchangeCredentials, hashExchangeSecret } from "../exchange/exchange-credentials";
 import { CHANNELS, describeChannel, type IntegrationChannelType } from "./channel-registry";
+import { silentAfterHoursSchema } from "./dto";
 import type {
   CandidateDto,
   CandidatesPageDto,
@@ -91,6 +92,25 @@ export class IntegrationsService {
     };
   }
 
+  /**
+   * `silentAfterHours` is pulled out of `patch` before anything touches
+   * `descriptor.settingsSchema`: it is its own top-level column
+   * (`silent_after_hours`, see packages/db/src/schema/integrations.ts), not
+   * a member of the channel's own JSONB `settings`. Every `settingsSchema`
+   * in `channel-registry.ts` is a plain `z.object()` with no `.passthrough()`,
+   * so left mixed in, `safeParse` would just silently strip the key --
+   * `parsed.success` stays `true`, the request "succeeds", and the value
+   * never reaches the database. That is the exact bug this method used to
+   * have: the admin's "порог молчания" field saved with a success toast and
+   * changed nothing.
+   *
+   * Both parts are validated and written independently, and each is only
+   * included in the write when the caller actually sent it -- a patch
+   * containing only `silentAfterHours` must not reset `settings` back to
+   * schema defaults (most fields are optional/defaulted, so re-parsing `{}`
+   * would silently blank them), and a patch containing only settings must
+   * not reset `silentAfterHours` back to 48.
+   */
   async updateChannel(
     tenantId: string,
     type: IntegrationChannelType,
@@ -100,19 +120,55 @@ export class IntegrationsService {
     if (!descriptor.available) {
       throw new ConflictException("Channel is not available yet");
     }
-    const parsed = descriptor.settingsSchema.safeParse(patch);
-    if (!parsed.success) {
-      // 400, а не 409: настройки прислали неверной формы — это про запрос,
-      // а не про состояние канала.
-      throw new BadRequestException(parsed.error.message);
+
+    const { silentAfterHours, ...settingsPatch } = patch;
+
+    let settings: Record<string, unknown> | undefined;
+    if (Object.keys(settingsPatch).length > 0) {
+      const parsed = descriptor.settingsSchema.safeParse(settingsPatch);
+      if (!parsed.success) {
+        // 400, а не 409: настройки прислали неверной формы — это про запрос,
+        // а не про состояние канала.
+        throw new BadRequestException(parsed.error.message);
+      }
+      settings = parsed.data;
+    }
+
+    let parsedSilentAfterHours: number | undefined;
+    if (silentAfterHours !== undefined) {
+      const parsed = silentAfterHoursSchema.safeParse(silentAfterHours);
+      if (!parsed.success) {
+        throw new BadRequestException(parsed.error.message);
+      }
+      parsedSilentAfterHours = parsed.data;
+    }
+
+    if (settings === undefined && parsedSilentAfterHours === undefined) {
+      // Пустой патч: нечего писать, а вставка пустой строки создала бы канал
+      // со значениями по умолчанию из воздуха -- канал, который никто не
+      // настраивал, должен оставаться `not_configured`, а не обзавестись
+      // строкой сам по себе.
+      return;
     }
 
     await this.db
       .insert(schema.integrationChannels)
-      .values({ tenantId, type, settings: parsed.data })
+      .values({
+        tenantId,
+        type,
+        ...(settings !== undefined ? { settings } : {}),
+        ...(parsedSilentAfterHours !== undefined
+          ? { silentAfterHours: parsedSilentAfterHours }
+          : {}),
+      })
       .onConflictDoUpdate({
         target: [schema.integrationChannels.tenantId, schema.integrationChannels.type],
-        set: { settings: parsed.data },
+        set: {
+          ...(settings !== undefined ? { settings } : {}),
+          ...(parsedSilentAfterHours !== undefined
+            ? { silentAfterHours: parsedSilentAfterHours }
+            : {}),
+        },
       });
   }
 
