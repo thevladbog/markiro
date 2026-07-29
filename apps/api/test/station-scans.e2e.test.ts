@@ -609,17 +609,48 @@ describe.skipIf(!ready)("station-scans e2e", () => {
 
   it("gives an unowned code to the batch that sent it, with no conflict", async () => {
     const agent = request.agent(app!.getHttpServer());
-    await signUpAndActivate(agent);
+    const tenantId = await signUpAndActivate(agent);
     const apiKey = await deviceKey(agent);
     const shiftId = await openShift(agent);
+    const scan = item(shiftId, 1);
 
     const res = await request(app!.getHttpServer())
       .post("/station/scans")
       .set("x-api-key", apiKey)
-      .send({ batchId: "m1:10", items: [item(shiftId, 1)] })
+      .send({ batchId: "m1:10", items: [scan] })
       .expect(201);
 
     expect((res.body as { conflicts: unknown[] }).conflicts).toEqual([]);
+    // The response alone is application-computed JSON and could stay green
+    // even if a bug wrote a row anyway (e.g. the uppercase-shiftId self-
+    // conflict this guards against — see the next test): assert the
+    // database directly holds none for this code either.
+    expect(await conflictRows(tenantId, scan.code!.codeHash)).toEqual([]);
+  });
+
+  it("does not self-conflict a fresh code whose shiftId arrives uppercased", async () => {
+    // Regression: `claim.shiftId` is whatever case the client sends, but a
+    // prior incumbent read back from Postgres's `uuid` column always comes
+    // back lowercased. Before the dto-level normalisation, an uppercase
+    // shiftId passed z.string().uuid() and the tenant-scoped shift guard
+    // (both semantic uuid comparisons) but then failed `sameScan`'s plain
+    // string equality against itself — via `freshHashes` folding into
+    // `wonHashes` for a code this same batch just inserted — fabricating a
+    // code_conflicts row whose losing and winning sides were the same scan.
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const apiKey = await deviceKey(agent);
+    const shiftId = (await openShift(agent)).toUpperCase();
+    const scan = item(shiftId, 1);
+
+    const res = await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send({ batchId: "m1:11", items: [scan] })
+      .expect(201);
+
+    expect((res.body as { conflicts: unknown[] }).conflicts).toEqual([]);
+    expect(await conflictRows(tenantId, scan.code!.codeHash)).toEqual([]);
   });
 
   it("reports a later scan of an already-owned code back to the sender", async () => {

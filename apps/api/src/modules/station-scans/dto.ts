@@ -1,7 +1,15 @@
 import { z } from "zod";
 
 const scanItemSchema = z.object({
-  shiftId: z.string().uuid(),
+  // Normalised to lowercase here, at the boundary: Postgres's `uuid` type is
+  // case-insensitive on input but always renders lowercase on output, so a
+  // client-sent uppercase id would otherwise match the tenant-scoped shift
+  // guard (semantic uuid comparison in SQL) yet fail a same-value JS string
+  // comparison against a value read back from the database (e.g. `sameScan`
+  // in conflict-resolution.ts, comparing a fresh claim's shiftId against a
+  // registry row's). Normalising once here keeps every downstream string
+  // comparison correct without each of them having to know about this.
+  shiftId: z.string().uuid().toLowerCase(),
   terminalId: z.string().nullable(),
   raw: z.string().min(1),
   verdict: z.string().min(1),
