@@ -96,6 +96,20 @@ export const STATION_MIGRATIONS: string[] = [
      winning_scanned_at TEXT NOT NULL,
      detected_at TEXT NOT NULL
    );`,
+  // The device's local SSCC serial pool (Task 8, plan 06c): ranges the server
+  // handed down for this device's own issuer prefix, burned one serial at a
+  // time by apps/station/src/lib/sscc-pool.ts. The primary key on
+  // (issuer_prefix, extension_digit, from_serial) is what makes a replayed
+  // bundle harmless -- the same block cannot be inserted twice, so a retried
+  // sync can never double the pool.
+  `CREATE TABLE IF NOT EXISTS sscc_pool (
+     issuer_prefix TEXT NOT NULL,
+     extension_digit INTEGER NOT NULL,
+     from_serial INTEGER NOT NULL,
+     to_serial INTEGER NOT NULL,
+     next_serial INTEGER NOT NULL,
+     PRIMARY KEY (issuer_prefix, extension_digit, from_serial)
+   );`,
   // Upgrade path for devices enrolled before operators had a personnel number.
   // SQLite has no `ADD COLUMN IF NOT EXISTS`, and applyMigrations re-runs every
   // statement on each boot, so this throws "duplicate column name" once the

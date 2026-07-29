@@ -1,4 +1,4 @@
-import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 /** Station-local key/value metadata (e.g. current terminal id, last sync). */
 export const stationMeta = sqliteTable("station_meta", {
@@ -138,6 +138,27 @@ export const conflictsMirror = sqliteTable("conflicts_mirror", {
   winningScannedAt: text("winning_scanned_at").notNull(),
   detectedAt: text("detected_at").notNull(),
 });
+
+/**
+ * The device's local SSCC serial pool: ranges the server handed down for
+ * this device's own issuer prefix, burned one serial at a time by
+ * `apps/station/src/lib/sscc-pool.ts`. Keyed by the 9-digit issuer PREFIX,
+ * not a GLN -- see `ssccCounters` in `../schema/platform.ts` for why the
+ * prefix, not the GLN, is the number space's identity. The primary key on
+ * (issuerPrefix, extensionDigit, fromSerial) is what makes a replayed bundle
+ * harmless: the same block cannot be inserted twice.
+ */
+export const ssccPool = sqliteTable(
+  "sscc_pool",
+  {
+    issuerPrefix: text("issuer_prefix").notNull(),
+    extensionDigit: integer("extension_digit").notNull(),
+    fromSerial: integer("from_serial").notNull(),
+    toSerial: integer("to_serial").notNull(),
+    nextSerial: integer("next_serial").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.issuerPrefix, t.extensionDigit, t.fromSerial] })],
+);
 
 /**
  * A local operator record after offline hydration. `pinHash`/`badgeHash` are
