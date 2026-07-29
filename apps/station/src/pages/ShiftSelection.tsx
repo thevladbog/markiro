@@ -106,7 +106,12 @@ export function ShiftSelection({
             </Button>
           ) : null}
           {onConflicts ? (
-            <Button variant="secondary" style={{ minHeight: 64 }} onClick={onConflicts}>
+            <Button
+              variant="secondary"
+              style={{ minHeight: 64 }}
+              disabled={busy}
+              onClick={onConflicts}
+            >
               {t("shell.conflicts")}
             </Button>
           ) : null}
