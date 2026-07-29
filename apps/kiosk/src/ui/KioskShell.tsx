@@ -5,7 +5,12 @@ import { useTranslation } from "react-i18next";
 // a hoisted function declaration and nothing here runs at module scope, so the
 // binding is initialised long before the component body can read it.
 import { nextKioskView } from "../App.js";
-import { createKioskClient, isDeviceRevoked, type KioskClient } from "../api/client.js";
+import {
+  createKioskClient,
+  isDeviceRevoked,
+  KioskApiError,
+  type KioskClient,
+} from "../api/client.js";
 import type { CreateOrderDto, CreateOrderResultDto } from "../api/types.js";
 import { buildBadgeIndex, resolveBadge } from "../credentials/badge.js";
 import { createKeyboardWedgeSource } from "../scanner/keyboard.js";
@@ -25,10 +30,12 @@ import { readJournalSince } from "../store/journal.js";
 import { enqueueOrder, listQuarantine, listQueue, quarantineQueue } from "../store/queue.js";
 import { scrubStoredBadgeCodes } from "../store/scrub.js";
 import {
+  cancelFlushRetry,
   flushQueue,
   refreshSnapshot,
   serverNow,
   snapshotAge,
+  snapshotAgeMs,
   REFRESH_INTERVAL_MS,
   type CacheAge,
 } from "../sync/worker.js";
@@ -207,13 +214,36 @@ export function KioskShell(): React.JSX.Element {
       // methods, so handing the reference over would detach it from its object.
       bootstrap: () => base.bootstrap(),
       submitOrder: async (body) => {
-        const result = await base.submitOrder(body);
-        // Only the order somebody is waiting on. Everything else the drain
-        // acknowledges is already in the journal, which is where a screen that
-        // was not there at the time is supposed to read it from.
-        const waiting = awaited.current;
-        if (waiting?.deviceSeq === body.deviceSeq) waiting.result = result;
-        return result;
+        try {
+          const result = await base.submitOrder(body);
+          // A DELIVERY IS PROOF OF A LINK, whatever `navigator.onLine`
+          // believes — and the browser believes nothing useful when it was the
+          // API that went away and came back.
+          setOnline(true);
+          // Only the order somebody is waiting on. Everything else the drain
+          // acknowledges is already in the journal, which is where a screen
+          // that was not there at the time is supposed to read it from.
+          const waiting = awaited.current;
+          if (waiting?.deviceSeq === body.deviceSeq) waiting.result = result;
+          return result;
+        } catch (err) {
+          // AND A FAILED DELIVERY IS THE STRIP'S BUSINESS, which it was not
+          // until a smoke run caught it: stop the API with the Wi-Fi still up
+          // and nothing tells this device — `navigator.onLine` stays true, no
+          // `offline` event fires — so for up to five minutes the kiosk queued
+          // orders offline underneath «Связь с сервером есть». `Done` told the
+          // truth, so nothing was lost, but the strip is what a passing
+          // administrator reads.
+          //
+          // A STATUS IS NOT AN OUTAGE. `KioskApiError` means the server
+          // answered — 400, 500, even the 401 of a revoked device — so the link
+          // is demonstrably fine and saying otherwise would send an
+          // administrator after the network for a server-side problem. Only a
+          // failure carrying no answer at all (a dead `fetch`, an expired
+          // deadline) is «нет связи».
+          if (!(err instanceof KioskApiError)) setOnline(false);
+          throw err;
+        }
       },
     };
   }, []);
@@ -310,12 +340,15 @@ export function KioskShell(): React.JSX.Element {
   /**
    * One heartbeat: pull the dataset, then push whatever is owed.
    *
-   * `refreshSnapshot` REJECTS on failure, and that rejection is the only signal
-   * the device has that it is offline — uncaught it would take the whole kiosk
+   * `refreshSnapshot` REJECTS on failure, and that rejection is the periodic
+   * signal that the device is offline — uncaught it would take the whole kiosk
    * down five minutes after the network blinked. Caught, it is exactly what the
-   * status strip reports, and nothing more: a failed drain says nothing here,
+   * status strip reports, and nothing more: a failed DRAIN says nothing HERE,
    * because `flushQueue` swallows the difference between a dead network and a
-   * refused order and the strip must not invent a diagnosis out of it.
+   * refused order and this function must not invent a diagnosis out of it. That
+   * distinction is made one level down instead, in `clientFor`'s wrapper, which
+   * sees the actual error — which is what stops the strip asserting a link for
+   * the five minutes between two ticks.
    *
    * With ONE exception, and it is the one failure that is not about the
    * network at all: a 401 is the server saying this device is no longer a
@@ -488,6 +521,23 @@ export function KioskShell(): React.JSX.Element {
     const timer = setInterval(() => void sync(), REFRESH_INTERVAL_MS);
     return () => clearInterval(timer);
   }, [token, serverUrl, sync]);
+
+  /**
+   * The queue's own retry, disowned when this tree goes away.
+   *
+   * `flushQueue` arms a backoff retry of its own after a drain that reached
+   * nothing (see `RETRY_BASE_MS`), and that timer closes over the CLIENT built
+   * above — the one recording the reply for the order `submitCart` is awaiting.
+   * Left armed past an unmount it would post under a React tree that no longer
+   * exists, and on a device re-paired in between, under a token this shell no
+   * longer holds.
+   *
+   * ITS OWN EFFECT, with no dependencies, precisely so it runs on unmount and
+   * NOWHERE else. Folding it into the refresh interval below would cancel a
+   * legitimate retry every time the token or the server address changed — which
+   * is the moment a queue is likeliest to be owed.
+   */
+  useEffect(() => cancelFlushRetry, []);
 
   useEffect(() => {
     // `online` is the browser's word for "there is a link", which is worth
@@ -705,9 +755,15 @@ export function KioskShell(): React.JSX.Element {
   );
 
   const paired = Boolean(config?.token);
+  // ONE reading of the clock for both answers, so the verdict and the age the
+  // strip prints beside it can never describe two different instants.
+  const measuredAt = now();
   // Including "no snapshot at all is blocked", which is `snapshotAge`'s rule
   // and is tested beside its NaN sibling in `sync/worker.ts` rather than here.
-  const age: CacheAge = snapshotAge(snapshot, now());
+  const age: CacheAge = snapshotAge(snapshot, measuredAt);
+  // `null` for exactly the snapshots the gate refuses to date; the strip states
+  // the threshold rather than a number there.
+  const ageMs = snapshotAgeMs(snapshot, measuredAt);
 
   const view = nextKioskView({
     paired,
@@ -883,7 +939,7 @@ export function KioskShell(): React.JSX.Element {
           installer screens would only be reading a strip about a device that is
           not yet a kiosk. */}
       {view === "idle" || view === "cart" || view === "done" || view === "blocked" ? (
-        <StatusStrip online={online} age={age} quarantined={quarantinedCount} />
+        <StatusStrip online={online} age={age} ageMs={ageMs} quarantined={quarantinedCount} />
       ) : null}
       {screen}
     </div>

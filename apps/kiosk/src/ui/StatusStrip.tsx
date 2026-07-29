@@ -1,10 +1,25 @@
 import { useTranslation } from "react-i18next";
 import { StatusChip } from "@markiro/ui";
-import type { CacheAge } from "../sync/worker.js";
+import { humaniseAge, type CacheAge } from "../sync/worker.js";
 
 export interface StatusStripProps {
   online: boolean;
   age: CacheAge;
+  /**
+   * How long ago the dataset was refreshed, in milliseconds — or `null` when
+   * that cannot be established at all.
+   *
+   * Carried BESIDE the verdict rather than derived from it, because a verdict
+   * cannot be un-rounded: `warn` covers everything from a day to a week, and
+   * «Данные обновлялись N назад» (design 2026-07-24 §7) is the sentence that
+   * tells a kiosk whose Wi-Fi dropped after lunch apart from one that has been
+   * quietly off the network since Friday.
+   *
+   * `null` is the state `snapshotAgeMs` answers for exactly the snapshots
+   * `snapshotAge` calls `blocked` — none at all, or stamps that cannot be read
+   * — and the strip states the threshold there rather than inventing a number.
+   */
+  ageMs: number | null;
   /**
    * Orders the server refused for good and the device has set aside
    * (`store/queue.ts`'s quarantine store).
@@ -40,8 +55,33 @@ export interface StatusStripProps {
  * nothing about the data's age — a kiosk can be online, fresh and still be
  * holding an order the server will never take.
  */
-export function StatusStrip({ online, age, quarantined }: StatusStripProps): React.JSX.Element {
+export function StatusStrip({
+  online,
+  age,
+  ageMs,
+  quarantined,
+}: StatusStripProps): React.JSX.Element {
   const { t } = useTranslation();
+
+  /**
+   * «Данные обновлялись 30 ч назад», or the bare threshold when there is no
+   * measurable age to name.
+   *
+   * The unit is decided in `humaniseAge` rather than here, and the copy names
+   * it with an indeclinable abbreviation, so no plural suffix is ever needed:
+   * i18next's RU categories (`_one/_few/_many/_other`) have no EN counterpart
+   * and the lockstep test requires identical key sets in both files — the same
+   * constraint the quarantine line below is written around.
+   *
+   * The EN strings say «hours»/«days» outright because the singular is
+   * unreachable: this chip renders only for `warn` and `blocked`, so the hour
+   * count starts at 24 and the day count at 2.
+   */
+  const stale = ageMs === null ? null : humaniseAge(ageMs);
+  const staleLabel =
+    stale === null
+      ? t("status.stale")
+      : t(stale.unit === "days" ? "status.staleDays" : "status.staleHours", { n: stale.n });
 
   // Kiosk-sized: `StatusChip`'s office default is 24px tall with 12px type,
   // which is unreadable at the distance someone stands from a wall-mounted
@@ -73,7 +113,12 @@ export function StatusStrip({ online, age, quarantined }: StatusStripProps): Rea
         label={online ? t("status.online") : t("status.offline")}
         style={chip}
       />
-      {age !== "fresh" ? <StatusChip status="warn" label={t("status.stale")} style={chip} /> : null}
+      {/* UNOBTRUSIVE, and that is the design's word for it («ненавязчивая
+          плашка», 2026-07-24 §7): a chip in the strip beside the others rather
+          than a banner or a modal, and it gates nothing — a kiosk whose data is
+          a day old goes on handing product out, which is why the routing in
+          `nextKioskView` reads `blocked` and never `warn`. */}
+      {age !== "fresh" ? <StatusChip status="warn" label={staleLabel} style={chip} /> : null}
       {/* ONLY when there is one. A permanent «отклонил: 0» would teach everyone
           who walks past this kiosk to read straight through the line, on the
           day it finally has something to say.

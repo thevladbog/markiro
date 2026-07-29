@@ -23,7 +23,7 @@ import {
 } from "../src/store/config.js";
 import { appendJournal, type JournalEntry } from "../src/store/journal.js";
 import { enqueueOrder, listQuarantine, listQueue } from "../src/store/queue.js";
-import { REFRESH_INTERVAL_MS, STALE_BLOCK_MS } from "../src/sync/worker.js";
+import { REFRESH_INTERVAL_MS, RETRY_MAX_MS, STALE_BLOCK_MS } from "../src/sync/worker.js";
 
 afterEach(cleanup);
 
@@ -801,6 +801,117 @@ describe("KioskShell", () => {
     // And it really is handing product out, not merely showing the idle screen.
     scan(BADGE);
     await settle(() => expect(screen.getByText(CART_TITLE)).toBeDefined());
+  });
+
+  /**
+   * THE 24-HOUR PLAQUE, which design 2026-07-24 §7 asks for in as many words:
+   * «>24 ч — ненавязчивая плашка "Данные обновлялись N назад", отбор разрешён».
+   *
+   * The threshold was enforced and the plaque was not: the strip said «больше
+   * суток назад», which is the same sentence on the second day as on the sixth
+   * — and the sixth is the one where a kiosk is about to stop entirely.
+   */
+  it("names how old its dataset is past a day, and goes on handing product out", async () => {
+    // Out of contact for thirty hours, and still out of contact — a reachable
+    // server would simply refresh the snapshot out from under the assertion.
+    await pair(new Date(NOW.getTime() - 30 * 60 * 60_000).toISOString());
+    server.reachable = false;
+
+    render(<App />);
+
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+    expect(screen.getByText("Данные обновлялись 30 ч назад")).toBeDefined();
+
+    // «отбор разрешён»: the plaque is a remark, not a gate.
+    scan(BADGE);
+    await settle(() => expect(screen.getByText(CART_TITLE)).toBeDefined());
+  });
+
+  /**
+   * THE STRIP MUST NOT ASSERT A LINK THAT IS NOT THERE, and this is the way it
+   * used to — found in a live smoke run rather than by reasoning.
+   *
+   * Stop the API while the Wi-Fi stays up: `navigator.onLine` is still true, no
+   * `offline` event fires, and the refresh tick is up to five minutes away. So
+   * for those five minutes the kiosk queued orders offline while the strip went
+   * on saying «Связь с сервером есть». The `Done` screen told the truth, so
+   * nothing was lost — but the strip is the one thing a passing administrator
+   * reads, and it was the one thing lying.
+   */
+  it("stops claiming a connection the moment a delivery fails, long before the refresh tick", async () => {
+    await pair();
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+    // The boot sync reached the server, so this is true when it is said.
+    expect(screen.getByText("Связь с сервером есть")).toBeDefined();
+
+    // And now the API stops, with nothing on the device told about it.
+    server.reachable = false;
+
+    await takeOneBottle();
+
+    await settle(() => expect(screen.getByText(QUEUED_TITLE)).toBeDefined());
+    expect(screen.getByText(OFFLINE)).toBeDefined();
+    expect(screen.queryByText("Связь с сервером есть")).toBeNull();
+  });
+
+  /**
+   * And the other direction, which is what stops the fix becoming a strip stuck
+   * on «нет связи»: a delivery that lands is proof of a link, whatever
+   * `navigator.onLine` believes.
+   *
+   * Driven by the BACKOFF rather than by an `online` event or the refresh tick,
+   * because that is the path a recovering kiosk actually takes — the browser
+   * fires nothing at all when it was the API that went away and came back.
+   */
+  it("says the link is back as soon as a delivery lands, with nothing else telling it", async () => {
+    await pair();
+    await enqueueOrder(queuedOrder(3), EMPLOYEE.id);
+    server.reachable = false;
+    setOnLine(false);
+    render(<App />);
+    await settle(() => expect(screen.getByText(OFFLINE)).toBeDefined());
+
+    // The API comes back. `navigator.onLine` stays false, so not even the
+    // browser's own event fires, and the refresh tick is minutes away.
+    server.reachable = true;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(RETRY_MAX_MS);
+    });
+
+    await settle(() => expect(screen.getByText("Связь с сервером есть")).toBeDefined());
+    expect(server.orders.map((order) => order.deviceSeq)).toEqual([3]);
+    expect(await listQueue()).toEqual([]);
+  });
+
+  /**
+   * THE RETRY MUST NOT OUTLIVE THE SHELL. It holds the client this tree built —
+   * the one that records the reply for the order `submitCart` is awaiting — so
+   * one left armed past an unmount fires into a React tree that is gone, and on
+   * a device that has been re-paired in between would post under a token the
+   * shell no longer has.
+   */
+  it("leaves no retry armed once the shell unmounts", async () => {
+    await pair();
+    await enqueueOrder(queuedOrder(3), EMPLOYEE.id);
+    server.reachable = false;
+    const { unmount } = render(<App />);
+    await settle(() => expect(screen.getByText(OFFLINE)).toBeDefined());
+    const posted = () =>
+      (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.filter(
+        ([input]) => String(input).endsWith("/kiosk/orders"),
+      ).length;
+    // A retry really is owed at this point, or this test proves nothing.
+    expect(posted()).toBeGreaterThan(0);
+    const before = posted();
+
+    unmount();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2 * REFRESH_INTERVAL_MS);
+    });
+
+    expect(posted()).toBe(before);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("confirms an offline handover without a number and keeps the order queued", async () => {

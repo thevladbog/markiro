@@ -95,6 +95,8 @@
     "online": "Connected to the server",
     "offline": "No connection — the kiosk is working offline",
     "stale": "The data was last refreshed more than a day ago",
+    "staleHours": "The data was last refreshed {{n}} hours ago",
+    "staleDays": "The data was last refreshed {{n}} days ago",
     "quarantined": "Orders the server refused: {{n}} — an administrator is needed"
   },
   "scannerSetup": {

@@ -62,6 +62,69 @@ describe("keyboard wedge", () => {
     expect(seen).toEqual([]);
   });
 
+  /**
+   * «ОТСЕИВАЕТ "ЧЕЛОВЕЧЕСКИЙ" ВВОД ПО СКОРОСТИ» (design 2026-07-24 §6) — and it
+   * already does, through the silence window rather than through a second
+   * threshold layered on top of it.
+   *
+   * The window is not merely a flush timer: it caps EVERY inter-key interval in
+   * a payload at 60 ms. Assembling one therefore demands better than 16
+   * keystrokes a second, sustained, for the whole code — where an ordinary fast
+   * typist runs at 8 (120 ms) and 100 wpm is about 120 ms a keystroke. Type at
+   * human pace and the wedge emits one-character payloads that classify as «не
+   * распознано»; the code never forms.
+   *
+   * WHY NO TIGHTER THRESHOLD WAS ADDED. Any second filter must sit between the
+   * slowest scanner this device tolerates and the fastest human — and that gap
+   * is empty. The window already admits scanners with inter-character delays up
+   * to 60 ms (a routine, configurable setting on HID scanners, used to placate
+   * slow hosts), while a record-pace typist is at 50-60 ms. So a threshold
+   * tight enough to catch a human would reject a legitimately configured
+   * scanner, and the cost of that is the worst failure this codebase has: a
+   * real scan silently dropped, at an unattended machine, with the worker shown
+   * nothing. The threshold that IS safe is the one already here.
+   *
+   * This test is the guard on that reasoning: it fails if the window ever stops
+   * being a speed filter — for instance if someone lengthens it to a quarter of
+   * a second to "help" a slow scanner.
+   */
+  it("cannot assemble a payload from human-paced typing — the silence window is the speed filter", () => {
+    const target = new FakeTarget();
+    const seen: string[] = [];
+    createKeyboardWedgeSource({ target, silenceMs: 60 }).start((raw) => seen.push(raw));
+
+    const code = "0104600682000013";
+    for (const char of code) {
+      target.type(char);
+      // 120 ms apart: eight keystrokes a second, already brisk for a human and
+      // twice what the window allows.
+      vi.advanceTimersByTime(120);
+    }
+    target.press("Enter");
+
+    expect(seen).not.toContain(code);
+    expect(seen.every((payload) => payload.length === 1)).toBe(true);
+  });
+
+  it("assembles the same code from scanner-paced keystrokes", () => {
+    const target = new FakeTarget();
+    const seen: string[] = [];
+    createKeyboardWedgeSource({ target, silenceMs: 60 }).start((raw) => seen.push(raw));
+
+    const code = "0104600682000013";
+    for (const char of code) {
+      target.type(char);
+      // A real HID scanner types at single-digit milliseconds per character;
+      // even one configured with a generous inter-character delay stays inside
+      // the window, which is exactly why the window can be trusted to separate
+      // the two without a second threshold guessing at it.
+      vi.advanceTimersByTime(5);
+    }
+    target.press("Enter");
+
+    expect(seen).toEqual([code]);
+  });
+
   it("stops listening when the returned function is called", () => {
     const target = new FakeTarget();
     const stop = createKeyboardWedgeSource({ target }).start(() => {});

@@ -367,23 +367,62 @@ describe("Blocked", () => {
   });
 });
 
+const HOUR = 60 * 60_000;
+const DAY = 24 * HOUR;
+
 describe("StatusStrip", () => {
   it("says the kiosk is online, and says something different when it is not", () => {
-    const { rerender } = render(<StatusStrip online age="fresh" quarantined={0} />);
+    const { rerender } = render(<StatusStrip online age="fresh" ageMs={0} quarantined={0} />);
     expect(screen.getByText("Связь с сервером есть")).toBeDefined();
     expect(screen.queryByText("Нет связи — киоск работает офлайн")).toBeNull();
 
-    rerender(<StatusStrip online={false} age="fresh" quarantined={0} />);
+    rerender(<StatusStrip online={false} age="fresh" ageMs={0} quarantined={0} />);
 
     expect(screen.getByText("Нет связи — киоск работает офлайн")).toBeDefined();
     expect(screen.queryByText("Связь с сервером есть")).toBeNull();
   });
 
-  it("warns once the snapshot is older than a day, and not before", () => {
-    const { rerender } = render(<StatusStrip online age="fresh" quarantined={0} />);
-    expect(screen.queryByText("Данные обновлялись больше суток назад")).toBeNull();
+  /**
+   * «Данные обновлялись N назад» — the plaque design 2026-07-24 §7 asks for by
+   * name, and the half that was missing: the threshold was enforced but the
+   * strip only ever said «больше суток назад», which is the same sentence on
+   * the second day and on the sixth.
+   *
+   * The AGE is what an administrator walking past needs, because it is the only
+   * thing that distinguishes a kiosk whose Wi-Fi dropped after lunch from one
+   * that has been quietly off the network since Friday — and the second is the
+   * one that is about to stop handing product out.
+   */
+  it("names how long ago the data was refreshed, not merely that it is old", () => {
+    const { rerender } = render(<StatusStrip online age="fresh" ageMs={HOUR} quarantined={0} />);
+    // Nothing at all while the dataset is young: this plaque is for the
+    // exception, and a permanent line about freshness is one nobody reads.
+    expect(text()).not.toContain("обновлялись");
 
-    rerender(<StatusStrip online age="warn" quarantined={0} />);
+    rerender(<StatusStrip online age="warn" ageMs={30 * HOUR} quarantined={0} />);
+    expect(screen.getByText("Данные обновлялись 30 ч назад")).toBeDefined();
+
+    rerender(<StatusStrip online age="warn" ageMs={3 * DAY + 5 * HOUR} quarantined={0} />);
+    expect(screen.getByText("Данные обновлялись 3 сут назад")).toBeDefined();
+  });
+
+  // Strictly worse than a day old, so staying silent here would be the strip
+  // asserting freshness at the exact moment it is least true.
+  it("keeps naming the age past the blocking threshold", () => {
+    render(<StatusStrip online={false} age="blocked" ageMs={9 * DAY} quarantined={0} />);
+
+    expect(screen.getByText("Данные обновлялись 9 сут назад")).toBeDefined();
+  });
+
+  /**
+   * And when the age cannot be established at all — a paired device holding no
+   * snapshot, or one whose stamps are unreadable — it says the threshold rather
+   * than inventing a number. `snapshotAgeMs` answers `null` for exactly the
+   * cases `snapshotAge` calls `blocked`, so this is reachable and is the one
+   * state where the old wording is still the true one.
+   */
+  it("falls back to the threshold when there is no measurable age", () => {
+    render(<StatusStrip online={false} age="blocked" ageMs={null} quarantined={0} />);
 
     expect(screen.getByText("Данные обновлялись больше суток назад")).toBeDefined();
   });
@@ -399,7 +438,7 @@ describe("StatusStrip", () => {
    * day it finally says something.
    */
   it("says nothing about quarantine while nothing has been set aside", () => {
-    render(<StatusStrip online age="fresh" quarantined={0} />);
+    render(<StatusStrip online age="fresh" ageMs={0} quarantined={0} />);
 
     expect(text()).not.toContain("отклонил");
     expect(text()).not.toContain("администратор");
@@ -414,7 +453,7 @@ describe("StatusStrip", () => {
    * send them to fetch someone for a kiosk that is otherwise working perfectly.
    */
   it("names the orders the server refused for good, and whose problem they are", () => {
-    render(<StatusStrip online age="fresh" quarantined={2} />);
+    render(<StatusStrip online age="fresh" ageMs={0} quarantined={2} />);
 
     expect(text()).toContain("Сервер отклонил заявки: 2");
     expect(text()).toContain("нужен администратор");

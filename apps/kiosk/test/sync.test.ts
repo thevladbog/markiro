@@ -1,11 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   cacheAge,
+  cancelFlushRetry,
   flushQueue,
+  humaniseAge,
   isTerminalRejection,
   refreshSnapshot,
+  RETRY_BASE_MS,
+  RETRY_MAX_MS,
   serverNow,
   snapshotAge,
+  snapshotAgeMs,
   STALE_BLOCK_MS,
   STALE_WARN_MS,
 } from "../src/sync/worker.js";
@@ -22,6 +27,12 @@ import {
 import type { KioskBootstrapDto } from "../src/api/types.js";
 
 afterEach(() => {
+  // FIRST, and while the fake timers are still installed: a drain that stopped
+  // on a transport failure leaves a retry armed, and this module holds it —
+  // `clearTimeout` has to reach the same timer implementation that set it.
+  // Without this a pending retry would fire into the NEXT test, against a
+  // client that test never built.
+  cancelFlushRetry();
   vi.restoreAllMocks();
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -693,6 +704,209 @@ describe("flushQueue", () => {
   });
 });
 
+/**
+ * THE BACKOFF, and the gap it closes.
+ *
+ * A drain that stops on a dead network used to wait for whatever came first:
+ * the five-minute refresh tick or an `online` event. A blink that clears in two
+ * seconds therefore cost a worker's order up to five minutes in the queue —
+ * and `online` never fires at all for the commonest outage of the lot, an API
+ * that is down behind a Wi-Fi link that is perfectly up.
+ *
+ * Every test here drives the clock with fake timers. `setImmediate` is left
+ * REAL because `fake-indexeddb` schedules every transaction step through it,
+ * and the stores are mocked out besides — a schedule measured through a real
+ * IndexedDB round trip would be measuring the store, not the backoff.
+ */
+describe("flushQueue backoff", () => {
+  /** The queue, answered from memory: see the note above. */
+  function queueOf(...deviceSeqs: number[]): void {
+    vi.spyOn(queueStore, "listQueue").mockResolvedValue(
+      deviceSeqs.map((deviceSeq) => ({
+        deviceSeq,
+        employeeId: "e1",
+        body: { deviceSeq, badgeDigest: "B", reason: "buy" as const, items: [] },
+      })),
+    );
+    vi.spyOn(queueStore, "dequeueOrder").mockResolvedValue(undefined);
+    vi.spyOn(journalStore, "appendJournal").mockResolvedValue(undefined);
+  }
+
+  function useSyncFakeTimers(): void {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  }
+
+  /** Every submission this drain attempted, by the fake clock. */
+  function attemptRecorder(fail: () => unknown) {
+    const at: number[] = [];
+    return {
+      at,
+      gaps: () => {
+        let previous = at[0] ?? 0;
+        return at.slice(1).map((moment) => {
+          const gap = moment - previous;
+          previous = moment;
+          return gap;
+        });
+      },
+      client: {
+        bootstrap: vi.fn(),
+        submitOrder: vi.fn(async () => {
+          at.push(Date.now());
+          const err = fail();
+          if (err) throw err;
+          return { orderNo: "ORD-26-0001", status: "pending", itemCount: 0, conflicts: [] };
+        }),
+      },
+    };
+  }
+
+  it("retries a drain the network refused, doubling the wait and never exceeding the cap", async () => {
+    useSyncFakeTimers();
+    queueOf(1);
+    const recorder = attemptRecorder(() => new TypeError("Failed to fetch"));
+
+    await flushQueue(recorder.client as never, () => new Date());
+    await vi.advanceTimersByTimeAsync(190_000);
+
+    // 1 s doubling to a one-minute ceiling: fast enough that a blink which
+    // clears in seconds costs the worker seconds, and bounded well below the
+    // five-minute refresh tick so a night-long outage is one attempt a minute
+    // rather than a spin.
+    expect(recorder.gaps()).toEqual([1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 60_000, 60_000]);
+    expect(recorder.gaps()[0]).toBe(RETRY_BASE_MS);
+    expect(Math.max(...recorder.gaps())).toBe(RETRY_MAX_MS);
+  });
+
+  it("keeps exactly one retry armed, however many drains stop on the same outage", async () => {
+    useSyncFakeTimers();
+    queueOf(1);
+    const recorder = attemptRecorder(() => new TypeError("Failed to fetch"));
+
+    await flushQueue(recorder.client as never, () => new Date());
+    await flushQueue(recorder.client as never, () => new Date());
+    await flushQueue(recorder.client as never, () => new Date());
+
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
+  it("resets the wait once a delivery lands, so the next outage starts from the base again", async () => {
+    useSyncFakeTimers();
+    queueOf(1);
+    let offline = true;
+    const recorder = attemptRecorder(() => (offline ? new TypeError("Failed to fetch") : null));
+
+    await flushQueue(recorder.client as never, () => new Date());
+    await vi.advanceTimersByTimeAsync(1_000); // second attempt
+    await vi.advanceTimersByTimeAsync(2_000); // third — the wait is now 4 s
+    expect(recorder.at).toHaveLength(3);
+
+    // The link comes back and the fourth attempt goes through.
+    offline = false;
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(recorder.at).toHaveLength(4);
+    // Nothing is owed, so nothing is armed.
+    expect(vi.getTimerCount()).toBe(0);
+
+    // And when it dies again the schedule starts over rather than resuming at
+    // the 8 s it had climbed to — the whole point of resetting on success.
+    offline = true;
+    await flushQueue(recorder.client as never, () => new Date());
+    await vi.advanceTimersByTimeAsync(RETRY_BASE_MS - 1);
+    expect(recorder.at).toHaveLength(5);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(recorder.at).toHaveLength(6);
+  });
+
+  /**
+   * A STATUS IS AN ANSWER, AND AN ANSWER IS NOT AN OUTAGE.
+   *
+   * The backoff exists for the case where nothing was reached at all. A server
+   * that replies 500 or 429 has been reached, and hammering it every second
+   * while it is struggling is the opposite of back-pressure; a 401 is a revoked
+   * device, which the shell handles by returning to pairing and which no number
+   * of retries can fix. Both wait for the ordinary refresh tick, exactly as
+   * they did before.
+   */
+  it.each([
+    ["a server fault", new KioskApiError(500, "boom")],
+    ["back-pressure", new KioskApiError(429, "Too Many Requests")],
+    ["a lost route", new KioskApiError(404, "Not Found")],
+    ["a revoked device", new KioskApiError(401, "Unauthorized")],
+  ])("arms no retry for %s — the server answered", async (_label, err) => {
+    useSyncFakeTimers();
+    queueOf(1);
+
+    await flushQueue(refusingClient(err) as never, () => new Date());
+
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("arms no retry for an order the server refused for good — it is parked, not owed", async () => {
+    useSyncFakeTimers();
+    queueOf(1);
+    vi.spyOn(queueStore, "quarantineOrder").mockResolvedValue(undefined);
+
+    await flushQueue(
+      refusingClient(new KioskApiError(422, "Unknown or inactive badge")) as never,
+      () => new Date(),
+    );
+
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  /**
+   * NO TIMER MAY OUTLIVE THE SHELL. The retry holds the client the shell built,
+   * and that client records the reply for the order `submitCart` is awaiting —
+   * so a retry left armed past an unmount fires into a React tree that is gone.
+   */
+  it("drops a pending retry on cancelFlushRetry, and the schedule starts over afterwards", async () => {
+    useSyncFakeTimers();
+    queueOf(1);
+    const recorder = attemptRecorder(() => new TypeError("Failed to fetch"));
+
+    await flushQueue(recorder.client as never, () => new Date());
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(recorder.at).toHaveLength(2);
+    expect(vi.getTimerCount()).toBe(1);
+
+    cancelFlushRetry();
+
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(10 * RETRY_MAX_MS);
+    expect(recorder.at).toHaveLength(2);
+  });
+
+  /**
+   * The same guarantee against the race that makes it hard: the cancel lands
+   * while a drain is still in flight, so the drain arms its retry AFTER the
+   * shell has already gone. A flag checked only at cancel time would miss this
+   * one, and it is precisely the unmount-during-an-outage case.
+   */
+  it("arms nothing when the cancel lands mid-drain", async () => {
+    useSyncFakeTimers();
+    queueOf(1);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const client = {
+      bootstrap: vi.fn(),
+      submitOrder: vi.fn(async () => {
+        await held;
+        throw new TypeError("Failed to fetch");
+      }),
+    };
+
+    const drained = flushQueue(client as never, () => new Date());
+    cancelFlushRetry();
+    release();
+    await drained;
+
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
 describe("isTerminalRejection", () => {
   it.each([400, 409, 422])(
     "treats %i as a verdict this order can never come back from",
@@ -864,6 +1078,82 @@ describe("snapshotAge", () => {
     expect(snapshotAge(snap, after(STALE_WARN_MS))).toBe("warn");
     expect(snapshotAge(snap, after(STALE_BLOCK_MS - 1))).toBe("warn");
     expect(snapshotAge(snap, after(STALE_BLOCK_MS))).toBe("blocked");
+  });
+});
+
+/**
+ * The same measurement the gate makes, handed back as a NUMBER — which is what
+ * the strip needs to say «Данные обновлялись 30 ч назад» instead of the
+ * threshold-shaped «больше суток назад» (design 2026-07-24 §7).
+ *
+ * `null` rather than a guess wherever the age cannot be established, which is
+ * the same fail-closed rule `snapshotAge` states as `blocked`: the two answers
+ * are two readings of one arithmetic, so the strip can never claim an age for a
+ * dataset the gate has refused to date.
+ */
+describe("snapshotAgeMs", () => {
+  const SERVER = "2026-07-28T00:00:00.000Z";
+  const HOUR = 60 * 60_000;
+
+  it("measures elapsed time since the fetch", () => {
+    const snap: CachedSnapshot = { bootstrap: bootstrap(SERVER), fetchedAt: SERVER };
+    expect(snapshotAgeMs(snap, new Date(Date.parse(SERVER) + 30 * HOUR))).toBe(30 * HOUR);
+  });
+
+  // Two readings of the SAME clock, so a tablet whose date is years out still
+  // ages its snapshot at one second per second — exactly as `snapshotAge` does.
+  it("cancels a skewed device clock out, like the gate above it", () => {
+    const skew = 40 * STALE_BLOCK_MS;
+    const snap: CachedSnapshot = {
+      bootstrap: bootstrap(SERVER),
+      fetchedAt: new Date(Date.parse(SERVER) + skew).toISOString(),
+    };
+    expect(snapshotAgeMs(snap, new Date(Date.parse(SERVER) + skew + 30 * HOUR))).toBe(30 * HOUR);
+  });
+
+  it("refuses to date a snapshot it cannot measure", () => {
+    expect(snapshotAgeMs(null, new Date(SERVER))).toBeNull();
+    expect(
+      snapshotAgeMs({ bootstrap: bootstrap("not-a-date"), fetchedAt: SERVER }, new Date(SERVER)),
+    ).toBeNull();
+    expect(
+      snapshotAgeMs({ bootstrap: bootstrap(SERVER), fetchedAt: "not-a-date" }, new Date(SERVER)),
+    ).toBeNull();
+  });
+});
+
+/**
+ * «N назад», coarsely — hours, then days.
+ *
+ * Coarse on purpose. Nobody standing at a kiosk acts differently on 30 h than
+ * on 30 h 40 min, and the precision would cost the one thing this copy cannot
+ * afford: a Russian plural. i18next's RU categories (`_one/_few/_many/_other`)
+ * have no EN counterpart, and the two files must carry identical key sets — so
+ * the unit is chosen here and the copy names it with an indeclinable
+ * abbreviation («ч», «сут»), the way `cart.total` already says «{{n}} шт».
+ */
+describe("humaniseAge", () => {
+  const HOUR = 60 * 60_000;
+  const DAY = 24 * HOUR;
+
+  it("counts whole hours below two days", () => {
+    expect(humaniseAge(24 * HOUR)).toEqual({ unit: "hours", n: 24 });
+    expect(humaniseAge(30 * HOUR + 59 * 60_000)).toEqual({ unit: "hours", n: 30 });
+    expect(humaniseAge(2 * DAY - 1)).toEqual({ unit: "hours", n: 47 });
+  });
+
+  it("switches to whole days at two, where the hour count stops meaning anything", () => {
+    expect(humaniseAge(2 * DAY)).toEqual({ unit: "days", n: 2 });
+    expect(humaniseAge(6 * DAY + 23 * HOUR)).toEqual({ unit: "days", n: 6 });
+    expect(humaniseAge(9 * DAY)).toEqual({ unit: "days", n: 9 });
+  });
+
+  // Rounds DOWN, like every «N ago» anywhere: 30 h 59 min is «30 ч назад».
+  // Never below zero either — a device whose clock ran backwards between two
+  // refreshes must not be told its data is minus four hours old.
+  it("never counts backwards", () => {
+    expect(humaniseAge(0)).toEqual({ unit: "hours", n: 0 });
+    expect(humaniseAge(-5 * HOUR)).toEqual({ unit: "hours", n: 0 });
   });
 });
 
