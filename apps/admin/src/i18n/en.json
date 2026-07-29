@@ -384,7 +384,13 @@
       "filters": {
         "shiftLabel": "Shift",
         "shiftAll": "All shifts",
-        "shiftHint": "Shows conflicts where this shift's scan was the one displaced, not every conflict touching this shift"
+        "shiftHint": "Shows conflicts where this shift's scan was the one displaced, not every conflict touching this shift",
+        "reviewedLabel": "Status",
+        "reviewed": {
+          "unreviewed": "Unreviewed",
+          "reviewed": "Reviewed",
+          "all": "All"
+        }
       },
       "table": {
         "code": "Code",

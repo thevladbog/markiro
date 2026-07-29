@@ -139,7 +139,8 @@ describe("ConflictsPage", () => {
     expect(table.queryByText(UNREVIEWED.codeHash)).toBeNull();
     expect(table.getByText("t1")).toBeDefined();
     expect(table.getByText("t2")).toBeDefined();
-    expect(fetchMock).toHaveBeenCalledWith("/api/conflicts", expect.any(Object));
+    // Defaults to the unreviewed filter (see the test below dedicated to it).
+    expect(fetchMock).toHaveBeenCalledWith("/api/conflicts?reviewed=false", expect.any(Object));
   });
 
   it("shows a spinner (not EmptyState) while the list request is still pending", async () => {
@@ -313,12 +314,37 @@ describe("ConflictsPage", () => {
 
     renderPage();
     await screen.findByRole("table");
-    expect(fetchMock).toHaveBeenCalledWith("/api/conflicts", expect.any(Object));
+    expect(fetchMock).toHaveBeenCalledWith("/api/conflicts?reviewed=false", expect.any(Object));
 
     fireEvent.change(screen.getByLabelText("Смена"), { target: { value: "s2" } });
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/api/conflicts?shiftId=s2", expect.any(Object));
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/conflicts?shiftId=s2&reviewed=false",
+        expect.any(Object),
+      );
+    });
+  });
+
+  // The bug this guards against: the list showed reviewed and unreviewed
+  // conflicts together, forever, because the page never sent `reviewed` at
+  // all -- "mark reviewed" changed a badge and nothing else. Defaulting to
+  // unreviewed-only is what actually shrinks the list.
+  it("defaults to the unreviewed filter, and the status toggle changes it", async () => {
+    const fetchMock = stubFetch({ conflicts: [UNREVIEWED] });
+
+    renderPage();
+    await screen.findByRole("table");
+    expect(fetchMock).toHaveBeenCalledWith("/api/conflicts?reviewed=false", expect.any(Object));
+
+    fireEvent.change(screen.getByLabelText("Статус"), { target: { value: "reviewed" } });
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/conflicts?reviewed=true", expect.any(Object));
+    });
+
+    fireEvent.change(screen.getByLabelText("Статус"), { target: { value: "all" } });
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/conflicts", expect.any(Object));
     });
   });
 });

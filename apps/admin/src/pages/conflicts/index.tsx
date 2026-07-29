@@ -10,6 +10,8 @@ import { toast } from "../../lib/toast.js";
 import { useShifts, type ShiftDto } from "../shifts/api.js";
 import { useConflicts, useReviewConflict, type ConflictDto } from "./api.js";
 
+type ReviewedFilter = "unreviewed" | "reviewed" | "all";
+
 /**
  * Cabinet-only backstop for the conflict class a station never learns it
  * lost: the losing terminal's batch was already acknowledged, so the server
@@ -29,10 +31,16 @@ export function ConflictsPage() {
   const { t, i18n } = useTranslation();
 
   const [shiftFilter, setShiftFilter] = useState<string>("all");
+  // Defaults to "unreviewed": without this, the list keeps every conflict
+  // ever detected, reviewed or not, forever -- so "mark reviewed" changed
+  // only a badge and the list never got shorter. See the spec's testing
+  // note: this view lists *unresolved* conflicts for a shift.
+  const [reviewedFilter, setReviewedFilter] = useState<ReviewedFilter>("unreviewed");
 
-  const { data, isPending, isError } = useConflicts(
-    shiftFilter !== "all" ? { shiftId: shiftFilter } : {},
-  );
+  const { data, isPending, isError } = useConflicts({
+    ...(shiftFilter !== "all" ? { shiftId: shiftFilter } : {}),
+    ...(reviewedFilter !== "all" ? { reviewed: reviewedFilter === "reviewed" } : {}),
+  });
   const { data: shiftsData } = useShifts();
   const reviewMutation = useReviewConflict();
 
@@ -52,6 +60,15 @@ export function ConflictsPage() {
       ...[...shifts].reverse().map((shift) => ({ value: shift.id, label: shiftLabel(shift) })),
     ],
     [t, shifts],
+  );
+
+  const reviewedFilterOptions: SelectOption[] = useMemo(
+    () => [
+      { value: "unreviewed", label: t("pages.conflicts.filters.reviewed.unreviewed") },
+      { value: "reviewed", label: t("pages.conflicts.filters.reviewed.reviewed") },
+      { value: "all", label: t("pages.conflicts.filters.reviewed.all") },
+    ],
+    [t],
   );
 
   const handleReview = async (id: string) => {
@@ -148,6 +165,14 @@ export function ConflictsPage() {
             value={shiftFilter}
             hint={t("pages.conflicts.filters.shiftHint")}
             onChange={(value) => setShiftFilter(value)}
+          />
+        </div>
+        <div style={{ width: 200 }}>
+          <Select
+            label={t("pages.conflicts.filters.reviewedLabel")}
+            options={reviewedFilterOptions}
+            value={reviewedFilter}
+            onChange={(value) => setReviewedFilter(value as ReviewedFilter)}
           />
         </div>
       </div>
