@@ -8,7 +8,7 @@ import {
   replaceSnapshot,
   UnusableBootstrapError,
 } from "../store/cache.js";
-import { writeConfig } from "../store/config.js";
+import { kioskIdOf, writeConfig } from "../store/config.js";
 
 /** `POST /kiosk/pair` accepts `/^\d{8}$/` — the admin panel issues nothing else. */
 const CODE_LENGTH = 8;
@@ -229,6 +229,14 @@ export function Pairing({
       await writeConfig({
         serverUrl,
         token: result.token,
+        // THE ONE MOMENT THIS DEVICE'S KIOSK IDENTITY IS ESTABLISHED, so it is
+        // the one place it can be recorded. The day count needs it to tell its
+        // own gate's orders from the ones the server reports in
+        // `takenTodayElsewhere`, and re-pairing is exactly the event that used
+        // to make the two overlap. Checked rather than trusted — the response
+        // is a cast over `res.json()`, and a server too old to name the kiosk
+        // must leave the device unidentified rather than bound to `undefined`.
+        kioskId: kioskIdOf(result.device),
         kioskName: result.device.kioskName,
         place: result.device.place,
         // Continues the counter instead of restarting at 0, so a re-paired

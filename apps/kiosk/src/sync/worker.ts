@@ -4,6 +4,7 @@ import {
   replaceSnapshot,
   type CachedSnapshot,
 } from "../store/cache.js";
+import { readConfig } from "../store/config.js";
 import { appendJournal } from "../store/journal.js";
 import { dequeueOrder, listQueue, quarantineOrder, type QueuedOrder } from "../store/queue.js";
 
@@ -416,6 +417,7 @@ async function quarantine(
   order: QueuedOrder,
   err: KioskApiError,
   now: () => Date,
+  kioskId: string | null,
 ): Promise<boolean> {
   const at = now().toISOString();
   try {
@@ -430,6 +432,10 @@ async function quarantine(
       // The scan time, as on the success path: a refusal has to be readable
       // beside the day it belongs to, not the day it was finally answered.
       createdAt: order.body.createdAt ?? at,
+      // The gate that refused it, which is the gate it was offered to. A
+      // refusal counts nothing against the worker, so this only ever keeps the
+      // line legible beside its neighbours on the service screen.
+      kioskId,
       deviceSeq: order.deviceSeq,
       // The vocabulary `Done` already uses for an order the server refused
       // outright, so the service screen needs no new state to read one.
@@ -472,6 +478,23 @@ async function drainOnce(client: KioskClient, now: () => Date): Promise<void> {
    * that arms one. */
   let unreachable = false;
   try {
+    /**
+     * WHICH KIOSK EVERYTHING THIS PASS DELIVERS WILL BE FILED AT.
+     *
+     * The token in `client` is this kiosk's, so the server files every order
+     * below under this id — including one queued at a gate the tablet has since
+     * been moved from. Read ONCE per pass, and read from the store rather than
+     * taken as an argument, so it is the binding as of the drain and not as of
+     * whenever the caller was built (`flushQueue` has 30-odd call sites; a
+     * parameter would be a stale copy at most of them).
+     *
+     * Inside the try on purpose: a config the store will not hand over aborts
+     * the pass and leaves the orders queued, exactly as a failing `listQueue`
+     * does. Journalling them under a guessed `null` instead would file today's
+     * withdrawals under "no kiosk" on a device that has one, and the day count
+     * would stop seeing them.
+     */
+    const kioskId = (await readConfig())?.kioskId ?? null;
     const queued = await listQueue(); // ascending deviceSeq
     for (const order of queued) {
       /** Whether THIS order's failure came from the wire or from the store
@@ -492,6 +515,11 @@ async function drainOnce(client: KioskClient, now: () => Date): Promise<void> {
           // moment. Journalling the sync time instead would move an order
           // queued through an outage into the wrong day for the day count.
           createdAt: order.body.createdAt ?? at,
+          // The kiosk the server just filed it under — the one whose token
+          // carried it, not the one it was scanned at. An order queued at gate
+          // A and delivered after a re-pairing to gate B belongs to B, and the
+          // day count has to agree with the server about which.
+          kioskId,
           deviceSeq: order.deviceSeq,
           orderNo: result.orderNo,
           // Whom the DEVICE opened the session for; the server re-resolves the
@@ -509,7 +537,10 @@ async function drainOnce(client: KioskClient, now: () => Date): Promise<void> {
         // A timeout is deliberately NOT one of these — `KioskTimeoutError`
         // carries no status, so an aborted request stays retryable and the
         // order stays queued.
-        if (isTerminalRejection(err) && (await quarantine(order, err as KioskApiError, now))) {
+        if (
+          isTerminalRejection(err) &&
+          (await quarantine(order, err as KioskApiError, now, kioskId))
+        ) {
           continue;
         }
         // AN ANSWER FROM THE APPLICATION IS NOT AN OUTAGE — BUT AN ANSWER FROM

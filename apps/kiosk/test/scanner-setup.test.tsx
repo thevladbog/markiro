@@ -823,6 +823,7 @@ describe("ScannerSetup — what the store keeps", () => {
     await writeConfig({
       serverUrl: "https://markiro.test",
       token: "device-token",
+      kioskId: "k-1",
       kioskName: "Киоск 1",
       place: null,
       nextDeviceSeq: 1,

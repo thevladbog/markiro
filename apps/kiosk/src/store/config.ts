@@ -3,19 +3,56 @@ import { STORE_CONFIG, withStore } from "./db.js";
 const KEY = "current";
 const SCANNER_KEY = "scanner";
 
-/** Device identity and settings: server URL, device token, kiosk name/place,
- * and the next `deviceSeq` to use for a queued order. */
+/** Device identity and settings: server URL, device token, which kiosk the
+ * device is bound to (id, name, place), and the next `deviceSeq` to use for a
+ * queued order. */
 export interface KioskConfig {
   serverUrl: string;
   token: string | null;
+  /**
+   * WHICH KIOSK ROW THIS DEVICE IS BOUND TO — `PairKioskResultDto.device.kioskId`,
+   * recorded at the one moment it is established.
+   *
+   * Not cosmetic, unlike `kioskName` and `place` beside it: it is the identity
+   * the SERVER files this device's orders under, and therefore the identity its
+   * day-limit figure excludes when it reports what a worker took at every OTHER
+   * kiosk (`employees[].takenTodayElsewhere`). The device's own half of that sum
+   * is counted out of a journal that belongs to the DEVICE, so without this the
+   * two halves are keyed on different things and a re-paired tablet counts its
+   * old gate's orders in both — see `countTakenToday`.
+   *
+   * `null` on a config written before this field existed, which reads as "this
+   * device cannot say which kiosk it is", and is deliberately the same answer an
+   * unstamped journal entry gives. Any pairing writes a real id.
+   */
+  kioskId: string | null;
   kioskName: string;
   place: string | null;
   nextDeviceSeq: number;
 }
 
+/**
+ * The kiosk id a stored record names, checked rather than trusted — the ONE
+ * rule for what counts as a kiosk identity on this device.
+ *
+ * Shared by the two records that have to agree: the config's binding and the
+ * stamp on a journal entry. They are compared for equality, so a single rule is
+ * what keeps `undefined` (a record from an older build), `""` and a stray
+ * non-string from being three different kinds of "unknown" that fail to match
+ * each other — or, worse, match a real gate.
+ */
+export function kioskIdOf(value: unknown): string | null {
+  const id = (value as { kioskId?: unknown } | null | undefined)?.kioskId;
+  return typeof id === "string" && id !== "" ? id : null;
+}
+
 export async function readConfig(): Promise<KioskConfig | null> {
   const found = await withStore<KioskConfig>(STORE_CONFIG, "readonly", (s) => s.get(KEY));
-  return found ?? null;
+  if (!found) return null;
+  // Normalised HERE so every caller — and every record written back through a
+  // spread of this one — carries the field in the shape the type promises,
+  // whatever the build that first wrote the record put there.
+  return { ...found, kioskId: kioskIdOf(found) };
 }
 
 export async function writeConfig(cfg: KioskConfig): Promise<void> {

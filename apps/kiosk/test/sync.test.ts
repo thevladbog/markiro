@@ -17,6 +17,8 @@ import {
 import { enqueueOrder, listQuarantine, listQueue } from "../src/store/queue.js";
 import * as queueStore from "../src/store/queue.js";
 import * as journalStore from "../src/store/journal.js";
+import * as configStore from "../src/store/config.js";
+import { writeConfig } from "../src/store/config.js";
 import { readSnapshot, replaceSnapshot, type CachedSnapshot } from "../src/store/cache.js";
 import {
   createKioskClient,
@@ -177,6 +179,9 @@ describe("flushQueue", () => {
         // taken the previous evening and waited out an outage, and it is the
         // day it was TAKEN that the server counts it against.
         createdAt: "2026-07-27T21:30:00.000Z",
+        // No config was written in this test, so the device cannot say which
+        // kiosk it is — see the test below for the stamp that matters.
+        kioskId: null,
         deviceSeq: 4,
         orderNo: "ORD-26-0004",
         employeeId: "e1",
@@ -187,6 +192,55 @@ describe("flushQueue", () => {
       },
     ]);
     expect(await listQueue()).toEqual([]);
+  });
+
+  /**
+   * THE STAMP THAT KEEPS THE DAY COUNT'S TWO HALVES DISJOINT.
+   *
+   * The device counts its own gate's orders out of this journal and takes every
+   * other gate's from the server's `takenTodayElsewhere`, which is the figure
+   * with THIS gate excluded. The journal, though, belongs to the DEVICE — a
+   * tablet re-paired from gate A to gate B keeps A's entries — so each entry has
+   * to name the gate it was filed at or the two halves overlap and a worker is
+   * charged twice for one bottle.
+   *
+   * The binding is read at DRAIN time, not carried on the queued record: the
+   * token this client holds is the one the server files under, so an order
+   * queued at the old gate and delivered after the re-pairing belongs to the
+   * new one.
+   */
+  it("stamps the entry with the kiosk the device is bound to when the server answers", async () => {
+    await writeConfig({
+      serverUrl: "/api",
+      token: "tok",
+      kioskId: "k-gate-b",
+      kioskName: "Проходная Б",
+      place: null,
+      nextDeviceSeq: 2,
+    });
+    await enqueueOrder(
+      {
+        deviceSeq: 1,
+        badgeDigest: "B",
+        reason: "buy",
+        items: [{ rawKm: "01…" }],
+        createdAt: "2026-07-28T06:00:00.000Z",
+      },
+      "e1",
+    );
+    const client = {
+      bootstrap: vi.fn(),
+      submitOrder: vi.fn(async () => ({
+        orderNo: "ORD-26-0001",
+        status: "pending",
+        itemCount: 1,
+        conflicts: [],
+      })),
+    };
+
+    await flushQueue(client as never, () => new Date("2026-07-28T07:00:00.000Z"));
+
+    expect((await journalStore.readJournal(10))[0]).toMatchObject({ kioskId: "k-gate-b" });
   });
 
   // With no `createdAt` in the body the server stamps the order as it arrives
@@ -568,6 +622,10 @@ describe("flushQueue", () => {
       {
         at: "2026-07-28T07:00:00.000Z",
         createdAt: "2026-07-27T20:00:00.000Z",
+        // The gate it was offered to and refused at. Nothing is charged to the
+        // worker either way — this only keeps the line legible on the service
+        // screen beside the entries around it.
+        kioskId: null,
         deviceSeq: 1,
         orderNo: "",
         employeeId: "e1",
@@ -716,10 +774,15 @@ describe("flushQueue", () => {
  * Every test here drives the clock with fake timers. `setImmediate` is left
  * REAL because `fake-indexeddb` schedules every transaction step through it,
  * and the stores are mocked out besides — a schedule measured through a real
- * IndexedDB round trip would be measuring the store, not the backoff.
+ * IndexedDB round trip would be measuring the store, not the backoff. That is
+ * not merely tidier: a retry armed on the fake clock resolves inside
+ * `advanceTimersByTimeAsync`, which pumps microtasks but not a real
+ * `setImmediate`, so a drain awaiting a genuine store read there never gets
+ * past it and the attempt is simply never made.
  */
 describe("flushQueue backoff", () => {
-  /** The queue, answered from memory: see the note above. */
+  /** The queue and everything else the drain reads, answered from memory: see
+   * the note above. */
   function queueOf(...deviceSeqs: number[]): void {
     vi.spyOn(queueStore, "listQueue").mockResolvedValue(
       deviceSeqs.map((deviceSeq) => ({
@@ -730,6 +793,9 @@ describe("flushQueue backoff", () => {
     );
     vi.spyOn(queueStore, "dequeueOrder").mockResolvedValue(undefined);
     vi.spyOn(journalStore, "appendJournal").mockResolvedValue(undefined);
+    // The drain reads the device's binding once a pass, to stamp the journal
+    // with the kiosk the server is filing under.
+    vi.spyOn(configStore, "readConfig").mockResolvedValue(null);
   }
 
   function useSyncFakeTimers(): void {

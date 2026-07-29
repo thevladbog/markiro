@@ -637,6 +637,14 @@ export function KioskShell(): React.JSX.Element {
         // from must be the one current when the badge landed, not one captured
         // by a render, and this effect deliberately does not restart on refresh.
         const elsewhere = takenTodayElsewhere(snapshotRef.current?.bootstrap ?? null, employeeId);
+        // Through the ref for the same reason, and it is what makes the two
+        // halves disjoint: the journal holds whatever this DEVICE filed, at
+        // whichever gates it has been bound to, while `elsewhere` is the
+        // server's figure with THIS gate excluded. Only the entries stamped
+        // with the id below are this gate's; the rest are already in that
+        // figure. `null` — a device paired before the id was recorded — matches
+        // the entries that name no gate either (see `countTakenToday`).
+        const boundKioskId = configRef.current?.kioskId ?? null;
         const [journal, queued] = await Promise.all([
           readJournalSince(startOfUtcDay(at)),
           listQueue(),
@@ -644,7 +652,9 @@ export function KioskShell(): React.JSX.Element {
         if (!alive) return;
         setTakenToday({
           sessionId,
-          count: countTakenToday({ employeeId, today: utcDayOf(at), journal, queued }) + elsewhere,
+          count:
+            countTakenToday({ employeeId, today: utcDayOf(at), boundKioskId, journal, queued }) +
+            elsewhere,
         });
       } catch (err) {
         console.error("kiosk: could not count what this worker has taken today", err);

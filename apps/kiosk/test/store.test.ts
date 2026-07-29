@@ -8,7 +8,7 @@ import {
   quarantineOrder,
   quarantineQueue,
 } from "../src/store/queue.js";
-import { readConfig, writeConfig } from "../src/store/config.js";
+import { readConfig, writeConfig, type KioskConfig } from "../src/store/config.js";
 import type { KioskBootstrapDto } from "../src/api/types.js";
 
 const snapshot = (employees: KioskBootstrapDto["employees"]): KioskBootstrapDto => ({
@@ -126,10 +126,48 @@ describe("config", () => {
     await writeConfig({
       serverUrl: "http://srv",
       token: "tok",
+      kioskId: "k-1",
       kioskName: "Киоск-1",
       place: "Проходная",
       nextDeviceSeq: 7,
     });
-    expect(await readConfig()).toMatchObject({ token: "tok", nextDeviceSeq: 7 });
+    expect(await readConfig()).toMatchObject({ token: "tok", kioskId: "k-1", nextDeviceSeq: 7 });
+  });
+
+  /**
+   * THE UPGRADE PATH for the binding itself. A config written before
+   * `kioskId` existed carries no such property, and the day count compares the
+   * value it finds here against the stamp on a journal entry — so an
+   * `undefined` that is never normalised would be a third kind of "unknown"
+   * that matches neither a real gate nor an unstamped entry, and the local half
+   * of the day limit would silently read zero.
+   */
+  it("reads a config written before the binding was recorded as bound to no kiosk", async () => {
+    const legacy = {
+      serverUrl: "http://srv",
+      token: "tok",
+      kioskName: "Киоск-1",
+      place: null,
+      nextDeviceSeq: 7,
+    } as unknown as KioskConfig;
+    await writeConfig(legacy);
+
+    const found = await readConfig();
+    expect(found?.kioskId).toBeNull();
+    expect(found?.token).toBe("tok");
+  });
+
+  /** Checked rather than trusted, and by the same rule the journal's stamp is
+   * read with: an empty string is not an identity. */
+  it("reads an empty binding as no kiosk at all", async () => {
+    await writeConfig({
+      serverUrl: "http://srv",
+      token: "tok",
+      kioskId: "",
+      kioskName: "Киоск-1",
+      place: null,
+      nextDeviceSeq: 1,
+    });
+    expect((await readConfig())?.kioskId).toBeNull();
   });
 });

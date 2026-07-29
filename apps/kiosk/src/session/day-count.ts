@@ -1,4 +1,5 @@
 import type { KioskBootstrapDto } from "../api/types.js";
+import { kioskIdOf } from "../store/config.js";
 import type { JournalEntry } from "../store/journal.js";
 import type { QueuedOrder } from "../store/queue.js";
 
@@ -27,6 +28,14 @@ export interface TakenTodayInput {
   employeeId: string;
   /** The UTC day being counted, from `utcDayOf`. */
   today: string;
+  /**
+   * WHICH KIOSK THIS DEVICE IS BOUND TO RIGHT NOW — `KioskConfig.kioskId`, and
+   * the identity that decides which of the journal's entries are "this kiosk's".
+   *
+   * `null` for a device that cannot say (a config written before the field
+   * existed), which matches the entries that cannot say either.
+   */
+  boundKioskId: string | null;
   /** The journal, as `readJournalSince(startOfUtcDay(now))` returned it. */
   journal: readonly JournalEntry[];
   /** Everything still waiting to sync, from `listQueue()`. */
@@ -62,42 +71,78 @@ export interface TakenTodayInput {
  * not, and no order can be in both. Widening either side to overlap the other
  * reintroduces double counting, which is the unsafe direction above.
  *
- * WITH ONE KNOWN GAP, and it is in the identity of "this kiosk" rather than in
- * the arithmetic: the journal belongs to the DEVICE, and the server's exclusion
- * is by KIOSK ID. A device re-paired onto a DIFFERENT kiosk keeps the journal it
- * accumulated on the old one (nothing clears it, and `KioskConfig` does not even
- * record which kiosk it holds), so for the remainder of that UTC day those
- * orders are counted twice — once here, once in the server's figure, which no
- * longer excludes the kiosk they were filed under. It is the unsafe direction,
- * bounded by midnight and by how rarely a tablet moves gates. Closing it means
- * giving the journal a kiosk identity and ignoring the entries that do not match
- * the device's current pairing; do that as its own change, not as a watermark.
+ * AND "THIS KIOSK" IS NOW A KIOSK ID, not merely "whatever this device
+ * remembers". The journal belongs to the DEVICE while the server's exclusion is
+ * by KIOSK ID, and nothing clears the journal when a tablet is re-paired — the
+ * documented recovery path for a device nobody can sign into. So a tablet moved
+ * from gate A to gate B used to count gate A's orders here AND receive them in
+ * `takenTodayElsewhere`, double counted until UTC midnight: exactly the failure
+ * the split was built to make impossible. Each entry therefore carries the
+ * kiosk it was filed at (`JournalEntry.kioskId`, stamped when the server's
+ * answer is journalled) and only the entries matching `boundKioskId` are
+ * counted here. The rest are the server's to report, and it does.
+ *
+ * ENTRIES THAT NAME NO KIOSK — written by the build before that stamp existed —
+ * are counted only while the DEVICE'S OWN BINDING names none either. It is the
+ * one judgement call here, and it is decided by which unknown is which: an
+ * unstamped journal on a config that is equally unstamped is a device that has
+ * not paired since the upgrade, so it has not moved and its history really is
+ * this gate's; skipping it would switch the local half of the day limit off
+ * across the whole installed base for nothing. And a device that HAS paired
+ * since carries a real id, so those same entries stop matching — the very event
+ * that could have moved the tablet is the event that orphans them. Counting
+ * them unconditionally is what leaves the double count open; skipping them
+ * unconditionally under-counts a legitimate same-gate history. Matching unknown
+ * to unknown takes the safe side of each.
  *
  * Both sources are counted because both are withdrawals the worker has already
  * walked away with:
  *
  *  - the JOURNAL contributes what the server accepted, which is what actually
- *    counted against them server-side;
+ *    counted against them server-side, at the gate it was accepted for;
  *  - the QUEUE contributes everything scanned, because the server has not yet
  *    said which of those it accepts. The moment the order syncs, its journal
  *    entry replaces the estimate.
+ *
+ * THE QUEUE HALF CARRIES NO KIOSK AND IS NOT FILTERED, deliberately. A queued
+ * order has not been filed anywhere yet; it goes out under whatever token the
+ * device holds when the drain reaches it, so the server files it under the gate
+ * the device is bound to THEN — which is the gate asking this question. An
+ * enqueue-time stamp would be a claim about the past that the delivery can
+ * falsify, and filtering on it would drop an order this gate really is about to
+ * file while `takenTodayElsewhere` (this gate excluded) does not report it
+ * either: counted nowhere.
  *
  * Records this device cannot attribute are SKIPPED — entries written before
  * the journal carried an employee, orders queued by an older app version, a
  * stamp that will not parse. Skipping is what "cannot know" looks like; the
  * alternative is charging one worker's bottles to whoever badges in next.
  */
-export function countTakenToday({ employeeId, today, journal, queued }: TakenTodayInput): number {
+export function countTakenToday({
+  employeeId,
+  today,
+  boundKioskId,
+  journal,
+  queued,
+}: TakenTodayInput): number {
   // Keyed by `deviceSeq` — the order's own identity — because one order can
   // legitimately appear more than once. `flushQueue` journals BEFORE it
   // dequeues, so a crash in between leaves an order in both stores at once and
   // journals its verdict again on replay. Summing the rows would charge the
   // worker twice for bottles they took once.
+  //
+  // The key is only unique WITHIN one kiosk (`(tenantId, kioskId, deviceSeq)` is
+  // the server's idempotency key, and a freshly paired kiosk restarts the
+  // counter), which the filter below is what makes true here: every key in this
+  // map belongs to `boundKioskId`.
   const perOrder = new Map<number, number>();
 
   // The journal first: where both stores hold the same order, the server's
   // accepted count is the better answer than the queue's estimate.
   for (const entry of journal) {
+    // Another gate's order — the server counts it in `takenTodayElsewhere`, so
+    // counting it here too is the double count this filter exists to close.
+    if (kioskIdOf(entry) !== boundKioskId) continue;
     const taken = attributedEntry(entry);
     if (!taken) continue;
     if (taken.employeeId !== employeeId || utcDayOfStamp(taken.takenAt) !== today) continue;

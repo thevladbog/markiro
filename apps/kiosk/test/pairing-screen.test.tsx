@@ -217,6 +217,11 @@ describe("Pairing", () => {
     expect(await readConfig()).toEqual({
       serverUrl: SERVER,
       token: "tok-abc",
+      // WHICH KIOSK THE DEVICE JUST BECAME, and the only moment it can be
+      // learned. The day count needs it to tell the orders this gate filed from
+      // the ones the server reports for every other gate, and a tablet moved
+      // between gates has nothing else to distinguish them by.
+      kioskId: "k-1",
       kioskName: "Склад №1",
       place: "Проходная",
       nextDeviceSeq: 7,
@@ -233,6 +238,34 @@ describe("Pairing", () => {
     expect(writes.replaceSnapshot.mock.invocationCallOrder[0]!).toBeLessThan(
       writes.writeConfig.mock.invocationCallOrder[0]!,
     );
+  });
+
+  /**
+   * The upgrade path on the SERVER's side of the wire, for the binding. The
+   * response is a cast over `res.json()` and nothing validates it at runtime,
+   * so an API too old to name the kiosk must leave the device UNIDENTIFIED
+   * rather than bound to `undefined` — the day count compares this value for
+   * equality, and a third kind of unknown would match nothing.
+   */
+  it("pairs against a server that does not name the kiosk, and stays unidentified", async () => {
+    const result = bundle();
+    delete (result.device as Partial<PairKioskResultDto["device"]>).kioskId;
+    stubFetch(() => Promise.resolve(okResponse(result)));
+    render(
+      <Pairing
+        defaultServerUrl={SERVER}
+        subscribe={fakeFanOut().subscribe}
+        onPaired={vi.fn()}
+        onConfigureScanner={vi.fn()}
+      />,
+    );
+
+    typeDigits("12345678");
+    fireEvent.click(submitButton());
+
+    await handOver();
+    expect((await readConfig())?.token).toBe("tok-abc");
+    expect((await readConfig())?.kioskId).toBeNull();
   });
 
   it("leaves the device unpaired and recoverable when the snapshot write itself fails", async () => {

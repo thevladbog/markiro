@@ -304,9 +304,14 @@ function setOnLine(value: boolean): void {
   Object.defineProperty(navigator, "onLine", { value, configurable: true });
 }
 
+/** The gate this device is bound to, as pairing records it — and what the
+ * journal's entries have to name to be counted as this gate's. */
+const KIOSK_ID = "k-1";
+
 const config = (over: Partial<KioskConfig> = {}): KioskConfig => ({
   serverUrl: "/api",
   token: "tok-abc",
+  kioskId: KIOSK_ID,
   kioskName: "Склад №1",
   place: "Проходная",
   nextDeviceSeq: 5,
@@ -689,6 +694,7 @@ describe("KioskShell", () => {
     await appendJournal({
       at: NOW.toISOString(),
       createdAt: NOW.toISOString(),
+      kioskId: KIOSK_ID,
       deviceSeq: 3,
       orderNo: "ORD-26-0003",
       conflicts: [],
@@ -785,6 +791,7 @@ describe("KioskShell", () => {
     await appendJournal({
       at: NOW.toISOString(),
       createdAt: NOW.toISOString(),
+      kioskId: KIOSK_ID,
       deviceSeq: 3,
       orderNo: "ORD-26-0003",
       conflicts: [],
@@ -799,6 +806,72 @@ describe("KioskShell", () => {
     await settle(() => expect(screen.getByText(CART_TITLE)).toBeDefined());
     // 2 elsewhere + 1 here = 3 of 5.
     await settle(() => expect(screen.getByText("Лимит 5 шт в день · осталось 2")).toBeDefined());
+  });
+
+  /**
+   * A TABLET THAT HAS BEEN MOVED BETWEEN GATES, which is not exotic: re-pairing
+   * is the documented recovery path for a device nobody can sign into.
+   *
+   * The two halves are split by SOURCE, and the source the DEVICE stands for is
+   * one KIOSK — but nothing clears the journal when the tablet is re-paired, so
+   * the old gate's orders used to be counted here AND arrive in the server's
+   * `takenTodayElsewhere`, which excludes this gate and not the one they were
+   * filed at. Double counted until UTC midnight, and over-counting is the unsafe
+   * direction: it refuses a worker product they are entitled to, at a machine
+   * with nobody standing there to overrule it.
+   */
+  it("does not charge the worker twice for an order filed at the gate this tablet came from", async () => {
+    // The server's figure is "every kiosk except this one", so the old gate's
+    // order is already inside it.
+    server.takenTodayElsewhere = 1;
+    await pair();
+    await appendJournal({
+      at: NOW.toISOString(),
+      createdAt: NOW.toISOString(),
+      // Filed before somebody carried the tablet to this gate.
+      kioskId: "k-other-gate",
+      deviceSeq: 3,
+      orderNo: "ORD-26-0003",
+      conflicts: [],
+      employeeId: EMPLOYEE.id,
+      acceptedCount: 1,
+    });
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+
+    scan(BADGE);
+
+    await settle(() => expect(screen.getByText(CART_TITLE)).toBeDefined());
+    // One order, counted once — the server's 1, and nothing out of the journal.
+    await settle(() => expect(screen.getByText("Лимит 5 шт в день · осталось 4")).toBeDefined());
+  });
+
+  /**
+   * THE UPGRADE PATH, and the reason the count did not simply drop every entry
+   * that names no kiosk. A device paired before the binding was recorded holds
+   * a config that names none and a journal that names none, and it has not
+   * moved — so its history really is this gate's. Refusing to count it would
+   * switch the local half of the day limit off across the whole installed base
+   * until each tablet happened to be re-paired.
+   */
+  it("counts an un-stamped journal on a device that has not paired since the upgrade", async () => {
+    await pair(NOW.toISOString(), { kioskId: null });
+    await appendJournal({
+      at: NOW.toISOString(),
+      createdAt: NOW.toISOString(),
+      deviceSeq: 3,
+      orderNo: "ORD-26-0003",
+      conflicts: [],
+      employeeId: EMPLOYEE.id,
+      acceptedCount: 2,
+    } as unknown as JournalEntry);
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+
+    scan(BADGE);
+
+    await settle(() => expect(screen.getByText(CART_TITLE)).toBeDefined());
+    await settle(() => expect(screen.getByText("Лимит 5 шт в день · осталось 3")).toBeDefined());
   });
 
   /**

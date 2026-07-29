@@ -10,12 +10,16 @@ import type { JournalEntry } from "../src/store/journal.js";
 
 const NOW = new Date("2026-07-28T12:00:00.000Z");
 const EMPLOYEE = "e1";
+/** The gate these entries were filed at, and the one the device is still bound
+ * to — the day count only counts the entries that match its own binding. */
+const KIOSK = "k-1";
 
 /** `at` and `createdAt` an instant apart, which is the normal online case:
  * the order is scanned and acknowledged in the same breath. */
 const entry = (orderNo: string, over: Partial<JournalEntry> = {}): JournalEntry => ({
   at: "2026-07-28T06:00:01.000Z",
   createdAt: "2026-07-28T06:00:00.000Z",
+  kioskId: KIOSK,
   deviceSeq: 1,
   orderNo,
   conflicts: [],
@@ -123,6 +127,7 @@ describe("journal retention", () => {
       countTakenToday({
         employeeId: EMPLOYEE,
         today: utcDayOf(justAfterMidnight),
+        boundKioskId: KIOSK,
         journal,
         queued: [],
       }),
@@ -177,7 +182,13 @@ describe("readJournalSince", () => {
 
     expect(journal.map((e) => e.orderNo)).toEqual(["OUTAGE", "TODAY"]);
     expect(
-      countTakenToday({ employeeId: EMPLOYEE, today: utcDayOf(NOW), journal, queued: [] }),
+      countTakenToday({
+        employeeId: EMPLOYEE,
+        today: utcDayOf(NOW),
+        boundKioskId: KIOSK,
+        journal,
+        queued: [],
+      }),
     ).toBe(2);
   });
 });
