@@ -21,7 +21,7 @@ function migratedDb(): DatabaseSync {
 }
 
 describe("STATION_MIGRATIONS", () => {
-  it("creates all eight mirror tables", () => {
+  it("creates all nine mirror tables", () => {
     const db = migratedDb();
     const rows = db
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
@@ -35,6 +35,7 @@ describe("STATION_MIGRATIONS", () => {
     expect(names).toContain("codes_mirror");
     expect(names).toContain("scan_events_mirror");
     expect(names).toContain("outbox");
+    expect(names).toContain("conflicts_mirror");
   });
 
   it("keeps operators_mirror and operators_mirror_b column-for-column identical", () => {

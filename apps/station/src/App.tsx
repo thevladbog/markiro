@@ -16,6 +16,7 @@ import { createKeyboardWedgeSource } from "./lib/scan-source.js";
 import { loadSoundSettings, type SoundSettings } from "./lib/signal-sound.js";
 import { tauriExecutor } from "./lib/sqlite.js";
 import { useSyncEngine } from "./lib/use-sync-engine.js";
+import { ConflictList } from "./pages/ConflictList.js";
 import { Enrollment } from "./pages/Enrollment.js";
 import { OperatorLogin } from "./pages/OperatorLogin.js";
 import { ShiftSelection } from "./pages/ShiftSelection.js";
@@ -89,6 +90,7 @@ export function App() {
   const [hardwareConfig, setHardwareConfig] = useState<HardwareConfig>(DEFAULT_HARDWARE_CONFIG);
   const [scannerStatus, setScannerStatus] = useState<ScannerStatus | null>(null);
   const [showSetup, setShowSetup] = useState(false);
+  const [showConflicts, setShowConflicts] = useState(false);
   // Bumped every time the operator leaves the setup screen (Done or Back),
   // so the scanner-session effect below re-runs even when the saved
   // `hardwareConfig.scanner` port/baud are unchanged -- e.g. Setup's own
@@ -325,6 +327,7 @@ export function App() {
       printerConfigured={hardwareConfig.printer !== null}
       syncPending={syncState.pending}
       syncStuck={syncState.stuck}
+      conflicts={syncState.conflicts}
       tasks={[]}
       activeTaskId=""
       onSelectTask={() => {}}
@@ -346,6 +349,8 @@ export function App() {
             setSessionEpoch((epoch) => epoch + 1);
           }}
         />
+      ) : showConflicts ? (
+        <ConflictList exec={tauriExecutor} onBack={() => setShowConflicts(false)} />
       ) : shift ? (
         shiftContext ? (
           <WorkScreen
@@ -380,6 +385,7 @@ export function App() {
           onSelected={handleShiftEntered}
           onNew={() => setFloorView("new")}
           onSetup={() => setShowSetup(true)}
+          onConflicts={() => setShowConflicts(true)}
         />
       ) : (
         <NewShift

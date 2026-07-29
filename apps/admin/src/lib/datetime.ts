@@ -15,3 +15,22 @@ export function formatCreatedAt(iso: string, language: string): string {
     new Date(iso),
   );
 }
+
+/**
+ * Same locale mapping as `formatCreatedAt`, but with second-level precision
+ * (`timeStyle: "medium"` instead of `"short"`).
+ *
+ * Deliberately a separate function rather than widening `formatCreatedAt`,
+ * which other pages (pickup list/detail) use for a different purpose and at
+ * minute precision on purpose. This one exists for the conflicts cabinet
+ * view's losing/winning scan-time columns (`pages/conflicts/index.tsx`):
+ * a conflict is, by construction, two scans of the same code seconds apart,
+ * so minute precision makes them display identically and hides the very
+ * thing a manager is there to compare.
+ */
+export function formatScanTime(iso: string, language: string): string {
+  const locale = language.startsWith("ru") ? "ru-RU" : "en-US";
+  return new Intl.DateTimeFormat(locale, { dateStyle: "short", timeStyle: "medium" }).format(
+    new Date(iso),
+  );
+}

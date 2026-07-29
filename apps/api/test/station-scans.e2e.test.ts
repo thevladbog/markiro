@@ -144,6 +144,54 @@ describe.skipIf(!ready)("station-scans e2e", () => {
     return rows.length;
   }
 
+  // Reads `code_registry`'s actual current owner directly, tenant-scoped —
+  // the only way to prove ownership itself (not just the JSON response,
+  // which is computed in application code and can silently diverge from
+  // what the database holds; see Finding 1 / Finding 2 in the review that
+  // added this helper).
+  async function registryOwner(
+    tenantId: string,
+    codeHash: string,
+  ): Promise<{ terminalId: string | null; scannedAt: Date } | undefined> {
+    const rows = await db
+      .select({
+        terminalId: schema.codeRegistry.terminalId,
+        scannedAt: schema.codeRegistry.scannedAt,
+      })
+      .from(schema.codeRegistry)
+      .where(
+        and(eq(schema.codeRegistry.tenantId, tenantId), eq(schema.codeRegistry.codeHash, codeHash)),
+      );
+    return rows[0];
+  }
+
+  // Returns the actual persisted CONTENT of every code_conflicts row for
+  // this code, not just how many there are: `rows.length` alone cannot catch
+  // a transposed losing/winning pair (e.g. `losingTerminalId:
+  // c.winning.terminalId`), which would leave every count-only assertion
+  // green while silently inverting who lost -- see the review that added
+  // this shape.
+  async function conflictRows(
+    tenantId: string,
+    codeHash: string,
+  ): Promise<
+    { losingTerminalId: string | null; winningTerminalId: string | null; losingScannedAt: Date }[]
+  > {
+    return db
+      .select({
+        losingTerminalId: schema.codeConflicts.losingTerminalId,
+        winningTerminalId: schema.codeConflicts.winningTerminalId,
+        losingScannedAt: schema.codeConflicts.losingScannedAt,
+      })
+      .from(schema.codeConflicts)
+      .where(
+        and(
+          eq(schema.codeConflicts.tenantId, tenantId),
+          eq(schema.codeConflicts.codeHash, codeHash),
+        ),
+      );
+  }
+
   it("accepts a batch from a station api-key and stores codes and events", async () => {
     const agent = request.agent(app!.getHttpServer());
     const tenantId = await signUpAndActivate(agent);
@@ -557,5 +605,214 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       .post("/station/scans")
       .send({ batchId: "machine-1:500", items: [] })
       .expect(401);
+  });
+
+  it("gives an unowned code to the batch that sent it, with no conflict", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const apiKey = await deviceKey(agent);
+    const shiftId = await openShift(agent);
+    const scan = item(shiftId, 1);
+
+    const res = await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send({ batchId: "m1:10", items: [scan] })
+      .expect(201);
+
+    expect((res.body as { conflicts: unknown[] }).conflicts).toEqual([]);
+    // The response alone is application-computed JSON and could stay green
+    // even if a bug wrote a row anyway (e.g. the uppercase-shiftId self-
+    // conflict this guards against — see the next test): assert the
+    // database directly holds none for this code either.
+    expect(await conflictRows(tenantId, scan.code!.codeHash)).toEqual([]);
+  });
+
+  it("does not self-conflict a fresh code whose shiftId arrives uppercased", async () => {
+    // Regression: `claim.shiftId` is whatever case the client sends, but a
+    // prior incumbent read back from Postgres's `uuid` column always comes
+    // back lowercased. Before the dto-level normalisation, an uppercase
+    // shiftId passed z.string().uuid() and the tenant-scoped shift guard
+    // (both semantic uuid comparisons) but then failed `sameScan`'s plain
+    // string equality against itself — via `freshHashes` folding into
+    // `wonHashes` for a code this same batch just inserted — fabricating a
+    // code_conflicts row whose losing and winning sides were the same scan.
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const apiKey = await deviceKey(agent);
+    const shiftId = (await openShift(agent)).toUpperCase();
+    const scan = item(shiftId, 1);
+
+    const res = await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send({ batchId: "m1:11", items: [scan] })
+      .expect(201);
+
+    expect((res.body as { conflicts: unknown[] }).conflicts).toEqual([]);
+    expect(await conflictRows(tenantId, scan.code!.codeHash)).toEqual([]);
+  });
+
+  it("reports a later scan of an already-owned code back to the sender", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+    const apiKey = await deviceKey(agent);
+    const shiftId = await openShift(agent);
+
+    const first = item(shiftId, 1);
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send({ batchId: "m1:20", items: [{ ...first, terminalId: "t1" }] })
+      .expect(201);
+
+    const later = {
+      ...first,
+      terminalId: "t2",
+      scannedAt: new Date(Date.parse(first.scannedAt) + 5000).toISOString(),
+    };
+    const res = await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send({ batchId: "m1:21", items: [later] })
+      .expect(201);
+
+    const conflicts = (
+      res.body as {
+        conflicts: { codeHash: string; winningTerminalId: string; winningScannedAt: string }[];
+      }
+    ).conflicts;
+    expect(conflicts).toHaveLength(1);
+    // `codeHash` and `winningScannedAt` were previously never asserted here
+    // -- only `winningTerminalId` -- so a bug scrambling either field could
+    // pass unnoticed.
+    expect(conflicts[0]!.codeHash).toBe(first.code!.codeHash);
+    expect(conflicts[0]!.winningTerminalId).toBe("t1");
+    expect(conflicts[0]!.winningScannedAt).toBe(first.scannedAt);
+  });
+
+  it("keeps the incumbent when a later batch ties its scannedAt exactly", async () => {
+    // Regression for setWhere's strict "<" (station-scans.service.ts): a
+    // tied scannedAt must NOT beat the incumbent. If that comparison were
+    // ever loosened to "<=", the second (later-arriving) batch would take
+    // over ownership purely by matching the timestamp, and "the same two
+    // scans, replayed in either arrival order, converge on one stable
+    // owner" would no longer hold.
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const apiKey = await deviceKey(agent);
+    const shiftId = await openShift(agent);
+
+    const first = { ...item(shiftId, 1), terminalId: "t1" };
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send({ batchId: "m1:60", items: [first] })
+      .expect(201);
+
+    // Exact same scannedAt, a different terminal -- a genuine tie, not a
+    // duplicate resend of the same scan (terminalId differs).
+    const tied = { ...first, terminalId: "t2" };
+    const res = await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send({ batchId: "m1:61", items: [tied] })
+      .expect(201);
+
+    const owner = await registryOwner(tenantId, first.code!.codeHash);
+    expect(owner?.terminalId).toBe("t1");
+    expect(owner?.scannedAt.toISOString()).toBe(first.scannedAt);
+
+    // The tied claim lost, so its own sender is told.
+    const conflicts = (res.body as { conflicts: { winningTerminalId: string }[] }).conflicts;
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0]!.winningTerminalId).toBe("t1");
+  });
+
+  it("lets an earlier scan displace the incumbent, and does not report that to the sender", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const apiKey = await deviceKey(agent);
+    const shiftId = await openShift(agent);
+
+    const late = { ...item(shiftId, 1), terminalId: "t1" };
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send({ batchId: "m1:30", items: [late] })
+      .expect(201);
+
+    const earlier = {
+      ...late,
+      terminalId: "t2",
+      scannedAt: new Date(Date.parse(late.scannedAt) - 5000).toISOString(),
+    };
+    const res = await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send({ batchId: "m1:31", items: [earlier] })
+      .expect(201);
+
+    // The sender won, so nothing comes back to it — but a conflict exists.
+    expect((res.body as { conflicts: unknown[] }).conflicts).toEqual([]);
+
+    // The claim above is JSON computed by the server's application code and
+    // could pass even if ownership itself were never actually flipped (see
+    // Finding 2 in the review that added this block) — so assert the
+    // registry's actual post-state directly: the owner must now be the
+    // EARLIER terminal (t2), not the one that arrived first (t1).
+    const owner = await registryOwner(tenantId, earlier.code!.codeHash);
+    expect(owner?.terminalId).toBe("t2");
+    expect(owner?.scannedAt.toISOString()).toBe(earlier.scannedAt);
+
+    // The displaced scan (t1's) is deliberately never reported to any
+    // sender — the cabinet (`code_conflicts`) must be the only record of it.
+    // Asserting the row's actual CONTENT, not just its count: a transposed
+    // losing/winning pair in the service's mapping (e.g. `losingTerminalId:
+    // c.winning.terminalId`) would invert who lost while a count-only
+    // assertion stayed green.
+    const rows = await conflictRows(tenantId, earlier.code!.codeHash);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.losingTerminalId).toBe("t1");
+    expect(rows[0]!.winningTerminalId).toBe("t2");
+    expect(rows[0]!.losingScannedAt.toISOString()).toBe(late.scannedAt);
+  });
+
+  it("is idempotent: replaying a batch changes neither ownership nor conflict count", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+    const apiKey = await deviceKey(agent);
+    const shiftId = await openShift(agent);
+
+    const first = { ...item(shiftId, 1), terminalId: "t1" };
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send({ batchId: "m1:40", items: [first] })
+      .expect(201);
+
+    const body = {
+      batchId: "m1:41",
+      items: [
+        {
+          ...first,
+          terminalId: "t2",
+          scannedAt: new Date(Date.parse(first.scannedAt) + 5000).toISOString(),
+        },
+      ],
+    };
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send(body)
+      .expect(201);
+    const replay = await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send(body)
+      .expect(201);
+
+    expect((replay.body as { alreadyApplied: boolean }).alreadyApplied).toBe(true);
+    expect((replay.body as { conflicts: unknown[] }).conflicts).toEqual([]);
   });
 });

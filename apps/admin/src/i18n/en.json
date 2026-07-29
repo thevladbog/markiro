@@ -50,6 +50,7 @@
     "dashboard": "Overview",
     "catalog": "Catalog",
     "shifts": "Shifts",
+    "conflicts": "Conflicts",
     "counterparties": "Counterparties",
     "labels": "Labels",
     "pickup": "Self-pickup",
@@ -373,6 +374,35 @@
         "deleteError": "Could not delete the shift",
         "closeSuccess": "Shift closed",
         "closeError": "Could not close the shift"
+      }
+    },
+    "conflicts": {
+      "title": "Conflicts",
+      "empty": "No conflicts",
+      "review": "Mark reviewed",
+      "reviewed": "Reviewed",
+      "filters": {
+        "shiftLabel": "Shift",
+        "shiftAll": "All shifts",
+        "shiftHint": "Shows conflicts where this shift's scan was the one displaced, not every conflict touching this shift",
+        "reviewedLabel": "Status",
+        "reviewed": {
+          "unreviewed": "Unreviewed",
+          "reviewed": "Reviewed",
+          "all": "All"
+        }
+      },
+      "table": {
+        "code": "Code",
+        "shift": "Shift",
+        "losing": "Losing terminal",
+        "winning": "Winning terminal",
+        "detected": "Detected",
+        "actions": "Actions"
+      },
+      "toasts": {
+        "reviewSuccess": "Conflict marked reviewed",
+        "reviewError": "Could not mark the conflict reviewed"
       }
     },
     "pickup": {

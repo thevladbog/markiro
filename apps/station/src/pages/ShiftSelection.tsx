@@ -18,9 +18,17 @@ export interface ShiftSelectionProps {
   onNew: () => void;
   /** Opens the workstation setup screen; omitted where there is no way in. */
   onSetup?: () => void;
+  /** Opens the conflict list; omitted where there is no way in. */
+  onConflicts?: () => void;
 }
 
-export function ShiftSelection({ client, onSelected, onNew, onSetup }: ShiftSelectionProps) {
+export function ShiftSelection({
+  client,
+  onSelected,
+  onNew,
+  onSetup,
+  onConflicts,
+}: ShiftSelectionProps) {
   const { t } = useTranslation();
   const [items, setItems] = useState<ShiftListItem[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -95,6 +103,16 @@ export function ShiftSelection({ client, onSelected, onNew, onSetup }: ShiftSele
           {onSetup ? (
             <Button variant="secondary" style={{ minHeight: 64 }} onClick={onSetup}>
               {t("shell.setup")}
+            </Button>
+          ) : null}
+          {onConflicts ? (
+            <Button
+              variant="secondary"
+              style={{ minHeight: 64 }}
+              disabled={busy}
+              onClick={onConflicts}
+            >
+              {t("shell.conflicts")}
             </Button>
           ) : null}
         </div>

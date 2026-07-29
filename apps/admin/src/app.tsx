@@ -5,6 +5,7 @@ import { LoginPage } from "./pages/auth/Login.js";
 import { RegisterPage } from "./pages/auth/Register.js";
 import { SelectOrgPage } from "./pages/auth/SelectOrg.js";
 import { CatalogPage } from "./pages/catalog/index.js";
+import { ConflictsPage } from "./pages/conflicts/index.js";
 import { CounterpartiesPage } from "./pages/counterparties/index.js";
 import { DashboardPage } from "./pages/dashboard/index.js";
 import { EmployeesPage } from "./pages/employees/index.js";
@@ -39,6 +40,7 @@ export function App() {
           <Route index element={<DashboardPage />} />
           <Route path="catalog" element={<CatalogPage />} />
           <Route path="shifts" element={<ShiftsPage />} />
+          <Route path="conflicts" element={<ConflictsPage />} />
           <Route path="counterparties" element={<CounterpartiesPage />} />
           <Route path="employees" element={<EmployeesPage />} />
           <Route path="kiosks" element={<KiosksPage />} />

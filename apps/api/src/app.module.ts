@@ -17,6 +17,7 @@ import { KiosksModule } from "./modules/kiosks/kiosks.module";
 import { PickupReasonsModule } from "./modules/pickup-reasons/pickup-reasons.module";
 import { KioskModule } from "./modules/kiosk/kiosk.module";
 import { PickupOrdersModule } from "./modules/pickup-orders/pickup-orders.module";
+import { ConflictsModule } from "./modules/conflicts/conflicts.module";
 import { PickupRejectionsModule } from "./modules/pickup-rejections/pickup-rejections.module";
 
 @Module({ controllers: [HealthController] })
@@ -54,6 +55,7 @@ export class AppModule {
         PickupReasonsModule,
         KioskModule,
         PickupOrdersModule,
+        ConflictsModule,
         PickupRejectionsModule,
       ],
       controllers: [HealthController],

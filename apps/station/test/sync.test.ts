@@ -665,6 +665,211 @@ describe("sync engine", () => {
     10_000,
   );
 
+  it("records conflicts the server reports and counts them in the state", async () => {
+    const exec = await migratedExec();
+    await seed(exec, 1);
+    const post = vi.fn().mockResolvedValue({
+      applied: 1,
+      alreadyApplied: false,
+      conflicts: [
+        { codeHash: "h1", winningTerminalId: "t9", winningScannedAt: "2026-07-28T10:00:00.000Z" },
+      ],
+    });
+    const states: { conflicts: number }[] = [];
+
+    const engine = createSyncEngine({
+      exec,
+      client: { post },
+      machineId: "m1",
+      onState: (s) => states.push({ conflicts: s.conflicts }),
+    });
+    engine.nudge();
+    await engine.idle();
+
+    expect(states.at(-1)!.conflicts).toBe(1);
+    engine.stop();
+  });
+
+  it("still acknowledges when the response carries no conflicts field", async () => {
+    const exec = await migratedExec();
+    await seed(exec, 1);
+    const post = vi.fn().mockResolvedValue({ applied: 1, alreadyApplied: false });
+
+    const engine = createSyncEngine({ exec, client: { post }, machineId: "m1", onState: () => {} });
+    engine.nudge();
+    await engine.idle();
+
+    const rows = await exec.all<{ n: number }>("SELECT COUNT(*) AS n FROM outbox");
+    expect(rows[0]!.n).toBe(0);
+    engine.stop();
+  });
+
+  it(
+    "drops a conflict entry whose winningTerminalId is neither a string nor null, instead of " +
+      "letting a malformed value reach the device database as a raw SQL parameter -- one bad " +
+      "entry is dropped on its own, not the whole batch's conflicts (Finding 2)",
+    async () => {
+      const exec = await migratedExec();
+      await seed(exec, 2);
+      const post = vi.fn().mockResolvedValue({
+        applied: 2,
+        alreadyApplied: false,
+        conflicts: [
+          {
+            codeHash: "h1",
+            winningTerminalId: 12345,
+            winningScannedAt: "2026-07-28T10:00:00.000Z",
+          },
+          { codeHash: "h2", winningTerminalId: null, winningScannedAt: "2026-07-28T10:00:00.000Z" },
+        ],
+      });
+      const states: { conflicts: number }[] = [];
+
+      const engine = createSyncEngine({
+        exec,
+        client: { post },
+        machineId: "m1",
+        onState: (s) => states.push({ conflicts: s.conflicts }),
+      });
+      engine.nudge();
+      await engine.idle();
+
+      expect(states.at(-1)!.conflicts).toBe(1);
+      const rows = await exec.all<{ code_hash: string }>("SELECT code_hash FROM conflicts_mirror");
+      expect(rows.map((r) => r.code_hash)).toEqual(["h2"]);
+      engine.stop();
+    },
+  );
+
+  it(
+    "drops a conflict entry whose winningScannedAt does not parse to a real instant, instead of " +
+      "letting it reach conflicts_mirror unchanged and crash ConflictList's date formatting later " +
+      "-- one bad entry is dropped on its own, not the whole batch's conflicts (Finding 2)",
+    async () => {
+      const exec = await migratedExec();
+      await seed(exec, 2);
+      const post = vi.fn().mockResolvedValue({
+        applied: 2,
+        alreadyApplied: false,
+        conflicts: [
+          { codeHash: "h1", winningTerminalId: "t9", winningScannedAt: "garbage" },
+          { codeHash: "h2", winningTerminalId: "t9", winningScannedAt: "2026-07-28T10:00:00.000Z" },
+        ],
+      });
+      const states: { conflicts: number }[] = [];
+
+      const engine = createSyncEngine({
+        exec,
+        client: { post },
+        machineId: "m1",
+        onState: (s) => states.push({ conflicts: s.conflicts }),
+      });
+      engine.nudge();
+      await engine.idle();
+
+      expect(states.at(-1)!.conflicts).toBe(1);
+      const rows = await exec.all<{ code_hash: string }>("SELECT code_hash FROM conflicts_mirror");
+      expect(rows.map((r) => r.code_hash)).toEqual(["h2"]);
+      engine.stop();
+    },
+  );
+
+  it(
+    "records conflicts before acknowledging the batch, so a crash between the two device-side " +
+      "writes never loses the only local record a conflict existed for that batch (Finding 4)",
+    async () => {
+      const exec = await migratedExec();
+      await seed(exec, 1);
+      const post = vi.fn().mockResolvedValue({
+        applied: 1,
+        alreadyApplied: false,
+        conflicts: [
+          { codeHash: "h1", winningTerminalId: "t9", winningScannedAt: "2026-07-28T10:00:00.000Z" },
+        ],
+      });
+      const calls: string[] = [];
+      const realRun = exec.run.bind(exec);
+      const spiedExec: SqlExecutor = {
+        ...exec,
+        run: async (sql, params) => {
+          calls.push(sql);
+          return realRun(sql, params);
+        },
+      };
+
+      const engine = createSyncEngine({
+        exec: spiedExec,
+        client: { post },
+        machineId: "m1",
+        onState: () => {},
+      });
+      engine.nudge();
+      await engine.idle();
+
+      const conflictIdx = calls.findIndex((sql) => sql.includes("INSERT INTO conflicts_mirror"));
+      const ackIdx = calls.findIndex((sql) => sql.includes("DELETE FROM outbox"));
+      expect(conflictIdx).toBeGreaterThanOrEqual(0);
+      expect(ackIdx).toBeGreaterThanOrEqual(0);
+      expect(conflictIdx).toBeLessThan(ackIdx);
+      engine.stop();
+    },
+  );
+
+  it(
+    "acks the batch and keeps delivery moving when recording conflicts fails, so a local " +
+      "recording failure cannot wedge every later scan behind a batch that can never ack -- " +
+      "the server already durably applied it, so retrying protects nothing (Finding 1)",
+    async () => {
+      const exec = await migratedExec();
+      await seed(exec, 1);
+      const post = vi.fn().mockResolvedValue({
+        applied: 1,
+        alreadyApplied: false,
+        conflicts: [
+          { codeHash: "h1", winningTerminalId: "t9", winningScannedAt: "2026-07-28T10:00:00.000Z" },
+        ],
+      });
+      const realRun = exec.run.bind(exec);
+      const failingExec: SqlExecutor = {
+        ...exec,
+        run: async (sql, params) => {
+          if (sql.includes("INSERT INTO conflicts_mirror")) {
+            throw new Error("disk full");
+          }
+          return realRun(sql, params);
+        },
+      };
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const states: { conflicts: number; pending: number }[] = [];
+
+      const engine = createSyncEngine({
+        exec: failingExec,
+        client: { post },
+        machineId: "m1",
+        onState: (s) => states.push({ conflicts: s.conflicts, pending: s.pending }),
+      });
+      engine.nudge();
+      await engine.idle();
+
+      // The batch acked despite the recording failure: outbox drained, and
+      // the conflict was never recorded (the accepted, permanent loss).
+      const rows = await exec.all<{ n: number }>("SELECT COUNT(*) AS n FROM outbox");
+      expect(rows[0]!.n).toBe(0);
+      expect(states.at(-1)).toMatchObject({ pending: 0, conflicts: 0 });
+
+      // Delivery keeps moving for scans recorded after the failure --
+      // nothing wedged behind the batch that failed to record.
+      await seed(exec, 1, "2026-07-28T10:05:00.000Z");
+      engine.nudge();
+      await engine.idle();
+      const rows2 = await exec.all<{ n: number }>("SELECT COUNT(*) AS n FROM outbox");
+      expect(rows2[0]!.n).toBe(0);
+      expect(post).toHaveBeenCalledTimes(2);
+
+      engine.stop();
+    },
+  );
+
   it("is not stuck when the queue is empty, however long since the last sync", async () => {
     const exec = await migratedExec();
     const post = vi.fn();

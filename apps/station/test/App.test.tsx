@@ -183,12 +183,26 @@ function outboxRow(id: number): OutboxSeedRow {
  * scan), and empty defaults for everything else (`sound_settings`,
  * `operators_slot`, migrations).
  */
+/** Row shape the `conflicts_mirror` table holds (see conflicts.ts). */
+interface ConflictSeedRow {
+  code_hash: string;
+  winning_terminal_id: string | null;
+  winning_scanned_at: string;
+  detected_at: string;
+}
+
 function mockInvokeForFloor(
   pinHash: string,
   hardwareConfig: HardwareConfig,
   outboxRows: OutboxSeedRow[] = [],
 ): OutboxSeedRow[] {
   const outbox = [...outboxRows];
+  // Mutated by a real `recordConflicts`/`conflictCount` round-trip through
+  // this mock (see the Finding 1 regression test below): unlike `outbox`,
+  // no test seeds this up front -- every existing test in this file never
+  // touches `conflicts_mirror`, so `conflicts.length` stays 0 and behaves
+  // exactly as the previous unconditional `Promise.resolve([])` fallback did.
+  const conflicts: ConflictSeedRow[] = [];
   invokeMock.mockImplementation((cmd: string, payload?: unknown): Promise<unknown> => {
     if (cmd === "read_config") {
       return Promise.resolve({
@@ -209,6 +223,24 @@ function mockInvokeForFloor(
           if (outbox[i]!.id <= maxId) outbox.splice(i, 1);
         }
       }
+      // Mirrors `recordConflicts`'s upsert (conflicts.ts): keyed by
+      // code_hash, same as the real `ON CONFLICT(code_hash) DO NOTHING`.
+      if (query.includes("INSERT INTO conflicts_mirror")) {
+        const [codeHash, winningTerminalId, winningScannedAt, detectedAt] = (values ?? []) as [
+          string,
+          string | null,
+          string,
+          string,
+        ];
+        if (!conflicts.some((c) => c.code_hash === codeHash)) {
+          conflicts.push({
+            code_hash: codeHash,
+            winning_terminal_id: winningTerminalId,
+            winning_scanned_at: winningScannedAt,
+            detected_at: detectedAt,
+          });
+        }
+      }
       return Promise.resolve([0, 0]);
     }
     if (cmd === "plugin:sql|select") {
@@ -222,6 +254,14 @@ function mockInvokeForFloor(
           return Promise.resolve(outbox.length ? [{ scanned_at: outbox[0]!.scanned_at }] : []);
         }
         return Promise.resolve(outbox);
+      }
+      // `conflictCount` (its own COUNT statement) and `readConflicts` (a
+      // LEFT JOIN against `codes_mirror`, aliased `conflicts_mirror c`) both
+      // reference this table -- neither is asserted on by name elsewhere in
+      // this mock, so one branch answers both.
+      if (query.includes("FROM conflicts_mirror")) {
+        if (query.startsWith("SELECT COUNT(*)")) return Promise.resolve([{ n: conflicts.length }]);
+        return Promise.resolve(conflicts.map((c) => ({ ...c, gtin14: null, serial: null })));
       }
       // Checked BEFORE the `station_meta` branch below: `readOperatorsMirror`
       // resolves the active slot and reads its rows in one statement (see
@@ -822,6 +862,94 @@ describe("App", () => {
       });
 
       await waitFor(() => expect(posts.length).toBeGreaterThan(before));
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  // Task 6, Finding 1: `FloorShell`/`StatusBar` are exercised in isolation
+  // elsewhere with a literal `conflicts` prop, which cannot catch App.tsx
+  // wiring the wrong `SyncState` field into it -- `conflicts={syncState.conflicts}`
+  // and `conflicts={syncState.pending}` are both valid `number`s and both
+  // typecheck. This test drives a real conflict through the sync engine (a
+  // server response's `conflicts` array, exactly how `sync.ts` populates
+  // `conflicts_mirror` in production) so `conflicts-status` reflects a value
+  // that genuinely came from `syncState.conflicts`, and asserts it against a
+  // `pending` that has settled to a DIFFERENT number -- swapping the two
+  // fields in App.tsx would make this assertion fail, not vacuously pass.
+  it("regression (Finding 1): a conflict count reported by sync reaches the status bar under its own field, not pending's", async () => {
+    // The mount-time drain's deliberate first failure (mirroring the other
+    // floor-stage tests in this file) logs via `console.error` -- expected,
+    // silenced the same way.
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const pinHash = await hashSecret(OPERATOR_PIN);
+      mockInvokeForFloor(pinHash, { scanner: null, printer: null, printerLanguage: "zpl" }, [
+        outboxRow(1),
+      ]);
+
+      let scansAttempts = 0;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string, init?: RequestInit) => {
+          if (init?.method !== "POST") {
+            return new Response(JSON.stringify({ items: [] }), { status: 200 });
+          }
+          const path = new URL(url).pathname;
+          if (path === "/station/scans") {
+            scansAttempts += 1;
+            if (scansAttempts === 1) throw new Error("station: simulated network blip");
+            const items = (JSON.parse(init.body as string) as { items: unknown[] }).items;
+            return new Response(
+              JSON.stringify({
+                applied: items.length,
+                alreadyApplied: false,
+                conflicts: [
+                  {
+                    codeHash: "hash1",
+                    winningTerminalId: "t9",
+                    winningScannedAt: "2026-07-28T10:00:00.000Z",
+                  },
+                ],
+              }),
+              { status: 200 },
+            );
+          }
+          return new Response("{}", { status: 200 });
+        }),
+      );
+
+      render(<App />);
+      await signInAsOperator();
+
+      // The queue drains to 0 -- distinct from the conflict count asserted
+      // next, which is what makes this discriminate the actual confusion.
+      await waitFor(() => expect(screen.getByTestId("sync-status").textContent).toBe("0"), {
+        timeout: BACKOFF_START_MS + 2_000,
+      });
+      await waitFor(() => expect(screen.getByTestId("conflicts-status").textContent).toBe("1"));
+      expect(screen.getByTestId("conflicts-status").textContent).not.toBe(
+        screen.getByTestId("sync-status").textContent,
+      );
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  // Task 6, Finding 4: neither `ShiftSelection`'s conflicts button nor the
+  // `App.tsx` route into `ConflictList` had any coverage.
+  it("opens the conflict list from shift selection and returns via Back (Finding 4)", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await renderAtFloorStage();
+
+      fireEvent.click(screen.getByRole("button", { name: "Conflicts" }));
+      expect(await screen.findByText("Codes claimed elsewhere")).toBeDefined();
+
+      fireEvent.click(screen.getByRole("button", { name: "Back" }));
+      // Back on ConflictList to shift selection: the "Conflicts" button
+      // (only rendered on the ShiftSelection screen) is visible again.
+      expect(await screen.findByRole("button", { name: "Conflicts" })).toBeDefined();
     } finally {
       consoleErrorSpy.mockRestore();
     }

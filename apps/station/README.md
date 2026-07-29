@@ -264,6 +264,66 @@ that can lag arbitrarily far behind without blocking the floor.
   `shifts.late_data_at` once (a second late batch for an already-stamped
   shift does not move it), and the admin shift list surfaces it as a badge.
 
+## Cross-terminal conflicts
+
+Two terminals can scan the same code — a KM identifies one physical item —
+before either has seen the other's data. Ownership is decided server-side,
+by the earliest `scanned_at`, and **never** by arrival order: `code_registry`
+holds, per code, whichever claim happened earliest in physical time, and the
+ingest upsert only ever moves that row for a strictly earlier scan. Replaying
+the same batches in any order therefore always converges to the same owner —
+a terminal that was briefly offline does not lose an item merely because a
+neighbour's link was better. The registry exists, unpartitioned and keyed by
+the code alone, because the obvious alternative doesn't work: a unique index
+on a partitioned table must include the partition key, and `codes` is
+partitioned by `scanned_at`, not by code, so `codes` itself cannot enforce
+"one row per code." `code_registry` is the real authority, probed by primary
+key so the hot ingest path never has to scan a partitioned table.
+
+A station learns about a lost scan **only when it is the one that lost it**,
+through its own sync response (`conflicts` in `SyncBatchResponseDto`, folded
+into `conflicts_mirror` by `src/lib/conflicts.ts`). It is never told about a
+scan it displaced belonging to some other terminal — that terminal's batch
+was acknowledged long before this one arrived, and reopening an
+already-acknowledged batch would undo slice 06a's at-least-once delivery
+guarantee. The cabinet's conflict view (see
+[`docs/device-key-surface.md`](../../docs/device-key-surface.md)) is the only
+place that other class of loss is ever recorded or reviewed. This also means
+a conflict report reaches a device **at most once**: a resend of an
+already-applied batch reports `conflicts: []`, because the server decides
+conflicts once, at ingest, and never recomputes them for a retry — a device
+that drops that report has lost it for good, and the cabinet is the only
+backstop for that class.
+
+Conflicts are recorded before the batch is acknowledged locally, on purpose:
+`recordConflicts` (writing `conflicts_mirror`) runs strictly before
+`ackThrough` (deleting the batch's rows from the outbox) in `src/lib/sync.ts`.
+A crash between the two just means the batch resends — the server no-ops it
+(`alreadyApplied`) and the conflicts already written locally are untouched,
+since `recordConflicts` is an idempotent upsert keyed by `code_hash`. The
+other order would risk losing the conflict for good: acking first and then
+crashing before the write would delete the outbox rows that were the only
+local record a conflict existed, with no resend left to carry it again.
+Recording is also isolated in its own `try`/`catch`, separate from the one
+guarding the network call: a failure there has nothing to do with whether the
+server received the batch (it already did, durably), so the accepted
+trade-off is a silently under-reported count on this device rather than a
+terminal that stops delivering scans over a courtesy feature.
+
+On the floor this is deliberately **not an alarm**: nothing competes with a
+scan verdict, so the count (`conflictCount`, shown quietly in the status bar)
+is something an operator checks on their own initiative via the reachable
+`ConflictList` (`src/pages/ConflictList.tsx`), never a popup or a sound.
+
+**Recorded for plan 09:** `code_registry` grows one row per code ever
+accepted and is unpartitioned, so it becomes as large as `codes` without
+sharing its retention story. Scoping it per shift instead was considered and
+rejected: because a KM identifies one physical item, the same code scanned
+under two different shifts is still the same real duplicate and a genuine
+error worth catching — a per-shift registry would stop seeing that class of
+conflict entirely. Plan 09 inherits this trade-off rather than re-deriving
+it.
+
 ## Hardware
 
 `src/lib/hardware.ts` defines `HardwareContract` — scanner and printer

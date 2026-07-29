@@ -1,4 +1,5 @@
 import type { StationClient } from "./api-client.js";
+import { conflictCount, recordConflicts } from "./conflicts.js";
 import { getInstallId } from "./install-id.js";
 import type { SqlExecutor } from "./mirror.js";
 import { ackThrough, oldestQueuedAt, outboxDepth, readBatch, type OutboxItem } from "./outbox.js";
@@ -24,6 +25,12 @@ export interface SyncState {
   lastSuccessAt: number | null;
   /** The queue has work and has stopped moving — "the pipe is broken". */
   stuck: boolean;
+  /**
+   * How many of this device's own scans lost ownership to an earlier scan
+   * elsewhere. Not an alarm — the operator already saw a green verdict for
+   * each one — so this is a quiet count, never something that interrupts.
+   */
+  conflicts: number;
 }
 
 export interface SyncEngineDeps {
@@ -43,9 +50,40 @@ export interface SyncEngine {
   idle(): Promise<void>;
 }
 
+/** One of this device's scans that lost ownership, as the server reports it. */
+interface BatchConflict {
+  codeHash: string;
+  winningTerminalId: string | null;
+  winningScannedAt: string;
+}
+
 interface BatchResponse {
   applied: number;
   alreadyApplied: boolean;
+  conflicts?: BatchConflict[];
+}
+
+/**
+ * `winningScannedAt` must be a string AND parse to a real instant. A
+ * non-ISO string would otherwise ride through unchanged into
+ * `conflicts_mirror` and blow up `ConflictList`'s `Intl.DateTimeFormat` at
+ * render time (`new Date("garbage")` is an Invalid Date, and `.format()` on
+ * one throws a `RangeError`) -- taking the whole list down for one bad
+ * entry. `.filter(isBatchConflict)` already drops entries one at a time, so
+ * this costs only the malformed conflict, never its batch-mates. That cost
+ * is real, though: a dropped conflict is gone for good, since a resent
+ * already-applied batch answers `conflicts: []` (see the module doc
+ * comment above), so there is no second chance to record it.
+ */
+function isBatchConflict(value: unknown): value is BatchConflict {
+  if (typeof value !== "object" || value === null) return false;
+  const c = value as Record<string, unknown>;
+  return (
+    typeof c.codeHash === "string" &&
+    (typeof c.winningTerminalId === "string" || c.winningTerminalId === null) &&
+    typeof c.winningScannedAt === "string" &&
+    !Number.isNaN(Date.parse(c.winningScannedAt))
+  );
 }
 
 /**
@@ -53,6 +91,13 @@ interface BatchResponse {
  * strength of a response that merely parsed as JSON but isn't actually this
  * endpoint's contract — e.g. a captive portal or maintenance shim on the
  * plant network answering `200 {"status":"ok"}` instead of the server.
+ *
+ * The two original fields stay REQUIRED: this guard is what stands between a
+ * captive portal's `200 {"status":"ok"}` and an acknowledgement that
+ * permanently deletes scans. `conflicts` is tolerated when absent or
+ * malformed — a server that cannot describe conflicts must not cost the
+ * device its delivery — and is filtered element-by-element where it is
+ * consumed, not validated here.
  */
 function isBatchResponse(value: unknown): value is BatchResponse {
   return (
@@ -252,7 +297,8 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
         stuck = oldestQueuedIsStale;
       }
     }
-    deps.onState({ pending, lastSuccessAt, stuck });
+    const conflicts = await conflictCount(deps.exec);
+    deps.onState({ pending, lastSuccessAt, stuck, conflicts });
   }
 
   async function drain(): Promise<void> {
@@ -307,6 +353,54 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
             // proxy/captive portal on the plant network. Fall into the
             // same failure path as a network error: do not ack.
             throw new Error("station: unexpected /station/scans response shape");
+          }
+          // Filtered element-by-element, not all-or-nothing: dropping only
+          // the malformed entry (Finding 2) keeps the rest of this batch's
+          // conflicts intact. That matters more here than it would somewhere
+          // safety-critical — this is a courtesy count, not delivery — and
+          // discarding the whole array over one bad element would
+          // under-report further than a single malformed field warrants;
+          // nothing about one malformed entry says anything about the
+          // others in the same response.
+          const reported = Array.isArray(res.conflicts)
+            ? res.conflicts.filter(isBatchConflict)
+            : [];
+          if (reported.length > 0) {
+            // Recorded BEFORE the ack, on purpose: `recordConflicts` and
+            // `ackThrough` are two separate device-side writes (this pool
+            // has no multi-call transaction — see the module doc comment),
+            // so a crash between them is possible either way. Persisting
+            // conflicts first means a crash there simply resends the batch;
+            // the server already applied it and answers `alreadyApplied`
+            // with an empty `conflicts` list, and the ones already stored
+            // locally are untouched (recordConflicts is an idempotent
+            // upsert). The other order would lose them: acking first and
+            // then crashing before this write deletes the outbox rows that
+            // were the only local record a conflict existed for that batch,
+            // and the resend that would have carried them again never
+            // happens because the server no-ops an already-applied batch.
+            //
+            // Isolated in its own try/catch, separate from the network/shape
+            // catch below (Finding 1): a failure here has nothing to do with
+            // whether the server received the batch — it already did,
+            // durably, before this response ever arrived — so retrying
+            // protects nothing and would instead wedge every subsequent scan
+            // on this terminal behind a batch that can never ack. The floor
+            // rule (design brief 04) is that nothing competes with scan
+            // delivery, and a courtesy count is exactly the kind of thing
+            // that must not. The accepted trade: a failed recording loses
+            // those conflicts on this device permanently — a resend of an
+            // already-applied batch reports `conflicts: []` (the server
+            // decides conflicts at ingest and never recomputes them for a
+            // retry), so there is no second chance on this device. A
+            // silently under-reported courtesy count beats a terminal that
+            // cannot deliver scans, and the cabinet remains the
+            // authoritative record either way.
+            try {
+              await recordConflicts(deps.exec, reported, new Date(now()).toISOString());
+            } catch (err) {
+              console.error("station: recording conflicts failed", err);
+            }
           }
           // `alreadyApplied` is a success: this exact batch is on the
           // server already, so holding on to it would wedge the queue
