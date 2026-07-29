@@ -66,6 +66,22 @@ belong in either section:
   dimension only distinguishes callers when `TRUST_PROXY_HOPS` is set correctly behind
   a proxy; misconfigured, every caller collapses onto the proxy's own address and only
   the (much larger) global backstop bounds guessing.
+- `GET/POST /1c_exchange` (`apps/api/src/modules/exchange/exchange.controller.ts`)
+  carries **no guard either**, and unlike every other exception in this section, it
+  never falls back on `TenantGuard`/`SessionOnlyGuard` at all — not even indirectly.
+  This is deliberate, not a gap `TenantGuard` should have caught: the tenant for this
+  route is resolved from the 1С CommerceML exchange's own machine credentials (HTTP
+  Basic on `checkauth`, minted and hashed exactly like a kiosk device token — see
+  `exchange-credentials.ts`), then from the session cookie `checkauth` itself issues —
+  never from a Better Auth session or a station `x-api-key`. A station's `x-api-key`
+  simply does not authenticate here at all: `TenantGuard.canActivate` is never even
+  invoked for this route. Brute force on `checkauth` is bounded by a per-source
+  fixed-window attempt counter (`exchange_attempts`, `assertUnderCheckauthLimit`) —
+  deliberately ONE tier, not the kiosk-pairing route's two (per-source budget +
+  global backstop): the guessable secret here is 24 random bytes (192 bits), not an
+  8-digit code, so distributing guesses across sources doesn't turn an infeasible
+  brute force into a feasible one the way it does for a 10^8-entry code space: see
+  the comment above `assertUnderCheckauthLimit` in `exchange-credentials.ts`.
 
 Anything a station does not demonstrably need gets `SessionOnlyGuard`. When
 adding a `TenantGuard`-guarded route, decide which of the two sections above

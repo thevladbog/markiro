@@ -8,6 +8,19 @@ import { UnauthorizedException } from "@nestjs/common";
 export const CHECKAUTH_BUDGET = 10;
 export const CHECKAUTH_WINDOW_MS = 15 * 60_000;
 
+/**
+ * Floors `now` to the start of its fixed window -- the unit
+ * `assertUnderCheckauthLimit`/`refundCheckauthAttempt` count in. Identical
+ * shape to `pairAttemptWindowStart` in `pairing.service.ts` (same
+ * `Math.floor(ms / windowMs) * windowMs` flooring), which Task 5 left open as
+ * "what rounds the window" for whoever wires this counter into `checkauth`.
+ * Colocated with `CHECKAUTH_WINDOW_MS` rather than living in the controller,
+ * so the constant and the arithmetic that depends on it can't drift apart.
+ */
+export function checkauthWindowStart(now: Date): Date {
+  return new Date(Math.floor(now.getTime() / CHECKAUTH_WINDOW_MS) * CHECKAUTH_WINDOW_MS);
+}
+
 export interface ExchangeCredentials {
   login: string;
   /** Показывается один раз при выпуске; в базе только хэш. */
@@ -46,14 +59,28 @@ export async function verifyExchangeSecret(secret: string, phc: string): Promise
  * глобальный backstop (`GLOBAL_PAIR_ATTEMPT_BUDGET`, ключ `"*"`), — и
  * read-only предварительная проверка (`currentPairAttempts`), которая не даёт
  * атакующему безнаказанно раздувать таблицу попыток, перебирая значения
- * `source`, когда глобальный бюджет уже исчерпан. Ни глобальный backstop, ни
- * предварительная проверка сюда НЕ перенесены — это открытый вопрос для того,
- * кто будет подключать этот счётчик к реальному `checkauth`.
+ * `source`, когда глобальный бюджет уже исчерпан.
  *
  * Считаются ПОПЫТКИ, а не промахи по строке: неверный логин не совпадает ни с
  * одним каналом, поэтому счётчик, инкрементируемый только при найденной
  * строке, не сработал бы вообще — ровно эта ошибка уже была допущена в
  * привязке киоска и стоила трёх раундов правок.
+ *
+ * Task 6 resolved the open question above (no global backstop, no pre-check)
+ * for THIS counter -- deliberately, not by omission. The kiosk-pairing global
+ * backstop earns its keep because the guessable space is an 8-digit code
+ * (10^8): distributing guesses across many sources multiplies a genuinely
+ * feasible attack. The exchange secret (`generateExchangeCredentials`) is 24
+ * random bytes -- 192 bits -- so even every one of `CHECKAUTH_BUDGET` (10)
+ * attempts per window, multiplied across an unbounded number of sources, is
+ * still astronomically far from a feasible brute force. The per-source budget
+ * here is defense-in-depth (bounding log/DB noise and one misbehaving
+ * integration hammering the endpoint), not the thing standing between the
+ * secret and an attacker the way the kiosk limiter is -- so the extra
+ * complexity of a second tier and its own pre-check isn't justified. An
+ * unattributable caller (empty `source`) simply gets its own `""`-keyed
+ * bucket here rather than a shared global one, same net effect as every
+ * caller colliding onto one bucket when `TRUST_PROXY_HOPS=0` (see main.ts).
  */
 export async function assertUnderCheckauthLimit(
   db: Db,
