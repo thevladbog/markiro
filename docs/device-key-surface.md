@@ -38,6 +38,7 @@ added.
 | `pickup-orders`                                                                        | the admin's order resolution flow; the kiosk uses `/kiosk/*` behind `KioskDeviceGuard`                                                                                                                                                                     |
 | `pickup-reasons`                                                                       | the reason list is edited in the cabinet; the kiosk receives it in its bootstrap payload                                                                                                                                                                   |
 | `pickup-rejections`                                                                    | the admin's audit surface for refused scans; exposes **raw marking and badge codes**, which is exactly what shipping only hashes to devices is meant to prevent                                                                                            |
+| `integrations`                                                                         | configuring exchange channels and reading their journal is a back-office concern; the station never calls this module                                                                                                                                      |
 
 ## Rule for new routes
 

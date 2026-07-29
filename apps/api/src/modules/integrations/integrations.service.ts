@@ -86,6 +86,7 @@ export class IntegrationsService {
   }
 
   async readJournal(tenantId: string, type: IntegrationChannelType): Promise<JournalPageDto> {
+    safeDescribeChannel(type);
     const sessions = await this.db
       .select()
       .from(schema.integrationSessions)
@@ -143,6 +144,11 @@ export class IntegrationsService {
  * Состояние канала выводится, а не хранится: хранимое состояние рассинхронится
  * с событиями при первом же пропущенном обновлении, а «молчит» вообще нельзя
  * записать — оно наступает от того, что НИЧЕГО не произошло.
+ *
+ * Давность проверяется РАНЬШЕ исхода: канал, однажды ошибившийся и с тех пор
+ * молчащий, обязан со временем показать «молчит», а не «ошибка» навечно.
+ * Ошибка — то, что видно в журнале и так; «с нами никто не разговаривает» —
+ * то, что чинят прямо сейчас, и именно это состояние важнее.
  */
 function stateOf(
   available: boolean,
@@ -151,10 +157,10 @@ function stateOf(
 ): ChannelState {
   if (!available) return "unavailable";
   if (!row) return "not_configured";
-  if (row.lastOutcome === "error") return "error";
   if (!row.lastEventAt) return "not_configured";
   const silentAfterMs = row.silentAfterHours * 3_600_000;
   if (now.getTime() - row.lastEventAt.getTime() > silentAfterMs) return "silent";
+  if (row.lastOutcome === "error") return "error";
   return "working";
 }
 
