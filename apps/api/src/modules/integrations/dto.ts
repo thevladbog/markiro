@@ -46,3 +46,40 @@ export interface CredentialsIssuedDto {
 
 export const updateChannelSchema = z.record(z.string(), z.unknown());
 export type UpdateChannelDto = z.infer<typeof updateChannelSchema>;
+
+/** Позиция внешней системы, ещё не сопоставленная с каталогом (Task 9's queue). */
+export interface CandidateDto {
+  id: string;
+  externalRef: string;
+  name: string;
+  article: string | null;
+  unit: string | null;
+  price: string | null;
+  priceType: string | null;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  hidden: boolean;
+  /**
+   * Только при единственном совпадении по нормализованному имени/артикулу
+   * среди ещё не связанных товаров -- см. `suggestProductId` в
+   * `integrations.service.ts`. Двусмысленная подсказка хуже отсутствующей:
+   * её примут не глядя (бриф Task 10).
+   */
+  suggestedProductId: string | null;
+}
+
+export interface CandidatesPageDto {
+  candidates: CandidateDto[];
+}
+
+/** GET /integrations/:type/candidates query schema. */
+export const listCandidatesQuerySchema = z.object({
+  hidden: z.enum(["true", "false"]).optional(),
+});
+export type ListCandidatesQueryDto = z.infer<typeof listCandidatesQuerySchema>;
+
+/** POST /integrations/:type/candidates/:id/link body schema. */
+export const linkCandidateSchema = z.object({
+  productId: z.string().uuid(),
+});
+export type LinkCandidateDto = z.infer<typeof linkCandidateSchema>;

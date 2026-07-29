@@ -1,13 +1,32 @@
-import { Body, Controller, Get, Param, Patch, Post, Req, UseGuards } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { SessionOnlyGuard } from "../../tenancy/session-only.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
+import { ZodValidationPipe } from "../../zod.pipe";
 import type { IntegrationChannelType } from "./channel-registry";
-import type {
-  ChannelDetailDto,
-  ChannelSummaryDto,
-  CredentialsIssuedDto,
-  JournalPageDto,
+import {
+  linkCandidateSchema,
+  listCandidatesQuerySchema,
+  type CandidatesPageDto,
+  type ChannelDetailDto,
+  type ChannelSummaryDto,
+  type CredentialsIssuedDto,
+  type JournalPageDto,
+  type LinkCandidateDto,
+  type ListCandidatesQueryDto,
 } from "./dto";
 import { IntegrationsService } from "./integrations.service";
 
@@ -58,5 +77,67 @@ export class IntegrationsController {
     @Param("type") type: IntegrationChannelType,
   ): Promise<CredentialsIssuedDto> {
     return this.integrations.issueCredentials(req.tenantId!, type);
+  }
+
+  @Get(":type/candidates")
+  async listCandidates(
+    @Req() req: RequestWithTenant,
+    @Param("type") type: IntegrationChannelType,
+    @Query(new ZodValidationPipe(listCandidatesQuerySchema)) query: ListCandidatesQueryDto,
+  ): Promise<CandidatesPageDto> {
+    return this.integrations.listCandidates(req.tenantId!, type, query.hidden === "true");
+  }
+
+  @Post(":type/candidates/:id/link")
+  @HttpCode(HttpStatus.OK)
+  async linkCandidate(
+    @Req() req: RequestWithTenant,
+    @Param("type") type: IntegrationChannelType,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(linkCandidateSchema)) body: LinkCandidateDto,
+  ): Promise<void> {
+    await this.integrations.linkCandidate(req.tenantId!, type, id, body.productId);
+  }
+
+  @Post(":type/candidates/:id/hide")
+  @HttpCode(HttpStatus.OK)
+  async hideCandidate(
+    @Req() req: RequestWithTenant,
+    @Param("type") type: IntegrationChannelType,
+    @Param("id") id: string,
+  ): Promise<void> {
+    await this.integrations.hideCandidate(req.tenantId!, type, id);
+  }
+
+  @Post(":type/candidates/:id/unhide")
+  @HttpCode(HttpStatus.OK)
+  async unhideCandidate(
+    @Req() req: RequestWithTenant,
+    @Param("type") type: IntegrationChannelType,
+    @Param("id") id: string,
+  ): Promise<void> {
+    await this.integrations.unhideCandidate(req.tenantId!, type, id);
+  }
+}
+
+/**
+ * Разрыв связи товара с внешней системой живёт в `/products`, а не в
+ * `/integrations/:type/...`: `products.external_ref` не привязан к
+ * конкретному каналу (в отличие от `integration_candidates`), так что этот
+ * маршрут не может быть параметризован типом канала. Реализация всё равно
+ * здесь, в модуле кандидатов (Task 10), а не в `ProductsController` —
+ * разрыв связи это часть того же кабинетного API, что и связывание/скрытие.
+ * `TenantGuard` + `SessionOnlyGuard` — та же кабинетная граница
+ * (docs/device-key-surface.md).
+ */
+@ApiTags("products")
+@Controller("products")
+@UseGuards(TenantGuard, SessionOnlyGuard)
+export class ProductExternalLinkController {
+  constructor(private readonly integrations: IntegrationsService) {}
+
+  @Delete(":id/external-link")
+  async unlink(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<void> {
+    await this.integrations.unlinkProduct(req.tenantId!, id);
   }
 }

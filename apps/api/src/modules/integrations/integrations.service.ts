@@ -6,17 +6,20 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { schema, type Db } from "@markiro/db";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { DB } from "../../auth/auth.module";
 import { generateExchangeCredentials, hashExchangeSecret } from "../exchange/exchange-credentials";
 import { CHANNELS, describeChannel, type IntegrationChannelType } from "./channel-registry";
 import type {
+  CandidateDto,
+  CandidatesPageDto,
   ChannelDetailDto,
   ChannelState,
   ChannelSummaryDto,
   CredentialsIssuedDto,
   JournalPageDto,
 } from "./dto";
+import { JournalService } from "./journal.service";
 
 /**
  * Bounded retries so a login collision on `integration_channels_login_uq`
@@ -27,7 +30,10 @@ const ISSUE_ATTEMPTS = 5;
 
 @Injectable()
 export class IntegrationsService {
-  constructor(@Inject(DB) private readonly db: Db) {}
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    private readonly journal: JournalService,
+  ) {}
 
   async listChannels(tenantId: string, now: Date): Promise<{ channels: ChannelSummaryDto[] }> {
     const rows = await this.db
@@ -178,11 +184,65 @@ export class IntegrationsService {
           .orderBy(desc(schema.integrationEvents.at))
       : [];
 
+    // Действия человека вне обмена (разрыв связи — Task 10; "checkauth:
+    // неверный пароль" до открытия сеанса — see exchange.controller.ts)
+    // пишутся с `sessionId: null`, потому что сеанса на этот момент попросту
+    // нет. Без этого блока такое событие осело бы в базе, но было бы
+    // невидимо в кабинетном журнале: `events` выше собирает только то, что
+    // привязано к одному из уже найденных `sessions`. Каждое такое событие
+    // становится собственной записью-сеансом из одного события.
+    const orphanEvents = await this.db
+      .select()
+      .from(schema.integrationEvents)
+      .where(
+        and(
+          eq(schema.integrationEvents.tenantId, tenantId),
+          eq(schema.integrationEvents.channelType, type),
+          isNull(schema.integrationEvents.sessionId),
+        ),
+      )
+      .orderBy(desc(schema.integrationEvents.at))
+      .limit(50);
+
+    type SessionLike = {
+      id: string;
+      startedAt: Date;
+      finishedAt: Date | null;
+      outcome: string | null;
+      summary: Record<string, unknown> | null;
+      events: (typeof schema.integrationEvents.$inferSelect)[];
+    };
+
+    const realSessions: SessionLike[] = sessions.map((s) => ({
+      id: s.id,
+      startedAt: s.startedAt,
+      finishedAt: s.finishedAt,
+      outcome: s.outcome,
+      summary: s.summary ?? null,
+      events: events.filter((e) => e.sessionId === s.id),
+    }));
+
+    const orphanSessions: SessionLike[] = orphanEvents.map((e) => ({
+      id: e.id,
+      startedAt: e.at,
+      finishedAt: e.at,
+      outcome: e.outcome,
+      summary: null,
+      events: [e],
+    }));
+
+    // Сначала — по давности через оба источника вместе, иначе сеансы и
+    // одиночные события легли бы двумя раздельными, не перемешанными
+    // блоками вместо одной ленты по времени.
+    const merged = [...realSessions, ...orphanSessions].sort(
+      (a, b) => b.startedAt.getTime() - a.startedAt.getTime(),
+    );
+
     // Неуспешный сеанс наверх: его ищут первым, когда обмен сломался
     // (бриф 08, «Channel page»).
     const ordered = [
-      ...sessions.filter((s) => s.outcome === "error"),
-      ...sessions.filter((s) => s.outcome !== "error"),
+      ...merged.filter((s) => s.outcome === "error"),
+      ...merged.filter((s) => s.outcome !== "error"),
     ];
 
     return {
@@ -191,19 +251,223 @@ export class IntegrationsService {
         startedAt: s.startedAt.toISOString(),
         finishedAt: s.finishedAt?.toISOString() ?? null,
         outcome: s.outcome,
-        summary: s.summary ?? null,
-        events: events
-          .filter((e) => e.sessionId === s.id)
-          .map((e) => ({
-            at: e.at.toISOString(),
-            direction: e.direction,
-            outcome: e.outcome,
-            message: e.message,
-            details: e.details ?? null,
-          })),
+        summary: s.summary,
+        events: s.events.map((e) => ({
+          at: e.at.toISOString(),
+          direction: e.direction,
+          outcome: e.outcome,
+          message: e.message,
+          details: e.details ?? null,
+        })),
       })),
     };
   }
+
+  /**
+   * Очередь несопоставленной номенклатуры (Task 9). `hidden` переключает
+   * между двумя непересекающимися видами: по умолчанию (`false`) — рабочая
+   * очередь, `hiddenAt IS NULL`; `hidden=true` — то, что убрали с глаз,
+   * `hiddenAt IS NOT NULL`. Не объединение: скрытое не должно всплывать в
+   * обычном списке КАЖДЫЙ обмен, а отдельный вид "скрытые" — это то самое
+   * "остаётся под фильтром и восстанавливается" из брифа Task 10.
+   */
+  async listCandidates(
+    tenantId: string,
+    type: IntegrationChannelType,
+    hidden: boolean,
+  ): Promise<CandidatesPageDto> {
+    safeDescribeChannel(type);
+
+    const rows = await this.db
+      .select()
+      .from(schema.integrationCandidates)
+      .where(
+        and(
+          eq(schema.integrationCandidates.tenantId, tenantId),
+          eq(schema.integrationCandidates.channelType, type),
+          hidden
+            ? isNotNull(schema.integrationCandidates.hiddenAt)
+            : isNull(schema.integrationCandidates.hiddenAt),
+        ),
+      )
+      .orderBy(desc(schema.integrationCandidates.lastSeenAt));
+
+    if (rows.length === 0) return { candidates: [] };
+
+    // Пул для подсказки — только ещё НЕ связанные товары: предложить товар,
+    // у которого уже есть чужой external_ref, значит подсунуть подсказку,
+    // принятие которой немедленно упрётся в 409 (см. linkCandidate ниже).
+    const unlinkedProducts = await this.db
+      .select({ id: schema.products.id, name: schema.products.name })
+      .from(schema.products)
+      .where(and(eq(schema.products.tenantId, tenantId), isNull(schema.products.externalRef)));
+
+    return {
+      candidates: rows.map((row): CandidateDto => ({
+        id: row.id,
+        externalRef: row.externalRef,
+        name: row.name,
+        article: row.article,
+        unit: row.unit,
+        price: row.price,
+        priceType: row.priceType,
+        firstSeenAt: row.firstSeenAt.toISOString(),
+        lastSeenAt: row.lastSeenAt.toISOString(),
+        hidden: row.hiddenAt !== null,
+        suggestedProductId: suggestProductId(row, unlinkedProducts),
+      })),
+    };
+  }
+
+  /**
+   * Проставляет `external_ref` товару из позиции очереди и убирает саму
+   * позицию: она разрешена, очереди в ней больше нет места (бриф Task 10).
+   * Товар с уже проставленным `external_ref` — 409: молча перезаписать связь
+   * значит увести цены другого товара на этот.
+   */
+  async linkCandidate(
+    tenantId: string,
+    type: IntegrationChannelType,
+    candidateId: string,
+    productId: string,
+  ): Promise<void> {
+    safeDescribeChannel(type);
+
+    const [candidate] = await this.db
+      .select()
+      .from(schema.integrationCandidates)
+      .where(
+        and(
+          eq(schema.integrationCandidates.tenantId, tenantId),
+          eq(schema.integrationCandidates.channelType, type),
+          eq(schema.integrationCandidates.id, candidateId),
+        ),
+      );
+    if (!candidate) throw new NotFoundException("Unknown candidate");
+
+    const [product] = await this.db
+      .select({ id: schema.products.id, externalRef: schema.products.externalRef })
+      .from(schema.products)
+      .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.id, productId)));
+    if (!product) throw new NotFoundException("Unknown product");
+    if (product.externalRef !== null) {
+      throw new ConflictException("Product is already linked to an external item");
+    }
+
+    await this.db.transaction(async (tx) => {
+      await tx
+        .update(schema.products)
+        .set({ externalRef: candidate.externalRef })
+        .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.id, productId)));
+      await tx
+        .delete(schema.integrationCandidates)
+        .where(
+          and(
+            eq(schema.integrationCandidates.tenantId, tenantId),
+            eq(schema.integrationCandidates.id, candidateId),
+          ),
+        );
+    });
+  }
+
+  async hideCandidate(
+    tenantId: string,
+    type: IntegrationChannelType,
+    candidateId: string,
+  ): Promise<void> {
+    await this.setHidden(tenantId, type, candidateId, new Date());
+  }
+
+  /** Восстанавливает скрытую позицию обратно в рабочую очередь. */
+  async unhideCandidate(
+    tenantId: string,
+    type: IntegrationChannelType,
+    candidateId: string,
+  ): Promise<void> {
+    await this.setHidden(tenantId, type, candidateId, null);
+  }
+
+  private async setHidden(
+    tenantId: string,
+    type: IntegrationChannelType,
+    candidateId: string,
+    hiddenAt: Date | null,
+  ): Promise<void> {
+    safeDescribeChannel(type);
+    const [row] = await this.db
+      .update(schema.integrationCandidates)
+      .set({ hiddenAt })
+      .where(
+        and(
+          eq(schema.integrationCandidates.tenantId, tenantId),
+          eq(schema.integrationCandidates.channelType, type),
+          eq(schema.integrationCandidates.id, candidateId),
+        ),
+      )
+      .returning({ id: schema.integrationCandidates.id });
+    if (!row) throw new NotFoundException("Unknown candidate");
+  }
+
+  /**
+   * Разрыв связи с внешней системой: чистит `external_ref` и только его —
+   * цена остаётся как есть (бриф Task 10: «разрыв связи не трогает цену»).
+   * Пишется отдельным событием журнала ВНЕ сеанса (`sessionId: null`,
+   * `grain: "session"`): вопрос «почему товар перестал получать цены»
+   * задают через недели, а построчная (`item`) ретенция живёт четырнадцать
+   * дней и его не переживёт.
+   *
+   * Канал жёстко "commerceml": в отличие от `integration_candidates`,
+   * `products.external_ref` не хранит, через какой канал он был проставлен,
+   * а сегодня единственный канал, который вообще умеет его проставлять, —
+   * `commerceml`.
+   */
+  async unlinkProduct(tenantId: string, productId: string): Promise<void> {
+    const [product] = await this.db
+      .select({ id: schema.products.id })
+      .from(schema.products)
+      .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.id, productId)));
+    if (!product) throw new NotFoundException("Unknown product");
+
+    await this.db
+      .update(schema.products)
+      .set({ externalRef: null })
+      .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.id, productId)));
+
+    await this.journal.append({
+      tenantId,
+      channelType: "commerceml",
+      sessionId: null,
+      direction: "local",
+      outcome: "ok",
+      grain: "session",
+      message: `Связь товара с внешней номенклатурой разорвана вручную (${productId})`,
+    });
+  }
+}
+
+/** Trim/lowercase/collapse-whitespace so "  Жигулёвское  0,5" и "жигулёвское 0,5" совпадают. */
+function normalizeForMatch(value: string): string {
+  return value.normalize("NFKC").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/**
+ * Подсказка `suggestedProductId` для одной позиции очереди: сравнивает
+ * нормализованное имя (и, если есть, артикул) кандидата с нормализованным
+ * именем каждого ещё не связанного товара. Возвращает id, только если
+ * ровно ОДИН товар совпал — двусмысленная подсказка хуже отсутствующей,
+ * её примут не глядя (бриф Task 10).
+ */
+function suggestProductId(
+  candidate: { name: string; article: string | null },
+  products: { id: string; name: string }[],
+): string | null {
+  const keys = [normalizeForMatch(candidate.name)];
+  if (candidate.article) keys.push(normalizeForMatch(candidate.article));
+
+  const matches = new Set(
+    products.filter((product) => keys.includes(normalizeForMatch(product.name))).map((p) => p.id),
+  );
+  return matches.size === 1 ? [...matches][0]! : null;
 }
 
 /**
