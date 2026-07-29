@@ -1,5 +1,5 @@
 {
-  "id": "fcf48244-1824-4c9b-9bc7-4efb41447d3f",
+  "id": "4f5906f7-9b5d-4dc6-981d-c5c19bf18d8f",
   "prevId": "8d019fe4-2b2c-4ccb-90a5-03a9b5bfc2a6",
   "version": "7",
   "dialect": "postgresql",
@@ -1063,6 +1063,21 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "boxes_tenant_operator_fk": {
+          "name": "boxes_tenant_operator_fk",
+          "tableFrom": "boxes",
+          "tableTo": "employees",
+          "columnsFrom": [
+            "tenant_id",
+            "operator_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1982,6 +1997,21 @@
             "tenant_id"
           ],
           "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "sscc_blocks_tenant_device_fk": {
+          "name": "sscc_blocks_tenant_device_fk",
+          "tableFrom": "sscc_blocks",
+          "tableTo": "station_devices",
+          "columnsFrom": [
+            "tenant_id",
+            "device_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
             "id"
           ],
           "onDelete": "no action",

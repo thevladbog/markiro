@@ -28,5 +28,10 @@ export const scanEvents = pgTable("scan_events", {
   raw: text("raw").notNull(),
   verdict: text("verdict").notNull(),
   scannedAt: timestamp("scanned_at", { withTimezone: true }).notNull(),
+  // Deliberately NOT a composite tenant FK, unlike boxes.operator_id: this
+  // table is partitioned (see the file header), so a FK here would land on
+  // every partition and would have to be taught to the scheduled
+  // partition-creation job — a risk to next month's partition creation that
+  // outweighs the defence. Same reasoning already applies to terminal_id.
   operatorId: uuid("operator_id"),
 });

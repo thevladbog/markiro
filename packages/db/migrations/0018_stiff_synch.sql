@@ -50,7 +50,9 @@ ALTER TABLE "box_items" ADD CONSTRAINT "box_items_tenant_id_organization_id_fk" 
 ALTER TABLE "box_items" ADD CONSTRAINT "box_items_tenant_box_fk" FOREIGN KEY ("tenant_id","box_id") REFERENCES "public"."boxes"("tenant_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "boxes" ADD CONSTRAINT "boxes_tenant_id_organization_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."organization"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "boxes" ADD CONSTRAINT "boxes_tenant_shift_fk" FOREIGN KEY ("tenant_id","shift_id") REFERENCES "public"."shifts"("tenant_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "boxes" ADD CONSTRAINT "boxes_tenant_operator_fk" FOREIGN KEY ("tenant_id","operator_id") REFERENCES "public"."employees"("tenant_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "sscc_blocks" ADD CONSTRAINT "sscc_blocks_tenant_id_organization_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."organization"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "sscc_blocks" ADD CONSTRAINT "sscc_blocks_tenant_device_fk" FOREIGN KEY ("tenant_id","device_id") REFERENCES "public"."station_devices"("tenant_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "sscc_counters" ADD CONSTRAINT "sscc_counters_tenant_id_organization_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."organization"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "box_items_tenant_code_idx" ON "box_items" USING btree ("tenant_id","code_hash");--> statement-breakpoint
 ALTER TABLE "shifts" ADD CONSTRAINT "shifts_tenant_sscc_issuer_fk" FOREIGN KEY ("tenant_id","sscc_issuer_counterparty_id") REFERENCES "public"."counterparties"("tenant_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint

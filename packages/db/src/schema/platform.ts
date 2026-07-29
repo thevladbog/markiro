@@ -18,6 +18,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { organization } from "./auth.js";
 import { labelTemplates } from "./labels.js";
+import { employees } from "./pickup.js";
 
 export const productStatus = pgEnum("product_status", ["draft", "active"]);
 export const shiftStatus = pgEnum("shift_status", ["planned", "active", "closed"]);
@@ -297,16 +298,30 @@ export const ssccCounters = pgTable(
  * a ten-million space per extension digit runs low only slowly, and when it
  * does the only way to find out where it went is to have written it down.
  */
-export const ssccBlocks = pgTable("sscc_blocks", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  tenantId: tenantId(),
-  issuerGln: char("issuer_gln", { length: 13 }).notNull(),
-  extensionDigit: integer("extension_digit").notNull(),
-  deviceId: uuid("device_id").notNull(),
-  fromSerial: bigint("from_serial", { mode: "number" }).notNull(),
-  toSerial: bigint("to_serial", { mode: "number" }).notNull(),
-  issuedAt: timestamp("issued_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const ssccBlocks = pgTable(
+  "sscc_blocks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    issuerGln: char("issuer_gln", { length: 13 }).notNull(),
+    extensionDigit: integer("extension_digit").notNull(),
+    deviceId: uuid("device_id").notNull(),
+    fromSerial: bigint("from_serial", { mode: "number" }).notNull(),
+    toSerial: bigint("to_serial", { mode: "number" }).notNull(),
+    issuedAt: timestamp("issued_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // Composite FK: device_id must belong to the same tenant as the sscc
+    // block referencing it — same shape as shifts' own FKs above. Unlike
+    // those, device_id is NOT NULL: a block always records the device that
+    // received it, so MATCH SIMPLE's null-skip never applies here.
+    foreignKey({
+      name: "sscc_blocks_tenant_device_fk",
+      columns: [t.tenantId, t.deviceId],
+      foreignColumns: [stationDevices.tenantId, stationDevices.id],
+    }),
+  ],
+);
 
 /**
  * A transport box. The row is created when its FIRST ITEM arrives, not when
@@ -342,6 +357,13 @@ export const boxes = pgTable(
       name: "boxes_tenant_shift_fk",
       columns: [t.tenantId, t.shiftId],
       foreignColumns: [shifts.tenantId, shifts.id],
+    }),
+    // operator_id is nullable — MATCH SIMPLE (the default) means a NULL
+    // skips the check; a box may close before an operator is attributed.
+    foreignKey({
+      name: "boxes_tenant_operator_fk",
+      columns: [t.tenantId, t.operatorId],
+      foreignColumns: [employees.tenantId, employees.id],
     }),
   ],
 );
