@@ -61,13 +61,22 @@ describe("closeCurrentBox", () => {
     await openBox(exec, SHIFT, "b1", ISO, "dev-1");
     await recordScan(exec, event("a"), code("aa", "b1"));
 
-    const res = await closeCurrentBox(deps, SHIFT, null);
+    const res = await closeCurrentBox(deps, SHIFT, "op-1");
 
     expect(res.status).toBe("closed");
     if (res.status !== "closed") throw new Error("unreachable");
     expect(isValidSscc(res.sscc)).toBe(true);
     expect(res.sscc).toBe(buildSscc(0, ISSUER_PREFIX, 7));
     expect(res.itemCount).toBe(1);
+
+    // The box itself must actually be closed, under the operator who closed
+    // it -- not just a serial handed back with the mirror row left open.
+    expect(await currentBox(exec, SHIFT)).toBeNull();
+    const rows = await exec.all<{ sscc: string; closed_by: string | null; closed_at: string }>(
+      `SELECT sscc, closed_by, closed_at FROM boxes_mirror WHERE box_id = ?`,
+      ["b1"],
+    );
+    expect(rows[0]).toEqual({ sscc: res.sscc, closed_by: "op-1", closed_at: ISO });
   });
 
   it("refuses to close when the pool is dry, and burns nothing", async () => {
@@ -112,7 +121,7 @@ describe("closeCurrentBox", () => {
 });
 
 describe("boxLabelFields", () => {
-  it("carries the SSCC and item count straight through, with no derived shift/km fields", () => {
+  it("maps every input to its own labelled slot, leaving km.code and shift.no blank", () => {
     const fields = boxLabelFields({
       sscc: SSCC,
       itemCount: 12,
@@ -120,10 +129,33 @@ describe("boxLabelFields", () => {
       gtin14: GTIN,
       operatorName: "Иванов",
       counterpartyName: "Клиент",
+      closedAt: "2026-07-29T10:15:00.000Z",
+    });
+    expect(fields).toEqual({
+      "product.name": "Кола",
+      "product.gtin": GTIN,
+      "km.code": "",
+      sscc: SSCC,
+      "shift.no": "",
+      date: "2026-07-29",
+      qty: "12",
+      operator: "Иванов",
+      "counterparty.name": "Клиент",
+    });
+  });
+
+  it("defaults a missing operator or counterparty to an empty string", () => {
+    const fields = boxLabelFields({
+      sscc: SSCC,
+      itemCount: 1,
+      productName: "",
+      gtin14: GTIN,
+      operatorName: null,
+      counterpartyName: null,
       closedAt: ISO,
     });
-    expect(fields.sscc).toBe(SSCC);
-    expect(fields.qty).toBe("12");
+    expect(fields.operator).toBe("");
+    expect(fields["counterparty.name"]).toBe("");
   });
 
   it("puts no application identifier in the field record", () => {
