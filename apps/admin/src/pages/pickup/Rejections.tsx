@@ -1,0 +1,259 @@
+import { useState } from "react";
+import { useTranslation } from "react-i18next";
+import { Link } from "react-router";
+
+import {
+  Alert,
+  Button,
+  EmptyState,
+  Input,
+  PageHeader,
+  Select,
+  Spinner,
+  StatusChip,
+  Table,
+} from "@markiro/ui";
+import type { SelectOption, TableColumn } from "@markiro/ui";
+
+import { formatCreatedAt } from "../../lib/datetime.js";
+import { toast } from "../../lib/toast.js";
+import { useKiosks } from "../kiosks/api.js";
+import {
+  useAcknowledgeRejection,
+  usePickupRejections,
+  type PickupScanRejectionRowDto,
+  type RejectionState,
+} from "./rejections-api.js";
+
+/**
+ * «Для себя» → отклонённые сканы. The durable home for codes the server
+ * refused: partial refusals (which also live on the order) and, crucially,
+ * whole sessions that produced no order at all — those have nowhere else to
+ * be seen. Reached from the warn banner on the свод.
+ */
+export function RejectionsPage() {
+  const { t, i18n } = useTranslation();
+
+  const [kioskId, setKioskId] = useState("all");
+  const [stateFilter, setStateFilter] = useState<RejectionState>("all");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  const { data: kiosks } = useKiosks();
+
+  const { data, isPending, isError } = usePickupRejections({
+    state: stateFilter,
+    ...(kioskId !== "all" ? { kioskId } : {}),
+    ...(fromDate ? { from: fromDate } : {}),
+    ...(toDate ? { to: toDate } : {}),
+  });
+  const acknowledge = useAcknowledgeRejection();
+
+  const items = data?.items ?? [];
+
+  const kioskOptions: SelectOption[] = [
+    { value: "all", label: t("pages.pickup.rejections.filters.kioskAll") },
+    ...(kiosks ?? []).map((kiosk) => ({ value: kiosk.id, label: kiosk.name })),
+  ];
+
+  const stateOptions: SelectOption[] = [
+    { value: "all", label: t("pages.pickup.rejections.filters.state.all") },
+    { value: "open", label: t("pages.pickup.rejections.filters.state.open") },
+    { value: "acknowledged", label: t("pages.pickup.rejections.filters.state.acknowledged") },
+  ];
+
+  const toggleExpanded = (id: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleAcknowledge = async (id: string) => {
+    try {
+      await acknowledge.mutateAsync(id);
+      toast("ok", t("pages.pickup.rejections.toasts.acknowledged"));
+    } catch {
+      toast("error", t("pages.pickup.rejections.toasts.acknowledgeError"));
+    }
+  };
+
+  const columns: TableColumn<PickupScanRejectionRowDto>[] = [
+    {
+      key: "syncedAt",
+      title: t("pages.pickup.rejections.table.syncedAt"),
+      mono: true,
+      render: (row) => formatCreatedAt(row.syncedAt, i18n.language),
+    },
+    {
+      key: "scannedAt",
+      title: t("pages.pickup.rejections.table.scannedAt"),
+      mono: true,
+      render: (row) => formatCreatedAt(row.scannedAt, i18n.language),
+    },
+    { key: "kioskName", title: t("pages.pickup.rejections.table.kioskName") },
+    {
+      key: "employeeName",
+      title: t("pages.pickup.rejections.table.employeeName"),
+      render: (row) =>
+        row.kind === "unknown_badge" ? (
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            <span>{t("pages.pickup.rejections.unknownBadge")}</span>
+            <span style={{ font: "var(--text-code)", color: "var(--fg-2)" }}>
+              {t("pages.pickup.rejections.badgeCodeLabel", { code: row.badgeCode ?? "" })}
+            </span>
+          </div>
+        ) : (
+          (row.employeeName ?? "—")
+        ),
+    },
+    {
+      key: "codeCount",
+      title: t("pages.pickup.rejections.table.codeCount"),
+      align: "right",
+      mono: true,
+      render: (row) => (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8 }}>
+          <span>{row.codes.length}</span>
+          <Button
+            type="button"
+            variant="secondary"
+            size="compact"
+            onClick={() => toggleExpanded(row.id)}
+          >
+            {expanded.has(row.id)
+              ? t("pages.pickup.rejections.hideCodes")
+              : t("pages.pickup.rejections.showCodes")}
+          </Button>
+        </div>
+      ),
+    },
+    {
+      key: "order",
+      title: t("pages.pickup.rejections.table.order"),
+      mono: true,
+      render: (row) =>
+        row.orderId ? (
+          <Link to={`/pickup/${row.orderId}`} style={{ color: "inherit" }}>
+            {row.orderNo}
+          </Link>
+        ) : (
+          <span style={{ color: "var(--fg-2)" }}>{t("pages.pickup.rejections.noOrder")}</span>
+        ),
+    },
+    {
+      key: "state",
+      title: t("pages.pickup.rejections.table.state"),
+      render: (row) => (
+        <StatusChip
+          status={row.acknowledgedAt ? "ok" : "warn"}
+          label={
+            row.acknowledgedAt
+              ? t("pages.pickup.rejections.state.acknowledged")
+              : t("pages.pickup.rejections.state.open")
+          }
+        />
+      ),
+    },
+    {
+      key: "actions",
+      title: t("pages.pickup.rejections.table.actions"),
+      render: (row) =>
+        row.acknowledgedAt ? null : (
+          <Button
+            type="button"
+            size="compact"
+            loading={acknowledge.isPending && acknowledge.variables === row.id}
+            onClick={() => void handleAcknowledge(row.id)}
+          >
+            {t("pages.pickup.rejections.acknowledgeAction")}
+          </Button>
+        ),
+    },
+  ];
+
+  return (
+    <div style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: 20 }}>
+      <PageHeader
+        title={t("pages.pickup.rejections.title")}
+        actions={
+          <Link to="/pickup" style={{ color: "inherit" }}>
+            {t("pages.pickup.rejections.backAction")}
+          </Link>
+        }
+      />
+
+      <div style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
+        <div style={{ width: 200 }}>
+          <Select
+            label={t("pages.pickup.rejections.filters.kioskLabel")}
+            options={kioskOptions}
+            value={kioskId}
+            onChange={(value) => setKioskId(value)}
+          />
+        </div>
+        <div style={{ width: 200 }}>
+          <Select
+            label={t("pages.pickup.rejections.filters.stateLabel")}
+            options={stateOptions}
+            value={stateFilter}
+            onChange={(value) => setStateFilter(value as RejectionState)}
+          />
+        </div>
+        <div style={{ width: 180 }}>
+          <Input
+            label={t("pages.pickup.rejections.filters.fromLabel")}
+            type="date"
+            value={fromDate}
+            onChange={(event) => setFromDate(event.target.value)}
+          />
+        </div>
+        <div style={{ width: 180 }}>
+          <Input
+            label={t("pages.pickup.rejections.filters.toLabel")}
+            type="date"
+            value={toDate}
+            onChange={(event) => setToDate(event.target.value)}
+          />
+        </div>
+      </div>
+
+      {isPending ? (
+        <div style={{ display: "flex", justifyContent: "center", padding: 48 }}>
+          <Spinner label={t("common.loading")} />
+        </div>
+      ) : isError ? (
+        <Alert tone="error">{t("common.loadError")}</Alert>
+      ) : items.length === 0 ? (
+        <EmptyState
+          title={t("pages.pickup.rejections.emptyTitle")}
+          hint={t("pages.pickup.rejections.emptyHint")}
+        />
+      ) : (
+        <>
+          <Table columns={columns} rows={items} />
+          {items
+            .filter((row) => expanded.has(row.id))
+            .map((row) => (
+              <Alert
+                key={row.id}
+                tone="warn"
+                title={`${row.kioskName} · ${row.employeeName ?? row.badgeCode} · ${t("pages.pickup.conflicts.title", { count: row.codes.length })}`}
+              >
+                <ul style={{ margin: 0, paddingInlineStart: "var(--sp-5)" }}>
+                  {row.codes.map((code, index) => (
+                    <li key={`${code.rawKm}:${index}`} style={{ font: "var(--text-code)" }}>
+                      {code.rawKm} — {t(`pages.pickup.conflicts.reason.${code.reason}`)}
+                    </li>
+                  ))}
+                </ul>
+              </Alert>
+            ))}
+        </>
+      )}
+    </div>
+  );
+}

@@ -1,5 +1,5 @@
 {
-  "id": "83a6e6e4-16c5-490a-9d7a-e45439e37526",
+  "id": "a28306d5-5bdf-4516-be7f-8d308d8c01dc",
   "prevId": "06666048-907a-4ccd-8301-7b1c3631829b",
   "version": "7",
   "dialect": "postgresql",
@@ -853,195 +853,6 @@
       },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.code_conflicts": {
-      "name": "code_conflicts",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "code_hash": {
-          "name": "code_hash",
-          "type": "char(64)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "losing_shift_id": {
-          "name": "losing_shift_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "losing_terminal_id": {
-          "name": "losing_terminal_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "losing_scanned_at": {
-          "name": "losing_scanned_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "winning_shift_id": {
-          "name": "winning_shift_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "winning_terminal_id": {
-          "name": "winning_terminal_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "winning_scanned_at": {
-          "name": "winning_scanned_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "detected_at": {
-          "name": "detected_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "reviewed_at": {
-          "name": "reviewed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "code_conflicts_shift_idx": {
-          "name": "code_conflicts_shift_idx",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "losing_shift_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "code_conflicts_tenant_id_organization_id_fk": {
-          "name": "code_conflicts_tenant_id_organization_id_fk",
-          "tableFrom": "code_conflicts",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "tenant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.code_registry": {
-      "name": "code_registry",
-      "schema": "",
-      "columns": {
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "code_hash": {
-          "name": "code_hash",
-          "type": "char(64)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "shift_id": {
-          "name": "shift_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "terminal_id": {
-          "name": "terminal_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "scanned_at": {
-          "name": "scanned_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "code_registry_tenant_id_organization_id_fk": {
-          "name": "code_registry_tenant_id_organization_id_fk",
-          "tableFrom": "code_registry",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "tenant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "code_registry_tenant_id_code_hash_pk": {
-          "name": "code_registry_tenant_id_code_hash_pk",
-          "columns": [
-            "tenant_id",
-            "code_hash"
-          ]
-        }
-      },
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
@@ -3092,6 +2903,198 @@
       },
       "policies": {},
       "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.pickup_scan_rejections": {
+      "name": "pickup_scan_rejections",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kiosk_id": {
+          "name": "kiosk_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "employee_id": {
+          "name": "employee_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "badge_code": {
+          "name": "badge_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "order_id": {
+          "name": "order_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "device_seq": {
+          "name": "device_seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "codes": {
+          "name": "codes",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "scanned_at": {
+          "name": "scanned_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "synced_at": {
+          "name": "synced_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "acknowledged_at": {
+          "name": "acknowledged_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "acknowledged_by_user_id": {
+          "name": "acknowledged_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "pickup_scan_rejections_open_idx": {
+          "name": "pickup_scan_rejections_open_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "synced_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "acknowledged_at is null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "pickup_scan_rejections_tenant_id_organization_id_fk": {
+          "name": "pickup_scan_rejections_tenant_id_organization_id_fk",
+          "tableFrom": "pickup_scan_rejections",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "pickup_scan_rejections_tenant_kiosk_fk": {
+          "name": "pickup_scan_rejections_tenant_kiosk_fk",
+          "tableFrom": "pickup_scan_rejections",
+          "tableTo": "kiosks",
+          "columnsFrom": [
+            "tenant_id",
+            "kiosk_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "pickup_scan_rejections_tenant_employee_fk": {
+          "name": "pickup_scan_rejections_tenant_employee_fk",
+          "tableFrom": "pickup_scan_rejections",
+          "tableTo": "employees",
+          "columnsFrom": [
+            "tenant_id",
+            "employee_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "pickup_scan_rejections_tenant_order_fk": {
+          "name": "pickup_scan_rejections_tenant_order_fk",
+          "tableFrom": "pickup_scan_rejections",
+          "tableTo": "pickup_orders",
+          "columnsFrom": [
+            "tenant_id",
+            "order_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "pickup_scan_rejections_tenant_id_uq": {
+          "name": "pickup_scan_rejections_tenant_id_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "id"
+          ]
+        },
+        "pickup_scan_rejections_kiosk_device_seq_uq": {
+          "name": "pickup_scan_rejections_kiosk_device_seq_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "kiosk_id",
+            "device_seq"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "pickup_scan_rejections_badge_xor_employee": {
+          "name": "pickup_scan_rejections_badge_xor_employee",
+          "value": "(employee_id is null) = (badge_code is not null)"
+        }
+      },
       "isRLSEnabled": false
     }
   },

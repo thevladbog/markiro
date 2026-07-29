@@ -37,6 +37,7 @@ export function SelectOrgPage() {
     };
     // Runs once on mount; the auth client instance is stable for the
     // lifetime of the app (or the test that injects a fake one).
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only: `t` is read only in the error paths, and re-listing the orgs on a language change would clobber the current selection.
   }, []);
 
   const handleSelect = async (organizationId: string) => {

@@ -57,6 +57,7 @@ export function ReasonsEditor() {
       next[reason.id] = draftFrom(reason);
     }
     setDrafts(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `items` is `data ?? []`, a fresh array each render; depending on it would re-seed the drafts on every render and discard in-progress edits.
   }, [data]);
 
   const handleAdd = async () => {
