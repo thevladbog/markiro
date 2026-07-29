@@ -24,6 +24,27 @@ describe("commerceml parse", () => {
     ]);
   });
 
+  it("разрешает тип цены по ИдТипЦены через справочник ТипыЦен, когда Представление не задано", () => {
+    const offers = parseOffers(fixture("offers-price-ref.xml"));
+    expect(offers.priceTypes).toEqual({
+      "a0000000-0000-0000-0000-000000000001": "Розничная",
+      "a0000000-0000-0000-0000-000000000002": "Закупочная",
+    });
+    expect(offers.offers[0]!.prices[0]).toEqual({
+      type: "Розничная",
+      typeRef: "a0000000-0000-0000-0000-000000000001",
+      value: "99.90",
+      currency: "руб",
+    });
+  });
+
+  it("оставляет тип цены пустым, но отличимым от «типа не было», когда ссылка не разрешается", () => {
+    const offers = parseOffers(fixture("offers-price-ref.xml"));
+    const unresolved = offers.offers[0]!.prices[1]!;
+    expect(unresolved.type).toBe("");
+    expect(unresolved.typeRef).toBe("a0000000-0000-0000-0000-000000000099");
+  });
+
   it("не падает на файле без товаров", () => {
     const empty = Buffer.from(
       '<?xml version="1.0" encoding="UTF-8"?><КоммерческаяИнформация/>',

@@ -22,9 +22,25 @@ export interface ParsedCatalog {
  * (e.g. "Розничная", "Закупочная") -- CommerceML carries several price types
  * per offer, and this parser is not the place that picks which one is "the"
  * price. That choice belongs to the caller.
+ *
+ * 1С's built-in web exchange writes the label straight onto the price as
+ * `<Представление>`, but the typical configurations (УТ, Розница,
+ * Бухгалтерия) instead put a `<ИдТипЦены>` GUID on the price and declare the
+ * name once in the document-level `<ТипыЦен>` catalog (see
+ * `ParsedOffers.priceTypes`). `type` is resolved from whichever form is
+ * present -- inline label first, catalog lookup second -- so callers never
+ * have to think about which shape a given file used.
+ *
+ * `typeRef` carries the raw `<ИдТипЦены>` GUID whenever the price had one,
+ * regardless of whether it resolved. This is what makes an *unresolvable*
+ * reference distinguishable from *no type at all*: both leave `type: ""`,
+ * but only the former leaves `typeRef` set. `typeRef` is `undefined` (not
+ * `null`) when the price never carried a `<ИдТипЦены>`, because `null` would
+ * be a real, present-but-empty value and this is the absence of one.
  */
 export interface ParsedOfferPrice {
   type: string;
+  typeRef?: string | undefined;
   value: string;
   currency: string;
 }
@@ -37,6 +53,15 @@ export interface ParsedOffer {
 
 export interface ParsedOffers {
   offers: ParsedOffer[];
+  /**
+   * The document's `<ТипыЦен>` catalog, as GUID -> `<Наименование>`.
+   * Declared once per document (under `<ПакетПредложений>`), not per price,
+   * so it is returned alongside `offers` rather than duplicated onto every
+   * `ParsedOfferPrice`. Already used to resolve `ParsedOfferPrice.type`
+   * where possible; exposed here too so a caller can look up a `typeRef`
+   * that failed to resolve (e.g. to report *which* GUID was unknown).
+   */
+  priceTypes: Record<string, string>;
 }
 
 /**
@@ -45,7 +70,7 @@ export interface ParsedOffers {
  * hands back a bare object for a single `<Товар>` and an array for two or
  * more, and every caller would need to special-case the singular shape.
  */
-const REPEATING_TAGS = new Set(["Товар", "Предложение", "Цена"]);
+const REPEATING_TAGS = new Set(["Товар", "Предложение", "Цена", "ТипЦены"]);
 
 /**
  * 1С defaults to windows-1251 and only ever declares its real encoding in the
@@ -131,9 +156,28 @@ export function parseCatalog(bytes: Buffer): ParsedCatalog {
   return { items };
 }
 
+/**
+ * Reads the document-level `<ТипыЦен>` catalog into a GUID -> name table.
+ * Declared once under `<ПакетПредложений>`, sibling to `<Предложения>`, so
+ * it is parsed independently of any single offer or price.
+ */
+function parsePriceTypes(root: unknown): Record<string, string> {
+  const container = dig(root, "КоммерческаяИнформация", "ПакетПредложений", "ТипыЦен");
+  const rawTypes = container["ТипЦены"];
+  const table: Record<string, string> = {};
+  for (const raw of Array.isArray(rawTypes) ? rawTypes : []) {
+    const entry = asObject(raw);
+    const id = textOf(entry["Ид"]);
+    if (id === "") continue;
+    table[id] = textOf(entry["Наименование"]);
+  }
+  return table;
+}
+
 /** `parseOffers(bytes)` -- reads `<ПакетПредложений><Предложения><Предложение>` entries. */
 export function parseOffers(bytes: Buffer): ParsedOffers {
   const root = parseXml(bytes);
+  const priceTypes = parsePriceTypes(root);
   const listing = dig(root, "КоммерческаяИнформация", "ПакетПредложений", "Предложения");
   const rawOffers = listing["Предложение"];
   const offers = (Array.isArray(rawOffers) ? rawOffers : []).map((raw): ParsedOffer => {
@@ -141,13 +185,24 @@ export function parseOffers(bytes: Buffer): ParsedOffers {
     const rawPrices = asObject(offer["Цены"])["Цена"];
     const prices = (Array.isArray(rawPrices) ? rawPrices : []).map((rawPrice): ParsedOfferPrice => {
       const price = asObject(rawPrice);
+      const inline = textOf(price["Представление"]);
+      const typeRef = optionalTextOf(price["ИдТипЦены"]) ?? undefined;
+      // Inline label wins when present -- it is what 1С's built-in exchange
+      // form writes. Only consult the <ТипыЦен> catalog when there is no
+      // inline label to use; if the GUID isn't in the catalog either, `type`
+      // stays "" but `typeRef` (set above) still records the GUID that
+      // failed to resolve, so this case is never confused with a price that
+      // carried no type information at all.
+      const type =
+        inline !== "" ? inline : typeRef !== undefined ? (priceTypes[typeRef] ?? "") : "";
       return {
-        type: textOf(price["Представление"]),
+        type,
+        typeRef,
         value: textOf(price["ЦенаЗаЕдиницу"]),
         currency: textOf(price["Валюта"]),
       };
     });
     return { externalRef: textOf(offer["Ид"]), prices };
   });
-  return { offers };
+  return { offers, priceTypes };
 }
