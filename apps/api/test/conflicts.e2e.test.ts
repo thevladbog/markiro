@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import express from "express";
 import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
@@ -9,6 +8,7 @@ import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import type { ScanItemDto } from "../src/modules/station-scans/dto";
 import { listenOnLoopback } from "./support/listen-loopback";
+import { signUpAndActivate } from "./support/auth";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -37,34 +37,6 @@ describe.skipIf(!ready)("conflicts e2e", () => {
   afterAll(async () => {
     await app?.close();
   });
-
-  async function signUpWithInactiveOrg(agent: ReturnType<typeof request.agent>): Promise<string> {
-    const email = `t-${randomUUID()}@example.com`;
-    await agent
-      .post("/api/auth/sign-up/email")
-      .send({ email, password: `Pw-${randomUUID()}!Aa1`, name: "T" })
-      .expect(200);
-
-    const org = await agent
-      .post("/api/auth/organization/create")
-      .send({
-        name: "Test Plant",
-        slug: `plant-${randomUUID()}`,
-        keepCurrentActiveOrganization: true,
-      })
-      .expect(200);
-
-    return org.body.id as string;
-  }
-
-  async function signUpAndActivate(agent: ReturnType<typeof request.agent>): Promise<string> {
-    const orgId = await signUpWithInactiveOrg(agent);
-    await agent
-      .post("/api/auth/organization/set-active")
-      .send({ organizationId: orgId })
-      .expect(200);
-    return orgId;
-  }
 
   async function deviceKey(agent: ReturnType<typeof request.agent>): Promise<string> {
     const device = await agent.post("/station-devices").send({ name: "Line 1" }).expect(201);
