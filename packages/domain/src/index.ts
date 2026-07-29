@@ -33,5 +33,12 @@ export type { GenerateTsplDeps } from "./labels/tspl.js";
 export { bitmapToTsplBytes, bitmapToZplHex, convertToMonochrome } from "./labels/raster.js";
 export type { TsplBytesPacking, ZplHexPacking } from "./labels/raster.js";
 export { renderCode128Svg, renderDataMatrixSvg, renderQrSvg } from "./barcodes/svg.js";
-export { deriveDigestB64, formatPhc, parsePhc, PHC_ITERATIONS, verifyPhc } from "./crypto/phc.js";
+export {
+  deriveDigestB64,
+  formatPhc,
+  isCanonicalDigestB64,
+  parsePhc,
+  PHC_ITERATIONS,
+  verifyPhc,
+} from "./crypto/phc.js";
 export type { ParsedPhc } from "./crypto/phc.js";

@@ -96,13 +96,73 @@ export async function withStore<T>(
 }
 
 /**
+ * Rewrites records IN PLACE: `apply` is called for every record in the store
+ * and returns its replacement, or `null` to leave it alone. Resolves with how
+ * many were replaced. (The return type is plain `unknown` because `null` is
+ * already one of its inhabitants — no record here is ever `null`, so the
+ * sentinel costs nothing.)
+ *
+ * A CURSOR RATHER THAN read-then-`put`, and the difference is an order. `put`
+ * on a key that no longer exists RE-CREATES it, so a record the drain deleted
+ * between the read and the write would come back — resurrecting a delivered
+ * order under a `deviceSeq` the server has already spent, which is the silent
+ * failure `quarantineQueue` documents: the server answers a repeated
+ * `(tenantId, kioskId, deviceSeq)` with the FIRST order, so a later worker's
+ * whole cart evaporates under a stranger's number. A cursor only visits what
+ * is there when its transaction runs, and IndexedDB serialises overlapping
+ * transactions on the same store, so a concurrent dequeue either happens
+ * wholly before this walk (the record is not visited) or wholly after it (the
+ * record is deleted, rewrite and all).
+ *
+ * `apply` is therefore SYNCHRONOUS by contract, not by accident: an IndexedDB
+ * transaction commits as soon as its microtask queue drains, so awaiting
+ * anything inside the walk would close the transaction under it. Callers that
+ * need async work (deriving a digest, say) must do it before calling this.
+ */
+export async function updateEach(
+  name: string,
+  apply: (value: unknown) => unknown,
+): Promise<number> {
+  const db = await open();
+  return new Promise<number>((resolve, reject) => {
+    const tx = db.transaction(name, "readwrite");
+    let updated = 0;
+    tx.oncomplete = () => {
+      db.close();
+      resolve(updated);
+    };
+    tx.onerror = () => {
+      db.close();
+      reject(tx.error ?? new Error("IndexedDB transaction failed"));
+    };
+    try {
+      const request = tx.objectStore(name).openCursor();
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) return;
+        const next = apply(cursor.value);
+        if (next !== null) {
+          cursor.update(next);
+          updated += 1;
+        }
+        cursor.continue();
+      };
+    } catch (err) {
+      db.close();
+      reject(err instanceof Error ? err : new Error(String(err)));
+    }
+  });
+}
+
+/**
  * Like `withStore`, but drives a cursor: `onCursor` fires once per step (most
  * recent first with `direction: "prev"`), and its `stop` callback ends the
  * walk by simply not calling `cursor.continue()` again. Every value the
  * cursor visits before `stop()` is called is collected, in visit order, into
- * the resolved array — this is the only place in `src/store/` allowed to
- * drive a multi-step request against a single transaction, exactly as
- * `withStore` is the only place allowed to drive a single-request one.
+ * the resolved array — this and `updateEach` above are the only places in
+ * `src/store/` allowed to drive a multi-step request against a single
+ * transaction, exactly as `withStore` is the only place allowed to drive a
+ * single-request one.
  */
 export async function withCursor<T>(
   name: string,

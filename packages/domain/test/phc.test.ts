@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   deriveDigestB64,
   formatPhc,
+  isCanonicalDigestB64,
   parsePhc,
   PHC_ITERATIONS,
   verifyPhc,
@@ -32,6 +33,30 @@ describe("parsePhc", () => {
     expect(parsePhc(`pbkdf2$sha256$1000$${KNOWN_SALT_B64}$AA==`)).toBeNull();
     // non-canonical base64 must not slip through
     expect(parsePhc(`pbkdf2$sha256$100000$${KNOWN_SALT_B64}$AA==!`)).toBeNull();
+  });
+});
+
+describe("isCanonicalDigestB64", () => {
+  it("accepts what deriveDigestB64 produces", async () => {
+    const digest = await deriveDigestB64("BADGE-4412", KNOWN_SALT_B64, PHC_ITERATIONS);
+    expect(isCanonicalDigestB64(digest)).toBe(true);
+  });
+
+  it("rejects anything that is not the canonical base64 of 32 bytes", () => {
+    expect(isCanonicalDigestB64("")).toBe(false);
+    expect(isCanonicalDigestB64("not base64 at all")).toBe(false);
+    // a 16-byte salt is the right shape but the wrong length
+    expect(isCanonicalDigestB64(KNOWN_SALT_B64)).toBe(false);
+    // a whole verifier, rather than the digest field of one
+    expect(
+      isCanonicalDigestB64(
+        `pbkdf2$sha256$100000$${KNOWN_SALT_B64}$PGnhdQA2lW09CcvuOhCmvp0z4HbztWXaYIq7+dqmLoQ=`,
+      ),
+    ).toBe(false);
+    // non-canonical: `atob` is lenient about the unused bits of the final
+    // character, so this decodes to the same 32 bytes as the digest above and
+    // would otherwise pass a bare length check
+    expect(isCanonicalDigestB64("PGnhdQA2lW09CcvuOhCmvp0z4HbztWXaYIq7+dqmLoR=")).toBe(false);
   });
 });
 

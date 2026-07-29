@@ -5,7 +5,7 @@ import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
-import { verifyPhc } from "@markiro/domain";
+import { deriveDigestB64, PHC_ITERATIONS, verifyPhc } from "@markiro/domain";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
@@ -271,6 +271,180 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
       .set("x-kiosk-token", TOKEN)
       .send({ deviceSeq: 12, badgeCode: archivedBadge, reason: "buy", items: [] })
       .expect(422);
+  });
+
+  /**
+   * THE BADGE ARRIVES AS A DIGEST, because the device PERSISTS this body.
+   *
+   * `POST /kiosk/orders` is written to the kiosk's IndexedDB queue before any
+   * network attempt, and a permanently refused one is kept in its quarantine
+   * store for good — so whatever names the employee here is what an unattended
+   * tablet holds at rest. A badge CODE is the one credential in this system
+   * that also works away from the device (any kiosk, the line station's
+   * operator sign-in, a physical card); a digest is already in that device's
+   * own bootstrap and can be scanned nowhere.
+   *
+   * The server matches it against the `employee_badges.badge_hash` it already
+   * stores, so neither end needs the plaintext and the resolution is the SAME
+   * lookup as the code path — which is what makes roster drift between an
+   * offline scan and its sync behave identically either way, as the two 422
+   * cases below pin down.
+   */
+  describe("badge digest", () => {
+    /** Exactly what the device does: one derivation under the salt its
+     * bootstrap shipped, then send the result. */
+    async function digestOf(badgeCode: string): Promise<string> {
+      const bootstrap = await request(app!.getHttpServer())
+        .get("/kiosk/bootstrap")
+        .set("x-kiosk-token", TOKEN)
+        .expect(200);
+      return deriveDigestB64(badgeCode, bootstrap.body.badgeSalt as string, PHC_ITERATIONS);
+    }
+
+    it("files an order under the same employee the plaintext code would have", async () => {
+      // Its own employee, so the accepted item below spends that employee's
+      // daily allowance rather than a slot the shared `BADGE` fixture's later
+      // tests are counting on (`dayLimitPerEmployee: 5`).
+      const id = randomUUID();
+      const badge = `badge-digest-${randomUUID()}`;
+      await db.insert(schema.employees).values({ id, tenantId, fullName: "Дайджестов Д." });
+      await db.insert(schema.employeeBadges).values({ tenantId, employeeId: id, badgeCode: badge });
+
+      const res = await request(app!.getHttpServer())
+        .post("/kiosk/orders")
+        .set("x-kiosk-token", TOKEN)
+        .send({
+          deviceSeq: 50,
+          badgeDigest: await digestOf(badge),
+          reason: "buy",
+          items: [{ rawKm: `01${GTIN}21DIGEST1${GS}93Abcd` }],
+        })
+        .expect(201);
+      expect(res.body.itemCount).toBe(1);
+
+      const [order] = await db
+        .select({ employeeId: schema.pickupOrders.employeeId })
+        .from(schema.pickupOrders)
+        .where(
+          and(eq(schema.pickupOrders.tenantId, tenantId), eq(schema.pickupOrders.deviceSeq, 50)),
+        );
+      // The digest resolved to the badge's holder — the same row the plaintext
+      // path finds, reached through the hash the server already stores.
+      expect(order!.employeeId).toBe(id);
+    });
+
+    /**
+     * The whole reason `badgeCode` survives as a legacy field. Removing it
+     * would fail validation with 400, and 400 is in the kiosk's
+     * `TERMINAL_STATUSES` — so shipping the digest as a hard cutover would
+     * quarantine every order already queued on every device that was offline
+     * during the upgrade. (Every other test in this file sends a code, so this
+     * one exists to say WHY that is still allowed rather than to add coverage.)
+     */
+    it("still accepts a legacy plaintext code, so an upgrade cannot quarantine a queued backlog", async () => {
+      await request(app!.getHttpServer())
+        .post("/kiosk/orders")
+        .set("x-kiosk-token", TOKEN)
+        .send({ deviceSeq: 51, badgeCode: BADGE, reason: "buy", items: [] })
+        .expect(201);
+    });
+
+    it("refuses a body carrying both identifiers, or neither", async () => {
+      await request(app!.getHttpServer())
+        .post("/kiosk/orders")
+        .set("x-kiosk-token", TOKEN)
+        .send({
+          deviceSeq: 52,
+          badgeDigest: await digestOf(BADGE),
+          badgeCode: BADGE,
+          reason: "buy",
+          items: [],
+        })
+        .expect(400);
+
+      await request(app!.getHttpServer())
+        .post("/kiosk/orders")
+        .set("x-kiosk-token", TOKEN)
+        .send({ deviceSeq: 53, reason: "buy", items: [] })
+        .expect(400);
+    });
+
+    /**
+     * 400 and not 422, deliberately: a digest that is not the canonical base64
+     * of 32 bytes is a malformed BODY, not a badge the server failed to
+     * recognise, and only the latter is the device's cue to quarantine one
+     * order. Both are terminal on the device, so this is about the record an
+     * administrator reads, not about the queue.
+     */
+    it("refuses a digest that is not the canonical encoding of 32 bytes", async () => {
+      for (const badgeDigest of [
+        "", // empty
+        "not-base64!!",
+        "AAAA", // canonical, but 3 bytes
+        // Right length, non-canonical: `atob` ignores the unused bits of the
+        // final character, so a bare decode-and-measure check would pass this.
+        `${(await digestOf(BADGE)).slice(0, 42)}R=`,
+      ]) {
+        await request(app!.getHttpServer())
+          .post("/kiosk/orders")
+          .set("x-kiosk-token", TOKEN)
+          .send({ deviceSeq: 54, badgeDigest, reason: "buy", items: [] })
+          .expect(400);
+      }
+    });
+
+    it("answers a digest whose badge was revoked with 422, exactly as the code path does", async () => {
+      const id = randomUUID();
+      const badge = `badge-digest-revoked-${randomUUID()}`;
+      await db.insert(schema.employees).values({ id, tenantId, fullName: "Отозванов Д." });
+      await db.insert(schema.employeeBadges).values({ tenantId, employeeId: id, badgeCode: badge });
+
+      // The badge hash is materialised by the bootstrap the device pulls, so
+      // derive the digest while the badge is still live — which is exactly the
+      // order of events this 422 exists for: scanned offline, revoked in the
+      // cabinet, synced hours later.
+      const badgeDigest = await digestOf(badge);
+      await request(app!.getHttpServer())
+        .post("/kiosk/orders")
+        .set("x-kiosk-token", TOKEN)
+        .send({ deviceSeq: 55, badgeDigest, reason: "buy", items: [] })
+        .expect(201);
+
+      await db
+        .update(schema.employeeBadges)
+        .set({ revokedAt: new Date() })
+        .where(
+          and(
+            eq(schema.employeeBadges.tenantId, tenantId),
+            eq(schema.employeeBadges.employeeId, id),
+          ),
+        );
+
+      await request(app!.getHttpServer())
+        .post("/kiosk/orders")
+        .set("x-kiosk-token", TOKEN)
+        .send({ deviceSeq: 56, badgeDigest, reason: "buy", items: [] })
+        .expect(422);
+    });
+
+    it("answers a digest whose employee was archived with 422", async () => {
+      const id = randomUUID();
+      const badge = `badge-digest-archived-${randomUUID()}`;
+      await db.insert(schema.employees).values({ id, tenantId, fullName: "Архивов Д." });
+      await db.insert(schema.employeeBadges).values({ tenantId, employeeId: id, badgeCode: badge });
+      const badgeDigest = await digestOf(badge);
+
+      await db
+        .update(schema.employees)
+        .set({ status: "archived" })
+        .where(eq(schema.employees.id, id));
+
+      await request(app!.getHttpServer())
+        .post("/kiosk/orders")
+        .set("x-kiosk-token", TOKEN)
+        .send({ deviceSeq: 57, badgeDigest, reason: "buy", items: [] })
+        .expect(422);
+    });
   });
 
   it("flags a not-a-KM scan and a KM missing its crypto tail (dropped GS) distinctly", async () => {

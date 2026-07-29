@@ -23,6 +23,7 @@ import { readSnapshot, type CachedSnapshot } from "../store/cache.js";
 import { readConfig, readScannerSettings, writeConfig, type KioskConfig } from "../store/config.js";
 import { readJournalSince } from "../store/journal.js";
 import { enqueueOrder, listQuarantine, listQueue, quarantineQueue } from "../store/queue.js";
+import { scrubStoredBadgeCodes } from "../store/scrub.js";
 import {
   flushQueue,
   refreshSnapshot,
@@ -43,9 +44,11 @@ const DEFAULT_SERVER_URL = "/api";
 const now = (): Date => new Date();
 
 /** One worker, from the badge that admitted them to the confirmation they walk
- * away from. `badgeCode` is carried because `POST /kiosk/orders` re-resolves the
- * badge server-side — the employee id the device matched locally is not what the
- * server files the order under, and is never sent. */
+ * away from. `badgeDigest` is carried because `POST /kiosk/orders` re-resolves
+ * the badge server-side — the employee id the device matched locally is not
+ * what the server files the order under, and is never sent. The DIGEST rather
+ * than the scanned code: the order it goes into is persisted before it is sent
+ * (see `CreateOrderDto` in ../api/types.ts). */
 interface KioskSession {
   /** Monotonic, and the `Cart`'s `key`: `cartReducer`'s `reset` action is
    * unreachable from the screen (nothing dispatches it), so a fresh instance is
@@ -53,7 +56,7 @@ interface KioskSession {
   id: number;
   employeeId: string;
   fullName: string;
-  badgeCode: string;
+  badgeDigest: string;
 }
 
 /** An order that has been filed, and what the server made of it — `null` when
@@ -349,6 +352,15 @@ export function KioskShell(): React.JSX.Element {
     try {
       const cfg = await readConfig();
       const snap = await readSnapshot();
+      // BEFORE the config is applied, and therefore before anything can drain:
+      // the sync interval is keyed on `config.token`, so until `applyConfig`
+      // runs there is no client and no drain. The scrub is safe against a
+      // concurrent dequeue on its own (`updateEach` walks a cursor rather than
+      // putting records back), but a device holding pre-digest orders should
+      // not offer one over the network at all if it is a boot away from not
+      // having to. Needs the snapshot for its salt, and never rejects — an
+      // unscrubbable store must leave the kiosk working.
+      if (snap) await scrubStoredBadgeCodes(snap.bootstrap.badgeSalt);
       applyConfig(cfg);
       applySnapshot(snap);
     } catch (err) {
@@ -557,10 +569,11 @@ export function KioskShell(): React.JSX.Element {
   /**
    * The badge that opened the session, stashed by the resolver at the moment it
    * matched. `Idle.onEmployee` carries only the employee id — by design, it has
-   * no business handling the credential — but `CreateOrderDto.badgeCode` is the
-   * raw payload, because the server re-resolves it against live data. Recording
-   * it inside the resolver keeps it consistent with the very snapshot the match
-   * was made against, even if a refresh lands during the derivation.
+   * no business handling the credential — but `CreateOrderDto.badgeDigest` is
+   * the derivation that matched, because the server re-resolves it against live
+   * data. Recording it inside the resolver keeps it consistent with the very
+   * snapshot the match was made against, even if a refresh lands during the
+   * derivation.
    */
   const admitting = useRef<Omit<KioskSession, "id"> | null>(null);
   const sessions = useRef(0);
@@ -603,7 +616,7 @@ export function KioskShell(): React.JSX.Element {
       const deviceSeq = cfg.nextDeviceSeq;
       const body: CreateOrderDto = {
         deviceSeq,
-        badgeCode: active.badgeCode,
+        badgeDigest: active.badgeDigest,
         reason: state.reason,
         writeoffReasonId: state.writeoffReasonId,
         items: state.items.map((item) => ({ rawKm: item.rawKm })),
@@ -641,7 +654,7 @@ export function KioskShell(): React.JSX.Element {
         // first and queueing on failure would lose the order in exactly the
         // window that matters.
         // The employee id travels with the record but NOT in the body: the
-        // server re-resolves `badgeCode` and files the order under its own
+        // server re-resolves the badge and files the order under its own
         // answer, so this is device-local bookkeeping — it is what lets the
         // day count charge an order that has not synced yet to the worker who
         // took it, and what `flushQueue` copies into the journal.
@@ -811,14 +824,21 @@ export function KioskShell(): React.JSX.Element {
         onScan={subscribe}
         resolveBadge={async (raw) => {
           if (!roster) return null;
-          const employeeId = await resolveBadge(raw, roster.bootstrap, roster.index);
-          if (employeeId === null) return null;
-          const employee = roster.bootstrap.employees.find((one) => one.id === employeeId);
+          const match = await resolveBadge(raw, roster.bootstrap, roster.index);
+          if (match === null) return null;
+          const employee = roster.bootstrap.employees.find((one) => one.id === match.employeeId);
           // Unreachable — the id came from an index built over these very rows
           // — but a session with no name to show is not one to open.
           if (!employee) return null;
-          admitting.current = { employeeId, fullName: employee.fullName, badgeCode: raw };
-          return employeeId;
+          // `match.digest`, never `raw`: this is the value that ends up in the
+          // order body and therefore in IndexedDB, and the scanned code must
+          // not go there. It leaves this callback nowhere else.
+          admitting.current = {
+            employeeId: match.employeeId,
+            fullName: employee.fullName,
+            badgeDigest: match.digest,
+          };
+          return match.employeeId;
         }}
         onEmployee={() => {
           const admitted = admitting.current;

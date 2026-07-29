@@ -9,9 +9,9 @@ import {
 } from "@nestjs/common";
 import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, sql, type SQL } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
-import { validatePickupKm } from "@markiro/domain";
+import { formatPhc, PHC_ITERATIONS, validatePickupKm } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
-import { getOrCreateBadgeSalt } from "../../lib/badge-salt";
+import { getOrCreateBadgeSalt, readBadgeSalt } from "../../lib/badge-salt";
 import { nextOrderNo } from "../../pickup/order-number";
 import { computeTotalPrice } from "../../pickup/total-price";
 import type { PickupSlipData } from "../../pickup/slip";
@@ -123,7 +123,7 @@ export class PickupOrdersService {
 
     // 2. Badge -> active employee (badge's revoked_at is null, employee active).
     //
-    // 422, NOT 401, AND THE DIFFERENCE IS LOAD-BEARING. `badgeCode` is a field
+    // 422, NOT 401, AND THE DIFFERENCE IS LOAD-BEARING. The badge is a field
     // of the ORDER, not the caller's credential: the device already
     // authenticated (`KioskDeviceGuard`), and what failed is that a well-formed
     // body names an employee no withdrawal can be filed against — which is
@@ -148,7 +148,7 @@ export class PickupOrdersService {
     // (`TERMINAL_STATUSES`, apps/kiosk/src/sync/worker.ts), so the queue
     // unblocks the moment this ships, including on a device still running an
     // older bundle.
-    const employeeId = await this.resolveActiveEmployeeId(tenantId, dto.badgeCode);
+    const employeeId = await this.resolveActiveEmployeeId(tenantId, dto);
     if (!employeeId) {
       // An offline sync lands hours after the scan, so the badge may have
       // been revoked in between -- and this 422 fires before a single item
@@ -160,7 +160,7 @@ export class PickupOrdersService {
           tenantId,
           kioskId,
           employeeId: null,
-          badgeCode: dto.badgeCode,
+          badgeCode: await this.auditBadgeValue(tenantId, dto),
           orderId: null,
           deviceSeq: dto.deviceSeq,
           codes: dto.items.map((item) => ({ rawKm: item.rawKm, reason: "unknown_badge" })),
@@ -822,10 +822,28 @@ export class PickupOrdersService {
     await db.insert(schema.pickupScanRejections).values(row).onConflictDoNothing();
   }
 
+  /**
+   * The badge the order names -> the active employee it belongs to, by
+   * whichever of the two identifiers the body carries (see `CreateOrderDto`:
+   * exactly one is present, and `badgeCode` is the legacy one).
+   *
+   * BOTH BRANCHES ASK THE SAME QUESTION of the same row, which is what keeps
+   * this change invisible to everything downstream: an active badge of this
+   * tenant, held by an active employee. So roster drift between an offline
+   * scan and its sync resolves exactly as it always did -- a revoked badge or
+   * an archived employee is unresolvable either way, and a card reissued to
+   * somebody else in between resolves to its new holder either way.
+   */
   private async resolveActiveEmployeeId(
     tenantId: string,
-    badgeCode: string,
+    dto: CreateOrderDto,
   ): Promise<string | undefined> {
+    const presented = this.presentedBadge(dto);
+    const match =
+      "digest" in presented
+        ? eq(schema.employeeBadges.badgeHash, await this.badgeHashFor(tenantId, presented.digest))
+        : eq(schema.employeeBadges.badgeCode, presented.code);
+
     const [badge] = await this.db
       .select({ employeeId: schema.employeeBadges.employeeId })
       .from(schema.employeeBadges)
@@ -839,12 +857,87 @@ export class PickupOrdersService {
       .where(
         and(
           eq(schema.employeeBadges.tenantId, tenantId),
-          eq(schema.employeeBadges.badgeCode, badgeCode),
+          match,
           isNull(schema.employeeBadges.revokedAt),
           eq(schema.employees.status, "active"),
         ),
       );
     return badge?.employeeId;
+  }
+
+  /**
+   * Which of the two identifiers the body names the badge by, as one value the
+   * callers below can exhaust.
+   *
+   * The 400 is unreachable through the HTTP DTO -- `createOrderSchema` already
+   * requires exactly one -- but reachable through a direct service call, which
+   * this module has (see the kiosk-row lock test). Loud rather than tolerated:
+   * a body naming no badge cannot produce a 422 either, because the rejection
+   * row that 422 writes has nothing to put in `badge_code`, and the table's
+   * `badge_xor_employee` check forbids leaving it null there.
+   */
+  private presentedBadge(dto: CreateOrderDto): { digest: string } | { code: string } {
+    if (dto.badgeDigest !== undefined) return { digest: dto.badgeDigest };
+    if (dto.badgeCode !== undefined) return { code: dto.badgeCode };
+    throw new BadRequestException("Exactly one of badgeDigest or badgeCode is required");
+  }
+
+  /**
+   * The stored verifier a digest would equal, rebuilt from the tenant's salt.
+   *
+   * `employee_badges.badge_hash` is a whole PHC string and the device sends
+   * only the digest half, so the comparison is made by rebuilding the string
+   * around it rather than by decomposing the column -- an equality the index
+   * planner can use, and no PBKDF2 on this path at all.
+   *
+   * The salt is READ, never minted (`readBadgeSalt`): this runs once per order
+   * and has no business writing a row to answer a lookup. A tenant with no
+   * salt row has no verifiers either, so the empty string it falls back to
+   * matches nothing and the caller's 422 is the correct outcome.
+   */
+  private async badgeHashFor(tenantId: string, digestB64: string): Promise<string> {
+    const salt = await readBadgeSalt(this.db, tenantId);
+    if (salt === null) return "";
+    return formatPhc(PHC_ITERATIONS, salt, digestB64);
+  }
+
+  /**
+   * What `pickup_scan_rejections.badge_code` records for a badge that no
+   * longer resolves -- the plaintext code wherever the tenant still has the
+   * row, which is what makes that column worth reading («so the admin can
+   * still tell whose badge was used once the employee is gone from the
+   * roster»).
+   *
+   * A digest is looked up across ALL of the tenant's badges, REVOKED INCLUDED,
+   * which is the whole trick: the badge is unresolvable precisely because it
+   * was revoked or its employee archived, and neither of those deletes the row
+   * (`EmployeesService` only ever sets `revoked_at`). So the case the column
+   * exists for is exactly the case this recovers.
+   *
+   * The digest itself is the fallback, and it is not reachable from a real
+   * kiosk: `Idle` refuses to open a session for a badge its cached roster
+   * cannot resolve, so every badge a device sends was an active badge of this
+   * tenant when the snapshot was taken. A digest matching no row at all means
+   * the caller is not a kiosk following that flow, and an opaque token is a
+   * truer record of it than a guess. Non-null either way, because the table's
+   * `badge_xor_employee` check requires a value whenever `employee_id` is null.
+   */
+  private async auditBadgeValue(tenantId: string, dto: CreateOrderDto): Promise<string> {
+    const presented = this.presentedBadge(dto);
+    if (!("digest" in presented)) return presented.code;
+    // More than one row can share a hash -- the same code revoked and later
+    // reissued -- but they all decode to the same plaintext, so any of them
+    // answers the question this column asks.
+    const [badge] = await this.db
+      .select({ badgeCode: schema.employeeBadges.badgeCode })
+      .from(schema.employeeBadges)
+      .where(
+        and(
+          eq(schema.employeeBadges.tenantId, tenantId),
+          eq(schema.employeeBadges.badgeHash, await this.badgeHashFor(tenantId, presented.digest)),
+        ),
+      );
+    return badge?.badgeCode ?? presented.digest;
   }
 
   private async resolveWriteoffReasonId(

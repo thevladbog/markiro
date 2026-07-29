@@ -95,7 +95,7 @@ describe("cacheAge", () => {
 describe("flushQueue", () => {
   it("submits in deviceSeq order and drops each order only after the server acknowledges it", async () => {
     for (const deviceSeq of [1, 2]) {
-      await enqueueOrder({ deviceSeq, badgeCode: "B", reason: "buy", items: [] }, "e1");
+      await enqueueOrder({ deviceSeq, badgeDigest: "B", reason: "buy", items: [] }, "e1");
     }
     const seen: number[] = [];
     const client = {
@@ -119,7 +119,7 @@ describe("flushQueue", () => {
 
   it("stops at the first failure and keeps the rest queued, so ordering is never broken", async () => {
     for (const deviceSeq of [1, 2]) {
-      await enqueueOrder({ deviceSeq, badgeCode: "B", reason: "buy", items: [] }, "e1");
+      await enqueueOrder({ deviceSeq, badgeDigest: "B", reason: "buy", items: [] }, "e1");
     }
     const client = {
       bootstrap: vi.fn(),
@@ -140,7 +140,7 @@ describe("flushQueue", () => {
     await enqueueOrder(
       {
         deviceSeq: 4,
-        badgeCode: "B",
+        badgeDigest: "B",
         reason: "buy",
         items: [{ rawKm: "01…" }, { rawKm: "01…dup" }],
         createdAt: "2026-07-27T21:30:00.000Z",
@@ -182,7 +182,7 @@ describe("flushQueue", () => {
   // (`when = dto.createdAt ?? new Date()`), so the device journals that same
   // moment rather than leaving the day count with nothing to place it by.
   it("falls back to the sync moment for an order that carries no scan time", async () => {
-    await enqueueOrder({ deviceSeq: 9, badgeCode: "B", reason: "buy", items: [] }, "e1");
+    await enqueueOrder({ deviceSeq: 9, badgeDigest: "B", reason: "buy", items: [] }, "e1");
     const client = {
       bootstrap: vi.fn(),
       submitOrder: vi.fn(async () => ({
@@ -202,7 +202,7 @@ describe("flushQueue", () => {
   });
 
   it("keeps the order queued when journalling fails, so a crash mid-flight replays instead of losing it", async () => {
-    await enqueueOrder({ deviceSeq: 1, badgeCode: "B", reason: "buy", items: [] }, "e1");
+    await enqueueOrder({ deviceSeq: 1, badgeDigest: "B", reason: "buy", items: [] }, "e1");
     const client = {
       bootstrap: vi.fn(),
       submitOrder: vi.fn(async () => ({
@@ -235,7 +235,7 @@ describe("flushQueue", () => {
 
   it("aborts the whole drain at the failing order, leaving it and everything after it queued in order", async () => {
     for (const deviceSeq of [1, 2, 3]) {
-      await enqueueOrder({ deviceSeq, badgeCode: "B", reason: "buy", items: [] }, "e1");
+      await enqueueOrder({ deviceSeq, badgeDigest: "B", reason: "buy", items: [] }, "e1");
     }
     const client = {
       bootstrap: vi.fn(),
@@ -273,7 +273,7 @@ describe("flushQueue", () => {
   });
 
   it("resolves when the dequeue fails too, leaving the acknowledged order to replay", async () => {
-    await enqueueOrder({ deviceSeq: 1, badgeCode: "B", reason: "buy", items: [] }, "e1");
+    await enqueueOrder({ deviceSeq: 1, badgeDigest: "B", reason: "buy", items: [] }, "e1");
     vi.spyOn(queueStore, "dequeueOrder").mockRejectedValueOnce(new Error("indexeddb unavailable"));
     const client = {
       bootstrap: vi.fn(),
@@ -308,7 +308,7 @@ describe("flushQueue", () => {
    */
   it("serialises an overlapping drain instead of running two at once, and submits nothing twice", async () => {
     for (const deviceSeq of [1, 2]) {
-      await enqueueOrder({ deviceSeq, badgeCode: "B", reason: "buy", items: [] }, "e1");
+      await enqueueOrder({ deviceSeq, badgeDigest: "B", reason: "buy", items: [] }, "e1");
     }
     let reachedSubmit!: () => void;
     const submitStarted = new Promise<void>((resolve) => {
@@ -370,7 +370,7 @@ describe("flushQueue", () => {
    * OWN, chained behind the one in flight.
    */
   it("delivers the caller's own order even when it was enqueued after a running drain read the queue", async () => {
-    await enqueueOrder({ deviceSeq: 1, badgeCode: "B", reason: "buy", items: [] }, "e1");
+    await enqueueOrder({ deviceSeq: 1, badgeDigest: "B", reason: "buy", items: [] }, "e1");
     let reachedSubmit!: () => void;
     const submitStarted = new Promise<void>((resolve) => {
       reachedSubmit = resolve;
@@ -400,7 +400,7 @@ describe("flushQueue", () => {
     await submitStarted;
     // The worker's order lands after that read — the backlog drain will never
     // see it, whatever it goes on to do.
-    await enqueueOrder({ deviceSeq: 2, badgeCode: "B", reason: "buy", items: [] }, "e1");
+    await enqueueOrder({ deviceSeq: 2, badgeDigest: "B", reason: "buy", items: [] }, "e1");
     const mine = flushQueue(client as never, () => new Date());
     releaseSubmit();
     await mine;
@@ -426,7 +426,7 @@ describe("flushQueue", () => {
    */
   it("settles on a fetch that never answers, leaving the order queued for the next drain", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    await enqueueOrder({ deviceSeq: 1, badgeCode: "B", reason: "buy", items: [] }, "e1");
+    await enqueueOrder({ deviceSeq: 1, badgeDigest: "B", reason: "buy", items: [] }, "e1");
     let requested!: () => void;
     const posted = new Promise<void>((resolve) => {
       requested = resolve;
@@ -480,7 +480,7 @@ describe("flushQueue", () => {
     await enqueueOrder(
       {
         deviceSeq: 1,
-        badgeCode: "B",
+        badgeDigest: "B",
         reason: "writeoff",
         writeoffReasonId: "r-archived",
         items: [{ rawKm: "01…poison" }],
@@ -489,7 +489,7 @@ describe("flushQueue", () => {
       "e1",
     );
     for (const deviceSeq of [2, 3]) {
-      await enqueueOrder({ deviceSeq, badgeCode: "B", reason: "buy", items: [] }, "e1");
+      await enqueueOrder({ deviceSeq, badgeDigest: "B", reason: "buy", items: [] }, "e1");
     }
     const client = {
       bootstrap: vi.fn(),
@@ -523,7 +523,7 @@ describe("flushQueue", () => {
         message: "Unknown or archived writeoff reason",
         body: {
           deviceSeq: 1,
-          badgeCode: "B",
+          badgeDigest: "B",
           reason: "writeoff",
           writeoffReasonId: "r-archived",
           items: [{ rawKm: "01…poison" }],
@@ -540,7 +540,7 @@ describe("flushQueue", () => {
     await enqueueOrder(
       {
         deviceSeq: 1,
-        badgeCode: "B",
+        badgeDigest: "B",
         reason: "writeoff",
         items: [{ rawKm: "01…" }],
         createdAt: "2026-07-27T20:00:00.000Z",
@@ -583,7 +583,7 @@ describe("flushQueue", () => {
     await enqueueOrder(
       {
         deviceSeq: 1,
-        badgeCode: "GONE",
+        badgeDigest: "GONE",
         reason: "buy",
         items: [{ rawKm: "01…orphaned" }],
         createdAt: "2026-07-27T20:00:00.000Z",
@@ -591,7 +591,7 @@ describe("flushQueue", () => {
       "e-deleted",
     );
     for (const deviceSeq of [2, 3]) {
-      await enqueueOrder({ deviceSeq, badgeCode: "B", reason: "buy", items: [] }, "e1");
+      await enqueueOrder({ deviceSeq, badgeDigest: "B", reason: "buy", items: [] }, "e1");
     }
     const client = {
       bootstrap: vi.fn(),
@@ -621,7 +621,7 @@ describe("flushQueue", () => {
         message: "Unknown or inactive badge",
         body: {
           deviceSeq: 1,
-          badgeCode: "GONE",
+          badgeDigest: "GONE",
           reason: "buy",
           items: [{ rawKm: "01…orphaned" }],
           createdAt: "2026-07-27T20:00:00.000Z",
@@ -642,7 +642,7 @@ describe("flushQueue", () => {
    */
   it("never quarantines on a 401: that is a revoked device, not a bad order", async () => {
     for (const deviceSeq of [1, 2]) {
-      await enqueueOrder({ deviceSeq, badgeCode: "B", reason: "buy", items: [] }, "e1");
+      await enqueueOrder({ deviceSeq, badgeDigest: "B", reason: "buy", items: [] }, "e1");
     }
 
     await flushQueue(
@@ -665,7 +665,7 @@ describe("flushQueue", () => {
     ["a request that ran out of time", new KioskTimeoutError(SUBMIT_TIMEOUT_MS)],
   ])("keeps the order queued on %s", async (_label, err) => {
     for (const deviceSeq of [1, 2]) {
-      await enqueueOrder({ deviceSeq, badgeCode: "B", reason: "buy", items: [] }, "e1");
+      await enqueueOrder({ deviceSeq, badgeDigest: "B", reason: "buy", items: [] }, "e1");
     }
     const client = refusingClient(err);
 
@@ -679,8 +679,8 @@ describe("flushQueue", () => {
   // Custody before removal, the same invariant the success path keeps: an order
   // may leave the queue only once its body is durable somewhere else.
   it("leaves a refused order queued when it cannot be set aside", async () => {
-    await enqueueOrder({ deviceSeq: 1, badgeCode: "B", reason: "buy", items: [] }, "e1");
-    await enqueueOrder({ deviceSeq: 2, badgeCode: "B", reason: "buy", items: [] }, "e1");
+    await enqueueOrder({ deviceSeq: 1, badgeDigest: "B", reason: "buy", items: [] }, "e1");
+    await enqueueOrder({ deviceSeq: 2, badgeDigest: "B", reason: "buy", items: [] }, "e1");
     vi.spyOn(queueStore, "quarantineOrder").mockRejectedValueOnce(new Error("indexeddb refused"));
     const client = refusingClient(new KioskApiError(400, "bad body"));
 
