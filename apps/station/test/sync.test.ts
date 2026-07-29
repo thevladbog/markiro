@@ -1,8 +1,12 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DatabaseSync } from "node:sqlite";
 import { createStationClient, REQUEST_TIMEOUT_MS } from "../src/lib/api-client.js";
 import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
 import { BACKOFF_START_MS, BATCH_SIZE, createSyncEngine, STUCK_AFTER_MS } from "../src/lib/sync.js";
+import { addRange, remaining } from "../src/lib/sscc-pool.js";
+import { closeBox, currentBox, openBox } from "../src/lib/boxes.js";
+import { recordScan, type AcceptedCode, type ScanEventRow } from "../src/lib/journal.js";
+import { outboxDepth } from "../src/lib/outbox.js";
 
 // Several tests below deliberately fail the POST (or the device DB) to
 // exercise the retry path, which logs through `console.error` by design.
@@ -890,5 +894,247 @@ describe("sync engine", () => {
     expect(post).not.toHaveBeenCalled();
     expect(states.at(-1)).toMatchObject({ stuck: false });
     engine.stop();
+  });
+});
+
+describe("sync engine: pools and closures", () => {
+  const SHIFT = "s1";
+  const ISO = "2026-07-29T10:00:00.000Z";
+  // A 9-digit GS1 issuer prefix -- see sscc-pool.ts's doc comment for why
+  // the pool is keyed by prefix, not by GLN (the brief that seeded these
+  // tests predates that correction).
+  const ISSUER_PREFIX = "460123456";
+  const SSCC = "004601234560000017";
+  const TERMINAL = "t1";
+
+  /** One scan event, distinguished by `id` only in its raw payload. */
+  function event(id: string): ScanEventRow {
+    return {
+      shiftId: SHIFT,
+      terminalId: TERMINAL,
+      raw: `RAW-${id}`,
+      verdict: "ok",
+      scannedAt: ISO,
+      operatorId: null,
+    };
+  }
+
+  /** One accepted code, named into `boxId` (or null for none). `id` IS the codeHash. */
+  function code(id: string, boxId: string | null): AcceptedCode {
+    return {
+      codeHash: id,
+      shiftId: SHIFT,
+      gtin14: "04600000000015",
+      serial: id,
+      scannedAt: ISO,
+      boxId,
+    };
+  }
+
+  /** Wraps `exec` so any `run` whose SQL matches `pattern` throws instead of writing. */
+  function failingExecOn(exec: SqlExecutor, pattern: RegExp): SqlExecutor {
+    const realRun = exec.run.bind(exec);
+    return {
+      ...exec,
+      run: async (sql, params) => {
+        if (pattern.test(sql)) throw new Error("simulated failure");
+        return realRun(sql, params);
+      },
+    };
+  }
+
+  async function outboxCount(execToCount: SqlExecutor): Promise<number> {
+    return outboxDepth(execToCount);
+  }
+
+  let exec: SqlExecutor;
+  let post = vi.fn();
+
+  beforeEach(async () => {
+    exec = await migratedExec();
+    post = vi.fn().mockResolvedValue({ applied: 1, alreadyApplied: false, conflicts: [] });
+    // A default queued scan so every `drainOnce()` below has a batch to
+    // send, even in tests that otherwise queue nothing of their own (the
+    // pool-reporting tests) or only close a box.
+    await seed(exec, 1);
+  });
+
+  function mockPost(response: unknown): void {
+    post.mockResolvedValue(response);
+  }
+
+  /**
+   * The body of the most recent POST made by the most recent `drainOnce()`
+   * call, or an empty-batch stand-in if that call made no POST at all (there
+   * was genuinely nothing left to send -- see "does not resend a box
+   * already acknowledged" below, which relies on exactly this to prove a
+   * SECOND drain carries no box).
+   */
+  function lastBody(): string {
+    const call = post.mock.calls.at(-1);
+    return JSON.stringify(call ? call[1] : { items: [], boxes: [] });
+  }
+
+  /**
+   * Drains once against `execForDrain` (defaulting to the shared `exec`),
+   * via a fresh engine bound to the shared `post` mock. `post.mockClear()`
+   * runs first so `lastBody()` reflects only THIS call, not a previous one.
+   */
+  async function drainOnce(execForDrain: SqlExecutor = exec): Promise<void> {
+    post.mockClear();
+    const engine = createSyncEngine({
+      exec: execForDrain,
+      client: { post },
+      machineId: "m1",
+      onState: () => {},
+    });
+    engine.nudge();
+    await engine.idle();
+    engine.stop();
+  }
+
+  it("applies a serial block carried by the sync response", async () => {
+    mockPost({
+      applied: 1,
+      alreadyApplied: false,
+      conflicts: [],
+      ssccBlock: { issuerPrefix: ISSUER_PREFIX, extensionDigit: 0, fromSerial: 5, toSerial: 9 },
+    });
+    await drainOnce();
+    expect(await remaining(exec, ISSUER_PREFIX, 0)).toBe(5);
+  });
+
+  it("reports how many serials are left in the batch it sends", async () => {
+    await addRange(exec, {
+      issuerPrefix: ISSUER_PREFIX,
+      extensionDigit: 0,
+      fromSerial: 1,
+      toSerial: 3,
+    });
+    await drainOnce();
+    expect(JSON.parse(lastBody()).serialsLeft).toBe(3);
+  });
+
+  it("sends a closed box with its serial", async () => {
+    await openBox(exec, SHIFT, "b1", ISO, TERMINAL);
+    await closeBox(exec, "b1", SSCC, ISO, null);
+    await drainOnce();
+    expect(JSON.parse(lastBody()).boxes).toEqual([
+      {
+        boxId: "b1",
+        shiftId: SHIFT,
+        terminalId: TERMINAL,
+        sscc: SSCC,
+        closedAt: ISO,
+        operatorId: null,
+      },
+    ]);
+  });
+
+  // Task 9 threaded `box_id`/`operator_id` onto the outbox row itself; this
+  // pins the OTHER half, that `readBatch`/`toPayload` actually carry them
+  // through to the request body rather than silently dropping them there --
+  // the box-membership and operator-attribution bookkeeping those columns
+  // exist for would otherwise never reach the server despite being recorded
+  // correctly on the device.
+  it("carries a scan's box id and operator id from the outbox row into the request body", async () => {
+    const OPERATOR = "22222222-2222-2222-2222-222222222222";
+    await openBox(exec, SHIFT, "b1", ISO, TERMINAL);
+    await recordScan(exec, { ...event("a"), operatorId: OPERATOR }, code("aa", "b1"));
+    await drainOnce();
+    const items = JSON.parse(lastBody()).items as Array<{
+      boxId: string | null;
+      operatorId: string | null;
+      code: { codeHash: string } | null;
+    }>;
+    const item = items.find((i) => i.code?.codeHash === "aa");
+    expect(item).toMatchObject({ boxId: "b1", operatorId: OPERATOR });
+  });
+
+  it("does not resend a box already acknowledged", async () => {
+    await openBox(exec, SHIFT, "b1", ISO, TERMINAL);
+    await closeBox(exec, "b1", SSCC, ISO, null);
+    await drainOnce();
+    await drainOnce();
+    expect(JSON.parse(lastBody()).boxes).toEqual([]);
+  });
+
+  // A box can close well after its last item was drained -- the shift's
+  // last box, with nothing left queued behind it. This pins the path with
+  // no outbox maxId at all (batch.length === 0, boxes.length > 0): the
+  // batchId falls back to the box's own rowid, and the ack skips
+  // `ackThrough` entirely (there is no outbox range to acknowledge) while
+  // still marking the box itself acknowledged.
+  it("sends a closed box on its own once the queue has otherwise drained", async () => {
+    await drainOnce(); // drains away the default seeded row, leaving the outbox empty.
+    await openBox(exec, SHIFT, "b1", ISO, TERMINAL);
+    await closeBox(exec, "b1", SSCC, ISO, null);
+    await drainOnce();
+    const body = JSON.parse(lastBody());
+    expect(body.items).toEqual([]);
+    expect(body.boxes).toEqual([
+      {
+        boxId: "b1",
+        shiftId: SHIFT,
+        terminalId: TERMINAL,
+        sscc: SSCC,
+        closedAt: ISO,
+        operatorId: null,
+      },
+    ]);
+  });
+
+  it("still acknowledges when applying a serial block fails", async () => {
+    const failing = failingExecOn(exec, /INSERT INTO sscc_pool/);
+    mockPost({
+      applied: 1,
+      alreadyApplied: false,
+      conflicts: [],
+      ssccBlock: { issuerPrefix: ISSUER_PREFIX, extensionDigit: 0, fromSerial: 5, toSerial: 9 },
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    await drainOnce(failing);
+    expect(await outboxCount(exec)).toBe(0);
+  });
+
+  it("still rejects a response that is not this endpoint's shape", async () => {
+    mockPost({
+      status: "ok",
+      ssccBlock: { issuerPrefix: ISSUER_PREFIX, extensionDigit: 0, fromSerial: 5, toSerial: 9 },
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    await drainOnce();
+    expect(await outboxCount(exec)).toBe(1);
+    expect(await remaining(exec, ISSUER_PREFIX, 0)).toBe(0);
+  });
+
+  it("drops a lost code from the box that is still open", async () => {
+    await openBox(exec, SHIFT, "b1", ISO, TERMINAL);
+    await recordScan(exec, event("a"), code("aa", "b1"));
+    await recordScan(exec, event("b"), code("bb", "b1"));
+    mockPost({
+      applied: 2,
+      alreadyApplied: false,
+      conflicts: [{ codeHash: "aa", winningTerminalId: "t9", winningScannedAt: ISO }],
+    });
+    await drainOnce();
+    expect((await currentBox(exec, SHIFT))?.itemCount).toBe(1);
+  });
+
+  it("leaves a closed box alone when one of its codes is lost", async () => {
+    await openBox(exec, SHIFT, "b1", ISO, TERMINAL);
+    await recordScan(exec, event("a"), code("aa", "b1"));
+    await closeBox(exec, "b1", SSCC, ISO, null);
+    mockPost({
+      applied: 1,
+      alreadyApplied: false,
+      conflicts: [{ codeHash: "aa", winningTerminalId: "t9", winningScannedAt: ISO }],
+    });
+    await drainOnce();
+    const rows = await exec.all<{ box_id: string }>(
+      `SELECT box_id FROM codes_mirror WHERE code_hash = ?`,
+      ["aa"],
+    );
+    expect(rows[0]!.box_id).toBe("b1");
   });
 });

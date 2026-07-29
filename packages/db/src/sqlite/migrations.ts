@@ -116,13 +116,19 @@ export const STATION_MIGRATIONS: string[] = [
   // `codes_mirror` (see the ALTER below), not a join table -- see
   // apps/station/src/lib/journal.ts's recordScan doc comment for why a
   // fourth write was rejected in favour of riding the insert already there.
-  // `acked_at` is what stops a closed box being resent for the rest of the
-  // shift once the sync engine sets it (Task 11); `print_verified_at` and
-  // `print_skipped_at` are set once the label has been printed or the
-  // operator explicitly skipped printing.
+  // `terminal_id` is the box's OWN terminal, captured at open time (Task
+  // 11): the sync engine reports a closure's shift/terminal from THIS row,
+  // never from whatever the device considers "current" at drain time,
+  // because `deviceId`/terminalId lives in station.json and can change
+  // (re-enrollment) independently of this SQLite mirror, and a box can
+  // still be open when that happens. `acked_at` is what stops a closed box
+  // being resent for the rest of the shift once the sync engine sets it
+  // (Task 11); `print_verified_at` and `print_skipped_at` are set once the
+  // label has been printed or the operator explicitly skipped printing.
   `CREATE TABLE IF NOT EXISTS boxes_mirror (
      box_id TEXT PRIMARY KEY,
      shift_id TEXT NOT NULL,
+     terminal_id TEXT,
      sscc TEXT,
      opened_at TEXT NOT NULL,
      closed_at TEXT,

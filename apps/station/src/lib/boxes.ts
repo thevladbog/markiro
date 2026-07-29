@@ -55,18 +55,30 @@ export async function currentBox(exec: SqlExecutor, shiftId: string): Promise<De
   };
 }
 
-/** Opens a new box for this shift. One INSERT; every other column defaults to null. */
+/**
+ * Opens a new box for this shift. One INSERT; every other column defaults
+ * to null.
+ *
+ * `terminalId` is captured here, at open time, and never re-derived later:
+ * `deviceId`/terminalId lives in `station.json`, not this SQLite mirror, and
+ * can change (e.g. re-enrollment) independently of a box that is still open
+ * in the local database. The sync engine's closure report reads it back off
+ * this row rather than whatever the device considers "current" when it
+ * happens to drain (Task 11) -- otherwise a box open across such a change
+ * would report the wrong terminal, or a shift change would make it never
+ * match the server's row at all.
+ */
 export async function openBox(
   exec: SqlExecutor,
   shiftId: string,
   boxId: string,
   openedAt: string,
+  terminalId: string | null,
 ): Promise<void> {
-  await exec.run(`INSERT INTO boxes_mirror (box_id, shift_id, opened_at) VALUES (?,?,?)`, [
-    boxId,
-    shiftId,
-    openedAt,
-  ]);
+  await exec.run(
+    `INSERT INTO boxes_mirror (box_id, shift_id, terminal_id, opened_at) VALUES (?,?,?,?)`,
+    [boxId, shiftId, terminalId, openedAt],
+  );
 }
 
 /**

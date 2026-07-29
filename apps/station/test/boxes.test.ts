@@ -41,20 +41,20 @@ describe("boxes", () => {
   });
 
   it("counts the codes that name the open box", async () => {
-    await openBox(exec, "s1", "b1", "2026-07-29T10:00:00.000Z");
+    await openBox(exec, "s1", "b1", "2026-07-29T10:00:00.000Z", "dev-1");
     await recordScan(exec, event("a"), code("aa", "b1"));
     await recordScan(exec, event("b"), code("bb", "b1"));
     expect((await currentBox(exec, "s1"))?.itemCount).toBe(2);
   });
 
   it("stops being current once closed", async () => {
-    await openBox(exec, "s1", "b1", "2026-07-29T10:00:00.000Z");
+    await openBox(exec, "s1", "b1", "2026-07-29T10:00:00.000Z", "dev-1");
     await closeBox(exec, "b1", "004601234560000017", "2026-07-29T10:05:00.000Z", null);
     expect(await currentBox(exec, "s1")).toBeNull();
   });
 
   it("keeps a closed box's item count", async () => {
-    await openBox(exec, "s1", "b1", "2026-07-29T10:00:00.000Z");
+    await openBox(exec, "s1", "b1", "2026-07-29T10:00:00.000Z", "dev-1");
     await recordScan(exec, event("a"), code("aa", "b1"));
     await closeBox(exec, "b1", "004601234560000017", "2026-07-29T10:05:00.000Z", null);
     const rows = await exec.all<{ sscc: string }>(
@@ -65,7 +65,7 @@ describe("boxes", () => {
   });
 
   it("keeps boxes of different shifts apart", async () => {
-    await openBox(exec, "s1", "b1", "2026-07-29T10:00:00.000Z");
+    await openBox(exec, "s1", "b1", "2026-07-29T10:00:00.000Z", "dev-1");
     expect(await currentBox(exec, "s2")).toBeNull();
   });
 
@@ -76,7 +76,7 @@ describe("boxes", () => {
   // the one currently open ("b0" was never opened at all), so it must never
   // show up in b1's count.
   it("excludes codes that name a different box in the same shift from the count", async () => {
-    await openBox(exec, "s1", "b1", "2026-07-29T10:00:00.000Z");
+    await openBox(exec, "s1", "b1", "2026-07-29T10:00:00.000Z", "dev-1");
     await recordScan(exec, event("a"), code("aa", "b1"));
     await recordScan(exec, event("z"), code("zz", "b0"));
     expect((await currentBox(exec, "s1"))?.itemCount).toBe(1);
@@ -86,9 +86,9 @@ describe("boxes", () => {
   // a code scanned into a box opened under a DIFFERENT shift must not
   // inflate this shift's current box count either.
   it("excludes codes that name a box opened under a different shift from the count", async () => {
-    await openBox(exec, "s1", "b1", "2026-07-29T10:00:00.000Z");
+    await openBox(exec, "s1", "b1", "2026-07-29T10:00:00.000Z", "dev-1");
     await recordScan(exec, event("a"), code("aa", "b1"));
-    await openBox(exec, "s2", "b2", "2026-07-29T10:00:00.000Z");
+    await openBox(exec, "s2", "b2", "2026-07-29T10:00:00.000Z", "dev-1");
     await recordScan(exec, event("z", "s2"), code("zz", "b2", "s2"));
     expect((await currentBox(exec, "s1"))?.itemCount).toBe(1);
   });

@@ -3,6 +3,7 @@ import { conflictCount, recordConflicts } from "./conflicts.js";
 import { getInstallId } from "./install-id.js";
 import type { SqlExecutor } from "./mirror.js";
 import { ackThrough, oldestQueuedAt, outboxDepth, readBatch, type OutboxItem } from "./outbox.js";
+import { addRange, remaining, type PoolRange } from "./sscc-pool.js";
 
 /** Scans per request. Small enough to survive a flaky link and to retry cheaply. */
 export const BATCH_SIZE = 200;
@@ -31,6 +32,14 @@ export interface SyncState {
    * each one — so this is a quiet count, never something that interrupts.
    */
   conflicts: number;
+  /**
+   * Unburned SSCC serials left in this device's local pool (box ranges,
+   * extension digit 0), summed across every range it holds. Zero when the
+   * device has never received a range at all, same as a dry pool — the
+   * operator-facing signal (a later slice) has no reason to tell those
+   * apart.
+   */
+  serialsLeft: number;
 }
 
 export interface SyncEngineDeps {
@@ -57,10 +66,14 @@ interface BatchConflict {
   winningScannedAt: string;
 }
 
+/** A block of box-range serials the server is topping this device's pool up with. */
+type BatchSsccBlock = Omit<PoolRange, "nextSerial">;
+
 interface BatchResponse {
   applied: number;
   alreadyApplied: boolean;
   conflicts?: BatchConflict[];
+  ssccBlock?: BatchSsccBlock;
 }
 
 /**
@@ -83,6 +96,26 @@ function isBatchConflict(value: unknown): value is BatchConflict {
     (typeof c.winningTerminalId === "string" || c.winningTerminalId === null) &&
     typeof c.winningScannedAt === "string" &&
     !Number.isNaN(Date.parse(c.winningScannedAt))
+  );
+}
+
+/**
+ * Same discipline as `isBatchConflict`, for the same reason: `ssccBlock` is
+ * optional, and a malformed one must cost only the top-up, never the batch's
+ * ack. Checked at the point of consumption (below), not folded into
+ * `isBatchResponse` itself — that guard's two required fields are what
+ * stand between a captive portal and a permanent delete, and this is not
+ * that; a server that sends a top-up in a shape this device does not
+ * recognize should still see its batch acknowledged.
+ */
+function isBatchSsccBlock(value: unknown): value is BatchSsccBlock {
+  if (typeof value !== "object" || value === null) return false;
+  const b = value as Record<string, unknown>;
+  return (
+    typeof b.issuerPrefix === "string" &&
+    typeof b.extensionDigit === "number" &&
+    typeof b.fromSerial === "number" &&
+    typeof b.toSerial === "number"
   );
 }
 
@@ -116,7 +149,112 @@ function toPayload(items: OutboxItem[]) {
     verdict: i.verdict,
     scannedAt: i.scannedAt,
     code: i.code,
+    boxId: i.boxId,
+    operatorId: i.operatorId,
   }));
+}
+
+/** A closed-but-unreported box, as read off this device's own `boxes_mirror` row. */
+interface BoxClosureRow {
+  boxId: string;
+  shiftId: string;
+  terminalId: string | null;
+  sscc: string;
+  closedAt: string;
+  operatorId: string | null;
+  /** SQLite's own rowid -- see `readClosedUnackedBoxes`'s doc comment. */
+  rowid: number;
+}
+
+/**
+ * Every box this device has closed but not yet had acknowledged, oldest
+ * first. Unlike `readBatch`'s outbox read, this is never pinned to a
+ * ceiling: a box closure is idempotent on the server (matched on
+ * (tenant, shift, terminal, deviceBoxId) with `closedAt IS NULL`, so
+ * applying the same one twice is a harmless no-op -- see station-scans
+ * dto.ts/service.ts), so growing this set between one attempt and a retry
+ * of the SAME items batch carries none of the duplication risk the outbox
+ * ceiling exists to prevent.
+ *
+ * Reports `shiftId`/`terminalId` straight off the box's OWN row, never
+ * whatever the device would consider "current" at drain time: this engine
+ * has no notion of a "current" shift or terminal at all (it drains the
+ * WHOLE device outbox, which can span a shift change), and terminalId
+ * (`deviceId`) lives in `station.json`, not this SQLite mirror, so it can
+ * change independently of a box still open in the local database. A box
+ * spanning either change must still report the identity it was opened
+ * under, or the server's four-column match can never find it.
+ */
+async function readClosedUnackedBoxes(exec: SqlExecutor): Promise<BoxClosureRow[]> {
+  const rows = await exec.all<{
+    box_id: string;
+    shift_id: string;
+    terminal_id: string | null;
+    sscc: string;
+    closed_at: string;
+    closed_by: string | null;
+    rowid: number;
+  }>(
+    `SELECT rowid, box_id, shift_id, terminal_id, sscc, closed_at, closed_by
+       FROM boxes_mirror
+      WHERE closed_at IS NOT NULL AND acked_at IS NULL
+      ORDER BY rowid`,
+  );
+  return rows.map((r) => ({
+    boxId: r.box_id,
+    shiftId: r.shift_id,
+    terminalId: r.terminal_id,
+    sscc: r.sscc,
+    closedAt: r.closed_at,
+    operatorId: r.closed_by,
+    rowid: r.rowid,
+  }));
+}
+
+function toBoxPayload(boxes: BoxClosureRow[]) {
+  return boxes.map((b) => ({
+    boxId: b.boxId,
+    shiftId: b.shiftId,
+    terminalId: b.terminalId,
+    sscc: b.sscc,
+    closedAt: b.closedAt,
+    operatorId: b.operatorId,
+  }));
+}
+
+/**
+ * Marks every one of these boxes acknowledged -- one statement, an IN list
+ * rather than one UPDATE per box, since `box_id` alone (no tenant/shift
+ * scoping needed here; this is the device's OWN table) already names each
+ * row uniquely.
+ */
+async function ackBoxes(exec: SqlExecutor, boxIds: string[], ackedAt: string): Promise<void> {
+  if (boxIds.length === 0) return;
+  const placeholders = boxIds.map(() => "?").join(",");
+  await exec.run(`UPDATE boxes_mirror SET acked_at = ? WHERE box_id IN (${placeholders})`, [
+    ackedAt,
+    ...boxIds,
+  ]);
+}
+
+/**
+ * The issuer prefix this device's local pool is keyed under, or null if it
+ * has never received a box range at all. A device holds at most one in
+ * practice (`StationBundle.sscc` hands down a single prefix), so the lowest
+ * one on an otherwise-unexpected multi-prefix device is as good a choice as
+ * any -- this is a reporting figure, not an allocation decision.
+ */
+async function currentIssuerPrefix(exec: SqlExecutor): Promise<string | null> {
+  const rows = await exec.all<{ issuer_prefix: string }>(
+    "SELECT issuer_prefix FROM sscc_pool WHERE extension_digit = 0 ORDER BY issuer_prefix LIMIT 1",
+  );
+  return rows[0]?.issuer_prefix ?? null;
+}
+
+/** Serials left in the box pool (extension digit 0), for `SyncState` and the request body. */
+async function computeSerialsLeft(exec: SqlExecutor): Promise<number> {
+  const issuerPrefix = await currentIssuerPrefix(exec);
+  return issuerPrefix === null ? 0 : remaining(exec, issuerPrefix, 0);
 }
 
 const CEILING_META_KEY = "sync_pending_ceiling";
@@ -298,7 +436,8 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
       }
     }
     const conflicts = await conflictCount(deps.exec);
-    deps.onState({ pending, lastSuccessAt, stuck, conflicts });
+    const serialsLeft = await computeSerialsLeft(deps.exec);
+    deps.onState({ pending, lastSuccessAt, stuck, conflicts, serialsLeft });
   }
 
   async function drain(): Promise<void> {
@@ -313,7 +452,13 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
         // that range; otherwise this is a plain fresh prefix.
         const ceiling = await ensurePendingCeiling();
         const batch = await readBatch(deps.exec, BATCH_SIZE, ceiling);
-        if (batch.length === 0) {
+        // Boxes ride along independently of the outbox ceiling above (see
+        // `readClosedUnackedBoxes`'s doc comment) -- a shift's last box can
+        // close with nothing left queued, and that closure must still reach
+        // the server without waiting for some LATER scan to give the drain
+        // a reason to run.
+        const boxes = await readClosedUnackedBoxes(deps.exec);
+        if (batch.length === 0 && boxes.length === 0) {
           if (ceiling !== null) {
             // Only reachable with a stale ceiling if the rows it pinned were
             // somehow removed without going through `ackThrough` below (or
@@ -331,7 +476,11 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
           break;
         }
 
-        const maxId = batch[batch.length - 1]!.id;
+        // `null` exactly when this attempt carries no outbox items at all
+        // (a boxes-only send, `batch.length === 0`, which the check above
+        // guarantees means `boxes.length > 0`) -- there is then no outbox
+        // range to pin or acknowledge.
+        const maxId = batch.length > 0 ? batch[batch.length - 1]!.id : null;
         // Pin BEFORE sending — in memory AND in `station_meta` (a single
         // upsert; never a multi-statement transaction, see the module doc
         // comment) — so that if the post fails, or the whole process dies
@@ -339,14 +488,36 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
         // scheduled retry, a nudge that lands while one is outstanding, or a
         // brand-new engine's first drain after a restart — re-requests
         // exactly this id range, never a fresh read that could have grown
-        // past it.
-        pendingCeiling = maxId;
+        // past it. Left untouched for a boxes-only send: there is nothing
+        // to pin, and box closures need none of this (see
+        // `readClosedUnackedBoxes`'s doc comment).
+        if (maxId !== null) {
+          pendingCeiling = maxId;
+        }
         try {
-          await savePersistedCeiling(deps.exec, maxId);
+          if (maxId !== null) {
+            await savePersistedCeiling(deps.exec, maxId);
+          }
           const instId = await ensureInstallId();
+          // A boxes-only send has no outbox maxId to key the batch to; the
+          // highest `rowid` among the boxes it carries fills that role
+          // instead, borrowing `boxes_mirror`'s own monotonically
+          // increasing rowid as the analogous "how far this attempt
+          // reaches" marker outbox ids provide for items. Distinct box sets
+          // therefore get distinct keys -- required so a LATER boxes-only
+          // batch can never be mistaken by the server for a resend of an
+          // earlier one and silently no-op (`alreadyApplied`) without its
+          // own closures ever being applied.
+          const batchId =
+            maxId !== null
+              ? `${deps.machineId}:${instId}:${maxId}`
+              : `${deps.machineId}:${instId}:box:${boxes[boxes.length - 1]!.rowid}`;
+          const serialsLeft = await computeSerialsLeft(deps.exec);
           const res = await deps.client.post<BatchResponse>("/station/scans", {
-            batchId: `${deps.machineId}:${instId}:${maxId}`,
+            batchId,
             items: toPayload(batch),
+            boxes: toBoxPayload(boxes),
+            serialsLeft,
           });
           if (!isBatchResponse(res)) {
             // Parsed fine but isn't this endpoint's contract — could be a
@@ -398,16 +569,53 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
             // authoritative record either way.
             try {
               await recordConflicts(deps.exec, reported, new Date(now()).toISOString());
+              // A still-open box corrects itself: the operator simply scans
+              // one more item. A CLOSED box is taped and labelled, so it
+              // stays as printed and ends one position short — the cabinet
+              // is where that surfaces. This is the same trade the server
+              // makes when it marks a box item displaced rather than
+              // deleting it. Same try/catch as `recordConflicts` above, for
+              // the same reason: this is bookkeeping, not delivery.
+              for (const c of reported) {
+                await deps.exec.run(
+                  `UPDATE codes_mirror SET box_id = NULL
+                         WHERE code_hash = ?
+                           AND box_id IN (SELECT box_id FROM boxes_mirror WHERE closed_at IS NULL)`,
+                  [c.codeHash],
+                );
+              }
             } catch (err) {
               console.error("station: recording conflicts failed", err);
+            }
+          }
+          // Applied AFTER the validated response and BEFORE the ack, in its
+          // own try/catch: a pool top-up that fails must not block delivery,
+          // for the same reason a failed conflict recording does not (see
+          // above). The device simply runs on what it has; the next
+          // response carries another block. Losing one block costs at most
+          // some burnt numbers, and SSCCs need not be contiguous.
+          if (res.ssccBlock && isBatchSsccBlock(res.ssccBlock)) {
+            try {
+              await addRange(deps.exec, res.ssccBlock);
+            } catch (err) {
+              console.error("station: applying serial block failed", err);
             }
           }
           // `alreadyApplied` is a success: this exact batch is on the
           // server already, so holding on to it would wedge the queue
           // forever.
-          await ackThrough(deps.exec, maxId);
-          pendingCeiling = null;
-          await clearPersistedCeiling(deps.exec);
+          if (maxId !== null) {
+            await ackThrough(deps.exec, maxId);
+            pendingCeiling = null;
+            await clearPersistedCeiling(deps.exec);
+          }
+          if (boxes.length > 0) {
+            await ackBoxes(
+              deps.exec,
+              boxes.map((b) => b.boxId),
+              new Date(now()).toISOString(),
+            );
+          }
           lastSuccessAt = now();
           backoffMs = BACKOFF_START_MS;
         } catch (err) {

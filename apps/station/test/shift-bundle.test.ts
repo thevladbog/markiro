@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
 import { applyMigrations, type SqlExecutor, type StationBundle } from "../src/lib/mirror.js";
 import { mirrorShiftBundle } from "../src/lib/shift-bundle.js";
+import { remaining } from "../src/lib/sscc-pool.js";
 
 function nodeExecutor(): SqlExecutor {
   const db = new DatabaseSync(":memory:");
@@ -78,6 +79,20 @@ describe("mirrorShiftBundle", () => {
       ["p1"],
     );
     expect(productRows).toHaveLength(1);
+  });
+
+  it("adds the bundle's box serial block to the local pool when present (Task 11)", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    const aggregationBundle: StationBundle = {
+      ...bundle,
+      sscc: { issuerPrefix: "460123456", extensionDigit: 0, fromSerial: 1, toSerial: 5 },
+    };
+    const get = vi.fn().mockResolvedValue(aggregationBundle);
+
+    await mirrorShiftBundle({ get }, exec, "s1");
+
+    expect(await remaining(exec, "460123456", 0)).toBe(5);
   });
 
   it("is resilient: a download failure is logged, not thrown, and mirrors nothing", async () => {

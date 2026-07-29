@@ -146,12 +146,16 @@ export const outbox = sqliteTable("outbox", {
  * Box membership of a scanned code is a column on `codes_mirror`
  * (`codesMirror.boxId` above), not a join table — see `recordScan`'s doc
  * comment in `journal.ts` for why a fourth write was rejected there.
- * `ackedAt` is what stops a closed box being resent for the rest of the
- * shift, set by the sync engine (Task 11) beside the outbox ack.
+ * `terminalId` is the box's OWN terminal, captured at open time (Task 11) so
+ * a closure can report it from this row rather than whatever the device
+ * considers "current" when it happens to sync. `ackedAt` is what stops a
+ * closed box being resent for the rest of the shift, set by the sync engine
+ * (Task 11) beside the outbox ack.
  */
 export const boxesMirror = sqliteTable("boxes_mirror", {
   boxId: text("box_id").primaryKey(),
   shiftId: text("shift_id").notNull(),
+  terminalId: text("terminal_id"),
   sscc: text("sscc"),
   openedAt: text("opened_at").notNull(),
   closedAt: text("closed_at"),
