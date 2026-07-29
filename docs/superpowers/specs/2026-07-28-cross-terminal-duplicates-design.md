@@ -1,7 +1,7 @@
 # Cross-Terminal Duplicates & Conflict Screen (06b) — Design Spec
 
 **Date:** 2026-07-28
-**Status:** Design approved (brainstorming); implementation plan pending
+**Status:** Delivered — see `docs/superpowers/plans/2026-07-28-06b-cross-terminal.md` for the implementation plan and PR #26 for the shipped change.
 **Slice of:** roadmap plan 06 (aggregation & sync). 06a delivered the sync; **06b is this slice**; aggregation (boxes, pallets, SSCC) and exceptions follow it
 **Related:** `docs/superpowers/specs/2026-07-28-station-sync-design.md`, `docs/design-briefs/04-line-station.md`
 
@@ -54,7 +54,7 @@ The whole ingest already runs inside one transaction guarded by `sync_batches`, 
 
 **The station whose scan was displaced** does not: its batch was acknowledged long before, and re-opening an acknowledged batch would undo the delivery guarantee 06a rests on. The cabinet is the backstop for that case, and the spec says so rather than implying every operator is told.
 
-**On the station this is not an alarm.** The operator was shown a green verdict for that scan minutes ago, and design brief 04's floor rule is that nothing competes with a scan verdict. So: a quiet count of codes claimed by another terminal, and a list — reachable, not thrown at them — showing the raw code, because that is what lets a person find the physical item.
+**On the station this is not an alarm.** The operator was shown a green verdict for that scan minutes ago, and design brief 04's floor rule is that nothing competes with a scan verdict. So: a quiet count of codes claimed by another terminal, and a list — reachable, not thrown at them — showing the item's GTIN and serial, joined from `codes_mirror` (`conflicts_mirror` itself carries no raw field at all). That, not the raw code, is what actually lets a person find the physical item: a raw KM carries non-printable GS separators and cannot be matched by eye, while the GTIN and serial are what is printed in human-readable form under the DataMatrix.
 
 **In the cabinet**, a per-shift conflict view: both terminals, both times, which won, and the ability to mark a conflict reviewed. This is what a manager needs before reporting a shift.
 
