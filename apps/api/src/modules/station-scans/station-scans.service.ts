@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable } from "@nestjs/common";
+import { BadRequestException, Inject, Injectable, Logger } from "@nestjs/common";
 import { and, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
 import { ensurePartitions, schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
@@ -108,6 +108,8 @@ function assertScannedAtWithinWindow(items: SyncBatchDto["items"]): void {
 
 @Injectable()
 export class StationScansService {
+  private readonly logger = new Logger(StationScansService.name);
+
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly ssccService: SsccService,
@@ -667,17 +669,23 @@ export class StationScansService {
               ? isNull(schema.boxes.terminalId)
               : eq(schema.boxes.terminalId, closure.terminalId);
 
-          // Scoped to `closedAt IS NULL` in addition to the four identifying
-          // columns: a box is only ever closed once, so this also protects
-          // against a closure racing (or being redelivered for) a box that
-          // was already closed. Asserting exactly one row affected, rather
-          // than trusting the four columns alone, turns any future mismatch
-          // (a shift/terminal/box-id combination that resolves to zero or
-          // more than one row -- which should be structurally impossible
-          // given `boxes_device_box_uq`, but would otherwise surface only as
-          // an opaque `boxes_tenant_sscc_uq` 23505 from writing the same sscc
-          // to multiple rows, or a silent no-op from writing to none) into an
-          // immediately diagnosable failure instead.
+          // Deliberately NOT scoped to `closedAt IS NULL` (a prior wave of
+          // this fix added it, then treated a zero-row match as fatal -- see
+          // below for why that reproduced the exact permanent stall this
+          // slice exists to prevent). A batch that errors is retried under
+          // the SAME batchId forever (sync.ts's own doc comment on the
+          // device side), so a closure redelivered under a FRESH batchId --
+          // the device having lost its own record of what it already sent,
+          // the same scenario `codes` and `box_items`'s own
+          // ON CONFLICT DO NOTHING already guard against -- must be a no-op,
+          // exactly like a redelivered item. With `closedAt IS NULL` in the
+          // match, that redelivery matches the box's already-closed row
+          // (correct identity, wrong closedAt) and finds ZERO rows purely
+          // because it is already closed; without it, the same four-column
+          // match still finds exactly the one row `boxes_device_box_uq`
+          // guarantees, and simply reapplies the SAME sscc/closedAt/
+          // operatorId it already carries -- a genuine no-op, not a second,
+          // different close.
           const result = await tx
             .update(schema.boxes)
             .set({
@@ -691,21 +699,57 @@ export class StationScansService {
                 eq(schema.boxes.shiftId, closure.shiftId),
                 terminalCondition,
                 eq(schema.boxes.deviceBoxId, closure.boxId),
-                isNull(schema.boxes.closedAt),
               ),
             );
-          if (result.rowCount !== 1) {
+          const rowCount = result.rowCount ?? 0;
+
+          // `boxes_device_box_uq` (platform.ts) uniquely identifies a box by
+          // exactly these four columns, so matching more than one row is a
+          // structural invariant violation, not an ordinary input -- worth
+          // failing loudly on, the same way the prior wave intended, just
+          // narrowed to the one case that can actually never happen given
+          // the constraint.
+          if (rowCount > 1) {
             throw new Error(
               `Box closure for deviceBoxId ${closure.boxId} (tenant ${tenantId}, shift ` +
                 `${closure.shiftId}, terminal ${closure.terminalId ?? "null"}) matched ` +
-                `${result.rowCount} row(s), expected exactly 1`,
+                `${rowCount} rows, but boxes_device_box_uq guarantees at most 1`,
             );
+          }
+
+          // Zero rows is "nothing to apply", not an error. Two ordinary
+          // inputs land here, neither of them a bug: a closure for a box
+          // that was never created at all (a box row is created from its
+          // FIRST item, not the closure -- see the box-upsert above -- so a
+          // box closed with zero items has no row to match), or a device
+          // that reports a different shiftId at close time than the one its
+          // box row actually carries (a box spanning a shift boundary).
+          // Throwing here would render as a 500, and the station retries a
+          // non-2xx batch under the SAME batchId forever, wedging that
+          // device's queue permanently over an ordinary input -- exactly the
+          // failure mode this fix removes. Logged with enough detail to find
+          // the box by hand; `continue` skips `recordConsumedSerial` below
+          // too, since there is genuinely nothing this closure applied.
+          if (rowCount === 0) {
+            this.logger.warn(
+              `Box closure for deviceBoxId ${closure.boxId} (tenant ${tenantId}, shift ` +
+                `${closure.shiftId}, terminal ${closure.terminalId ?? "null"}) matched no box ` +
+                `row -- box was never created (closed with zero items) or its shiftId no ` +
+                `longer matches the box's own; skipping as a no-op`,
+            );
+            continue;
           }
 
           // The server's only chance to learn a serial was really used --
           // see SsccService.recordConsumedSerial's doc comment. Passed `tx`
           // so this enlists in the SAME transaction as the closure write
-          // above: a rollback of one must roll back the other.
+          // above: a rollback of one must roll back the other. Safe to call
+          // again for a redelivered closure (rowCount === 1 above, having
+          // dropped `closedAt IS NULL` from the match): recordConsumedSerial
+          // advances its cursor with `GREATEST`, so reapplying the SAME sscc
+          // a second time never moves it backwards, and never moves it
+          // forward twice for the one closure either -- it is idempotent by
+          // construction, not merely by accident here.
           await this.ssccService.recordConsumedSerial(tenantId, closure.sscc, tx);
         }
       }
