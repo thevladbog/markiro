@@ -21,7 +21,7 @@ CREATE TABLE "boxes" (
 	"print_skipped_at" timestamp with time zone,
 	CONSTRAINT "boxes_tenant_id_uq" UNIQUE("tenant_id","id"),
 	CONSTRAINT "boxes_tenant_sscc_uq" UNIQUE("tenant_id","sscc"),
-	CONSTRAINT "boxes_device_box_uq" UNIQUE("tenant_id","shift_id","terminal_id","device_box_id")
+	CONSTRAINT "boxes_device_box_uq" UNIQUE NULLS NOT DISTINCT("tenant_id","shift_id","terminal_id","device_box_id")
 );
 --> statement-breakpoint
 CREATE TABLE "sscc_blocks" (

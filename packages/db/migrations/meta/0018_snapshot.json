@@ -1100,7 +1100,7 @@
         },
         "boxes_device_box_uq": {
           "name": "boxes_device_box_uq",
-          "nullsNotDistinct": false,
+          "nullsNotDistinct": true,
           "columns": [
             "tenant_id",
             "shift_id",

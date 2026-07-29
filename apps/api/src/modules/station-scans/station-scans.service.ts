@@ -421,6 +421,20 @@ export class StationScansService {
           // `coded` in length) is empty, which is exactly the branch this is
           // nested in.
           const boxed = coded.filter((i) => i.boxId !== null);
+
+          // This batch's own box ids -- populated only inside the
+          // `boxed.length > 0` branch below. Stays `[]` for a batch that
+          // boxed nothing itself (every item `boxId: null`, an ordinary
+          // unboxed scan per dto.ts), which is exactly the case the
+          // RETROACTIVE block further down (Finding 2) must still run for:
+          // an unboxed scan can still WIN ownership and displace an
+          // incumbent recorded elsewhere in a box, and `notInArray` on an
+          // empty array excludes nothing (verified against this drizzle-orm
+          // version's `notInArray` -- see its own comment below), so the
+          // retroactive UPDATE correctly considers every one of that
+          // incumbent's box items with no this-batch box to exempt.
+          let thisBatchBoxIds: string[] = [];
+
           if (boxed.length > 0) {
             const boxKey = (shiftId: string, terminalId: string | null, boxId: string): string =>
               `${shiftId}|${terminalId ?? ""}|${boxId}`;
@@ -550,7 +564,7 @@ export class StationScansService {
               return { boxId: p.boxId, codeHash: p.codeHash, addedAt: p.addedAt, ownerIsThisScan };
             });
             const toMark = displacedHashes(membershipRows);
-            const thisBatchBoxIds = [...new Set(preBoxItems.map((p) => p.boxId))];
+            thisBatchBoxIds = [...new Set(preBoxItems.map((p) => p.boxId))];
             if (toMark.length > 0) {
               await tx
                 .update(schema.boxItems)
@@ -564,29 +578,47 @@ export class StationScansService {
                   ),
                 );
             }
+          }
 
-            // The RETROACTIVE direction: reusing `displaced` (already computed
-            // above by `displacedIncumbents`) rather than recomputing it --
-            // when this batch's win displaces an owner already recorded
-            // elsewhere, that owner's OWN box item (opened by some earlier
-            // batch, never this one) must be marked too. `notInArray` on an
-            // empty `thisBatchBoxIds` resolves to `true` (no exclusion),
-            // exactly right for a batch whose own boxed items don't include
-            // this hash at all.
-            const retroHashes = [...new Set(displaced.map((d) => d.codeHash))];
-            if (retroHashes.length > 0) {
-              await tx
-                .update(schema.boxItems)
-                .set({ displacedAt: sql`now()` })
-                .where(
-                  and(
-                    eq(schema.boxItems.tenantId, tenantId),
-                    inArray(schema.boxItems.codeHash, retroHashes),
-                    isNull(schema.boxItems.displacedAt),
-                    notInArray(schema.boxItems.boxId, thisBatchBoxIds),
-                  ),
-                );
-            }
+          // The RETROACTIVE direction (Finding 2): reusing `displaced`
+          // (already computed above by `displacedIncumbents`, from EVERY
+          // claim in this batch, not just the boxed ones) rather than
+          // recomputing it -- when this batch's win displaces an owner
+          // already recorded elsewhere, that owner's OWN box item (opened by
+          // some earlier batch, never this one) must be marked too.
+          //
+          // Deliberately hoisted OUT of `if (boxed.length > 0)`: this must
+          // run whenever this batch CLAIMED ownership of a code (i.e.
+          // whenever `claimItems` was non-empty, the scope this whole
+          // section sits in), not only when it ALSO boxed something itself.
+          // dto.ts explicitly blesses `boxId: null` as an ordinary unboxed
+          // scan -- e.g. one taken at a verification station -- and such a
+          // scan can still win the registry claim and displace an
+          // incumbent's box item; the old `if (boxed.length > 0)` guard
+          // skipped this whole block for exactly that batch, leaving the
+          // displaced incumbent's box item live and its box counting an item
+          // its own scan no longer owns (the bug this task exists to close).
+          //
+          // `notInArray` on an empty `thisBatchBoxIds` (a batch that boxed
+          // nothing itself) resolves to `true` -- i.e. excludes nothing --
+          // verified against this project's drizzle-orm 0.45.2
+          // (`notInArray`'s empty-array branch returns `sql\`true\``, the
+          // same file's `inArray` returns `sql\`false\`` for the same case),
+          // so this correctly considers every one of the incumbent's box
+          // items with no this-batch box wrongly exempted from it.
+          const retroHashes = [...new Set(displaced.map((d) => d.codeHash))];
+          if (retroHashes.length > 0) {
+            await tx
+              .update(schema.boxItems)
+              .set({ displacedAt: sql`now()` })
+              .where(
+                and(
+                  eq(schema.boxItems.tenantId, tenantId),
+                  inArray(schema.boxItems.codeHash, retroHashes),
+                  isNull(schema.boxItems.displacedAt),
+                  notInArray(schema.boxItems.boxId, thisBatchBoxIds),
+                ),
+              );
           }
         }
 
@@ -609,9 +641,15 @@ export class StationScansService {
 
       // Box closures (Task 10): applied regardless of whether this batch
       // carries any items -- a box can close well after its last item was
-      // drained, in a batch of its own (see the DTO's `boxes` field, whose
-      // closures carry no shiftId/terminalId of their own, so each is
-      // matched on the device box id alone, tenant-scoped).
+      // drained, in a batch of its own (see the DTO's `boxes` field). Matched
+      // on all four of `boxes_device_box_uq`'s own columns (Finding 3): a
+      // bare (tenant, deviceBoxId) match is not enough to identify one box --
+      // that constraint scopes deviceBoxId to (shift, terminal) precisely
+      // because the device-local string alone is not unique (two terminals
+      // in one tenant both calling a box "b1", or one device reusing "b1"
+      // after a shift change). Matching on the string alone would update
+      // every row sharing it and write the same sscc to all of them,
+      // raising boxes_tenant_sscc_uq's 23505.
       if (body.boxes.length > 0) {
         // Sorted by boxId -- same 40P01 reason as the box upsert above,
         // even though each closure is its own statement rather than one
@@ -619,7 +657,28 @@ export class StationScansService {
         // must still acquire them in the same order.
         const closures = [...body.boxes].sort((a, b) => a.boxId.localeCompare(b.boxId));
         for (const closure of closures) {
-          await tx
+          // `eq(col, null)` compiles to `col = NULL`, which SQL's
+          // three-valued logic never treats as true -- an `IS NULL` check is
+          // required whenever the closure's own terminalId is null, the same
+          // pitfall boxKey's map-based lookup elsewhere in this file sidesteps
+          // by never expressing the comparison in SQL at all.
+          const terminalCondition =
+            closure.terminalId === null
+              ? isNull(schema.boxes.terminalId)
+              : eq(schema.boxes.terminalId, closure.terminalId);
+
+          // Scoped to `closedAt IS NULL` in addition to the four identifying
+          // columns: a box is only ever closed once, so this also protects
+          // against a closure racing (or being redelivered for) a box that
+          // was already closed. Asserting exactly one row affected, rather
+          // than trusting the four columns alone, turns any future mismatch
+          // (a shift/terminal/box-id combination that resolves to zero or
+          // more than one row -- which should be structurally impossible
+          // given `boxes_device_box_uq`, but would otherwise surface only as
+          // an opaque `boxes_tenant_sscc_uq` 23505 from writing the same sscc
+          // to multiple rows, or a silent no-op from writing to none) into an
+          // immediately diagnosable failure instead.
+          const result = await tx
             .update(schema.boxes)
             .set({
               sscc: closure.sscc,
@@ -627,8 +686,21 @@ export class StationScansService {
               operatorId: closure.operatorId,
             })
             .where(
-              and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.deviceBoxId, closure.boxId)),
+              and(
+                eq(schema.boxes.tenantId, tenantId),
+                eq(schema.boxes.shiftId, closure.shiftId),
+                terminalCondition,
+                eq(schema.boxes.deviceBoxId, closure.boxId),
+                isNull(schema.boxes.closedAt),
+              ),
             );
+          if (result.rowCount !== 1) {
+            throw new Error(
+              `Box closure for deviceBoxId ${closure.boxId} (tenant ${tenantId}, shift ` +
+                `${closure.shiftId}, terminal ${closure.terminalId ?? "null"}) matched ` +
+                `${result.rowCount} row(s), expected exactly 1`,
+            );
+          }
 
           // The server's only chance to learn a serial was really used --
           // see SsccService.recordConsumedSerial's doc comment. Passed `tx`

@@ -863,10 +863,16 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       OTHER_OPERATOR_ID = (op2.body as { id: string }).id;
     });
 
-    function batchBody(
-      items: ScanItemDto[],
-      boxes: { boxId: string; sscc: string; closedAt: string; operatorId: string | null }[] = [],
-    ) {
+    interface ClosureFixture {
+      boxId: string;
+      shiftId: string;
+      terminalId: string | null;
+      sscc: string;
+      closedAt: string;
+      operatorId: string | null;
+    }
+
+    function batchBody(items: ScanItemDto[], boxes: ClosureFixture[] = []) {
       return { batchId: `box-batch-${randomUUID()}`, items, boxes };
     }
 
@@ -886,10 +892,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       return postBatchAs("t1", items);
     }
 
-    async function postBatchWithBoxes(
-      items: ScanItemDto[],
-      boxes: { boxId: string; sscc: string; closedAt: string; operatorId: string | null }[],
-    ) {
+    async function postBatchWithBoxes(items: ScanItemDto[], boxes: ClosureFixture[]) {
       return postRaw(batchBody(items, boxes));
     }
 
@@ -901,19 +904,24 @@ describe.skipIf(!ready)("station-scans e2e", () => {
      * describe block shares the same calendar day, so tests can compare
      * "earlier" vs "later" scans without spelling out a full timestamp each
      * time.
+     *
+     * `terminalId` defaults to "t1" only when the caller OMITS it
+     * (`undefined`) -- an explicit `null` (a device with no notion of
+     * "terminal", Finding 1) must pass through unchanged, so this cannot use
+     * `??`, which would treat that explicit `null` as absent too.
      */
     function scan(
       codeLabel: string,
       overrides: {
         boxId?: string | null;
         operatorId?: string | null;
-        terminalId?: string;
+        terminalId?: string | null;
         scannedAt?: string;
       } = {},
     ): ScanItemDto {
       return {
         shiftId,
-        terminalId: overrides.terminalId ?? "t1",
+        terminalId: overrides.terminalId === undefined ? "t1" : overrides.terminalId,
         raw: `RAW-${codeLabel}`,
         verdict: "ok",
         scannedAt: `2026-07-29T${overrides.scannedAt ?? "10:00:00"}.000Z`,
@@ -982,12 +990,31 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       expect(rows[0]!.closedAt).toBeNull();
     });
 
-    it("fills in the serial when the closure arrives", async () => {
+    it("fills in the serial, closedAt, and operator when the closure arrives", async () => {
       await postBatch([scan("aa", { boxId: "b1" })]);
-      await postBatchWithBoxes([], [{ boxId: "b1", sscc: SSCC, closedAt: ISO, operatorId: null }]);
+      await postBatchWithBoxes(
+        [],
+        [
+          {
+            boxId: "b1",
+            shiftId,
+            terminalId: "t1",
+            sscc: SSCC,
+            closedAt: ISO,
+            operatorId: OPERATOR_ID,
+          },
+        ],
+      );
       const [box] = await db.select().from(schema.boxes).where(eq(schema.boxes.tenantId, tenantId));
       expect(box!.sscc).toBe(SSCC);
-      expect(box!.closedAt).not.toBeNull();
+      // Compared against the exact value sent, not just non-null: `new
+      // Date()` in place of the closure's own closedAt would previously have
+      // passed this assertion (cheap gap named in the review).
+      expect(box!.closedAt?.toISOString()).toBe(ISO);
+      // boxes.operator_id is written by the closure but was previously
+      // asserted by nothing in this suite -- every closure test sent
+      // `operatorId: null` (another cheap gap named in the review).
+      expect(box!.operatorId).toBe(OPERATOR_ID);
     });
 
     it("records the operator on the scan event", async () => {
@@ -1083,7 +1110,10 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       const sscc = buildSscc(0, prefix, block.fromSerial + 3);
 
       await postBatch([scan("aa", { boxId: "b1" })]);
-      await postBatchWithBoxes([], [{ boxId: "b1", sscc, closedAt: ISO, operatorId: null }]);
+      await postBatchWithBoxes(
+        [],
+        [{ boxId: "b1", shiftId, terminalId: "t1", sscc, closedAt: ISO, operatorId: null }],
+      );
 
       const [row] = await db
         .select({ consumedThroughSerial: schema.ssccBlocks.consumedThroughSerial })
@@ -1092,6 +1122,104 @@ describe.skipIf(!ready)("station-scans e2e", () => {
           and(eq(schema.ssccBlocks.tenantId, tenantId), eq(schema.ssccBlocks.deviceId, deviceId)),
         );
       expect(row!.consumedThroughSerial).toBe(block.fromSerial + 3);
+    });
+
+    // Finding 1: `boxes_device_box_uq` is a plain UNIQUE over a NULLABLE
+    // terminal_id -- Postgres treats every NULL as distinct from every
+    // other in a plain unique index, so `ON CONFLICT` would never fire for
+    // a null-terminal device, and each batch would insert a NEW box row
+    // instead of resolving to the one already open. Two batches (not the
+    // three in the review's failure narrative) are enough to prove it: the
+    // second batch's insert either collides (fixed) or silently creates a
+    // second row (the bug).
+    it(
+      "resolves a null-terminal box drained across two batches to one row, and closes it " +
+        "without error (Finding 1)",
+      async () => {
+        await postRaw(batchBody([scan("aa", { boxId: "b1", terminalId: null })]));
+        await postRaw(batchBody([scan("bb", { boxId: "b1", terminalId: null })]));
+
+        expect(await boxCount(tenantId)).toBe(1);
+        const aaRows = await boxItemRows(tenantId, "aa");
+        const bbRows = await boxItemRows(tenantId, "bb");
+        expect(aaRows).toHaveLength(1);
+        expect(bbRows).toHaveLength(1);
+        // Both items landed in the SAME box row, not two different ones.
+        expect(aaRows[0]!.boxId).toBe(bbRows[0]!.boxId);
+
+        // Closes cleanly: before the fix, the closure UPDATE (matched only
+        // on tenant_id/device_box_id at the time, or even on all four
+        // columns post-Finding-3) would have found more than one row for
+        // deviceBoxId "b1" and either written the same sscc to both --
+        // raising boxes_tenant_sscc_uq's 23505 -- or, post-Finding-3,
+        // failed the "matched exactly 1 row" assertion outright.
+        await postBatchWithBoxes(
+          [],
+          [{ boxId: "b1", shiftId, terminalId: null, sscc: SSCC, closedAt: ISO, operatorId: null }],
+        );
+        const [box] = await db
+          .select()
+          .from(schema.boxes)
+          .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.deviceBoxId, "b1")));
+        expect(box!.sscc).toBe(SSCC);
+      },
+    );
+
+    // Finding 2: the retroactive displacement UPDATE used to sit inside
+    // `if (boxed.length > 0)`, but the DTO explicitly blesses `boxId: null`
+    // as an ordinary unboxed scan (e.g. one taken at a verification
+    // station). t2 boxes an item as the (later, losing) incumbent; t1 then
+    // WINS ownership with an earlier, UNBOXED scan of the same code. Before
+    // the fix, `boxed.length === 0` for t1's batch skipped the retroactive
+    // block entirely, leaving b2's item live even though b2's own scan no
+    // longer owns the code.
+    it(
+      "retroactively displaces an incumbent's box item when the winning claim is itself " +
+        "unboxed (Finding 2)",
+      async () => {
+        await postBatchAs("t2", [scan("aa", { boxId: "b2", scannedAt: "10:00:05" })]);
+        await postBatchAs("t1", [scan("aa", { boxId: null, scannedAt: "10:00:00" })]);
+
+        // t1's earlier, unboxed scan now owns "aa" -- b2 (t2's box) must no
+        // longer count it.
+        expect(await liveItemCount("b2")).toBe(0);
+        const items = await boxItemRows(tenantId, "aa");
+        const b2Id = await boxIdFor("b2");
+        const b2Item = items.find((i) => i.boxId === b2Id);
+        expect(b2Item?.displacedAt).not.toBeNull();
+      },
+    );
+
+    // Finding 3: `boxes_device_box_uq` scopes a device box id to (shift,
+    // terminal) precisely because the bare string is not unique on its own.
+    // Two terminals in the SAME shift both call their (different) box "b1"
+    // -- closing one must not touch the other, which is exactly what a
+    // closure matched on `(tenant_id, device_box_id)` alone could not tell
+    // apart.
+    it("closes each terminal's own box when two terminals share a shift and deviceBoxId (Finding 3)", async () => {
+      await postBatchAs("t1", [scan("aa", { boxId: "b1" })]);
+      await postBatchAs("t2", [scan("bb", { boxId: "b1" })]);
+      expect(await boxCount(tenantId)).toBe(2);
+
+      const ssccT1 = SSCC;
+      const ssccT2 = "223456789012345670";
+      await postBatchWithBoxes(
+        [],
+        [{ boxId: "b1", shiftId, terminalId: "t1", sscc: ssccT1, closedAt: ISO, operatorId: null }],
+      );
+      await postBatchWithBoxes(
+        [],
+        [{ boxId: "b1", shiftId, terminalId: "t2", sscc: ssccT2, closedAt: ISO, operatorId: null }],
+      );
+
+      const rows = await db
+        .select({ terminalId: schema.boxes.terminalId, sscc: schema.boxes.sscc })
+        .from(schema.boxes)
+        .where(eq(schema.boxes.tenantId, tenantId));
+      expect(rows).toHaveLength(2);
+      const byTerminal = new Map(rows.map((r) => [r.terminalId, r.sscc]));
+      expect(byTerminal.get("t1")).toBe(ssccT1);
+      expect(byTerminal.get("t2")).toBe(ssccT2);
     });
   });
 });

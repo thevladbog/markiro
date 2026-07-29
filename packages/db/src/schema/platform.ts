@@ -376,7 +376,40 @@ export const boxes = pgTable(
     unique("boxes_tenant_sscc_uq").on(t.tenantId, t.sscc),
     // A device's own id for the box, unique within its shift and terminal:
     // this is what an arriving scan carries instead of a server id.
-    unique("boxes_device_box_uq").on(t.tenantId, t.shiftId, t.terminalId, t.deviceBoxId),
+    //
+    // `.nullsNotDistinct()` is load-bearing, not cosmetic: `terminalId` is
+    // nullable (a device that has no notion of "terminal" sends `null`), and
+    // a PLAIN unique index treats every NULL as distinct from every other,
+    // so `ON CONFLICT (tenant_id, shift_id, terminal_id, device_box_id)`
+    // would never fire for a null-terminal device -- each batch would insert
+    // a NEW box row instead of resolving to the one already open, scattering
+    // one box's items across several rows, and a later closure naming that
+    // device_box_id would then match all of them and try to write the same
+    // sscc to each, raising boxes_tenant_sscc_uq's 23505. `NULLS NOT
+    // DISTINCT` (Postgres 15+; this project runs 17) makes two null-terminal
+    // rows for the same (tenant, shift, device_box_id) collide exactly like
+    // two non-null ones would, so the upsert's conflict arbiter fires either
+    // way.
+    //
+    // drizzle-kit 0.31.10 CAN regenerate this correctly from
+    // `.nullsNotDistinct()` (it understands the flag when diffing/rendering
+    // `UNIQUE` constraints), but regenerating migration 0018 here was
+    // avoided anyway: each prior regeneration of this same migration has
+    // cost a dev-database recreate. `boxes` (and this constraint) are
+    // themselves created BY migration 0018, so the fix is a direct hand-edit
+    // of that CREATE TABLE statement's own inline constraint clause --
+    // `UNIQUE NULLS NOT DISTINCT(...)` in place of `UNIQUE(...)` -- in
+    // migrations/0018_gigantic_texas_twister.sql, not a separate appended
+    // statement (unlike scan_events' hand-migrated ALTERs further down that
+    // same file, which target a table that migration doesn't create). THAT
+    // hand-edited DDL is authoritative for what actually exists in the
+    // database; the `.nullsNotDistinct()` call here exists so drizzle-kit's
+    // introspection of a live database (and any future `db:generate` diff)
+    // agrees with the schema instead of proposing to "fix" it back to a
+    // plain UNIQUE.
+    unique("boxes_device_box_uq")
+      .on(t.tenantId, t.shiftId, t.terminalId, t.deviceBoxId)
+      .nullsNotDistinct(),
     foreignKey({
       name: "boxes_tenant_shift_fk",
       columns: [t.tenantId, t.shiftId],

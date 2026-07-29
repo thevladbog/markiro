@@ -53,6 +53,16 @@ export const syncBatchSchema = z.object({
     .array(
       z.object({
         boxId: z.string().min(1).max(64),
+        // `boxes_device_box_uq` scopes a device's box id to (shift,
+        // terminal): a bare deviceBoxId string is NOT unique on its own --
+        // two terminals in one tenant can both call a box "b1", and one
+        // device can reuse a box id after a shift change. Carrying these
+        // (Finding 3 on this task) is what lets the closure UPDATE identify
+        // exactly one box instead of matching every row sharing that string;
+        // the device already knows both, the same way it does for a scan
+        // item above.
+        shiftId: z.string().uuid().toLowerCase(),
+        terminalId: z.string().nullable(),
         sscc: z.string().length(18),
         closedAt: z.string().datetime(),
         operatorId: z.string().uuid().toLowerCase().nullable(),
