@@ -55,11 +55,8 @@ export class AppModule {
         PickupReasonsModule,
         KioskModule,
         PickupOrdersModule,
-<<<<<<< HEAD
         ConflictsModule,
-=======
         PickupRejectionsModule,
->>>>>>> origin/main
       ],
       controllers: [HealthController],
     };
