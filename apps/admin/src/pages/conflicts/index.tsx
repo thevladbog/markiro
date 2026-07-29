@@ -41,10 +41,15 @@ export function ConflictsPage() {
 
   const shiftsById = useMemo(() => new Map(shifts.map((shift) => [shift.id, shift])), [shifts]);
 
+  // `GET /shifts` orders oldest-first (`createdAt` ascending -- see
+  // ShiftsService.listShifts), so the shift a manager is currently closing
+  // would otherwise sit at the bottom of a long list. The filter dropdown
+  // reverses that for its own display purposes only; `shiftsById` above
+  // keeps the server's order since lookup doesn't care about it.
   const shiftFilterOptions: SelectOption[] = useMemo(
     () => [
       { value: "all", label: t("pages.conflicts.filters.shiftAll") },
-      ...shifts.map((shift) => ({ value: shift.id, label: shiftLabel(shift) })),
+      ...[...shifts].reverse().map((shift) => ({ value: shift.id, label: shiftLabel(shift) })),
     ],
     [t, shifts],
   );

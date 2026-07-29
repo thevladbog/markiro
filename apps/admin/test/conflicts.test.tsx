@@ -30,13 +30,18 @@ function renderPage() {
   );
 }
 
+// losingShiftId and winningShiftId are deliberately DISTINCT ("s1" vs "s2"):
+// the shift column/filter reads losingShiftId only (see
+// ConflictsService.listConflicts), and with both ids equal, a bug that read
+// winningShiftId instead would still render the correct label and every
+// assertion below would stay green.
 const UNREVIEWED = {
   id: "c1",
   codeHash: "h1".padEnd(64, "0"),
   losingShiftId: "s1",
   losingTerminalId: "t1",
   losingScannedAt: "2026-07-28T10:00:00.000Z",
-  winningShiftId: "s1",
+  winningShiftId: "s2",
   winningTerminalId: "t2",
   winningScannedAt: "2026-07-28T10:00:05.000Z",
   detectedAt: "2026-07-28T10:00:06.000Z",
@@ -233,6 +238,32 @@ describe("ConflictsPage", () => {
     expect(table.getByText(winningTime)).toBeDefined();
   });
 
+  it("pins each terminal id to its own scan time cell, not the other column's", async () => {
+    stubFetch({ conflicts: [UNREVIEWED] });
+
+    renderPage();
+    await screen.findByRole("table");
+
+    // Looking values up anywhere in the table (as the test above does) stays
+    // green even if the losing/winning columns -- or just their scan-time
+    // spans -- were swapped between render functions, since both terminal
+    // ids and both times would still be present *somewhere*. Scoping to the
+    // specific <td> a terminal id renders in, and asserting its OWN scan
+    // time lives in that same cell (and the other column's time does not),
+    // is what actually pins the pairing.
+    const losingTime = formatScanTime(UNREVIEWED.losingScannedAt, "ru");
+    const winningTime = formatScanTime(UNREVIEWED.winningScannedAt, "ru");
+
+    const losingCell = screen.getByText("t1").closest("td");
+    const winningCell = screen.getByText("t2").closest("td");
+    if (!losingCell || !winningCell) throw new Error("expected terminal id cells to render");
+
+    expect(within(losingCell).getByText(losingTime)).toBeDefined();
+    expect(within(losingCell).queryByText(winningTime)).toBeNull();
+    expect(within(winningCell).getByText(winningTime)).toBeDefined();
+    expect(within(winningCell).queryByText(losingTime)).toBeNull();
+  });
+
   it("renders an em dash, not a blank cell, when the losing terminal id is null", async () => {
     stubFetch({ conflicts: [NULL_LOSING_TERMINAL] });
 
@@ -251,6 +282,21 @@ describe("ConflictsPage", () => {
     // UNREVIEWED.losingShiftId is "s1" -- SHIFT_S1's product/date, not SHIFT_S2's.
     expect(table.getByText("2026-07-28 — Cola")).toBeDefined();
     expect(table.queryByText("2026-07-29 — Sprite")).toBeNull();
+  });
+
+  it("lists the shift filter options newest first, though GET /shifts returns oldest first", async () => {
+    stubFetch({ conflicts: [UNREVIEWED], shifts: [SHIFT_S1, SHIFT_S2] });
+
+    renderPage();
+    await screen.findByRole("table");
+
+    const select = screen.getByLabelText("Смена") as HTMLSelectElement;
+    const optionLabels = Array.from(select.options).map((option) => option.textContent);
+    // The mocked /api/shifts response lists SHIFT_S1 (older) before SHIFT_S2
+    // (newer), matching the server's real oldest-first order -- the manager
+    // currently closing the newest shift should not have to scroll to find
+    // it in the dropdown.
+    expect(optionLabels).toEqual(["Все смены", "2026-07-29 — Sprite", "2026-07-28 — Cola"]);
   });
 
   it("refetches the list scoped to the selected shift when the shift filter changes", async () => {
