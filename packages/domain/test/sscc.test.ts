@@ -90,4 +90,17 @@ describe("parseScannedSscc", () => {
   it("rejects an empty payload", () => {
     expect(parseScannedSscc("")).toBeNull();
   });
+
+  it("rejects a wrong application identifier", () => {
+    const sscc = buildSscc(0, "460123456", 1);
+    // Payload with "01" (not "00") app ID + valid SSCC = 20 characters
+    expect(parseScannedSscc(`01${sscc}`)).toBeNull();
+  });
+
+  it("accepts a bare SSCC that starts with 00", () => {
+    const sscc = buildSscc(0, "012345678", 1);
+    // Verify the fixture really starts with "00"
+    expect(sscc.startsWith("00")).toBe(true);
+    expect(parseScannedSscc(sscc)).toBe(sscc);
+  });
 });
