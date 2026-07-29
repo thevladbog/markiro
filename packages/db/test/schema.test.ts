@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { getTableName } from "drizzle-orm";
-import { counterparties, lines, products, shifts } from "../src/schema/platform.js";
+import {
+  boxes,
+  counterparties,
+  lines,
+  products,
+  shifts,
+  ssccCounters,
+} from "../src/schema/platform.js";
 
 describe("platform schema", () => {
   it("exports the four tables", () => {
@@ -12,5 +19,19 @@ describe("platform schema", () => {
   it("products enforce tenant-scoped GTIN uniqueness (by declared index name)", () => {
     // structural smoke: the unique index is declared in the table config
     expect(Object.keys(products)).toContain("gtin14");
+  });
+
+  it("keys the sscc counter by tenant, issuer and extension digit", () => {
+    const cols = Object.keys(ssccCounters);
+    expect(cols).toEqual(
+      expect.arrayContaining(["tenantId", "issuerGln", "extensionDigit", "nextSerial"]),
+    );
+  });
+
+  it("gives boxes a tenant-unique sscc", () => {
+    const cols = Object.keys(boxes);
+    expect(cols).toEqual(
+      expect.arrayContaining(["tenantId", "id", "sscc", "shiftId", "terminalId", "closedAt"]),
+    );
   });
 });

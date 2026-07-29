@@ -1,4 +1,5 @@
 import {
+  bigint,
   boolean,
   char,
   date,
@@ -103,6 +104,16 @@ export const shifts = pgTable(
     lineId: uuid("line_id"),
     counterpartyId: uuid("counterparty_id"),
     labelTemplateId: uuid("label_template_id"),
+    /**
+     * Whose numbers this shift's boxes carry. Null means the tenant's own
+     * organisation. Deliberately NOT inferred from `counterpartyId`: that
+     * field answers "who is this for", this one answers "whose numbers".
+     * Packing for a client under one's own SSCCs is legal and common, and
+     * inferring one from the other would silently produce a wrong number,
+     * discovered at the recipient's goods-in.
+     */
+    ssccIssuerCounterpartyId: uuid("sscc_issuer_counterparty_id"),
+    boxLabelTemplateId: uuid("box_label_template_id"),
     status: shiftStatus("status").notNull().default("planned"),
     mode: shiftMode("mode").notNull(),
     plannedQty: integer("planned_qty"),
@@ -148,6 +159,16 @@ export const shifts = pgTable(
     foreignKey({
       name: "shifts_tenant_label_template_fk",
       columns: [t.tenantId, t.labelTemplateId],
+      foreignColumns: [labelTemplates.tenantId, labelTemplates.id],
+    }),
+    foreignKey({
+      name: "shifts_tenant_sscc_issuer_fk",
+      columns: [t.tenantId, t.ssccIssuerCounterpartyId],
+      foreignColumns: [counterparties.tenantId, counterparties.id],
+    }),
+    foreignKey({
+      name: "shifts_tenant_box_label_template_fk",
+      columns: [t.tenantId, t.boxLabelTemplateId],
       foreignColumns: [labelTemplates.tenantId, labelTemplates.id],
     }),
   ],
@@ -248,4 +269,105 @@ export const stationDevices = pgTable(
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
   },
   (t) => [unique("station_devices_tenant_id_uq").on(t.tenantId, t.id)],
+);
+
+/**
+ * One serial counter per (tenant, issuer, extension digit).
+ *
+ * The issuer is identified by its GLN — the tenant's own or a counterparty's
+ * — because the SSCC prefix is the GLN's first 9 digits, so the GLN IS the
+ * number space's identity. `nextSerial` is what an administrator seeds when
+ * migrating off another system that issued SSCCs under the same prefix.
+ * Allocation is one statement; see SsccService.
+ */
+export const ssccCounters = pgTable(
+  "sscc_counters",
+  {
+    tenantId: tenantId(),
+    issuerGln: char("issuer_gln", { length: 13 }).notNull(),
+    extensionDigit: integer("extension_digit").notNull(),
+    nextSerial: bigint("next_serial", { mode: "number" }).notNull().default(0),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.issuerGln, t.extensionDigit] })],
+);
+
+/**
+ * Which device received which serial range. Not bookkeeping for its own sake:
+ * a ten-million space per extension digit runs low only slowly, and when it
+ * does the only way to find out where it went is to have written it down.
+ */
+export const ssccBlocks = pgTable("sscc_blocks", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tenantId: tenantId(),
+  issuerGln: char("issuer_gln", { length: 13 }).notNull(),
+  extensionDigit: integer("extension_digit").notNull(),
+  deviceId: uuid("device_id").notNull(),
+  fromSerial: bigint("from_serial", { mode: "number" }).notNull(),
+  toSerial: bigint("to_serial", { mode: "number" }).notNull(),
+  issuedAt: timestamp("issued_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * A transport box. The row is created when its FIRST ITEM arrives, not when
+ * the closure event does: items are queued before the closure and the drain
+ * is sequential, so this needs no buffering and no out-of-order handling.
+ * A box with a null `sscc` is one whose closure has not arrived yet — which
+ * is also exactly what an open box on the device looks like.
+ */
+export const boxes = pgTable(
+  "boxes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    shiftId: uuid("shift_id").notNull(),
+    terminalId: text("terminal_id"),
+    deviceBoxId: text("device_box_id").notNull(),
+    sscc: char("sscc", { length: 18 }),
+    operatorId: uuid("operator_id"),
+    openedAt: timestamp("opened_at", { withTimezone: true }).notNull().defaultNow(),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    printVerifiedAt: timestamp("print_verified_at", { withTimezone: true }),
+    printSkippedAt: timestamp("print_skipped_at", { withTimezone: true }),
+  },
+  (t) => [
+    unique("boxes_tenant_id_uq").on(t.tenantId, t.id),
+    // Two devices holding overlapping pools is precisely the situation
+    // nothing else would reveal. An index, not a check in code.
+    unique("boxes_tenant_sscc_uq").on(t.tenantId, t.sscc),
+    // A device's own id for the box, unique within its shift and terminal:
+    // this is what an arriving scan carries instead of a server id.
+    unique("boxes_device_box_uq").on(t.tenantId, t.shiftId, t.terminalId, t.deviceBoxId),
+    foreignKey({
+      name: "boxes_tenant_shift_fk",
+      columns: [t.tenantId, t.shiftId],
+      foreignColumns: [shifts.tenantId, shifts.id],
+    }),
+  ],
+);
+
+/**
+ * A code's membership of a box. `displacedAt` marks an item whose code is
+ * owned by another scan (06b's rule: the earlier scannedAt wins). It is
+ * marked, never deleted — the row is the only evidence of what happened,
+ * and it does not count towards the box's contents.
+ */
+export const boxItems = pgTable(
+  "box_items",
+  {
+    tenantId: tenantId(),
+    boxId: uuid("box_id").notNull(),
+    codeHash: char("code_hash", { length: 64 }).notNull(),
+    addedAt: timestamp("added_at", { withTimezone: true }).notNull(),
+    displacedAt: timestamp("displaced_at", { withTimezone: true }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.boxId, t.codeHash] }),
+    index("box_items_tenant_code_idx").on(t.tenantId, t.codeHash),
+    foreignKey({
+      name: "box_items_tenant_box_fk",
+      columns: [t.tenantId, t.boxId],
+      foreignColumns: [boxes.tenantId, boxes.id],
+    }),
+  ],
 );

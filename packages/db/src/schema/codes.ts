@@ -28,4 +28,5 @@ export const scanEvents = pgTable("scan_events", {
   raw: text("raw").notNull(),
   verdict: text("verdict").notNull(),
   scannedAt: timestamp("scanned_at", { withTimezone: true }).notNull(),
+  operatorId: uuid("operator_id"),
 });
