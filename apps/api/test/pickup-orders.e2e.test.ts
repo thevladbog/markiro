@@ -11,6 +11,7 @@ import { loadEnv } from "../src/env";
 import { hashDeviceToken } from "../src/pickup/device-token";
 import { schema, type Db } from "@markiro/db";
 import { listenOnLoopback } from "./support/listen-loopback";
+import { PickupOrdersService } from "../src/modules/pickup-orders/pickup-orders.service";
 
 /** GTIN test vector (check-digit VALID). See kiosk-orders.e2e.test.ts for the full rationale. */
 const GTIN = "04600682000013";
@@ -26,6 +27,7 @@ describe.skipIf(!ready)("pickup orders admin e2e", () => {
   let app: INestApplication | undefined;
   let setup: AuthSetup;
   let db: Db;
+  let pickupOrdersService: PickupOrdersService;
 
   let tenantId: string;
   let employeeId: string;
@@ -43,6 +45,7 @@ describe.skipIf(!ready)("pickup orders admin e2e", () => {
     const ref = await Test.createTestingModule({
       imports: [AppModule.forRoot({ ...setup, databaseUrl: env.DATABASE_URL })],
     }).compile();
+    pickupOrdersService = ref.get(PickupOrdersService);
 
     app = ref.createNestApplication({ bodyParser: false });
     const server = app.getHttpAdapter().getInstance();
@@ -259,6 +262,51 @@ describe.skipIf(!ready)("pickup orders admin e2e", () => {
 
     // --- Cancel on a non-pending order -> 409 ---
     await agent.post(`/pickup-orders/${idCancel}/cancel`).expect(409);
+  });
+
+  it("findExportCandidates отдаёт только pending и ещё не выгруженные заявки, с товарами", async () => {
+    const linkedProductId = randomUUID();
+    await db.insert(schema.products).values({
+      id: linkedProductId,
+      tenantId,
+      gtin14: "04600682000037",
+      name: "Товар со связью",
+      externalRef: `ext-${randomUUID()}`,
+    });
+
+    const orderId = randomUUID();
+    await db.insert(schema.pickupOrders).values({
+      id: orderId,
+      tenantId,
+      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      kioskId,
+      employeeId,
+      reason: "buy",
+      itemCount: 1,
+      totalPrice: "10.00",
+    });
+    await db.insert(schema.pickupOrderItems).values({
+      tenantId,
+      orderId,
+      productId: linkedProductId,
+      gtin14: "04600682000037",
+      serial: "SN0001",
+      rawKm: "raw-export-1",
+      kmKey: `kmkey-${randomUUID()}`,
+      unitPrice: "10.00",
+      scannedAt: new Date(),
+    });
+
+    const already = await pickupOrdersService.findExportCandidates(tenantId, 100);
+    const found = already.find((o) => o.id === orderId);
+    expect(found).toBeDefined();
+    expect(found!.items).toEqual([
+      { productId: linkedProductId, productExternalRef: expect.any(String), unitPrice: "10.00" },
+    ]);
+
+    await db.update(schema.pickupOrders).set({ exportedAt: new Date() }).where(eq(schema.pickupOrders.id, orderId));
+    const afterExport = await pickupOrdersService.findExportCandidates(tenantId, 100);
+    expect(afterExport.some((o) => o.id === orderId)).toBe(false);
   });
 
   it("cross-tenant isolation: org B cannot read, resolve, cancel, slip or export org A's order", async () => {

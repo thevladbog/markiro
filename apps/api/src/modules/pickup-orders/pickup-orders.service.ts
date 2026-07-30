@@ -411,6 +411,93 @@ export class PickupOrdersService {
     return { items: rows.map((row) => this.mapRowDto(row)) };
   }
 
+  /** One row `findExportCandidates` hands to `order-export.ts`'s `planExport`. */
+
+  /**
+   * Orders eligible for `mode=query` this round: `pending`, never yet
+   * exported (`exported_at is null`). Ordered oldest-first so a channel with
+   * more pending orders than `limit` still makes steady progress across
+   * rounds rather than the same newest batch crowding out the rest forever.
+   * Items are fetched in a SECOND query (keyed on the same order ids) rather
+   * than joined into the first, same shape `readJournal` already uses for
+   * sessions + events (`integrations.service.ts`) -- an order-to-items join
+   * would repeat every order column once per item row for no reason.
+   */
+  async findExportCandidates(
+    tenantId: string,
+    limit: number,
+  ): Promise<
+    {
+      id: string;
+      orderNo: string;
+      createdAt: Date;
+      reason: "buy" | "writeoff";
+      writeoffReasonName: string | null;
+      totalPrice: string | null;
+      items: { productId: string; productExternalRef: string | null; unitPrice: string | null }[];
+    }[]
+  > {
+    const orders = await this.db
+      .select({
+        id: schema.pickupOrders.id,
+        orderNo: schema.pickupOrders.orderNo,
+        createdAt: schema.pickupOrders.createdAt,
+        reason: schema.pickupOrders.reason,
+        writeoffReasonName: schema.pickupOrderReasons.name,
+        totalPrice: schema.pickupOrders.totalPrice,
+      })
+      .from(schema.pickupOrders)
+      .leftJoin(
+        schema.pickupOrderReasons,
+        eq(schema.pickupOrderReasons.id, schema.pickupOrders.writeoffReasonId),
+      )
+      .where(
+        and(
+          eq(schema.pickupOrders.tenantId, tenantId),
+          eq(schema.pickupOrders.status, "pending"),
+          isNull(schema.pickupOrders.exportedAt),
+        ),
+      )
+      .orderBy(asc(schema.pickupOrders.createdAt))
+      .limit(limit);
+
+    if (orders.length === 0) return [];
+
+    const orderIds = orders.map((order) => order.id);
+    const items = await this.db
+      .select({
+        orderId: schema.pickupOrderItems.orderId,
+        productId: schema.pickupOrderItems.productId,
+        productExternalRef: schema.products.externalRef,
+        unitPrice: schema.pickupOrderItems.unitPrice,
+      })
+      .from(schema.pickupOrderItems)
+      .innerJoin(schema.products, eq(schema.products.id, schema.pickupOrderItems.productId))
+      .where(
+        and(
+          inArray(schema.pickupOrderItems.orderId, orderIds),
+          eq(schema.pickupOrderItems.voided, false),
+        ),
+      );
+
+    const itemsByOrder = new Map<
+      string,
+      { productId: string; productExternalRef: string | null; unitPrice: string | null }[]
+    >();
+    for (const item of items) {
+      const entry = {
+        productId: item.productId,
+        productExternalRef: item.productExternalRef,
+        unitPrice: item.unitPrice,
+      };
+      const bucket = itemsByOrder.get(item.orderId);
+      if (bucket) bucket.push(entry);
+      else itemsByOrder.set(item.orderId, [entry]);
+    }
+
+    return orders.map((order) => ({ ...order, items: itemsByOrder.get(order.id) ?? [] }));
+  }
+
   /** Admin detail: joined row + the employee's active badge code + items (with product names). */
   async detail(tenantId: string, id: string): Promise<PickupOrderDetailDto> {
     const [row] = await this.db
