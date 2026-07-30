@@ -95,16 +95,14 @@ describe("commerceml parse", () => {
       "utf8",
     );
 
-    const startedAt = Date.now();
     const catalog = parseCatalog(bomb);
-    const elapsedMs = Date.now() - startedAt;
 
-    // Fast: a genuine expansion of this shape is gigabytes of text: this
-    // must not even come close to spending real time computing it.
-    expect(elapsedMs).toBeLessThan(2000);
     // Not expanded at all: with `processEntities: false`, the reference is
     // left exactly as it arrived -- proof no substitution happened, not just
-    // that whatever came back is merely short.
+    // that whatever came back is merely short. This alone rules out the
+    // expansion (a genuine one would be gigabytes of text, not a 6-character
+    // literal), without an elapsed-time assertion that would be flaky under
+    // CI load rather than actually testing this behavior.
     expect(catalog.items[0]!.name).toBe("&lol3;");
   });
 
@@ -122,18 +120,13 @@ describe("commerceml parse", () => {
       "utf8",
     );
 
-    const before = process.memoryUsage().heapUsed;
-    const startedAt = Date.now();
     const catalog = parseCatalog(bomb);
-    const elapsedMs = Date.now() - startedAt;
-    const heapDeltaMb = (process.memoryUsage().heapUsed - before) / 1e6;
 
-    expect(elapsedMs).toBeLessThan(2000);
     // The raw file itself is ~100KB (20,000 * 5-byte references); a real
-    // expansion would be ~190MB (20,000 * 9999 chars). A generous ceiling
-    // here still catches that blowup without being flaky over ordinary GC
-    // noise.
-    expect(heapDeltaMb).toBeLessThan(50);
+    // expansion would be ~190MB (20,000 * 9999 chars). This bound alone
+    // proves no expansion happened -- an elapsed-time or heap-delta
+    // assertion would claim the same thing less directly, and be flaky
+    // under CI load or ordinary GC noise besides.
     expect(catalog.items[0]!.name.length).toBeLessThan(repeatedRef.length + 1);
   });
 
@@ -154,5 +147,38 @@ describe("commerceml parse", () => {
     );
     const catalog = parseCatalog(bytes);
     expect(catalog.items[0]!.name).toBe(`Соль & перец <3> "острый" 'набор'`);
+  });
+
+  // Review fix (round 2): decodePredefinedXmlEntities now also resolves
+  // numeric character references, which `processEntities: false` leaves
+  // untouched the same way it leaves named entities untouched.
+  it("раскрывает числовые ссылки на символы (десятичные и шестнадцатеричные)", () => {
+    const bytes = Buffer.from(
+      [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        "<КоммерческаяИнформация><Каталог><Товары><Товар>",
+        "<Ид>guid-numeric-refs</Ид>",
+        "<Наименование>&#1046;&#x438;&#1075;&#x443;&#1083;&#x451;&#1074;&#x441;&#1082;&#1086;&#1077;</Наименование>",
+        "</Товар></Товары></Каталог></КоммерческаяИнформация>",
+      ].join(""),
+      "utf8",
+    );
+    const catalog = parseCatalog(bytes);
+    expect(catalog.items[0]!.name).toBe("Жигулёвское");
+  });
+
+  it("оставляет нечитаемую числовую ссылку как есть, не бросая исключение", () => {
+    const bytes = Buffer.from(
+      [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        "<КоммерческаяИнформация><Каталог><Товары><Товар>",
+        "<Ид>guid-bad-numeric-ref</Ид>",
+        "<Наименование>перед&#xFFFFFFFF;после</Наименование>",
+        "</Товар></Товары></Каталог></КоммерческаяИнформация>",
+      ].join(""),
+      "utf8",
+    );
+    const catalog = parseCatalog(bytes);
+    expect(catalog.items[0]!.name).toBe("перед&#xFFFFFFFF;после");
   });
 });

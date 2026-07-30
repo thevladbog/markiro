@@ -469,7 +469,7 @@ export class IntegrationsService {
       // Review fix (PR #32, item 7): see `CANDIDATES_PAGE_SIZE`'s own comment.
       .limit(CANDIDATES_PAGE_SIZE);
 
-    if (rows.length === 0) return { candidates: [] };
+    if (rows.length === 0) return { candidates: [], truncated: false };
 
     // Пул для подсказки — только ещё НЕ связанные товары: предложить товар,
     // у которого уже есть чужой external_ref, значит подсунуть подсказку,
@@ -504,6 +504,11 @@ export class IntegrationsService {
         hidden: row.hiddenAt !== null,
         suggestedProductId: suggestProductId(row, unlinkedProductsByNormalizedName),
       })),
+      // Rows hit the page cap -- there may be more beyond it that this page
+      // is silently not showing. Not a guarantee there IS more (the (n+1)th
+      // row could tie and lose ordering by chance), just that this page
+      // alone can't rule it out.
+      truncated: rows.length === CANDIDATES_PAGE_SIZE,
     };
   }
 

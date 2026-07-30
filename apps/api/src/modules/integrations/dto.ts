@@ -103,6 +103,8 @@ export interface CandidateDto {
 
 export interface CandidatesPageDto {
   candidates: CandidateDto[];
+  /** True when the page hit `CANDIDATES_PAGE_SIZE` -- there may be more rows the queue isn't showing. */
+  truncated: boolean;
 }
 
 /** GET /integrations/:type/candidates query schema. */

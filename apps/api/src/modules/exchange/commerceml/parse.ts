@@ -116,14 +116,19 @@ function decode(bytes: Buffer): string {
 }
 
 /**
- * The five entities XML itself defines (`&lt; &gt; &amp; &quot; &apos;`) --
- * and ONLY these. A single, non-recursive, linear pass (`String.replace` with
- * a global regex never re-scans text it has already substituted), so this
- * cannot itself be turned into an expansion attack: there is no table of
- * custom names to grow, nested, or reference each other. `parseXml` below
- * turns off fast-xml-parser's own entity substitution entirely
- * (`processEntities: false`) -- this is what puts those five predefined
- * entities, which a genuine CommerceML product name legitimately needs
+ * The five entities XML itself defines (`&lt; &gt; &amp; &quot; &apos;`),
+ * plus numeric character references (`&#930;`, `&#xD2;`) -- the other form
+ * XML allows for escaping a character, and one a genuine CommerceML export
+ * uses too (some 1С configurations emit non-ASCII or reserved characters
+ * this way rather than as a raw named entity). A single, non-recursive,
+ * linear pass (`String.replace` with a global regex never re-scans text it
+ * has already substituted), so this cannot itself be turned into an
+ * expansion attack: there is no table of custom names to grow, nested, or
+ * reference each other -- a numeric reference always resolves to exactly one
+ * Unicode scalar value, never to more text that could itself contain another
+ * reference. `parseXml` below turns off fast-xml-parser's own entity
+ * substitution entirely (`processEntities: false`) -- this is what puts
+ * these entities, which a genuine CommerceML product name legitimately needs
  * (a name containing literal `&` or `<` MUST be escaped to stay well-formed
  * XML), back without reopening the door `processEntities` closes.
  */
@@ -137,8 +142,19 @@ const PREDEFINED_XML_ENTITIES: Readonly<Record<string, string>> = {
 
 function decodePredefinedXmlEntities(text: string): string {
   return text.replace(
-    /&(lt|gt|amp|quot|apos);/g,
-    (_match, name: string) => PREDEFINED_XML_ENTITIES[name]!,
+    /&(?:(lt|gt|amp|quot|apos)|#(\d+)|#[xX]([0-9a-fA-F]+));/g,
+    (match: string, name?: string, decimal?: string, hex?: string) => {
+      if (name !== undefined) return PREDEFINED_XML_ENTITIES[name]!;
+      const codePoint = Number.parseInt(decimal ?? hex!, decimal !== undefined ? 10 : 16);
+      // Malformed or out-of-range references (e.g. a stray `&#xFFFFFFFF;`)
+      // are left exactly as they arrived rather than throwing -- this is a
+      // best-effort decode of leaf text, not a validator.
+      try {
+        return String.fromCodePoint(codePoint);
+      } catch {
+        return match;
+      }
+    },
   );
 }
 

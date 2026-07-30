@@ -149,10 +149,15 @@ function JournalSessionRow({
         // the `onClick={toggle}` above -- without stopping it here, opening
         // an event's protocol response collapsed the very session it belongs
         // to in the same gesture. `stopPropagation` only blocks the bubble;
-        // the summary's own native open/close toggle is unaffected.
+        // the summary's own native open/close toggle is unaffected. Keyboard
+        // activation (Enter/Space on the focused `<summary>`) fires a
+        // `keydown` that bubbles the same way -- without stopping it too, the
+        // outer row's `onKeyDown` both `preventDefault()`s the summary's own
+        // native toggle AND closes the session out from under it.
         <ul
           style={{ margin: 0, padding: 0, listStyle: "none" }}
           onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => event.stopPropagation()}
         >
           {session.events.map((event, index) => (
             // Events carry no id of their own (dto.ts's `JournalEventDto`) --

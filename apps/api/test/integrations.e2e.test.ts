@@ -259,9 +259,13 @@ describe("integrations (cabinet)", () => {
     const res = await agent.get("/integrations/commerceml/journal").expect(200);
     const thisSession = res.body.sessions.find((s: { id: string }) => s.id === session!.id);
     expect(thisSession).toBeDefined();
-    // Bounded, not the full 1050+ rows this session actually owns in the DB.
-    expect(thisSession.events.length).toBeLessThanOrEqual(JOURNAL_EVENTS_LIMIT);
-    expect(thisSession.events.length).toBeGreaterThan(0);
+    // Bounded to EXACTLY the limit, not just "no more than" it: this session
+    // alone contributes more rows than the limit, all with the same (latest)
+    // insert timestamp, so the global events query's top JOURNAL_EVENTS_LIMIT
+    // rows can only come from here -- a weaker "some smaller number came
+    // back" bound would also pass if the query silently dropped rows, leaked
+    // rows from elsewhere, or applied the limit somewhere it shouldn't.
+    expect(thisSession.events.length).toBe(JOURNAL_EVENTS_LIMIT);
     // Every event handed back for THIS session really does belong to it --
     // proof the grouping didn't leak another session's rows in, or this
     // session's rows out, while redistributing `events` into buckets.
