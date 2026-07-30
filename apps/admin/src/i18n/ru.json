@@ -50,6 +50,7 @@
     "dashboard": "Обзор",
     "catalog": "Каталог",
     "shifts": "Смены",
+    "boxes": "Короба",
     "conflicts": "Конфликты",
     "counterparties": "Контрагенты",
     "labels": "Этикетки",
@@ -393,6 +394,23 @@
         "deleteError": "Не удалось удалить смену",
         "closeSuccess": "Смена закрыта",
         "closeError": "Не удалось закрыть смену"
+      }
+    },
+    "boxes": {
+      "title": "Короба",
+      "empty": "В этой смене нет коробов",
+      "selectShift": "Выберите смену, чтобы увидеть её короба",
+      "contentsChangedAfterClose": "Изменилось после закрытия",
+      "filters": {
+        "shiftLabel": "Смена"
+      },
+      "table": {
+        "sscc": "SSCC",
+        "terminal": "Терминал",
+        "operator": "Оператор",
+        "itemCount": "Кол-во",
+        "closedAt": "Закрыт",
+        "status": "Статус"
       }
     },
     "conflicts": {

@@ -20,6 +20,7 @@ import { PickupOrdersModule } from "./modules/pickup-orders/pickup-orders.module
 import { ConflictsModule } from "./modules/conflicts/conflicts.module";
 import { PickupRejectionsModule } from "./modules/pickup-rejections/pickup-rejections.module";
 import { SsccModule } from "./modules/sscc/sscc.module";
+import { BoxesModule } from "./modules/boxes/boxes.module";
 
 @Module({ controllers: [HealthController] })
 export class AppModule {
@@ -59,6 +60,7 @@ export class AppModule {
         ConflictsModule,
         PickupRejectionsModule,
         SsccModule,
+        BoxesModule,
       ],
       controllers: [HealthController],
     };

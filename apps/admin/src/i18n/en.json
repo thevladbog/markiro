@@ -50,6 +50,7 @@
     "dashboard": "Overview",
     "catalog": "Catalog",
     "shifts": "Shifts",
+    "boxes": "Boxes",
     "conflicts": "Conflicts",
     "counterparties": "Counterparties",
     "labels": "Labels",
@@ -393,6 +394,23 @@
         "deleteError": "Could not delete the shift",
         "closeSuccess": "Shift closed",
         "closeError": "Could not close the shift"
+      }
+    },
+    "boxes": {
+      "title": "Boxes",
+      "empty": "No boxes in this shift",
+      "selectShift": "Select a shift to see its boxes",
+      "contentsChangedAfterClose": "Changed after closing",
+      "filters": {
+        "shiftLabel": "Shift"
+      },
+      "table": {
+        "sscc": "SSCC",
+        "terminal": "Terminal",
+        "operator": "Operator",
+        "itemCount": "Count",
+        "closedAt": "Closed",
+        "status": "Status"
       }
     },
     "conflicts": {

@@ -4,6 +4,7 @@ import { CreateOrgPage } from "./pages/auth/CreateOrg.js";
 import { LoginPage } from "./pages/auth/Login.js";
 import { RegisterPage } from "./pages/auth/Register.js";
 import { SelectOrgPage } from "./pages/auth/SelectOrg.js";
+import { BoxesPage } from "./pages/boxes/index.js";
 import { CatalogPage } from "./pages/catalog/index.js";
 import { ConflictsPage } from "./pages/conflicts/index.js";
 import { CounterpartiesPage } from "./pages/counterparties/index.js";
@@ -40,6 +41,7 @@ export function App() {
           <Route index element={<DashboardPage />} />
           <Route path="catalog" element={<CatalogPage />} />
           <Route path="shifts" element={<ShiftsPage />} />
+          <Route path="boxes" element={<BoxesPage />} />
           <Route path="conflicts" element={<ConflictsPage />} />
           <Route path="counterparties" element={<CounterpartiesPage />} />
           <Route path="employees" element={<EmployeesPage />} />
