@@ -309,6 +309,72 @@ describe.skipIf(!ready)("pickup orders admin e2e", () => {
     expect(afterExport.some((o) => o.id === orderId)).toBe(false);
   });
 
+  it("applyExternalStatus переводит pending заявку в punched", async () => {
+    const orderId = randomUUID();
+    await db.insert(schema.pickupOrders).values({
+      id: orderId,
+      tenantId,
+      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      kioskId,
+      employeeId,
+      reason: "buy",
+      itemCount: 1,
+    });
+
+    const result = await pickupOrdersService.applyExternalStatus(tenantId, orderId, "punched");
+    expect(result).toEqual({ outcome: "applied" });
+
+    const [row] = await db
+      .select({ status: schema.pickupOrders.status })
+      .from(schema.pickupOrders)
+      .where(eq(schema.pickupOrders.id, orderId));
+    expect(row?.status).toBe("punched");
+  });
+
+  it("applyExternalStatus отказывает расхождением, если заявка уже не pending", async () => {
+    const orderId = randomUUID();
+    await db.insert(schema.pickupOrders).values({
+      id: orderId,
+      tenantId,
+      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      kioskId,
+      employeeId,
+      reason: "buy",
+      itemCount: 1,
+      status: "punched",
+    });
+
+    const result = await pickupOrdersService.applyExternalStatus(tenantId, orderId, "cancelled");
+    expect(result).toEqual({ outcome: "not_pending", currentStatus: "punched" });
+
+    const [row] = await db
+      .select({ status: schema.pickupOrders.status })
+      .from(schema.pickupOrders)
+      .where(eq(schema.pickupOrders.id, orderId));
+    expect(row?.status).toBe("punched");
+  });
+
+  it("applyExternalStatus отказывает списанием без причины", async () => {
+    const orderId = randomUUID();
+    await db.insert(schema.pickupOrders).values({
+      id: orderId,
+      tenantId,
+      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      kioskId,
+      employeeId,
+      reason: "buy",
+      itemCount: 1,
+    });
+
+    const result = await pickupOrdersService.applyExternalStatus(tenantId, orderId, "writtenoff");
+    expect(result).toEqual({ outcome: "missing_writeoff_reason" });
+  });
+
+  it("applyExternalStatus отдаёт not_found для чужого/несуществующего id", async () => {
+    const result = await pickupOrdersService.applyExternalStatus(tenantId, randomUUID(), "punched");
+    expect(result).toEqual({ outcome: "not_found" });
+  });
+
   it("cross-tenant isolation: org B cannot read, resolve, cancel, slip or export org A's order", async () => {
     const orderRes = await scan(999, `01${GTIN}21XTEN1${GS}93Abcd`).expect(201);
     const orderId = await orderIdByNo(orderRes.body.orderNo);

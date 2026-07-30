@@ -25,6 +25,7 @@ import type {
   OrderConflict,
   PickupOrderDetailDto,
   PickupOrderRowDto,
+  PickupOrderStatus,
   ResolvePickupOrderDto,
 } from "./dto";
 
@@ -65,6 +66,17 @@ const CLIENT_CLOCK_BEHIND_TOLERANCE_MS = 7 * 24 * 60 * 60_000;
 type ParsedItem =
   | { rawKm: string; ok: true; gtin14: string; serial: string; key: string }
   | { rawKm: string; ok: false; conflictReason: "not_km" | "incomplete" };
+
+export type ApplyExternalStatusOutcome =
+  | "applied"
+  | "not_found"
+  | "not_pending"
+  | "missing_writeoff_reason";
+
+export interface ApplyExternalStatusResult {
+  outcome: ApplyExternalStatusOutcome;
+  currentStatus?: PickupOrderStatus;
+}
 
 @Injectable()
 export class PickupOrdersService {
@@ -795,6 +807,75 @@ export class PickupOrdersService {
     });
 
     return this.rowDtoById(tenantId, cancelledId);
+  }
+
+  /**
+   * Applies a status 1С reported for this tenant's order via the CommerceML
+   * `type=sale` reconciliation (спека §6, `order-status.ts`'s
+   * `resolveMappedStatus`). Same guarded `pending -> X` transition
+   * `resolve`/`cancel` above already enforce -- an order 1С reports as
+   * changed, but this server no longer sees as `pending` (an admin already
+   * resolved/cancelled it locally, or 1С already reported this exact change
+   * before), is a discrepancy for the CALLER to journal, never a thrown
+   * exception: one bad row inside a reconciliation batch must never abort
+   * the rest of it (same discipline `commerceml/apply.ts` already follows
+   * for a bad price).
+   */
+  async applyExternalStatus(
+    tenantId: string,
+    orderId: string,
+    mappedStatus: "punched" | "writtenoff" | "cancelled",
+  ): Promise<ApplyExternalStatusResult> {
+    const current = await this.findRow(tenantId, orderId);
+    if (!current) return { outcome: "not_found" };
+    if (current.status !== "pending") {
+      return { outcome: "not_pending", currentStatus: current.status };
+    }
+
+    const pendingCondition = and(
+      eq(schema.pickupOrders.tenantId, tenantId),
+      eq(schema.pickupOrders.id, orderId),
+      eq(schema.pickupOrders.status, "pending"),
+    );
+
+    if (mappedStatus === "cancelled") {
+      const cancelledId = await this.db.transaction(async (tx) => {
+        const [row] = await tx
+          .update(schema.pickupOrders)
+          .set({ status: "cancelled" })
+          .where(pendingCondition)
+          .returning({ id: schema.pickupOrders.id });
+        if (!row) return null;
+        await tx
+          .update(schema.pickupOrderItems)
+          .set({ voided: true })
+          .where(
+            and(
+              eq(schema.pickupOrderItems.tenantId, tenantId),
+              eq(schema.pickupOrderItems.orderId, orderId),
+            ),
+          );
+        return row.id;
+      });
+      return cancelledId ? { outcome: "applied" } : { outcome: "not_pending" };
+    }
+
+    if (mappedStatus === "writtenoff" && !current.writeoffReasonId) {
+      return { outcome: "missing_writeoff_reason" };
+    }
+
+    const resolvedAt = new Date();
+    const [row] = await this.db
+      .update(schema.pickupOrders)
+      .set(
+        mappedStatus === "punched"
+          ? { status: "punched", resolvedAt, resolvedByUserId: null }
+          : { status: "writtenoff", resolvedAt, resolvedByUserId: null },
+      )
+      .where(pendingCondition)
+      .returning({ id: schema.pickupOrders.id });
+
+    return row ? { outcome: "applied" } : { outcome: "not_pending" };
   }
 
   /**
