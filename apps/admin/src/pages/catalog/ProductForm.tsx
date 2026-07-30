@@ -84,8 +84,14 @@ export interface ProductFormProps {
   /**
    * Only meaningful in edit mode -- the product's current link to its 1С
    * counterpart (`ProductDto.externalRef`), or `null`/absent if never
-   * linked. Task 14: "a linked product shows its link on its own card,
-   * with an unlink action" (brief 08) -- this is that section.
+   * linked. Brief 08 (Task 14): "a linked product shows its link on its own
+   * card in the Catalogue section, with the external name and an unlink
+   * action" -- this is that section, with a known, accepted gap from the
+   * brief's own wording: it shows the external REF (1С's `<Ид>` GUID,
+   * `linkedText` below), not the external NAME the brief describes.
+   * `products` carries no column for the 1С item's name at the time it was
+   * linked -- only `externalRef` -- so there is nothing to show but the
+   * GUID today.
    */
   externalRef?: string | null;
   counterparties: CounterpartyDto[];

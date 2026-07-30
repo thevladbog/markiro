@@ -99,6 +99,20 @@ function CommercemlSettingsForm({
     const priceType = values.priceType.trim();
     try {
       await onSave({
+        // Accepted limitation (final review, Fix 9): clearing this field and
+        // saving does NOT reset a previously configured `priceType` back to
+        // "decide by file" -- an empty value is omitted from the patch
+        // entirely (the same convention `toCreateInput` in
+        // `pages/catalog/ProductForm.tsx` uses for its own optional fields),
+        // and `updateChannel` (integrations.service.ts) treats an omitted key
+        // as "not touched", not "clear it". The server-side schema
+        // (`commercemlSettings` in channel-registry.ts) only makes this
+        // worse: `priceType` is `z.string().min(1).optional()`, so there is
+        // no valid value that means "explicitly unset" even if this client
+        // sent one. The operator sees their cleared field silently repopulate
+        // with the old value the next time `channel` refetches and this form
+        // resyncs (the effect above). Deliberately not fixed here -- it needs
+        // a real "unset" representation server-side, not a client patch.
         ...(priceType ? { priceType } : {}),
         splitWriteoffDocument: values.splitWriteoffDocument,
         silentAfterHours: values.silentAfterHours,

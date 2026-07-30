@@ -89,12 +89,21 @@ function LinkModal({
  * Deliberately narrower than the Catalogue's full `ProductForm`: this modal
  * exists only to supply the one field 1С never sends (a GTIN) for a name
  * already known from the exchange, not to duplicate the catalogue's entire
- * create flow. It always still ends in the same atomic `linkCandidate` call
- * the manual-link modal above uses (never a bare product create with
+ * create flow. It always still ends in the same `linkCandidate` call the
+ * manual-link modal above uses (never a bare product create with
  * `externalRef` set by hand), so a candidate this modal resolves is removed
  * from the queue exactly the way a manually-linked one is -- see
- * `integrations.service.ts`'s `linkCandidate` for why that atomicity matters
- * under concurrent use.
+ * `integrations.service.ts`'s `linkCandidate` for why ITS OWN atomicity
+ * (a single `UPDATE ... WHERE external_ref IS NULL`) matters under
+ * concurrent use.
+ *
+ * Accepted limitation (final review, Fix 9): `handleCreateConfirm` below is
+ * two independent requests, `createProduct` then `linkCandidate` -- NOT one
+ * atomic operation, and there is no rollback between them. If the create
+ * succeeds and the link fails (a dropped connection, a 409 from some other
+ * concurrent change), the operator is left with a real, unlinked product and
+ * this candidate still sitting in the queue -- recoverable by hand (link the
+ * new product from the queue, or delete it), but not undone automatically.
  */
 function CreateModal({
   candidate,
