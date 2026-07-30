@@ -185,6 +185,25 @@ function isRequestBuffer(value: unknown): value is Buffer {
 const IMPORT_PARSE_FAILURE = "invalid file";
 
 /**
+ * Shape check for `type=sale&mode=import`'s per-document `<Ид>` -- raw text
+ * lifted from an untrusted 1С file, compared against `pickupOrders.id`, a
+ * `uuid` column. Checked BEFORE `applyExternalStatus` is ever called (see
+ * `importOrderStatuses`, Fix A re-review) rather than by catching the
+ * Postgres `22P02` a non-UUID value would otherwise throw: validating first
+ * lets a genuinely malformed id be skipped and journaled as a discrepancy
+ * without also swallowing a real transient failure (pool timeout, deadlock,
+ * serialization failure) from the SAME try/catch, which must be allowed to
+ * escape and abort the batch so 1С's own retry can recover it.
+ *
+ * Deliberately loose: case-insensitive, and not checking the version/variant
+ * nibbles RFC 4122 defines, since a 1С-supplied GUID isn't guaranteed to set
+ * them the way `gen_random_uuid()` (this column's own generator) does. Only
+ * the dashed 8-4-4-4-12 hex layout matters here -- anything shaped like that
+ * reaches the real lookup; anything else is refused up front.
+ */
+const UUID_SHAPE_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
  * Constant address 1С's "Обмен с сайтом" client calls (спека §3):
  * `checkauth` -> `init` -> `mode=file` (chunked upload), repeated. Parsing
  * and applying an assembled file (`mode=import`) is later work.
@@ -820,26 +839,23 @@ export class ExchangeController {
         continue;
       }
 
-      // Fix 1 (final review): `document.externalRef` is raw text lifted from
-      // an untrusted 1С file, and `pickupOrders.id` is a `uuid` column -- a
-      // non-UUID (or empty) `externalRef` makes the underlying
-      // `eq(schema.pickupOrders.id, orderId)` comparison throw a Postgres
-      // `22P02`, not resolve to "no row". Left unguarded here, that throw
-      // would escape this loop and abort the rest of the batch -- and 1С
-      // retrying the exact same file would reproduce the crash forever.
-      // Caught and treated exactly like the `result.outcome !== "applied"`
-      // discrepancy below, just under a reason that names the lookup failure
-      // itself rather than a resolved-but-wrong outcome.
-      let result: ApplyExternalStatusResult;
-      try {
-        result = await this.pickupOrders.applyExternalStatus(
-          session.tenantId,
-          document.externalRef,
-          mapped,
-        );
-      } catch (cause) {
+      // Fix A (re-review of final-review Fix 1): `document.externalRef` is
+      // raw text lifted from an untrusted 1С file, and `pickupOrders.id` is a
+      // `uuid` column -- a non-UUID (or empty) `externalRef` makes the
+      // underlying `eq(schema.pickupOrders.id, orderId)` comparison throw a
+      // Postgres `22P02`, not resolve to "no row". Validated HERE, before the
+      // call, rather than by wrapping `applyExternalStatus` in a try/catch:
+      // catching afterwards cannot tell this permanent, one-document shape
+      // failure apart from a genuine TRANSIENT failure (pool timeout,
+      // deadlock, serialization failure) -- and a transient failure must be
+      // allowed to escape and abort the rest of this batch, so 1С's own retry
+      // of the same file can recover it, rather than being converted into a
+      // permanent "success" that stops 1С from ever resending it. Skipped and
+      // journaled exactly like the `result.outcome !== "applied"` discrepancy
+      // below, just under a reason that names the shape failure itself rather
+      // than a resolved-but-wrong outcome.
+      if (!UUID_SHAPE_PATTERN.test(document.externalRef)) {
         discrepancies++;
-        const detail = cause instanceof Error ? cause.message : String(cause);
         await this.journal
           .append({
             tenantId: session.tenantId,
@@ -853,7 +869,7 @@ export class ExchangeController {
               externalRef: document.externalRef,
               mapped,
               outcome: "lookup_failed",
-              error: detail,
+              error: "externalRef is not UUID-shaped",
             },
           })
           .catch((error: unknown) => {
@@ -865,6 +881,12 @@ export class ExchangeController {
           });
         continue;
       }
+
+      const result: ApplyExternalStatusResult = await this.pickupOrders.applyExternalStatus(
+        session.tenantId,
+        document.externalRef,
+        mapped,
+      );
 
       if (result.outcome === "applied") {
         applied++;
@@ -904,7 +926,13 @@ export class ExchangeController {
       // checklist). `warn` here lets an operator tell "we understood the file
       // and 0 things changed" apart from "we may not have understood the file
       // at all".
-      outcome: documents.length === 0 ? "warn" : "ok",
+      //
+      // Fix B (re-review): `discrepancies > 0` added to the same condition --
+      // a round where EVERY document produced a discrepancy (unmapped status,
+      // non-UUID externalRef, or a genuine `applyExternalStatus` mismatch) is
+      // just as worth flagging as an empty file: `applied` would stay 0 with
+      // nothing above distinguishing it from a healthy, quiet round.
+      outcome: documents.length === 0 || discrepancies > 0 ? "warn" : "ok",
       grain: "session",
       message: `import (sale): файл «${filename}» применён`,
       details: { filename, applied, discrepancies, total: documents.length },
@@ -1044,7 +1072,19 @@ export class ExchangeController {
       // `plan.held.length`: `candidates` is now pre-filtered to exclude held
       // orders (Fix 4), so `plan.held` is always empty and would misreport
       // this as 0 regardless of how many orders are actually held.
-      details: { offered: plan.eligible.length, held: held.length },
+      //
+      // Fix C (re-review): `heldTruncated` mirrors the same convention
+      // `IntegrationsService.listCandidates`'s `truncated` field already
+      // established for `CandidatesPageDto` -- `findHeldExportOrders`
+      // (pickup-orders.service.ts) caps its result at this same
+      // `EXPORT_BATCH_SIZE` limit, so `held.length` is a SAMPLE, not a total,
+      // once a tenant has more held orders than that; without this flag
+      // `held: held.length` reads as an exact count when it may not be one.
+      details: {
+        offered: plan.eligible.length,
+        held: held.length,
+        heldTruncated: held.length === EXPORT_BATCH_SIZE,
+      },
     });
 
     res.status(200).type("application/xml").send(xml);
