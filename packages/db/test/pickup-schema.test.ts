@@ -112,4 +112,24 @@ describe.skipIf(!url)("pickup schema constraints", () => {
       );
     await expect(db.insert(schema.pickupOrderItems).values(item(order2))).resolves.toBeDefined();
   });
+
+  it("exported_at defaults to null and can be set", async () => {
+    const [before] = await db
+      .select({ exportedAt: schema.pickupOrders.exportedAt })
+      .from(schema.pickupOrders)
+      .where(eq(schema.pickupOrders.id, order1));
+    expect(before?.exportedAt).toBeNull();
+
+    const now = new Date();
+    await db.update(schema.pickupOrders).set({ exportedAt: now }).where(eq(schema.pickupOrders.id, order1));
+
+    const [after] = await db
+      .select({ exportedAt: schema.pickupOrders.exportedAt })
+      .from(schema.pickupOrders)
+      .where(eq(schema.pickupOrders.id, order1));
+    expect(after?.exportedAt?.getTime()).toBe(now.getTime());
+
+    // Reset for any test after this one in the same file.
+    await db.update(schema.pickupOrders).set({ exportedAt: null }).where(eq(schema.pickupOrders.id, order1));
+  });
 });
