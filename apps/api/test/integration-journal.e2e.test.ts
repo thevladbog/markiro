@@ -114,6 +114,44 @@ describe.skipIf(!ready)("journal", () => {
     expect(channel!.lastEventAt).not.toBeNull();
   });
 
+  // Fix 2 (final review): `append` used to write the channel's moved state
+  // with a plain `UPDATE ... WHERE tenant_id = ? AND type = ?` -- a no-op
+  // against zero rows when the channel has never had its `integration_
+  // channels` row created. `updateChannel` (a non-empty settings patch) and
+  // `issueCredentials` are the only two writers of that row, and
+  // `public_api`'s settings schema is `{}`-only (an empty patch is treated as
+  // "nothing to write", see `updateChannel`'s own comment) while
+  // `issueCredentials` now 409s for it (Task 15) -- so a channel exactly like
+  // `public_api` can go through a real event (a key issuance, in production)
+  // without ever getting a settings row through either path. `GET
+  // /integrations` would then keep reporting `not_configured` /
+  // `lastEventAt: null` forever, contradicting the journal this very call
+  // just wrote. `append` must create the row itself when it's missing.
+  it("двигает состояние канала, даже если у него никогда не было строки настроек", async () => {
+    await journal.append({
+      tenantId,
+      channelType: "public_api",
+      sessionId: null,
+      direction: "local",
+      outcome: "ok",
+      grain: "session",
+      message: "Ключ публичного API выпущен",
+    });
+
+    const [channel] = await db
+      .select()
+      .from(schema.integrationChannels)
+      .where(
+        and(
+          eq(schema.integrationChannels.tenantId, tenantId),
+          eq(schema.integrationChannels.type, "public_api"),
+        ),
+      );
+    expect(channel).toBeDefined();
+    expect(channel!.lastOutcome).toBe("ok");
+    expect(channel!.lastEventAt).not.toBeNull();
+  });
+
   it("чистит построчную детализацию раньше сводок, а сводки — только после 90 дней", async () => {
     const old = new Date(Date.now() - 30 * 24 * 3_600_000);
     const wayOld = new Date(Date.now() - (SESSION_RETENTION_DAYS + 10) * 24 * 3_600_000);

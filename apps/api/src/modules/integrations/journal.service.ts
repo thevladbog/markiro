@@ -45,20 +45,36 @@ export class JournalService {
    * на неё смотрят из-за поломки. Обе записи идут в одной транзакции: одного
    * вызова недостаточно, если процесс падает МЕЖДУ вставкой и обновлением —
    * именно этот сбой и обязан не допустить сам комментарий выше.
+   *
+   * Fix 2 (final review): двигать состояние UPDATE'ом, а не upsert'ом, было
+   * ошибкой — `UPDATE ... WHERE tenant_id = ? AND type = ?` это no-op против
+   * НУЛЯ строк, если у канала ещё никогда не было строки в
+   * `integration_channels`. Такую строку сегодня создают только
+   * `updateChannel` (непустой патч настроек) и `issueCredentials` — а канал
+   * вроде `public_api` не проходит ни тем, ни другим путём (пустая схема
+   * настроек делает патч всегда «пустым», а выпуск учётных данных 1С этому
+   * каналу запрещён, Task 15), при этом реальные события (выпуск ключа) он
+   * пишет. Строка сеанса в журнале уже есть, а `GET /integrations` всё ещё
+   * отвечает `not_configured`/`lastEventAt: null` — ровно то враньё, против
+   * которого предостерегает комментарий выше. `append` обязан создать строку
+   * сам, если её нет, а не полагаться на то, что кто-то другой её уже создал.
    */
   async append(input: AppendEventInput): Promise<void> {
     const at = new Date();
     await this.db.transaction(async (tx) => {
       await tx.insert(schema.integrationEvents).values({ ...input, at });
       await tx
-        .update(schema.integrationChannels)
-        .set({ lastEventAt: at, lastOutcome: input.outcome })
-        .where(
-          and(
-            eq(schema.integrationChannels.tenantId, input.tenantId),
-            eq(schema.integrationChannels.type, input.channelType),
-          ),
-        );
+        .insert(schema.integrationChannels)
+        .values({
+          tenantId: input.tenantId,
+          type: input.channelType,
+          lastEventAt: at,
+          lastOutcome: input.outcome,
+        })
+        .onConflictDoUpdate({
+          target: [schema.integrationChannels.tenantId, schema.integrationChannels.type],
+          set: { lastEventAt: at, lastOutcome: input.outcome },
+        });
     });
   }
 
