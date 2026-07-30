@@ -61,8 +61,7 @@ export type ServerRange = Omit<PoolRange, "nextSerial"> & {
  * candidate value below is what actually reconciles the cursor.
  */
 export async function addRange(exec: SqlExecutor, r: ServerRange): Promise<void> {
-  const nextSerial =
-    r.consumedThroughSerial != null ? r.consumedThroughSerial + 1 : r.fromSerial;
+  const nextSerial = r.consumedThroughSerial != null ? r.consumedThroughSerial + 1 : r.fromSerial;
   await exec.run(
     `INSERT INTO sscc_pool (issuer_prefix, extension_digit, from_serial, to_serial, next_serial)
      VALUES (?,?,?,?,?)

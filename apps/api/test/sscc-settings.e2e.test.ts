@@ -284,7 +284,10 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
       // Untouched by the rejected attempt.
       expect((await agent.get("/org/profile/sscc").expect(200)).body.nextSerial).toBe(floor);
 
-      await agent.put("/org/profile/sscc").send({ extensionDigit: 0, nextSerial: floor }).expect(200);
+      await agent
+        .put("/org/profile/sscc")
+        .send({ extensionDigit: 0, nextSerial: floor })
+        .expect(200);
       expect((await agent.get("/org/profile/sscc").expect(200)).body.nextSerial).toBe(floor);
     });
 
