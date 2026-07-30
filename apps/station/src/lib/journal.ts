@@ -1,4 +1,5 @@
 import type { SqlExecutor } from "./mirror.js";
+import { insertException } from "./box-exceptions-mirror.js";
 
 /** One row of the local scan journal — every scan, accepted or not. */
 export interface ScanEventRow {
@@ -224,6 +225,52 @@ export async function recordScan(
   }
 
   return { storedCode, alreadyPresent };
+}
+
+/** Input to {@link undoLastScan}. */
+export interface UndoScanInput {
+  boxId: string;
+  codeHash: string;
+  shiftId: string;
+  terminalId: string | null;
+  operatorId: string | null;
+  at: string;
+}
+
+/**
+ * Undoes the single most recent scan into a still-open box: frees the code
+ * hash immediately (so a rescan is never mistaken for a duplicate),
+ * journals the correction, and queues the fact for the server to release
+ * the same code from `code_registry` (see the design spec's "Releasing a
+ * code" section).
+ *
+ * Three sequential writes, not a transaction (this pool cannot do
+ * multi-call transactions -- see recordScan's own doc comment). A failure
+ * partway through is a rare, logged edge case, not a silent data loss: the
+ * worst case is the codes_mirror row is already gone (harmless -- the
+ * operator can simply rescan) with a thinner audit trail for that one
+ * event, never a lost or duplicated code.
+ */
+export async function undoLastScan(exec: SqlExecutor, input: UndoScanInput): Promise<void> {
+  await exec.run("DELETE FROM codes_mirror WHERE code_hash = ?", [input.codeHash]);
+  await appendScanEvent(exec, {
+    shiftId: input.shiftId,
+    terminalId: input.terminalId,
+    raw: input.codeHash,
+    verdict: "undone",
+    scannedAt: input.at,
+    operatorId: input.operatorId,
+  });
+  await insertException(exec, {
+    kind: "undo",
+    boxId: input.boxId,
+    codeHash: input.codeHash,
+    shiftId: input.shiftId,
+    terminalId: input.terminalId,
+    operatorId: input.operatorId,
+    reason: null,
+    at: input.at,
+  });
 }
 
 /** When this code was originally accepted, for the duplicate signal. */

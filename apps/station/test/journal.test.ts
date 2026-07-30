@@ -2,7 +2,13 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { STATION_MIGRATIONS } from "@markiro/db";
 import type { SqlExecutor } from "../src/lib/mirror.js";
-import { appendScanEvent, findFirstSeen, loadCodeKeys, recordScan } from "../src/lib/journal.js";
+import {
+  appendScanEvent,
+  findFirstSeen,
+  loadCodeKeys,
+  recordScan,
+  undoLastScan,
+} from "../src/lib/journal.js";
 
 function makeExec(): SqlExecutor {
   const db = new DatabaseSync(":memory:");
@@ -649,5 +655,50 @@ describe("box id and operator id", () => {
     const out = await exec.all<{ operator_id: string }>(`SELECT operator_id FROM outbox`);
     expect(ev[0]!.operator_id).toBe("op-1");
     expect(out[0]!.operator_id).toBe("op-1");
+  });
+});
+
+describe("undoLastScan", () => {
+  it("deletes the code from codes_mirror, journals it as undone, and queues the exception fact", async () => {
+    const exec = makeExec();
+    await recordScan(
+      exec,
+      {
+        shiftId: "s1",
+        terminalId: null,
+        raw: "raw1",
+        verdict: "ok",
+        scannedAt: "t1",
+        operatorId: null,
+      },
+      {
+        codeHash: "hash1",
+        shiftId: "s1",
+        gtin14: "04006381333931",
+        serial: "1",
+        scannedAt: "t1",
+        boxId: "b1",
+      },
+    );
+
+    await undoLastScan(exec, {
+      boxId: "b1",
+      codeHash: "hash1",
+      shiftId: "s1",
+      terminalId: null,
+      operatorId: null,
+      at: "t2",
+    });
+
+    const codes = await exec.all("SELECT * FROM codes_mirror WHERE code_hash = ?", ["hash1"]);
+    expect(codes).toHaveLength(0);
+
+    const events = await exec.all<{ verdict: string }>(
+      "SELECT verdict FROM scan_events_mirror ORDER BY id DESC LIMIT 1",
+    );
+    expect(events[0]?.verdict).toBe("undone");
+
+    const pending = await exec.all("SELECT * FROM box_exceptions_mirror");
+    expect(pending).toHaveLength(1);
   });
 });
