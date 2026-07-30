@@ -3,9 +3,11 @@ import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { gs1CheckDigit } from "@markiro/domain";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
+import { SsccService } from "../src/modules/sscc/sscc.service";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { signUpAndActivate } from "./support/auth";
 
@@ -46,8 +48,10 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
   let setup: AuthSetup;
 
   let agent: ReturnType<typeof request.agent>;
+  let tenantId: string;
   let counterpartyId: string;
   let stationKey: string;
+  let deviceId: string;
 
   beforeAll(async () => {
     const env = loadEnv();
@@ -65,7 +69,7 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
     await listenOnLoopback(app);
 
     agent = request.agent(app.getHttpServer());
-    await signUpAndActivate(agent);
+    tenantId = await signUpAndActivate(agent);
 
     await agent.put("/org/profile").send({ gln: ORG_GLN }).expect(200);
 
@@ -80,6 +84,7 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
       .send({ name: "Line 1 terminal" })
       .expect(201);
     stationKey = (device.body as { apiKey: string }).apiKey;
+    deviceId = (device.body as { deviceId: string }).deviceId;
   });
 
   afterAll(async () => {
@@ -231,5 +236,83 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
     // Same prefix as counterparty A, different tenant -- must read as fresh.
     const resB = await agentB.get(`/counterparties/${cpBId}/sscc`).expect(200);
     expect(resB.body).toEqual({ extensionDigit: 0, nextSerial: 0 });
+  });
+
+  describe("putSscc floor (final review, finding 2)", () => {
+    // A fresh, check-digit-valid 13-digit GLN per call, isolated from every
+    // fixture prefix used above -- these tests cut a REAL sscc_blocks row
+    // (via SsccService.allocate) under whatever prefix they use, and must
+    // never collide with a prefix another test in this file already seeded.
+    // The counter is placed in the body's FIRST 7 digits (after "46"), so it
+    // lands inside the 9-digit PREFIX itself (`gln.slice(0, 9)`) -- padding
+    // it into the trailing serial-shaped digits instead would leave every
+    // call sharing the same 9-digit prefix, since only those first 9 digits
+    // are ever read.
+    let counter = 0;
+    function freshGln(): string {
+      counter += 1;
+      const body = `46${String(counter).padStart(7, "0")}000`;
+      return body + String(gs1CheckDigit(body));
+    }
+
+    it("seeds freely when no block has ever been issued under the prefix", async () => {
+      await agent.put("/org/profile").send({ gln: freshGln() }).expect(200);
+      await agent.put("/org/profile/sscc").send({ extensionDigit: 0, nextSerial: 777 }).expect(200);
+      const res = await agent.get("/org/profile/sscc").expect(200);
+      expect(res.body).toEqual({ extensionDigit: 0, nextSerial: 777 });
+    });
+
+    it("rejects seeding below the floor once a block has been issued, but allows seeding at or above it", async () => {
+      const gln = freshGln();
+      await agent.put("/org/profile").send({ gln }).expect(200);
+      const prefix = gln.slice(0, 9);
+
+      // Cuts a real sscc_blocks row under this prefix, the same one-statement
+      // path a shift bundle uses -- no HTTP route exposes raw allocation, so
+      // SsccService is called directly, same as sscc.e2e.test.ts does.
+      // `allocate` itself already advances `sscc_counters` to `size` (50) as
+      // part of granting the block, so the floor -- one past the block's
+      // toSerial -- equals that same baseline here (fromSerial 0, size 50).
+      const block = await app!.get(SsccService).allocate(tenantId, prefix, 0, deviceId, 50);
+      const floor = block.toSerial + 1;
+      expect((await agent.get("/org/profile/sscc").expect(200)).body.nextSerial).toBe(floor);
+
+      await agent
+        .put("/org/profile/sscc")
+        .send({ extensionDigit: 0, nextSerial: floor - 1 })
+        .expect(400);
+      // Untouched by the rejected attempt.
+      expect((await agent.get("/org/profile/sscc").expect(200)).body.nextSerial).toBe(floor);
+
+      await agent.put("/org/profile/sscc").send({ extensionDigit: 0, nextSerial: floor }).expect(200);
+      expect((await agent.get("/org/profile/sscc").expect(200)).body.nextSerial).toBe(floor);
+    });
+
+    it("rejects seeding below the floor for a counterparty's counter once a block has been issued", async () => {
+      const gln = freshGln();
+      const counterparty = await agent
+        .post("/counterparties")
+        .send({ name: "Floor test counterparty", gln })
+        .expect(201);
+      const cpId = (counterparty.body as { id: string }).id;
+      const prefix = gln.slice(0, 9);
+
+      const block = await app!.get(SsccService).allocate(tenantId, prefix, 0, deviceId, 50);
+      const floor = block.toSerial + 1;
+
+      const rejected = await agent
+        .put(`/counterparties/${cpId}/sscc`)
+        .send({ extensionDigit: 0, nextSerial: floor - 1 })
+        .expect(400);
+      expect((rejected.body as { message: string }).message).toContain(String(floor));
+
+      await agent
+        .put(`/counterparties/${cpId}/sscc`)
+        .send({ extensionDigit: 0, nextSerial: floor })
+        .expect(200);
+      expect((await agent.get(`/counterparties/${cpId}/sscc`).expect(200)).body.nextSerial).toBe(
+        floor,
+      );
+    });
   });
 });

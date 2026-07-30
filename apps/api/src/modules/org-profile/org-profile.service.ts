@@ -2,7 +2,7 @@ import { BadRequestException, Inject, Injectable } from "@nestjs/common";
 import { and, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
-import { BOX_EXTENSION_DIGIT, deriveIssuerPrefix } from "../sscc/sscc.service";
+import { BOX_EXTENSION_DIGIT, deriveIssuerPrefix, seedFloor } from "../sscc/sscc.service";
 import type { OrgProfileDto, PutOrgProfileDto, SsccCounterDto } from "./dto";
 
 const EMPTY_PROFILE: OrgProfileDto = { gln: null, gs1Prefixes: [], inn: null };
@@ -83,9 +83,22 @@ export class OrgProfileService {
    * without re-handing-out serials that system already used. Keyed by the
    * prefix derived from the org's own GLN, not the GLN itself (see
    * `deriveIssuerPrefix`'s doc comment).
+   *
+   * Refuses to seed below `seedFloor` (final review, finding 2): once a
+   * block has been handed to a device under this prefix, reseeding lower
+   * would let the next `allocate` cut a range overlapping one already in a
+   * device's hands -- an SSCC collision across devices. Not silently
+   * clamped -- an admin correcting a typo before any block has ever been
+   * issued must still be free to seed anywhere.
    */
   async putSscc(tenantId: string, dto: SsccCounterDto): Promise<SsccCounterDto> {
     const issuerPrefix = await this.ownIssuerPrefix(tenantId);
+    const floor = await seedFloor(this.db, tenantId, issuerPrefix, dto.extensionDigit);
+    if (dto.nextSerial < floor) {
+      throw new BadRequestException(
+        `nextSerial must be at least ${floor}: serials below it were already issued to a device under this prefix`,
+      );
+    }
     await this.db
       .insert(schema.ssccCounters)
       .values({

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Inject,
   Injectable,
@@ -8,7 +9,7 @@ import {
 import { and, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
-import { BOX_EXTENSION_DIGIT, deriveIssuerPrefix } from "../sscc/sscc.service";
+import { BOX_EXTENSION_DIGIT, deriveIssuerPrefix, seedFloor } from "../sscc/sscc.service";
 import type {
   CounterpartyDto,
   CreateCounterpartyDto,
@@ -140,9 +141,21 @@ export class CounterpartiesService {
     return { extensionDigit: BOX_EXTENSION_DIGIT, nextSerial: row ? Number(row.nextSerial) : 0 };
   }
 
-  /** Seeds (or reseeds) a counterparty's box counter. See getSscc's doc comment. */
+  /**
+   * Seeds (or reseeds) a counterparty's box counter. See getSscc's doc
+   * comment. Refuses to seed below `seedFloor` (final review, finding 2) --
+   * see org-profile.service.ts's `putSscc` for the full rationale, which
+   * applies identically here since both write the same `sscc_counters`
+   * table keyed by the same derived issuer prefix.
+   */
   async putSscc(tenantId: string, id: string, dto: SsccCounterDto): Promise<SsccCounterDto> {
     const issuerPrefix = await this.counterpartyIssuerPrefix(tenantId, id);
+    const floor = await seedFloor(this.db, tenantId, issuerPrefix, dto.extensionDigit);
+    if (dto.nextSerial < floor) {
+      throw new BadRequestException(
+        `nextSerial must be at least ${floor}: serials below it were already issued to a device under this prefix`,
+      );
+    }
     await this.db
       .insert(schema.ssccCounters)
       .values({
