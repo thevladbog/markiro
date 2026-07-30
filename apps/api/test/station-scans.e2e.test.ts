@@ -1697,5 +1697,138 @@ describe.skipIf(!ready)("station-scans e2e", () => {
         expect(blockRow!.consumedThroughSerial).toBeNull();
       },
     );
+
+    // Task 4: applying "undo" exceptions inside the same sync-batch
+    // transaction. Nested here (rather than a fresh top-level describe) so
+    // it inherits this describe's own beforeEach (agent/tenantId/apiKey/
+    // shiftId) and its scan/postBatch/postBatchAs/postRaw/boxIdFor/
+    // registryOwner helpers, instead of re-deriving a fresh fixture shape.
+    describe("exceptions", () => {
+      it("undo releases the code from the registry and marks the box item removed", async () => {
+        await postBatch([scan("aa", { boxId: "b1" })]);
+        const boxId = await boxIdFor("b1");
+        const codeHash = "aa".padEnd(64, "0");
+
+        const undoRes = await postRaw({
+          batchId: `undo-test-${randomUUID()}`,
+          items: [],
+          boxes: [],
+          exceptions: [
+            {
+              kind: "undo",
+              boxId,
+              codeHash,
+              shiftId,
+              terminalId: "t1",
+              operatorId: null,
+              reason: null,
+              occurredAt: new Date().toISOString(),
+            },
+          ],
+        });
+        expect(undoRes.body.applied).toBe(0);
+
+        const [registryRow] = await db
+          .select()
+          .from(schema.codeRegistry)
+          .where(
+            and(
+              eq(schema.codeRegistry.tenantId, tenantId),
+              eq(schema.codeRegistry.codeHash, codeHash),
+            ),
+          );
+        expect(registryRow).toBeUndefined();
+
+        const [itemRow] = await db
+          .select()
+          .from(schema.boxItems)
+          .where(
+            and(
+              eq(schema.boxItems.tenantId, tenantId),
+              eq(schema.boxItems.boxId, boxId),
+              eq(schema.boxItems.codeHash, codeHash),
+            ),
+          );
+        expect(itemRow?.removedAt).not.toBeNull();
+
+        const [auditRow] = await db
+          .select()
+          .from(schema.boxExceptions)
+          .where(eq(schema.boxExceptions.tenantId, tenantId));
+        expect(auditRow?.kind).toBe("undo");
+      });
+
+      // t1 claims "aa" first (a LATER scannedAt); t2's own later-arriving but
+      // EARLIER-scannedAt claim then wins ownership (06b: earlier scannedAt
+      // wins) and retroactively marks t1's own box item displaced -- the
+      // exact scenario "marks its own box item displaced..." above already
+      // exercises. code_registry now belongs to t2, not the original t1.
+      it("undo on a code already displaced to another terminal is a harmless no-op", async () => {
+        await postBatchAs("t1", [scan("aa", { boxId: "b1", scannedAt: "10:00:05" })]);
+        await postBatchAs("t2", [scan("aa", { boxId: "b2", scannedAt: "10:00:00" })]);
+
+        const codeHash = "aa".padEnd(64, "0");
+        const before = await registryOwner(tenantId, codeHash);
+        expect(before?.terminalId).toBe("t2");
+
+        const boxId = await boxIdFor("b1");
+        await postRaw({
+          batchId: `undo-test-${randomUUID()}`,
+          items: [],
+          boxes: [],
+          exceptions: [
+            {
+              kind: "undo",
+              boxId,
+              codeHash,
+              shiftId,
+              terminalId: "t1",
+              operatorId: null,
+              reason: null,
+              occurredAt: new Date().toISOString(),
+            },
+          ],
+        });
+
+        const after = await registryOwner(tenantId, codeHash);
+        expect(after?.terminalId).toBe("t2");
+        expect(after?.scannedAt).toEqual(before?.scannedAt);
+      });
+
+      it("redelivering the same undo exception twice is idempotent", async () => {
+        await postBatch([scan("aa", { boxId: "b1" })]);
+        const boxId = await boxIdFor("b1");
+        const codeHash = "aa".padEnd(64, "0");
+
+        const body = {
+          batchId: `undo-test-${randomUUID()}`,
+          items: [],
+          boxes: [],
+          exceptions: [
+            {
+              kind: "undo",
+              boxId,
+              codeHash,
+              shiftId,
+              terminalId: "t1",
+              operatorId: null,
+              reason: null,
+              occurredAt: new Date().toISOString(),
+            },
+          ],
+        };
+
+        const first = await postRaw(body);
+        expect(first.body.alreadyApplied).toBe(false);
+        const second = await postRaw(body);
+        expect(second.body.alreadyApplied).toBe(true);
+
+        const auditRows = await db
+          .select()
+          .from(schema.boxExceptions)
+          .where(eq(schema.boxExceptions.tenantId, tenantId));
+        expect(auditRows).toHaveLength(1);
+      });
+    });
   });
 });

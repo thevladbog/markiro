@@ -10,6 +10,7 @@ import {
   type OwnerRow,
 } from "./conflict-resolution";
 import { displacedHashes, type MembershipRow } from "./box-membership";
+import { sortExceptions, type ExceptionDto } from "./box-exceptions";
 import { SsccService } from "../sscc/sscc.service";
 import type { BatchConflictDto, SyncBatchDto, SyncBatchResponseDto } from "./dto";
 
@@ -828,7 +829,110 @@ export class StationScansService {
         }
       }
 
+      // Exception facts (undo/clear/disassemble/reprint -- Task 4 wires up
+      // "undo", Tasks 5-7 extend the same applyExceptions method with the
+      // other three kinds). Applied LAST, after both items and box closures
+      // above, so an exception targeting a scan or closure carried in this
+      // very same batch always applies to a row that already exists -- the
+      // device can never enqueue an exception fact ahead of the scan it
+      // corrects, since the fact is only ever created after the operator has
+      // already made that scan (see the design spec's "Sync protocol"
+      // section).
+      if (body.exceptions.length > 0) {
+        await this.applyExceptions(tx, tenantId, sortExceptions(body.exceptions));
+      }
+
       return { applied: body.items.length, alreadyApplied: false, conflicts: batchConflicts };
     });
+  }
+
+  /**
+   * Applies undo/clear/disassemble/reprint facts, one at a time in the
+   * sorted order the caller already computed (`sortExceptions` -- boxId,
+   * then kind, then codeHash, for the same 40P01-avoidance reasoning as
+   * every other multi-row loop in this file). Every kind writes its own
+   * `box_exceptions` row regardless of whether anything else changed -- a
+   * no-op (redelivery, a code already released elsewhere) is still a
+   * recorded attempt, matching the pattern the box-closures loop above
+   * already established for exactly this class of redelivery/race.
+   *
+   * Only "undo" is handled today (Task 4); "clear"/"disassemble"/"reprint"
+   * are added by Tasks 5-7 as further branches in this same loop body, not
+   * as a rewrite of it.
+   *
+   * `tx` is loosely typed to the exact operations this method (and
+   * `releaseCode`) actually use, same as `SsccService.recordConsumedSerial`
+   * and `PickupOrdersService.recordScanRejection`: the transaction callback
+   * argument `this.db.transaction(async (tx) => ...)` infers as a
+   * `PgTransaction`, which does not structurally satisfy the full `Db` type
+   * (it has no `$client`), so a parameter typed as plain `Db` would reject
+   * every call site that passes it a transaction handle.
+   */
+  private async applyExceptions(
+    tx: Pick<Db, "insert" | "update" | "delete">,
+    tenantId: string,
+    exceptions: ExceptionDto[],
+  ): Promise<void> {
+    for (const ex of exceptions) {
+      if (ex.kind === "undo" && ex.codeHash) {
+        await this.releaseCode(tx, tenantId, ex.codeHash, ex.shiftId, ex.terminalId);
+        await tx
+          .update(schema.boxItems)
+          .set({ removedAt: sql`now()` })
+          .where(
+            and(
+              eq(schema.boxItems.tenantId, tenantId),
+              eq(schema.boxItems.boxId, ex.boxId),
+              eq(schema.boxItems.codeHash, ex.codeHash),
+              isNull(schema.boxItems.displacedAt),
+              isNull(schema.boxItems.removedAt),
+            ),
+          );
+      }
+      // "clear" and "disassemble" are added in Tasks 5-6; "reprint" writes
+      // only the audit row below, added in Task 7.
+      await tx.insert(schema.boxExceptions).values({
+        tenantId,
+        kind: ex.kind,
+        boxId: ex.boxId,
+        codeHash: ex.codeHash,
+        shiftId: ex.shiftId,
+        terminalId: ex.terminalId,
+        operatorId: ex.operatorId,
+        reason: ex.reason,
+        occurredAt: new Date(ex.occurredAt),
+      });
+    }
+  }
+
+  /**
+   * Releases a code claim, scoped to the EXACT scan that still holds it
+   * (tenant + codeHash + shiftId + terminalId). If the code was displaced
+   * to another terminal in the meantime (06b), this WHERE matches nothing
+   * -- a harmless no-op, since the code was never really this device's to
+   * release once displaced (see the design spec's "Releasing a code"
+   * section).
+   */
+  private async releaseCode(
+    tx: Pick<Db, "delete">,
+    tenantId: string,
+    codeHash: string,
+    shiftId: string,
+    terminalId: string | null,
+  ): Promise<void> {
+    const terminalCondition =
+      terminalId === null
+        ? isNull(schema.codeRegistry.terminalId)
+        : eq(schema.codeRegistry.terminalId, terminalId);
+    await tx
+      .delete(schema.codeRegistry)
+      .where(
+        and(
+          eq(schema.codeRegistry.tenantId, tenantId),
+          eq(schema.codeRegistry.codeHash, codeHash),
+          eq(schema.codeRegistry.shiftId, shiftId),
+          terminalCondition,
+        ),
+      );
   }
 }
