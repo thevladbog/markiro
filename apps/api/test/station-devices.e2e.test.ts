@@ -4,9 +4,12 @@ import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
+import { schema, type Db } from "@markiro/db";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
+import { SsccService } from "../src/modules/sscc/sscc.service";
 import { listenOnLoopback } from "./support/listen-loopback";
 
 const ready = Boolean(
@@ -15,10 +18,12 @@ const ready = Boolean(
 
 describe.skipIf(!ready)("station devices e2e", () => {
   let app: INestApplication | undefined;
+  let db: Db;
 
   beforeAll(async () => {
     const env = loadEnv();
     const setup: AuthSetup = setupAuth(env);
+    db = setup.db;
     const ref = await Test.createTestingModule({
       imports: [AppModule.forRoot({ ...setup, databaseUrl: env.DATABASE_URL })],
     }).compile();
@@ -34,7 +39,7 @@ describe.skipIf(!ready)("station devices e2e", () => {
     await app?.close();
   });
 
-  async function signUpAndActivate(agent: ReturnType<typeof request.agent>): Promise<void> {
+  async function signUpAndActivate(agent: ReturnType<typeof request.agent>): Promise<string> {
     const email = `t-${randomUUID()}@example.com`;
     await agent
       .post("/api/auth/sign-up/email")
@@ -48,6 +53,7 @@ describe.skipIf(!ready)("station devices e2e", () => {
       .post("/api/auth/organization/set-active")
       .send({ organizationId: org.body.id })
       .expect(200);
+    return org.body.id as string;
   }
 
   it("enroll -> list -> delete, cross-tenant isolation", async () => {
@@ -111,4 +117,60 @@ describe.skipIf(!ready)("station devices e2e", () => {
       .send({ name: "Terminal 3" })
       .expect(403);
   });
+
+  // CodeRabbit PR33 review, Finding 8: sscc_blocks' composite FK to
+  // station_devices has no `onDelete` (defaults to NO ACTION). The OLD
+  // revoke() deleted station_devices first, inside one transaction with the
+  // apikey delete -- so a device that had ever issued a box serial block hit
+  // that FK violation, which rolled back the WHOLE transaction (including
+  // the apikey delete), leaving the credential silently still live. The fix
+  // deletes apikey FIRST, as its own committed statement, so the credential
+  // dies regardless of whatever the (still FK-blocked) device-row delete
+  // does afterward.
+  it(
+    "revoking a device with an sscc_blocks row referencing it still kills the api-key, even " +
+      "though the device-row delete itself is blocked by the FK",
+    async () => {
+      const agent = request.agent(app!.getHttpServer());
+      const tenantId = await signUpAndActivate(agent);
+
+      const enroll = await agent.post("/station-devices").send({ name: "Bundle terminal" }).expect(201);
+      const deviceId = enroll.body.deviceId as string;
+      const apiKey = enroll.body.apiKey as string;
+
+      // The key works before revoking -- baseline.
+      await request(app!.getHttpServer())
+        .get("/shifts")
+        .set("x-api-key", apiKey)
+        .expect(200);
+
+      // Cuts a REAL sscc_blocks row referencing this device -- the only way
+      // to reach the FK this finding is about (no HTTP route allocates
+      // directly; see sscc.e2e.test.ts's own use of the service this way).
+      await app!.get(SsccService).allocate(tenantId, "460000009", 0, deviceId, 10);
+
+      // The device-row delete itself is expected to fail deterministically
+      // (the FK this finding documents raises before any custom handling
+      // catches it, so NestJS's default filter turns it into a 500) -- but
+      // the important assertion is what happens to the credential
+      // regardless of this response's own status.
+      await agent.delete(`/station-devices/${deviceId}`).expect(500);
+
+      // The fix under test: the api-key is dead, unconditionally -- even
+      // though the request above did not return success.
+      await request(app!.getHttpServer())
+        .get("/shifts")
+        .set("x-api-key", apiKey)
+        .expect(401);
+
+      // The device row itself is left orphaned (its own delete blocked by
+      // the FK) -- accepted bookkeeping debt, not a live credential, which
+      // is exactly the trade-off this finding's fix makes on purpose.
+      const rows = await db
+        .select({ id: schema.stationDevices.id })
+        .from(schema.stationDevices)
+        .where(eq(schema.stationDevices.id, deviceId));
+      expect(rows).toHaveLength(1);
+    },
+  );
 });

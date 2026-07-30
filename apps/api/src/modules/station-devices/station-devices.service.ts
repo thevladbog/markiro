@@ -97,23 +97,53 @@ export class StationDevicesService {
   }
 
   /**
-   * Revoke: delete the device row AND the underlying apikey row atomically,
-   * so a transient failure can never leave the api-key live while the device
-   * row is gone (which would make a retry 404 without actually revoking).
+   * Revoke: delete the underlying apikey row, then the device row.
+   *
+   * CodeRabbit PR33 review, Finding 8: this used to delete BOTH rows inside
+   * one transaction, device row first, api-key second ("atomically, so a
+   * transient failure can never leave the api-key live while the device row
+   * is gone"). `sscc_blocks`'s composite FK to `station_devices`
+   * (packages/db/src/schema/platform.ts) has no `onDelete`, so it defaults
+   * to `NO ACTION`; once a device has fetched even one aggregation bundle (a
+   * real `sscc_blocks` row referencing it), deleting `station_devices` FIRST
+   * raises an FK violation. Inside one transaction that violation aborts the
+   * ENTIRE transaction, undoing the api-key delete too (Postgres has no
+   * partial commit without explicit SAVEPOINTs) -- so the admin sees a
+   * failed request, but the credential is silently still live until they
+   * notice and retry differently.
+   *
+   * The fix is not just reordering the two statements inside the same
+   * transaction -- that alone changes nothing, since ANY error in a
+   * transaction still rolls back everything before it, regardless of
+   * statement order. The api-key delete must instead commit
+   * UNCONDITIONALLY, independent of whatever happens to the device row
+   * afterward: it runs as its own auto-committed statement (not inside a
+   * `this.db.transaction(...)` with the device-row delete), so a station can
+   * no longer authenticate the instant this statement returns, no matter
+   * what the device-row delete that follows does. If that second delete
+   * then fails (the same FK, for a device with issued blocks, or anything
+   * else), the error still propagates to the caller -- an orphaned
+   * `station_devices` row with no matching `apikey` is bookkeeping debt an
+   * admin can investigate, not a live credential, which is the
+   * security-critical property this finding exists to guarantee.
+   *
+   * Safe to split: nothing else in this method reads `apikey` via a join
+   * against `station_devices`, or otherwise depends on `station_devices`
+   * still existing at the point `apikey` is deleted -- the SELECT below
+   * already captured everything this method needs (`row.apiKeyId`) before
+   * either delete runs.
    */
   async revoke(tenantId: string, id: string): Promise<void> {
-    await this.db.transaction(async (tx) => {
-      const [row] = await tx
-        .select()
-        .from(schema.stationDevices)
-        .where(and(eq(schema.stationDevices.tenantId, tenantId), eq(schema.stationDevices.id, id)));
-      if (!row) throw new NotFoundException();
+    const [row] = await this.db
+      .select()
+      .from(schema.stationDevices)
+      .where(and(eq(schema.stationDevices.tenantId, tenantId), eq(schema.stationDevices.id, id)));
+    if (!row) throw new NotFoundException();
 
-      await tx
-        .delete(schema.stationDevices)
-        .where(and(eq(schema.stationDevices.tenantId, tenantId), eq(schema.stationDevices.id, id)));
-      await tx.delete(schema.apikey).where(eq(schema.apikey.id, row.apiKeyId));
-    });
+    await this.db.delete(schema.apikey).where(eq(schema.apikey.id, row.apiKeyId));
+    await this.db
+      .delete(schema.stationDevices)
+      .where(and(eq(schema.stationDevices.tenantId, tenantId), eq(schema.stationDevices.id, id)));
   }
 
   private rowToDto(row: typeof schema.stationDevices.$inferSelect): StationDeviceDto {
