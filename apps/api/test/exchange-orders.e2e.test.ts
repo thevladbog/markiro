@@ -198,6 +198,16 @@ describe("1c_exchange orders (И-2)", () => {
 
     const events = await journalEvents();
     expect(events.some((e) => e.message.includes(orderNo))).toBe(true);
+
+    // Regression: this round's summary event must report the TRUE held
+    // count. `findExportCandidates`'s `candidates` are pre-filtered to
+    // exclude held orders (final-review Fix 4), so `planExport`'s own
+    // `plan.held` is always empty by construction -- if `query()` still read
+    // `plan.held.length` here instead of the separately-queried `held` array,
+    // this would silently report `held: 0` no matter how many orders were
+    // actually held back.
+    const summary = events.find((e) => e.message.startsWith("query: предложено заявок"));
+    expect(summary?.details).toMatchObject({ offered: 0, held: 1 });
   });
 
   it("type=sale&mode=import переводит pending заявку по сопоставленному статусу", async () => {

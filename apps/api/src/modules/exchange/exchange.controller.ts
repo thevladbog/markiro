@@ -1040,7 +1040,11 @@ export class ExchangeController {
       outcome: "ok",
       grain: "session",
       message: `query: предложено заявок: ${plan.eligible.length}`,
-      details: { offered: plan.eligible.length, held: plan.held.length },
+      // `held.length` -- the separately-queried set above -- NOT
+      // `plan.held.length`: `candidates` is now pre-filtered to exclude held
+      // orders (Fix 4), so `plan.held` is always empty and would misreport
+      // this as 0 regardless of how many orders are actually held.
+      details: { offered: plan.eligible.length, held: held.length },
     });
 
     res.status(200).type("application/xml").send(xml);
