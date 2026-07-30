@@ -80,10 +80,10 @@ simply forgotten or genuinely unverified:
   order simply doesn't appear in `plan.eligible` until every item's product
   carries an `external_ref`.
 - ~~That `mode=success` only confirms what THIS session's own `mode=query`
-  actually offered~~ — covered by `exchange-protocol.e2e.test.ts`'s outbound
+  actually offered~~ — covered by `exchange-orders.e2e.test.ts`'s outbound
   cycle test, which asserts the SAME order is not re-offered on a second
   `mode=query` round after `mode=success`.
 - ~~That an unmapped external status never silently moves an order~~ —
-  covered by `exchange-protocol.e2e.test.ts`'s inbound reconciliation test
+  covered by `exchange-orders.e2e.test.ts`'s inbound reconciliation test
   (unmapped-value case) and `commerceml-order-status.test.ts`'s
   `resolveMappedStatus` tests.
