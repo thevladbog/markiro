@@ -17,6 +17,7 @@ CREATE TABLE "boxes" (
 	"operator_id" uuid,
 	"opened_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"closed_at" timestamp with time zone,
+	"closure_received_at" timestamp with time zone,
 	"print_verified_at" timestamp with time zone,
 	"print_skipped_at" timestamp with time zone,
 	CONSTRAINT "boxes_tenant_id_uq" UNIQUE("tenant_id","id"),

@@ -51,6 +51,17 @@ describe.skipIf(!ready)("boxes e2e", () => {
   let openShiftId: string;
   /** A second tenant's shift, to prove the list never crosses tenants. */
   let otherTenantShiftId: string;
+  /**
+   * A box closed with a client-supplied `closedAt` far in the FUTURE --
+   * simulating a fast device clock (CodeRabbit PR33 review, Finding 7) --
+   * whose sole item is THEN displaced (server-assigned `displacedAt`, a
+   * real "now()" that is, by construction, well BEHIND that fake future
+   * `closedAt`). The old `displacedAt > closedAt` comparison would read
+   * this as "changed before closing" (false) purely because the client's
+   * clock lied, even though the contents genuinely changed after the
+   * physical close.
+   */
+  let futureClockShiftId: string;
   /** The employee behind displacedShiftId's box b2 closure, for the field-mapping test below. */
   let operatorId: string;
 
@@ -127,6 +138,33 @@ describe.skipIf(!ready)("boxes e2e", () => {
     openShiftId = await openShiftForProduct(agent, productId);
     await postBatch(stationKey, [scan(openShiftId, "oo", "t1", "2026-07-01T10:00:05.000Z", "b3")]);
     await postBatch(stationKey, [scan(openShiftId, "oo", "t2", "2026-07-01T10:00:00.000Z", null)]);
+
+    // futureClockShiftId: box b4 closes with closedAt set far in the future
+    // (a fast device clock), THEN a rival scan elsewhere claims "ff" with an
+    // earlier scannedAt, retroactively marking b4's own item displaced at
+    // the real "now()" -- which is nowhere near closedAt's fake future
+    // value, but IS strictly after the server's own closureReceivedAt.
+    futureClockShiftId = await openShiftForProduct(agent, productId);
+    await postBatch(stationKey, [
+      scan(futureClockShiftId, "ff", "t1", "2026-07-01T10:00:00.000Z", "b4"),
+    ]);
+    await postBatch(
+      stationKey,
+      [],
+      [
+        {
+          boxId: "b4",
+          shiftId: futureClockShiftId,
+          terminalId: "t1",
+          sscc: "123456789012345683",
+          closedAt: "2099-01-01T00:00:00.000Z",
+          operatorId,
+        },
+      ],
+    );
+    await postBatch(stationKey, [
+      scan(futureClockShiftId, "ff", "t2", "2026-07-01T09:00:00.000Z", null),
+    ]);
 
     // otherTenantShiftId: a second tenant entirely, with its own box.
     const other = request.agent(app!.getHttpServer());
@@ -243,6 +281,26 @@ describe.skipIf(!ready)("boxes e2e", () => {
     expect(box.operatorId).toBe(operatorId);
     expect(box.closedAt).toBe("2026-01-01T00:00:00.000Z");
   });
+
+  // CodeRabbit PR33 review, Finding 7: `contentsChangedAfterClose` used to
+  // compare the server-assigned `displacedAt` against the CLIENT-supplied
+  // `closedAt` -- a device timestamp with no clock-skew bound at all
+  // (unlike scan items, closures have no `assertScannedAtWithinWindow`
+  // -style check). A fast device clock could therefore make this flag
+  // report `false` for a box whose contents genuinely changed after the
+  // physical close, purely because the client's clock lied about when that
+  // was. The fix compares against `closureReceivedAt` (server-assigned
+  // `now()` at ingest) instead, so this must still correctly report `true`
+  // even though `closedAt` itself sits decades in the future.
+  it(
+    "still reports contentsChangedAfterClose: true for a fast device clock's far-future " +
+      "closedAt, because the comparison uses the server-assigned receipt time (Finding 7)",
+    async () => {
+      const res = await agent.get(`/boxes?shiftId=${futureClockShiftId}`).expect(200);
+      expect(res.body.items[0].closedAt).toBe("2099-01-01T00:00:00.000Z");
+      expect(res.body.items[0].contentsChangedAfterClose).toBe(true);
+    },
+  );
 
   it("does not flag a box displaced before it closed", async () => {
     const res = await agent.get(`/boxes?shiftId=${openShiftId}`).expect(200);

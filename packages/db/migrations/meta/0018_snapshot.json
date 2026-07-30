@@ -1,5 +1,5 @@
 {
-  "id": "48f5c54e-6abd-40f6-aa1b-37be86302609",
+  "id": "17870abb-9037-4dda-baa0-a41214d0f8c7",
   "prevId": "8d019fe4-2b2c-4ccb-90a5-03a9b5bfc2a6",
   "version": "7",
   "dialect": "postgresql",
@@ -1017,6 +1017,12 @@
         },
         "closed_at": {
           "name": "closed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "closure_received_at": {
+          "name": "closure_received_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false

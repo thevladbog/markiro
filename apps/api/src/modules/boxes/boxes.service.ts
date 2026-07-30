@@ -30,17 +30,29 @@ export class BoxesService {
    * still surfaces, with `count()` correctly returning 0 for that group
    * rather than dropping the box entirely.
    *
-   * `contentsChangedAfterClose` is `coalesce(bool_or(displaced_at > closed_at),
-   * false)`. `bool_or` returns SQL NULL, not false, when every row in the
-   * group has a null `displaced_at` (an untouched box), when the LEFT JOIN
-   * produced no `box_items` row at all, or when the box has not closed yet
-   * (`displaced_at > NULL` is NULL in SQL's three-valued logic, never true) --
-   * the `coalesce` turns that NULL into `false` in the statement itself.
-   * Drizzle's row mapper (`mapResultRow` in `drizzle-orm/utils`) short-circuits
-   * a raw SQL NULL to JS `null` unconditionally, BEFORE ever calling a
-   * `.mapWith` decoder, so `.mapWith(Boolean)` alone -- which never actually
-   * runs on this column -- would leave a genuinely undisplaced or still-open
-   * box's flag as `null`, not `false`.
+   * `contentsChangedAfterClose` is `coalesce(bool_or(displaced_at >
+   * closure_received_at), false)`. `bool_or` returns SQL NULL, not false, when
+   * every row in the group has a null `displaced_at` (an untouched box), when
+   * the LEFT JOIN produced no `box_items` row at all, or when the box has not
+   * closed yet (`displaced_at > NULL` is NULL in SQL's three-valued logic,
+   * never true) -- the `coalesce` turns that NULL into `false` in the
+   * statement itself. Drizzle's row mapper (`mapResultRow` in
+   * `drizzle-orm/utils`) short-circuits a raw SQL NULL to JS `null`
+   * unconditionally, BEFORE ever calling a `.mapWith` decoder, so
+   * `.mapWith(Boolean)` alone -- which never actually runs on this column --
+   * would leave a genuinely undisplaced or still-open box's flag as `null`,
+   * not `false`.
+   *
+   * Compared against `closureReceivedAt` (server-assigned `now()` at the same
+   * ingest statement that sets `closedAt`), NOT the client-supplied
+   * `closedAt` itself (CodeRabbit PR33 review, Finding 7): unlike scan items
+   * (`assertScannedAtWithinWindow`), a box closure's `closedAt` has no
+   * clock-skew bound at all, so comparing a server-assigned `displacedAt`
+   * against it directly could report `false` for contents that genuinely
+   * changed after the physical close (a fast device clock puts `closedAt` in
+   * the future relative to the server), or `true` when they didn't (a slow
+   * device clock). `closureReceivedAt` and `displacedAt` are both
+   * server-assigned, so they are always measured on the SAME clock.
    *
    * `GROUP BY boxes.id` alone (not every selected `boxes.*` column) is valid
    * Postgres: grouping by a table's primary key lets every other column of
@@ -63,7 +75,7 @@ export class BoxesService {
             Number,
           ),
         contentsChangedAfterClose:
-          sql<boolean>`coalesce(bool_or(${schema.boxItems.displacedAt} > ${schema.boxes.closedAt}), false)`.mapWith(
+          sql<boolean>`coalesce(bool_or(${schema.boxItems.displacedAt} > ${schema.boxes.closureReceivedAt}), false)`.mapWith(
             Boolean,
           ),
       })

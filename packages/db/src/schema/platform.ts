@@ -380,6 +380,19 @@ export const boxes = pgTable(
     operatorId: uuid("operator_id"),
     openedAt: timestamp("opened_at", { withTimezone: true }).notNull().defaultNow(),
     closedAt: timestamp("closed_at", { withTimezone: true }),
+    /**
+     * Server-assigned `now()` at the SAME ingest statement that sets
+     * `closedAt`/`sscc`/`operatorId` (CodeRabbit PR33 review, Finding 7) --
+     * unlike `closedAt`, which is a client-supplied device timestamp with no
+     * `assertScannedAtWithinWindow`-style bound (unlike scan items, a box
+     * closure has no clock-skew check at all). `contentsChangedAfterClose`
+     * compares against THIS column, never `closedAt`: clock skew between a
+     * device and the server could otherwise make that flag report `false`
+     * when contents genuinely changed after the physical close, or `true`
+     * when they didn't, since `closedAt` and `displacedAt` (server-assigned)
+     * are not measured on the same clock.
+     */
+    closureReceivedAt: timestamp("closure_received_at", { withTimezone: true }),
     printVerifiedAt: timestamp("print_verified_at", { withTimezone: true }),
     printSkippedAt: timestamp("print_skipped_at", { withTimezone: true }),
   },

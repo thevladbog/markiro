@@ -695,6 +695,11 @@ export class StationScansService {
               sscc: closure.sscc,
               closedAt: new Date(closure.closedAt),
               operatorId: closure.operatorId,
+              // Server-assigned, at this SAME statement (Finding 7) -- see
+              // the column's own doc comment in platform.ts for why
+              // `contentsChangedAfterClose` must compare against this, never
+              // the client-supplied `closedAt` above.
+              closureReceivedAt: sql`now()`,
             })
             .where(
               and(
