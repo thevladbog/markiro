@@ -31,6 +31,33 @@ export const FILE_CHUNK_LIMIT = 512 * 1024;
  */
 export const EXCHANGE_COOKIE_NAME = "mk_1c_session";
 
+/**
+ * The exact wire message `exchange.controller.ts` sends whenever `resolve()`
+ * below returns `null`, on every one of the three cases it treats
+ * identically (see `resolve()`'s own comment) -- an unknown cookie, an
+ * expired session, and a finished one. Exported so the controller's
+ * `this.fail(res, NO_SESSION_MESSAGE)` and this service's own journal writes
+ * for the latter two cases (Fix 6, final review) can never drift onto two
+ * different strings for what is, on the wire, the exact same response.
+ */
+export const NO_SESSION_MESSAGE = "no session";
+
+/**
+ * The exact wire text a `failure` response carries. Exported as a pure
+ * function, not inlined at each call site, so every journal event written on
+ * a failure path can put the SAME string in `details.raw` (Fix 1, final
+ * review): brief 08's "a failed session shows what we actually answered into
+ * the protocol, verbatim" needs the verbatim text, and computing it twice --
+ * once for the response, once for the journal -- is exactly how the two
+ * would eventually drift apart. Lives here rather than on
+ * `ExchangeController` so this service's own journal writes below (which the
+ * controller has no visibility into -- see `resolve()`'s comment) can use it
+ * too, without an import cycle back to the controller.
+ */
+export function rawFailureBody(message: string): string {
+  return ["failure", message].join("\n");
+}
+
 export interface OpenedExchangeSession {
   id: string;
   /** Plaintext cookie value -- handed to the caller exactly once, here; only its hash is persisted. */
@@ -119,9 +146,9 @@ export class ExchangeSessionService {
 
   /**
    * Looks up the live session behind a presented cookie. `null` covers three
-   * cases identically, on purpose -- a caller presenting a bad cookie must
-   * not be able to distinguish "never existed" from "expired" from
-   * "finished" by the response: no row, an expired `expiresAt`, and a
+   * cases identically ON THE WIRE, on purpose -- a caller presenting a bad
+   * cookie must not be able to distinguish "never existed" from "expired"
+   * from "finished" by the RESPONSE: no row, an expired `expiresAt`, and a
    * non-null `finishedAt`. The last one matters because `finishSession`
    * (called only by `sweepExpired` below, since Fix 1 -- no route handler
    * calls it any more) is a terminal for the session's event stream -- an
@@ -129,6 +156,20 @@ export class ExchangeSessionService {
    * step running against an already-finished session would be building on a
    * foundation retention is free to erase. Treat it as gone, the same as an
    * unknown cookie.
+   *
+   * Fix 6 (final review): identical on the wire is not identical everywhere.
+   * A truly unknown cookie has no matching row at all -- there is no tenant
+   * to journal against, the same boundary `exchange.controller.ts`'s
+   * `checkauth` already draws for a login that matches no row. An expired or
+   * finished session, by contrast, DID match a row: its `tenantId` is right
+   * there, and presenting a real (if stale) 256-bit cookie is not the kind of
+   * thing brute-forcing produces -- unlike an 8-digit kiosk pairing code,
+   * withholding this journal write buys no defense against guessing.
+   * `sweepExpired` only runs once an hour, so without a write here, a
+   * genuinely expired session leaves no trace: the channel's card keeps
+   * reading `state: "working"` off its OLD `lastEventAt` while 1С gets
+   * `failure\nno session` on every call, for up to an hour, and nothing in
+   * the journal says why.
    */
   async resolve(cookie: string): Promise<ResolvedExchangeSession | null> {
     const cookieHash = hashExchangeCookie(cookie);
@@ -137,8 +178,25 @@ export class ExchangeSessionService {
       .from(schema.integrationSessions)
       .where(eq(schema.integrationSessions.cookieHash, cookieHash));
     if (!row) return null;
-    if (row.finishedAt) return null;
-    if (row.expiresAt.getTime() <= Date.now()) return null;
+
+    const isFinished = row.finishedAt !== null;
+    const isExpired = row.expiresAt.getTime() <= Date.now();
+    if (isFinished || isExpired) {
+      await this.journal.append({
+        tenantId: row.tenantId,
+        channelType: row.channelType as IntegrationChannelType,
+        sessionId: row.id,
+        direction: "in",
+        outcome: "error",
+        grain: "session",
+        message: isFinished
+          ? "предъявлена cookie уже завершённого сеанса"
+          : "предъявлена cookie просроченного сеанса",
+        details: { raw: rawFailureBody(NO_SESSION_MESSAGE) },
+      });
+      return null;
+    }
+
     return {
       id: row.id,
       tenantId: row.tenantId,

@@ -33,6 +33,8 @@ import {
   ExchangeSessionService,
   extractExchangeCookie,
   FILE_CHUNK_LIMIT,
+  NO_SESSION_MESSAGE,
+  rawFailureBody,
   type ResolvedExchangeSession,
 } from "./exchange-session.service";
 
@@ -123,7 +125,7 @@ export class ExchangeController {
 
     const session = await this.resolveSession(req);
     if (!session) {
-      this.fail(res, "no session");
+      this.fail(res, NO_SESSION_MESSAGE);
       return;
     }
     req.exchangeContext = {
@@ -169,7 +171,7 @@ export class ExchangeController {
   ): Promise<void> {
     const session = await this.resolveSession(req);
     if (!session) {
-      this.fail(res, "no session");
+      this.fail(res, NO_SESSION_MESSAGE);
       return;
     }
     req.exchangeContext = {
@@ -190,7 +192,7 @@ export class ExchangeController {
           outcome: "error",
           grain: "session",
           message: "file: отсутствует имя файла или тело запроса",
-          details: { filename: filename ?? null },
+          details: { filename: filename ?? null, raw: rawFailureBody("missing filename or body") },
         });
         this.fail(res, "missing filename or body");
         return;
@@ -288,6 +290,7 @@ export class ExchangeController {
           outcome: "error",
           grain: "session",
           message: "checkauth: неверный пароль",
+          details: { raw: rawFailureBody("invalid credentials") },
         });
       }
       this.fail(res, "invalid credentials");
@@ -366,6 +369,7 @@ export class ExchangeController {
         outcome: "error",
         grain: "session",
         message: "import: отсутствует имя файла",
+        details: { raw: rawFailureBody("missing filename") },
       });
       this.fail(res, "missing filename");
       return;
@@ -393,7 +397,7 @@ export class ExchangeController {
         outcome: "error",
         grain: "session",
         message: `import: ${detail}`,
-        details: { filename },
+        details: { filename, raw: rawFailureBody(detail) },
       });
       // Fix 1: a broken FILE is not a broken EXCHANGE -- 1С may still retry
       // this filename or move on to another one with the same cookie, so
@@ -532,6 +536,19 @@ export class ExchangeController {
       return;
     }
 
+    // Accepted limitation (final review, Fix 9): a file that took more than
+    // one round to finish leaves its LAST intermediate cursor entry
+    // (`session.summary.importCursors[filename]`) sitting in the row after
+    // completion -- nothing here ever deletes it. Harmless in practice: a
+    // stale entry is only ever read again if the SAME filename comes back
+    // against the SAME session, and the fingerprint check above (Fix 2)
+    // already refuses to resume blindly from it the moment the underlying
+    // worklist has actually changed. Worst case is one redundant re-apply of
+    // the file's last batch (idempotent either way -- a price `UPDATE` and a
+    // candidate upsert both are) if 1С genuinely resends an already-completed
+    // filename verbatim. Not worth a second write just to clear a key that
+    // does no harm left in place.
+    //
     // Fix 1: this FILE is done, but the exchange might not be -- 1С can still
     // send another file (e.g. offers.xml after import.xml) against the SAME
     // cookie, so the outcome is recorded as a journal event, not by finishing
@@ -614,7 +631,11 @@ export class ExchangeController {
       outcome: "error",
       grain: "session",
       message: `неизвестный режим: ${mode ?? "(пусто)"}`,
-      details: { mode: mode ?? null },
+      // `"unknown mode"` here, not this method's own more specific message
+      // above -- both call sites (`get`/`post`) always follow `unknownMode`
+      // with `this.fail(res, "unknown mode")`, verbatim, so that fixed
+      // string is the actual wire response `details.raw` must record.
+      details: { mode: mode ?? null, raw: rawFailureBody("unknown mode") },
     });
   }
 
@@ -625,7 +646,7 @@ export class ExchangeController {
   }
 
   private fail(res: Response, message: string): void {
-    this.text(res, ["failure", message].join("\n"));
+    this.text(res, rawFailureBody(message));
   }
 
   /**

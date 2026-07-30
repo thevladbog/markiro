@@ -90,6 +90,20 @@ describe("1c_exchange", () => {
     await app?.close();
   });
 
+  /**
+   * Fix 1 (final review): flattens this tenant's `commerceml` journal into
+   * its events, across every session -- same shape every other e2e file in
+   * this directory reads `journal.body.sessions.flatMap(...)` in.
+   */
+  async function journalEvents(): Promise<
+    { message: string; details: Record<string, unknown> | null }[]
+  > {
+    const res = await agent.get("/integrations/commerceml/journal").expect(200);
+    return res.body.sessions.flatMap(
+      (s: { events: { message: string; details: Record<string, unknown> | null }[] }) => s.events,
+    );
+  }
+
   /** Repeats the checkauth exchange and turns its two body lines into a `Cookie` header value. */
   async function checkauth(): Promise<{ cookie: string; value: string }> {
     const res = await request(app!.getHttpServer())
@@ -156,6 +170,38 @@ describe("1c_exchange", () => {
     expect(res.text.startsWith("failure")).toBe(true);
   });
 
+  // Fix 6 (final review): a genuinely UNKNOWN cookie (above) has no matching
+  // row -- no tenant, nowhere to journal, correctly silent. An EXPIRED
+  // session's cookie is different: `resolve()` matched a real row before
+  // deciding it's too old, so the tenant is known, and `sweepExpired` (the
+  // only other thing that would ever record this) runs at most once an
+  // hour -- until then this must not fail without a trace.
+  it("просроченная (но некогда настоящая) cookie сеанса пишет событие в журнал, хотя ответ всё равно failure\\nno session", async () => {
+    const auth = await checkauth();
+    const cookieHash = hashDeviceToken(auth.value);
+    const [session] = await db
+      .select()
+      .from(schema.integrationSessions)
+      .where(eq(schema.integrationSessions.cookieHash, cookieHash));
+    expect(session).toBeDefined();
+
+    await db
+      .update(schema.integrationSessions)
+      .set({ expiresAt: new Date(Date.now() - 1000) })
+      .where(eq(schema.integrationSessions.id, session!.id));
+
+    const res = await request(app!.getHttpServer())
+      .get("/1c_exchange?type=catalog&mode=init")
+      .set("Cookie", auth.cookie)
+      .expect(200);
+    expect(res.text).toBe("failure\nno session");
+
+    const events = await journalEvents();
+    const event = events.find((e) => e.message.includes("просроченн"));
+    expect(event).toBeDefined();
+    expect(event?.details).toMatchObject({ raw: "failure\nno session" });
+  });
+
   // Beyond the brief's five: the prose requirements ("ни одна ветка не
   // завершается молча") aren't exercised by the five tests above, so pin
   // them directly.
@@ -218,6 +264,15 @@ describe("1c_exchange", () => {
       .from(schema.integrationChannels)
       .where(eq(schema.integrationChannels.tenantId, before!.tenantId));
     expect(after!.lastOutcome).toBe("error");
+
+    // Fix 1 (final review): brief 08's "a failed session shows what we
+    // actually answered into the protocol, verbatim" was never implemented
+    // server-side -- `JournalList.tsx` (admin) already renders
+    // `details.raw`, but nothing ever wrote it. The wire response for THIS
+    // branch is `this.fail(res, "invalid credentials")`.
+    const events = await journalEvents();
+    const event = events.find((e) => e.message === "checkauth: неверный пароль");
+    expect(event?.details).toMatchObject({ raw: "failure\ninvalid credentials" });
   });
 
   it("неизвестный режим отвечает failure и пишет событие в журнал", async () => {
@@ -233,6 +288,14 @@ describe("1c_exchange", () => {
       .from(schema.integrationChannels)
       .where(eq(schema.integrationChannels.credentialLogin, login));
     expect(channel!.lastOutcome).toBe("error");
+
+    // Fix 1: the wire response here is a fixed "unknown mode", independent
+    // of the journal's own (more specific) human-readable message -- both
+    // must be captured, and they must not silently drift apart.
+    expect(res.text).toBe("failure\nunknown mode");
+    const events = await journalEvents();
+    const event = events.find((e) => e.message.startsWith("неизвестный режим"));
+    expect(event?.details).toMatchObject({ raw: "failure\nunknown mode" });
   });
 
   it("превышенный кусок отвечает failure, а не рвёт соединение 4xx-ом", async () => {
@@ -281,6 +344,17 @@ describe("1c_exchange", () => {
         .from(schema.integrationChannels)
         .where(eq(schema.integrationChannels.credentialLogin, login));
       expect(channel!.lastOutcome).toBe("error");
+
+      // Fix 1 (final review): `ExchangeExceptionFilter` sends a fixed
+      // "failure\ninternal error" regardless of the actual exception (the
+      // real `detail` is logged and journaled in `message`, never handed to
+      // 1С) -- `details.raw` must record exactly that fixed wire body, not
+      // the internal detail, so admin-facing raw and wire response can never
+      // read differently.
+      expect(res.text).toBe("failure\ninternal error");
+      const events = await journalEvents();
+      const event = events.find((e) => e.message.includes("boom: simulated db outage"));
+      expect(event?.details).toMatchObject({ raw: "failure\ninternal error" });
     } finally {
       spy.mockRestore();
     }

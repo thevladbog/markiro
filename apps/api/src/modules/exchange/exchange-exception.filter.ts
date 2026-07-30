@@ -26,6 +26,15 @@ export interface ExchangeRequest extends Request {
 }
 
 /**
+ * The one, fixed wire body this filter ever sends -- see `catch()`'s own
+ * comment for why it is a constant, not `exception`'s own message. Exported
+ * as a constant, not composed twice, so the `details.raw` written to the
+ * journal (Fix 1, final review) and the actual `res.send()` below can never
+ * read differently from each other.
+ */
+export const INTERNAL_ERROR_RAW = "failure\ninternal error";
+
+/**
  * Catches anything `ExchangeController`'s handlers don't -- a DB outage
  * mid-`sessions.open`, `journal.append` itself failing, a lost race on
  * `exchange_uploads_part_uq`, a failed `sessions.resolve`, or literally
@@ -78,6 +87,13 @@ export class ExchangeExceptionFilter implements ExceptionFilter {
           outcome: "error",
           grain: "session",
           message: `внутренняя ошибка: ${detail}`,
+          // Fix 1 (final review): the wire response below is the FIXED
+          // `INTERNAL_ERROR_RAW`, not `detail` -- 1С never sees the real
+          // exception message, only this generic line. `details.raw` must
+          // record what was actually sent, so it stays that constant even
+          // though `message` above (correctly) carries the real detail for
+          // whoever reads the journal.
+          details: { raw: INTERNAL_ERROR_RAW },
         });
       } catch (journalError) {
         this.logger.error(
@@ -107,7 +123,7 @@ export class ExchangeExceptionFilter implements ExceptionFilter {
     // places, must never do is let its OWN attempt at recovery throw
     // somewhere unobserved.
     try {
-      res.status(200).type("text/plain").send("failure\ninternal error");
+      res.status(200).type("text/plain").send(INTERNAL_ERROR_RAW);
     } catch (sendError) {
       this.logger.error(
         `failed to send the /1c_exchange failure response itself: ${
