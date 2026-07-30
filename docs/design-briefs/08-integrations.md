@@ -197,8 +197,8 @@ checks.
 `ChannelPage.tsx` — a new `channel.type === "..."` branch, a new bespoke
 settings component, a new bespoke actions area — exactly the "changing this
 brief" outcome the anatomy is supposed to prevent. The promise holds for
-*reading* a channel (state, journal, candidates); it does not yet hold for
-*configuring* or *acting on* one.
+_reading_ a channel (state, journal, candidates); it does not yet hold for
+_configuring_ or _acting on_ one.
 
 **Input for the next plan, not fixed now.** Closing this gap needs the
 settings schema (or a client-renderable projection of it — e.g. a small

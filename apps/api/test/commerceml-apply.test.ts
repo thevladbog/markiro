@@ -147,7 +147,9 @@ describe("decideApplication", () => {
     const plan = decideApplication({
       known,
       items: [],
-      offers: [{ externalRef: "guid-1", prices: [{ type: "Розничная", value: "", currency: "руб" }] }],
+      offers: [
+        { externalRef: "guid-1", prices: [{ type: "Розничная", value: "", currency: "руб" }] },
+      ],
       configuredPriceType: undefined,
     });
     expect(plan.priceUpdates).toEqual([]);

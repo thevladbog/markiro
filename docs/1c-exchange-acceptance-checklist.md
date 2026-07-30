@@ -15,8 +15,8 @@ each item.
       issued `/1c_exchange` address and the login/secret from
       `POST /integrations/commerceml/credentials`; run a full exchange;
       confirm the catalog's prices actually land on `products.unit_price`.
-      Nothing short of a real client driving the real `checkauth -> init ->
-      file -> import` handshake can prove this end to end.
+      Nothing short of a real client driving the real `checkauth`/`init`/
+      `file`/`import` handshake can prove this end to end.
 - [ ] Confirm a catalog carrying more than one price type (`<ТипЦен>`)
       genuinely requires picking one in the channel's settings (`priceType`)
       before prices apply — that the channel refuses to guess when more than

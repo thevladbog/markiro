@@ -98,7 +98,9 @@ type PriceChoice =
  * from before -- there is nothing left to discriminate it by.
  */
 function distinctPriceTypes(prices: ParsedOffer["prices"]): string[] {
-  return [...new Set(prices.map((price) => (price.type !== "" ? price.type : (price.typeRef ?? ""))))];
+  return [
+    ...new Set(prices.map((price) => (price.type !== "" ? price.type : (price.typeRef ?? "")))),
+  ];
 }
 
 /**
