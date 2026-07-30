@@ -373,14 +373,26 @@ label, and have the server record the box hierarchy.
   per range received.
 - **The bundle allocates a fresh block only when the device holds none for
   that issuer/extension-digit pair** — `SsccService.allocateForBundle` hands
-  back the device's existing block's _unconsumed remainder_ on a repeat
-  fetch, not a new block on every shift entry, re-entry or app restart (which
-  would burn through a 10-million-serial space in a few thousand fetches).
-  Top-ups beyond that ride two channels only: the shift bundle's `sscc` field
-  (`shift-bundle.ts`, aggregation shifts only) and the sync response's
-  `ssccBlock` field (`sync.ts`) — both fed through `sscc-pool.ts`'s `addRange`,
-  which is idempotent (primary key on `(issuer_prefix, extension_digit,
-from_serial)`) so a replayed bundle or response can never double the pool.
+  back the device's existing block's _original_ bounds plus its
+  consumed-through cursor on a repeat fetch, not a new block on every shift
+  entry, re-entry or app restart (which would burn through a
+  10-million-serial space in a few thousand fetches). **The shift bundle is
+  the only channel that actually supplies SSCC blocks today.** The sync
+  response's `ssccBlock` field (`sync.ts`'s `isBatchSsccBlock`) and
+  `SyncState.serialsLeft` are built and tested device-side, but there is no
+  server-side counterpart: `station-scans/dto.ts`'s `SyncBatchResponseDto`
+  carries no `ssccBlock`, `syncBatchSchema` accepts no `serialsLeft` from the
+  device, and neither ingest return site emits a top-up. That device-side
+  code is forward-compatible plumbing for a later slice, not a delivered
+  feature — a device that exhausts its 2000-serial block mid-shift has no
+  server-pushed recovery today. What actually recovers it: **re-entering the
+  shift**, which re-fetches the bundle and, thanks to the original-bounds
+  fix above, is now a safe, idempotent way to top up the pool without
+  reissuing anything. Both `sscc-pool.ts`'s `addRange` call sites (the
+  bundle's and the sync response's) feed the same idempotent, cursor-aware
+  upsert (primary key on `(issuer_prefix, extension_digit, from_serial)`,
+  `next_serial = MAX(...)`), so whichever channel eventually delivers a
+  top-up, a replay can never double the pool or reissue a serial.
 - **The serial is assigned at close, not at open.** `close-box.ts`'s
   `closeCurrentBox` burns a serial and builds the SSCC only when the operator
   closes a box that actually has items; an empty box costs nothing, and an
