@@ -51,6 +51,8 @@ describe.skipIf(!ready)("boxes e2e", () => {
   let openShiftId: string;
   /** A second tenant's shift, to prove the list never crosses tenants. */
   let otherTenantShiftId: string;
+  /** The employee behind displacedShiftId's box b2 closure, for the field-mapping test below. */
+  let operatorId: string;
 
   beforeAll(async () => {
     const env = loadEnv();
@@ -76,6 +78,15 @@ describe.skipIf(!ready)("boxes e2e", () => {
     // multiple shifts can share one product (see conflicts.e2e.test.ts's
     // `openShiftForProduct(agent, productId)` reuse for the same reason).
     const productId = await createActiveProduct(agent);
+    // A real `employees` row: `boxes.operator_id` carries a composite tenant
+    // FK to it (see station-scans.e2e.test.ts's box-membership describe
+    // block), so a non-null operatorId that doesn't resolve to one would
+    // 23503 the closure batch below.
+    const operatorRes = await agent
+      .post("/employees")
+      .send({ fullName: "Operator One" })
+      .expect(201);
+    operatorId = (operatorRes.body as { id: string }).id;
 
     // shiftId: two clean items in one box, nothing displaced.
     shiftId = await openShiftForProduct(agent, productId);
@@ -102,7 +113,7 @@ describe.skipIf(!ready)("boxes e2e", () => {
           terminalId: "t1",
           sscc: "123456789012345675",
           closedAt: "2026-01-01T00:00:00.000Z",
-          operatorId: null,
+          operatorId,
         },
       ],
     );
@@ -217,6 +228,20 @@ describe.skipIf(!ready)("boxes e2e", () => {
   it("flags a box whose contents changed after it closed", async () => {
     const res = await agent.get(`/boxes?shiftId=${displacedShiftId}`).expect(200);
     expect(res.body.items[0].contentsChangedAfterClose).toBe(true);
+  });
+
+  // None of the brief's own assertions distinguish `sscc` from `terminalId`
+  // from `operatorId` from `closedAt` -- each is a DIFFERENT, distinguishable
+  // value here, so a `toDto`/`select` mapping bug that swapped two of these
+  // columns (or read the wrong one) would fail this test even though it
+  // would pass every assertion above unnoticed.
+  it("maps the box's own sscc, terminal, operator, and closing time onto the DTO", async () => {
+    const res = await agent.get(`/boxes?shiftId=${displacedShiftId}`).expect(200);
+    const box = res.body.items[0];
+    expect(box.sscc).toBe("123456789012345675");
+    expect(box.terminalId).toBe("t1");
+    expect(box.operatorId).toBe(operatorId);
+    expect(box.closedAt).toBe("2026-01-01T00:00:00.000Z");
   });
 
   it("does not flag a box displaced before it closed", async () => {
