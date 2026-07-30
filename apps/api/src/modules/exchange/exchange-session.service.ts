@@ -305,6 +305,37 @@ export class ExchangeSessionService {
   }
 
   /**
+   * Records which order ids `mode=query` just offered, in THIS session's
+   * `summary` -- same piggyback `readImportCursor`/`writeImportCursor` above
+   * already use (a live session's `summary` is write-only scratch space
+   * until `finishSession` sets the terminal one; see those methods' own
+   * comment). `mode=success` (спека §5: "подтверждение до пометки") reads
+   * this back to know exactly which orders THIS round's query covered,
+   * without trusting whatever 1С's own success call happens to say.
+   */
+  async writeQueriedOrderIds(sessionId: string, orderIds: string[]): Promise<void> {
+    const [row] = await this.db
+      .select({ summary: schema.integrationSessions.summary })
+      .from(schema.integrationSessions)
+      .where(eq(schema.integrationSessions.id, sessionId));
+    const summary = { ...(row?.summary ?? {}) };
+    summary["queriedOrderIds"] = orderIds;
+    await this.db
+      .update(schema.integrationSessions)
+      .set({ summary })
+      .where(eq(schema.integrationSessions.id, sessionId));
+  }
+
+  /** Reads back what `writeQueriedOrderIds` last recorded for `sessionId`; `[]` if nothing was ever written. */
+  async readQueriedOrderIds(sessionId: string): Promise<string[]> {
+    const [row] = await this.db
+      .select({ summary: schema.integrationSessions.summary })
+      .from(schema.integrationSessions)
+      .where(eq(schema.integrationSessions.id, sessionId));
+    return (row?.summary?.["queriedOrderIds"] as string[] | undefined) ?? [];
+  }
+
+  /**
    * Closes sessions whose TTL ran out, along with purging their chunks, so a
    * transfer that never resumes doesn't leave large binary rows in Postgres
    * forever. Targets `finishedAt is null AND expiresAt < now`.
