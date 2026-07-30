@@ -22,7 +22,10 @@ each item.
       before prices apply — that the channel refuses to guess when more than
       one type is present in a REAL export from a real 1С configuration, not
       just the hand-written fixtures `commerceml-apply.test.ts` and
-      `exchange-import.e2e.test.ts` already exercise this against.
+      `exchange-import.e2e.test.ts` already exercise this against: a
+      synthetic multi-price-type fixture can only prove the code's own logic
+      is internally consistent, never that a real 1С configuration's actual
+      export shapes ambiguity the same way.
 
 ## Already covered — do not re-spend the live session on these
 
