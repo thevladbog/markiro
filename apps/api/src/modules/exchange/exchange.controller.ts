@@ -21,6 +21,7 @@ import { JournalService } from "../integrations/journal.service";
 import { PickupOrdersService } from "../pickup-orders/pickup-orders.service";
 import { decideApplication, type KnownProduct } from "./commerceml/apply";
 import { parseCommerceMl } from "./commerceml/parse";
+import { buildOrdersDocument, planExport } from "./commerceml/order-export";
 import {
   assertUnderCheckauthLimit,
   checkauthWindowStart,
@@ -49,6 +50,15 @@ import {
  * enough that one batch is a bounded amount of work.
  */
 export const IMPORT_BATCH_SIZE = 500;
+
+/**
+ * Ceiling on how many orders `mode=query` offers in one round -- spec §5's
+ * outbound direction, mirroring `IMPORT_BATCH_SIZE`'s own reasoning: an order
+ * document is heavier than a single price row, so this batch is smaller.
+ * Picked comfortably larger than any fixture in this test suite; not tuned
+ * against a real large backlog yet.
+ */
+export const EXPORT_BATCH_SIZE = 200;
 
 /** One row of the plan this controller actually writes, in a fixed, stable order (see `handleImport`). */
 type ImportWorkItem =
@@ -269,6 +279,11 @@ export class ExchangeController {
 
     if (mode === "import") {
       await this.import(session, filename, res);
+      return;
+    }
+
+    if (mode === "query") {
+      await this.query(session, res);
       return;
     }
 
@@ -747,6 +762,71 @@ export class ExchangeController {
         ],
         set: { name: work.name, article: work.article, unit: work.unit, lastSeenAt: now },
       });
+  }
+
+  /**
+   * `mode=query`: спека §5's outbound direction. Builds this round's
+   * eligible-order document (Task 4's `planExport`/`buildOrdersDocument`),
+   * remembers which order ids it just offered (Task 8's
+   * `writeQueriedOrderIds` -- `mode=success` reads this back rather than
+   * trusting whatever 1С's own confirmation happens to say), and journals a
+   * held-order warning for every order this round is NOT offering because a
+   * product still lacks a 1С link (спека §5: "товар без связи придерживает
+   * заявку").
+   */
+  private async query(session: ResolvedExchangeSession, res: Response): Promise<void> {
+    const candidates = await this.pickupOrders.findExportCandidates(session.tenantId, EXPORT_BATCH_SIZE);
+    const plan = planExport(candidates);
+
+    for (const held of plan.held) {
+      await this.journal.append({
+        tenantId: session.tenantId,
+        channelType: session.channelType,
+        sessionId: session.id,
+        direction: "out",
+        outcome: "warn",
+        grain: "item",
+        message: `заявка придержана — товар без связи с 1С: ${held.orderNo}`,
+        details: { orderId: held.orderId, orderNo: held.orderNo, unlinkedProductIds: held.unlinkedProductIds },
+      });
+    }
+
+    const [channelRow] = await this.db
+      .select({ settings: schema.integrationChannels.settings })
+      .from(schema.integrationChannels)
+      .where(
+        and(
+          eq(schema.integrationChannels.tenantId, session.tenantId),
+          eq(schema.integrationChannels.type, session.channelType),
+        ),
+      );
+    const settings = (channelRow?.settings ?? {}) as {
+      splitWriteoffDocument?: boolean;
+      writeoffDocumentType?: string;
+    };
+
+    const xml = buildOrdersDocument(plan.eligible, {
+      splitWriteoffDocument: settings.splitWriteoffDocument ?? false,
+      writeoffDocumentType: settings.writeoffDocumentType,
+    });
+
+    await this.sessions.writeQueriedOrderIds(
+      session.id,
+      plan.eligible.map((eligible) => eligible.order.id),
+    );
+
+    await this.journal.append({
+      tenantId: session.tenantId,
+      channelType: session.channelType,
+      sessionId: session.id,
+      direction: "out",
+      outcome: "ok",
+      grain: "session",
+      message: `query: предложено заявок: ${plan.eligible.length}`,
+      details: { offered: plan.eligible.length, held: plan.held.length },
+    });
+
+    res.status(200).type("application/xml").send(xml);
   }
 
   private async unknownMode(
