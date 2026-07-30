@@ -1221,6 +1221,99 @@ describe("sync engine: pools and closures", () => {
     ]);
   });
 
+  // Task 13 review, second wave: for a boxes-only send (the `maxId === null`
+  // branch pinned above) the batch id used to be
+  // `${machineId}:${instId}:box:${rowid}` alone. A box's `rowid` is assigned
+  // once at `openBox`'s INSERT and never changes, so when the operator
+  // resolves the print-verification prompt AFTER the box's closure already
+  // synced -- with nothing else queued in between, e.g. the last box of a
+  // shift -- the resend was byte-identical to the original send's batch id.
+  // A real server claims a batch id in `sync_batches` and no-ops an exact
+  // repeat (`alreadyApplied: true`) WITHOUT inspecting content, so the
+  // resolved outcome would be silently swallowed forever -- in exactly the
+  // case the `acked_at`-clearing fix above exists to serve.
+  //
+  // The mock below models that claim-by-id behaviour explicitly, rather than
+  // returning a canned response: a batch id is claimed on first use (its
+  // boxes' fields are recorded as "applied"), and a repeat of that exact id
+  // is a no-op that leaves the previously recorded fields untouched. A
+  // batch-id collision here therefore fails the test on its own terms, not
+  // just via a content assertion that happens to also be wrong.
+  it(
+    "gives a boxes-only resend carrying a newly-resolved print outcome a batch id distinct " +
+      "from the original send, so the server's batch-id idempotency guard cannot swallow the " +
+      "resolved outcome",
+    async () => {
+      const claimed = new Set<string>();
+      const appliedOutcomes = new Map<
+        string,
+        { printVerifiedAt: string | null; printSkippedAt: string | null }
+      >();
+      const serverPost = vi.fn().mockImplementation(async (_path: string, body: unknown) => {
+        const {
+          batchId,
+          boxes: sentBoxes,
+          items,
+        } = body as {
+          batchId: string;
+          boxes: Array<{
+            boxId: string;
+            printVerifiedAt: string | null;
+            printSkippedAt: string | null;
+          }>;
+          items: unknown[];
+        };
+        if (claimed.has(batchId)) {
+          // Exactly the real server's contract: a repeated batch id is a
+          // no-op that never looks at (let alone re-applies) its content.
+          return { applied: 0, alreadyApplied: true };
+        }
+        claimed.add(batchId);
+        for (const b of sentBoxes) {
+          appliedOutcomes.set(b.boxId, {
+            printVerifiedAt: b.printVerifiedAt,
+            printSkippedAt: b.printSkippedAt,
+          });
+        }
+        return { applied: items.length, alreadyApplied: false };
+      });
+
+      async function drainWithServer(): Promise<void> {
+        serverPost.mockClear();
+        const engine = createSyncEngine({
+          exec,
+          client: { post: serverPost },
+          machineId: "m1",
+          onState: () => {},
+        });
+        engine.nudge();
+        await engine.idle();
+        engine.stop();
+      }
+
+      await drainWithServer(); // drains away the default seeded scan.
+      await openBox(exec, SHIFT, "b1", ISO, TERMINAL);
+      await closeBox(exec, "b1", SSCC, ISO, null);
+
+      await drainWithServer(); // boxes-only first send: outcome unresolved.
+      expect(serverPost).toHaveBeenCalledTimes(1);
+      const firstBatchId = (serverPost.mock.calls[0]![1] as { batchId: string }).batchId;
+      expect(appliedOutcomes.get("b1")).toEqual({ printVerifiedAt: null, printSkippedAt: null });
+
+      // The operator resolves the prompt only now -- nothing else has
+      // queued since the first send, so this resend is boxes-only too, and
+      // the box's rowid is exactly what it was above.
+      await markPrintVerified(exec, "b1", ISO);
+
+      await drainWithServer(); // boxes-only resend: outcome resolved.
+      expect(serverPost).toHaveBeenCalledTimes(1);
+      const secondBatchId = (serverPost.mock.calls[0]![1] as { batchId: string }).batchId;
+
+      expect(secondBatchId).not.toBe(firstBatchId);
+      expect(appliedOutcomes.get("b1")).toEqual({ printVerifiedAt: ISO, printSkippedAt: null });
+    },
+  );
+
   it("still acknowledges when applying a serial block fails", async () => {
     const failing = failingExecOn(exec, /INSERT INTO sscc_pool/);
     mockPost({

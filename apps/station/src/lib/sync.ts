@@ -528,10 +528,33 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
           // batch can never be mistaken by the server for a resend of an
           // earlier one and silently no-op (`alreadyApplied`) without its
           // own closures ever being applied.
+          //
+          // The rowid alone is not enough, though (Task 13 review, second
+          // wave): it is assigned once at `openBox`'s INSERT and never
+          // changes, but `markPrintVerified`/`markPrintSkipped` clear a
+          // closed box's `acked_at` to force exactly this box back through
+          // this same boxes-only path with its now-resolved outcome (see
+          // those functions' doc comments). If nothing else has queued
+          // since the original send, that resend would otherwise carry the
+          // identical rowid -- and therefore the identical batch id -- as
+          // the send that already got acknowledged, and the server's
+          // `alreadyApplied` guard would silently swallow the resolved
+          // outcome for good. Appending the resolved outcome itself (never
+          // both -- `markPrintVerified`/`markPrintSkipped` are mutually
+          // exclusive terminal states for a given box) turns that resend
+          // into a distinct key, because the first send always carries
+          // both fields null. Two resends carrying the SAME already-
+          // resolved outcome still collide on this suffix, on purpose: that
+          // is a genuine retry with no new information, and it should keep
+          // benefiting from the server's idempotency rather than
+          // reprocessing pointlessly.
+          const lastBox = boxes[boxes.length - 1]!;
           const batchId =
             maxId !== null
               ? `${deps.machineId}:${instId}:${maxId}`
-              : `${deps.machineId}:${instId}:box:${boxes[boxes.length - 1]!.rowid}`;
+              : `${deps.machineId}:${instId}:box:${lastBox.rowid}:${
+                  lastBox.printVerifiedAt ?? lastBox.printSkippedAt ?? ""
+                }`;
           const serialsLeft = await computeSerialsLeft(deps.exec);
           const res = await deps.client.post<BatchResponse>("/station/scans", {
             batchId,
