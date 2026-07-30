@@ -316,4 +316,194 @@ describe("1c_exchange orders (И-2)", () => {
     const events = await journalEvents();
     expect(events.some((e) => e.message.startsWith("статус не сопоставлен"))).toBe(true);
   });
+
+  it("type=sale&mode=import: не-UUID Ид у одного документа не прерывает пакет — журналируется как расхождение (Fix A)", async () => {
+    const { cookie } = await checkauth();
+
+    await agent
+      .patch("/integrations/commerceml")
+      .send({ orderStatusField: "СтатусЗаказа", statusMapping: { Оплачен: "punched" } })
+      .expect(200);
+
+    // Not shaped like a UUID at all -- the exact case Fix A validates for
+    // BEFORE calling `applyExternalStatus`, rather than by catching the
+    // Postgres `22P02` that comparing this against a `uuid` column used to
+    // throw. Paired with a status value that DOES map to something
+    // (`Оплачен` -> `punched`) so this exercises the lookup-failure path, not
+    // the separate "статус не сопоставлен" path already covered above.
+    const badExternalRef = "not-a-real-guid";
+    const saleXml = Buffer.from(
+      [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        "<КоммерческаяИнформация><ПакетДокументов><Документ>",
+        `<Ид>${badExternalRef}</Ид>`,
+        "<ЗначенияРеквизитов><ЗначениеРеквизита>",
+        "<Наименование>СтатусЗаказа</Наименование><Значение>Оплачен</Значение>",
+        "</ЗначениеРеквизита></ЗначенияРеквизитов>",
+        "</Документ></ПакетДокументов></КоммерческаяИнформация>",
+      ].join(""),
+      "utf8",
+    );
+
+    await request(app!.getHttpServer())
+      .post("/1c_exchange?mode=file&filename=sale-bad-guid.xml")
+      .set("Cookie", cookie)
+      .send(saleXml)
+      .expect(200);
+
+    const importRes = await request(app!.getHttpServer())
+      .get("/1c_exchange?mode=import&type=sale&filename=sale-bad-guid.xml")
+      .set("Cookie", cookie)
+      .expect(200);
+    // The route must still answer "success" -- a malformed single document
+    // must never abort the whole batch (which is exactly what removing the
+    // former overly-wide try/catch, in favor of validating up front, fixes).
+    expect(importRes.text).toBe("success");
+
+    const events = await journalEvents();
+    const discrepancy = events.find((e) =>
+      e.message.includes(`расхождение статуса (lookup_failed): ${badExternalRef}`),
+    );
+    expect(discrepancy).toBeTruthy();
+    expect(discrepancy?.details).toMatchObject({
+      externalRef: badExternalRef,
+      mapped: "punched",
+      outcome: "lookup_failed",
+      error: "externalRef is not UUID-shaped",
+    });
+  });
+
+  it("GET /1c_exchange?mode=success ведёт себя так же, как POST-вариант (Fix 2)", async () => {
+    const { cookie } = await checkauth();
+
+    const linkedProductId = randomUUID();
+    await db.insert(schema.products).values({
+      id: linkedProductId,
+      tenantId,
+      gtin14: "04600682000136",
+      name: "Экспортный товар (GET success)",
+      externalRef: `ext-${randomUUID()}`,
+    });
+
+    const orderId = randomUUID();
+    await db.insert(schema.pickupOrders).values({
+      id: orderId,
+      tenantId,
+      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      kioskId,
+      employeeId,
+      reason: "buy",
+      itemCount: 1,
+      totalPrice: "50.00",
+    });
+    await db.insert(schema.pickupOrderItems).values({
+      tenantId,
+      orderId,
+      productId: linkedProductId,
+      gtin14: "04600682000136",
+      serial: "SN9003",
+      rawKm: "raw-query-get-success",
+      kmKey: `kmkey-${randomUUID()}`,
+      unitPrice: "50.00",
+      scannedAt: new Date(),
+    });
+
+    const queryRes = await request(app!.getHttpServer())
+      .get("/1c_exchange?mode=query")
+      .set("Cookie", cookie)
+      .expect(200);
+    expect(queryRes.text).toContain(`<Ид>${orderId}</Ид>`);
+
+    const [beforeSuccess] = await db
+      .select({ exportedAt: schema.pickupOrders.exportedAt })
+      .from(schema.pickupOrders)
+      .where(eq(schema.pickupOrders.id, orderId));
+    expect(beforeSuccess?.exportedAt).toBeNull();
+
+    // Fix 2 (final review): the real 1С protocol's own order/sale round-trip
+    // (checkauth -> init -> query -> success) runs entirely over GET, so
+    // `mode=success` must work identically here to the POST-based test above.
+    const successRes = await request(app!.getHttpServer())
+      .get("/1c_exchange?mode=success")
+      .set("Cookie", cookie)
+      .expect(200);
+    expect(successRes.text).toBe("success");
+
+    const [afterSuccess] = await db
+      .select({ exportedAt: schema.pickupOrders.exportedAt })
+      .from(schema.pickupOrders)
+      .where(eq(schema.pickupOrders.id, orderId));
+    expect(afterSuccess?.exportedAt).not.toBeNull();
+  });
+
+  it("mode=success помечает exportedAt даже если заявку уже разрешили локально до success (Fix 3)", async () => {
+    const { cookie } = await checkauth();
+
+    const linkedProductId = randomUUID();
+    await db.insert(schema.products).values({
+      id: linkedProductId,
+      tenantId,
+      gtin14: "04600682000143",
+      name: "Экспортный товар (resolve до success)",
+      externalRef: `ext-${randomUUID()}`,
+    });
+
+    const orderId = randomUUID();
+    await db.insert(schema.pickupOrders).values({
+      id: orderId,
+      tenantId,
+      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      kioskId,
+      employeeId,
+      reason: "buy",
+      itemCount: 1,
+      totalPrice: "50.00",
+    });
+    await db.insert(schema.pickupOrderItems).values({
+      tenantId,
+      orderId,
+      productId: linkedProductId,
+      gtin14: "04600682000143",
+      serial: "SN9004",
+      rawKm: "raw-query-resolved-before-success",
+      kmKey: `kmkey-${randomUUID()}`,
+      unitPrice: "50.00",
+      scannedAt: new Date(),
+    });
+
+    const queryRes = await request(app!.getHttpServer())
+      .get("/1c_exchange?mode=query")
+      .set("Cookie", cookie)
+      .expect(200);
+    expect(queryRes.text).toContain(`<Ид>${orderId}</Ид>`);
+
+    // Resolved LOCALLY through the admin API, between this session's own
+    // `mode=query` and `mode=success` -- the exact race Fix 3's own comment
+    // (`PickupOrdersService.success`) describes: 1С genuinely received and is
+    // about to confirm this order, but an operator punched it in the cabinet
+    // first, so the order is no longer `pending` by the time `mode=success`
+    // runs.
+    const resolveRes = await agent
+      .post(`/pickup-orders/${orderId}/resolve`)
+      .send({ action: "punch", receiptNo: "R-1c-success" })
+      .expect(200);
+    expect(resolveRes.body.status).toBe("punched");
+
+    const successRes = await request(app!.getHttpServer())
+      .post("/1c_exchange?mode=success")
+      .set("Cookie", cookie)
+      .expect(200);
+    expect(successRes.text).toBe("success");
+
+    const [afterSuccess] = await db
+      .select({ exportedAt: schema.pickupOrders.exportedAt, status: schema.pickupOrders.status })
+      .from(schema.pickupOrders)
+      .where(eq(schema.pickupOrders.id, orderId));
+    // The order is terminal (`punched`, not `pending`) but Fix 3 (dropping
+    // `success()`'s `status = "pending"` predicate) means `exportedAt` still
+    // gets set -- proving it isn't left permanently unset just because the
+    // order was resolved before 1С's own confirmation arrived.
+    expect(afterSuccess?.status).toBe("punched");
+    expect(afterSuccess?.exportedAt).not.toBeNull();
+  });
 });
