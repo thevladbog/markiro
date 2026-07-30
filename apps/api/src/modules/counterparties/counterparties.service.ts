@@ -6,10 +6,15 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from "@nestjs/common";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
-import { BOX_EXTENSION_DIGIT, deriveIssuerPrefix, seedFloor } from "../sscc/sscc.service";
+import {
+  atomicSeedSscc,
+  BOX_EXTENSION_DIGIT,
+  deriveIssuerPrefix,
+  seedFloor,
+} from "../sscc/sscc.service";
 import type {
   CounterpartyDto,
   CreateCounterpartyDto,
@@ -147,6 +152,12 @@ export class CounterpartiesService {
    * see org-profile.service.ts's `putSscc` for the full rationale, which
    * applies identically here since both write the same `sscc_counters`
    * table keyed by the same derived issuer prefix.
+   *
+   * CodeRabbit PR33 review, Finding 5: same fix as org-profile.service.ts's
+   * `putSscc`, applied identically here -- `atomicSeedSscc` re-validates
+   * `seedFloor`'s condition live, inside the SAME statement as the write,
+   * closing the race where a concurrent `allocate()` issues a new block
+   * between this method's own `seedFloor` read and its write.
    */
   async putSscc(tenantId: string, id: string, dto: SsccCounterDto): Promise<SsccCounterDto> {
     const issuerPrefix = await this.counterpartyIssuerPrefix(tenantId, id);
@@ -156,22 +167,18 @@ export class CounterpartiesService {
         `nextSerial must be at least ${floor}: serials below it were already issued to a device under this prefix`,
       );
     }
-    await this.db
-      .insert(schema.ssccCounters)
-      .values({
-        tenantId,
-        issuerPrefix,
-        extensionDigit: dto.extensionDigit,
-        nextSerial: dto.nextSerial,
-      })
-      .onConflictDoUpdate({
-        target: [
-          schema.ssccCounters.tenantId,
-          schema.ssccCounters.issuerPrefix,
-          schema.ssccCounters.extensionDigit,
-        ],
-        set: { nextSerial: dto.nextSerial, updatedAt: sql`now()` },
-      });
+    const applied = await atomicSeedSscc(
+      this.db,
+      tenantId,
+      issuerPrefix,
+      dto.extensionDigit,
+      dto.nextSerial,
+    );
+    if (!applied) {
+      throw new ConflictException(
+        "nextSerial floor moved: a box serial block was issued under this prefix while this seed was in flight. Retry with the current floor.",
+      );
+    }
     return { extensionDigit: dto.extensionDigit, nextSerial: dto.nextSerial };
   }
 

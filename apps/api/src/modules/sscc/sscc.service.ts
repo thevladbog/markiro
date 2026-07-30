@@ -109,6 +109,65 @@ export async function seedFloor(
   return row?.highest == null ? 0 : Number(row.highest) + 1;
 }
 
+/**
+ * Atomically seeds (tenant, issuer prefix, extension digit)'s counter to
+ * `nextSerial`, in ONE statement that re-validates `seedFloor`'s condition
+ * live against `sscc_blocks` at write time -- CodeRabbit PR33 review,
+ * Finding 5.
+ *
+ * `putSscc` (org-profile.service.ts, counterparties.service.ts) used to read
+ * `seedFloor` and then write `nextSerial` unconditionally in a SEPARATE
+ * statement. If an `allocate()` call's counter-advance (and matching
+ * `sscc_blocks` insert) landed in the gap between that read and this write,
+ * the write would silently overwrite the counter with a value now BEHIND
+ * the block just issued -- the next `allocate()` would then re-cut that same
+ * range for a different device, an SSCC collision across devices, exactly
+ * what `seedFloor` exists to prevent in the first place.
+ *
+ * Folding the guard into the `ON CONFLICT DO UPDATE ... WHERE` clause makes
+ * the check part of the SAME atomic statement as the write: the subquery
+ * against `sscc_blocks` is evaluated against the database's CURRENT
+ * committed state at the moment this statement runs, not a value read
+ * earlier and passed in, so a block that committed a moment before is
+ * already reflected. Returns `false` (having written nothing) when that
+ * guard excludes the update -- the floor moved out from under the caller's
+ * own pre-check, and the caller should surface a conflict rather than
+ * silently accept a stale seed.
+ *
+ * The INSERT branch (no counter row yet for this key) needs no such guard:
+ * every `sscc_blocks` row is created in the SAME transaction as its
+ * `sscc_counters` row (`allocate`, above), so a block can never exist
+ * without a corresponding counter row already present -- meaning a
+ * brand-new key can never have a floor above 0 to violate.
+ */
+export async function atomicSeedSscc(
+  db: Pick<Db, "insert">,
+  tenantId: string,
+  issuerPrefix: string,
+  extensionDigit: number,
+  nextSerial: number,
+): Promise<boolean> {
+  const [row] = await db
+    .insert(schema.ssccCounters)
+    .values({ tenantId, issuerPrefix, extensionDigit, nextSerial })
+    .onConflictDoUpdate({
+      target: [
+        schema.ssccCounters.tenantId,
+        schema.ssccCounters.issuerPrefix,
+        schema.ssccCounters.extensionDigit,
+      ],
+      set: { nextSerial, updatedAt: sql`now()` },
+      setWhere: sql`${nextSerial} >= COALESCE((
+        SELECT MAX(${schema.ssccBlocks.toSerial}) + 1 FROM ${schema.ssccBlocks}
+        WHERE ${schema.ssccBlocks.tenantId} = ${tenantId}
+          AND ${schema.ssccBlocks.issuerPrefix} = ${issuerPrefix}
+          AND ${schema.ssccBlocks.extensionDigit} = ${extensionDigit}
+      ), 0)`,
+    })
+    .returning({ nextSerial: schema.ssccCounters.nextSerial });
+  return row !== undefined;
+}
+
 @Injectable()
 export class SsccService {
   constructor(@Inject(DB) private readonly db: Db) {}

@@ -1,8 +1,13 @@
-import { BadRequestException, Inject, Injectable } from "@nestjs/common";
-import { and, eq, sql } from "drizzle-orm";
+import { BadRequestException, ConflictException, Inject, Injectable } from "@nestjs/common";
+import { and, eq } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
-import { BOX_EXTENSION_DIGIT, deriveIssuerPrefix, seedFloor } from "../sscc/sscc.service";
+import {
+  atomicSeedSscc,
+  BOX_EXTENSION_DIGIT,
+  deriveIssuerPrefix,
+  seedFloor,
+} from "../sscc/sscc.service";
 import type { OrgProfileDto, PutOrgProfileDto, SsccCounterDto } from "./dto";
 
 const EMPTY_PROFILE: OrgProfileDto = { gln: null, gs1Prefixes: [], inn: null };
@@ -90,6 +95,19 @@ export class OrgProfileService {
    * device's hands -- an SSCC collision across devices. Not silently
    * clamped -- an admin correcting a typo before any block has ever been
    * issued must still be free to seed anywhere.
+   *
+   * CodeRabbit PR33 review, Finding 5: the `seedFloor` read above and the
+   * write below used to be two SEPARATE statements. If a device's
+   * `allocate()` call landed in between -- advancing the counter and
+   * recording a new block -- this write would still land unconditionally,
+   * silently overwriting the counter with a value now BEHIND that block,
+   * reopening exactly the cross-device collision `seedFloor` exists to
+   * prevent. `atomicSeedSscc` closes that gap by re-validating the SAME
+   * condition live, inside the single statement that performs the write
+   * (`ON CONFLICT DO UPDATE ... WHERE`) -- see its own doc comment. A `false`
+   * return means the floor moved between this method's own `seedFloor` read
+   * above and the write: reported as a 409 the admin can retry, not
+   * silently landed on a stale value.
    */
   async putSscc(tenantId: string, dto: SsccCounterDto): Promise<SsccCounterDto> {
     const issuerPrefix = await this.ownIssuerPrefix(tenantId);
@@ -99,22 +117,18 @@ export class OrgProfileService {
         `nextSerial must be at least ${floor}: serials below it were already issued to a device under this prefix`,
       );
     }
-    await this.db
-      .insert(schema.ssccCounters)
-      .values({
-        tenantId,
-        issuerPrefix,
-        extensionDigit: dto.extensionDigit,
-        nextSerial: dto.nextSerial,
-      })
-      .onConflictDoUpdate({
-        target: [
-          schema.ssccCounters.tenantId,
-          schema.ssccCounters.issuerPrefix,
-          schema.ssccCounters.extensionDigit,
-        ],
-        set: { nextSerial: dto.nextSerial, updatedAt: sql`now()` },
-      });
+    const applied = await atomicSeedSscc(
+      this.db,
+      tenantId,
+      issuerPrefix,
+      dto.extensionDigit,
+      dto.nextSerial,
+    );
+    if (!applied) {
+      throw new ConflictException(
+        "nextSerial floor moved: a box serial block was issued under this prefix while this seed was in flight. Retry with the current floor.",
+      );
+    }
     return { extensionDigit: dto.extensionDigit, nextSerial: dto.nextSerial };
   }
 
