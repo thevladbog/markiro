@@ -86,6 +86,25 @@ export const syncBatchSchema = z.object({
     // batch indefinitely rather than ever dropping data).
     .max(MAX_BOX_CLOSURES_PER_SYNC_BATCH)
     .default([]),
+  // Operator exceptions carried by this batch (undo/clear/disassemble/
+  // reprint) -- see box-exceptions.ts. Independent of `items`/`boxes` for
+  // the same reason boxes are: the fact a device queues can outlive the
+  // scan or closure it corrects by an arbitrary number of batches.
+  exceptions: z
+    .array(
+      z.object({
+        kind: z.enum(["undo", "clear", "disassemble", "reprint"]),
+        boxId: z.string().min(1).max(64),
+        codeHash: z.string().length(64).nullable(),
+        shiftId: z.string().uuid().toLowerCase(),
+        terminalId: z.string().nullable(),
+        operatorId: z.string().uuid().toLowerCase().nullable(),
+        reason: z.string().min(1).nullable(),
+        occurredAt: z.string().datetime(),
+      }),
+    )
+    .max(200)
+    .default([]),
 });
 
 export type ScanItemDto = z.infer<typeof scanItemSchema>;
