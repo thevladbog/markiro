@@ -13,7 +13,7 @@ import {
 } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { schema, type Db } from "@markiro/db";
-import { and, eq, isNotNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import type { Response } from "express";
 import { DB } from "../../auth/auth.module";
 import type { IntegrationChannelType } from "../integrations/channel-registry";
@@ -348,6 +348,11 @@ export class ExchangeController {
         details: { filename, bytes: body.length },
       });
       this.text(res, "success");
+      return;
+    }
+
+    if (mode === "success") {
+      await this.success(session, res);
       return;
     }
 
@@ -833,6 +838,51 @@ export class ExchangeController {
     });
 
     res.status(200).type("application/xml").send(xml);
+  }
+
+  /**
+   * `mode=success`: спека §5's "подтверждение до пометки" -- marks EXACTLY
+   * the order ids the immediately preceding `mode=query` on THIS session
+   * offered (Task 8's `readQueriedOrderIds`, not whatever 1С's own success
+   * call happens to say) as exported, and only those still `pending` with no
+   * `exportedAt` yet -- a race with a manual admin resolve/cancel in between
+   * is harmless either way (the order is already terminal, or already
+   * exported by a concurrent success call). Clears the recorded ids after,
+   * so a stray extra `mode=success` with nothing pending confirms zero.
+   */
+  private async success(session: ResolvedExchangeSession, res: Response): Promise<void> {
+    const orderIds = await this.sessions.readQueriedOrderIds(session.id);
+    let confirmed = 0;
+
+    if (orderIds.length > 0) {
+      const updated = await this.db
+        .update(schema.pickupOrders)
+        .set({ exportedAt: new Date() })
+        .where(
+          and(
+            eq(schema.pickupOrders.tenantId, session.tenantId),
+            inArray(schema.pickupOrders.id, orderIds),
+            eq(schema.pickupOrders.status, "pending"),
+            isNull(schema.pickupOrders.exportedAt),
+          ),
+        )
+        .returning({ id: schema.pickupOrders.id });
+      confirmed = updated.length;
+      await this.sessions.writeQueriedOrderIds(session.id, []);
+    }
+
+    await this.journal.append({
+      tenantId: session.tenantId,
+      channelType: session.channelType,
+      sessionId: session.id,
+      direction: "out",
+      outcome: "ok",
+      grain: "session",
+      message: `success: подтверждено заявок: ${confirmed}`,
+      details: { confirmed, offered: orderIds.length },
+    });
+
+    this.text(res, "success");
   }
 
   private async unknownMode(
