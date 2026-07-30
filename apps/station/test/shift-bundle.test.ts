@@ -115,4 +115,71 @@ describe("mirrorShiftBundle", () => {
     expect(rows).toHaveLength(0);
     consoleError.mockRestore();
   });
+
+  // CodeRabbit PR33 review, Finding 10: `addRange` used to run AFTER
+  // `upsertBundle`, whose very first statement publishes
+  // `shift_mirror.issuer_prefix` -- the column `WorkScreen` polls to decide
+  // whether to show the box UI at all, with no check that the pool actually
+  // has anything in it. A poll landing between the two writes (or a failed
+  // `addRange`, as here) could enable box aggregation before -- or without
+  // ever -- a usable pool existing, closing a box as `no-serials` for a
+  // range that was never actually missing. This pins the fix: `addRange`
+  // running FIRST means a failure there must leave `issuer_prefix`
+  // unpublished (no shift_mirror row at all, on this first-ever fetch)
+  // rather than committed and orphaned.
+  it(
+    "leaves issuerPrefix unpublished (no shift_mirror row) when addRange fails, instead of " +
+      "committing it ahead of a pool that was never actually populated (Finding 10)",
+    async () => {
+      const exec = nodeExecutor();
+      await applyMigrations(exec);
+      const aggregationBundle: StationBundle = {
+        ...bundle,
+        sscc: {
+          issuerPrefix: "460123456",
+          extensionDigit: 0,
+          fromSerial: 1,
+          toSerial: 5,
+          consumedThroughSerial: null,
+        },
+      };
+      const get = vi.fn().mockResolvedValue(aggregationBundle);
+      // Simulates addRange failing -- e.g. a locked device DB -- by making
+      // its own target table's write throw. `shift_mirror`/`product_mirror`
+      // writes are left untouched by this wrapper, so if `upsertBundle` ran
+      // anyway (the bug this fix closes), it would succeed and this test
+      // would fail to catch the regression.
+      const failingExec: SqlExecutor = {
+        ...exec,
+        run: async (sql, params) => {
+          if (sql.includes("INSERT INTO sscc_pool")) {
+            throw new Error("device database is locked");
+          }
+          return exec.run(sql, params);
+        },
+      };
+      const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      await expect(mirrorShiftBundle({ get }, failingExec, "s1")).resolves.toBeUndefined();
+
+      expect(consoleError).toHaveBeenCalled();
+      // The fix under test: NOT published. A concurrent reader (WorkScreen's
+      // own `readShiftMirror` poll) sees no row at all, never a non-null
+      // issuerPrefix ahead of a pool that failed to populate.
+      const shiftRows = await exec.all("SELECT id FROM shift_mirror WHERE id = ?", ["s1"]);
+      expect(shiftRows).toHaveLength(0);
+      expect(await remaining(exec, "460123456", 0)).toBe(0);
+      consoleError.mockRestore();
+
+      // Recovery: the next fetch, with a working device database, mirrors
+      // everything normally.
+      await mirrorShiftBundle({ get }, exec, "s1");
+      const recovered = await exec.all<{ issuer_prefix: string | null }>(
+        "SELECT issuer_prefix FROM shift_mirror WHERE id = ?",
+        ["s1"],
+      );
+      expect(recovered[0]?.issuer_prefix).toBe("460123456");
+      expect(await remaining(exec, "460123456", 0)).toBe(5);
+    },
+  );
 });
