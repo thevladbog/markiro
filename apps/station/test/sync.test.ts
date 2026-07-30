@@ -1255,11 +1255,13 @@ describe("sync engine: pools and closures", () => {
       // was correctly skipped by the ack guard; the second carries the now
       // -resolved outcome and genuinely acks.
       expect(raceOnce).toHaveBeenCalledTimes(2);
-      const firstSent = (raceOnce.mock.calls[0]![1] as { boxes: Array<{ printVerifiedAt: unknown }> })
-        .boxes;
+      const firstSent = (
+        raceOnce.mock.calls[0]![1] as { boxes: Array<{ printVerifiedAt: unknown }> }
+      ).boxes;
       expect(firstSent).toEqual([expect.objectContaining({ boxId: "b1", printVerifiedAt: null })]);
-      const secondSent = (raceOnce.mock.calls[1]![1] as { boxes: Array<{ printVerifiedAt: unknown }> })
-        .boxes;
+      const secondSent = (
+        raceOnce.mock.calls[1]![1] as { boxes: Array<{ printVerifiedAt: unknown }> }
+      ).boxes;
       expect(secondSent).toEqual([
         expect.objectContaining({ boxId: "b1", printVerifiedAt: RESOLVED_AT }),
       ]);

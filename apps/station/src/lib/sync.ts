@@ -333,11 +333,7 @@ function boxSetSignature(boxes: BoxClosureRow[]): string {
  * `=`. `IS` is null-safe, so `print_verified_at IS NULL` correctly matches
  * a still-null column.
  */
-async function ackBoxes(
-  exec: SqlExecutor,
-  boxes: BoxClosureRow[],
-  ackedAt: string,
-): Promise<void> {
+async function ackBoxes(exec: SqlExecutor, boxes: BoxClosureRow[], ackedAt: string): Promise<void> {
   for (const box of boxes) {
     await exec.run(
       `UPDATE boxes_mirror SET acked_at = ?

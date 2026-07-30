@@ -134,15 +134,15 @@ describe.skipIf(!ready)("station devices e2e", () => {
       const agent = request.agent(app!.getHttpServer());
       const tenantId = await signUpAndActivate(agent);
 
-      const enroll = await agent.post("/station-devices").send({ name: "Bundle terminal" }).expect(201);
+      const enroll = await agent
+        .post("/station-devices")
+        .send({ name: "Bundle terminal" })
+        .expect(201);
       const deviceId = enroll.body.deviceId as string;
       const apiKey = enroll.body.apiKey as string;
 
       // The key works before revoking -- baseline.
-      await request(app!.getHttpServer())
-        .get("/shifts")
-        .set("x-api-key", apiKey)
-        .expect(200);
+      await request(app!.getHttpServer()).get("/shifts").set("x-api-key", apiKey).expect(200);
 
       // Cuts a REAL sscc_blocks row referencing this device -- the only way
       // to reach the FK this finding is about (no HTTP route allocates
@@ -158,10 +158,7 @@ describe.skipIf(!ready)("station devices e2e", () => {
 
       // The fix under test: the api-key is dead, unconditionally -- even
       // though the request above did not return success.
-      await request(app!.getHttpServer())
-        .get("/shifts")
-        .set("x-api-key", apiKey)
-        .expect(401);
+      await request(app!.getHttpServer()).get("/shifts").set("x-api-key", apiKey).expect(401);
 
       // The device row itself is left orphaned (its own delete blocked by
       // the FK) -- accepted bookkeeping debt, not a live credential, which

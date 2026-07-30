@@ -983,84 +983,81 @@ describe("WorkScreen box progress, closing and printing", () => {
   // concurrent calls (never more than 1 in flight), and BOTH boxes' outcomes
   // are resolved -- one at a time, via the queued prompts -- rather than
   // the first one being silently lost.
-  it(
-    "serializes concurrent box-label prints and loses neither box's verification outcome",
-    async () => {
-      const exec = makeExec();
-      await seedLabelSpec(exec, "s1");
-      await addRange(exec, {
-        issuerPrefix: TEST_ISSUER_PREFIX,
-        extensionDigit: 0,
-        fromSerial: 1,
-        toSerial: 5,
-      });
+  it("serializes concurrent box-label prints and loses neither box's verification outcome", async () => {
+    const exec = makeExec();
+    await seedLabelSpec(exec, "s1");
+    await addRange(exec, {
+      issuerPrefix: TEST_ISSUER_PREFIX,
+      extensionDigit: 0,
+      fromSerial: 1,
+      toSerial: 5,
+    });
 
-      let inFlight = 0;
-      let maxInFlight = 0;
-      const print = vi.fn(async () => {
-        inFlight++;
-        maxInFlight = Math.max(maxInFlight, inFlight);
-        // A deliberately slow printer -- long enough that, without
-        // serialization, the SECOND box's print would start while the
-        // first's is still in flight.
-        await new Promise((resolve) => setTimeout(resolve, 30));
-        inFlight--;
-      });
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const print = vi.fn(async () => {
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      // A deliberately slow printer -- long enough that, without
+      // serialization, the SECOND box's print would start while the
+      // first's is still in flight.
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      inFlight--;
+    });
 
-      renderWorkTracked({
-        exec,
-        boxCapacity: 1,
-        boxItemCount: 0,
-        verifyPrintedLabel: true,
-        printing: { target: PRINT_TARGET, language: "zpl", print },
-      });
+    renderWorkTracked({
+      exec,
+      boxCapacity: 1,
+      boxItemCount: 0,
+      verifyPrintedLabel: true,
+      printing: { target: PRINT_TARGET, language: "zpl", print },
+    });
 
-      // Two distinct codes, fired back-to-back: `boxCapacity: 1` closes a
-      // box (and fires a print) for each.
-      act(() => {
-        scan(KM);
-        scan(OTHER_KM);
-      });
+    // Two distinct codes, fired back-to-back: `boxCapacity: 1` closes a
+    // box (and fires a print) for each.
+    act(() => {
+      scan(KM);
+      scan(OTHER_KM);
+    });
 
-      await waitFor(() => expect(print).toHaveBeenCalledTimes(2));
-      // The core serialization assertion: never more than one physical
-      // print call in flight, however close together the two boxes closed.
-      expect(maxInFlight).toBe(1);
+    await waitFor(() => expect(print).toHaveBeenCalledTimes(2));
+    // The core serialization assertion: never more than one physical
+    // print call in flight, however close together the two boxes closed.
+    expect(maxInFlight).toBe(1);
 
-      await waitFor(async () => {
-        const rows = await exec.all<{ n: number }>(
-          `SELECT COUNT(*) AS n FROM boxes_mirror WHERE closed_at IS NOT NULL`,
-        );
-        expect(rows[0]?.n).toBe(2);
-      });
+    await waitFor(async () => {
+      const rows = await exec.all<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM boxes_mirror WHERE closed_at IS NOT NULL`,
+      );
+      expect(rows[0]?.n).toBe(2);
+    });
 
-      // First prompt: resolve it (skip), then the SECOND must appear --
-      // proving it was queued, not dropped, while the first was showing.
-      const firstSscc = (await screen.findByText(/^\d{18}$/)).textContent;
-      fireEvent.click(screen.getByRole("button", { name: "Пропустить" }));
+    // First prompt: resolve it (skip), then the SECOND must appear --
+    // proving it was queued, not dropped, while the first was showing.
+    const firstSscc = (await screen.findByText(/^\d{18}$/)).textContent;
+    fireEvent.click(screen.getByRole("button", { name: "Пропустить" }));
 
-      const secondSscc = await waitFor(() => {
-        const text = screen.getByText(/^\d{18}$/).textContent;
-        if (text === firstSscc) throw new Error("still showing the first prompt");
-        return text;
-      });
-      expect(secondSscc).not.toBe(firstSscc);
-      fireEvent.click(screen.getByRole("button", { name: "Пропустить" }));
+    const secondSscc = await waitFor(() => {
+      const text = screen.getByText(/^\d{18}$/).textContent;
+      if (text === firstSscc) throw new Error("still showing the first prompt");
+      return text;
+    });
+    expect(secondSscc).not.toBe(firstSscc);
+    fireEvent.click(screen.getByRole("button", { name: "Пропустить" }));
 
-      // Neither box was left without an outcome -- both boxes_mirror rows
-      // carry a resolved print_skipped_at, and the queue is now empty.
-      await waitFor(async () => {
-        const rows = await exec.all<{ sscc: string; print_skipped_at: string | null }>(
-          `SELECT sscc, print_skipped_at FROM boxes_mirror WHERE closed_at IS NOT NULL`,
-        );
-        expect(rows).toHaveLength(2);
-        for (const row of rows) {
-          expect(row.print_skipped_at).not.toBeNull();
-        }
-      });
-      expect(screen.queryByText(/^\d{18}$/)).toBeNull();
-    },
-  );
+    // Neither box was left without an outcome -- both boxes_mirror rows
+    // carry a resolved print_skipped_at, and the queue is now empty.
+    await waitFor(async () => {
+      const rows = await exec.all<{ sscc: string; print_skipped_at: string | null }>(
+        `SELECT sscc, print_skipped_at FROM boxes_mirror WHERE closed_at IS NOT NULL`,
+      );
+      expect(rows).toHaveLength(2);
+      for (const row of rows) {
+        expect(row.print_skipped_at).not.toBeNull();
+      }
+    });
+    expect(screen.queryByText(/^\d{18}$/)).toBeNull();
+  });
 
   // Self-review addition: pins the exact mutation named in this task's
   // dispatch -- "a validation-mode shift (no sscc block) attempting to

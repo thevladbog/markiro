@@ -222,7 +222,10 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
       palletCapacity: 48,
       defaultLabelTemplateId: itemTemplateId,
     });
-    const created = await agent.post("/shifts").send({ productId, mode: "aggregation" }).expect(201);
+    const created = await agent
+      .post("/shifts")
+      .send({ productId, mode: "aggregation" })
+      .expect(201);
     const id = created.body.id as string;
 
     const bundle = await agent.get(`/shifts/${id}/bundle`).expect(200);
