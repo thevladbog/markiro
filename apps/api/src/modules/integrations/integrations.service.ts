@@ -237,6 +237,17 @@ export class IntegrationsService {
     if (!descriptor.available) {
       throw new ConflictException("Channel is not available yet");
     }
+    // `available` alone used to be the only gate here, so `public_api`
+    // (available, but authenticated through its own `apikey` rows -- see
+    // `api-keys.service.ts`) could mint and persist a REAL, checkable
+    // `credentialLogin`/`credentialHash` pair that nothing on the verifying
+    // side (`exchange.controller.ts`'s `POST /1c_exchange`) ever reads for
+    // this channel: a working "issue" button producing a login+secret that
+    // silently authenticates nothing. `usesExchangeCredentials` (see
+    // `channel-registry.ts`) is the narrower flag this actually needs.
+    if (!descriptor.usesExchangeCredentials) {
+      throw new ConflictException("Channel does not use exchange credentials");
+    }
 
     for (let attempt = 0; attempt < ISSUE_ATTEMPTS; attempt++) {
       const { login, secret } = generateExchangeCredentials();

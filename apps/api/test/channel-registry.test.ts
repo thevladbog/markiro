@@ -73,4 +73,16 @@ describe("channel registry", () => {
   it("public_api канал доступен", () => {
     expect(describeChannel("public_api").available).toBe(true);
   });
+
+  // Fix 1 (review, task 15 follow-up): `usesExchangeCredentials` is
+  // narrower than both `available` and `inbound` -- `public_api` is
+  // available and `commerceml` is inbound, but only `commerceml` actually
+  // authenticates with the login+secret pair `IntegrationsService.issueCredentials`
+  // mints (see that method's guard on this flag).
+  it("только commerceml пользуется учётными данными обмена", () => {
+    expect(describeChannel("commerceml").usesExchangeCredentials).toBe(true);
+    expect(describeChannel("public_api").usesExchangeCredentials).toBe(false);
+    expect(describeChannel("gis_mt_files").usesExchangeCredentials).toBe(false);
+    expect(describeChannel("chestny_znak").usesExchangeCredentials).toBe(false);
+  });
 });

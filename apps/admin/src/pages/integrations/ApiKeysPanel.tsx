@@ -75,6 +75,21 @@ export function ApiKeysPanel() {
       toast("ok", t("pages.integrations.channel.apiKeys.revokeSuccess"));
       setRevokeTarget(null);
     } catch (error) {
+      if (error instanceof ApiRequestError && error.status === 404) {
+        // The key was already gone server-side (revoked from another tab,
+        // by another admin, or a repeated click racing the first request) --
+        // the operator's actual goal ("this key must stop working") is
+        // already achieved, so this reads as success, not failure. A raw
+        // "Unknown public API key" from the server would be a confusing
+        // thing to show for what is, from the operator's point of view, a
+        // completed revoke. `useRevokeApiKey`'s own `onError` already
+        // invalidated the list for the same reason -- the modal must close
+        // here too, or the now-vanished row stays selected behind a dialog
+        // that offers to revoke it again with the same result forever.
+        toast("ok", t("pages.integrations.channel.apiKeys.revokeAlreadyGone"));
+        setRevokeTarget(null);
+        return;
+      }
       toast(
         "error",
         error instanceof ApiRequestError

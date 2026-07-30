@@ -164,6 +164,23 @@ describe("integrations (cabinet)", () => {
     await agent.patch("/integrations/chestny_znak").send({}).expect(409);
   });
 
+  // Fix 1 (review, task 15 follow-up): before this guard, `issueCredentials`
+  // only checked `available` -- `public_api` is available, so this route
+  // used to happily mint and persist a real exchange login+secret pair on
+  // its `integration_channels` row even though nothing on the verifying
+  // side (`exchange.controller.ts`'s `POST /1c_exchange`) ever reads a
+  // `public_api` row's credentials; that channel's real authentication is
+  // its own key list (`api-keys.e2e.test.ts`). 409, not 500, and not a
+  // silent 201 -- `channel-registry.ts`'s `usesExchangeCredentials` is
+  // `false` for `public_api`.
+  it("отказывает в выпуске учётных данных обмена каналу, который их не использует (public_api)", async () => {
+    const res = await agent.post("/integrations/public_api/credentials").send({}).expect(409);
+    expect(res.body.message).toEqual(expect.any(String));
+
+    const row = await agent.get("/integrations/public_api").expect(200);
+    expect(row.body.credentialLogin).toBeNull();
+  });
+
   it("отдаёт журнал сеансами, неуспешный — первым", async () => {
     const res = await agent.get("/integrations/commerceml/journal").expect(200);
     expect(Array.isArray(res.body.sessions)).toBe(true);

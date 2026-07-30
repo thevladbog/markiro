@@ -873,6 +873,7 @@
           "revokeAction": "Отозвать",
           "revokeSuccess": "Ключ отозван",
           "revokeError": "Не удалось отозвать ключ",
+          "revokeAlreadyGone": "Ключ уже был отозван — список обновлён",
           "revokeConfirmTitle": "Отозвать ключ?",
           "revokeConfirmBody": "Ключ «{{name}}» будет отозван без возможности восстановления. Всё, что обращалось к API с ним, перестанет работать.",
           "revokeConfirmAction": "Отозвать",

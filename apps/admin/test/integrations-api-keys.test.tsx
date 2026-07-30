@@ -54,6 +54,16 @@ function iso(hoursOffset: number): string {
 let keysFixture: KeyFixture[] = [];
 /** How `GET /integrations/public_api/keys` should behave for `renderPanel`. */
 let listMode: "ok" | "pending" | "error" = "ok";
+/**
+ * How `DELETE /integrations/public_api/keys/:id` should behave.
+ * "already-gone" mirrors the server's real repeat-revoke contract
+ * (`api-keys.service.ts`'s `revoke`: "there is no separate 'already
+ * revoked' response", just the same 404 any unknown id gets) -- it also
+ * removes the id from `keysFixture` so the *next* `GET` (the refetch a
+ * correct `onError` triggers) reflects the row actually being gone, the
+ * same way a real server would after another admin/tab revoked it first.
+ */
+let revokeMode: "ok" | "already-gone" = "ok";
 
 /** Every `DELETE /integrations/public_api/keys/:id` call, as the key id. */
 const revokeSpy = vi.fn();
@@ -61,6 +71,7 @@ const revokeSpy = vi.fn();
 beforeEach(() => {
   keysFixture = [];
   listMode = "ok";
+  revokeMode = "ok";
   revokeSpy.mockClear();
 });
 
@@ -88,6 +99,10 @@ function renderPanel() {
     const revokeMatch = /^\/integrations\/public_api\/keys\/([^/]+)$/.exec(path);
     if (method === "DELETE" && revokeMatch) {
       revokeSpy(revokeMatch[1]);
+      if (revokeMode === "already-gone") {
+        keysFixture = keysFixture.filter((k) => k.id !== revokeMatch[1]);
+        return jsonResponse(404, { message: "Unknown public API key" });
+      }
       return jsonResponse(200, undefined);
     }
 
@@ -154,5 +169,35 @@ describe("ApiKeysPanel", () => {
 
     await waitFor(() => expect(revokeSpy).toHaveBeenCalledWith("k1"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  // Fix 2 (review, task 15 follow-up): the brief's contract for a repeat
+  // revoke is a 404 -- meaning "this key is already gone", not "the request
+  // failed". `useRevokeApiKey` used to invalidate the list only in
+  // `onSuccess`, so this 404 left the confirm modal open, the already-gone
+  // row still sitting in the table (offering "Отозвать" against it forever,
+  // with the same 404 every time), and a raw server string in the toast.
+  it("повторный отзыв (404) убирает исчезнувшую строку, закрывает диалог и не показывает сырую ошибку сервера", async () => {
+    stubKeys([{ id: "k1", name: "Склад", createdAt: iso(-1) }]);
+    revokeMode = "already-gone";
+    renderPanel();
+
+    await userEvent.click(await screen.findByRole("button", { name: /отозвать/i }));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: /отозвать/i }));
+
+    await waitFor(() => expect(revokeSpy).toHaveBeenCalledWith("k1"));
+    // The 404 must be treated as "goal achieved", not "failed": the modal
+    // closes and the vanished row leaves the table, exactly like a
+    // successfully confirmed revoke would.
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("Склад")).toBeNull());
+    expect(screen.queryByText(/unknown public api key/i)).toBeNull();
+
+    // Clicking "Отозвать" again against the now-vanished row must not be
+    // possible -- there is no more "Отозвать" button for it, and no second
+    // DELETE call happens on its own.
+    expect(screen.queryByRole("button", { name: /отозвать/i })).toBeNull();
+    expect(revokeSpy).toHaveBeenCalledTimes(1);
   });
 });

@@ -345,12 +345,26 @@ export function ChannelPage() {
           </p>
         )}
 
-        <CredentialsSection
-          channel={channel}
-          onIssue={() => void handleIssueCredentials()}
-          issuing={issuing}
-          issued={issued}
-        />
+        {/*
+         * Gated the same way `CommercemlSettingsForm` above is: `commerceml`
+         * is the only channel that actually authenticates with this
+         * login+secret pair on `POST /1c_exchange` (server's
+         * `channel-registry.ts`'s `usesExchangeCredentials`, checked by
+         * `IntegrationsService.issueCredentials`). Rendering this
+         * unconditionally used to hand `public_api` a second, meaningless
+         * "Выпустить"/one-time-secret widget next to `ApiKeysPanel`'s own --
+         * a fully working button that minted a real login+secret nothing on
+         * the server ever checks for that channel (its actual
+         * authentication is the separate keys list below, not this).
+         */}
+        {channel.type === "commerceml" && (
+          <CredentialsSection
+            channel={channel}
+            onIssue={() => void handleIssueCredentials()}
+            issuing={issuing}
+            issued={issued}
+          />
+        )}
       </Card>
 
       {/*

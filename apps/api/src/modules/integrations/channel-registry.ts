@@ -15,6 +15,29 @@ export interface ChannelDescriptor {
   available: boolean;
   /** Приходит ли внешняя система сама (влияет на состояние «молчит»). */
   inbound: boolean;
+  /**
+   * Аутентифицируется ли канал именно парой логин+секрет из
+   * `IntegrationsService.issueCredentials` (`integration_channels.credentialLogin`/
+   * `credentialHash`, которую проверяет `exchange.controller.ts` на
+   * `POST /1c_exchange`). Уже, чем `available`: канал может быть построен и
+   * доступен, ни разу не тронув эту таблицу — у `public_api` своя
+   * аутентификация через `apikey` (`api-keys.service.ts`), у файловых
+   * экспортов её вообще нет. Уже и чем `inbound`: `chestny_znak` тоже
+   * входящий, но его реальная схема подключения ещё не решена (таблица
+   * брифа 08, «Undecided» для остальных строк не про это, но для
+   * `chestny_znak` статус — «placeholder»), так что заводить его на эту
+   * таблицу заранее значит угадывать контракт, которого ещё нет.
+   *
+   * Единственный канал с `true` сегодня — `commerceml`: это единственный,
+   * кто реально предъявляет этот логин+секрет на `POST /1c_exchange`.
+   * `IntegrationsService.issueCredentials` отказывает (409) любому каналу,
+   * для которого здесь `false` — без этой проверки `POST
+   * /integrations/:type/credentials` проверял только `available`, и
+   * `public_api` (доступен, но не обменивается по этому протоколу) мог
+   * выпустить и сохранить настоящий логин+хэш, которые на проверяющей
+   * стороне никто и никогда не читает.
+   */
+  usesExchangeCredentials: boolean;
   settingsSchema: z.ZodType<Record<string, unknown>>;
 }
 
@@ -33,6 +56,7 @@ export const CHANNELS: readonly ChannelDescriptor[] = [
     labelKey: "integrations.channel.commerceml",
     available: true,
     inbound: true,
+    usesExchangeCredentials: true,
     settingsSchema: commercemlSettings,
   },
   {
@@ -40,6 +64,7 @@ export const CHANNELS: readonly ChannelDescriptor[] = [
     labelKey: "integrations.channel.publicApi",
     available: true,
     inbound: false,
+    usesExchangeCredentials: false,
     settingsSchema: emptySettings,
   },
   {
@@ -47,6 +72,7 @@ export const CHANNELS: readonly ChannelDescriptor[] = [
     labelKey: "integrations.channel.gisMtFiles",
     available: false,
     inbound: false,
+    usesExchangeCredentials: false,
     settingsSchema: emptySettings,
   },
   {
@@ -54,6 +80,7 @@ export const CHANNELS: readonly ChannelDescriptor[] = [
     labelKey: "integrations.channel.chestnyZnak",
     available: false,
     inbound: true,
+    usesExchangeCredentials: false,
     settingsSchema: emptySettings,
   },
 ];

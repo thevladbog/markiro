@@ -7,7 +7,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 
-import { apiFetch } from "../../api/client.js";
+import { apiFetch, ApiRequestError } from "../../api/client.js";
 
 /**
  * Mirrors `apps/api/src/modules/integrations/dto.ts`'s `ChannelState`. Five
@@ -387,9 +387,17 @@ export function useIssueApiKey(): { issue: (name: string) => Promise<ApiKeyIssue
  * API key. Carries no secret, so unlike `useIssueApiKey` above there is no
  * mutation-cache leak concern here -- a plain `useMutation` is fine. Revoking
  * an already-revoked id is the server's own 404 (`api-keys.service.ts`'s
- * `revoke`: "there is no separate 'already revoked' response"), which
- * `ApiKeysPanel` surfaces like any other failed revoke rather than treating
- * it as a special case.
+ * `revoke`: "there is no separate 'already revoked' response").
+ *
+ * That 404 means the caller's goal is already met -- the key is gone either
+ * way -- so it must not be treated like any other failed mutation: the list
+ * has to lose that row regardless of which of the two calls (this one, or
+ * whoever revoked it first) actually deleted it. Invalidating only in
+ * `onSuccess` (the previous shape) left a 404'd row sitting in the table
+ * forever, offering "Отозвать" against it indefinitely with the same 404
+ * every time. `ApiKeysPanel` still tells the two cases apart for its own
+ * toast/modal handling -- this hook only owns making sure the list itself
+ * always ends up correct.
  */
 export function useRevokeApiKey(): UseMutationResult<void, Error, string> {
   const queryClient = useQueryClient();
@@ -398,6 +406,11 @@ export function useRevokeApiKey(): UseMutationResult<void, Error, string> {
       apiFetch<void>(`/integrations/public_api/keys/${id}`, { method: "DELETE" }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: API_KEYS_QUERY_KEY });
+    },
+    onError: (error) => {
+      if (error instanceof ApiRequestError && error.status === 404) {
+        void queryClient.invalidateQueries({ queryKey: API_KEYS_QUERY_KEY });
+      }
     },
   });
 }

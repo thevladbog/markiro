@@ -873,6 +873,7 @@
           "revokeAction": "Revoke",
           "revokeSuccess": "Key revoked",
           "revokeError": "Could not revoke the key",
+          "revokeAlreadyGone": "The key was already revoked — list refreshed",
           "revokeConfirmTitle": "Revoke this key?",
           "revokeConfirmBody": "The key \"{{name}}\" will be revoked with no way back. Anything calling the API with it will stop working.",
           "revokeConfirmAction": "Revoke",

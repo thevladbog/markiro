@@ -52,10 +52,27 @@ function stubJournal(sessions: JournalSessionDto[]): void {
   journalSessions = sessions;
 }
 
+/**
+ * `i18n/*.json`'s `integrations.channel` keys are camelCase
+ * (`publicApi`, `gisMtFiles`, `chestnyZnak`), not the snake_case `type` the
+ * server/tests use on the wire -- every prior test in this file only ever
+ * rendered `"commerceml"` (where the two happen to be spelled the same), so
+ * this mismatch never mattered until a `public_api` test needed a real
+ * `labelKey` too. `i18n.test.tsx`'s "throws instead of silently rendering a
+ * missing key" guard means a wrong `labelKey` here fails loudly (not with a
+ * blank title), which is how this was caught.
+ */
+const LABEL_KEY_SEGMENT: Record<string, string> = {
+  commerceml: "commerceml",
+  public_api: "publicApi",
+  gis_mt_files: "gisMtFiles",
+  chestny_znak: "chestnyZnak",
+};
+
 function defaultDetail(type: string) {
   return {
     type,
-    labelKey: `integrations.channel.${type}`,
+    labelKey: `integrations.channel.${LABEL_KEY_SEGMENT[type] ?? type}`,
     state: "working",
     lastEventAt: null,
     settings: {},
@@ -101,6 +118,16 @@ function createFetchMock(options: FetchMockOptions = {}) {
       }
       const type = path.split("/").pop()!;
       return jsonResponse(200, { ...defaultDetail(type), settings: body });
+    }
+    // `GET /integrations/public_api/keys` -- `ApiKeysPanel`'s own list,
+    // mounted by `ChannelPage` alongside everything else for `public_api`.
+    // Handled explicitly (an empty list) rather than falling through to the
+    // plain channel-detail branch below: that branch's response has no
+    // `keys` field at all, which would leave `ApiKeysPanel`'s query
+    // resolving to `undefined` data -- incidental, not something this file's
+    // `public_api` test should depend on.
+    if (method === "GET" && /\/keys$/.test(path)) {
+      return jsonResponse(200, { keys: [] });
     }
     // Plain `GET /integrations/:type` -- the channel-detail fallback.
     if (detailMode === "pending") return new Promise<Response>(() => {});
@@ -332,5 +359,26 @@ describe("ChannelPage", () => {
 
     expect(await screen.findByText(/не удалось выпустить учётные данные/i)).toBeDefined();
     expect(screen.queryByText(/mk-1c-/)).toBeNull();
+  });
+
+  // Fix 1 (review, task 15 follow-up): `CredentialsSection` used to render
+  // unconditionally for every channel type, so `public_api`'s settings card
+  // carried a second, meaningless "Выпустить"/one-time-secret widget next to
+  // `ApiKeysPanel`'s own -- a fully working button that minted a real
+  // exchange login+secret nothing on the server ever checks for this
+  // channel (see `channel-registry.ts`'s `usesExchangeCredentials` and
+  // `IntegrationsService.issueCredentials`'s guard on it). `public_api`'s
+  // real "settings" are the key list, not this.
+  it("не показывает выпуск учётных данных обмена для канала без обмена (public_api)", async () => {
+    renderChannel("public_api");
+
+    // Wait for `ApiKeysPanel` (public_api's own card) to render, so the page
+    // is fully settled before asserting on what it does NOT show.
+    await screen.findByText(/ключи публичного api/i);
+
+    expect(screen.queryByText(/учётные данные обмена/i)).toBeNull();
+    // Exactly one "Выпустить" button should remain -- `ApiKeysPanel`'s own.
+    // Before this fix there were two: this one, plus `CredentialsSection`'s.
+    expect(screen.getAllByRole("button", { name: /выпустить/i }).length).toBe(1);
   });
 });
