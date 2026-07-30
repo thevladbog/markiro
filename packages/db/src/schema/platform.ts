@@ -344,6 +344,20 @@ export const ssccBlocks = pgTable(
       columns: [t.tenantId, t.deviceId],
       foreignColumns: [stationDevices.tenantId, stationDevices.id],
     }),
+    // Backs both of this table's own hot queries (final review, finding 4):
+    // `allocateForBundle`'s SELECT filters on the first four columns (plus
+    // `ORDER BY issued_at DESC LIMIT 1`, covered by the trailing DESC
+    // column), and `recordConsumedSerial`'s UPDATE filters on the first
+    // three plus a serial range. Neither was backed by anything but the
+    // `id` primary key, so both seq-scanned a table that grows one row per
+    // block per device, forever.
+    index("sscc_blocks_tenant_issuer_ext_device_idx").on(
+      t.tenantId,
+      t.issuerPrefix,
+      t.extensionDigit,
+      t.deviceId,
+      t.issuedAt.desc(),
+    ),
   ],
 );
 

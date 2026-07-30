@@ -1,5 +1,5 @@
 {
-  "id": "edf1fd63-fd09-4529-8c79-d8fe403dc083",
+  "id": "48f5c54e-6abd-40f6-aa1b-37be86302609",
   "prevId": "8d019fe4-2b2c-4ccb-90a5-03a9b5bfc2a6",
   "version": "7",
   "dialect": "postgresql",
@@ -1993,7 +1993,47 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "sscc_blocks_tenant_issuer_ext_device_idx": {
+          "name": "sscc_blocks_tenant_issuer_ext_device_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "issuer_prefix",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "extension_digit",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "device_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "issued_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "sscc_blocks_tenant_id_organization_id_fk": {
           "name": "sscc_blocks_tenant_id_organization_id_fk",

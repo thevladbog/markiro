@@ -56,6 +56,7 @@ ALTER TABLE "sscc_blocks" ADD CONSTRAINT "sscc_blocks_tenant_id_organization_id_
 ALTER TABLE "sscc_blocks" ADD CONSTRAINT "sscc_blocks_tenant_device_fk" FOREIGN KEY ("tenant_id","device_id") REFERENCES "public"."station_devices"("tenant_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "sscc_counters" ADD CONSTRAINT "sscc_counters_tenant_id_organization_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."organization"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "box_items_tenant_code_idx" ON "box_items" USING btree ("tenant_id","code_hash");--> statement-breakpoint
+CREATE INDEX "sscc_blocks_tenant_issuer_ext_device_idx" ON "sscc_blocks" USING btree ("tenant_id","issuer_prefix","extension_digit","device_id","issued_at" DESC NULLS LAST);--> statement-breakpoint
 ALTER TABLE "shifts" ADD CONSTRAINT "shifts_tenant_sscc_issuer_fk" FOREIGN KEY ("tenant_id","sscc_issuer_counterparty_id") REFERENCES "public"."counterparties"("tenant_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "shifts" ADD CONSTRAINT "shifts_tenant_box_label_template_fk" FOREIGN KEY ("tenant_id","box_label_template_id") REFERENCES "public"."label_templates"("tenant_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 -- scan_events is hand-migrated (partitioned; excluded from drizzle-kit's
