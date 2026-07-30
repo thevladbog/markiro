@@ -207,8 +207,13 @@ function buildDocumentXml(
  * here for a real builder library to guard against that `escapeXmlText`
  * doesn't already cover.
  */
-export function buildOrdersDocument(orders: EligibleOrder[], settings: OrderDocumentSettings): string {
-  const documentsXml = orders.map(({ order, lines }) => buildDocumentXml(order, lines, settings)).join("");
+export function buildOrdersDocument(
+  orders: EligibleOrder[],
+  settings: OrderDocumentSettings,
+): string {
+  const documentsXml = orders
+    .map(({ order, lines }) => buildDocumentXml(order, lines, settings))
+    .join("");
   const body = tag("КоммерческаяИнформация", tag("ПакетДокументов", documentsXml));
   return `<?xml version="1.0" encoding="UTF-8"?>\n${body}`;
 }

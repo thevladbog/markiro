@@ -105,7 +105,7 @@ describe("commerceml order-export: buildOrdersDocument", () => {
   });
 
   it("экранирует & < > в текстовых полях", () => {
-    const weirdOrder: ExportCandidateOrder = { ...baseOrder, orderNo: 'A&B <test>' };
+    const weirdOrder: ExportCandidateOrder = { ...baseOrder, orderNo: "A&B <test>" };
     const plan = planExport([weirdOrder]);
     const xml = buildOrdersDocument(plan.eligible, { splitWriteoffDocument: false });
     expect(xml).toContain("<Номер>A&amp;B &lt;test&gt;</Номер>");

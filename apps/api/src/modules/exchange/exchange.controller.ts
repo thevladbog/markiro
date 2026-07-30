@@ -784,22 +784,24 @@ export class ExchangeController {
       const mapped = resolveMappedStatus(document.statusValue, settings.statusMapping);
       if (mapped === null) {
         discrepancies++;
-        await this.journal.append({
-          tenantId: session.tenantId,
-          channelType: session.channelType,
-          sessionId: session.id,
-          direction: "in",
-          outcome: "warn",
-          grain: "item",
-          message: `статус не сопоставлен: ${document.externalRef}`,
-          details: { externalRef: document.externalRef, statusValue: document.statusValue },
-        }).catch((error: unknown) => {
-          this.logger.warn(
-            `import (sale): status-unmapped journal failed (continuing): ${document.externalRef} — ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
-        });
+        await this.journal
+          .append({
+            tenantId: session.tenantId,
+            channelType: session.channelType,
+            sessionId: session.id,
+            direction: "in",
+            outcome: "warn",
+            grain: "item",
+            message: `статус не сопоставлен: ${document.externalRef}`,
+            details: { externalRef: document.externalRef, statusValue: document.statusValue },
+          })
+          .catch((error: unknown) => {
+            this.logger.warn(
+              `import (sale): status-unmapped journal failed (continuing): ${document.externalRef} — ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+          });
         continue;
       }
 
@@ -813,22 +815,24 @@ export class ExchangeController {
         continue;
       }
       discrepancies++;
-      await this.journal.append({
-        tenantId: session.tenantId,
-        channelType: session.channelType,
-        sessionId: session.id,
-        direction: "in",
-        outcome: "warn",
-        grain: "item",
-        message: `расхождение статуса (${result.outcome}): ${document.externalRef} -> ${mapped}`,
-        details: { externalRef: document.externalRef, mapped, outcome: result.outcome },
-      }).catch((error: unknown) => {
-        this.logger.warn(
-          `import (sale): status-discrepancy journal failed (continuing): ${document.externalRef} — ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      });
+      await this.journal
+        .append({
+          tenantId: session.tenantId,
+          channelType: session.channelType,
+          sessionId: session.id,
+          direction: "in",
+          outcome: "warn",
+          grain: "item",
+          message: `расхождение статуса (${result.outcome}): ${document.externalRef} -> ${mapped}`,
+          details: { externalRef: document.externalRef, mapped, outcome: result.outcome },
+        })
+        .catch((error: unknown) => {
+          this.logger.warn(
+            `import (sale): status-discrepancy journal failed (continuing): ${document.externalRef} — ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        });
     }
 
     await this.journal.append({
@@ -901,26 +905,35 @@ export class ExchangeController {
    * заявку").
    */
   private async query(session: ResolvedExchangeSession, res: Response): Promise<void> {
-    const candidates = await this.pickupOrders.findExportCandidates(session.tenantId, EXPORT_BATCH_SIZE);
+    const candidates = await this.pickupOrders.findExportCandidates(
+      session.tenantId,
+      EXPORT_BATCH_SIZE,
+    );
     const plan = planExport(candidates);
 
     for (const held of plan.held) {
-      await this.journal.append({
-        tenantId: session.tenantId,
-        channelType: session.channelType,
-        sessionId: session.id,
-        direction: "out",
-        outcome: "warn",
-        grain: "item",
-        message: `заявка придержана — товар без связи с 1С: ${held.orderNo}`,
-        details: { orderId: held.orderId, orderNo: held.orderNo, unlinkedProductIds: held.unlinkedProductIds },
-      }).catch((error: unknown) => {
-        this.logger.warn(
-          `query: held-order journal failed (continuing): ${held.orderNo} — ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      });
+      await this.journal
+        .append({
+          tenantId: session.tenantId,
+          channelType: session.channelType,
+          sessionId: session.id,
+          direction: "out",
+          outcome: "warn",
+          grain: "item",
+          message: `заявка придержана — товар без связи с 1С: ${held.orderNo}`,
+          details: {
+            orderId: held.orderId,
+            orderNo: held.orderNo,
+            unlinkedProductIds: held.unlinkedProductIds,
+          },
+        })
+        .catch((error: unknown) => {
+          this.logger.warn(
+            `query: held-order journal failed (continuing): ${held.orderNo} — ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        });
     }
 
     const [channelRow] = await this.db

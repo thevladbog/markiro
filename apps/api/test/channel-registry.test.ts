@@ -87,17 +87,17 @@ describe("channel registry", () => {
 
   it("commerceml схема принимает statusMapping только с известными значениями", () => {
     const ok = describeChannel("commerceml").settingsSchema.safeParse({
-      statusMapping: { "Оплачен": "punched", "Списан": "writtenoff", "Отменён": "cancelled" },
+      statusMapping: { Оплачен: "punched", Списан: "writtenoff", Отменён: "cancelled" },
     });
     expect(ok.success).toBe(true);
 
     const bad = describeChannel("commerceml").settingsSchema.safeParse({
-      statusMapping: { "Оплачен": "pending" },
+      statusMapping: { Оплачен: "pending" },
     });
     expect(bad.success).toBe(false);
 
     const alsoBad = describeChannel("commerceml").settingsSchema.safeParse({
-      statusMapping: { "Оплачен": "shipped" },
+      statusMapping: { Оплачен: "shipped" },
     });
     expect(alsoBad.success).toBe(false);
   });

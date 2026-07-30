@@ -121,7 +121,10 @@ describe.skipIf(!url)("pickup schema constraints", () => {
     expect(before?.exportedAt).toBeNull();
 
     const now = new Date();
-    await db.update(schema.pickupOrders).set({ exportedAt: now }).where(eq(schema.pickupOrders.id, order1));
+    await db
+      .update(schema.pickupOrders)
+      .set({ exportedAt: now })
+      .where(eq(schema.pickupOrders.id, order1));
 
     const [after] = await db
       .select({ exportedAt: schema.pickupOrders.exportedAt })
@@ -130,6 +133,9 @@ describe.skipIf(!url)("pickup schema constraints", () => {
     expect(after?.exportedAt?.getTime()).toBe(now.getTime());
 
     // Reset for any test after this one in the same file.
-    await db.update(schema.pickupOrders).set({ exportedAt: null }).where(eq(schema.pickupOrders.id, order1));
+    await db
+      .update(schema.pickupOrders)
+      .set({ exportedAt: null })
+      .where(eq(schema.pickupOrders.id, order1));
   });
 });

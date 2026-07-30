@@ -220,7 +220,7 @@ describe("1c_exchange orders (И-2)", () => {
     // used for `/1c_exchange` itself).
     await agent
       .patch("/integrations/commerceml")
-      .send({ orderStatusField: "СтатусЗаказа", statusMapping: { "Оплачен": "punched" } })
+      .send({ orderStatusField: "СтатусЗаказа", statusMapping: { Оплачен: "punched" } })
       .expect(200);
 
     const saleXml = Buffer.from(

@@ -48,7 +48,7 @@ describe("commerceml order-status: parseOrderStatusDocuments", () => {
 });
 
 describe("commerceml order-status: resolveMappedStatus", () => {
-  const mapping = { "Оплачен": "punched", "Списан": "writtenoff", "Отменён": "cancelled" };
+  const mapping = { Оплачен: "punched", Списан: "writtenoff", Отменён: "cancelled" };
 
   it("сопоставляет известное значение", () => {
     expect(resolveMappedStatus("Оплачен", mapping)).toBe("punched");

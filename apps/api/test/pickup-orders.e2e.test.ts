@@ -304,7 +304,10 @@ describe.skipIf(!ready)("pickup orders admin e2e", () => {
       { productId: linkedProductId, productExternalRef: expect.any(String), unitPrice: "10.00" },
     ]);
 
-    await db.update(schema.pickupOrders).set({ exportedAt: new Date() }).where(eq(schema.pickupOrders.id, orderId));
+    await db
+      .update(schema.pickupOrders)
+      .set({ exportedAt: new Date() })
+      .where(eq(schema.pickupOrders.id, orderId));
     const afterExport = await pickupOrdersService.findExportCandidates(tenantId, 100);
     expect(afterExport.some((o) => o.id === orderId)).toBe(false);
   });
