@@ -21,6 +21,7 @@ import { JournalService } from "../integrations/journal.service";
 import { PickupOrdersService } from "../pickup-orders/pickup-orders.service";
 import { decideApplication, type KnownProduct } from "./commerceml/apply";
 import { parseCommerceMl } from "./commerceml/parse";
+import { parseOrderStatusDocuments, resolveMappedStatus } from "./commerceml/order-status";
 import { buildOrdersDocument, planExport } from "./commerceml/order-export";
 import {
   assertUnderCheckauthLimit,
@@ -278,7 +279,7 @@ export class ExchangeController {
     }
 
     if (mode === "import") {
-      await this.import(session, filename, res);
+      await this.import(session, type, filename, res);
       return;
     }
 
@@ -500,6 +501,7 @@ export class ExchangeController {
    */
   private async import(
     session: ResolvedExchangeSession,
+    type: string | undefined,
     filename: string | undefined,
     res: Response,
   ): Promise<void> {
@@ -519,6 +521,11 @@ export class ExchangeController {
     }
 
     const bytes = await this.sessions.assemble(session.id, filename);
+
+    if (type === "sale") {
+      await this.importOrderStatuses(session, filename, bytes, res);
+      return;
+    }
 
     let items: ReturnType<typeof parseCommerceMl>["items"];
     let offers: ReturnType<typeof parseCommerceMl>["offers"];
@@ -719,6 +726,120 @@ export class ExchangeController {
         skipped: plan.skipped.length,
         unmatchedOffers: unmatchedOfferRefs.length,
       },
+    });
+    this.text(res, "success");
+  }
+
+  /**
+   * `type=sale&mode=import` -- спека §6, "Из 1С к нам". Reads changed-order
+   * documents 1С reports (Task 5's `parseOrderStatusDocuments`) and, for
+   * each, resolves its own status requisite through this connection's
+   * `statusMapping` (Task 5's `resolveMappedStatus`) into one of the three
+   * transitions `PickupOrdersService.applyExternalStatus` (Task 7) can
+   * apply. One row's outcome never aborts the round -- same discipline
+   * `apply.ts`'s price decisions already follow.
+   */
+  private async importOrderStatuses(
+    session: ResolvedExchangeSession,
+    filename: string,
+    bytes: Buffer,
+    res: Response,
+  ): Promise<void> {
+    const [channelRow] = await this.db
+      .select({ settings: schema.integrationChannels.settings })
+      .from(schema.integrationChannels)
+      .where(
+        and(
+          eq(schema.integrationChannels.tenantId, session.tenantId),
+          eq(schema.integrationChannels.type, session.channelType),
+        ),
+      );
+    const settings = (channelRow?.settings ?? {}) as {
+      orderStatusField?: string;
+      statusMapping?: Record<string, string>;
+    };
+
+    let documents: ReturnType<typeof parseOrderStatusDocuments>;
+    try {
+      documents = parseOrderStatusDocuments(bytes, settings.orderStatusField);
+    } catch (cause) {
+      const detail = cause instanceof Error ? cause.message : String(cause);
+      await this.journal.append({
+        tenantId: session.tenantId,
+        channelType: session.channelType,
+        sessionId: session.id,
+        direction: "in",
+        outcome: "error",
+        grain: "session",
+        message: `import (sale): ${detail}`,
+        details: { filename, raw: rawFailureBody(IMPORT_PARSE_FAILURE) },
+      });
+      this.fail(res, IMPORT_PARSE_FAILURE);
+      return;
+    }
+
+    let applied = 0;
+    let discrepancies = 0;
+    for (const document of documents) {
+      const mapped = resolveMappedStatus(document.statusValue, settings.statusMapping);
+      if (mapped === null) {
+        discrepancies++;
+        await this.journal.append({
+          tenantId: session.tenantId,
+          channelType: session.channelType,
+          sessionId: session.id,
+          direction: "in",
+          outcome: "warn",
+          grain: "item",
+          message: `статус не сопоставлен: ${document.externalRef}`,
+          details: { externalRef: document.externalRef, statusValue: document.statusValue },
+        }).catch((error: unknown) => {
+          this.logger.warn(
+            `import (sale): status-unmapped journal failed (continuing): ${document.externalRef} — ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        });
+        continue;
+      }
+
+      const result = await this.pickupOrders.applyExternalStatus(
+        session.tenantId,
+        document.externalRef,
+        mapped,
+      );
+      if (result.outcome === "applied") {
+        applied++;
+        continue;
+      }
+      discrepancies++;
+      await this.journal.append({
+        tenantId: session.tenantId,
+        channelType: session.channelType,
+        sessionId: session.id,
+        direction: "in",
+        outcome: "warn",
+        grain: "item",
+        message: `расхождение статуса (${result.outcome}): ${document.externalRef} -> ${mapped}`,
+        details: { externalRef: document.externalRef, mapped, outcome: result.outcome },
+      }).catch((error: unknown) => {
+        this.logger.warn(
+          `import (sale): status-discrepancy journal failed (continuing): ${document.externalRef} — ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      });
+    }
+
+    await this.journal.append({
+      tenantId: session.tenantId,
+      channelType: session.channelType,
+      sessionId: session.id,
+      direction: "in",
+      outcome: "ok",
+      grain: "session",
+      message: `import (sale): файл «${filename}» применён`,
+      details: { filename, applied, discrepancies, total: documents.length },
     });
     this.text(res, "success");
   }
