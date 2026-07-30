@@ -1716,7 +1716,17 @@ describe.skipIf(!ready)("station-scans e2e", () => {
           exceptions: [
             {
               kind: "undo",
-              boxId,
+              // The real device-local box id, exactly as the station's own
+              // sync protocol sends it (see ScanItemDto.boxId and the
+              // box-closures loop's own `boxId` a few hundred lines above in
+              // station-scans.service.ts) -- deliberately NOT the resolved
+              // server `boxes.id` UUID `boxIdFor` returns below. Proves the
+              // resolution step inside `applyExceptions` actually resolves a
+              // raw device string, rather than merely accepting an
+              // already-resolved UUID by luck (the bug this fix closes: a
+              // real device sending "b1" here used to raise Postgres 22P02,
+              // "invalid input syntax for type uuid").
+              boxId: "b1",
               codeHash,
               shiftId,
               terminalId: "t1",
@@ -1756,6 +1766,11 @@ describe.skipIf(!ready)("station-scans e2e", () => {
           .from(schema.boxExceptions)
           .where(eq(schema.boxExceptions.tenantId, tenantId));
         expect(auditRow?.kind).toBe("undo");
+        // The audit row's boxId is the RESOLVED server UUID, not the raw
+        // "b1" the request carried -- proving the resolution step's output
+        // actually flows into the box_exceptions write (and not just into
+        // the box_items update above).
+        expect(auditRow?.boxId).toBe(boxId);
       });
 
       // t1 claims "aa" first (a LATER scannedAt); t2's own later-arriving but
@@ -1771,7 +1786,6 @@ describe.skipIf(!ready)("station-scans e2e", () => {
         const before = await registryOwner(tenantId, codeHash);
         expect(before?.terminalId).toBe("t2");
 
-        const boxId = await boxIdFor("b1");
         await postRaw({
           batchId: `undo-test-${randomUUID()}`,
           items: [],
@@ -1779,7 +1793,12 @@ describe.skipIf(!ready)("station-scans e2e", () => {
           exceptions: [
             {
               kind: "undo",
-              boxId,
+              // Raw device-local id (see the previous test's comment) --
+              // "b1" resolves to t1's own box, which is exactly the box this
+              // no-op case must resolve successfully; the no-op comes from
+              // `releaseCode`'s own WHERE (terminal no longer owns the
+              // code), not from a resolution failure.
+              boxId: "b1",
               codeHash,
               shiftId,
               terminalId: "t1",
@@ -1797,7 +1816,6 @@ describe.skipIf(!ready)("station-scans e2e", () => {
 
       it("redelivering the same undo exception twice is idempotent", async () => {
         await postBatch([scan("aa", { boxId: "b1" })]);
-        const boxId = await boxIdFor("b1");
         const codeHash = "aa".padEnd(64, "0");
 
         const body = {
@@ -1807,7 +1825,8 @@ describe.skipIf(!ready)("station-scans e2e", () => {
           exceptions: [
             {
               kind: "undo",
-              boxId,
+              // Raw device-local id -- see the first test's comment.
+              boxId: "b1",
               codeHash,
               shiftId,
               terminalId: "t1",
@@ -1829,6 +1848,56 @@ describe.skipIf(!ready)("station-scans e2e", () => {
           .where(eq(schema.boxExceptions.tenantId, tenantId));
         expect(auditRows).toHaveLength(1);
       });
+
+      // Critical-finding regression: a device's boxId is device-local and can
+      // fail to resolve to any server `boxes` row at all -- a genuinely
+      // stale/unknown id, or a race with the box's own first item. This must
+      // be a logged no-op, never a throw: throwing here 500s the whole batch,
+      // and per this file's own established retry semantics (see the
+      // box-closures loop's "Zero rows is..." comment in
+      // station-scans.service.ts) the device resends a failing batch under
+      // the SAME batchId forever, wedging that device's queue permanently --
+      // exactly the failure this fix exists to prevent. No `box_exceptions`
+      // audit row either: `box_exceptions.box_id` carries a NOT NULL foreign
+      // key onto `boxes(tenant_id, id)` (packages/db/src/schema/platform.ts),
+      // so a row naming an unresolved box could never be written even if the
+      // code tried.
+      it(
+        "logs and no-ops an exception whose boxId never resolves to a box row, without " +
+          "erroring or writing an audit row",
+        async () => {
+          const warnSpy = vi.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
+          try {
+            const res = await postRaw({
+              batchId: `undo-test-${randomUUID()}`,
+              items: [],
+              boxes: [],
+              exceptions: [
+                {
+                  kind: "undo",
+                  boxId: "ghost-box",
+                  codeHash: "aa".padEnd(64, "0"),
+                  shiftId,
+                  terminalId: "t1",
+                  operatorId: null,
+                  reason: null,
+                  occurredAt: new Date().toISOString(),
+                },
+              ],
+            });
+            expect(res.body.applied).toBe(0);
+            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("ghost-box"));
+
+            const auditRows = await db
+              .select()
+              .from(schema.boxExceptions)
+              .where(eq(schema.boxExceptions.tenantId, tenantId));
+            expect(auditRows).toHaveLength(0);
+          } finally {
+            warnSpy.mockRestore();
+          }
+        },
+      );
     });
   });
 });

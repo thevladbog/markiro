@@ -860,6 +860,15 @@ export class StationScansService {
    * are added by Tasks 5-7 as further branches in this same loop body, not
    * as a rewrite of it.
    *
+   * `ex.boxId` is the device-local box id string, exactly like
+   * `ScanItemDto.boxId` and the box-closures loop's own `closure.boxId`
+   * above -- NOT the server's `boxes.id` UUID. Both `box_items.box_id` and
+   * `box_exceptions.box_id` are Postgres `uuid` columns, so it must be
+   * resolved to the server id, once per exception, BEFORE any kind-specific
+   * branch runs (and before the `clear`/`disassemble` branches Task 5 adds
+   * next): see the resolution step below, copied from the box-closures
+   * loop's own four-column match.
+   *
    * `tx` is loosely typed to the exact operations this method (and
    * `releaseCode`) actually use, same as `SsccService.recordConsumedSerial`
    * and `PickupOrdersService.recordScanRejection`: the transaction callback
@@ -869,11 +878,57 @@ export class StationScansService {
    * every call site that passes it a transaction handle.
    */
   private async applyExceptions(
-    tx: Pick<Db, "insert" | "update" | "delete">,
+    tx: Pick<Db, "select" | "insert" | "update" | "delete">,
     tenantId: string,
     exceptions: ExceptionDto[],
   ): Promise<void> {
     for (const ex of exceptions) {
+      // Resolve the device-local `ex.boxId` to the server's `boxes.id`
+      // UUID, matching on ALL FOUR of `boxes_device_box_uq`'s own columns --
+      // copied from the box-closures loop's `terminalCondition`/WHERE shape
+      // above, not a new comparison style: a bare (tenant, deviceBoxId)
+      // match is not enough to identify one box (two terminals in one
+      // tenant can both call a box "b1", or one device can reuse "b1" after
+      // a shift change).
+      const terminalCondition =
+        ex.terminalId === null
+          ? isNull(schema.boxes.terminalId)
+          : eq(schema.boxes.terminalId, ex.terminalId);
+      const [boxRow] = await tx
+        .select({ id: schema.boxes.id })
+        .from(schema.boxes)
+        .where(
+          and(
+            eq(schema.boxes.tenantId, tenantId),
+            eq(schema.boxes.shiftId, ex.shiftId),
+            terminalCondition,
+            eq(schema.boxes.deviceBoxId, ex.boxId),
+          ),
+        );
+
+      // Zero rows is "nothing to apply this exception to", not an error --
+      // same reasoning as the box-closures loop's own `rowCount === 0`
+      // branch above ("Zero rows is..."): a genuinely stale/unknown
+      // deviceBoxId, or a race with the box's own first item, is an
+      // ordinary input, and throwing here would 500 the whole batch. This
+      // file's own retry semantics mean the device resends a failing batch
+      // under the SAME batchId forever, so a throw here would wedge that
+      // device's queue permanently -- exactly the failure this resolution
+      // step exists to prevent. `box_exceptions.box_id` also carries a NOT
+      // NULL foreign key onto `boxes(tenant_id, id)` (platform.ts), so an
+      // audit row naming an unresolved box could not be written even if
+      // this tried -- there is no partial write to make here, only the log.
+      if (!boxRow) {
+        this.logger.warn(
+          `Exception ${ex.kind} for deviceBoxId ${ex.boxId} (tenant ${tenantId}, shift ` +
+            `${ex.shiftId}, terminal ${ex.terminalId ?? "null"}) matched no box row -- box was ` +
+            `never created, belongs to a different shift/terminal, or is otherwise ` +
+            `unresolvable; skipping as a no-op`,
+        );
+        continue;
+      }
+      const resolvedBoxId = boxRow.id;
+
       if (ex.kind === "undo" && ex.codeHash) {
         await this.releaseCode(tx, tenantId, ex.codeHash, ex.shiftId, ex.terminalId);
         await tx
@@ -882,7 +937,7 @@ export class StationScansService {
           .where(
             and(
               eq(schema.boxItems.tenantId, tenantId),
-              eq(schema.boxItems.boxId, ex.boxId),
+              eq(schema.boxItems.boxId, resolvedBoxId),
               eq(schema.boxItems.codeHash, ex.codeHash),
               isNull(schema.boxItems.displacedAt),
               isNull(schema.boxItems.removedAt),
@@ -890,11 +945,12 @@ export class StationScansService {
           );
       }
       // "clear" and "disassemble" are added in Tasks 5-6; "reprint" writes
-      // only the audit row below, added in Task 7.
+      // only the audit row below, added in Task 7. Every branch above (and
+      // every one still to come) uses `resolvedBoxId`, never `ex.boxId`.
       await tx.insert(schema.boxExceptions).values({
         tenantId,
         kind: ex.kind,
-        boxId: ex.boxId,
+        boxId: resolvedBoxId,
         codeHash: ex.codeHash,
         shiftId: ex.shiftId,
         terminalId: ex.terminalId,
