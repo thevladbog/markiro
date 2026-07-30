@@ -15,6 +15,9 @@ import { EmployeesModule } from "./modules/employees/employees.module";
 import { OperatorsModule } from "./modules/operators/operators.module";
 import { KiosksModule } from "./modules/kiosks/kiosks.module";
 import { PickupReasonsModule } from "./modules/pickup-reasons/pickup-reasons.module";
+import { IntegrationsModule } from "./modules/integrations/integrations.module";
+import { ApiKeysModule } from "./modules/api-keys/api-keys.module";
+import { ExchangeModule } from "./modules/exchange/exchange.module";
 import { KioskModule } from "./modules/kiosk/kiosk.module";
 import { PickupOrdersModule } from "./modules/pickup-orders/pickup-orders.module";
 import { ConflictsModule } from "./modules/conflicts/conflicts.module";
@@ -53,6 +56,9 @@ export class AppModule {
         OperatorsModule,
         KiosksModule,
         PickupReasonsModule,
+        IntegrationsModule,
+        ApiKeysModule,
+        ExchangeModule,
         KioskModule,
         PickupOrdersModule,
         ConflictsModule,

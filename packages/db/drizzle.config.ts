@@ -10,6 +10,7 @@ export default defineConfig({
     "./src/schema/org-profile.ts",
     "./src/schema/labels.ts",
     "./src/schema/pickup.ts",
+    "./src/schema/integrations.ts",
   ],
   out: "./migrations",
   dbCredentials: { url: process.env.DATABASE_URL ?? "" },

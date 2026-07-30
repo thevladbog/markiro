@@ -162,6 +162,54 @@ A new channel must be expressible as _identity, state, settings, journal_
 without changing this brief. If one cannot be, that is a signal the anatomy is
 wrong — fix the anatomy, do not add a second kind of screen.
 
+## Honest accounting against this brief's promise (added post-И-1)
+
+This brief promises that a new channel arrives as "a descriptor, a settings
+schema and an adapter — not a screen, not a journal, not a migration per
+integration" ("How this grows"). И-1 shipped two channels (`commerceml`,
+`public_api`) plus two placeholders (`chestny_znak`, `gis_mt_files`), which is
+enough to check that promise against what actually got built, not just what
+was intended.
+
+**Kept, genuinely.** State, journal and the unmatched-items queue are uniform
+today, in code, not just in principle: `ChannelSummaryDto`, `JournalPageDto`
+and `CandidatesPageDto` (apps/api/src/modules/integrations/dto.ts) carry no
+per-type branching, `stateOf` (integrations.service.ts) derives state from
+the same four fields for every channel, and `JournalList`/`CandidatesQueue`
+(admin) render off those DTOs alone. A fifth channel gets all three for free.
+
+**Not kept: settings and actions.** `ChannelDetailDto.settings` is an untyped
+`Record<string, unknown>` blob — the server-side `ChannelDescriptor.
+settingsSchema` (channel-registry.ts) that actually describes its shape never
+leaves the server. The admin has no way to know what a channel's settings
+form should look like except by being told in advance, so
+`ChannelPage.tsx` hardcodes it: `channel.type === "commerceml" ?
+<CommercemlSettingsForm ... /> : <p>{noSettingsText}</p>`, and again for
+`public_api`'s key panel, and again to decide whether `CredentialsSection`
+(the issue-a-secret action) or `CandidatesQueue` apply at all. There is
+likewise no field on `ChannelDescriptor` for a channel's own actions ("test
+the connection", "export now", "revoke a key") — each one that exists today
+is its own hardcoded component, gated by the same `channel.type === "..."`
+checks.
+
+**What this means for the next channel.** `gis_mt_files` or `chestny_znak`
+(the next two rows in "How this grows") will each still require editing
+`ChannelPage.tsx` — a new `channel.type === "..."` branch, a new bespoke
+settings component, a new bespoke actions area — exactly the "changing this
+brief" outcome the anatomy is supposed to prevent. The promise holds for
+_reading_ a channel (state, journal, candidates); it does not yet hold for
+_configuring_ or _acting on_ one.
+
+**Input for the next plan, not fixed now.** Closing this gap needs the
+settings schema (or a client-renderable projection of it — e.g. a small
+field-spec DSL, not the raw zod object) to travel to the browser as part of
+`ChannelDetailDto`, and a `actions: ChannelActionDescriptor[]`-shaped field on
+`ChannelDescriptor` that the admin can render generically instead of
+special-casing. Deliberately not designed here: doing it well needs to look
+at what `gis_mt_files`' and `chestny_znak`'s actual settings/actions turn out
+to need first, or the generic shape risks being guessed wrong before there is
+a second real (non-placeholder) data point to design it against.
+
 ## Out of scope for this brief
 
 Per-counterparty exchange connections, more than one 1C connection per tenant,

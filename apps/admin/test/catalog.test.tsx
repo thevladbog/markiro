@@ -549,4 +549,66 @@ describe("CatalogPage", () => {
     expect(patchBody.unitPrice).toBe("52.00");
     expect(patchBody.egaisCode).toBe("EG-123");
   });
+
+  // Fix 2 (review, Task 14 follow-up): `CatalogPage` used to rebuild
+  // `initialValues` as a fresh object literal on every render. `ProductForm`'s
+  // resync effect depends on that object referentially, so *any* unrelated
+  // parent re-render -- including the one `useUnlinkProduct`'s own
+  // `invalidateQueries` triggers once the products list refetch settles --
+  // re-fired the effect with the still-stale `externalRef` prop (`formState`
+  // holds a snapshot captured when "Изменить" was clicked, not the freshly
+  // refetched row) and silently restored the just-cleared plaque.
+  it("не восстанавливает плашку связи с 1С после успешного разрыва", async () => {
+    const LINKED_PRODUCT = {
+      ...DRAFT_PRODUCT,
+      id: "p7",
+      externalRef: "1C-GUID-1",
+    };
+    let unlinked = false;
+    let productsGetCount = 0;
+    // Mirrors what the real server does: the DELETE actually clears the ref,
+    // so the products list refetch that `invalidateQueries` triggers comes
+    // back with a *different* `externalRef` than the modal was opened with.
+    // That's what makes TanStack Query's structural sharing treat `data` as
+    // genuinely changed and re-render `CatalogPage` -- returning the
+    // unchanged ref every time (as an earlier version of this test did)
+    // never exercised the bug at all.
+    let serverExternalRef: string | null = LINKED_PRODUCT.externalRef;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/counterparties") return jsonResponse(200, { items: [] });
+      if (
+        path === `/api/products/${LINKED_PRODUCT.id}/external-link` &&
+        init?.method === "DELETE"
+      ) {
+        unlinked = true;
+        serverExternalRef = null;
+        return jsonResponse(200, undefined);
+      }
+      productsGetCount += 1;
+      return jsonResponse(200, { items: [{ ...LINKED_PRODUCT, externalRef: serverExternalRef }] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText(LINKED_PRODUCT.name);
+
+    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+    await screen.findByText("Изменить продукт");
+    expect(screen.getByText(/Связано с 1С: 1C-GUID-1/)).toBeDefined();
+
+    const productsGetCountBeforeUnlink = productsGetCount;
+    fireEvent.click(screen.getByRole("button", { name: "Разорвать связь" }));
+    await waitFor(() => expect(unlinked).toBe(true));
+    await waitFor(() => expect(screen.queryByText(/Связано с 1С:/)).toBeNull());
+
+    // Wait for `useUnlinkProduct`'s `invalidateQueries` to actually drive a
+    // real products refetch to completion (not just fire it) -- that refetch
+    // is what triggers the parent (`CatalogPage`) re-render this test targets.
+    await waitFor(() => expect(productsGetCount).toBeGreaterThan(productsGetCountBeforeUnlink));
+    // Flush the re-render(s) that refetch's resolution schedules.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(screen.queryByText(/Связано с 1С:/)).toBeNull();
+  });
 });
