@@ -784,10 +784,11 @@
         "settings": {
           "title": "Settings",
           "priceTypeLabel": "Price type",
-          "priceTypeHint": "Which 1C price type fills the product price. Empty — decided by the file.",
+          "priceTypeHint": "Which 1C price type fills the product price. For a not-yet-configured channel, empty means the file decides; if a price type is already set, clearing this field will not reset it — the previous value stays in effect.",
           "splitWriteoffDocumentLabel": "Split off a separate write-off document",
           "silentAfterHoursLabel": "Silence threshold, hours",
           "silentAfterHoursHint": "How many hours without events before the channel counts as gone silent.",
+          "silentAfterHoursError": "Minimum 1 hour",
           "saveAction": "Save",
           "saveSuccess": "Settings saved",
           "saveError": "Could not save the settings",

@@ -7,6 +7,7 @@ import { Alert, Button, Card, Input, PageHeader, Spinner, StatusChip } from "@ma
 import type { StatusChipStatus } from "@markiro/ui";
 
 import { ApiRequestError } from "../../api/client.js";
+import { errorProp } from "../../lib/form-error.js";
 import { toast } from "../../lib/toast.js";
 import { ApiKeysPanel } from "./ApiKeysPanel.js";
 import { CandidatesQueue } from "./CandidatesQueue.js";
@@ -84,7 +85,7 @@ function CommercemlSettingsForm({
     register,
     handleSubmit,
     reset,
-    formState: { isDirty },
+    formState: { isDirty, errors },
   } = useForm<CommercemlSettingsValues>({
     defaultValues: commercemlSettingsValuesOf(channel),
   });
@@ -134,6 +135,13 @@ function CommercemlSettingsForm({
   return (
     <form
       onSubmit={(event) => void submit(event)}
+      // Fix (review, Task 13 follow-up): without `noValidate`, the browser's
+      // own HTML5 constraint validation (triggered by `silentAfterHours`'s
+      // native `min={1}` attribute below) intercepted the submit click and
+      // silently refused to even dispatch the "submit" event -- react-hook-
+      // form's own `handleSubmit`, and thus `formState.errors`, never ran at
+      // all. Same convention as `pages/catalog/ProductForm.tsx`'s form.
+      noValidate
       style={{ display: "flex", flexDirection: "column", gap: 16 }}
     >
       <Input
@@ -150,7 +158,23 @@ function CommercemlSettingsForm({
         min={1}
         label={t("pages.integrations.channel.settings.silentAfterHoursLabel")}
         hint={t("pages.integrations.channel.settings.silentAfterHoursHint")}
-        {...register("silentAfterHours", { valueAsNumber: true, min: 1 })}
+        {...errorProp(
+          errors.silentAfterHours?.message ? t(errors.silentAfterHours.message) : undefined,
+        )}
+        {...register("silentAfterHours", {
+          valueAsNumber: true,
+          min: {
+            value: 1,
+            // Fix (review, Task 13 follow-up): `min: 1` alone made an invalid
+            // value (0, blank) fail react-hook-form's own validation --
+            // `handleSubmit` then never called the submit handler at all, and
+            // since `formState.errors` was never read anywhere, the operator
+            // got no toast, no message, nothing. The i18n key here is
+            // translated at render above, same convention `ProductForm.tsx`
+            // uses for its zod issues.
+            message: "pages.integrations.channel.settings.silentAfterHoursError",
+          },
+        })}
       />
       <div>
         <Button type="submit" loading={saving}>

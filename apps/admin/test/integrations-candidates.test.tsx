@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -330,5 +330,96 @@ describe("CandidatesQueue", () => {
     renderQueue();
     expect(await screen.findByText(/не удалось загрузить очередь/i)).toBeDefined();
     expect(screen.queryByText(/очередь пуста/i)).toBeNull();
+  });
+
+  // Fix 3 (review, Task 14 follow-up): "confirm all suggestions" used to fan
+  // every candidate's link request out via `Promise.all`/`Promise.allSettled`
+  // simultaneously -- with the first exchange queuing the tenant's whole
+  // catalogue, that meant hundreds of concurrent POSTs, plus a candidates-list
+  // refetch on every single one of them. This test drives a 12-candidate
+  // batch through a `fetch` mock that only resolves a `.../link` call when
+  // the test tells it to, so it can observe how many are in flight at once,
+  // and asserts the candidates list is refetched only once (its own initial
+  // mount, plus one after the whole batch settles) rather than once per link.
+  it("ограничивает параллелизм пакетного подтверждения и обновляет список один раз", async () => {
+    const candidates: CandidateFixture[] = Array.from({ length: 12 }, (_, i) => ({
+      id: `c${i}`,
+      externalRef: `g${i}`,
+      name: `Товар ${i}`,
+      article: null,
+      suggestedProductId: `p-${i}`,
+    }));
+
+    let inFlight = 0;
+    let maxInFlight = 0;
+    // Total `.../link` requests *dispatched* so far (incremented as each one
+    // starts, not when it resolves) -- this, not the completed count, is what
+    // tells the draining loop below whether another wave can still arrive.
+    // Driving the loop off the completed count instead raced against this
+    // test's own bookkeeping: the last wave's requests are dispatched
+    // synchronously, but "completed" only catches up a few microtask hops
+    // after they're resolved, so the loop could believe a 4th (nonexistent)
+    // wave was still coming after the 3rd (final) one had already been both
+    // dispatched and drained.
+    let dispatched = 0;
+    let listCallCount = 0;
+    const pendingResolvers: Array<() => void> = [];
+
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      const method = init?.method ?? "GET";
+
+      if (method === "GET" && path.startsWith("/api/integrations/commerceml/candidates")) {
+        listCallCount += 1;
+        const hidden = path.includes("hidden=true");
+        const fixtures = hidden ? [] : candidates;
+        return jsonResponse(200, { candidates: fixtures.map(toCandidateDto) });
+      }
+
+      const linkMatch = /^\/api\/integrations\/commerceml\/candidates\/([^/]+)\/link$/.exec(path);
+      if (method === "POST" && linkMatch) {
+        dispatched += 1;
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise<void>((resolve) => pendingResolvers.push(resolve));
+        inFlight -= 1;
+        return jsonResponse(200, undefined);
+      }
+
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <QueryClientProvider client={newQueryClient()}>
+        <CandidatesQueue type="commerceml" />
+      </QueryClientProvider>,
+    );
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: /подтвердить все подсказки/i }),
+    );
+
+    // Drain the batch wave by wave, asserting the in-flight count never
+    // exceeds the pool size at any point along the way. Keep going as long as
+    // there's either a wave still to come (not all 12 dispatched yet) or one
+    // currently sitting unresolved.
+    while (dispatched < candidates.length || pendingResolvers.length > 0) {
+      await waitFor(() => expect(pendingResolvers.length).toBeGreaterThan(0));
+      expect(inFlight).toBeLessThanOrEqual(5);
+      const wave = pendingResolvers.splice(0, pendingResolvers.length);
+      wave.forEach((resolve) => resolve());
+    }
+
+    expect(maxInFlight).toBeLessThanOrEqual(5);
+    // A pool of 1 (i.e. still fully sequential) would also satisfy the bound
+    // above -- confirm it actually ran several at once.
+    expect(maxInFlight).toBeGreaterThan(1);
+
+    await screen.findByText(/связано: 12, отклонено: 0/i);
+
+    // One GET on mount, one more from the single end-of-batch invalidation --
+    // never one per completed link (which would be 12 additional calls).
+    expect(listCallCount).toBe(2);
   });
 });

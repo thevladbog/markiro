@@ -143,7 +143,17 @@ function JournalSessionRow({
         />
       </div>
       {expanded && (
-        <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
+        // Fix (review, Task 13 follow-up): this nested list holds `EventRow`'s
+        // own `<details>`/`<summary>` disclosure. A click there is a real DOM
+        // click on a descendant of this `<li>`, which bubbles straight up to
+        // the `onClick={toggle}` above -- without stopping it here, opening
+        // an event's protocol response collapsed the very session it belongs
+        // to in the same gesture. `stopPropagation` only blocks the bubble;
+        // the summary's own native open/close toggle is unaffected.
+        <ul
+          style={{ margin: 0, padding: 0, listStyle: "none" }}
+          onClick={(event) => event.stopPropagation()}
+        >
           {session.events.map((event, index) => (
             // Events carry no id of their own (dto.ts's `JournalEventDto`) --
             // index is stable here since this list is never reordered or

@@ -209,6 +209,41 @@ describe("ChannelPage", () => {
     expect(await screen.findByText(/unexpected token at 12/)).toBeDefined();
   });
 
+  // Fix 1 (review, Task 13 follow-up): `EventRow`'s `<summary>` sits inside
+  // the session row, which is itself a click-to-toggle element -- clicking
+  // the summary used to bubble up and collapse the very session it belongs
+  // to, unmounting the just-expanded protocol response before it could be
+  // read. Assert the session survives the click on its nested disclosure.
+  it("раскрытие деталей события не схлопывает сеанс", async () => {
+    stubJournal([
+      {
+        id: "s1",
+        startedAt: iso(-1),
+        finishedAt: iso(-1),
+        outcome: "error",
+        summary: {},
+        events: [
+          {
+            at: iso(-1),
+            direction: "in",
+            outcome: "error",
+            message: "Файл не разобран",
+            details: { raw: "failure\nCommerceML: unexpected token at 12" },
+          },
+        ],
+      },
+    ]);
+    renderChannel("commerceml");
+    const session = await screen.findByTestId("journal-session");
+    await userEvent.click(session);
+    expect(session.getAttribute("aria-expanded")).toBe("true");
+
+    await userEvent.click(screen.getByText("Ответ в протокол обмена"));
+
+    expect(session.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText(/unexpected token at 12/)).toBeDefined();
+  });
+
   it("сохраняет тип цены", async () => {
     renderChannel("commerceml");
     await userEvent.type(await screen.findByLabelText(/тип цены/i), "Розничная");
@@ -217,6 +252,22 @@ describe("ChannelPage", () => {
       "/integrations/commerceml",
       expect.objectContaining({ priceType: "Розничная" }),
     );
+  });
+
+  // Fix 4 (review, Task 13 follow-up): `silentAfterHours` is registered with
+  // `min: 1`, so an invalid value (0, here) makes `handleSubmit` refuse to
+  // call the submit handler at all -- but `formState.errors` was never read,
+  // so the operator got no toast, no message, nothing: the button looked
+  // like it just silently did nothing. The field must show its own error.
+  it("показывает ошибку валидации порога молчания и не отправляет форму", async () => {
+    renderChannel("commerceml");
+    const silentInput = await screen.findByLabelText(/порог молчания/i);
+    await userEvent.clear(silentInput);
+    await userEvent.type(silentInput, "0");
+    await userEvent.click(screen.getByRole("button", { name: /сохранить/i }));
+
+    expect(await screen.findByText(/минимум 1 час/i)).toBeDefined();
+    expect(patchSpy).not.toHaveBeenCalled();
   });
 
   // Брифа 08 требования к спискам (пустое состояние, загрузка, ошибка --

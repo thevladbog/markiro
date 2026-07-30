@@ -262,6 +262,13 @@ export interface LinkCandidateInput {
   productId: string;
 }
 
+function postLinkCandidate(type: string, { candidateId, productId }: LinkCandidateInput) {
+  return apiFetch<void>(`/integrations/${type}/candidates/${candidateId}/link`, {
+    method: "POST",
+    body: JSON.stringify({ productId }),
+  });
+}
+
 /**
  * `POST /integrations/:type/candidates/:id/link`. A 409 here means the
  * chosen product already carries a different external link -- the caller
@@ -273,15 +280,24 @@ export interface LinkCandidateInput {
 export function useLinkCandidate(type: string): UseMutationResult<void, Error, LinkCandidateInput> {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ candidateId, productId }) =>
-      apiFetch<void>(`/integrations/${type}/candidates/${candidateId}/link`, {
-        method: "POST",
-        body: JSON.stringify({ productId }),
-      }),
+    mutationFn: (input: LinkCandidateInput) => postLinkCandidate(type, input),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["integrations", type, "candidates"] });
     },
   });
+}
+
+/**
+ * Same request as `useLinkCandidate`'s `mutationFn`, but with no query-cache
+ * side effect of its own -- for the bulk "confirm all suggestions" path
+ * (`CandidatesQueue`'s `handleConfirmAllSuggestions`), which can be linking
+ * hundreds of candidates (the first exchange queues the tenant's whole
+ * catalogue, per that component's own doc comment) and must not invalidate
+ * -- and thus refetch -- the candidates list once per completed link. The
+ * caller invalidates exactly once after the whole batch settles instead.
+ */
+export function linkCandidateRequest(type: string, input: LinkCandidateInput): Promise<void> {
+  return postLinkCandidate(type, input);
 }
 
 /** `POST /integrations/:type/candidates/:id/hide` -- moves a row out of the working queue into the hidden view. */

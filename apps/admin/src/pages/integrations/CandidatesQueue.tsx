@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { isValidGtin } from "@markiro/domain";
 import { Alert, Button, Card, EmptyState, Input, Modal, Select, Spinner, Table } from "@markiro/ui";
@@ -10,12 +11,23 @@ import { ApiRequestError } from "../../api/client.js";
 import { toast } from "../../lib/toast.js";
 import { useCreateProduct, useProducts, type ProductDto } from "../catalog/api.js";
 import {
+  linkCandidateRequest,
   useCandidates,
   useHideCandidate,
   useLinkCandidate,
   useUnhideCandidate,
   type CandidateDto,
 } from "./api.js";
+
+/**
+ * How many "confirm all suggestions" link requests run at once (Task 14
+ * follow-up, review). The first exchange can queue the tenant's entire
+ * catalogue as candidates -- firing every link request simultaneously meant
+ * hundreds of concurrent POSTs. A small worker pool keeps the browser (and
+ * the server) from being hit with the whole batch at once while still
+ * running well ahead of one-at-a-time.
+ */
+const CONFIRM_ALL_CONCURRENCY = 5;
 
 interface CreateFormValues {
   gtin: string;
@@ -184,6 +196,7 @@ function CreateModal({
  */
 export function CandidatesQueue({ type }: { type: string }) {
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
   const [hidden, setHidden] = useState(false);
   const [linkTarget, setLinkTarget] = useState<CandidateDto | null>(null);
   const [createTarget, setCreateTarget] = useState<CandidateDto | null>(null);
@@ -277,32 +290,56 @@ export function CandidatesQueue({ type }: { type: string }) {
    * under concurrent use, not a bug) meant the operator saw a single
    * nondeterministic error toast with no idea the other 49 out of 50 had
    * actually gone through. That is exactly the "confidently wrong" answer
-   * this whole plan exists to avoid. `Promise.allSettled` lets every
-   * candidate resolve independently and the toast reports the true tally --
-   * always both numbers, never a message that implies total success or
-   * total failure when the real outcome was mixed.
+   * this whole plan exists to avoid. Every candidate now resolves
+   * independently (via a bounded worker pool, see `CONFIRM_ALL_CONCURRENCY`
+   * above) and the toast reports the true tally -- always both numbers,
+   * never a message that implies total success or total failure when the
+   * real outcome was mixed.
+   *
+   * Fix (review, further follow-up): the pool calls `linkCandidateRequest`
+   * directly rather than `linkCandidate.mutateAsync` -- the mutation's own
+   * `onSuccess` invalidates the candidates list on *every* call, which with
+   * hundreds of candidates in flight turned into a refetch storm layered on
+   * top of the writes themselves. The list is invalidated exactly once here,
+   * after the whole batch has settled.
    *
    * The button is also locked to `confirmingAll` for the duration (not to
    * `linkCandidate.isPending`, which reflects only the single most recent
-   * dispatch on this shared mutation object and would under-report while N
+   * dispatch on that separate mutation object and would under-report while N
    * calls are in flight at once) -- a second click mid-batch would otherwise
    * re-link everything already-linked and manufacture a fresh wave of 409s.
    */
   const handleConfirmAllSuggestions = async () => {
     setConfirmingAll(true);
     try {
-      const results = await Promise.allSettled(
-        suggestedCandidates.map((c) =>
-          linkCandidate.mutateAsync({ candidateId: c.id, productId: c.suggestedProductId! }),
-        ),
-      );
-      const linked = results.filter((r) => r.status === "fulfilled").length;
+      const queue = [...suggestedCandidates];
+      const results: Array<"fulfilled" | "rejected"> = [];
+
+      const worker = async () => {
+        for (let candidate = queue.shift(); candidate; candidate = queue.shift()) {
+          try {
+            await linkCandidateRequest(type, {
+              candidateId: candidate.id,
+              productId: candidate.suggestedProductId!,
+            });
+            results.push("fulfilled");
+          } catch {
+            results.push("rejected");
+          }
+        }
+      };
+
+      const workerCount = Math.min(CONFIRM_ALL_CONCURRENCY, queue.length);
+      await Promise.all(Array.from({ length: workerCount }, () => worker()));
+
+      const linked = results.filter((status) => status === "fulfilled").length;
       const failed = results.length - linked;
       toast(
         failed === 0 ? "ok" : linked === 0 ? "error" : "warn",
         t("pages.integrations.channel.candidates.confirmAllResult", { linked, failed }),
       );
     } finally {
+      void queryClient.invalidateQueries({ queryKey: ["integrations", type, "candidates"] });
       setConfirmingAll(false);
     }
   };

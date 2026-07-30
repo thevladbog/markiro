@@ -154,20 +154,37 @@ export function CatalogPage() {
   );
 
   const editingProduct = formState?.mode === "edit" ? formState.product : undefined;
-  const initialValues: ProductFormValues | undefined = editingProduct
-    ? {
-        gtin: editingProduct.gtin14,
-        name: editingProduct.name,
-        productGroup: editingProduct.productGroup ?? "",
-        boxCapacity: editingProduct.boxCapacity !== null ? String(editingProduct.boxCapacity) : "",
-        palletCapacity:
-          editingProduct.palletCapacity !== null ? String(editingProduct.palletCapacity) : "",
-        unitPrice: editingProduct.unitPrice ?? "",
-        egaisCode: editingProduct.egaisCode ?? "",
-        defaultCounterpartyId: editingProduct.defaultCounterpartyId ?? "",
-        defaultLabelTemplateId: editingProduct.defaultLabelTemplateId ?? "",
-      }
-    : undefined;
+  // Fix (review, Task 14 follow-up): this used to be a plain object literal
+  // rebuilt on every `CatalogPage` render. `ProductForm`'s resync effect
+  // depends on it *referentially*, so any unrelated parent re-render -- most
+  // notably the one `useUnlinkProduct`'s own `invalidateQueries` triggers
+  // once the products list refetch lands -- handed that effect a "new"
+  // `initialValues` object and made it refire with the still-stale
+  // `externalRef` prop (`editingProduct` is a snapshot captured when
+  // "Изменить" was clicked; it does not track the refetched row), silently
+  // restoring a link the operator had just torn down. Memoizing on
+  // `editingProduct`'s own identity keeps this reference stable across
+  // renders that don't actually change which product (or snapshot of it) is
+  // being edited.
+  const initialValues: ProductFormValues | undefined = useMemo(
+    () =>
+      editingProduct
+        ? {
+            gtin: editingProduct.gtin14,
+            name: editingProduct.name,
+            productGroup: editingProduct.productGroup ?? "",
+            boxCapacity:
+              editingProduct.boxCapacity !== null ? String(editingProduct.boxCapacity) : "",
+            palletCapacity:
+              editingProduct.palletCapacity !== null ? String(editingProduct.palletCapacity) : "",
+            unitPrice: editingProduct.unitPrice ?? "",
+            egaisCode: editingProduct.egaisCode ?? "",
+            defaultCounterpartyId: editingProduct.defaultCounterpartyId ?? "",
+            defaultLabelTemplateId: editingProduct.defaultLabelTemplateId ?? "",
+          }
+        : undefined,
+    [editingProduct],
+  );
 
   const handleSubmit = async (input: CreateProductInput) => {
     const isEdit = formState?.mode === "edit";
