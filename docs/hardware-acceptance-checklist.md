@@ -16,6 +16,14 @@ beside each item.
       and not a literal `>8` / `!1` in the barcode. Verify on both a Zebra
       (ZPL) and a TSC (TSPL) printer: the FNC1 escape differs per language
       and neither is provable from emitted text alone.
+- [ ] **Print verification round-trip (opt-in, 06c).** With print
+      verification enabled for the workstation, close a box: `PrintVerification`
+      takes over the scanner. Scanning the box's own freshly-printed label
+      advances immediately; scanning a different (foreign) SSCC or the same
+      label a second time after a reprint shows the mismatch message and
+      Reprint remains available; scanning a non-SSCC payload shows the
+      "not an SSCC" message. Skip always works, including with the scanner
+      disconnected — confirm neither button is ever disabled or hidden.
 
 ## Station storage (plans 05a, 05b-1, 05b-2)
 
