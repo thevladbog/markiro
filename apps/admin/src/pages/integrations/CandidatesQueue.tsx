@@ -178,6 +178,7 @@ export function CandidatesQueue({ type }: { type: string }) {
   const [hidden, setHidden] = useState(false);
   const [linkTarget, setLinkTarget] = useState<CandidateDto | null>(null);
   const [createTarget, setCreateTarget] = useState<CandidateDto | null>(null);
+  const [confirmingAll, setConfirmingAll] = useState(false);
 
   const { data, isPending, isError } = useCandidates(type, hidden);
   const candidates = useMemo(() => data ?? [], [data]);
@@ -234,6 +235,7 @@ export function CandidatesQueue({ type }: { type: string }) {
   const handleHide = async (candidateId: string) => {
     try {
       await hideCandidate.mutateAsync(candidateId);
+      toast("ok", t("pages.integrations.channel.candidates.hideSuccess"));
     } catch (error) {
       toast(
         "error",
@@ -247,6 +249,7 @@ export function CandidatesQueue({ type }: { type: string }) {
   const handleUnhide = async (candidateId: string) => {
     try {
       await unhideCandidate.mutateAsync(candidateId);
+      toast("ok", t("pages.integrations.channel.candidates.unhideSuccess"));
     } catch (error) {
       toast(
         "error",
@@ -257,21 +260,41 @@ export function CandidatesQueue({ type }: { type: string }) {
     }
   };
 
+  /**
+   * Fix (review, Task 14 follow-up): this used to fan the batch out through
+   * `Promise.all` and show one binary toast. `Promise.all` rejects on the
+   * *first* rejection -- one candidate hitting the server's atomic
+   * `UPDATE ... WHERE external_ref IS NULL` 409 (a real, expected outcome
+   * under concurrent use, not a bug) meant the operator saw a single
+   * nondeterministic error toast with no idea the other 49 out of 50 had
+   * actually gone through. That is exactly the "confidently wrong" answer
+   * this whole plan exists to avoid. `Promise.allSettled` lets every
+   * candidate resolve independently and the toast reports the true tally --
+   * always both numbers, never a message that implies total success or
+   * total failure when the real outcome was mixed.
+   *
+   * The button is also locked to `confirmingAll` for the duration (not to
+   * `linkCandidate.isPending`, which reflects only the single most recent
+   * dispatch on this shared mutation object and would under-report while N
+   * calls are in flight at once) -- a second click mid-batch would otherwise
+   * re-link everything already-linked and manufacture a fresh wave of 409s.
+   */
   const handleConfirmAllSuggestions = async () => {
+    setConfirmingAll(true);
     try {
-      await Promise.all(
+      const results = await Promise.allSettled(
         suggestedCandidates.map((c) =>
           linkCandidate.mutateAsync({ candidateId: c.id, productId: c.suggestedProductId! }),
         ),
       );
-      toast("ok", t("pages.integrations.channel.candidates.confirmAllSuccess"));
-    } catch (error) {
+      const linked = results.filter((r) => r.status === "fulfilled").length;
+      const failed = results.length - linked;
       toast(
-        "error",
-        error instanceof ApiRequestError
-          ? error.message
-          : t("pages.integrations.channel.candidates.confirmAllError"),
+        failed === 0 ? "ok" : linked === 0 ? "error" : "warn",
+        t("pages.integrations.channel.candidates.confirmAllResult", { linked, failed }),
       );
+    } finally {
+      setConfirmingAll(false);
     }
   };
 
@@ -379,6 +402,7 @@ export function CandidatesQueue({ type }: { type: string }) {
             <Button
               type="button"
               variant="secondary"
+              loading={confirmingAll}
               onClick={() => void handleConfirmAllSuggestions()}
             >
               {t("pages.integrations.channel.candidates.confirmAllAction")}

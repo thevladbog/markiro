@@ -61,6 +61,8 @@ let workingFixture: CandidateFixture[] = [];
 let hiddenFixture: CandidateFixture[] = [];
 /** How `GET /integrations/commerceml/candidates` (either view) should behave for `renderQueue`. */
 let queueListMode: "ok" | "pending" | "error" = "ok";
+/** When set, the `.../link` call for this one candidate id answers 409 instead of 200. */
+let failLinkCandidateId: string | null = null;
 
 /** Every POST .../link call, as `(candidateId, productId)`. */
 const linkSpy = vi.fn();
@@ -73,6 +75,7 @@ beforeEach(() => {
   workingFixture = [];
   hiddenFixture = [];
   queueListMode = "ok";
+  failLinkCandidateId = null;
   linkSpy.mockClear();
   listSpy.mockClear();
   unlinkSpy.mockClear();
@@ -81,6 +84,11 @@ beforeEach(() => {
 /** `stubCandidates([...])` -- overrides the working-queue fixture for one test. */
 function stubCandidates(fixtures: CandidateFixture[]): void {
   workingFixture = fixtures;
+}
+
+/** `stubLinkFailure(id)` -- makes the `.../link` call for this one candidate answer 409, as the server's real atomic `UPDATE ... WHERE external_ref IS NULL` does when the target product is already taken. */
+function stubLinkFailure(candidateId: string): void {
+  failLinkCandidateId = candidateId;
 }
 
 function renderQueue() {
@@ -102,6 +110,9 @@ function renderQueue() {
       const candidateId = linkMatch[1]!;
       const body = JSON.parse((init?.body as string | undefined) ?? "{}") as { productId: string };
       linkSpy(candidateId, body.productId);
+      if (candidateId === failLinkCandidateId) {
+        return jsonResponse(409, { message: "Товар уже связан с другой позицией" });
+      }
       return jsonResponse(200, undefined);
     }
 
@@ -237,6 +248,41 @@ describe("CandidatesQueue", () => {
       await screen.findByRole("button", { name: /подтвердить все подсказки/i }),
     );
     expect(linkSpy).toHaveBeenCalledTimes(2);
+  });
+
+  // Fix 1 (review, Task 14 follow-up): a single 409 in the batch used to
+  // reject the whole `Promise.all`, so the operator saw one nondeterministic
+  // error toast with no idea 49 of 50 candidates had actually linked. Now
+  // every candidate settles independently and the toast reports the true
+  // tally.
+  it("подтверждение пачкой переживает единичный 409 и честно считает итог", async () => {
+    stubCandidates([
+      {
+        id: "c1",
+        externalRef: "g1",
+        name: "Жигулёвское 0,5",
+        article: null,
+        suggestedProductId: "p-1",
+      },
+      { id: "c2", externalRef: "g2", name: "Вода 1,0", article: null, suggestedProductId: "p-2" },
+      { id: "c3", externalRef: "g3", name: "Квас 1,5", article: null, suggestedProductId: "p-3" },
+    ]);
+    stubLinkFailure("c2");
+    renderQueue();
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: /подтвердить все подсказки/i }),
+    );
+
+    // The toast reports both numbers -- two linked, one rejected -- rather
+    // than a single binary success/failure verdict.
+    expect(await screen.findByText(/связано: 2, отклонено: 1/i)).toBeDefined();
+
+    // All three were attempted (no short-circuit on the first rejection),
+    // and the two that didn't hit the 409 really did link.
+    expect(linkSpy).toHaveBeenCalledTimes(3);
+    expect(linkSpy).toHaveBeenCalledWith("c1", "p-1");
+    expect(linkSpy).toHaveBeenCalledWith("c3", "p-3");
   });
 
   it("скрытые доступны под фильтром", async () => {
