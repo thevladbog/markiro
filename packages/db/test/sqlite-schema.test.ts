@@ -114,4 +114,29 @@ describe("STATION_MIGRATIONS", () => {
     expect(terminalId).toBeDefined();
     expect(terminalId?.notnull).toBe(0);
   });
+
+  it("round-trips boxes_mirror.disassembled_at and box_exceptions_mirror", () => {
+    const db = migratedDb();
+    db.prepare(
+      `INSERT INTO boxes_mirror (box_id, shift_id, opened_at, disassembled_at)
+       VALUES (?, ?, ?, ?)`,
+    ).run("b1", "s1", "2026-07-30T00:00:00.000Z", "2026-07-30T00:05:00.000Z");
+
+    const box = db
+      .prepare("SELECT disassembled_at FROM boxes_mirror WHERE box_id = ?")
+      .get("b1") as {
+      disassembled_at: string;
+    } | undefined;
+
+    expect(box?.disassembled_at).toBe("2026-07-30T00:05:00.000Z");
+
+    db.prepare(
+      `INSERT INTO box_exceptions_mirror (kind, box_id, shift_id, at)
+       VALUES (?, ?, ?, ?)`,
+    ).run("clear", "b1", "s1", "2026-07-30T00:06:00.000Z");
+
+    const rows = db.prepare("SELECT * FROM box_exceptions_mirror").all() as Array<{ id: number }>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.id).toBe(1);
+  });
 });

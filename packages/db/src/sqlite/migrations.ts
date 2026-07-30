@@ -171,4 +171,27 @@ export const STATION_MIGRATIONS: string[] = [
   // alongside the other shift_mirror columns; read back by `readShiftMirror`
   // the same way. Same re-runnable idempotency as the `login` ALTER above.
   `ALTER TABLE shift_mirror ADD COLUMN box_label_template_spec TEXT;`,
+  // Station exceptions (undo/clear/reprint/disassemble): the box's own
+  // retired flag. Upgrade path for devices enrolled before this slice --
+  // same re-runnable idempotency as the `login` ALTER above (SQLite has no
+  // `ADD COLUMN IF NOT EXISTS`, and applyMigrations swallows the resulting
+  // "duplicate column name" once the column already exists).
+  `ALTER TABLE boxes_mirror ADD COLUMN disassembled_at TEXT;`,
+  // The device-local queue for exception facts, drained the same
+  // read-unacked -> send -> ack-by-hard-delete way the outbox already is
+  // (outbox.ts's readBatch/ackThrough) -- these rows are pure facts, never
+  // updated in place after insert, so they need no boxes_mirror-style
+  // acked_at flag or content signature: a plain monotonic id ceiling is
+  // enough (see sync.ts's box-exceptions read/ack functions).
+  `CREATE TABLE IF NOT EXISTS box_exceptions_mirror (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     kind TEXT NOT NULL,
+     box_id TEXT NOT NULL,
+     code_hash TEXT,
+     shift_id TEXT NOT NULL,
+     terminal_id TEXT,
+     operator_id TEXT,
+     reason TEXT,
+     at TEXT NOT NULL
+   );`,
 ];
