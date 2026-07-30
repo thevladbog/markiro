@@ -199,4 +199,111 @@ describe("1c_exchange orders (И-2)", () => {
     const events = await journalEvents();
     expect(events.some((e) => e.message.includes(orderNo))).toBe(true);
   });
+
+  it("type=sale&mode=import переводит pending заявку по сопоставленному статусу", async () => {
+    const { cookie } = await checkauth();
+
+    const orderId = randomUUID();
+    await db.insert(schema.pickupOrders).values({
+      id: orderId,
+      tenantId,
+      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      kioskId,
+      employeeId,
+      reason: "buy",
+      itemCount: 1,
+    });
+
+    // Configure this connection's orderStatusField/statusMapping before
+    // sending the file -- PATCH /integrations/commerceml with the admin
+    // agent (this file's `agent`, distinct from the raw `request(...)` calls
+    // used for `/1c_exchange` itself).
+    await agent
+      .patch("/integrations/commerceml")
+      .send({ orderStatusField: "СтатусЗаказа", statusMapping: { "Оплачен": "punched" } })
+      .expect(200);
+
+    const saleXml = Buffer.from(
+      [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        "<КоммерческаяИнформация><ПакетДокументов><Документ>",
+        `<Ид>${orderId}</Ид>`,
+        "<ЗначенияРеквизитов><ЗначениеРеквизита>",
+        "<Наименование>СтатусЗаказа</Наименование><Значение>Оплачен</Значение>",
+        "</ЗначениеРеквизита></ЗначенияРеквизитов>",
+        "</Документ></ПакетДокументов></КоммерческаяИнформация>",
+      ].join(""),
+      "utf8",
+    );
+
+    // No explicit Content-Type header, matching every other `mode=file` test
+    // in this codebase: `ensureContentType` (exchange.module.ts) backfills
+    // one when absent, and supertest's `.send(Buffer)` doesn't set one on
+    // its own -- see exchange-protocol.e2e.test.ts's own chunk-upload test.
+    await request(app!.getHttpServer())
+      .post("/1c_exchange?mode=file&filename=sale.xml")
+      .set("Cookie", cookie)
+      .send(saleXml)
+      .expect(200);
+
+    const importRes = await request(app!.getHttpServer())
+      .get("/1c_exchange?mode=import&type=sale&filename=sale.xml")
+      .set("Cookie", cookie)
+      .expect(200);
+    expect(importRes.text).toBe("success");
+
+    const [row] = await db
+      .select({ status: schema.pickupOrders.status })
+      .from(schema.pickupOrders)
+      .where(eq(schema.pickupOrders.id, orderId));
+    expect(row?.status).toBe("punched");
+  });
+
+  it("статус, не найденный в таблице сопоставления, журналируется как расхождение и заявку не трогает", async () => {
+    const { cookie } = await checkauth();
+
+    const orderId = randomUUID();
+    await db.insert(schema.pickupOrders).values({
+      id: orderId,
+      tenantId,
+      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      kioskId,
+      employeeId,
+      reason: "buy",
+      itemCount: 1,
+    });
+
+    const saleXml = Buffer.from(
+      [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        "<КоммерческаяИнформация><ПакетДокументов><Документ>",
+        `<Ид>${orderId}</Ид>`,
+        "<ЗначенияРеквизитов><ЗначениеРеквизита>",
+        "<Наименование>СтатусЗаказа</Наименование><Значение>НеизвестноеЗначение</Значение>",
+        "</ЗначениеРеквизита></ЗначенияРеквизитов>",
+        "</Документ></ПакетДокументов></КоммерческаяИнформация>",
+      ].join(""),
+      "utf8",
+    );
+
+    await request(app!.getHttpServer())
+      .post("/1c_exchange?mode=file&filename=sale2.xml")
+      .set("Cookie", cookie)
+      .send(saleXml)
+      .expect(200);
+
+    await request(app!.getHttpServer())
+      .get("/1c_exchange?mode=import&type=sale&filename=sale2.xml")
+      .set("Cookie", cookie)
+      .expect(200);
+
+    const [row] = await db
+      .select({ status: schema.pickupOrders.status })
+      .from(schema.pickupOrders)
+      .where(eq(schema.pickupOrders.id, orderId));
+    expect(row?.status).toBe("pending");
+
+    const events = await journalEvents();
+    expect(events.some((e) => e.message.startsWith("статус не сопоставлен"))).toBe(true);
+  });
 });
