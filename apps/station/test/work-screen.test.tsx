@@ -593,6 +593,29 @@ describe("WorkScreen box progress, closing and printing", () => {
     await waitFor(() => expect(onScan).toHaveBeenCalledTimes(2));
   });
 
+  // CodeRabbit PR33 review, Finding 4: `closeCurrentBox` used to only ever
+  // resolve to "closed" | "no-serials" | "empty" -- a burned serial that
+  // `buildSscc` could not turn into a valid SSCC (an over-capacity pool
+  // range) had no status of its own and, before close-box.ts's fix, threw
+  // uncaught. WorkScreen's own try/catch around `impl(...)` only ever
+  // logged that via `console.error` and returned silently -- the operator
+  // saw nothing at all. This pins the operator-visible half of the fix: the
+  // new "invalid-serial" status must surface a real message, and scanning
+  // must keep working (this is not a fatal state).
+  it("says plainly that a box number could not be built, and keeps accepting scans", async () => {
+    const close = vi
+      .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
+      .mockResolvedValue({ status: "invalid-serial" });
+    const onScan = vi.fn();
+    renderWorkTracked({ boxCapacity: 10, boxItemCount: 9, closeCurrentBox: close, onScan });
+    act(() => scan(KM));
+    await waitFor(() =>
+      expect(screen.getByText(/не удалось сформировать номер короба/i)).toBeDefined(),
+    );
+    act(() => scan(OTHER_KM));
+    await waitFor(() => expect(onScan).toHaveBeenCalledTimes(2));
+  });
+
   it("does not prompt for verification when the setting is off", async () => {
     const close = vi
       .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()

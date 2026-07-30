@@ -130,6 +130,13 @@ export function WorkScreen({
   const boxReady = useRef<Promise<void> | null>(null);
 
   const [noSerials, setNoSerials] = useState(false);
+  // CodeRabbit PR33 review, Finding 4: `closeCurrentBox` burned a serial
+  // that `buildSscc` could not turn into a valid SSCC (an over-capacity
+  // local pool range -- see `close-box.ts`'s `invalid-serial` status for
+  // the full story). Surfaced plainly rather than a silent console.error:
+  // the box stays open (no sscc/closedAt written), so the operator can
+  // simply try closing it again.
+  const [invalidSerial, setInvalidSerial] = useState(false);
   // The box label's geometry -- a plain ref, not React state, the same shape
   // `keys` (above) already takes: nothing renders off this, and
   // `printAndMaybeVerify` reads it from inside `closeTheBox`, which can
@@ -410,8 +417,13 @@ export function WorkScreen({
         setNoSerials(true);
         return;
       }
+      if (result.status === "invalid-serial") {
+        setInvalidSerial(true);
+        return;
+      }
 
       setNoSerials(false);
+      setInvalidSerial(false);
       setPrintUnavailable(false);
       const newBoxId = crypto.randomUUID();
       try {
@@ -780,6 +792,7 @@ export function WorkScreen({
             </div>
           ) : null}
           {noSerials ? <Alert tone="warn" title={t("box.noSerials")} /> : null}
+          {invalidSerial ? <Alert tone="warn" title={t("box.invalidSerial")} /> : null}
           {printUnavailable ? <Alert tone="warn" title={t("box.printNotAvailable")} /> : null}
         </div>
       ) : null}

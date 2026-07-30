@@ -1,4 +1,4 @@
-import { buildSscc } from "@markiro/domain";
+import { buildSscc, DomainError } from "@markiro/domain";
 import { closeBox, currentBox } from "./boxes.js";
 import type { SqlExecutor } from "./mirror.js";
 import { burnSerial } from "./sscc-pool.js";
@@ -13,7 +13,23 @@ const BOX_EXTENSION_DIGIT = 0;
 export type CloseBoxResult =
   | { status: "closed"; sscc: string; itemCount: number }
   | { status: "no-serials" }
-  | { status: "empty" };
+  | { status: "empty" }
+  /**
+   * CodeRabbit PR33 review, Finding 4: the burned serial cannot be turned
+   * into a valid SSCC -- `buildSscc` threw `SSCC_RANGE`. This can only
+   * happen if this device's local pool holds a range that reaches beyond
+   * the issuer prefix's own capacity, which should never occur once the
+   * server-side allocation fix (`SsccService.allocate`) is in place; this
+   * is defense in depth for a range mirrored before that fix, or a
+   * corrupted local pool. The serial that produced this is already burned
+   * -- `burnSerial` is one atomic SQL statement, by design (see its own doc
+   * comment), so there is no clean way to give it back -- and is accepted
+   * as lost, the same way an abandoned box already costs a burned serial.
+   * Surfaced as its own status so the caller can tell the operator plainly,
+   * rather than a silent `console.error` repeating on every retry until the
+   * whole (invalid) block is exhausted.
+   */
+  | { status: "invalid-serial" };
 
 export interface CloseBoxDeps {
   exec: SqlExecutor;
@@ -49,7 +65,19 @@ export async function closeCurrentBox(
   const serial = await burnSerial(deps.exec, deps.issuerPrefix, BOX_EXTENSION_DIGIT);
   if (serial === null) return { status: "no-serials" };
 
-  const sscc = buildSscc(BOX_EXTENSION_DIGIT, deps.issuerPrefix, serial);
+  let sscc: string;
+  try {
+    sscc = buildSscc(BOX_EXTENSION_DIGIT, deps.issuerPrefix, serial);
+  } catch (err) {
+    if (err instanceof DomainError && err.code === "SSCC_RANGE") {
+      // See `invalid-serial`'s own doc comment above: the serial is already
+      // burned and cannot be un-burned, and this box's row is left untouched
+      // (still open, no sscc/closedAt written) so the operator can simply
+      // try closing it again.
+      return { status: "invalid-serial" };
+    }
+    throw err;
+  }
   const closedAt = new Date(deps.now ? deps.now() : Date.now()).toISOString();
   await closeBox(deps.exec, box.boxId, sscc, closedAt, operatorId);
 

@@ -14,7 +14,11 @@ import type { LabelTemplateSpec } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
 import { OperatorsService } from "../operators/operators.service";
 import type { ProductDto } from "../products/dto";
-import { BOX_EXTENSION_DIGIT, SsccService } from "../sscc/sscc.service";
+import {
+  BOX_EXTENSION_DIGIT,
+  SsccCapacityExhaustedException,
+  SsccService,
+} from "../sscc/sscc.service";
 import type {
   CloseShiftDto,
   CreateShiftDto,
@@ -409,6 +413,15 @@ export class ShiftsService {
    * (the org-profile/counterparty settings routes need that 400 to tell an
    * admin what's wrong), so the degrade lives here, at this one call site,
    * not in the shared method.
+   *
+   * CodeRabbit PR33 review, Finding 4: the same reasoning extends to
+   * `SsccCapacityExhaustedException` -- an entire 9-digit issuer prefix's
+   * serial space being spent is exceedingly rare, but if it ever happens the
+   * station must still get its product, label template and operator roster;
+   * it already has a graceful "no-serials" state for a device with an empty
+   * local pool (`sscc-pool.ts`'s `burnSerial` returning null), so degrading
+   * to `sscc: null` here lands the device in that SAME, already-handled
+   * state rather than losing the whole bundle over it.
    */
   private async bundleSscc(
     tenantId: string,
@@ -431,13 +444,21 @@ export class ShiftsService {
       );
       return null;
     }
-    return this.sscc.allocateForBundle(
-      tenantId,
-      issuerPrefix,
-      BOX_EXTENSION_DIGIT,
-      deviceId,
-      BOX_BLOCK_SIZE,
-    );
+    try {
+      return await this.sscc.allocateForBundle(
+        tenantId,
+        issuerPrefix,
+        BOX_EXTENSION_DIGIT,
+        deviceId,
+        BOX_BLOCK_SIZE,
+      );
+    } catch (error) {
+      if (!(error instanceof SsccCapacityExhaustedException)) throw error;
+      this.logger.warn(
+        `Shift ${shiftId} (tenant ${tenantId}) bundle has no box serial block -- ${error.message}`,
+      );
+      return null;
+    }
   }
 
   private async findRow(tenantId: string, id: string): Promise<ShiftRow | undefined> {

@@ -9,7 +9,7 @@ import { schema, type Db } from "@markiro/db";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
-import { SsccService } from "../src/modules/sscc/sscc.service";
+import { SsccCapacityExhaustedException, SsccService } from "../src/modules/sscc/sscc.service";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { signUpAndActivate } from "./support/auth";
 
@@ -471,6 +471,105 @@ describe.skipIf(!ready)("sscc e2e", () => {
       const next = await svc.allocateForBundle(tenantId, prefix, 0, deviceId, 5);
       expect(next.fromSerial).toBe(first.toSerial + 1);
       expect(next.toSerial).toBeGreaterThanOrEqual(next.fromSerial);
+    });
+  });
+
+  // CodeRabbit PR33 review, Finding 4: `allocate` used to increment the
+  // counter unconditionally, with nothing stopping a block from crossing a
+  // 9-digit issuer prefix's own capacity (10_000_000 = 10 ** (16 - 9)). The
+  // settings API lets an admin seed `nextSerial` up to 9_999_999, so an
+  // allocation near that ceiling could produce a block whose `toSerial` sat
+  // beyond capacity -- burning serials `buildSscc` can never turn into a
+  // valid SSCC.
+  describe("capacity boundary (CodeRabbit PR33 review, Finding 4)", () => {
+    const CAPACITY = 10_000_000;
+
+    /** Seeds the counter directly to `nextSerial`, bypassing putSscc's own floor check (not under test here). */
+    async function seedCounter(prefix: string, nextSerial: number): Promise<void> {
+      await db
+        .insert(schema.ssccCounters)
+        .values({ tenantId, issuerPrefix: prefix, extensionDigit: 0, nextSerial });
+    }
+
+    async function readCounter(prefix: string): Promise<number | null> {
+      const [row] = await db
+        .select({ nextSerial: schema.ssccCounters.nextSerial })
+        .from(schema.ssccCounters)
+        .where(
+          and(
+            eq(schema.ssccCounters.tenantId, tenantId),
+            eq(schema.ssccCounters.issuerPrefix, prefix),
+            eq(schema.ssccCounters.extensionDigit, 0),
+          ),
+        );
+      return row ? Number(row.nextSerial) : null;
+    }
+
+    it("clamps a block that would cross capacity to only the remainder, and corrects the persisted counter to exactly capacity", async () => {
+      const svc = app!.get(SsccService);
+      const prefix = "800000001";
+      const deviceId = await registerDevice("Near-ceiling device A");
+      // Only 5 serials remain (9_999_995..9_999_999) before capacity.
+      await seedCounter(prefix, CAPACITY - 5);
+
+      const block = await svc.allocate(tenantId, prefix, 0, deviceId, 10);
+
+      expect(block.fromSerial).toBe(CAPACITY - 5);
+      // NOT fromSerial + 10 - 1: clamped to the last serial actually inside
+      // capacity, not the full requested size.
+      expect(block.toSerial).toBe(CAPACITY - 1);
+      // The persisted counter must land exactly on capacity -- never above
+      // it, which would silently corrupt every later allocate() on this
+      // counter into producing an over-capacity block again.
+      expect(await readCounter(prefix)).toBe(CAPACITY);
+      // buildSscc must accept every serial in the granted (clamped) block.
+      expect(() => buildSscc(0, prefix, block.fromSerial)).not.toThrow();
+      expect(() => buildSscc(0, prefix, block.toSerial)).not.toThrow();
+    });
+
+    it("refuses cleanly (named exhaustion error) once the counter is already at capacity, rolling back the attempted increment", async () => {
+      const svc = app!.get(SsccService);
+      const prefix = "800000002";
+      const deviceId = await registerDevice("Near-ceiling device B");
+      await seedCounter(prefix, CAPACITY);
+
+      await expect(svc.allocate(tenantId, prefix, 0, deviceId, 10)).rejects.toBeInstanceOf(
+        SsccCapacityExhaustedException,
+      );
+
+      // The rejected attempt must leave the counter untouched -- rolled back
+      // inside the SAME transaction the increment ran in, not left sitting
+      // over capacity.
+      expect(await readCounter(prefix)).toBe(CAPACITY);
+      // And no orphaned sscc_blocks row was left behind for the failed attempt.
+      const rows = await db
+        .select()
+        .from(schema.ssccBlocks)
+        .where(
+          and(eq(schema.ssccBlocks.tenantId, tenantId), eq(schema.ssccBlocks.issuerPrefix, prefix)),
+        );
+      expect(rows).toHaveLength(0);
+    });
+
+    it("stays internally consistent across repeated allocations right up to and past the ceiling", async () => {
+      const svc = app!.get(SsccService);
+      const prefix = "800000003";
+      const deviceA = await registerDevice("Near-ceiling device C1");
+      const deviceB = await registerDevice("Near-ceiling device C2");
+      await seedCounter(prefix, CAPACITY - 3);
+
+      // First device: only 3 remain -- gets a clamped block of exactly 3.
+      const first = await svc.allocate(tenantId, prefix, 0, deviceA, 10);
+      expect(first.fromSerial).toBe(CAPACITY - 3);
+      expect(first.toSerial).toBe(CAPACITY - 1);
+      expect(await readCounter(prefix)).toBe(CAPACITY);
+
+      // Second device, right after: nothing left at all.
+      await expect(svc.allocate(tenantId, prefix, 0, deviceB, 10)).rejects.toBeInstanceOf(
+        SsccCapacityExhaustedException,
+      );
+      // Still exactly at capacity -- the failed second attempt changed nothing.
+      expect(await readCounter(prefix)).toBe(CAPACITY);
     });
   });
 });

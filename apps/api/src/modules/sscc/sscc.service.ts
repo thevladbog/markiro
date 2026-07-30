@@ -1,11 +1,12 @@
 import {
   BadRequestException,
+  ConflictException,
   Inject,
   Injectable,
   InternalServerErrorException,
 } from "@nestjs/common";
 import { and, desc, eq, gte, lte, max, sql } from "drizzle-orm";
-import { parseSscc } from "@markiro/domain";
+import { parseSscc, ssccSerialCapacity } from "@markiro/domain";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
 
@@ -34,6 +35,24 @@ export interface SsccBlock {
 
 /** A GS1 GLN is always exactly 13 digits; the issuer prefix is its first 9. */
 const GLN_PATTERN = /^\d{13}$/;
+
+/**
+ * CodeRabbit PR33 review, Finding 4: a NAMED exhaustion error, thrown by
+ * `allocate` when a (tenant, issuer prefix, extension digit) counter has
+ * nothing left to give at all -- distinct from `InternalServerErrorException`
+ * (an unexpected failure) or `BadRequestException` (a caller error). This is
+ * an entirely expected, if rare, business condition once a 9-digit issuer
+ * prefix's whole 10-million-serial space is spent, and callers (see
+ * `ShiftsService.bundleSscc`) treat it as such -- caught and degraded to
+ * `sscc: null`, the same way a missing GLN already is, rather than a 500.
+ */
+export class SsccCapacityExhaustedException extends ConflictException {
+  constructor(issuerPrefix: string, extensionDigit: number) {
+    super(
+      `SSCC serial space for issuer prefix ${issuerPrefix}, extension digit ${extensionDigit} is exhausted`,
+    );
+  }
+}
 
 /**
  * Derives the 9-digit issuer prefix from a 13-digit GLN. Exported (rather
@@ -147,6 +166,44 @@ export class SsccService {
    * transient error) would leave the counter already advanced with nothing
    * recording who got the range — a burned, unaccounted-for block, which is
    * exactly what this table exists to prevent.
+   *
+   * CodeRabbit PR33 review, Finding 4: the increment used to be unconditional
+   * -- `nextSerial + size`, with nothing stopping it from crossing the
+   * prefix's own capacity (`ssccSerialCapacity`, `10 ** (16 - 9)` for a
+   * 9-digit issuer prefix). The settings API lets an admin seed `nextSerial`
+   * up to `9_999_999` (one below capacity), so an allocation near the
+   * ceiling could produce a block whose `toSerial` sat beyond it. The device
+   * would then burn a serial from that block, have `buildSscc` throw
+   * `SSCC_RANGE` when asked to build the actual SSCC, and repeat -- burning
+   * another serial each time -- until the block was exhausted, with only a
+   * console error to show for it (see `close-box.ts` on the device side).
+   *
+   * The fix stays inside the SAME statement/transaction as the increment,
+   * never a separate check that could race a concurrent `allocate` for the
+   * SAME counter: the UPDATE's SET expression computes
+   * `LEAST(nextSerial + size, capacity)` using the row's OWN current value
+   * at conflict-resolution time -- exactly the value Postgres's `ON CONFLICT
+   * DO UPDATE` already serializes concurrent upsers against (the same
+   * guarantee the un-clamped `nextSerial + size` expression already relied
+   * on) -- so two concurrent allocations against a nearly-exhausted counter
+   * can never together cross `capacity`, only ever approach it. `before`
+   * (this call's own pre-increment value) is derived from the RETURNED
+   * unclamped next value minus `size`, needing no separate read: it is
+   * correct regardless of clamping, because it is computed from this
+   * request's own known inputs, not a fresh query that could see a value a
+   * concurrent transaction has since changed.
+   *
+   * - `before >= capacity`: nothing at all remains. Refuse cleanly by
+   *   throwing `SsccCapacityExhaustedException` -- INSIDE the transaction, so
+   *   the increment this statement just performed is rolled back and the
+   *   counter is left exactly as it was, never parked over capacity.
+   * - `before < capacity` but the unclamped `after` would exceed it: grant
+   *   only the remainder (`capacity - before`), a partial (but still
+   *   correct, still usable) block, and issue a follow-up UPDATE — still
+   *   inside this same transaction, so no concurrent allocate can observe
+   *   the intermediate unclamped value — correcting the persisted counter
+   *   back down to `capacity` so it does not silently sit over-capacity for
+   *   the next call.
    */
   async allocate(
     tenantId: string,
@@ -155,6 +212,7 @@ export class SsccService {
     deviceId: string,
     size: number,
   ): Promise<SsccBlock> {
+    const capacity = ssccSerialCapacity(issuerPrefix);
     return this.db.transaction(async (tx) => {
       const [row] = await tx
         .insert(schema.ssccCounters)
@@ -173,11 +231,42 @@ export class SsccService {
         .returning({ next: schema.ssccCounters.nextSerial });
 
       if (!row) throw new InternalServerErrorException("Failed to allocate sscc block");
-      const toExclusive = Number(row.next);
+      // Unclamped: the counter's actual post-increment value, which may sit
+      // beyond `capacity` at this point -- corrected below before this
+      // transaction ever commits.
+      const rawNext = Number(row.next);
+      const before = rawNext - size;
+
+      if (before >= capacity) {
+        // Nothing left to give at all. Throwing here rolls back the
+        // increment above (still inside this transaction), leaving the
+        // counter exactly where it was for the next attempt to see the
+        // same, consistent "exhausted" state.
+        throw new SsccCapacityExhaustedException(issuerPrefix, extensionDigit);
+      }
+
+      const toExclusive = Math.min(rawNext, capacity);
+      if (toExclusive !== rawNext) {
+        // Partial: this allocation would have crossed the boundary. Correct
+        // the persisted counter back down to `capacity` -- still inside this
+        // transaction, so no concurrent allocate can ever observe the
+        // intermediate unclamped value.
+        await tx
+          .update(schema.ssccCounters)
+          .set({ nextSerial: toExclusive, updatedAt: sql`now()` })
+          .where(
+            and(
+              eq(schema.ssccCounters.tenantId, tenantId),
+              eq(schema.ssccCounters.issuerPrefix, issuerPrefix),
+              eq(schema.ssccCounters.extensionDigit, extensionDigit),
+            ),
+          );
+      }
+
       const block: SsccBlock = {
         issuerPrefix,
         extensionDigit,
-        fromSerial: toExclusive - size,
+        fromSerial: before,
         toSerial: toExclusive - 1,
         consumedThroughSerial: null,
       };
