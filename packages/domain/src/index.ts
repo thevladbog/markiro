@@ -42,3 +42,4 @@ export type { TsplBytesPacking, ZplHexPacking } from "./labels/raster.js";
 export { renderCode128Svg, renderDataMatrixSvg, renderQrSvg } from "./barcodes/svg.js";
 export { deriveDigestB64, formatPhc, parsePhc, PHC_ITERATIONS, verifyPhc } from "./crypto/phc.js";
 export type { ParsedPhc } from "./crypto/phc.js";
+export { MAX_BOX_CLOSURES_PER_SYNC_BATCH } from "./sync/limits.js";

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MAX_BOX_CLOSURES_PER_SYNC_BATCH } from "@markiro/domain";
 
 const scanItemSchema = z.object({
   // Normalised to lowercase here, at the boundary: Postgres's `uuid` type is
@@ -76,7 +77,14 @@ export const syncBatchSchema = z.object({
         printSkippedAt: z.string().datetime().nullable().default(null),
       }),
     )
-    .max(50)
+    // Shared with the station's own drain loop (`MAX_BOX_CLOSURES_PER_SYNC_
+    // BATCH` in `apps/station/src/lib/sync.ts`, sourced from
+    // `@markiro/domain`): the two sides MUST agree, or a device that reads
+    // more closed-unacked boxes than this endpoint accepts would have its
+    // whole batch rejected here every time, wedging both box closures and
+    // item delivery on that device forever (the drain retries a rejected
+    // batch indefinitely rather than ever dropping data).
+    .max(MAX_BOX_CLOSURES_PER_SYNC_BATCH)
     .default([]),
 });
 

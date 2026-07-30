@@ -2,7 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DatabaseSync } from "node:sqlite";
 import { createStationClient, REQUEST_TIMEOUT_MS } from "../src/lib/api-client.js";
 import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
-import { BACKOFF_START_MS, BATCH_SIZE, createSyncEngine, STUCK_AFTER_MS } from "../src/lib/sync.js";
+import {
+  BACKOFF_START_MS,
+  BATCH_SIZE,
+  createSyncEngine,
+  MAX_BOX_CLOSURES_PER_SYNC_BATCH,
+  STUCK_AFTER_MS,
+} from "../src/lib/sync.js";
 import { addRange, remaining } from "../src/lib/sscc-pool.js";
 import {
   closeBox,
@@ -1311,6 +1317,165 @@ describe("sync engine: pools and closures", () => {
 
       expect(secondBatchId).not.toBe(firstBatchId);
       expect(appliedOutcomes.get("b1")).toEqual({ printVerifiedAt: ISO, printSkippedAt: null });
+    },
+  );
+
+  // CodeRabbit PR33 review, Finding 1: the OLD `batchId` only ever folded in
+  // the outbox's `maxId` when the batch also carried items -- never the box
+  // set. A box that closes DURING the backoff window between a lost
+  // response and its retry therefore rode the SAME batch id as the original
+  // (unchanged `maxId`), and the real server (station-scans.service.ts)
+  // short-circuits an already-claimed batch id with `alreadyApplied` BEFORE
+  // its own box-closures loop even runs -- so that new closure was never
+  // actually applied server-side, yet this device's (then-unconditional)
+  // `ackBoxes` marked it acknowledged anyway, losing it permanently. The
+  // mock below models the server's real claim-by-id contract explicitly (as
+  // the boxes-only test above does), including that a repeat of an
+  // already-claimed id skips recording ANYTHING new it carries.
+  it(
+    "applies a NEW box closure that arrives while an item batch's response is lost, instead of " +
+      "letting the retry's grown box set collide with the already-claimed batch id and " +
+      "silently swallow the new closure (Finding 1)",
+    async () => {
+      const claimed = new Set<string>();
+      const appliedBoxIds = new Set<string>();
+      let dropNextResponse = false;
+      const serverPost = vi.fn().mockImplementation(async (_path: string, body: unknown) => {
+        const {
+          batchId,
+          boxes: sentBoxes,
+          items,
+        } = body as {
+          batchId: string;
+          boxes: Array<{ boxId: string }>;
+          items: unknown[];
+        };
+        if (claimed.has(batchId)) {
+          // Exactly the real server's contract: an already-claimed batch id
+          // short-circuits with `alreadyApplied` before ever looking at (let
+          // alone applying) the box closures this call carries.
+          return { applied: 0, alreadyApplied: true, conflicts: [] };
+        }
+        claimed.add(batchId);
+        for (const b of sentBoxes) appliedBoxIds.add(b.boxId);
+        if (dropNextResponse) {
+          dropNextResponse = false;
+          // The server durably applied (and claimed) the batch above, but
+          // its RESPONSE never reaches the device -- indistinguishable, from
+          // here, from an ordinary network failure.
+          throw new Error("response lost");
+        }
+        return { applied: items.length, alreadyApplied: false, conflicts: [] };
+      });
+      vi.spyOn(console, "error").mockImplementation(() => {});
+
+      // The default seeded scan (beforeEach) supplies the ITEM this batch
+      // needs to hit the exact branch Finding 1 describes -- the bug is
+      // specific to a batch that also carries items, since a boxes-only
+      // batch already keyed itself off the box's own rowid.
+      await openBox(exec, SHIFT, "b1", ISO, TERMINAL);
+      await closeBox(exec, "b1", SSCC, ISO, null);
+
+      const engine = createSyncEngine({
+        exec,
+        client: { post: serverPost },
+        machineId: "m1",
+        onState: () => {},
+      });
+
+      dropNextResponse = true;
+      engine.nudge();
+      await engine.idle();
+      expect(serverPost).toHaveBeenCalledTimes(1);
+      const firstBatchId = (serverPost.mock.calls[0]![1] as { batchId: string }).batchId;
+      // The server DID apply b1 -- but the device has no way to know that
+      // yet, since the response never arrived.
+      expect(appliedBoxIds.has("b1")).toBe(true);
+      expect(await outboxCount(exec)).toBeGreaterThan(0);
+
+      // A NEW box closes while the retry backoff is still pending -- the
+      // exact Finding 1 trigger.
+      await openBox(exec, SHIFT, "b2", ISO, TERMINAL);
+      await closeBox(exec, "b2", "004601234560000024", ISO, null);
+
+      await new Promise((resolve) => setTimeout(resolve, BACKOFF_START_MS + 500));
+      await engine.idle();
+
+      // The fix under test: b2's closure actually reaches the server,
+      // rather than being silently marked acknowledged on the strength of a
+      // response that was never about it.
+      expect(appliedBoxIds.has("b2")).toBe(true);
+      const batchIds = serverPost.mock.calls.map((c) => (c[1] as { batchId: string }).batchId);
+      // The retry of the pinned (b1-only) batch legitimately reuses the
+      // SAME key -- a harmless collision on genuinely unchanged content --
+      // while b2 rides a fresh, distinct key of its own.
+      expect(batchIds.filter((id) => id === firstBatchId).length).toBeGreaterThanOrEqual(2);
+      expect(batchIds.some((id) => id !== firstBatchId)).toBe(true);
+
+      engine.stop();
+    },
+    10_000,
+  );
+
+  // CodeRabbit PR33 review, Finding 2: `readClosedUnackedBoxes` used to have
+  // no LIMIT at all, but the server's `syncBatchSchema.boxes` caps a batch at
+  // `MAX_BOX_CLOSURES_PER_SYNC_BATCH` (50). A station that closes more boxes
+  // offline than that -- easily reached across a full offline shift at low
+  // box capacity -- would otherwise assemble one oversized payload that 400s
+  // every time, wedging both box delivery AND item delivery on that device
+  // forever (the drain retries a rejected batch indefinitely). This proves
+  // the cap is enforced per POST, and that the drain loop's own `for` loop
+  // still delivers the remainder without needing a second `nudge()`.
+  it(
+    "caps a single box batch at MAX_BOX_CLOSURES_PER_SYNC_BATCH and delivers the remainder in " +
+      "a later iteration of the same drain, rather than ever assembling one oversized payload " +
+      "(Finding 2)",
+    async () => {
+      const TOTAL_BOXES = MAX_BOX_CLOSURES_PER_SYNC_BATCH + 5;
+      for (let i = 0; i < TOTAL_BOXES; i++) {
+        const boxId = `box-${String(i).padStart(3, "0")}`;
+        await openBox(exec, SHIFT, boxId, ISO, TERMINAL);
+        await closeBox(exec, boxId, `00460123456000${String(1000 + i).slice(-4)}`, ISO, null);
+      }
+
+      const sentBoxIds: string[][] = [];
+      const drainPost = vi.fn().mockImplementation(async (_path: string, body: unknown) => {
+        const { boxes: sentBoxes, items } = body as {
+          boxes: Array<{ boxId: string }>;
+          items: unknown[];
+        };
+        sentBoxIds.push(sentBoxes.map((b) => b.boxId));
+        return { applied: items.length, alreadyApplied: false, conflicts: [] };
+      });
+
+      const engine = createSyncEngine({
+        exec,
+        client: { post: drainPost },
+        machineId: "m1",
+        onState: () => {},
+      });
+      engine.nudge();
+      await engine.idle();
+      engine.stop();
+
+      // Every individual POST stayed within the API's own cap.
+      for (const ids of sentBoxIds) {
+        expect(ids.length).toBeLessThanOrEqual(MAX_BOX_CLOSURES_PER_SYNC_BATCH);
+      }
+      // At least two POSTs were required, since one alone cannot legally
+      // carry all of them.
+      expect(sentBoxIds.length).toBeGreaterThanOrEqual(2);
+      expect(sentBoxIds[0]!.length).toBe(MAX_BOX_CLOSURES_PER_SYNC_BATCH);
+      // Nothing was silently dropped: every closure was eventually sent
+      // exactly once, and every one of this device's boxes is now
+      // acknowledged.
+      const allSent = sentBoxIds.flat();
+      expect(allSent).toHaveLength(TOTAL_BOXES);
+      expect(new Set(allSent).size).toBe(TOTAL_BOXES);
+      const unacked = await exec.all<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM boxes_mirror WHERE closed_at IS NOT NULL AND acked_at IS NULL",
+      );
+      expect(unacked[0]!.n).toBe(0);
     },
   );
 
