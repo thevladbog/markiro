@@ -4,8 +4,24 @@ import type { ParsedItem, ParsedOffer } from "./parse";
  * The reference currency `products.unit_price` is kept in. Per spec §4.3, a
  * price quoted in anything else is never applied -- there is no conversion
  * step in this exchange, only a refusal recorded for the journal.
+ *
+ * Review fix (PR #32, item 3): a bare `"руб"` literal used to be the only accepted
+ * spelling. Which of these a real export uses depends on the 1С
+ * configuration, not on anything this connection controls -- `руб` (typed
+ * label), `руб.` (with the period Russian abbreviations conventionally take),
+ * `RUB` (ISO 4217 alpha code), and `643` (ISO 4217 numeric code) are all the
+ * SAME currency, and a channel that only recognised one spelling was silently
+ * refusing every price from a 1С configuration that happened to use another
+ * -- indistinguishable, from the journal, from a genuinely foreign currency.
+ * Genuinely foreign currencies (`USD`, `978`/EUR, ...) are still refused:
+ * this is a closed set of RUB spellings, not a loosened comparison.
  */
-const HOME_CURRENCY = "руб";
+const HOME_CURRENCY_ALIASES = new Set(["руб", "руб.", "rub", "643"]);
+
+/** Case/whitespace-insensitive membership check against `HOME_CURRENCY_ALIASES`. */
+function isHomeCurrency(currency: string): boolean {
+  return HOME_CURRENCY_ALIASES.has(currency.trim().toLowerCase());
+}
 
 /** A product this connection already links to a 1С `<Ид>`, looked up ahead of time by the caller (DB access is its job, not this one). */
 export interface KnownProduct {
@@ -26,7 +42,7 @@ export interface PriceUpdate {
  * doesn't match anything in this offer. `foreign_currency` and
  * `invalid_price_value` are the opposite: exactly one price was picked, but
  * its own content disqualifies it -- see the comment on `choosePrice` for the
- * first pair, and `isValidUnitPriceValue` for the second.
+ * first pair, and `normalizeUnitPriceValue` for the second.
  */
 export type SkipReason =
   | "ambiguous_price_type"
@@ -167,18 +183,77 @@ function choosePrice(
  * its next tick, reproducing the exact same failure forever. One bad price
  * must be a skip, exactly like a foreign currency, not a stuck cursor.
  *
- * Three shapes `parse.ts`'s `textOf` can hand back that this catches: an
- * empty string (`<ЦенаЗаЕдиницу>` present but empty, or absent entirely --
- * see parse.ts), a comma decimal separator (`"89,90"`, the RU locale 1С's
- * own operator UI would show, but never what CommerceML's numeric fields
- * use), and a value whose integer part is too wide for 10 digits (a data
- * error upstream, or a stray extra zero). All three, and anything else that
- * isn't a plain `\d{1,10}(\.\d{1,2})?`, come back `false`.
+ * Three shapes `parse.ts`'s `textOf` can hand back that this still catches:
+ * an empty string (`<ЦенаЗаЕдиницу>` present but empty, or absent entirely --
+ * see parse.ts), a comma decimal separator (`"89,90"`, the RU locale 1С's own
+ * operator UI would show, but never what CommerceML's numeric fields use),
+ * and a value whose integer part is too wide for 10 digits (a data error
+ * upstream, or a stray extra zero).
+ *
+ * Review fix (PR #32, item 2 -- regression): a typed 1С configuration commonly
+ * exports `<ЦенаЗаЕдиницу>` with FOUR fractional digits (`"89.9000"`), not
+ * two -- the previous pattern (`\.\d{1,2}` only) rejected every one of these
+ * as `invalid_price_value`, turning a routine, well-formed export into a
+ * file-wide string of skips. `numeric(12,2)` itself already rounds a value
+ * with more than two fractional digits on write (confirmed directly against
+ * Postgres: `89.9000` -> `89.90`, `89.905` -> `89.91`, half rounds up, an
+ * overflowing integer part still raises `numeric field overflow` exactly as
+ * before) -- so accepting extra fractional digits here does not, on its own,
+ * change what ends up stored. Rounding is still done HERE, not left to
+ * Postgres, so `PriceUpdate.unitPrice` -- what this pure function actually
+ * hands back, asserted directly in `commerceml-apply.test.ts` with no
+ * database involved -- already reads the value that lands on the row,
+ * rather than a figure only `numeric(12,2)`'s own silent cast would produce.
  */
-const UNIT_PRICE_PATTERN = /^\d{1,10}(\.\d{1,2})?$/;
+const UNIT_PRICE_PATTERN = /^(\d{1,10})(?:\.(\d+))?$/;
 
-function isValidUnitPriceValue(value: string): boolean {
-  return UNIT_PRICE_PATTERN.test(value);
+/** Adds 1 to a string of decimal digits; used by `normalizeUnitPriceValue`'s carry step. */
+function incrementDecimalDigitString(digits: string): string {
+  const chars = digits.split("");
+  let carry = 1;
+  for (let i = chars.length - 1; i >= 0 && carry > 0; i--) {
+    const next = Number(chars[i]) + carry;
+    chars[i] = String(next % 10);
+    carry = next >= 10 ? 1 : 0;
+  }
+  return (carry > 0 ? "1" : "") + chars.join("");
+}
+
+/**
+ * Accepts `value` as a `numeric(12,2)`-bound price and returns the exact
+ * string that should be written, rounded to two fractional digits -- half
+ * rounds up, matching `numeric(12,2)`'s own observed rounding (see this
+ * section's own comment). Returns `null` for anything `UNIT_PRICE_PATTERN`
+ * doesn't match at all, AND for the one case rounding can itself create: an
+ * integer part already at the 10-digit ceiling whose fractional part rounds
+ * up into an 11th digit (e.g. `"9999999999.995"`) would still overflow
+ * `numeric(12,2)` after rounding, so it is refused here rather than handed to
+ * Postgres as a value that looks accepted only to fail the write.
+ */
+function normalizeUnitPriceValue(value: string): string | null {
+  const match = UNIT_PRICE_PATTERN.exec(value);
+  if (!match) return null;
+  const [, integerPart, fractionalPart = ""] = match;
+
+  if (fractionalPart.length <= 2) {
+    return fractionalPart.length === 0 ? integerPart! : `${integerPart}.${fractionalPart}`;
+  }
+
+  const kept = fractionalPart.slice(0, 2);
+  const roundUp = fractionalPart.charCodeAt(2) >= "5".charCodeAt(0);
+  if (!roundUp) {
+    return `${integerPart}.${kept}`;
+  }
+
+  const roundedKept = incrementDecimalDigitString(kept);
+  if (roundedKept.length > 2) {
+    // Carried out of the fractional part (".99" -> "100"): the integer part
+    // itself absorbs the extra one.
+    const roundedInteger = incrementDecimalDigitString(integerPart!);
+    if (roundedInteger.length > 10) return null; // would overflow numeric(12,2)
+    return `${roundedInteger}.${roundedKept.slice(1)}`;
+  }
+  return `${integerPart}.${roundedKept}`;
 }
 
 /**
@@ -218,19 +293,20 @@ export function decideApplication(input: DecideApplicationInput): ApplicationPla
       });
       continue;
     }
-    if (choice.price.currency !== HOME_CURRENCY) {
+    if (!isHomeCurrency(choice.price.currency)) {
       skipped.push({ externalRef: offer.externalRef, reason: "foreign_currency" });
       continue;
     }
-    if (!isValidUnitPriceValue(choice.price.value)) {
-      // Fix 3 (final review): the same treatment as a foreign currency --
+    const normalizedPrice = normalizeUnitPriceValue(choice.price.value);
+    if (normalizedPrice === null) {
+      // Review fix (PR #32, item 2): the same treatment as a foreign currency --
       // this one offer is refused, the rest of the round keeps moving. See
-      // `isValidUnitPriceValue`'s own comment for why this check cannot be
+      // `normalizeUnitPriceValue`'s own comment for why this check cannot be
       // skipped in favour of letting Postgres reject the write.
       skipped.push({ externalRef: offer.externalRef, reason: "invalid_price_value" });
       continue;
     }
-    priceUpdates.push({ productId: product.id, unitPrice: choice.price.value });
+    priceUpdates.push({ productId: product.id, unitPrice: normalizedPrice });
   }
 
   // Catalog owns product creation, not the exchange -- an item without a
