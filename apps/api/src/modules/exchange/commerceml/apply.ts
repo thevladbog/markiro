@@ -19,26 +19,34 @@ export interface PriceUpdate {
 }
 
 /**
- * Why an offer's price was not applied. Both reasons stand for "we cannot
- * tell which of the incoming prices is the right one" -- the first because
- * nothing said so, the second because the one thing that did (the connection
- * setting) doesn't match anything in this offer. Guessing is off the table
- * either way: see the comment on `choosePrice`.
+ * Why an offer's price was not applied. `ambiguous_price_type` and
+ * `configured_price_type_not_found` both stand for "we cannot tell which of
+ * the incoming prices is the right one" -- the first because nothing said
+ * so, the second because the one thing that did (the connection setting)
+ * doesn't match anything in this offer. `foreign_currency` and
+ * `invalid_price_value` are the opposite: exactly one price was picked, but
+ * its own content disqualifies it -- see the comment on `choosePrice` for the
+ * first pair, and `isValidUnitPriceValue` for the second.
  */
 export type SkipReason =
-  "ambiguous_price_type" | "configured_price_type_not_found" | "foreign_currency";
+  | "ambiguous_price_type"
+  | "configured_price_type_not_found"
+  | "foreign_currency"
+  | "invalid_price_value";
 
 export interface SkippedOffer {
   externalRef: string;
   reason: SkipReason;
   /**
-   * The distinct price types (`ParsedOfferPrice.type`, in order of first
-   * appearance) that arrived on this offer. Per spec §4.3, the journal must
-   * say which types showed up whenever the price was ambiguous -- this is
-   * exactly what tells an administrator what to type into the connection's
-   * configured price type. Present only for the two "couldn't pick a price"
-   * reasons (`ambiguous_price_type`, `configured_price_type_not_found`);
-   * absent for `foreign_currency`, which isn't a type-selection problem.
+   * The distinct prices (`ParsedOfferPrice.type`, falling back to `typeRef`
+   * -- see `distinctPriceTypes` -- in order of first appearance) that arrived
+   * on this offer. Per spec §4.3, the journal must say which types showed up
+   * whenever the price was ambiguous -- this is exactly what tells an
+   * administrator what to type into the connection's configured price type.
+   * Present only for the two "couldn't pick a price" reasons
+   * (`ambiguous_price_type`, `configured_price_type_not_found`); absent for
+   * `foreign_currency` and `invalid_price_value`, neither of which is a
+   * type-selection problem -- exactly one price WAS picked in both cases.
    */
   priceTypes?: string[];
 }
@@ -68,9 +76,29 @@ type PriceChoice =
       priceTypes: string[];
     };
 
-/** The distinct `type` labels among `prices`, in order of first appearance. */
+/**
+ * The distinct prices among `prices`, in order of first appearance, keyed by
+ * `type` when it has a name and by `typeRef` when it doesn't.
+ *
+ * Fix 4 (final review): keying by `price.type` alone used to collapse EVERY
+ * unresolved `<ИдТипЦены>` onto the same `""` bucket, no matter how many
+ * distinct GUIDs they carried -- a file whose `<ТипыЦен>` catalog lives in a
+ * different upload than its offers (offers and their nomenclature commonly
+ * arrive as separate files against the same session, each parsed
+ * independently -- see `exchange.controller.ts`) leaves every price's
+ * `<ИдТипЦены>` unresolved, so several genuinely different price types all
+ * read as "one type" and `choosePrice` below took the first one as-is. That
+ * is exactly the "propose a purchase price to a kiosk" failure spec §4.3
+ * forbids, just reached through a different door than an outright ambiguous
+ * NAME. `typeRef` is the discriminator already sitting right next to `type`
+ * for exactly this case (see parse.ts's own comment on `ParsedOfferPrice`):
+ * fall back to it whenever `type` is empty, so two unresolved references are
+ * told apart. A price that carries genuinely neither a name nor a reference
+ * (no signal at all) still collapses into the single blank bucket, unchanged
+ * from before -- there is nothing left to discriminate it by.
+ */
 function distinctPriceTypes(prices: ParsedOffer["prices"]): string[] {
-  return [...new Set(prices.map((price) => price.type))];
+  return [...new Set(prices.map((price) => (price.type !== "" ? price.type : (price.typeRef ?? ""))))];
 }
 
 /**
@@ -86,17 +114,22 @@ function distinctPriceTypes(prices: ParsedOffer["prices"]): string[] {
  * taking it anyway (as a size-1 shortcut once did) would silently hand
  * `unit_price` a purchase price on a connection configured for retail. Only
  * when no `configuredPriceType` was set at all does the "how many distinct
- * types arrived" question take over: one distinct type (whether carried by
- * one price record or several identical ones) is taken as-is, more than one
- * is `ambiguous_price_type`.
+ * types arrived" question (`distinctPriceTypes`) take over: one distinct
+ * type is taken as-is, more than one is `ambiguous_price_type`. Accepted
+ * limitation this leaves open: two price records that share the same `type`
+ * NAME are treated as one distinct type by that count regardless of whether
+ * their VALUES agree -- nothing here compares the values themselves, so if a
+ * file genuinely carries two same-named prices with different figures, the
+ * first one in document order silently wins.
  *
  * `ParsedOfferPrice.type` is `""` both when the price carried an
  * `<ИдТипЦены>` that failed to resolve to a name (`typeRef` set) and when it
  * carried no type reference at all (`typeRef` undefined) -- see parse.ts.
- * This function deliberately does not distinguish the two: either way there
- * is no name to compare against `configuredPriceType`. The `typeRef` itself
- * is a diagnostic detail for the journal (task 9's concern, once this plan
- * reaches persistence), not a selection input here.
+ * Matching against `configuredPriceType` (immediately below) deliberately
+ * does not distinguish the two: either way there is no NAME to compare a
+ * configured name against. `distinctPriceTypes`, however, does fall back to
+ * `typeRef` -- see its own comment (Fix 4) for why the ambiguity count still
+ * needs that distinction even though a name-based match never will.
  */
 function choosePrice(
   prices: ParsedOffer["prices"],
@@ -118,6 +151,32 @@ function choosePrice(
     return { ok: false, reason: "ambiguous_price_type", priceTypes: types };
   }
   return { ok: true, price: prices[0]! };
+}
+
+/**
+ * `products.unit_price` (packages/db/src/schema/platform.ts) is
+ * `numeric(12,2)` -- 10 integer digits, 2 fractional. Anything that does not
+ * fit this exact shape must be caught HERE, not by Postgres, because a
+ * rejected `UPDATE` inside `exchange.controller.ts`'s `mode=import` loop
+ * throws `invalid input syntax for type numeric`, which
+ * `ExchangeExceptionFilter` turns into a `failure` response for the WHOLE
+ * round -- the import cursor (`ExchangeSessionService.readImportCursor`)
+ * never advances past the bad row, and 1С resubmits the identical file on
+ * its next tick, reproducing the exact same failure forever. One bad price
+ * must be a skip, exactly like a foreign currency, not a stuck cursor.
+ *
+ * Three shapes `parse.ts`'s `textOf` can hand back that this catches: an
+ * empty string (`<ЦенаЗаЕдиницу>` present but empty, or absent entirely --
+ * see parse.ts), a comma decimal separator (`"89,90"`, the RU locale 1С's
+ * own operator UI would show, but never what CommerceML's numeric fields
+ * use), and a value whose integer part is too wide for 10 digits (a data
+ * error upstream, or a stray extra zero). All three, and anything else that
+ * isn't a plain `\d{1,10}(\.\d{1,2})?`, come back `false`.
+ */
+const UNIT_PRICE_PATTERN = /^\d{1,10}(\.\d{1,2})?$/;
+
+function isValidUnitPriceValue(value: string): boolean {
+  return UNIT_PRICE_PATTERN.test(value);
 }
 
 /**
@@ -159,6 +218,14 @@ export function decideApplication(input: DecideApplicationInput): ApplicationPla
     }
     if (choice.price.currency !== HOME_CURRENCY) {
       skipped.push({ externalRef: offer.externalRef, reason: "foreign_currency" });
+      continue;
+    }
+    if (!isValidUnitPriceValue(choice.price.value)) {
+      // Fix 3 (final review): the same treatment as a foreign currency --
+      // this one offer is refused, the rest of the round keeps moving. See
+      // `isValidUnitPriceValue`'s own comment for why this check cannot be
+      // skipped in favour of letting Postgres reject the write.
+      skipped.push({ externalRef: offer.externalRef, reason: "invalid_price_value" });
       continue;
     }
     priceUpdates.push({ productId: product.id, unitPrice: choice.price.value });
