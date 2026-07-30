@@ -20,6 +20,7 @@ import type { IntegrationChannelType } from "./channel-registry";
 import {
   linkCandidateSchema,
   listCandidatesQuerySchema,
+  updateChannelSchema,
   type CandidatesPageDto,
   type ChannelDetailDto,
   type ChannelSummaryDto,
@@ -27,6 +28,7 @@ import {
   type JournalPageDto,
   type LinkCandidateDto,
   type ListCandidatesQueryDto,
+  type UpdateChannelDto,
 } from "./dto";
 import { IntegrationsService } from "./integrations.service";
 
@@ -55,7 +57,18 @@ export class IntegrationsController {
   async update(
     @Req() req: RequestWithTenant,
     @Param("type") type: IntegrationChannelType,
-    @Body() body: Record<string, unknown>,
+    // Review fix (PR #32, item 8): a bare `@Body() body: Record<string,
+    // unknown>` was only ever a TypeScript annotation -- nothing checked that
+    // the actual JSON body was an object at all. A non-object body (an
+    // array, a bare string, `null`) reached `updateChannel`'s destructuring
+    // (`const { silentAfterHours, ...settingsPatch } = patch`), which throws
+    // outright for `null` and does something unintended for the rest, rather
+    // than the clean 400 every other body-validated route in this file
+    // already gives (`linkCandidate`, `listCandidates`). `updateChannelSchema`
+    // (dto.ts) already rejects anything that isn't a plain object; wiring the
+    // same `ZodValidationPipe` this file uses elsewhere is all that was
+    // missing.
+    @Body(new ZodValidationPipe(updateChannelSchema)) body: UpdateChannelDto,
   ): Promise<ChannelDetailDto> {
     await this.integrations.updateChannel(req.tenantId!, type, body);
     return this.integrations.getChannel(req.tenantId!, type, new Date());

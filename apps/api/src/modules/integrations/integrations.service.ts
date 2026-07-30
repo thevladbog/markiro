@@ -40,6 +40,38 @@ const ISSUE_ATTEMPTS = 5;
  */
 const JOURNAL_PAGE_SIZE = 50;
 
+/**
+ * Review fix (PR #32, item 6): the events query below used to carry no
+ * `.limit()` at all -- every `integration_events` row belonging to any of
+ * this page's (up to `JOURNAL_PAGE_SIZE`) sessions, full stop. A single
+ * `mode=import` round journals one `grain: "item"` event per skipped/
+ * unmatched offer (`exchange.controller.ts`'s `import()`), so one big
+ * catalog can leave a session with thousands of events -- fifty such
+ * sessions turn one channel-page load into a tens-of-thousands-of-rows
+ * fetch. This caps the events query itself; `JOURNAL_PAGE_SIZE * 20` is
+ * generous per session (twenty is already more than a human reads on one
+ * page) while keeping the worst case bounded regardless of import size.
+ * Accepted limitation: the cap applies to the query as a whole, ordered by
+ * recency, not evenly per session -- one very event-heavy recent session can
+ * still crowd out an older session's events within this window. That is
+ * still a fixed, bounded cost instead of an unbounded one, and the sessions
+ * list itself (which is what a channel page actually starts from) is
+ * unaffected either way.
+ */
+export const JOURNAL_EVENTS_LIMIT = JOURNAL_PAGE_SIZE * 20;
+
+/**
+ * Review fix (PR #32, item 7): `listCandidates`'s two queries (the queue
+ * itself and the unlinked-products pool `suggestProductId` matches against)
+ * used to carry no `.limit()` either -- after a first full import, both can
+ * run into the thousands. Page-sized rather than unbounded; true
+ * cursor/offset pagination for a queue this large is a separate, larger
+ * contract change (new query params, an admin-side "load more") left for
+ * when a real tenant's queue actually needs it.
+ */
+export const CANDIDATES_PAGE_SIZE = 1000;
+export const UNLINKED_PRODUCTS_LIMIT = 5000;
+
 @Injectable()
 export class IntegrationsService {
   constructor(
@@ -298,7 +330,28 @@ export class IntegrationsService {
             ),
           )
           .orderBy(desc(schema.integrationEvents.at))
+          // Review fix (PR #32, item 6): see `JOURNAL_EVENTS_LIMIT`'s own
+          // comment -- a large import can journal thousands of `grain: "item"`
+          // events against one session; this bounds the query regardless.
+          .limit(JOURNAL_EVENTS_LIMIT)
       : [];
+
+    // Review fix (PR #32, item 6): grouped once, here, instead of each
+    // session below re-`filter()`ing the whole `events` array
+    // (O(sessions × events) -- fifty sessions against thousands of events
+    // was fifty full passes over that array on every channel-page load).
+    // One pass over `events` distributes every row into its session's own
+    // bucket; each session then just reads its own bucket back out.
+    const eventsBySessionId = new Map<string, (typeof schema.integrationEvents.$inferSelect)[]>();
+    for (const event of events) {
+      if (event.sessionId === null) continue;
+      const bucket = eventsBySessionId.get(event.sessionId);
+      if (bucket) {
+        bucket.push(event);
+      } else {
+        eventsBySessionId.set(event.sessionId, [event]);
+      }
+    }
 
     // Действия человека вне обмена (разрыв связи — Task 10; "checkauth:
     // неверный пароль" до открытия сеанса — see exchange.controller.ts)
@@ -335,7 +388,7 @@ export class IntegrationsService {
       finishedAt: s.finishedAt,
       outcome: s.outcome,
       summary: s.summary ?? null,
-      events: events.filter((e) => e.sessionId === s.id),
+      events: eventsBySessionId.get(s.id) ?? [],
     }));
 
     const orphanSessions: SessionLike[] = orphanEvents.map((e) => ({
@@ -412,7 +465,9 @@ export class IntegrationsService {
             : isNull(schema.integrationCandidates.hiddenAt),
         ),
       )
-      .orderBy(desc(schema.integrationCandidates.lastSeenAt));
+      .orderBy(desc(schema.integrationCandidates.lastSeenAt))
+      // Review fix (PR #32, item 7): see `CANDIDATES_PAGE_SIZE`'s own comment.
+      .limit(CANDIDATES_PAGE_SIZE);
 
     if (rows.length === 0) return { candidates: [] };
 
@@ -422,7 +477,18 @@ export class IntegrationsService {
     const unlinkedProducts = await this.db
       .select({ id: schema.products.id, name: schema.products.name })
       .from(schema.products)
-      .where(and(eq(schema.products.tenantId, tenantId), isNull(schema.products.externalRef)));
+      .where(and(eq(schema.products.tenantId, tenantId), isNull(schema.products.externalRef)))
+      // Review fix (PR #32, item 7): see `UNLINKED_PRODUCTS_LIMIT`'s own comment.
+      .limit(UNLINKED_PRODUCTS_LIMIT);
+
+    // Review fix (PR #32, item 7): built ONCE, here, instead of
+    // `suggestProductId` re-normalizing every one of `unlinkedProducts` for
+    // EVERY row of `rows` (O(candidates × products) -- a few thousand of
+    // each after a first full import is millions of `normalizeForMatch`
+    // calls on one page load). Each product is normalized exactly once;
+    // `suggestProductId` below is then an O(1) map lookup per candidate.
+    const unlinkedProductsByNormalizedName =
+      groupUnlinkedProductsByNormalizedName(unlinkedProducts);
 
     return {
       candidates: rows.map((row): CandidateDto => ({
@@ -436,7 +502,7 @@ export class IntegrationsService {
         firstSeenAt: row.firstSeenAt.toISOString(),
         lastSeenAt: row.lastSeenAt.toISOString(),
         hidden: row.hiddenAt !== null,
-        suggestedProductId: suggestProductId(row, unlinkedProducts),
+        suggestedProductId: suggestProductId(row, unlinkedProductsByNormalizedName),
       })),
     };
   }
@@ -638,16 +704,38 @@ function normalizeForMatch(value: string): string {
  * самостоятельный критерий совпадения), а не сваливать оба в один набор
  * ключей, как было здесь.
  */
+/**
+ * Review fix (PR #32, item 7): every unlinked product normalized exactly
+ * ONCE, keyed by its normalized name, so `suggestProductId` below never has
+ * to re-normalize the whole product pool per candidate row. Values are a
+ * `Set` of ids (not a single id) so a normalized name shared by more than one
+ * product is still distinguishable from a genuinely unique match --
+ * `suggestProductId` treats `size !== 1` as "no suggestion", the same
+ * ambiguity rule it always enforced, just without re-deriving it from a
+ * fresh linear scan every time.
+ */
+function groupUnlinkedProductsByNormalizedName(
+  products: { id: string; name: string }[],
+): Map<string, Set<string>> {
+  const byName = new Map<string, Set<string>>();
+  for (const product of products) {
+    const key = normalizeForMatch(product.name);
+    const ids = byName.get(key);
+    if (ids) {
+      ids.add(product.id);
+    } else {
+      byName.set(key, new Set([product.id]));
+    }
+  }
+  return byName;
+}
+
 function suggestProductId(
   candidate: { name: string },
-  products: { id: string; name: string }[],
+  unlinkedProductsByNormalizedName: Map<string, Set<string>>,
 ): string | null {
-  const key = normalizeForMatch(candidate.name);
-
-  const matches = new Set(
-    products.filter((product) => normalizeForMatch(product.name) === key).map((p) => p.id),
-  );
-  return matches.size === 1 ? [...matches][0]! : null;
+  const matches = unlinkedProductsByNormalizedName.get(normalizeForMatch(candidate.name));
+  return matches?.size === 1 ? [...matches][0]! : null;
 }
 
 /**

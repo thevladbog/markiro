@@ -9,6 +9,7 @@ import { eq } from "drizzle-orm";
 import { AppModule } from "../src/app.module";
 import { loadEnv } from "../src/env";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
+import { CANDIDATES_PAGE_SIZE } from "../src/modules/integrations/integrations.service";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { signUpAndActivate } from "./support/auth";
 
@@ -161,5 +162,23 @@ describe.skipIf(!ready)("candidates", () => {
       s.events.map((e) => e.message),
     );
     expect(messages.join(" ")).toMatch(/связь/i);
+  });
+
+  // Review fix (PR #32, item 7): `listCandidates`'s own query used to carry
+  // no `.limit()` at all -- a queue that grows into the thousands after a
+  // first full import used to come back whole, every time, on every page
+  // load. This pins that the route itself is bounded, not just that
+  // `suggestProductId` no longer re-normalizes the whole product pool per row.
+  it("очередь кандидатов ограничена страницей, а не отдаёт всё разом", async () => {
+    const bulkRows = Array.from({ length: CANDIDATES_PAGE_SIZE + 5 }, (_, i) => ({
+      tenantId,
+      channelType: "commerceml" as const,
+      externalRef: `bulk-guid-${randomUUID()}-${i}`,
+      name: `Bulk item ${i}`,
+    }));
+    await db.insert(schema.integrationCandidates).values(bulkRows);
+
+    const res = await agent.get("/integrations/commerceml/candidates").expect(200);
+    expect(res.body.candidates.length).toBeLessThanOrEqual(CANDIDATES_PAGE_SIZE);
   });
 });

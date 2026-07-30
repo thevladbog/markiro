@@ -41,25 +41,41 @@ export interface ChannelDescriptor {
   settingsSchema: z.ZodType<Record<string, unknown>>;
 }
 
-const commercemlSettings = z.object({
-  /**
-   * Какой тип цены ложится в `products.unit_price`. Пусто — решаем по файлу.
-   *
-   * Принятое ограничение (final review, Fix 9): раз однажды заданное, это
-   * значение нельзя осознанно вернуть обратно в «решаем по файлу» —
-   * `.min(1)` не пускает пустую строку как валидное значение, а
-   * `IntegrationsService.updateChannel` (integrations.service.ts) трактует
-   * ОТСУТСТВИЕ ключа в патче как «не трогать», а не как «очистить». Клиент
-   * (`ChannelPage.tsx`) как раз опускает ключ, когда поле формы пустое, так
-   * что поле молча возвращает прежнее значение при следующей пересинхронизации
-   * формы. Нужна отдельная форма представления «явно не задано» (например,
-   * `null`), а не просто более мягкая схема здесь.
-   */
-  priceType: z.string().min(1).optional(),
-  /** Разделять ли списание в свой тип документа (используется в И-2). */
-  splitWriteoffDocument: z.boolean().default(false),
-});
+const commercemlSettings = z
+  .object({
+    /**
+     * Какой тип цены ложится в `products.unit_price`. Пусто — решаем по файлу.
+     *
+     * Принятое ограничение (final review, Fix 9): раз однажды заданное, это
+     * значение нельзя осознанно вернуть обратно в «решаем по файлу» —
+     * `.min(1)` не пускает пустую строку как валидное значение, а
+     * `IntegrationsService.updateChannel` (integrations.service.ts) трактует
+     * ОТСУТСТВИЕ ключа в патче как «не трогать», а не как «очистить». Клиент
+     * (`ChannelPage.tsx`) как раз опускает ключ, когда поле формы пустое, так
+     * что поле молча возвращает прежнее значение при следующей пересинхронизации
+     * формы. Нужна отдельная форма представления «явно не задано» (например,
+     * `null`), а не просто более мягкая схема здесь.
+     */
+    priceType: z.string().min(1).optional(),
+    /** Разделять ли списание в свой тип документа (используется в И-2). */
+    splitWriteoffDocument: z.boolean().default(false),
+  })
+  // Review fix (PR #32, item 8): plain `z.object()` silently STRIPS a key it
+  // doesn't recognise -- `safeParse` still reports `success: true`, so a
+  // typo'd field name (`pricetype`, `priceTyp`) used to come back a clean
+  // 200 that changed nothing, the exact "сохранено, ничего не изменилось"
+  // this method's own comment already warns about for the empty-patch case.
+  // `.strict()` turns an unrecognised key into a validation failure instead.
+  .strict();
 
+// `.passthrough()` stays: unlike `commercemlSettings` above, this schema
+// declares no fields AT ALL on purpose -- these three channels have no
+// settings contract yet, and accepting (not rejecting) an arbitrary shape
+// here is the deliberate, already-tested placeholder for that
+// (`channel-registry.test.ts`'s "схема другого канала принимает произвольные
+// поля"). Item 8's regression was a NAMED field silently swallowing a typo of
+// itself (`commercemlSettings`, above); it was never about a channel that
+// declares no fields to begin with.
 const emptySettings = z.object({}).passthrough();
 
 export const CHANNELS: readonly ChannelDescriptor[] = [

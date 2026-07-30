@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import express from "express";
 import request from "supertest";
 import { Test } from "@nestjs/testing";
@@ -9,6 +10,7 @@ import { AppModule } from "../src/app.module";
 import { loadEnv } from "../src/env";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { SILENT_AFTER_HOURS_MAX } from "../src/modules/integrations/dto";
+import { JOURNAL_EVENTS_LIMIT } from "../src/modules/integrations/integrations.service";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { signUpAndActivate } from "./support/auth";
 
@@ -59,6 +61,43 @@ describe("integrations (cabinet)", () => {
     expect(res.body.settings.priceType).toBe("Розничная");
 
     await agent.patch("/integrations/commerceml").send({ priceType: 42 }).expect(400);
+  });
+
+  // Review fix (PR #32, item 8): before `.strict()` (channel-registry.ts),
+  // `descriptor.settingsSchema.safeParse` silently STRIPPED any key it
+  // didn't recognise -- `parsed.success` stayed `true`, so a typo'd field
+  // name came back a clean 200 that changed nothing, and settings stayed
+  // exactly as they were.
+  it("отвергает неизвестный ключ настроек, а не молча отбрасывает его", async () => {
+    const before = await agent.get("/integrations/commerceml").expect(200);
+
+    await agent.patch("/integrations/commerceml").send({ priceTyp: "Розничная" }).expect(400);
+
+    const after = await agent.get("/integrations/commerceml").expect(200);
+    expect(after.body.settings).toEqual(before.body.settings);
+  });
+
+  // Review fix (PR #32, item 8): `@Body()` alone was only a TypeScript
+  // annotation -- nothing checked the actual JSON body was an object at all.
+  // A bare array or string used to reach `updateChannel`'s destructuring
+  // assignment unfiltered; wiring `ZodValidationPipe` (integrations.controller.ts)
+  // now rejects both with a clean 400 instead.
+  it("отвергает тело настроек, которое не является объектом", async () => {
+    await agent
+      .patch("/integrations/commerceml")
+      .set("Content-Type", "application/json")
+      .send("[1,2,3]")
+      .expect(400);
+    await agent
+      .patch("/integrations/commerceml")
+      .set("Content-Type", "application/json")
+      .send('"just a string"')
+      .expect(400);
+    await agent
+      .patch("/integrations/commerceml")
+      .set("Content-Type", "application/json")
+      .send("null")
+      .expect(400);
   });
 
   // `silentAfterHours` — отдельная top-level колонка (`silent_after_hours`),
@@ -184,6 +223,52 @@ describe("integrations (cabinet)", () => {
   it("отдаёт журнал сеансами, неуспешный — первым", async () => {
     const res = await agent.get("/integrations/commerceml/journal").expect(200);
     expect(Array.isArray(res.body.sessions)).toBe(true);
+  });
+
+  // Review fix (PR #32, item 6): the events query behind this route used to
+  // carry no `.limit()` at all -- a big import journals one `grain: "item"`
+  // event per skipped/unmatched offer, so a single event-heavy session could
+  // make one page load fetch tens of thousands of rows. This pins two things
+  // at once: the query is actually bounded (`JOURNAL_EVENTS_LIMIT`), and the
+  // events that DO come back are still grouped onto the RIGHT session (the
+  // O(sessions × events) `.filter()` this replaced could otherwise have hidden
+  // a grouping bug behind a small fixture that happened to work either way).
+  it("журнал ограничивает число событий и не путает их между сеансами", async () => {
+    const [session] = await db
+      .insert(schema.integrationSessions)
+      .values({
+        tenantId,
+        channelType: "commerceml",
+        cookieHash: `bulk-events-${randomUUID()}`,
+        expiresAt: new Date(Date.now() + 3_600_000),
+      })
+      .returning({ id: schema.integrationSessions.id });
+
+    const eventCount = JOURNAL_EVENTS_LIMIT + 50;
+    const rows = Array.from({ length: eventCount }, (_, i) => ({
+      tenantId,
+      channelType: "commerceml" as const,
+      sessionId: session!.id,
+      direction: "in" as const,
+      outcome: "warn" as const,
+      grain: "item" as const,
+      message: `bulk-event-${i}`,
+    }));
+    await db.insert(schema.integrationEvents).values(rows);
+
+    const res = await agent.get("/integrations/commerceml/journal").expect(200);
+    const thisSession = res.body.sessions.find((s: { id: string }) => s.id === session!.id);
+    expect(thisSession).toBeDefined();
+    // Bounded, not the full 1050+ rows this session actually owns in the DB.
+    expect(thisSession.events.length).toBeLessThanOrEqual(JOURNAL_EVENTS_LIMIT);
+    expect(thisSession.events.length).toBeGreaterThan(0);
+    // Every event handed back for THIS session really does belong to it --
+    // proof the grouping didn't leak another session's rows in, or this
+    // session's rows out, while redistributing `events` into buckets.
+    for (const event of thisSession.events) {
+      expect(typeof event.message).toBe("string");
+      expect((event.message as string).startsWith("bulk-event-")).toBe(true);
+    }
   });
 
   // `getChannel`/`updateChannel` уже гоняли тип через `safeDescribeChannel`;
