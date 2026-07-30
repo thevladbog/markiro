@@ -368,4 +368,68 @@ describe.skipIf(!ready)("boxes e2e", () => {
     expect(box.itemCount).toBe(1);
     expect(box.disassembledAt).toBeNull();
   });
+
+  // Task review finding: the test above only proves `disassembledAt` is
+  // `null` for a box that was NEVER disassembled -- it never proves
+  // `BoxesService.listBoxes` actually surfaces a real, non-null
+  // `disassembledAt` through this HTTP endpoint for a box that WAS
+  // disassembled (station-scans.e2e.test.ts's own "disassemble" tests only
+  // check `schema.boxes` directly, bypassing `listBoxes`'s select/`toDto`
+  // mapping entirely). A dedicated shift/box, same reasoning as the test
+  // above: closing and disassembling its own box here must not retroactively
+  // change any other test's fixture or assertions.
+  it("surfaces a non-null disassembledAt for a disassembled box via GET /boxes", async () => {
+    const disassembledShiftId = await openShiftForProduct(agent, productId);
+    await postBatch(stationKey, [
+      scan(disassembledShiftId, "tt", "t1", "2026-07-01T10:00:00.000Z", "b6"),
+    ]);
+    await postBatch(
+      stationKey,
+      [],
+      [
+        {
+          boxId: "b6",
+          shiftId: disassembledShiftId,
+          terminalId: "t1",
+          sscc: "123456789012345690",
+          closedAt: "2026-01-02T00:00:00.000Z",
+          operatorId,
+        },
+      ],
+    );
+
+    // Captured right before the disassemble call: `disassembledAt` is
+    // server-assigned `now()` (station-scans.service.ts's "disassemble"
+    // branch), not the client-supplied `occurredAt`, so this is the correct
+    // lower bound to assert against.
+    const beforeDisassemble = new Date();
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", stationKey)
+      .send({
+        batchId: `disassemble-batch-${randomUUID()}`,
+        items: [],
+        boxes: [],
+        exceptions: [
+          {
+            kind: "disassemble",
+            boxId: "b6",
+            codeHash: null,
+            shiftId: disassembledShiftId,
+            terminalId: "t1",
+            operatorId: null,
+            reason: "packed for wrong customer",
+            occurredAt: new Date().toISOString(),
+          },
+        ],
+      })
+      .expect(201);
+
+    const res = await agent.get(`/boxes?shiftId=${disassembledShiftId}`).expect(200);
+    const box = res.body.items[0];
+    expect(box.disassembledAt).not.toBeNull();
+    const disassembledAt = new Date(box.disassembledAt);
+    expect(Number.isNaN(disassembledAt.getTime())).toBe(false);
+    expect(disassembledAt.getTime()).toBeGreaterThanOrEqual(beforeDisassemble.getTime());
+  });
 });
