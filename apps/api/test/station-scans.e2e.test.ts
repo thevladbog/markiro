@@ -4,7 +4,7 @@ import { Test } from "@nestjs/testing";
 import { Logger, type INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { buildSscc } from "@markiro/domain";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
@@ -1898,6 +1898,137 @@ describe.skipIf(!ready)("station-scans e2e", () => {
           }
         },
       );
+
+      // Task 5: "clear" empties a still-open box (every active item's code
+      // released and the item itself marked removed) WITHOUT closing it --
+      // that's the difference from "disassemble" (Task 6), which does the
+      // same emptying but only to an already-closed box.
+      it("clear removes every active item from a still-open box, closes none of it", async () => {
+        await postBatch([scan("aa", { boxId: "b1" }), scan("bb", { boxId: "b1" })]);
+        const boxId = await boxIdFor("b1");
+        const codeHash1 = "aa".padEnd(64, "0");
+        const codeHash2 = "bb".padEnd(64, "0");
+
+        const res = await postRaw({
+          batchId: `clear-test-${randomUUID()}`,
+          items: [],
+          boxes: [],
+          exceptions: [
+            {
+              kind: "clear",
+              // Raw device-local id (see the "undo" tests' own comment
+              // above) -- proves this branch also consumes the resolution
+              // step's `resolvedBoxId`, not `ex.boxId` directly.
+              boxId: "b1",
+              codeHash: null,
+              shiftId,
+              terminalId: "t1",
+              operatorId: null,
+              reason: "wrong destination",
+              occurredAt: new Date().toISOString(),
+            },
+          ],
+        });
+        expect(res.body.applied).toBe(0);
+
+        const items = await db
+          .select()
+          .from(schema.boxItems)
+          .where(and(eq(schema.boxItems.tenantId, tenantId), eq(schema.boxItems.boxId, boxId)));
+        expect(items).toHaveLength(2);
+        expect(items.every((i) => i.removedAt !== null)).toBe(true);
+
+        const registryRows = await db
+          .select()
+          .from(schema.codeRegistry)
+          .where(
+            and(
+              eq(schema.codeRegistry.tenantId, tenantId),
+              inArray(schema.codeRegistry.codeHash, [codeHash1, codeHash2]),
+            ),
+          );
+        expect(registryRows).toHaveLength(0);
+
+        const [box] = await db.select().from(schema.boxes).where(eq(schema.boxes.id, boxId));
+        expect(box?.closedAt).toBeNull();
+        expect(box?.disassembledAt).toBeNull();
+
+        const [auditRow] = await db
+          .select()
+          .from(schema.boxExceptions)
+          .where(eq(schema.boxExceptions.tenantId, tenantId));
+        expect(auditRow?.kind).toBe("clear");
+        // Same proof as the "undo" test above: the audit row's boxId is the
+        // RESOLVED server UUID, not the raw "b1" the request carried.
+        expect(auditRow?.boxId).toBe(boxId);
+      });
+
+      it("clear on an already-closed box is a no-op (guarded by closedAt IS NULL)", async () => {
+        await postBatch([scan("aa", { boxId: "b1" })]);
+        const codeHash = "aa".padEnd(64, "0");
+        await postBatchWithBoxes(
+          [],
+          [
+            {
+              boxId: "b1",
+              shiftId,
+              terminalId: "t1",
+              sscc: SSCC,
+              closedAt: ISO,
+              operatorId: OPERATOR_ID,
+            },
+          ],
+        );
+        const boxId = await boxIdFor("b1");
+
+        await postRaw({
+          batchId: `clear-test-${randomUUID()}`,
+          items: [],
+          boxes: [],
+          exceptions: [
+            {
+              kind: "clear",
+              boxId: "b1",
+              codeHash: null,
+              shiftId,
+              terminalId: "t1",
+              operatorId: null,
+              reason: "wrong destination",
+              occurredAt: new Date().toISOString(),
+            },
+          ],
+        });
+
+        // Item untouched -- the box was already closed, so the guard
+        // (`closedAt IS NULL`) must have refused to act at all.
+        const [itemRow] = await db
+          .select()
+          .from(schema.boxItems)
+          .where(
+            and(
+              eq(schema.boxItems.tenantId, tenantId),
+              eq(schema.boxItems.boxId, boxId),
+              eq(schema.boxItems.codeHash, codeHash),
+            ),
+          );
+        expect(itemRow?.removedAt).toBeNull();
+
+        const registryRow = await registryOwner(tenantId, codeHash);
+        expect(registryRow).toBeDefined();
+
+        const [box] = await db.select().from(schema.boxes).where(eq(schema.boxes.id, boxId));
+        expect(box?.closedAt?.toISOString()).toBe(ISO);
+        expect(box?.disassembledAt).toBeNull();
+
+        // Still a recorded attempt (same pattern as every other kind/no-op
+        // combination in this describe block) even though nothing else
+        // changed.
+        const [auditRow] = await db
+          .select()
+          .from(schema.boxExceptions)
+          .where(eq(schema.boxExceptions.tenantId, tenantId));
+        expect(auditRow?.kind).toBe("clear");
+      });
     });
   });
 });

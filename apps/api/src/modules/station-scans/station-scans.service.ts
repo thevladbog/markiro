@@ -856,9 +856,9 @@ export class StationScansService {
    * recorded attempt, matching the pattern the box-closures loop above
    * already established for exactly this class of redelivery/race.
    *
-   * Only "undo" is handled today (Task 4); "clear"/"disassemble"/"reprint"
-   * are added by Tasks 5-7 as further branches in this same loop body, not
-   * as a rewrite of it.
+   * "undo" (Task 4) and "clear" (Task 5) are handled today;
+   * "disassemble"/"reprint" are added by Tasks 6-7 as further branches in
+   * this same loop body, not as a rewrite of it.
    *
    * `ex.boxId` is the device-local box id string, exactly like
    * `ScanItemDto.boxId` and the box-closures loop's own `closure.boxId`
@@ -943,10 +943,62 @@ export class StationScansService {
               isNull(schema.boxItems.removedAt),
             ),
           );
+      } else if (ex.kind === "clear") {
+        // Guarded to a box that is STILL OPEN (`closedAt IS NULL`): "clear"
+        // empties a box the operator can keep packing into, never one
+        // that's already been closed and labelled -- reaching into a
+        // closed box is "disassemble" (Task 6), a distinct kind with its
+        // own guard. The resolution step above already confirmed
+        // `resolvedBoxId` names a real row for this exception's own
+        // (tenantId, shiftId, terminalId, deviceBoxId); this second lookup
+        // exists only to read that row's CURRENT `closedAt`, not to
+        // re-resolve identity, so it queries by `resolvedBoxId` (the
+        // server UUID), never `ex.boxId` again.
+        const [openBox] = await tx
+          .select({ id: schema.boxes.id })
+          .from(schema.boxes)
+          .where(
+            and(
+              eq(schema.boxes.tenantId, tenantId),
+              eq(schema.boxes.id, resolvedBoxId),
+              isNull(schema.boxes.closedAt),
+            ),
+          );
+        if (openBox) {
+          // Every still-active item (not already displaced to another box,
+          // not already removed by an earlier undo/clear) has its code
+          // claim released, exactly like "undo" above but for every item
+          // in the box at once rather than one named codeHash.
+          const activeItems = await tx
+            .select({ codeHash: schema.boxItems.codeHash })
+            .from(schema.boxItems)
+            .where(
+              and(
+                eq(schema.boxItems.tenantId, tenantId),
+                eq(schema.boxItems.boxId, resolvedBoxId),
+                isNull(schema.boxItems.displacedAt),
+                isNull(schema.boxItems.removedAt),
+              ),
+            );
+          for (const item of activeItems) {
+            await this.releaseCode(tx, tenantId, item.codeHash, ex.shiftId, ex.terminalId);
+          }
+          await tx
+            .update(schema.boxItems)
+            .set({ removedAt: sql`now()` })
+            .where(
+              and(
+                eq(schema.boxItems.tenantId, tenantId),
+                eq(schema.boxItems.boxId, resolvedBoxId),
+                isNull(schema.boxItems.displacedAt),
+                isNull(schema.boxItems.removedAt),
+              ),
+            );
+        }
       }
-      // "clear" and "disassemble" are added in Tasks 5-6; "reprint" writes
-      // only the audit row below, added in Task 7. Every branch above (and
-      // every one still to come) uses `resolvedBoxId`, never `ex.boxId`.
+      // "disassemble" is added in Task 6; "reprint" writes only the audit
+      // row below, added in Task 7. Every branch above (and every one
+      // still to come) uses `resolvedBoxId`, never `ex.boxId`.
       await tx.insert(schema.boxExceptions).values({
         tenantId,
         kind: ex.kind,
