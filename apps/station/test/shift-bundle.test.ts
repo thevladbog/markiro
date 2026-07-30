@@ -52,6 +52,7 @@ const bundle: StationBundle = {
     name: "T",
     spec: { widthMm: 58, heightMm: 40, dpi: 203, language: "zpl", elements: [] },
   },
+  boxLabelTemplate: null,
   counterpartyGln: "6291041500213",
   // The server bundle returns `operators: []` in 05a — the server operators
   // table is a parallel 05b workstream (see plan decision #4).

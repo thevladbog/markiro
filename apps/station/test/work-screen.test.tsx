@@ -203,10 +203,17 @@ const LABEL_SPEC: LabelTemplateSpec = {
   elements: [{ id: "a", kind: "field", field: "sscc", xMm: 4, yMm: 4, fontSizePt: 10 }],
 };
 
-/** Seeds a minimal `shift_mirror` row carrying `LABEL_SPEC`, so WorkScreen's own label-geometry effect has something to load. */
+/**
+ * Seeds a minimal `shift_mirror` row carrying `LABEL_SPEC` as the BOX
+ * label's own template (`box_label_template_spec`), so WorkScreen's
+ * label-geometry effect has something to load for box printing. NOT
+ * `label_template_spec` (CodeRabbit PR33 review, Finding 3): that column is
+ * the ITEM template, a completely separate field the box-printing path must
+ * never read.
+ */
 async function seedLabelSpec(exec: SqlExecutor, shiftId: string): Promise<void> {
   await exec.run(
-    `INSERT INTO shift_mirror (id, status, mode, product_id, label_template_spec) VALUES (?,?,?,?,?)`,
+    `INSERT INTO shift_mirror (id, status, mode, product_id, box_label_template_spec) VALUES (?,?,?,?,?)`,
     [shiftId, "active", "aggregation", "p1", JSON.stringify(LABEL_SPEC)],
   );
 }
@@ -701,6 +708,64 @@ describe("WorkScreen box progress, closing and printing", () => {
     expect(target).toEqual(PRINT_TARGET);
     expect(bytes).toBeInstanceOf(Uint8Array);
     expect(bytes.length).toBeGreaterThan(0);
+  });
+
+  // CodeRabbit PR33 review, Finding 3: the box-printing path used to read
+  // `shift_mirror.label_template_spec` -- the ITEM template -- for every box
+  // label. This seeds the two columns with DIFFERENT specs: `label_template_
+  // spec` gets deliberately unparsable JSON (so reading it would make
+  // printing silently fail), and `box_label_template_spec` gets a real,
+  // valid spec. A fixed WorkScreen must print successfully (it only ever
+  // reads the box column); the pre-fix code would have failed to parse the
+  // item column and shown "print unavailable" instead.
+  it("prints using the box's own label template, never the item template, even when the item template is invalid", async () => {
+    const close = vi
+      .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
+      .mockResolvedValue({ status: "closed", sscc: SSCC, itemCount: 10 });
+    const print = vi.fn(async (_target: PrintTarget, _bytes: Uint8Array) => {});
+    const exec = makeExec();
+    await exec.run(
+      `INSERT INTO shift_mirror (id, status, mode, product_id, label_template_spec, box_label_template_spec)
+       VALUES (?,?,?,?,?,?)`,
+      ["s1", "active", "aggregation", "p1", "{ not valid json", JSON.stringify(LABEL_SPEC)],
+    );
+    renderWorkTracked({
+      exec,
+      boxCapacity: 10,
+      boxItemCount: 9,
+      closeCurrentBox: close,
+      printing: { target: PRINT_TARGET, language: "zpl", print },
+    });
+    act(() => scan(KM));
+    await waitFor(() => expect(print).toHaveBeenCalledOnce());
+    expect(screen.queryByText(/печать не выполнена/i)).toBeNull();
+  });
+
+  // The converse: a box template that is missing entirely must NOT fall back
+  // to a perfectly valid item template -- printing must be visibly skipped,
+  // not silently substituted with the wrong label.
+  it("does not fall back to the item template when no box template is configured", async () => {
+    const close = vi
+      .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
+      .mockResolvedValue({ status: "closed", sscc: SSCC, itemCount: 10 });
+    const print = vi.fn(async (_target: PrintTarget, _bytes: Uint8Array) => {});
+    const exec = makeExec();
+    await exec.run(
+      `INSERT INTO shift_mirror (id, status, mode, product_id, label_template_spec)
+       VALUES (?,?,?,?,?)`,
+      ["s1", "active", "aggregation", "p1", JSON.stringify(LABEL_SPEC)],
+    );
+    renderWorkTracked({
+      exec,
+      boxCapacity: 10,
+      boxItemCount: 9,
+      closeCurrentBox: close,
+      printing: { target: PRINT_TARGET, language: "zpl", print },
+    });
+    act(() => scan(KM));
+    await waitFor(() => expect(close).toHaveBeenCalled());
+    expect(await screen.findByText(/печать не выполнена/i)).toBeDefined();
+    expect(print).not.toHaveBeenCalled();
   });
 
   // Task 13 review, Finding 4: `printAndMaybeVerify`'s decision of whether a

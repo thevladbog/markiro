@@ -329,19 +329,14 @@ export class ShiftsService {
       createdAt: productRow.createdAt,
     };
 
-    let labelTemplate: ShiftBundleDto["labelTemplate"] = null;
-    if (shift.labelTemplateId) {
-      const [lt] = await this.db
-        .select()
-        .from(schema.labelTemplates)
-        .where(
-          and(
-            eq(schema.labelTemplates.tenantId, tenantId),
-            eq(schema.labelTemplates.id, shift.labelTemplateId),
-          ),
-        );
-      if (lt) labelTemplate = { id: lt.id, name: lt.name, spec: lt.spec as LabelTemplateSpec };
-    }
+    const labelTemplate = await this.findLabelTemplate(tenantId, shift.labelTemplateId);
+    // The box label's own template (Finding 3): resolved the exact same way
+    // as `labelTemplate` above, from `shift.boxLabelTemplateId` -- a
+    // completely separate column, with no fallback to the item template or
+    // to any product-level default (products have no equivalent "default box
+    // label template" column, unlike `defaultLabelTemplateId` for the item
+    // template).
+    const boxLabelTemplate = await this.findLabelTemplate(tenantId, shift.boxLabelTemplateId);
 
     let counterpartyGln: string | null = null;
     if (shift.counterpartyId) {
@@ -372,7 +367,27 @@ export class ShiftsService {
         ? await this.bundleSscc(tenantId, shift.id, deviceId)
         : null;
 
-    return { shift, product, labelTemplate, counterpartyGln, operators, sscc };
+    return { shift, product, labelTemplate, boxLabelTemplate, counterpartyGln, operators, sscc };
+  }
+
+  /**
+   * Resolves a label template id (tenant-scoped) into the `{ id, name, spec }`
+   * shape both `ShiftBundleDto.labelTemplate` and `.boxLabelTemplate` share.
+   * Null in, or a template this tenant does not own, both resolve to null --
+   * never a fallback to any other template.
+   */
+  private async findLabelTemplate(
+    tenantId: string,
+    templateId: string | null,
+  ): Promise<{ id: string; name: string; spec: LabelTemplateSpec } | null> {
+    if (!templateId) return null;
+    const [lt] = await this.db
+      .select()
+      .from(schema.labelTemplates)
+      .where(
+        and(eq(schema.labelTemplates.tenantId, tenantId), eq(schema.labelTemplates.id, templateId)),
+      );
+    return lt ? { id: lt.id, name: lt.name, spec: lt.spec as LabelTemplateSpec } : null;
   }
 
   /**

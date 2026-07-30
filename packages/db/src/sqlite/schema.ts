@@ -72,6 +72,11 @@ export const shiftMirror = sqliteTable("shift_mirror", {
   // This device's box-SSCC issuer prefix (Task 13 review, plan 06c) -- see
   // migrations.ts's ALTER for why this trails the rest of the table.
   issuerPrefix: text("issuer_prefix"),
+  // The box label's OWN template spec (CodeRabbit PR33 review, Finding 3) --
+  // entirely separate from labelTemplateSpec above, which is the ITEM
+  // template. See migrations.ts's trailing ALTER for why this trails the
+  // rest of the table too.
+  boxLabelTemplateSpec: text("box_label_template_spec"),
 });
 
 /** Local mirror of the shift's product (for ad-hoc GTIN resolution offline). */

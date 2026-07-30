@@ -114,6 +114,19 @@ export interface ShiftBundleDto {
   shift: ShiftDto;
   product: ProductDto;
   labelTemplate: { id: string; name: string; spec: LabelTemplateSpec } | null;
+  /**
+   * The BOX label's own template (CodeRabbit PR33 review, Finding 3),
+   * resolved from `shift.boxLabelTemplateId` -- entirely separate from
+   * `labelTemplate` above, which is the ITEM label's template. Before this
+   * field existed, the station mirrored only `labelTemplate` and used it for
+   * every print, box included, so a shift with a distinct box template
+   * either printed the item template on every box or (when only a box
+   * template was configured) printed nothing at all. Null exactly when
+   * `shift.boxLabelTemplateId` is null or no longer resolves to a template
+   * this tenant owns -- same shape `labelTemplate` already has, no fallback
+   * to any other template.
+   */
+  boxLabelTemplate: { id: string; name: string; spec: LabelTemplateSpec } | null;
   counterpartyGln: string | null;
   operators: OperatorMirrorRecord[];
   /**

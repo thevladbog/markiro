@@ -39,6 +39,15 @@ export interface StationBundle {
     defaultLabelTemplateId: string | null;
   };
   labelTemplate: { id: string; name: string; spec: unknown } | null;
+  /**
+   * The BOX label's own template (CodeRabbit PR33 review, Finding 3) --
+   * entirely separate from `labelTemplate` above, which is the ITEM
+   * template. Null exactly when the shift has no `boxLabelTemplateId`, or it
+   * no longer resolves to a template this tenant owns -- see
+   * `ShiftBundleDto.boxLabelTemplate` on the server for the matching doc
+   * comment.
+   */
+  boxLabelTemplate: { id: string; name: string; spec: unknown } | null;
   counterpartyGln: string | null;
   operators: OperatorMirrorRecord[];
   /**
@@ -67,6 +76,12 @@ export interface ShiftMirrorRow {
   mode: string;
   counterpartyGln: string | null;
   labelTemplateSpec: string | null;
+  /**
+   * The box label's OWN template spec (CodeRabbit PR33 review, Finding 3) --
+   * entirely separate from `labelTemplateSpec` above (the ITEM template).
+   * Read by `WorkScreen.tsx`'s box-printing path, never `labelTemplateSpec`.
+   */
+  boxLabelTemplateSpec: string | null;
   /** The shift's box capacity (Task 13 review, Finding 1) -- null disables auto-close. */
   boxCapacity: number | null;
   /**
@@ -127,8 +142,8 @@ async function upsertBundleBody(exec: SqlExecutor, bundle: StationBundle): Promi
        counterparty_id, counterparty_name, counterparty_gln,
        label_template_id, label_template_name, label_template_spec,
        planned_qty, planned_date, box_capacity, pallet_capacity, pallets_enabled, opened_at,
-       issuer_prefix
-     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       issuer_prefix, box_label_template_spec
+     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
      ON CONFLICT(id) DO UPDATE SET
        status=excluded.status, mode=excluded.mode, product_id=excluded.product_id,
        product_name=excluded.product_name,
@@ -139,7 +154,8 @@ async function upsertBundleBody(exec: SqlExecutor, bundle: StationBundle): Promi
        planned_qty=excluded.planned_qty, planned_date=excluded.planned_date,
        box_capacity=excluded.box_capacity, pallet_capacity=excluded.pallet_capacity,
        pallets_enabled=excluded.pallets_enabled, opened_at=excluded.opened_at,
-       issuer_prefix=excluded.issuer_prefix`,
+       issuer_prefix=excluded.issuer_prefix,
+       box_label_template_spec=excluded.box_label_template_spec`,
     [
       s.id,
       s.status,
@@ -165,6 +181,9 @@ async function upsertBundleBody(exec: SqlExecutor, bundle: StationBundle): Promi
       // review, Finding 1) -- exactly as `mirrorShiftBundle` already treats
       // `bundle.sscc` itself.
       bundle.sscc?.issuerPrefix ?? null,
+      // The box label's OWN template spec (Finding 3) -- never a fallback to
+      // `bundle.labelTemplate`'s spec, even when this is null.
+      bundle.boxLabelTemplate ? JSON.stringify(bundle.boxLabelTemplate.spec) : null,
     ],
   );
 
@@ -353,8 +372,10 @@ export async function readShiftMirror(
     label_template_spec: string | null;
     box_capacity: number | null;
     issuer_prefix: string | null;
+    box_label_template_spec: string | null;
   }>(
-    `SELECT id, status, mode, counterparty_gln, label_template_spec, box_capacity, issuer_prefix
+    `SELECT id, status, mode, counterparty_gln, label_template_spec, box_capacity, issuer_prefix,
+            box_label_template_spec
      FROM shift_mirror WHERE id = ?`,
     [id],
   );
@@ -368,6 +389,7 @@ export async function readShiftMirror(
     labelTemplateSpec: r.label_template_spec,
     boxCapacity: r.box_capacity ?? null,
     issuerPrefix: r.issuer_prefix ?? null,
+    boxLabelTemplateSpec: r.box_label_template_spec ?? null,
   };
 }
 

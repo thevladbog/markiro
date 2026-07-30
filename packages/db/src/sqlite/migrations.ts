@@ -161,4 +161,14 @@ export const STATION_MIGRATIONS: string[] = [
   // prefix -- never a fallback), and read back by `readShiftMirror` the same
   // way. Same re-runnable idempotency as the `login` ALTER above.
   `ALTER TABLE shift_mirror ADD COLUMN issuer_prefix TEXT;`,
+  // CodeRabbit PR33 review, Finding 3: the box label's OWN template spec,
+  // entirely separate from `label_template_spec` above (the ITEM template).
+  // Before this column, `getBundle` never even resolved
+  // `shift.boxLabelTemplateId` server-side, so the station had nothing to
+  // mirror here and its box-printing path (WorkScreen.tsx) fell back to the
+  // item template -- printing the wrong label on every box, or nothing at
+  // all when only a box template was configured. Written by `upsertBundle`
+  // alongside the other shift_mirror columns; read back by `readShiftMirror`
+  // the same way. Same re-runnable idempotency as the `login` ALTER above.
+  `ALTER TABLE shift_mirror ADD COLUMN box_label_template_spec TEXT;`,
 ];

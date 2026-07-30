@@ -58,6 +58,9 @@ const bundle: StationBundle = {
     name: "T",
     spec: { widthMm: 58, heightMm: 40, dpi: 203, language: "zpl", elements: [] },
   },
+  // No box template configured by default (CodeRabbit PR33 review, Finding
+  // 3) -- see the dedicated round-trip test below for the non-null case.
+  boxLabelTemplate: null,
   counterpartyGln: "6291041500213",
   operators: [
     {
@@ -87,6 +90,43 @@ describe("mirror", () => {
     const ops = await readOperatorsMirror(exec);
     expect(ops).toHaveLength(1);
     expect(ops[0]).toMatchObject({ operatorId: "op1", active: true });
+  });
+
+  // CodeRabbit PR33 review, Finding 3: `boxLabelTemplate` mirrors into its
+  // OWN `box_label_template_spec` column -- entirely separate from
+  // `label_template_spec` (the item template) -- and must round-trip through
+  // `upsertBundle`/`readShiftMirror` distinctly from it, so WorkScreen's box
+  // print path (which now reads `boxLabelTemplateSpec`, not
+  // `labelTemplateSpec`) actually has a real, DIFFERENT spec to read.
+  it("mirrors boxLabelTemplate into its own column, distinct from the item labelTemplate", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    const withBoxTemplate: StationBundle = {
+      ...bundle,
+      boxLabelTemplate: {
+        id: "boxlt1",
+        name: "Box T",
+        spec: { widthMm: 100, heightMm: 100, dpi: 300, language: "tspl", elements: [] },
+      },
+    };
+    await upsertBundle(exec, withBoxTemplate);
+
+    const shift = await readShiftMirror(exec, "s1");
+    expect(JSON.parse(shift!.labelTemplateSpec!)).toMatchObject({ language: "zpl" });
+    expect(JSON.parse(shift!.boxLabelTemplateSpec!)).toMatchObject({ language: "tspl" });
+    expect(shift!.boxLabelTemplateSpec).not.toBe(shift!.labelTemplateSpec);
+  });
+
+  // The absence case: no boxLabelTemplate at all must mirror to a null
+  // column, never falling back to the item template's spec.
+  it("mirrors a null boxLabelTemplate as a null column, not a fallback to the item template", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    await upsertBundle(exec, bundle);
+
+    const shift = await readShiftMirror(exec, "s1");
+    expect(shift?.boxLabelTemplateSpec).toBeNull();
+    expect(shift?.labelTemplateSpec).not.toBeNull();
   });
 
   // Task 13 review, Finding 1: `boxCapacity` was already a `shift_mirror`

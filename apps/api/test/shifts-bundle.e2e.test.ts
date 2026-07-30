@@ -175,6 +175,61 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     expect(bundle.body.operators[0].pinHash).toMatch(/^pbkdf2\$sha256\$100000\$/);
   });
 
+  // CodeRabbit PR33 review, Finding 3: the box template column, schema, and
+  // admin picker were all fully wired, but `getBundle` only ever resolved
+  // `labelTemplate` off `shift.labelTemplateId` -- the ITEM template -- and
+  // never touched `shift.boxLabelTemplateId` at all. The station therefore
+  // had no way to print anything but the item template on a box label. This
+  // pins the fix at the bundle level: a shift with its own distinct box
+  // template returns that template's spec under a NEW `boxLabelTemplate`
+  // field, clearly distinct from `labelTemplate`.
+  it("GET /shifts/:id/bundle resolves boxLabelTemplateId into its own boxLabelTemplate field, distinct from labelTemplate (Finding 3)", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const itemTemplateId = await seedLabelTemplate(orgId, "Item Template");
+    const boxTemplateId = await seedLabelTemplate(orgId, "Box Template");
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      productGroup: "Beverages",
+      boxCapacity: 12,
+      palletCapacity: 48,
+      defaultLabelTemplateId: itemTemplateId,
+    });
+    const created = await agent
+      .post("/shifts")
+      .send({ productId, mode: "aggregation", boxLabelTemplateId: boxTemplateId })
+      .expect(201);
+    const id = created.body.id as string;
+    expect(created.body.boxLabelTemplateId).toBe(boxTemplateId);
+
+    const bundle = await agent.get(`/shifts/${id}/bundle`).expect(200);
+    expect(bundle.body.labelTemplate).toMatchObject({ id: itemTemplateId, name: "Item Template" });
+    expect(bundle.body.boxLabelTemplate).toMatchObject({ id: boxTemplateId, name: "Box Template" });
+    expect(bundle.body.boxLabelTemplate.spec).toMatchObject({ language: "zpl" });
+    expect(bundle.body.boxLabelTemplate.id).not.toBe(bundle.body.labelTemplate.id);
+  });
+
+  // The absence case: no boxLabelTemplateId at all must resolve to null, not
+  // a fallback to the item template or any other guess.
+  it("GET /shifts/:id/bundle returns boxLabelTemplate: null when the shift has no box template set (Finding 3)", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const itemTemplateId = await seedLabelTemplate(orgId, "Item Only Template");
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      productGroup: "Beverages",
+      boxCapacity: 12,
+      palletCapacity: 48,
+      defaultLabelTemplateId: itemTemplateId,
+    });
+    const created = await agent.post("/shifts").send({ productId, mode: "aggregation" }).expect(201);
+    const id = created.body.id as string;
+
+    const bundle = await agent.get(`/shifts/${id}/bundle`).expect(200);
+    expect(bundle.body.labelTemplate).toMatchObject({ id: itemTemplateId });
+    expect(bundle.body.boxLabelTemplate).toBeNull();
+  });
+
   it("GET /shifts/:id/bundle is 404 for another tenant's shift", async () => {
     const a1 = request.agent(app!.getHttpServer());
     const org1 = await signUpAndActivate(a1);

@@ -270,13 +270,20 @@ export function WorkScreen({
     let cancelled = false;
     labelSpecReady.current = readShiftMirror(exec, shiftId)
       .then((row) => {
-        if (cancelled || !row?.labelTemplateSpec) return;
+        // CodeRabbit PR33 review, Finding 3: this is the BOX label's own
+        // template spec (`box_label_template_spec`), never
+        // `row.labelTemplateSpec` -- that is the ITEM template, mirrored from
+        // a completely separate `shift.labelTemplateId`. Reading the item
+        // spec here used to print the wrong label on every box (or nothing
+        // at all, when only a box template was configured and the item one
+        // was left unset).
+        if (cancelled || !row?.boxLabelTemplateSpec) return;
         try {
           // Written synchronously, in the same tick this `.then()` runs, so
           // `printAndMaybeVerify` sees it the instant `labelSpecReady`
           // resolves rather than waiting on a React re-render (see
           // `labelSpecRef`'s own doc comment).
-          labelSpecRef.current = JSON.parse(row.labelTemplateSpec) as LabelTemplateSpec;
+          labelSpecRef.current = JSON.parse(row.boxLabelTemplateSpec) as LabelTemplateSpec;
         } catch (err) {
           console.error("station: failed to parse the box label template spec", err);
         }
