@@ -1,3 +1,4 @@
+import { insertException } from "./box-exceptions-mirror.js";
 import type { SqlExecutor } from "./mirror.js";
 
 /**
@@ -142,4 +143,109 @@ export async function markPrintSkipped(
     at,
     boxId,
   ]);
+}
+
+export interface ClearBoxInput {
+  boxId: string;
+  shiftId: string;
+  terminalId: string | null;
+  operatorId: string | null;
+  at: string;
+}
+
+/**
+ * Empties every code from a still-open box and queues the fact -- the
+ * "start over without closing" shortcut (design spec's fourth action).
+ * Does NOT touch closed_at/sscc/disassembled_at: the box stays open, ready
+ * to be filled again. No reason is recorded (see the design spec, scope
+ * decision 5) -- nothing has been printed or numbered yet.
+ */
+export async function clearBox(exec: SqlExecutor, input: ClearBoxInput): Promise<void> {
+  await exec.run("DELETE FROM codes_mirror WHERE box_id = ?", [input.boxId]);
+  await insertException(exec, {
+    kind: "clear",
+    boxId: input.boxId,
+    codeHash: null,
+    shiftId: input.shiftId,
+    terminalId: input.terminalId,
+    operatorId: input.operatorId,
+    reason: null,
+    at: input.at,
+  });
+}
+
+export interface DisassembleBoxInput {
+  boxId: string;
+  shiftId: string;
+  terminalId: string | null;
+  operatorId: string | null;
+  reason: string;
+  at: string;
+}
+
+/**
+ * Retires a closed box: frees every code it still held and marks the
+ * mirror row disassembled, so it drops out of `listClosedBoxes` and can
+ * never be reprinted or disassembled again. The server independently
+ * voids the box's SSCC forever (see the design spec's scope decision 4) --
+ * a re-packed box is a brand-new box row with a brand-new SSCC.
+ */
+export async function disassembleBox(exec: SqlExecutor, input: DisassembleBoxInput): Promise<void> {
+  await exec.run("DELETE FROM codes_mirror WHERE box_id = ?", [input.boxId]);
+  await exec.run("UPDATE boxes_mirror SET disassembled_at = ? WHERE box_id = ?", [
+    input.at,
+    input.boxId,
+  ]);
+  await insertException(exec, {
+    kind: "disassemble",
+    boxId: input.boxId,
+    codeHash: null,
+    shiftId: input.shiftId,
+    terminalId: input.terminalId,
+    operatorId: input.operatorId,
+    reason: input.reason,
+    at: input.at,
+  });
+}
+
+export interface ClosedBoxSummary {
+  boxId: string;
+  sscc: string;
+  itemCount: number;
+  closedAt: string;
+}
+
+/**
+ * Closed, not-yet-disassembled boxes for this shift and terminal, most
+ * recently closed first -- the picker for the reprint/disassemble panel
+ * (Task 14). Scoped to `terminalId` (Task 11's own scope decision 3): an
+ * operator manages what physically closed at their own workstation.
+ */
+export async function listClosedBoxes(
+  exec: SqlExecutor,
+  shiftId: string,
+  terminalId: string | null,
+): Promise<ClosedBoxSummary[]> {
+  const terminalClause = terminalId === null ? "terminal_id IS NULL" : "terminal_id = ?";
+  const params = terminalId === null ? [shiftId] : [shiftId, terminalId];
+  const rows = await exec.all<{
+    box_id: string;
+    sscc: string;
+    closed_at: string;
+    item_count: number;
+  }>(
+    `SELECT b.box_id AS box_id, b.sscc AS sscc, b.closed_at AS closed_at,
+            (SELECT COUNT(*) FROM codes_mirror c WHERE c.box_id = b.box_id) AS item_count
+       FROM boxes_mirror b
+      WHERE b.shift_id = ? AND ${terminalClause}
+        AND b.closed_at IS NOT NULL AND b.disassembled_at IS NULL
+      ORDER BY b.closed_at DESC`,
+    params,
+  );
+  return rows.map((r) => ({
+    boxId: r.box_id,
+    sscc: r.sscc,
+    itemCount: Number(r.item_count),
+    closedAt: r.closed_at,
+  }));
 }
