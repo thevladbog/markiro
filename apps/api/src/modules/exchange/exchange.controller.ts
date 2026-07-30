@@ -18,7 +18,10 @@ import type { Response } from "express";
 import { DB } from "../../auth/auth.module";
 import type { IntegrationChannelType } from "../integrations/channel-registry";
 import { JournalService } from "../integrations/journal.service";
-import { PickupOrdersService } from "../pickup-orders/pickup-orders.service";
+import {
+  PickupOrdersService,
+  type ApplyExternalStatusResult,
+} from "../pickup-orders/pickup-orders.service";
 import { decideApplication, type KnownProduct } from "./commerceml/apply";
 import { parseCommerceMl } from "./commerceml/parse";
 import { parseOrderStatusDocuments, resolveMappedStatus } from "./commerceml/order-status";
@@ -280,6 +283,18 @@ export class ExchangeController {
 
     if (mode === "import") {
       await this.import(session, type, filename, res);
+      return;
+    }
+
+    // Fix 2 (final review): the real 1С "Обмен с сайтом" protocol's
+    // order/sale direction (checkauth -> init -> query -> success) runs
+    // entirely over GET -- POST is used only for `mode=file` (the chunked
+    // file upload in the OTHER, catalog-import direction). `mode=success` was
+    // wired only into `post()` below; this is the same `success()` method, a
+    // second call site so a genuine GET-driven confirmation isn't refused as
+    // an unknown mode.
+    if (mode === "success") {
+      await this.success(session, res);
       return;
     }
 
@@ -805,11 +820,52 @@ export class ExchangeController {
         continue;
       }
 
-      const result = await this.pickupOrders.applyExternalStatus(
-        session.tenantId,
-        document.externalRef,
-        mapped,
-      );
+      // Fix 1 (final review): `document.externalRef` is raw text lifted from
+      // an untrusted 1С file, and `pickupOrders.id` is a `uuid` column -- a
+      // non-UUID (or empty) `externalRef` makes the underlying
+      // `eq(schema.pickupOrders.id, orderId)` comparison throw a Postgres
+      // `22P02`, not resolve to "no row". Left unguarded here, that throw
+      // would escape this loop and abort the rest of the batch -- and 1С
+      // retrying the exact same file would reproduce the crash forever.
+      // Caught and treated exactly like the `result.outcome !== "applied"`
+      // discrepancy below, just under a reason that names the lookup failure
+      // itself rather than a resolved-but-wrong outcome.
+      let result: ApplyExternalStatusResult;
+      try {
+        result = await this.pickupOrders.applyExternalStatus(
+          session.tenantId,
+          document.externalRef,
+          mapped,
+        );
+      } catch (cause) {
+        discrepancies++;
+        const detail = cause instanceof Error ? cause.message : String(cause);
+        await this.journal
+          .append({
+            tenantId: session.tenantId,
+            channelType: session.channelType,
+            sessionId: session.id,
+            direction: "in",
+            outcome: "warn",
+            grain: "item",
+            message: `расхождение статуса (lookup_failed): ${document.externalRef} -> ${mapped}`,
+            details: {
+              externalRef: document.externalRef,
+              mapped,
+              outcome: "lookup_failed",
+              error: detail,
+            },
+          })
+          .catch((error: unknown) => {
+            this.logger.warn(
+              `import (sale): status-discrepancy journal failed (continuing): ${document.externalRef} — ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+          });
+        continue;
+      }
+
       if (result.outcome === "applied") {
         applied++;
         continue;
@@ -840,7 +896,15 @@ export class ExchangeController {
       channelType: session.channelType,
       sessionId: session.id,
       direction: "in",
-      outcome: "ok",
+      // "also" fix (final review): a `documents.length === 0` parse result is
+      // indistinguishable from "genuinely nothing changed" once it's logged
+      // as `outcome: "ok"` -- and this codebase's own assumed outbound XML
+      // envelope shape (`<КоммерческаяИнформация><ПакетДокументов><Документ>`)
+      // is unverified against a real 1С instance (see the acceptance
+      // checklist). `warn` here lets an operator tell "we understood the file
+      // and 0 things changed" apart from "we may not have understood the file
+      // at all".
+      outcome: documents.length === 0 ? "warn" : "ok",
       grain: "session",
       message: `import (sale): файл «${filename}» применён`,
       details: { filename, applied, discrepancies, total: documents.length },
@@ -905,13 +969,21 @@ export class ExchangeController {
    * заявку").
    */
   private async query(session: ResolvedExchangeSession, res: Response): Promise<void> {
-    const candidates = await this.pickupOrders.findExportCandidates(
+    // Fix 4 (final review): `findExportCandidates` now returns its
+    // `candidates` PRE-FILTERED to exclude held orders (a `NOT EXISTS` in
+    // the SQL itself, before `limit`, so a batch full of held orders can
+    // never starve out a genuinely eligible one -- see that method's own
+    // comment). `planExport` still runs over `candidates` and will report
+    // 100% of them `eligible`; the held set for journaling below comes from
+    // `findExportCandidates`'s own separately-queried `held`, not from
+    // `plan.held` (which is now always empty).
+    const { candidates, held } = await this.pickupOrders.findExportCandidates(
       session.tenantId,
       EXPORT_BATCH_SIZE,
     );
     const plan = planExport(candidates);
 
-    for (const held of plan.held) {
+    for (const heldOrder of held) {
       await this.journal
         .append({
           tenantId: session.tenantId,
@@ -920,16 +992,16 @@ export class ExchangeController {
           direction: "out",
           outcome: "warn",
           grain: "item",
-          message: `заявка придержана — товар без связи с 1С: ${held.orderNo}`,
+          message: `заявка придержана — товар без связи с 1С: ${heldOrder.orderNo}`,
           details: {
-            orderId: held.orderId,
-            orderNo: held.orderNo,
-            unlinkedProductIds: held.unlinkedProductIds,
+            orderId: heldOrder.orderId,
+            orderNo: heldOrder.orderNo,
+            unlinkedProductIds: heldOrder.unlinkedProductIds,
           },
         })
         .catch((error: unknown) => {
           this.logger.warn(
-            `query: held-order journal failed (continuing): ${held.orderNo} — ${
+            `query: held-order journal failed (continuing): ${heldOrder.orderNo} — ${
               error instanceof Error ? error.message : String(error)
             }`,
           );
@@ -978,11 +1050,25 @@ export class ExchangeController {
    * `mode=success`: спека §5's "подтверждение до пометки" -- marks EXACTLY
    * the order ids the immediately preceding `mode=query` on THIS session
    * offered (Task 8's `readQueriedOrderIds`, not whatever 1С's own success
-   * call happens to say) as exported, and only those still `pending` with no
-   * `exportedAt` yet -- a race with a manual admin resolve/cancel in between
-   * is harmless either way (the order is already terminal, or already
-   * exported by a concurrent success call). Clears the recorded ids after,
-   * so a stray extra `mode=success` with nothing pending confirms zero.
+   * call happens to say) as exported: `tenantId` + `inArray(orderIds)` +
+   * `isNull(exportedAt)`.
+   *
+   * Fix 3 (final review): deliberately NOT also conditioned on
+   * `status = "pending"` any more. `orderIds` only ever holds ids THIS exact
+   * session's own `mode=query` call selected from pending, unexported orders
+   * in the first place (see `query()` above) -- so an additional `status`
+   * check in the WHERE clause here does not guard against marking the wrong
+   * order as exported, it only narrows which of THOSE SAME ids still get
+   * marked. If an admin resolves (punches/writes off) one of them locally
+   * between this session's `query` and `success` -- a real, reachable race,
+   * not a hypothetical one -- the order genuinely WAS sent to and accepted by
+   * 1С; excluding it here because it is no longer `pending` would leave
+   * `exportedAt` permanently unset on an order that isn't going to be
+   * re-queried (it's terminal now), so its admin-facing card would
+   * incorrectly show "not yet exported" forever. Dropping the `status` check
+   * lets `exportedAt` still get set in that case, which is what actually
+   * happened; `isNull(exportedAt)` alone is enough to keep this call
+   * idempotent against a stray repeat.
    */
   private async success(session: ResolvedExchangeSession, res: Response): Promise<void> {
     const orderIds = await this.sessions.readQueriedOrderIds(session.id);
@@ -996,7 +1082,6 @@ export class ExchangeController {
           and(
             eq(schema.pickupOrders.tenantId, session.tenantId),
             inArray(schema.pickupOrders.id, orderIds),
-            eq(schema.pickupOrders.status, "pending"),
             isNull(schema.pickupOrders.exportedAt),
           ),
         )

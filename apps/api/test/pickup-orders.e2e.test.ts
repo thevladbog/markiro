@@ -298,7 +298,7 @@ describe.skipIf(!ready)("pickup orders admin e2e", () => {
     });
 
     const already = await pickupOrdersService.findExportCandidates(tenantId, 100);
-    const found = already.find((o) => o.id === orderId);
+    const found = already.candidates.find((o) => o.id === orderId);
     expect(found).toBeDefined();
     expect(found!.items).toEqual([
       { productId: linkedProductId, productExternalRef: expect.any(String), unitPrice: "10.00" },
@@ -309,7 +309,123 @@ describe.skipIf(!ready)("pickup orders admin e2e", () => {
       .set({ exportedAt: new Date() })
       .where(eq(schema.pickupOrders.id, orderId));
     const afterExport = await pickupOrdersService.findExportCandidates(tenantId, 100);
-    expect(afterExport.some((o) => o.id === orderId)).toBe(false);
+    expect(afterExport.candidates.some((o) => o.id === orderId)).toBe(false);
+  });
+
+  it("findExportCandidates не отдаёт заявки с непривязанным товаром в candidates, но видит их в held", async () => {
+    const unlinkedProductId = randomUUID();
+    await db.insert(schema.products).values({
+      id: unlinkedProductId,
+      tenantId,
+      gtin14: "04600682000044",
+      name: "Товар без связи",
+    });
+
+    const heldOrderId = randomUUID();
+    await db.insert(schema.pickupOrders).values({
+      id: heldOrderId,
+      tenantId,
+      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      kioskId,
+      employeeId,
+      reason: "buy",
+      itemCount: 1,
+      totalPrice: "10.00",
+    });
+    await db.insert(schema.pickupOrderItems).values({
+      tenantId,
+      orderId: heldOrderId,
+      productId: unlinkedProductId,
+      gtin14: "04600682000044",
+      serial: "SN-HELD",
+      rawKm: "raw-held-1",
+      kmKey: `kmkey-${randomUUID()}`,
+      unitPrice: "10.00",
+      scannedAt: new Date(),
+    });
+
+    const result = await pickupOrdersService.findExportCandidates(tenantId, 100);
+    expect(result.candidates.some((o) => o.id === heldOrderId)).toBe(false);
+    const heldEntry = result.held.find((h) => h.orderId === heldOrderId);
+    expect(heldEntry).toBeDefined();
+    expect(heldEntry!.unlinkedProductIds).toEqual([unlinkedProductId]);
+  });
+
+  it("findExportCandidates: заявки с непривязанным товаром не морят голодом заявку, готовую к экспорту, даже когда held-заявок больше limit", async () => {
+    // The starvation bug this fix prevents: the OLD implementation selected
+    // the oldest `limit` pending+unexported orders FIRST, then split them
+    // into eligible/held afterwards -- so once `limit` or more orders were
+    // held, the eligible order below (created LAST, i.e. newest) would never
+    // even be selected by the first query, let alone offered. Three held
+    // orders against `limit=2` reproduces that: a limit of 2 is smaller than
+    // the 3 held orders alone, so the old code would return 2 held orders
+    // and nothing else, every round, forever.
+    const unlinkedProductId = randomUUID();
+    await db.insert(schema.products).values({
+      id: unlinkedProductId,
+      tenantId,
+      gtin14: "04600682000051",
+      name: "Товар без связи (starvation)",
+    });
+
+    for (let i = 0; i < 3; i++) {
+      const orderId = randomUUID();
+      await db.insert(schema.pickupOrders).values({
+        id: orderId,
+        tenantId,
+        orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+        kioskId,
+        employeeId,
+        reason: "buy",
+        itemCount: 1,
+        totalPrice: "10.00",
+      });
+      await db.insert(schema.pickupOrderItems).values({
+        tenantId,
+        orderId,
+        productId: unlinkedProductId,
+        gtin14: "04600682000051",
+        serial: `SN-STARVE-${i}`,
+        rawKm: `raw-starve-${i}`,
+        kmKey: `kmkey-${randomUUID()}`,
+        unitPrice: "10.00",
+        scannedAt: new Date(),
+      });
+    }
+
+    const linkedProductId = randomUUID();
+    await db.insert(schema.products).values({
+      id: linkedProductId,
+      tenantId,
+      gtin14: "04600682000068",
+      name: "Товар со связью (starvation)",
+      externalRef: `ext-${randomUUID()}`,
+    });
+    const eligibleOrderId = randomUUID();
+    await db.insert(schema.pickupOrders).values({
+      id: eligibleOrderId,
+      tenantId,
+      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      kioskId,
+      employeeId,
+      reason: "buy",
+      itemCount: 1,
+      totalPrice: "10.00",
+    });
+    await db.insert(schema.pickupOrderItems).values({
+      tenantId,
+      orderId: eligibleOrderId,
+      productId: linkedProductId,
+      gtin14: "04600682000068",
+      serial: "SN-STARVE-ELIGIBLE",
+      rawKm: "raw-starve-eligible",
+      kmKey: `kmkey-${randomUUID()}`,
+      unitPrice: "10.00",
+      scannedAt: new Date(),
+    });
+
+    const result = await pickupOrdersService.findExportCandidates(tenantId, 2);
+    expect(result.candidates.some((o) => o.id === eligibleOrderId)).toBe(true);
   });
 
   it("applyExternalStatus переводит pending заявку в punched", async () => {
