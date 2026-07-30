@@ -475,6 +475,7 @@ export class PickupOrdersService {
       .innerJoin(schema.products, eq(schema.products.id, schema.pickupOrderItems.productId))
       .where(
         and(
+          eq(schema.pickupOrderItems.tenantId, tenantId),
           inArray(schema.pickupOrderItems.orderId, orderIds),
           eq(schema.pickupOrderItems.voided, false),
         ),
