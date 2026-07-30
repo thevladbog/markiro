@@ -46,11 +46,44 @@ simply forgotten or genuinely unverified:
   `resolvePriceType` in this codebase — the resolution happens inline in
   `offersFrom` (parse.ts).
 
-## Input for plan И-2 (order status)
+## Order export & status reconciliation (plan И-2)
 
-- [ ] Record the exact requisite (реквизит) name the client's 1С
-      configuration uses for order status on an outgoing document, and its
-      full dictionary of values — plan И-2's two-way status mapping needs
-      this before it can be designed; §9 of
-      `docs/superpowers/specs/2026-07-29-commerceml-design.md` names it as
-      an open input, not yet an assumption baked into any code.
+- [ ] Configure the requisite name this client's 1С configuration uses for
+      order status (`СтатусЗаказа`-shaped or otherwise) as `orderStatusField`
+      on the CommerceML channel's settings, and its full dictionary of values
+      as `statusMapping` — this cannot be guessed from any synthetic fixture;
+      it must come from the client's own 1С specialist or a live document
+      dump.
+- [ ] Run a full `checkauth → init → query → success` cycle against a real
+      1С instance with a genuine pending pickup order queued; confirm 1С's
+      importer accepts the outbound `<Документ>` shape this exchange builds
+      (`order-export.ts`) — a synthetic assertion can only prove the XML is
+      well-formed and internally consistent, never that a real 1С
+      configuration's importer parses these exact tag names/shape the way
+      this exchange assumes.
+- [ ] Confirm a real 1С configuration's own outgoing "changed order" export
+      (`type=sale&mode=file`) actually carries the order status inside
+      `<ЗначенияРеквизитов>`/`<ЗначениеРеквизита>`, in the shape
+      `order-status.ts` expects, rather than some other document structure
+      this exchange has not been built against.
+- [ ] Confirm `splitWriteoffDocument` + `writeoffDocumentType` actually route
+      to a distinct document type this client's own 1С configuration
+      recognizes, if the client wants writeoffs split — this is a
+      per-configuration dictionary (спека §2), so there is no default this
+      exchange can assume is right.
+
+## Already covered — do not re-spend the live session on these
+
+- ~~That an order held back because of an unlinked product does not silently
+  vanish~~ — covered by `commerceml-order-export.test.ts`'s `planExport`
+  tests and `pickup-orders.e2e.test.ts`'s `findExportCandidates` test: the
+  order simply doesn't appear in `plan.eligible` until every item's product
+  carries an `external_ref`.
+- ~~That `mode=success` only confirms what THIS session's own `mode=query`
+  actually offered~~ — covered by `exchange-protocol.e2e.test.ts`'s outbound
+  cycle test, which asserts the SAME order is not re-offered on a second
+  `mode=query` round after `mode=success`.
+- ~~That an unmapped external status never silently moves an order~~ —
+  covered by `exchange-protocol.e2e.test.ts`'s inbound reconciliation test
+  (unmapped-value case) and `commerceml-order-status.test.ts`'s
+  `resolveMappedStatus` tests.
