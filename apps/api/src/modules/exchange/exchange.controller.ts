@@ -18,6 +18,7 @@ import type { Response } from "express";
 import { DB } from "../../auth/auth.module";
 import type { IntegrationChannelType } from "../integrations/channel-registry";
 import { JournalService } from "../integrations/journal.service";
+import { PickupOrdersService } from "../pickup-orders/pickup-orders.service";
 import { decideApplication, type KnownProduct } from "./commerceml/apply";
 import { parseCommerceMl } from "./commerceml/parse";
 import {
@@ -200,6 +201,7 @@ export class ExchangeController {
     @Inject(DB) private readonly db: Db,
     private readonly sessions: ExchangeSessionService,
     private readonly journal: JournalService,
+    private readonly pickupOrders: PickupOrdersService,
   ) {}
 
   @Get("1c_exchange")
