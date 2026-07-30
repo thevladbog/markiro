@@ -156,7 +156,7 @@ export class IntegrationsService {
       // запросе", а не "отличается ли значение от дефолта".
       settings = {};
       for (const key of Object.keys(settingsPatch)) {
-        settings[key] = (parsed.data as Record<string, unknown>)[key];
+        settings[key] = parsed.data[key];
       }
     }
 

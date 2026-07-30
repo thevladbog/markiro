@@ -11,6 +11,8 @@ import { PgBoss } from "pg-boss";
 import { sql } from "drizzle-orm";
 import { ensurePartitions, schema, type Db } from "@markiro/db";
 import { DB } from "../auth/auth.module";
+import { ExchangeSessionService } from "../modules/exchange/exchange-session.service";
+import { JournalService } from "../modules/integrations/journal.service";
 import { currentMonthUTC, nextMonthUTC } from "./months";
 
 export const PG_CONNECTION_STRING = "JOBS_PG_CONNECTION_STRING";
@@ -26,9 +28,31 @@ const QUEUE_CRON = "0 4 * * *";
 const PRUNE_PAIR_ATTEMPTS_QUEUE_NAME = "prune-kiosk-pair-attempts";
 const PRUNE_PAIR_ATTEMPTS_QUEUE_CRON = "0 * * * *";
 
+// Same abandoned-mid-transfer concern as `kiosk_pair_attempts` above, but
+// for `/1c_exchange`: `ExchangeSessionService.sweepExpired` (Task 6) already
+// knows how to close a session whose TTL ran out and drop its chunks --
+// nothing was ever wired to call it, so an interrupted CommerceML exchange
+// left its `exchange_uploads` rows (and eventually its `integration_
+// sessions` row too, once retention below catches it) forever. An hour
+// matches the sessions' own `SESSION_TTL_MS`, same reasoning as
+// `PRUNE_PAIR_ATTEMPTS_QUEUE_CRON`: no point checking more often than the
+// window it enforces can even turn over.
+const SWEEP_EXPIRED_EXCHANGE_SESSIONS_QUEUE_NAME = "sweep-expired-exchange-sessions";
+const SWEEP_EXPIRED_EXCHANGE_SESSIONS_QUEUE_CRON = "0 * * * *";
+
+// `JournalService.prune` (Task 3) is the retention policy for
+// `integration_sessions`/`integration_events` (спека §7: 90-day session
+// summaries, 14-day item-grain detail) -- also written, also tested, also
+// never called until now. Daily, not hourly: this trims a slow-growing
+// audit trail, not a rate limiter's window, so there is no benefit to
+// checking more often than once a day. Offset from `QUEUE_CRON`'s 04:00 so
+// the two daily jobs don't contend for the same tick.
+const PRUNE_INTEGRATION_JOURNAL_QUEUE_NAME = "prune-integration-journal";
+const PRUNE_INTEGRATION_JOURNAL_QUEUE_CRON = "0 3 * * *";
+
 /**
  * Boots a dedicated pg-boss instance (its own `pgboss` schema, same
- * database as the app) and runs two independent schedules on it:
+ * database as the app) and runs four independent schedules on it:
  *  - keeps the `codes`/`scan_events` monthly partitions ahead of traffic:
  *    ensures the current + next month exist once at startup, then again
  *    every day at 04:00 UTC.
@@ -36,6 +60,12 @@ const PRUNE_PAIR_ATTEMPTS_QUEUE_CRON = "0 * * * *";
  *    limiter's fixed-window counters) once at startup, then again every
  *    hour, so an unauthenticated write path with no other cleanup doesn't
  *    grow the table forever.
+ *  - sweeps expired `/1c_exchange` sessions once at startup, then again
+ *    every hour, closing them and dropping their uploaded chunks so an
+ *    abandoned exchange doesn't leave binary rows around forever.
+ *  - prunes the integrations journal once at startup, then again every day
+ *    at 03:00 UTC, per the per-grain retention described on
+ *    `JournalService.prune`.
  *
  * pg-boss v12 requires a queue to be created (`createQueue`) before it can
  * be scheduled or worked -- scheduling against a queue that doesn't exist
@@ -52,6 +82,8 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
   constructor(
     @Inject(DB) private readonly db: Db,
     @Inject(PG_CONNECTION_STRING) private readonly connectionString: string,
+    private readonly journal: JournalService,
+    private readonly exchangeSessions: ExchangeSessionService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -77,10 +109,30 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
         await this.runPruneKioskPairAttempts();
       });
 
-      // Also run both once immediately at boot rather than waiting for the
-      // first tick of either schedule.
+      await boss.createQueue(SWEEP_EXPIRED_EXCHANGE_SESSIONS_QUEUE_NAME);
+      await boss.schedule(
+        SWEEP_EXPIRED_EXCHANGE_SESSIONS_QUEUE_NAME,
+        SWEEP_EXPIRED_EXCHANGE_SESSIONS_QUEUE_CRON,
+      );
+      await boss.work(SWEEP_EXPIRED_EXCHANGE_SESSIONS_QUEUE_NAME, async () => {
+        await this.runSweepExpiredExchangeSessions();
+      });
+
+      await boss.createQueue(PRUNE_INTEGRATION_JOURNAL_QUEUE_NAME);
+      await boss.schedule(
+        PRUNE_INTEGRATION_JOURNAL_QUEUE_NAME,
+        PRUNE_INTEGRATION_JOURNAL_QUEUE_CRON,
+      );
+      await boss.work(PRUNE_INTEGRATION_JOURNAL_QUEUE_NAME, async () => {
+        await this.runPruneIntegrationJournal();
+      });
+
+      // Also run all four once immediately at boot rather than waiting for
+      // the first tick of any schedule.
       await this.runEnsurePartitions();
       await this.runPruneKioskPairAttempts();
+      await this.runSweepExpiredExchangeSessions();
+      await this.runPruneIntegrationJournal();
     } catch (e) {
       // Bootstrap failed partway through: stop whatever pg-boss managed to
       // start so it doesn't leak a connection/maintenance loop, then
@@ -121,6 +173,27 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
         : "No stale kiosk_pair_attempts rows to prune",
     );
   }
+
+  /**
+   * Closes `/1c_exchange` sessions whose TTL ran out and drops their
+   * uploaded chunks. See `ExchangeSessionService.sweepExpired`'s own
+   * comment for why this can't just be folded into `finishSession`'s call
+   * sites: the protocol has no explicit goodbye, so only running out of
+   * time (this job) ever ends an abandoned session.
+   */
+  private async runSweepExpiredExchangeSessions(): Promise<void> {
+    await this.exchangeSessions.sweepExpired(new Date());
+    this.logger.log("Swept expired /1c_exchange sessions");
+  }
+
+  /**
+   * Applies the integrations journal's per-grain retention (session
+   * summaries 90 days, item-grain detail 14 -- see `JournalService.prune`).
+   */
+  private async runPruneIntegrationJournal(): Promise<void> {
+    await this.journal.prune(new Date());
+    this.logger.log("Pruned integrations journal");
+  }
 }
 
 @Module({})
@@ -129,7 +202,12 @@ export class JobsModule {
   static forRoot(connectionString: string): DynamicModule {
     return {
       module: JobsModule,
-      providers: [{ provide: PG_CONNECTION_STRING, useValue: connectionString }, PgBossService],
+      providers: [
+        { provide: PG_CONNECTION_STRING, useValue: connectionString },
+        PgBossService,
+        JournalService,
+        ExchangeSessionService,
+      ],
     };
   }
 }

@@ -98,8 +98,9 @@ design attention.
 
 - Organization profile (incl. own GLN and GS1 company prefixes);
   lines/workstations (name, expected hardware);
-- API keys for external integrations (create/revoke, scopes read/write);
 - Language (RU/EN) and theme (light/dark/system) defaults.
+- API keys for external integrations live in the **Integrations** section
+  (brief 08), not here — see that brief for create/revoke and scopes.
 
 ## Cross-cutting notes
 
