@@ -4,7 +4,7 @@ import {
   Injectable,
   InternalServerErrorException,
 } from "@nestjs/common";
-import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, lte, max, sql } from "drizzle-orm";
 import { parseSscc } from "@markiro/domain";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
@@ -20,6 +20,16 @@ export interface SsccBlock {
   extensionDigit: number;
   fromSerial: number;
   toSerial: number;
+  /**
+   * The highest serial in this block known to be consumed, or null before
+   * any is. Always null for a block just cut by `allocate` (nothing in a
+   * fresh range has been used yet); carries the real value through from
+   * `allocateForBundle` when it hands back an existing block, so the
+   * device can reconcile its own cursor against the row it already holds
+   * instead of being handed a range shaped like a brand new one (final
+   * review, finding 1).
+   */
+  consumedThroughSerial: number | null;
 }
 
 /** A GS1 GLN is always exactly 13 digits; the issuer prefix is its first 9. */
@@ -41,6 +51,43 @@ export function deriveIssuerPrefix(gln: string, ownerLabel: string): string {
     throw new BadRequestException(`${ownerLabel}'s GLN must be exactly 13 digits`);
   }
   return gln.slice(0, 9);
+}
+
+/**
+ * The lowest `nextSerial` an admin may legally seed for (tenant, issuer
+ * prefix, extension digit): one past the highest serial ever actually
+ * handed to a device in `sscc_blocks`, or 0 if no block has ever been
+ * issued under that triple (final review, finding 2).
+ *
+ * Exported as a plain function (rather than a method requiring
+ * `SsccService` as an injected dependency) for the same reason
+ * `deriveIssuerPrefix` above is: org-profile.service.ts's and
+ * counterparties.service.ts's `putSscc` both need it, and neither module
+ * currently depends on `SsccModule`.
+ *
+ * Without this floor, an admin re-seeding the counter below it (a stale
+ * migration script re-run after production started, a typo) would let the
+ * next `allocate` cut a range overlapping a block some device already
+ * holds -- an SSCC collision ACROSS devices, the exact failure the prefix
+ * keying and one-statement allocation exist to prevent.
+ */
+export async function seedFloor(
+  db: Pick<Db, "select">,
+  tenantId: string,
+  issuerPrefix: string,
+  extensionDigit: number,
+): Promise<number> {
+  const [row] = await db
+    .select({ highest: max(schema.ssccBlocks.toSerial) })
+    .from(schema.ssccBlocks)
+    .where(
+      and(
+        eq(schema.ssccBlocks.tenantId, tenantId),
+        eq(schema.ssccBlocks.issuerPrefix, issuerPrefix),
+        eq(schema.ssccBlocks.extensionDigit, extensionDigit),
+      ),
+    );
+  return row?.highest == null ? 0 : Number(row.highest) + 1;
 }
 
 @Injectable()
@@ -132,6 +179,7 @@ export class SsccService {
         extensionDigit,
         fromSerial: toExclusive - size,
         toSerial: toExclusive - 1,
+        consumedThroughSerial: null,
       };
 
       await tx.insert(schema.ssccBlocks).values({
@@ -163,16 +211,31 @@ export class SsccService {
    * device numbers for an issuer it has NEVER held, and recover a device
    * that lost its own record of what it already holds.
    *
-   * A repeat call returns the device's EXISTING block's UNCONSUMED
-   * REMAINDER, not the whole original range: the device may have lost its
-   * local database (a factory reset, a corrupted store) and be
-   * re-provisioning from scratch, in which case handing back serials
-   * `recordConsumedSerial` already knows were printed would let it restart
-   * its own cursor at `fromSerial` and reprint them -- caught only later,
-   * and only at ingest, by `boxes_tenant_sscc_uq`, after the labels are
-   * already on the boxes. `consumedThroughSerial` null (nothing recorded
-   * consumed yet) is treated as "remainder is the whole range", so an
-   * ordinary repeat fetch before any box has closed is unaffected.
+   * A repeat call returns the device's EXISTING block's ORIGINAL
+   * `fromSerial`/`toSerial` -- never shrunk -- PLUS `consumedThroughSerial`
+   * as its own field, so the device can reconcile against the row it
+   * already holds (matching primary key: `(issuer_prefix, extension_digit,
+   * from_serial)` on the device's own `sscc_pool`) rather than being handed
+   * a range shaped like a brand new one.
+   *
+   * This used to shrink `fromSerial` to `consumedThroughSerial + 1`
+   * instead (final review, finding 1): that reads like a fresh, disjoint
+   * range to the device's `addRange`, which inserts it as a SECOND row
+   * alongside the one it already holds for the same block (its primary key
+   * is keyed on `from_serial`, and a shrunk `fromSerial` never matches the
+   * original). `burnSerial`'s `ORDER BY from_serial` then drains the
+   * original row's remainder first and, once THAT is exhausted, restarts
+   * the second row from ITS OWN `from_serial` -- reissuing every serial in
+   * between a second time, onto a second physical box, long after the
+   * first row's labels are already printed. Returning the original bounds
+   * unconditionally means the device's `addRange` always targets the SAME
+   * row it already has; the cursor itself is reconciled device-side via
+   * `consumedThroughSerial`, which also recovers a device that lost its
+   * local database (a factory reset, a corrupted store): re-provisioning
+   * from scratch, it has no row to conflict against, so this field lets it
+   * seed a fresh row's cursor PAST what was already printed instead of
+   * restarting at `fromSerial` and reprinting labels already on boxes --
+   * caught only later, and only at ingest, by `boxes_tenant_sscc_uq`.
    */
   async allocateForBundle(
     tenantId: string,
@@ -216,11 +279,9 @@ export class SsccService {
       return {
         issuerPrefix: existing.issuerPrefix,
         extensionDigit: existing.extensionDigit,
-        fromSerial:
-          existing.consumedThroughSerial == null
-            ? existing.fromSerial
-            : existing.consumedThroughSerial + 1,
+        fromSerial: existing.fromSerial,
         toSerial: existing.toSerial,
+        consumedThroughSerial: existing.consumedThroughSerial,
       };
     }
     // No block at all yet, OR the held one is fully consumed -- either way,

@@ -11,8 +11,10 @@ import { addRange } from "./sscc-pool.js";
  * `bundle.sscc` (aggregation shifts only; null in validation mode, and null
  * when the server could not resolve this device an issuer prefix) is
  * likewise added to the local serial pool when present -- `addRange` is
- * idempotent (its primary key drops a block already held), so a replayed
- * bundle download can never double it.
+ * idempotent (its primary key upserts a block already held, advancing its
+ * cursor rather than regressing or duplicating it -- see its own doc
+ * comment), so a replayed bundle download can never double the pool or
+ * reissue a serial.
  *
  * Deliberately resilient: a download or mirror failure must never block the
  * operator from entering the shift they just opened/rejoined/started, so

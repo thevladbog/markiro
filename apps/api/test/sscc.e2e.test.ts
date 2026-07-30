@@ -346,7 +346,7 @@ describe.skipIf(!ready)("sscc e2e", () => {
       expect(rows).toHaveLength(1);
     });
 
-    it("hands back only the unconsumed remainder once part of the block is recorded consumed", async () => {
+    it("hands back the block's ORIGINAL bounds plus the consumed cursor once part of it is recorded consumed (final review, finding 1)", async () => {
       const svc = app!.get(SsccService);
       const prefix = "700000002";
       const deviceId = await registerDevice("Remainder device B");
@@ -356,8 +356,15 @@ describe.skipIf(!ready)("sscc e2e", () => {
       await svc.recordConsumedSerial(tenantId, buildSscc(0, prefix, consumedUpTo));
 
       const remainder = await svc.allocateForBundle(tenantId, prefix, 0, deviceId, 20);
-      expect(remainder.fromSerial).toBe(consumedUpTo + 1);
+      // NEVER a shrunk range: a fromSerial that moves would not match the
+      // device's already-held row's primary key (issuer_prefix,
+      // extension_digit, from_serial) on its own sscc_pool, and would be
+      // inserted there as a SECOND, overlapping row instead of reconciling
+      // the first -- the exact bug this correction fixes (see
+      // SsccService.allocateForBundle's doc comment).
+      expect(remainder.fromSerial).toBe(first.fromSerial);
       expect(remainder.toSerial).toBe(first.toSerial);
+      expect(remainder.consumedThroughSerial).toBe(consumedUpTo);
 
       // Still the SAME block, not a fresh one -- the row count must not grow.
       const rows = await db
@@ -412,7 +419,7 @@ describe.skipIf(!ready)("sscc e2e", () => {
       expect(afterRows[1]!.consumedThroughSerial).toBe(next.fromSerial);
     });
 
-    it("starts the remainder one serial past a consumed fromSerial of 0 (Task 10 fix)", async () => {
+    it("reports a consumed cursor of 0 as itself, not as 'nothing consumed yet' (Task 10 fix)", async () => {
       const svc = app!.get(SsccService);
       // A brand-new prefix, never allocated under before in this file, so
       // this device's very first block starts at serial 0 -- the one value
@@ -427,14 +434,14 @@ describe.skipIf(!ready)("sscc e2e", () => {
       await svc.recordConsumedSerial(tenantId, buildSscc(0, prefix, first.fromSerial));
 
       const remainder = await svc.allocateForBundle(tenantId, prefix, 0, deviceId, 20);
-      expect(remainder.fromSerial).toBe(first.fromSerial + 1);
+      // Original bounds, unchanged (final review, finding 1) -- and a falsy
+      // check regression would have read `consumedThroughSerial: 0` as
+      // "nothing consumed yet" and returned null here instead of 0.
+      expect(remainder.fromSerial).toBe(first.fromSerial);
       expect(remainder.toSerial).toBe(first.toSerial);
+      expect(remainder.consumedThroughSerial).toBe(0);
 
-      // Still the SAME block -- a falsy-check regression would ALSO have
-      // treated `consumedThroughSerial: 0` as "nothing consumed yet" and
-      // handed back fromSerial itself (not fromSerial + 1) rather than
-      // being uncovered as a fresh-block miscut; assert the row count stays
-      // 1 as an extra guard against that alternate failure shape.
+      // Still the SAME block -- row count must stay 1.
       const rows = await db
         .select()
         .from(schema.ssccBlocks)

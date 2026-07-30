@@ -45,12 +45,19 @@ export interface StationBundle {
    * The box serial block this device may print from -- aggregation shifts
    * only, and only when this device fetched the bundle over its own
    * api-key (see ShiftBundleDto.sscc in shifts/dto.ts on the server).
+   *
+   * `fromSerial`/`toSerial` are always the block's ORIGINAL bounds, even on
+   * a repeat fetch -- never shrunk to the unconsumed remainder (final
+   * review, finding 1). `consumedThroughSerial` is what lets `addRange`
+   * (`sscc-pool.ts`) reconcile its own cursor against the row it already
+   * holds instead of receiving a range shaped like a brand new block.
    */
   sscc: {
     issuerPrefix: string;
     extensionDigit: number;
     fromSerial: number;
     toSerial: number;
+    consumedThroughSerial: number | null;
   } | null;
 }
 

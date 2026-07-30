@@ -100,7 +100,13 @@ describe("mirror", () => {
     const aggregationBundle: StationBundle = {
       ...bundle,
       shift: { ...bundle.shift, mode: "aggregation", boxCapacity: 12 },
-      sscc: { issuerPrefix: "460123456", extensionDigit: 0, fromSerial: 1, toSerial: 5 },
+      sscc: {
+        issuerPrefix: "460123456",
+        extensionDigit: 0,
+        fromSerial: 1,
+        toSerial: 5,
+        consumedThroughSerial: null,
+      },
     };
     await upsertBundle(exec, aggregationBundle);
 

@@ -18,18 +18,57 @@ export interface PoolRange {
 }
 
 /**
+ * A range as the server now describes it (final review, finding 1):
+ * `fromSerial`/`toSerial` are always the block's ORIGINAL bounds, even for
+ * a block the device already holds, and `consumedThroughSerial` -- the
+ * highest serial the server has recorded as actually used, or null before
+ * any is -- is what lets `addRange` reconcile its own cursor against the
+ * row it already has instead of treating the block as a brand new range.
+ * Optional so every existing caller that only ever hands a genuinely fresh
+ * range (nothing consumed yet) is unaffected.
+ */
+export type ServerRange = Omit<PoolRange, "nextSerial"> & {
+  consumedThroughSerial?: number | null;
+};
+
+/**
  * Adds a range the device received from the server.
  *
- * Idempotent: the primary key on (issuer_prefix, extension_digit,
- * from_serial) drops a block the device already holds, so a replayed sync
- * bundle can never double the pool.
+ * Idempotent, and progress-preserving: the primary key on (issuer_prefix,
+ * extension_digit, from_serial) turns a replay of a block the device
+ * already holds into an UPDATE of that SAME row rather than a second one,
+ * and `next_serial = MAX(...)` makes the update safe in both directions --
+ * it never regresses an already-advanced local cursor, and it advances a
+ * cursor that is somehow behind what the server knows was consumed (e.g.
+ * this device's local database was lost or restored from a stale
+ * snapshot: re-provisioning, or resuming from an old copy that still holds
+ * this row, would otherwise let `burnSerial` reissue serials already on
+ * printed labels).
+ *
+ * This used to be `ON CONFLICT ... DO NOTHING` (final review, finding 1).
+ * That was safe only as long as the server always sent back either a
+ * genuinely fresh range or a byte-for-byte replay of one already held --
+ * it stopped being safe the moment a repeat bundle fetch could describe an
+ * existing block with a DIFFERENT `fromSerial` (the old
+ * `allocateForBundle` shrank it to the unconsumed remainder): that shape
+ * never matches the existing row's primary key, so it inserted as a
+ * SECOND, overlapping row instead of conflicting with the first, and
+ * `burnSerial`'s `ORDER BY from_serial` would drain the original row's
+ * remainder, then restart the second row from ITS OWN `from_serial` --
+ * reissuing every serial in between. The server now always reports a
+ * block's ORIGINAL bounds (see `SsccService.allocateForBundle`), so this
+ * INSERT always targets the row the device already has; `next_serial`'s
+ * candidate value below is what actually reconciles the cursor.
  */
-export async function addRange(exec: SqlExecutor, r: Omit<PoolRange, "nextSerial">): Promise<void> {
+export async function addRange(exec: SqlExecutor, r: ServerRange): Promise<void> {
+  const nextSerial =
+    r.consumedThroughSerial != null ? r.consumedThroughSerial + 1 : r.fromSerial;
   await exec.run(
     `INSERT INTO sscc_pool (issuer_prefix, extension_digit, from_serial, to_serial, next_serial)
      VALUES (?,?,?,?,?)
-     ON CONFLICT(issuer_prefix, extension_digit, from_serial) DO NOTHING`,
-    [r.issuerPrefix, r.extensionDigit, r.fromSerial, r.toSerial, r.fromSerial],
+     ON CONFLICT(issuer_prefix, extension_digit, from_serial)
+     DO UPDATE SET next_serial = MAX(next_serial, excluded.next_serial)`,
+    [r.issuerPrefix, r.extensionDigit, r.fromSerial, r.toSerial, nextSerial],
   );
 }
 

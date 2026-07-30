@@ -378,8 +378,8 @@ export class ShiftsService {
   /**
    * Resolves the shift's issuer prefix and hands the device its block for
    * the bundle (a fresh one the first time it's seen for this issuer, the
-   * unconsumed remainder of its existing one on every later fetch, or
-   * another fresh one if that one is fully consumed -- see
+   * SAME block's original bounds plus its consumed-through cursor on every
+   * later fetch, or another fresh one if that one is fully consumed -- see
    * `SsccService.allocateForBundle` for why).
    *
    * `apps/station/src/lib/shift-bundle.ts` swallows a bundle download error

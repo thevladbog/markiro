@@ -121,11 +121,23 @@ export interface ShiftBundleDto {
    * only (a validation shift closes no boxes, so allocating one would burn
    * serials nothing will ever print), and only when the caller is an actual
    * station device (no device to attribute a block to otherwise).
+   *
+   * `fromSerial`/`toSerial` are always the block's ORIGINAL bounds, even on
+   * a repeat fetch of an already-held block -- never shrunk to the
+   * unconsumed remainder (final review, finding 1: a shrunk `fromSerial`
+   * doesn't match the device's already-held row's primary key, so it was
+   * inserted as a second, overlapping range instead of reconciling the
+   * first). `consumedThroughSerial` carries the same cursor
+   * `SsccService.recordConsumedSerial` tracks server-side, so the device
+   * can advance (never regress) its own local cursor against the row it
+   * already has, or seed a lost one correctly, instead of being handed a
+   * range shaped like a brand new block.
    */
   sscc: {
     issuerPrefix: string;
     extensionDigit: number;
     fromSerial: number;
     toSerial: number;
+    consumedThroughSerial: number | null;
   } | null;
 }

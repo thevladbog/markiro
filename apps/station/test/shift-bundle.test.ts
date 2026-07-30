@@ -86,7 +86,13 @@ describe("mirrorShiftBundle", () => {
     await applyMigrations(exec);
     const aggregationBundle: StationBundle = {
       ...bundle,
-      sscc: { issuerPrefix: "460123456", extensionDigit: 0, fromSerial: 1, toSerial: 5 },
+      sscc: {
+        issuerPrefix: "460123456",
+        extensionDigit: 0,
+        fromSerial: 1,
+        toSerial: 5,
+        consumedThroughSerial: null,
+      },
     };
     const get = vi.fn().mockResolvedValue(aggregationBundle);
 
