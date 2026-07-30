@@ -181,4 +181,25 @@ describe("commerceml parse", () => {
     const catalog = parseCatalog(bytes);
     expect(catalog.items[0]!.name).toBe("перед&#xFFFFFFFF;после");
   });
+
+  // Review fix (round 2): `String.fromCodePoint` alone accepts a NUL byte and
+  // lone UTF-16 surrogate halves, but XML's own `Char` production forbids
+  // referencing either -- and a bare NUL is invalid in a Postgres `text`
+  // column outright, so decoding one here would turn into a DB error several
+  // layers downstream instead of staying inert text at the one place that
+  // knows why.
+  it("не расшифровывает числовые ссылки на NUL и суррогатные половины", () => {
+    const bytes = Buffer.from(
+      [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        "<КоммерческаяИнформация><Каталог><Товары><Товар>",
+        "<Ид>guid-illegal-numeric-ref</Ид>",
+        "<Наименование>до&#0;после &#xD800;далее</Наименование>",
+        "</Товар></Товары></Каталог></КоммерческаяИнформация>",
+      ].join(""),
+      "utf8",
+    );
+    const catalog = parseCatalog(bytes);
+    expect(catalog.items[0]!.name).toBe("до&#0;после &#xD800;далее");
+  });
 });

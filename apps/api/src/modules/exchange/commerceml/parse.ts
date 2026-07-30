@@ -140,20 +140,42 @@ const PREDEFINED_XML_ENTITIES: Readonly<Record<string, string>> = {
   apos: "'",
 };
 
+/**
+ * XML 1.0's own `Char` production (https://www.w3.org/TR/xml/#charsets):
+ * tab/LF/CR, U+0020-U+D7FF, U+E000-U+FFFD, U+10000-U+10FFFF. This is
+ * narrower than "whatever `String.fromCodePoint` accepts" -- that also
+ * happily builds a NUL byte or a lone UTF-16 surrogate half (U+D800-U+DFFF),
+ * neither of which XML permits a document to contain at all, well-formed
+ * character reference or not. Decoding one anyway would put a value in the
+ * parsed tree a compliant XML processor would have rejected the document
+ * for containing in the first place -- and one Postgres' own `text` columns
+ * reject outright for a bare NUL byte, so an out-of-range reference here
+ * would otherwise turn into a DB error several layers downstream instead of
+ * being left as inert text at the one place that actually understands why.
+ */
+function isPermittedXmlChar(codePoint: number): boolean {
+  return (
+    codePoint === 0x9 ||
+    codePoint === 0xa ||
+    codePoint === 0xd ||
+    (codePoint >= 0x20 && codePoint <= 0xd7ff) ||
+    (codePoint >= 0xe000 && codePoint <= 0xfffd) ||
+    (codePoint >= 0x10000 && codePoint <= 0x10ffff)
+  );
+}
+
 function decodePredefinedXmlEntities(text: string): string {
   return text.replace(
     /&(?:(lt|gt|amp|quot|apos)|#(\d+)|#[xX]([0-9a-fA-F]+));/g,
     (match: string, name?: string, decimal?: string, hex?: string) => {
       if (name !== undefined) return PREDEFINED_XML_ENTITIES[name]!;
       const codePoint = Number.parseInt(decimal ?? hex!, decimal !== undefined ? 10 : 16);
-      // Malformed or out-of-range references (e.g. a stray `&#xFFFFFFFF;`)
-      // are left exactly as they arrived rather than throwing -- this is a
-      // best-effort decode of leaf text, not a validator.
-      try {
-        return String.fromCodePoint(codePoint);
-      } catch {
-        return match;
-      }
+      // Malformed, out-of-range, or otherwise-illegal references (a stray
+      // `&#xFFFFFFFF;`, a NUL, a lone surrogate half) are left exactly as
+      // they arrived -- this is a best-effort decode of leaf text, not a
+      // validator that rejects the whole document.
+      if (!isPermittedXmlChar(codePoint)) return match;
+      return String.fromCodePoint(codePoint);
     },
   );
 }
