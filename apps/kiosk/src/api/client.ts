@@ -76,6 +76,69 @@ export function isDeviceRevoked(err: unknown): boolean {
   return err instanceof KioskApiError && err.status === 401;
 }
 
+/**
+ * The statuses a GATEWAY raises ABOUT AN UPSTREAM, rather than statuses the
+ * application ever produces about a request.
+ *
+ * All three are defined as the proxy speaking for itself: 502 it could not get
+ * a valid answer out of the upstream, 503 it has no healthy upstream to try,
+ * 504 the upstream did not answer in time. Caddy — which Markiro deploys behind
+ * (roadmap plan 08) — raises 502 when the API refuses the connection and 503
+ * when every upstream is marked down, and the Vite dev proxy answers 502 for a
+ * stopped API, which is how this was found.
+ *
+ * 500 IS DELIBERATELY ABSENT, and it is the whole reason this is a list rather
+ * than "5xx". A 500 comes from a handler that ran: the application was reached,
+ * the link is fine, and reporting it to a worker as «нет связи» would send an
+ * administrator after a network instead of after a bug. The same goes for 429
+ * and every 4xx.
+ *
+ * NOT AN ABSOLUTE TRUTH, and it does not need to be. An application MAY choose
+ * to answer 503 itself, for maintenance or load-shedding; read as unreachable
+ * it costs a strip that says «нет связи» while the API is technically alive but
+ * refusing to serve — which is what the kiosk can do about it either way — and a
+ * queue that retries on the backoff instead of on the refresh tick. The reverse
+ * mistake, which is the one this fixes, costs a kiosk that queues every order
+ * under a strip asserting a link that leads nowhere.
+ */
+const GATEWAY_STATUSES: ReadonlySet<number> = new Set([502, 503, 504]);
+
+/**
+ * Whether this failure means the request NEVER REACHED THE APPLICATION.
+ *
+ * Two questions in the app turn on exactly this and used to answer it
+ * separately, each by asking whether a status was present at all: the status
+ * strip's «нет связи», and whether the drain arms its fast backoff instead of
+ * waiting out the five-minute refresh tick. Both were right about the case they
+ * were written for — a 500 from a working API is a handler bug, not an outage —
+ * and both were wrong about a gateway, which ANSWERS on behalf of an
+ * application it could not talk to. A live smoke run found the pair of them:
+ * the API was stopped, the dev proxy replied 502, the strip went on saying
+ * «Связь с сервером есть» and the queue sat still.
+ *
+ * So it is one predicate, in one place. Two call sites deriving "did we reach
+ * the server" from the same evidence must not be able to disagree again.
+ *
+ * A 504 IS THE AWKWARD ONE and is included anyway. Unlike 502 and 503 it means
+ * the upstream was there and merely slow, so the request may well have been
+ * PROCESSED — the order filed, the answer lost on the way back. That is
+ * precisely the shape of `KioskTimeoutError`, which this module already refuses
+ * to give a status for, and it is safe for the same reason: the replay is
+ * idempotent on `(tenantId, kioskId, deviceSeq)`, so the server returns the
+ * original order rather than filing a second one. What must never happen is a
+ * gateway status reaching the drain's quarantine as a per-order verdict — none
+ * of the three is on that allowlist (`isTerminalRejection`), and a 504 is the
+ * one it would be most costly to add, because the order it would throw away may
+ * be one the server already has.
+ *
+ * A failure carrying NO status at all — a dead `fetch`, an expired deadline —
+ * has always meant this and still does.
+ */
+export function isUnreachable(err: unknown): boolean {
+  if (!(err instanceof KioskApiError)) return true;
+  return GATEWAY_STATUSES.has(err.status);
+}
+
 async function readError(res: Response): Promise<string> {
   try {
     const body: unknown = await res.json();

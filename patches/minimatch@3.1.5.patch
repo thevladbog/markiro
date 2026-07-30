@@ -1,0 +1,19 @@
+diff --git a/minimatch.js b/minimatch.js
+index 2e4a058a130dceebf83a7bd435f5d22b765ac836..cff4c193842c93dcfc66095ca96afe36d33142e6 100644
+--- a/minimatch.js
++++ b/minimatch.js
+@@ -7,7 +7,13 @@ var path = (function () { try { return require('path') } catch (e) {}}()) || {
+ minimatch.sep = path.sep
+ 
+ var GLOBSTAR = minimatch.GLOBSTAR = Minimatch.GLOBSTAR = {}
+-var expand = require('brace-expansion')
++// GHSA-mh99-v99m-4gvg / CVE-2026-14257: brace-expansion 1.x expands without an
++// upper bound and OOM-crashes the process. The fix only exists in 5.0.8, which
++// moved from `module.exports = expand` to a named `expand` export. The paired
++// `minimatch@3>brace-expansion` override in pnpm-workspace.yaml resolves 5.0.8
++// here, so read the named export. Everything below calls `expand(pattern)` with
++// a single argument, which 5.0.8 keeps compatible.
++var expand = require('brace-expansion').expand
+ 
+ var plTypes = {
+   '!': { open: '(?:(?!(?:', close: '))[^/]*?)'},

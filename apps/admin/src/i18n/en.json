@@ -57,6 +57,7 @@
     "pickup": "Self-pickup",
     "employees": "Employees",
     "kiosks": "Kiosks",
+    "integrations": "Integrations",
     "settings": "Settings"
   },
   "shell": {
@@ -66,6 +67,28 @@
       "toggleTheme": "Toggle theme",
       "toggleLanguage": "Switch language"
     }
+  },
+  "integrations": {
+    "channel": {
+      "commerceml": "1C exchange",
+      "publicApi": "Public API",
+      "gisMtFiles": "GIS MT files",
+      "chestnyZnak": "Chestny ZNAK"
+    },
+    "channelDescription": {
+      "commerceml": "Exchange with 1C via the website",
+      "publicApi": "External systems by API key",
+      "gisMtFiles": "File exports for GIS MT and 1C",
+      "chestnyZnak": "Direct connection to SUZ and GIS MT"
+    },
+    "state": {
+      "not_configured": "Not configured",
+      "working": "Working",
+      "error": "Error",
+      "silent": "No exchange",
+      "unavailable": "Unavailable"
+    },
+    "lastEvent": "Last event: {{time}}"
   },
   "pages": {
     "dashboard": {
@@ -133,6 +156,12 @@
           "productGroupTooLong": "200 characters or fewer",
           "capacityInvalid": "Enter a positive whole number",
           "unitPriceInvalid": "Enter price in format 0.00 or leave blank"
+        },
+        "externalLink": {
+          "linkedText": "Linked to 1C: {{ref}}",
+          "unlinkAction": "Unlink",
+          "unlinkSuccess": "Link removed",
+          "unlinkError": "Could not remove the link"
         }
       },
       "toasts": {
@@ -142,6 +171,10 @@
         "updateError": "Could not update the product",
         "deleteSuccess": "Product deleted",
         "deleteError": "Could not delete the product"
+      },
+      "candidatesPlaque": {
+        "text": "New items arrived in the exchange ({{count}}) — check the unmatched queue.",
+        "action": "Go to the queue"
       }
     },
     "counterparties": {
@@ -775,6 +808,125 @@
         "reasonUpdateError": "Could not update the reason",
         "reasonArchiveSuccess": "Reason deleted",
         "reasonArchiveError": "Could not delete the reason"
+      }
+    },
+    "integrations": {
+      "title": "Integrations",
+      "emptyTitle": "No channels configured",
+      "emptyHint": "Data-exchange channels with outside systems will appear here: 1C, GIS MT, Chestny ZNAK.",
+      "channel": {
+        "backAction": "Back to integrations",
+        "loadError": "Could not load the channel. Refresh the page.",
+        "neverEvent": "No events yet",
+        "settings": {
+          "title": "Settings",
+          "priceTypeLabel": "Price type",
+          "priceTypeHint": "Which 1C price type fills the product price. For a not-yet-configured channel, empty means the file decides; if a price type is already set, clearing this field will not reset it — the previous value stays in effect.",
+          "splitWriteoffDocumentLabel": "Split off a separate write-off document",
+          "silentAfterHoursLabel": "Silence threshold, hours",
+          "silentAfterHoursHint": "How many hours without events before the channel counts as gone silent.",
+          "silentAfterHoursError": "Minimum 1 hour",
+          "saveAction": "Save",
+          "saveSuccess": "Settings saved",
+          "saveError": "Could not save the settings",
+          "noSettings": "This channel has no settings"
+        },
+        "credentials": {
+          "title": "Exchange credentials",
+          "notIssued": "Not issued yet",
+          "loginValue": "Login: {{login}}",
+          "issueAction": "Issue",
+          "issueSuccess": "Credentials issued",
+          "issueError": "Could not issue credentials",
+          "issuedTitle": "Exchange secret",
+          "issuedLogin": "Login: {{login}}",
+          "issuedSecret": "Secret: {{secret}}",
+          "issuedWarning": "It will not be shown again — save it now."
+        },
+        "journal": {
+          "title": "Journal",
+          "emptyTitle": "No exchanges yet",
+          "emptyHint": "The exchange history will appear here after the first session.",
+          "loadError": "Could not load the journal. Refresh the page.",
+          "detailsSummary": "Response sent into the exchange protocol",
+          "outcome": {
+            "ok": "OK",
+            "warn": "Has warnings",
+            "error": "Error",
+            "unknown": "Not finished"
+          },
+          "direction": {
+            "in": "Inbound",
+            "out": "Outbound",
+            "local": "Cabinet action"
+          }
+        },
+        "candidates": {
+          "title": "Unmatched queue",
+          "showHiddenLabel": "Show hidden",
+          "confirmAllAction": "Confirm all suggestions",
+          "confirmAllResult": "Linked: {{linked}}, rejected: {{failed}}",
+          "linkAction": "Link",
+          "createAction": "Create",
+          "hideAction": "Hide",
+          "unhideAction": "Show",
+          "hideSuccess": "Item hidden",
+          "hideError": "Could not hide the item",
+          "unhideSuccess": "Item restored",
+          "unhideError": "Could not restore the item",
+          "loadError": "Could not load the queue. Refresh the page.",
+          "emptyTitle": "Queue is empty",
+          "emptyHint": "There are no unmatched items from the exchange right now.",
+          "table": {
+            "name": "Name",
+            "article": "Article",
+            "externalRef": "1C id",
+            "actions": "Actions",
+            "suggestion": "Looks like: {{name}}"
+          },
+          "link": {
+            "title": "Link \"{{name}}\"",
+            "productLabel": "Catalogue product",
+            "choosePlaceholder": "Choose a product",
+            "confirmAction": "Link",
+            "success": "Item linked to the product",
+            "error": "Could not link the item"
+          },
+          "create": {
+            "title": "Create a product from the item",
+            "confirmAction": "Create and link",
+            "success": "Product created and linked",
+            "error": "Could not create the product"
+          }
+        },
+        "apiKeys": {
+          "title": "Public API keys",
+          "nameLabel": "Name",
+          "issueAction": "Issue",
+          "issueSuccess": "Key issued",
+          "issueError": "Could not issue the key",
+          "issuedTitle": "Key secret",
+          "issuedKey": "Key: {{key}}",
+          "issuedWarning": "It will not be shown again — save it now.",
+          "revokeAction": "Revoke",
+          "revokeSuccess": "Key revoked",
+          "revokeError": "Could not revoke the key",
+          "revokeAlreadyGone": "The key was already revoked — list refreshed",
+          "revokeConfirmTitle": "Revoke this key?",
+          "revokeConfirmBody": "The key \"{{name}}\" will be revoked with no way back. Anything calling the API with it will stop working.",
+          "revokeConfirmAction": "Revoke",
+          "cancel": "Cancel",
+          "loadError": "Could not load the keys. Refresh the page.",
+          "emptyTitle": "No keys yet",
+          "emptyHint": "Keys let outside systems and integrations call the cabinet's API on the organization's behalf.",
+          "table": {
+            "name": "Name",
+            "createdAt": "Issued",
+            "lastRequest": "Last request",
+            "neverUsed": "Never used",
+            "actions": "Actions"
+          }
+        }
       }
     },
     "settings": {

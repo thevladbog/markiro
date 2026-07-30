@@ -57,6 +57,7 @@
     "pickup": "Для себя",
     "employees": "Сотрудники",
     "kiosks": "Киоски",
+    "integrations": "Интеграции",
     "settings": "Настройки"
   },
   "shell": {
@@ -66,6 +67,28 @@
       "toggleTheme": "Переключить тему",
       "toggleLanguage": "Переключить язык"
     }
+  },
+  "integrations": {
+    "channel": {
+      "commerceml": "Обмен с 1С",
+      "publicApi": "Публичное API",
+      "gisMtFiles": "Файлы ГИС МТ",
+      "chestnyZnak": "Честный ЗНАК"
+    },
+    "channelDescription": {
+      "commerceml": "Обмен с 1С через сайт",
+      "publicApi": "Внешние системы по ключу",
+      "gisMtFiles": "Файловые выгрузки для ГИС МТ и 1С",
+      "chestnyZnak": "Прямая работа с СУЗ и ГИС МТ"
+    },
+    "state": {
+      "not_configured": "Не настроен",
+      "working": "Работает",
+      "error": "Ошибка",
+      "silent": "Нет обмена",
+      "unavailable": "Недоступно"
+    },
+    "lastEvent": "Последнее событие: {{time}}"
   },
   "pages": {
     "dashboard": {
@@ -133,6 +156,12 @@
           "productGroupTooLong": "Не более 200 символов",
           "capacityInvalid": "Введите положительное целое число",
           "unitPriceInvalid": "Укажите цену в формате 0.00 или оставьте пустым"
+        },
+        "externalLink": {
+          "linkedText": "Связано с 1С: {{ref}}",
+          "unlinkAction": "Разорвать связь",
+          "unlinkSuccess": "Связь разорвана",
+          "unlinkError": "Не удалось разорвать связь"
         }
       },
       "toasts": {
@@ -142,6 +171,10 @@
         "updateError": "Не удалось обновить продукт",
         "deleteSuccess": "Продукт удалён",
         "deleteError": "Не удалось удалить продукт"
+      },
+      "candidatesPlaque": {
+        "text": "В обмене появились новые товары ({{count}}) — загляните в очередь несопоставленных.",
+        "action": "Перейти в очередь"
       }
     },
     "counterparties": {
@@ -775,6 +808,125 @@
         "reasonUpdateError": "Не удалось обновить причину",
         "reasonArchiveSuccess": "Причина удалена",
         "reasonArchiveError": "Не удалось удалить причину"
+      }
+    },
+    "integrations": {
+      "title": "Интеграции",
+      "emptyTitle": "Каналы не настроены",
+      "emptyHint": "Здесь появятся каналы обмена данными с внешними системами: 1С, ГИС МТ, Честный ЗНАК.",
+      "channel": {
+        "backAction": "Назад к интеграциям",
+        "loadError": "Не удалось загрузить канал. Обновите страницу.",
+        "neverEvent": "Событий ещё не было",
+        "settings": {
+          "title": "Настройки",
+          "priceTypeLabel": "Тип цены",
+          "priceTypeHint": "Какой тип цены 1С кладёт в цену товара. Для ещё не настроенного канала пусто значит «решаем по присланному файлу»; если тип цены уже задан, очистка этого поля его не сбросит — прежнее значение останется действовать.",
+          "splitWriteoffDocumentLabel": "Разделять документ списания",
+          "silentAfterHoursLabel": "Порог молчания, часов",
+          "silentAfterHoursHint": "Через сколько часов без событий канал считается замолчавшим.",
+          "silentAfterHoursError": "Минимум 1 час",
+          "saveAction": "Сохранить",
+          "saveSuccess": "Настройки сохранены",
+          "saveError": "Не удалось сохранить настройки",
+          "noSettings": "У этого канала нет настроек"
+        },
+        "credentials": {
+          "title": "Учётные данные обмена",
+          "notIssued": "Ещё не выпущены",
+          "loginValue": "Логин: {{login}}",
+          "issueAction": "Выпустить",
+          "issueSuccess": "Учётные данные выпущены",
+          "issueError": "Не удалось выпустить учётные данные",
+          "issuedTitle": "Секрет обмена",
+          "issuedLogin": "Логин: {{login}}",
+          "issuedSecret": "Секрет: {{secret}}",
+          "issuedWarning": "Больше он показан не будет — сохраните его сейчас."
+        },
+        "journal": {
+          "title": "Журнал",
+          "emptyTitle": "Обменов ещё не было",
+          "emptyHint": "Здесь появится история обмена после первого сеанса.",
+          "loadError": "Не удалось загрузить журнал. Обновите страницу.",
+          "detailsSummary": "Ответ в протокол обмена",
+          "outcome": {
+            "ok": "Успешно",
+            "warn": "Есть замечания",
+            "error": "Ошибка",
+            "unknown": "Не завершён"
+          },
+          "direction": {
+            "in": "Входящее",
+            "out": "Исходящее",
+            "local": "Действие в кабинете"
+          }
+        },
+        "candidates": {
+          "title": "Очередь несопоставленных",
+          "showHiddenLabel": "Показать скрытые",
+          "confirmAllAction": "Подтвердить все подсказки",
+          "confirmAllResult": "Связано: {{linked}}, отклонено: {{failed}}",
+          "linkAction": "Связать",
+          "createAction": "Создать",
+          "hideAction": "Скрыть",
+          "unhideAction": "Показать",
+          "hideSuccess": "Позиция скрыта",
+          "hideError": "Не удалось скрыть позицию",
+          "unhideSuccess": "Позиция восстановлена",
+          "unhideError": "Не удалось восстановить позицию",
+          "loadError": "Не удалось загрузить очередь. Обновите страницу.",
+          "emptyTitle": "Очередь пуста",
+          "emptyHint": "Несопоставленных позиций из обмена сейчас нет.",
+          "table": {
+            "name": "Название",
+            "article": "Артикул",
+            "externalRef": "Ид из 1С",
+            "actions": "Действия",
+            "suggestion": "Похоже на: {{name}}"
+          },
+          "link": {
+            "title": "Связать «{{name}}»",
+            "productLabel": "Товар в каталоге",
+            "choosePlaceholder": "Выберите товар",
+            "confirmAction": "Связать",
+            "success": "Позиция связана с товаром",
+            "error": "Не удалось связать позицию"
+          },
+          "create": {
+            "title": "Создать товар из позиции",
+            "confirmAction": "Создать и связать",
+            "success": "Товар создан и связан",
+            "error": "Не удалось создать товар"
+          }
+        },
+        "apiKeys": {
+          "title": "Ключи публичного API",
+          "nameLabel": "Название",
+          "issueAction": "Выпустить",
+          "issueSuccess": "Ключ выпущен",
+          "issueError": "Не удалось выпустить ключ",
+          "issuedTitle": "Секрет ключа",
+          "issuedKey": "Ключ: {{key}}",
+          "issuedWarning": "Больше он показан не будет — сохраните его сейчас.",
+          "revokeAction": "Отозвать",
+          "revokeSuccess": "Ключ отозван",
+          "revokeError": "Не удалось отозвать ключ",
+          "revokeAlreadyGone": "Ключ уже был отозван — список обновлён",
+          "revokeConfirmTitle": "Отозвать ключ?",
+          "revokeConfirmBody": "Ключ «{{name}}» будет отозван без возможности восстановления. Всё, что обращалось к API с ним, перестанет работать.",
+          "revokeConfirmAction": "Отозвать",
+          "cancel": "Отмена",
+          "loadError": "Не удалось загрузить ключи. Обновите страницу.",
+          "emptyTitle": "Ключей пока нет",
+          "emptyHint": "Ключи нужны сторонним системам и интеграциям, чтобы обращаться к API кабинета от имени организации.",
+          "table": {
+            "name": "Название",
+            "createdAt": "Выпущен",
+            "lastRequest": "Последнее обращение",
+            "neverUsed": "Ещё не использовался",
+            "actions": "Действия"
+          }
+        }
       }
     },
     "settings": {

@@ -8,7 +8,7 @@ import {
   quarantineOrder,
   quarantineQueue,
 } from "../src/store/queue.js";
-import { readConfig, writeConfig } from "../src/store/config.js";
+import { readConfig, writeConfig, type KioskConfig } from "../src/store/config.js";
 import type { KioskBootstrapDto } from "../src/api/types.js";
 
 const snapshot = (employees: KioskBootstrapDto["employees"]): KioskBootstrapDto => ({
@@ -29,13 +29,13 @@ describe("cache", () => {
   it("replaces the snapshot wholesale — an employee removed on the server disappears locally", async () => {
     await replaceSnapshot(
       snapshot([
-        { id: "e1", fullName: "A", role: null, badgeHash: null },
-        { id: "e2", fullName: "B", role: null, badgeHash: null },
+        { id: "e1", fullName: "A", role: null, badgeHash: null, takenTodayElsewhere: 0 },
+        { id: "e2", fullName: "B", role: null, badgeHash: null, takenTodayElsewhere: 0 },
       ]),
       new Date("2026-07-28T06:00:00.000Z"),
     );
     await replaceSnapshot(
-      snapshot([{ id: "e1", fullName: "A", role: null, badgeHash: null }]),
+      snapshot([{ id: "e1", fullName: "A", role: null, badgeHash: null, takenTodayElsewhere: 0 }]),
       new Date("2026-07-28T06:05:00.000Z"),
     );
 
@@ -59,14 +59,14 @@ describe("cache", () => {
 describe("queue", () => {
   it("drains in deviceSeq order regardless of insertion order", async () => {
     for (const deviceSeq of [3, 1, 2]) {
-      await enqueueOrder({ deviceSeq, badgeCode: "B", reason: "buy", items: [] }, "e1");
+      await enqueueOrder({ deviceSeq, badgeDigest: "B", reason: "buy", items: [] }, "e1");
     }
     expect((await listQueue()).map((q) => q.deviceSeq)).toEqual([1, 2, 3]);
   });
 
   it("removes only the acknowledged order", async () => {
-    await enqueueOrder({ deviceSeq: 1, badgeCode: "B", reason: "buy", items: [] }, "e1");
-    await enqueueOrder({ deviceSeq: 2, badgeCode: "B", reason: "buy", items: [] }, "e1");
+    await enqueueOrder({ deviceSeq: 1, badgeDigest: "B", reason: "buy", items: [] }, "e1");
+    await enqueueOrder({ deviceSeq: 2, badgeDigest: "B", reason: "buy", items: [] }, "e1");
     await dequeueOrder(1);
     expect((await listQueue()).map((q) => q.deviceSeq)).toEqual([2]);
   });
@@ -76,7 +76,7 @@ describe("quarantine", () => {
   const order = (deviceSeq: number) => ({
     deviceSeq,
     employeeId: "e1",
-    body: { deviceSeq, badgeCode: "B", reason: "buy" as const, items: [{ rawKm: "01…" }] },
+    body: { deviceSeq, badgeDigest: "B", reason: "buy" as const, items: [{ rawKm: "01…" }] },
   });
 
   // Keyed by `deviceSeq`, so a drain that parked an order and then crashed
@@ -126,10 +126,48 @@ describe("config", () => {
     await writeConfig({
       serverUrl: "http://srv",
       token: "tok",
+      kioskId: "k-1",
       kioskName: "Киоск-1",
       place: "Проходная",
       nextDeviceSeq: 7,
     });
-    expect(await readConfig()).toMatchObject({ token: "tok", nextDeviceSeq: 7 });
+    expect(await readConfig()).toMatchObject({ token: "tok", kioskId: "k-1", nextDeviceSeq: 7 });
+  });
+
+  /**
+   * THE UPGRADE PATH for the binding itself. A config written before
+   * `kioskId` existed carries no such property, and the day count compares the
+   * value it finds here against the stamp on a journal entry — so an
+   * `undefined` that is never normalised would be a third kind of "unknown"
+   * that matches neither a real gate nor an unstamped entry, and the local half
+   * of the day limit would silently read zero.
+   */
+  it("reads a config written before the binding was recorded as bound to no kiosk", async () => {
+    const legacy = {
+      serverUrl: "http://srv",
+      token: "tok",
+      kioskName: "Киоск-1",
+      place: null,
+      nextDeviceSeq: 7,
+    } as unknown as KioskConfig;
+    await writeConfig(legacy);
+
+    const found = await readConfig();
+    expect(found?.kioskId).toBeNull();
+    expect(found?.token).toBe("tok");
+  });
+
+  /** Checked rather than trusted, and by the same rule the journal's stamp is
+   * read with: an empty string is not an identity. */
+  it("reads an empty binding as no kiosk at all", async () => {
+    await writeConfig({
+      serverUrl: "http://srv",
+      token: "tok",
+      kioskId: "",
+      kioskName: "Киоск-1",
+      place: null,
+      nextDeviceSeq: 1,
+    });
+    expect((await readConfig())?.kioskId).toBeNull();
   });
 });

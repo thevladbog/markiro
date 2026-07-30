@@ -386,6 +386,15 @@ export const pickupScanRejections = pgTable(
     // plaintext, exactly as `employee_badges.badge_code` already is; the
     // paired `badge_hash` exists only because bootstrap ships to an untrusted
     // tablet (see docs/device-key-surface.md).
+    //
+    // The kiosk now names the badge by DIGEST rather than by code (an order
+    // sits in that tablet's IndexedDB before it syncs, so the code must not),
+    // and the plaintext written here is recovered server-side by looking the
+    // digest up across the tenant's badges, revoked ones included -- which is
+    // exactly the population this column is about. `PickupOrdersService`'s
+    // `auditBadgeValue` owns that lookup, and falls back to recording the
+    // digest for one that matches no row at all: unreachable from a kiosk,
+    // which will not open a session for a badge its roster cannot resolve.
     badgeCode: text("badge_code"),
     orderId: uuid("order_id"),
     deviceSeq: integer("device_seq").notNull(),

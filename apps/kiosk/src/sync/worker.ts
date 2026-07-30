@@ -1,9 +1,10 @@
-import { KioskApiError, type KioskClient } from "../api/client.js";
+import { isUnreachable, KioskApiError, type KioskClient } from "../api/client.js";
 import {
   assertMeasurableGeneratedAt,
   replaceSnapshot,
   type CachedSnapshot,
 } from "../store/cache.js";
+import { readConfig } from "../store/config.js";
 import { appendJournal } from "../store/journal.js";
 import { dequeueOrder, listQueue, quarantineOrder, type QueuedOrder } from "../store/queue.js";
 
@@ -44,7 +45,12 @@ export type CacheAge = "fresh" | "warn" | "blocked";
  * is defence in depth for one that reached the store by another route.
  */
 export function cacheAge(generatedAt: string, now: Date): CacheAge {
-  const ageMs = now.getTime() - Date.parse(generatedAt);
+  return ageVerdict(now.getTime() - Date.parse(generatedAt));
+}
+
+/** The two thresholds, applied to an age that has already been measured — one
+ * rule behind all three doors into it (`cacheAge`, `snapshotAge`). */
+function ageVerdict(ageMs: number): CacheAge {
   if (Number.isNaN(ageMs)) return "blocked";
   if (ageMs >= STALE_BLOCK_MS) return "blocked";
   if (ageMs >= STALE_WARN_MS) return "warn";
@@ -113,12 +119,57 @@ export function serverNow(snapshot: CachedSnapshot | null, now: Date): Date {
  * matters for a device that IS paired and has somehow lost its dataset.
  */
 export function snapshotAge(snapshot: CachedSnapshot | null, now: Date): CacheAge {
-  if (!snapshot) return "blocked";
-  // An unmeasurable `fetchedAt` makes `serverNow` an Invalid Date, whose
-  // `getTime()` is NaN — so `cacheAge` blocks, exactly as it does for an
-  // unmeasurable `generatedAt`. Both halves of the offset must be readable for
-  // this gate to assert anything.
-  return cacheAge(snapshot.bootstrap.generatedAt, serverNow(snapshot, now));
+  const ageMs = snapshotAgeMs(snapshot, now);
+  // `null` is the fail-closed answer — no snapshot, or a stamp that cannot be
+  // read — and it is `blocked` for the same reason either way.
+  return ageMs === null ? "blocked" : ageVerdict(ageMs);
+}
+
+/**
+ * The same measurement, handed back as a NUMBER rather than as a verdict.
+ *
+ * The strip needs it to say «Данные обновлялись 30 ч назад» (design 2026-07-24
+ * §7) instead of the threshold-shaped «больше суток назад», which reads
+ * identically on the second day and on the sixth — and the sixth is the one
+ * where the kiosk is about to stop.
+ *
+ * `null` WHEREVER THE GATE WOULD BLOCK, and that is the point of deriving one
+ * from the other: an unreadable stamp must not become a confident number on a
+ * plaque, and the two answers can never drift apart because there is only one
+ * arithmetic. `serverNow` reduces this to `now - fetchedAt`, two readings of
+ * the same clock, so a skewed tablet still ages its snapshot at one second per
+ * second — see `snapshotAge` above.
+ */
+export function snapshotAgeMs(snapshot: CachedSnapshot | null, now: Date): number | null {
+  if (!snapshot) return null;
+  const ageMs = serverNow(snapshot, now).getTime() - Date.parse(snapshot.bootstrap.generatedAt);
+  return Number.isFinite(ageMs) ? ageMs : null;
+}
+
+/** How the plaque says «N назад»: a unit and a whole number, never a suffix. */
+export interface AgeLabel {
+  unit: "hours" | "days";
+  n: number;
+}
+
+/**
+ * «N назад», coarsely — whole hours up to two days, whole days after that.
+ *
+ * COARSE ON PURPOSE, for two reasons. Nobody standing at a kiosk acts
+ * differently on 30 h than on 30 h 40 min; and the precision would cost the one
+ * thing this copy cannot afford, which is a Russian plural. i18next's RU
+ * categories (`_one/_few/_many/_other`) have no EN counterpart and the two
+ * files must carry identical key sets, so the unit is chosen HERE and the copy
+ * names it with an indeclinable abbreviation («ч», «сут») — the same dodge
+ * `cart.total` already uses for «{{n}} шт».
+ *
+ * Rounds DOWN, like every «N ago» anywhere, and never below zero: a device
+ * whose clock moved backwards between two refreshes must not be told its data
+ * is minus four hours old.
+ */
+export function humaniseAge(ageMs: number): AgeLabel {
+  const hours = Math.max(0, Math.floor(ageMs / (60 * 60_000)));
+  return hours < 48 ? { unit: "hours", n: hours } : { unit: "days", n: Math.floor(hours / 24) };
 }
 
 /**
@@ -137,6 +188,84 @@ export function snapshotAge(snapshot: CachedSnapshot | null, now: Date): CacheAg
  * than be turned away — see `flushQueue`.
  */
 let draining: Promise<void> | null = null;
+
+/**
+ * THE FIRST RETRY AFTER A DEAD LINK, and the floor for every later one.
+ *
+ * A drain that stops on a transport failure used to wait for whatever came
+ * first: the five-minute refresh tick, or an `online` event. So a blink that
+ * cleared in two seconds still cost a worker's order up to five minutes in the
+ * queue — and `online` never fires at all for the commonest outage of the lot,
+ * an API that is down behind a Wi-Fi link that is perfectly up. One second is
+ * short enough that such a blink costs a blink.
+ */
+export const RETRY_BASE_MS = 1_000;
+
+/**
+ * And the ceiling, deliberately well below `REFRESH_INTERVAL_MS`.
+ *
+ * A kiosk left over a weekend outage must not spin, but it must also never
+ * back off to LONGER than the refresh tick that used to be the only retry —
+ * that would make this change a regression for exactly the long outage it is
+ * least about. One attempt a minute is the compromise: negligible traffic, and
+ * a queue that starts moving within a minute of the link returning.
+ */
+export const RETRY_MAX_MS = 60_000;
+
+let retryDelayMs = RETRY_BASE_MS;
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+/**
+ * Bumped by `cancelFlushRetry`, and read by a drain that was already running
+ * when it was called. Without it the unmount race stays open: the shell cancels,
+ * the in-flight drain then reaches its own `finally` and arms a retry holding
+ * the client of a React tree that no longer exists.
+ */
+let retryEpoch = 0;
+
+/** Clears the armed retry and puts the schedule back to the base — the ordinary
+ * "the link works again" reset, with no bearing on drains in flight. */
+function resetRetry(): void {
+  if (retryTimer !== null) {
+    clearTimeout(retryTimer);
+    retryTimer = null;
+  }
+  retryDelayMs = RETRY_BASE_MS;
+}
+
+/**
+ * Disowns the retry entirely: the armed one is dropped, the schedule is reset,
+ * and any drain still in flight is barred from arming a replacement.
+ *
+ * The shell calls this when it unmounts. The retry closes over the CLIENT that
+ * shell built — the one recording the reply for the order `submitCart` awaits —
+ * so one left armed past an unmount posts under a React tree that is gone, and
+ * on a device re-paired in between would post under a token it no longer holds.
+ */
+export function cancelFlushRetry(): void {
+  retryEpoch += 1;
+  resetRetry();
+}
+
+/**
+ * Arms the next attempt and doubles the wait, capped.
+ *
+ * ONE PENDING RETRY AT A TIME. Several drains can stop on the same outage — the
+ * refresh tick, an `online` handler and a worker's own submit all reach here —
+ * and each arming its own would turn a backoff into a burst, growing with the
+ * length of the outage. The first one owns the slot; the rest are already
+ * covered by it.
+ */
+function scheduleRetry(client: KioskClient, now: () => Date): void {
+  if (retryTimer !== null) return;
+  const delay = retryDelayMs;
+  retryDelayMs = Math.min(retryDelayMs * 2, RETRY_MAX_MS);
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    // Through `flushQueue`, never straight into `drainOnce`: the retry has to
+    // respect the same no-overlap chain as every other caller.
+    void flushQueue(client, now);
+  }, delay);
+}
 
 /**
  * Drains the offline queue oldest-first. NEVER REJECTS — every failure, from
@@ -194,6 +323,11 @@ let draining: Promise<void> | null = null;
  * The chained drain uses the CLIENT ITS OWN CALLER PASSED, which the shell
  * depends on: that client is the one recording the reply for the order being
  * awaited.
+ *
+ * AND IT RE-ARMS ITSELF after a pass that reached nothing — an exponential
+ * backoff from `RETRY_BASE_MS` to `RETRY_MAX_MS`, reset by the first delivery
+ * that lands. Callers therefore own no retry schedule of their own, and the
+ * shell owns exactly one obligation in return: `cancelFlushRetry` on unmount.
  */
 export function flushQueue(client: KioskClient, now: () => Date): Promise<void> {
   // Started synchronously when nothing is in flight, so a lone caller reads the
@@ -283,6 +417,7 @@ async function quarantine(
   order: QueuedOrder,
   err: KioskApiError,
   now: () => Date,
+  kioskId: string | null,
 ): Promise<boolean> {
   const at = now().toISOString();
   try {
@@ -297,6 +432,10 @@ async function quarantine(
       // The scan time, as on the success path: a refusal has to be readable
       // beside the day it belongs to, not the day it was finally answered.
       createdAt: order.body.createdAt ?? at,
+      // The gate that refused it, which is the gate it was offered to. A
+      // refusal counts nothing against the worker, so this only ever keeps the
+      // line legible beside its neighbours on the service screen.
+      kioskId,
       deviceSeq: order.deviceSeq,
       // The vocabulary `Done` already uses for an order the server refused
       // outright, so the service screen needs no new state to read one.
@@ -321,14 +460,51 @@ async function quarantine(
   return true;
 }
 
-/** One pass over the queue. Never rejects, never overlaps another — the
- * serialisation is `flushQueue`'s, which is the only caller. */
+/**
+ * One pass over the queue. Never rejects, never overlaps another — the
+ * serialisation is `flushQueue`'s, which is the only caller.
+ *
+ * AND IT SCHEDULES ITS OWN FOLLOW-UP when it stopped because nothing was
+ * reached. See `RETRY_BASE_MS` for why, and `scheduleRetry` for the shape.
+ */
 async function drainOnce(client: KioskClient, now: () => Date): Promise<void> {
+  const startedAt = retryEpoch;
+  /** The server answered at least once in this pass — so the link works, and
+   * whatever the backoff had climbed to describes an outage that is over. */
+  let delivered = false;
+  /** This pass stopped on a failure that never reached the APPLICATION — no
+   * answer at all, or a gateway answering for an upstream it could not talk to
+   * (`isUnreachable`). The only kind a fast retry can fix, and the only kind
+   * that arms one. */
+  let unreachable = false;
   try {
+    /**
+     * WHICH KIOSK EVERYTHING THIS PASS DELIVERS WILL BE FILED AT.
+     *
+     * The token in `client` is this kiosk's, so the server files every order
+     * below under this id — including one queued at a gate the tablet has since
+     * been moved from. Read ONCE per pass, and read from the store rather than
+     * taken as an argument, so it is the binding as of the drain and not as of
+     * whenever the caller was built (`flushQueue` has 30-odd call sites; a
+     * parameter would be a stale copy at most of them).
+     *
+     * Inside the try on purpose: a config the store will not hand over aborts
+     * the pass and leaves the orders queued, exactly as a failing `listQueue`
+     * does. Journalling them under a guessed `null` instead would file today's
+     * withdrawals under "no kiosk" on a device that has one, and the day count
+     * would stop seeing them.
+     */
+    const kioskId = (await readConfig())?.kioskId ?? null;
     const queued = await listQueue(); // ascending deviceSeq
     for (const order of queued) {
+      /** Whether THIS order's failure came from the wire or from the store
+       * beneath the journal write — the two are indistinguishable by the error
+       * alone (neither carries a status) and mean opposite things here. */
+      let answered = false;
       try {
         const result = await client.submitOrder(order.body);
+        answered = true;
+        delivered = true;
         const at = now().toISOString();
         await appendJournal({
           at,
@@ -339,6 +515,11 @@ async function drainOnce(client: KioskClient, now: () => Date): Promise<void> {
           // moment. Journalling the sync time instead would move an order
           // queued through an outage into the wrong day for the day count.
           createdAt: order.body.createdAt ?? at,
+          // The kiosk the server just filed it under — the one whose token
+          // carried it, not the one it was scanned at. An order queued at gate
+          // A and delivered after a re-pairing to gate B belongs to B, and the
+          // day count has to agree with the server about which.
+          kioskId,
           deviceSeq: order.deviceSeq,
           orderNo: result.orderNo,
           // Whom the DEVICE opened the session for; the server re-resolves the
@@ -356,9 +537,30 @@ async function drainOnce(client: KioskClient, now: () => Date): Promise<void> {
         // A timeout is deliberately NOT one of these — `KioskTimeoutError`
         // carries no status, so an aborted request stays retryable and the
         // order stays queued.
-        if (isTerminalRejection(err) && (await quarantine(order, err as KioskApiError, now))) {
+        if (
+          isTerminalRejection(err) &&
+          (await quarantine(order, err as KioskApiError, now, kioskId))
+        ) {
           continue;
         }
+        // AN ANSWER FROM THE APPLICATION IS NOT AN OUTAGE — BUT AN ANSWER FROM
+        // A GATEWAY IS. The backoff is for a link that carried nothing to the
+        // API, because that is the only failure a fast retry can fix. A 500 or
+        // a 429 has been reached, and hammering a struggling server every
+        // second is the opposite of back-pressure; a 401 is a revoked device,
+        // which the shell answers by returning to pairing and which no retry
+        // can repair. Those wait for the ordinary refresh tick, as they always
+        // did.
+        //
+        // A 502/503/504 is neither: the proxy is answering for an application
+        // it could not reach (`isUnreachable`), so the queue is stalled by an
+        // outage after all and used to wait out the full five-minute tick
+        // before trying again — the whole reason the backoff exists.
+        //
+        // And a failure raised AFTER the submit resolved is the journal's
+        // store, not the wire — the order is owed, but the network is
+        // demonstrably fine.
+        unreachable = !answered && isUnreachable(err);
         // Offline, rejected, or the journal write failed — either way this
         // order is still owed. Stop here so the next drain retries it in place.
         return;
@@ -370,6 +572,18 @@ async function drainOnce(client: KioskClient, now: () => Date): Promise<void> {
     // an order only leaves the queue after a durable acknowledgement, so the
     // next drain picks up wherever this one stopped. Swallowed to keep the
     // never-rejects contract above true for the timer that drives it.
+  } finally {
+    // A cancel that landed WHILE this pass ran disowns it: the shell it belongs
+    // to has gone, so neither half of the bookkeeping below is its business any
+    // more, least of all arming a timer that would outlive the tree.
+    if (retryEpoch === startedAt) {
+      // Order matters: the reset clears whatever the outage had armed and puts
+      // the schedule back to the base, and the arming below then starts from
+      // that base. A pass that delivered and then lost the link is making
+      // progress and is not the same outage.
+      if (delivered) resetRetry();
+      if (unreachable) scheduleRetry(client, now);
+    }
   }
 }
 

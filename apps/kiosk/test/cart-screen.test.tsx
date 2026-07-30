@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { KioskBootstrapDto } from "../src/api/types.js";
 import { classifyKioskScan, type KioskScan } from "../src/domain-guard/classify.js";
 import i18n from "../src/i18n/index.js";
@@ -398,6 +398,128 @@ describe("Cart", () => {
     unmount();
 
     expect(stop).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * The amber strip clears itself, and the two things that look like it do not.
+ *
+ * Design 2026-07-24 §8.2 gives the repeated-code banner «~2,6 с» and nothing
+ * else on this screen a duration. Before this, a banner stood until the next
+ * ACCEPTED scan — so a worker who scanned a duplicate and then walked away left
+ * «Этот код уже в списке» on the kiosk for the next person to read as a verdict
+ * on their own bottle.
+ */
+describe("Cart notices", () => {
+  // The subject of every test here is a timer, so the clock is faked for all of
+  // them rather than per-test. Only the timer functions: nothing in this file
+  // touches IndexedDB, but `Date` is left real so nothing else shifts under the
+  // screen.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** The spec's «~2,6 с». */
+  const NOTICE_MS = 2_600;
+  const DUPLICATE = "Этот код уже в списке. У каждой бутылки — свой код: возьмите другую.";
+  const advance = (ms: number) => act(() => void vi.advanceTimersByTime(ms));
+
+  it("clears the amber banner by itself after about 2.6 s", () => {
+    const { scan } = renderCart();
+    const repeated = km(GTIN_MILK, "KYC9X7MQ");
+
+    scan(repeated);
+    scan(repeated);
+    expect(screen.getByText(DUPLICATE)).toBeDefined();
+
+    advance(NOTICE_MS - 100);
+    expect(screen.getByText(DUPLICATE)).toBeDefined();
+
+    advance(100);
+    expect(screen.queryByText(DUPLICATE)).toBeNull();
+    // Only the banner went: the list it was about is untouched.
+    expect(rows()).toHaveLength(1);
+  });
+
+  it("gives a new banner its own full 2.6 s instead of the remains of the last one", () => {
+    const { scan } = renderCart();
+    const repeated = km(GTIN_MILK, "KYC9X7MQ");
+
+    scan(repeated);
+    scan(repeated);
+    advance(NOTICE_MS - 200);
+
+    // A different refusal, 200 ms before the first one was due to clear. It
+    // must be readable for its own 2.6 s — inheriting the predecessor's
+    // remaining 200 ms would flash the one message the worker needed most.
+    scan(bareBarcode());
+    expect(screen.getByRole("alert").textContent).toContain("Это обычный штрихкод");
+
+    advance(NOTICE_MS - 200);
+    expect(screen.getByRole("alert").textContent).toContain("Это обычный штрихкод");
+
+    advance(200);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  /**
+   * The red modal is NOT a banner and must not be timed out.
+   *
+   * It is the one notice the worker has to act on — the bottle in their hand
+   * goes back on the shelf — and a modal that vanishes while they are still
+   * looking at the product leaves them holding something the kiosk has silently
+   * stopped objecting to.
+   */
+  it("leaves the red modal standing until the worker acknowledges it", () => {
+    const { scan } = renderCart();
+
+    scan(km(GTIN_ABSENT, "BBBB2222"));
+    expect(screen.getByRole("dialog").textContent).toContain("Эту бутылку здесь взять нельзя");
+
+    advance(NOTICE_MS * 4);
+
+    expect(screen.getByRole("dialog").textContent).toContain("Эту бутылку здесь взять нельзя");
+
+    click("Понятно");
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  /**
+   * And the limit's amber panel is a STATE, not a notice: it says the cart is
+   * full, which stays true until something leaves the cart. Timing it out would
+   * put the scan prompt back in front of a worker whose next scan the reducer
+   * still refuses.
+   */
+  it("does not time the limit panel out while the cart is still full", () => {
+    const { scan } = renderCart({ bootstrap: bootstrapWith({ dayLimitPerEmployee: 1 }) });
+
+    scan(km(GTIN_MILK, "KYC9X7MQ"));
+    // ...and a scan the limit refuses, so the `limit` notice is genuinely set.
+    scan(km(GTIN_BREAD, "BBBB2222"));
+    expect(screen.getByText("Лимит на сегодня — 1 шт")).toBeDefined();
+
+    advance(NOTICE_MS * 4);
+
+    expect(screen.getByText("Лимит на сегодня — 1 шт")).toBeDefined();
+    expect(screen.queryByText(SCAN_PROMPT)).toBeNull();
+  });
+
+  // A timer that outlives the screen is one leaked timer per refused scan, each
+  // holding a dispatch into a reducer nobody is reading any more.
+  it("takes its timer with it when it leaves the screen", () => {
+    const { scan, unmount } = renderCart();
+    const repeated = km(GTIN_MILK, "KYC9X7MQ");
+
+    scan(repeated);
+    scan(repeated);
+    expect(vi.getTimerCount()).toBe(1);
+
+    unmount();
+
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 

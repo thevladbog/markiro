@@ -9,9 +9,9 @@ import {
 } from "@nestjs/common";
 import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, sql, type SQL } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
-import { validatePickupKm } from "@markiro/domain";
+import { formatPhc, PHC_ITERATIONS, validatePickupKm } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
-import { getOrCreateBadgeSalt } from "../../lib/badge-salt";
+import { getOrCreateBadgeSalt, readBadgeSalt } from "../../lib/badge-salt";
 import { nextOrderNo } from "../../pickup/order-number";
 import { computeTotalPrice } from "../../pickup/total-price";
 import type { PickupSlipData } from "../../pickup/slip";
@@ -123,7 +123,7 @@ export class PickupOrdersService {
 
     // 2. Badge -> active employee (badge's revoked_at is null, employee active).
     //
-    // 422, NOT 401, AND THE DIFFERENCE IS LOAD-BEARING. `badgeCode` is a field
+    // 422, NOT 401, AND THE DIFFERENCE IS LOAD-BEARING. The badge is a field
     // of the ORDER, not the caller's credential: the device already
     // authenticated (`KioskDeviceGuard`), and what failed is that a well-formed
     // body names an employee no withdrawal can be filed against — which is
@@ -148,7 +148,7 @@ export class PickupOrdersService {
     // (`TERMINAL_STATUSES`, apps/kiosk/src/sync/worker.ts), so the queue
     // unblocks the moment this ships, including on a device still running an
     // older bundle.
-    const employeeId = await this.resolveActiveEmployeeId(tenantId, dto.badgeCode);
+    const employeeId = await this.resolveActiveEmployeeId(tenantId, dto);
     if (!employeeId) {
       // An offline sync lands hours after the scan, so the badge may have
       // been revoked in between -- and this 422 fires before a single item
@@ -160,7 +160,7 @@ export class PickupOrdersService {
           tenantId,
           kioskId,
           employeeId: null,
-          badgeCode: dto.badgeCode,
+          badgeCode: await this.auditBadgeValue(tenantId, dto),
           orderId: null,
           deviceSeq: dto.deviceSeq,
           codes: dto.items.map((item) => ({ rawKm: item.rawKm, reason: "unknown_badge" })),
@@ -294,6 +294,11 @@ export class PickupOrdersService {
 
   /** Offline-cache payload: everything a kiosk needs to operate without a round-trip per scan. */
   async bootstrap(tenantId: string, kioskId: string): Promise<KioskBootstrapDto> {
+    // ONE reading of the clock for the whole payload, so `generatedAt` and the
+    // UTC day the per-employee counts below are taken over can never straddle
+    // a midnight between two `new Date()` calls.
+    const generatedAt = new Date();
+
     const [kiosk] = await this.db
       .select({
         dayLimitPerEmployee: schema.kiosks.dayLimitPerEmployee,
@@ -349,8 +354,13 @@ export class PickupOrdersService {
     );
     const operators = await this.operatorsService.buildRoster(tenantId);
 
+    // ONE grouped query for the entire roster, never one per employee: this
+    // runs on every bootstrap and every paired kiosk pulls one every five
+    // minutes.
+    const takenElsewhere = await this.takenTodayElsewhereByEmployee(tenantId, kioskId, generatedAt);
+
     return {
-      generatedAt: new Date().toISOString(),
+      generatedAt: generatedAt.toISOString(),
       config: {
         dayLimitPerEmployee: kiosk?.dayLimitPerEmployee ?? 0,
         showPrices: kiosk?.showPrices ?? true,
@@ -363,6 +373,10 @@ export class PickupOrdersService {
         fullName: e.fullName,
         role: e.role,
         badgeHash: badgeHashes.get(e.id) ?? null,
+        // Absent from the grouped result means this employee took nothing at
+        // another kiosk today, which is `0` and not a missing field: the device
+        // reads this per employee and adds it to its own count.
+        takenTodayElsewhere: takenElsewhere.get(e.id) ?? 0,
       })),
       operators: operators.map((o) => ({
         employeeId: o.operatorId,
@@ -822,10 +836,28 @@ export class PickupOrdersService {
     await db.insert(schema.pickupScanRejections).values(row).onConflictDoNothing();
   }
 
+  /**
+   * The badge the order names -> the active employee it belongs to, by
+   * whichever of the two identifiers the body carries (see `CreateOrderDto`:
+   * exactly one is present, and `badgeCode` is the legacy one).
+   *
+   * BOTH BRANCHES ASK THE SAME QUESTION of the same row, which is what keeps
+   * this change invisible to everything downstream: an active badge of this
+   * tenant, held by an active employee. So roster drift between an offline
+   * scan and its sync resolves exactly as it always did -- a revoked badge or
+   * an archived employee is unresolvable either way, and a card reissued to
+   * somebody else in between resolves to its new holder either way.
+   */
   private async resolveActiveEmployeeId(
     tenantId: string,
-    badgeCode: string,
+    dto: CreateOrderDto,
   ): Promise<string | undefined> {
+    const presented = this.presentedBadge(dto);
+    const match =
+      "digest" in presented
+        ? eq(schema.employeeBadges.badgeHash, await this.badgeHashFor(tenantId, presented.digest))
+        : eq(schema.employeeBadges.badgeCode, presented.code);
+
     const [badge] = await this.db
       .select({ employeeId: schema.employeeBadges.employeeId })
       .from(schema.employeeBadges)
@@ -839,12 +871,87 @@ export class PickupOrdersService {
       .where(
         and(
           eq(schema.employeeBadges.tenantId, tenantId),
-          eq(schema.employeeBadges.badgeCode, badgeCode),
+          match,
           isNull(schema.employeeBadges.revokedAt),
           eq(schema.employees.status, "active"),
         ),
       );
     return badge?.employeeId;
+  }
+
+  /**
+   * Which of the two identifiers the body names the badge by, as one value the
+   * callers below can exhaust.
+   *
+   * The 400 is unreachable through the HTTP DTO -- `createOrderSchema` already
+   * requires exactly one -- but reachable through a direct service call, which
+   * this module has (see the kiosk-row lock test). Loud rather than tolerated:
+   * a body naming no badge cannot produce a 422 either, because the rejection
+   * row that 422 writes has nothing to put in `badge_code`, and the table's
+   * `badge_xor_employee` check forbids leaving it null there.
+   */
+  private presentedBadge(dto: CreateOrderDto): { digest: string } | { code: string } {
+    if (dto.badgeDigest !== undefined) return { digest: dto.badgeDigest };
+    if (dto.badgeCode !== undefined) return { code: dto.badgeCode };
+    throw new BadRequestException("Exactly one of badgeDigest or badgeCode is required");
+  }
+
+  /**
+   * The stored verifier a digest would equal, rebuilt from the tenant's salt.
+   *
+   * `employee_badges.badge_hash` is a whole PHC string and the device sends
+   * only the digest half, so the comparison is made by rebuilding the string
+   * around it rather than by decomposing the column -- an equality the index
+   * planner can use, and no PBKDF2 on this path at all.
+   *
+   * The salt is READ, never minted (`readBadgeSalt`): this runs once per order
+   * and has no business writing a row to answer a lookup. A tenant with no
+   * salt row has no verifiers either, so the empty string it falls back to
+   * matches nothing and the caller's 422 is the correct outcome.
+   */
+  private async badgeHashFor(tenantId: string, digestB64: string): Promise<string> {
+    const salt = await readBadgeSalt(this.db, tenantId);
+    if (salt === null) return "";
+    return formatPhc(PHC_ITERATIONS, salt, digestB64);
+  }
+
+  /**
+   * What `pickup_scan_rejections.badge_code` records for a badge that no
+   * longer resolves -- the plaintext code wherever the tenant still has the
+   * row, which is what makes that column worth reading («so the admin can
+   * still tell whose badge was used once the employee is gone from the
+   * roster»).
+   *
+   * A digest is looked up across ALL of the tenant's badges, REVOKED INCLUDED,
+   * which is the whole trick: the badge is unresolvable precisely because it
+   * was revoked or its employee archived, and neither of those deletes the row
+   * (`EmployeesService` only ever sets `revoked_at`). So the case the column
+   * exists for is exactly the case this recovers.
+   *
+   * The digest itself is the fallback, and it is not reachable from a real
+   * kiosk: `Idle` refuses to open a session for a badge its cached roster
+   * cannot resolve, so every badge a device sends was an active badge of this
+   * tenant when the snapshot was taken. A digest matching no row at all means
+   * the caller is not a kiosk following that flow, and an opaque token is a
+   * truer record of it than a guess. Non-null either way, because the table's
+   * `badge_xor_employee` check requires a value whenever `employee_id` is null.
+   */
+  private async auditBadgeValue(tenantId: string, dto: CreateOrderDto): Promise<string> {
+    const presented = this.presentedBadge(dto);
+    if (!("digest" in presented)) return presented.code;
+    // More than one row can share a hash -- the same code revoked and later
+    // reissued -- but they all decode to the same plaintext, so any of them
+    // answers the question this column asks.
+    const [badge] = await this.db
+      .select({ badgeCode: schema.employeeBadges.badgeCode })
+      .from(schema.employeeBadges)
+      .where(
+        and(
+          eq(schema.employeeBadges.tenantId, tenantId),
+          eq(schema.employeeBadges.badgeHash, await this.badgeHashFor(tenantId, presented.digest)),
+        ),
+      );
+    return badge?.badgeCode ?? presented.digest;
   }
 
   private async resolveWriteoffReasonId(
@@ -1010,6 +1117,66 @@ export class PickupOrdersService {
         `Check the device's clock.`,
     );
     return now;
+  }
+
+  /**
+   * Per employee, how much of today's allowance they spent at EVERY KIOSK
+   * EXCEPT `kioskId` — the half of the day count the asking kiosk cannot see.
+   *
+   * WHY IT EXCLUDES THIS KIOSK, since a future reader will be tempted to
+   * "fix" it into a total: the device counts its own kiosk's contribution
+   * itself, off its journal and its unsynced queue, and adds the two. Split by
+   * SOURCE like this, the two halves cannot overlap — no watermark, no
+   * timestamp comparison, nothing that can be slightly wrong. A total would be
+   * added to a number that already contains it, and double-counting refuses a
+   * worker product they are entitled to at a machine with nobody to overrule
+   * it. (Under-counting, the other direction, merely defers the refusal to
+   * `POST /kiosk/orders`, which remains the authority.) See
+   * `KioskBootstrapDto.employees[].takenTodayElsewhere`.
+   *
+   * The predicates are `applyDayLimit`'s, deliberately identical, so what a
+   * device plans with and what the server enforces cannot drift: accepted
+   * (non-voided) items, on non-cancelled orders, whose order's
+   * `(created_at at time zone 'utc')::date` is `when`'s UTC day.
+   *
+   * ONE query for the whole roster — grouped, not looped: every paired kiosk
+   * bootstraps every five minutes, so a per-employee query here would multiply
+   * that by the size of the tenant's roster.
+   */
+  private async takenTodayElsewhereByEmployee(
+    tenantId: string,
+    kioskId: string,
+    when: Date,
+  ): Promise<Map<string, number>> {
+    const dateStr = when.toISOString().slice(0, 10);
+    const rows = await this.db
+      .select({
+        employeeId: schema.pickupOrders.employeeId,
+        // `::int` because Postgres `count()` is bigint, which node-postgres
+        // hands back as a STRING — and a string here would be JSON-encoded as
+        // one and silently fail the device's numeric guard, reading as zero.
+        taken: sql<number>`count(*)::int`,
+      })
+      .from(schema.pickupOrderItems)
+      .innerJoin(
+        schema.pickupOrders,
+        and(
+          eq(schema.pickupOrders.tenantId, schema.pickupOrderItems.tenantId),
+          eq(schema.pickupOrders.id, schema.pickupOrderItems.orderId),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.pickupOrderItems.tenantId, tenantId),
+          ne(schema.pickupOrders.kioskId, kioskId),
+          ne(schema.pickupOrders.status, "cancelled"),
+          eq(schema.pickupOrderItems.voided, false),
+          sql`(${schema.pickupOrders.createdAt} at time zone 'utc')::date = ${dateStr}`,
+        ),
+      )
+      .groupBy(schema.pickupOrders.employeeId);
+
+    return new Map(rows.map((row) => [row.employeeId, row.taken]));
   }
 
   /** Accepts up to `dayLimitPerEmployee` items for today (UTC), flagging the rest `over_limit`. */

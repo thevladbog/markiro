@@ -1,3 +1,4 @@
+import { isCanonicalDigestB64 } from "@markiro/domain";
 import { z } from "zod";
 
 /** POST /kiosk/pair body — the 8-digit code shown on the kiosk cabinet. */
@@ -16,15 +17,55 @@ export type CreateOrderItemInput = z.infer<typeof createOrderItemSchema>;
  * plausible window around server time, and otherwise replaced by it, because
  * it also decides which day the order's items count against (see
  * `PickupOrdersService.resolveScanTime`).
+ *
+ * THE BADGE ARRIVES AS A DIGEST, NOT A CODE, and that is a storage decision
+ * rather than a transport one. An order is written to the kiosk's IndexedDB
+ * queue BEFORE any network attempt (that is what makes a pickup survive a
+ * battery pull), and a permanently refused one is kept in its quarantine store
+ * indefinitely — so whatever identifies the employee here is what an
+ * unattended tablet at a factory gate holds at rest. A badge CODE is the one
+ * credential in this system that also works away from the device: the same
+ * value authorises a pickup at any kiosk, signs an operator in at the line
+ * station, and is printed on a physical card. A digest is not: it is already
+ * in the device's own bootstrap (`employees[].badgeHash`), so the queue holds
+ * nothing the snapshot does not, and it cannot be scanned anywhere.
+ *
+ * `badgeDigest` is `deriveDigestB64(badgeCode, tenant badgeSalt,
+ * PHC_ITERATIONS)` — the value the device already derives to resolve the badge
+ * locally, and the digest half of the `employee_badges.badge_hash` the server
+ * already stores, so the lookup is one string equality and neither end needs
+ * the plaintext.
+ *
+ * ROTATING THE TENANT BADGE SALT WOULD STRAND QUEUED ORDERS. A digest derived
+ * under an old salt matches no stored hash, so a device's whole backlog would
+ * 422 and quarantine. Nothing rotates it today (`getOrCreateBadgeSalt` only
+ * ever creates), and rotation would have to drain kiosks first.
+ *
+ * `badgeCode` is LEGACY and stays accepted only for bodies queued by a
+ * pre-digest bundle. Rejecting it would fail validation with 400, and 400 is
+ * in the kiosk's `TERMINAL_STATUSES` (apps/kiosk/src/sync/worker.ts) — so
+ * dropping it would quarantine every order already queued on every device that
+ * was offline during the upgrade. It can go once no device can still hold a
+ * pre-upgrade queue; the device's own seven-day staleness block bounds that.
  */
-export const createOrderSchema = z.object({
-  deviceSeq: z.number().int().nonnegative(),
-  badgeCode: z.string().min(1),
-  reason: z.enum(["buy", "writeoff"]),
-  writeoffReasonId: z.string().uuid().nullable().optional(),
-  items: z.array(createOrderItemSchema),
-  createdAt: z.string().datetime().optional(),
-});
+export const createOrderSchema = z
+  .object({
+    deviceSeq: z.number().int().nonnegative(),
+    badgeDigest: z.string().refine(isCanonicalDigestB64, "Not a canonical badge digest").optional(),
+    badgeCode: z.string().min(1).optional(),
+    reason: z.enum(["buy", "writeoff"]),
+    writeoffReasonId: z.string().uuid().nullable().optional(),
+    items: z.array(createOrderItemSchema),
+    createdAt: z.string().datetime().optional(),
+  })
+  // Exactly one, never both: two identifiers for one employee is two answers
+  // the server would have to rank, and a body carrying a digest AND the
+  // plaintext it is meant to replace is the very thing this field exists to
+  // stop being persisted.
+  .refine(
+    (body) => (body.badgeDigest === undefined) !== (body.badgeCode === undefined),
+    "Exactly one of badgeDigest or badgeCode is required",
+  );
 export type CreateOrderDto = z.infer<typeof createOrderSchema>;
 
 /** A scanned item that could not be accepted into the order, and why. */
@@ -72,7 +113,33 @@ export interface KioskBootstrapDto {
     unitPrice: string | null;
     egaisCode: string | null;
   }[];
-  employees: { id: string; fullName: string; role: string | null; badgeHash: string | null }[];
+  employees: {
+    id: string;
+    fullName: string;
+    role: string | null;
+    badgeHash: string | null;
+    /**
+     * How many items this employee has already taken TODAY AT EVERY KIOSK BUT
+     * THE ONE ASKING. Not a total, and it must never become one.
+     *
+     * The device's own day count (`apps/kiosk/src/session/day-count.ts`) is
+     * computed from this kiosk's journal and its unsynced queue, and the limit
+     * check is the SUM of the two numbers. Split by SOURCE — this kiosk's
+     * orders here, every other kiosk's there — an overlap is impossible by
+     * construction, with no watermark and no clock comparison to get subtly
+     * wrong. Send a total instead and every item this device filed is counted
+     * twice, which refuses a worker product they are entitled to at an
+     * unattended machine with nobody present to overrule it. The opposite
+     * error, under-counting, is the safe one: `POST /kiosk/orders` re-decides
+     * the limit against live data and is still the gate.
+     *
+     * Counted exactly the way `PickupOrdersService.applyDayLimit` counts —
+     * non-voided items, on non-cancelled orders, whose order's
+     * `(created_at at time zone 'utc')::date` is today — so the number a device
+     * plans with and the number the server enforces cannot disagree.
+     */
+    takenTodayElsewhere: number;
+  }[];
   operators: {
     employeeId: string;
     name: string;

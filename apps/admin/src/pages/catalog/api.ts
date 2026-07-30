@@ -23,6 +23,13 @@ export interface ProductDto {
   palletCapacity: number | null;
   unitPrice: string | null;
   egaisCode: string | null;
+  /**
+   * The `<Ид>` of the 1С item this product is linked to (Task 10's
+   * `integration_candidates.external_ref`), or `null` if never linked.
+   * Surfaced on the product's own card (Task 14) alongside the unlink
+   * action -- see `useUnlinkProduct` below.
+   */
+  externalRef: string | null;
   status: ProductStatus;
   defaultCounterpartyId: string | null;
   defaultLabelTemplateId: string | null;
@@ -164,4 +171,28 @@ export function useDeleteProduct(): UseMutationResult<void, Error, string> {
  */
 export function useGtinCheck(): UseMutationResult<GtinCheckResult, Error, string> {
   return useMutation({ mutationFn: postGtinCheck });
+}
+
+function deleteExternalLink(id: string): Promise<void> {
+  return apiFetch<void>(`/products/${id}/external-link`, { method: "DELETE" });
+}
+
+/**
+ * `DELETE /products/:id/external-link` -- breaks a product's link to its
+ * external (1С) counterpart without touching any of its own fields (brief
+ * 08: "unlinking leaves the product's current values alone"). On a
+ * not-currently-linked product the server answers 409 -- the caller
+ * (`ProductForm`) surfaces that message rather than a generic failure, same
+ * as `useLinkCandidate` on the other side of this same link. Invalidates the
+ * products list so the card reflects `externalRef: null` the next time it's
+ * opened.
+ */
+export function useUnlinkProduct(): UseMutationResult<void, Error, string> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: deleteExternalLink,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: PRODUCTS_QUERY_KEY });
+    },
+  });
 }

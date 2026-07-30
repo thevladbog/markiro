@@ -16,10 +16,23 @@ export interface CreateOrderItemInput {
  * together with `(tenantId, kioskId)` it's the idempotency key for offline
  * sync retries. `createdAt` lets an offline-queued order replay with its
  * original scan time instead of the sync moment.
+ *
+ * `badgeDigest` is what `resolveBadge` already derived to admit the worker
+ * (`deriveDigestB64(raw, badgeSalt, PHC_ITERATIONS)`), and NOT the scanned
+ * code, because this body is written to IndexedDB before any network attempt
+ * and a permanently refused one is kept there for good. A badge code is the
+ * only credential on this device that also works away from it — the same value
+ * opens a pickup at any kiosk and signs an operator in at the station — while
+ * a digest is already in this device's own bootstrap and can be scanned
+ * nowhere. See `credentials/badge.ts` and the server's own `CreateOrderDto`.
+ *
+ * The server still accepts a legacy `badgeCode`, which is what lets an order
+ * queued by an older bundle drain instead of failing validation; today's app
+ * never writes one, and `store/scrub.ts` removes the ones it already wrote.
  */
 export interface CreateOrderDto {
   deviceSeq: number;
-  badgeCode: string;
+  badgeDigest: string;
   reason: "buy" | "writeoff";
   writeoffReasonId?: string | null;
   items: CreateOrderItemInput[];
@@ -71,7 +84,32 @@ export interface KioskBootstrapDto {
     unitPrice: string | null;
     egaisCode: string | null;
   }[];
-  employees: { id: string; fullName: string; role: string | null; badgeHash: string | null }[];
+  employees: {
+    id: string;
+    fullName: string;
+    role: string | null;
+    badgeHash: string | null;
+    /**
+     * What this employee has taken today AT EVERY KIOSK BUT THIS ONE. Not a
+     * total, and reading it as one would break the very thing it fixes.
+     *
+     * This device counts its OWN kiosk's contribution from its journal and its
+     * unsynced queue (`session/day-count.ts`), and the limit is the SUM. The
+     * two halves are split by SOURCE, so an overlap is impossible by
+     * construction — no watermark, no clock comparison. Were this a total, the
+     * items this device filed would be counted twice and a worker would be
+     * refused product they are entitled to, at an unattended machine with
+     * nobody to overrule it.
+     *
+     * DECLARED REQUIRED, BUT READ AS UNTRUSTED. This interface describes what
+     * today's server sends; the app casts `res.json()` to it and validates
+     * nothing, and IndexedDB holds whatever snapshot any past server sent. So
+     * it is read through `takenTodayElsewhere()`, which answers zero for a
+     * payload that does not carry it — the same reason `day-count.ts` guards
+     * the journal it reads back.
+     */
+    takenTodayElsewhere: number;
+  }[];
   operators: {
     employeeId: string;
     name: string;

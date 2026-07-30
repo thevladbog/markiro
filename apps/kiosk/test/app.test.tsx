@@ -23,7 +23,7 @@ import {
 } from "../src/store/config.js";
 import { appendJournal, type JournalEntry } from "../src/store/journal.js";
 import { enqueueOrder, listQuarantine, listQueue } from "../src/store/queue.js";
-import { REFRESH_INTERVAL_MS, STALE_BLOCK_MS } from "../src/sync/worker.js";
+import { REFRESH_INTERVAL_MS, RETRY_MAX_MS, STALE_BLOCK_MS } from "../src/sync/worker.js";
 
 afterEach(cleanup);
 
@@ -139,12 +139,16 @@ const NOW = new Date("2026-07-28T12:00:00.000Z");
  * never match and every session test would fail for the wrong reason.
  */
 let badgeHash = "";
+/** The digest half of `badgeHash` — what an ORDER names the employee by, since
+ * the scanned code must never reach the device's stores. */
+let badgeDigest = "";
 let operatorBadgeHash = "";
 let operatorPinHash = "";
 beforeAll(async () => {
   const phc = async (raw: string) =>
     formatPhc(PHC_ITERATIONS, SALT, await deriveDigestB64(raw, SALT, PHC_ITERATIONS));
   badgeHash = await phc(BADGE);
+  badgeDigest = await deriveDigestB64(BADGE, SALT, PHC_ITERATIONS);
   operatorBadgeHash = await phc(OPERATOR_BADGE);
   operatorPinHash = await phc(OPERATOR_PIN);
 });
@@ -158,7 +162,17 @@ function bootstrapAt(generatedAt: string): KioskBootstrapDto {
     products: [
       { id: "p-milk", gtin14: GTIN_MILK, name: MILK, unitPrice: "89.90", egaisCode: null },
     ],
-    employees: [{ id: EMPLOYEE.id, fullName: EMPLOYEE.fullName, role: null, badgeHash }],
+    employees: [
+      {
+        id: EMPLOYEE.id,
+        fullName: EMPLOYEE.fullName,
+        role: null,
+        badgeHash,
+        // What this worker took at the OTHER kiosks today, which is the one
+        // part of their day count this device cannot see for itself.
+        takenTodayElsewhere: server.takenTodayElsewhere,
+      },
+    ],
     // One operator, so the post-pairing settings gate has somebody who can
     // actually open it — by badge or by personnel number and PIN, since the
     // tests below need both entrances.
@@ -188,7 +202,26 @@ interface FakeServer {
    * `reachable: false`, the device is being ANSWERED.
    */
   revoked: boolean;
+  /**
+   * A GATEWAY IN FRONT OF AN API THAT IS NOT THERE — the Vite dev proxy's 502
+   * with the API stopped, and Caddy's in front of a production deployment
+   * (roadmap plan 08). `null` is a gateway simply passing requests through.
+   *
+   * Deliberately a RESOLVED response rather than a rejected `fetch`, and that is
+   * the whole point of it: `reachable: false` models a dropped connection, which
+   * is the only outage every test here modelled until a live smoke run found the
+   * other one. A gateway ANSWERS, from the wrong machine, and the device read
+   * that answer as proof of an application it had never reached.
+   */
+  gateway: number | null;
   generatedAt: string;
+  /**
+   * What the roster reports this employee took today AT EVERY OTHER KIOSK —
+   * `employees[].takenTodayElsewhere`, and deliberately never a total. The
+   * device adds it to what it counts off its own journal and queue, so the two
+   * halves come from disjoint sources and cannot overlap.
+   */
+  takenTodayElsewhere: number;
   bootstraps: number;
   orders: CreateOrderDto[];
 }
@@ -223,13 +256,19 @@ beforeEach(() => {
   server = {
     reachable: true,
     revoked: false,
+    gateway: null,
     generatedAt: NOW.toISOString(),
+    takenTodayElsewhere: 0,
     bootstraps: 0,
     orders: [],
   };
   globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (!server.reachable) throw new TypeError("Failed to fetch");
+    // BEFORE the guard, and before any route: a proxy that cannot reach the
+    // application answers on its own behalf, so nothing behind it ever sees the
+    // request — not the device guard, not the order handler.
+    if (server.gateway !== null) return errorResponse(server.gateway, "Bad Gateway");
     // The guard sits in front of every `/kiosk` route but the pairing redeem,
     // so a revoked device is refused before anything looks at the request.
     if (server.revoked) return errorResponse(401, "Unauthorized");
@@ -265,9 +304,14 @@ function setOnLine(value: boolean): void {
   Object.defineProperty(navigator, "onLine", { value, configurable: true });
 }
 
+/** The gate this device is bound to, as pairing records it — and what the
+ * journal's entries have to name to be counted as this gate's. */
+const KIOSK_ID = "k-1";
+
 const config = (over: Partial<KioskConfig> = {}): KioskConfig => ({
   serverUrl: "/api",
   token: "tok-abc",
+  kioskId: KIOSK_ID,
   kioskName: "Склад №1",
   place: "Проходная",
   nextDeviceSeq: 5,
@@ -291,7 +335,7 @@ async function pair(generatedAt = NOW.toISOString(), over: Partial<KioskConfig> 
 
 const queuedOrder = (deviceSeq: number): CreateOrderDto => ({
   deviceSeq,
-  badgeCode: BADGE,
+  badgeDigest,
   reason: "buy",
   items: [{ rawKm: KM }],
   createdAt: NOW.toISOString(),
@@ -650,6 +694,7 @@ describe("KioskShell", () => {
     await appendJournal({
       at: NOW.toISOString(),
       createdAt: NOW.toISOString(),
+      kioskId: KIOSK_ID,
       deviceSeq: 3,
       orderNo: "ORD-26-0003",
       conflicts: [],
@@ -711,6 +756,153 @@ describe("KioskShell", () => {
     await settle(() => expect(screen.getByText("Лимит 5 шт в день · осталось 5")).toBeDefined());
   });
 
+  /**
+   * THE OTHER HALF OF THE DAY COUNT, and the failure it closes: a worker who
+   * spent their allowance at another gate used to be offered a fresh one here,
+   * scan a bottle, be told «Заявка передана», and walk off with it — the server
+   * refused the overflow, but on an offline submit nobody was there to hear it.
+   *
+   * The device cannot know about the other kiosk's orders, so the SERVER
+   * reports them, per employee, in the bootstrap roster.
+   */
+  it("counts what the worker took at another kiosk against their limit here", async () => {
+    server.takenTodayElsewhere = 2;
+    await pair();
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+
+    scan(BADGE);
+
+    await settle(() => expect(screen.getByText(CART_TITLE)).toBeDefined());
+    await settle(() => expect(screen.getByText("Лимит 5 шт в день · осталось 3")).toBeDefined());
+  });
+
+  /**
+   * The two halves ADD. They are split by SOURCE — this kiosk's orders come off
+   * this device's own journal, every other kiosk's off the roster — so they
+   * cannot overlap, and neither may replace the other. A snapshot figure that
+   * OVERWROTE the local count would forget the bottle this device just handed
+   * over; a local count that ignored the snapshot is the bug this test exists
+   * for.
+   */
+  it("adds another kiosk's items to this one's rather than replacing them", async () => {
+    server.takenTodayElsewhere = 2;
+    await pair();
+    await appendJournal({
+      at: NOW.toISOString(),
+      createdAt: NOW.toISOString(),
+      kioskId: KIOSK_ID,
+      deviceSeq: 3,
+      orderNo: "ORD-26-0003",
+      conflicts: [],
+      employeeId: EMPLOYEE.id,
+      acceptedCount: 1,
+    });
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+
+    scan(BADGE);
+
+    await settle(() => expect(screen.getByText(CART_TITLE)).toBeDefined());
+    // 2 elsewhere + 1 here = 3 of 5.
+    await settle(() => expect(screen.getByText("Лимит 5 шт в день · осталось 2")).toBeDefined());
+  });
+
+  /**
+   * A TABLET THAT HAS BEEN MOVED BETWEEN GATES, which is not exotic: re-pairing
+   * is the documented recovery path for a device nobody can sign into.
+   *
+   * The two halves are split by SOURCE, and the source the DEVICE stands for is
+   * one KIOSK — but nothing clears the journal when the tablet is re-paired, so
+   * the old gate's orders used to be counted here AND arrive in the server's
+   * `takenTodayElsewhere`, which excludes this gate and not the one they were
+   * filed at. Double counted until UTC midnight, and over-counting is the unsafe
+   * direction: it refuses a worker product they are entitled to, at a machine
+   * with nobody standing there to overrule it.
+   */
+  it("does not charge the worker twice for an order filed at the gate this tablet came from", async () => {
+    // The server's figure is "every kiosk except this one", so the old gate's
+    // order is already inside it.
+    server.takenTodayElsewhere = 1;
+    await pair();
+    await appendJournal({
+      at: NOW.toISOString(),
+      createdAt: NOW.toISOString(),
+      // Filed before somebody carried the tablet to this gate.
+      kioskId: "k-other-gate",
+      deviceSeq: 3,
+      orderNo: "ORD-26-0003",
+      conflicts: [],
+      employeeId: EMPLOYEE.id,
+      acceptedCount: 1,
+    });
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+
+    scan(BADGE);
+
+    await settle(() => expect(screen.getByText(CART_TITLE)).toBeDefined());
+    // One order, counted once — the server's 1, and nothing out of the journal.
+    await settle(() => expect(screen.getByText("Лимит 5 шт в день · осталось 4")).toBeDefined());
+  });
+
+  /**
+   * THE UPGRADE PATH, and the reason the count did not simply drop every entry
+   * that names no kiosk. A device paired before the binding was recorded holds
+   * a config that names none and a journal that names none, and it has not
+   * moved — so its history really is this gate's. Refusing to count it would
+   * switch the local half of the day limit off across the whole installed base
+   * until each tablet happened to be re-paired.
+   */
+  it("counts an un-stamped journal on a device that has not paired since the upgrade", async () => {
+    await pair(NOW.toISOString(), { kioskId: null });
+    await appendJournal({
+      at: NOW.toISOString(),
+      createdAt: NOW.toISOString(),
+      deviceSeq: 3,
+      orderNo: "ORD-26-0003",
+      conflicts: [],
+      employeeId: EMPLOYEE.id,
+      acceptedCount: 2,
+    } as unknown as JournalEntry);
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+
+    scan(BADGE);
+
+    await settle(() => expect(screen.getByText(CART_TITLE)).toBeDefined());
+    await settle(() => expect(screen.getByText("Лимит 5 шт в день · осталось 3")).toBeDefined());
+  });
+
+  /**
+   * The upgrade path on the SERVER's side of the wire. Nothing validates a
+   * bootstrap at runtime — `KioskBootstrapDto` is a cast over `res.json()`, not
+   * a schema — so a device talking to an older API, or one still holding a
+   * snapshot it cached before this field existed, gets a roster row without it.
+   * That must read as zero: no `NaN` in «осталось», and no crash on the path
+   * that opens a worker's cart.
+   *
+   * Held offline deliberately, which is also how this arises in the field: the
+   * device upgraded its bundle, the cabinet did not, and the cached snapshot is
+   * the old shape until something replaces it.
+   */
+  it("opens the cart on a bootstrap that predates the cross-kiosk count", async () => {
+    const older = bootstrapAt(NOW.toISOString());
+    delete (older.employees[0] as Partial<KioskBootstrapDto["employees"][number]>)
+      .takenTodayElsewhere;
+    await replaceSnapshot(older, NOW);
+    await writeConfig(config());
+    server.reachable = false;
+    setOnLine(false);
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+
+    scan(BADGE);
+
+    await settle(() => expect(screen.getByText(CART_TITLE)).toBeDefined());
+    await settle(() => expect(screen.getByText("Лимит 5 шт в день · осталось 5")).toBeDefined());
+  });
+
   it("submits online and shows the number the server gave back", async () => {
     await pair();
     render(<App />);
@@ -722,10 +914,13 @@ describe("KioskShell", () => {
     expect(server.orders).toHaveLength(1);
     expect(server.orders[0]).toMatchObject({
       deviceSeq: 5,
-      badgeCode: BADGE,
+      // The DIGEST of the badge that was scanned, never the badge itself — see
+      // the store-scrubbing test below for the property this protects.
+      badgeDigest,
       reason: "buy",
       items: [{ rawKm: KM }],
     });
+    expect(server.orders[0]).not.toHaveProperty("badgeCode");
     // Acknowledged, so it has left the queue — and the counter moved on, or the
     // next order would collide with this one's idempotency key.
     expect(await listQueue()).toEqual([]);
@@ -796,6 +991,181 @@ describe("KioskShell", () => {
     await settle(() => expect(screen.getByText(CART_TITLE)).toBeDefined());
   });
 
+  /**
+   * THE 24-HOUR PLAQUE, which design 2026-07-24 §7 asks for in as many words:
+   * «>24 ч — ненавязчивая плашка "Данные обновлялись N назад", отбор разрешён».
+   *
+   * The threshold was enforced and the plaque was not: the strip said «больше
+   * суток назад», which is the same sentence on the second day as on the sixth
+   * — and the sixth is the one where a kiosk is about to stop entirely.
+   */
+  it("names how old its dataset is past a day, and goes on handing product out", async () => {
+    // Out of contact for thirty hours, and still out of contact — a reachable
+    // server would simply refresh the snapshot out from under the assertion.
+    await pair(new Date(NOW.getTime() - 30 * 60 * 60_000).toISOString());
+    server.reachable = false;
+
+    render(<App />);
+
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+    expect(screen.getByText("Данные обновлялись 30 ч назад")).toBeDefined();
+
+    // «отбор разрешён»: the plaque is a remark, not a gate.
+    scan(BADGE);
+    await settle(() => expect(screen.getByText(CART_TITLE)).toBeDefined());
+  });
+
+  /**
+   * THE STRIP MUST NOT ASSERT A LINK THAT IS NOT THERE, and this is the way it
+   * used to — found in a live smoke run rather than by reasoning.
+   *
+   * Stop the API while the Wi-Fi stays up: `navigator.onLine` is still true, no
+   * `offline` event fires, and the refresh tick is up to five minutes away. So
+   * for those five minutes the kiosk queued orders offline while the strip went
+   * on saying «Связь с сервером есть». The `Done` screen told the truth, so
+   * nothing was lost — but the strip is the one thing a passing administrator
+   * reads, and it was the one thing lying.
+   */
+  it("stops claiming a connection the moment a delivery fails, long before the refresh tick", async () => {
+    await pair();
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+    // The boot sync reached the server, so this is true when it is said.
+    expect(screen.getByText("Связь с сервером есть")).toBeDefined();
+
+    // And now the API stops, with nothing on the device told about it.
+    server.reachable = false;
+
+    await takeOneBottle();
+
+    await settle(() => expect(screen.getByText(QUEUED_TITLE)).toBeDefined());
+    expect(screen.getByText(OFFLINE)).toBeDefined();
+    expect(screen.queryByText("Связь с сервером есть")).toBeNull();
+  });
+
+  /**
+   * And the other direction, which is what stops the fix becoming a strip stuck
+   * on «нет связи»: a delivery that lands is proof of a link, whatever
+   * `navigator.onLine` believes.
+   *
+   * Driven by the BACKOFF rather than by an `online` event or the refresh tick,
+   * because that is the path a recovering kiosk actually takes — the browser
+   * fires nothing at all when it was the API that went away and came back.
+   */
+  it("says the link is back as soon as a delivery lands, with nothing else telling it", async () => {
+    await pair();
+    await enqueueOrder(queuedOrder(3), EMPLOYEE.id);
+    server.reachable = false;
+    setOnLine(false);
+    render(<App />);
+    await settle(() => expect(screen.getByText(OFFLINE)).toBeDefined());
+
+    // The API comes back. `navigator.onLine` stays false, so not even the
+    // browser's own event fires, and the refresh tick is minutes away.
+    server.reachable = true;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(RETRY_MAX_MS);
+    });
+
+    await settle(() => expect(screen.getByText("Связь с сервером есть")).toBeDefined());
+    expect(server.orders.map((order) => order.deviceSeq)).toEqual([3]);
+    expect(await listQueue()).toEqual([]);
+  });
+
+  /**
+   * THE SAME LIE, TOLD BY A PROXY — and the one the rule above could not catch.
+   *
+   * Stopping the API in a live smoke run did not produce a dead `fetch` at all.
+   * The Vite dev proxy ANSWERED, `502 Bad Gateway`, and Caddy does the same in
+   * front of a production deployment (roadmap plan 08). So the device had a
+   * `KioskApiError` in its hands, read it as "the server answered", and went on
+   * showing «Связь с сервером есть» while every order queued underneath it.
+   *
+   * A gateway status is the one kind of answer that says the APPLICATION was
+   * never reached, which is exactly what the strip is reporting on. `fetch`
+   * RESOLVES here — that is the whole gap, and no test above had it.
+   */
+  it("stops claiming a connection when a gateway answers for an API it cannot reach", async () => {
+    await pair();
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+    // The boot sync went all the way through to the application, so this is true.
+    expect(screen.getByText("Связь с сервером есть")).toBeDefined();
+
+    // And now the API stops behind a proxy that is perfectly healthy: the link
+    // is up, the request is answered, and nothing on the device is told.
+    server.gateway = 502;
+
+    await takeOneBottle();
+
+    await settle(() => expect(screen.getByText(QUEUED_TITLE)).toBeDefined());
+    expect(screen.getByText(OFFLINE)).toBeDefined();
+    expect(screen.queryByText("Связь с сервером есть")).toBeNull();
+  });
+
+  /**
+   * And the queue behind that gateway must not wait out the refresh tick.
+   *
+   * The backoff is what delivers a worker's order promptly once the API is
+   * back, and it used to arm only for a failure carrying no status at all — so
+   * behind a proxy it never armed, and every queued order sat for up to five
+   * minutes after the outage had ended.
+   *
+   * The clock is advanced by less than a refresh interval on purpose: the ONLY
+   * thing that can deliver this order inside that window is the backoff.
+   */
+  it("arms the backoff behind a gateway, and delivers as soon as the API is back", async () => {
+    await pair();
+    await enqueueOrder(queuedOrder(3), EMPLOYEE.id);
+    server.gateway = 503;
+    // No browser event will help: the Wi-Fi never moved, so `online` never
+    // fires — the commonest shape of this outage and the reason it is silent.
+    setOnLine(false);
+    render(<App />);
+    await settle(() => expect(screen.getByText(OFFLINE)).toBeDefined());
+
+    // The API comes back up behind the same proxy.
+    server.gateway = null;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(RETRY_MAX_MS);
+    });
+
+    expect(RETRY_MAX_MS).toBeLessThan(REFRESH_INTERVAL_MS);
+    await settle(() => expect(screen.getByText("Связь с сервером есть")).toBeDefined());
+    expect(server.orders.map((order) => order.deviceSeq)).toEqual([3]);
+    expect(await listQueue()).toEqual([]);
+  });
+
+  /**
+   * THE RETRY MUST NOT OUTLIVE THE SHELL. It holds the client this tree built —
+   * the one that records the reply for the order `submitCart` is awaiting — so
+   * one left armed past an unmount fires into a React tree that is gone, and on
+   * a device that has been re-paired in between would post under a token the
+   * shell no longer has.
+   */
+  it("leaves no retry armed once the shell unmounts", async () => {
+    await pair();
+    await enqueueOrder(queuedOrder(3), EMPLOYEE.id);
+    server.reachable = false;
+    const { unmount } = render(<App />);
+    await settle(() => expect(screen.getByText(OFFLINE)).toBeDefined());
+    const posted = () =>
+      (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.filter(
+        ([input]) => String(input).endsWith("/kiosk/orders"),
+      ).length;
+    // A retry really is owed at this point, or this test proves nothing.
+    expect(posted()).toBeGreaterThan(0);
+    const before = posted();
+
+    unmount();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2 * REFRESH_INTERVAL_MS);
+    });
+
+    expect(posted()).toBe(before);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("confirms an offline handover without a number and keeps the order queued", async () => {
     await pair();
     render(<App />);
@@ -815,6 +1185,43 @@ describe("KioskShell", () => {
     expect(said()).not.toContain("ORD-");
     expect((await listQueue()).map((entry) => entry.deviceSeq)).toEqual([5]);
     expect(screen.getByText(OFFLINE)).toBeDefined();
+  });
+
+  /**
+   * THE QUEUE MUST NOT BE A CREDENTIAL STORE.
+   *
+   * This is the whole point of `badgeDigest`. An order is written to IndexedDB
+   * before any network attempt — that is what makes a pickup survive a battery
+   * pull — so during an outage the device holds one record per worker who
+   * submitted, and it holds them until the queue drains. A permanently refused
+   * order goes to the quarantine store instead, which nothing prunes at all.
+   *
+   * A badge CODE in there is the one credential on this tablet that also works
+   * away from it: the same value opens a pickup at any kiosk, signs an operator
+   * in at the line station, and is printed on a card. So the assertion is
+   * deliberately about the whole serialised record rather than about one field
+   * — a future field carrying the code anywhere in it fails this too.
+   */
+  it("keeps the scanned badge code out of the queue an outage fills up", async () => {
+    await pair();
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+    server.reachable = false;
+    setOnLine(false);
+    await act(async () => {
+      window.dispatchEvent(new Event("offline"));
+    });
+
+    await takeOneBottle();
+    await settle(() => expect(screen.getByText(QUEUED_TITLE)).toBeDefined());
+
+    const queued = await listQueue();
+    expect(queued).toHaveLength(1);
+    expect(JSON.stringify(queued)).not.toContain(BADGE);
+    // And what IS there is the digest, so the order is still resolvable —
+    // scrubbing the code by simply dropping it would pass the line above and
+    // strand every queued pickup.
+    expect(queued[0]!.body.badgeDigest).toBe(badgeDigest);
   });
 
   // `Cart` has no busy prop, so both halves of a double tap reach the shell

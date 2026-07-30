@@ -110,6 +110,10 @@ registry, `save-exact`, `engine-strict`, `minimum-release-age=10080`
   read/write scopes.
 - **Exports:** format adapters (GIS MT files, 1C); the future direct
   Chestny ZNAK API (SUZ/GIS MT + UKEP signing) plugs in as another adapter.
+- **1C exchange:** another format adapter, inbound this time — CommerceML
+  over the "Обмен с сайтом" protocol at `/1c_exchange`, live in the
+  Integrations section of the cabinet (`docs/design-briefs/08-integrations.md`,
+  `docs/superpowers/specs/2026-07-29-commerceml-design.md`).
 
 ## 6. AuthN/AuthZ
 

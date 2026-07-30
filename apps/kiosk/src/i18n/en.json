@@ -18,7 +18,12 @@
     "connectionFailed": "No connection to the server. Check the network and try again.",
     "badBundle": "The server sent unusable data. Ask the administrator for a new code.",
     "codeSpent": "The code has already been used, but the kiosk could not save the data. Ask the administrator for a new code.",
-    "retry": "Retry"
+    "retry": "Retry",
+    "bound": "Kiosk bound to “{{place}}”",
+    "boundNoPlace": "Kiosk bound — no point is set",
+    "boundName": "This is “{{name}}”",
+    "boundHint": "Wrong kiosk? Unbind it in the admin panel and pair the right one.",
+    "boundContinue": "Start working"
   },
   "idle": {
     "title": "Take products for yourself",
@@ -65,7 +70,7 @@
     "subtitleTail": "and take the codes out of circulation.",
     "queuedCheck": "The server still has to check the order — some bottles may not make it in.",
     "refusedHint": "Not one code went through. Put the bottles aside and ask an administrator.",
-    "summary": "{{n}} pcs in the order",
+    "summary": "{{n}} pcs",
     "reset": "Done",
     "autoReset": "The screen returns to the start in {{seconds}} seconds",
     "conflictsTitle": "{{n}} pcs were not accepted",
@@ -90,6 +95,8 @@
     "online": "Connected to the server",
     "offline": "No connection — the kiosk is working offline",
     "stale": "The data was last refreshed more than a day ago",
+    "staleHours": "The data was last refreshed {{n}} hours ago",
+    "staleDays": "The data was last refreshed {{n}} days ago",
     "quarantined": "Orders the server refused: {{n}} — an administrator is needed"
   },
   "scannerSetup": {

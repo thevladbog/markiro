@@ -5,7 +5,12 @@ import { useTranslation } from "react-i18next";
 // a hoisted function declaration and nothing here runs at module scope, so the
 // binding is initialised long before the component body can read it.
 import { nextKioskView } from "../App.js";
-import { createKioskClient, isDeviceRevoked, type KioskClient } from "../api/client.js";
+import {
+  createKioskClient,
+  isDeviceRevoked,
+  isUnreachable,
+  type KioskClient,
+} from "../api/client.js";
 import type { CreateOrderDto, CreateOrderResultDto } from "../api/types.js";
 import { buildBadgeIndex, resolveBadge } from "../credentials/badge.js";
 import { createKeyboardWedgeSource } from "../scanner/keyboard.js";
@@ -18,16 +23,24 @@ import { Idle } from "../screens/Idle.js";
 import { Pairing } from "../screens/Pairing.js";
 import { ScannerSetup } from "../screens/ScannerSetup.js";
 import type { CartState } from "../session/cart.js";
-import { countTakenToday, startOfUtcDay, utcDayOf } from "../session/day-count.js";
+import {
+  countTakenToday,
+  startOfUtcDay,
+  takenTodayElsewhere,
+  utcDayOf,
+} from "../session/day-count.js";
 import { readSnapshot, type CachedSnapshot } from "../store/cache.js";
 import { readConfig, readScannerSettings, writeConfig, type KioskConfig } from "../store/config.js";
 import { readJournalSince } from "../store/journal.js";
 import { enqueueOrder, listQuarantine, listQueue, quarantineQueue } from "../store/queue.js";
+import { scrubStoredBadgeCodes } from "../store/scrub.js";
 import {
+  cancelFlushRetry,
   flushQueue,
   refreshSnapshot,
   serverNow,
   snapshotAge,
+  snapshotAgeMs,
   REFRESH_INTERVAL_MS,
   type CacheAge,
 } from "../sync/worker.js";
@@ -43,9 +56,11 @@ const DEFAULT_SERVER_URL = "/api";
 const now = (): Date => new Date();
 
 /** One worker, from the badge that admitted them to the confirmation they walk
- * away from. `badgeCode` is carried because `POST /kiosk/orders` re-resolves the
- * badge server-side — the employee id the device matched locally is not what the
- * server files the order under, and is never sent. */
+ * away from. `badgeDigest` is carried because `POST /kiosk/orders` re-resolves
+ * the badge server-side — the employee id the device matched locally is not
+ * what the server files the order under, and is never sent. The DIGEST rather
+ * than the scanned code: the order it goes into is persisted before it is sent
+ * (see `CreateOrderDto` in ../api/types.ts). */
 interface KioskSession {
   /** Monotonic, and the `Cart`'s `key`: `cartReducer`'s `reset` action is
    * unreachable from the screen (nothing dispatches it), so a fresh instance is
@@ -53,7 +68,7 @@ interface KioskSession {
   id: number;
   employeeId: string;
   fullName: string;
-  badgeCode: string;
+  badgeDigest: string;
 }
 
 /** An order that has been filed, and what the server made of it — `null` when
@@ -61,7 +76,16 @@ interface KioskSession {
 interface SubmittedOrder {
   deviceSeq: number;
   result: CreateOrderResultDto | null;
-  itemCount: number;
+  /**
+   * The cart that became this order, carried whole rather than reduced to a
+   * count. `Done` summarises the handover as «причина · штук · сумма» (design
+   * 2026-07-24 §8.3) and the server's answer holds none of that: no reason, no
+   * prices, and offline no answer at all. Keeping the submitted state is also
+   * what stops the summary drifting — a refresh landing between the submit and
+   * the confirmation would re-price the order under the worker if the items
+   * were looked up again.
+   */
+  cart: CartState;
 }
 
 /**
@@ -121,8 +145,9 @@ export function KioskShell(): React.JSX.Element {
   /** The live scan transport: `null` is the keyboard wedge, a port is Web Serial. */
   const [scanPort, setScanPort] = useState<SerialPort | null>(null);
   /**
-   * What the signed-in worker has already taken today, counted off this
-   * device's own history — and WHOSE session it was counted for.
+   * What the signed-in worker has already taken today — this device's own
+   * history PLUS what the roster says they took at other kiosks — and WHOSE
+   * session it was counted for.
    *
    * The session id is carried with the number because the read is async: an
    * answer that arrives late must not be spent by the next worker, and a
@@ -195,13 +220,43 @@ export function KioskShell(): React.JSX.Element {
       // methods, so handing the reference over would detach it from its object.
       bootstrap: () => base.bootstrap(),
       submitOrder: async (body) => {
-        const result = await base.submitOrder(body);
-        // Only the order somebody is waiting on. Everything else the drain
-        // acknowledges is already in the journal, which is where a screen that
-        // was not there at the time is supposed to read it from.
-        const waiting = awaited.current;
-        if (waiting?.deviceSeq === body.deviceSeq) waiting.result = result;
-        return result;
+        try {
+          const result = await base.submitOrder(body);
+          // A DELIVERY IS PROOF OF A LINK, whatever `navigator.onLine`
+          // believes — and the browser believes nothing useful when it was the
+          // API that went away and came back.
+          setOnline(true);
+          // Only the order somebody is waiting on. Everything else the drain
+          // acknowledges is already in the journal, which is where a screen
+          // that was not there at the time is supposed to read it from.
+          const waiting = awaited.current;
+          if (waiting?.deviceSeq === body.deviceSeq) waiting.result = result;
+          return result;
+        } catch (err) {
+          // AND A FAILED DELIVERY IS THE STRIP'S BUSINESS, which it was not
+          // until a smoke run caught it: stop the API with the Wi-Fi still up
+          // and nothing tells this device — `navigator.onLine` stays true, no
+          // `offline` event fires — so for up to five minutes the kiosk queued
+          // orders offline underneath «Связь с сервером есть». `Done` told the
+          // truth, so nothing was lost, but the strip is what a passing
+          // administrator reads.
+          //
+          // THE APPLICATION'S OWN STATUS IS NOT AN OUTAGE. 400, 500, even the
+          // 401 of a revoked device mean a handler ran, so the link is
+          // demonstrably fine and saying otherwise would send an administrator
+          // after the network for a server-side problem.
+          //
+          // A GATEWAY'S STATUS IS ONE, and that is the half this got wrong
+          // until a second smoke run: stop the API behind a proxy that is still
+          // up and the answer is `502`, not a dead `fetch` — so this read a
+          // `KioskApiError` and went on asserting «Связь с сервером есть» about
+          // an application nothing had reached. `isUnreachable` is the one
+          // place that distinction is drawn; the drain's backoff reads the same
+          // predicate, so the strip and the retry can never disagree about
+          // whether this device is talking to anything.
+          if (isUnreachable(err)) setOnline(false);
+          throw err;
+        }
       },
     };
   }, []);
@@ -298,12 +353,15 @@ export function KioskShell(): React.JSX.Element {
   /**
    * One heartbeat: pull the dataset, then push whatever is owed.
    *
-   * `refreshSnapshot` REJECTS on failure, and that rejection is the only signal
-   * the device has that it is offline — uncaught it would take the whole kiosk
+   * `refreshSnapshot` REJECTS on failure, and that rejection is the periodic
+   * signal that the device is offline — uncaught it would take the whole kiosk
    * down five minutes after the network blinked. Caught, it is exactly what the
-   * status strip reports, and nothing more: a failed drain says nothing here,
+   * status strip reports, and nothing more: a failed DRAIN says nothing HERE,
    * because `flushQueue` swallows the difference between a dead network and a
-   * refused order and the strip must not invent a diagnosis out of it.
+   * refused order and this function must not invent a diagnosis out of it. That
+   * distinction is made one level down instead, in `clientFor`'s wrapper, which
+   * sees the actual error — which is what stops the strip asserting a link for
+   * the five minutes between two ticks.
    *
    * With ONE exception, and it is the one failure that is not about the
    * network at all: a 401 is the server saying this device is no longer a
@@ -349,6 +407,15 @@ export function KioskShell(): React.JSX.Element {
     try {
       const cfg = await readConfig();
       const snap = await readSnapshot();
+      // BEFORE the config is applied, and therefore before anything can drain:
+      // the sync interval is keyed on `config.token`, so until `applyConfig`
+      // runs there is no client and no drain. The scrub is safe against a
+      // concurrent dequeue on its own (`updateEach` walks a cursor rather than
+      // putting records back), but a device holding pre-digest orders should
+      // not offer one over the network at all if it is a boot away from not
+      // having to. Needs the snapshot for its salt, and never rejects — an
+      // unscrubbable store must leave the kiosk working.
+      if (snap) await scrubStoredBadgeCodes(snap.bootstrap.badgeSalt);
       applyConfig(cfg);
       applySnapshot(snap);
     } catch (err) {
@@ -468,6 +535,23 @@ export function KioskShell(): React.JSX.Element {
     return () => clearInterval(timer);
   }, [token, serverUrl, sync]);
 
+  /**
+   * The queue's own retry, disowned when this tree goes away.
+   *
+   * `flushQueue` arms a backoff retry of its own after a drain that reached
+   * nothing (see `RETRY_BASE_MS`), and that timer closes over the CLIENT built
+   * above — the one recording the reply for the order `submitCart` is awaiting.
+   * Left armed past an unmount it would post under a React tree that no longer
+   * exists, and on a device re-paired in between, under a token this shell no
+   * longer holds.
+   *
+   * ITS OWN EFFECT, with no dependencies, precisely so it runs on unmount and
+   * NOWHERE else. Folding it into the refresh interval below would cancel a
+   * legitimate retry every time the token or the server address changed — which
+   * is the moment a queue is likeliest to be owed.
+   */
+  useEffect(() => cancelFlushRetry, []);
+
   useEffect(() => {
     // `online` is the browser's word for "there is a link", which is worth
     // acting on immediately; `sync` then replaces it with what the server
@@ -509,16 +593,29 @@ export function KioskShell(): React.JSX.Element {
   }, []);
 
   /**
-   * The day limit, answered from local history the moment a badge opens a
-   * session — the journal's delivered orders plus whatever is still queued.
+   * The day limit, answered the moment a badge opens a session, from BOTH
+   * sources it has: this device's own history — the journal's delivered orders
+   * plus whatever is still queued — and the roster's per-employee figure for
+   * every OTHER kiosk.
+   *
+   * THE SUM IS SAFE BECAUSE THE SPLIT IS BY SOURCE. `countTakenToday` sees
+   * exactly the orders this kiosk filed; `takenTodayElsewhere` is the server's
+   * count with this kiosk excluded. No order can be in both, so nothing here
+   * has to subtract this device's own contribution out of a total — no
+   * watermark, no clock comparison, and therefore no way to over-count. Both
+   * halves may still come up SHORT (a lost journal, a snapshot from before the
+   * worker's last trip to the other gate), which is the safe direction:
+   * `POST /kiosk/orders` re-decides the limit and its `conflicts[]` win.
    *
    * Read HERE rather than in `Cart`, which owns no store access and is a
-   * projection of `CartState`; the decision itself is `countTakenToday`'s, and
-   * this is only the wiring that feeds it.
+   * projection of `CartState`; the decisions themselves belong to
+   * `session/day-count.ts`, and this is only the wiring that feeds them.
    *
-   * ONCE PER SESSION is enough. Nothing this device can see changes a worker's
-   * spent allowance while they stand at the cart except the cart itself, and
-   * `remainingToday` already subtracts that.
+   * ONCE PER SESSION is enough. The only thing that moves while the worker
+   * stands at the cart is the cart itself, and `remainingToday` already
+   * subtracts that. A refresh landing mid-session can raise the elsewhere
+   * figure — that is not re-read, so this under-counts until the next badge,
+   * which is the direction that costs the worker nothing.
    *
    * A failed read leaves the count where it was — at zero for a fresh session
    * — rather than refusing to open the cart. Guessing low costs a conflict on
@@ -536,6 +633,18 @@ export function KioskShell(): React.JSX.Element {
         // server's — and a skewed tablet would answer zero for a worker who has
         // already spent their allowance.
         const at = scannedAt();
+        // Through the REF, like the clock above: the snapshot the count is read
+        // from must be the one current when the badge landed, not one captured
+        // by a render, and this effect deliberately does not restart on refresh.
+        const elsewhere = takenTodayElsewhere(snapshotRef.current?.bootstrap ?? null, employeeId);
+        // Through the ref for the same reason, and it is what makes the two
+        // halves disjoint: the journal holds whatever this DEVICE filed, at
+        // whichever gates it has been bound to, while `elsewhere` is the
+        // server's figure with THIS gate excluded. Only the entries stamped
+        // with the id below are this gate's; the rest are already in that
+        // figure. `null` — a device paired before the id was recorded — matches
+        // the entries that name no gate either (see `countTakenToday`).
+        const boundKioskId = configRef.current?.kioskId ?? null;
         const [journal, queued] = await Promise.all([
           readJournalSince(startOfUtcDay(at)),
           listQueue(),
@@ -543,7 +652,9 @@ export function KioskShell(): React.JSX.Element {
         if (!alive) return;
         setTakenToday({
           sessionId,
-          count: countTakenToday({ employeeId, today: utcDayOf(at), journal, queued }),
+          count:
+            countTakenToday({ employeeId, today: utcDayOf(at), boundKioskId, journal, queued }) +
+            elsewhere,
         });
       } catch (err) {
         console.error("kiosk: could not count what this worker has taken today", err);
@@ -557,10 +668,11 @@ export function KioskShell(): React.JSX.Element {
   /**
    * The badge that opened the session, stashed by the resolver at the moment it
    * matched. `Idle.onEmployee` carries only the employee id — by design, it has
-   * no business handling the credential — but `CreateOrderDto.badgeCode` is the
-   * raw payload, because the server re-resolves it against live data. Recording
-   * it inside the resolver keeps it consistent with the very snapshot the match
-   * was made against, even if a refresh lands during the derivation.
+   * no business handling the credential — but `CreateOrderDto.badgeDigest` is
+   * the derivation that matched, because the server re-resolves it against live
+   * data. Recording it inside the resolver keeps it consistent with the very
+   * snapshot the match was made against, even if a refresh lands during the
+   * derivation.
    */
   const admitting = useRef<Omit<KioskSession, "id"> | null>(null);
   const sessions = useRef(0);
@@ -603,7 +715,7 @@ export function KioskShell(): React.JSX.Element {
       const deviceSeq = cfg.nextDeviceSeq;
       const body: CreateOrderDto = {
         deviceSeq,
-        badgeCode: active.badgeCode,
+        badgeDigest: active.badgeDigest,
         reason: state.reason,
         writeoffReasonId: state.writeoffReasonId,
         items: state.items.map((item) => ({ rawKm: item.rawKm })),
@@ -641,7 +753,7 @@ export function KioskShell(): React.JSX.Element {
         // first and queueing on failure would lose the order in exactly the
         // window that matters.
         // The employee id travels with the record but NOT in the body: the
-        // server re-resolves `badgeCode` and files the order under its own
+        // server re-resolves the badge and files the order under its own
         // answer, so this is device-local bookkeeping — it is what lets the
         // day count charge an order that has not synced yet to the worker who
         // took it, and what `flushQueue` copies into the journal.
@@ -654,7 +766,7 @@ export function KioskShell(): React.JSX.Element {
         // order, and `Done` says exactly that instead of inventing an «№ —».
         const result = awaited.current.result;
         awaited.current = null;
-        setSubmitted({ deviceSeq, result, itemCount: body.items.length });
+        setSubmitted({ deviceSeq, result, cart: state });
       } catch (err) {
         // The store refused. Nothing was promised, so the worker stays on their
         // cart and can press again — under the SAME sequence if the counter
@@ -683,9 +795,15 @@ export function KioskShell(): React.JSX.Element {
   );
 
   const paired = Boolean(config?.token);
+  // ONE reading of the clock for both answers, so the verdict and the age the
+  // strip prints beside it can never describe two different instants.
+  const measuredAt = now();
   // Including "no snapshot at all is blocked", which is `snapshotAge`'s rule
   // and is tested beside its NaN sibling in `sync/worker.ts` rather than here.
-  const age: CacheAge = snapshotAge(snapshot, now());
+  const age: CacheAge = snapshotAge(snapshot, measuredAt);
+  // `null` for exactly the snapshots the gate refuses to date; the strip states
+  // the threshold rather than a number there.
+  const ageMs = snapshotAgeMs(snapshot, measuredAt);
 
   const view = nextKioskView({
     paired,
@@ -767,7 +885,12 @@ export function KioskShell(): React.JSX.Element {
         // different things to tell the worker, and that screen is where the
         // distinction is made.
         result={submitted.result}
-        itemCount={submitted.itemCount}
+        // What the worker actually handed over: the only record of the reason
+        // they chose and the prices they were shown while choosing it.
+        cart={submitted.cart}
+        // Hidden rather than defaulted-on if the snapshot is somehow gone: a
+        // kiosk that cannot read its own config must not invent a price.
+        showPrices={snapshot?.bootstrap.config.showPrices ?? false}
         onReset={() => {
           setSubmitted(null);
           setSession(null);
@@ -780,14 +903,16 @@ export function KioskShell(): React.JSX.Element {
         key={session.id}
         employee={{ id: session.employeeId, fullName: session.fullName }}
         bootstrap={snapshot.bootstrap}
-        // Counted off this device's own order journal and its unsynced queue,
-        // which is what the design asks for: the local day limit is
-        // «best-effort по локальному журналу заявок киоска (сервер остаётся
-        // авторитетом)» (design 2026-07-24 §7). It can only MISS withdrawals —
-        // another kiosk's, or history older than the journal keeps — never
-        // invent one, and missing them is the safe direction because
-        // `POST /kiosk/orders` re-decides the limit against live data and its
-        // `conflicts[]` are authoritative either way.
+        // This kiosk's own journal and unsynced queue, PLUS the roster's count
+        // for every other kiosk — the two disjoint halves of the day, summed
+        // above. Still best-effort, which is what the design asks for: the
+        // local day limit is «best-effort по локальному журналу заявок киоска
+        // (сервер остаётся авторитетом)» (design 2026-07-24 §7). It can only
+        // MISS withdrawals — history older than the journal keeps, or a trip to
+        // the other gate made since this snapshot — never invent one, and
+        // missing them is the safe direction because `POST /kiosk/orders`
+        // re-decides the limit against live data and its `conflicts[]` are
+        // authoritative either way.
         //
         // Zero until the read lands (and if it fails), for the same reason.
         alreadyTakenToday={takenToday?.sessionId === session.id ? takenToday.count : 0}
@@ -811,14 +936,21 @@ export function KioskShell(): React.JSX.Element {
         onScan={subscribe}
         resolveBadge={async (raw) => {
           if (!roster) return null;
-          const employeeId = await resolveBadge(raw, roster.bootstrap, roster.index);
-          if (employeeId === null) return null;
-          const employee = roster.bootstrap.employees.find((one) => one.id === employeeId);
+          const match = await resolveBadge(raw, roster.bootstrap, roster.index);
+          if (match === null) return null;
+          const employee = roster.bootstrap.employees.find((one) => one.id === match.employeeId);
           // Unreachable — the id came from an index built over these very rows
           // — but a session with no name to show is not one to open.
           if (!employee) return null;
-          admitting.current = { employeeId, fullName: employee.fullName, badgeCode: raw };
-          return employeeId;
+          // `match.digest`, never `raw`: this is the value that ends up in the
+          // order body and therefore in IndexedDB, and the scanned code must
+          // not go there. It leaves this callback nowhere else.
+          admitting.current = {
+            employeeId: match.employeeId,
+            fullName: employee.fullName,
+            badgeDigest: match.digest,
+          };
+          return match.employeeId;
         }}
         onEmployee={() => {
           const admitted = admitting.current;
@@ -849,7 +981,7 @@ export function KioskShell(): React.JSX.Element {
           installer screens would only be reading a strip about a device that is
           not yet a kiosk. */}
       {view === "idle" || view === "cart" || view === "done" || view === "blocked" ? (
-        <StatusStrip online={online} age={age} quarantined={quarantinedCount} />
+        <StatusStrip online={online} age={age} ageMs={ageMs} quarantined={quarantinedCount} />
       ) : null}
       {screen}
     </div>

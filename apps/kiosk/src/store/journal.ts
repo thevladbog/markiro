@@ -6,14 +6,14 @@ import { STORE_JOURNAL, withCursor, withStore } from "./db.js";
  * back by `session/day-count.ts` to answer how much of their daily allowance a
  * worker has already spent on this device.
  *
- * NO SCHEMA VERSION BUMP came with the three fields below, and none was needed:
- * the store is still `{ autoIncrement: true }` with no index, so its SHAPE is
+ * NO SCHEMA VERSION BUMP came with the fields below, and none was needed: the
+ * store is still `{ autoIncrement: true }` with no index, so its SHAPE is
  * unchanged and `db.ts` had nothing to migrate. What did change is what a
  * record contains, and an entry written by an earlier version of the app
- * carries only `at`, `deviceSeq`, `orderNo` and `conflicts`. Such an entry
- * cannot be attributed to anybody, so every reader that counts must skip it
- * rather than trust these fields to be there — see `countTakenToday`, which
- * checks each record at runtime for exactly that reason.
+ * carries only `at`, `deviceSeq`, `orderNo` and `conflicts` — or those plus the
+ * employee and the accepted count, but no `kioskId`. Such an entry cannot be
+ * attributed, so every reader that counts must check rather than trust these
+ * fields to be there — see `countTakenToday`, which does exactly that.
  */
 export interface JournalEntry {
   /** When the DEVICE received the server's answer. Written from the device's
@@ -27,14 +27,32 @@ export interface JournalEntry {
    * the limit is counted against.
    */
   createdAt: string;
+  /**
+   * WHICH KIOSK THIS ORDER WAS FILED AT — the binding the device held when the
+   * server answered, which is the kiosk the server filed it under, because the
+   * token that carried it is that kiosk's.
+   *
+   * Stamped at APPEND time and not at scan time, and the difference is the whole
+   * point: an order queued at gate A and delivered after the tablet was
+   * re-paired to gate B is filed by the server at B, so B is what this entry has
+   * to say. `deviceSeq` alone cannot stand in for it — the server's idempotency
+   * key is `(tenantId, kioskId, deviceSeq)` and a freshly paired kiosk restarts
+   * the counter, so the same sequence names different orders at different gates.
+   *
+   * `null` where the device cannot say which kiosk it is (a config written
+   * before `KioskConfig.kioskId` existed), which is the same answer an entry
+   * from before this field gives — see `countTakenToday` for why those two
+   * unknowns are made to match.
+   */
+  kioskId: string | null;
   deviceSeq: number;
   orderNo: string;
   /**
    * Which employee this device attributed the order to. Device-local: the
-   * order itself carries a `badgeCode` and the server re-resolves it, so this
-   * is what the KIOSK believed, never what the server filed. Held here rather
-   * than the badge code itself — a journal outlives the order by weeks, and a
-   * badge is the credential that authorises a pickup.
+   * order itself names the badge and the server re-resolves it, so this is
+   * what the KIOSK believed, never what the server filed. Held here rather
+   * than the badge itself — a journal outlives the order by weeks, and a badge
+   * is the credential that authorises a pickup.
    */
   employeeId: string;
   /**

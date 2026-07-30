@@ -14,6 +14,17 @@ export interface QueuedOrder {
    * skipped by the count rather than attributed to whoever asks.
    */
   employeeId: string;
+  /**
+   * The request, verbatim, because this record IS the order until the server
+   * has one.
+   *
+   * Which is why the body names the badge by DIGEST and not by the scanned
+   * code (`CreateOrderDto.badgeDigest`): this store, and the quarantine store
+   * that outlives it, are the only places on an unattended tablet that hold an
+   * order body at rest, and a badge code is the one credential here that also
+   * works away from the device. `store/scrub.ts` clears the codes an earlier
+   * version of the app left behind.
+   */
   body: CreateOrderDto;
 }
 

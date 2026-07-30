@@ -1,15 +1,26 @@
 import { describe, expect, it } from "vitest";
-import { countTakenToday, startOfUtcDay, utcDayOf } from "../src/session/day-count.js";
+import type { KioskBootstrapDto } from "../src/api/types.js";
+import {
+  countTakenToday,
+  startOfUtcDay,
+  takenTodayElsewhere,
+  utcDayOf,
+} from "../src/session/day-count.js";
 import type { JournalEntry } from "../src/store/journal.js";
 import type { QueuedOrder } from "../src/store/queue.js";
 
 const ME = "e1";
 const SOMEBODY_ELSE = "e2";
 const TODAY = "2026-07-28";
+/** The gate this device is bound to, as `KioskConfig.kioskId` holds it. */
+const THIS_KIOSK = "k-here";
+/** The gate it used to be bound to, before somebody re-paired the tablet. */
+const OTHER_KIOSK = "k-there";
 
 const journalled = (over: Partial<JournalEntry> = {}): JournalEntry => ({
   at: "2026-07-28T09:00:01.000Z",
   createdAt: "2026-07-28T09:00:00.000Z",
+  kioskId: THIS_KIOSK,
   deviceSeq: 1,
   orderNo: "ORD-26-0001",
   conflicts: [],
@@ -25,15 +36,19 @@ const queued = (
   employeeId: over.employeeId ?? ME,
   body: {
     deviceSeq: over.deviceSeq ?? 1,
-    badgeCode: "BADGE-1",
+    badgeDigest: "BADGE-1",
     reason: "buy",
     items: Array.from({ length: over.items ?? 1 }, (_, i) => ({ rawKm: `01…${i}` })),
     createdAt: over.createdAt ?? "2026-07-28T09:00:00.000Z",
   },
 });
 
-const count = (journal: JournalEntry[], queue: QueuedOrder[] = []): number =>
-  countTakenToday({ employeeId: ME, today: TODAY, journal, queued: queue });
+const count = (
+  journal: JournalEntry[],
+  queue: QueuedOrder[] = [],
+  boundKioskId: string | null = THIS_KIOSK,
+): number =>
+  countTakenToday({ employeeId: ME, today: TODAY, boundKioskId, journal, queued: queue });
 
 describe("utcDayOf", () => {
   /**
@@ -200,5 +215,162 @@ describe("countTakenToday", () => {
 
   it("skips a journal entry whose accepted count is not a number", () => {
     expect(count([journalled({ acceptedCount: "2" as unknown as number })])).toBe(0);
+  });
+});
+
+/**
+ * THE RE-PAIRING HOLE, and it was in the identity of "this kiosk" rather than
+ * in the arithmetic.
+ *
+ * The day count is split by SOURCE — this device counts its own gate, the
+ * server reports every other one in `takenTodayElsewhere` — but the journal
+ * belongs to the DEVICE while the server's exclusion is by KIOSK ID. Nothing
+ * clears the journal when a tablet is moved from gate A to gate B, so for the
+ * rest of that UTC day gate A's orders were counted twice: once out of the
+ * journal here, once in the server's figure, which no longer excludes the gate
+ * they were filed at. Over-counting is the unsafe direction — it refuses a
+ * worker product they are entitled to, at a machine with nobody to overrule it.
+ */
+describe("countTakenToday, on a device that has been re-paired", () => {
+  it("ignores what it filed at the gate it is no longer bound to", () => {
+    expect(count([journalled({ kioskId: OTHER_KIOSK, acceptedCount: 4 })])).toBe(0);
+  });
+
+  it("still counts what it filed at the gate it IS bound to", () => {
+    expect(
+      count([
+        journalled({ deviceSeq: 1, kioskId: OTHER_KIOSK, acceptedCount: 4 }),
+        journalled({ deviceSeq: 2, acceptedCount: 2 }),
+      ]),
+    ).toBe(2);
+  });
+
+  /**
+   * THE UPGRADE PATH, and the one judgement call in this change.
+   *
+   * An entry written by the build before this one names no kiosk at all, and
+   * neither does the config of a device that has not paired since. Those two
+   * unknowns MATCH: the device has not moved, so its whole journal is its
+   * current gate's, and refusing to count it would switch the local half of the
+   * day limit off across the entire installed base.
+   *
+   * The moment the device pairs — the only moment its gate can change — the
+   * config carries an id and every unstamped entry stops matching it. So the
+   * event that used to open the double count is exactly the event that orphans
+   * the records it would have double counted.
+   */
+  it("counts an entry that names no kiosk only while the device's own binding names none either", () => {
+    const unstamped = journalled({ acceptedCount: 2 });
+    delete (unstamped as Partial<JournalEntry>).kioskId;
+
+    expect(count([unstamped], [], null)).toBe(2);
+    expect(count([unstamped], [], THIS_KIOSK)).toBe(0);
+  });
+
+  /** Checked rather than trusted, like every other field read back out of
+   * IndexedDB: a stamp that is not a plain non-empty string names no kiosk, and
+   * an unnamed kiosk is not the one this device is bound to. */
+  it("reads a stamp that is not a plain non-empty string as no kiosk at all", () => {
+    expect(count([journalled({ kioskId: "" })])).toBe(0);
+    expect(count([journalled({ kioskId: 7 as unknown as string })])).toBe(0);
+    expect(count([journalled({ kioskId: "" })], [], null)).toBe(1);
+  });
+
+  /**
+   * THE QUEUE HALF IS NOT STAMPED, and must not be.
+   *
+   * A queued order has not been filed anywhere yet. When it finally drains it
+   * goes out under whatever token the device holds THEN, so the server files it
+   * under the gate the device is bound to at that moment — which is this one.
+   * Stamping the record at enqueue time and filtering on it would drop an order
+   * that this gate really is about to file, and the server would not report it
+   * in `takenTodayElsewhere` either, because that is the figure with this gate
+   * excluded. It would be counted nowhere.
+   */
+  it("counts a queued order under whichever gate is about to file it", () => {
+    expect(count([], [queued({ items: 2 })], THIS_KIOSK)).toBe(2);
+    expect(count([], [queued({ items: 2 })], OTHER_KIOSK)).toBe(2);
+    expect(count([], [queued({ items: 2 })], null)).toBe(2);
+  });
+
+  /**
+   * `deviceSeq` IS ONLY UNIQUE WITHIN A KIOSK. The server's idempotency key is
+   * `(tenantId, kioskId, deviceSeq)` and a freshly paired kiosk restarts the
+   * counter, so seq 3 here is a different order from seq 3 at the gate this
+   * tablet came from. The merge that stops one order being counted twice must
+   * therefore never reach across gates — an entry from the old gate cancelling
+   * a queued order that happens to share its sequence would silently swallow a
+   * real withdrawal.
+   */
+  it("does not let the old gate's entry cancel a queued order that reuses its sequence", () => {
+    expect(
+      count(
+        [journalled({ deviceSeq: 3, kioskId: OTHER_KIOSK, acceptedCount: 5 })],
+        [queued({ deviceSeq: 3, items: 1 })],
+      ),
+    ).toBe(1);
+  });
+});
+
+describe("takenTodayElsewhere", () => {
+  const bootstrap = (employees: unknown): KioskBootstrapDto =>
+    ({ employees }) as unknown as KioskBootstrapDto;
+
+  const roster = bootstrap([
+    { id: ME, fullName: "Я", role: null, badgeHash: null, takenTodayElsewhere: 3 },
+    { id: SOMEBODY_ELSE, fullName: "Не я", role: null, badgeHash: null, takenTodayElsewhere: 7 },
+  ]);
+
+  it("reads the employee's own figure off the snapshot", () => {
+    expect(takenTodayElsewhere(roster, ME)).toBe(3);
+    expect(takenTodayElsewhere(roster, SOMEBODY_ELSE)).toBe(7);
+  });
+
+  it("is zero for somebody the snapshot does not list, and with no snapshot at all", () => {
+    expect(takenTodayElsewhere(roster, "nobody")).toBe(0);
+    expect(takenTodayElsewhere(null, ME)).toBe(0);
+  });
+
+  /**
+   * THE UPGRADE PATH, and the reason this is a checked read rather than a
+   * property access. `KioskBootstrapDto` is a cast over `res.json()`, not a
+   * schema — nothing validates a bootstrap at runtime — so an older server, or
+   * a snapshot this device cached before the field existed, delivers a roster
+   * row without it. Zero, not `NaN` and not a crash: an unattended kiosk must
+   * keep handing out product, and under-counting is the safe direction (the
+   * server re-decides the limit and its `conflicts[]` win).
+   */
+  it("treats an older server's missing field as zero", () => {
+    const older = bootstrap([{ id: ME, fullName: "Я", role: null, badgeHash: null }]);
+    expect(takenTodayElsewhere(older, ME)).toBe(0);
+  });
+
+  /**
+   * Anything that is not a plain non-negative count reads as zero for the same
+   * reason. `count(*)` comes back from Postgres as bigint, which node-postgres
+   * renders as a STRING unless it is cast — so `"3"` is the shape a regression
+   * on the server would actually take, and `+"3"` would quietly paper over it.
+   */
+  it("refuses a figure that is not a real count", () => {
+    const rowWith = (value: unknown) =>
+      bootstrap([
+        { id: ME, fullName: "Я", role: null, badgeHash: null, takenTodayElsewhere: value },
+      ]);
+    expect(takenTodayElsewhere(rowWith("3"), ME)).toBe(0);
+    expect(takenTodayElsewhere(rowWith(null), ME)).toBe(0);
+    expect(takenTodayElsewhere(rowWith(Number.NaN), ME)).toBe(0);
+    expect(takenTodayElsewhere(rowWith(Number.POSITIVE_INFINITY), ME)).toBe(0);
+    expect(takenTodayElsewhere(rowWith(-2), ME)).toBe(0);
+    expect(takenTodayElsewhere(rowWith(1.5), ME)).toBe(0);
+  });
+
+  /**
+   * The whole point of the split. This number is what the worker took at OTHER
+   * kiosks; `countTakenToday` is what they took at this one. They come from
+   * disjoint sources, so they ADD — and no watermark is needed to keep them
+   * from overlapping, because neither can contain the other's orders.
+   */
+  it("adds to this device's own count rather than replacing it", () => {
+    expect(count([journalled({ acceptedCount: 2 })]) + takenTodayElsewhere(roster, ME)).toBe(5);
   });
 });
