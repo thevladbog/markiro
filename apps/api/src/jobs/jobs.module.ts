@@ -40,6 +40,18 @@ const PRUNE_PAIR_ATTEMPTS_QUEUE_CRON = "0 * * * *";
 const SWEEP_EXPIRED_EXCHANGE_SESSIONS_QUEUE_NAME = "sweep-expired-exchange-sessions";
 const SWEEP_EXPIRED_EXCHANGE_SESSIONS_QUEUE_CRON = "0 * * * *";
 
+// Same unauthenticated-write concern as `kiosk_pair_attempts` above, but for
+// `exchange_attempts` (exchange-credentials.ts's `assertUnderCheckauthLimit`):
+// `checkauth` on `/1c_exchange` writes a row there before any credential is
+// even checked, exactly like kiosk pairing does -- and Task 16 wired up
+// hourly cleanup for the kiosk table but never for this one, its own twin,
+// same shape, same reason (final review, Fix 5). Same hour-late margin as
+// `PRUNE_PAIR_ATTEMPTS_QUEUE_CRON`: nothing ever reads a dead
+// `CHECKAUTH_WINDOW_MS` window again, so there is no benefit to pruning
+// closer to the boundary, only risk of racing an in-flight request.
+const PRUNE_EXCHANGE_ATTEMPTS_QUEUE_NAME = "prune-exchange-attempts";
+const PRUNE_EXCHANGE_ATTEMPTS_QUEUE_CRON = "0 * * * *";
+
 // `JournalService.prune` (Task 3) is the retention policy for
 // `integration_sessions`/`integration_events` (спека §7: 90-day session
 // summaries, 14-day item-grain detail) -- also written, also tested, also
@@ -52,7 +64,7 @@ const PRUNE_INTEGRATION_JOURNAL_QUEUE_CRON = "0 3 * * *";
 
 /**
  * Boots a dedicated pg-boss instance (its own `pgboss` schema, same
- * database as the app) and runs four independent schedules on it:
+ * database as the app) and runs five independent schedules on it:
  *  - keeps the `codes`/`scan_events` monthly partitions ahead of traffic:
  *    ensures the current + next month exist once at startup, then again
  *    every day at 04:00 UTC.
@@ -60,6 +72,9 @@ const PRUNE_INTEGRATION_JOURNAL_QUEUE_CRON = "0 3 * * *";
  *    limiter's fixed-window counters) once at startup, then again every
  *    hour, so an unauthenticated write path with no other cleanup doesn't
  *    grow the table forever.
+ *  - prunes stale `exchange_attempts` rows (the `/1c_exchange` `checkauth`
+ *    rate limiter's own fixed-window counters -- final review, Fix 5) on the
+ *    same schedule and for the same reason as `kiosk_pair_attempts` above.
  *  - sweeps expired `/1c_exchange` sessions once at startup, then again
  *    every hour, closing them and dropping their uploaded chunks so an
  *    abandoned exchange doesn't leave binary rows around forever.
@@ -109,6 +124,12 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
         await this.runPruneKioskPairAttempts();
       });
 
+      await boss.createQueue(PRUNE_EXCHANGE_ATTEMPTS_QUEUE_NAME);
+      await boss.schedule(PRUNE_EXCHANGE_ATTEMPTS_QUEUE_NAME, PRUNE_EXCHANGE_ATTEMPTS_QUEUE_CRON);
+      await boss.work(PRUNE_EXCHANGE_ATTEMPTS_QUEUE_NAME, async () => {
+        await this.runPruneExchangeAttempts();
+      });
+
       await boss.createQueue(SWEEP_EXPIRED_EXCHANGE_SESSIONS_QUEUE_NAME);
       await boss.schedule(
         SWEEP_EXPIRED_EXCHANGE_SESSIONS_QUEUE_NAME,
@@ -127,10 +148,11 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
         await this.runPruneIntegrationJournal();
       });
 
-      // Also run all four once immediately at boot rather than waiting for
+      // Also run all five once immediately at boot rather than waiting for
       // the first tick of any schedule.
       await this.runEnsurePartitions();
       await this.runPruneKioskPairAttempts();
+      await this.runPruneExchangeAttempts();
       await this.runSweepExpiredExchangeSessions();
       await this.runPruneIntegrationJournal();
     } catch (e) {
@@ -171,6 +193,25 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       count > 0
         ? `Pruned ${count} stale kiosk_pair_attempts row(s)`
         : "No stale kiosk_pair_attempts rows to prune",
+    );
+  }
+
+  /**
+   * Deletes `exchange_attempts` rows whose fixed window ended over an hour
+   * ago -- `/1c_exchange`'s `checkauth` rate limiter's own twin of
+   * `runPruneKioskPairAttempts` above (final review, Fix 5). Same "an hour
+   * late" reasoning: nothing ever reads a window again once it's over, and
+   * pruning right at the boundary would race an in-flight `checkauth` call.
+   */
+  private async runPruneExchangeAttempts(): Promise<void> {
+    const result = await this.db
+      .delete(schema.exchangeAttempts)
+      .where(sql`${schema.exchangeAttempts.windowStartedAt} < now() - interval '1 hour'`);
+    const count = result.rowCount ?? 0;
+    this.logger.log(
+      count > 0
+        ? `Pruned ${count} stale exchange_attempts row(s)`
+        : "No stale exchange_attempts rows to prune",
     );
   }
 

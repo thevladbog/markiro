@@ -36,10 +36,13 @@ async function bootstrap() {
   // left-most entry of X-Forwarded-For, which an attacker fully controls --
   // that both makes the kiosk-pairing limiter trivially bypassable by
   // rotating a header value and turns `kiosk_pair_attempts.source` (an
-  // unbounded `text` column written from the one unauthenticated route in
-  // the system) into an attacker-controlled row-growth vector. A hop count
-  // counts inward from the right of X-Forwarded-For, which is the only end
-  // the reverse proxy itself authoritatively controls.
+  // unbounded `text` column written from an unauthenticated route) into an
+  // attacker-controlled row-growth vector. `/1c_exchange`'s `checkauth`
+  // (`exchange_attempts.source`, exchange-credentials.ts) is the same shape
+  // of exposure on a second unauthenticated route -- kiosk pairing is no
+  // longer the only one, so `@Ip()`'s trustworthiness matters there too. A
+  // hop count counts inward from the right of X-Forwarded-For, which is the
+  // only end the reverse proxy itself authoritatively controls.
   server.set("trust proxy", env.TRUST_PROXY_HOPS);
   if (process.env.NODE_ENV === "production" && env.TRUST_PROXY_HOPS === 0) {
     // Not a boot failure -- refusing to start over a rate-limiter
