@@ -473,4 +473,39 @@ describe("1c_exchange", () => {
       .expect(200);
     expect(res.text).toBe("failure\nrepeated query parameter");
   });
+
+  // Review fix (PR #32, item 4): CodeQL (js/type-confusion-through-parameter-
+  // tampering) flags `filename` where `post()`'s `mode=file` branch reads it
+  // into the journal `details` object, reasoning that an HTTP query
+  // parameter "may be either an array or a string". Checked directly against
+  // this app's actual Express config (5.2.1, default `query parser: "simple"`
+  // -- Node's own `querystring`, NOT the `qs`-based `extended` parser Express
+  // 4 defaulted to): bracket notation never produces a nested value under the
+  // plain `filename` key at all here -- `filename[x]=y`/`filename[]=a` come
+  // back as entirely separate, literal keys (`"filename[x]"`/`"filename[]"`),
+  // so `query.filename` itself can only ever be `undefined`, a `string`, or a
+  // `string[]` (a genuinely repeated key -- the three tests above) under this
+  // app's actual configuration; `singleQueryValue` already narrows all three
+  // to `string | undefined`. This pins that bracket syntax specifically falls
+  // into the harmless "filename absent" case -- never a crash, never a
+  // silently-wrong comparison -- rather than asserting behaviour that would
+  // only apply to a query-parser configuration this app doesn't use.
+  it("`filename[]=...` не создаёт объект под `filename` — параметр просто отсутствует (mode=file)", async () => {
+    const auth = await checkauth();
+    const res = await request(app!.getHttpServer())
+      .post("/1c_exchange?type=catalog&mode=file&filename[]=a.xml&filename[]=b.xml")
+      .set("Cookie", auth.cookie)
+      .send(Buffer.from("x", "utf8"))
+      .expect(200);
+    expect(res.text).toBe("failure\nmissing filename or body");
+  });
+
+  it("`filename[x]=y` не создаёт объект под `filename` — параметр просто отсутствует (mode=import)", async () => {
+    const auth = await checkauth();
+    const res = await request(app!.getHttpServer())
+      .get("/1c_exchange?type=catalog&mode=import&filename[x]=y")
+      .set("Cookie", auth.cookie)
+      .expect(200);
+    expect(res.text).toBe("failure\nmissing filename");
+  });
 });
