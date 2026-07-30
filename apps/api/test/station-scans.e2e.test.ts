@@ -2245,6 +2245,80 @@ describe.skipIf(!ready)("station-scans e2e", () => {
           expect(auditRows.filter((r) => r.kind === "disassemble")).toHaveLength(2);
         },
       );
+
+      // Task 7: "reprint" is a pure audit fact -- unlike every other kind in
+      // this describe block, no branch in `applyExceptions` matches it, so
+      // it falls straight through the if/else-if chain to the unconditional
+      // box_exceptions insert at the end of the loop and touches nothing
+      // else: no box_items update, no registry release, no box retirement.
+      it("reprint writes only an audit row -- no box or item state changes", async () => {
+        await postBatch([scan("aa", { boxId: "b1" }), scan("bb", { boxId: "b1" })]);
+        const boxId = await boxIdFor("b1");
+        const [before] = await db.select().from(schema.boxes).where(eq(schema.boxes.id, boxId));
+        const itemsBefore = await db
+          .select()
+          .from(schema.boxItems)
+          .where(and(eq(schema.boxItems.tenantId, tenantId), eq(schema.boxItems.boxId, boxId)));
+
+        const res = await postRaw({
+          batchId: `reprint-test-${randomUUID()}`,
+          items: [],
+          boxes: [],
+          exceptions: [
+            {
+              kind: "reprint",
+              // Raw device-local id (same proof as every other kind in this
+              // describe block above) -- proves this kind also goes through
+              // the resolution step, not just an already-resolved UUID.
+              boxId: "b1",
+              codeHash: null,
+              shiftId,
+              terminalId: "t1",
+              operatorId: null,
+              reason: "label jammed",
+              occurredAt: new Date().toISOString(),
+            },
+          ],
+        });
+        expect(res.body.applied).toBe(0);
+
+        const [after] = await db.select().from(schema.boxes).where(eq(schema.boxes.id, boxId));
+        expect(after).toEqual(before);
+
+        const itemsAfter = await db
+          .select()
+          .from(schema.boxItems)
+          .where(and(eq(schema.boxItems.tenantId, tenantId), eq(schema.boxItems.boxId, boxId)));
+        expect(itemsAfter).toEqual(itemsBefore);
+
+        const codeHash1 = "aa".padEnd(64, "0");
+        const codeHash2 = "bb".padEnd(64, "0");
+        const registryRows = await db
+          .select()
+          .from(schema.codeRegistry)
+          .where(
+            and(
+              eq(schema.codeRegistry.tenantId, tenantId),
+              inArray(schema.codeRegistry.codeHash, [codeHash1, codeHash2]),
+            ),
+          );
+        // Both codes still owned -- "reprint" releases nothing.
+        expect(registryRows).toHaveLength(2);
+
+        const [auditRow] = await db
+          .select()
+          .from(schema.boxExceptions)
+          .where(
+            and(
+              eq(schema.boxExceptions.tenantId, tenantId),
+              eq(schema.boxExceptions.kind, "reprint"),
+            ),
+          );
+        expect(auditRow?.reason).toBe("label jammed");
+        // Same proof as every other kind above: the audit row's boxId is the
+        // RESOLVED server UUID, not the raw "b1" the request carried.
+        expect(auditRow?.boxId).toBe(boxId);
+      });
     });
   });
 });

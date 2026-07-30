@@ -12,6 +12,7 @@ interface BoxRow {
   closedAt: Date | null;
   itemCount: number;
   contentsChangedAfterClose: boolean;
+  disassembledAt: Date | null;
 }
 
 @Injectable()
@@ -23,12 +24,14 @@ export class BoxesService {
    * tenant-matched in the join condition, not just the outer `WHERE`) and
    * aggregated per box.
    *
-   * `itemCount` is `count(...) filter (where displaced_at is null)` -- a
-   * plain `count(*)` would include a `box_items` row whose ownership was
-   * since claimed by a different scan (see dto.ts). The LEFT JOIN (rather
-   * than an INNER JOIN) means a box with zero matching `box_items` rows
-   * still surfaces, with `count()` correctly returning 0 for that group
-   * rather than dropping the box entirely.
+   * `itemCount` is `count(...) filter (where displaced_at is null and
+   * removed_at is null)` (Task 7) -- a plain `count(*)` would include a
+   * `box_items` row whose ownership was since claimed by a different scan
+   * (`displaced_at`) or one an operator exception has since released
+   * (`removed_at`, see dto.ts). The LEFT JOIN (rather than an INNER JOIN)
+   * means a box with zero matching `box_items` rows still surfaces, with
+   * `count()` correctly returning 0 for that group rather than dropping the
+   * box entirely.
    *
    * `contentsChangedAfterClose` is `coalesce(bool_or(displaced_at >
    * closure_received_at), false)`. `bool_or` returns SQL NULL, not false, when
@@ -70,8 +73,9 @@ export class BoxesService {
         terminalId: schema.boxes.terminalId,
         operatorId: schema.boxes.operatorId,
         closedAt: schema.boxes.closedAt,
+        disassembledAt: schema.boxes.disassembledAt,
         itemCount:
-          sql<number>`count(${schema.boxItems.codeHash}) filter (where ${schema.boxItems.displacedAt} is null)`.mapWith(
+          sql<number>`count(${schema.boxItems.codeHash}) filter (where ${schema.boxItems.displacedAt} is null and ${schema.boxItems.removedAt} is null)`.mapWith(
             Number,
           ),
         contentsChangedAfterClose:
@@ -103,6 +107,7 @@ export class BoxesService {
       itemCount: row.itemCount,
       closedAt: row.closedAt,
       contentsChangedAfterClose: row.contentsChangedAfterClose,
+      disassembledAt: row.disassembledAt,
     };
   }
 }
