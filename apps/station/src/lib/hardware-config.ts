@@ -14,12 +14,21 @@ export interface HardwareConfig {
   scanner: { port: string; baud: number } | null;
   printer: PrintTarget | null;
   printerLanguage: PrinterLanguage;
+  /**
+   * Opt-in per workstation: after a box closes and prints, require the
+   * operator to scan the printed label back before moving on. Off by
+   * default -- the one place a scan verdict is deliberately allowed to
+   * compete with the ordinary scan loop, so a station must be told to turn
+   * it on rather than have it appear unannounced.
+   */
+  verifyPrintedLabel: boolean;
 }
 
 export const DEFAULT_HARDWARE_CONFIG: HardwareConfig = {
   scanner: null,
   printer: null,
   printerLanguage: "zpl",
+  verifyPrintedLabel: false,
 };
 
 const META_KEY = "hardware_config";
@@ -62,6 +71,7 @@ export async function loadHardwareConfig(exec: SqlExecutor): Promise<HardwareCon
       scanner: parseScanner(parsed.scanner),
       printer: parsePrinter(parsed.printer),
       printerLanguage: parsed.printerLanguage === "tspl" ? "tspl" : "zpl",
+      verifyPrintedLabel: parsed.verifyPrintedLabel === true,
     };
   } catch {
     return { ...DEFAULT_HARDWARE_CONFIG };

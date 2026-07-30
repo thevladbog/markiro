@@ -101,6 +101,7 @@
     "languageZpl": "ZPL",
     "languageTspl": "TSPL",
     "testPrint": "Test print",
+    "verifyPrintedLabel": "Verify each printed label by scanning it back",
     "sound": "Sound",
     "mute": "Mute",
     "volume": "Volume",
@@ -117,5 +118,17 @@
     "wonBy": "Kept by {{terminal}} at {{time}}",
     "back": "Back",
     "unknownItem": "Item no longer on this device"
+  },
+  "box": {
+    "progress": "{{items}} / {{capacity}}",
+    "close": "Close box",
+    "noSerials": "Box numbers have run out. Connect the station to the network to get more.",
+    "printExpected": "Scan the printed label",
+    "printMismatch": "This is a different label",
+    "printNotSscc": "This is not a group code",
+    "printReprint": "Print again",
+    "printSkip": "Skip",
+    "printNotAvailable": "Printing did not happen, so there is nothing to verify.",
+    "invalidSerial": "Could not build a box number. Try closing the box again."
   }
 }

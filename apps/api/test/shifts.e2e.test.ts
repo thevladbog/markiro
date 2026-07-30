@@ -478,6 +478,171 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
   });
 
   // ---------------------------------------------------------------------
+  // Shifts: explicit sscc issuer + box label template (Task 6) -- the issuer
+  // is deliberately never inferred from counterpartyId (see the doc comment
+  // on shifts.ssccIssuerCounterpartyId in platform.ts): a plant may pack for
+  // a client (counterpartyId) while still stamping boxes with its own SSCCs,
+  // or vice versa, so the two fields must be settable independently.
+  // ---------------------------------------------------------------------
+
+  it("stores an explicit sscc issuer distinct from the counterparty", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+
+    const buyerId = await seedCounterparty(orgId, "Buyer");
+    const brandOwnerId = await seedCounterparty(orgId, "Brand Owner");
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      productGroup: "Beverages",
+      boxCapacity: 12,
+      palletCapacity: 48,
+    });
+
+    const res = await agent
+      .post("/shifts")
+      .send({
+        productId,
+        mode: "validation",
+        counterpartyId: buyerId,
+        ssccIssuerCounterpartyId: brandOwnerId,
+      })
+      .expect(201);
+
+    expect(res.body.counterpartyId).toBe(buyerId);
+    expect(res.body.ssccIssuerCounterpartyId).toBe(brandOwnerId);
+  });
+
+  it("defaults the sscc issuer to the tenant's own organisation", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      productGroup: "Beverages",
+      boxCapacity: 12,
+      palletCapacity: 48,
+    });
+
+    const res = await agent.post("/shifts").send({ productId, mode: "validation" }).expect(201);
+
+    expect(res.body.ssccIssuerCounterpartyId).toBeNull();
+  });
+
+  it("rejects an sscc issuer from another tenant", async () => {
+    const agent1 = request.agent(app!.getHttpServer());
+    const org1 = await signUpAndActivate(agent1);
+    const otherTenantCounterpartyId = await seedCounterparty(org1, "Org1 Counterparty");
+
+    const agent2 = request.agent(app!.getHttpServer());
+    const org2 = await signUpAndActivate(agent2);
+    const productId = await seedProduct(org2, {
+      status: "active",
+      productGroup: "Beverages",
+      boxCapacity: 12,
+      palletCapacity: 48,
+    });
+
+    const res = await agent2
+      .post("/shifts")
+      .send({
+        productId,
+        mode: "validation",
+        ssccIssuerCounterpartyId: otherTenantCounterpartyId,
+      })
+      .expect(400);
+
+    expect(res.body.message).toEqual(expect.stringContaining("sscc issuer"));
+  });
+
+  it("stores a boxLabelTemplateId distinct from the shift's own labelTemplateId", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+
+    const itemTemplateId = await seedLabelTemplate(orgId, "Item Template");
+    const boxTemplateId = await seedLabelTemplate(orgId, "Box Template");
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      productGroup: "Beverages",
+      boxCapacity: 12,
+      palletCapacity: 48,
+    });
+
+    const res = await agent
+      .post("/shifts")
+      .send({
+        productId,
+        mode: "validation",
+        labelTemplateId: itemTemplateId,
+        boxLabelTemplateId: boxTemplateId,
+      })
+      .expect(201);
+
+    expect(res.body.labelTemplateId).toBe(itemTemplateId);
+    expect(res.body.boxLabelTemplateId).toBe(boxTemplateId);
+  });
+
+  it("rejects a cross-tenant boxLabelTemplateId with 400", async () => {
+    const agent1 = request.agent(app!.getHttpServer());
+    const org1 = await signUpAndActivate(agent1);
+    const templateId = await seedLabelTemplate(org1, "Org1 Box Template");
+
+    const agent2 = request.agent(app!.getHttpServer());
+    const org2 = await signUpAndActivate(agent2);
+    const productId = await seedProduct(org2, {
+      status: "active",
+      productGroup: "Beverages",
+      boxCapacity: 12,
+      palletCapacity: 48,
+    });
+
+    const res = await agent2
+      .post("/shifts")
+      .send({ productId, mode: "validation", boxLabelTemplateId: templateId })
+      .expect(400);
+
+    expect(res.body.message).toEqual(expect.stringContaining("Unknown box label template"));
+  });
+
+  it("PATCH /shifts/:id updates the sscc issuer and box label template independently of the counterparty and item template", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+
+    const buyerId = await seedCounterparty(orgId, "Buyer");
+    const brandOwnerId = await seedCounterparty(orgId, "Brand Owner");
+    const itemTemplateId = await seedLabelTemplate(orgId, "Item Template");
+    const boxTemplateId = await seedLabelTemplate(orgId, "Box Template");
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      productGroup: "Beverages",
+      boxCapacity: 12,
+      palletCapacity: 48,
+    });
+
+    const createRes = await agent
+      .post("/shifts")
+      .send({ productId, mode: "validation", counterpartyId: buyerId })
+      .expect(201);
+    const id = createRes.body.id as string;
+    expect(createRes.body.ssccIssuerCounterpartyId).toBeNull();
+
+    const patchRes = await agent
+      .patch(`/shifts/${id}`)
+      .send({
+        ssccIssuerCounterpartyId: brandOwnerId,
+        labelTemplateId: itemTemplateId,
+        boxLabelTemplateId: boxTemplateId,
+      })
+      .expect(200);
+
+    // counterpartyId is untouched by the PATCH -- a mutation that routed the
+    // issuer update into the counterparty column instead would flip this.
+    expect(patchRes.body.counterpartyId).toBe(buyerId);
+    expect(patchRes.body.ssccIssuerCounterpartyId).toBe(brandOwnerId);
+    expect(patchRes.body.labelTemplateId).toBe(itemTemplateId);
+    expect(patchRes.body.boxLabelTemplateId).toBe(boxTemplateId);
+  });
+
+  // ---------------------------------------------------------------------
   // Shifts: PATCH/DELETE gated by planned status
   // ---------------------------------------------------------------------
 

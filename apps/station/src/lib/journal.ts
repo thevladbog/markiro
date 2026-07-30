@@ -7,6 +7,13 @@ export interface ScanEventRow {
   raw: string;
   verdict: string;
   scannedAt: string;
+  /**
+   * The operator signed in when this scan happened, or null if none.
+   * Required rather than optional: unlike a report that can be added later,
+   * an attribution never captured here can never be recovered, so every
+   * call site must make an explicit choice instead of silently defaulting.
+   */
+  operatorId: string | null;
 }
 
 /** An accepted code, mirrored for offline duplicate detection. */
@@ -16,6 +23,13 @@ export interface AcceptedCode {
   gtin14: string;
   serial: string;
   scannedAt: string;
+  /**
+   * The transport box this code was scanned into, or null if none is open.
+   * A plain column on the code row rather than a join table — see
+   * `recordScan`'s doc comment below for why a fourth write was rejected in
+   * favour of riding the insert already made here.
+   */
+  boxId: string | null;
 }
 
 /**
@@ -36,9 +50,9 @@ export async function loadCodeKeys(exec: SqlExecutor): Promise<Set<string>> {
 
 export async function appendScanEvent(exec: SqlExecutor, e: ScanEventRow): Promise<void> {
   await exec.run(
-    `INSERT INTO scan_events_mirror (shift_id, terminal_id, raw, verdict, scanned_at)
-     VALUES (?,?,?,?,?)`,
-    [e.shiftId, e.terminalId, e.raw, e.verdict, e.scannedAt],
+    `INSERT INTO scan_events_mirror (shift_id, terminal_id, raw, verdict, scanned_at, operator_id)
+     VALUES (?,?,?,?,?,?)`,
+    [e.shiftId, e.terminalId, e.raw, e.verdict, e.scannedAt, e.operatorId],
   );
 }
 
@@ -157,9 +171,9 @@ export async function recordScan(
   if (code) {
     try {
       await exec.run(
-        `INSERT INTO codes_mirror (code_hash, shift_id, gtin14, serial, scanned_at)
-         VALUES (?,?,?,?,?)`,
-        [code.codeHash, code.shiftId, code.gtin14, code.serial, code.scannedAt],
+        `INSERT INTO codes_mirror (code_hash, shift_id, gtin14, serial, scanned_at, box_id)
+         VALUES (?,?,?,?,?,?)`,
+        [code.codeHash, code.shiftId, code.gtin14, code.serial, code.scannedAt, code.boxId],
       );
       storedCode = true;
     } catch (err) {
@@ -189,8 +203,8 @@ export async function recordScan(
   // comment above for the full story.
   try {
     await exec.run(
-      `INSERT INTO outbox (shift_id, terminal_id, raw, verdict, scanned_at, code_hash, gtin14, serial)
-         VALUES (?,?,?,?,?,?,?,?)`,
+      `INSERT INTO outbox (shift_id, terminal_id, raw, verdict, scanned_at, code_hash, gtin14, serial, box_id, operator_id)
+         VALUES (?,?,?,?,?,?,?,?,?,?)`,
       [
         journalled.shiftId,
         journalled.terminalId,
@@ -200,6 +214,8 @@ export async function recordScan(
         storedCode && code ? code.codeHash : null,
         storedCode && code ? code.gtin14 : null,
         storedCode && code ? code.serial : null,
+        storedCode && code ? code.boxId : null,
+        journalled.operatorId,
       ],
     );
   } catch (outboxErr) {

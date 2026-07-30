@@ -96,9 +96,79 @@ export const STATION_MIGRATIONS: string[] = [
      winning_scanned_at TEXT NOT NULL,
      detected_at TEXT NOT NULL
    );`,
+  // The device's local SSCC serial pool (Task 8, plan 06c): ranges the server
+  // handed down for this device's own issuer prefix, burned one serial at a
+  // time by apps/station/src/lib/sscc-pool.ts. The primary key on
+  // (issuer_prefix, extension_digit, from_serial) is what makes a replayed
+  // bundle harmless -- the same block cannot be inserted twice, so a retried
+  // sync can never double the pool.
+  `CREATE TABLE IF NOT EXISTS sscc_pool (
+     issuer_prefix TEXT NOT NULL,
+     extension_digit INTEGER NOT NULL,
+     from_serial INTEGER NOT NULL,
+     to_serial INTEGER NOT NULL,
+     next_serial INTEGER NOT NULL,
+     PRIMARY KEY (issuer_prefix, extension_digit, from_serial)
+   );`,
+  // The device's local mirror of transport boxes (Task 9, plan 06c): one row
+  // per box this device has opened, keyed by boxId so a replayed sync bundle
+  // stays idempotent. Membership of a scanned code in a box is a column on
+  // `codes_mirror` (see the ALTER below), not a join table -- see
+  // apps/station/src/lib/journal.ts's recordScan doc comment for why a
+  // fourth write was rejected in favour of riding the insert already there.
+  // `acked_at` is what stops a closed box being resent for the rest of the
+  // shift once the sync engine sets it (Task 11); `print_verified_at` and
+  // `print_skipped_at` are set once the label has been printed or the
+  // operator explicitly skipped printing.
+  `CREATE TABLE IF NOT EXISTS boxes_mirror (
+     box_id TEXT PRIMARY KEY,
+     shift_id TEXT NOT NULL,
+     sscc TEXT,
+     opened_at TEXT NOT NULL,
+     closed_at TEXT,
+     closed_by TEXT,
+     acked_at TEXT,
+     print_verified_at TEXT,
+     print_skipped_at TEXT
+   );`,
   // Upgrade path for devices enrolled before operators had a personnel number.
   // SQLite has no `ADD COLUMN IF NOT EXISTS`, and applyMigrations re-runs every
   // statement on each boot, so this throws "duplicate column name" once the
   // column exists — applyMigrations swallows exactly that error.
   `ALTER TABLE operators_mirror ADD COLUMN login TEXT;`,
+  // Upgrade path for devices enrolled before boxes existed (Task 9, plan
+  // 06c): box membership rides the code/outbox insert already there rather
+  // than a fourth write, and operator attribution threads through the same
+  // two rows. Same re-runnable idempotency as the `login` ALTER above.
+  `ALTER TABLE codes_mirror ADD COLUMN box_id TEXT;`,
+  `ALTER TABLE outbox ADD COLUMN box_id TEXT;`,
+  `ALTER TABLE outbox ADD COLUMN operator_id TEXT;`,
+  `ALTER TABLE scan_events_mirror ADD COLUMN operator_id TEXT;`,
+  // Upgrade path for devices enrolled before boxes captured their own
+  // terminal (Task 11, plan 06c): a closure must report the box's own
+  // shift/terminal from THIS row, never from whatever the device considers
+  // "current" at drain time, because deviceId/terminalId lives in
+  // station.json and can change (re-enrollment) independently of this
+  // SQLite mirror, and a box can still be open when that happens. Same
+  // re-runnable idempotency as the `login` ALTER above.
+  `ALTER TABLE boxes_mirror ADD COLUMN terminal_id TEXT;`,
+  // Upgrade path for devices enrolled before the box UI existed (Task 13
+  // review, plan 06c): `StationBundle.sscc.issuerPrefix` is fetched with
+  // every bundle but, until this column, had no durable home -- the device
+  // only ever held it in memory for the lifetime of the download. Written
+  // by `upsertBundle` alongside `box_capacity` (null for a validation-mode
+  // shift, or when the server could not resolve this device an issuer
+  // prefix -- never a fallback), and read back by `readShiftMirror` the same
+  // way. Same re-runnable idempotency as the `login` ALTER above.
+  `ALTER TABLE shift_mirror ADD COLUMN issuer_prefix TEXT;`,
+  // CodeRabbit PR33 review, Finding 3: the box label's OWN template spec,
+  // entirely separate from `label_template_spec` above (the ITEM template).
+  // Before this column, `getBundle` never even resolved
+  // `shift.boxLabelTemplateId` server-side, so the station had nothing to
+  // mirror here and its box-printing path (WorkScreen.tsx) fell back to the
+  // item template -- printing the wrong label on every box, or nothing at
+  // all when only a box template was configured. Written by `upsertBundle`
+  // alongside the other shift_mirror columns; read back by `readShiftMirror`
+  // the same way. Same re-runnable idempotency as the `login` ALTER above.
+  `ALTER TABLE shift_mirror ADD COLUMN box_label_template_spec TEXT;`,
 ];

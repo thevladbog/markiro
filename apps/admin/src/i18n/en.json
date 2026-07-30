@@ -50,6 +50,7 @@
     "dashboard": "Overview",
     "catalog": "Catalog",
     "shifts": "Shifts",
+    "boxes": "Boxes",
     "conflicts": "Conflicts",
     "counterparties": "Counterparties",
     "labels": "Labels",
@@ -211,6 +212,20 @@
           "glnFormat": "GLN must be exactly 13 digits",
           "glnCheckDigit": "Invalid GLN check digit",
           "gs1PrefixesFormat": "Each prefix must be 4-12 digits"
+        },
+        "sscc": {
+          "cardTitle": "Box SSCC counter",
+          "description": "The starting serial counts within the prefix below. Set it when migrating box numbers already issued by another system under this GLN.",
+          "prefixLabel": "Derived prefix",
+          "nextSerialLabel": "Starting serial",
+          "save": "Save",
+          "errors": {
+            "nextSerialInvalid": "Enter a whole number from 0 to 9,999,999"
+          },
+          "toasts": {
+            "updateSuccess": "Counter saved",
+            "updateError": "Could not save the counter"
+          }
         }
       },
       "toasts": {
@@ -379,8 +394,13 @@
         "noLinesHint": "No lines yet -- create one via the API or settings.",
         "counterpartyLabel": "For counterparty (tolling)",
         "noCounterparty": "None selected",
+        "ssccIssuerLabel": "SSCC issuer",
+        "ssccIssuerOurOrganization": "Our organization",
+        "ssccIssuerHint": "Decides whose numbers appear on the boxes -- not the same question as which counterparty the goods are for.",
         "labelTemplateLabel": "Label template",
         "noLabelTemplate": "None selected",
+        "boxLabelTemplateLabel": "Box label template",
+        "noBoxLabelTemplate": "None selected",
         "boxCapacityLabel": "Box capacity, units",
         "palletsEnabledLabel": "Use pallets",
         "palletCapacityLabel": "Pallet capacity, units",
@@ -407,6 +427,23 @@
         "deleteError": "Could not delete the shift",
         "closeSuccess": "Shift closed",
         "closeError": "Could not close the shift"
+      }
+    },
+    "boxes": {
+      "title": "Boxes",
+      "empty": "No boxes in this shift",
+      "selectShift": "Select a shift to see its boxes",
+      "contentsChangedAfterClose": "Changed after closing",
+      "filters": {
+        "shiftLabel": "Shift"
+      },
+      "table": {
+        "sscc": "SSCC",
+        "terminal": "Terminal",
+        "operator": "Operator",
+        "itemCount": "Count",
+        "closedAt": "Closed",
+        "status": "Status"
       }
     },
     "conflicts": {
@@ -894,8 +931,38 @@
     },
     "settings": {
       "title": "Settings",
-      "emptyTitle": "Organization settings",
-      "emptyHint": "Organization profile, GLN and GS1 prefixes will appear here."
+      "profile": {
+        "cardTitle": "Organisation profile",
+        "glnLabel": "GLN",
+        "innLabel": "Tax ID",
+        "prefixesLabel": "GS1 prefixes",
+        "prefixesHint": "Comma-separated, e.g. 4600000, 4600001",
+        "save": "Save",
+        "errors": {
+          "glnFormat": "GLN must be exactly 13 digits",
+          "glnCheckDigit": "Invalid GLN check digit",
+          "gs1PrefixesFormat": "Each prefix must be 4-12 digits"
+        },
+        "toasts": {
+          "updateSuccess": "Profile saved",
+          "updateError": "Could not save the profile"
+        }
+      },
+      "sscc": {
+        "cardTitle": "Box SSCC counter",
+        "description": "The starting serial counts within the prefix below. Set it when migrating box numbers already issued by another system under this GLN.",
+        "prefixLabel": "Derived prefix",
+        "prefixUnavailable": "Set the GLN above to see the derived prefix",
+        "nextSerialLabel": "Starting serial",
+        "save": "Save",
+        "errors": {
+          "nextSerialInvalid": "Enter a whole number from 0 to 9,999,999"
+        },
+        "toasts": {
+          "updateSuccess": "Counter saved",
+          "updateError": "Could not save the counter"
+        }
+      }
     }
   }
 }

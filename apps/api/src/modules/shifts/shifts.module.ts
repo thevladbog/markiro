@@ -1,10 +1,11 @@
 import { Module } from "@nestjs/common";
 import { OperatorsModule } from "../operators/operators.module";
+import { SsccModule } from "../sscc/sscc.module";
 import { ShiftsController } from "./shifts.controller";
 import { ShiftsService } from "./shifts.service";
 
 @Module({
-  imports: [OperatorsModule],
+  imports: [OperatorsModule, SsccModule],
   controllers: [ShiftsController],
   providers: [ShiftsService],
 })

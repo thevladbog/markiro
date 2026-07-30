@@ -109,6 +109,7 @@ export function WorkstationSetup({
   // silently persist `printer: null` the way an empty field used to.
   const [printerTransport, setPrinterTransport] = useState<PrintTarget["kind"] | "none">("none");
   const [printerLanguage, setPrinterLanguage] = useState<PrinterLanguage>("zpl");
+  const [verifyPrintedLabel, setVerifyPrintedLabel] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // True until the stored configuration has seeded every field below. While
@@ -176,6 +177,7 @@ export function WorkstationSetup({
           setPrinterTransport("none");
         }
         setPrinterLanguage(config.printerLanguage);
+        setVerifyPrintedLabel(config.verifyPrintedLabel);
         setLoading(false);
       })
       .catch((err: unknown) => {
@@ -273,7 +275,18 @@ export function WorkstationSetup({
       printer = { kind: "serial", port: printerPort, baud: serialBaud };
     }
 
-    return { ok: true, config: { scanner, printer, printerLanguage } };
+    return {
+      ok: true,
+      config: {
+        scanner,
+        printer,
+        printerLanguage,
+        // Never persisted as true alongside `printer: null` (Task 13 review,
+        // Finding 3): see the checkbox's own comment above for why "no
+        // printer" and "verify what got printed" cannot both be true at once.
+        verifyPrintedLabel: printer === null ? false : verifyPrintedLabel,
+      },
+    };
   }
 
   async function testPrint() {
@@ -526,6 +539,32 @@ export function WorkstationSetup({
             {t("setup.languageTspl")}
           </Button>
         </div>
+        {/* Disabled, and shown unchecked, whenever no printer is configured
+            (Task 13 review, Finding 3): with `printerTransport === "none"`
+            nothing is ever printed, so this setting can never fire -- it
+            would only ever produce WorkScreen's "printing did not happen"
+            notice on every box close, never an actual verification prompt.
+            The underlying `verifyPrintedLabel` state is deliberately left
+            untouched here (not force-cleared) so a detour through "No
+            printer" and back to a real transport before pressing Done does
+            not lose whatever the operator had chosen -- but `buildConfig()`
+            below applies the same "none means off" rule to what actually
+            gets PERSISTED, so the saved configuration itself can never claim
+            verification is on while no printer is configured either.
+            `minHeight: 64` on the label (not just the checkbox itself) is
+            what gives this control -- the one new interactive element added
+            to this screen -- a touch target that meets the floor rule the
+            same way every Button on this screen already does. */}
+        <label style={{ display: "flex", gap: 12, alignItems: "center", minHeight: 64 }}>
+          <input
+            type="checkbox"
+            style={{ width: 32, height: 32 }}
+            checked={printerTransport === "none" ? false : verifyPrintedLabel}
+            disabled={loading || printerTransport === "none"}
+            onChange={(e) => setVerifyPrintedLabel(e.target.checked)}
+          />
+          {t("setup.verifyPrintedLabel")}
+        </label>
         <Button
           type="button"
           style={{ minHeight: 64 }}

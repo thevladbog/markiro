@@ -24,7 +24,14 @@ function sideOf(x: ClaimItem | OwnerRow): Omit<ClaimItem, "codeHash"> {
   return { shiftId: x.shiftId, terminalId: x.terminalId, scannedAt: x.scannedAt };
 }
 
-function sameScan(a: Omit<ClaimItem, "codeHash">, b: Omit<ClaimItem, "codeHash">): boolean {
+/**
+ * Exported for reuse by station-scans.service.ts's box-membership section
+ * (Task 10): whether a box item's own scan is the code's registry owner is
+ * exactly the same "same (shiftId, terminalId, scannedAt)" comparison this
+ * file already makes for ownership itself, and duplicating the comparison
+ * there would risk it drifting from this one.
+ */
+export function sameScan(a: Omit<ClaimItem, "codeHash">, b: Omit<ClaimItem, "codeHash">): boolean {
   return (
     a.shiftId === b.shiftId &&
     a.terminalId === b.terminalId &&

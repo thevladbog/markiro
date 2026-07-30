@@ -1,4 +1,4 @@
-import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 /** Station-local key/value metadata (e.g. current terminal id, last sync). */
 export const stationMeta = sqliteTable("station_meta", {
@@ -69,6 +69,14 @@ export const shiftMirror = sqliteTable("shift_mirror", {
   palletCapacity: integer("pallet_capacity"),
   palletsEnabled: integer("pallets_enabled", { mode: "boolean" }).notNull().default(false),
   openedAt: text("opened_at"),
+  // This device's box-SSCC issuer prefix (Task 13 review, plan 06c) -- see
+  // migrations.ts's ALTER for why this trails the rest of the table.
+  issuerPrefix: text("issuer_prefix"),
+  // The box label's OWN template spec (CodeRabbit PR33 review, Finding 3) --
+  // entirely separate from labelTemplateSpec above, which is the ITEM
+  // template. See migrations.ts's trailing ALTER for why this trails the
+  // rest of the table too.
+  boxLabelTemplateSpec: text("box_label_template_spec"),
 });
 
 /** Local mirror of the shift's product (for ad-hoc GTIN resolution offline). */
@@ -87,6 +95,10 @@ export const productMirror = sqliteTable("product_mirror", {
 /**
  * Local journal mirror of server `codes` (05b writes here; 05a only defines
  * the schema). Columns mirror packages/db/src/schema/codes.ts.
+ *
+ * `boxId` (Task 9, plan 06c) is the box this code was scanned into, if any --
+ * a plain column rather than a join table, so it rides the insert `recordScan`
+ * already makes here instead of widening its compensate-on-failure surface.
  */
 export const codesMirror = sqliteTable("codes_mirror", {
   codeHash: text("code_hash").primaryKey(),
@@ -94,9 +106,16 @@ export const codesMirror = sqliteTable("codes_mirror", {
   gtin14: text("gtin14").notNull(),
   serial: text("serial").notNull(),
   scannedAt: text("scanned_at").notNull(),
+  boxId: text("box_id"),
 });
 
-/** Local journal mirror of server `scan_events` (05b writes here). */
+/**
+ * Local journal mirror of server `scan_events` (05b writes here).
+ *
+ * `operatorId` (Task 9, plan 06c) attributes the scan to the operator signed
+ * in when it happened -- captured here because, unlike a report, an
+ * attribution never recorded cannot be recovered later.
+ */
 export const scanEventsMirror = sqliteTable("scan_events_mirror", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   shiftId: text("shift_id").notNull(),
@@ -104,6 +123,7 @@ export const scanEventsMirror = sqliteTable("scan_events_mirror", {
   raw: text("raw").notNull(),
   verdict: text("verdict").notNull(),
   scannedAt: text("scanned_at").notNull(),
+  operatorId: text("operator_id"),
 });
 
 /**
@@ -122,6 +142,35 @@ export const outbox = sqliteTable("outbox", {
   codeHash: text("code_hash"),
   gtin14: text("gtin14"),
   serial: text("serial"),
+  // Task 9, plan 06c: carried alongside the other code fields so the server
+  // can attribute a synced scan to its box and to the operator who made it.
+  boxId: text("box_id"),
+  operatorId: text("operator_id"),
+});
+
+/**
+ * The device's local mirror of transport boxes (Task 9, plan 06c): one row
+ * per box this device has opened, written by `apps/station/src/lib/boxes.ts`.
+ * Box membership of a scanned code is a column on `codes_mirror`
+ * (`codesMirror.boxId` above), not a join table — see `recordScan`'s doc
+ * comment in `journal.ts` for why a fourth write was rejected there.
+ * `terminalId` is the box's OWN terminal, captured at open time (Task 11) so
+ * a closure can report it from this row rather than whatever the device
+ * considers "current" when it happens to sync. `ackedAt` is what stops a
+ * closed box being resent for the rest of the shift, set by the sync engine
+ * (Task 11) beside the outbox ack.
+ */
+export const boxesMirror = sqliteTable("boxes_mirror", {
+  boxId: text("box_id").primaryKey(),
+  shiftId: text("shift_id").notNull(),
+  terminalId: text("terminal_id"),
+  sscc: text("sscc"),
+  openedAt: text("opened_at").notNull(),
+  closedAt: text("closed_at"),
+  closedBy: text("closed_by"),
+  ackedAt: text("acked_at"),
+  printVerifiedAt: text("print_verified_at"),
+  printSkippedAt: text("print_skipped_at"),
 });
 
 /**
@@ -138,6 +187,27 @@ export const conflictsMirror = sqliteTable("conflicts_mirror", {
   winningScannedAt: text("winning_scanned_at").notNull(),
   detectedAt: text("detected_at").notNull(),
 });
+
+/**
+ * The device's local SSCC serial pool: ranges the server handed down for
+ * this device's own issuer prefix, burned one serial at a time by
+ * `apps/station/src/lib/sscc-pool.ts`. Keyed by the 9-digit issuer PREFIX,
+ * not a GLN -- see `ssccCounters` in `../schema/platform.ts` for why the
+ * prefix, not the GLN, is the number space's identity. The primary key on
+ * (issuerPrefix, extensionDigit, fromSerial) is what makes a replayed bundle
+ * harmless: the same block cannot be inserted twice.
+ */
+export const ssccPool = sqliteTable(
+  "sscc_pool",
+  {
+    issuerPrefix: text("issuer_prefix").notNull(),
+    extensionDigit: integer("extension_digit").notNull(),
+    fromSerial: integer("from_serial").notNull(),
+    toSerial: integer("to_serial").notNull(),
+    nextSerial: integer("next_serial").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.issuerPrefix, t.extensionDigit, t.fromSerial] })],
+);
 
 /**
  * A local operator record after offline hydration. `pinHash`/`badgeHash` are

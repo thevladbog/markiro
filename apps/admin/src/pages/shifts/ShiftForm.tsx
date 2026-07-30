@@ -41,6 +41,8 @@ const shiftFormSchema = z.object({
   lineId: z.string().trim().optional(),
   counterpartyId: z.string().trim().optional(),
   labelTemplateId: z.string().trim().optional(),
+  ssccIssuerCounterpartyId: z.string().trim().optional(),
+  boxLabelTemplateId: z.string().trim().optional(),
   boxCapacity: z
     .string()
     .trim()
@@ -78,6 +80,8 @@ const EMPTY_VALUES: ShiftFormValues = {
   lineId: "",
   counterpartyId: "",
   labelTemplateId: "",
+  ssccIssuerCounterpartyId: "",
+  boxLabelTemplateId: "",
   boxCapacity: "",
   palletCapacity: "",
   palletsEnabled: false,
@@ -112,6 +116,13 @@ export function ShiftForm({
   const counterpartyTouchedRef = useRef(false);
   // Same contract as `counterpartyTouchedRef`, for the label template select.
   const labelTemplateTouchedRef = useRef(false);
+  // Same contract again, for the sscc issuer and box label template selects.
+  // Neither has a product-level default to prefill from (unlike
+  // counterparty/label template above), but the "only send what the user
+  // actually chose" contract still applies: leaving them alone must not
+  // send an explicit null that would collide with a future prefill.
+  const ssccIssuerTouchedRef = useRef(false);
+  const boxLabelTemplateTouchedRef = useRef(false);
 
   const {
     register,
@@ -130,6 +141,8 @@ export function ShiftForm({
   const lineId = watch("lineId");
   const counterpartyId = watch("counterpartyId");
   const labelTemplateId = watch("labelTemplateId");
+  const ssccIssuerCounterpartyId = watch("ssccIssuerCounterpartyId");
+  const boxLabelTemplateId = watch("boxLabelTemplateId");
   const palletsEnabled = watch("palletsEnabled");
 
   // Re-seed the form whenever the modal opens (covers both the create ->
@@ -145,6 +158,8 @@ export function ShiftForm({
       lastPrefilledProductRef.current = formMode === "create" ? null : seeded.productId || null;
       counterpartyTouchedRef.current = false;
       labelTemplateTouchedRef.current = false;
+      ssccIssuerTouchedRef.current = false;
+      boxLabelTemplateTouchedRef.current = false;
     }
   }, [open, initialValues, reset, formMode]);
 
@@ -177,7 +192,12 @@ export function ShiftForm({
 
   const submit = handleSubmit(async (values) => {
     await onSubmit(
-      toPayload(values, formMode, counterpartyTouchedRef.current, labelTemplateTouchedRef.current),
+      toPayload(values, formMode, {
+        counterparty: counterpartyTouchedRef.current,
+        labelTemplate: labelTemplateTouchedRef.current,
+        ssccIssuer: ssccIssuerTouchedRef.current,
+        boxLabelTemplate: boxLabelTemplateTouchedRef.current,
+      }),
     );
   });
 
@@ -208,6 +228,23 @@ export function ShiftForm({
 
   const labelTemplateOptions: SelectOption[] = [
     { value: "", label: t("pages.shifts.form.noLabelTemplate") },
+    ...labelTemplates.map((template) => ({ value: template.id, label: template.name })),
+  ];
+
+  // Default option reads "our own organization", not "none selected" -- the
+  // issuer always resolves to *something* (the tenant itself when unset),
+  // unlike the counterparty/label template selects above where "none" is a
+  // genuine absence.
+  const ssccIssuerOptions: SelectOption[] = [
+    { value: "", label: t("pages.shifts.form.ssccIssuerOurOrganization") },
+    ...counterparties.map((counterparty) => ({
+      value: counterparty.id,
+      label: counterparty.name,
+    })),
+  ];
+
+  const boxLabelTemplateOptions: SelectOption[] = [
+    { value: "", label: t("pages.shifts.form.noBoxLabelTemplate") },
     ...labelTemplates.map((template) => ({ value: template.id, label: template.name })),
   ];
 
@@ -311,12 +348,36 @@ export function ShiftForm({
         />
 
         <Select
+          label={t("pages.shifts.form.ssccIssuerLabel")}
+          options={ssccIssuerOptions}
+          value={ssccIssuerCounterpartyId ?? ""}
+          hint={t("pages.shifts.form.ssccIssuerHint")}
+          onChange={(value) => {
+            ssccIssuerTouchedRef.current = true;
+            setValue("ssccIssuerCounterpartyId", value, {
+              shouldDirty: true,
+              shouldValidate: true,
+            });
+          }}
+        />
+
+        <Select
           label={t("pages.shifts.form.labelTemplateLabel")}
           options={labelTemplateOptions}
           value={labelTemplateId ?? ""}
           onChange={(value) => {
             labelTemplateTouchedRef.current = true;
             setValue("labelTemplateId", value, { shouldDirty: true, shouldValidate: true });
+          }}
+        />
+
+        <Select
+          label={t("pages.shifts.form.boxLabelTemplateLabel")}
+          options={boxLabelTemplateOptions}
+          value={boxLabelTemplateId ?? ""}
+          onChange={(value) => {
+            boxLabelTemplateTouchedRef.current = true;
+            setValue("boxLabelTemplateId", value, { shouldDirty: true, shouldValidate: true });
           }}
         />
 
@@ -357,17 +418,23 @@ export function ShiftForm({
  * Payload semantics (plan-03 Task 13 brief, chosen + documented here since
  * the brief poses this as an open question):
  *
- * - `counterpartyId`/`labelTemplateId`: omitted entirely unless the user
- *   actually touched the respective select (`counterpartyTouched`/
- *   `labelTemplateTouched`, each sourced from its own plain ref the select's
- *   `onChange` sets -- deliberately not react-hook-form's `dirtyFields`,
- *   which compares the *final* value to the default and would read "not
- *   dirty" if the user picks a different option and then picks the original
- *   one back). This lets the server's own create-time prefill-from-product
- *   run when a field is left alone, while an explicit user selection
+ * - `counterpartyId`/`labelTemplateId`/`ssccIssuerCounterpartyId`/
+ *   `boxLabelTemplateId`: omitted entirely unless the user actually touched
+ *   the respective select (`touched.counterparty`/`touched.labelTemplate`/
+ *   `touched.ssccIssuer`/`touched.boxLabelTemplate`, each sourced from its
+ *   own plain ref the select's `onChange` sets -- deliberately not
+ *   react-hook-form's `dirtyFields`, which compares the *final* value to the
+ *   default and would read "not dirty" if the user picks a different option
+ *   and then picks the original one back). This lets the server's own
+ *   create-time prefill-from-product run when `counterpartyId`/
+ *   `labelTemplateId` is left alone, while an explicit user selection
  *   (including clearing it back to "None") always sends `null`/the chosen
- *   id. On edit, "untouched" maps onto the same `undefined`-means-"no
- *   change" contract `updateShiftSchema` already uses.
+ *   id. `ssccIssuerCounterpartyId`/`boxLabelTemplateId` have no product-level
+ *   default to prefill from, but the same "don't send what wasn't touched"
+ *   contract still applies -- it keeps an untouched field from ever sending
+ *   an explicit `null` that could shadow a default added later. On edit,
+ *   "untouched" maps onto the same `undefined`-means-"no change" contract
+ *   `updateShiftSchema` already uses.
  * - `boxCapacity`/`palletCapacity`: the opposite rule -- once the aggregation
  *   fields are visible, whatever value is *shown* is always sent (never
  *   omitted, touched or not), because the user can see a concrete number in
@@ -384,14 +451,20 @@ export function ShiftForm({
 function toPayload(
   values: ShiftFormValues,
   formMode: "create" | "edit",
-  counterpartyTouched: boolean,
-  labelTemplateTouched: boolean,
+  touched: {
+    counterparty: boolean;
+    labelTemplate: boolean;
+    ssccIssuer: boolean;
+    boxLabelTemplate: boolean;
+  },
 ): CreateShiftInput | UpdateShiftInput {
   const plannedQty = values.plannedQty?.trim();
   const plannedDate = values.plannedDate?.trim();
   const lineId = values.lineId?.trim();
   const counterpartyId = values.counterpartyId?.trim();
   const labelTemplateId = values.labelTemplateId?.trim();
+  const ssccIssuerCounterpartyId = values.ssccIssuerCounterpartyId?.trim();
+  const boxLabelTemplateId = values.boxLabelTemplateId?.trim();
   const boxCapacity = values.boxCapacity?.trim();
   const palletCapacity = values.palletCapacity?.trim();
 
@@ -402,12 +475,20 @@ function toPayload(
     plannedDate: plannedDate ? plannedDate : null,
   };
 
-  if (counterpartyTouched) {
+  if (touched.counterparty) {
     payload.counterpartyId = counterpartyId ? counterpartyId : null;
   }
 
-  if (labelTemplateTouched) {
+  if (touched.labelTemplate) {
     payload.labelTemplateId = labelTemplateId ? labelTemplateId : null;
+  }
+
+  if (touched.ssccIssuer) {
+    payload.ssccIssuerCounterpartyId = ssccIssuerCounterpartyId ? ssccIssuerCounterpartyId : null;
+  }
+
+  if (touched.boxLabelTemplate) {
+    payload.boxLabelTemplateId = boxLabelTemplateId ? boxLabelTemplateId : null;
   }
 
   if (values.mode === "aggregation") {

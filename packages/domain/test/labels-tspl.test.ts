@@ -264,6 +264,37 @@ describe("generateTspl - barcode formats", () => {
     expect(tspl).toContain('BARCODE 0,0,"128",80,1,0,2,2,"12345"');
   });
 
+  it("emits a GS1-128 (FNC1 !1 + AI 00) for a code128 element bound to sscc", async () => {
+    const spec: LabelTemplateSpec = {
+      widthMm: 100,
+      heightMm: 50,
+      dpi: 203,
+      language: "tspl",
+      elements: [
+        { kind: "barcode", id: "b", data: "sscc", format: "code128", xMm: 5, yMm: 5, sizeMm: 15 },
+      ],
+    };
+    const tspl = await generateTspl(spec, { ...sampleLabelData(), sscc: "004601234560000017" });
+    // xMm=5,yMm=5 -> 40,40 dots; sizeMm=15 -> mmToDots(15,203)=120 dots.
+    // !1 is TSPL's FNC1 marker, then the 00 AI and the 18 digits.
+    expect(tspl).toContain('BARCODE 40,40,"128",120,1,0,2,2,"!100004601234560000017"');
+  });
+
+  it("leaves a code128 element bound to another (non-sscc) field as a plain Code 128", async () => {
+    const spec: LabelTemplateSpec = {
+      widthMm: 100,
+      heightMm: 50,
+      dpi: 203,
+      language: "tspl",
+      elements: [
+        { kind: "barcode", id: "b", data: "qty", format: "code128", xMm: 5, yMm: 5, sizeMm: 15 },
+      ],
+    };
+    const tspl = await generateTspl(spec, { ...sampleLabelData(), qty: "12" });
+    expect(tspl).toContain('BARCODE 40,40,"128",120,1,0,2,2,"12"');
+    expect(tspl).not.toContain("!1");
+  });
+
   it("renders a qr code with a clamped cell width", async () => {
     const spec: LabelTemplateSpec = {
       widthMm: 58,

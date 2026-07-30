@@ -1,15 +1,17 @@
 import { randomUUID } from "node:crypto";
 import express from "express";
 import { Test } from "@nestjs/testing";
-import type { INestApplication } from "@nestjs/common";
+import { Logger, type INestApplication } from "@nestjs/common";
 import request from "supertest";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { and, eq, sql } from "drizzle-orm";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { and, eq, isNull, sql } from "drizzle-orm";
+import { buildSscc } from "@markiro/domain";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { partitionName, schema, type Db } from "@markiro/db";
 import type { ScanItemDto } from "../src/modules/station-scans/dto";
+import { SsccService } from "../src/modules/sscc/sscc.service";
 import { listenOnLoopback } from "./support/listen-loopback";
 
 const ready = Boolean(
@@ -122,6 +124,8 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       verdict: "ok",
       scannedAt: `2026-07-28T10:00:0${n}.000Z`,
       code: { codeHash: `h${n}`.padEnd(64, "0"), gtin14: VALID_GTIN14, serial: `S${n}` },
+      boxId: null,
+      operatorId: null,
       ...overrides,
     };
   }
@@ -814,5 +818,884 @@ describe.skipIf(!ready)("station-scans e2e", () => {
 
     expect((replay.body as { alreadyApplied: boolean }).alreadyApplied).toBe(true);
     expect((replay.body as { conflicts: unknown[] }).conflicts).toEqual([]);
+  });
+
+  /**
+   * Task 10: boxes get created from their first item, box items get marked
+   * displaced (both directions -- this batch's own, and the retroactive
+   * one on an incumbent it displaces), and box closures both fill in the
+   * box's sscc/closedAt and advance the covering sscc_blocks row's
+   * consumedThroughSerial (SsccService.recordConsumedSerial's wiring).
+   *
+   * A fresh tenant/device/shift per test (not shared with the describe
+   * above): several of these tests post the SAME deviceBoxId ("b1"/"b2")
+   * from more than one terminal, and reusing state across tests would let
+   * an earlier test's boxes collide with (or be silently reused by) a
+   * later one.
+   */
+  describe("box membership (Task 10)", () => {
+    let agent: ReturnType<typeof request.agent>;
+    let tenantId: string;
+    let apiKey: string;
+    let shiftId: string;
+    let OPERATOR_ID: string;
+    let OTHER_OPERATOR_ID: string;
+
+    // Arbitrary but well-formed shape: the DTO only requires exactly 18
+    // characters (z.string().length(18)) -- it need not be a real,
+    // check-digit-valid SSCC for the tests that merely assert it round-trips
+    // into `boxes.sscc` unchanged.
+    const SSCC = "123456789012345675";
+    const ISO = "2026-07-29T09:00:00.000Z";
+
+    beforeEach(async () => {
+      agent = request.agent(app!.getHttpServer());
+      tenantId = await signUpAndActivate(agent);
+      apiKey = await deviceKey(agent);
+      shiftId = await openShift(agent);
+
+      // Real employees rows: boxes.operator_id and scan_events.operator_id
+      // both carry a composite tenant FK to employees, so a non-null
+      // operatorId that doesn't resolve to one would 23503 the whole batch.
+      const op1 = await agent.post("/employees").send({ fullName: "Operator One" }).expect(201);
+      OPERATOR_ID = (op1.body as { id: string }).id;
+      const op2 = await agent.post("/employees").send({ fullName: "Operator Two" }).expect(201);
+      OTHER_OPERATOR_ID = (op2.body as { id: string }).id;
+    });
+
+    interface ClosureFixture {
+      boxId: string;
+      shiftId: string;
+      terminalId: string | null;
+      sscc: string;
+      closedAt: string;
+      operatorId: string | null;
+      // Optional (Task 13 review, Finding 6): the DTO defaults an absent
+      // field to null, exactly like an older station build that has not
+      // learned to send these two fields yet -- so every closure fixture
+      // that predates this finding is still a valid payload unchanged.
+      printVerifiedAt?: string | null;
+      printSkippedAt?: string | null;
+    }
+
+    function batchBody(items: ScanItemDto[], boxes: ClosureFixture[] = []) {
+      return { batchId: `box-batch-${randomUUID()}`, items, boxes };
+    }
+
+    async function postRaw(body: Record<string, unknown>) {
+      return request(app!.getHttpServer())
+        .post("/station/scans")
+        .set("x-api-key", apiKey)
+        .send(body)
+        .expect(201);
+    }
+
+    async function postBatchAs(terminalId: string, items: ScanItemDto[]) {
+      return postRaw(batchBody(items.map((i) => ({ ...i, terminalId }))));
+    }
+
+    async function postBatch(items: ScanItemDto[]) {
+      return postBatchAs("t1", items);
+    }
+
+    async function postBatchWithBoxes(items: ScanItemDto[], boxes: ClosureFixture[]) {
+      return postRaw(batchBody(items, boxes));
+    }
+
+    /**
+     * Builds a scan for a short, human-readable code label (e.g. "aa"),
+     * expanded to the full 64-char codeHash the same way every other file
+     * in this suite does (`item()`'s `` `h${n}`.padEnd(64, "0")` `` above).
+     * `scannedAt` is a bare time-of-day ("10:00:05"); every scan in this
+     * describe block shares the same calendar day, so tests can compare
+     * "earlier" vs "later" scans without spelling out a full timestamp each
+     * time.
+     *
+     * `terminalId` defaults to "t1" only when the caller OMITS it
+     * (`undefined`) -- an explicit `null` (a device with no notion of
+     * "terminal", Finding 1) must pass through unchanged, so this cannot use
+     * `??`, which would treat that explicit `null` as absent too.
+     */
+    function scan(
+      codeLabel: string,
+      overrides: {
+        boxId?: string | null;
+        operatorId?: string | null;
+        terminalId?: string | null;
+        scannedAt?: string;
+      } = {},
+    ): ScanItemDto {
+      return {
+        shiftId,
+        terminalId: overrides.terminalId === undefined ? "t1" : overrides.terminalId,
+        raw: `RAW-${codeLabel}`,
+        verdict: "ok",
+        scannedAt: `2026-07-29T${overrides.scannedAt ?? "10:00:00"}.000Z`,
+        code: {
+          codeHash: codeLabel.padEnd(64, "0"),
+          gtin14: VALID_GTIN14,
+          serial: `S-${codeLabel}`,
+        },
+        boxId: overrides.boxId ?? null,
+        operatorId: overrides.operatorId ?? null,
+      };
+    }
+
+    async function boxIdFor(deviceBoxId: string): Promise<string> {
+      const [row] = await db
+        .select({ id: schema.boxes.id })
+        .from(schema.boxes)
+        .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.deviceBoxId, deviceBoxId)));
+      if (!row) throw new Error(`no box row for deviceBoxId ${deviceBoxId}`);
+      return row.id;
+    }
+
+    async function boxItemRows(
+      forTenantId: string,
+      codeLabel: string,
+    ): Promise<{ boxId: string; displacedAt: Date | null }[]> {
+      return db
+        .select({ boxId: schema.boxItems.boxId, displacedAt: schema.boxItems.displacedAt })
+        .from(schema.boxItems)
+        .where(
+          and(
+            eq(schema.boxItems.tenantId, forTenantId),
+            eq(schema.boxItems.codeHash, codeLabel.padEnd(64, "0")),
+          ),
+        );
+    }
+
+    async function liveItemCount(deviceBoxId: string): Promise<number> {
+      const boxId = await boxIdFor(deviceBoxId);
+      const rows = await db
+        .select({ codeHash: schema.boxItems.codeHash })
+        .from(schema.boxItems)
+        .where(
+          and(
+            eq(schema.boxItems.tenantId, tenantId),
+            eq(schema.boxItems.boxId, boxId),
+            isNull(schema.boxItems.displacedAt),
+          ),
+        );
+      return rows.length;
+    }
+
+    async function boxCount(forTenantId: string): Promise<number> {
+      const rows = await db
+        .select({ id: schema.boxes.id })
+        .from(schema.boxes)
+        .where(eq(schema.boxes.tenantId, forTenantId));
+      return rows.length;
+    }
+
+    it("creates the box row from its first item, before any closure arrives", async () => {
+      await postBatch([scan("aa", { boxId: "b1" })]);
+      const rows = await db.select().from(schema.boxes).where(eq(schema.boxes.tenantId, tenantId));
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.sscc).toBeNull();
+      expect(rows[0]!.closedAt).toBeNull();
+    });
+
+    it("fills in the serial, closedAt, and operator when the closure arrives", async () => {
+      await postBatch([scan("aa", { boxId: "b1" })]);
+      await postBatchWithBoxes(
+        [],
+        [
+          {
+            boxId: "b1",
+            shiftId,
+            terminalId: "t1",
+            sscc: SSCC,
+            closedAt: ISO,
+            operatorId: OPERATOR_ID,
+          },
+        ],
+      );
+      const [box] = await db.select().from(schema.boxes).where(eq(schema.boxes.tenantId, tenantId));
+      expect(box!.sscc).toBe(SSCC);
+      // Compared against the exact value sent, not just non-null: `new
+      // Date()` in place of the closure's own closedAt would previously have
+      // passed this assertion (cheap gap named in the review).
+      expect(box!.closedAt?.toISOString()).toBe(ISO);
+      // boxes.operator_id is written by the closure but was previously
+      // asserted by nothing in this suite -- every closure test sent
+      // `operatorId: null` (another cheap gap named in the review).
+      expect(box!.operatorId).toBe(OPERATOR_ID);
+    });
+
+    // Task 13 review, Finding 6: the closure DTO now carries the device's own
+    // print-verification outcome (`boxes_mirror.print_verified_at`) through
+    // to the server's `boxes` row, in the SAME UPDATE that already sets
+    // sscc/closedAt/operatorId.
+    it("persists a non-null printVerifiedAt from the closure onto the server's boxes row", async () => {
+      await postBatch([scan("aa", { boxId: "b1" })]);
+      await postBatchWithBoxes(
+        [],
+        [
+          {
+            boxId: "b1",
+            shiftId,
+            terminalId: "t1",
+            sscc: SSCC,
+            closedAt: ISO,
+            operatorId: OPERATOR_ID,
+            printVerifiedAt: ISO,
+          },
+        ],
+      );
+      const [box] = await db.select().from(schema.boxes).where(eq(schema.boxes.tenantId, tenantId));
+      expect(box!.printVerifiedAt?.toISOString()).toBe(ISO);
+      expect(box!.printSkippedAt).toBeNull();
+    });
+
+    // The counterpart: a closure whose printVerifiedAt/printSkippedAt are
+    // both absent (the ordinary case -- the operator has usually not yet
+    // resolved the prompt by the time the closure is acked) must not
+    // manufacture either timestamp out of nothing.
+    it("leaves printVerifiedAt/printSkippedAt null when the closure carries neither", async () => {
+      await postBatch([scan("aa", { boxId: "b1" })]);
+      await postBatchWithBoxes(
+        [],
+        [{ boxId: "b1", shiftId, terminalId: "t1", sscc: SSCC, closedAt: ISO, operatorId: null }],
+      );
+      const [box] = await db.select().from(schema.boxes).where(eq(schema.boxes.tenantId, tenantId));
+      expect(box!.printVerifiedAt).toBeNull();
+      expect(box!.printSkippedAt).toBeNull();
+    });
+
+    // A later delivery of the SAME closure, now carrying a resolved outcome
+    // that was still unresolved the first time -- e.g. the device acked the
+    // closure before the operator answered the print-verification prompt.
+    // The primary sscc/closedAt/operatorId write deliberately refuses to
+    // touch an already-closed row, but the print-outcome fields must still
+    // be allowed to land (see the service's own comment on why this is
+    // scoped safely by sscc equality).
+    it("accepts a late-arriving printVerifiedAt for a box the closure already closed earlier", async () => {
+      await postBatch([scan("aa", { boxId: "b1" })]);
+      await postBatchWithBoxes(
+        [],
+        [{ boxId: "b1", shiftId, terminalId: "t1", sscc: SSCC, closedAt: ISO, operatorId: null }],
+      );
+      let [box] = await db.select().from(schema.boxes).where(eq(schema.boxes.tenantId, tenantId));
+      expect(box!.printVerifiedAt).toBeNull();
+
+      // Resent under a fresh batchId (a real device would not resend the
+      // very same batchId once it has moved on) with the SAME sscc, now
+      // carrying the resolved outcome.
+      await postBatchWithBoxes(
+        [],
+        [
+          {
+            boxId: "b1",
+            shiftId,
+            terminalId: "t1",
+            sscc: SSCC,
+            closedAt: ISO,
+            operatorId: null,
+            printVerifiedAt: ISO,
+          },
+        ],
+      );
+      [box] = await db.select().from(schema.boxes).where(eq(schema.boxes.tenantId, tenantId));
+      expect(box!.printVerifiedAt?.toISOString()).toBe(ISO);
+      // The original closure fields are untouched by this second delivery.
+      expect(box!.closedAt?.toISOString()).toBe(ISO);
+      expect(box!.sscc).toBe(SSCC);
+    });
+
+    it("records the operator on the scan event", async () => {
+      // Two items, two different operators: a single-item batch would pass
+      // even if the production code wrote the BATCH's first operatorId onto
+      // every scan event instead of each item's own (see dto.ts's comment
+      // on why this must be per scan, not per batch).
+      await postBatch([
+        scan("aa", { boxId: "b1", operatorId: OPERATOR_ID }),
+        scan("bb", { boxId: "b1", operatorId: OTHER_OPERATOR_ID }),
+      ]);
+      const evs = await db
+        .select({ raw: schema.scanEvents.raw, operatorId: schema.scanEvents.operatorId })
+        .from(schema.scanEvents)
+        .where(eq(schema.scanEvents.tenantId, tenantId));
+      const byRaw = new Map(evs.map((e) => [e.raw, e.operatorId]));
+      expect(byRaw.get("RAW-aa")).toBe(OPERATOR_ID);
+      expect(byRaw.get("RAW-bb")).toBe(OTHER_OPERATOR_ID);
+    });
+
+    it("marks the later terminal's box item displaced when an earlier scan wins", async () => {
+      await postBatchAs("t2", [scan("aa", { boxId: "b2", scannedAt: "10:00:05" })]);
+      await postBatchAs("t1", [scan("aa", { boxId: "b1", scannedAt: "10:00:00" })]);
+      const items = await boxItemRows(tenantId, "aa");
+      const displaced = items.filter((i) => i.displacedAt !== null);
+      expect(displaced).toHaveLength(1);
+      expect(displaced[0]!.boxId).toBe(await boxIdFor("b2"));
+    });
+
+    it("marks nothing when a batch is clean", async () => {
+      await postBatch([scan("aa", { boxId: "b1" })]);
+      const items = await boxItemRows(tenantId, "aa");
+      expect(items.every((i) => i.displacedAt === null)).toBe(true);
+    });
+
+    it("counts a box's contents excluding displaced items", async () => {
+      await postBatchAs("t2", [scan("aa", { boxId: "b2", scannedAt: "10:00:05" })]);
+      await postBatchAs("t1", [scan("aa", { boxId: "b1", scannedAt: "10:00:00" })]);
+      expect(await liveItemCount("b2")).toBe(0);
+      expect(await liveItemCount("b1")).toBe(1);
+    });
+
+    it("is idempotent: replaying a batch changes neither boxes nor items", async () => {
+      const body = batchBody([scan("aa", { boxId: "b1" })]);
+      await postRaw(body);
+      await postRaw(body);
+      expect(await boxCount(tenantId)).toBe(1);
+      expect((await boxItemRows(tenantId, "aa")).length).toBe(1);
+    });
+
+    // Beyond the brief's own cases: the batch that WINS ownership can also
+    // be the one whose OWN box item must be marked -- when its scan loses
+    // ownership to an EARLIER one already recorded by a previous batch.
+    // None of the cases above reach this branch (the earlier-scan winner is
+    // always this same batch's own claim there); this one arrives second
+    // with the LATER scannedAt, so its own newly-inserted box item is the
+    // one that must come back displaced.
+    it("marks its own box item displaced when its scan loses to an already-recorded earlier one", async () => {
+      await postBatchAs("t1", [scan("aa", { boxId: "b1", scannedAt: "10:00:00" })]);
+      await postBatchAs("t2", [scan("aa", { boxId: "b2", scannedAt: "10:00:05" })]);
+      const items = await boxItemRows(tenantId, "aa");
+      const displaced = items.filter((i) => i.displacedAt !== null);
+      expect(displaced).toHaveLength(1);
+      expect(displaced[0]!.boxId).toBe(await boxIdFor("b2"));
+    });
+
+    // Beyond the brief's own idempotency case (which replays the identical
+    // batchId and so never re-executes the transaction body at all): a
+    // device that lost its own record of what it already sent can resend
+    // the SAME item under a FRESH batchId (the exact scenario `codes`' own
+    // ON CONFLICT DO NOTHING already guards against -- see
+    // station-scans.service.ts). Without box_items' ON CONFLICT DO NOTHING,
+    // this second, differently-keyed batch would 500 on a duplicate-key
+    // violation instead of being a clean no-op.
+    it("keeps one box_items row when the same scan is redelivered under a fresh batchId", async () => {
+      const item = scan("aa", { boxId: "b1" });
+      await postRaw(batchBody([item]));
+      await postRaw(batchBody([item]));
+      expect(await boxCount(tenantId)).toBe(1);
+      expect((await boxItemRows(tenantId, "aa")).length).toBe(1);
+    });
+
+    // Beyond the brief's own cases: proves SsccService.recordConsumedSerial
+    // is actually wired into the closure path end-to-end, not merely
+    // present and unreachable -- the concern the parent task calls out
+    // explicitly ("Call it for every closure this batch applies").
+    it("advances the covering sscc_blocks row's consumedThroughSerial when a closure names a real serial", async () => {
+      const device = await agent.post("/station-devices").send({ name: "Box device" }).expect(201);
+      const deviceId = (device.body as { deviceId: string }).deviceId;
+
+      const prefix = "800000001";
+      const block = await app!.get(SsccService).allocate(tenantId, prefix, 0, deviceId, 20);
+      const sscc = buildSscc(0, prefix, block.fromSerial + 3);
+
+      await postBatch([scan("aa", { boxId: "b1" })]);
+      await postBatchWithBoxes(
+        [],
+        [{ boxId: "b1", shiftId, terminalId: "t1", sscc, closedAt: ISO, operatorId: null }],
+      );
+
+      const [row] = await db
+        .select({ consumedThroughSerial: schema.ssccBlocks.consumedThroughSerial })
+        .from(schema.ssccBlocks)
+        .where(
+          and(eq(schema.ssccBlocks.tenantId, tenantId), eq(schema.ssccBlocks.deviceId, deviceId)),
+        );
+      expect(row!.consumedThroughSerial).toBe(block.fromSerial + 3);
+    });
+
+    // Finding 1: `boxes_device_box_uq` is a plain UNIQUE over a NULLABLE
+    // terminal_id -- Postgres treats every NULL as distinct from every
+    // other in a plain unique index, so `ON CONFLICT` would never fire for
+    // a null-terminal device, and each batch would insert a NEW box row
+    // instead of resolving to the one already open. Two batches (not the
+    // three in the review's failure narrative) are enough to prove it: the
+    // second batch's insert either collides (fixed) or silently creates a
+    // second row (the bug).
+    it(
+      "resolves a null-terminal box drained across two batches to one row, and closes it " +
+        "without error (Finding 1)",
+      async () => {
+        await postRaw(batchBody([scan("aa", { boxId: "b1", terminalId: null })]));
+        await postRaw(batchBody([scan("bb", { boxId: "b1", terminalId: null })]));
+
+        expect(await boxCount(tenantId)).toBe(1);
+        const aaRows = await boxItemRows(tenantId, "aa");
+        const bbRows = await boxItemRows(tenantId, "bb");
+        expect(aaRows).toHaveLength(1);
+        expect(bbRows).toHaveLength(1);
+        // Both items landed in the SAME box row, not two different ones.
+        expect(aaRows[0]!.boxId).toBe(bbRows[0]!.boxId);
+
+        // Closes cleanly: before the fix, the closure UPDATE (matched only
+        // on tenant_id/device_box_id at the time, or even on all four
+        // columns post-Finding-3) would have found more than one row for
+        // deviceBoxId "b1" and either written the same sscc to both --
+        // raising boxes_tenant_sscc_uq's 23505 -- or, post-Finding-3,
+        // failed the "matched exactly 1 row" assertion outright.
+        await postBatchWithBoxes(
+          [],
+          [{ boxId: "b1", shiftId, terminalId: null, sscc: SSCC, closedAt: ISO, operatorId: null }],
+        );
+        const [box] = await db
+          .select()
+          .from(schema.boxes)
+          .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.deviceBoxId, "b1")));
+        expect(box!.sscc).toBe(SSCC);
+      },
+    );
+
+    // Finding 2: the retroactive displacement UPDATE used to sit inside
+    // `if (boxed.length > 0)`, but the DTO explicitly blesses `boxId: null`
+    // as an ordinary unboxed scan (e.g. one taken at a verification
+    // station). t2 boxes an item as the (later, losing) incumbent; t1 then
+    // WINS ownership with an earlier, UNBOXED scan of the same code. Before
+    // the fix, `boxed.length === 0` for t1's batch skipped the retroactive
+    // block entirely, leaving b2's item live even though b2's own scan no
+    // longer owns the code.
+    it(
+      "retroactively displaces an incumbent's box item when the winning claim is itself " +
+        "unboxed (Finding 2)",
+      async () => {
+        await postBatchAs("t2", [scan("aa", { boxId: "b2", scannedAt: "10:00:05" })]);
+        await postBatchAs("t1", [scan("aa", { boxId: null, scannedAt: "10:00:00" })]);
+
+        // t1's earlier, unboxed scan now owns "aa" -- b2 (t2's box) must no
+        // longer count it.
+        expect(await liveItemCount("b2")).toBe(0);
+        const items = await boxItemRows(tenantId, "aa");
+        const b2Id = await boxIdFor("b2");
+        const b2Item = items.find((i) => i.boxId === b2Id);
+        // Assert the row EXISTS before asserting anything about its
+        // `displacedAt`: optional chaining on a missing row yields
+        // `undefined`, which `.not.toBeNull()` is satisfied by just as
+        // vacuously as a real timestamp -- so without this, a bug that made
+        // the retroactive UPDATE match zero rows (or a bug that deleted the
+        // row outright) would pass this assertion right alongside a genuine
+        // fix (cheap gap named in the review).
+        expect(b2Item).toBeDefined();
+        expect(b2Item!.displacedAt).not.toBeNull();
+      },
+    );
+
+    // Finding 3: `boxes_device_box_uq` scopes a device box id to (shift,
+    // terminal) precisely because the bare string is not unique on its own.
+    // Two terminals in the SAME shift both call their (different) box "b1"
+    // -- closing one must not touch the other, which is exactly what a
+    // closure matched on `(tenant_id, device_box_id)` alone could not tell
+    // apart.
+    it("closes each terminal's own box when two terminals share a shift and deviceBoxId (Finding 3)", async () => {
+      await postBatchAs("t1", [scan("aa", { boxId: "b1" })]);
+      await postBatchAs("t2", [scan("bb", { boxId: "b1" })]);
+      expect(await boxCount(tenantId)).toBe(2);
+
+      const ssccT1 = SSCC;
+      const ssccT2 = "223456789012345670";
+      await postBatchWithBoxes(
+        [],
+        [{ boxId: "b1", shiftId, terminalId: "t1", sscc: ssccT1, closedAt: ISO, operatorId: null }],
+      );
+      await postBatchWithBoxes(
+        [],
+        [{ boxId: "b1", shiftId, terminalId: "t2", sscc: ssccT2, closedAt: ISO, operatorId: null }],
+      );
+
+      const rows = await db
+        .select({ terminalId: schema.boxes.terminalId, sscc: schema.boxes.sscc })
+        .from(schema.boxes)
+        .where(eq(schema.boxes.tenantId, tenantId));
+      expect(rows).toHaveLength(2);
+      const byTerminal = new Map(rows.map((r) => [r.terminalId, r.sscc]));
+      expect(byTerminal.get("t1")).toBe(ssccT1);
+      expect(byTerminal.get("t2")).toBe(ssccT2);
+    });
+
+    // Regression for the defect this task fixes: the closure UPDATE used to
+    // also scope to `closedAt IS NULL` and throw a bare `Error` (-> 500) on
+    // any other row count. A batch that errors is retried under the SAME
+    // batchId forever (sync.ts's own doc comment on the device side), so a
+    // closure redelivered under a FRESH batchId -- the device having lost
+    // its own record that this one already landed, exactly the scenario
+    // `codes`/`box_items`'s own ON CONFLICT DO NOTHING already guard
+    // against -- used to match zero rows (the box already closed) and throw,
+    // wedging the device's queue permanently over its own documented threat
+    // model. Must now be a clean no-op, leaving the box closed with the
+    // SAME serial.
+    it(
+      "leaves a box closed with the same serial when its closure is redelivered under a " +
+        "fresh batchId, without erroring",
+      async () => {
+        await postBatch([scan("aa", { boxId: "b1" })]);
+        const closure: ClosureFixture = {
+          boxId: "b1",
+          shiftId,
+          terminalId: "t1",
+          sscc: SSCC,
+          closedAt: ISO,
+          operatorId: OPERATOR_ID,
+        };
+        await postBatchWithBoxes([], [closure]);
+        // Same closure fields, a FRESH batchId -- postBatchWithBoxes ->
+        // postRaw asserts 201, so a regression back to the bare `throw new
+        // Error` (-> 500) fails this test outright.
+        await postBatchWithBoxes([], [closure]);
+
+        const rows = await db
+          .select()
+          .from(schema.boxes)
+          .where(eq(schema.boxes.tenantId, tenantId));
+        expect(rows).toHaveLength(1);
+        expect(rows[0]!.sscc).toBe(SSCC);
+        expect(rows[0]!.closedAt?.toISOString()).toBe(ISO);
+        expect(await boxCount(tenantId)).toBe(1);
+      },
+    );
+
+    // Regression: a box with zero items has no row at all (a box row is
+    // created from its FIRST item, never the closure -- see the box-upsert
+    // in station-scans.service.ts), so its closure's four-column match finds
+    // nothing to update. That used to be indistinguishable from any other
+    // row-count mismatch and threw; it must now be a no-op, not a 500.
+    it("does not error when a closure arrives for a box that has no items", async () => {
+      // The warn log is the operator's ONLY signal that a real closure was
+      // dropped on the floor -- a 201 response alone (asserted below via
+      // postBatchWithBoxes) would stay green even if this logging silently
+      // stopped firing, so assert it directly.
+      const warnSpy = vi.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
+      try {
+        await postBatchWithBoxes(
+          [],
+          [
+            {
+              boxId: "empty-box",
+              shiftId,
+              terminalId: "t1",
+              sscc: SSCC,
+              closedAt: ISO,
+              operatorId: null,
+            },
+          ],
+        );
+        expect(await boxCount(tenantId)).toBe(0);
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("empty-box"));
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    // shiftId's presence in the closure match was previously undiscriminated
+    // by this suite: every other test here uses exactly one shift, so a
+    // closure match missing `eq(boxes.shiftId, closure.shiftId)` would still
+    // leave every existing test green. Two shifts reusing the same terminal
+    // AND deviceBoxId ("b1") close independently here -- proving shiftId is
+    // actually load-bearing in the match, the same way Finding 3's test
+    // proves terminalId is.
+    it(
+      "closes only its own shift's box when two shifts reuse the same terminal and " +
+        "deviceBoxId",
+      async () => {
+        // A second, independent product -- `openShift(agent)` with no
+        // `productId` would call `createActiveProduct`, which always sends
+        // the SAME `VALID_GTIN14`, and gtin14 is unique per tenant (see
+        // products.e2e.test.ts), so a bare second `openShift(agent)` call in
+        // an already-provisioned tenant 409s. `GTIN14_WIDGET_A` is the same
+        // valid, distinct fixture products.e2e.test.ts uses for exactly
+        // this reason.
+        const productB = await agent
+          .post("/products")
+          .send({
+            name: "Cola B",
+            gtin: "04006382000009",
+            productGroup: "Beverages",
+            boxCapacity: 10,
+            palletCapacity: 5,
+          })
+          .expect(201);
+        const shiftB = await openShift(agent, (productB.body as { id: string }).id);
+
+        await postBatch([scan("aa", { boxId: "b1" })]);
+        await postRaw(batchBody([{ ...scan("bb", { boxId: "b1" }), shiftId: shiftB }]));
+        expect(await boxCount(tenantId)).toBe(2);
+
+        const ssccA = SSCC;
+        const ssccB = "223456789012345670";
+        await postBatchWithBoxes(
+          [],
+          [
+            {
+              boxId: "b1",
+              shiftId,
+              terminalId: "t1",
+              sscc: ssccA,
+              closedAt: ISO,
+              operatorId: null,
+            },
+          ],
+        );
+        await postBatchWithBoxes(
+          [],
+          [
+            {
+              boxId: "b1",
+              shiftId: shiftB,
+              terminalId: "t1",
+              sscc: ssccB,
+              closedAt: ISO,
+              operatorId: null,
+            },
+          ],
+        );
+
+        const rows = await db
+          .select({ shiftId: schema.boxes.shiftId, sscc: schema.boxes.sscc })
+          .from(schema.boxes)
+          .where(eq(schema.boxes.tenantId, tenantId));
+        expect(rows).toHaveLength(2);
+        const byShift = new Map(rows.map((r) => [r.shiftId, r.sscc]));
+        expect(byShift.get(shiftId)).toBe(ssccA);
+        expect(byShift.get(shiftB)).toBe(ssccB);
+      },
+    );
+
+    // Nothing in this suite previously sent a batch carrying TWO closures,
+    // so recordConsumedSerial's call being hoisted outside the closures loop
+    // (applying only the LAST closure's sscc) went uncaught. Two DIFFERENT
+    // devices' blocks, each closed in the SAME batch, makes that visible: if
+    // only the last-processed closure (sorted by boxId -- "b1" then "b2")
+    // took effect, deviceA's block would stay unconsumed while deviceB's
+    // correctly advanced.
+    it(
+      "advances both sscc_blocks rows' consumedThroughSerial when one batch carries two " +
+        "closures",
+      async () => {
+        const deviceA = await agent
+          .post("/station-devices")
+          .send({ name: "Box device A" })
+          .expect(201);
+        const deviceAId = (deviceA.body as { deviceId: string }).deviceId;
+        const deviceB = await agent
+          .post("/station-devices")
+          .send({ name: "Box device B" })
+          .expect(201);
+        const deviceBId = (deviceB.body as { deviceId: string }).deviceId;
+
+        const prefixA = "800000001";
+        const prefixB = "800000002";
+        const blockA = await app!.get(SsccService).allocate(tenantId, prefixA, 0, deviceAId, 20);
+        const blockB = await app!.get(SsccService).allocate(tenantId, prefixB, 0, deviceBId, 20);
+        const ssccA = buildSscc(0, prefixA, blockA.fromSerial + 3);
+        const ssccB = buildSscc(0, prefixB, blockB.fromSerial + 7);
+
+        await postBatch([scan("aa", { boxId: "b1" }), scan("bb", { boxId: "b2" })]);
+        await postBatchWithBoxes(
+          [],
+          [
+            {
+              boxId: "b1",
+              shiftId,
+              terminalId: "t1",
+              sscc: ssccA,
+              closedAt: ISO,
+              operatorId: null,
+            },
+            {
+              boxId: "b2",
+              shiftId,
+              terminalId: "t1",
+              sscc: ssccB,
+              closedAt: ISO,
+              operatorId: null,
+            },
+          ],
+        );
+
+        const rows = await db
+          .select({
+            deviceId: schema.ssccBlocks.deviceId,
+            consumedThroughSerial: schema.ssccBlocks.consumedThroughSerial,
+          })
+          .from(schema.ssccBlocks)
+          .where(eq(schema.ssccBlocks.tenantId, tenantId));
+        const byDevice = new Map(rows.map((r) => [r.deviceId, r.consumedThroughSerial]));
+        expect(byDevice.get(deviceAId)).toBe(blockA.fromSerial + 3);
+        expect(byDevice.get(deviceBId)).toBe(blockB.fromSerial + 7);
+      },
+    );
+
+    // Finding 17: `recordConsumedSerial` must run for EVERY closure this
+    // batch carries, matched to a box row or not -- a box closed with zero
+    // items is still a case where a PHYSICAL box was closed and a label
+    // carrying this serial was printed and applied; only the server's own
+    // bookkeeping (the box row) failed to find a match. Before the fix, the
+    // `continue` on the zero-row path skipped `recordConsumedSerial`
+    // entirely for this input, silently forgetting the consumption and
+    // reopening the reprint hazard that method exists to close.
+    it(
+      "advances the covering sscc_blocks row's consumedThroughSerial for a closure whose box " +
+        "row does not exist (Finding 17)",
+      async () => {
+        const device = await agent
+          .post("/station-devices")
+          .send({ name: "Ghost box device" })
+          .expect(201);
+        const deviceId = (device.body as { deviceId: string }).deviceId;
+
+        const prefix = "800000003";
+        const block = await app!.get(SsccService).allocate(tenantId, prefix, 0, deviceId, 20);
+        const sscc = buildSscc(0, prefix, block.fromSerial + 5);
+
+        // No items posted for "empty-box" at all -- its box row is never
+        // created (a box row is created from its FIRST item, never the
+        // closure -- see the box-upsert in station-scans.service.ts).
+        await postBatchWithBoxes(
+          [],
+          [
+            {
+              boxId: "empty-box",
+              shiftId,
+              terminalId: "t1",
+              sscc,
+              closedAt: ISO,
+              operatorId: null,
+            },
+          ],
+        );
+        expect(await boxCount(tenantId)).toBe(0);
+
+        const [row] = await db
+          .select({ consumedThroughSerial: schema.ssccBlocks.consumedThroughSerial })
+          .from(schema.ssccBlocks)
+          .where(
+            and(eq(schema.ssccBlocks.tenantId, tenantId), eq(schema.ssccBlocks.deviceId, deviceId)),
+          );
+        expect(row!.consumedThroughSerial).toBe(block.fromSerial + 5);
+      },
+    );
+
+    // Finding 18: `closedAt IS NULL` is back in the closure match. Without
+    // it, a second closure sharing the same box IDENTITY (tenant, shift,
+    // terminal, deviceBoxId) but carrying a DIFFERENT sscc would match the
+    // already-closed row and silently overwrite its serial -- an in-place
+    // UPDATE that `boxes_tenant_sscc_uq` cannot catch, since there is no
+    // second row to collide with. The reachable path: a device that lost its
+    // local database restarts its box counter at "b1" inside the SAME
+    // still-open shift and terminal; its box upsert earlier in the
+    // transaction no-ops onto this same old, already-closed row.
+    it(
+      "leaves the original serial intact when a second closure for the same box carries a " +
+        "different serial (Finding 18)",
+      async () => {
+        await postBatch([scan("aa", { boxId: "b1" })]);
+        await postBatchWithBoxes(
+          [],
+          [
+            {
+              boxId: "b1",
+              shiftId,
+              terminalId: "t1",
+              sscc: SSCC,
+              closedAt: ISO,
+              operatorId: OPERATOR_ID,
+            },
+          ],
+        );
+
+        // Same box identity, a DIFFERENT serial and a later closedAt/operator
+        // -- must be a no-op against the already-closed row, not a rewrite.
+        const differentSscc = "223456789012345670";
+        const laterIso = "2026-07-29T09:30:00.000Z";
+        await postBatchWithBoxes(
+          [],
+          [
+            {
+              boxId: "b1",
+              shiftId,
+              terminalId: "t1",
+              sscc: differentSscc,
+              closedAt: laterIso,
+              operatorId: OTHER_OPERATOR_ID,
+            },
+          ],
+        );
+
+        const rows = await db
+          .select()
+          .from(schema.boxes)
+          .where(eq(schema.boxes.tenantId, tenantId));
+        expect(rows).toHaveLength(1);
+        expect(rows[0]!.sscc).toBe(SSCC);
+        expect(rows[0]!.closedAt?.toISOString()).toBe(ISO);
+        expect(rows[0]!.operatorId).toBe(OPERATOR_ID);
+      },
+    );
+
+    // No test previously rolled a closure back, so dropping
+    // `recordConsumedSerial`'s `tx` argument (falling back to `this.db`,
+    // which would commit outside the ingest transaction) would leave this
+    // suite green. Forces a genuine mid-transaction failure AFTER a closure
+    // has already advanced a block's cursor, via a SECOND closure in the
+    // SAME batch that collides on `boxes_tenant_sscc_uq` (same tenant, same
+    // sscc, a DIFFERENT box row) -- and proves the cursor advance rolled
+    // back along with everything else.
+    it(
+      "rolls back a closure's consumedThroughSerial advance when a later statement in the " +
+        "same batch fails (transaction wiring)",
+      async () => {
+        const device = await agent
+          .post("/station-devices")
+          .send({ name: "Rollback device" })
+          .expect(201);
+        const deviceId = (device.body as { deviceId: string }).deviceId;
+        const prefix = "800000004";
+        const block = await app!.get(SsccService).allocate(tenantId, prefix, 0, deviceId, 20);
+        const sscc = buildSscc(0, prefix, block.fromSerial + 2);
+
+        await postBatch([scan("aa", { boxId: "b1" }), scan("bb", { boxId: "b2" })]);
+
+        // Sorted by boxId ("b1" then "b2"): b1's closure applies first
+        // within the transaction and advances the block's cursor; b2's
+        // closure then tries to write the SAME sscc to a DIFFERENT box row,
+        // which `boxes_tenant_sscc_uq` forbids -- raising a 23505 that must
+        // roll back the whole transaction, including b1's cursor advance.
+        await request(app!.getHttpServer())
+          .post("/station/scans")
+          .set("x-api-key", apiKey)
+          .send(
+            batchBody(
+              [],
+              [
+                { boxId: "b1", shiftId, terminalId: "t1", sscc, closedAt: ISO, operatorId: null },
+                { boxId: "b2", shiftId, terminalId: "t1", sscc, closedAt: ISO, operatorId: null },
+              ],
+            ),
+          )
+          .expect(500);
+
+        // b1 must still be OPEN -- if the transaction had committed anything
+        // at all, b1's closedAt would be set.
+        const [boxRow] = await db
+          .select({ closedAt: schema.boxes.closedAt })
+          .from(schema.boxes)
+          .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.deviceBoxId, "b1")));
+        expect(boxRow!.closedAt).toBeNull();
+
+        // The assertion that actually distinguishes `tx` from `this.db`: if
+        // `recordConsumedSerial` had used `this.db`, b1's advance would have
+        // committed immediately and survived b2's later rollback.
+        const [blockRow] = await db
+          .select({ consumedThroughSerial: schema.ssccBlocks.consumedThroughSerial })
+          .from(schema.ssccBlocks)
+          .where(
+            and(eq(schema.ssccBlocks.tenantId, tenantId), eq(schema.ssccBlocks.deviceId, deviceId)),
+          );
+        expect(blockRow!.consumedThroughSerial).toBeNull();
+      },
+    );
   });
 });

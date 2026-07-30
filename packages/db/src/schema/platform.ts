@@ -1,4 +1,5 @@
 import {
+  bigint,
   boolean,
   char,
   date,
@@ -17,6 +18,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { organization } from "./auth.js";
 import { labelTemplates } from "./labels.js";
+import { employees } from "./pickup.js";
 
 export const productStatus = pgEnum("product_status", ["draft", "active"]);
 export const shiftStatus = pgEnum("shift_status", ["planned", "active", "closed"]);
@@ -103,6 +105,16 @@ export const shifts = pgTable(
     lineId: uuid("line_id"),
     counterpartyId: uuid("counterparty_id"),
     labelTemplateId: uuid("label_template_id"),
+    /**
+     * Whose numbers this shift's boxes carry. Null means the tenant's own
+     * organisation. Deliberately NOT inferred from `counterpartyId`: that
+     * field answers "who is this for", this one answers "whose numbers".
+     * Packing for a client under one's own SSCCs is legal and common, and
+     * inferring one from the other would silently produce a wrong number,
+     * discovered at the recipient's goods-in.
+     */
+    ssccIssuerCounterpartyId: uuid("sscc_issuer_counterparty_id"),
+    boxLabelTemplateId: uuid("box_label_template_id"),
     status: shiftStatus("status").notNull().default("planned"),
     mode: shiftMode("mode").notNull(),
     plannedQty: integer("planned_qty"),
@@ -148,6 +160,16 @@ export const shifts = pgTable(
     foreignKey({
       name: "shifts_tenant_label_template_fk",
       columns: [t.tenantId, t.labelTemplateId],
+      foreignColumns: [labelTemplates.tenantId, labelTemplates.id],
+    }),
+    foreignKey({
+      name: "shifts_tenant_sscc_issuer_fk",
+      columns: [t.tenantId, t.ssccIssuerCounterpartyId],
+      foreignColumns: [counterparties.tenantId, counterparties.id],
+    }),
+    foreignKey({
+      name: "shifts_tenant_box_label_template_fk",
+      columns: [t.tenantId, t.boxLabelTemplateId],
       foreignColumns: [labelTemplates.tenantId, labelTemplates.id],
     }),
   ],
@@ -248,4 +270,210 @@ export const stationDevices = pgTable(
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
   },
   (t) => [unique("station_devices_tenant_id_uq").on(t.tenantId, t.id)],
+);
+
+/**
+ * One serial counter per (tenant, issuer prefix, extension digit).
+ *
+ * Keyed by the 9-digit issuer PREFIX, not the full 13-digit GLN, because the
+ * prefix — not the GLN — is the number space's identity: an SSCC's serial is
+ * unique only within (extension digit, issuer prefix), and one GS1 member
+ * commonly holds several GLNs (one per location) that share the same first 9
+ * digits and differ only in the location digits after it. Keying on the full
+ * GLN would give each of those GLNs its own counter, and two counters both
+ * handing out serial 100 under the same prefix produces the exact same
+ * SSCC — the collision this slice's one-statement allocation exists to
+ * prevent. `nextSerial` is what an administrator seeds when migrating off
+ * another system that issued SSCCs under the same prefix. Allocation is one
+ * statement; see SsccService.
+ */
+export const ssccCounters = pgTable(
+  "sscc_counters",
+  {
+    tenantId: tenantId(),
+    issuerPrefix: char("issuer_prefix", { length: 9 }).notNull(),
+    extensionDigit: integer("extension_digit").notNull(),
+    nextSerial: bigint("next_serial", { mode: "number" }).notNull().default(0),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.issuerPrefix, t.extensionDigit] })],
+);
+
+/**
+ * Which device received which serial range. Not bookkeeping for its own sake:
+ * a ten-million space per extension digit runs low only slowly, and when it
+ * does the only way to find out where it went is to have written it down.
+ *
+ * Keyed by the same 9-digit issuer prefix as `ssccCounters` above, for the
+ * same reason: the prefix, not the GLN, identifies the number space a block
+ * was cut from, and several GLNs can share one prefix.
+ */
+export const ssccBlocks = pgTable(
+  "sscc_blocks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    issuerPrefix: char("issuer_prefix", { length: 9 }).notNull(),
+    extensionDigit: integer("extension_digit").notNull(),
+    deviceId: uuid("device_id").notNull(),
+    fromSerial: bigint("from_serial", { mode: "number" }).notNull(),
+    toSerial: bigint("to_serial", { mode: "number" }).notNull(),
+    /**
+     * The highest serial in this range known to have been used, or null
+     * before any is. Set by `SsccService.recordConsumedSerial`, the moment a
+     * box closure at ingest names a real SSCC -- the only point the server
+     * ever learns a serial actually got printed rather than merely handed
+     * out. Without this, a device that loses its local database re-provisions
+     * from scratch, receives this same range back from the bundle, and
+     * restarts its cursor at `fromSerial`, reprinting serials already on
+     * boxes (caught only later, and only at ingest, by
+     * `boxes_tenant_sscc_uq`). The bundle uses it to hand back the
+     * unconsumed remainder instead of the whole range -- see
+     * `SsccService.allocateForBundle`.
+     */
+    consumedThroughSerial: bigint("consumed_through_serial", { mode: "number" }),
+    issuedAt: timestamp("issued_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // Composite FK: device_id must belong to the same tenant as the sscc
+    // block referencing it — same shape as shifts' own FKs above. Unlike
+    // those, device_id is NOT NULL: a block always records the device that
+    // received it, so MATCH SIMPLE's null-skip never applies here.
+    foreignKey({
+      name: "sscc_blocks_tenant_device_fk",
+      columns: [t.tenantId, t.deviceId],
+      foreignColumns: [stationDevices.tenantId, stationDevices.id],
+    }),
+    // Backs both of this table's own hot queries (final review, finding 4):
+    // `allocateForBundle`'s SELECT filters on the first four columns (plus
+    // `ORDER BY issued_at DESC LIMIT 1`, covered by the trailing DESC
+    // column), and `recordConsumedSerial`'s UPDATE filters on the first
+    // three plus a serial range. Neither was backed by anything but the
+    // `id` primary key, so both seq-scanned a table that grows one row per
+    // block per device, forever.
+    index("sscc_blocks_tenant_issuer_ext_device_idx").on(
+      t.tenantId,
+      t.issuerPrefix,
+      t.extensionDigit,
+      t.deviceId,
+      t.issuedAt.desc(),
+    ),
+  ],
+);
+
+/**
+ * A transport box. The row is created when its FIRST ITEM arrives, not when
+ * the closure event does: items are queued before the closure and the drain
+ * is sequential, so this needs no buffering and no out-of-order handling.
+ * A box with a null `sscc` is one whose closure has not arrived yet — which
+ * is also exactly what an open box on the device looks like.
+ */
+export const boxes = pgTable(
+  "boxes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    shiftId: uuid("shift_id").notNull(),
+    terminalId: text("terminal_id"),
+    deviceBoxId: text("device_box_id").notNull(),
+    sscc: char("sscc", { length: 18 }),
+    operatorId: uuid("operator_id"),
+    openedAt: timestamp("opened_at", { withTimezone: true }).notNull().defaultNow(),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    /**
+     * Server-assigned `now()` at the SAME ingest statement that sets
+     * `closedAt`/`sscc`/`operatorId` (CodeRabbit PR33 review, Finding 7) --
+     * unlike `closedAt`, which is a client-supplied device timestamp with no
+     * `assertScannedAtWithinWindow`-style bound (unlike scan items, a box
+     * closure has no clock-skew check at all). `contentsChangedAfterClose`
+     * compares against THIS column, never `closedAt`: clock skew between a
+     * device and the server could otherwise make that flag report `false`
+     * when contents genuinely changed after the physical close, or `true`
+     * when they didn't, since `closedAt` and `displacedAt` (server-assigned)
+     * are not measured on the same clock.
+     */
+    closureReceivedAt: timestamp("closure_received_at", { withTimezone: true }),
+    printVerifiedAt: timestamp("print_verified_at", { withTimezone: true }),
+    printSkippedAt: timestamp("print_skipped_at", { withTimezone: true }),
+  },
+  (t) => [
+    unique("boxes_tenant_id_uq").on(t.tenantId, t.id),
+    // Two devices holding overlapping pools is precisely the situation
+    // nothing else would reveal. An index, not a check in code.
+    unique("boxes_tenant_sscc_uq").on(t.tenantId, t.sscc),
+    // A device's own id for the box, unique within its shift and terminal:
+    // this is what an arriving scan carries instead of a server id.
+    //
+    // `.nullsNotDistinct()` is load-bearing, not cosmetic: `terminalId` is
+    // nullable (a device that has no notion of "terminal" sends `null`), and
+    // a PLAIN unique index treats every NULL as distinct from every other,
+    // so `ON CONFLICT (tenant_id, shift_id, terminal_id, device_box_id)`
+    // would never fire for a null-terminal device -- each batch would insert
+    // a NEW box row instead of resolving to the one already open, scattering
+    // one box's items across several rows, and a later closure naming that
+    // device_box_id would then match all of them and try to write the same
+    // sscc to each, raising boxes_tenant_sscc_uq's 23505. `NULLS NOT
+    // DISTINCT` (Postgres 15+; this project runs 17) makes two null-terminal
+    // rows for the same (tenant, shift, device_box_id) collide exactly like
+    // two non-null ones would, so the upsert's conflict arbiter fires either
+    // way.
+    //
+    // drizzle-kit 0.31.10 CAN regenerate this correctly from
+    // `.nullsNotDistinct()` (it understands the flag when diffing/rendering
+    // `UNIQUE` constraints), but regenerating migration 0018 here was
+    // avoided anyway: each prior regeneration of this same migration has
+    // cost a dev-database recreate. `boxes` (and this constraint) are
+    // themselves created BY migration 0018, so the fix is a direct hand-edit
+    // of that CREATE TABLE statement's own inline constraint clause --
+    // `UNIQUE NULLS NOT DISTINCT(...)` in place of `UNIQUE(...)` -- in
+    // migrations/0018_gigantic_texas_twister.sql, not a separate appended
+    // statement (unlike scan_events' hand-migrated ALTERs further down that
+    // same file, which target a table that migration doesn't create). THAT
+    // hand-edited DDL is authoritative for what actually exists in the
+    // database; the `.nullsNotDistinct()` call here exists so drizzle-kit's
+    // introspection of a live database (and any future `db:generate` diff)
+    // agrees with the schema instead of proposing to "fix" it back to a
+    // plain UNIQUE.
+    unique("boxes_device_box_uq")
+      .on(t.tenantId, t.shiftId, t.terminalId, t.deviceBoxId)
+      .nullsNotDistinct(),
+    foreignKey({
+      name: "boxes_tenant_shift_fk",
+      columns: [t.tenantId, t.shiftId],
+      foreignColumns: [shifts.tenantId, shifts.id],
+    }),
+    // operator_id is nullable — MATCH SIMPLE (the default) means a NULL
+    // skips the check; a box may close before an operator is attributed.
+    foreignKey({
+      name: "boxes_tenant_operator_fk",
+      columns: [t.tenantId, t.operatorId],
+      foreignColumns: [employees.tenantId, employees.id],
+    }),
+  ],
+);
+
+/**
+ * A code's membership of a box. `displacedAt` marks an item whose code is
+ * owned by another scan (06b's rule: the earlier scannedAt wins). It is
+ * marked, never deleted — the row is the only evidence of what happened,
+ * and it does not count towards the box's contents.
+ */
+export const boxItems = pgTable(
+  "box_items",
+  {
+    tenantId: tenantId(),
+    boxId: uuid("box_id").notNull(),
+    codeHash: char("code_hash", { length: 64 }).notNull(),
+    addedAt: timestamp("added_at", { withTimezone: true }).notNull(),
+    displacedAt: timestamp("displaced_at", { withTimezone: true }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.boxId, t.codeHash] }),
+    index("box_items_tenant_code_idx").on(t.tenantId, t.codeHash),
+    foreignKey({
+      name: "box_items_tenant_box_fk",
+      columns: [t.tenantId, t.boxId],
+      foreignColumns: [boxes.tenantId, boxes.id],
+    }),
+  ],
 );

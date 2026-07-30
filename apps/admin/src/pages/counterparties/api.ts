@@ -31,12 +31,22 @@ export interface CreateCounterpartyInput {
 
 export type UpdateCounterpartyInput = Partial<CreateCounterpartyInput>;
 
+/** Mirrors `apps/api/src/modules/counterparties/dto.ts`'s (re-exported) `SsccCounterDto`. */
+export interface SsccCounterDto {
+  extensionDigit: number;
+  nextSerial: number;
+}
+
 interface ListCounterpartiesResponse {
   items: CounterpartyDto[];
 }
 
 /** Shared TanStack Query cache key for the counterparties list. */
 export const COUNTERPARTIES_QUERY_KEY = ["counterparties"] as const;
+
+function ssccQueryKey(id: string) {
+  return ["counterparties", id, "sscc"] as const;
+}
 
 async function fetchCounterparties(): Promise<CounterpartyDto[]> {
   const response = await apiFetch<ListCounterpartiesResponse>("/counterparties");
@@ -103,6 +113,46 @@ export function useDeleteCounterparty(): UseMutationResult<void, Error, string> 
     mutationFn: removeCounterparty,
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: COUNTERPARTIES_QUERY_KEY });
+    },
+  });
+}
+
+function fetchCounterpartySscc(id: string): Promise<SsccCounterDto> {
+  return apiFetch<SsccCounterDto>(`/counterparties/${id}/sscc`);
+}
+
+function putCounterpartySscc(id: string, input: SsccCounterDto): Promise<SsccCounterDto> {
+  return apiFetch<SsccCounterDto>(`/counterparties/${id}/sscc`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+
+/**
+ * `GET /counterparties/:id/sscc` -- this counterparty's own box SSCC counter
+ * (06c Task 5). Only meaningful for an existing counterparty, so `id` is
+ * optional and the query stays disabled (never fires) until one is given --
+ * covers the create-modal case, which has no id yet.
+ */
+export function useCounterpartySscc(id: string | undefined): UseQueryResult<SsccCounterDto> {
+  return useQuery({
+    queryKey: ssccQueryKey(id ?? ""),
+    queryFn: () => fetchCounterpartySscc(id!),
+    enabled: Boolean(id),
+  });
+}
+
+/** `PUT /counterparties/:id/sscc`. Invalidates that counterparty's counter query on success. */
+export function useUpdateCounterpartySscc(): UseMutationResult<
+  SsccCounterDto,
+  Error,
+  { id: string; input: SsccCounterDto }
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }) => putCounterpartySscc(id, input),
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({ queryKey: ssccQueryKey(variables.id) });
     },
   });
 }

@@ -223,6 +223,71 @@ describe("WorkstationSetup", () => {
     expect(runs.some(([sql]) => sql.includes("station_meta"))).toBe(true);
   });
 
+  // Task 13 review, Finding 5: existing fixtures only ever carried
+  // `verifyPrintedLabel: false` (or round-tripped a stored value unchanged)
+  // -- nothing here actually toggled the checkbox and asserted the SAVED
+  // config carries `true`. A printer is configured first: with no printer,
+  // the checkbox is disabled and the value is forced to `false` on save
+  // (see the checkbox's own comment in WorkstationSetup.tsx), which would
+  // make this test pass for the wrong reason.
+  it("persists a ticked verify-printed-label checkbox", async () => {
+    const exec: SqlExecutor = { run: async () => {}, all: async () => [] };
+    const onConfigChange = vi.fn();
+
+    render(
+      <WorkstationSetup
+        hw={hardware()}
+        exec={exec}
+        sound={{ muted: false, volume: 1 }}
+        onSoundChange={() => {}}
+        onConfigChange={onConfigChange}
+        onDone={() => {}}
+      />,
+    );
+
+    await screen.findByText("COM3");
+    fireEvent.click(screen.getByRole("button", { name: "Network (TCP)" }));
+    fireEvent.change(screen.getByLabelText("Printer address"), {
+      target: { value: "10.0.0.7" },
+    });
+    fireEvent.click(screen.getByLabelText("Verify each printed label by scanning it back"));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+    await waitFor(() => expect(onConfigChange).toHaveBeenCalled());
+    const saved = onConfigChange.mock.calls.at(-1)![0] as HardwareConfig;
+    expect(saved.verifyPrintedLabel).toBe(true);
+  });
+
+  it("disables and force-clears the verify-printed-label checkbox when no printer is configured", async () => {
+    const exec: SqlExecutor = { run: async () => {}, all: async () => [] };
+    const onConfigChange = vi.fn();
+
+    render(
+      <WorkstationSetup
+        hw={hardware()}
+        exec={exec}
+        sound={{ muted: false, volume: 1 }}
+        onSoundChange={() => {}}
+        onConfigChange={onConfigChange}
+        onDone={() => {}}
+      />,
+    );
+
+    await screen.findByText("COM3");
+    const checkbox = screen.getByLabelText(
+      "Verify each printed label by scanning it back",
+    ) as HTMLInputElement;
+    expect(checkbox.disabled).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "COM3" }));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+    await waitFor(() => expect(onConfigChange).toHaveBeenCalled());
+    const saved = onConfigChange.mock.calls.at(-1)![0] as HardwareConfig;
+    expect(saved.printer).toBeNull();
+    expect(saved.verifyPrintedLabel).toBe(false);
+  });
+
   it("keeps a serial printer's own baud rate when there is no scanner configured", async () => {
     // A documented valid state: no scanner (keyboard wedge), serial printer
     // previously saved at a non-default baud. Reopening Setup and pressing
@@ -231,6 +296,7 @@ describe("WorkstationSetup", () => {
       scanner: null,
       printer: { kind: "serial", port: "COM7", baud: 19200 },
       printerLanguage: "zpl",
+      verifyPrintedLabel: false,
     };
     const exec: SqlExecutor = {
       run: async () => {},
@@ -270,6 +336,7 @@ describe("WorkstationSetup", () => {
       scanner: { port: "COM3", baud: 19200 },
       printer: null,
       printerLanguage: "zpl",
+      verifyPrintedLabel: false,
     };
     const exec: SqlExecutor = {
       run: async () => {},
@@ -326,6 +393,7 @@ describe("WorkstationSetup", () => {
       scanner: { port: "COM3", baud: 9600 },
       printer: null,
       printerLanguage: "zpl",
+      verifyPrintedLabel: false,
     };
     const exec: SqlExecutor = {
       run: async () => {},
@@ -365,6 +433,7 @@ describe("WorkstationSetup", () => {
       scanner: null,
       printer: { kind: "tcp", host: "10.0.0.9", port: 9200 },
       printerLanguage: "zpl",
+      verifyPrintedLabel: false,
     };
     const exec: SqlExecutor = {
       run: async () => {},
@@ -400,6 +469,7 @@ describe("WorkstationSetup", () => {
       scanner: { port: "COM3", baud: 9600 },
       printer: null,
       printerLanguage: "zpl",
+      verifyPrintedLabel: false,
     };
     const exec: SqlExecutor = {
       run: async () => {},
@@ -578,6 +648,7 @@ describe("WorkstationSetup", () => {
       scanner: null,
       printer: { kind: "tcp", host: "10.0.0.9", port: 9200 },
       printerLanguage: "zpl",
+      verifyPrintedLabel: false,
     };
     const exec: SqlExecutor = {
       run: async () => {},
@@ -616,6 +687,7 @@ describe("WorkstationSetup", () => {
       scanner: { port: "COM9", baud: 19200 },
       printer: { kind: "serial", port: "COM7", baud: 19200 },
       printerLanguage: "tspl",
+      verifyPrintedLabel: false,
     };
     let resolveAll: (rows: unknown[]) => void = () => {};
     const exec: SqlExecutor = {
@@ -693,6 +765,7 @@ describe("WorkstationSetup", () => {
       scanner: null,
       printer: { kind: "tcp", host: "10.0.0.9", port: 9200 },
       printerLanguage: "zpl",
+      verifyPrintedLabel: false,
     };
     const exec: SqlExecutor = {
       run: async () => {},

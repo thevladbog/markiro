@@ -205,6 +205,8 @@ export function ShiftsPage() {
         lineId: editingShift.lineId ?? "",
         counterpartyId: editingShift.counterpartyId ?? "",
         labelTemplateId: editingShift.labelTemplateId ?? "",
+        ssccIssuerCounterpartyId: editingShift.ssccIssuerCounterpartyId ?? "",
+        boxLabelTemplateId: editingShift.boxLabelTemplateId ?? "",
         boxCapacity: editingShift.boxCapacity !== null ? String(editingShift.boxCapacity) : "",
         palletCapacity:
           editingShift.palletCapacity !== null ? String(editingShift.palletCapacity) : "",

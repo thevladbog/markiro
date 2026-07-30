@@ -69,6 +69,7 @@ export function useSyncEngine(deps: UseSyncEngineDeps): UseSyncEngineResult {
     lastSuccessAt: null,
     stuck: false,
     conflicts: 0,
+    serialsLeft: 0,
   });
   const engineRef = useRef<SyncEngine | null>(null);
 

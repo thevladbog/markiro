@@ -7,6 +7,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Req,
   UseGuards,
 } from "@nestjs/common";
@@ -16,10 +17,12 @@ import { SessionOnlyGuard } from "../../tenancy/session-only.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
   createCounterpartySchema,
+  ssccCounterSchema,
   updateCounterpartySchema,
   type CounterpartyDto,
   type CreateCounterpartyDto,
   type ListCounterpartiesResponseDto,
+  type SsccCounterDto,
   type UpdateCounterpartyDto,
 } from "./dto";
 import { CounterpartiesService } from "./counterparties.service";
@@ -66,5 +69,19 @@ export class CounterpartiesController {
   @HttpCode(204)
   async deleteCounterparty(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<void> {
     return this.counterpartiesService.deleteCounterparty(req.tenantId!, id);
+  }
+
+  @Get(":id/sscc")
+  async getSscc(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<SsccCounterDto> {
+    return this.counterpartiesService.getSscc(req.tenantId!, id);
+  }
+
+  @Put(":id/sscc")
+  async putSscc(
+    @Req() req: RequestWithTenant,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(ssccCounterSchema)) body: SsccCounterDto,
+  ): Promise<SsccCounterDto> {
+    return this.counterpartiesService.putSscc(req.tenantId!, id, body);
   }
 }

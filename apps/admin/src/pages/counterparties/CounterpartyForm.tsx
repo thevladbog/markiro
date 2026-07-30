@@ -6,10 +6,16 @@ import { useTranslation } from "react-i18next";
 import { z } from "zod";
 
 import { hasValidCheckDigit } from "@markiro/domain";
-import { Button, Input, Modal } from "@markiro/ui";
+import { Alert, Button, Input, Modal, Spinner } from "@markiro/ui";
 
+import { ApiRequestError } from "../../api/client.js";
 import { errorProp } from "../../lib/form-error.js";
-import type { CreateCounterpartyInput } from "./api.js";
+import { toast } from "../../lib/toast.js";
+import {
+  useCounterpartySscc,
+  useUpdateCounterpartySscc,
+  type CreateCounterpartyInput,
+} from "./api.js";
 
 /**
  * Client-side mirror of the server's zod schema
@@ -52,10 +58,44 @@ export interface CounterpartyFormProps {
   open: boolean;
   mode: "create" | "edit";
   initialValues?: CounterpartyFormValues;
+  /** Only present in edit mode -- the SSCC counter section below needs an existing counterparty to key its GET/PUT on. */
+  counterpartyId?: string;
   submitting?: boolean;
   onSubmit: (input: CreateCounterpartyInput) => void | Promise<void>;
   onClose: () => void;
 }
+
+/**
+ * Boxes take extension digit 0; 1 is reserved for pallets (06d) -- see
+ * `apps/api/src/modules/sscc/sscc.service.ts`'s `BOX_EXTENSION_DIGIT`. Same
+ * fixed-digit choice as `pages/settings/OrgProfilePage.tsx`'s counter form.
+ */
+const BOX_EXTENSION_DIGIT = 0;
+
+/** A GS1 GLN is always exactly 13 digits; the issuer prefix is its first 9 -- mirrors the server's `deriveIssuerPrefix`. */
+const GLN_PATTERN = /^\d{13}$/;
+
+function derivePrefix(gln: string | undefined): string | null {
+  if (!gln || !GLN_PATTERN.test(gln)) return null;
+  return gln.slice(0, 9);
+}
+
+/**
+ * Mirrors `apps/api/src/modules/org-profile/dto.ts`'s `ssccCounterSchema`
+ * (`nextSerial`: 0..9_999_999). Kept as a string in form state, same
+ * convention as `ProductForm.tsx`'s capacity fields.
+ */
+const ssccFormSchema = z.object({
+  nextSerial: z
+    .string()
+    .trim()
+    .refine((v) => /^\d+$/.test(v), "pages.counterparties.form.sscc.errors.nextSerialInvalid")
+    .refine(
+      (v) => Number(v) <= 9_999_999,
+      "pages.counterparties.form.sscc.errors.nextSerialInvalid",
+    ),
+});
+type SsccFormValues = z.infer<typeof ssccFormSchema>;
 
 const EMPTY_VALUES: CounterpartyFormValues = {
   name: "",
@@ -76,6 +116,7 @@ export function CounterpartyForm({
   open,
   mode,
   initialValues,
+  counterpartyId,
   submitting = false,
   onSubmit,
   onClose,
@@ -164,7 +205,118 @@ export function CounterpartyForm({
           {...register("notes")}
         />
       </form>
+
+      {/* Sibling to (not nested in) the form above -- its own resource
+          (`GET/PUT /counterparties/:id/sscc`) with its own save action, kept
+          out of the outer form so saving it never runs the name/gln/notes
+          validation above. Only meaningful once the counterparty exists. */}
+      {mode === "edit" && counterpartyId && (
+        <CounterpartySsccSection counterpartyId={counterpartyId} gln={initialValues?.gln} />
+      )}
     </Modal>
+  );
+}
+
+function CounterpartySsccSection({
+  counterpartyId,
+  gln,
+}: {
+  counterpartyId: string;
+  gln: string | undefined;
+}) {
+  const { t } = useTranslation();
+  const ssccQuery = useCounterpartySscc(counterpartyId);
+  const updateSscc = useUpdateCounterpartySscc();
+  const derivedPrefix = derivePrefix(gln);
+
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors },
+  } = useForm<SsccFormValues>({
+    resolver: zodResolver(ssccFormSchema),
+    defaultValues: { nextSerial: "0" },
+  });
+
+  useEffect(() => {
+    if (ssccQuery.data) {
+      reset({ nextSerial: String(ssccQuery.data.nextSerial) });
+    }
+  }, [ssccQuery.data, reset]);
+
+  const submit = handleSubmit(async (values) => {
+    try {
+      await updateSscc.mutateAsync({
+        id: counterpartyId,
+        input: { extensionDigit: BOX_EXTENSION_DIGIT, nextSerial: Number(values.nextSerial) },
+      });
+      toast("ok", t("pages.counterparties.form.sscc.toasts.updateSuccess"));
+    } catch (error) {
+      toast(
+        "error",
+        error instanceof ApiRequestError
+          ? error.message
+          : t("pages.counterparties.form.sscc.toasts.updateError"),
+      );
+    }
+  });
+
+  return (
+    <div
+      style={{
+        marginTop: 20,
+        paddingTop: 20,
+        borderTop: "1px solid var(--line)",
+        display: "flex",
+        flexDirection: "column",
+        gap: 16,
+      }}
+    >
+      <div>
+        <span style={{ font: "var(--text-h3)", color: "var(--fg-1)" }}>
+          {t("pages.counterparties.form.sscc.cardTitle")}
+        </span>
+        <p style={{ font: "var(--text-body)", color: "var(--fg-2)", margin: "4px 0 0" }}>
+          {t("pages.counterparties.form.sscc.description")}
+        </p>
+      </div>
+
+      {ssccQuery.isPending ? (
+        <div style={{ display: "flex", justifyContent: "center", padding: 16 }}>
+          <Spinner label={t("common.loading")} />
+        </div>
+      ) : ssccQuery.isError ? (
+        <Alert tone="error">{t("common.loadError")}</Alert>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <Input
+            label={t("pages.counterparties.form.sscc.prefixLabel")}
+            mono
+            readOnly
+            disabled
+            value={derivedPrefix ?? ""}
+          />
+          <Input
+            label={t("pages.counterparties.form.sscc.nextSerialLabel")}
+            mono
+            inputMode="numeric"
+            {...errorProp(translateFieldError(t, errors.nextSerial?.message))}
+            {...register("nextSerial")}
+          />
+          <div>
+            <Button
+              type="button"
+              loading={updateSscc.isPending}
+              disabled={!derivedPrefix}
+              onClick={() => void submit()}
+            >
+              {t("pages.counterparties.form.sscc.save")}
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
