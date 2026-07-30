@@ -158,11 +158,32 @@ export function WorkScreen({
   // now that Finding 3 makes a non-print visible -- show "print unavailable"
   // for a label that would have printed fine a moment later.
   const labelSpecReady = useRef<Promise<void> | null>(null);
-  const [verification, setVerification] = useState<{
+  // CodeRabbit PR33 review, Finding 9: a QUEUE, not a single slot. Printing
+  // is fired per box without being awaited by `closeTheBox` (a slow printer
+  // must never delay the next scan), so with box capacity 1 (or a slow
+  // printer) two boxes can finish printing in close succession. A single
+  // `verification` slot would have the second box's prompt silently
+  // overwrite -- and permanently lose -- the first's, leaving that box's
+  // `print_verified_at`/`print_skipped_at` null forever (the operator never
+  // even sees a prompt to resolve it against). Queuing means every box that
+  // printed gets its own prompt, shown one at a time in arrival order; none
+  // is silently dropped.
+  const [verificationQueue, setVerificationQueue] = useState<
+    Array<{ sscc: string; bytes: Uint8Array | null; boxId: string | null }>
+  >([]);
+  /** The one prompt currently shown, or null when the queue is empty. */
+  const verification = verificationQueue[0] ?? null;
+  function enqueueVerification(entry: {
     sscc: string;
     bytes: Uint8Array | null;
     boxId: string | null;
-  } | null>(null);
+  }): void {
+    setVerificationQueue((q) => [...q, entry]);
+  }
+  /** Drops the currently-shown prompt, revealing the next queued one (if any). */
+  function dequeueVerification(): void {
+    setVerificationQueue((q) => q.slice(1));
+  }
   // Verification was requested (the workstation setting is on) but the box
   // closed without a genuine print -- no label spec, no printer configured,
   // or rendering/printing itself threw (Task 13 review, Finding 3). Told to
@@ -177,6 +198,27 @@ export function WorkScreen({
   // seeing the current box id.
   const verificationRef = useRef(verification);
   verificationRef.current = verification;
+  // CodeRabbit PR33 review, Finding 9: serializes every `printing.print(...)`
+  // call -- a native/hardware call with no serialization of its own -- so
+  // two boxes closing in quick succession (box capacity 1, or a slow
+  // printer) can never send two labels to the printer concurrently, which
+  // could arrive out of order or fail on a busy serial port. Deliberately
+  // scoped to ONLY the printer call, not the whole print-and-verify flow:
+  // scanning itself (and rendering each box's own label bytes) must stay
+  // non-blocking, and only the shared printer resource needs exclusive
+  // access. A promise chain, not a lock flag: each job attaches to the
+  // TAIL of whatever is already queued, and the tail is always renormalized
+  // to a non-rejecting promise so one job's failure (already handled by its
+  // own caller) never poisons the chain for jobs queued after it.
+  const printQueueRef = useRef<Promise<void>>(Promise.resolve());
+  function serializePrint<T>(job: () => Promise<T>): Promise<T> {
+    const started = printQueueRef.current.then(job);
+    printQueueRef.current = started.then(
+      () => undefined,
+      () => undefined,
+    );
+    return started;
+  }
 
   // Ref-based in-flight guard around `closeTheBox`, mirroring `boxRef` above:
   // checked and set synchronously, before any `await`, so a double-tap of
@@ -328,6 +370,17 @@ export function WorkScreen({
    * with only a `console.error` -- silent to the operator. Verification is
    * the separate, opt-in question of whether a print that DID happen gets
    * checked; it is not what makes a failed print visible.
+   *
+   * `printing.print(...)` itself runs through `serializePrint` (CodeRabbit
+   * PR33 review, Finding 9): rendering (`renderLabelBytes`, pure
+   * computation) stays unserialized -- each call renders its OWN box's bytes
+   * independently -- but the actual printer call is queued, so two boxes
+   * closing in quick succession never send two labels to the printer at
+   * once. A resolved verification prompt is QUEUED (`enqueueVerification`),
+   * never simply set, for the same reason: this function itself can be
+   * in flight for more than one box at a time (it is never awaited by
+   * `closeTheBox`), so two boxes finishing printing in close succession
+   * must not have the second's prompt silently overwrite the first's.
    */
   async function printAndMaybeVerify(
     result: { sscc: string; itemCount: number },
@@ -353,7 +406,8 @@ export function WorkScreen({
           printing.language,
           rasterizeText,
         );
-        await printing.print(printing.target, bytes);
+        const printBytes = bytes;
+        await serializePrint(() => printing.print(printing.target, printBytes));
         printed = true;
       } catch (err) {
         console.error("station: rendering or printing the box label failed", err);
@@ -366,7 +420,7 @@ export function WorkScreen({
     }
     setPrintUnavailable(false);
     if (!verifyPrintedLabel) return;
-    setVerification({ sscc: result.sscc, bytes, boxId: closedBoxId });
+    enqueueVerification({ sscc: result.sscc, bytes, boxId: closedBoxId });
   }
 
   /**
@@ -669,7 +723,10 @@ export function WorkScreen({
   // stable identity in the first place.
   const handleVerified = useCallback(() => {
     const boxId = verificationRef.current?.boxId ?? null;
-    setVerification(null);
+    // Reveals the next queued prompt (if any), rather than clearing to
+    // empty outright (Finding 9) -- see `verificationQueue`'s own doc
+    // comment.
+    dequeueVerification();
     // `.catch`, not a bare `void` (Task 13 review, "also fix, cheap"): a
     // locked-DB write here would otherwise become an unhandled rejection,
     // and unlike a rendering/printing failure (which the operator can see
@@ -813,15 +870,24 @@ export function WorkScreen({
             // `.catch`, not a bare `void` (Task 13 review, "also fix,
             // cheap"): a rejected printer call must not become an unhandled
             // rejection just because this handler cannot itself await it.
+            // Routed through `serializePrint` too (Finding 9): a manual
+            // reprint shares the same physical printer as an ordinary
+            // box-close print, and could otherwise overlap with one for a
+            // DIFFERENT box closing at the same moment.
             if (verification.bytes && printing) {
-              printing.print(printing.target, verification.bytes).catch((err: unknown) => {
-                console.error("station: reprinting the box label failed", err);
-              });
+              const reprintBytes = verification.bytes;
+              serializePrint(() => printing.print(printing.target, reprintBytes)).catch(
+                (err: unknown) => {
+                  console.error("station: reprinting the box label failed", err);
+                },
+              );
             }
           }}
           onSkip={() => {
             const boxId = verification.boxId;
-            setVerification(null);
+            // Reveals the next queued prompt (if any) -- see
+            // `verificationQueue`'s own doc comment (Finding 9).
+            dequeueVerification();
             // `.catch`, not a bare `void` -- see `handleVerified` above for
             // why.
             if (boxId) {
