@@ -68,10 +68,7 @@ type ParsedItem =
   | { rawKm: string; ok: false; conflictReason: "not_km" | "incomplete" };
 
 export type ApplyExternalStatusOutcome =
-  | "applied"
-  | "not_found"
-  | "not_pending"
-  | "missing_writeoff_reason";
+  "applied" | "not_found" | "not_pending" | "missing_writeoff_reason";
 
 export interface ApplyExternalStatusResult {
   outcome: ApplyExternalStatusOutcome;
@@ -549,6 +546,7 @@ export class PickupOrdersService {
         serial: schema.pickupOrderItems.serial,
         rawKm: schema.pickupOrderItems.rawKm,
         productName: schema.products.name,
+        externalRef: schema.products.externalRef,
         unitPrice: schema.pickupOrderItems.unitPrice,
       })
       .from(schema.pickupOrderItems)
@@ -559,6 +557,12 @@ export class PickupOrdersService {
           eq(schema.pickupOrderItems.orderId, id),
         ),
       );
+
+    const exportHeldProductNames = [
+      ...new Set(
+        itemRows.filter((item) => item.externalRef === null).map((item) => item.productName ?? ""),
+      ),
+    ];
 
     return {
       ...this.mapRowDto(row),
@@ -574,6 +578,7 @@ export class PickupOrdersService {
       receiptNo: row.receiptNo,
       actNo: row.actNo,
       syncConflicts: (row.syncConflicts as OrderConflict[] | null) ?? [],
+      exportHeldProductNames,
     };
   }
 
@@ -947,6 +952,7 @@ export class PickupOrdersService {
       totalPrice: schema.pickupOrders.totalPrice,
       status: schema.pickupOrders.status,
       createdAt: schema.pickupOrders.createdAt,
+      exportedAt: schema.pickupOrders.exportedAt,
       syncConflicts: schema.pickupOrders.syncConflicts,
     };
   }
@@ -962,6 +968,7 @@ export class PickupOrdersService {
     totalPrice: string | null;
     status: "pending" | "punched" | "writtenoff" | "cancelled";
     createdAt: Date;
+    exportedAt: Date | null;
     syncConflicts: { rawKm: string; reason: string }[] | null;
   }): PickupOrderRowDto {
     return {
@@ -975,6 +982,7 @@ export class PickupOrdersService {
       totalPrice: row.totalPrice,
       status: row.status,
       createdAt: row.createdAt,
+      exportedAt: row.exportedAt,
       conflictCount: row.syncConflicts?.length ?? 0,
     };
   }

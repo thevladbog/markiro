@@ -420,6 +420,47 @@ describe("ChannelPage", () => {
   // channel (see `channel-registry.ts`'s `usesExchangeCredentials` and
   // `IntegrationsService.issueCredentials`'s guard on it). `public_api`'s
   // real "settings" are the key list, not this.
+  // Task 15 (И-2): the order-status-mapping sub-form -- a repeatable
+  // key/value editor backed by `useFieldArray`, whose value half is a
+  // `Controller`-wrapped `Select` (a controlled component), not a
+  // `register()`-bound native `<select>` (which react-hook-form cannot
+  // drive correctly for a controlled component like `@markiro/ui`'s `Select`).
+  it("сохраняет тип документа списания, реквизит статуса и сопоставление статусов", async () => {
+    renderChannel("commerceml");
+
+    await userEvent.type(
+      await screen.findByLabelText(/тип документа для списания/i),
+      "СписаниеТоваров",
+    );
+    await userEvent.type(await screen.findByLabelText(/реквизит статуса заказа/i), "Статус");
+
+    await userEvent.click(screen.getByRole("button", { name: /добавить строку/i }));
+    await userEvent.type(screen.getByPlaceholderText(/внешнее значение/i), "ЗаказВыполнен");
+    await userEvent.selectOptions(screen.getByRole("combobox"), "writtenoff");
+
+    await userEvent.click(screen.getByRole("button", { name: /сохранить/i }));
+
+    expect(patchSpy).toHaveBeenCalledWith(
+      "/integrations/commerceml",
+      expect.objectContaining({
+        writeoffDocumentType: "СписаниеТоваров",
+        orderStatusField: "Статус",
+        statusMapping: { ЗаказВыполнен: "writtenoff" },
+      }),
+    );
+  });
+
+  it("отбрасывает строки сопоставления статусов с пустым внешним значением", async () => {
+    renderChannel("commerceml");
+
+    await userEvent.click(await screen.findByRole("button", { name: /добавить строку/i }));
+    await userEvent.click(screen.getByRole("button", { name: /сохранить/i }));
+
+    const call = patchSpy.mock.calls.find((c) => c[0] === "/integrations/commerceml");
+    expect(call).toBeDefined();
+    expect(call?.[1]).not.toHaveProperty("statusMapping");
+  });
+
   it("не показывает выпуск учётных данных обмена для канала без обмена (public_api)", async () => {
     renderChannel("public_api");
 
