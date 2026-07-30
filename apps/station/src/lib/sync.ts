@@ -304,18 +304,47 @@ function boxSetSignature(boxes: BoxClosureRow[]): string {
 }
 
 /**
- * Marks every one of these boxes acknowledged -- one statement, an IN list
- * rather than one UPDATE per box, since `box_id` alone (no tenant/shift
- * scoping needed here; this is the device's OWN table) already names each
- * row uniquely.
+ * Marks each of these boxes acknowledged -- CONDITIONALLY (CodeRabbit PR33
+ * review, Finding 6): only if its print-verification outcome still matches
+ * what was actually read into the payload this ack is FOR, at
+ * payload-build time (`boxes`, the exact rows `readClosedUnackedBoxes`
+ * returned for this send). One UPDATE per box, not a single IN-list
+ * statement, because each box's own `printVerifiedAt`/`printSkippedAt` at
+ * that moment can differ from its batch-mates', so one shared WHERE cannot
+ * express every box's own condition at once.
+ *
+ * The race this closes: `markPrintVerified`/`markPrintSkipped` can resolve
+ * a box's outcome AFTER its closure has already been read into an
+ * in-flight upload's payload but BEFORE that upload's response is
+ * acknowledged. Both of those functions clear `acked_at` on their own write
+ * (see their own doc comments) specifically to re-open a resend window --
+ * but an unconditional ack here would immediately re-close that SAME
+ * window on the strength of a response that was for the OLD (still-null)
+ * outcome, permanently losing the just-recorded resolution (it would never
+ * be read by `readClosedUnackedBoxes` again). Gating on the STALE values
+ * captured at payload-build time means: if the row's outcome is unchanged
+ * since then, this ack lands normally; if it changed in that window, this
+ * ack is correctly a no-op -- the row stays unacked and the next drain
+ * resends it, carrying the real, now-resolved outcome.
+ *
+ * `IS`, not `=`, for both comparisons: SQLite's `=` is never true against
+ * NULL (three-valued logic), so a box whose outcome was -- and still is --
+ * unresolved (both columns null) would never match its own WHERE under
+ * `=`. `IS` is null-safe, so `print_verified_at IS NULL` correctly matches
+ * a still-null column.
  */
-async function ackBoxes(exec: SqlExecutor, boxIds: string[], ackedAt: string): Promise<void> {
-  if (boxIds.length === 0) return;
-  const placeholders = boxIds.map(() => "?").join(",");
-  await exec.run(`UPDATE boxes_mirror SET acked_at = ? WHERE box_id IN (${placeholders})`, [
-    ackedAt,
-    ...boxIds,
-  ]);
+async function ackBoxes(
+  exec: SqlExecutor,
+  boxes: BoxClosureRow[],
+  ackedAt: string,
+): Promise<void> {
+  for (const box of boxes) {
+    await exec.run(
+      `UPDATE boxes_mirror SET acked_at = ?
+       WHERE box_id = ? AND print_verified_at IS ? AND print_skipped_at IS ?`,
+      [ackedAt, box.boxId, box.printVerifiedAt, box.printSkippedAt],
+    );
+  }
 }
 
 /**
@@ -759,11 +788,10 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
             await clearPersistedCeiling(deps.exec, CEILING_META_KEY);
           }
           if (boxes.length > 0) {
-            await ackBoxes(
-              deps.exec,
-              boxes.map((b) => b.boxId),
-              new Date(now()).toISOString(),
-            );
+            // `boxes` itself -- not just the ids -- so the ack can gate each
+            // row on the outcome fields actually read into THIS payload
+            // (Finding 6): see `ackBoxes`'s own doc comment.
+            await ackBoxes(deps.exec, boxes, new Date(now()).toISOString());
             pendingBoxCeiling = null;
             await clearPersistedCeiling(deps.exec, BOX_CEILING_META_KEY);
           }

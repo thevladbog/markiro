@@ -1200,6 +1200,86 @@ describe("sync engine: pools and closures", () => {
     ]);
   });
 
+  // CodeRabbit PR33 review, Finding 6: `ackBoxes` used to be unconditional.
+  // If `markPrintVerified`/`markPrintSkipped` resolves the operator's
+  // decision AFTER a closure has already been read into an outgoing
+  // payload but BEFORE that upload's response arrives, the in-flight
+  // response's ack would still land unconditionally -- clearing the
+  // resend window `markPrintVerified` itself just opened, on the strength
+  // of a response that was for the OLD (still-null) outcome. The resolved
+  // outcome would then never reach the server: the row is already acked,
+  // so `readClosedUnackedBoxes` never picks it up again.
+  //
+  // The mock's implementation performs the resolution AS A SIDE EFFECT of
+  // resolving the FIRST POST, which is exactly this race: by the time
+  // `post` resolves, `readClosedUnackedBoxes`'s own read (with the stale
+  // null outcome) has already happened and captured the payload, but the
+  // ack that follows the response must see the row as it is NOW, not as it
+  // was when read. The drain loop's own `for` loop then immediately retries
+  // (still within this ONE `nudge()`, since nothing failed -- only a stale
+  // ack was skipped) and resends the box with its real, resolved outcome,
+  // which this time matches and genuinely acks.
+  it(
+    "does not acknowledge a box whose print-verification outcome resolves between reading the " +
+      "payload and acking it, resending it with the real outcome instead",
+    async () => {
+      await drainOnce(); // drains away the default seeded scan.
+      await openBox(exec, SHIFT, "b1", ISO, TERMINAL);
+      await closeBox(exec, "b1", SSCC, ISO, null);
+
+      const RESOLVED_AT = "2026-07-29T10:05:00.000Z";
+      let resolvedOnce = false;
+      const raceOnce = vi.fn().mockImplementation(async () => {
+        if (!resolvedOnce) {
+          resolvedOnce = true;
+          // The operator resolves the prompt WHILE this FIRST response is
+          // still in flight -- after readClosedUnackedBoxes already built
+          // the payload (carrying printVerifiedAt: null), but before the
+          // ack below runs.
+          await markPrintVerified(exec, "b1", RESOLVED_AT);
+        }
+        return { applied: 0, alreadyApplied: false, conflicts: [] };
+      });
+      const engine = createSyncEngine({
+        exec,
+        client: { post: raceOnce },
+        machineId: "m1",
+        onState: () => {},
+      });
+      engine.nudge();
+      await engine.idle();
+      engine.stop();
+
+      // The self-healing retry happens within this SAME drain (no separate
+      // nudge needed): the first send carried the stale null outcome and
+      // was correctly skipped by the ack guard; the second carries the now
+      // -resolved outcome and genuinely acks.
+      expect(raceOnce).toHaveBeenCalledTimes(2);
+      const firstSent = (raceOnce.mock.calls[0]![1] as { boxes: Array<{ printVerifiedAt: unknown }> })
+        .boxes;
+      expect(firstSent).toEqual([expect.objectContaining({ boxId: "b1", printVerifiedAt: null })]);
+      const secondSent = (raceOnce.mock.calls[1]![1] as { boxes: Array<{ printVerifiedAt: unknown }> })
+        .boxes;
+      expect(secondSent).toEqual([
+        expect.objectContaining({ boxId: "b1", printVerifiedAt: RESOLVED_AT }),
+      ]);
+
+      // The fix under test, directly: after settling, the row is acked and
+      // carries the REAL outcome -- never lost to the first (stale) ack
+      // attempt.
+      const rows = await exec.all<{ acked_at: string | null; print_verified_at: string | null }>(
+        "SELECT acked_at, print_verified_at FROM boxes_mirror WHERE box_id = ?",
+        ["b1"],
+      );
+      expect(rows[0]!.print_verified_at).toBe(RESOLVED_AT);
+      expect(rows[0]!.acked_at).not.toBeNull();
+
+      // Nothing left to resend -- the ack genuinely stuck.
+      await drainOnce();
+      expect(JSON.parse(lastBody()).boxes).toEqual([]);
+    },
+  );
+
   // A box can close well after its last item was drained -- the shift's
   // last box, with nothing left queued behind it. This pins the path with
   // no outbox maxId at all (batch.length === 0, boxes.length > 0): the
