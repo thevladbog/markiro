@@ -788,6 +788,12 @@ export class ExchangeController {
         grain: "item",
         message: `заявка придержана — товар без связи с 1С: ${held.orderNo}`,
         details: { orderId: held.orderId, orderNo: held.orderNo, unlinkedProductIds: held.unlinkedProductIds },
+      }).catch((error: unknown) => {
+        this.logger.warn(
+          `query: held-order journal failed (continuing): ${held.orderNo} — ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
       });
     }
 
