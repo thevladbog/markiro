@@ -57,4 +57,102 @@ describe("commerceml parse", () => {
   it("сообщает о неразобранном XML, а не возвращает пустоту", () => {
     expect(() => parseCatalog(Buffer.from("<не xml", "utf8"))).toThrow(/CommerceML/);
   });
+
+  // Review fix (PR #32, item 5): an unrecognised `encoding="..."` used to
+  // reach the caller as Node's own `RangeError` message ("The \"encoding\"
+  // argument..."), not the "CommerceML: не удалось разобрать XML" wrapper
+  // every other parse failure gets -- the one thing a 1С specialist reading
+  // the journal actually knows to look for.
+  it("сообщает о неразобранной кодировке тем же сообщением CommerceML, а не сырым RangeError", () => {
+    const bytes = Buffer.from(
+      '<?xml version="1.0" encoding="such-encoding-does-not-exist"?><a/>',
+      "utf8",
+    );
+    expect(() => parseCatalog(bytes)).toThrow(/CommerceML/);
+  });
+
+  // Review fix (PR #32, item 1 -- Security): `/1c_exchange` is the one route
+  // in this API reachable with no credential at all, so this parser is the
+  // one XML parse call in the codebase an anonymous caller controls end to
+  // end. fast-xml-parser defaults to expanding `<!DOCTYPE>` entities
+  // (`processEntities: true`); this file's own `parseXml` turns that off.
+  // These two cases are the classic "billion laughs" shapes -- proof the
+  // parse neither hangs nor blows up memory, not just that it "still works".
+  it("сущность, ссылающаяся на другие сущности (billion laughs), не раздувается и не виснет", () => {
+    const bomb = Buffer.from(
+      [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        "<!DOCTYPE d [",
+        ' <!ENTITY lol "lol">',
+        ' <!ENTITY lol1 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">',
+        ' <!ENTITY lol2 "&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;">',
+        ' <!ENTITY lol3 "&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;">',
+        "]>",
+        "<КоммерческаяИнформация><Каталог><Товары><Товар>",
+        "<Ид>guid-bomb</Ид><Наименование>&lol3;</Наименование>",
+        "</Товар></Товары></Каталог></КоммерческаяИнформация>",
+      ].join(""),
+      "utf8",
+    );
+
+    const startedAt = Date.now();
+    const catalog = parseCatalog(bomb);
+    const elapsedMs = Date.now() - startedAt;
+
+    // Fast: a genuine expansion of this shape is gigabytes of text: this
+    // must not even come close to spending real time computing it.
+    expect(elapsedMs).toBeLessThan(2000);
+    // Not expanded at all: with `processEntities: false`, the reference is
+    // left exactly as it arrived -- proof no substitution happened, not just
+    // that whatever came back is merely short.
+    expect(catalog.items[0]!.name).toBe("&lol3;");
+  });
+
+  it("одна сущность, повторённая много раз (амплификация без вложенности), тоже не раздувается", () => {
+    const bigEntityValue = "A".repeat(9999);
+    const repeatedRef = "&big;".repeat(20_000);
+    const bomb = Buffer.from(
+      [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        `<!DOCTYPE d [ <!ENTITY big "${bigEntityValue}"> ]>`,
+        "<КоммерческаяИнформация><Каталог><Товары><Товар>",
+        `<Ид>guid-amplify</Ид><Наименование>${repeatedRef}</Наименование>`,
+        "</Товар></Товары></Каталог></КоммерческаяИнформация>",
+      ].join(""),
+      "utf8",
+    );
+
+    const before = process.memoryUsage().heapUsed;
+    const startedAt = Date.now();
+    const catalog = parseCatalog(bomb);
+    const elapsedMs = Date.now() - startedAt;
+    const heapDeltaMb = (process.memoryUsage().heapUsed - before) / 1e6;
+
+    expect(elapsedMs).toBeLessThan(2000);
+    // The raw file itself is ~100KB (20,000 * 5-byte references); a real
+    // expansion would be ~190MB (20,000 * 9999 chars). A generous ceiling
+    // here still catches that blowup without being flaky over ordinary GC
+    // noise.
+    expect(heapDeltaMb).toBeLessThan(50);
+    expect(catalog.items[0]!.name.length).toBeLessThan(repeatedRef.length + 1);
+  });
+
+  // Review fix (PR #32, item 1): `processEntities: false` must not take the
+  // five entities XML itself defines down with it -- a product name
+  // legitimately containing `&` or `<` MUST be escaped to stay well-formed
+  // XML, and this parser is still the one thing that has to read it back.
+  it("раскрывает пять предопределённых сущностей XML несмотря на отключённый processEntities", () => {
+    const bytes = Buffer.from(
+      [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        "<КоммерческаяИнформация><Каталог><Товары><Товар>",
+        "<Ид>guid-entities</Ид>",
+        "<Наименование>Соль &amp; перец &lt;3&gt; &quot;острый&quot; &apos;набор&apos;</Наименование>",
+        "</Товар></Товары></Каталог></КоммерческаяИнформация>",
+      ].join(""),
+      "utf8",
+    );
+    const catalog = parseCatalog(bytes);
+    expect(catalog.items[0]!.name).toBe(`Соль & перец <3> "острый" 'набор'`);
+  });
 });

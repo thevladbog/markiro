@@ -93,9 +93,53 @@ function declaredEncoding(bytes: Buffer): string {
   return match?.[1]?.trim() || "utf-8";
 }
 
+/**
+ * `declaredEncoding`'s own comment covers why the label comes straight off
+ * the file. `TextDecoder`'s constructor throws a plain `RangeError` (not
+ * something naming CommerceML) for a label it doesn't recognise -- an
+ * attacker-controlled `encoding="..."` on this ungated route (see
+ * exchange.controller.ts's class-level comment), or simply a 1С
+ * configuration exporting under a label Node's ICU build doesn't carry. Any
+ * throw here must reach the caller the SAME shape a genuine parse failure
+ * does -- one message naming CommerceML, not a bare "Invalid encoding label"
+ * that a 1С specialist reading the journal has no reason to connect to their
+ * export.
+ */
 function decode(bytes: Buffer): string {
   const encoding = declaredEncoding(bytes);
-  return new TextDecoder(encoding).decode(bytes);
+  try {
+    return new TextDecoder(encoding).decode(bytes);
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    throw new Error(`CommerceML: не удалось разобрать XML (${detail})`, { cause });
+  }
+}
+
+/**
+ * The five entities XML itself defines (`&lt; &gt; &amp; &quot; &apos;`) --
+ * and ONLY these. A single, non-recursive, linear pass (`String.replace` with
+ * a global regex never re-scans text it has already substituted), so this
+ * cannot itself be turned into an expansion attack: there is no table of
+ * custom names to grow, nested, or reference each other. `parseXml` below
+ * turns off fast-xml-parser's own entity substitution entirely
+ * (`processEntities: false`) -- this is what puts those five predefined
+ * entities, which a genuine CommerceML product name legitimately needs
+ * (a name containing literal `&` or `<` MUST be escaped to stay well-formed
+ * XML), back without reopening the door `processEntities` closes.
+ */
+const PREDEFINED_XML_ENTITIES: Readonly<Record<string, string>> = {
+  lt: "<",
+  gt: ">",
+  amp: "&",
+  quot: '"',
+  apos: "'",
+};
+
+function decodePredefinedXmlEntities(text: string): string {
+  return text.replace(
+    /&(lt|gt|amp|quot|apos);/g,
+    (_match, name: string) => PREDEFINED_XML_ENTITIES[name]!,
+  );
 }
 
 /**
@@ -104,6 +148,22 @@ function decode(bytes: Buffer): string {
  * this throws ends up in the integration journal, read by a 1С specialist on
  * the client's side, so it names CommerceML and gives a position rather than
  * a bare parser error.
+ *
+ * Review fix (PR #32, item 1 -- Security): `bytes` arrives over `/1c_exchange`, the
+ * one route in this whole API reachable with no credential at all (see
+ * exchange.controller.ts's class-level comment) -- so this is the one XML
+ * parse call in the codebase an anonymous caller controls end to end.
+ * fast-xml-parser v5 defaults `processEntities` to `true`: a `<!DOCTYPE>`
+ * carrying `<!ENTITY>` declarations gets expanded during parsing, the classic
+ * "billion laughs" shape, and the library's own advisory history (several
+ * GHSAs against its expansion limits, the most recent fixed only in 5.10.1 --
+ * the exact version pinned here) shows those built-in limits have been
+ * bypassed before. CommerceML never legitimately declares a custom entity --
+ * 1С's exporter has no reason to -- so there is no feature lost by refusing
+ * the whole mechanism outright rather than trusting whichever limits this
+ * dependency's CURRENT version happens to enforce. `parseTagValue: false` is
+ * unrelated: it keeps leaf values un-coerced strings (see its own comment),
+ * not entity substitution.
  */
 function parseXml(bytes: Buffer): unknown {
   const xml = decode(bytes);
@@ -113,6 +173,8 @@ function parseXml(bytes: Buffer): unknown {
     // codes like "0000" must round-trip exactly, not get coerced to numbers.
     parseTagValue: false,
     isArray: (tagName) => REPEATING_TAGS.has(tagName),
+    // Review fix (PR #32, item 1): see this function's own comment above.
+    processEntities: false,
   });
   try {
     return parser.parse(xml, true);
@@ -135,8 +197,14 @@ function dig(root: unknown, ...path: string[]): Record<string, unknown> {
   return current;
 }
 
+/**
+ * Every leaf value in the parsed tree passes through here -- the one place
+ * that applies `decodePredefinedXmlEntities`, so every field (`Наименование`,
+ * `Артикул`, `Представление`, ...) gets the same treatment regardless of
+ * which caller reads it.
+ */
 function textOf(value: unknown): string {
-  if (typeof value === "string") return value;
+  if (typeof value === "string") return decodePredefinedXmlEntities(value);
   if (typeof value === "number" || typeof value === "boolean") return String(value);
   return "";
 }
