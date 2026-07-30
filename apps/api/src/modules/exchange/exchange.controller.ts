@@ -136,6 +136,24 @@ function repeatedParamKeys(values: Record<string, string | undefined | null>): s
 }
 
 /**
+ * True exactly when `value` is a genuine Node.js `Buffer` -- the SAME
+ * runtime check `Buffer.isBuffer` itself performs, just re-declared as a
+ * type predicate IN THIS FILE. `Buffer.isBuffer`'s own `value is Buffer`
+ * signature lives in `@types/node`, a library declaration outside the
+ * source CodeQL's `js/type-confusion-through-parameter-tampering` query
+ * actually reasons about -- so a bare `Buffer.isBuffer(body)` call narrows
+ * `body` for TypeScript (see `post()`, `mode === "file"`) but leaves that
+ * analysis believing `req.body` (read as `unknown` off `express.raw()`'s
+ * output, see exchange.module.ts) could still reach `body.length` as an
+ * array or a string. Re-declaring the identical check as a LOCAL predicate
+ * makes the narrowing visible to both analyses without changing what the
+ * check actually verifies.
+ */
+function isRequestBuffer(value: unknown): value is Buffer {
+  return Buffer.isBuffer(value);
+}
+
+/**
  * Fixed wire text `mode=import` sends whenever `parseCommerceMl` throws --
  * never the real parser exception message (`detail`, below), which can
  * carry arbitrary internal detail (a fast-xml-parser message, a byte
@@ -286,7 +304,7 @@ export class ExchangeController {
 
     if (mode === "file") {
       const body: unknown = req.body;
-      if (!filename || !Buffer.isBuffer(body)) {
+      if (!filename || !isRequestBuffer(body)) {
         await this.journal.append({
           tenantId: session.tenantId,
           channelType: session.channelType,
