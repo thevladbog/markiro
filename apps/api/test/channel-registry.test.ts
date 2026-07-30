@@ -70,6 +70,45 @@ describe("channel registry", () => {
     }
   });
 
+  it("commerceml схема принимает orderStatusField и опциональна без него", () => {
+    const withField = describeChannel("commerceml").settingsSchema.safeParse({
+      orderStatusField: "СтатусЗаказа",
+    });
+    expect(withField.success).toBe(true);
+
+    const withoutField = describeChannel("commerceml").settingsSchema.safeParse({});
+    expect(withoutField.success).toBe(true);
+  });
+
+  it("commerceml схема отвергает пустой orderStatusField", () => {
+    const empty = describeChannel("commerceml").settingsSchema.safeParse({ orderStatusField: "" });
+    expect(empty.success).toBe(false);
+  });
+
+  it("commerceml схема принимает statusMapping только с известными значениями", () => {
+    const ok = describeChannel("commerceml").settingsSchema.safeParse({
+      statusMapping: { "Оплачен": "punched", "Списан": "writtenoff", "Отменён": "cancelled" },
+    });
+    expect(ok.success).toBe(true);
+
+    const bad = describeChannel("commerceml").settingsSchema.safeParse({
+      statusMapping: { "Оплачен": "pending" },
+    });
+    expect(bad.success).toBe(false);
+
+    const alsoBad = describeChannel("commerceml").settingsSchema.safeParse({
+      statusMapping: { "Оплачен": "shipped" },
+    });
+    expect(alsoBad.success).toBe(false);
+  });
+
+  it("commerceml схема принимает writeoffDocumentType", () => {
+    const ok = describeChannel("commerceml").settingsSchema.safeParse({
+      writeoffDocumentType: "Списание товара",
+    });
+    expect(ok.success).toBe(true);
+  });
+
   it("public_api канал доступен", () => {
     expect(describeChannel("public_api").available).toBe(true);
   });
