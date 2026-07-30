@@ -8,6 +8,7 @@ import type { StatusChipStatus } from "@markiro/ui";
 
 import { ApiRequestError } from "../../api/client.js";
 import { toast } from "../../lib/toast.js";
+import { ApiKeysPanel } from "./ApiKeysPanel.js";
 import { CandidatesQueue } from "./CandidatesQueue.js";
 import { JournalList } from "./JournalList.js";
 import {
@@ -228,11 +229,12 @@ function CredentialsSection({
  * One page per channel, regions per brief 08 ("Channel page"): header
  * (identity/state/last event), settings (the channel's own form plus its
  * exchange credentials), the candidates queue (only for channels that
- * actually import data -- see `CandidatesQueue` below), and journal
+ * actually import data -- see `CandidatesQueue` below), the public API keys
+ * panel (only for `public_api` -- see `ApiKeysPanel` below), and journal
  * (`JournalList`). Kept as visually separate `Card`s rather than one merged
- * block deliberately -- the public API keys panel a later task adds slots in
- * as one more area on this same page, and that only stays simple if these
- * regions never fuse into one.
+ * block deliberately -- each channel-specific area slots in as one more
+ * region on this same page, and that only stays simple if these regions
+ * never fuse into one.
  */
 export function ChannelPage() {
   const { type: typeParam } = useParams<{ type: string }>();
@@ -358,6 +360,13 @@ export function ChannelPage() {
        * that imports nothing doesn't grow an always-empty queue card.
        */}
       {channel.type === "commerceml" && <CandidatesQueue type={type} />}
+
+      {/*
+       * `public_api` is a channel without a schedule (Task 15, task-15-brief.md):
+       * its "settings" are the list of keys, not a form, so it gets its own
+       * area instead of slotting into `CommercemlSettingsForm`'s branch above.
+       */}
+      {channel.type === "public_api" && <ApiKeysPanel />}
 
       <JournalList type={type} />
     </div>

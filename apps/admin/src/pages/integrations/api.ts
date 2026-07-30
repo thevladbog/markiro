@@ -307,3 +307,97 @@ export function useUnhideCandidate(type: string): UseMutationResult<void, Error,
     },
   });
 }
+
+/**
+ * Mirrors `apps/api/src/modules/api-keys/api-keys.service.ts`'s
+ * `ApiKeySummaryDto` -- one public API key, without its secret. `kind` stays
+ * a literal `"public"` (not widened to `string` the way `ChannelSummaryDto.type`
+ * is) because the server's own type only ever hands back this one value here
+ * -- station keys are filtered out by the whitelist before they ever reach
+ * this endpoint (task-15-brief.md), so there is no second kind this union
+ * would need to grow to cover.
+ */
+export interface ApiKeySummaryDto {
+  id: string;
+  name: string | null;
+  kind: "public";
+  createdAt: string;
+  lastRequest: string | null;
+}
+
+/**
+ * Mirrors `ApiKeyIssuedDto`. Returned exactly once, by `useIssueApiKey`
+ * below -- the caller must hold `key` only in local component state (never
+ * the query cache) and never expect a second read; `useApiKeys`'s list never
+ * carries it.
+ */
+export interface ApiKeyIssuedDto {
+  id: string;
+  key: string;
+}
+
+interface ApiKeysListResponse {
+  keys: ApiKeySummaryDto[];
+}
+
+/** Cache key for the `public_api` channel's key list (`GET /integrations/public_api/keys`). */
+export const API_KEYS_QUERY_KEY = ["integrations", "public_api", "keys"] as const;
+
+async function fetchApiKeys(): Promise<ApiKeySummaryDto[]> {
+  const response = await apiFetch<ApiKeysListResponse>("/integrations/public_api/keys");
+  return response.keys;
+}
+
+/** `GET /integrations/public_api/keys` -- feeds `ApiKeysPanel`. */
+export function useApiKeys(): UseQueryResult<ApiKeySummaryDto[]> {
+  return useQuery({ queryKey: API_KEYS_QUERY_KEY, queryFn: fetchApiKeys });
+}
+
+/**
+ * `POST /integrations/public_api/keys` -- mints a fresh public API key and
+ * hands back its plaintext secret exactly once (see `ApiKeyIssuedDto`
+ * above). Deliberately NOT a `useMutation`, for the same reason
+ * `useIssueCredentials` above isn't (see that doc comment for the full
+ * explanation): a `Mutation` extends `Removable` and only *schedules* its
+ * own removal once its last observer unsubscribes, so with the default
+ * `gcTime` (five minutes) a `useMutation`-based version would leave this
+ * plaintext secret sitting in the `MutationCache` for up to five minutes
+ * after `ApiKeysPanel` unmounts -- and the mutation's own `reset()` doesn't
+ * clear it either. A plain async wrapper creates no such cache entry: the
+ * secret exists only in whatever the caller (`ApiKeysPanel`'s own state)
+ * does with the returned value. Invalidates the list on success so the new
+ * key (sans secret) shows up in the table without a manual refetch.
+ */
+export function useIssueApiKey(): { issue: (name: string) => Promise<ApiKeyIssuedDto> } {
+  const queryClient = useQueryClient();
+  return {
+    issue: async (name: string) => {
+      const data = await apiFetch<ApiKeyIssuedDto>("/integrations/public_api/keys", {
+        method: "POST",
+        body: JSON.stringify({ name }),
+      });
+      void queryClient.invalidateQueries({ queryKey: API_KEYS_QUERY_KEY });
+      return data;
+    },
+  };
+}
+
+/**
+ * `DELETE /integrations/public_api/keys/:id` -- revokes (deletes) a public
+ * API key. Carries no secret, so unlike `useIssueApiKey` above there is no
+ * mutation-cache leak concern here -- a plain `useMutation` is fine. Revoking
+ * an already-revoked id is the server's own 404 (`api-keys.service.ts`'s
+ * `revoke`: "there is no separate 'already revoked' response"), which
+ * `ApiKeysPanel` surfaces like any other failed revoke rather than treating
+ * it as a special case.
+ */
+export function useRevokeApiKey(): UseMutationResult<void, Error, string> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<void>(`/integrations/public_api/keys/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: API_KEYS_QUERY_KEY });
+    },
+  });
+}

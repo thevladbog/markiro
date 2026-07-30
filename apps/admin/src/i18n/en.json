@@ -860,6 +860,33 @@
             "success": "Product created and linked",
             "error": "Could not create the product"
           }
+        },
+        "apiKeys": {
+          "title": "Public API keys",
+          "nameLabel": "Name",
+          "issueAction": "Issue",
+          "issueSuccess": "Key issued",
+          "issueError": "Could not issue the key",
+          "issuedTitle": "Key secret",
+          "issuedKey": "Key: {{key}}",
+          "issuedWarning": "It will not be shown again — save it now.",
+          "revokeAction": "Revoke",
+          "revokeSuccess": "Key revoked",
+          "revokeError": "Could not revoke the key",
+          "revokeConfirmTitle": "Revoke this key?",
+          "revokeConfirmBody": "The key \"{{name}}\" will be revoked with no way back. Anything calling the API with it will stop working.",
+          "revokeConfirmAction": "Revoke",
+          "cancel": "Cancel",
+          "loadError": "Could not load the keys. Refresh the page.",
+          "emptyTitle": "No keys yet",
+          "emptyHint": "Keys let outside systems and integrations call the cabinet's API on the organization's behalf.",
+          "table": {
+            "name": "Name",
+            "createdAt": "Issued",
+            "lastRequest": "Last request",
+            "neverUsed": "Never used",
+            "actions": "Actions"
+          }
         }
       }
     },
