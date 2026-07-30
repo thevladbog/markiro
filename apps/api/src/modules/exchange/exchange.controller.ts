@@ -79,6 +79,79 @@ function fingerprintOf(worklist: ImportWorkItem[]): string {
 }
 
 /**
+ * The fixed wire text every method below sends the moment ANY query
+ * parameter it reads (`mode`, `type`, `filename`) turns out not to be a
+ * single string -- see `singleQueryValue`'s own comment for why that can
+ * happen at all on a plain `Record<string, unknown>` read off `req.query`.
+ */
+const REPEATED_PARAM_MESSAGE = "repeated query parameter";
+
+/**
+ * `@Query()` below reads `req.query` as `Record<string, unknown>` -- not
+ * `Record<string, string>` -- because that is the honest shape Express (via
+ * `qs`) actually hands back: a repeated key (`?filename=a.xml&filename=
+ * b.xml`, `?type=catalog&type=sale`) comes back `string[]`, not `string`,
+ * and bracket syntax (`?filename[x]=y`) comes back a nested object.
+ * Something a genuine 1С "Обмен с сайтом" client never sends -- спека §3
+ * addresses one value per key, always -- but this route carries neither
+ * `TenantGuard` nor `SessionOnlyGuard` (see the class-level comment: it is
+ * the one cabinet-adjacent route reachable with no credential at all), so
+ * whatever shows up here is externally controlled input a reader cannot
+ * assume away.
+ *
+ * Trusting the old `Record<string, string>` annotation and using `mode`/
+ * `type`/`filename` as strings without this check first is exactly the
+ * type confusion CodeQL flags: a string method downstream would throw, an
+ * `===` mode comparison would just silently never match (masking a real
+ * `mode=checkauth` attempt as "no session" instead of naming the actual
+ * problem), and handing the array on into something typed `string`
+ * (`ExchangeSessionService.appendChunk`/`.assemble`, both `filename:
+ * string`) would let a DB driver see a bind value its column was never
+ * meant to receive.
+ *
+ * Returns the value unchanged when it is `undefined` (the key was never
+ * sent -- every caller already has its own "missing" handling for that) or
+ * a plain `string`. Anything else comes back `null`: a distinct, explicit
+ * "tampered" outcome no caller can mistake for "absent", so each one can
+ * refuse outright -- the clearer response, per this route's own decision --
+ * rather than silently reading the first element or stringifying the whole
+ * array into a comparison that was never going to match anyway.
+ */
+function singleQueryValue(raw: unknown): string | undefined | null {
+  if (raw === undefined) return undefined;
+  return typeof raw === "string" ? raw : null;
+}
+
+/**
+ * Names every key in `values` whose `singleQueryValue` result came back
+ * `null` -- i.e. every query parameter THIS request repeated (or otherwise
+ * mangled into a non-string shape). Centralised so `get()` and `post()`
+ * build the same shape of list, and therefore the same journal message,
+ * rather than each hand-rolling its own filter.
+ */
+function repeatedParamKeys(values: Record<string, string | undefined | null>): string[] {
+  return Object.entries(values)
+    .filter(([, value]) => value === null)
+    .map(([key]) => key);
+}
+
+/**
+ * Fixed wire text `mode=import` sends whenever `parseCommerceMl` throws --
+ * never the real parser exception message (`detail`, below), which can
+ * carry arbitrary internal detail (a fast-xml-parser message, a byte
+ * offset -- in principle anything reachable through `cause`) that this
+ * ungated route (see the class-level comment) must not hand an anonymous
+ * caller. The real detail still reaches the journal -- in `message`, for
+ * the 1С specialist who actually needs it, exactly as `parseXml`'s own
+ * comment in commerceml/parse.ts intends -- only the WIRE response and
+ * `details.raw` (which brief 08 requires to record exactly what was sent,
+ * verbatim) use this constant instead. Same split
+ * `ExchangeExceptionFilter.INTERNAL_ERROR_RAW` already holds for its own
+ * catch-all, for the same reason.
+ */
+const IMPORT_PARSE_FAILURE = "invalid file";
+
+/**
  * Constant address 1С's "Обмен с сайтом" client calls (спека §3):
  * `checkauth` -> `init` -> `mode=file` (chunked upload), repeated. Parsing
  * and applying an assembled file (`mode=import`) is later work.
@@ -113,13 +186,24 @@ export class ExchangeController {
 
   @Get("1c_exchange")
   async get(
-    @Query() query: Record<string, string>,
+    @Query() query: Record<string, unknown>,
     @Req() req: ExchangeRequest,
     @Res() res: Response,
     @Ip() ip: string,
   ): Promise<void> {
-    if (query.mode === "checkauth") {
-      await this.checkauth(query, req, res, ip);
+    const mode = singleQueryValue(query.mode);
+    const type = singleQueryValue(query.type);
+    const filename = singleQueryValue(query.filename);
+
+    if (mode === "checkauth") {
+      // No tenant is known yet -- credentials haven't even been parsed, the
+      // same boundary `!credentials` below draws -- so a tampered `type`
+      // here is refused with text and 200, but nothing to journal against.
+      if (type === null) {
+        this.fail(res, REPEATED_PARAM_MESSAGE);
+        return;
+      }
+      await this.checkauth(type, req, res, ip);
       return;
     }
 
@@ -134,7 +218,16 @@ export class ExchangeController {
       sessionId: session.id,
     };
 
-    if (query.mode === "init") {
+    // Checked as direct `=== null` comparisons, not via a helper call, so
+    // TypeScript's control-flow narrowing drops `null` from `mode`/`type`/
+    // `filename` below -- every use past this point can stay exactly the
+    // `string | undefined` shape it always was.
+    if (mode === null || type === null || filename === null) {
+      await this.rejectRepeatedParam(session, res, repeatedParamKeys({ mode, type, filename }));
+      return;
+    }
+
+    if (mode === "init") {
       await this.journal.append({
         tenantId: session.tenantId,
         channelType: session.channelType,
@@ -143,7 +236,7 @@ export class ExchangeController {
         outcome: "ok",
         grain: "session",
         message: "init",
-        details: { type: query.type ?? null },
+        details: { type: type ?? null },
       });
       // `zip=no` in v1 (спека §3): archives are a new dependency and attack
       // surface (zip-bomb) to save bandwidth on a file that is megabytes,
@@ -154,21 +247,24 @@ export class ExchangeController {
       return;
     }
 
-    if (query.mode === "import") {
-      await this.import(session, query.filename, res);
+    if (mode === "import") {
+      await this.import(session, filename, res);
       return;
     }
 
-    await this.unknownMode(session, query.mode);
+    await this.unknownMode(session, mode);
     this.fail(res, "unknown mode");
   }
 
   @Post("1c_exchange")
   async post(
-    @Query() query: Record<string, string>,
+    @Query() query: Record<string, unknown>,
     @Req() req: ExchangeRequest,
     @Res() res: Response,
   ): Promise<void> {
+    const mode = singleQueryValue(query.mode);
+    const filename = singleQueryValue(query.filename);
+
     const session = await this.resolveSession(req);
     if (!session) {
       this.fail(res, NO_SESSION_MESSAGE);
@@ -180,8 +276,15 @@ export class ExchangeController {
       sessionId: session.id,
     };
 
-    if (query.mode === "file") {
-      const filename = query.filename;
+    // Direct `=== null` comparisons, not a helper call -- see the matching
+    // comment in `get()` for why: it lets TypeScript narrow `mode`/
+    // `filename` below back to `string | undefined`.
+    if (mode === null || filename === null) {
+      await this.rejectRepeatedParam(session, res, repeatedParamKeys({ mode, filename }));
+      return;
+    }
+
+    if (mode === "file") {
       const body: unknown = req.body;
       if (!filename || !Buffer.isBuffer(body)) {
         await this.journal.append({
@@ -213,12 +316,12 @@ export class ExchangeController {
       return;
     }
 
-    await this.unknownMode(session, query.mode);
+    await this.unknownMode(session, mode);
     this.fail(res, "unknown mode");
   }
 
   private async checkauth(
-    query: Record<string, string>,
+    type: string | undefined,
     req: ExchangeRequest,
     res: Response,
     ip: string,
@@ -333,7 +436,7 @@ export class ExchangeController {
       outcome: "ok",
       grain: "session",
       message: "checkauth: сеанс открыт",
-      details: { type: query.type ?? null },
+      details: { type: type ?? null },
     });
 
     this.text(res, ["success", EXCHANGE_COOKIE_NAME, opened.cookie].join("\n"));
@@ -389,6 +492,13 @@ export class ExchangeController {
       offers = parsed.offers;
     } catch (cause) {
       const detail = cause instanceof Error ? cause.message : String(cause);
+      // `message` below keeps the real `detail` -- the 1С specialist reading
+      // this journal needs it (see `parseXml`'s own comment in
+      // commerceml/parse.ts). `details.raw` does NOT: brief 08's "verbatim
+      // what we actually answered" means verbatim what was actually SENT,
+      // which is `IMPORT_PARSE_FAILURE` below, not `detail` -- see that
+      // constant's own comment for why the real exception text must never
+      // reach an anonymous caller on this ungated route.
       await this.journal.append({
         tenantId: session.tenantId,
         channelType: session.channelType,
@@ -397,12 +507,12 @@ export class ExchangeController {
         outcome: "error",
         grain: "session",
         message: `import: ${detail}`,
-        details: { filename, raw: rawFailureBody(detail) },
+        details: { filename, raw: rawFailureBody(IMPORT_PARSE_FAILURE) },
       });
       // Fix 1: a broken FILE is not a broken EXCHANGE -- 1С may still retry
       // this filename or move on to another one with the same cookie, so
       // the session is left open rather than finished here.
-      this.fail(res, detail);
+      this.fail(res, IMPORT_PARSE_FAILURE);
       return;
     }
 
@@ -637,6 +747,34 @@ export class ExchangeController {
       // string is the actual wire response `details.raw` must record.
       details: { mode: mode ?? null, raw: rawFailureBody("unknown mode") },
     });
+  }
+
+  /**
+   * A query parameter this controller reads (`mode`, `type`, `filename`)
+   * came back `null` from `singleQueryValue` -- present, but not a single
+   * string. Only called once a tenant is already known (`get`/`post` call
+   * this after `resolveSession` above has succeeded), unlike the
+   * pre-authentication tampering check in `get()`'s own `checkauth` branch,
+   * which has no tenant yet to journal against -- the same "no tenant, no
+   * journal" boundary this file already draws for every other pre-auth
+   * failure (e.g. `!credentials` in `checkauth` below).
+   */
+  private async rejectRepeatedParam(
+    session: ResolvedExchangeSession,
+    res: Response,
+    keys: string[],
+  ): Promise<void> {
+    await this.journal.append({
+      tenantId: session.tenantId,
+      channelType: session.channelType,
+      sessionId: session.id,
+      direction: "in",
+      outcome: "error",
+      grain: "session",
+      message: `повторён параметр запроса: ${keys.join(", ")}`,
+      details: { keys, raw: rawFailureBody(REPEATED_PARAM_MESSAGE) },
+    });
+    this.fail(res, REPEATED_PARAM_MESSAGE);
   }
 
   private async resolveSession(req: ExchangeRequest): Promise<ResolvedExchangeSession | null> {

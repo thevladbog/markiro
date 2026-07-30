@@ -422,4 +422,55 @@ describe("1c_exchange", () => {
       spy.mockRestore();
     }
   });
+
+  // CodeQL js/type-confusion-through-parameter-tampering: Express (`qs`)
+  // hands back `string[]` the moment a query key repeats
+  // (`?type=catalog&type=sale`) -- something a genuine 1С "Обмен с сайтом"
+  // client never sends (спека §3 addresses one value per key). This route
+  // carries neither `TenantGuard` nor `SessionOnlyGuard` (class-level
+  // comment), so a caller can send whatever it likes. Each of the three
+  // tests below repeats a different parameter this controller reads
+  // (`type`, `mode`, `filename`) and pins the refusal this fix introduces --
+  // never a crash, never a mismatched-but-silent comparison, never a 4xx.
+
+  it("повторённый `type` на checkauth отвечает failure и не выдаёт cookie (Fix: репутация параметра)", async () => {
+    const res = await request(app!.getHttpServer())
+      .get("/1c_exchange?type=catalog&type=sale&mode=checkauth")
+      .auth(login, secret)
+      .expect(200);
+    expect(res.text).toBe("failure\nrepeated query parameter");
+  });
+
+  it("повторённый `mode` при уже открытом сеансе отвечает failure и пишет событие в журнал", async () => {
+    const auth = await checkauth();
+    const res = await request(app!.getHttpServer())
+      .get("/1c_exchange?type=catalog&mode=init&mode=import")
+      .set("Cookie", auth.cookie)
+      .expect(200);
+    expect(res.text).toBe("failure\nrepeated query parameter");
+
+    const events = await journalEvents();
+    const event = events.find((e) => e.message.includes("повторён параметр запроса"));
+    expect(event).toBeDefined();
+    expect(event?.details).toMatchObject({ raw: "failure\nrepeated query parameter" });
+  });
+
+  it("повторённый `filename` при mode=import отвечает failure, не пытаясь читать файл", async () => {
+    const auth = await checkauth();
+    const res = await request(app!.getHttpServer())
+      .get("/1c_exchange?type=catalog&mode=import&filename=a.xml&filename=b.xml")
+      .set("Cookie", auth.cookie)
+      .expect(200);
+    expect(res.text).toBe("failure\nrepeated query parameter");
+  });
+
+  it("повторённый `filename` при mode=file (POST) отвечает failure и не сохраняет кусок", async () => {
+    const auth = await checkauth();
+    const res = await request(app!.getHttpServer())
+      .post("/1c_exchange?type=catalog&mode=file&filename=a.xml&filename=b.xml")
+      .set("Cookie", auth.cookie)
+      .send(Buffer.from("x", "utf8"))
+      .expect(200);
+    expect(res.text).toBe("failure\nrepeated query parameter");
+  });
 });

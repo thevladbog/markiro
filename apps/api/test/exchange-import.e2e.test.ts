@@ -461,4 +461,44 @@ ${guids.map((guid) => `  <Товар><Ид>${guid}</Ид><Наименовани
       .where(eq(schema.products.id, productId));
     expect(product!.unitPrice).toBe("501.00");
   });
+
+  // CodeQL js/stack-trace-exposure: `parseCommerceMl` (commerceml/parse.ts)
+  // deliberately throws a DETAILED message -- "the message this throws ends
+  // up in the integration journal, read by a 1С specialist on the client's
+  // side" (parseXml's own comment) -- but that detail must never reach the
+  // wire response itself: this is the one route with no guard in front of it
+  // at all (class-level comment on ExchangeController), so whoever is
+  // calling it is, by definition, unauthenticated as far as this check goes.
+  it("невалидный XML отвечает стабильным отказом на проводе, а подробность разбора остаётся только в журнале", async () => {
+    const auth = await checkauth();
+    // Same malformed fragment `commerceml-parse.test.ts` uses to pin that
+    // `parseCommerceMl` itself throws rather than silently returning
+    // nothing -- guaranteed to reach the `catch` block in `import()`.
+    await uploadFile(auth, "broken.xml", "<не xml");
+
+    const res = await request(app!.getHttpServer())
+      .get("/1c_exchange?type=catalog&mode=import&filename=broken.xml")
+      .set("Cookie", auth.cookie)
+      .expect(200);
+    // Stable, generic wire text -- not the real fast-xml-parser exception.
+    expect(res.text).toBe("failure\ninvalid file");
+    expect(res.text).not.toMatch(/CommerceML|xml|parser|char|line|tag/i);
+
+    const journal = await agent.get("/integrations/commerceml/journal").expect(200);
+    const events = journal.body.sessions.flatMap(
+      (s: { events: { message: string; details: Record<string, unknown> | null }[] }) => s.events,
+    );
+    // The detailed parse failure DOES still reach the journal -- the 1С
+    // specialist reading it needs to know what actually broke.
+    const event = events.find((e: { message: string }) =>
+      e.message.includes("не удалось разобрать XML"),
+    );
+    expect(event).toBeDefined();
+    // `details.raw` records exactly what was sent over the wire, verbatim
+    // (brief 08) -- which is now the STABLE message, not the real detail
+    // that landed in `message` above. Same split
+    // `ExchangeExceptionFilter.INTERNAL_ERROR_RAW` already holds for its own
+    // unhandled-exception catch-all.
+    expect(event?.details).toMatchObject({ raw: "failure\ninvalid file" });
+  });
 });
