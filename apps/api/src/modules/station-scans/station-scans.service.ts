@@ -1,5 +1,5 @@
 import { BadRequestException, Inject, Injectable, Logger } from "@nestjs/common";
-import { and, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, notInArray, sql } from "drizzle-orm";
 import { ensurePartitions, schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
 import {
@@ -856,9 +856,9 @@ export class StationScansService {
    * recorded attempt, matching the pattern the box-closures loop above
    * already established for exactly this class of redelivery/race.
    *
-   * "undo" (Task 4) and "clear" (Task 5) are handled today;
-   * "disassemble"/"reprint" are added by Tasks 6-7 as further branches in
-   * this same loop body, not as a rewrite of it.
+   * "undo" (Task 4), "clear" (Task 5), and "disassemble" (Task 6) are
+   * handled today; "reprint" is added by Task 7 as a further branch in this
+   * same loop body, not as a rewrite of it.
    *
    * `ex.boxId` is the device-local box id string, exactly like
    * `ScanItemDto.boxId` and the box-closures loop's own `closure.boxId`
@@ -995,10 +995,86 @@ export class StationScansService {
               ),
             );
         }
+      } else if (ex.kind === "disassemble") {
+        // Guarded to a box that is CLOSED (`closedAt IS NOT NULL`) and not
+        // already disassembled (`disassembledAt IS NULL`): "disassemble"
+        // reaches into an already-closed, already-labelled box and retires
+        // it -- the mirror image of "clear" above, which only ever acts on
+        // a box still open for packing. Both predicates are required:
+        // `closedAt IS NOT NULL` rules out ever touching a box "clear"
+        // should have handled instead, and `disassembledAt IS NULL` stops a
+        // redelivered/duplicate "disassemble" (or two independent ones
+        // targeting the same box) from re-stamping `disassembledAt` with a
+        // fresh `now()` a second time -- releasing the same (already
+        // released) items a second time would itself be harmless, but
+        // silently overwriting the FIRST disassembly's own timestamp would
+        // not be. Scoped by `resolvedBoxId`, matching every other lookup in
+        // this method (see the resolution step's own comment) -- not
+        // `ex.boxId` again.
+        const [closedBox] = await tx
+          .select({ id: schema.boxes.id })
+          .from(schema.boxes)
+          .where(
+            and(
+              eq(schema.boxes.tenantId, tenantId),
+              eq(schema.boxes.id, resolvedBoxId),
+              isNotNull(schema.boxes.closedAt),
+              isNull(schema.boxes.disassembledAt),
+            ),
+          );
+        if (closedBox) {
+          // Every still-active item released, identical to "clear" above --
+          // "disassemble" and "clear" empty a box the same way, differing
+          // only in which box each is allowed to act on, and in
+          // "disassemble"'s additional retirement of the box row itself
+          // below.
+          const activeItems = await tx
+            .select({ codeHash: schema.boxItems.codeHash })
+            .from(schema.boxItems)
+            .where(
+              and(
+                eq(schema.boxItems.tenantId, tenantId),
+                eq(schema.boxItems.boxId, resolvedBoxId),
+                isNull(schema.boxItems.displacedAt),
+                isNull(schema.boxItems.removedAt),
+              ),
+            );
+          for (const item of activeItems) {
+            await this.releaseCode(tx, tenantId, item.codeHash, ex.shiftId, ex.terminalId);
+          }
+          await tx
+            .update(schema.boxItems)
+            .set({ removedAt: sql`now()` })
+            .where(
+              and(
+                eq(schema.boxItems.tenantId, tenantId),
+                eq(schema.boxItems.boxId, resolvedBoxId),
+                isNull(schema.boxItems.displacedAt),
+                isNull(schema.boxItems.removedAt),
+              ),
+            );
+
+          // The box's own retirement. `sscc` is deliberately left
+          // untouched -- it stays on the row as a historical record of what
+          // was printed and applied to the physical box; only
+          // `disassembledAt` marks the box itself retired (excluded from
+          // "active" listings). The "sscc never reused" guarantee is not
+          // enforced by anything here: it lives entirely in
+          // `SsccService.allocate`'s counter, which only ever advances
+          // forward and never reads `boxes` at all, so a retired box's sscc
+          // cannot be handed to a NEW box by construction -- see
+          // sscc.e2e.test.ts's "disassemble retires an SSCC for good" test,
+          // which locks that existing property down against this new
+          // caller.
+          await tx
+            .update(schema.boxes)
+            .set({ disassembledAt: sql`now()` })
+            .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.id, resolvedBoxId)));
+        }
       }
-      // "disassemble" is added in Task 6; "reprint" writes only the audit
-      // row below, added in Task 7. Every branch above (and every one
-      // still to come) uses `resolvedBoxId`, never `ex.boxId`.
+      // "reprint" writes only the audit row below, added in Task 7. Every
+      // branch above (and every one still to come) uses `resolvedBoxId`,
+      // never `ex.boxId`.
       await tx.insert(schema.boxExceptions).values({
         tenantId,
         kind: ex.kind,
