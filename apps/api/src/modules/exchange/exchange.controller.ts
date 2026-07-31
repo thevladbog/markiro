@@ -93,6 +93,27 @@ function fingerprintOf(worklist: ImportWorkItem[]): string {
   return `${worklist.length}:${hash}`;
 }
 
+function saleFingerprint(
+  documents: ReturnType<typeof parseOrderStatusDocuments>,
+  orderStatusField: string | undefined,
+  statusMapping: Record<string, string> | undefined,
+): string {
+  const effectiveWork = documents.map((document) => ({
+    externalRef: document.externalRef,
+    statusValue: document.statusValue,
+    mapped: resolveMappedStatus(document.statusValue, statusMapping),
+  }));
+  const effectiveConfig = {
+    orderStatusField: orderStatusField ?? null,
+    statusMapping: Object.fromEntries(
+      Object.entries(statusMapping ?? {}).sort(([a], [b]) => a.localeCompare(b)),
+    ),
+  };
+  return createHash("sha256")
+    .update(JSON.stringify({ effectiveConfig, effectiveWork }))
+    .digest("hex");
+}
+
 /**
  * The fixed wire text every method below sends the moment ANY query
  * parameter it reads (`mode`, `type`, `filename`) turns out not to be a
@@ -793,9 +814,15 @@ export class ExchangeController {
       statusMapping?: Record<string, string>;
     };
 
+    const stored = await this.sessions.readSaleImportCursor(session.id, filename);
+    const effectiveOrderStatusField =
+      stored && !stored.completed ? stored.orderStatusField : settings.orderStatusField;
+    const effectiveStatusMapping =
+      stored && !stored.completed ? stored.statusMapping : settings.statusMapping;
+
     let documents: ReturnType<typeof parseOrderStatusDocuments>;
     try {
-      documents = parseOrderStatusDocuments(bytes, settings.orderStatusField);
+      documents = parseOrderStatusDocuments(bytes, effectiveOrderStatusField ?? undefined);
     } catch (cause) {
       const detail = cause instanceof Error ? cause.message : String(cause);
       await this.journal.append({
@@ -812,10 +839,43 @@ export class ExchangeController {
       return;
     }
 
-    let applied = 0;
-    let discrepancies = 0;
-    for (const document of documents) {
-      const mapped = resolveMappedStatus(document.statusValue, settings.statusMapping);
+    const fingerprint = saleFingerprint(
+      documents,
+      effectiveOrderStatusField ?? undefined,
+      effectiveStatusMapping ?? undefined,
+    );
+    const sourceFingerprint = createHash("sha256").update(bytes).digest("hex");
+    // A lost final response must stay retryable even if an administrator
+    // changes the mapping before 1C repeats this call. The exact uploaded
+    // file already completed under the settings captured by `fingerprint`;
+    // re-evaluating it under new settings would apply the same external fact
+    // twice with potentially different meanings.
+    if (stored?.completed && stored.sourceFingerprint === sourceFingerprint) {
+      this.text(res, "success");
+      return;
+    }
+    if (stored && stored.fingerprint !== fingerprint) {
+      await this.journal.append({
+        tenantId: session.tenantId,
+        channelType: session.channelType,
+        sessionId: session.id,
+        direction: "in",
+        outcome: "error",
+        grain: "session",
+        message: `import (sale): список для «${filename}» изменился между кругами`,
+        details: { filename, previousOffset: stored.offset, raw: rawFailureBody("import changed") },
+      });
+      this.fail(res, "import changed");
+      return;
+    }
+
+    let applied = stored?.applied ?? 0;
+    let discrepancies = stored?.discrepancies ?? 0;
+    const offset = stored?.offset ?? 0;
+    const end = Math.min(offset + IMPORT_BATCH_SIZE, documents.length);
+    for (let index = offset; index < end; index++) {
+      const document = documents[index]!;
+      const mapped = resolveMappedStatus(document.statusValue, effectiveStatusMapping ?? undefined);
       if (mapped === null) {
         discrepancies++;
         await this.journal
@@ -888,7 +948,15 @@ export class ExchangeController {
         mapped,
       );
 
-      if (result.outcome === "applied") {
+      // A transient failure can happen after an earlier item in this batch
+      // committed but before the cursor did. On retry that prefix is already
+      // terminal. The SAME mapped status means the external fact is already
+      // reconciled, not a discrepancy; treating it as success keeps retries
+      // idempotent without hiding a genuinely different terminal status.
+      if (
+        result.outcome === "applied" ||
+        (result.outcome === "not_pending" && result.currentStatus === mapped)
+      ) {
         applied++;
         continue;
       }
@@ -911,6 +979,24 @@ export class ExchangeController {
             }`,
           );
         });
+    }
+
+    const completed = end >= documents.length;
+    await this.sessions.writeSaleImportCursor(session.id, filename, {
+      offset: end,
+      fingerprint,
+      sourceFingerprint,
+      orderStatusField: effectiveOrderStatusField ?? null,
+      statusMapping: effectiveStatusMapping ?? null,
+      applied,
+      discrepancies,
+      total: documents.length,
+      completed,
+    });
+
+    if (!completed) {
+      this.text(res, "progress");
+      return;
     }
 
     await this.journal.append({
@@ -989,14 +1075,30 @@ export class ExchangeController {
   /**
    * `mode=query`: спека §5's outbound direction. Builds this round's
    * eligible-order document (Task 4's `planExport`/`buildOrdersDocument`),
-   * remembers which order ids it just offered (Task 8's
-   * `writeQueriedOrderIds` -- `mode=success` reads this back rather than
+   * remembers the exact batch it just offered (Task 8's session
+   * summary snapshot -- `mode=success` reads its IDs rather than
    * trusting whatever 1С's own confirmation happens to say), and journals a
    * held-order warning for every order this round is NOT offering because a
    * product still lacks a 1С link (спека §5: "товар без связи придерживает
    * заявку").
    */
   private async query(session: ResolvedExchangeSession, res: Response): Promise<void> {
+    const outstanding = await this.sessions.readOutstandingOrderQuery(session.id);
+    if (outstanding) {
+      await this.journal.append({
+        tenantId: session.tenantId,
+        channelType: session.channelType,
+        sessionId: session.id,
+        direction: "out",
+        outcome: "ok",
+        grain: "session",
+        message: `query: повторно предложено заявок: ${outstanding.orderIds.length}`,
+        details: { offered: outstanding.orderIds.length },
+      });
+      res.status(200).type("application/xml").send(outstanding.xml);
+      return;
+    }
+
     // Fix 4 (final review): `findExportCandidates` now returns its
     // `candidates` PRE-FILTERED to exclude held orders (a `NOT EXISTS` in
     // the SQL itself, before `limit`, so a batch full of held orders can
@@ -1050,15 +1152,17 @@ export class ExchangeController {
       writeoffDocumentType?: string;
     };
 
-    const xml = buildOrdersDocument(plan.eligible, {
+    let xml = buildOrdersDocument(plan.eligible, {
       splitWriteoffDocument: settings.splitWriteoffDocument ?? false,
       writeoffDocumentType: settings.writeoffDocumentType,
     });
 
-    await this.sessions.writeQueriedOrderIds(
-      session.id,
-      plan.eligible.map((eligible) => eligible.order.id),
-    );
+    const ensured = await this.sessions.ensureOutstandingOrderQuery(session.id, {
+      orderIds: plan.eligible.map((eligible) => eligible.order.id),
+      xml,
+    });
+    const orderIds = ensured.orderIds;
+    xml = ensured.xml;
 
     await this.journal.append({
       tenantId: session.tenantId,
@@ -1067,7 +1171,7 @@ export class ExchangeController {
       direction: "out",
       outcome: "ok",
       grain: "session",
-      message: `query: предложено заявок: ${plan.eligible.length}`,
+      message: `query: предложено заявок: ${orderIds.length}`,
       // `held.length` -- the separately-queried set above -- NOT
       // `plan.held.length`: `candidates` is now pre-filtered to exclude held
       // orders (Fix 4), so `plan.held` is always empty and would misreport
@@ -1081,7 +1185,7 @@ export class ExchangeController {
       // once a tenant has more held orders than that; without this flag
       // `held: held.length` reads as an exact count when it may not be one.
       details: {
-        offered: plan.eligible.length,
+        offered: orderIds.length,
         held: held.length,
         heldTruncated: held.length === EXPORT_BATCH_SIZE,
       },
@@ -1092,8 +1196,8 @@ export class ExchangeController {
 
   /**
    * `mode=success`: спека §5's "подтверждение до пометки" -- marks EXACTLY
-   * the order ids the immediately preceding `mode=query` on THIS session
-   * offered (Task 8's `readQueriedOrderIds`, not whatever 1С's own success
+   * the order ids the outstanding `mode=query` batch on THIS session
+   * offered (Task 8's summary snapshot, not whatever 1С's own success
    * call happens to say) as exported: `tenantId` + `inArray(orderIds)` +
    * `isNull(exportedAt)`.
    *
@@ -1115,7 +1219,8 @@ export class ExchangeController {
    * idempotent against a stray repeat.
    */
   private async success(session: ResolvedExchangeSession, res: Response): Promise<void> {
-    const orderIds = await this.sessions.readQueriedOrderIds(session.id);
+    const outstanding = await this.sessions.readOutstandingOrderQuery(session.id);
+    const orderIds = outstanding?.orderIds ?? [];
     let confirmed = 0;
 
     if (orderIds.length > 0) {
@@ -1131,7 +1236,9 @@ export class ExchangeController {
         )
         .returning({ id: schema.pickupOrders.id });
       confirmed = updated.length;
-      await this.sessions.writeQueriedOrderIds(session.id, []);
+    }
+    if (outstanding) {
+      await this.sessions.writeOutstandingOrderQuery(session.id, null);
     }
 
     await this.journal.append({

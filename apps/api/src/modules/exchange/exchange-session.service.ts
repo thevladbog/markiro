@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { Inject, Injectable } from "@nestjs/common";
 import { schema, type Db } from "@markiro/db";
-import { and, asc, eq, inArray, isNull, lt, max } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lt, max, sql } from "drizzle-orm";
 import { DB } from "../../auth/auth.module";
 import { hashDeviceToken } from "../../pickup/device-token";
 import type { IntegrationChannelType } from "../integrations/channel-registry";
@@ -89,6 +89,21 @@ export interface ResolvedExchangeSession {
 export interface ImportCursor {
   offset: number;
   fingerprint: string;
+}
+
+export interface SaleImportCursor extends ImportCursor {
+  sourceFingerprint: string;
+  orderStatusField: string | null;
+  statusMapping: Record<string, string> | null;
+  applied: number;
+  discrepancies: number;
+  total: number;
+  completed: boolean;
+}
+
+export interface OutstandingOrderQuery {
+  orderIds: string[];
+  xml: string;
 }
 
 /**
@@ -290,49 +305,130 @@ export class ExchangeSessionService {
     filename: string,
     cursor: ImportCursor,
   ): Promise<void> {
+    await this.db
+      .update(schema.integrationSessions)
+      .set({
+        summary: sql`jsonb_set(
+          coalesce(${schema.integrationSessions.summary}, '{}'::jsonb),
+          '{importCursors}',
+          coalesce(${schema.integrationSessions.summary}->'importCursors', '{}'::jsonb)
+            || ${JSON.stringify({ [filename]: cursor })}::jsonb,
+          true
+        )`,
+      })
+      .where(eq(schema.integrationSessions.id, sessionId));
+  }
+
+  async readSaleImportCursor(
+    sessionId: string,
+    filename: string,
+  ): Promise<SaleImportCursor | null> {
     const [row] = await this.db
       .select({ summary: schema.integrationSessions.summary })
       .from(schema.integrationSessions)
       .where(eq(schema.integrationSessions.id, sessionId));
-    const summary = { ...(row?.summary ?? {}) };
-    const cursors = { ...((summary["importCursors"] as Record<string, ImportCursor>) ?? {}) };
-    cursors[filename] = cursor;
-    summary["importCursors"] = cursors;
+    const cursors = row?.summary?.["saleImportCursors"] as
+      Record<string, SaleImportCursor> | undefined;
+    return cursors?.[filename] ?? null;
+  }
+
+  /** Persists sale-import progress separately from catalog cursors because their work and counters differ. */
+  async writeSaleImportCursor(
+    sessionId: string,
+    filename: string,
+    cursor: SaleImportCursor,
+  ): Promise<void> {
     await this.db
       .update(schema.integrationSessions)
-      .set({ summary })
+      .set({
+        summary: sql`jsonb_set(
+          coalesce(${schema.integrationSessions.summary}, '{}'::jsonb),
+          '{saleImportCursors}',
+          coalesce(${schema.integrationSessions.summary}->'saleImportCursors', '{}'::jsonb)
+            || ${JSON.stringify({ [filename]: cursor })}::jsonb,
+          true
+        )`,
+      })
       .where(eq(schema.integrationSessions.id, sessionId));
   }
 
   /**
-   * Records which order ids `mode=query` just offered, in THIS session's
+   * Records the exact batch `mode=query` offered, in THIS session's
    * `summary` -- same piggyback `readImportCursor`/`writeImportCursor` above
    * already use (a live session's `summary` is write-only scratch space
    * until `finishSession` sets the terminal one; see those methods' own
-   * comment). `mode=success` (спека §5: "подтверждение до пометки") reads
-   * this back to know exactly which orders THIS round's query covered,
-   * without trusting whatever 1С's own success call happens to say.
+   * comment). IDs let `mode=success` mark exactly the offered rows; XML lets
+   * every repeated query replay byte-for-byte even if rows or settings change.
    */
-  async writeQueriedOrderIds(sessionId: string, orderIds: string[]): Promise<void> {
-    const [row] = await this.db
-      .select({ summary: schema.integrationSessions.summary })
-      .from(schema.integrationSessions)
-      .where(eq(schema.integrationSessions.id, sessionId));
-    const summary = { ...(row?.summary ?? {}) };
-    summary["queriedOrderIds"] = orderIds;
+  async writeOutstandingOrderQuery(
+    sessionId: string,
+    outstanding: OutstandingOrderQuery | null,
+  ): Promise<void> {
     await this.db
       .update(schema.integrationSessions)
-      .set({ summary })
+      .set({
+        summary:
+          outstanding === null
+            ? sql`coalesce(${schema.integrationSessions.summary}, '{}'::jsonb) - 'outstandingOrderQuery'`
+            : sql`jsonb_set(
+                coalesce(${schema.integrationSessions.summary}, '{}'::jsonb),
+                '{outstandingOrderQuery}',
+                ${JSON.stringify(outstanding)}::jsonb,
+                true
+              )`,
+      })
       .where(eq(schema.integrationSessions.id, sessionId));
   }
 
-  /** Reads back what `writeQueriedOrderIds` last recorded for `sessionId`; `[]` if nothing was ever written. */
-  async readQueriedOrderIds(sessionId: string): Promise<string[]> {
+  /**
+   * Installs the first outstanding batch and returns the batch that actually
+   * owns the session. The CASE and RETURNING run in one statement, so two
+   * overlapping initial queries cannot each send one XML body while leaving
+   * the other request's ids for `mode=success`.
+   */
+  async ensureOutstandingOrderQuery(
+    sessionId: string,
+    proposed: OutstandingOrderQuery,
+  ): Promise<OutstandingOrderQuery> {
+    const [row] = await this.db
+      .update(schema.integrationSessions)
+      .set({
+        summary: sql`case
+          when coalesce(${schema.integrationSessions.summary}, '{}'::jsonb)
+            ->'outstandingOrderQuery' is null
+          then jsonb_set(
+            coalesce(${schema.integrationSessions.summary}, '{}'::jsonb),
+            '{outstandingOrderQuery}',
+            ${JSON.stringify(proposed)}::jsonb,
+            true
+          )
+          else coalesce(${schema.integrationSessions.summary}, '{}'::jsonb)
+        end`,
+      })
+      .where(eq(schema.integrationSessions.id, sessionId))
+      .returning({
+        outstanding: sql<OutstandingOrderQuery>`${schema.integrationSessions.summary}->'outstandingOrderQuery'`,
+      });
+    if (!row) throw new Error("Exchange session disappeared while storing query batch");
+    return row.outstanding;
+  }
+
+  async readOutstandingOrderQuery(sessionId: string): Promise<OutstandingOrderQuery | null> {
     const [row] = await this.db
       .select({ summary: schema.integrationSessions.summary })
       .from(schema.integrationSessions)
       .where(eq(schema.integrationSessions.id, sessionId));
-    return (row?.summary?.["queriedOrderIds"] as string[] | undefined) ?? [];
+    const value = row?.summary?.["outstandingOrderQuery"] as
+      Partial<OutstandingOrderQuery> | undefined;
+    if (
+      !value ||
+      !Array.isArray(value.orderIds) ||
+      !value.orderIds.every((id) => typeof id === "string") ||
+      typeof value.xml !== "string"
+    ) {
+      return null;
+    }
+    return { orderIds: value.orderIds, xml: value.xml };
   }
 
   /**

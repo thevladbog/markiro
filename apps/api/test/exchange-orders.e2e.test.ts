@@ -13,6 +13,9 @@ import { listenOnLoopback } from "./support/listen-loopback";
 import { signUpAndActivate } from "./support/auth";
 import { excludeExchangeRoute } from "../src/modules/exchange/exchange.module";
 import { checkauthWindowStart } from "../src/modules/exchange/exchange-credentials";
+import { IMPORT_BATCH_SIZE } from "../src/modules/exchange/exchange.controller";
+import { hashDeviceToken } from "../src/pickup/device-token";
+import { ExchangeSessionService } from "../src/modules/exchange/exchange-session.service";
 
 describe("1c_exchange orders (И-2)", () => {
   let app: INestApplication | undefined;
@@ -155,6 +158,27 @@ describe("1c_exchange orders (И-2)", () => {
     expect(secondQueryRes.text).not.toContain(`<Ид>${orderId}</Ид>`);
   });
 
+  it("атомарно выбирает одну outstanding query-пачку для конкурентных первых запросов", async () => {
+    const { cookie } = await checkauth();
+    const cookieValue = cookie.slice(cookie.indexOf("=") + 1);
+    const [session] = await db
+      .select({ id: schema.integrationSessions.id })
+      .from(schema.integrationSessions)
+      .where(eq(schema.integrationSessions.cookieHash, hashDeviceToken(cookieValue)));
+    const sessions = app!.get(ExchangeSessionService);
+    const first = { orderIds: [randomUUID()], xml: "<first/>" };
+    const second = { orderIds: [], xml: "<empty/>" };
+
+    const [left, right] = await Promise.all([
+      sessions.ensureOutstandingOrderQuery(session!.id, first),
+      sessions.ensureOutstandingOrderQuery(session!.id, second),
+    ]);
+
+    expect(left).toEqual(right);
+    expect([first, second]).toContainEqual(left);
+    await sessions.writeOutstandingOrderQuery(session!.id, null);
+  });
+
   it("товар без связи придерживает заявку — она не появляется в query", async () => {
     const { cookie } = await checkauth();
 
@@ -267,6 +291,107 @@ describe("1c_exchange orders (И-2)", () => {
       .from(schema.pickupOrders)
       .where(eq(schema.pickupOrders.id, orderId));
     expect(row?.status).toBe("punched");
+  });
+
+  it("type=sale&mode=import обрабатывает ограниченные возобновляемые пакеты и безопасно повторяет финальный success", async () => {
+    const auth = await checkauth();
+    await agent
+      .patch("/integrations/commerceml")
+      .send({ orderStatusField: "СтатусЗаказа", statusMapping: { Оплачен: "punched" } })
+      .expect(200);
+
+    const orderIds = Array.from({ length: IMPORT_BATCH_SIZE + 1 }, () => randomUUID());
+    await db.insert(schema.pickupOrders).values(
+      orderIds.map((id, index) => ({
+        id,
+        tenantId,
+        orderNo: `SALE-BATCH-${randomUUID()}-${index}`,
+        kioskId,
+        employeeId,
+        reason: "buy" as const,
+        itemCount: 1,
+      })),
+    );
+    const documents = orderIds
+      .map(
+        (id) =>
+          `<Документ><Ид>${id}</Ид><ЗначенияРеквизитов><ЗначениеРеквизита>` +
+          "<Наименование>СтатусЗаказа</Наименование><Значение>Оплачен</Значение>" +
+          "</ЗначениеРеквизита></ЗначенияРеквизитов></Документ>",
+      )
+      .join("");
+    const saleXml = Buffer.from(
+      `<?xml version="1.0" encoding="UTF-8"?><КоммерческаяИнформация><ПакетДокументов>${documents}</ПакетДокументов></КоммерческаяИнформация>`,
+      "utf8",
+    );
+    const filename = `sale-batch-${randomUUID()}.xml`;
+    await request(app!.getHttpServer())
+      .post(`/1c_exchange?mode=file&filename=${filename}`)
+      .set("Cookie", auth.cookie)
+      .send(saleXml)
+      .expect(200);
+
+    const first = await request(app!.getHttpServer())
+      .get(`/1c_exchange?mode=import&type=sale&filename=${filename}`)
+      .set("Cookie", auth.cookie)
+      .expect(200);
+    expect(first.text).toBe("progress");
+
+    const rowsAfterFirst = await db
+      .select({ id: schema.pickupOrders.id, status: schema.pickupOrders.status })
+      .from(schema.pickupOrders)
+      .where(inArray(schema.pickupOrders.id, orderIds));
+    expect(rowsAfterFirst.filter((row) => row.status === "punched")).toHaveLength(
+      IMPORT_BATCH_SIZE,
+    );
+
+    // A settings edit between progress rounds must not mix two mappings in
+    // one file or strand its remainder. The cursor keeps the first round's
+    // effective configuration until this exact upload completes.
+    await agent
+      .patch("/integrations/commerceml")
+      .send({ statusMapping: { Оплачен: "cancelled" } })
+      .expect(200);
+    const second = await request(app!.getHttpServer())
+      .get(`/1c_exchange?mode=import&type=sale&filename=${filename}`)
+      .set("Cookie", auth.cookie)
+      .expect(200);
+    expect(second.text).toBe("success");
+
+    const rowsAfterCompletion = await db
+      .select({ status: schema.pickupOrders.status })
+      .from(schema.pickupOrders)
+      .where(inArray(schema.pickupOrders.id, orderIds));
+    expect(rowsAfterCompletion.every((row) => row.status === "punched")).toBe(true);
+
+    // The final response may have reached 1C ambiguously. Changing the
+    // mapping after this file completed must not reinterpret and replay it;
+    // the same uploaded bytes still receive the cached successful outcome.
+    const third = await request(app!.getHttpServer())
+      .get(`/1c_exchange?mode=import&type=sale&filename=${filename}`)
+      .set("Cookie", auth.cookie)
+      .expect(200);
+    expect(third.text).toBe("success");
+
+    const cookieValue = auth.cookie.slice(auth.cookie.indexOf("=") + 1);
+    const [session] = await db
+      .select({ summary: schema.integrationSessions.summary })
+      .from(schema.integrationSessions)
+      .where(eq(schema.integrationSessions.cookieHash, hashDeviceToken(cookieValue)));
+    expect(session?.summary?.["saleImportCursors"]).toMatchObject({
+      [filename]: {
+        offset: orderIds.length,
+        applied: orderIds.length,
+        discrepancies: 0,
+        total: orderIds.length,
+        completed: true,
+      },
+    });
+
+    const events = await journalEvents();
+    expect(
+      events.filter((event) => event.message === `import (sale): файл «${filename}» применён`),
+    ).toHaveLength(1);
   });
 
   it("статус, не найденный в таблице сопоставления, журналируется как расхождение и заявку не трогает", async () => {
@@ -488,6 +613,19 @@ describe("1c_exchange orders (И-2)", () => {
       .send({ action: "punch", receiptNo: "R-1c-success" })
       .expect(200);
     expect(resolveRes.body.status).toBe("punched");
+
+    // The pending batch is a protocol offer, not a fresh selection. Even
+    // after the order becomes terminal and export formatting settings move,
+    // query must replay the exact bytes 1С has not acknowledged yet.
+    await agent
+      .patch("/integrations/commerceml")
+      .send({ splitWriteoffDocument: true, writeoffDocumentType: "Changed after query" })
+      .expect(200);
+    const repeatedQueryRes = await request(app!.getHttpServer())
+      .get("/1c_exchange?mode=query")
+      .set("Cookie", cookie)
+      .expect(200);
+    expect(repeatedQueryRes.text).toBe(queryRes.text);
 
     const successRes = await request(app!.getHttpServer())
       .post("/1c_exchange?mode=success")

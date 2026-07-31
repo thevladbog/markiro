@@ -138,6 +138,7 @@ function CommercemlSettingsForm({
     const priceType = values.priceType.trim();
     const writeoffDocumentType = values.writeoffDocumentType.trim();
     const orderStatusField = values.orderStatusField.trim();
+    const hadSavedStatusMapping = commercemlSettingsValuesOf(channel).statusMapping.length > 0;
     const statusMapping = Object.fromEntries(
       values.statusMapping
         .filter((row) => row.key.trim().length > 0)
@@ -163,7 +164,9 @@ function CommercemlSettingsForm({
         splitWriteoffDocument: values.splitWriteoffDocument,
         ...(writeoffDocumentType ? { writeoffDocumentType } : {}),
         ...(orderStatusField ? { orderStatusField } : {}),
-        ...(Object.keys(statusMapping).length > 0 ? { statusMapping } : {}),
+        ...(Object.keys(statusMapping).length > 0 || hadSavedStatusMapping
+          ? { statusMapping }
+          : {}),
         silentAfterHours: values.silentAfterHours,
       });
       // Saved: this is the new clean baseline. Marking the form not-dirty

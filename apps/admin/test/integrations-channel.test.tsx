@@ -461,6 +461,27 @@ describe("ChannelPage", () => {
     expect(call?.[1]).not.toHaveProperty("statusMapping");
   });
 
+  it("отправляет пустое сопоставление при удалении последней сохранённой строки", async () => {
+    const { queryClient } = renderChannel("commerceml");
+    await screen.findByLabelText(/тип цены/i);
+
+    await act(async () => {
+      queryClient.setQueryData(channelDetailQueryKey("commerceml"), {
+        ...defaultDetail("commerceml"),
+        settings: { statusMapping: { ЗаказВыполнен: "writtenoff" } },
+      });
+    });
+    await screen.findByDisplayValue("ЗаказВыполнен");
+
+    await userEvent.click(screen.getByRole("button", { name: /удалить/i }));
+    await userEvent.click(screen.getByRole("button", { name: /сохранить/i }));
+
+    expect(patchSpy).toHaveBeenCalledWith(
+      "/integrations/commerceml",
+      expect.objectContaining({ statusMapping: {} }),
+    );
+  });
+
   it("не показывает выпуск учётных данных обмена для канала без обмена (public_api)", async () => {
     renderChannel("public_api");
 
