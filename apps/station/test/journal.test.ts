@@ -28,6 +28,7 @@ const EVENT = {
   raw: "0104600000000015215Ab1",
   verdict: "ok",
   scannedAt: "2026-07-26T10:00:00.000Z",
+  operatorId: null,
 };
 const CODE = {
   codeHash: "0104600000000015215Ab1",
@@ -35,7 +36,26 @@ const CODE = {
   gtin14: "04600000000015",
   serial: "5Ab1",
   scannedAt: "2026-07-26T10:00:00.000Z",
+  boxId: null,
 };
+/** Alias for the brief's box/operator tests below -- same fixture, read name. */
+const acceptedCode = CODE;
+
+/** One scan event, distinguished by `id` only in its raw payload. */
+function event(id: string): typeof EVENT {
+  return { ...EVENT, raw: `RAW-${id}` };
+}
+
+/** Wraps `exec` so any statement matching `pattern` throws instead of running. */
+function failingExecOn(exec: SqlExecutor, pattern: RegExp): SqlExecutor {
+  return {
+    run: async (sql, params) => {
+      if (pattern.test(sql)) throw new Error("disk full");
+      return exec.run(sql, params);
+    },
+    all: (sql, params) => exec.all(sql, params),
+  };
+}
 
 describe("journal", () => {
   it("appendScanEvent writes exactly one event row and touches nothing else", async () => {
@@ -154,6 +174,7 @@ describe("outbox", () => {
         raw: "RAW1",
         verdict: "ok",
         scannedAt: "2026-07-28T10:00:00.000Z",
+        operatorId: null,
       },
       {
         codeHash: "h1",
@@ -161,6 +182,7 @@ describe("outbox", () => {
         gtin14: "04600000000017",
         serial: "AB1",
         scannedAt: "2026-07-28T10:00:00.000Z",
+        boxId: null,
       },
     );
 
@@ -186,6 +208,7 @@ describe("outbox", () => {
         raw: "junk",
         verdict: "invalid",
         scannedAt: "2026-07-28T10:00:01.000Z",
+        operatorId: null,
       },
       null,
     );
@@ -204,10 +227,18 @@ describe("outbox", () => {
       gtin14: "04600000000017",
       serial: "AB1",
       scannedAt: "2026-07-28T10:00:00.000Z",
+      boxId: null,
     };
     await recordScan(
       exec,
-      { shiftId: "s1", terminalId: null, raw: "RAW1", verdict: "ok", scannedAt: code.scannedAt },
+      {
+        shiftId: "s1",
+        terminalId: null,
+        raw: "RAW1",
+        verdict: "ok",
+        scannedAt: code.scannedAt,
+        operatorId: null,
+      },
       code,
     );
 
@@ -220,6 +251,7 @@ describe("outbox", () => {
         raw: "RAW1",
         verdict: "ok",
         scannedAt: "2026-07-28T10:00:05.000Z",
+        operatorId: null,
       },
       { ...code, scannedAt: "2026-07-28T10:00:05.000Z" },
     );
@@ -254,6 +286,7 @@ describe("outbox", () => {
           raw: "RAW1",
           verdict: "invalid",
           scannedAt: "2026-07-28T10:00:00.000Z",
+          operatorId: null,
         },
         null,
       ),
@@ -281,6 +314,7 @@ describe("outbox", () => {
       raw: "RAW1",
       verdict: "ok",
       scannedAt: "2026-07-28T10:00:00.000Z",
+      operatorId: null,
     };
     const code = {
       codeHash: "h1",
@@ -288,6 +322,7 @@ describe("outbox", () => {
       gtin14: "04600000000017",
       serial: "AB1",
       scannedAt: "2026-07-28T10:00:00.000Z",
+      boxId: null,
     };
 
     await expect(recordScan(failing, event, code)).rejects.toThrow(/disk full/);
@@ -332,6 +367,7 @@ describe("outbox", () => {
       raw: "RAW1",
       verdict: "ok",
       scannedAt: "2026-07-28T10:00:00.000Z",
+      operatorId: null,
     };
     const code = {
       codeHash: "h1",
@@ -339,6 +375,7 @@ describe("outbox", () => {
       gtin14: "04600000000017",
       serial: "AB1",
       scannedAt: "2026-07-28T10:00:00.000Z",
+      boxId: null,
     };
 
     await expect(recordScan(failing, event, code)).rejects.toThrow(/disk full/);
@@ -377,6 +414,7 @@ describe("outbox", () => {
       raw: "RAW1",
       verdict: "ok",
       scannedAt: "2026-07-28T10:00:00.000Z",
+      operatorId: null,
     };
     const code = {
       codeHash: "h1",
@@ -384,6 +422,7 @@ describe("outbox", () => {
       gtin14: "04600000000017",
       serial: "AB1",
       scannedAt: "2026-07-28T10:00:00.000Z",
+      boxId: null,
     };
 
     await expect(recordScan(failing, event, code)).rejects.toThrow(/disk full/);
@@ -400,6 +439,7 @@ describe("outbox", () => {
         raw: "OTHER",
         verdict: "ok",
         scannedAt: "2026-07-28T09:00:00.000Z",
+        operatorId: null,
       },
       {
         codeHash: "other-h",
@@ -407,6 +447,7 @@ describe("outbox", () => {
         gtin14: "04600000000017",
         serial: "OTHER1",
         scannedAt: "2026-07-28T09:00:00.000Z",
+        boxId: null,
       },
     );
 
@@ -427,6 +468,7 @@ describe("outbox", () => {
           raw: "junk",
           verdict: "invalid",
           scannedAt: "2026-07-28T10:00:01.000Z",
+          operatorId: null,
         },
         null,
       ),
@@ -452,6 +494,7 @@ describe("outbox", () => {
       raw: "RAW1",
       verdict: "ok",
       scannedAt: "2026-07-28T10:00:00.000Z",
+      operatorId: null,
     };
     const code = {
       codeHash: "h1",
@@ -459,6 +502,7 @@ describe("outbox", () => {
       gtin14: "04600000000017",
       serial: "AB1",
       scannedAt: "2026-07-28T10:00:00.000Z",
+      boxId: null,
     };
 
     await expect(recordScan(failing, event, code)).rejects.toThrow(/disk full/);
@@ -475,6 +519,7 @@ describe("outbox", () => {
         raw: "OTHER",
         verdict: "ok",
         scannedAt: "2026-07-28T09:00:00.000Z",
+        operatorId: null,
       },
       {
         codeHash: "other-h",
@@ -482,6 +527,7 @@ describe("outbox", () => {
         gtin14: "04600000000017",
         serial: "OTHER1",
         scannedAt: "2026-07-28T09:00:00.000Z",
+        boxId: null,
       },
     );
 
@@ -502,6 +548,7 @@ describe("outbox", () => {
           raw: "junk",
           verdict: "invalid",
           scannedAt: "2026-07-28T10:00:01.000Z",
+          operatorId: null,
         },
         null,
       ),
@@ -519,6 +566,7 @@ describe("outbox", () => {
       gtin14: "04600000000017",
       serial: "AB1",
       scannedAt: "2026-07-28T10:00:00.000Z",
+      boxId: null,
     };
 
     // First scan: the code gets stored.
@@ -530,6 +578,7 @@ describe("outbox", () => {
         raw: "RAW1",
         verdict: "ok",
         scannedAt: "2026-07-28T10:00:00.000Z",
+        operatorId: null,
       },
       code,
     );
@@ -557,6 +606,7 @@ describe("outbox", () => {
           raw: "RAW1",
           verdict: "ok",
           scannedAt: "2026-07-28T10:00:05.000Z",
+          operatorId: null,
         },
         code,
       ),
@@ -568,5 +618,36 @@ describe("outbox", () => {
     // 'code', the code would be incorrectly deleted, losing the first scan's
     // payload forever.
     expect(await loadCodeKeys(exec)).toEqual(new Set(["h1"]));
+  });
+});
+
+describe("box id and operator id", () => {
+  it("stores the box id on the code row and on the outbox row", async () => {
+    const exec = makeExec();
+    await recordScan(exec, event("a"), { ...acceptedCode, boxId: "b1" });
+    const code = await exec.all<{ box_id: string }>(`SELECT box_id FROM codes_mirror`);
+    const out = await exec.all<{ box_id: string }>(`SELECT box_id FROM outbox`);
+    expect(code[0]!.box_id).toBe("b1");
+    expect(out[0]!.box_id).toBe("b1");
+  });
+
+  it("compensates the code row away when the outbox write fails, box id and all", async () => {
+    const exec = makeExec();
+    const failing = failingExecOn(exec, /INSERT INTO outbox/);
+    await expect(
+      recordScan(failing, event("a"), { ...acceptedCode, boxId: "b1" }),
+    ).rejects.toThrow();
+    expect(await exec.all(`SELECT 1 FROM codes_mirror`)).toHaveLength(0);
+  });
+
+  it("stores the operator on the journal row and on the outbox row", async () => {
+    const exec = makeExec();
+    await recordScan(exec, { ...event("a"), operatorId: "op-1" }, { ...acceptedCode, boxId: "b1" });
+    const ev = await exec.all<{ operator_id: string }>(
+      `SELECT operator_id FROM scan_events_mirror`,
+    );
+    const out = await exec.all<{ operator_id: string }>(`SELECT operator_id FROM outbox`);
+    expect(ev[0]!.operator_id).toBe("op-1");
+    expect(out[0]!.operator_id).toBe("op-1");
   });
 });

@@ -32,15 +32,17 @@ const CONFIG: HardwareConfig = {
   scanner: { port: "COM3", baud: 9600 },
   printer: { kind: "tcp", host: "10.0.0.7", port: 9100 },
   printerLanguage: "tspl",
+  verifyPrintedLabel: true,
 };
 
 describe("hardware config", () => {
-  it("defaults to no hardware and ZPL when nothing is stored", async () => {
+  it("defaults to no hardware, ZPL and no print verification when nothing is stored", async () => {
     expect(await loadHardwareConfig(await makeExec())).toEqual(DEFAULT_HARDWARE_CONFIG);
     expect(DEFAULT_HARDWARE_CONFIG).toEqual({
       scanner: null,
       printer: null,
       printerLanguage: "zpl",
+      verifyPrintedLabel: false,
     });
   });
 
@@ -56,6 +58,7 @@ describe("hardware config", () => {
       scanner: null,
       printer: { kind: "serial", port: "COM4", baud: 19200 },
       printerLanguage: "zpl",
+      verifyPrintedLabel: false,
     };
     await saveHardwareConfig(exec, serial);
     expect(await loadHardwareConfig(exec)).toEqual(serial);
@@ -77,6 +80,15 @@ describe("hardware config", () => {
       JSON.stringify({ scanner: null, printer: null, printerLanguage: "postscript" }),
     ]);
     expect((await loadHardwareConfig(exec)).printerLanguage).toBe("zpl");
+  });
+
+  it("defaults verifyPrintedLabel to false when the stored value is not a boolean", async () => {
+    const exec = await makeExec();
+    await exec.run("INSERT INTO station_meta (key, value) VALUES (?,?)", [
+      "hardware_config",
+      JSON.stringify({ scanner: null, printer: null, printerLanguage: "zpl" }),
+    ]);
+    expect((await loadHardwareConfig(exec)).verifyPrintedLabel).toBe(false);
   });
 
   it("never rejects when the table does not exist yet", async () => {

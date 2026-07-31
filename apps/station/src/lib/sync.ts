@@ -1,8 +1,12 @@
+import { MAX_BOX_CLOSURES_PER_SYNC_BATCH } from "@markiro/domain";
 import type { StationClient } from "./api-client.js";
 import { conflictCount, recordConflicts } from "./conflicts.js";
 import { getInstallId } from "./install-id.js";
 import type { SqlExecutor } from "./mirror.js";
 import { ackThrough, oldestQueuedAt, outboxDepth, readBatch, type OutboxItem } from "./outbox.js";
+import { addRange, remaining, type PoolRange } from "./sscc-pool.js";
+
+export { MAX_BOX_CLOSURES_PER_SYNC_BATCH };
 
 /** Scans per request. Small enough to survive a flaky link and to retry cheaply. */
 export const BATCH_SIZE = 200;
@@ -31,6 +35,14 @@ export interface SyncState {
    * each one — so this is a quiet count, never something that interrupts.
    */
   conflicts: number;
+  /**
+   * Unburned SSCC serials left in this device's local pool (box ranges,
+   * extension digit 0), summed across every range it holds. Zero when the
+   * device has never received a range at all, same as a dry pool — the
+   * operator-facing signal (a later slice) has no reason to tell those
+   * apart.
+   */
+  serialsLeft: number;
 }
 
 export interface SyncEngineDeps {
@@ -57,10 +69,14 @@ interface BatchConflict {
   winningScannedAt: string;
 }
 
+/** A block of box-range serials the server is topping this device's pool up with. */
+type BatchSsccBlock = Omit<PoolRange, "nextSerial">;
+
 interface BatchResponse {
   applied: number;
   alreadyApplied: boolean;
   conflicts?: BatchConflict[];
+  ssccBlock?: BatchSsccBlock;
 }
 
 /**
@@ -83,6 +99,26 @@ function isBatchConflict(value: unknown): value is BatchConflict {
     (typeof c.winningTerminalId === "string" || c.winningTerminalId === null) &&
     typeof c.winningScannedAt === "string" &&
     !Number.isNaN(Date.parse(c.winningScannedAt))
+  );
+}
+
+/**
+ * Same discipline as `isBatchConflict`, for the same reason: `ssccBlock` is
+ * optional, and a malformed one must cost only the top-up, never the batch's
+ * ack. Checked at the point of consumption (below), not folded into
+ * `isBatchResponse` itself — that guard's two required fields are what
+ * stand between a captive portal and a permanent delete, and this is not
+ * that; a server that sends a top-up in a shape this device does not
+ * recognize should still see its batch acknowledged.
+ */
+function isBatchSsccBlock(value: unknown): value is BatchSsccBlock {
+  if (typeof value !== "object" || value === null) return false;
+  const b = value as Record<string, unknown>;
+  return (
+    typeof b.issuerPrefix === "string" &&
+    typeof b.extensionDigit === "number" &&
+    typeof b.fromSerial === "number" &&
+    typeof b.toSerial === "number"
   );
 }
 
@@ -116,26 +152,252 @@ function toPayload(items: OutboxItem[]) {
     verdict: i.verdict,
     scannedAt: i.scannedAt,
     code: i.code,
+    boxId: i.boxId,
+    operatorId: i.operatorId,
   }));
 }
 
-const CEILING_META_KEY = "sync_pending_ceiling";
+/** A closed-but-unreported box, as read off this device's own `boxes_mirror` row. */
+interface BoxClosureRow {
+  boxId: string;
+  shiftId: string;
+  terminalId: string | null;
+  sscc: string;
+  closedAt: string;
+  operatorId: string | null;
+  /**
+   * Whether the closed box's printed label has been scanned back and
+   * matched, or the operator explicitly chose to skip that (Task 13 review,
+   * Finding 6) -- read straight off `boxes_mirror`'s own `print_verified_at`/
+   * `print_skipped_at` columns (Task 9), which is where `PrintVerification`'s
+   * `onVerified`/`onSkip` paths write them. Null on either just means "not
+   * yet resolved" -- an ack can race the operator's decision (the box is
+   * typically acked within seconds of closing, often before the prompt is
+   * even answered), and that is fine: there is no requirement that the
+   * outcome reach the server before the ack, only that it eventually can.
+   */
+  printVerifiedAt: string | null;
+  printSkippedAt: string | null;
+  /** SQLite's own rowid -- see `readClosedUnackedBoxes`'s doc comment. */
+  rowid: number;
+}
 
 /**
- * Reads back the in-flight batch's pinned ceiling (see `pendingCeiling`
- * below), persisted in `station_meta` — the same key/value table
- * `hardware_config`, the roster slot pointer, and the install id already
- * use. This is what makes the ceiling survive not just the engine's own
- * scheduled retry within one process, but an app restart, crash, or update:
- * a brand-new engine, built over the same on-device database, seeds its
- * in-memory ceiling from here instead of starting at `null` and reopening a
- * plain fresh prefix read — see `createSyncEngine`'s doc comment for why
- * that gap is exactly what let a resend duplicate data server-side.
+ * Every box this device has closed but not yet had acknowledged, oldest
+ * first -- capped at `limit` (the API's own `syncBatchSchema.boxes.max()`,
+ * `MAX_BOX_CLOSURES_PER_SYNC_BATCH`) so a station that closes more boxes
+ * offline than one batch may carry never assembles a payload the server
+ * rejects outright: without this cap, an over-limit batch would 400 every
+ * time (Zod's `.max()`), and since the drain treats every error as
+ * retryable and never drops data (see the module doc comment), the
+ * identical oversized payload would retry forever, wedging both box
+ * closures and item delivery on that device. The drain loop's own `for`
+ * loop is what delivers anything left over: once this capped batch acks,
+ * the next iteration reads fresh and picks up the remainder.
+ *
+ * `ceilingRowid`, when given, additionally requires `rowid <= ceilingRowid`
+ * -- the same discipline `readBatch`'s `ceilingId` applies to the outbox
+ * (see `pendingBoxCeiling`'s doc comment in `createSyncEngine` for why a box
+ * closure needs this too, despite being idempotent on the server): a retry
+ * of a batch already in flight must re-read the EXACT box set that batch's
+ * id was computed from, never a fresh read that could have grown to include
+ * a box that closed during the backoff window. Omitted (or `null`), this is
+ * a plain "oldest `limit` rows" read, used only when no box batch is
+ * currently pinned.
+ *
+ * Reports `shiftId`/`terminalId` straight off the box's OWN row, never
+ * whatever the device would consider "current" at drain time: this engine
+ * has no notion of a "current" shift or terminal at all (it drains the
+ * WHOLE device outbox, which can span a shift change), and terminalId
+ * (`deviceId`) lives in `station.json`, not this SQLite mirror, so it can
+ * change independently of a box still open in the local database. A box
+ * spanning either change must still report the identity it was opened
+ * under, or the server's four-column match can never find it.
  */
-async function loadPersistedCeiling(exec: SqlExecutor): Promise<number | null> {
+async function readClosedUnackedBoxes(
+  exec: SqlExecutor,
+  limit: number,
+  ceilingRowid?: number | null,
+): Promise<BoxClosureRow[]> {
+  const rows =
+    ceilingRowid != null
+      ? await exec.all<{
+          box_id: string;
+          shift_id: string;
+          terminal_id: string | null;
+          sscc: string;
+          closed_at: string;
+          closed_by: string | null;
+          print_verified_at: string | null;
+          print_skipped_at: string | null;
+          rowid: number;
+        }>(
+          `SELECT rowid, box_id, shift_id, terminal_id, sscc, closed_at, closed_by,
+                  print_verified_at, print_skipped_at
+             FROM boxes_mirror
+            WHERE closed_at IS NOT NULL AND acked_at IS NULL AND rowid <= ?
+            ORDER BY rowid LIMIT ?`,
+          [ceilingRowid, limit],
+        )
+      : await exec.all<{
+          box_id: string;
+          shift_id: string;
+          terminal_id: string | null;
+          sscc: string;
+          closed_at: string;
+          closed_by: string | null;
+          print_verified_at: string | null;
+          print_skipped_at: string | null;
+          rowid: number;
+        }>(
+          `SELECT rowid, box_id, shift_id, terminal_id, sscc, closed_at, closed_by,
+                  print_verified_at, print_skipped_at
+             FROM boxes_mirror
+            WHERE closed_at IS NOT NULL AND acked_at IS NULL
+            ORDER BY rowid LIMIT ?`,
+          [limit],
+        );
+  return rows.map((r) => ({
+    boxId: r.box_id,
+    shiftId: r.shift_id,
+    terminalId: r.terminal_id,
+    sscc: r.sscc,
+    closedAt: r.closed_at,
+    operatorId: r.closed_by,
+    printVerifiedAt: r.print_verified_at,
+    printSkippedAt: r.print_skipped_at,
+    rowid: r.rowid,
+  }));
+}
+
+function toBoxPayload(boxes: BoxClosureRow[]) {
+  return boxes.map((b) => ({
+    boxId: b.boxId,
+    shiftId: b.shiftId,
+    terminalId: b.terminalId,
+    sscc: b.sscc,
+    closedAt: b.closedAt,
+    operatorId: b.operatorId,
+    printVerifiedAt: b.printVerifiedAt,
+    printSkippedAt: b.printSkippedAt,
+  }));
+}
+
+/**
+ * A compact identity for a set of box closures, folded into `batchId` so a
+ * retry's key changes whenever the SET actually being sent changes (Finding
+ * 1) -- either because a box was added (the ceiling rowid grows) or because
+ * an already-included box's print-verification outcome resolved (Task 13
+ * review, Finding 1's `acked_at`-clearing resend, which reuses the SAME
+ * rowid). One character per box -- `u`nresolved, `v`erified, or `s`kipped --
+ * keeps this well within `batchId`'s 200-character budget even at
+ * `MAX_BOX_CLOSURES_PER_SYNC_BATCH` boxes, and each box transitions its
+ * character exactly once (an outcome is terminal), so this cannot cycle back
+ * to a signature already used for a genuinely different set.
+ */
+function boxSetSignature(boxes: BoxClosureRow[]): string {
+  const ceiling = boxes[boxes.length - 1]!.rowid;
+  const outcomes = boxes
+    .map((b) => (b.printVerifiedAt !== null ? "v" : b.printSkippedAt !== null ? "s" : "u"))
+    .join("");
+  return `${ceiling}:${outcomes}`;
+}
+
+/**
+ * Marks each of these boxes acknowledged -- CONDITIONALLY (CodeRabbit PR33
+ * review, Finding 6): only if its print-verification outcome still matches
+ * what was actually read into the payload this ack is FOR, at
+ * payload-build time (`boxes`, the exact rows `readClosedUnackedBoxes`
+ * returned for this send). One UPDATE per box, not a single IN-list
+ * statement, because each box's own `printVerifiedAt`/`printSkippedAt` at
+ * that moment can differ from its batch-mates', so one shared WHERE cannot
+ * express every box's own condition at once.
+ *
+ * The race this closes: `markPrintVerified`/`markPrintSkipped` can resolve
+ * a box's outcome AFTER its closure has already been read into an
+ * in-flight upload's payload but BEFORE that upload's response is
+ * acknowledged. Both of those functions clear `acked_at` on their own write
+ * (see their own doc comments) specifically to re-open a resend window --
+ * but an unconditional ack here would immediately re-close that SAME
+ * window on the strength of a response that was for the OLD (still-null)
+ * outcome, permanently losing the just-recorded resolution (it would never
+ * be read by `readClosedUnackedBoxes` again). Gating on the STALE values
+ * captured at payload-build time means: if the row's outcome is unchanged
+ * since then, this ack lands normally; if it changed in that window, this
+ * ack is correctly a no-op -- the row stays unacked and the next drain
+ * resends it, carrying the real, now-resolved outcome.
+ *
+ * `IS`, not `=`, for both comparisons: SQLite's `=` is never true against
+ * NULL (three-valued logic), so a box whose outcome was -- and still is --
+ * unresolved (both columns null) would never match its own WHERE under
+ * `=`. `IS` is null-safe, so `print_verified_at IS NULL` correctly matches
+ * a still-null column.
+ */
+async function ackBoxes(exec: SqlExecutor, boxes: BoxClosureRow[], ackedAt: string): Promise<void> {
+  for (const box of boxes) {
+    await exec.run(
+      `UPDATE boxes_mirror SET acked_at = ?
+       WHERE box_id = ? AND print_verified_at IS ? AND print_skipped_at IS ?`,
+      [ackedAt, box.boxId, box.printVerifiedAt, box.printSkippedAt],
+    );
+  }
+}
+
+/**
+ * The issuer prefix this device's local pool is keyed under, or null if it
+ * has never received a box range at all. A device holds at most one in
+ * practice (`StationBundle.sscc` hands down a single prefix), so the lowest
+ * one on an otherwise-unexpected multi-prefix device is as good a choice as
+ * any -- this is a reporting figure, not an allocation decision.
+ */
+async function currentIssuerPrefix(exec: SqlExecutor): Promise<string | null> {
+  const rows = await exec.all<{ issuer_prefix: string }>(
+    "SELECT issuer_prefix FROM sscc_pool WHERE extension_digit = 0 ORDER BY issuer_prefix LIMIT 1",
+  );
+  return rows[0]?.issuer_prefix ?? null;
+}
+
+/** Serials left in the box pool (extension digit 0), for `SyncState` and the request body. */
+async function computeSerialsLeft(exec: SqlExecutor): Promise<number> {
+  const issuerPrefix = await currentIssuerPrefix(exec);
+  return issuerPrefix === null ? 0 : remaining(exec, issuerPrefix, 0);
+}
+
+const CEILING_META_KEY = "sync_pending_ceiling";
+/**
+ * The box-closure counterpart of `CEILING_META_KEY` (Finding 1): pins the
+ * `boxes_mirror` rowid ceiling of the box set currently in flight, the same
+ * way `CEILING_META_KEY` pins the outbox `id` ceiling of the items in
+ * flight. Without this, a batch that carries items keys its `batchId` off
+ * `CEILING_META_KEY`'s `maxId` alone; if a NEW box closes while that batch
+ * awaits acknowledgement, a retry would resend the identical `batchId` with
+ * a grown box set. The server claims batch ids in `sync_batches` and
+ * short-circuits an already-claimed one with `alreadyApplied` BEFORE its own
+ * box-closures loop (`station-scans.service.ts`), so that new closure would
+ * never actually be applied server-side -- yet this device's `ackBoxes` (see
+ * `drain` below) marks it acknowledged anyway, losing it permanently. Pinning
+ * the box set separately, exactly like the item ceiling, keeps a retry of
+ * THIS batch scoped to the box set it was originally computed from; a box
+ * that closes afterward rides a later, distinct batch instead.
+ */
+const BOX_CEILING_META_KEY = "sync_pending_box_ceiling";
+
+/**
+ * Reads back an in-flight batch's pinned ceiling (see `pendingCeiling`/
+ * `pendingBoxCeiling` below), persisted in `station_meta` under `key` — the
+ * same key/value table `hardware_config`, the roster slot pointer, and the
+ * install id already use. This is what makes a ceiling survive not just the
+ * engine's own scheduled retry within one process, but an app restart,
+ * crash, or update: a brand-new engine, built over the same on-device
+ * database, seeds its in-memory ceiling from here instead of starting at
+ * `null` and reopening a plain fresh read — see `createSyncEngine`'s doc
+ * comment for why that gap is exactly what let a resend duplicate data
+ * server-side.
+ */
+async function loadPersistedCeiling(exec: SqlExecutor, key: string): Promise<number | null> {
   const rows = await exec.all<{ value: string | null }>(
     "SELECT value FROM station_meta WHERE key = ?",
-    [CEILING_META_KEY],
+    [key],
   );
   const value = rows[0]?.value;
   if (value == null) return null;
@@ -151,17 +413,17 @@ async function loadPersistedCeiling(exec: SqlExecutor): Promise<number | null> {
  * and the response arriving still leaves the ceiling pinned for whichever
  * process resends next.
  */
-async function savePersistedCeiling(exec: SqlExecutor, id: number): Promise<void> {
+async function savePersistedCeiling(exec: SqlExecutor, key: string, id: number): Promise<void> {
   await exec.run(
     `INSERT INTO station_meta (key, value) VALUES (?, ?)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    [CEILING_META_KEY, String(id)],
+    [key, String(id)],
   );
 }
 
 /** Single statement; called once the server has confirmed the batch. */
-async function clearPersistedCeiling(exec: SqlExecutor): Promise<void> {
-  await exec.run("DELETE FROM station_meta WHERE key = ?", [CEILING_META_KEY]);
+async function clearPersistedCeiling(exec: SqlExecutor, key: string): Promise<void> {
+  await exec.run("DELETE FROM station_meta WHERE key = ?", [key]);
 }
 
 /**
@@ -236,6 +498,17 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
   // load it before doing anything else, instead of every engine's first
   // batch after a restart silently reopening a plain fresh prefix read.
   let ceilingLoaded = false;
+  // The `boxes_mirror` rowid ceiling of the box set currently awaiting
+  // acknowledgement (Finding 1) -- `pendingCeiling`'s exact counterpart for
+  // box closures, pinned and persisted the same way, for the same reason:
+  // without it, a batch that also carries items keys its `batchId` off
+  // `pendingCeiling` alone, so a box that closes while that batch is in
+  // flight would silently ride an unchanged retry key straight past the
+  // server's already-claimed-batch short-circuit. See `BOX_CEILING_META_KEY`
+  // above and `readClosedUnackedBoxes`'s `ceilingRowid` parameter.
+  let pendingBoxCeiling: number | null = null;
+  // `ceilingLoaded`'s exact counterpart for `pendingBoxCeiling`.
+  let boxCeilingLoaded = false;
   // Resolved once per engine instance and cached: the install id never
   // changes for the life of a given local database, so there is no reason
   // to re-query `station_meta` for every batch.
@@ -248,10 +521,19 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
 
   async function ensurePendingCeiling(): Promise<number | null> {
     if (!ceilingLoaded) {
-      pendingCeiling = await loadPersistedCeiling(deps.exec);
+      pendingCeiling = await loadPersistedCeiling(deps.exec, CEILING_META_KEY);
       ceilingLoaded = true;
     }
     return pendingCeiling;
+  }
+
+  /** `ensurePendingCeiling`'s exact counterpart for `pendingBoxCeiling`. */
+  async function ensurePendingBoxCeiling(): Promise<number | null> {
+    if (!boxCeilingLoaded) {
+      pendingBoxCeiling = await loadPersistedCeiling(deps.exec, BOX_CEILING_META_KEY);
+      boxCeilingLoaded = true;
+    }
+    return pendingBoxCeiling;
   }
 
   function settleIdle() {
@@ -298,7 +580,8 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
       }
     }
     const conflicts = await conflictCount(deps.exec);
-    deps.onState({ pending, lastSuccessAt, stuck, conflicts });
+    const serialsLeft = await computeSerialsLeft(deps.exec);
+    deps.onState({ pending, lastSuccessAt, stuck, conflicts, serialsLeft });
   }
 
   async function drain(): Promise<void> {
@@ -313,40 +596,102 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
         // that range; otherwise this is a plain fresh prefix.
         const ceiling = await ensurePendingCeiling();
         const batch = await readBatch(deps.exec, BATCH_SIZE, ceiling);
-        if (batch.length === 0) {
-          if (ceiling !== null) {
+        // Boxes ride along independently of the outbox ceiling above (see
+        // `readClosedUnackedBoxes`'s doc comment) -- a shift's last box can
+        // close with nothing left queued, and that closure must still reach
+        // the server without waiting for some LATER scan to give the drain
+        // a reason to run. Pinned to its OWN ceiling (Finding 1), the same
+        // way `batch` is pinned to `ceiling`: a retry of this same attempt
+        // must re-read the exact box set it was keyed to, never a fresh read
+        // that could have grown to include a box closed during the backoff
+        // window. Capped at `MAX_BOX_CLOSURES_PER_SYNC_BATCH` (Finding 2) so
+        // this device can never assemble a payload the server's own
+        // `syncBatchSchema.boxes.max()` would reject outright.
+        const boxCeiling = await ensurePendingBoxCeiling();
+        const boxes = await readClosedUnackedBoxes(
+          deps.exec,
+          MAX_BOX_CLOSURES_PER_SYNC_BATCH,
+          boxCeiling,
+        );
+        if (batch.length === 0 && boxes.length === 0) {
+          if (ceiling !== null || boxCeiling !== null) {
             // Only reachable with a stale ceiling if the rows it pinned were
-            // somehow removed without going through `ackThrough` below (or
-            // were already acknowledged by whichever process posted them,
-            // and this one never learned that) — not expected, but clearing
-            // it here (in memory and in `station_meta`) avoids wedging every
-            // later drain on a ceiling that can never again be satisfied.
-            // `continue`, not `break`: any rows queued above the (now
-            // cleared) ceiling must drain in this same pass, not wait for
-            // the next nudge or the 15-second heartbeat.
+            // somehow removed without going through `ackThrough`/`ackBoxes`
+            // below (or were already acknowledged by whichever process
+            // posted them, and this one never learned that) — not expected,
+            // but clearing it here (in memory and in `station_meta`) avoids
+            // wedging every later drain on a ceiling that can never again be
+            // satisfied. `continue`, not `break`: any rows queued above the
+            // (now cleared) ceiling must drain in this same pass, not wait
+            // for the next nudge or the 15-second heartbeat.
             pendingCeiling = null;
-            await clearPersistedCeiling(deps.exec);
+            pendingBoxCeiling = null;
+            await clearPersistedCeiling(deps.exec, CEILING_META_KEY);
+            await clearPersistedCeiling(deps.exec, BOX_CEILING_META_KEY);
             continue;
           }
           break;
         }
 
-        const maxId = batch[batch.length - 1]!.id;
+        // `null` exactly when this attempt carries no outbox items at all
+        // (a boxes-only send, `batch.length === 0`, which the check above
+        // guarantees means `boxes.length > 0`) -- there is then no outbox
+        // range to pin or acknowledge.
+        const maxId = batch.length > 0 ? batch[batch.length - 1]!.id : null;
+        // `null` exactly when this attempt carries no box closures at all.
+        const newBoxCeiling = boxes.length > 0 ? boxes[boxes.length - 1]!.rowid : null;
         // Pin BEFORE sending — in memory AND in `station_meta` (a single
         // upsert; never a multi-statement transaction, see the module doc
         // comment) — so that if the post fails, or the whole process dies
         // before it completes, every later attempt on this batch — the
         // scheduled retry, a nudge that lands while one is outstanding, or a
         // brand-new engine's first drain after a restart — re-requests
-        // exactly this id range, never a fresh read that could have grown
-        // past it.
-        pendingCeiling = maxId;
+        // exactly this id range (and exactly this box set), never a fresh
+        // read that could have grown past it. Left untouched for whichever
+        // side (items or boxes) this attempt carries none of.
+        if (maxId !== null) {
+          pendingCeiling = maxId;
+        }
+        if (newBoxCeiling !== null) {
+          pendingBoxCeiling = newBoxCeiling;
+        }
         try {
-          await savePersistedCeiling(deps.exec, maxId);
+          if (maxId !== null) {
+            await savePersistedCeiling(deps.exec, CEILING_META_KEY, maxId);
+          }
+          if (newBoxCeiling !== null) {
+            await savePersistedCeiling(deps.exec, BOX_CEILING_META_KEY, newBoxCeiling);
+          }
           const instId = await ensureInstallId();
+          // A batch's box set (when non-empty) is folded into `batchId`
+          // (Finding 1) via `boxSetSignature`, on top of `maxId` when items
+          // are ALSO present: pinning `pendingCeiling` alone is not enough
+          // to protect a box that closes while an ITEM batch is in flight,
+          // because `maxId` does not change just because the box set grew,
+          // and the server claims batch ids in `sync_batches` and
+          // short-circuits an already-claimed one with `alreadyApplied`
+          // BEFORE its own box-closures loop (`station-scans.service.ts`) --
+          // so a retry that silently balloons its box set under an unchanged
+          // key would never have that new closure actually applied
+          // server-side, while this device's `ackBoxes` marks it
+          // acknowledged anyway. `pendingBoxCeiling` above already stops the
+          // SET from growing mid-retry; folding its signature into `batchId`
+          // is what also lets the NEXT batch (once this one clears) claim a
+          // key of its own, and what already gave the boxes-only branch
+          // (`maxId === null`) a distinct key across a print-verification
+          // outcome resolving (Task 13 review, second wave) -- see
+          // `boxSetSignature`'s own doc comment.
+          const boxSuffix = boxes.length > 0 ? `:box:${boxSetSignature(boxes)}` : "";
+          const batchId =
+            maxId !== null
+              ? `${deps.machineId}:${instId}:${maxId}${boxSuffix}`
+              : `${deps.machineId}:${instId}${boxSuffix}`;
+          const serialsLeft = await computeSerialsLeft(deps.exec);
           const res = await deps.client.post<BatchResponse>("/station/scans", {
-            batchId: `${deps.machineId}:${instId}:${maxId}`,
+            batchId,
             items: toPayload(batch),
+            boxes: toBoxPayload(boxes),
+            serialsLeft,
           });
           if (!isBatchResponse(res)) {
             // Parsed fine but isn't this endpoint's contract — could be a
@@ -398,16 +743,54 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
             // authoritative record either way.
             try {
               await recordConflicts(deps.exec, reported, new Date(now()).toISOString());
+              // A still-open box corrects itself: the operator simply scans
+              // one more item. A CLOSED box is taped and labelled, so it
+              // stays as printed and ends one position short — the cabinet
+              // is where that surfaces. This is the same trade the server
+              // makes when it marks a box item displaced rather than
+              // deleting it. Same try/catch as `recordConflicts` above, for
+              // the same reason: this is bookkeeping, not delivery.
+              for (const c of reported) {
+                await deps.exec.run(
+                  `UPDATE codes_mirror SET box_id = NULL
+                         WHERE code_hash = ?
+                           AND box_id IN (SELECT box_id FROM boxes_mirror WHERE closed_at IS NULL)`,
+                  [c.codeHash],
+                );
+              }
             } catch (err) {
               console.error("station: recording conflicts failed", err);
+            }
+          }
+          // Applied AFTER the validated response and BEFORE the ack, in its
+          // own try/catch: a pool top-up that fails must not block delivery,
+          // for the same reason a failed conflict recording does not (see
+          // above). The device simply runs on what it has; the next
+          // response carries another block. Losing one block costs at most
+          // some burnt numbers, and SSCCs need not be contiguous.
+          if (res.ssccBlock && isBatchSsccBlock(res.ssccBlock)) {
+            try {
+              await addRange(deps.exec, res.ssccBlock);
+            } catch (err) {
+              console.error("station: applying serial block failed", err);
             }
           }
           // `alreadyApplied` is a success: this exact batch is on the
           // server already, so holding on to it would wedge the queue
           // forever.
-          await ackThrough(deps.exec, maxId);
-          pendingCeiling = null;
-          await clearPersistedCeiling(deps.exec);
+          if (maxId !== null) {
+            await ackThrough(deps.exec, maxId);
+            pendingCeiling = null;
+            await clearPersistedCeiling(deps.exec, CEILING_META_KEY);
+          }
+          if (boxes.length > 0) {
+            // `boxes` itself -- not just the ids -- so the ack can gate each
+            // row on the outcome fields actually read into THIS payload
+            // (Finding 6): see `ackBoxes`'s own doc comment.
+            await ackBoxes(deps.exec, boxes, new Date(now()).toISOString());
+            pendingBoxCeiling = null;
+            await clearPersistedCeiling(deps.exec, BOX_CEILING_META_KEY);
+          }
           lastSuccessAt = now();
           backoffMs = BACKOFF_START_MS;
         } catch (err) {

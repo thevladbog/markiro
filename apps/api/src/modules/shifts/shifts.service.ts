@@ -4,6 +4,7 @@ import {
   Inject,
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
   UnprocessableEntityException,
 } from "@nestjs/common";
@@ -13,6 +14,11 @@ import type { LabelTemplateSpec } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
 import { OperatorsService } from "../operators/operators.service";
 import type { ProductDto } from "../products/dto";
+import {
+  BOX_EXTENSION_DIGIT,
+  SsccCapacityExhaustedException,
+  SsccService,
+} from "../sscc/sscc.service";
 import type {
   CloseShiftDto,
   CreateShiftDto,
@@ -27,11 +33,21 @@ import type {
 type ShiftRow = typeof schema.shifts.$inferSelect;
 type ProductRow = typeof schema.products.$inferSelect;
 
+/**
+ * One block must outlast a shift even if the network drops at the worst
+ * moment. Ten million serials per extension digit make generosity free, and
+ * a burnt serial costs nothing — SSCCs need not be contiguous.
+ */
+const BOX_BLOCK_SIZE = 2000;
+
 @Injectable()
 export class ShiftsService {
+  private readonly logger = new Logger(ShiftsService.name);
+
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly operatorsService: OperatorsService,
+    private readonly sscc: SsccService,
   ) {}
 
   /** List a tenant's shifts, joined with product/line/counterparty names. */
@@ -112,6 +128,11 @@ export class ShiftsService {
           lineId: data.lineId ?? null,
           counterpartyId: counterpartyId ?? null,
           labelTemplateId: labelTemplateId ?? null,
+          // No product-level default exists for either field (unlike
+          // counterpartyId/labelTemplateId above) -- the issuer is always
+          // explicit, so an omitted value is simply null ("our organisation").
+          ssccIssuerCounterpartyId: data.ssccIssuerCounterpartyId ?? null,
+          boxLabelTemplateId: data.boxLabelTemplateId ?? null,
           mode: data.mode,
           plannedQty: data.plannedQty ?? null,
           plannedDate: data.plannedDate ?? null,
@@ -150,6 +171,12 @@ export class ShiftsService {
       data.counterpartyId !== undefined ? data.counterpartyId : current.counterpartyId;
     const labelTemplateId =
       data.labelTemplateId !== undefined ? data.labelTemplateId : current.labelTemplateId;
+    const ssccIssuerCounterpartyId =
+      data.ssccIssuerCounterpartyId !== undefined
+        ? data.ssccIssuerCounterpartyId
+        : current.ssccIssuerCounterpartyId;
+    const boxLabelTemplateId =
+      data.boxLabelTemplateId !== undefined ? data.boxLabelTemplateId : current.boxLabelTemplateId;
     const plannedQty = data.plannedQty !== undefined ? data.plannedQty : current.plannedQty;
     const plannedDate = data.plannedDate !== undefined ? data.plannedDate : current.plannedDate;
     const boxCapacity = data.boxCapacity !== undefined ? data.boxCapacity : current.boxCapacity;
@@ -168,6 +195,8 @@ export class ShiftsService {
           lineId,
           counterpartyId,
           labelTemplateId,
+          ssccIssuerCounterpartyId,
+          boxLabelTemplateId,
           plannedQty,
           plannedDate,
           boxCapacity,
@@ -276,8 +305,14 @@ export class ShiftsService {
    * tenant's active roster, from the same `OperatorsService.buildRoster`
    * query `GET /station/operators` uses -- one method, two consumers, so the
    * initialization sync and the per-shift refresh can never drift.
+   *
+   * `deviceId` is the calling station device's own id (from `TenantGuard`,
+   * resolved off its api-key -- see tenant.guard.ts), or `null` for a
+   * session-authenticated caller (admin/manager UI browsing a shift, not a
+   * device). It gates the box serial block below: `sscc_blocks.device_id`
+   * carries a NOT NULL FK, so a block can only ever be cut for a real device.
    */
-  async getBundle(tenantId: string, id: string): Promise<ShiftBundleDto> {
+  async getBundle(tenantId: string, id: string, deviceId: string | null): Promise<ShiftBundleDto> {
     const shift = await this.getShift(tenantId, id); // 404 if cross-tenant/missing
 
     const productRow = await this.findProductRow(tenantId, shift.productId);
@@ -298,19 +333,14 @@ export class ShiftsService {
       createdAt: productRow.createdAt,
     };
 
-    let labelTemplate: ShiftBundleDto["labelTemplate"] = null;
-    if (shift.labelTemplateId) {
-      const [lt] = await this.db
-        .select()
-        .from(schema.labelTemplates)
-        .where(
-          and(
-            eq(schema.labelTemplates.tenantId, tenantId),
-            eq(schema.labelTemplates.id, shift.labelTemplateId),
-          ),
-        );
-      if (lt) labelTemplate = { id: lt.id, name: lt.name, spec: lt.spec as LabelTemplateSpec };
-    }
+    const labelTemplate = await this.findLabelTemplate(tenantId, shift.labelTemplateId);
+    // The box label's own template (Finding 3): resolved the exact same way
+    // as `labelTemplate` above, from `shift.boxLabelTemplateId` -- a
+    // completely separate column, with no fallback to the item template or
+    // to any product-level default (products have no equivalent "default box
+    // label template" column, unlike `defaultLabelTemplateId` for the item
+    // template).
+    const boxLabelTemplate = await this.findLabelTemplate(tenantId, shift.boxLabelTemplateId);
 
     let counterpartyGln: string | null = null;
     if (shift.counterpartyId) {
@@ -332,7 +362,103 @@ export class ShiftsService {
     // refresh can never drift.
     const operators = await this.operatorsService.buildRoster(tenantId);
 
-    return { shift, product, labelTemplate, counterpartyGln, operators };
+    // Aggregation shifts, and only for an actual station device. A
+    // validation shift closes no boxes, so allocating for it would burn
+    // serials nothing will ever print; a session caller has no device row to
+    // attribute a block to (sscc_blocks.device_id is NOT NULL).
+    const sscc: ShiftBundleDto["sscc"] =
+      shift.mode === "aggregation" && deviceId
+        ? await this.bundleSscc(tenantId, shift.id, deviceId)
+        : null;
+
+    return { shift, product, labelTemplate, boxLabelTemplate, counterpartyGln, operators, sscc };
+  }
+
+  /**
+   * Resolves a label template id (tenant-scoped) into the `{ id, name, spec }`
+   * shape both `ShiftBundleDto.labelTemplate` and `.boxLabelTemplate` share.
+   * Null in, or a template this tenant does not own, both resolve to null --
+   * never a fallback to any other template.
+   */
+  private async findLabelTemplate(
+    tenantId: string,
+    templateId: string | null,
+  ): Promise<{ id: string; name: string; spec: LabelTemplateSpec } | null> {
+    if (!templateId) return null;
+    const [lt] = await this.db
+      .select()
+      .from(schema.labelTemplates)
+      .where(
+        and(eq(schema.labelTemplates.tenantId, tenantId), eq(schema.labelTemplates.id, templateId)),
+      );
+    return lt ? { id: lt.id, name: lt.name, spec: lt.spec as LabelTemplateSpec } : null;
+  }
+
+  /**
+   * Resolves the shift's issuer prefix and hands the device its block for
+   * the bundle (a fresh one the first time it's seen for this issuer, the
+   * SAME block's original bounds plus its consumed-through cursor on every
+   * later fetch, or another fresh one if that one is fully consumed -- see
+   * `SsccService.allocateForBundle` for why).
+   *
+   * `apps/station/src/lib/shift-bundle.ts` swallows a bundle download error
+   * BY DESIGN, so a thrown 400 here would not just skip the serial block --
+   * it would silently cost the operator the product, label template AND
+   * operator roster too, with nothing anywhere explaining why. A tenant that
+   * never filled in its organisation profile's GLN (that field is nullable,
+   * and a tenant may have no profile row at all) must not lose its whole
+   * offline mirror over it, so this degrades to `sscc: null` instead of
+   * letting `resolveIssuerPrefix`'s `BadRequestException` propagate.
+   * `resolveIssuerPrefix` itself must keep throwing for its OTHER callers
+   * (the org-profile/counterparty settings routes need that 400 to tell an
+   * admin what's wrong), so the degrade lives here, at this one call site,
+   * not in the shared method.
+   *
+   * CodeRabbit PR33 review, Finding 4: the same reasoning extends to
+   * `SsccCapacityExhaustedException` -- an entire 9-digit issuer prefix's
+   * serial space being spent is exceedingly rare, but if it ever happens the
+   * station must still get its product, label template and operator roster;
+   * it already has a graceful "no-serials" state for a device with an empty
+   * local pool (`sscc-pool.ts`'s `burnSerial` returning null), so degrading
+   * to `sscc: null` here lands the device in that SAME, already-handled
+   * state rather than losing the whole bundle over it.
+   */
+  private async bundleSscc(
+    tenantId: string,
+    shiftId: string,
+    deviceId: string,
+  ): Promise<ShiftBundleDto["sscc"]> {
+    let issuerPrefix: string;
+    try {
+      issuerPrefix = await this.sscc.resolveIssuerPrefix(tenantId, shiftId);
+    } catch (error) {
+      if (!(error instanceof BadRequestException)) throw error;
+      // The station never sees this (the bundle just comes back with
+      // sscc: null, silently, by the design note above), so the server log
+      // is the ONLY place this is ever visible -- it must carry enough to
+      // act on: which tenant, which shift, and resolveIssuerPrefix's own
+      // reason (no org GLN, or no GLN on the shift's named sscc issuer
+      // counterparty).
+      this.logger.warn(
+        `Shift ${shiftId} (tenant ${tenantId}) bundle has no box serial block -- ${error.message}`,
+      );
+      return null;
+    }
+    try {
+      return await this.sscc.allocateForBundle(
+        tenantId,
+        issuerPrefix,
+        BOX_EXTENSION_DIGIT,
+        deviceId,
+        BOX_BLOCK_SIZE,
+      );
+    } catch (error) {
+      if (!(error instanceof SsccCapacityExhaustedException)) throw error;
+      this.logger.warn(
+        `Shift ${shiftId} (tenant ${tenantId}) bundle has no box serial block -- ${error.message}`,
+      );
+      return null;
+    }
   }
 
   private async findRow(tenantId: string, id: string): Promise<ShiftRow | undefined> {
@@ -385,6 +511,8 @@ export class ShiftsService {
       counterpartyName: schema.counterparties.name,
       labelTemplateId: schema.shifts.labelTemplateId,
       labelTemplateName: schema.labelTemplates.name,
+      ssccIssuerCounterpartyId: schema.shifts.ssccIssuerCounterpartyId,
+      boxLabelTemplateId: schema.shifts.boxLabelTemplateId,
       plannedQty: schema.shifts.plannedQty,
       plannedDate: schema.shifts.plannedDate,
       boxCapacity: schema.shifts.boxCapacity,
@@ -426,6 +554,12 @@ export class ShiftsService {
       }
       if (constraint === "shifts_tenant_label_template_fk") {
         throw new BadRequestException("Unknown label template for this organization");
+      }
+      if (constraint === "shifts_tenant_sscc_issuer_fk") {
+        throw new BadRequestException("Unknown sscc issuer counterparty for this organization");
+      }
+      if (constraint === "shifts_tenant_box_label_template_fk") {
+        throw new BadRequestException("Unknown box label template for this organization");
       }
       throw new BadRequestException(
         "Referenced entity does not belong to this organization or does not exist",

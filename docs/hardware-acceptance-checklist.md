@@ -4,13 +4,26 @@ Executed once, on real hardware, when the MVP is assembled. Every item here
 was deliberately deferred because CI cannot prove it. Record the outcome
 beside each item.
 
-## Label output (plans 04, 05b-2)
+## Label output (plans 04, 05b-2, 06c)
 
 - [ ] ZPL `^BX` DataMatrix with GS1 FNC1 prints and scans back on a real Zebra.
 - [ ] TSPL `DMATRIX` GS1/FNC1 behaviour — currently unverified; raw GS passthrough is pinned.
 - [ ] TSPL `DMATRIX` cell-size form: `w`/`h` are a symbol area, not a module size.
 - [ ] Cyrillic raster output matches the admin editor's preview byte-for-byte.
 - [ ] TSPL binary payload survives serial and TCP transport (base64 → Rust → printer).
+- [ ] **GS1-128 SSCC on a real printer.** Print a box label and scan it. The
+      scanner must report `(00)` followed by 18 digits — not 20 bare digits
+      and not a literal `>8` / `!1` in the barcode. Verify on both a Zebra
+      (ZPL) and a TSC (TSPL) printer: the FNC1 escape differs per language
+      and neither is provable from emitted text alone.
+- [ ] **Print verification round-trip (opt-in, 06c).** With print
+      verification enabled for the workstation, close a box: `PrintVerification`
+      takes over the scanner. Scanning the box's own freshly-printed label
+      advances immediately; scanning a different (foreign) SSCC or the same
+      label a second time after a reprint shows the mismatch message and
+      Reprint remains available; scanning a non-SSCC payload shows the
+      "not an SSCC" message. Skip always works, including with the scanner
+      disconnected — confirm neither button is ever disabled or hidden.
 
 ## Station storage (plans 05a, 05b-1, 05b-2)
 

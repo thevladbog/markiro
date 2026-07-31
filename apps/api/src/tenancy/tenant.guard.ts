@@ -7,14 +7,24 @@ import {
   type ExecutionContext,
 } from "@nestjs/common";
 import { fromNodeHeaders } from "better-auth/node";
+import { and, eq } from "drizzle-orm";
 import type { Request } from "express";
-import type { Auth } from "@markiro/db";
-import { AUTH } from "../auth/auth.module";
+import { schema, type Auth, type Db } from "@markiro/db";
+import { AUTH, DB } from "../auth/auth.module";
 
 /** Exported so guarded controllers can type `@Req()` without re-declaring this. */
 export interface RequestWithTenant extends Request {
   tenantId?: string;
   userId?: string;
+  /**
+   * The calling station device's own id (`station_devices.id`), set only on
+   * the api-key path below. A session-authenticated caller (admin/manager
+   * UI) is not a device, so this stays undefined there. Consumers that need
+   * a real device row (e.g. sscc block allocation, Task 7 -- `sscc_blocks
+   * .device_id` carries a NOT NULL composite FK) must treat an undefined
+   * `deviceId` as "no device to allocate for", not invent one.
+   */
+  deviceId?: string;
 }
 
 /**
@@ -28,7 +38,10 @@ export interface RequestWithTenant extends Request {
  */
 @Injectable()
 export class TenantGuard implements CanActivate {
-  constructor(@Inject(AUTH) private readonly auth: Auth) {}
+  constructor(
+    @Inject(AUTH) private readonly auth: Auth,
+    @Inject(DB) private readonly db: Db,
+  ) {}
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
     const req = ctx.switchToHttp().getRequest<RequestWithTenant>();
@@ -57,6 +70,21 @@ export class TenantGuard implements CanActivate {
       });
       if (result.valid && result.key) {
         req.tenantId = result.key.referenceId;
+        // Enrollment (station-devices.service.ts) mints exactly one api-key
+        // per device and stores that key's id as station_devices.apiKeyId --
+        // a 1:1 mapping, so this lookup is the one reliable way to learn
+        // which physical device is calling. Tenant-scoped in the statement
+        // itself, matching every other query in this codebase.
+        const [device] = await this.db
+          .select({ id: schema.stationDevices.id })
+          .from(schema.stationDevices)
+          .where(
+            and(
+              eq(schema.stationDevices.tenantId, req.tenantId),
+              eq(schema.stationDevices.apiKeyId, result.key.id),
+            ),
+          );
+        if (device) req.deviceId = device.id;
         return true;
       }
     }

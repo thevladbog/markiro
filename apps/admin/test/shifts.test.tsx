@@ -86,6 +86,42 @@ const LABEL_TEMPLATE = {
   updatedAt: "2026-01-01T00:00:00.000Z",
 };
 
+// Task 6: a second, distinct label template -- used together with
+// LABEL_TEMPLATE so the item-label-template select and the box-label-template
+// select can each be asserted against their own id, not each other's.
+const BOX_LABEL_TEMPLATE = {
+  id: "lt2",
+  name: "Короб паллета 100×150",
+  widthMm: 100,
+  heightMm: 150,
+  dpi: 203,
+  language: "zpl",
+  updatedAt: "2026-01-01T00:00:00.000Z",
+};
+
+// Task 6: two distinct counterparties -- the buyer the goods are for, and a
+// brand owner whose SSCC numbers the boxes carry instead. They must be
+// settable independently, so fixtures for the two need distinct ids.
+const BUYER = {
+  id: "cp3",
+  name: "Buyer LLC",
+  gln: "6291041500213",
+  inn: null,
+  gs1Prefixes: [],
+  notes: null,
+  createdAt: "2026-01-01T00:00:00.000Z",
+};
+
+const BRAND_OWNER = {
+  id: "cp2",
+  name: "Brand Owner Co",
+  gln: "6291041500220",
+  inn: null,
+  gs1Prefixes: [],
+  notes: null,
+  createdAt: "2026-01-01T00:00:00.000Z",
+};
+
 const PLANNED_SHIFT = {
   id: "s1",
   status: "planned",
@@ -622,8 +658,202 @@ describe("ShiftsPage", () => {
         // counterpartyId and productId should NOT be in PATCH payloads at all
         expect(body).not.toHaveProperty("counterpartyId");
         expect(body).not.toHaveProperty("productId");
+        // Same "untouched -> omitted" contract for the new selects (Task 6):
+        // a mutation that sent them unconditionally would show up here.
+        expect(body).not.toHaveProperty("ssccIssuerCounterpartyId");
+        expect(body).not.toHaveProperty("boxLabelTemplateId");
       },
       { timeout: 3000 },
+    );
+  });
+
+  it("submits the sscc issuer separately from the counterparty", async () => {
+    const updated = {
+      ...PLANNED_SHIFT,
+      counterpartyId: BUYER.id,
+      ssccIssuerCounterpartyId: BRAND_OWNER.id,
+    };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/shifts/s1" && init?.method === "PATCH") {
+        return jsonResponse(200, updated);
+      }
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [PLANNED_SHIFT] });
+      if (path === "/api/counterparties") return jsonResponse(200, { items: [BUYER, BRAND_OWNER] });
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Молоко 1л");
+
+    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+    await screen.findByText("Изменить смену");
+
+    // The issuer select defaults to "our own organization", not "none" --
+    // it must read as a real choice with its own identity, not an absence.
+    const ssccIssuerSelect = screen.getByLabelText("Эмитент группового кода");
+    expect(
+      within(ssccIssuerSelect).getByRole("option", { name: "Наша организация" }),
+    ).toBeDefined();
+
+    fireEvent.change(screen.getByLabelText("Для контрагента (толлинг)"), {
+      target: { value: BUYER.id },
+    });
+    fireEvent.change(ssccIssuerSelect, {
+      target: { value: BRAND_OWNER.id },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    await waitFor(
+      () => {
+        const patchCalls = fetchMock.mock.calls.filter(
+          (call) => call[0] === "/api/shifts/s1" && call[1]?.method === "PATCH",
+        );
+        expect(patchCalls.length).toBeGreaterThan(0);
+        const body = JSON.parse(patchCalls[0]![1]?.body as string);
+        // The two ids must land on their own distinct fields -- a swapped
+        // assignment (issuer id sent as counterpartyId or vice versa) would
+        // typecheck and look plausible, since both are plain uuid strings
+        // drawn from the same counterparties list.
+        expect(body.counterpartyId).toBe(BUYER.id);
+        expect(body.ssccIssuerCounterpartyId).toBe(BRAND_OWNER.id);
+      },
+      { timeout: 3000 },
+    );
+  });
+
+  it("sends ssccIssuerCounterpartyId: null when the user selects then clears it back to the default", async () => {
+    const updated = { ...PLANNED_SHIFT, ssccIssuerCounterpartyId: null };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/shifts/s1" && init?.method === "PATCH") {
+        return jsonResponse(200, updated);
+      }
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [PLANNED_SHIFT] });
+      if (path === "/api/counterparties") return jsonResponse(200, { items: [BRAND_OWNER] });
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Молоко 1л");
+
+    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+    await screen.findByText("Изменить смену");
+
+    // Same "default sends null" contract counterpartyId/labelTemplateId
+    // already have their own test for (see "sends counterpartyId: null..."
+    // above) -- touch the select away from its default, then clear it back
+    // to "Наша организация" ("") before submitting. Deleting the `? : null`
+    // ternary in toPayload would send a raw "" here instead of null.
+    const ssccIssuerSelect = screen.getByLabelText("Эмитент группового кода");
+    fireEvent.change(ssccIssuerSelect, { target: { value: BRAND_OWNER.id } });
+    fireEvent.change(ssccIssuerSelect, { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    await waitFor(
+      () => {
+        const patchCalls = fetchMock.mock.calls.filter(
+          (call) => call[0] === "/api/shifts/s1" && call[1]?.method === "PATCH",
+        );
+        expect(patchCalls.length).toBeGreaterThan(0);
+        const body = JSON.parse(patchCalls[0]![1]?.body as string);
+        expect(body.ssccIssuerCounterpartyId).toBeNull();
+      },
+      { timeout: 3000 },
+    );
+  });
+
+  it("sends boxLabelTemplateId: null when the user selects then clears it back to the default", async () => {
+    const updated = { ...PLANNED_SHIFT, boxLabelTemplateId: null };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/shifts/s1" && init?.method === "PATCH") {
+        return jsonResponse(200, updated);
+      }
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [PLANNED_SHIFT] });
+      if (path === "/api/label-templates") return jsonResponse(200, { items: [LABEL_TEMPLATE] });
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Молоко 1л");
+
+    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+    await screen.findByText("Изменить смену");
+
+    // Same contract as above, for the box label template select: touch it
+    // away from its default, then clear it back to the no-template option
+    // ("") before submitting, and confirm the payload carries an explicit
+    // null rather than a raw empty string.
+    const boxLabelTemplateSelect = screen.getByLabelText("Шаблон этикетки короба");
+    fireEvent.change(boxLabelTemplateSelect, { target: { value: LABEL_TEMPLATE.id } });
+    fireEvent.change(boxLabelTemplateSelect, { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    await waitFor(
+      () => {
+        const patchCalls = fetchMock.mock.calls.filter(
+          (call) => call[0] === "/api/shifts/s1" && call[1]?.method === "PATCH",
+        );
+        expect(patchCalls.length).toBeGreaterThan(0);
+        const body = JSON.parse(patchCalls[0]![1]?.body as string);
+        expect(body.boxLabelTemplateId).toBeNull();
+      },
+      { timeout: 3000 },
+    );
+  });
+
+  it("renders each select's own value, not its counterpart's, on load in edit mode", async () => {
+    // Two near-identical pairs of Selects sit side by side in the form:
+    // counterparty/ssccIssuer, and labelTemplate/boxLabelTemplate. A
+    // copy-paste error that crosses only the `value=` prop between a pair
+    // would still submit correctly (fireEvent.change sets the value it then
+    // asserts, so submission-based tests can't see it) but would *display*
+    // the wrong answer to "whose numbers/template is this" -- exactly the
+    // silent defect this feature exists to prevent. Assert the rendered DOM
+    // value of each select against its own distinct fixture id, before any
+    // interaction.
+    const shiftWithDistinctFields = {
+      ...PLANNED_SHIFT,
+      counterpartyId: BUYER.id,
+      counterpartyName: BUYER.name,
+      ssccIssuerCounterpartyId: BRAND_OWNER.id,
+      labelTemplateId: LABEL_TEMPLATE.id,
+      boxLabelTemplateId: BOX_LABEL_TEMPLATE.id,
+    };
+    const fetchMock = vi.fn(async (url: string) => {
+      const path = String(url);
+      if (path.startsWith("/api/shifts")) {
+        return jsonResponse(200, { items: [shiftWithDistinctFields] });
+      }
+      if (path === "/api/counterparties") return jsonResponse(200, { items: [BUYER, BRAND_OWNER] });
+      if (path === "/api/label-templates") {
+        return jsonResponse(200, { items: [LABEL_TEMPLATE, BOX_LABEL_TEMPLATE] });
+      }
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Молоко 1л");
+
+    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+    await screen.findByText("Изменить смену");
+
+    expect((screen.getByLabelText("Для контрагента (толлинг)") as HTMLSelectElement).value).toBe(
+      BUYER.id,
+    );
+    expect((screen.getByLabelText("Эмитент группового кода") as HTMLSelectElement).value).toBe(
+      BRAND_OWNER.id,
+    );
+    expect((screen.getByLabelText("Шаблон этикетки") as HTMLSelectElement).value).toBe(
+      LABEL_TEMPLATE.id,
+    );
+    expect((screen.getByLabelText("Шаблон этикетки короба") as HTMLSelectElement).value).toBe(
+      BOX_LABEL_TEMPLATE.id,
     );
   });
 

@@ -324,6 +324,143 @@ error worth catching — a per-shift registry would stop seeing that class of
 conflict entirely. Plan 09 inherits this trade-off rather than re-deriving
 it.
 
+## Aggregation: boxes
+
+Slice 06c lets a shift in `aggregation` mode group scanned items into
+transport boxes identified by an SSCC, print and optionally verify the
+label, and have the server record the box hierarchy.
+
+- **Aggregation follows ownership.** 06b's rule — the earliest `scanned_at`
+  owns a code — does not stop at cross-terminal conflicts: a box only ever
+  counts the items its own scan still owns. `box-membership.ts`'s
+  `displacedHashes` (server) marks a box item `displacedAt` the instant
+  ingest discovers its code's ownership belongs to a different scan, in
+  either direction — this batch's own box losing a code it just boxed, or an
+  incumbent recorded in some earlier batch's box losing to this one. The item
+  is marked, never deleted: it is the only evidence that two terminals boxed
+  what is physically one item, and `BoxesService.listBoxes`
+  (`apps/api/src/modules/boxes/boxes.service.ts`) counts a box's `itemCount`
+  with `displaced_at IS NULL`, so a displaced item silently stops counting
+  without ever disappearing from the row.
+- **The issuer prefix, not the issuer's GLN, is the number space's identity.**
+  A GS1 member commonly holds several 13-digit GLNs that differ only in their
+  location digits and share the same first 9 — `deriveIssuerPrefix`
+  (`apps/api/src/modules/sscc/sscc.service.ts`) always takes exactly those 9,
+  and `sscc_counters`/`sscc_blocks` (`packages/db/src/schema/platform.ts`) are
+  keyed on the prefix, never the GLN. Keying on the GLN instead would give
+  two GLNs under one member their own independent counters, and two counters
+  both handing out serial 100 under the same prefix produces the identical
+  SSCC — exactly the collision one-statement allocation exists to prevent. A
+  shift's issuer is `ssccIssuerCounterpartyId`, chosen explicitly in the
+  admin shift form — a deliberately different question from `counterpartyId`
+  (who the goods are for): packing for a client under one's own SSCCs is
+  ordinary, and inferring one field from the other would silently produce a
+  wrong number, caught only at the recipient's goods-in.
+- **Extension digit 0 is boxes; 1 is reserved for pallets (06d)** — see
+  `sscc-pool.ts`'s doc comment. `sscc_counters` is keyed
+  `(tenant, issuer_prefix, extension_digit)`; its `nextSerial` is what an
+  administrator seeds when migrating off another system that already issued
+  SSCCs under the same prefix, so a fresh Markiro counter never repeats a
+  serial that system already handed out.
+- **Allocation is one statement on both sides, never a read then a write.**
+  Server-side, `SsccService.allocate` upserts `sscc_counters.nextSerial` and
+  inserts the `sscc_blocks` row in one transaction. Device-side,
+  `sscc-pool.ts`'s `burnSerial` is a single `UPDATE ... RETURNING` — necessary
+  because `tauri-plugin-sql` hands out pooled connections per call, so a
+  SELECT followed by an UPDATE could hand two callers the same serial, and
+  two boxes sharing one SSCC is the one failure the server cannot repair. The
+  device holds its pool keyed by `(issuerPrefix, extensionDigit)`, one row
+  per range received.
+- **The bundle allocates a fresh block only when the device holds none for
+  that issuer/extension-digit pair** — `SsccService.allocateForBundle` hands
+  back the device's existing block's _original_ bounds plus its
+  consumed-through cursor on a repeat fetch, not a new block on every shift
+  entry, re-entry or app restart (which would burn through a
+  10-million-serial space in a few thousand fetches). **The shift bundle is
+  the only channel that actually supplies SSCC blocks today.** The sync
+  response's `ssccBlock` field (`sync.ts`'s `isBatchSsccBlock`) and
+  `SyncState.serialsLeft` are built and tested device-side, but there is no
+  server-side counterpart: `station-scans/dto.ts`'s `SyncBatchResponseDto`
+  carries no `ssccBlock`, `syncBatchSchema` accepts no `serialsLeft` from the
+  device, and neither ingest return site emits a top-up. That device-side
+  code is forward-compatible plumbing for a later slice, not a delivered
+  feature — a device that exhausts its 2000-serial block mid-shift has no
+  server-pushed recovery today. What actually recovers it: **re-entering the
+  shift**, which re-fetches the bundle and, thanks to the original-bounds
+  fix above, is now a safe, idempotent way to top up the pool without
+  reissuing anything. Both `sscc-pool.ts`'s `addRange` call sites (the
+  bundle's and the sync response's) feed the same idempotent, cursor-aware
+  upsert (primary key on `(issuer_prefix, extension_digit, from_serial)`,
+  `next_serial = MAX(...)`), so whichever channel eventually delivers a
+  top-up, a replay can never double the pool or reissue a serial.
+- **The serial is assigned at close, not at open.** `close-box.ts`'s
+  `closeCurrentBox` burns a serial and builds the SSCC only when the operator
+  closes a box that actually has items; an empty box costs nothing, and an
+  exhausted pool (`no-serials`) blocks _closing_, never scanning — items keep
+  landing in the open box regardless of whether a serial is currently
+  available to close it with.
+- **A box row is created by its first item, not by its closure.**
+  `station-scans.service.ts`'s ingest upserts a `boxes` row
+  (`ON CONFLICT DO NOTHING` on `boxes_device_box_uq`) the moment a batch
+  carries an item naming a box the server hasn't seen yet; the closure, which
+  can arrive in a batch of its own well after the last item drained, only
+  ever UPDATEs a row that must already exist. Items are queued ahead of the
+  closure and the drain is sequential, so no buffering or out-of-order
+  handling is needed for this to hold.
+- **Closures are identified by all four of `(tenant, shiftId, terminalId,
+deviceBoxId)`** — a bare `deviceBoxId` string is not unique across
+  terminals (two terminals can both call a box `"b1"`), and an earlier
+  version that matched on fewer columns collided fatally in exactly that
+  case. `boxes_device_box_uq` is declared `UNIQUE NULLS NOT DISTINCT` (not a
+  plain `UNIQUE`) for the same reason `terminalId` is nullable at all: a
+  plain unique index treats every NULL as distinct from every other, so two
+  null-terminal boxes in the same shift would never collide in the conflict
+  arbiter, scattering one physical box's items across several rows and later
+  raising `boxes_tenant_sscc_uq` when a closure tried to write the same sscc
+  to more than one of them.
+- **`(00)` exists only in the printer emitter.** `box-label.ts`'s
+  `boxLabelFields` carries the bare 18-digit SSCC; `zpl.ts`'s
+  `renderBarcodeElement` is the one place that prepends the GS1-128
+  application identifier, and only for a `code128` element bound to the
+  `sscc` field. Storage and transport — `boxes.sscc`, `boxes_mirror.sscc`,
+  the sync payload — never carry it; adding it there, or forgetting it in the
+  emitter, are both silent failures with no test short of scanning a real
+  printed label (see `docs/hardware-acceptance-checklist.md`).
+- **Print verification is the one deliberate exception to "nothing competes
+  with a scan verdict."** Opt-in per workstation
+  (`hardware_config.verifyPrintedLabel`, off by default), it takes over the
+  scan source the instant a box closes and prints: `PrintVerification`
+  (`apps/station/src/ui/PrintVerification.tsx`) always offers an exit — a
+  mismatched or unreadable scan offers Reprint, a disconnected scanner or a
+  ruined label offers Skip — and neither button is ever disabled. A skip is
+  recorded (`boxes_mirror.print_skipped_at`), never silently dropped, the
+  same way a verified match is (`print_verified_at`).
+- **A print-verification outcome can resolve after its box's closure has
+  already synced and been acknowledged** — a box is typically acked within
+  seconds of closing, well before an operator usually resolves the prompt.
+  `markPrintVerified`/`markPrintSkipped` (`boxes.ts`) write the outcome and
+  clear that box's `acked_at` in the same statement, which forces exactly
+  this box's closure back through the sync engine's boxes-only path on the
+  next drain. That resend's batch id must differ from the original send's:
+  the server's idempotency guard (`sync_batches`) treats a repeated batch id
+  as an already-applied no-op and would silently swallow the resolved
+  outcome otherwise. `sync.ts`'s batch-id construction appends
+  `printVerifiedAt ?? printSkippedAt ?? ""` to the boxes-only key precisely
+  so a resend carrying a newly-resolved outcome gets a distinct id, while two
+  resends carrying the _same_ already-resolved outcome still collide on
+  purpose (a genuine retry with nothing new, which should keep benefiting
+  from the server's idempotency).
+- **The cabinet's box list** (`GET /boxes`, `BoxesController`) excludes
+  displaced items from `itemCount` (see above) and is guarded by
+  `SessionOnlyGuard` alongside `TenantGuard` — a station's device api-key
+  resolves a tenant but may not browse another terminal's boxes, the same
+  pattern `conflicts.controller.ts` uses.
+
+**Recorded for plan 09 or a later slice, not built here:** `sscc_counters`
+and `sscc_blocks` grow without an established retention story, the same gap
+`code_registry` already carries (see "Cross-terminal conflicts" above).
+Pallets (06d) reuse extension digit 1 and are unblocked by this slice.
+
 ## Hardware
 
 `src/lib/hardware.ts` defines `HardwareContract` — scanner and printer

@@ -157,6 +157,7 @@ export function CounterpartiesPage() {
         open={formState !== null}
         mode={formState?.mode ?? "create"}
         {...(initialValues ? { initialValues } : {})}
+        {...(editingCounterparty ? { counterpartyId: editingCounterparty.id } : {})}
         submitting={createMutation.isPending || updateMutation.isPending}
         onSubmit={handleSubmit}
         onClose={() => setFormState(null)}

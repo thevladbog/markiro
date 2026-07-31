@@ -1,5 +1,5 @@
 {
-  "id": "3d300745-2fa1-4e4d-9f7b-dfd92d9608c5",
+  "id": "8e06ca82-7b6b-4602-89d7-f598717b5860",
   "prevId": "cbb5d44a-fc9b-4d1b-8fb2-d051cd2dc96d",
   "version": "7",
   "dialect": "postgresql",
@@ -858,6 +858,267 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.box_items": {
+      "name": "box_items",
+      "schema": "",
+      "columns": {
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "box_id": {
+          "name": "box_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "code_hash": {
+          "name": "code_hash",
+          "type": "char(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "added_at": {
+          "name": "added_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "displaced_at": {
+          "name": "displaced_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "box_items_tenant_code_idx": {
+          "name": "box_items_tenant_code_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "code_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "box_items_tenant_id_organization_id_fk": {
+          "name": "box_items_tenant_id_organization_id_fk",
+          "tableFrom": "box_items",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "box_items_tenant_box_fk": {
+          "name": "box_items_tenant_box_fk",
+          "tableFrom": "box_items",
+          "tableTo": "boxes",
+          "columnsFrom": [
+            "tenant_id",
+            "box_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "box_items_tenant_id_box_id_code_hash_pk": {
+          "name": "box_items_tenant_id_box_id_code_hash_pk",
+          "columns": [
+            "tenant_id",
+            "box_id",
+            "code_hash"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.boxes": {
+      "name": "boxes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "shift_id": {
+          "name": "shift_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "terminal_id": {
+          "name": "terminal_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "device_box_id": {
+          "name": "device_box_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sscc": {
+          "name": "sscc",
+          "type": "char(18)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "operator_id": {
+          "name": "operator_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "opened_at": {
+          "name": "opened_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "closed_at": {
+          "name": "closed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "closure_received_at": {
+          "name": "closure_received_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "print_verified_at": {
+          "name": "print_verified_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "print_skipped_at": {
+          "name": "print_skipped_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "boxes_tenant_id_organization_id_fk": {
+          "name": "boxes_tenant_id_organization_id_fk",
+          "tableFrom": "boxes",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "boxes_tenant_shift_fk": {
+          "name": "boxes_tenant_shift_fk",
+          "tableFrom": "boxes",
+          "tableTo": "shifts",
+          "columnsFrom": [
+            "tenant_id",
+            "shift_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "boxes_tenant_operator_fk": {
+          "name": "boxes_tenant_operator_fk",
+          "tableFrom": "boxes",
+          "tableTo": "employees",
+          "columnsFrom": [
+            "tenant_id",
+            "operator_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "boxes_tenant_id_uq": {
+          "name": "boxes_tenant_id_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "id"
+          ]
+        },
+        "boxes_tenant_sscc_uq": {
+          "name": "boxes_tenant_sscc_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "sscc"
+          ]
+        },
+        "boxes_device_box_uq": {
+          "name": "boxes_device_box_uq",
+          "nullsNotDistinct": true,
+          "columns": [
+            "tenant_id",
+            "shift_id",
+            "terminal_id",
+            "device_box_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.code_conflicts": {
       "name": "code_conflicts",
       "schema": "",
@@ -1458,6 +1719,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "sscc_issuer_counterparty_id": {
+          "name": "sscc_issuer_counterparty_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "box_label_template_id": {
+          "name": "box_label_template_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "status": {
           "name": "status",
           "type": "shift_status",
@@ -1618,6 +1891,36 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "shifts_tenant_sscc_issuer_fk": {
+          "name": "shifts_tenant_sscc_issuer_fk",
+          "tableFrom": "shifts",
+          "tableTo": "counterparties",
+          "columnsFrom": [
+            "tenant_id",
+            "sscc_issuer_counterparty_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "shifts_tenant_box_label_template_fk": {
+          "name": "shifts_tenant_box_label_template_fk",
+          "tableFrom": "shifts",
+          "tableTo": "label_templates",
+          "columnsFrom": [
+            "tenant_id",
+            "box_label_template_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1631,6 +1934,212 @@
           ]
         }
       },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.sscc_blocks": {
+      "name": "sscc_blocks",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "issuer_prefix": {
+          "name": "issuer_prefix",
+          "type": "char(9)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "extension_digit": {
+          "name": "extension_digit",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "device_id": {
+          "name": "device_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "from_serial": {
+          "name": "from_serial",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "to_serial": {
+          "name": "to_serial",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "consumed_through_serial": {
+          "name": "consumed_through_serial",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "issued_at": {
+          "name": "issued_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "sscc_blocks_tenant_issuer_ext_device_idx": {
+          "name": "sscc_blocks_tenant_issuer_ext_device_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "issuer_prefix",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "extension_digit",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "device_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "issued_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "sscc_blocks_tenant_id_organization_id_fk": {
+          "name": "sscc_blocks_tenant_id_organization_id_fk",
+          "tableFrom": "sscc_blocks",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "sscc_blocks_tenant_device_fk": {
+          "name": "sscc_blocks_tenant_device_fk",
+          "tableFrom": "sscc_blocks",
+          "tableTo": "station_devices",
+          "columnsFrom": [
+            "tenant_id",
+            "device_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.sscc_counters": {
+      "name": "sscc_counters",
+      "schema": "",
+      "columns": {
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "issuer_prefix": {
+          "name": "issuer_prefix",
+          "type": "char(9)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "extension_digit": {
+          "name": "extension_digit",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "next_serial": {
+          "name": "next_serial",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "sscc_counters_tenant_id_organization_id_fk": {
+          "name": "sscc_counters_tenant_id_organization_id_fk",
+          "tableFrom": "sscc_counters",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "sscc_counters_tenant_id_issuer_prefix_extension_digit_pk": {
+          "name": "sscc_counters_tenant_id_issuer_prefix_extension_digit_pk",
+          "columns": [
+            "tenant_id",
+            "issuer_prefix",
+            "extension_digit"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -3042,12 +3551,6 @@
         "resolved_by_user_id": {
           "name": "resolved_by_user_id",
           "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "exported_at": {
-          "name": "exported_at",
-          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         }

@@ -10,6 +10,16 @@ export interface OutboxItem {
   scannedAt: string;
   /** Present only for a scan this device accepted and stored. */
   code: { codeHash: string; gtin14: string; serial: string } | null;
+  /**
+   * The transport box this scan belonged to, or null for an unboxed scan
+   * (Task 9, plan 06c). Threaded through to the sync request body so the
+   * server's box-membership bookkeeping (station-scans dto.ts's `boxId` per
+   * item) is populated from what this device actually recorded, not left
+   * null for every scan.
+   */
+  boxId: string | null;
+  /** The operator signed in when this scan happened, or null if none. */
+  operatorId: string | null;
 }
 
 interface OutboxRow {
@@ -22,6 +32,8 @@ interface OutboxRow {
   code_hash: string | null;
   gtin14: string | null;
   serial: string | null;
+  box_id: string | null;
+  operator_id: string | null;
 }
 
 /**
@@ -47,12 +59,14 @@ export async function readBatch(
   const rows =
     ceilingId != null
       ? await exec.all<OutboxRow>(
-          `SELECT id, shift_id, terminal_id, raw, verdict, scanned_at, code_hash, gtin14, serial
+          `SELECT id, shift_id, terminal_id, raw, verdict, scanned_at, code_hash, gtin14, serial,
+                  box_id, operator_id
              FROM outbox WHERE id <= ? ORDER BY id LIMIT ?`,
           [ceilingId, limit],
         )
       : await exec.all<OutboxRow>(
-          `SELECT id, shift_id, terminal_id, raw, verdict, scanned_at, code_hash, gtin14, serial
+          `SELECT id, shift_id, terminal_id, raw, verdict, scanned_at, code_hash, gtin14, serial,
+                  box_id, operator_id
              FROM outbox ORDER BY id LIMIT ?`,
           [limit],
         );
@@ -67,6 +81,8 @@ export async function readBatch(
       r.code_hash !== null && r.gtin14 !== null && r.serial !== null
         ? { codeHash: r.code_hash, gtin14: r.gtin14, serial: r.serial }
         : null,
+    boxId: r.box_id,
+    operatorId: r.operator_id,
   }));
 }
 

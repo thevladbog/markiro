@@ -1,5 +1,9 @@
 import { z } from "zod";
 import { hasValidCheckDigit } from "@markiro/domain";
+import { ssccCounterSchema, type SsccCounterDto } from "../org-profile/dto";
+
+export { ssccCounterSchema };
+export type { SsccCounterDto };
 
 /** GS1 GLN: exactly 13 digits with valid check digit. */
 const glnSchema = z

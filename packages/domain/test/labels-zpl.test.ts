@@ -206,6 +206,37 @@ describe("generateZpl - barcode formats", () => {
     expect(zpl).toContain("^FO0,0^BCN,80,N,N,N^FD12345^FS");
   });
 
+  it("emits a GS1-128 (subset C + FNC1 + AI 00) for a code128 element bound to sscc", async () => {
+    const spec: LabelTemplateSpec = {
+      widthMm: 100,
+      heightMm: 50,
+      dpi: 203,
+      language: "zpl",
+      elements: [
+        { kind: "barcode", id: "b", data: "sscc", format: "code128", xMm: 5, yMm: 5, sizeMm: 15 },
+      ],
+    };
+    const zpl = await generateZpl(spec, { ...sampleLabelData(), sscc: "004601234560000017" });
+    // xMm=5,yMm=5 -> 40,40 dots; sizeMm=15 -> mmToDots(15,203)=120 dots.
+    // >; selects subset C, >8 is FNC1, then the 00 AI and the 18 digits.
+    expect(zpl).toContain("^FO40,40^BCN,120,N,N,N^FD>;>800004601234560000017^FS");
+  });
+
+  it("leaves a code128 element bound to another (non-sscc) field as a plain Code 128", async () => {
+    const spec: LabelTemplateSpec = {
+      widthMm: 100,
+      heightMm: 50,
+      dpi: 203,
+      language: "zpl",
+      elements: [
+        { kind: "barcode", id: "b", data: "qty", format: "code128", xMm: 5, yMm: 5, sizeMm: 15 },
+      ],
+    };
+    const zpl = await generateZpl(spec, { ...sampleLabelData(), qty: "12" });
+    expect(zpl).toContain("^FO40,40^BCN,120,N,N,N^FD12^FS");
+    expect(zpl).not.toContain(">8");
+  });
+
   it("renders a qr code with a clamped magnification and QA-prefixed data", async () => {
     const spec: LabelTemplateSpec = {
       widthMm: 58,

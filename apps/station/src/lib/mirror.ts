@@ -39,8 +39,35 @@ export interface StationBundle {
     defaultLabelTemplateId: string | null;
   };
   labelTemplate: { id: string; name: string; spec: unknown } | null;
+  /**
+   * The BOX label's own template (CodeRabbit PR33 review, Finding 3) --
+   * entirely separate from `labelTemplate` above, which is the ITEM
+   * template. Null exactly when the shift has no `boxLabelTemplateId`, or it
+   * no longer resolves to a template this tenant owns -- see
+   * `ShiftBundleDto.boxLabelTemplate` on the server for the matching doc
+   * comment.
+   */
+  boxLabelTemplate: { id: string; name: string; spec: unknown } | null;
   counterpartyGln: string | null;
   operators: OperatorMirrorRecord[];
+  /**
+   * The box serial block this device may print from -- aggregation shifts
+   * only, and only when this device fetched the bundle over its own
+   * api-key (see ShiftBundleDto.sscc in shifts/dto.ts on the server).
+   *
+   * `fromSerial`/`toSerial` are always the block's ORIGINAL bounds, even on
+   * a repeat fetch -- never shrunk to the unconsumed remainder (final
+   * review, finding 1). `consumedThroughSerial` is what lets `addRange`
+   * (`sscc-pool.ts`) reconcile its own cursor against the row it already
+   * holds instead of receiving a range shaped like a brand new block.
+   */
+  sscc: {
+    issuerPrefix: string;
+    extensionDigit: number;
+    fromSerial: number;
+    toSerial: number;
+    consumedThroughSerial: number | null;
+  } | null;
 }
 
 export interface ShiftMirrorRow {
@@ -49,6 +76,21 @@ export interface ShiftMirrorRow {
   mode: string;
   counterpartyGln: string | null;
   labelTemplateSpec: string | null;
+  /**
+   * The box label's OWN template spec (CodeRabbit PR33 review, Finding 3) --
+   * entirely separate from `labelTemplateSpec` above (the ITEM template).
+   * Read by `WorkScreen.tsx`'s box-printing path, never `labelTemplateSpec`.
+   */
+  boxLabelTemplateSpec: string | null;
+  /** The shift's box capacity (Task 13 review, Finding 1) -- null disables auto-close. */
+  boxCapacity: number | null;
+  /**
+   * This device's 9-digit GS1 issuer prefix for box SSCCs
+   * (`StationBundle.sscc.issuerPrefix`), mirrored onto `shift_mirror` at
+   * bundle time -- null for a validation-mode shift, or when the server
+   * could not resolve one for this device (see `upsertBundleBody`).
+   */
+  issuerPrefix: string | null;
 }
 
 /** True for SQLite's "duplicate column name: x" error from a re-run ALTER. */
@@ -99,8 +141,9 @@ async function upsertBundleBody(exec: SqlExecutor, bundle: StationBundle): Promi
        id, status, mode, product_id, product_name, line_id, line_name,
        counterparty_id, counterparty_name, counterparty_gln,
        label_template_id, label_template_name, label_template_spec,
-       planned_qty, planned_date, box_capacity, pallet_capacity, pallets_enabled, opened_at
-     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       planned_qty, planned_date, box_capacity, pallet_capacity, pallets_enabled, opened_at,
+       issuer_prefix, box_label_template_spec
+     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
      ON CONFLICT(id) DO UPDATE SET
        status=excluded.status, mode=excluded.mode, product_id=excluded.product_id,
        product_name=excluded.product_name,
@@ -110,7 +153,9 @@ async function upsertBundleBody(exec: SqlExecutor, bundle: StationBundle): Promi
        label_template_name=excluded.label_template_name, label_template_spec=excluded.label_template_spec,
        planned_qty=excluded.planned_qty, planned_date=excluded.planned_date,
        box_capacity=excluded.box_capacity, pallet_capacity=excluded.pallet_capacity,
-       pallets_enabled=excluded.pallets_enabled, opened_at=excluded.opened_at`,
+       pallets_enabled=excluded.pallets_enabled, opened_at=excluded.opened_at,
+       issuer_prefix=excluded.issuer_prefix,
+       box_label_template_spec=excluded.box_label_template_spec`,
     [
       s.id,
       s.status,
@@ -131,6 +176,14 @@ async function upsertBundleBody(exec: SqlExecutor, bundle: StationBundle): Promi
       s.palletCapacity,
       b(s.palletsEnabled),
       s.openedAt,
+      // Never a fallback: a validation-mode shift, or one the server could
+      // not resolve an issuer prefix for, mirrors null here too (Task 13
+      // review, Finding 1) -- exactly as `mirrorShiftBundle` already treats
+      // `bundle.sscc` itself.
+      bundle.sscc?.issuerPrefix ?? null,
+      // The box label's OWN template spec (Finding 3) -- never a fallback to
+      // `bundle.labelTemplate`'s spec, even when this is null.
+      bundle.boxLabelTemplate ? JSON.stringify(bundle.boxLabelTemplate.spec) : null,
     ],
   );
 
@@ -317,8 +370,13 @@ export async function readShiftMirror(
     mode: string;
     counterparty_gln: string | null;
     label_template_spec: string | null;
+    box_capacity: number | null;
+    issuer_prefix: string | null;
+    box_label_template_spec: string | null;
   }>(
-    "SELECT id, status, mode, counterparty_gln, label_template_spec FROM shift_mirror WHERE id = ?",
+    `SELECT id, status, mode, counterparty_gln, label_template_spec, box_capacity, issuer_prefix,
+            box_label_template_spec
+     FROM shift_mirror WHERE id = ?`,
     [id],
   );
   const r = rows[0];
@@ -329,6 +387,9 @@ export async function readShiftMirror(
     mode: r.mode,
     counterpartyGln: r.counterparty_gln,
     labelTemplateSpec: r.label_template_spec,
+    boxCapacity: r.box_capacity ?? null,
+    issuerPrefix: r.issuer_prefix ?? null,
+    boxLabelTemplateSpec: r.box_label_template_spec ?? null,
   };
 }
 

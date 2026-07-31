@@ -50,6 +50,7 @@
     "dashboard": "Обзор",
     "catalog": "Каталог",
     "shifts": "Смены",
+    "boxes": "Короба",
     "conflicts": "Конфликты",
     "counterparties": "Контрагенты",
     "labels": "Этикетки",
@@ -211,6 +212,20 @@
           "glnFormat": "GLN должен состоять ровно из 13 цифр",
           "glnCheckDigit": "Неверная контрольная цифра GLN",
           "gs1PrefixesFormat": "Каждый префикс должен состоять из 4-12 цифр"
+        },
+        "sscc": {
+          "cardTitle": "Счётчик SSCC для коробов",
+          "description": "Начальный серийный номер отсчитывается внутри указанного ниже префикса. Задайте его при переносе номеров коробов, уже выданных другой системой под этим GLN.",
+          "prefixLabel": "Производный префикс",
+          "nextSerialLabel": "Начальный серийный номер",
+          "save": "Сохранить",
+          "errors": {
+            "nextSerialInvalid": "Введите целое число от 0 до 9 999 999"
+          },
+          "toasts": {
+            "updateSuccess": "Счётчик сохранён",
+            "updateError": "Не удалось сохранить счётчик"
+          }
         }
       },
       "toasts": {
@@ -379,8 +394,13 @@
         "noLinesHint": "Линии не заведены — создайте через API или в настройках.",
         "counterpartyLabel": "Для контрагента (толлинг)",
         "noCounterparty": "Не выбран",
+        "ssccIssuerLabel": "Эмитент группового кода",
+        "ssccIssuerOurOrganization": "Наша организация",
+        "ssccIssuerHint": "Определяет, чьи номера будут на коробах — это не то же самое, что контрагент, для которого предназначен товар.",
         "labelTemplateLabel": "Шаблон этикетки",
         "noLabelTemplate": "Не выбран",
+        "boxLabelTemplateLabel": "Шаблон этикетки короба",
+        "noBoxLabelTemplate": "Не выбран",
         "boxCapacityLabel": "Вместимость короба, шт",
         "palletsEnabledLabel": "Использовать паллеты",
         "palletCapacityLabel": "Вместимость паллеты, шт",
@@ -407,6 +427,23 @@
         "deleteError": "Не удалось удалить смену",
         "closeSuccess": "Смена закрыта",
         "closeError": "Не удалось закрыть смену"
+      }
+    },
+    "boxes": {
+      "title": "Короба",
+      "empty": "В этой смене нет коробов",
+      "selectShift": "Выберите смену, чтобы увидеть её короба",
+      "contentsChangedAfterClose": "Изменилось после закрытия",
+      "filters": {
+        "shiftLabel": "Смена"
+      },
+      "table": {
+        "sscc": "SSCC",
+        "terminal": "Терминал",
+        "operator": "Оператор",
+        "itemCount": "Кол-во",
+        "closedAt": "Закрыт",
+        "status": "Статус"
       }
     },
     "conflicts": {
@@ -917,8 +954,38 @@
     },
     "settings": {
       "title": "Настройки",
-      "emptyTitle": "Настройки организации",
-      "emptyHint": "Профиль организации, GLN и префиксы GS1 появятся здесь."
+      "profile": {
+        "cardTitle": "Профиль организации",
+        "glnLabel": "GLN",
+        "innLabel": "ИНН",
+        "prefixesLabel": "Префиксы GS1",
+        "prefixesHint": "Через запятую, например 4600000, 4600001",
+        "save": "Сохранить",
+        "errors": {
+          "glnFormat": "GLN должен состоять ровно из 13 цифр",
+          "glnCheckDigit": "Неверная контрольная цифра GLN",
+          "gs1PrefixesFormat": "Каждый префикс должен состоять из 4-12 цифр"
+        },
+        "toasts": {
+          "updateSuccess": "Профиль сохранён",
+          "updateError": "Не удалось сохранить профиль"
+        }
+      },
+      "sscc": {
+        "cardTitle": "Счётчик SSCC для коробов",
+        "description": "Начальный серийный номер отсчитывается внутри указанного ниже префикса. Задайте его при переносе номеров коробов, уже выданных другой системой под этим GLN.",
+        "prefixLabel": "Производный префикс",
+        "prefixUnavailable": "Укажите GLN выше, чтобы увидеть производный префикс",
+        "nextSerialLabel": "Начальный серийный номер",
+        "save": "Сохранить",
+        "errors": {
+          "nextSerialInvalid": "Введите целое число от 0 до 9 999 999"
+        },
+        "toasts": {
+          "updateSuccess": "Счётчик сохранён",
+          "updateError": "Не удалось сохранить счётчик"
+        }
+      }
     }
   }
 }

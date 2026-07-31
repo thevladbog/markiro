@@ -99,6 +99,6 @@ export class ShiftsController {
 
   @Get(":id/bundle")
   async getBundle(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<ShiftBundleDto> {
-    return this.shiftsService.getBundle(req.tenantId!, id);
+    return this.shiftsService.getBundle(req.tenantId!, id, req.deviceId ?? null);
   }
 }

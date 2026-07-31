@@ -1,8 +1,24 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DatabaseSync } from "node:sqlite";
 import { createStationClient, REQUEST_TIMEOUT_MS } from "../src/lib/api-client.js";
 import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
-import { BACKOFF_START_MS, BATCH_SIZE, createSyncEngine, STUCK_AFTER_MS } from "../src/lib/sync.js";
+import {
+  BACKOFF_START_MS,
+  BATCH_SIZE,
+  createSyncEngine,
+  MAX_BOX_CLOSURES_PER_SYNC_BATCH,
+  STUCK_AFTER_MS,
+} from "../src/lib/sync.js";
+import { addRange, remaining } from "../src/lib/sscc-pool.js";
+import {
+  closeBox,
+  currentBox,
+  markPrintSkipped,
+  markPrintVerified,
+  openBox,
+} from "../src/lib/boxes.js";
+import { recordScan, type AcceptedCode, type ScanEventRow } from "../src/lib/journal.js";
+import { outboxDepth } from "../src/lib/outbox.js";
 
 // Several tests below deliberately fail the POST (or the device DB) to
 // exercise the retry path, which logs through `console.error` by design.
@@ -890,5 +906,712 @@ describe("sync engine", () => {
     expect(post).not.toHaveBeenCalled();
     expect(states.at(-1)).toMatchObject({ stuck: false });
     engine.stop();
+  });
+});
+
+describe("sync engine: pools and closures", () => {
+  const SHIFT = "s1";
+  const ISO = "2026-07-29T10:00:00.000Z";
+  // A 9-digit GS1 issuer prefix -- see sscc-pool.ts's doc comment for why
+  // the pool is keyed by prefix, not by GLN (the brief that seeded these
+  // tests predates that correction).
+  const ISSUER_PREFIX = "460123456";
+  const SSCC = "004601234560000017";
+  const TERMINAL = "t1";
+
+  /** One scan event, distinguished by `id` only in its raw payload. */
+  function event(id: string): ScanEventRow {
+    return {
+      shiftId: SHIFT,
+      terminalId: TERMINAL,
+      raw: `RAW-${id}`,
+      verdict: "ok",
+      scannedAt: ISO,
+      operatorId: null,
+    };
+  }
+
+  /** One accepted code, named into `boxId` (or null for none). `id` IS the codeHash. */
+  function code(id: string, boxId: string | null): AcceptedCode {
+    return {
+      codeHash: id,
+      shiftId: SHIFT,
+      gtin14: "04600000000015",
+      serial: id,
+      scannedAt: ISO,
+      boxId,
+    };
+  }
+
+  /** Wraps `exec` so any `run` whose SQL matches `pattern` throws instead of writing. */
+  function failingExecOn(exec: SqlExecutor, pattern: RegExp): SqlExecutor {
+    const realRun = exec.run.bind(exec);
+    return {
+      ...exec,
+      run: async (sql, params) => {
+        if (pattern.test(sql)) throw new Error("simulated failure");
+        return realRun(sql, params);
+      },
+    };
+  }
+
+  async function outboxCount(execToCount: SqlExecutor): Promise<number> {
+    return outboxDepth(execToCount);
+  }
+
+  let exec: SqlExecutor;
+  let post = vi.fn();
+
+  beforeEach(async () => {
+    exec = await migratedExec();
+    post = vi.fn().mockResolvedValue({ applied: 1, alreadyApplied: false, conflicts: [] });
+    // A default queued scan so every `drainOnce()` below has a batch to
+    // send, even in tests that otherwise queue nothing of their own (the
+    // pool-reporting tests) or only close a box.
+    await seed(exec, 1);
+  });
+
+  function mockPost(response: unknown): void {
+    post.mockResolvedValue(response);
+  }
+
+  /**
+   * The body of the most recent POST made by the most recent `drainOnce()`
+   * call, or an empty-batch stand-in if that call made no POST at all (there
+   * was genuinely nothing left to send -- see "does not resend a box
+   * already acknowledged" below, which relies on exactly this to prove a
+   * SECOND drain carries no box).
+   */
+  function lastBody(): string {
+    const call = post.mock.calls.at(-1);
+    return JSON.stringify(call ? call[1] : { items: [], boxes: [] });
+  }
+
+  /**
+   * Drains once against `execForDrain` (defaulting to the shared `exec`),
+   * via a fresh engine bound to the shared `post` mock. `post.mockClear()`
+   * runs first so `lastBody()` reflects only THIS call, not a previous one.
+   */
+  async function drainOnce(execForDrain: SqlExecutor = exec): Promise<void> {
+    post.mockClear();
+    const engine = createSyncEngine({
+      exec: execForDrain,
+      client: { post },
+      machineId: "m1",
+      onState: () => {},
+    });
+    engine.nudge();
+    await engine.idle();
+    engine.stop();
+  }
+
+  it("applies a serial block carried by the sync response", async () => {
+    mockPost({
+      applied: 1,
+      alreadyApplied: false,
+      conflicts: [],
+      ssccBlock: { issuerPrefix: ISSUER_PREFIX, extensionDigit: 0, fromSerial: 5, toSerial: 9 },
+    });
+    await drainOnce();
+    expect(await remaining(exec, ISSUER_PREFIX, 0)).toBe(5);
+  });
+
+  it("reports how many serials are left in the batch it sends", async () => {
+    await addRange(exec, {
+      issuerPrefix: ISSUER_PREFIX,
+      extensionDigit: 0,
+      fromSerial: 1,
+      toSerial: 3,
+    });
+    await drainOnce();
+    expect(JSON.parse(lastBody()).serialsLeft).toBe(3);
+  });
+
+  it("sends a closed box with its serial", async () => {
+    await openBox(exec, SHIFT, "b1", ISO, TERMINAL);
+    await closeBox(exec, "b1", SSCC, ISO, null);
+    await drainOnce();
+    expect(JSON.parse(lastBody()).boxes).toEqual([
+      {
+        boxId: "b1",
+        shiftId: SHIFT,
+        terminalId: TERMINAL,
+        sscc: SSCC,
+        closedAt: ISO,
+        operatorId: null,
+        printVerifiedAt: null,
+        printSkippedAt: null,
+      },
+    ]);
+  });
+
+  // Task 13 review, Finding 6: `boxes_mirror.print_verified_at`/
+  // `print_skipped_at` (Task 9's columns, idle until now) must actually
+  // reach the closure payload, not just exist on the device.
+  it("carries the print-verification outcome recorded on boxes_mirror into the closure payload", async () => {
+    await openBox(exec, SHIFT, "b1", ISO, TERMINAL);
+    await closeBox(exec, "b1", SSCC, ISO, null);
+    await markPrintVerified(exec, "b1", ISO);
+    await drainOnce();
+    const boxes = JSON.parse(lastBody()).boxes;
+    expect(boxes).toEqual([
+      {
+        boxId: "b1",
+        shiftId: SHIFT,
+        terminalId: TERMINAL,
+        sscc: SSCC,
+        closedAt: ISO,
+        operatorId: null,
+        printVerifiedAt: ISO,
+        printSkippedAt: null,
+      },
+    ]);
+  });
+
+  it("carries a skipped print verification into the closure payload", async () => {
+    await openBox(exec, SHIFT, "b1", ISO, TERMINAL);
+    await closeBox(exec, "b1", SSCC, ISO, null);
+    await markPrintSkipped(exec, "b1", ISO);
+    await drainOnce();
+    const boxes = JSON.parse(lastBody()).boxes;
+    expect(boxes).toEqual([
+      {
+        boxId: "b1",
+        shiftId: SHIFT,
+        terminalId: TERMINAL,
+        sscc: SSCC,
+        closedAt: ISO,
+        operatorId: null,
+        printVerifiedAt: null,
+        printSkippedAt: ISO,
+      },
+    ]);
+  });
+
+  // Task 9 threaded `box_id`/`operator_id` onto the outbox row itself; this
+  // pins the OTHER half, that `readBatch`/`toPayload` actually carry them
+  // through to the request body rather than silently dropping them there --
+  // the box-membership and operator-attribution bookkeeping those columns
+  // exist for would otherwise never reach the server despite being recorded
+  // correctly on the device.
+  it("carries a scan's box id and operator id from the outbox row into the request body", async () => {
+    const OPERATOR = "22222222-2222-2222-2222-222222222222";
+    await openBox(exec, SHIFT, "b1", ISO, TERMINAL);
+    await recordScan(exec, { ...event("a"), operatorId: OPERATOR }, code("aa", "b1"));
+    await drainOnce();
+    const items = JSON.parse(lastBody()).items as Array<{
+      boxId: string | null;
+      operatorId: string | null;
+      code: { codeHash: string } | null;
+    }>;
+    const item = items.find((i) => i.code?.codeHash === "aa");
+    expect(item).toMatchObject({ boxId: "b1", operatorId: OPERATOR });
+  });
+
+  it("does not resend a box already acknowledged", async () => {
+    await openBox(exec, SHIFT, "b1", ISO, TERMINAL);
+    await closeBox(exec, "b1", SSCC, ISO, null);
+    await drainOnce();
+    await drainOnce();
+    expect(JSON.parse(lastBody()).boxes).toEqual([]);
+  });
+
+  // Task 13 review, Finding 1: a box is typically acked within seconds of
+  // closing -- long before the operator usually resolves the print-
+  // verification prompt -- so `markPrintVerified`/`markPrintSkipped` must
+  // re-open the resend window that `ackBoxes` closed, or the outcome they
+  // just recorded has no way off the device (the closure never gets read by
+  // `readClosedUnackedBoxes` again). This resolves the outcome AFTER the
+  // first successful drain -- the dominant real-world ordering -- and pins
+  // that a second drain both sends the closure again AND carries the
+  // resolved field, not just an empty resend.
+  it("resends a closed box once its print-verification outcome resolves after the first ack", async () => {
+    await openBox(exec, SHIFT, "b1", ISO, TERMINAL);
+    await closeBox(exec, "b1", SSCC, ISO, null);
+    await drainOnce();
+    // The first drain's own closure carried both fields null -- the ordinary
+    // case, since the operator has not resolved the prompt yet.
+    expect(JSON.parse(lastBody()).boxes).toEqual([
+      {
+        boxId: "b1",
+        shiftId: SHIFT,
+        terminalId: TERMINAL,
+        sscc: SSCC,
+        closedAt: ISO,
+        operatorId: null,
+        printVerifiedAt: null,
+        printSkippedAt: null,
+      },
+    ]);
+
+    // The operator resolves the prompt only now, after the ack above.
+    await markPrintVerified(exec, "b1", ISO);
+
+    await drainOnce();
+    expect(JSON.parse(lastBody()).boxes).toEqual([
+      {
+        boxId: "b1",
+        shiftId: SHIFT,
+        terminalId: TERMINAL,
+        sscc: SSCC,
+        closedAt: ISO,
+        operatorId: null,
+        printVerifiedAt: ISO,
+        printSkippedAt: null,
+      },
+    ]);
+
+    // The server's own response acked the resend the same way it did the
+    // first send -- a THIRD drain must once again carry nothing for this
+    // box, proving the resend did not just repeat forever.
+    await drainOnce();
+    expect(JSON.parse(lastBody()).boxes).toEqual([]);
+  });
+
+  // The skip counterpart, and a check that this does not depend on the box
+  // still being the ONLY thing in the outbox: a fresh scan queued between
+  // the two drains gives the resend a real outbox maxId to key its batchId
+  // to (rather than the box-only rowid fallback), which is the ordinary
+  // shape a resend takes in practice -- the box closing rarely leaves the
+  // device with nothing else ever queued again before the operator responds.
+  it("resends a closed box once a print-verification skip resolves after the first ack, alongside a fresh scan", async () => {
+    await openBox(exec, SHIFT, "b1", ISO, TERMINAL);
+    await closeBox(exec, "b1", SSCC, ISO, null);
+    await drainOnce();
+    expect(JSON.parse(lastBody()).boxes).toMatchObject([{ boxId: "b1", printSkippedAt: null }]);
+
+    await markPrintSkipped(exec, "b1", ISO);
+    await recordScan(exec, event("a"), code("aa", "b1"));
+
+    await drainOnce();
+    const body = JSON.parse(lastBody());
+    expect(body.items).toHaveLength(1);
+    expect(body.boxes).toEqual([
+      {
+        boxId: "b1",
+        shiftId: SHIFT,
+        terminalId: TERMINAL,
+        sscc: SSCC,
+        closedAt: ISO,
+        operatorId: null,
+        printVerifiedAt: null,
+        printSkippedAt: ISO,
+      },
+    ]);
+  });
+
+  // CodeRabbit PR33 review, Finding 6: `ackBoxes` used to be unconditional.
+  // If `markPrintVerified`/`markPrintSkipped` resolves the operator's
+  // decision AFTER a closure has already been read into an outgoing
+  // payload but BEFORE that upload's response arrives, the in-flight
+  // response's ack would still land unconditionally -- clearing the
+  // resend window `markPrintVerified` itself just opened, on the strength
+  // of a response that was for the OLD (still-null) outcome. The resolved
+  // outcome would then never reach the server: the row is already acked,
+  // so `readClosedUnackedBoxes` never picks it up again.
+  //
+  // The mock's implementation performs the resolution AS A SIDE EFFECT of
+  // resolving the FIRST POST, which is exactly this race: by the time
+  // `post` resolves, `readClosedUnackedBoxes`'s own read (with the stale
+  // null outcome) has already happened and captured the payload, but the
+  // ack that follows the response must see the row as it is NOW, not as it
+  // was when read. The drain loop's own `for` loop then immediately retries
+  // (still within this ONE `nudge()`, since nothing failed -- only a stale
+  // ack was skipped) and resends the box with its real, resolved outcome,
+  // which this time matches and genuinely acks.
+  it(
+    "does not acknowledge a box whose print-verification outcome resolves between reading the " +
+      "payload and acking it, resending it with the real outcome instead",
+    async () => {
+      await drainOnce(); // drains away the default seeded scan.
+      await openBox(exec, SHIFT, "b1", ISO, TERMINAL);
+      await closeBox(exec, "b1", SSCC, ISO, null);
+
+      const RESOLVED_AT = "2026-07-29T10:05:00.000Z";
+      let resolvedOnce = false;
+      const raceOnce = vi.fn().mockImplementation(async () => {
+        if (!resolvedOnce) {
+          resolvedOnce = true;
+          // The operator resolves the prompt WHILE this FIRST response is
+          // still in flight -- after readClosedUnackedBoxes already built
+          // the payload (carrying printVerifiedAt: null), but before the
+          // ack below runs.
+          await markPrintVerified(exec, "b1", RESOLVED_AT);
+        }
+        return { applied: 0, alreadyApplied: false, conflicts: [] };
+      });
+      const engine = createSyncEngine({
+        exec,
+        client: { post: raceOnce },
+        machineId: "m1",
+        onState: () => {},
+      });
+      engine.nudge();
+      await engine.idle();
+      engine.stop();
+
+      // The self-healing retry happens within this SAME drain (no separate
+      // nudge needed): the first send carried the stale null outcome and
+      // was correctly skipped by the ack guard; the second carries the now
+      // -resolved outcome and genuinely acks.
+      expect(raceOnce).toHaveBeenCalledTimes(2);
+      const firstSent = (
+        raceOnce.mock.calls[0]![1] as { boxes: Array<{ printVerifiedAt: unknown }> }
+      ).boxes;
+      expect(firstSent).toEqual([expect.objectContaining({ boxId: "b1", printVerifiedAt: null })]);
+      const secondSent = (
+        raceOnce.mock.calls[1]![1] as { boxes: Array<{ printVerifiedAt: unknown }> }
+      ).boxes;
+      expect(secondSent).toEqual([
+        expect.objectContaining({ boxId: "b1", printVerifiedAt: RESOLVED_AT }),
+      ]);
+
+      // The fix under test, directly: after settling, the row is acked and
+      // carries the REAL outcome -- never lost to the first (stale) ack
+      // attempt.
+      const rows = await exec.all<{ acked_at: string | null; print_verified_at: string | null }>(
+        "SELECT acked_at, print_verified_at FROM boxes_mirror WHERE box_id = ?",
+        ["b1"],
+      );
+      expect(rows[0]!.print_verified_at).toBe(RESOLVED_AT);
+      expect(rows[0]!.acked_at).not.toBeNull();
+
+      // Nothing left to resend -- the ack genuinely stuck.
+      await drainOnce();
+      expect(JSON.parse(lastBody()).boxes).toEqual([]);
+    },
+  );
+
+  // A box can close well after its last item was drained -- the shift's
+  // last box, with nothing left queued behind it. This pins the path with
+  // no outbox maxId at all (batch.length === 0, boxes.length > 0): the
+  // batchId falls back to the box's own rowid, and the ack skips
+  // `ackThrough` entirely (there is no outbox range to acknowledge) while
+  // still marking the box itself acknowledged.
+  it("sends a closed box on its own once the queue has otherwise drained", async () => {
+    await drainOnce(); // drains away the default seeded row, leaving the outbox empty.
+    await openBox(exec, SHIFT, "b1", ISO, TERMINAL);
+    await closeBox(exec, "b1", SSCC, ISO, null);
+    await drainOnce();
+    const body = JSON.parse(lastBody());
+    expect(body.items).toEqual([]);
+    expect(body.boxes).toEqual([
+      {
+        boxId: "b1",
+        shiftId: SHIFT,
+        terminalId: TERMINAL,
+        sscc: SSCC,
+        closedAt: ISO,
+        operatorId: null,
+        printVerifiedAt: null,
+        printSkippedAt: null,
+      },
+    ]);
+  });
+
+  // Task 13 review, second wave: for a boxes-only send (the `maxId === null`
+  // branch pinned above) the batch id used to be
+  // `${machineId}:${instId}:box:${rowid}` alone. A box's `rowid` is assigned
+  // once at `openBox`'s INSERT and never changes, so when the operator
+  // resolves the print-verification prompt AFTER the box's closure already
+  // synced -- with nothing else queued in between, e.g. the last box of a
+  // shift -- the resend was byte-identical to the original send's batch id.
+  // A real server claims a batch id in `sync_batches` and no-ops an exact
+  // repeat (`alreadyApplied: true`) WITHOUT inspecting content, so the
+  // resolved outcome would be silently swallowed forever -- in exactly the
+  // case the `acked_at`-clearing fix above exists to serve.
+  //
+  // The mock below models that claim-by-id behaviour explicitly, rather than
+  // returning a canned response: a batch id is claimed on first use (its
+  // boxes' fields are recorded as "applied"), and a repeat of that exact id
+  // is a no-op that leaves the previously recorded fields untouched. A
+  // batch-id collision here therefore fails the test on its own terms, not
+  // just via a content assertion that happens to also be wrong.
+  it(
+    "gives a boxes-only resend carrying a newly-resolved print outcome a batch id distinct " +
+      "from the original send, so the server's batch-id idempotency guard cannot swallow the " +
+      "resolved outcome",
+    async () => {
+      const claimed = new Set<string>();
+      const appliedOutcomes = new Map<
+        string,
+        { printVerifiedAt: string | null; printSkippedAt: string | null }
+      >();
+      const serverPost = vi.fn().mockImplementation(async (_path: string, body: unknown) => {
+        const {
+          batchId,
+          boxes: sentBoxes,
+          items,
+        } = body as {
+          batchId: string;
+          boxes: Array<{
+            boxId: string;
+            printVerifiedAt: string | null;
+            printSkippedAt: string | null;
+          }>;
+          items: unknown[];
+        };
+        if (claimed.has(batchId)) {
+          // Exactly the real server's contract: a repeated batch id is a
+          // no-op that never looks at (let alone re-applies) its content.
+          return { applied: 0, alreadyApplied: true };
+        }
+        claimed.add(batchId);
+        for (const b of sentBoxes) {
+          appliedOutcomes.set(b.boxId, {
+            printVerifiedAt: b.printVerifiedAt,
+            printSkippedAt: b.printSkippedAt,
+          });
+        }
+        return { applied: items.length, alreadyApplied: false };
+      });
+
+      async function drainWithServer(): Promise<void> {
+        serverPost.mockClear();
+        const engine = createSyncEngine({
+          exec,
+          client: { post: serverPost },
+          machineId: "m1",
+          onState: () => {},
+        });
+        engine.nudge();
+        await engine.idle();
+        engine.stop();
+      }
+
+      await drainWithServer(); // drains away the default seeded scan.
+      await openBox(exec, SHIFT, "b1", ISO, TERMINAL);
+      await closeBox(exec, "b1", SSCC, ISO, null);
+
+      await drainWithServer(); // boxes-only first send: outcome unresolved.
+      expect(serverPost).toHaveBeenCalledTimes(1);
+      const firstBatchId = (serverPost.mock.calls[0]![1] as { batchId: string }).batchId;
+      expect(appliedOutcomes.get("b1")).toEqual({ printVerifiedAt: null, printSkippedAt: null });
+
+      // The operator resolves the prompt only now -- nothing else has
+      // queued since the first send, so this resend is boxes-only too, and
+      // the box's rowid is exactly what it was above.
+      await markPrintVerified(exec, "b1", ISO);
+
+      await drainWithServer(); // boxes-only resend: outcome resolved.
+      expect(serverPost).toHaveBeenCalledTimes(1);
+      const secondBatchId = (serverPost.mock.calls[0]![1] as { batchId: string }).batchId;
+
+      expect(secondBatchId).not.toBe(firstBatchId);
+      expect(appliedOutcomes.get("b1")).toEqual({ printVerifiedAt: ISO, printSkippedAt: null });
+    },
+  );
+
+  // CodeRabbit PR33 review, Finding 1: the OLD `batchId` only ever folded in
+  // the outbox's `maxId` when the batch also carried items -- never the box
+  // set. A box that closes DURING the backoff window between a lost
+  // response and its retry therefore rode the SAME batch id as the original
+  // (unchanged `maxId`), and the real server (station-scans.service.ts)
+  // short-circuits an already-claimed batch id with `alreadyApplied` BEFORE
+  // its own box-closures loop even runs -- so that new closure was never
+  // actually applied server-side, yet this device's (then-unconditional)
+  // `ackBoxes` marked it acknowledged anyway, losing it permanently. The
+  // mock below models the server's real claim-by-id contract explicitly (as
+  // the boxes-only test above does), including that a repeat of an
+  // already-claimed id skips recording ANYTHING new it carries.
+  it(
+    "applies a NEW box closure that arrives while an item batch's response is lost, instead of " +
+      "letting the retry's grown box set collide with the already-claimed batch id and " +
+      "silently swallow the new closure (Finding 1)",
+    async () => {
+      const claimed = new Set<string>();
+      const appliedBoxIds = new Set<string>();
+      let dropNextResponse = false;
+      const serverPost = vi.fn().mockImplementation(async (_path: string, body: unknown) => {
+        const {
+          batchId,
+          boxes: sentBoxes,
+          items,
+        } = body as {
+          batchId: string;
+          boxes: Array<{ boxId: string }>;
+          items: unknown[];
+        };
+        if (claimed.has(batchId)) {
+          // Exactly the real server's contract: an already-claimed batch id
+          // short-circuits with `alreadyApplied` before ever looking at (let
+          // alone applying) the box closures this call carries.
+          return { applied: 0, alreadyApplied: true, conflicts: [] };
+        }
+        claimed.add(batchId);
+        for (const b of sentBoxes) appliedBoxIds.add(b.boxId);
+        if (dropNextResponse) {
+          dropNextResponse = false;
+          // The server durably applied (and claimed) the batch above, but
+          // its RESPONSE never reaches the device -- indistinguishable, from
+          // here, from an ordinary network failure.
+          throw new Error("response lost");
+        }
+        return { applied: items.length, alreadyApplied: false, conflicts: [] };
+      });
+      vi.spyOn(console, "error").mockImplementation(() => {});
+
+      // The default seeded scan (beforeEach) supplies the ITEM this batch
+      // needs to hit the exact branch Finding 1 describes -- the bug is
+      // specific to a batch that also carries items, since a boxes-only
+      // batch already keyed itself off the box's own rowid.
+      await openBox(exec, SHIFT, "b1", ISO, TERMINAL);
+      await closeBox(exec, "b1", SSCC, ISO, null);
+
+      const engine = createSyncEngine({
+        exec,
+        client: { post: serverPost },
+        machineId: "m1",
+        onState: () => {},
+      });
+
+      dropNextResponse = true;
+      engine.nudge();
+      await engine.idle();
+      expect(serverPost).toHaveBeenCalledTimes(1);
+      const firstBatchId = (serverPost.mock.calls[0]![1] as { batchId: string }).batchId;
+      // The server DID apply b1 -- but the device has no way to know that
+      // yet, since the response never arrived.
+      expect(appliedBoxIds.has("b1")).toBe(true);
+      expect(await outboxCount(exec)).toBeGreaterThan(0);
+
+      // A NEW box closes while the retry backoff is still pending -- the
+      // exact Finding 1 trigger.
+      await openBox(exec, SHIFT, "b2", ISO, TERMINAL);
+      await closeBox(exec, "b2", "004601234560000024", ISO, null);
+
+      await new Promise((resolve) => setTimeout(resolve, BACKOFF_START_MS + 500));
+      await engine.idle();
+
+      // The fix under test: b2's closure actually reaches the server,
+      // rather than being silently marked acknowledged on the strength of a
+      // response that was never about it.
+      expect(appliedBoxIds.has("b2")).toBe(true);
+      const batchIds = serverPost.mock.calls.map((c) => (c[1] as { batchId: string }).batchId);
+      // The retry of the pinned (b1-only) batch legitimately reuses the
+      // SAME key -- a harmless collision on genuinely unchanged content --
+      // while b2 rides a fresh, distinct key of its own.
+      expect(batchIds.filter((id) => id === firstBatchId).length).toBeGreaterThanOrEqual(2);
+      expect(batchIds.some((id) => id !== firstBatchId)).toBe(true);
+
+      engine.stop();
+    },
+    10_000,
+  );
+
+  // CodeRabbit PR33 review, Finding 2: `readClosedUnackedBoxes` used to have
+  // no LIMIT at all, but the server's `syncBatchSchema.boxes` caps a batch at
+  // `MAX_BOX_CLOSURES_PER_SYNC_BATCH` (50). A station that closes more boxes
+  // offline than that -- easily reached across a full offline shift at low
+  // box capacity -- would otherwise assemble one oversized payload that 400s
+  // every time, wedging both box delivery AND item delivery on that device
+  // forever (the drain retries a rejected batch indefinitely). This proves
+  // the cap is enforced per POST, and that the drain loop's own `for` loop
+  // still delivers the remainder without needing a second `nudge()`.
+  it(
+    "caps a single box batch at MAX_BOX_CLOSURES_PER_SYNC_BATCH and delivers the remainder in " +
+      "a later iteration of the same drain, rather than ever assembling one oversized payload " +
+      "(Finding 2)",
+    async () => {
+      const TOTAL_BOXES = MAX_BOX_CLOSURES_PER_SYNC_BATCH + 5;
+      for (let i = 0; i < TOTAL_BOXES; i++) {
+        const boxId = `box-${String(i).padStart(3, "0")}`;
+        await openBox(exec, SHIFT, boxId, ISO, TERMINAL);
+        await closeBox(exec, boxId, `00460123456000${String(1000 + i).slice(-4)}`, ISO, null);
+      }
+
+      const sentBoxIds: string[][] = [];
+      const drainPost = vi.fn().mockImplementation(async (_path: string, body: unknown) => {
+        const { boxes: sentBoxes, items } = body as {
+          boxes: Array<{ boxId: string }>;
+          items: unknown[];
+        };
+        sentBoxIds.push(sentBoxes.map((b) => b.boxId));
+        return { applied: items.length, alreadyApplied: false, conflicts: [] };
+      });
+
+      const engine = createSyncEngine({
+        exec,
+        client: { post: drainPost },
+        machineId: "m1",
+        onState: () => {},
+      });
+      engine.nudge();
+      await engine.idle();
+      engine.stop();
+
+      // Every individual POST stayed within the API's own cap.
+      for (const ids of sentBoxIds) {
+        expect(ids.length).toBeLessThanOrEqual(MAX_BOX_CLOSURES_PER_SYNC_BATCH);
+      }
+      // At least two POSTs were required, since one alone cannot legally
+      // carry all of them.
+      expect(sentBoxIds.length).toBeGreaterThanOrEqual(2);
+      expect(sentBoxIds[0]!.length).toBe(MAX_BOX_CLOSURES_PER_SYNC_BATCH);
+      // Nothing was silently dropped: every closure was eventually sent
+      // exactly once, and every one of this device's boxes is now
+      // acknowledged.
+      const allSent = sentBoxIds.flat();
+      expect(allSent).toHaveLength(TOTAL_BOXES);
+      expect(new Set(allSent).size).toBe(TOTAL_BOXES);
+      const unacked = await exec.all<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM boxes_mirror WHERE closed_at IS NOT NULL AND acked_at IS NULL",
+      );
+      expect(unacked[0]!.n).toBe(0);
+    },
+  );
+
+  it("still acknowledges when applying a serial block fails", async () => {
+    const failing = failingExecOn(exec, /INSERT INTO sscc_pool/);
+    mockPost({
+      applied: 1,
+      alreadyApplied: false,
+      conflicts: [],
+      ssccBlock: { issuerPrefix: ISSUER_PREFIX, extensionDigit: 0, fromSerial: 5, toSerial: 9 },
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    await drainOnce(failing);
+    expect(await outboxCount(exec)).toBe(0);
+  });
+
+  it("still rejects a response that is not this endpoint's shape", async () => {
+    mockPost({
+      status: "ok",
+      ssccBlock: { issuerPrefix: ISSUER_PREFIX, extensionDigit: 0, fromSerial: 5, toSerial: 9 },
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    await drainOnce();
+    expect(await outboxCount(exec)).toBe(1);
+    expect(await remaining(exec, ISSUER_PREFIX, 0)).toBe(0);
+  });
+
+  it("drops a lost code from the box that is still open", async () => {
+    await openBox(exec, SHIFT, "b1", ISO, TERMINAL);
+    await recordScan(exec, event("a"), code("aa", "b1"));
+    await recordScan(exec, event("b"), code("bb", "b1"));
+    mockPost({
+      applied: 2,
+      alreadyApplied: false,
+      conflicts: [{ codeHash: "aa", winningTerminalId: "t9", winningScannedAt: ISO }],
+    });
+    await drainOnce();
+    expect((await currentBox(exec, SHIFT))?.itemCount).toBe(1);
+  });
+
+  it("leaves a closed box alone when one of its codes is lost", async () => {
+    await openBox(exec, SHIFT, "b1", ISO, TERMINAL);
+    await recordScan(exec, event("a"), code("aa", "b1"));
+    await closeBox(exec, "b1", SSCC, ISO, null);
+    mockPost({
+      applied: 1,
+      alreadyApplied: false,
+      conflicts: [{ codeHash: "aa", winningTerminalId: "t9", winningScannedAt: ISO }],
+    });
+    await drainOnce();
+    const rows = await exec.all<{ box_id: string }>(
+      `SELECT box_id FROM codes_mirror WHERE code_hash = ?`,
+      ["aa"],
+    );
+    expect(rows[0]!.box_id).toBe("b1");
   });
 });

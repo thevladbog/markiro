@@ -32,6 +32,9 @@ export interface ShiftDto {
   counterpartyName: string | null;
   labelTemplateId: string | null;
   labelTemplateName: string | null;
+  /** Whose numbers this shift's boxes carry; null means the tenant's own organisation. */
+  ssccIssuerCounterpartyId: string | null;
+  boxLabelTemplateId: string | null;
   plannedQty: number | null;
   plannedDate: string | null;
   boxCapacity: number | null;
@@ -56,6 +59,8 @@ export interface CreateShiftInput {
   lineId?: string | null;
   counterpartyId?: string | null;
   labelTemplateId?: string | null;
+  ssccIssuerCounterpartyId?: string | null;
+  boxLabelTemplateId?: string | null;
   plannedQty?: number | null;
   plannedDate?: string | null;
   boxCapacity?: number | null;

@@ -9,7 +9,12 @@ import {
   type HardwareConfig,
 } from "./lib/hardware-config.js";
 import { createHardwareScanSource, tauriHardware, type ScannerStatus } from "./lib/hardware.js";
-import { applyMigrations, readShiftContext, type ShiftContextRow } from "./lib/mirror.js";
+import {
+  applyMigrations,
+  readShiftContext,
+  readShiftMirror,
+  type ShiftContextRow,
+} from "./lib/mirror.js";
 import { mirrorShiftBundle } from "./lib/shift-bundle.js";
 import { syncOperatorRoster } from "./lib/roster-sync.js";
 import { createKeyboardWedgeSource } from "./lib/scan-source.js";
@@ -87,6 +92,14 @@ export function App() {
   const [online, setOnline] = useState(() => navigator.onLine);
   const [sound, setSound] = useState<SoundSettings>({ muted: false, volume: 1 });
   const [shiftContext, setShiftContext] = useState<ShiftContextRow | null>(null);
+  // Threaded into WorkScreen's box UI (Task 13 review, Finding 1) --
+  // `boxCapacity` was already a `shift_mirror` column written by
+  // `mirrorShiftBundle`, just never read back; `issuerPrefix` is mirrored
+  // there for the same reason (see mirror.ts's `upsertBundleBody`). Both are
+  // read together with `shiftContext` below, off the same `shift_mirror` row,
+  // and reset alongside it whenever the shift itself changes.
+  const [boxCapacity, setBoxCapacity] = useState<number | null>(null);
+  const [issuerPrefix, setIssuerPrefix] = useState<string | null>(null);
   const [hardwareConfig, setHardwareConfig] = useState<HardwareConfig>(DEFAULT_HARDWARE_CONFIG);
   const [scannerStatus, setScannerStatus] = useState<ScannerStatus | null>(null);
   const [showSetup, setShowSetup] = useState(false);
@@ -172,16 +185,38 @@ export function App() {
   useEffect(() => {
     if (!shift) {
       setShiftContext(null);
+      setBoxCapacity(null);
+      setIssuerPrefix(null);
       return;
     }
     let cancelled = false;
     // mirrorShiftBundle writes in the background, so poll briefly until the
     // product row lands rather than blocking shift entry on the network.
+    // `readShiftMirror` is fetched alongside `readShiftContext` on every
+    // tick: the shift row it reads is written before the product row
+    // `readShiftContext`'s join depends on (see `upsertBundleBody`), so by
+    // the time `ctx` resolves non-null the mirror row is already there too --
+    // gating this poll on `ctx` (rather than adding a second one) is enough.
+    // `readShiftMirror` carries its OWN `.catch(() => null)` (Task 13 review,
+    // Finding 2), separate from the `.catch` below that guards the whole
+    // `Promise.all`: without it, a mirror-read failure -- including
+    // `applyMigrations` rethrowing a genuine (non-duplicate-column) migration
+    // error, plausible if a lock or transient error hits the `issuer_prefix`
+    // column or any ALTER before it -- would reject the WHOLE `Promise.all`,
+    // so `ctx` is never reached and `setShiftContext` is never called,
+    // stranding the operator on "Preparing the shift..." indefinitely. Before
+    // this task, a mirror-read failure only degraded the box feature to
+    // absent; it must not now be able to block shift entry entirely.
     const tick = setInterval(() => {
-      void readShiftContext(tauriExecutor, shift.id)
-        .then((ctx) => {
+      void Promise.all([
+        readShiftContext(tauriExecutor, shift.id),
+        readShiftMirror(tauriExecutor, shift.id).catch(() => null),
+      ])
+        .then(([ctx, mirror]) => {
           if (cancelled || !ctx) return;
           setShiftContext(ctx);
+          setBoxCapacity(mirror?.boxCapacity ?? null);
+          setIssuerPrefix(mirror?.issuerPrefix ?? null);
           clearInterval(tick);
         })
         .catch((err) => {
@@ -373,6 +408,22 @@ export function App() {
               setFloorView("select");
             }}
             pendingSync={syncState.pending}
+            // Read off `shift_mirror` alongside `shiftContext` above (Task 13
+            // review, Finding 1) -- null for a validation-mode shift, or a
+            // device the server could not resolve an issuer prefix for,
+            // which is exactly what turns WorkScreen's box UI off entirely.
+            issuerPrefix={issuerPrefix}
+            boxCapacity={boxCapacity}
+            verifyPrintedLabel={hardwareConfig.verifyPrintedLabel}
+            printing={
+              hardwareConfig.printer
+                ? {
+                    target: hardwareConfig.printer,
+                    language: hardwareConfig.printerLanguage,
+                    print: (target, bytes) => tauriHardware.print(target, bytes),
+                  }
+                : null
+            }
           />
         ) : (
           <main style={{ minHeight: "100%", display: "grid", placeItems: "center" }}>

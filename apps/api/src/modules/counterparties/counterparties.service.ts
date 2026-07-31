@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Inject,
   Injectable,
@@ -8,10 +9,17 @@ import {
 import { and, eq } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
+import {
+  atomicSeedSscc,
+  BOX_EXTENSION_DIGIT,
+  deriveIssuerPrefix,
+  seedFloor,
+} from "../sscc/sscc.service";
 import type {
   CounterpartyDto,
   CreateCounterpartyDto,
   ListCounterpartiesResponseDto,
+  SsccCounterDto,
   UpdateCounterpartyDto,
 } from "./dto";
 
@@ -114,6 +122,70 @@ export class CounterpartiesService {
       }
       throw error;
     }
+  }
+
+  /**
+   * A counterparty's box SSCC counter (Task 5) -- kept separate from the
+   * tenant's own counter (org-profile.service.ts's getSscc) because it's
+   * keyed by the counterparty's own GLN-derived prefix, which is ordinarily
+   * a different number space entirely. `getCounterparty` both 404s a
+   * cross-tenant id and tenant-scopes the lookup in one place.
+   */
+  async getSscc(tenantId: string, id: string): Promise<SsccCounterDto> {
+    const issuerPrefix = await this.counterpartyIssuerPrefix(tenantId, id);
+    const [row] = await this.db
+      .select({ nextSerial: schema.ssccCounters.nextSerial })
+      .from(schema.ssccCounters)
+      .where(
+        and(
+          eq(schema.ssccCounters.tenantId, tenantId),
+          eq(schema.ssccCounters.issuerPrefix, issuerPrefix),
+          eq(schema.ssccCounters.extensionDigit, BOX_EXTENSION_DIGIT),
+        ),
+      );
+    return { extensionDigit: BOX_EXTENSION_DIGIT, nextSerial: row ? Number(row.nextSerial) : 0 };
+  }
+
+  /**
+   * Seeds (or reseeds) a counterparty's box counter. See getSscc's doc
+   * comment. Refuses to seed below `seedFloor` (final review, finding 2) --
+   * see org-profile.service.ts's `putSscc` for the full rationale, which
+   * applies identically here since both write the same `sscc_counters`
+   * table keyed by the same derived issuer prefix.
+   *
+   * CodeRabbit PR33 review, Finding 5: same fix as org-profile.service.ts's
+   * `putSscc`, applied identically here -- `atomicSeedSscc` re-validates
+   * `seedFloor`'s condition live, inside the SAME statement as the write,
+   * closing the race where a concurrent `allocate()` issues a new block
+   * between this method's own `seedFloor` read and its write.
+   */
+  async putSscc(tenantId: string, id: string, dto: SsccCounterDto): Promise<SsccCounterDto> {
+    const issuerPrefix = await this.counterpartyIssuerPrefix(tenantId, id);
+    const floor = await seedFloor(this.db, tenantId, issuerPrefix, dto.extensionDigit);
+    if (dto.nextSerial < floor) {
+      throw new BadRequestException(
+        `nextSerial must be at least ${floor}: serials below it were already issued to a device under this prefix`,
+      );
+    }
+    const applied = await atomicSeedSscc(
+      this.db,
+      tenantId,
+      issuerPrefix,
+      dto.extensionDigit,
+      dto.nextSerial,
+    );
+    if (!applied) {
+      throw new ConflictException(
+        "nextSerial floor moved: a box serial block was issued under this prefix while this seed was in flight. Retry with the current floor.",
+      );
+    }
+    return { extensionDigit: dto.extensionDigit, nextSerial: dto.nextSerial };
+  }
+
+  /** The 9-digit prefix derived from this counterparty's own GLN; 404s if the id isn't this tenant's. */
+  private async counterpartyIssuerPrefix(tenantId: string, id: string): Promise<string> {
+    const counterparty = await this.getCounterparty(tenantId, id);
+    return deriveIssuerPrefix(counterparty.gln, "counterparty");
   }
 
   private rowToDto(row: typeof schema.counterparties.$inferSelect): CounterpartyDto {
