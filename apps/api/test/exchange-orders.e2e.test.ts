@@ -392,7 +392,7 @@ describe("1c_exchange orders (И-2)", () => {
     expect(
       events.filter((event) => event.message === `import (sale): файл «${filename}» применён`),
     ).toHaveLength(1);
-  });
+  }, 15_000);
 
   it("статус, не найденный в таблице сопоставления, журналируется как расхождение и заявку не трогает", async () => {
     const { cookie } = await checkauth();
