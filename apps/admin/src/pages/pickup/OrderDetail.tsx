@@ -233,6 +233,16 @@ export function OrderDetailPage() {
             label={t("pages.pickup.detail.totalLabel")}
             value={order.totalPrice ?? "—"}
           />
+          <DetailField
+            label={t("pages.pickup.detail.exportStatusLabel")}
+            value={
+              order.exportedAt
+                ? t("pages.pickup.detail.exportStatus.exported", {
+                    time: formatCreatedAt(order.exportedAt, i18n.language),
+                  })
+                : t("pages.pickup.detail.exportStatus.notExported")
+            }
+          />
         </div>
       </Card>
 
@@ -250,6 +260,30 @@ export function OrderDetailPage() {
           </ul>
         </Alert>
       )}
+
+      {order.status === "pending" &&
+        !order.exportedAt &&
+        order.exportHeldProductNames.length > 0 && (
+          <Alert
+            tone="warn"
+            title={t("pages.pickup.detail.exportHeld.title", {
+              count: order.exportHeldProductNames.length,
+            })}
+          >
+            <ul style={{ margin: 0, paddingInlineStart: "var(--sp-5)" }}>
+              {order.exportHeldProductNames.map((name) => (
+                <li key={name} style={{ font: "var(--text-body)" }}>
+                  {name}
+                </li>
+              ))}
+            </ul>
+            <p style={{ font: "var(--text-caption)", color: "var(--fg-3)", marginTop: 8 }}>
+              <Link to="/integrations/commerceml">
+                {t("pages.pickup.detail.exportHeld.linkAction")}
+              </Link>
+            </p>
+          </Alert>
+        )}
 
       <Card title={t("pages.pickup.detail.itemsTitle")}>
         <Table columns={itemColumns} rows={order.items} />

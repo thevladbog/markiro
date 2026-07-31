@@ -534,6 +534,15 @@
         "reasonLabel": "Причина",
         "createdAtLabel": "Создана",
         "totalLabel": "Итого",
+        "exportStatusLabel": "Выгрузка в 1С",
+        "exportStatus": {
+          "exported": "Выгружена {{time}}",
+          "notExported": "Ещё не выгружена"
+        },
+        "exportHeld": {
+          "title": "Заявка придержана — {{count}} товар(ов) без связи с 1С",
+          "linkAction": "Перейти к очереди сопоставления"
+        },
         "itemsTitle": "Коды маркировки",
         "table": {
           "code": "Код",
@@ -826,6 +835,22 @@
           "silentAfterHoursLabel": "Порог молчания, часов",
           "silentAfterHoursHint": "Через сколько часов без событий канал считается замолчавшим.",
           "silentAfterHoursError": "Минимум 1 час",
+          "writeoffDocumentTypeLabel": "Тип документа для списания",
+          "writeoffDocumentTypeHint": "Значение ХозОперация для заявок на списание, когда включено разделение документа.",
+          "orderStatusFieldLabel": "Реквизит статуса заказа",
+          "orderStatusFieldHint": "Название реквизита, которым 1С сообщает статус заказа — узнаётся у специалиста 1С со стороны клиента.",
+          "statusMappingLabel": "Сопоставление статусов",
+          "statusMappingHint": "Внешнее значение реквизита → наш статус. Несопоставленное значение не двигает заявку.",
+          "statusMappingExternalPlaceholder": "Внешнее значение",
+          "statusMappingExternalLabel": "Внешнее значение, строка {{row}}",
+          "statusMappingStatusLabel": "Внутренний статус, строка {{row}}",
+          "statusMappingOption": {
+            "punched": "Пробит",
+            "writtenoff": "Списан",
+            "cancelled": "Отменён"
+          },
+          "statusMappingAddAction": "Добавить строку",
+          "statusMappingRemoveAction": "Удалить",
           "saveAction": "Сохранить",
           "saveSuccess": "Настройки сохранены",
           "saveError": "Не удалось сохранить настройки",

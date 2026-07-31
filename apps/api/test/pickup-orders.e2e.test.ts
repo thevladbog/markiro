@@ -11,6 +11,7 @@ import { loadEnv } from "../src/env";
 import { hashDeviceToken } from "../src/pickup/device-token";
 import { schema, type Db } from "@markiro/db";
 import { listenOnLoopback } from "./support/listen-loopback";
+import { PickupOrdersService } from "../src/modules/pickup-orders/pickup-orders.service";
 
 /** GTIN test vector (check-digit VALID). See kiosk-orders.e2e.test.ts for the full rationale. */
 const GTIN = "04600682000013";
@@ -26,6 +27,7 @@ describe.skipIf(!ready)("pickup orders admin e2e", () => {
   let app: INestApplication | undefined;
   let setup: AuthSetup;
   let db: Db;
+  let pickupOrdersService: PickupOrdersService;
 
   let tenantId: string;
   let employeeId: string;
@@ -43,6 +45,7 @@ describe.skipIf(!ready)("pickup orders admin e2e", () => {
     const ref = await Test.createTestingModule({
       imports: [AppModule.forRoot({ ...setup, databaseUrl: env.DATABASE_URL })],
     }).compile();
+    pickupOrdersService = ref.get(PickupOrdersService);
 
     app = ref.createNestApplication({ bodyParser: false });
     const server = app.getHttpAdapter().getInstance();
@@ -259,6 +262,383 @@ describe.skipIf(!ready)("pickup orders admin e2e", () => {
 
     // --- Cancel on a non-pending order -> 409 ---
     await agent.post(`/pickup-orders/${idCancel}/cancel`).expect(409);
+  });
+
+  it("findExportCandidates отдаёт только pending и ещё не выгруженные заявки, с товарами", async () => {
+    const linkedProductId = randomUUID();
+    await db.insert(schema.products).values({
+      id: linkedProductId,
+      tenantId,
+      gtin14: "04600682000037",
+      name: "Товар со связью",
+      externalRef: `ext-${randomUUID()}`,
+    });
+
+    const orderId = randomUUID();
+    await db.insert(schema.pickupOrders).values({
+      id: orderId,
+      tenantId,
+      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      kioskId,
+      employeeId,
+      reason: "buy",
+      itemCount: 1,
+      totalPrice: "10.00",
+    });
+    await db.insert(schema.pickupOrderItems).values({
+      tenantId,
+      orderId,
+      productId: linkedProductId,
+      gtin14: "04600682000037",
+      serial: "SN0001",
+      rawKm: "raw-export-1",
+      kmKey: `kmkey-${randomUUID()}`,
+      unitPrice: "10.00",
+      scannedAt: new Date(),
+    });
+
+    const already = await pickupOrdersService.findExportCandidates(tenantId, 100);
+    const found = already.candidates.find((o) => o.id === orderId);
+    expect(found).toBeDefined();
+    expect(found!.items).toEqual([
+      { productId: linkedProductId, productExternalRef: expect.any(String), unitPrice: "10.00" },
+    ]);
+
+    await db
+      .update(schema.pickupOrders)
+      .set({ exportedAt: new Date() })
+      .where(eq(schema.pickupOrders.id, orderId));
+    const afterExport = await pickupOrdersService.findExportCandidates(tenantId, 100);
+    expect(afterExport.candidates.some((o) => o.id === orderId)).toBe(false);
+  });
+
+  it("findExportCandidates не отдаёт заявку без активных товаров", async () => {
+    const orderId = randomUUID();
+    const allVoidedOrderId = randomUUID();
+    await db.insert(schema.pickupOrders).values({
+      id: orderId,
+      tenantId,
+      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      kioskId,
+      employeeId,
+      reason: "buy",
+      itemCount: 0,
+      totalPrice: "0.00",
+    });
+    await db.insert(schema.pickupOrders).values({
+      id: allVoidedOrderId,
+      tenantId,
+      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      kioskId,
+      employeeId,
+      reason: "buy",
+      itemCount: 1,
+      totalPrice: "0.00",
+    });
+    await db.insert(schema.pickupOrderItems).values({
+      tenantId,
+      orderId: allVoidedOrderId,
+      productId,
+      gtin14: GTIN,
+      serial: `SN-${randomUUID()}`,
+      rawKm: `raw-${randomUUID()}`,
+      kmKey: `kmkey-${randomUUID()}`,
+      voided: true,
+      scannedAt: new Date(),
+    });
+
+    const result = await pickupOrdersService.findExportCandidates(tenantId, 100);
+    expect(result.candidates.some((order) => order.id === orderId)).toBe(false);
+    expect(result.candidates.some((order) => order.id === allVoidedOrderId)).toBe(false);
+  });
+
+  it("findExportCandidates не отдаёт заявки с непривязанным товаром в candidates, но видит их в held", async () => {
+    const unlinkedProductId = randomUUID();
+    await db.insert(schema.products).values({
+      id: unlinkedProductId,
+      tenantId,
+      gtin14: "04600682000044",
+      name: "Товар без связи",
+    });
+
+    const heldOrderId = randomUUID();
+    await db.insert(schema.pickupOrders).values({
+      id: heldOrderId,
+      tenantId,
+      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      kioskId,
+      employeeId,
+      reason: "buy",
+      itemCount: 1,
+      totalPrice: "10.00",
+    });
+    await db.insert(schema.pickupOrderItems).values({
+      tenantId,
+      orderId: heldOrderId,
+      productId: unlinkedProductId,
+      gtin14: "04600682000044",
+      serial: "SN-HELD",
+      rawKm: "raw-held-1",
+      kmKey: `kmkey-${randomUUID()}`,
+      unitPrice: "10.00",
+      scannedAt: new Date(),
+    });
+
+    const result = await pickupOrdersService.findExportCandidates(tenantId, 100);
+    expect(result.candidates.some((o) => o.id === heldOrderId)).toBe(false);
+    const heldEntry = result.held.find((h) => h.orderId === heldOrderId);
+    expect(heldEntry).toBeDefined();
+    expect(heldEntry!.unlinkedProductIds).toEqual([unlinkedProductId]);
+  });
+
+  it("findExportCandidates: заявки с непривязанным товаром не морят голодом заявку, готовую к экспорту, даже когда held-заявок больше limit", async () => {
+    // The starvation bug this fix prevents: the OLD implementation selected
+    // the oldest `limit` pending+unexported orders FIRST, then split them
+    // into eligible/held afterwards -- so once `limit` or more orders were
+    // held, the eligible order below (created LAST, i.e. newest) would never
+    // even be selected by the first query, let alone offered. Three held
+    // orders against `limit=2` reproduces that: a limit of 2 is smaller than
+    // the 3 held orders alone, so the old code would return 2 held orders
+    // and nothing else, every round, forever.
+    const unlinkedProductId = randomUUID();
+    await db.insert(schema.products).values({
+      id: unlinkedProductId,
+      tenantId,
+      gtin14: "04600682000051",
+      name: "Товар без связи (starvation)",
+    });
+
+    for (let i = 0; i < 3; i++) {
+      const orderId = randomUUID();
+      await db.insert(schema.pickupOrders).values({
+        id: orderId,
+        tenantId,
+        orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+        kioskId,
+        employeeId,
+        reason: "buy",
+        itemCount: 1,
+        totalPrice: "10.00",
+      });
+      await db.insert(schema.pickupOrderItems).values({
+        tenantId,
+        orderId,
+        productId: unlinkedProductId,
+        gtin14: "04600682000051",
+        serial: `SN-STARVE-${i}`,
+        rawKm: `raw-starve-${i}`,
+        kmKey: `kmkey-${randomUUID()}`,
+        unitPrice: "10.00",
+        scannedAt: new Date(),
+      });
+    }
+
+    const linkedProductId = randomUUID();
+    await db.insert(schema.products).values({
+      id: linkedProductId,
+      tenantId,
+      gtin14: "04600682000068",
+      name: "Товар со связью (starvation)",
+      externalRef: `ext-${randomUUID()}`,
+    });
+    const eligibleOrderId = randomUUID();
+    await db.insert(schema.pickupOrders).values({
+      id: eligibleOrderId,
+      tenantId,
+      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      kioskId,
+      employeeId,
+      reason: "buy",
+      itemCount: 1,
+      totalPrice: "10.00",
+    });
+    await db.insert(schema.pickupOrderItems).values({
+      tenantId,
+      orderId: eligibleOrderId,
+      productId: linkedProductId,
+      gtin14: "04600682000068",
+      serial: "SN-STARVE-ELIGIBLE",
+      rawKm: "raw-starve-eligible",
+      kmKey: `kmkey-${randomUUID()}`,
+      unitPrice: "10.00",
+      scannedAt: new Date(),
+    });
+
+    const result = await pickupOrdersService.findExportCandidates(tenantId, 2);
+    expect(result.candidates.some((o) => o.id === eligibleOrderId)).toBe(true);
+  });
+
+  it("detail показывает уникальные непустые названия только для активных непривязанных товаров", async () => {
+    const namedProductId = randomUUID();
+    const emptyProductId = randomUUID();
+    const voidedProductId = randomUUID();
+    await db.insert(schema.products).values([
+      {
+        id: namedProductId,
+        tenantId,
+        gtin14: "04600682000075",
+        name: "Непривязанный товар",
+      },
+      { id: emptyProductId, tenantId, gtin14: "04600682000082", name: "" },
+      {
+        id: voidedProductId,
+        tenantId,
+        gtin14: "04600682000099",
+        name: "Аннулированный товар",
+      },
+    ]);
+    const orderId = randomUUID();
+    await db.insert(schema.pickupOrders).values({
+      id: orderId,
+      tenantId,
+      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      kioskId,
+      employeeId,
+      reason: "buy",
+      itemCount: 4,
+    });
+    await db.insert(schema.pickupOrderItems).values(
+      [namedProductId, namedProductId, emptyProductId, voidedProductId].map(
+        (itemProductId, index) => ({
+          tenantId,
+          orderId,
+          productId: itemProductId,
+          gtin14: `04600682000${["075", "075", "082", "099"][index]}`,
+          serial: `SN-HELD-NAME-${index}`,
+          rawKm: `raw-held-name-${randomUUID()}`,
+          kmKey: `kmkey-${randomUUID()}`,
+          voided: index === 3,
+          scannedAt: new Date(),
+        }),
+      ),
+    );
+
+    const detail = await pickupOrdersService.detail(tenantId, orderId);
+    expect(detail.exportHeldProductNames).toEqual(["Непривязанный товар"]);
+  });
+
+  it("applyExternalStatus переводит pending заявку в punched", async () => {
+    const orderId = randomUUID();
+    await db.insert(schema.pickupOrders).values({
+      id: orderId,
+      tenantId,
+      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      kioskId,
+      employeeId,
+      reason: "buy",
+      itemCount: 1,
+    });
+
+    const result = await pickupOrdersService.applyExternalStatus(tenantId, orderId, "punched");
+    expect(result).toEqual({ outcome: "applied" });
+
+    const [row] = await db
+      .select({ status: schema.pickupOrders.status })
+      .from(schema.pickupOrders)
+      .where(eq(schema.pickupOrders.id, orderId));
+    expect(row?.status).toBe("punched");
+  });
+
+  it("applyExternalStatus отказывает расхождением, если заявка уже не pending", async () => {
+    const orderId = randomUUID();
+    await db.insert(schema.pickupOrders).values({
+      id: orderId,
+      tenantId,
+      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      kioskId,
+      employeeId,
+      reason: "buy",
+      itemCount: 1,
+      status: "punched",
+    });
+
+    const result = await pickupOrdersService.applyExternalStatus(tenantId, orderId, "cancelled");
+    expect(result).toEqual({ outcome: "not_pending", currentStatus: "punched" });
+
+    const [row] = await db
+      .select({ status: schema.pickupOrders.status })
+      .from(schema.pickupOrders)
+      .where(eq(schema.pickupOrders.id, orderId));
+    expect(row?.status).toBe("punched");
+  });
+
+  it("applyExternalStatus отказывает списанием без причины", async () => {
+    const orderId = randomUUID();
+    await db.insert(schema.pickupOrders).values({
+      id: orderId,
+      tenantId,
+      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      kioskId,
+      employeeId,
+      reason: "buy",
+      itemCount: 1,
+    });
+
+    const result = await pickupOrdersService.applyExternalStatus(tenantId, orderId, "writtenoff");
+    expect(result).toEqual({ outcome: "missing_writeoff_reason" });
+  });
+
+  it("applyExternalStatus отдаёт not_found для чужого/несуществующего id", async () => {
+    const result = await pickupOrdersService.applyExternalStatus(tenantId, randomUUID(), "punched");
+    expect(result).toEqual({ outcome: "not_found" });
+  });
+
+  it("applyExternalStatus отдаёт not_found для реальной заявки другого tenant", async () => {
+    const orderId = randomUUID();
+    await db.insert(schema.pickupOrders).values({
+      id: orderId,
+      tenantId,
+      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      kioskId,
+      employeeId,
+      reason: "buy",
+      itemCount: 1,
+    });
+    const otherTenantId = await signUpAndActivate(request.agent(app!.getHttpServer()));
+
+    const result = await pickupOrdersService.applyExternalStatus(otherTenantId, orderId, "punched");
+    expect(result).toEqual({ outcome: "not_found" });
+  });
+
+  it("applyExternalStatus при cancelled помечает товары voided", async () => {
+    const orderId = randomUUID();
+    await db.insert(schema.pickupOrders).values({
+      id: orderId,
+      tenantId,
+      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      kioskId,
+      employeeId,
+      reason: "buy",
+      itemCount: 1,
+    });
+    await db.insert(schema.pickupOrderItems).values({
+      tenantId,
+      orderId,
+      productId,
+      gtin14: GTIN,
+      serial: `SN-${randomUUID()}`,
+      rawKm: `raw-${randomUUID()}`,
+      kmKey: `kmkey-${randomUUID()}`,
+      scannedAt: new Date(),
+    });
+
+    const result = await pickupOrdersService.applyExternalStatus(tenantId, orderId, "cancelled");
+    expect(result).toEqual({ outcome: "applied" });
+    const [order] = await db
+      .select({ status: schema.pickupOrders.status })
+      .from(schema.pickupOrders)
+      .where(and(eq(schema.pickupOrders.tenantId, tenantId), eq(schema.pickupOrders.id, orderId)));
+    const items = await db
+      .select({ voided: schema.pickupOrderItems.voided })
+      .from(schema.pickupOrderItems)
+      .where(
+        and(
+          eq(schema.pickupOrderItems.tenantId, tenantId),
+          eq(schema.pickupOrderItems.orderId, orderId),
+        ),
+      );
+    expect(order?.status).toBe("cancelled");
+    expect(items).toEqual([{ voided: true }]);
   });
 
   it("cross-tenant isolation: org B cannot read, resolve, cancel, slip or export org A's order", async () => {

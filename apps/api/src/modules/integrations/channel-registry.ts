@@ -59,6 +59,31 @@ const commercemlSettings = z
     priceType: z.string().min(1).optional(),
     /** Разделять ли списание в свой тип документа (используется в И-2). */
     splitWriteoffDocument: z.boolean().default(false),
+    /**
+     * Значение `<ХозОперация>` для заявок на списание, когда
+     * `splitWriteoffDocument` включён (плана И-2, спека §2/§5: "словарь
+     * документов в конфигурациях разный; разделение — настройка, а не
+     * допущение"). Без этого значения `splitWriteoffDocument: true` не меняет
+     * ничего — `order-export.ts`'s `buildOrdersDocument` падает обратно на
+     * единый тип документа по умолчанию, если это поле пусто.
+     */
+    writeoffDocumentType: z.string().min(1).nullable().optional(),
+    /**
+     * Название реквизита статуса заказа в ЭТОЙ конфигурации 1С (плана И-2,
+     * спека §6). Стандартного названия нет — приёмочный чек-лист
+     * (`docs/1c-exchange-acceptance-checklist.md`) прямо называет его
+     * неизвестным до первого живого сеанса. Пусто — входящий статус вообще
+     * не читается (спека §6: "по умолчанию слой выключен").
+     */
+    orderStatusField: z.string().min(1).nullable().optional(),
+    /**
+     * Таблица «внешнее значение реквизита → наш статус» (спека §6: "данные, а
+     * не код"). Значение — один из трёх терминальных статусов
+     * `pickup_order_status`, никогда `pending` (спека §6: "инварианты
+     * жизненного цикла сильнее внешнего статуса" — сопоставление не может
+     * протащить заказ назад в `pending`).
+     */
+    statusMapping: z.record(z.string(), z.enum(["punched", "writtenoff", "cancelled"])).optional(),
   })
   // Review fix (PR #32, item 8): plain `z.object()` silently STRIPS a key it
   // doesn't recognise -- `safeParse` still reports `success: true`, so a

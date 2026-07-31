@@ -1,6 +1,6 @@
 {
-  "id": "0032828c-3583-4174-ac3e-0e568499d0cd",
-  "prevId": "8e06ca82-7b6b-4602-89d7-f598717b5860",
+  "id": "d5406c12-1619-4eae-8e94-a5054c5e7e13",
+  "prevId": "b9027c2b-a0b7-4e7f-bf25-13d7a43d8fbb",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -858,6 +858,159 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.box_exceptions": {
+      "name": "box_exceptions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "box_id": {
+          "name": "box_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "code_hash": {
+          "name": "code_hash",
+          "type": "char(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "shift_id": {
+          "name": "shift_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "terminal_id": {
+          "name": "terminal_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "operator_id": {
+          "name": "operator_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "occurred_at": {
+          "name": "occurred_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "recorded_at": {
+          "name": "recorded_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "box_exceptions_tenant_box_idx": {
+          "name": "box_exceptions_tenant_box_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "box_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "recorded_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "box_exceptions_tenant_id_organization_id_fk": {
+          "name": "box_exceptions_tenant_id_organization_id_fk",
+          "tableFrom": "box_exceptions",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "box_exceptions_tenant_box_fk": {
+          "name": "box_exceptions_tenant_box_fk",
+          "tableFrom": "box_exceptions",
+          "tableTo": "boxes",
+          "columnsFrom": [
+            "tenant_id",
+            "box_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "box_exceptions_tenant_shift_fk": {
+          "name": "box_exceptions_tenant_shift_fk",
+          "tableFrom": "box_exceptions",
+          "tableTo": "shifts",
+          "columnsFrom": [
+            "tenant_id",
+            "shift_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.box_items": {
       "name": "box_items",
       "schema": "",
@@ -888,6 +1041,12 @@
         },
         "displaced_at": {
           "name": "displaced_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "removed_at": {
+          "name": "removed_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
@@ -1035,6 +1194,12 @@
         },
         "print_skipped_at": {
           "name": "print_skipped_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "disassembled_at": {
+          "name": "disassembled_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
@@ -3561,7 +3726,30 @@
           "notNull": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "pickup_orders_export_queue_idx": {
+          "name": "pickup_orders_export_queue_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "status = 'pending' and exported_at is null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "pickup_orders_tenant_id_organization_id_fk": {
           "name": "pickup_orders_tenant_id_organization_id_fk",

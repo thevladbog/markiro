@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { useForm } from "react-hook-form";
+import { Controller, useFieldArray, useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router";
 
-import { Alert, Button, Card, Input, PageHeader, Spinner, StatusChip } from "@markiro/ui";
+import { Alert, Button, Card, Input, PageHeader, Select, Spinner, StatusChip } from "@markiro/ui";
 import type { StatusChipStatus } from "@markiro/ui";
 
 import { ApiRequestError } from "../../api/client.js";
@@ -30,18 +30,54 @@ const STATE_STATUS: Record<ChannelState, StatusChipStatus> = {
   unavailable: "info",
 };
 
+/** Options for each `statusMapping` row's value dropdown -- `labelKey` (not `label`) because it's an i18n key, translated at render time inside the component (`t(option.labelKey)`), same as every other label in this file. */
+const STATUS_MAPPING_OPTIONS: {
+  value: "punched" | "writtenoff" | "cancelled";
+  labelKey: string;
+}[] = [
+  { value: "punched", labelKey: "pages.integrations.channel.settings.statusMappingOption.punched" },
+  {
+    value: "writtenoff",
+    labelKey: "pages.integrations.channel.settings.statusMappingOption.writtenoff",
+  },
+  {
+    value: "cancelled",
+    labelKey: "pages.integrations.channel.settings.statusMappingOption.cancelled",
+  },
+];
+
 interface CommercemlSettingsValues {
   priceType: string;
   splitWriteoffDocument: boolean;
+  writeoffDocumentType: string;
+  orderStatusField: string;
+  statusMapping: { key: string; value: "punched" | "writtenoff" | "cancelled" }[];
   silentAfterHours: number;
 }
 
 /** Derives `useForm`'s values from the server's `ChannelDetailDto` -- shared by the initial `defaultValues` and by the resync effect below, so both read the same shape the same way. */
 function commercemlSettingsValuesOf(channel: ChannelDetailDto): CommercemlSettingsValues {
+  const rawMapping = channel.settings["statusMapping"];
+  const statusMapping =
+    rawMapping && typeof rawMapping === "object"
+      ? Object.entries(rawMapping as Record<string, string>).map(([key, value]) => ({
+          key,
+          value: value as "punched" | "writtenoff" | "cancelled",
+        }))
+      : [];
   return {
     priceType:
       typeof channel.settings["priceType"] === "string" ? channel.settings["priceType"] : "",
     splitWriteoffDocument: Boolean(channel.settings["splitWriteoffDocument"]),
+    writeoffDocumentType:
+      typeof channel.settings["writeoffDocumentType"] === "string"
+        ? channel.settings["writeoffDocumentType"]
+        : "",
+    orderStatusField:
+      typeof channel.settings["orderStatusField"] === "string"
+        ? channel.settings["orderStatusField"]
+        : "",
+    statusMapping,
     silentAfterHours: channel.silentAfterHours,
   };
 }
@@ -85,10 +121,12 @@ function CommercemlSettingsForm({
     register,
     handleSubmit,
     reset,
+    control,
     formState: { isDirty, errors },
   } = useForm<CommercemlSettingsValues>({
     defaultValues: commercemlSettingsValuesOf(channel),
   });
+  const { fields, append, remove } = useFieldArray({ control, name: "statusMapping" });
 
   useEffect(() => {
     if (!isDirty) {
@@ -98,6 +136,14 @@ function CommercemlSettingsForm({
 
   const submit = handleSubmit(async (values) => {
     const priceType = values.priceType.trim();
+    const writeoffDocumentType = values.writeoffDocumentType.trim();
+    const orderStatusField = values.orderStatusField.trim();
+    const hadSavedStatusMapping = commercemlSettingsValuesOf(channel).statusMapping.length > 0;
+    const statusMapping = Object.fromEntries(
+      values.statusMapping
+        .filter((row) => row.key.trim().length > 0)
+        .map((row) => [row.key.trim(), row.value]),
+    );
     try {
       await onSave({
         // Accepted limitation (final review, Fix 9): clearing this field and
@@ -116,6 +162,11 @@ function CommercemlSettingsForm({
         // a real "unset" representation server-side, not a client patch.
         ...(priceType ? { priceType } : {}),
         splitWriteoffDocument: values.splitWriteoffDocument,
+        writeoffDocumentType: writeoffDocumentType || null,
+        orderStatusField: orderStatusField || null,
+        ...(Object.keys(statusMapping).length > 0 || hadSavedStatusMapping
+          ? { statusMapping }
+          : {}),
         silentAfterHours: values.silentAfterHours,
       });
       // Saved: this is the new clean baseline. Marking the form not-dirty
@@ -153,6 +204,66 @@ function CommercemlSettingsForm({
         <input type="checkbox" {...register("splitWriteoffDocument")} />
         {t("pages.integrations.channel.settings.splitWriteoffDocumentLabel")}
       </label>
+      <Input
+        label={t("pages.integrations.channel.settings.writeoffDocumentTypeLabel")}
+        hint={t("pages.integrations.channel.settings.writeoffDocumentTypeHint")}
+        {...register("writeoffDocumentType")}
+      />
+      <Input
+        label={t("pages.integrations.channel.settings.orderStatusFieldLabel")}
+        hint={t("pages.integrations.channel.settings.orderStatusFieldHint")}
+        {...register("orderStatusField")}
+      />
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <span style={{ font: "600 13px/18px var(--font-ui)", color: "var(--fg-1)" }}>
+          {t("pages.integrations.channel.settings.statusMappingLabel")}
+        </span>
+        <span style={{ font: "var(--text-caption)", color: "var(--fg-3)" }}>
+          {t("pages.integrations.channel.settings.statusMappingHint")}
+        </span>
+        {fields.map((field, index) => (
+          <div key={field.id} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <Input
+              aria-label={t("pages.integrations.channel.settings.statusMappingExternalLabel", {
+                row: index + 1,
+              })}
+              placeholder={t(
+                "pages.integrations.channel.settings.statusMappingExternalPlaceholder",
+              )}
+              {...register(`statusMapping.${index}.key` as const)}
+            />
+            <Controller
+              control={control}
+              name={`statusMapping.${index}.value` as const}
+              render={({ field: controllerField }) => (
+                <Select
+                  aria-label={t("pages.integrations.channel.settings.statusMappingStatusLabel", {
+                    row: index + 1,
+                  })}
+                  options={STATUS_MAPPING_OPTIONS.map((option) => ({
+                    value: option.value,
+                    label: t(option.labelKey),
+                  }))}
+                  value={controllerField.value}
+                  onChange={controllerField.onChange}
+                />
+              )}
+            />
+            <Button type="button" variant="secondary" onClick={() => remove(index)}>
+              {t("pages.integrations.channel.settings.statusMappingRemoveAction")}
+            </Button>
+          </div>
+        ))}
+        <div>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => append({ key: "", value: "punched" })}
+          >
+            {t("pages.integrations.channel.settings.statusMappingAddAction")}
+          </Button>
+        </div>
+      </div>
       <Input
         type="number"
         min={1}

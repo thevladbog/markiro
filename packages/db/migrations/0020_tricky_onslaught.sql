@@ -1,0 +1,1 @@
+ALTER TABLE "pickup_orders" ADD COLUMN "exported_at" timestamp with time zone;
