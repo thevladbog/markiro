@@ -334,7 +334,7 @@ export function App() {
   }
 
   if (stage === "login") {
-    return <OperatorLogin exec={tauriExecutor} onAuthed={setOperator} />;
+    return <OperatorLogin exec={tauriExecutor} source={scanSource} onAuthed={setOperator} />;
   }
 
   // stage === "floor" here, which requires `isEnrolled(config)` (apiKey +

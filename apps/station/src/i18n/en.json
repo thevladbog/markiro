@@ -17,6 +17,7 @@
     "back": "Back",
     "pinPrompt": "Enter PIN",
     "badgePrompt": "Or scan your badge",
+    "badgeWrong": "Badge not recognized",
     "clear": "Clear",
     "submit": "Sign in",
     "wrong": "Wrong personnel number or PIN"
