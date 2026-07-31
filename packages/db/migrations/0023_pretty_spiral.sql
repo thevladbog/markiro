@@ -1,0 +1,4 @@
+ALTER TABLE "box_exceptions" ADD CONSTRAINT "box_exceptions_tenant_operator_fk" FOREIGN KEY ("tenant_id","operator_id") REFERENCES "public"."employees"("tenant_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "box_exceptions" ADD CONSTRAINT "box_exceptions_kind_payload_check" CHECK (("box_exceptions"."kind" = 'undo' AND "box_exceptions"."code_hash" IS NOT NULL AND "box_exceptions"."reason" IS NULL)
+          OR ("box_exceptions"."kind" = 'clear' AND "box_exceptions"."code_hash" IS NULL AND "box_exceptions"."reason" IS NULL)
+          OR ("box_exceptions"."kind" IN ('disassemble', 'reprint') AND "box_exceptions"."code_hash" IS NULL AND "box_exceptions"."reason" IS NOT NULL));

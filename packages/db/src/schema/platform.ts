@@ -1,7 +1,9 @@
+import { sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
   char,
+  check,
   date,
   foreignKey,
   index,
@@ -283,6 +285,12 @@ export const boxExceptions = pgTable(
   },
   (t) => [
     index("box_exceptions_tenant_box_idx").on(t.tenantId, t.boxId, t.recordedAt),
+    check(
+      "box_exceptions_kind_payload_check",
+      sql`(${t.kind} = 'undo' AND ${t.codeHash} IS NOT NULL AND ${t.reason} IS NULL)
+          OR (${t.kind} = 'clear' AND ${t.codeHash} IS NULL AND ${t.reason} IS NULL)
+          OR (${t.kind} IN ('disassemble', 'reprint') AND ${t.codeHash} IS NULL AND ${t.reason} IS NOT NULL)`,
+    ),
     foreignKey({
       name: "box_exceptions_tenant_box_fk",
       columns: [t.tenantId, t.boxId],
@@ -292,6 +300,11 @@ export const boxExceptions = pgTable(
       name: "box_exceptions_tenant_shift_fk",
       columns: [t.tenantId, t.shiftId],
       foreignColumns: [shifts.tenantId, shifts.id],
+    }),
+    foreignKey({
+      name: "box_exceptions_tenant_operator_fk",
+      columns: [t.tenantId, t.operatorId],
+      foreignColumns: [employees.tenantId, employees.id],
     }),
   ],
 );

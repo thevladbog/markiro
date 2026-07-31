@@ -124,9 +124,11 @@ describe("STATION_MIGRATIONS", () => {
 
     const box = db
       .prepare("SELECT disassembled_at FROM boxes_mirror WHERE box_id = ?")
-      .get("b1") as {
-      disassembled_at: string;
-    } | undefined;
+      .get("b1") as
+      | {
+          disassembled_at: string;
+        }
+      | undefined;
 
     expect(box?.disassembled_at).toBe("2026-07-30T00:05:00.000Z");
 
@@ -138,5 +140,43 @@ describe("STATION_MIGRATIONS", () => {
     const rows = db.prepare("SELECT * FROM box_exceptions_mirror").all() as Array<{ id: number }>;
     expect(rows).toHaveLength(1);
     expect(rows[0]?.id).toBe(1);
+  });
+
+  it("applies exception facts and local box mutations atomically through triggers", () => {
+    const db = migratedDb();
+    db.prepare(
+      `INSERT INTO boxes_mirror (box_id, shift_id, opened_at, closed_at)
+       VALUES (?, ?, ?, ?)`,
+    ).run("b1", "s1", "2026-07-30T00:00:00.000Z", "2026-07-30T00:01:00.000Z");
+    db.prepare(
+      `INSERT INTO codes_mirror (code_hash, shift_id, gtin14, serial, scanned_at, box_id)
+       VALUES (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "h1",
+      "s1",
+      "04600000000015",
+      "a",
+      "2026-07-30T00:00:00.000Z",
+      "b1",
+      "h2",
+      "s1",
+      "04600000000015",
+      "b",
+      "2026-07-30T00:00:01.000Z",
+      "b1",
+    );
+
+    db.prepare(
+      `INSERT INTO box_exceptions_mirror (kind, box_id, shift_id, reason, at)
+       VALUES ('disassemble', ?, ?, ?, ?)`,
+    ).run("b1", "s1", "wrong customer", "2026-07-30T00:02:00.000Z");
+
+    expect(db.prepare("SELECT code_hash FROM codes_mirror WHERE box_id = 'b1'").all()).toEqual([]);
+    expect(
+      db.prepare("SELECT disassembled_at FROM boxes_mirror WHERE box_id = 'b1'").get(),
+    ).toEqual({ disassembled_at: "2026-07-30T00:02:00.000Z" });
+    expect(db.prepare("SELECT kind FROM box_exceptions_mirror").all()).toEqual([
+      { kind: "disassemble" },
+    ]);
   });
 });

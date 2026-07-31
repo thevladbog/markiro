@@ -17,6 +17,8 @@ export interface ScanQueueDeps {
    * operator scanned something and must see SOME signal, even a failure one.
    */
   onError?(raw: string, err: unknown): void;
+  /** Called when an ordered correction/box action fails. */
+  onJobError?(err: unknown): void;
 }
 
 export interface ScanQueue {
@@ -67,6 +69,7 @@ export function createScanQueue(deps: ScanQueueDeps): ScanQueue {
             await entry.run();
           } catch (err) {
             console.error("station: scan-queue job failed", err);
+            deps.onJobError?.(err);
           }
           continue;
         }

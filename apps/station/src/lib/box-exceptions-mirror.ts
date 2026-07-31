@@ -93,3 +93,15 @@ export async function readExceptions(
 export async function ackExceptionsThrough(exec: SqlExecutor, id: number): Promise<void> {
   await exec.run("DELETE FROM box_exceptions_mirror WHERE id <= ?", [id]);
 }
+
+export async function exceptionDepth(exec: SqlExecutor): Promise<number> {
+  const rows = await exec.all<{ n: number }>("SELECT COUNT(*) AS n FROM box_exceptions_mirror");
+  return rows[0]?.n ?? 0;
+}
+
+export async function oldestExceptionAt(exec: SqlExecutor): Promise<string | null> {
+  const rows = await exec.all<{ at: string }>(
+    "SELECT at FROM box_exceptions_mirror ORDER BY id LIMIT 1",
+  );
+  return rows[0]?.at ?? null;
+}

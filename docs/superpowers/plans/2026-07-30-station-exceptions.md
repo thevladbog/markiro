@@ -22,11 +22,13 @@
 ### Task 1: Server schema — `removed_at`, `disassembled_at`, `box_exceptions`
 
 **Files:**
+
 - Modify: `packages/db/src/schema/platform.ts` (the `boxItems` and `boxes` table definitions, and add a new `boxExceptions` table near `codeConflicts`)
 - Create: a new Drizzle migration (generated, not hand-written — see Step 4)
 - Test: `packages/db/test/schema.test.ts` (or the closest existing schema round-trip test file — check `packages/db/test/` for the file that already covers `boxes`/`boxItems`/`codeConflicts` and add to it)
 
 **Interfaces:**
+
 - Produces: `schema.boxItems.removedAt`, `schema.boxes.disassembledAt`, `schema.boxExceptions` (Drizzle table), consumed by every later server task.
 
 - [ ] **Step 1: Add `removed_at` to `box_items` and `disassembled_at` to `boxes`**
@@ -176,11 +178,13 @@ git commit -m "feat(db): add box_items.removed_at, boxes.disassembled_at, box_ex
 ### Task 2: Station schema — mirror columns and the exceptions mirror table
 
 **Files:**
+
 - Modify: `packages/db/src/sqlite/migrations.ts` (append new `ALTER`/`CREATE` statements — never edit existing ones, this array is replayed on every boot)
 - Modify: `packages/db/src/sqlite/schema.ts` (drizzle-sqlite parity file — must stay in sync with `migrations.ts`, per that file's own header comment)
 - Test: `packages/db/test/sqlite-schema.test.ts`
 
 **Interfaces:**
+
 - Produces: `boxes_mirror.disassembled_at`, table `box_exceptions_mirror` (columns: `id`, `kind`, `box_id`, `code_hash`, `shift_id`, `terminal_id`, `operator_id`, `reason`, `at`) — consumed by Task 9 (station lib) and Task 12 (sync engine).
 
 - [ ] **Step 1: Append the new DDL to `STATION_MIGRATIONS`**
@@ -260,7 +264,9 @@ it("round-trips boxes_mirror.disassembled_at and box_exceptions_mirror", () => {
     `INSERT INTO boxes_mirror (box_id, shift_id, opened_at, disassembled_at)
      VALUES ('b1', 's1', '2026-07-30T00:00:00.000Z', '2026-07-30T00:05:00.000Z')`,
   );
-  const [box] = db.prepare("SELECT disassembled_at FROM boxes_mirror WHERE box_id = 'b1'").all() as {
+  const [box] = db
+    .prepare("SELECT disassembled_at FROM boxes_mirror WHERE box_id = 'b1'")
+    .all() as {
     disassembled_at: string;
   }[];
   expect(box?.disassembled_at).toBe("2026-07-30T00:05:00.000Z");
@@ -299,11 +305,13 @@ git commit -m "feat(db): station mirror schema for box exceptions"
 ### Task 3: Sync protocol — `exceptions` on `SyncBatchDto`
 
 **Files:**
+
 - Modify: `apps/api/src/modules/station-scans/dto.ts`
 - Create: `apps/api/src/modules/station-scans/box-exceptions.ts`
 - Test: `apps/api/test/box-exceptions.test.ts`
 
 **Interfaces:**
+
 - Consumes: nothing new (pure Zod + pure TS).
 - Produces: `ExceptionDto` (exported type), `syncBatchSchema.exceptions` (zod), `sortExceptions(exceptions: ExceptionDto[]): ExceptionDto[]` — consumed by Task 4-7 (station-scans.service.ts).
 
@@ -315,7 +323,11 @@ Create `apps/api/test/box-exceptions.test.ts`:
 import { describe, expect, it } from "vitest";
 import { sortExceptions, type ExceptionDto } from "../src/modules/station-scans/box-exceptions";
 
-function ex(boxId: string, kind: ExceptionDto["kind"], codeHash: string | null = null): ExceptionDto {
+function ex(
+  boxId: string,
+  kind: ExceptionDto["kind"],
+  codeHash: string | null = null,
+): ExceptionDto {
   return {
     kind,
     boxId,
@@ -330,7 +342,12 @@ function ex(boxId: string, kind: ExceptionDto["kind"], codeHash: string | null =
 
 describe("sortExceptions", () => {
   it("orders deterministically by boxId, then kind, then codeHash", () => {
-    const input = [ex("b2", "reprint"), ex("b1", "clear"), ex("b1", "undo", "hash2"), ex("b1", "undo", "hash1")];
+    const input = [
+      ex("b2", "reprint"),
+      ex("b1", "clear"),
+      ex("b1", "undo", "hash2"),
+      ex("b1", "undo", "hash1"),
+    ];
     const sorted = sortExceptions(input);
     expect(sorted.map((e) => `${e.boxId}:${e.kind}:${e.codeHash ?? ""}`)).toEqual([
       "b1:clear:",
@@ -427,10 +444,12 @@ git commit -m "feat(api): exceptions array on SyncBatchDto + deterministic sort 
 ### Task 4: Server — apply "undo"
 
 **Files:**
+
 - Modify: `apps/api/src/modules/station-scans/station-scans.service.ts`
 - Test: `apps/api/test/station-scans.e2e.test.ts`
 
 **Interfaces:**
+
 - Consumes: `ExceptionDto`, `sortExceptions` (Task 3).
 - Produces: exception processing block inside `applyBatch`'s transaction, reused and extended by Tasks 5-7.
 
@@ -476,7 +495,9 @@ describe("exceptions", () => {
     const [registryRow] = await db
       .select()
       .from(schema.codeRegistry)
-      .where(and(eq(schema.codeRegistry.tenantId, tenantId), eq(schema.codeRegistry.codeHash, codeHash)));
+      .where(
+        and(eq(schema.codeRegistry.tenantId, tenantId), eq(schema.codeRegistry.codeHash, codeHash)),
+      );
     expect(registryRow).toBeUndefined();
 
     const [itemRow] = await db
@@ -629,10 +650,12 @@ git commit -m "feat(api): apply undo exceptions in the sync batch transaction"
 ### Task 5: Server — apply "clear"
 
 **Files:**
+
 - Modify: `apps/api/src/modules/station-scans/station-scans.service.ts`
 - Test: `apps/api/test/station-scans.e2e.test.ts`
 
 **Interfaces:**
+
 - Consumes: `applyExceptions` (Task 4), extends its `switch`/`if` chain.
 - Produces: nothing new for later tasks — this is the second of four kinds handled by the same method.
 
@@ -674,7 +697,12 @@ it("clear removes every active item from a still-open box, closes none of it", a
   const registryRows = await db
     .select()
     .from(schema.codeRegistry)
-    .where(and(eq(schema.codeRegistry.tenantId, tenantId), inArray(schema.codeRegistry.codeHash, [codeHash1, codeHash2])));
+    .where(
+      and(
+        eq(schema.codeRegistry.tenantId, tenantId),
+        inArray(schema.codeRegistry.codeHash, [codeHash1, codeHash2]),
+      ),
+    );
   expect(registryRows).toHaveLength(0);
 
   const [box] = await db.select().from(schema.boxes).where(eq(schema.boxes.id, boxId));
@@ -767,10 +795,12 @@ git commit -m "feat(api): apply clear exceptions, guarded to still-open boxes"
 ### Task 6: Server — apply "disassemble" + SSCC-never-reused test
 
 **Files:**
+
 - Modify: `apps/api/src/modules/station-scans/station-scans.service.ts` (already handles `disassemble` structurally from Task 5's shared branch — this task verifies and locks it down with the compliance-critical test)
 - Test: `apps/api/test/station-scans.e2e.test.ts`, `apps/api/test/sscc-settings.e2e.test.ts` (or wherever the existing `SsccService.allocate` e2e coverage lives — check for the file, likely under this name or `sscc.e2e.test.ts`)
 
 **Interfaces:**
+
 - Consumes: the shared `clear`/`disassemble` branch from Task 5.
 - Produces: nothing new — this task is verification-only, closing the loop the spec calls out as the compliance-critical guarantee.
 
@@ -853,10 +883,12 @@ git commit -m "test(api): lock down disassemble's SSCC-never-reused guarantee"
 ### Task 7: Server — apply "reprint" + `listBoxes` corrections
 
 **Files:**
+
 - Modify: `apps/api/src/modules/station-scans/station-scans.service.ts`, `apps/api/src/modules/boxes/boxes.service.ts`, `apps/api/src/modules/boxes/dto.ts`
 - Test: `apps/api/test/station-scans.e2e.test.ts`, `apps/api/test/boxes.e2e.test.ts`
 
 **Interfaces:**
+
 - Consumes: `applyExceptions` (Task 4-5).
 - Produces: `BoxDto.disassembledAt` — consumed by Task 8's cabinet endpoint and any future cabinet UI.
 
@@ -891,7 +923,9 @@ it("reprint writes only an audit row -- no box or item state changes", async () 
   const [audit] = await db
     .select()
     .from(schema.boxExceptions)
-    .where(and(eq(schema.boxExceptions.tenantId, tenantId), eq(schema.boxExceptions.kind, "reprint")));
+    .where(
+      and(eq(schema.boxExceptions.tenantId, tenantId), eq(schema.boxExceptions.kind, "reprint")),
+    );
   expect(audit?.reason).toBe("label jammed");
 });
 ```
@@ -962,11 +996,13 @@ git commit -m "feat(api): reprint audit-only path, listBoxes excludes removed it
 ### Task 8: Server — cabinet-only audit read endpoint
 
 **Files:**
+
 - Create: `apps/api/src/modules/box-exceptions/box-exceptions.controller.ts`, `apps/api/src/modules/box-exceptions/box-exceptions.service.ts`, `apps/api/src/modules/box-exceptions/box-exceptions.module.ts`, `apps/api/src/modules/box-exceptions/dto.ts`
 - Modify: `apps/api/src/app.module.ts` (register the new module), `docs/device-key-surface.md`
 - Test: `apps/api/test/box-exceptions.e2e.test.ts`
 
 **Interfaces:**
+
 - Consumes: `schema.boxExceptions` (Task 1).
 - Produces: `GET /box-exceptions?shiftId=` — a manager-only read of the audit trail, mirroring `boxes.controller.ts`'s exact guard shape.
 
@@ -1039,7 +1075,11 @@ import { Inject, Injectable } from "@nestjs/common";
 import { and, desc, eq } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
-import type { BoxExceptionDto, ListBoxExceptionsQueryDto, ListBoxExceptionsResponseDto } from "./dto";
+import type {
+  BoxExceptionDto,
+  ListBoxExceptionsQueryDto,
+  ListBoxExceptionsResponseDto,
+} from "./dto";
 
 @Injectable()
 export class BoxExceptionsService {
@@ -1053,23 +1093,24 @@ export class BoxExceptionsService {
       .select()
       .from(schema.boxExceptions)
       .where(
-        and(eq(schema.boxExceptions.tenantId, tenantId), eq(schema.boxExceptions.shiftId, query.shiftId)),
+        and(
+          eq(schema.boxExceptions.tenantId, tenantId),
+          eq(schema.boxExceptions.shiftId, query.shiftId),
+        ),
       )
       .orderBy(desc(schema.boxExceptions.recordedAt));
     return {
-      items: rows.map(
-        (r): BoxExceptionDto => ({
-          id: r.id,
-          kind: r.kind,
-          boxId: r.boxId,
-          codeHash: r.codeHash,
-          terminalId: r.terminalId,
-          operatorId: r.operatorId,
-          reason: r.reason,
-          occurredAt: r.occurredAt,
-          recordedAt: r.recordedAt,
-        }),
-      ),
+      items: rows.map((r): BoxExceptionDto => ({
+        id: r.id,
+        kind: r.kind,
+        boxId: r.boxId,
+        codeHash: r.codeHash,
+        terminalId: r.terminalId,
+        operatorId: r.operatorId,
+        reason: r.reason,
+        occurredAt: r.occurredAt,
+        recordedAt: r.recordedAt,
+      })),
     };
   }
 }
@@ -1156,10 +1197,12 @@ git commit -m "feat(api): cabinet-only GET /box-exceptions audit endpoint"
 ### Task 9: Station lib — `box-exceptions-mirror.ts`
 
 **Files:**
+
 - Create: `apps/station/src/lib/box-exceptions-mirror.ts`
 - Test: `apps/station/test/box-exceptions-mirror.test.ts`
 
 **Interfaces:**
+
 - Consumes: `SqlExecutor` (`mirror.ts`).
 - Produces: `insertException`, `readExceptions`, `ackExceptionsThrough`, `PendingException` type — consumed by Task 10 (undo), Task 11 (clear/disassemble), Task 12 (sync engine).
 
@@ -1171,7 +1214,11 @@ Create `apps/station/test/box-exceptions-mirror.test.ts`, modeling `apps/station
 import { describe, expect, it, beforeEach } from "vitest";
 import { DatabaseSync } from "node:sqlite";
 import { STATION_MIGRATIONS } from "@markiro/db";
-import { insertException, readExceptions, ackExceptionsThrough } from "../src/lib/box-exceptions-mirror.js";
+import {
+  insertException,
+  readExceptions,
+  ackExceptionsThrough,
+} from "../src/lib/box-exceptions-mirror.js";
 import type { SqlExecutor } from "../src/lib/mirror.js";
 
 function makeExec(db: DatabaseSync): SqlExecutor {
@@ -1368,10 +1415,12 @@ git commit -m "feat(station): device-local exceptions queue (read/insert/ack)"
 ### Task 10: Station lib — undo in `journal.ts`
 
 **Files:**
+
 - Modify: `apps/station/src/lib/journal.ts`
 - Test: `apps/station/test/journal.test.ts`
 
 **Interfaces:**
+
 - Consumes: `insertException` (Task 9).
 - Produces: `undoLastScan(exec, input): Promise<void>` — consumed by Task 13 (WorkScreen UI).
 
@@ -1384,8 +1433,22 @@ describe("undoLastScan", () => {
   it("deletes the code from codes_mirror, journals it as undone, and queues the exception fact", async () => {
     await recordScan(
       exec,
-      { shiftId: "s1", terminalId: null, raw: "raw1", verdict: "ok", scannedAt: "t1", operatorId: null },
-      { codeHash: "hash1", shiftId: "s1", gtin14: "04006381333931", serial: "1", scannedAt: "t1", boxId: "b1" },
+      {
+        shiftId: "s1",
+        terminalId: null,
+        raw: "raw1",
+        verdict: "ok",
+        scannedAt: "t1",
+        operatorId: null,
+      },
+      {
+        codeHash: "hash1",
+        shiftId: "s1",
+        gtin14: "04006381333931",
+        serial: "1",
+        scannedAt: "t1",
+        boxId: "b1",
+      },
     );
 
     await undoLastScan(exec, {
@@ -1490,10 +1553,12 @@ git commit -m "feat(station): undoLastScan releases a code and queues the except
 ### Task 11: Station lib — `clearBox` and `disassembleBox` in `boxes.ts`
 
 **Files:**
+
 - Modify: `apps/station/src/lib/boxes.ts`
 - Test: `apps/station/test/boxes.test.ts`
 
 **Interfaces:**
+
 - Consumes: `insertException` (Task 9).
 - Produces: `clearBox(exec, input): Promise<void>`, `disassembleBox(exec, input): Promise<void>`, `listClosedBoxes(exec, shiftId, terminalId): Promise<ClosedBoxSummary[]>` — consumed by Task 13-14 (WorkScreen UI, ShiftBoxesPanel).
 
@@ -1509,7 +1574,13 @@ describe("clearBox", () => {
       "INSERT INTO codes_mirror (code_hash, shift_id, gtin14, serial, scanned_at, box_id) VALUES (?,?,?,?,?,?)",
       ["h1", "s1", "04006381333931", "1", "t1", "b1"],
     );
-    await clearBox(exec, { boxId: "b1", shiftId: "s1", terminalId: null, operatorId: null, at: "t2" });
+    await clearBox(exec, {
+      boxId: "b1",
+      shiftId: "s1",
+      terminalId: null,
+      operatorId: null,
+      at: "t2",
+    });
 
     const codes = await exec.all("SELECT * FROM codes_mirror WHERE box_id = ?", ["b1"]);
     expect(codes).toHaveLength(0);
@@ -1622,7 +1693,10 @@ export interface DisassembleBoxInput {
  */
 export async function disassembleBox(exec: SqlExecutor, input: DisassembleBoxInput): Promise<void> {
   await exec.run("DELETE FROM codes_mirror WHERE box_id = ?", [input.boxId]);
-  await exec.run("UPDATE boxes_mirror SET disassembled_at = ? WHERE box_id = ?", [input.at, input.boxId]);
+  await exec.run("UPDATE boxes_mirror SET disassembled_at = ? WHERE box_id = ?", [
+    input.at,
+    input.boxId,
+  ]);
   await insertException(exec, {
     kind: "disassemble",
     boxId: input.boxId,
@@ -1695,10 +1769,12 @@ git commit -m "feat(station): clearBox, disassembleBox, listClosedBoxes"
 ### Task 12: Station — `scan-queue.ts` job support + sync engine wiring
 
 **Files:**
+
 - Modify: `apps/station/src/lib/scan-queue.ts`, `apps/station/src/lib/sync.ts`
 - Test: `apps/station/test/scan-queue.test.ts`, `apps/station/test/sync.test.ts`
 
 **Interfaces:**
+
 - Consumes: `readExceptions`, `ackExceptionsThrough` (Task 9).
 - Produces: `ScanQueue.enqueueJob(job): void` — consumed by Task 13 (Undo/Clear buttons must run through the same serial queue as scans, never interleaved).
 
@@ -1828,8 +1904,14 @@ it("drains queued exceptions alongside items and boxes, and acks them by deletin
     reason: null,
     at: "t1",
   });
-  const client = { post: vi.fn().mockResolvedValue({ applied: 0, alreadyApplied: false, conflicts: [] }) };
-  const engine = createSyncEngine({ exec, client, machineId: "m1" /* ...this file's other required deps */ });
+  const client = {
+    post: vi.fn().mockResolvedValue({ applied: 0, alreadyApplied: false, conflicts: [] }),
+  };
+  const engine = createSyncEngine({
+    exec,
+    client,
+    machineId: "m1" /* ...this file's other required deps */,
+  });
   await engine.drainOnce(); // or however this file's existing tests drive one drain pass
   expect(client.post).toHaveBeenCalledWith(
     "/station/scans",
@@ -1854,20 +1936,24 @@ In `apps/station/src/lib/sync.ts`:
 Add imports:
 
 ```typescript
-import { readExceptions, ackExceptionsThrough, type PendingException } from "./box-exceptions-mirror.js";
+import {
+  readExceptions,
+  ackExceptionsThrough,
+  type PendingException,
+} from "./box-exceptions-mirror.js";
 ```
 
 Add a ceiling variable alongside `pendingCeiling`/`pendingBoxCeiling` (near their declarations in `createSyncEngine`):
 
 ```typescript
-  let pendingExceptionCeiling: number | null = null;
+let pendingExceptionCeiling: number | null = null;
 ```
 
 In `drain()`, alongside the existing `batch`/`boxes` reads:
 
 ```typescript
-        const exceptionCeiling = pendingExceptionCeiling;
-        const exceptions = await readExceptions(deps.exec, 200, exceptionCeiling);
+const exceptionCeiling = pendingExceptionCeiling;
+const exceptions = await readExceptions(deps.exec, 200, exceptionCeiling);
 ```
 
 Update the empty-check (`if (batch.length === 0 && boxes.length === 0)`) to also check `exceptions.length === 0`, and the ceiling-clearing branch inside it to also clear `pendingExceptionCeiling`.
@@ -1875,22 +1961,22 @@ Update the empty-check (`if (batch.length === 0 && boxes.length === 0)`) to also
 Pin the new ceiling the same way `pendingBoxCeiling` is pinned (no `station_meta` persistence needed here -- unlike the outbox and box-closure ceilings, losing this ceiling on a crash mid-retry only risks resending a FEW already-synced exception rows, which the server's box-exceptions handling already treats as a safe no-op via its guard conditions; the outbox/box ceilings persist because losing THEM risks resending thousands of items, not a handful of rare operator corrections):
 
 ```typescript
-        const newExceptionCeiling = exceptions.length > 0 ? exceptions[exceptions.length - 1]!.id : null;
-        if (newExceptionCeiling !== null) {
-          pendingExceptionCeiling = newExceptionCeiling;
-        }
+const newExceptionCeiling = exceptions.length > 0 ? exceptions[exceptions.length - 1]!.id : null;
+if (newExceptionCeiling !== null) {
+  pendingExceptionCeiling = newExceptionCeiling;
+}
 ```
 
 Include `exceptions` in the POST body (find the `deps.client.post<BatchResponse>("/station/scans", { batchId, items: ..., boxes: ..., serialsLeft })` call):
 
 ```typescript
-          const res = await deps.client.post<BatchResponse>("/station/scans", {
-            batchId,
-            items: toPayload(batch),
-            boxes: toBoxPayload(boxes),
-            exceptions: toExceptionPayload(exceptions),
-            serialsLeft,
-          });
+const res = await deps.client.post<BatchResponse>("/station/scans", {
+  batchId,
+  items: toPayload(batch),
+  boxes: toBoxPayload(boxes),
+  exceptions: toExceptionPayload(exceptions),
+  serialsLeft,
+});
 ```
 
 Add the payload mapper near `toBoxPayload`:
@@ -1913,10 +1999,10 @@ function toExceptionPayload(exceptions: PendingException[]) {
 After a successful send, alongside the existing `ackBoxes`/`ackThrough` calls:
 
 ```typescript
-          if (exceptions.length > 0) {
-            await ackExceptionsThrough(deps.exec, newExceptionCeiling!);
-            pendingExceptionCeiling = null;
-          }
+if (exceptions.length > 0) {
+  await ackExceptionsThrough(deps.exec, newExceptionCeiling!);
+  pendingExceptionCeiling = null;
+}
 ```
 
 - [ ] **Step 8: Run the test to verify it passes**
@@ -1941,10 +2027,12 @@ git commit -m "feat(station): drain exceptions alongside items/boxes; enqueueJob
 ### Task 13: Station UI — Undo and Clear box on `WorkScreen`
 
 **Files:**
+
 - Modify: `apps/station/src/pages/WorkScreen.tsx`
 - Test: `apps/station/test/work-screen.test.tsx` (or the existing WorkScreen test file — check the exact name under `apps/station/test/`)
 
 **Interfaces:**
+
 - Consumes: `undoLastScan` (Task 10), `clearBox` (Task 11), `ScanQueue.enqueueJob` (Task 12).
 - Produces: two new buttons on the running work screen, gated on state this task introduces.
 
@@ -1998,67 +2086,73 @@ import { clearBox } from "../lib/boxes.js";
 Add state near `boxRef`'s declaration (after the `boxReady` ref, ~line 130):
 
 ```typescript
-  // The single most recent scan accepted into the currently open box, or
-  // null. Cleared the instant a new scan lands or the box changes/closes --
-  // strictly one level of undo, never a history stack (design spec's scope
-  // decision).
-  const [lastScanned, setLastScanned] = useState<{ boxId: string; codeHash: string } | null>(null);
-  const [confirmClear, setConfirmClear] = useState(false);
+// The single most recent scan accepted into the currently open box, or
+// null. Cleared the instant a new scan lands or the box changes/closes --
+// strictly one level of undo, never a history stack (design spec's scope
+// decision).
+const [lastScanned, setLastScanned] = useState<{ boxId: string; codeHash: string } | null>(null);
+const [confirmClear, setConfirmClear] = useState(false);
 ```
 
 In the scan-processing `process()` function, right after the existing `if (codeHash) keys.current.add(codeHash);` line and before `if (codeHash && boxId !== null) { await live.current.refreshBox(boxId); }`, add:
 
 ```typescript
-            if (codeHash && boxId !== null) {
-              setLastScanned({ boxId, codeHash });
-            }
+if (codeHash && boxId !== null) {
+  setLastScanned({ boxId, codeHash });
+}
 ```
 
 Add handlers near `requestExit`:
 
 ```typescript
-  function handleUndo(): void {
-    const target = lastScanned;
-    if (!target) return;
-    setLastScanned(null);
-    queue.enqueueJob(async () => {
-      try {
-        await undoLastScan(exec, {
-          boxId: target.boxId,
-          codeHash: target.codeHash,
-          shiftId,
-          terminalId,
-          operatorId: null,
-          at: new Date().toISOString(),
-        });
-        keys.current.delete(target.codeHash);
-        await refreshBoxAndMaybeClose(target.boxId);
-        onScanRecorded?.();
-      } catch (err) {
-        console.error("station: undo failed", err);
-      }
-    });
-  }
+function handleUndo(): void {
+  const target = lastScanned;
+  if (!target) return;
+  setLastScanned(null);
+  queue.enqueueJob(async () => {
+    try {
+      await undoLastScan(exec, {
+        boxId: target.boxId,
+        codeHash: target.codeHash,
+        shiftId,
+        terminalId,
+        operatorId: null,
+        at: new Date().toISOString(),
+      });
+      keys.current.delete(target.codeHash);
+      await refreshBoxAndMaybeClose(target.boxId);
+      onScanRecorded?.();
+    } catch (err) {
+      console.error("station: undo failed", err);
+    }
+  });
+}
 
-  function handleClearBox(): void {
-    setConfirmClear(true);
-  }
+function handleClearBox(): void {
+  setConfirmClear(true);
+}
 
-  function confirmClearBox(): void {
-    setConfirmClear(false);
-    const boxId = boxRef.current?.boxId;
-    if (!boxId) return;
-    setLastScanned(null);
-    queue.enqueueJob(async () => {
-      try {
-        await clearBox(exec, { boxId, shiftId, terminalId, operatorId: null, at: new Date().toISOString() });
-        await refreshBoxAndMaybeClose(boxId);
-        onScanRecorded?.();
-      } catch (err) {
-        console.error("station: clear box failed", err);
-      }
-    });
-  }
+function confirmClearBox(): void {
+  setConfirmClear(false);
+  const boxId = boxRef.current?.boxId;
+  if (!boxId) return;
+  setLastScanned(null);
+  queue.enqueueJob(async () => {
+    try {
+      await clearBox(exec, {
+        boxId,
+        shiftId,
+        terminalId,
+        operatorId: null,
+        at: new Date().toISOString(),
+      });
+      await refreshBoxAndMaybeClose(boxId);
+      onScanRecorded?.();
+    } catch (err) {
+      console.error("station: clear box failed", err);
+    }
+  });
+}
 ```
 
 (`refreshBoxAndMaybeClose` on a now-empty box must not immediately re-trigger auto-close: check that function's existing `boxCapacity !== null && updated.itemCount >= boxCapacity` guard already handles `itemCount === 0` correctly — it does, since `0 >= boxCapacity` is false for any positive capacity — no change needed there.)
@@ -2066,8 +2160,8 @@ Add handlers near `requestExit`:
 Clear `lastScanned` whenever the box itself changes to a different one or closes — in `refreshBoxAndMaybeClose`, after `updateBox(...)`:
 
 ```typescript
-    updateBox({ boxId: updated.boxId, itemCount: updated.itemCount });
-    setLastScanned((prev) => (prev && prev.boxId === updated.boxId ? prev : null));
+updateBox({ boxId: updated.boxId, itemCount: updated.itemCount });
+setLastScanned((prev) => (prev && prev.boxId === updated.boxId ? prev : null));
 ```
 
 - [ ] **Step 4: Render the two buttons and the confirm dialog**
@@ -2075,31 +2169,37 @@ Clear `lastScanned` whenever the box itself changes to a different one or closes
 In the JSX where the box's item count is displayed, add (matching this file's existing `Button`/`Alert` usage from `@markiro/ui`):
 
 ```tsx
-{box && lastScanned && lastScanned.boxId === box.boxId && (
-  <Button variant="secondary" onClick={handleUndo}>
-    {t("work.undoLastScan", "Отменить последний скан")}
-  </Button>
-)}
-{box && (
-  <Button variant="secondary" onClick={handleClearBox}>
-    {t("work.clearBox", "Очистить короб")}
-  </Button>
-)}
-{confirmClear && (
-  <Alert
-    tone="warning"
-    title={t("work.confirmClearTitle", "Очистить короб?")}
-    detail={t("work.confirmClearDetail", "Все позиции текущего короба будут удалены.")}
-    actions={
-      <>
-        <Button onClick={confirmClearBox}>{t("common.confirm", "Подтвердить")}</Button>
-        <Button variant="secondary" onClick={() => setConfirmClear(false)}>
-          {t("common.cancel", "Отмена")}
-        </Button>
-      </>
-    }
-  />
-)}
+{
+  box && lastScanned && lastScanned.boxId === box.boxId && (
+    <Button variant="secondary" onClick={handleUndo}>
+      {t("work.undoLastScan", "Отменить последний скан")}
+    </Button>
+  );
+}
+{
+  box && (
+    <Button variant="secondary" onClick={handleClearBox}>
+      {t("work.clearBox", "Очистить короб")}
+    </Button>
+  );
+}
+{
+  confirmClear && (
+    <Alert
+      tone="warning"
+      title={t("work.confirmClearTitle", "Очистить короб?")}
+      detail={t("work.confirmClearDetail", "Все позиции текущего короба будут удалены.")}
+      actions={
+        <>
+          <Button onClick={confirmClearBox}>{t("common.confirm", "Подтвердить")}</Button>
+          <Button variant="secondary" onClick={() => setConfirmClear(false)}>
+            {t("common.cancel", "Отмена")}
+          </Button>
+        </>
+      }
+    />
+  );
+}
 ```
 
 (Match this file's actual `Alert`/`Button` prop shapes exactly — check their real signatures in `packages/ui` before finalizing; the confirm-exit dialog already in this file (`confirmExit` state) is the closest existing pattern to copy.)
@@ -2126,11 +2226,13 @@ git commit -m "feat(station): Undo last scan and Clear box actions on WorkScreen
 ### Task 14: Station UI — `ShiftBoxesPanel` (reprint / disassemble)
 
 **Files:**
+
 - Create: `apps/station/src/ui/ShiftBoxesPanel.tsx`
 - Modify: `apps/station/src/pages/WorkScreen.tsx` (mount the panel, wire the reprint action)
 - Test: `apps/station/test/shift-boxes-panel.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `listClosedBoxes`, `disassembleBox` (Task 11), `printAndMaybeVerify` (existing, reused unchanged for reprint).
 - Produces: a reachable panel listing this terminal's closed boxes with Reprint/Disassemble actions.
 
@@ -2194,7 +2296,9 @@ export interface ShiftBoxesPanelProps {
  */
 export function ShiftBoxesPanel({ boxes, onReprint, onDisassemble }: ShiftBoxesPanelProps) {
   const { t } = useTranslation();
-  const [pending, setPending] = useState<{ boxId: string; kind: "reprint" | "disassemble" } | null>(null);
+  const [pending, setPending] = useState<{ boxId: string; kind: "reprint" | "disassemble" } | null>(
+    null,
+  );
   const [reason, setReason] = useState("");
 
   function startAction(boxId: string, kind: "reprint" | "disassemble") {
@@ -2274,14 +2378,14 @@ Expected: PASS.
 Add state and a loader near the other box-related state:
 
 ```typescript
-  const [closedBoxes, setClosedBoxes] = useState<ClosedBoxSummary[]>([]);
-  async function reloadClosedBoxes(): Promise<void> {
-    try {
-      setClosedBoxes(await listClosedBoxes(exec, shiftId, terminalId));
-    } catch (err) {
-      console.error("station: failed to list closed boxes", err);
-    }
+const [closedBoxes, setClosedBoxes] = useState<ClosedBoxSummary[]>([]);
+async function reloadClosedBoxes(): Promise<void> {
+  try {
+    setClosedBoxes(await listClosedBoxes(exec, shiftId, terminalId));
+  } catch (err) {
+    console.error("station: failed to list closed boxes", err);
   }
+}
 ```
 
 Call `reloadClosedBoxes()` once on mount (a small `useEffect([exec, shiftId, terminalId])`) and again after every successful close/disassemble/reprint (append the call to the end of `closeTheBox`'s success path, and to the two new handlers below).
@@ -2289,35 +2393,42 @@ Call `reloadClosedBoxes()` once on mount (a small `useEffect([exec, shiftId, ter
 Add the two handlers:
 
 ```typescript
-  function handleReprint(boxId: string, reason: string): void {
-    queue.enqueueJob(async () => {
-      const target = closedBoxes.find((b) => b.boxId === boxId);
-      if (!target) return;
-      await printAndMaybeVerify({ sscc: target.sscc, itemCount: target.itemCount }, boxId);
-      await insertException(exec, {
-        kind: "reprint",
+function handleReprint(boxId: string, reason: string): void {
+  queue.enqueueJob(async () => {
+    const target = closedBoxes.find((b) => b.boxId === boxId);
+    if (!target) return;
+    await printAndMaybeVerify({ sscc: target.sscc, itemCount: target.itemCount }, boxId);
+    await insertException(exec, {
+      kind: "reprint",
+      boxId,
+      codeHash: null,
+      shiftId,
+      terminalId,
+      operatorId: null,
+      reason,
+      at: new Date().toISOString(),
+    });
+  });
+}
+
+function handleDisassemble(boxId: string, reason: string): void {
+  queue.enqueueJob(async () => {
+    try {
+      await disassembleBox(exec, {
         boxId,
-        codeHash: null,
         shiftId,
         terminalId,
         operatorId: null,
         reason,
         at: new Date().toISOString(),
       });
-    });
-  }
-
-  function handleDisassemble(boxId: string, reason: string): void {
-    queue.enqueueJob(async () => {
-      try {
-        await disassembleBox(exec, { boxId, shiftId, terminalId, operatorId: null, reason, at: new Date().toISOString() });
-        await reloadClosedBoxes();
-        onScanRecorded?.();
-      } catch (err) {
-        console.error("station: disassemble failed", err);
-      }
-    });
-  }
+      await reloadClosedBoxes();
+      onScanRecorded?.();
+    } catch (err) {
+      console.error("station: disassemble failed", err);
+    }
+  });
+}
 ```
 
 Add the import and mount the panel in the JSX, near the box display:
@@ -2349,6 +2460,7 @@ git commit -m "feat(station): ShiftBoxesPanel for reprint and disassemble"
 ### Task 15: Docs and full verification
 
 **Files:**
+
 - Modify: `docs/superpowers/plans/2026-07-21-markiro-mvp-roadmap.md` (mark this slice done once merged — leave as a note for the finishing step, not this task, since delivery date isn't known yet at planning time)
 - Modify: `.superpowers/sdd/progress.md` ledger (gitignored, maintained automatically by subagent-driven-development)
 

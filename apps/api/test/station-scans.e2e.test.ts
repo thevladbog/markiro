@@ -22,6 +22,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
   let app: INestApplication | undefined;
   let setup: AuthSetup;
   let db: Db;
+  const deviceIdsByKey = new Map<string, string>();
 
   beforeAll(async () => {
     const env = loadEnv();
@@ -74,7 +75,9 @@ describe.skipIf(!ready)("station-scans e2e", () => {
 
   async function deviceKey(agent: ReturnType<typeof request.agent>): Promise<string> {
     const device = await agent.post("/station-devices").send({ name: "Line 1" }).expect(201);
-    return (device.body as { apiKey: string }).apiKey;
+    const body = device.body as { apiKey: string; deviceId: string };
+    deviceIdsByKey.set(body.apiKey, body.deviceId);
+    return body.apiKey;
   }
 
   // A genuinely valid GTIN-14 (same fixture as products.e2e.test.ts's
@@ -837,6 +840,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
     let agent: ReturnType<typeof request.agent>;
     let tenantId: string;
     let apiKey: string;
+    let deviceId: string;
     let shiftId: string;
     let OPERATOR_ID: string;
     let OTHER_OPERATOR_ID: string;
@@ -852,6 +856,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       agent = request.agent(app!.getHttpServer());
       tenantId = await signUpAndActivate(agent);
       apiKey = await deviceKey(agent);
+      deviceId = deviceIdsByKey.get(apiKey)!;
       shiftId = await openShift(agent);
 
       // Real employees rows: boxes.operator_id and scan_events.operator_id
@@ -1705,7 +1710,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
     // registryOwner helpers, instead of re-deriving a fresh fixture shape.
     describe("exceptions", () => {
       it("undo releases the code from the registry and marks the box item removed", async () => {
-        await postBatch([scan("aa", { boxId: "b1" })]);
+        await postBatchAs(deviceId, [scan("aa", { boxId: "b1" })]);
         const boxId = await boxIdFor("b1");
         const codeHash = "aa".padEnd(64, "0");
 
@@ -1766,11 +1771,45 @@ describe.skipIf(!ready)("station-scans e2e", () => {
           .from(schema.boxExceptions)
           .where(eq(schema.boxExceptions.tenantId, tenantId));
         expect(auditRow?.kind).toBe("undo");
+        expect(auditRow?.terminalId).toBe(deviceId);
         // The audit row's boxId is the RESOLVED server UUID, not the raw
         // "b1" the request carried -- proving the resolution step's output
         // actually flows into the box_exceptions write (and not just into
         // the box_items update above).
         expect(auditRow?.boxId).toBe(boxId);
+      });
+
+      it("reactivates box membership when the released code is scanned again later", async () => {
+        const codeHash = "aa".padEnd(64, "0");
+        await postBatchAs(deviceId, [scan("aa", { boxId: "b1", scannedAt: "10:00:00" })]);
+        await postRaw({
+          batchId: `undo-rescan-${randomUUID()}`,
+          items: [],
+          boxes: [],
+          exceptions: [
+            {
+              kind: "undo",
+              boxId: "b1",
+              codeHash,
+              shiftId,
+              terminalId: "spoofed-terminal",
+              operatorId: null,
+              reason: null,
+              occurredAt: "2026-07-29T10:00:01.000Z",
+            },
+          ],
+        });
+        await postBatchAs(deviceId, [scan("aa", { boxId: "b1", scannedAt: "10:00:02" })]);
+
+        expect((await registryOwner(tenantId, codeHash))?.terminalId).toBe(deviceId);
+        const [membership] = await db
+          .select({ removedAt: schema.boxItems.removedAt, addedAt: schema.boxItems.addedAt })
+          .from(schema.boxItems)
+          .where(
+            and(eq(schema.boxItems.tenantId, tenantId), eq(schema.boxItems.codeHash, codeHash)),
+          );
+        expect(membership?.removedAt).toBeNull();
+        expect(membership?.addedAt.toISOString()).toBe("2026-07-29T10:00:02.000Z");
       });
 
       // t1 claims "aa" first (a LATER scannedAt); t2's own later-arriving but
@@ -1779,7 +1818,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       // exact scenario "marks its own box item displaced..." above already
       // exercises. code_registry now belongs to t2, not the original t1.
       it("undo on a code already displaced to another terminal is a harmless no-op", async () => {
-        await postBatchAs("t1", [scan("aa", { boxId: "b1", scannedAt: "10:00:05" })]);
+        await postBatchAs(deviceId, [scan("aa", { boxId: "b1", scannedAt: "10:00:05" })]);
         await postBatchAs("t2", [scan("aa", { boxId: "b2", scannedAt: "10:00:00" })]);
 
         const codeHash = "aa".padEnd(64, "0");
@@ -1815,7 +1854,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       });
 
       it("redelivering the same undo exception twice is idempotent", async () => {
-        await postBatch([scan("aa", { boxId: "b1" })]);
+        await postBatchAs(deviceId, [scan("aa", { boxId: "b1" })]);
         const codeHash = "aa".padEnd(64, "0");
 
         const body = {
@@ -1904,7 +1943,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       // that's the difference from "disassemble" (Task 6), which does the
       // same emptying but only to an already-closed box.
       it("clear removes every active item from a still-open box, closes none of it", async () => {
-        await postBatch([scan("aa", { boxId: "b1" }), scan("bb", { boxId: "b1" })]);
+        await postBatchAs(deviceId, [scan("aa", { boxId: "b1" }), scan("bb", { boxId: "b1" })]);
         const boxId = await boxIdFor("b1");
         const codeHash1 = "aa".padEnd(64, "0");
         const codeHash2 = "bb".padEnd(64, "0");
@@ -1924,7 +1963,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
               shiftId,
               terminalId: "t1",
               operatorId: null,
-              reason: "wrong destination",
+              reason: null,
               occurredAt: new Date().toISOString(),
             },
           ],
@@ -1964,7 +2003,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       });
 
       it("clear on an already-closed box is a no-op (guarded by closedAt IS NULL)", async () => {
-        await postBatch([scan("aa", { boxId: "b1" })]);
+        await postBatchAs(deviceId, [scan("aa", { boxId: "b1" })]);
         const codeHash = "aa".padEnd(64, "0");
         await postBatchWithBoxes(
           [],
@@ -1972,7 +2011,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
             {
               boxId: "b1",
               shiftId,
-              terminalId: "t1",
+              terminalId: deviceId,
               sscc: SSCC,
               closedAt: ISO,
               operatorId: OPERATOR_ID,
@@ -1993,7 +2032,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
               shiftId,
               terminalId: "t1",
               operatorId: null,
-              reason: "wrong destination",
+              reason: null,
               occurredAt: new Date().toISOString(),
             },
           ],
@@ -2042,7 +2081,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       // `SsccService.allocate`'s counter, which always moves forward and
       // never reads `boxes` -- see sscc.e2e.test.ts's own lock-down test).
       it("disassemble retires a closed box: items released, box excluded from active listing", async () => {
-        await postBatch([scan("aa", { boxId: "b1" }), scan("bb", { boxId: "b1" })]);
+        await postBatchAs(deviceId, [scan("aa", { boxId: "b1" }), scan("bb", { boxId: "b1" })]);
         const codeHash1 = "aa".padEnd(64, "0");
         const codeHash2 = "bb".padEnd(64, "0");
         await postBatchWithBoxes(
@@ -2051,7 +2090,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
             {
               boxId: "b1",
               shiftId,
-              terminalId: "t1",
+              terminalId: deviceId,
               sscc: SSCC,
               closedAt: ISO,
               operatorId: OPERATOR_ID,
@@ -2118,7 +2157,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       });
 
       it("disassemble on a still-open box is a no-op (guarded by closedAt IS NOT NULL)", async () => {
-        await postBatch([scan("aa", { boxId: "b1" })]);
+        await postBatchAs(deviceId, [scan("aa", { boxId: "b1" })]);
         const codeHash = "aa".padEnd(64, "0");
         const boxId = await boxIdFor("b1");
 
@@ -2176,14 +2215,14 @@ describe.skipIf(!ready)("station-scans e2e", () => {
         "disassemble twice on the same box is a no-op the second time (guarded by " +
           "disassembledAt IS NULL)",
         async () => {
-          await postBatch([scan("aa", { boxId: "b1" })]);
+          await postBatchAs(deviceId, [scan("aa", { boxId: "b1" })]);
           await postBatchWithBoxes(
             [],
             [
               {
                 boxId: "b1",
                 shiftId,
-                terminalId: "t1",
+                terminalId: deviceId,
                 sscc: SSCC,
                 closedAt: ISO,
                 operatorId: OPERATOR_ID,
@@ -2252,7 +2291,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       // box_exceptions insert at the end of the loop and touches nothing
       // else: no box_items update, no registry release, no box retirement.
       it("reprint writes only an audit row -- no box or item state changes", async () => {
-        await postBatch([scan("aa", { boxId: "b1" }), scan("bb", { boxId: "b1" })]);
+        await postBatchAs(deviceId, [scan("aa", { boxId: "b1" }), scan("bb", { boxId: "b1" })]);
         const boxId = await boxIdFor("b1");
         const [before] = await db.select().from(schema.boxes).where(eq(schema.boxes.id, boxId));
         const itemsBefore = await db

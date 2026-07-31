@@ -193,5 +193,27 @@ export const STATION_MIGRATIONS: string[] = [
      operator_id TEXT,
      reason TEXT,
      at TEXT NOT NULL
-   );`,
+    );`,
+  // One INSERT is the atomic unit available through tauri-plugin-sql's pool.
+  // Keep the durable exception fact and its local state transition in that
+  // same SQLite statement so a crash cannot leave only one side applied.
+  `CREATE TRIGGER IF NOT EXISTS box_exception_undo_local
+     AFTER INSERT ON box_exceptions_mirror
+     WHEN NEW.kind = 'undo'
+     BEGIN
+       DELETE FROM codes_mirror WHERE code_hash = NEW.code_hash;
+     END;`,
+  `CREATE TRIGGER IF NOT EXISTS box_exception_clear_local
+     AFTER INSERT ON box_exceptions_mirror
+     WHEN NEW.kind = 'clear'
+     BEGIN
+       DELETE FROM codes_mirror WHERE box_id = NEW.box_id;
+     END;`,
+  `CREATE TRIGGER IF NOT EXISTS box_exception_disassemble_local
+     AFTER INSERT ON box_exceptions_mirror
+     WHEN NEW.kind = 'disassemble'
+     BEGIN
+       DELETE FROM codes_mirror WHERE box_id = NEW.box_id;
+       UPDATE boxes_mirror SET disassembled_at = NEW.at WHERE box_id = NEW.box_id;
+     END;`,
 ];

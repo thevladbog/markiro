@@ -1,4 +1,10 @@
-import { BadRequestException, Inject, Injectable, Logger } from "@nestjs/common";
+import {
+  BadRequestException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  Logger,
+} from "@nestjs/common";
 import { and, eq, inArray, isNotNull, isNull, notInArray, sql } from "drizzle-orm";
 import { ensurePartitions, schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
@@ -123,7 +129,14 @@ export class StationScansService {
    * see an acknowledgement, and correctness rests entirely on this being
    * all-or-nothing.
    */
-  async applyBatch(tenantId: string, body: SyncBatchDto): Promise<SyncBatchResponseDto> {
+  async applyBatch(
+    tenantId: string,
+    body: SyncBatchDto,
+    authenticatedTerminalId?: string,
+  ): Promise<SyncBatchResponseDto> {
+    if (body.exceptions.length > 0 && !authenticatedTerminalId) {
+      throw new ForbiddenException("Station device authentication required for exceptions");
+    }
     // Ensure the months this batch actually needs have partitions BEFORE
     // opening the transaction below. Only the scheduled job (JobsModule)
     // proactively maintains current+next month; a device offline across a
@@ -523,10 +536,9 @@ export class StationScansService {
             }));
 
             // Sorted by (boxId, codeHash) -- same 40P01 reason as above -- and
-            // ON CONFLICT DO NOTHING so a replay, or a resend of an
-            // overlapping range under a fresh batchId (same rationale as
-            // `codes`' own insert above), is a no-op rather than a
-            // duplicate-key error.
+            // A strictly newer rescan into the same box reactivates the
+            // existing membership after undo/clear. An exact replay keeps
+            // the row untouched, so a stale delivery cannot resurrect it.
             const sortedBoxItems = [...preBoxItems].sort((a, b) =>
               a.boxId === b.boxId
                 ? a.codeHash.localeCompare(b.codeHash)
@@ -542,7 +554,15 @@ export class StationScansService {
                   addedAt: p.addedAt,
                 })),
               )
-              .onConflictDoNothing();
+              .onConflictDoUpdate({
+                target: [schema.boxItems.tenantId, schema.boxItems.boxId, schema.boxItems.codeHash],
+                set: {
+                  addedAt: sql`excluded.added_at`,
+                  displacedAt: null,
+                  removedAt: null,
+                },
+                setWhere: sql`excluded.added_at > ${schema.boxItems.addedAt}`,
+              });
 
             // THIS BATCH's own direction: a scan it just recorded might not be
             // the code's owner (06b's rule: the earlier scannedAt wins), in
@@ -839,7 +859,12 @@ export class StationScansService {
       // already made that scan (see the design spec's "Sync protocol"
       // section).
       if (body.exceptions.length > 0) {
-        await this.applyExceptions(tx, tenantId, sortExceptions(body.exceptions));
+        await this.applyExceptions(
+          tx,
+          tenantId,
+          authenticatedTerminalId!,
+          sortExceptions(body.exceptions),
+        );
       }
 
       return { applied: body.items.length, alreadyApplied: false, conflicts: batchConflicts };
@@ -880,6 +905,7 @@ export class StationScansService {
   private async applyExceptions(
     tx: Pick<Db, "select" | "insert" | "update" | "delete">,
     tenantId: string,
+    authenticatedTerminalId: string,
     exceptions: ExceptionDto[],
   ): Promise<void> {
     for (const ex of exceptions) {
@@ -890,10 +916,7 @@ export class StationScansService {
       // match is not enough to identify one box (two terminals in one
       // tenant can both call a box "b1", or one device can reuse "b1" after
       // a shift change).
-      const terminalCondition =
-        ex.terminalId === null
-          ? isNull(schema.boxes.terminalId)
-          : eq(schema.boxes.terminalId, ex.terminalId);
+      const terminalCondition = eq(schema.boxes.terminalId, authenticatedTerminalId);
       const [boxRow] = await tx
         .select({ id: schema.boxes.id })
         .from(schema.boxes)
@@ -921,7 +944,7 @@ export class StationScansService {
       if (!boxRow) {
         this.logger.warn(
           `Exception ${ex.kind} for deviceBoxId ${ex.boxId} (tenant ${tenantId}, shift ` +
-            `${ex.shiftId}, terminal ${ex.terminalId ?? "null"}) matched no box row -- box was ` +
+            `${ex.shiftId}, terminal ${authenticatedTerminalId}) matched no box row -- box was ` +
             `never created, belongs to a different shift/terminal, or is otherwise ` +
             `unresolvable; skipping as a no-op`,
         );
@@ -930,7 +953,7 @@ export class StationScansService {
       const resolvedBoxId = boxRow.id;
 
       if (ex.kind === "undo" && ex.codeHash) {
-        await this.releaseCode(tx, tenantId, ex.codeHash, ex.shiftId, ex.terminalId);
+        await this.releaseCode(tx, tenantId, ex.codeHash, ex.shiftId, authenticatedTerminalId);
         await tx
           .update(schema.boxItems)
           .set({ removedAt: sql`now()` })
@@ -981,7 +1004,13 @@ export class StationScansService {
               ),
             );
           for (const item of activeItems) {
-            await this.releaseCode(tx, tenantId, item.codeHash, ex.shiftId, ex.terminalId);
+            await this.releaseCode(
+              tx,
+              tenantId,
+              item.codeHash,
+              ex.shiftId,
+              authenticatedTerminalId,
+            );
           }
           await tx
             .update(schema.boxItems)
@@ -1040,7 +1069,13 @@ export class StationScansService {
               ),
             );
           for (const item of activeItems) {
-            await this.releaseCode(tx, tenantId, item.codeHash, ex.shiftId, ex.terminalId);
+            await this.releaseCode(
+              tx,
+              tenantId,
+              item.codeHash,
+              ex.shiftId,
+              authenticatedTerminalId,
+            );
           }
           await tx
             .update(schema.boxItems)
@@ -1081,7 +1116,7 @@ export class StationScansService {
         boxId: resolvedBoxId,
         codeHash: ex.codeHash,
         shiftId: ex.shiftId,
-        terminalId: ex.terminalId,
+        terminalId: authenticatedTerminalId,
         operatorId: ex.operatorId,
         reason: ex.reason,
         occurredAt: new Date(ex.occurredAt),

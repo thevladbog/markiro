@@ -33,6 +33,7 @@ describe.skipIf(!ready)("boxes e2e", () => {
 
   let agent: ReturnType<typeof request.agent>;
   let stationKey: string;
+  let stationDeviceId: string;
   /** A box with two live items, neither ever displaced. */
   let shiftId: string;
   /**
@@ -84,7 +85,9 @@ describe.skipIf(!ready)("boxes e2e", () => {
 
     agent = request.agent(app!.getHttpServer());
     await signUpAndActivate(agent);
-    stationKey = await deviceKey(agent);
+    const station = await deviceKey(agent);
+    stationKey = station.apiKey;
+    stationDeviceId = station.deviceId;
     // One product for every shift below: `openShift`'s own `createActiveProduct`
     // call would otherwise re-POST the same GTIN under the same tenant on
     // every invocation and 409 -- a single shared product is fine since
@@ -171,7 +174,7 @@ describe.skipIf(!ready)("boxes e2e", () => {
     // otherTenantShiftId: a second tenant entirely, with its own box.
     const other = request.agent(app!.getHttpServer());
     await signUpAndActivate(other);
-    const otherKey = await deviceKey(other);
+    const { apiKey: otherKey } = await deviceKey(other);
     otherTenantShiftId = await openShift(other);
     await postBatch(otherKey, [
       scan(otherTenantShiftId, "zz", "t1", "2026-07-01T10:00:00.000Z", "b9"),
@@ -182,9 +185,11 @@ describe.skipIf(!ready)("boxes e2e", () => {
     await app?.close();
   });
 
-  async function deviceKey(a: ReturnType<typeof request.agent>): Promise<string> {
+  async function deviceKey(
+    a: ReturnType<typeof request.agent>,
+  ): Promise<{ apiKey: string; deviceId: string }> {
     const device = await a.post("/station-devices").send({ name: "Line 1" }).expect(201);
-    return (device.body as { apiKey: string }).apiKey;
+    return device.body as { apiKey: string; deviceId: string };
   }
 
   // Same fixture as conflicts.e2e.test.ts / station-scans.e2e.test.ts.
@@ -335,8 +340,8 @@ describe.skipIf(!ready)("boxes e2e", () => {
   it("excludes operator-removed items from itemCount and surfaces disassembledAt", async () => {
     const removedShiftId = await openShiftForProduct(agent, productId);
     await postBatch(stationKey, [
-      scan(removedShiftId, "rr", "t1", "2026-07-01T10:00:00.000Z", "b5"),
-      scan(removedShiftId, "ss", "t1", "2026-07-01T10:00:01.000Z", "b5"),
+      scan(removedShiftId, "rr", stationDeviceId, "2026-07-01T10:00:00.000Z", "b5"),
+      scan(removedShiftId, "ss", stationDeviceId, "2026-07-01T10:00:01.000Z", "b5"),
     ]);
     await request(app!.getHttpServer())
       .post("/station/scans")
@@ -381,7 +386,7 @@ describe.skipIf(!ready)("boxes e2e", () => {
   it("surfaces a non-null disassembledAt for a disassembled box via GET /boxes", async () => {
     const disassembledShiftId = await openShiftForProduct(agent, productId);
     await postBatch(stationKey, [
-      scan(disassembledShiftId, "tt", "t1", "2026-07-01T10:00:00.000Z", "b6"),
+      scan(disassembledShiftId, "tt", stationDeviceId, "2026-07-01T10:00:00.000Z", "b6"),
     ]);
     await postBatch(
       stationKey,
@@ -390,7 +395,7 @@ describe.skipIf(!ready)("boxes e2e", () => {
         {
           boxId: "b6",
           shiftId: disassembledShiftId,
-          terminalId: "t1",
+          terminalId: stationDeviceId,
           sscc: "123456789012345690",
           closedAt: "2026-01-02T00:00:00.000Z",
           operatorId,

@@ -31,6 +31,7 @@ describe.skipIf(!ready)("box-exceptions e2e", () => {
 
   let agent: ReturnType<typeof request.agent>;
   let stationKey: string;
+  let stationDeviceId: string;
   let shiftId: string;
 
   beforeAll(async () => {
@@ -50,15 +51,17 @@ describe.skipIf(!ready)("box-exceptions e2e", () => {
 
     agent = request.agent(app!.getHttpServer());
     await signUpAndActivate(agent);
-    stationKey = await deviceKey(agent);
+    const station = await deviceKey(agent);
+    stationKey = station.apiKey;
+    stationDeviceId = station.deviceId;
     const productId = await createActiveProduct(agent);
 
     // One box with two live items, so each "undo" below has a real code to
     // release.
     shiftId = await openShiftForProduct(agent, productId);
     await postBatch(stationKey, [
-      scan(shiftId, "aa", "t1", "2026-07-01T10:00:00.000Z", "b1"),
-      scan(shiftId, "bb", "t1", "2026-07-01T10:00:01.000Z", "b1"),
+      scan(shiftId, "aa", stationDeviceId, "2026-07-01T10:00:00.000Z", "b1"),
+      scan(shiftId, "bb", stationDeviceId, "2026-07-01T10:00:01.000Z", "b1"),
     ]);
 
     // Two "undo" exceptions, each in its OWN sync batch so their
@@ -74,9 +77,11 @@ describe.skipIf(!ready)("box-exceptions e2e", () => {
     await app?.close();
   });
 
-  async function deviceKey(a: ReturnType<typeof request.agent>): Promise<string> {
+  async function deviceKey(
+    a: ReturnType<typeof request.agent>,
+  ): Promise<{ apiKey: string; deviceId: string }> {
     const device = await a.post("/station-devices").send({ name: "Line 1" }).expect(201);
-    return (device.body as { apiKey: string }).apiKey;
+    return device.body as { apiKey: string; deviceId: string };
   }
 
   // Same fixture as boxes.e2e.test.ts / conflicts.e2e.test.ts / station-scans.e2e.test.ts.
@@ -149,7 +154,7 @@ describe.skipIf(!ready)("box-exceptions e2e", () => {
       boxId,
       codeHash,
       shiftId: shiftIdArg,
-      terminalId: "t1",
+      terminalId: stationDeviceId,
       operatorId: null,
       reason: null,
       occurredAt: new Date().toISOString(),
@@ -189,7 +194,7 @@ describe.skipIf(!ready)("box-exceptions e2e", () => {
   });
 
   it("rejects a station device api-key with 403", async () => {
-    const key = await deviceKey(agent);
+    const { apiKey: key } = await deviceKey(agent);
     await request(app!.getHttpServer())
       .get(`/box-exceptions?shiftId=${shiftId}`)
       .set("x-api-key", key)

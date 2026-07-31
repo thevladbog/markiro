@@ -110,6 +110,7 @@ interface RenderWorkScreenOverrides {
   exec?: SqlExecutor;
   shiftId?: string;
   terminalId?: string | null;
+  operatorId?: string;
   expectedGtin14?: string;
   productName?: string;
   counterpartyName?: string | null;
@@ -125,6 +126,7 @@ function renderWorkScreen(overrides: RenderWorkScreenOverrides = {}) {
     exec = makeExec(),
     shiftId = "s1",
     terminalId = "dev-1",
+    operatorId = "operator-1",
     expectedGtin14 = "04600000000015",
     productName = "Water 0.5",
     counterpartyName = null,
@@ -140,6 +142,7 @@ function renderWorkScreen(overrides: RenderWorkScreenOverrides = {}) {
       exec={exec}
       shiftId={shiftId}
       terminalId={terminalId}
+      operatorId={operatorId}
       expectedGtin14={expectedGtin14}
       productName={productName}
       counterpartyName={counterpartyName}
@@ -245,6 +248,7 @@ function renderWork(overrides: RenderWorkOverrides = {}) {
     exec = makeExec(),
     shiftId = "s1",
     terminalId = "dev-1",
+    operatorId = "operator-1",
     expectedGtin14 = "04600000000015",
     productName = "Water 0.5",
     counterpartyName = null,
@@ -294,6 +298,7 @@ function renderWork(overrides: RenderWorkOverrides = {}) {
       exec={exec}
       shiftId={shiftId}
       terminalId={terminalId}
+      operatorId={operatorId}
       expectedGtin14={expectedGtin14}
       productName={productName}
       counterpartyName={counterpartyName}
@@ -564,8 +569,10 @@ describe("WorkScreen box progress, closing and printing", () => {
       expect(await exec.all("SELECT code_hash FROM codes_mirror")).toHaveLength(0);
     });
     expect(screen.queryByRole("button", { name: "Отменить последний скан" })).toBeNull();
-    const exceptions = await exec.all<{ kind: string }>("SELECT kind FROM box_exceptions_mirror");
-    expect(exceptions).toEqual([{ kind: "undo" }]);
+    const exceptions = await exec.all<{ kind: string; operator_id: string }>(
+      "SELECT kind, operator_id FROM box_exceptions_mirror",
+    );
+    expect(exceptions).toEqual([{ kind: "undo", operator_id: "operator-1" }]);
   });
 
   it("clears every scan from the open box only after confirmation", async () => {

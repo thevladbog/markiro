@@ -162,6 +162,13 @@
       "when": 1785494890034,
       "tag": "0022_fantastic_skullbuster",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1785497038628,
+      "tag": "0023_pretty_spiral",
+      "breakpoints": true
     }
   ]
 }

@@ -244,23 +244,11 @@ export interface UndoScanInput {
  * the same code from `code_registry` (see the design spec's "Releasing a
  * code" section).
  *
- * Three sequential writes, not a transaction (this pool cannot do
- * multi-call transactions -- see recordScan's own doc comment). A failure
- * partway through is a rare, logged edge case, not a silent data loss: the
- * worst case is the codes_mirror row is already gone (harmless -- the
- * operator can simply rescan) with a thinner audit trail for that one
- * event, never a lost or duplicated code.
+ * The durable exception is queued first. The local cleanup that follows is
+ * idempotent, while deleting locally first could permanently lose the only
+ * fact that tells the server to release ownership if a later write failed.
  */
 export async function undoLastScan(exec: SqlExecutor, input: UndoScanInput): Promise<void> {
-  await exec.run("DELETE FROM codes_mirror WHERE code_hash = ?", [input.codeHash]);
-  await appendScanEvent(exec, {
-    shiftId: input.shiftId,
-    terminalId: input.terminalId,
-    raw: input.codeHash,
-    verdict: "undone",
-    scannedAt: input.at,
-    operatorId: input.operatorId,
-  });
   await insertException(exec, {
     kind: "undo",
     boxId: input.boxId,
@@ -271,6 +259,21 @@ export async function undoLastScan(exec: SqlExecutor, input: UndoScanInput): Pro
     reason: null,
     at: input.at,
   });
+  // The trigger installed with box_exceptions_mirror deletes the code in the
+  // same statement as the INSERT above. This secondary local journal entry
+  // must not turn an already-completed correction into a reported failure.
+  try {
+    await appendScanEvent(exec, {
+      shiftId: input.shiftId,
+      terminalId: input.terminalId,
+      raw: input.codeHash,
+      verdict: "undone",
+      scannedAt: input.at,
+      operatorId: input.operatorId,
+    });
+  } catch (err) {
+    console.error("station: failed to append undo scan event", err);
+  }
 }
 
 /** When this code was originally accepted, for the duplicate signal. */

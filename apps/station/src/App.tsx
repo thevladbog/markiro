@@ -392,6 +392,7 @@ export function App() {
             exec={tauriExecutor}
             shiftId={shift.id}
             terminalId={config.deviceId ?? null}
+            operatorId={operator!.operatorId}
             expectedGtin14={shiftContext.gtin14}
             productName={shiftContext.productName}
             counterpartyName={shiftContext.counterpartyName}

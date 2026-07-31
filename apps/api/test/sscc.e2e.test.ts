@@ -620,7 +620,7 @@ describe.skipIf(!ready)("sscc e2e", () => {
           items: [
             {
               shiftId,
-              terminalId: "t1",
+              terminalId: deviceId,
               raw: "RAW-d1",
               verdict: "ok",
               scannedAt: new Date().toISOString(),
@@ -644,7 +644,7 @@ describe.skipIf(!ready)("sscc e2e", () => {
             {
               boxId: "b1",
               shiftId,
-              terminalId: "t1",
+              terminalId: deviceId,
               sscc,
               closedAt: new Date().toISOString(),
               operatorId: null,
@@ -674,7 +674,7 @@ describe.skipIf(!ready)("sscc e2e", () => {
               boxId: "b1",
               codeHash: null,
               shiftId,
-              terminalId: "t1",
+              terminalId: deviceId,
               operatorId: null,
               reason: "wrong customer",
               occurredAt: new Date().toISOString(),

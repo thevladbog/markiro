@@ -1066,6 +1066,129 @@ describe("sync engine: pools and closures", () => {
     expect(await readExceptions(exec, 10)).toEqual([]);
   });
 
+  it("sends scan, correction, and later rescan in chronological batches", async () => {
+    await insertException(exec, exception({ at: "2026-07-29T10:00:01.000Z", codeHash: "h1" }));
+    await seed(exec, 1, "2026-07-29T10:00:02.000Z");
+
+    await drainOnce();
+
+    expect(post).toHaveBeenCalledTimes(3);
+    const bodies = post.mock.calls.map(
+      (call) =>
+        call[1] as {
+          items: Array<{ scannedAt: string }>;
+          exceptions: Array<{ occurredAt: string }>;
+        },
+    );
+    expect(bodies.map((body) => [body.items.length, body.exceptions.length])).toEqual([
+      [1, 0],
+      [0, 1],
+      [1, 0],
+    ]);
+  });
+
+  it("preserves chronological splitting after a crash saved only the exception ceiling", async () => {
+    await insertException(exec, exception({ at: "2026-07-29T10:00:01.000Z", codeHash: "h1" }));
+    await exec.run("INSERT INTO station_meta (key, value) VALUES (?, ?)", [
+      "sync_pending_exception_ceiling",
+      "1",
+    ]);
+    await seed(exec, 1, "2026-07-29T10:00:02.000Z");
+
+    await drainOnce();
+
+    expect(post).toHaveBeenCalledTimes(3);
+    const bodies = post.mock.calls.map(
+      (call) =>
+        call[1] as {
+          items: unknown[];
+          exceptions: unknown[];
+        },
+    );
+    expect(bodies.map((body) => [body.items.length, body.exceptions.length])).toEqual([
+      [1, 0],
+      [0, 1],
+      [1, 0],
+    ]);
+  });
+
+  it("keeps fresh rows out of a persisted exception-only batch after restart", async () => {
+    await drainOnce();
+    await insertException(exec, exception({ at: "2026-07-29T10:00:01.000Z", codeHash: "h1" }));
+    await seed(exec, 1, "2026-07-29T10:00:02.000Z");
+    for (const [key, value] of [
+      ["sync_pending_ceiling", "0"],
+      ["sync_pending_box_ceiling", "0"],
+      ["sync_pending_exception_ceiling", "1"],
+      ["sync_pending_batch_id", "m1:install-crashed:exception:1"],
+    ]) {
+      await exec.run("INSERT INTO station_meta (key, value) VALUES (?, ?)", [key, value]);
+    }
+
+    await drainOnce();
+
+    expect(post).toHaveBeenCalledTimes(2);
+    const first = post.mock.calls[0]![1] as {
+      batchId: string;
+      items: unknown[];
+      exceptions: unknown[];
+    };
+    const second = post.mock.calls[1]![1] as { batchId: string; items: unknown[] };
+    expect(first.batchId).toBe("m1:install-crashed:exception:1");
+    expect(first.items).toEqual([]);
+    expect(first.exceptions).toHaveLength(1);
+    expect(second.items).toHaveLength(1);
+    expect(second.batchId).not.toBe(first.batchId);
+  });
+
+  it("keeps the same batch id when a local box ack fails after the item ack", async () => {
+    await openBox(exec, SHIFT, "b1", ISO, TERMINAL);
+    await closeBox(exec, "b1", SSCC, ISO, null);
+    const failing = failingExecOn(exec, /UPDATE boxes_mirror SET acked_at/);
+    const firstPost = vi
+      .fn()
+      .mockResolvedValue({ applied: 1, alreadyApplied: false, conflicts: [] });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const firstEngine = createSyncEngine({
+      exec: failing,
+      client: { post: firstPost },
+      machineId: "m1",
+      onState: () => {},
+    });
+    firstEngine.nudge();
+    await firstEngine.idle();
+    firstEngine.stop();
+
+    const retryPost = vi
+      .fn()
+      .mockResolvedValue({ applied: 0, alreadyApplied: true, conflicts: [] });
+    const retryEngine = createSyncEngine({
+      exec,
+      client: { post: retryPost },
+      machineId: "m1",
+      onState: () => {},
+    });
+    retryEngine.nudge();
+    await retryEngine.idle();
+    retryEngine.stop();
+
+    const first = firstPost.mock.calls[0]![1] as {
+      batchId: string;
+      items: unknown[];
+      boxes: unknown[];
+    };
+    const retry = retryPost.mock.calls[0]![1] as {
+      batchId: string;
+      items: unknown[];
+      boxes: unknown[];
+    };
+    expect(first.items).toHaveLength(1);
+    expect(first.boxes).toHaveLength(1);
+    expect(retry.items).toEqual([]);
+    expect(retry.boxes).toHaveLength(1);
+    expect(retry.batchId).toBe(first.batchId);
+  });
+
   it("gives consecutive exception-only batches distinct ids so server dedup cannot swallow one", async () => {
     await drainOnce(); // drain the default item first
     await insertException(exec, exception({ boxId: "b1", codeHash: "h1" }));
@@ -1078,6 +1201,26 @@ describe("sync engine: pools and closures", () => {
 
     expect(secondId).not.toBe(firstId);
     expect(await readExceptions(exec, 10)).toEqual([]);
+  });
+
+  it("reports an exception-only backlog as pending and stuck", async () => {
+    await drainOnce();
+    await insertException(exec, exception({ at: "2026-01-01T00:00:00.000Z" }));
+    const states: Array<{ pending: number; stuck: boolean }> = [];
+    const failedPost = vi.fn().mockRejectedValue(new Error("offline"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const engine = createSyncEngine({
+      exec,
+      client: { post: failedPost },
+      machineId: "m1",
+      onState: (state) => states.push({ pending: state.pending, stuck: state.stuck }),
+    });
+
+    engine.nudge();
+    await engine.idle();
+
+    expect(states.at(-1)).toEqual({ pending: 1, stuck: true });
+    engine.stop();
   });
 
   it("persists an exception batch ceiling so a restart retries its exact rows before newer facts", async () => {

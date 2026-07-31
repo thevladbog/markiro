@@ -134,4 +134,26 @@ describe("scan queue", () => {
     expect(done).toEqual(["after"]);
     consoleError.mockRestore();
   });
+
+  it("reports a failing ordered job and keeps draining", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const onJobError = vi.fn();
+    const done: string[] = [];
+    const queue = createScanQueue({
+      process: async (raw) => outcome(raw),
+      onOutcome: (o) => done.push(o.raw),
+      onJobError,
+    });
+    const failure = new Error("correction failed");
+
+    queue.enqueueJob(async () => {
+      throw failure;
+    });
+    queue.enqueue("after");
+    await queue.idle();
+
+    expect(onJobError).toHaveBeenCalledWith(failure);
+    expect(done).toEqual(["after"]);
+    consoleError.mockRestore();
+  });
 });

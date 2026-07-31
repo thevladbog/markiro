@@ -1,4 +1,4 @@
-import { Body, Controller, Post, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, ForbiddenException, Post, Req, UseGuards } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
@@ -23,6 +23,9 @@ export class StationScansController {
     @Req() req: RequestWithTenant,
     @Body(new ZodValidationPipe(syncBatchSchema)) body: SyncBatchDto,
   ): Promise<SyncBatchResponseDto> {
-    return this.service.applyBatch(req.tenantId!, body);
+    if (body.exceptions.length > 0 && !req.deviceId) {
+      throw new ForbiddenException("Station device authentication required for exceptions");
+    }
+    return this.service.applyBatch(req.tenantId!, body, req.deviceId);
   }
 }

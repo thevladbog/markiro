@@ -92,16 +92,39 @@ export const syncBatchSchema = z.object({
   // scan or closure it corrects by an arbitrary number of batches.
   exceptions: z
     .array(
-      z.object({
-        kind: z.enum(["undo", "clear", "disassemble", "reprint"]),
-        boxId: z.string().min(1).max(64),
-        codeHash: z.string().length(64).nullable(),
-        shiftId: z.string().uuid().toLowerCase(),
-        terminalId: z.string().nullable(),
-        operatorId: z.string().uuid().toLowerCase().nullable(),
-        reason: z.string().min(1).nullable(),
-        occurredAt: z.string().datetime(),
-      }),
+      z
+        .object({
+          kind: z.enum(["undo", "clear", "disassemble", "reprint"]),
+          boxId: z.string().min(1).max(64),
+          codeHash: z.string().length(64).nullable(),
+          shiftId: z.string().uuid().toLowerCase(),
+          terminalId: z.string().nullable(),
+          operatorId: z.string().uuid().toLowerCase().nullable(),
+          reason: z.string().min(1).nullable(),
+          occurredAt: z.string().datetime(),
+        })
+        .superRefine((exception, ctx) => {
+          const codeShapeValid =
+            exception.kind === "undo" ? exception.codeHash !== null : exception.codeHash === null;
+          const reasonShapeValid =
+            exception.kind === "undo" || exception.kind === "clear"
+              ? exception.reason === null
+              : exception.reason !== null;
+          if (!codeShapeValid) {
+            ctx.addIssue({
+              code: "custom",
+              path: ["codeHash"],
+              message: "Invalid codeHash for exception kind",
+            });
+          }
+          if (!reasonShapeValid) {
+            ctx.addIssue({
+              code: "custom",
+              path: ["reason"],
+              message: "Invalid reason for exception kind",
+            });
+          }
+        }),
     )
     .max(200)
     .default([]),

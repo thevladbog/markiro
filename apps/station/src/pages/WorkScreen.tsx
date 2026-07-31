@@ -38,6 +38,7 @@ export interface WorkScreenProps {
   exec: SqlExecutor;
   shiftId: string;
   terminalId: string | null;
+  operatorId: string;
   expectedGtin14: string;
   productName: string;
   counterpartyName?: string | null;
@@ -89,6 +90,7 @@ export function WorkScreen({
   exec,
   shiftId,
   terminalId,
+  operatorId,
   expectedGtin14,
   productName,
   counterpartyName,
@@ -487,7 +489,7 @@ export function WorkScreen({
 
       let result: CloseBoxResult;
       try {
-        result = await impl(shiftId, null);
+        result = await impl(shiftId, operatorId);
       } catch (err) {
         console.error("station: closeCurrentBox failed", err);
         return;
@@ -602,20 +604,13 @@ export function WorkScreen({
             isDuplicate: (key) => keys.current.has(key),
           });
           const scannedAt = new Date().toISOString();
-          // `operatorId` is threaded through recordScan's existing writes
-          // (Task 9, plan 06c) but this screen does not yet know it: operator
-          // attribution is wired into the work screen in a later task.
-          // Explicit `null` here, not an omitted field, so that wiring is a
-          // deliberate addition later rather than a silent default. `boxId`
-          // (also Task 9) IS wired here, from `boxRef` -- the current box's
-          // id, or null when this shift has no box open (or none at all).
           const event = {
             shiftId,
             terminalId,
             raw,
             verdict: verdict.status,
             scannedAt,
-            operatorId: null,
+            operatorId,
           };
           const boxId = boxRef.current?.boxId ?? null;
 
@@ -720,23 +715,30 @@ export function WorkScreen({
           if (flashTimer.current) clearTimeout(flashTimer.current);
           flashTimer.current = setTimeout(() => setSignal(null), FLASH_MS.error);
         },
+        onJobError() {
+          const { t: liveT, sound: liveSound } = live.current;
+          playSignalTone("error", liveSound);
+          setSignal({ tone: "error", title: liveT("signal.systemError") });
+          if (flashTimer.current) clearTimeout(flashTimer.current);
+          flashTimer.current = setTimeout(() => setSignal(null), FLASH_MS.error);
+        },
       }),
-    [exec, shiftId, terminalId, expectedGtin14],
+    [exec, shiftId, terminalId, operatorId, expectedGtin14],
   );
 
   function handleUndo(): void {
     const target = lastScanned;
     if (!target) return;
-    setLastScanned(null);
     queue.enqueueJob(async () => {
       await undoLastScan(exec, {
         boxId: target.boxId,
         codeHash: target.codeHash,
         shiftId,
         terminalId,
-        operatorId: null,
+        operatorId,
         at: new Date().toISOString(),
       });
+      setLastScanned(null);
       keys.current.delete(target.codeHash);
       await live.current.refreshBox(target.boxId);
       live.current.onScanRecorded?.();
@@ -747,7 +749,6 @@ export function WorkScreen({
     setConfirmClear(false);
     const boxId = boxRef.current?.boxId;
     if (!boxId) return;
-    setLastScanned(null);
     queue.enqueueJob(async () => {
       const clearedCodes = await exec.all<{ code_hash: string }>(
         "SELECT code_hash FROM codes_mirror WHERE box_id = ?",
@@ -757,9 +758,10 @@ export function WorkScreen({
         boxId,
         shiftId,
         terminalId,
-        operatorId: null,
+        operatorId,
         at: new Date().toISOString(),
       });
+      setLastScanned(null);
       for (const code of clearedCodes) keys.current.delete(code.code_hash);
       await live.current.refreshBox(boxId);
       live.current.onScanRecorded?.();
@@ -770,17 +772,17 @@ export function WorkScreen({
     const target = closedBoxes.find((candidate) => candidate.boxId === boxId);
     if (!target) return;
     queue.enqueueJob(async () => {
-      await printAndMaybeVerify({ sscc: target.sscc, itemCount: target.itemCount }, boxId);
       await insertException(exec, {
         kind: "reprint",
         boxId,
         codeHash: null,
         shiftId,
         terminalId,
-        operatorId: null,
+        operatorId,
         reason,
         at: new Date().toISOString(),
       });
+      await printAndMaybeVerify({ sscc: target.sscc, itemCount: target.itemCount }, boxId);
       await reloadClosedBoxes();
       live.current.onScanRecorded?.();
     });
@@ -796,7 +798,7 @@ export function WorkScreen({
         boxId,
         shiftId,
         terminalId,
-        operatorId: null,
+        operatorId,
         reason,
         at: new Date().toISOString(),
       });

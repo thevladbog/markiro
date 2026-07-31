@@ -161,7 +161,6 @@ export interface ClearBoxInput {
  * decision 5) -- nothing has been printed or numbered yet.
  */
 export async function clearBox(exec: SqlExecutor, input: ClearBoxInput): Promise<void> {
-  await exec.run("DELETE FROM codes_mirror WHERE box_id = ?", [input.boxId]);
   await insertException(exec, {
     kind: "clear",
     boxId: input.boxId,
@@ -191,11 +190,6 @@ export interface DisassembleBoxInput {
  * a re-packed box is a brand-new box row with a brand-new SSCC.
  */
 export async function disassembleBox(exec: SqlExecutor, input: DisassembleBoxInput): Promise<void> {
-  await exec.run("DELETE FROM codes_mirror WHERE box_id = ?", [input.boxId]);
-  await exec.run("UPDATE boxes_mirror SET disassembled_at = ? WHERE box_id = ?", [
-    input.at,
-    input.boxId,
-  ]);
   await insertException(exec, {
     kind: "disassemble",
     boxId: input.boxId,
