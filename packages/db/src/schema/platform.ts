@@ -285,6 +285,7 @@ export const boxExceptions = pgTable(
   },
   (t) => [
     index("box_exceptions_tenant_box_idx").on(t.tenantId, t.boxId, t.recordedAt),
+    index("box_exceptions_tenant_shift_recorded_idx").on(t.tenantId, t.shiftId, t.recordedAt),
     check(
       "box_exceptions_kind_payload_check",
       sql`(${t.kind} = 'undo' AND ${t.codeHash} IS NOT NULL AND ${t.reason} IS NULL)

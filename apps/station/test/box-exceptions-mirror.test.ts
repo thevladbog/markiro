@@ -46,7 +46,7 @@ describe("box-exceptions-mirror", () => {
       makeException({
         kind: "clear",
         codeHash: null,
-        reason: "wrong box",
+        reason: null,
         at: "2026-07-30T00:01:00.000Z",
       }),
     );

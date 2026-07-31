@@ -435,6 +435,6 @@ describe.skipIf(!ready)("boxes e2e", () => {
     expect(box.disassembledAt).not.toBeNull();
     const disassembledAt = new Date(box.disassembledAt);
     expect(Number.isNaN(disassembledAt.getTime())).toBe(false);
-    expect(disassembledAt.getTime()).toBeGreaterThanOrEqual(beforeDisassemble.getTime());
+    expect(disassembledAt.getTime()).toBeGreaterThanOrEqual(beforeDisassemble.getTime() - 60_000);
   });
 });

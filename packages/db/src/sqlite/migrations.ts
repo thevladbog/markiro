@@ -192,7 +192,12 @@ export const STATION_MIGRATIONS: string[] = [
      terminal_id TEXT,
      operator_id TEXT,
      reason TEXT,
-     at TEXT NOT NULL
+     at TEXT NOT NULL,
+     CHECK (
+       (kind = 'undo' AND code_hash IS NOT NULL AND reason IS NULL)
+       OR (kind = 'clear' AND code_hash IS NULL AND reason IS NULL)
+       OR (kind IN ('disassemble', 'reprint') AND code_hash IS NULL AND reason IS NOT NULL)
+     )
     );`,
   // One INSERT is the atomic unit available through tauri-plugin-sql's pool.
   // Keep the durable exception fact and its local state transition in that

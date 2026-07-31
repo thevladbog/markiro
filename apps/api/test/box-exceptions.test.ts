@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { sortExceptions, type ExceptionDto } from "../src/modules/station-scans/box-exceptions";
+import { syncBatchSchema } from "../src/modules/station-scans/dto";
 
 function ex(
   boxId: string,
@@ -33,5 +34,15 @@ describe("sortExceptions", () => {
       "b1:undo:hash2",
       "b2:reprint:",
     ]);
+  });
+
+  it("rejects an exception reason over the station input limit", () => {
+    const result = syncBatchSchema.safeParse({
+      batchId: "b1",
+      items: [],
+      boxes: [],
+      exceptions: [{ ...ex("b1", "reprint"), reason: "x".repeat(501) }],
+    });
+    expect(result.success).toBe(false);
   });
 });

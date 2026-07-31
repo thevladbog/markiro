@@ -177,6 +177,12 @@ function toExceptionPayload(exceptions: PendingException[]) {
   }));
 }
 
+/** Keeps the contiguous id prefix required by range-based acknowledgements. */
+function takePrefix<T>(rows: T[], keep: (row: T) => boolean): T[] {
+  const stop = rows.findIndex((row) => !keep(row));
+  return stop === -1 ? rows : rows.slice(0, stop);
+}
+
 /** A closed-but-unreported box, as read off this device's own `boxes_mirror` row. */
 interface BoxClosureRow {
   boxId: string;
@@ -695,11 +701,15 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
         if (pendingBatchId === null && batch.length > 0 && exceptions.length > 0) {
           const firstScanAt = Date.parse(batch[0]!.scannedAt);
           const firstExceptionAt = Date.parse(exceptions[0]!.at);
-          if (firstScanAt <= firstExceptionAt) {
-            batch = batch.filter((item) => Date.parse(item.scannedAt) <= firstExceptionAt);
+          if (!Number.isFinite(firstScanAt)) {
+            exceptions = [];
+          } else if (!Number.isFinite(firstExceptionAt)) {
+            batch = [];
+          } else if (firstScanAt <= firstExceptionAt) {
+            batch = takePrefix(batch, (item) => Date.parse(item.scannedAt) <= firstExceptionAt);
             exceptions = [];
           } else {
-            exceptions = exceptions.filter((item) => Date.parse(item.at) < firstScanAt);
+            exceptions = takePrefix(exceptions, (item) => Date.parse(item.at) < firstScanAt);
             batch = [];
           }
         }

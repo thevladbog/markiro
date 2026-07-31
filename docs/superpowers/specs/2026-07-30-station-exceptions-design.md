@@ -17,7 +17,7 @@ This means an operator has **no in-app recovery** from the mistakes that come wi
 2. **All four live on the station, operator-initiated, offline-capable.** The operator who made the mistake is standing in front of the terminal that made it; routing correction through the cabinet would make the common case (a mis-scan noticed within seconds) require a manager and a network connection neither may be available.
 3. **Scoped to the current shift and the terminal's own boxes.** A box closed by another terminal, or in a shift that has since closed, is out of reach of these actions — that is cabinet/manager territory, a different problem this slice does not solve. Restricting scope this way also keeps every action clear of 06b's cross-terminal ownership machinery: nothing here ever needs to reason about a box it does not exclusively own.
 4. **SSCC is retired, never reused, on disassembly.** GS1 SSCCs identify one physical logistics unit forever; reusing a number for different contents after disassembly would violate that and corrupt anything downstream that already saw the original code. A box disassembled and re-packed gets a brand-new SSCC through the existing one-statement `allocate()` path (06c) — no special-casing needed there.
-5. **Reason required for clear/reprint/disassemble; not for undo.** Undo corrects a single mis-scan within seconds of it happening — friction there defeats the point. Clearing an open box, reprinting a closed box's label, and disassembling a closed box are less frequent, more consequential actions where a manager reviewing the shift later benefits from knowing why.
+5. **Reason required for reprint/disassemble; not for undo/clear.** Undo corrects a single mis-scan within seconds of it happening — friction there defeats the point. Clear also stays reasonless because the open box has no printed label or assigned SSCC yet. Reprinting and disassembling a closed box require a reason for the manager's audit trail.
 
 ## The four actions
 
@@ -34,7 +34,7 @@ Undo and clear both need to make freed codes scannable again — see "Releasing 
 
 - `box_items.removed_at` (timestamp, nullable) — a new column, distinct from 06b's `displaced_at`. `displaced_at` means "lost the ownership race to another terminal"; `removed_at` means "the operator undid or cleared this on purpose." Keeping them separate matters for `contentsChangedAfterClose` (06c) and for any future reporting that needs to tell the two apart.
 - `boxes.disassembled_at` (timestamp, nullable) — once set, the box is retired: excluded from "active" listings, its `sscc` never reissued. A box re-packed after disassembly is a new box row with a new `deviceBoxId` and a fresh SSCC, exactly like any other box.
-- New table `box_exceptions` — the audit trail: `id`, `tenant_id`, `kind` (`undo` | `clear` | `disassemble` | `reprint`), `box_id`, `code_hash` (nullable — only `undo` targets a single code), `shift_id`, `terminal_id`, `operator_id`, `reason` (nullable — null for `undo`), `occurred_at` (client-supplied), `recorded_at` (server `now()`). Every action writes a row here, including a no-op (see "Idempotency" below) — the ledger records that the attempt happened, not only that it changed something.
+- New table `box_exceptions` — the audit trail: `id`, `tenant_id`, `kind` (`undo` | `clear` | `disassemble` | `reprint`), `box_id`, `code_hash` (nullable — only `undo` targets a single code), `shift_id`, `terminal_id`, `operator_id`, `reason` (nullable — null for `undo` and `clear`), `occurred_at` (client-supplied), `recorded_at` (server `now()`). Every action writes a row here, including a no-op (see "Idempotency" below) — the ledger records that the attempt happened, not only that it changed something.
 
 **Station (SQLite mirror):**
 
@@ -61,7 +61,7 @@ exceptions: Array<{
   shiftId: string;
   terminalId: string | null;
   operatorId: string | null;
-  reason: string | null;     // required for clear/disassemble/reprint, null for undo
+  reason: string | null;     // required for disassemble/reprint, null for undo/clear
   occurredAt: string;        // ISO
 }>
 ```

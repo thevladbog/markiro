@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, Input } from "@markiro/ui";
 import type { ClosedBoxSummary } from "../lib/boxes.js";
@@ -7,20 +7,29 @@ export interface ShiftBoxesPanelProps {
   boxes: ClosedBoxSummary[];
   onReprint: (boxId: string, reason: string) => void;
   onDisassemble: (boxId: string, reason: string) => void;
+  onPendingChange?: (pending: boolean) => void;
 }
 
 type PendingAction = { boxId: string; kind: "reprint" | "disassemble" };
 
 /** Actions for closed boxes produced by this terminal during the current shift. */
-export function ShiftBoxesPanel({ boxes, onReprint, onDisassemble }: ShiftBoxesPanelProps) {
+export function ShiftBoxesPanel({
+  boxes,
+  onReprint,
+  onDisassemble,
+  onPendingChange,
+}: ShiftBoxesPanelProps) {
   const { t } = useTranslation();
   const [pending, setPending] = useState<PendingAction | null>(null);
   const [reason, setReason] = useState("");
   const trimmedReason = reason.trim();
 
+  useEffect(() => () => onPendingChange?.(false), [onPendingChange]);
+
   function startAction(boxId: string, kind: PendingAction["kind"]): void {
     setPending({ boxId, kind });
     setReason("");
+    onPendingChange?.(true);
   }
 
   function confirm(): void {
@@ -29,6 +38,7 @@ export function ShiftBoxesPanel({ boxes, onReprint, onDisassemble }: ShiftBoxesP
     else onDisassemble(pending.boxId, trimmedReason);
     setPending(null);
     setReason("");
+    onPendingChange?.(false);
   }
 
   return (
@@ -91,6 +101,7 @@ export function ShiftBoxesPanel({ boxes, onReprint, onDisassemble }: ShiftBoxesP
               label={t("box.reason")}
               value={reason}
               onChange={(event) => setReason(event.target.value)}
+              maxLength={500}
               autoFocus
             />
             <div style={{ display: "flex", gap: 12 }}>
@@ -106,7 +117,10 @@ export function ShiftBoxesPanel({ boxes, onReprint, onDisassemble }: ShiftBoxesP
                 type="button"
                 variant="secondary"
                 style={{ minHeight: 64 }}
-                onClick={() => setPending(null)}
+                onClick={() => {
+                  setPending(null);
+                  onPendingChange?.(false);
+                }}
               >
                 {t("box.cancelClear")}
               </Button>

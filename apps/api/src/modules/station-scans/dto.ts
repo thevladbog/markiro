@@ -100,7 +100,7 @@ export const syncBatchSchema = z.object({
           shiftId: z.string().uuid().toLowerCase(),
           terminalId: z.string().nullable(),
           operatorId: z.string().uuid().toLowerCase().nullable(),
-          reason: z.string().min(1).nullable(),
+          reason: z.string().min(1).max(500).nullable(),
           occurredAt: z.string().datetime(),
         })
         .superRefine((exception, ctx) => {

@@ -14,8 +14,8 @@ export class BoxExceptionsService {
 
   /**
    * One tenant-scoped, shift-scoped select over `box_exceptions`, ordered by
-   * `recordedAt DESC` (newest first) -- the audit trail a manager reviews
-   * reads top-down as "what just happened", same reasoning as
+   * `recordedAt DESC` (newest first) and `id DESC` for stable ties. The audit
+   * trail a manager reviews reads top-down as "what just happened", same reasoning as
    * BoxesService.listBoxes ordering the still-open box to the top, but here
    * every row is an immutable, already-applied (or already-no-op'd) event
    * rather than a live aggregate.
@@ -33,11 +33,11 @@ export class BoxExceptionsService {
           eq(schema.boxExceptions.shiftId, query.shiftId),
         ),
       )
-      .orderBy(desc(schema.boxExceptions.recordedAt));
+      .orderBy(desc(schema.boxExceptions.recordedAt), desc(schema.boxExceptions.id));
     return {
       items: rows.map((r): BoxExceptionDto => ({
         id: r.id,
-        kind: r.kind,
+        kind: r.kind as BoxExceptionDto["kind"],
         boxId: r.boxId,
         codeHash: r.codeHash,
         terminalId: r.terminalId,

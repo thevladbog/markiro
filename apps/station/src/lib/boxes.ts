@@ -173,7 +173,7 @@ export async function clearBox(exec: SqlExecutor, input: ClearBoxInput): Promise
   });
 }
 
-export interface DisassembleBoxInput {
+export interface ReasonedBoxActionInput {
   boxId: string;
   shiftId: string;
   terminalId: string | null;
@@ -189,9 +189,26 @@ export interface DisassembleBoxInput {
  * voids the box's SSCC forever (see the design spec's scope decision 4) --
  * a re-packed box is a brand-new box row with a brand-new SSCC.
  */
-export async function disassembleBox(exec: SqlExecutor, input: DisassembleBoxInput): Promise<void> {
+export async function disassembleBox(
+  exec: SqlExecutor,
+  input: ReasonedBoxActionInput,
+): Promise<void> {
   await insertException(exec, {
     kind: "disassemble",
+    boxId: input.boxId,
+    codeHash: null,
+    shiftId: input.shiftId,
+    terminalId: input.terminalId,
+    operatorId: input.operatorId,
+    reason: input.reason,
+    at: input.at,
+  });
+}
+
+/** Queues an unchanged label reprint for a closed box. */
+export async function reprintBox(exec: SqlExecutor, input: ReasonedBoxActionInput): Promise<void> {
+  await insertException(exec, {
+    kind: "reprint",
     boxId: input.boxId,
     codeHash: null,
     shiftId: input.shiftId,

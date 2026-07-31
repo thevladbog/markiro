@@ -73,7 +73,7 @@ In the same file, add a new table after `codeConflicts` (reuse its imports — `
  * released elsewhere, the box was already disassembled) is still a
  * recorded attempt, never silently dropped, matching how 06c's box-closure
  * handling treats a redelivered closure. `codeHash` is set only for `undo`
- * (a single-code action); `reason` is set for everything except `undo`
+ * (a single-code action); `reason` is set for reprint and disassemble
  * (see the design spec's scope decision 5 for why undo alone is reasonless).
  */
 export const boxExceptions = pgTable(
@@ -376,7 +376,7 @@ export interface ExceptionDto {
   shiftId: string;
   terminalId: string | null;
   operatorId: string | null;
-  /** Required for everything except "undo" -- see the design spec, scope decision 5. */
+  /** Required for reprint and disassemble -- see the design spec, scope decision 5. */
   reason: string | null;
   occurredAt: string;
 }
@@ -412,16 +412,31 @@ In `apps/api/src/modules/station-scans/dto.ts`, add after the `boxes` field of `
   // scan or closure it corrects by an arbitrary number of batches.
   exceptions: z
     .array(
-      z.object({
-        kind: z.enum(["undo", "clear", "disassemble", "reprint"]),
-        boxId: z.string().min(1).max(64),
-        codeHash: z.string().length(64).nullable(),
-        shiftId: z.string().uuid().toLowerCase(),
-        terminalId: z.string().nullable(),
-        operatorId: z.string().uuid().toLowerCase().nullable(),
-        reason: z.string().min(1).nullable(),
-        occurredAt: z.string().datetime(),
-      }),
+      z
+        .object({
+          kind: z.enum(["undo", "clear", "disassemble", "reprint"]),
+          boxId: z.string().min(1).max(64),
+          codeHash: z.string().length(64).nullable(),
+          shiftId: z.string().uuid().toLowerCase(),
+          terminalId: z.string().nullable(),
+          operatorId: z.string().uuid().toLowerCase().nullable(),
+          reason: z.string().min(1).max(500).nullable(),
+          occurredAt: z.string().datetime(),
+        })
+        .superRefine((exception, ctx) => {
+          const codeShapeValid =
+            exception.kind === "undo" ? exception.codeHash !== null : exception.codeHash === null;
+          const reasonShapeValid =
+            exception.kind === "undo" || exception.kind === "clear"
+              ? exception.reason === null
+              : exception.reason !== null;
+          if (!codeShapeValid) {
+            ctx.addIssue({ code: "custom", path: ["codeHash"], message: "Invalid codeHash" });
+          }
+          if (!reasonShapeValid) {
+            ctx.addIssue({ code: "custom", path: ["reason"], message: "Invalid reason" });
+          }
+        }),
     )
     .max(200)
     .default([]),

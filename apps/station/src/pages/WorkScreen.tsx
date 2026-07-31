@@ -9,7 +9,6 @@ import {
 } from "@markiro/domain";
 import { Alert, Button, SignalOverlay, type SignalTone } from "@markiro/ui";
 import { boxLabelFields } from "../lib/box-label.js";
-import { insertException } from "../lib/box-exceptions-mirror.js";
 import {
   clearBox,
   currentBox,
@@ -18,6 +17,7 @@ import {
   markPrintSkipped,
   markPrintVerified,
   openBox,
+  reprintBox,
   type ClosedBoxSummary,
   type DeviceBox,
 } from "../lib/boxes.js";
@@ -261,6 +261,7 @@ export function WorkScreen({
   // ref is what actually closes the race.
   const closingRef = useRef(false);
   const [closing, setClosing] = useState(false);
+  const [boxActionPending, setBoxActionPending] = useState(false);
 
   function requestExit() {
     if (pendingSync > 0) setConfirmExit(true);
@@ -567,6 +568,7 @@ export function WorkScreen({
     sound,
     onScanRecorded,
     onScan,
+    operatorId,
     refreshBox: refreshBoxAndMaybeClose,
   });
   useEffect(() => {
@@ -576,6 +578,7 @@ export function WorkScreen({
       sound,
       onScanRecorded,
       onScan,
+      operatorId,
       refreshBox: refreshBoxAndMaybeClose,
     };
   });
@@ -610,7 +613,7 @@ export function WorkScreen({
             raw,
             verdict: verdict.status,
             scannedAt,
-            operatorId,
+            operatorId: live.current.operatorId,
           };
           const boxId = boxRef.current?.boxId ?? null;
 
@@ -723,7 +726,7 @@ export function WorkScreen({
           flashTimer.current = setTimeout(() => setSignal(null), FLASH_MS.error);
         },
       }),
-    [exec, shiftId, terminalId, operatorId, expectedGtin14],
+    [exec, shiftId, terminalId, expectedGtin14],
   );
 
   function handleUndo(): void {
@@ -772,17 +775,15 @@ export function WorkScreen({
     const target = closedBoxes.find((candidate) => candidate.boxId === boxId);
     if (!target) return;
     queue.enqueueJob(async () => {
-      await insertException(exec, {
-        kind: "reprint",
+      await reprintBox(exec, {
         boxId,
-        codeHash: null,
         shiftId,
         terminalId,
         operatorId,
         reason,
         at: new Date().toISOString(),
       });
-      await printAndMaybeVerify({ sscc: target.sscc, itemCount: target.itemCount }, boxId);
+      void printAndMaybeVerify({ sscc: target.sscc, itemCount: target.itemCount }, boxId);
       await reloadClosedBoxes();
       live.current.onScanRecorded?.();
     });
@@ -815,9 +816,9 @@ export function WorkScreen({
   // to compete with anything is print verification itself, not a stray
   // rejection from the loop underneath it.
   useEffect(() => {
-    if (verification || confirmClear) return;
+    if (verification || confirmClear || boxActionPending) return;
     return source.start((raw) => queue.enqueue(raw));
-  }, [source, queue, verification, confirmClear]);
+  }, [source, queue, verification, confirmClear, boxActionPending]);
 
   useEffect(
     () => () => {
@@ -1004,6 +1005,7 @@ export function WorkScreen({
               boxes={closedBoxes}
               onReprint={handleReprint}
               onDisassemble={handleDisassemble}
+              onPendingChange={setBoxActionPending}
             />
           )}
         </div>

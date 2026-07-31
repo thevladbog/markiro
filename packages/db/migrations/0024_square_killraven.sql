@@ -1,0 +1,1 @@
+CREATE INDEX "box_exceptions_tenant_shift_recorded_idx" ON "box_exceptions" USING btree ("tenant_id","shift_id","recorded_at");

@@ -635,6 +635,21 @@ describe("WorkScreen box progress, closing and printing", () => {
     expect(onScanRecorded).toHaveBeenCalledOnce();
   });
 
+  it("pauses ordinary scanning while a box-action reason dialog is open", async () => {
+    const exec = makeExec();
+    await seedClosedBox(exec);
+    const onScan = vi.fn();
+    renderWorkTracked({ exec, onScan });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Перепечатать" }));
+    act(() => scan(KM));
+    expect(onScan).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
+    act(() => scan(KM));
+    await waitFor(() => expect(onScan).toHaveBeenCalledOnce());
+  });
+
   it("disassembles a closed box, removes its codes and refreshes the panel", async () => {
     const exec = makeExec();
     await seedClosedBox(exec);

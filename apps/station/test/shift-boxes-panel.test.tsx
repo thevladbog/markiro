@@ -42,4 +42,38 @@ describe("ShiftBoxesPanel", () => {
 
     expect(onReprint).toHaveBeenCalledWith("b1", "Замятие этикетки");
   });
+
+  it("reports when a reason dialog opens and closes", () => {
+    const onPendingChange = vi.fn();
+    render(
+      <ShiftBoxesPanel
+        boxes={BOXES}
+        onReprint={vi.fn()}
+        onDisassemble={vi.fn()}
+        onPendingChange={onPendingChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Перепечатать" }));
+    fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
+
+    expect(onPendingChange.mock.calls).toEqual([[true], [false]]);
+  });
+
+  it("clears pending state if the panel unmounts while its dialog is open", () => {
+    const onPendingChange = vi.fn();
+    const view = render(
+      <ShiftBoxesPanel
+        boxes={BOXES}
+        onReprint={vi.fn()}
+        onDisassemble={vi.fn()}
+        onPendingChange={onPendingChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Перепечатать" }));
+    view.unmount();
+
+    expect(onPendingChange.mock.calls).toEqual([[true], [false]]);
+  });
 });

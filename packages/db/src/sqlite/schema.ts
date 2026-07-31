@@ -1,4 +1,5 @@
-import { integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
+import { check, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 /** Station-local key/value metadata (e.g. current terminal id, last sync). */
 export const stationMeta = sqliteTable("station_meta", {
@@ -197,17 +198,28 @@ export const conflictsMirror = sqliteTable("conflicts_mirror", {
  * monotonic id ceiling is enough for ack tracking (see sync.ts's
  * box-exceptions read/ack functions).
  */
-export const boxExceptionsMirror = sqliteTable("box_exceptions_mirror", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  kind: text("kind").notNull(),
-  boxId: text("box_id").notNull(),
-  codeHash: text("code_hash"),
-  shiftId: text("shift_id").notNull(),
-  terminalId: text("terminal_id"),
-  operatorId: text("operator_id"),
-  reason: text("reason"),
-  at: text("at").notNull(),
-});
+export const boxExceptionsMirror = sqliteTable(
+  "box_exceptions_mirror",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    kind: text("kind").notNull(),
+    boxId: text("box_id").notNull(),
+    codeHash: text("code_hash"),
+    shiftId: text("shift_id").notNull(),
+    terminalId: text("terminal_id"),
+    operatorId: text("operator_id"),
+    reason: text("reason"),
+    at: text("at").notNull(),
+  },
+  (t) => [
+    check(
+      "box_exceptions_mirror_kind_payload_check",
+      sql`(${t.kind} = 'undo' AND ${t.codeHash} IS NOT NULL AND ${t.reason} IS NULL)
+          OR (${t.kind} = 'clear' AND ${t.codeHash} IS NULL AND ${t.reason} IS NULL)
+          OR (${t.kind} IN ('disassemble', 'reprint') AND ${t.codeHash} IS NULL AND ${t.reason} IS NOT NULL)`,
+    ),
+  ],
+);
 
 /**
  * The device's local SSCC serial pool: ranges the server handed down for

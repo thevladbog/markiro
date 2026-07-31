@@ -1087,6 +1087,46 @@ describe("sync engine: pools and closures", () => {
     ]);
   });
 
+  it("never range-acks an unsent scan when device timestamps are out of id order", async () => {
+    await seed(exec, 1, "2026-07-29T10:00:03.000Z");
+    await exec.run("UPDATE outbox SET raw = 'LATE' WHERE id = 2");
+    await seed(exec, 1, "2026-07-29T10:00:00.000Z");
+    await exec.run("UPDATE outbox SET raw = 'EARLY' WHERE id = 3");
+    await insertException(exec, exception({ at: "2026-07-29T10:00:01.000Z", codeHash: "h1" }));
+
+    await drainOnce();
+
+    const bodies = post.mock.calls.map(
+      (call) => call[1] as { items: Array<{ raw: string }>; exceptions: unknown[] },
+    );
+    expect(bodies.map((body) => [body.items.length, body.exceptions.length])).toEqual([
+      [1, 0],
+      [0, 1],
+      [2, 0],
+    ]);
+    expect(bodies.flatMap((body) => body.items.map((item) => item.raw))).toEqual([
+      "RAW1",
+      "LATE",
+      "EARLY",
+    ]);
+    expect(await outboxCount(exec)).toBe(0);
+  });
+
+  it("retains an unparseable queued timestamp instead of range-acking it", async () => {
+    await exec.run("UPDATE outbox SET scanned_at = 'not-a-date' WHERE id = 1");
+    await insertException(exec, exception({ at: "2026-07-29T10:00:01.000Z", codeHash: "h1" }));
+    post.mockRejectedValue(new Error("API rejected malformed scannedAt"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await drainOnce();
+
+    const body = post.mock.calls[0]![1] as { items: unknown[]; exceptions: unknown[] };
+    expect(body.items).toHaveLength(1);
+    expect(body.exceptions).toEqual([]);
+    expect(await outboxCount(exec)).toBe(1);
+    expect(await readExceptions(exec, 10)).toHaveLength(1);
+  });
+
   it("preserves chronological splitting after a crash saved only the exception ceiling", async () => {
     await insertException(exec, exception({ at: "2026-07-29T10:00:01.000Z", codeHash: "h1" }));
     await exec.run("INSERT INTO station_meta (key, value) VALUES (?, ?)", [

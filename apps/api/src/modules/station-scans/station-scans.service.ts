@@ -988,41 +988,7 @@ export class StationScansService {
             ),
           );
         if (openBox) {
-          // Every still-active item (not already displaced to another box,
-          // not already removed by an earlier undo/clear) has its code
-          // claim released, exactly like "undo" above but for every item
-          // in the box at once rather than one named codeHash.
-          const activeItems = await tx
-            .select({ codeHash: schema.boxItems.codeHash })
-            .from(schema.boxItems)
-            .where(
-              and(
-                eq(schema.boxItems.tenantId, tenantId),
-                eq(schema.boxItems.boxId, resolvedBoxId),
-                isNull(schema.boxItems.displacedAt),
-                isNull(schema.boxItems.removedAt),
-              ),
-            );
-          for (const item of activeItems) {
-            await this.releaseCode(
-              tx,
-              tenantId,
-              item.codeHash,
-              ex.shiftId,
-              authenticatedTerminalId,
-            );
-          }
-          await tx
-            .update(schema.boxItems)
-            .set({ removedAt: sql`now()` })
-            .where(
-              and(
-                eq(schema.boxItems.tenantId, tenantId),
-                eq(schema.boxItems.boxId, resolvedBoxId),
-                isNull(schema.boxItems.displacedAt),
-                isNull(schema.boxItems.removedAt),
-              ),
-            );
+          await this.emptyBox(tx, tenantId, resolvedBoxId, ex.shiftId, authenticatedTerminalId);
         }
       } else if (ex.kind === "disassemble") {
         // Guarded to a box that is CLOSED (`closedAt IS NOT NULL`) and not
@@ -1052,42 +1018,7 @@ export class StationScansService {
             ),
           );
         if (closedBox) {
-          // Every still-active item released, identical to "clear" above --
-          // "disassemble" and "clear" empty a box the same way, differing
-          // only in which box each is allowed to act on, and in
-          // "disassemble"'s additional retirement of the box row itself
-          // below.
-          const activeItems = await tx
-            .select({ codeHash: schema.boxItems.codeHash })
-            .from(schema.boxItems)
-            .where(
-              and(
-                eq(schema.boxItems.tenantId, tenantId),
-                eq(schema.boxItems.boxId, resolvedBoxId),
-                isNull(schema.boxItems.displacedAt),
-                isNull(schema.boxItems.removedAt),
-              ),
-            );
-          for (const item of activeItems) {
-            await this.releaseCode(
-              tx,
-              tenantId,
-              item.codeHash,
-              ex.shiftId,
-              authenticatedTerminalId,
-            );
-          }
-          await tx
-            .update(schema.boxItems)
-            .set({ removedAt: sql`now()` })
-            .where(
-              and(
-                eq(schema.boxItems.tenantId, tenantId),
-                eq(schema.boxItems.boxId, resolvedBoxId),
-                isNull(schema.boxItems.displacedAt),
-                isNull(schema.boxItems.removedAt),
-              ),
-            );
+          await this.emptyBox(tx, tenantId, resolvedBoxId, ex.shiftId, authenticatedTerminalId);
 
           // The box's own retirement. `sscc` is deliberately left
           // untouched -- it stays on the row as a historical record of what
@@ -1122,6 +1053,50 @@ export class StationScansService {
         occurredAt: new Date(ex.occurredAt),
       });
     }
+  }
+
+  /** Releases all active memberships without per-code lock-order races. */
+  private async emptyBox(
+    tx: Pick<Db, "select" | "update" | "delete">,
+    tenantId: string,
+    resolvedBoxId: string,
+    shiftId: string,
+    terminalId: string,
+  ): Promise<void> {
+    const activeHashes = tx
+      .select({ codeHash: schema.boxItems.codeHash })
+      .from(schema.boxItems)
+      .where(
+        and(
+          eq(schema.boxItems.tenantId, tenantId),
+          eq(schema.boxItems.boxId, resolvedBoxId),
+          isNull(schema.boxItems.displacedAt),
+          isNull(schema.boxItems.removedAt),
+        ),
+      )
+      .orderBy(schema.boxItems.codeHash);
+    await tx
+      .delete(schema.codeRegistry)
+      .where(
+        and(
+          eq(schema.codeRegistry.tenantId, tenantId),
+          inArray(schema.codeRegistry.codeHash, activeHashes),
+          eq(schema.codeRegistry.shiftId, shiftId),
+          eq(schema.codeRegistry.terminalId, terminalId),
+        ),
+      );
+
+    await tx
+      .update(schema.boxItems)
+      .set({ removedAt: sql`now()` })
+      .where(
+        and(
+          eq(schema.boxItems.tenantId, tenantId),
+          eq(schema.boxItems.boxId, resolvedBoxId),
+          isNull(schema.boxItems.displacedAt),
+          isNull(schema.boxItems.removedAt),
+        ),
+      );
   }
 
   /**

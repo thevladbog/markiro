@@ -5,9 +5,10 @@ export interface ExceptionDto {
   /** Only set for "undo" -- the single code it targets. */
   codeHash: string | null;
   shiftId: string;
+  /** Informational wire field; the server always uses the authenticated device id. */
   terminalId: string | null;
   operatorId: string | null;
-  /** Required for everything except "undo" -- see the design spec, scope decision 5. */
+  /** Required for reprint and disassemble -- see the design spec, scope decision 5. */
   reason: string | null;
   occurredAt: string;
 }
