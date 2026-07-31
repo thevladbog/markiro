@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import express from "express";
 import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
@@ -570,6 +571,171 @@ describe.skipIf(!ready)("sscc e2e", () => {
       );
       // Still exactly at capacity -- the failed second attempt changed nothing.
       expect(await readCounter(prefix)).toBe(CAPACITY);
+    });
+  });
+
+  // Task 6: the compliance-critical guarantee that a disassembled box's own
+  // sscc can never be handed to a new box. Nothing in this plan modifies
+  // `SsccService.allocate`'s counter itself (it always advances forward and
+  // never reads `boxes` at all) -- this test exists to LOCK DOWN that an
+  // already-existing property of the counter continues to hold once
+  // "disassemble" (station-scans.service.ts) exists as a caller that can
+  // retire a box, not to drive new production code in this service.
+  describe("disassemble retires an SSCC for good (Task 6)", () => {
+    it("a disassembled box's SSCC never reappears in a later allocation for the same prefix", async () => {
+      const svc = app!.get(SsccService);
+      const prefix = "900000001";
+
+      const device = await agent
+        .post("/station-devices")
+        .send({ name: "Disassemble-lockdown device" })
+        .expect(201);
+      const deviceId = (device.body as { deviceId: string }).deviceId;
+      const apiKey = (device.body as { apiKey: string }).apiKey;
+
+      // A dedicated, OPENED shift -- this describe's shared `shiftWithIssuerId`/
+      // `plainShiftId` fixtures are never opened, and posting scans against a
+      // still-`planned` shift is not what a real device flow looks like.
+      const shift = await agent
+        .post("/shifts")
+        .send({ productId, mode: "aggregation" })
+        .expect(201);
+      const shiftId = (shift.body as { id: string }).id;
+      await agent.post(`/shifts/${shiftId}/open`).expect(200);
+
+      // Allocate a block and burn its very FIRST serial as the box's own
+      // sscc, closing a real box through the ordinary sync-batch endpoint --
+      // exactly the path that writes `boxes.sscc` and calls
+      // `SsccService.recordConsumedSerial` in production.
+      const block = await svc.allocate(tenantId, prefix, 0, deviceId, 20);
+      const burnedSerial = block.fromSerial;
+      const sscc = buildSscc(0, prefix, burnedSerial);
+      const codeHash = "d1".padEnd(64, "0");
+
+      await request(app!.getHttpServer())
+        .post("/station/scans")
+        .set("x-api-key", apiKey)
+        .send({
+          batchId: `disassemble-sscc-scan-${randomUUID()}`,
+          items: [
+            {
+              shiftId,
+              terminalId: deviceId,
+              raw: "RAW-d1",
+              verdict: "ok",
+              scannedAt: new Date().toISOString(),
+              code: { codeHash, gtin14: VALID_GTIN14, serial: "S-d1" },
+              boxId: "b1",
+              operatorId: null,
+            },
+          ],
+          boxes: [],
+          exceptions: [],
+        })
+        .expect(201);
+
+      await request(app!.getHttpServer())
+        .post("/station/scans")
+        .set("x-api-key", apiKey)
+        .send({
+          batchId: `disassemble-sscc-close-${randomUUID()}`,
+          items: [],
+          boxes: [
+            {
+              boxId: "b1",
+              shiftId,
+              terminalId: deviceId,
+              sscc,
+              closedAt: new Date().toISOString(),
+              operatorId: null,
+            },
+          ],
+          exceptions: [],
+        })
+        .expect(201);
+
+      const [boxRow] = await db
+        .select({ id: schema.boxes.id })
+        .from(schema.boxes)
+        .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.deviceBoxId, "b1")));
+      const boxId = boxRow!.id;
+
+      // Disassemble it via the same sync-batch endpoint a real station uses.
+      await request(app!.getHttpServer())
+        .post("/station/scans")
+        .set("x-api-key", apiKey)
+        .send({
+          batchId: `disassemble-sscc-exception-${randomUUID()}`,
+          items: [],
+          boxes: [],
+          exceptions: [
+            {
+              kind: "disassemble",
+              boxId: "b1",
+              codeHash: null,
+              shiftId,
+              terminalId: deviceId,
+              operatorId: null,
+              reason: "wrong customer",
+              occurredAt: new Date().toISOString(),
+            },
+          ],
+        })
+        .expect(201);
+
+      const [disassembled] = await db
+        .select({ disassembledAt: schema.boxes.disassembledAt, sscc: schema.boxes.sscc })
+        .from(schema.boxes)
+        .where(eq(schema.boxes.id, boxId));
+      expect(disassembled?.disassembledAt).not.toBeNull();
+      // The sscc string is kept, historical -- retirement is disassembledAt
+      // alone.
+      expect(disassembled?.sscc).toBe(sscc);
+
+      // Force fresh allocations for the SAME (tenantId, issuerPrefix,
+      // extensionDigit) -- enough of them to walk the counter well past the
+      // one serial this now-disassembled box already burned.
+      const next1 = await svc.allocate(tenantId, prefix, 0, deviceId, 20);
+      const next2 = await svc.allocate(tenantId, prefix, 0, deviceId, 20);
+
+      // Every block ever issued under this (tenant, prefix, extension
+      // digit): the burned serial must be covered by exactly ONE of them --
+      // the original block -- never a later one, which is what "the sscc
+      // never reappears as any serial range" actually means at the
+      // allocator's own level.
+      const allBlocks = await db
+        .select({ fromSerial: schema.ssccBlocks.fromSerial, toSerial: schema.ssccBlocks.toSerial })
+        .from(schema.ssccBlocks)
+        .where(
+          and(
+            eq(schema.ssccBlocks.tenantId, tenantId),
+            eq(schema.ssccBlocks.issuerPrefix, prefix),
+            eq(schema.ssccBlocks.extensionDigit, 0),
+          ),
+        );
+      const coveringBlocks = allBlocks.filter(
+        (b) => burnedSerial >= b.fromSerial && burnedSerial <= b.toSerial,
+      );
+      expect(coveringBlocks).toHaveLength(1);
+      expect(coveringBlocks[0]!.fromSerial).toBe(block.fromSerial);
+      expect(coveringBlocks[0]!.toSerial).toBe(block.toSerial);
+
+      // Neither fresh block's own range covers the burned serial either --
+      // the same fact, restated directly against the two new allocations.
+      for (const fresh of [next1, next2]) {
+        expect(burnedSerial < fresh.fromSerial || burnedSerial > fresh.toSerial).toBe(true);
+      }
+
+      // And no OTHER box -- disassembled or not -- was ever allowed to carry
+      // this same sscc string: `boxes_tenant_sscc_uq` already enforces this
+      // at the schema level, but the guarantee that matters here is
+      // behavioural, so assert it directly.
+      const boxesWithThisSscc = await db
+        .select({ id: schema.boxes.id })
+        .from(schema.boxes)
+        .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.sscc, sscc)));
+      expect(boxesWithThisSscc).toHaveLength(1);
+      expect(boxesWithThisSscc[0]!.id).toBe(boxId);
     });
   });
 });

@@ -90,7 +90,12 @@ describe("StationScansService.applyBatch month cap (Finding 2)", () => {
     const items = Array.from({ length: 30 }, (_, i) => item(monthsAgo(34 - i)));
 
     await expect(
-      service.applyBatch("tenant-1", { batchId: "m1:install-1:200", items, boxes: [] }),
+      service.applyBatch("tenant-1", {
+        batchId: "m1:install-1:200",
+        items,
+        boxes: [],
+        exceptions: [],
+      }),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(ensurePartitionsMock).not.toHaveBeenCalled();
   });
@@ -128,6 +133,7 @@ describe("StationScansService.applyBatch month cap (Finding 2)", () => {
       batchId: "m1:install-1:200",
       items,
       boxes: [],
+      exceptions: [],
     });
 
     expect(ensurePartitionsMock).toHaveBeenCalledTimes(1);
@@ -169,6 +175,7 @@ describe("StationScansService.applyBatch shift-ownership guard ordering (Finding
         batchId: "m1:install-1:1",
         items: [item(ancientScannedAt)],
         boxes: [],
+        exceptions: [],
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(ensurePartitionsMock).not.toHaveBeenCalled();
@@ -195,7 +202,12 @@ describe("StationScansService.applyBatch shift-ownership guard ordering (Finding
     const items = [item(new Date().toISOString())];
 
     await expect(
-      service.applyBatch("tenant-1", { batchId: "m1:install-1:1", items, boxes: [] }),
+      service.applyBatch("tenant-1", {
+        batchId: "m1:install-1:1",
+        items,
+        boxes: [],
+        exceptions: [],
+      }),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(ensurePartitionsMock).not.toHaveBeenCalled();
   });

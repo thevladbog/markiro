@@ -19,6 +19,11 @@ import {
 } from "../src/lib/boxes.js";
 import { recordScan, type AcceptedCode, type ScanEventRow } from "../src/lib/journal.js";
 import { outboxDepth } from "../src/lib/outbox.js";
+import {
+  insertException,
+  readExceptions,
+  type ExceptionInput,
+} from "../src/lib/box-exceptions-mirror.js";
 
 // Several tests below deliberately fail the POST (or the device DB) to
 // exercise the retry path, which logs through `console.error` by design.
@@ -1025,6 +1030,283 @@ describe("sync engine: pools and closures", () => {
     });
     await drainOnce();
     expect(JSON.parse(lastBody()).serialsLeft).toBe(3);
+  });
+
+  function exception(overrides: Partial<ExceptionInput> = {}): ExceptionInput {
+    return {
+      kind: "undo",
+      boxId: "b1",
+      codeHash: "h1",
+      shiftId: SHIFT,
+      terminalId: TERMINAL,
+      operatorId: null,
+      reason: null,
+      at: ISO,
+      ...overrides,
+    };
+  }
+
+  it("drains queued exceptions with items and deletes them only after acknowledgement", async () => {
+    await insertException(exec, exception());
+
+    await drainOnce();
+
+    expect(JSON.parse(lastBody()).exceptions).toEqual([
+      {
+        kind: "undo",
+        boxId: "b1",
+        codeHash: "h1",
+        shiftId: SHIFT,
+        terminalId: TERMINAL,
+        operatorId: null,
+        reason: null,
+        occurredAt: ISO,
+      },
+    ]);
+    expect(await readExceptions(exec, 10)).toEqual([]);
+  });
+
+  it("sends scan, correction, and later rescan in chronological batches", async () => {
+    await insertException(exec, exception({ at: "2026-07-29T10:00:01.000Z", codeHash: "h1" }));
+    await seed(exec, 1, "2026-07-29T10:00:02.000Z");
+
+    await drainOnce();
+
+    expect(post).toHaveBeenCalledTimes(3);
+    const bodies = post.mock.calls.map(
+      (call) =>
+        call[1] as {
+          items: Array<{ scannedAt: string }>;
+          exceptions: Array<{ occurredAt: string }>;
+        },
+    );
+    expect(bodies.map((body) => [body.items.length, body.exceptions.length])).toEqual([
+      [1, 0],
+      [0, 1],
+      [1, 0],
+    ]);
+  });
+
+  it("never range-acks an unsent scan when device timestamps are out of id order", async () => {
+    await seed(exec, 1, "2026-07-29T10:00:03.000Z");
+    await exec.run("UPDATE outbox SET raw = 'LATE' WHERE id = 2");
+    await seed(exec, 1, "2026-07-29T10:00:00.000Z");
+    await exec.run("UPDATE outbox SET raw = 'EARLY' WHERE id = 3");
+    await insertException(exec, exception({ at: "2026-07-29T10:00:01.000Z", codeHash: "h1" }));
+
+    await drainOnce();
+
+    const bodies = post.mock.calls.map(
+      (call) => call[1] as { items: Array<{ raw: string }>; exceptions: unknown[] },
+    );
+    expect(bodies.map((body) => [body.items.length, body.exceptions.length])).toEqual([
+      [1, 0],
+      [0, 1],
+      [2, 0],
+    ]);
+    expect(bodies.flatMap((body) => body.items.map((item) => item.raw))).toEqual([
+      "RAW1",
+      "LATE",
+      "EARLY",
+    ]);
+    expect(await outboxCount(exec)).toBe(0);
+  });
+
+  it("retains an unparseable queued timestamp instead of range-acking it", async () => {
+    await exec.run("UPDATE outbox SET scanned_at = 'not-a-date' WHERE id = 1");
+    await insertException(exec, exception({ at: "2026-07-29T10:00:01.000Z", codeHash: "h1" }));
+    post.mockRejectedValue(new Error("API rejected malformed scannedAt"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await drainOnce();
+
+    const body = post.mock.calls[0]![1] as { items: unknown[]; exceptions: unknown[] };
+    expect(body.items).toHaveLength(1);
+    expect(body.exceptions).toEqual([]);
+    expect(await outboxCount(exec)).toBe(1);
+    expect(await readExceptions(exec, 10)).toHaveLength(1);
+  });
+
+  it("preserves chronological splitting after a crash saved only the exception ceiling", async () => {
+    await insertException(exec, exception({ at: "2026-07-29T10:00:01.000Z", codeHash: "h1" }));
+    await exec.run("INSERT INTO station_meta (key, value) VALUES (?, ?)", [
+      "sync_pending_exception_ceiling",
+      "1",
+    ]);
+    await seed(exec, 1, "2026-07-29T10:00:02.000Z");
+
+    await drainOnce();
+
+    expect(post).toHaveBeenCalledTimes(3);
+    const bodies = post.mock.calls.map(
+      (call) =>
+        call[1] as {
+          items: unknown[];
+          exceptions: unknown[];
+        },
+    );
+    expect(bodies.map((body) => [body.items.length, body.exceptions.length])).toEqual([
+      [1, 0],
+      [0, 1],
+      [1, 0],
+    ]);
+  });
+
+  it("keeps fresh rows out of a persisted exception-only batch after restart", async () => {
+    await drainOnce();
+    await insertException(exec, exception({ at: "2026-07-29T10:00:01.000Z", codeHash: "h1" }));
+    await seed(exec, 1, "2026-07-29T10:00:02.000Z");
+    for (const [key, value] of [
+      ["sync_pending_ceiling", "0"],
+      ["sync_pending_box_ceiling", "0"],
+      ["sync_pending_exception_ceiling", "1"],
+      ["sync_pending_batch_id", "m1:install-crashed:exception:1"],
+    ]) {
+      await exec.run("INSERT INTO station_meta (key, value) VALUES (?, ?)", [key, value]);
+    }
+
+    await drainOnce();
+
+    expect(post).toHaveBeenCalledTimes(2);
+    const first = post.mock.calls[0]![1] as {
+      batchId: string;
+      items: unknown[];
+      exceptions: unknown[];
+    };
+    const second = post.mock.calls[1]![1] as { batchId: string; items: unknown[] };
+    expect(first.batchId).toBe("m1:install-crashed:exception:1");
+    expect(first.items).toEqual([]);
+    expect(first.exceptions).toHaveLength(1);
+    expect(second.items).toHaveLength(1);
+    expect(second.batchId).not.toBe(first.batchId);
+  });
+
+  it("keeps the same batch id when a local box ack fails after the item ack", async () => {
+    await openBox(exec, SHIFT, "b1", ISO, TERMINAL);
+    await closeBox(exec, "b1", SSCC, ISO, null);
+    const failing = failingExecOn(exec, /UPDATE boxes_mirror SET acked_at/);
+    const firstPost = vi
+      .fn()
+      .mockResolvedValue({ applied: 1, alreadyApplied: false, conflicts: [] });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const firstEngine = createSyncEngine({
+      exec: failing,
+      client: { post: firstPost },
+      machineId: "m1",
+      onState: () => {},
+    });
+    firstEngine.nudge();
+    await firstEngine.idle();
+    firstEngine.stop();
+
+    const retryPost = vi
+      .fn()
+      .mockResolvedValue({ applied: 0, alreadyApplied: true, conflicts: [] });
+    const retryEngine = createSyncEngine({
+      exec,
+      client: { post: retryPost },
+      machineId: "m1",
+      onState: () => {},
+    });
+    retryEngine.nudge();
+    await retryEngine.idle();
+    retryEngine.stop();
+
+    const first = firstPost.mock.calls[0]![1] as {
+      batchId: string;
+      items: unknown[];
+      boxes: unknown[];
+    };
+    const retry = retryPost.mock.calls[0]![1] as {
+      batchId: string;
+      items: unknown[];
+      boxes: unknown[];
+    };
+    expect(first.items).toHaveLength(1);
+    expect(first.boxes).toHaveLength(1);
+    expect(retry.items).toEqual([]);
+    expect(retry.boxes).toHaveLength(1);
+    expect(retry.batchId).toBe(first.batchId);
+  });
+
+  it("gives consecutive exception-only batches distinct ids so server dedup cannot swallow one", async () => {
+    await drainOnce(); // drain the default item first
+    await insertException(exec, exception({ boxId: "b1", codeHash: "h1" }));
+    await drainOnce();
+    const firstId = JSON.parse(lastBody()).batchId as string;
+
+    await insertException(exec, exception({ boxId: "b2", codeHash: "h2" }));
+    await drainOnce();
+    const secondId = JSON.parse(lastBody()).batchId as string;
+
+    expect(secondId).not.toBe(firstId);
+    expect(await readExceptions(exec, 10)).toEqual([]);
+  });
+
+  it("reports an exception-only backlog as pending and stuck", async () => {
+    await drainOnce();
+    await insertException(exec, exception({ at: "2026-01-01T00:00:00.000Z" }));
+    const states: Array<{ pending: number; stuck: boolean }> = [];
+    const failedPost = vi.fn().mockRejectedValue(new Error("offline"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const engine = createSyncEngine({
+      exec,
+      client: { post: failedPost },
+      machineId: "m1",
+      onState: (state) => states.push({ pending: state.pending, stuck: state.stuck }),
+    });
+
+    engine.nudge();
+    await engine.idle();
+
+    expect(states.at(-1)).toEqual({ pending: 1, stuck: true });
+    engine.stop();
+  });
+
+  it("persists an exception batch ceiling so a restart retries its exact rows before newer facts", async () => {
+    await drainOnce(); // drain the default item first
+    await insertException(exec, exception({ boxId: "b1", codeHash: "h1" }));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const failedPost = vi.fn().mockRejectedValue(new Error("response lost"));
+    const firstEngine = createSyncEngine({
+      exec,
+      client: { post: failedPost },
+      machineId: "m1",
+      onState: () => {},
+    });
+    firstEngine.nudge();
+    await firstEngine.idle();
+    firstEngine.stop();
+    const firstBody = failedPost.mock.calls[0]![1] as {
+      batchId: string;
+      exceptions: Array<{ boxId: string }>;
+    };
+
+    await insertException(exec, exception({ boxId: "b2", codeHash: "h2" }));
+    const resumedPost = vi
+      .fn()
+      .mockResolvedValue({ applied: 0, alreadyApplied: true, conflicts: [] });
+    const resumedEngine = createSyncEngine({
+      exec,
+      client: { post: resumedPost },
+      machineId: "m1",
+      onState: () => {},
+    });
+    resumedEngine.nudge();
+    await resumedEngine.idle();
+    resumedEngine.stop();
+
+    expect(firstBody.exceptions.map((item) => item.boxId)).toEqual(["b1"]);
+    expect(resumedPost).toHaveBeenCalledTimes(2);
+    const retried = resumedPost.mock.calls[0]![1] as {
+      batchId: string;
+      exceptions: Array<{ boxId: string }>;
+    };
+    expect(retried.batchId).toBe(firstBody.batchId);
+    expect(retried.exceptions.map((item) => item.boxId)).toEqual(["b1"]);
+    const fresh = resumedPost.mock.calls[1]![1] as { exceptions: Array<{ boxId: string }> };
+    expect(fresh.exceptions.map((item) => item.boxId)).toEqual(["b2"]);
+    expect(await readExceptions(exec, 10)).toEqual([]);
   });
 
   it("sends a closed box with its serial", async () => {

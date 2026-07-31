@@ -1,7 +1,9 @@
+import { sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
   char,
+  check,
   date,
   foreignKey,
   index,
@@ -257,6 +259,57 @@ export const codeConflicts = pgTable(
   ],
 );
 
+/**
+ * The audit trail for every undo/clear/disassemble/reprint action, whether
+ * or not it actually changed anything — a no-op (the code was already
+ * released elsewhere, the box was already disassembled) is still a
+ * recorded attempt, never silently dropped, matching how 06c's box-closure
+ * handling treats a redelivered closure. `codeHash` is set only for `undo`
+ * (a single-code action); `reason` is set for everything except `undo`
+ * (see the design spec's scope decision 5 for why undo alone is reasonless).
+ */
+export const boxExceptions = pgTable(
+  "box_exceptions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    kind: text("kind").notNull(),
+    boxId: uuid("box_id").notNull(),
+    codeHash: char("code_hash", { length: 64 }),
+    shiftId: uuid("shift_id").notNull(),
+    terminalId: text("terminal_id"),
+    operatorId: uuid("operator_id"),
+    reason: text("reason"),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("box_exceptions_tenant_box_idx").on(t.tenantId, t.boxId, t.recordedAt),
+    index("box_exceptions_tenant_shift_recorded_idx").on(t.tenantId, t.shiftId, t.recordedAt),
+    check(
+      "box_exceptions_kind_payload_check",
+      sql`(${t.kind} = 'undo' AND ${t.codeHash} IS NOT NULL AND ${t.reason} IS NULL)
+          OR (${t.kind} = 'clear' AND ${t.codeHash} IS NULL AND ${t.reason} IS NULL)
+          OR (${t.kind} IN ('disassemble', 'reprint') AND ${t.codeHash} IS NULL AND ${t.reason} IS NOT NULL)`,
+    ),
+    foreignKey({
+      name: "box_exceptions_tenant_box_fk",
+      columns: [t.tenantId, t.boxId],
+      foreignColumns: [boxes.tenantId, boxes.id],
+    }),
+    foreignKey({
+      name: "box_exceptions_tenant_shift_fk",
+      columns: [t.tenantId, t.shiftId],
+      foreignColumns: [shifts.tenantId, shifts.id],
+    }),
+    foreignKey({
+      name: "box_exceptions_tenant_operator_fk",
+      columns: [t.tenantId, t.operatorId],
+      foreignColumns: [employees.tenantId, employees.id],
+    }),
+  ],
+);
+
 export const stationDevices = pgTable(
   "station_devices",
   {
@@ -395,6 +448,13 @@ export const boxes = pgTable(
     closureReceivedAt: timestamp("closure_received_at", { withTimezone: true }),
     printVerifiedAt: timestamp("print_verified_at", { withTimezone: true }),
     printSkippedAt: timestamp("print_skipped_at", { withTimezone: true }),
+    /**
+     * Set when the operator disassembled this closed box. Once set, the box
+     * is retired: excluded from "active" listings, and its `sscc` is never
+     * reissued — a box re-packed after disassembly is a brand-new row with
+     * a brand-new SSCC through the ordinary `SsccService.allocate` path.
+     */
+    disassembledAt: timestamp("disassembled_at", { withTimezone: true }),
   },
   (t) => [
     unique("boxes_tenant_id_uq").on(t.tenantId, t.id),
@@ -466,6 +526,16 @@ export const boxItems = pgTable(
     codeHash: char("code_hash", { length: 64 }).notNull(),
     addedAt: timestamp("added_at", { withTimezone: true }).notNull(),
     displacedAt: timestamp("displaced_at", { withTimezone: true }),
+    /**
+     * Set when the OPERATOR removed this item on purpose (an "undo" of a
+     * single scan, or a "clear"/"disassemble" of the whole box) — distinct
+     * from `displacedAt`, which means a different terminal's earlier scan won
+     * the ownership race (06b). Kept separate because the two are different
+     * facts for `contentsChangedAfterClose` and any later reporting: one is
+     * an operator decision, the other is a race outcome neither terminal
+     * controlled.
+     */
+    removedAt: timestamp("removed_at", { withTimezone: true }),
   },
   (t) => [
     primaryKey({ columns: [t.tenantId, t.boxId, t.codeHash] }),

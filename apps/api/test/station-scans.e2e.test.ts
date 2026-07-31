@@ -4,7 +4,7 @@ import { Test } from "@nestjs/testing";
 import { Logger, type INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { buildSscc } from "@markiro/domain";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
@@ -22,6 +22,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
   let app: INestApplication | undefined;
   let setup: AuthSetup;
   let db: Db;
+  const deviceIdsByKey = new Map<string, string>();
 
   beforeAll(async () => {
     const env = loadEnv();
@@ -74,7 +75,9 @@ describe.skipIf(!ready)("station-scans e2e", () => {
 
   async function deviceKey(agent: ReturnType<typeof request.agent>): Promise<string> {
     const device = await agent.post("/station-devices").send({ name: "Line 1" }).expect(201);
-    return (device.body as { apiKey: string }).apiKey;
+    const body = device.body as { apiKey: string; deviceId: string };
+    deviceIdsByKey.set(body.apiKey, body.deviceId);
+    return body.apiKey;
   }
 
   // A genuinely valid GTIN-14 (same fixture as products.e2e.test.ts's
@@ -837,6 +840,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
     let agent: ReturnType<typeof request.agent>;
     let tenantId: string;
     let apiKey: string;
+    let deviceId: string;
     let shiftId: string;
     let OPERATOR_ID: string;
     let OTHER_OPERATOR_ID: string;
@@ -852,6 +856,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       agent = request.agent(app!.getHttpServer());
       tenantId = await signUpAndActivate(agent);
       apiKey = await deviceKey(agent);
+      deviceId = deviceIdsByKey.get(apiKey)!;
       shiftId = await openShift(agent);
 
       // Real employees rows: boxes.operator_id and scan_events.operator_id
@@ -1697,5 +1702,662 @@ describe.skipIf(!ready)("station-scans e2e", () => {
         expect(blockRow!.consumedThroughSerial).toBeNull();
       },
     );
+
+    // Task 4: applying "undo" exceptions inside the same sync-batch
+    // transaction. Nested here (rather than a fresh top-level describe) so
+    // it inherits this describe's own beforeEach (agent/tenantId/apiKey/
+    // shiftId) and its scan/postBatch/postBatchAs/postRaw/boxIdFor/
+    // registryOwner helpers, instead of re-deriving a fresh fixture shape.
+    describe("exceptions", () => {
+      it("undo releases the code from the registry and marks the box item removed", async () => {
+        await postBatchAs(deviceId, [scan("aa", { boxId: "b1" })]);
+        const boxId = await boxIdFor("b1");
+        const codeHash = "aa".padEnd(64, "0");
+
+        const undoRes = await postRaw({
+          batchId: `undo-test-${randomUUID()}`,
+          items: [],
+          boxes: [],
+          exceptions: [
+            {
+              kind: "undo",
+              // The real device-local box id, exactly as the station's own
+              // sync protocol sends it (see ScanItemDto.boxId and the
+              // box-closures loop's own `boxId` a few hundred lines above in
+              // station-scans.service.ts) -- deliberately NOT the resolved
+              // server `boxes.id` UUID `boxIdFor` returns below. Proves the
+              // resolution step inside `applyExceptions` actually resolves a
+              // raw device string, rather than merely accepting an
+              // already-resolved UUID by luck (the bug this fix closes: a
+              // real device sending "b1" here used to raise Postgres 22P02,
+              // "invalid input syntax for type uuid").
+              boxId: "b1",
+              codeHash,
+              shiftId,
+              terminalId: "t1",
+              operatorId: null,
+              reason: null,
+              occurredAt: new Date().toISOString(),
+            },
+          ],
+        });
+        expect(undoRes.body.applied).toBe(0);
+
+        const [registryRow] = await db
+          .select()
+          .from(schema.codeRegistry)
+          .where(
+            and(
+              eq(schema.codeRegistry.tenantId, tenantId),
+              eq(schema.codeRegistry.codeHash, codeHash),
+            ),
+          );
+        expect(registryRow).toBeUndefined();
+
+        const [itemRow] = await db
+          .select()
+          .from(schema.boxItems)
+          .where(
+            and(
+              eq(schema.boxItems.tenantId, tenantId),
+              eq(schema.boxItems.boxId, boxId),
+              eq(schema.boxItems.codeHash, codeHash),
+            ),
+          );
+        expect(itemRow?.removedAt).not.toBeNull();
+
+        const [auditRow] = await db
+          .select()
+          .from(schema.boxExceptions)
+          .where(eq(schema.boxExceptions.tenantId, tenantId));
+        expect(auditRow?.kind).toBe("undo");
+        expect(auditRow?.terminalId).toBe(deviceId);
+        // The audit row's boxId is the RESOLVED server UUID, not the raw
+        // "b1" the request carried -- proving the resolution step's output
+        // actually flows into the box_exceptions write (and not just into
+        // the box_items update above).
+        expect(auditRow?.boxId).toBe(boxId);
+      });
+
+      it("reactivates box membership when the released code is scanned again later", async () => {
+        const codeHash = "aa".padEnd(64, "0");
+        await postBatchAs(deviceId, [scan("aa", { boxId: "b1", scannedAt: "10:00:00" })]);
+        await postRaw({
+          batchId: `undo-rescan-${randomUUID()}`,
+          items: [],
+          boxes: [],
+          exceptions: [
+            {
+              kind: "undo",
+              boxId: "b1",
+              codeHash,
+              shiftId,
+              terminalId: "spoofed-terminal",
+              operatorId: null,
+              reason: null,
+              occurredAt: "2026-07-29T10:00:01.000Z",
+            },
+          ],
+        });
+        await postBatchAs(deviceId, [scan("aa", { boxId: "b1", scannedAt: "10:00:02" })]);
+
+        expect((await registryOwner(tenantId, codeHash))?.terminalId).toBe(deviceId);
+        const [membership] = await db
+          .select({ removedAt: schema.boxItems.removedAt, addedAt: schema.boxItems.addedAt })
+          .from(schema.boxItems)
+          .where(
+            and(eq(schema.boxItems.tenantId, tenantId), eq(schema.boxItems.codeHash, codeHash)),
+          );
+        expect(membership?.removedAt).toBeNull();
+        expect(membership?.addedAt.toISOString()).toBe("2026-07-29T10:00:02.000Z");
+      });
+
+      // t1 claims "aa" first (a LATER scannedAt); t2's own later-arriving but
+      // EARLIER-scannedAt claim then wins ownership (06b: earlier scannedAt
+      // wins) and retroactively marks t1's own box item displaced -- the
+      // exact scenario "marks its own box item displaced..." above already
+      // exercises. code_registry now belongs to t2, not the original t1.
+      it("undo on a code already displaced to another terminal is a harmless no-op", async () => {
+        await postBatchAs(deviceId, [scan("aa", { boxId: "b1", scannedAt: "10:00:05" })]);
+        await postBatchAs("t2", [scan("aa", { boxId: "b2", scannedAt: "10:00:00" })]);
+
+        const codeHash = "aa".padEnd(64, "0");
+        const before = await registryOwner(tenantId, codeHash);
+        expect(before?.terminalId).toBe("t2");
+
+        await postRaw({
+          batchId: `undo-test-${randomUUID()}`,
+          items: [],
+          boxes: [],
+          exceptions: [
+            {
+              kind: "undo",
+              // Raw device-local id (see the previous test's comment) --
+              // "b1" resolves to t1's own box, which is exactly the box this
+              // no-op case must resolve successfully; the no-op comes from
+              // `releaseCode`'s own WHERE (terminal no longer owns the
+              // code), not from a resolution failure.
+              boxId: "b1",
+              codeHash,
+              shiftId,
+              terminalId: "t1",
+              operatorId: null,
+              reason: null,
+              occurredAt: new Date().toISOString(),
+            },
+          ],
+        });
+
+        const after = await registryOwner(tenantId, codeHash);
+        expect(after?.terminalId).toBe("t2");
+        expect(after?.scannedAt).toEqual(before?.scannedAt);
+      });
+
+      it("redelivering the same undo exception twice is idempotent", async () => {
+        await postBatchAs(deviceId, [scan("aa", { boxId: "b1" })]);
+        const codeHash = "aa".padEnd(64, "0");
+
+        const body = {
+          batchId: `undo-test-${randomUUID()}`,
+          items: [],
+          boxes: [],
+          exceptions: [
+            {
+              kind: "undo",
+              // Raw device-local id -- see the first test's comment.
+              boxId: "b1",
+              codeHash,
+              shiftId,
+              terminalId: "t1",
+              operatorId: null,
+              reason: null,
+              occurredAt: new Date().toISOString(),
+            },
+          ],
+        };
+
+        const first = await postRaw(body);
+        expect(first.body.alreadyApplied).toBe(false);
+        const second = await postRaw(body);
+        expect(second.body.alreadyApplied).toBe(true);
+
+        const auditRows = await db
+          .select()
+          .from(schema.boxExceptions)
+          .where(eq(schema.boxExceptions.tenantId, tenantId));
+        expect(auditRows).toHaveLength(1);
+      });
+
+      // Critical-finding regression: a device's boxId is device-local and can
+      // fail to resolve to any server `boxes` row at all -- a genuinely
+      // stale/unknown id, or a race with the box's own first item. This must
+      // be a logged no-op, never a throw: throwing here 500s the whole batch,
+      // and per this file's own established retry semantics (see the
+      // box-closures loop's "Zero rows is..." comment in
+      // station-scans.service.ts) the device resends a failing batch under
+      // the SAME batchId forever, wedging that device's queue permanently --
+      // exactly the failure this fix exists to prevent. No `box_exceptions`
+      // audit row either: `box_exceptions.box_id` carries a NOT NULL foreign
+      // key onto `boxes(tenant_id, id)` (packages/db/src/schema/platform.ts),
+      // so a row naming an unresolved box could never be written even if the
+      // code tried.
+      it(
+        "logs and no-ops an exception whose boxId never resolves to a box row, without " +
+          "erroring or writing an audit row",
+        async () => {
+          const warnSpy = vi.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
+          try {
+            const res = await postRaw({
+              batchId: `undo-test-${randomUUID()}`,
+              items: [],
+              boxes: [],
+              exceptions: [
+                {
+                  kind: "undo",
+                  boxId: "ghost-box",
+                  codeHash: "aa".padEnd(64, "0"),
+                  shiftId,
+                  terminalId: "t1",
+                  operatorId: null,
+                  reason: null,
+                  occurredAt: new Date().toISOString(),
+                },
+              ],
+            });
+            expect(res.body.applied).toBe(0);
+            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("ghost-box"));
+
+            const auditRows = await db
+              .select()
+              .from(schema.boxExceptions)
+              .where(eq(schema.boxExceptions.tenantId, tenantId));
+            expect(auditRows).toHaveLength(0);
+          } finally {
+            warnSpy.mockRestore();
+          }
+        },
+      );
+
+      // Task 5: "clear" empties a still-open box (every active item's code
+      // released and the item itself marked removed) WITHOUT closing it --
+      // that's the difference from "disassemble" (Task 6), which does the
+      // same emptying but only to an already-closed box.
+      it("clear removes every active item from a still-open box, closes none of it", async () => {
+        await postBatchAs(deviceId, [scan("aa", { boxId: "b1" }), scan("bb", { boxId: "b1" })]);
+        const boxId = await boxIdFor("b1");
+        const codeHash1 = "aa".padEnd(64, "0");
+        const codeHash2 = "bb".padEnd(64, "0");
+
+        const res = await postRaw({
+          batchId: `clear-test-${randomUUID()}`,
+          items: [],
+          boxes: [],
+          exceptions: [
+            {
+              kind: "clear",
+              // Raw device-local id (see the "undo" tests' own comment
+              // above) -- proves this branch also consumes the resolution
+              // step's `resolvedBoxId`, not `ex.boxId` directly.
+              boxId: "b1",
+              codeHash: null,
+              shiftId,
+              terminalId: "t1",
+              operatorId: null,
+              reason: null,
+              occurredAt: new Date().toISOString(),
+            },
+          ],
+        });
+        expect(res.body.applied).toBe(0);
+
+        const items = await db
+          .select()
+          .from(schema.boxItems)
+          .where(and(eq(schema.boxItems.tenantId, tenantId), eq(schema.boxItems.boxId, boxId)));
+        expect(items).toHaveLength(2);
+        expect(items.every((i) => i.removedAt !== null)).toBe(true);
+
+        const registryRows = await db
+          .select()
+          .from(schema.codeRegistry)
+          .where(
+            and(
+              eq(schema.codeRegistry.tenantId, tenantId),
+              inArray(schema.codeRegistry.codeHash, [codeHash1, codeHash2]),
+            ),
+          );
+        expect(registryRows).toHaveLength(0);
+
+        const [box] = await db.select().from(schema.boxes).where(eq(schema.boxes.id, boxId));
+        expect(box?.closedAt).toBeNull();
+        expect(box?.disassembledAt).toBeNull();
+
+        const [auditRow] = await db
+          .select()
+          .from(schema.boxExceptions)
+          .where(eq(schema.boxExceptions.tenantId, tenantId));
+        expect(auditRow?.kind).toBe("clear");
+        // Same proof as the "undo" test above: the audit row's boxId is the
+        // RESOLVED server UUID, not the raw "b1" the request carried.
+        expect(auditRow?.boxId).toBe(boxId);
+      });
+
+      it("clear on an already-closed box is a no-op (guarded by closedAt IS NULL)", async () => {
+        await postBatchAs(deviceId, [scan("aa", { boxId: "b1" })]);
+        const codeHash = "aa".padEnd(64, "0");
+        await postBatchWithBoxes(
+          [],
+          [
+            {
+              boxId: "b1",
+              shiftId,
+              terminalId: deviceId,
+              sscc: SSCC,
+              closedAt: ISO,
+              operatorId: OPERATOR_ID,
+            },
+          ],
+        );
+        const boxId = await boxIdFor("b1");
+
+        await postRaw({
+          batchId: `clear-test-${randomUUID()}`,
+          items: [],
+          boxes: [],
+          exceptions: [
+            {
+              kind: "clear",
+              boxId: "b1",
+              codeHash: null,
+              shiftId,
+              terminalId: "t1",
+              operatorId: null,
+              reason: null,
+              occurredAt: new Date().toISOString(),
+            },
+          ],
+        });
+
+        // Item untouched -- the box was already closed, so the guard
+        // (`closedAt IS NULL`) must have refused to act at all.
+        const [itemRow] = await db
+          .select()
+          .from(schema.boxItems)
+          .where(
+            and(
+              eq(schema.boxItems.tenantId, tenantId),
+              eq(schema.boxItems.boxId, boxId),
+              eq(schema.boxItems.codeHash, codeHash),
+            ),
+          );
+        expect(itemRow?.removedAt).toBeNull();
+
+        const registryRow = await registryOwner(tenantId, codeHash);
+        expect(registryRow).toBeDefined();
+
+        const [box] = await db.select().from(schema.boxes).where(eq(schema.boxes.id, boxId));
+        expect(box?.closedAt?.toISOString()).toBe(ISO);
+        expect(box?.disassembledAt).toBeNull();
+
+        // Still a recorded attempt (same pattern as every other kind/no-op
+        // combination in this describe block) even though nothing else
+        // changed.
+        const [auditRow] = await db
+          .select()
+          .from(schema.boxExceptions)
+          .where(eq(schema.boxExceptions.tenantId, tenantId));
+        expect(auditRow?.kind).toBe("clear");
+      });
+
+      // Task 6: "disassemble" retires an ALREADY-CLOSED box (every active
+      // item's code released and the item itself marked removed, exactly
+      // like "clear" above) -- but unlike "clear", it acts only on a box
+      // that IS closed, and it additionally marks the box itself
+      // `disassembledAt` so it drops out of any "active" listing. The
+      // `sscc` string is deliberately left untouched: it stays on the row
+      // as a historical record of what was printed and applied to the
+      // physical box; only `disassembledAt` marks the box retired (the
+      // guarantee that the sscc itself is never reissued lives entirely in
+      // `SsccService.allocate`'s counter, which always moves forward and
+      // never reads `boxes` -- see sscc.e2e.test.ts's own lock-down test).
+      it("disassemble retires a closed box: items released, box excluded from active listing", async () => {
+        await postBatchAs(deviceId, [scan("aa", { boxId: "b1" }), scan("bb", { boxId: "b1" })]);
+        const codeHash1 = "aa".padEnd(64, "0");
+        const codeHash2 = "bb".padEnd(64, "0");
+        await postBatchWithBoxes(
+          [],
+          [
+            {
+              boxId: "b1",
+              shiftId,
+              terminalId: deviceId,
+              sscc: SSCC,
+              closedAt: ISO,
+              operatorId: OPERATOR_ID,
+            },
+          ],
+        );
+        const boxId = await boxIdFor("b1");
+
+        const res = await postRaw({
+          batchId: `disassemble-test-${randomUUID()}`,
+          items: [],
+          boxes: [],
+          exceptions: [
+            {
+              kind: "disassemble",
+              // Raw device-local id (same proof as "undo"/"clear" above) --
+              // proves this branch also consumes the resolution step's
+              // `resolvedBoxId`, not `ex.boxId` directly.
+              boxId: "b1",
+              codeHash: null,
+              shiftId,
+              terminalId: "t1",
+              operatorId: null,
+              reason: "packed for wrong customer",
+              occurredAt: new Date().toISOString(),
+            },
+          ],
+        });
+        expect(res.body.applied).toBe(0);
+
+        const [box] = await db.select().from(schema.boxes).where(eq(schema.boxes.id, boxId));
+        expect(box?.disassembledAt).not.toBeNull();
+        // The sscc string itself is kept -- historical record; only
+        // disassembledAt marks retirement.
+        expect(box?.sscc).toBe(SSCC);
+
+        const items = await db
+          .select()
+          .from(schema.boxItems)
+          .where(and(eq(schema.boxItems.tenantId, tenantId), eq(schema.boxItems.boxId, boxId)));
+        expect(items).toHaveLength(2);
+        expect(items.every((i) => i.removedAt !== null)).toBe(true);
+
+        const registryRows = await db
+          .select()
+          .from(schema.codeRegistry)
+          .where(
+            and(
+              eq(schema.codeRegistry.tenantId, tenantId),
+              inArray(schema.codeRegistry.codeHash, [codeHash1, codeHash2]),
+            ),
+          );
+        expect(registryRows).toHaveLength(0);
+
+        const [auditRow] = await db
+          .select()
+          .from(schema.boxExceptions)
+          .where(eq(schema.boxExceptions.tenantId, tenantId));
+        expect(auditRow?.kind).toBe("disassemble");
+        // Same proof as the "undo"/"clear" tests above: the audit row's
+        // boxId is the RESOLVED server UUID, not the raw "b1" the request
+        // carried.
+        expect(auditRow?.boxId).toBe(boxId);
+      });
+
+      it("disassemble on a still-open box is a no-op (guarded by closedAt IS NOT NULL)", async () => {
+        await postBatchAs(deviceId, [scan("aa", { boxId: "b1" })]);
+        const codeHash = "aa".padEnd(64, "0");
+        const boxId = await boxIdFor("b1");
+
+        await postRaw({
+          batchId: `disassemble-test-${randomUUID()}`,
+          items: [],
+          boxes: [],
+          exceptions: [
+            {
+              kind: "disassemble",
+              boxId: "b1",
+              codeHash: null,
+              shiftId,
+              terminalId: "t1",
+              operatorId: null,
+              reason: "packed for wrong customer",
+              occurredAt: new Date().toISOString(),
+            },
+          ],
+        });
+
+        // Untouched -- the box was never closed, so the guard (`closedAt
+        // IS NOT NULL`) must have refused to act at all: reaching into a
+        // still-open box is "clear"'s job, not "disassemble"'s.
+        const [itemRow] = await db
+          .select()
+          .from(schema.boxItems)
+          .where(
+            and(
+              eq(schema.boxItems.tenantId, tenantId),
+              eq(schema.boxItems.boxId, boxId),
+              eq(schema.boxItems.codeHash, codeHash),
+            ),
+          );
+        expect(itemRow?.removedAt).toBeNull();
+
+        const registryRow = await registryOwner(tenantId, codeHash);
+        expect(registryRow).toBeDefined();
+
+        const [box] = await db.select().from(schema.boxes).where(eq(schema.boxes.id, boxId));
+        expect(box?.closedAt).toBeNull();
+        expect(box?.disassembledAt).toBeNull();
+
+        // Still a recorded attempt (same pattern as every other kind/no-op
+        // combination in this describe block) even though nothing else
+        // changed.
+        const [auditRow] = await db
+          .select()
+          .from(schema.boxExceptions)
+          .where(eq(schema.boxExceptions.tenantId, tenantId));
+        expect(auditRow?.kind).toBe("disassemble");
+      });
+
+      it(
+        "disassemble twice on the same box is a no-op the second time (guarded by " +
+          "disassembledAt IS NULL)",
+        async () => {
+          await postBatchAs(deviceId, [scan("aa", { boxId: "b1" })]);
+          await postBatchWithBoxes(
+            [],
+            [
+              {
+                boxId: "b1",
+                shiftId,
+                terminalId: deviceId,
+                sscc: SSCC,
+                closedAt: ISO,
+                operatorId: OPERATOR_ID,
+              },
+            ],
+          );
+          const boxId = await boxIdFor("b1");
+
+          const disassembleException = {
+            kind: "disassemble",
+            boxId: "b1",
+            codeHash: null,
+            shiftId,
+            terminalId: "t1",
+            operatorId: null,
+            reason: "packed for wrong customer",
+            occurredAt: new Date().toISOString(),
+          };
+
+          await postRaw({
+            batchId: `disassemble-test-${randomUUID()}`,
+            items: [],
+            boxes: [],
+            exceptions: [disassembleException],
+          });
+          const [firstPass] = await db
+            .select({ disassembledAt: schema.boxes.disassembledAt })
+            .from(schema.boxes)
+            .where(eq(schema.boxes.id, boxId));
+          const firstTimestamp = firstPass!.disassembledAt;
+          expect(firstTimestamp).not.toBeNull();
+
+          // A SECOND, independent disassemble exception (a distinct batchId,
+          // not a redelivery of the same one) -- proves the guard is
+          // `disassembledAt IS NULL`, not merely the batch-level
+          // already-applied short-circuit.
+          await postRaw({
+            batchId: `disassemble-test-${randomUUID()}`,
+            items: [],
+            boxes: [],
+            exceptions: [{ ...disassembleException, occurredAt: new Date().toISOString() }],
+          });
+
+          const [secondPass] = await db
+            .select({ disassembledAt: schema.boxes.disassembledAt })
+            .from(schema.boxes)
+            .where(eq(schema.boxes.id, boxId));
+          // The FIRST disassembly's own timestamp survives untouched -- a
+          // missing guard would re-stamp `now()` a second time here.
+          expect(secondPass!.disassembledAt?.getTime()).toBe(firstTimestamp!.getTime());
+
+          const auditRows = await db
+            .select()
+            .from(schema.boxExceptions)
+            .where(eq(schema.boxExceptions.tenantId, tenantId));
+          // Both attempts are still recorded (same pattern as every other
+          // no-op case in this describe block) even though the second did
+          // nothing else.
+          expect(auditRows.filter((r) => r.kind === "disassemble")).toHaveLength(2);
+        },
+      );
+
+      // Task 7: "reprint" is a pure audit fact -- unlike every other kind in
+      // this describe block, no branch in `applyExceptions` matches it, so
+      // it falls straight through the if/else-if chain to the unconditional
+      // box_exceptions insert at the end of the loop and touches nothing
+      // else: no box_items update, no registry release, no box retirement.
+      it("reprint writes only an audit row -- no box or item state changes", async () => {
+        await postBatchAs(deviceId, [scan("aa", { boxId: "b1" }), scan("bb", { boxId: "b1" })]);
+        const boxId = await boxIdFor("b1");
+        const [before] = await db.select().from(schema.boxes).where(eq(schema.boxes.id, boxId));
+        const itemsBefore = await db
+          .select()
+          .from(schema.boxItems)
+          .where(and(eq(schema.boxItems.tenantId, tenantId), eq(schema.boxItems.boxId, boxId)));
+
+        const res = await postRaw({
+          batchId: `reprint-test-${randomUUID()}`,
+          items: [],
+          boxes: [],
+          exceptions: [
+            {
+              kind: "reprint",
+              // Raw device-local id (same proof as every other kind in this
+              // describe block above) -- proves this kind also goes through
+              // the resolution step, not just an already-resolved UUID.
+              boxId: "b1",
+              codeHash: null,
+              shiftId,
+              terminalId: "t1",
+              operatorId: null,
+              reason: "label jammed",
+              occurredAt: new Date().toISOString(),
+            },
+          ],
+        });
+        expect(res.body.applied).toBe(0);
+
+        const [after] = await db.select().from(schema.boxes).where(eq(schema.boxes.id, boxId));
+        expect(after).toEqual(before);
+
+        const itemsAfter = await db
+          .select()
+          .from(schema.boxItems)
+          .where(and(eq(schema.boxItems.tenantId, tenantId), eq(schema.boxItems.boxId, boxId)));
+        expect(itemsAfter).toEqual(itemsBefore);
+
+        const codeHash1 = "aa".padEnd(64, "0");
+        const codeHash2 = "bb".padEnd(64, "0");
+        const registryRows = await db
+          .select()
+          .from(schema.codeRegistry)
+          .where(
+            and(
+              eq(schema.codeRegistry.tenantId, tenantId),
+              inArray(schema.codeRegistry.codeHash, [codeHash1, codeHash2]),
+            ),
+          );
+        // Both codes still owned -- "reprint" releases nothing.
+        expect(registryRows).toHaveLength(2);
+
+        const [auditRow] = await db
+          .select()
+          .from(schema.boxExceptions)
+          .where(
+            and(
+              eq(schema.boxExceptions.tenantId, tenantId),
+              eq(schema.boxExceptions.kind, "reprint"),
+            ),
+          );
+        expect(auditRow?.reason).toBe("label jammed");
+        // Same proof as every other kind above: the audit row's boxId is the
+        // RESOLVED server UUID, not the raw "b1" the request carried.
+        expect(auditRow?.boxId).toBe(boxId);
+      });
+    });
   });
 });

@@ -114,4 +114,102 @@ describe("STATION_MIGRATIONS", () => {
     expect(terminalId).toBeDefined();
     expect(terminalId?.notnull).toBe(0);
   });
+
+  it("round-trips boxes_mirror.disassembled_at and box_exceptions_mirror", () => {
+    const db = migratedDb();
+    db.prepare(
+      `INSERT INTO boxes_mirror (box_id, shift_id, opened_at, disassembled_at)
+       VALUES (?, ?, ?, ?)`,
+    ).run("b1", "s1", "2026-07-30T00:00:00.000Z", "2026-07-30T00:05:00.000Z");
+
+    const box = db
+      .prepare("SELECT disassembled_at FROM boxes_mirror WHERE box_id = ?")
+      .get("b1") as
+      | {
+          disassembled_at: string;
+        }
+      | undefined;
+
+    expect(box?.disassembled_at).toBe("2026-07-30T00:05:00.000Z");
+
+    db.prepare(
+      `INSERT INTO box_exceptions_mirror (kind, box_id, shift_id, at)
+       VALUES (?, ?, ?, ?)`,
+    ).run("clear", "b1", "s1", "2026-07-30T00:06:00.000Z");
+
+    const rows = db.prepare("SELECT * FROM box_exceptions_mirror").all() as Array<{ id: number }>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.id).toBe(1);
+  });
+
+  it("applies exception facts and local box mutations atomically through triggers", () => {
+    const db = migratedDb();
+    db.prepare(
+      `INSERT INTO boxes_mirror (box_id, shift_id, opened_at, closed_at)
+       VALUES (?, ?, ?, ?)`,
+    ).run("b1", "s1", "2026-07-30T00:00:00.000Z", "2026-07-30T00:01:00.000Z");
+    db.prepare(
+      `INSERT INTO codes_mirror (code_hash, shift_id, gtin14, serial, scanned_at, box_id)
+       VALUES (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "h1",
+      "s1",
+      "04600000000015",
+      "a",
+      "2026-07-30T00:00:00.000Z",
+      "b1",
+      "h2",
+      "s1",
+      "04600000000015",
+      "b",
+      "2026-07-30T00:00:01.000Z",
+      "b1",
+    );
+
+    db.prepare(
+      `INSERT INTO box_exceptions_mirror (kind, box_id, shift_id, reason, at)
+       VALUES ('disassemble', ?, ?, ?, ?)`,
+    ).run("b1", "s1", "wrong customer", "2026-07-30T00:02:00.000Z");
+
+    expect(db.prepare("SELECT code_hash FROM codes_mirror WHERE box_id = 'b1'").all()).toEqual([]);
+    expect(
+      db.prepare("SELECT disassembled_at FROM boxes_mirror WHERE box_id = 'b1'").get(),
+    ).toEqual({ disassembled_at: "2026-07-30T00:02:00.000Z" });
+    expect(db.prepare("SELECT kind FROM box_exceptions_mirror").all()).toEqual([
+      { kind: "disassemble" },
+    ]);
+  });
+
+  it("rejects invalid exception payloads before local mutation triggers run", () => {
+    const db = migratedDb();
+    db.prepare(
+      `INSERT INTO boxes_mirror (box_id, shift_id, opened_at)
+       VALUES ('b1', 's1', '2026-07-30T00:00:00.000Z')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO codes_mirror (code_hash, shift_id, gtin14, serial, scanned_at, box_id)
+       VALUES ('h1', 's1', '04600000000015', 'a', '2026-07-30T00:00:00.000Z', 'b1')`,
+    ).run();
+
+    const insert = db.prepare(
+      `INSERT INTO box_exceptions_mirror (kind, box_id, code_hash, shift_id, reason, at)
+       VALUES (?, 'b1', ?, 's1', ?, '2026-07-30T00:01:00.000Z')`,
+    );
+    for (const values of [
+      ["undo", null, null],
+      ["clear", null, "unexpected"],
+      ["disassemble", null, null],
+      ["reprint", "h1", "damaged"],
+    ]) {
+      expect(() => insert.run(...values)).toThrow(/constraint/i);
+    }
+
+    expect(db.prepare("SELECT kind FROM box_exceptions_mirror").all()).toEqual([]);
+    expect(db.prepare("SELECT code_hash FROM codes_mirror").all()).toEqual([{ code_hash: "h1" }]);
+    expect(
+      db.prepare("SELECT disassembled_at FROM boxes_mirror WHERE box_id = 'b1'").get(),
+    ).toEqual({
+      disassembled_at: null,
+    });
+  });
 });

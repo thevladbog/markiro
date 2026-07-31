@@ -1,4 +1,5 @@
 import type { SqlExecutor } from "./mirror.js";
+import { insertException } from "./box-exceptions-mirror.js";
 
 /** One row of the local scan journal — every scan, accepted or not. */
 export interface ScanEventRow {
@@ -224,6 +225,55 @@ export async function recordScan(
   }
 
   return { storedCode, alreadyPresent };
+}
+
+/** Input to {@link undoLastScan}. */
+export interface UndoScanInput {
+  boxId: string;
+  codeHash: string;
+  shiftId: string;
+  terminalId: string | null;
+  operatorId: string | null;
+  at: string;
+}
+
+/**
+ * Undoes the single most recent scan into a still-open box: frees the code
+ * hash immediately (so a rescan is never mistaken for a duplicate),
+ * journals the correction, and queues the fact for the server to release
+ * the same code from `code_registry` (see the design spec's "Releasing a
+ * code" section).
+ *
+ * The durable exception is queued first. The local cleanup that follows is
+ * idempotent, while deleting locally first could permanently lose the only
+ * fact that tells the server to release ownership if a later write failed.
+ */
+export async function undoLastScan(exec: SqlExecutor, input: UndoScanInput): Promise<void> {
+  await insertException(exec, {
+    kind: "undo",
+    boxId: input.boxId,
+    codeHash: input.codeHash,
+    shiftId: input.shiftId,
+    terminalId: input.terminalId,
+    operatorId: input.operatorId,
+    reason: null,
+    at: input.at,
+  });
+  // The trigger installed with box_exceptions_mirror deletes the code in the
+  // same statement as the INSERT above. This secondary local journal entry
+  // must not turn an already-completed correction into a reported failure.
+  try {
+    await appendScanEvent(exec, {
+      shiftId: input.shiftId,
+      terminalId: input.terminalId,
+      raw: input.codeHash,
+      verdict: "undone",
+      scannedAt: input.at,
+      operatorId: input.operatorId,
+    });
+  } catch (err) {
+    console.error("station: failed to append undo scan event", err);
+  }
 }
 
 /** When this code was originally accepted, for the duplicate signal. */

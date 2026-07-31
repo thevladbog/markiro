@@ -10,16 +10,21 @@ import {
 import { Alert, Button, SignalOverlay, type SignalTone } from "@markiro/ui";
 import { boxLabelFields } from "../lib/box-label.js";
 import {
+  clearBox,
   currentBox,
+  disassembleBox,
+  listClosedBoxes,
   markPrintSkipped,
   markPrintVerified,
   openBox,
+  reprintBox,
+  type ClosedBoxSummary,
   type DeviceBox,
 } from "../lib/boxes.js";
 import { closeCurrentBox as closeCurrentBoxLib, type CloseBoxResult } from "../lib/close-box.js";
 import type { PrintTarget } from "../lib/hardware.js";
 import type { PrinterLanguage } from "../lib/hardware-config.js";
-import { findFirstSeen, loadCodeKeys, recordScan } from "../lib/journal.js";
+import { findFirstSeen, loadCodeKeys, recordScan, undoLastScan } from "../lib/journal.js";
 import { readShiftMirror, type SqlExecutor } from "../lib/mirror.js";
 import { renderLabelBytes } from "../lib/print-label.js";
 import { rasterizeText } from "../lib/rasterizer.js";
@@ -27,11 +32,13 @@ import { createScanQueue, type ScanOutcome } from "../lib/scan-queue.js";
 import type { ScanSource } from "../lib/scan-source.js";
 import { playSignalTone, type SoundSettings } from "../lib/signal-sound.js";
 import { PrintVerification } from "../ui/PrintVerification.js";
+import { ShiftBoxesPanel } from "../ui/ShiftBoxesPanel.js";
 
 export interface WorkScreenProps {
   exec: SqlExecutor;
   shiftId: string;
   terminalId: string | null;
+  operatorId: string;
   expectedGtin14: string;
   productName: string;
   counterpartyName?: string | null;
@@ -83,6 +90,7 @@ export function WorkScreen({
   exec,
   shiftId,
   terminalId,
+  operatorId,
   expectedGtin14,
   productName,
   counterpartyName,
@@ -111,6 +119,9 @@ export function WorkScreen({
   // device the server could not resolve an issuer prefix for, has no box
   // section to show.
   const [box, setBox] = useState<{ boxId: string; itemCount: number } | null>(null);
+  const [lastScanned, setLastScanned] = useState<{ boxId: string; codeHash: string } | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [closedBoxes, setClosedBoxes] = useState<ClosedBoxSummary[]>([]);
   // `boxRef` is the box's SOURCE OF TRUTH for `process()` below, updated by
   // `updateBox` synchronously and directly -- never derived from `box` via a
   // separate effect. A scan can arrive (and be judged) the instant this
@@ -120,14 +131,32 @@ export function WorkScreen({
   // with `setBox` alongside it purely to drive the on-screen display.
   const boxRef = useRef<{ boxId: string; itemCount: number } | null>(null);
   function updateBox(next: { boxId: string; itemCount: number } | null): void {
+    const previousBoxId = boxRef.current?.boxId ?? null;
     boxRef.current = next;
     setBox(next);
+    if ((next?.boxId ?? null) !== previousBoxId) setLastScanned(null);
   }
   // Resolves once the current box has been loaded (or opened, or -- with no
   // `issuerPrefix` -- decided there is none) so `process()` can await it the
   // same way it already awaits `keysReady`, instead of racing a scan that
   // arrives before this screen's mount effects have settled.
   const boxReady = useRef<Promise<void> | null>(null);
+
+  const reloadClosedBoxes = useCallback(async (): Promise<void> => {
+    try {
+      setClosedBoxes(await listClosedBoxes(exec, shiftId, terminalId));
+    } catch (err) {
+      console.error("station: failed to list closed boxes", err);
+    }
+  }, [exec, shiftId, terminalId]);
+
+  useEffect(() => {
+    if (issuerPrefix === null) {
+      setClosedBoxes([]);
+      return;
+    }
+    void reloadClosedBoxes();
+  }, [issuerPrefix, reloadClosedBoxes]);
 
   const [noSerials, setNoSerials] = useState(false);
   // CodeRabbit PR33 review, Finding 4: `closeCurrentBox` burned a serial
@@ -232,6 +261,7 @@ export function WorkScreen({
   // ref is what actually closes the race.
   const closingRef = useRef(false);
   const [closing, setClosing] = useState(false);
+  const [boxActionPending, setBoxActionPending] = useState(false);
 
   function requestExit() {
     if (pendingSync > 0) setConfirmExit(true);
@@ -460,7 +490,7 @@ export function WorkScreen({
 
       let result: CloseBoxResult;
       try {
-        result = await impl(shiftId, null);
+        result = await impl(shiftId, operatorId);
       } catch (err) {
         console.error("station: closeCurrentBox failed", err);
         return;
@@ -487,6 +517,7 @@ export function WorkScreen({
         console.error("station: failed to open the next box after closing", err);
         updateBox(null);
       }
+      void reloadClosedBoxes();
 
       void printAndMaybeVerify(result, closingBoxId);
     } finally {
@@ -537,6 +568,7 @@ export function WorkScreen({
     sound,
     onScanRecorded,
     onScan,
+    operatorId,
     refreshBox: refreshBoxAndMaybeClose,
   });
   useEffect(() => {
@@ -546,6 +578,7 @@ export function WorkScreen({
       sound,
       onScanRecorded,
       onScan,
+      operatorId,
       refreshBox: refreshBoxAndMaybeClose,
     };
   });
@@ -574,20 +607,13 @@ export function WorkScreen({
             isDuplicate: (key) => keys.current.has(key),
           });
           const scannedAt = new Date().toISOString();
-          // `operatorId` is threaded through recordScan's existing writes
-          // (Task 9, plan 06c) but this screen does not yet know it: operator
-          // attribution is wired into the work screen in a later task.
-          // Explicit `null` here, not an omitted field, so that wiring is a
-          // deliberate addition later rather than a silent default. `boxId`
-          // (also Task 9) IS wired here, from `boxRef` -- the current box's
-          // id, or null when this shift has no box open (or none at all).
           const event = {
             shiftId,
             terminalId,
             raw,
             verdict: verdict.status,
             scannedAt,
-            operatorId: null,
+            operatorId: live.current.operatorId,
           };
           const boxId = boxRef.current?.boxId ?? null;
 
@@ -627,6 +653,7 @@ export function WorkScreen({
             // NOT awaited (see printAndMaybeVerify) -- only the fast SQL
             // bookkeeping is on this critical path.
             if (codeHash && boxId !== null) {
+              setLastScanned({ boxId, codeHash });
               await live.current.refreshBox(boxId);
             }
             return { raw, verdict, firstSeen: null };
@@ -691,9 +718,96 @@ export function WorkScreen({
           if (flashTimer.current) clearTimeout(flashTimer.current);
           flashTimer.current = setTimeout(() => setSignal(null), FLASH_MS.error);
         },
+        onJobError() {
+          const { t: liveT, sound: liveSound } = live.current;
+          playSignalTone("error", liveSound);
+          setSignal({ tone: "error", title: liveT("signal.systemError") });
+          if (flashTimer.current) clearTimeout(flashTimer.current);
+          flashTimer.current = setTimeout(() => setSignal(null), FLASH_MS.error);
+        },
       }),
     [exec, shiftId, terminalId, expectedGtin14],
   );
+
+  function handleUndo(): void {
+    const target = lastScanned;
+    if (!target) return;
+    queue.enqueueJob(async () => {
+      await undoLastScan(exec, {
+        boxId: target.boxId,
+        codeHash: target.codeHash,
+        shiftId,
+        terminalId,
+        operatorId,
+        at: new Date().toISOString(),
+      });
+      setLastScanned(null);
+      keys.current.delete(target.codeHash);
+      await live.current.refreshBox(target.boxId);
+      live.current.onScanRecorded?.();
+    });
+  }
+
+  function confirmClearBox(): void {
+    setConfirmClear(false);
+    const boxId = boxRef.current?.boxId;
+    if (!boxId) return;
+    queue.enqueueJob(async () => {
+      const clearedCodes = await exec.all<{ code_hash: string }>(
+        "SELECT code_hash FROM codes_mirror WHERE box_id = ?",
+        [boxId],
+      );
+      await clearBox(exec, {
+        boxId,
+        shiftId,
+        terminalId,
+        operatorId,
+        at: new Date().toISOString(),
+      });
+      setLastScanned(null);
+      for (const code of clearedCodes) keys.current.delete(code.code_hash);
+      await live.current.refreshBox(boxId);
+      live.current.onScanRecorded?.();
+    });
+  }
+
+  function handleReprint(boxId: string, reason: string): void {
+    const target = closedBoxes.find((candidate) => candidate.boxId === boxId);
+    if (!target) return;
+    queue.enqueueJob(async () => {
+      await reprintBox(exec, {
+        boxId,
+        shiftId,
+        terminalId,
+        operatorId,
+        reason,
+        at: new Date().toISOString(),
+      });
+      void printAndMaybeVerify({ sscc: target.sscc, itemCount: target.itemCount }, boxId);
+      await reloadClosedBoxes();
+      live.current.onScanRecorded?.();
+    });
+  }
+
+  function handleDisassemble(boxId: string, reason: string): void {
+    queue.enqueueJob(async () => {
+      const releasedCodes = await exec.all<{ code_hash: string }>(
+        "SELECT code_hash FROM codes_mirror WHERE box_id = ?",
+        [boxId],
+      );
+      await disassembleBox(exec, {
+        boxId,
+        shiftId,
+        terminalId,
+        operatorId,
+        reason,
+        at: new Date().toISOString(),
+      });
+      for (const code of releasedCodes) keys.current.delete(code.code_hash);
+      await reloadClosedBoxes();
+      live.current.onScanRecorded?.();
+    });
+  }
 
   // Paused while print verification is up: that scan source is reading the
   // box label's SSCC, not a product KM, and feeding it into this ordinary
@@ -702,9 +816,9 @@ export function WorkScreen({
   // to compete with anything is print verification itself, not a stray
   // rejection from the loop underneath it.
   useEffect(() => {
-    if (verification) return;
+    if (verification || confirmClear || boxActionPending) return;
     return source.start((raw) => queue.enqueue(raw));
-  }, [source, queue, verification]);
+  }, [source, queue, verification, confirmClear, boxActionPending]);
 
   useEffect(
     () => () => {
@@ -846,11 +960,54 @@ export function WorkScreen({
               >
                 {t("box.close")}
               </Button>
+              {lastScanned?.boxId === box.boxId ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  style={{ minHeight: 64 }}
+                  onClick={(event) => {
+                    handleUndo();
+                    event.currentTarget.blur();
+                  }}
+                >
+                  {t("box.undoLastScan")}
+                </Button>
+              ) : null}
+              <Button
+                type="button"
+                variant="secondary"
+                style={{ minHeight: 64 }}
+                onClick={(event) => {
+                  setConfirmClear(true);
+                  event.currentTarget.blur();
+                }}
+              >
+                {t("box.clear")}
+              </Button>
             </div>
+          ) : null}
+          {confirmClear ? (
+            <Alert tone="warn" title={t("box.confirmClearTitle")}>
+              <p>{t("box.confirmClearDetail")}</p>
+              <Button type="button" onClick={confirmClearBox}>
+                {t("box.confirmClear")}
+              </Button>
+              <Button type="button" variant="secondary" onClick={() => setConfirmClear(false)}>
+                {t("box.cancelClear")}
+              </Button>
+            </Alert>
           ) : null}
           {noSerials ? <Alert tone="warn" title={t("box.noSerials")} /> : null}
           {invalidSerial ? <Alert tone="warn" title={t("box.invalidSerial")} /> : null}
           {printUnavailable ? <Alert tone="warn" title={t("box.printNotAvailable")} /> : null}
+          {verification ? null : (
+            <ShiftBoxesPanel
+              boxes={closedBoxes}
+              onReprint={handleReprint}
+              onDisassemble={handleDisassemble}
+              onPendingChange={setBoxActionPending}
+            />
+          )}
         </div>
       ) : null}
 

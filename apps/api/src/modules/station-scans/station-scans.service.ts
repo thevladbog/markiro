@@ -1,5 +1,11 @@
-import { BadRequestException, Inject, Injectable, Logger } from "@nestjs/common";
-import { and, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
+import {
+  BadRequestException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  Logger,
+} from "@nestjs/common";
+import { and, eq, inArray, isNotNull, isNull, notInArray, sql } from "drizzle-orm";
 import { ensurePartitions, schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
 import {
@@ -10,6 +16,7 @@ import {
   type OwnerRow,
 } from "./conflict-resolution";
 import { displacedHashes, type MembershipRow } from "./box-membership";
+import { sortExceptions, type ExceptionDto } from "./box-exceptions";
 import { SsccService } from "../sscc/sscc.service";
 import type { BatchConflictDto, SyncBatchDto, SyncBatchResponseDto } from "./dto";
 
@@ -122,7 +129,14 @@ export class StationScansService {
    * see an acknowledgement, and correctness rests entirely on this being
    * all-or-nothing.
    */
-  async applyBatch(tenantId: string, body: SyncBatchDto): Promise<SyncBatchResponseDto> {
+  async applyBatch(
+    tenantId: string,
+    body: SyncBatchDto,
+    authenticatedTerminalId?: string,
+  ): Promise<SyncBatchResponseDto> {
+    if (body.exceptions.length > 0 && !authenticatedTerminalId) {
+      throw new ForbiddenException("Station device authentication required for exceptions");
+    }
     // Ensure the months this batch actually needs have partitions BEFORE
     // opening the transaction below. Only the scheduled job (JobsModule)
     // proactively maintains current+next month; a device offline across a
@@ -522,10 +536,9 @@ export class StationScansService {
             }));
 
             // Sorted by (boxId, codeHash) -- same 40P01 reason as above -- and
-            // ON CONFLICT DO NOTHING so a replay, or a resend of an
-            // overlapping range under a fresh batchId (same rationale as
-            // `codes`' own insert above), is a no-op rather than a
-            // duplicate-key error.
+            // A strictly newer rescan into the same box reactivates the
+            // existing membership after undo/clear. An exact replay keeps
+            // the row untouched, so a stale delivery cannot resurrect it.
             const sortedBoxItems = [...preBoxItems].sort((a, b) =>
               a.boxId === b.boxId
                 ? a.codeHash.localeCompare(b.codeHash)
@@ -541,7 +554,15 @@ export class StationScansService {
                   addedAt: p.addedAt,
                 })),
               )
-              .onConflictDoNothing();
+              .onConflictDoUpdate({
+                target: [schema.boxItems.tenantId, schema.boxItems.boxId, schema.boxItems.codeHash],
+                set: {
+                  addedAt: sql`excluded.added_at`,
+                  displacedAt: null,
+                  removedAt: null,
+                },
+                setWhere: sql`excluded.added_at > ${schema.boxItems.addedAt}`,
+              });
 
             // THIS BATCH's own direction: a scan it just recorded might not be
             // the code's owner (06b's rule: the earlier scannedAt wins), in
@@ -828,7 +849,284 @@ export class StationScansService {
         }
       }
 
+      // Exception facts (undo/clear/disassemble/reprint -- Task 4 wires up
+      // "undo", Tasks 5-7 extend the same applyExceptions method with the
+      // other three kinds). Applied LAST, after both items and box closures
+      // above, so an exception targeting a scan or closure carried in this
+      // very same batch always applies to a row that already exists -- the
+      // device can never enqueue an exception fact ahead of the scan it
+      // corrects, since the fact is only ever created after the operator has
+      // already made that scan (see the design spec's "Sync protocol"
+      // section).
+      if (body.exceptions.length > 0) {
+        await this.applyExceptions(
+          tx,
+          tenantId,
+          authenticatedTerminalId!,
+          sortExceptions(body.exceptions),
+        );
+      }
+
       return { applied: body.items.length, alreadyApplied: false, conflicts: batchConflicts };
     });
+  }
+
+  /**
+   * Applies undo/clear/disassemble/reprint facts, one at a time in the
+   * sorted order the caller already computed (`sortExceptions` -- boxId,
+   * then kind, then codeHash, for the same 40P01-avoidance reasoning as
+   * every other multi-row loop in this file). Every kind writes its own
+   * `box_exceptions` row regardless of whether anything else changed -- a
+   * no-op (redelivery, a code already released elsewhere) is still a
+   * recorded attempt, matching the pattern the box-closures loop above
+   * already established for exactly this class of redelivery/race.
+   *
+   * "undo" (Task 4), "clear" (Task 5), and "disassemble" (Task 6) are
+   * handled today; "reprint" is added by Task 7 as a further branch in this
+   * same loop body, not as a rewrite of it.
+   *
+   * `ex.boxId` is the device-local box id string, exactly like
+   * `ScanItemDto.boxId` and the box-closures loop's own `closure.boxId`
+   * above -- NOT the server's `boxes.id` UUID. Both `box_items.box_id` and
+   * `box_exceptions.box_id` are Postgres `uuid` columns, so it must be
+   * resolved to the server id, once per exception, BEFORE any kind-specific
+   * branch runs (and before the `clear`/`disassemble` branches Task 5 adds
+   * next): see the resolution step below, copied from the box-closures
+   * loop's own four-column match.
+   *
+   * `tx` is loosely typed to the exact operations this method (and
+   * `releaseCode`) actually use, same as `SsccService.recordConsumedSerial`
+   * and `PickupOrdersService.recordScanRejection`: the transaction callback
+   * argument `this.db.transaction(async (tx) => ...)` infers as a
+   * `PgTransaction`, which does not structurally satisfy the full `Db` type
+   * (it has no `$client`), so a parameter typed as plain `Db` would reject
+   * every call site that passes it a transaction handle.
+   */
+  private async applyExceptions(
+    tx: Pick<Db, "select" | "insert" | "update" | "delete">,
+    tenantId: string,
+    authenticatedTerminalId: string,
+    exceptions: ExceptionDto[],
+  ): Promise<void> {
+    for (const ex of exceptions) {
+      // Resolve the device-local `ex.boxId` to the server's `boxes.id`
+      // UUID, matching on ALL FOUR of `boxes_device_box_uq`'s own columns --
+      // copied from the box-closures loop's `terminalCondition`/WHERE shape
+      // above, not a new comparison style: a bare (tenant, deviceBoxId)
+      // match is not enough to identify one box (two terminals in one
+      // tenant can both call a box "b1", or one device can reuse "b1" after
+      // a shift change).
+      const terminalCondition = eq(schema.boxes.terminalId, authenticatedTerminalId);
+      const [boxRow] = await tx
+        .select({ id: schema.boxes.id })
+        .from(schema.boxes)
+        .where(
+          and(
+            eq(schema.boxes.tenantId, tenantId),
+            eq(schema.boxes.shiftId, ex.shiftId),
+            terminalCondition,
+            eq(schema.boxes.deviceBoxId, ex.boxId),
+          ),
+        );
+
+      // Zero rows is "nothing to apply this exception to", not an error --
+      // same reasoning as the box-closures loop's own `rowCount === 0`
+      // branch above ("Zero rows is..."): a genuinely stale/unknown
+      // deviceBoxId, or a race with the box's own first item, is an
+      // ordinary input, and throwing here would 500 the whole batch. This
+      // file's own retry semantics mean the device resends a failing batch
+      // under the SAME batchId forever, so a throw here would wedge that
+      // device's queue permanently -- exactly the failure this resolution
+      // step exists to prevent. `box_exceptions.box_id` also carries a NOT
+      // NULL foreign key onto `boxes(tenant_id, id)` (platform.ts), so an
+      // audit row naming an unresolved box could not be written even if
+      // this tried -- there is no partial write to make here, only the log.
+      if (!boxRow) {
+        this.logger.warn(
+          `Exception ${ex.kind} for deviceBoxId ${ex.boxId} (tenant ${tenantId}, shift ` +
+            `${ex.shiftId}, terminal ${authenticatedTerminalId}) matched no box row -- box was ` +
+            `never created, belongs to a different shift/terminal, or is otherwise ` +
+            `unresolvable; skipping as a no-op`,
+        );
+        continue;
+      }
+      const resolvedBoxId = boxRow.id;
+
+      if (ex.kind === "undo" && ex.codeHash) {
+        await this.releaseCode(tx, tenantId, ex.codeHash, ex.shiftId, authenticatedTerminalId);
+        await tx
+          .update(schema.boxItems)
+          .set({ removedAt: sql`now()` })
+          .where(
+            and(
+              eq(schema.boxItems.tenantId, tenantId),
+              eq(schema.boxItems.boxId, resolvedBoxId),
+              eq(schema.boxItems.codeHash, ex.codeHash),
+              isNull(schema.boxItems.displacedAt),
+              isNull(schema.boxItems.removedAt),
+            ),
+          );
+      } else if (ex.kind === "clear") {
+        // Guarded to a box that is STILL OPEN (`closedAt IS NULL`): "clear"
+        // empties a box the operator can keep packing into, never one
+        // that's already been closed and labelled -- reaching into a
+        // closed box is "disassemble" (Task 6), a distinct kind with its
+        // own guard. The resolution step above already confirmed
+        // `resolvedBoxId` names a real row for this exception's own
+        // (tenantId, shiftId, terminalId, deviceBoxId); this second lookup
+        // exists only to read that row's CURRENT `closedAt`, not to
+        // re-resolve identity, so it queries by `resolvedBoxId` (the
+        // server UUID), never `ex.boxId` again.
+        const [openBox] = await tx
+          .select({ id: schema.boxes.id })
+          .from(schema.boxes)
+          .where(
+            and(
+              eq(schema.boxes.tenantId, tenantId),
+              eq(schema.boxes.id, resolvedBoxId),
+              isNull(schema.boxes.closedAt),
+            ),
+          );
+        if (openBox) {
+          await this.emptyBox(tx, tenantId, resolvedBoxId, ex.shiftId, authenticatedTerminalId);
+        }
+      } else if (ex.kind === "disassemble") {
+        // Guarded to a box that is CLOSED (`closedAt IS NOT NULL`) and not
+        // already disassembled (`disassembledAt IS NULL`): "disassemble"
+        // reaches into an already-closed, already-labelled box and retires
+        // it -- the mirror image of "clear" above, which only ever acts on
+        // a box still open for packing. Both predicates are required:
+        // `closedAt IS NOT NULL` rules out ever touching a box "clear"
+        // should have handled instead, and `disassembledAt IS NULL` stops a
+        // redelivered/duplicate "disassemble" (or two independent ones
+        // targeting the same box) from re-stamping `disassembledAt` with a
+        // fresh `now()` a second time -- releasing the same (already
+        // released) items a second time would itself be harmless, but
+        // silently overwriting the FIRST disassembly's own timestamp would
+        // not be. Scoped by `resolvedBoxId`, matching every other lookup in
+        // this method (see the resolution step's own comment) -- not
+        // `ex.boxId` again.
+        const [closedBox] = await tx
+          .select({ id: schema.boxes.id })
+          .from(schema.boxes)
+          .where(
+            and(
+              eq(schema.boxes.tenantId, tenantId),
+              eq(schema.boxes.id, resolvedBoxId),
+              isNotNull(schema.boxes.closedAt),
+              isNull(schema.boxes.disassembledAt),
+            ),
+          );
+        if (closedBox) {
+          await this.emptyBox(tx, tenantId, resolvedBoxId, ex.shiftId, authenticatedTerminalId);
+
+          // The box's own retirement. `sscc` is deliberately left
+          // untouched -- it stays on the row as a historical record of what
+          // was printed and applied to the physical box; only
+          // `disassembledAt` marks the box itself retired (excluded from
+          // "active" listings). The "sscc never reused" guarantee is not
+          // enforced by anything here: it lives entirely in
+          // `SsccService.allocate`'s counter, which only ever advances
+          // forward and never reads `boxes` at all, so a retired box's sscc
+          // cannot be handed to a NEW box by construction -- see
+          // sscc.e2e.test.ts's "disassemble retires an SSCC for good" test,
+          // which locks that existing property down against this new
+          // caller.
+          await tx
+            .update(schema.boxes)
+            .set({ disassembledAt: sql`now()` })
+            .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.id, resolvedBoxId)));
+        }
+      }
+      // "reprint" writes only the audit row below, added in Task 7. Every
+      // branch above (and every one still to come) uses `resolvedBoxId`,
+      // never `ex.boxId`.
+      await tx.insert(schema.boxExceptions).values({
+        tenantId,
+        kind: ex.kind,
+        boxId: resolvedBoxId,
+        codeHash: ex.codeHash,
+        shiftId: ex.shiftId,
+        terminalId: authenticatedTerminalId,
+        operatorId: ex.operatorId,
+        reason: ex.reason,
+        occurredAt: new Date(ex.occurredAt),
+      });
+    }
+  }
+
+  /** Releases all active memberships without per-code lock-order races. */
+  private async emptyBox(
+    tx: Pick<Db, "select" | "update" | "delete">,
+    tenantId: string,
+    resolvedBoxId: string,
+    shiftId: string,
+    terminalId: string,
+  ): Promise<void> {
+    const activeHashes = tx
+      .select({ codeHash: schema.boxItems.codeHash })
+      .from(schema.boxItems)
+      .where(
+        and(
+          eq(schema.boxItems.tenantId, tenantId),
+          eq(schema.boxItems.boxId, resolvedBoxId),
+          isNull(schema.boxItems.displacedAt),
+          isNull(schema.boxItems.removedAt),
+        ),
+      )
+      .orderBy(schema.boxItems.codeHash);
+    await tx
+      .delete(schema.codeRegistry)
+      .where(
+        and(
+          eq(schema.codeRegistry.tenantId, tenantId),
+          inArray(schema.codeRegistry.codeHash, activeHashes),
+          eq(schema.codeRegistry.shiftId, shiftId),
+          eq(schema.codeRegistry.terminalId, terminalId),
+        ),
+      );
+
+    await tx
+      .update(schema.boxItems)
+      .set({ removedAt: sql`now()` })
+      .where(
+        and(
+          eq(schema.boxItems.tenantId, tenantId),
+          eq(schema.boxItems.boxId, resolvedBoxId),
+          isNull(schema.boxItems.displacedAt),
+          isNull(schema.boxItems.removedAt),
+        ),
+      );
+  }
+
+  /**
+   * Releases a code claim, scoped to the EXACT scan that still holds it
+   * (tenant + codeHash + shiftId + terminalId). If the code was displaced
+   * to another terminal in the meantime (06b), this WHERE matches nothing
+   * -- a harmless no-op, since the code was never really this device's to
+   * release once displaced (see the design spec's "Releasing a code"
+   * section).
+   */
+  private async releaseCode(
+    tx: Pick<Db, "delete">,
+    tenantId: string,
+    codeHash: string,
+    shiftId: string,
+    terminalId: string | null,
+  ): Promise<void> {
+    const terminalCondition =
+      terminalId === null
+        ? isNull(schema.codeRegistry.terminalId)
+        : eq(schema.codeRegistry.terminalId, terminalId);
+    await tx
+      .delete(schema.codeRegistry)
+      .where(
+        and(
+          eq(schema.codeRegistry.tenantId, tenantId),
+          eq(schema.codeRegistry.codeHash, codeHash),
+          eq(schema.codeRegistry.shiftId, shiftId),
+          terminalCondition,
+        ),
+      );
   }
 }

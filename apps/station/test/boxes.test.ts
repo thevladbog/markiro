@@ -3,8 +3,11 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
 import { recordScan, type AcceptedCode, type ScanEventRow } from "../src/lib/journal.js";
 import {
+  clearBox,
   closeBox,
   currentBox,
+  disassembleBox,
+  listClosedBoxes,
   markPrintSkipped,
   markPrintVerified,
   openBox,
@@ -196,6 +199,106 @@ describe("boxes", () => {
         ["b2"],
       );
       expect(rows[0]!.print_verified_at).toBeNull();
+    });
+  });
+
+  describe("clearBox", () => {
+    it("frees every code in the box and leaves it open", async () => {
+      await openBox(exec, "s1", "b1", "t0", null);
+      await exec.run(
+        "INSERT INTO codes_mirror (code_hash, shift_id, gtin14, serial, scanned_at, box_id) VALUES (?,?,?,?,?,?)",
+        ["h1", "s1", "04006381333931", "1", "t1", "b1"],
+      );
+      await clearBox(exec, {
+        boxId: "b1",
+        shiftId: "s1",
+        terminalId: null,
+        operatorId: null,
+        at: "t2",
+      });
+
+      const codes = await exec.all("SELECT * FROM codes_mirror WHERE box_id = ?", ["b1"]);
+      expect(codes).toHaveLength(0);
+      const box = await currentBox(exec, "s1");
+      expect(box?.boxId).toBe("b1");
+      expect(box?.itemCount).toBe(0);
+      const pending = await exec.all<{ reason: string | null }>(
+        "SELECT * FROM box_exceptions_mirror WHERE kind = 'clear'",
+      );
+      expect(pending).toHaveLength(1);
+      expect(pending[0]!.reason).toBeNull();
+    });
+  });
+
+  describe("disassembleBox", () => {
+    it("marks a closed box disassembled and drops it from listClosedBoxes", async () => {
+      await openBox(exec, "s1", "b1", "t0", null);
+      await exec.run(
+        "INSERT INTO codes_mirror (code_hash, shift_id, gtin14, serial, scanned_at, box_id) VALUES (?,?,?,?,?,?)",
+        ["h1", "s1", "04006381333931", "1", "t1", "b1"],
+      );
+      await closeBox(exec, "b1", "123456789012345675", "t2", null);
+
+      await disassembleBox(exec, {
+        boxId: "b1",
+        shiftId: "s1",
+        terminalId: null,
+        operatorId: null,
+        reason: "wrong customer",
+        at: "t3",
+      });
+
+      const listed = await listClosedBoxes(exec, "s1", null);
+      expect(listed).toHaveLength(0);
+      const codes = await exec.all("SELECT * FROM codes_mirror WHERE box_id = ?", ["b1"]);
+      expect(codes).toHaveLength(0);
+      const pending = await exec.all<{ reason: string | null }>(
+        "SELECT * FROM box_exceptions_mirror WHERE kind = 'disassemble'",
+      );
+      expect(pending).toHaveLength(1);
+      expect(pending[0]!.reason).toBe("wrong customer");
+    });
+  });
+
+  describe("listClosedBoxes", () => {
+    it("lists closed, not-yet-disassembled boxes for this shift and terminal, newest first", async () => {
+      await openBox(exec, "s1", "b1", "t0", "term-1");
+      await closeBox(exec, "b1", "123456789012345675", "t1", null);
+      await openBox(exec, "s1", "b2", "t2", "term-1");
+      await closeBox(exec, "b2", "123456789012345682", "t3", null);
+
+      const listed = await listClosedBoxes(exec, "s1", "term-1");
+      expect(listed.map((b) => b.boxId)).toEqual(["b2", "b1"]);
+    });
+
+    // Task 11 review, Finding: the ordering test above only exercises boxes
+    // opened at a real terminal, so the terminal_id IS NULL branch (a device
+    // that never enrolled with a terminal) is only ever proven negatively
+    // elsewhere. This pins the positive case: a box opened and closed with
+    // terminalId: null must still be returned when the caller asks with
+    // terminalId: null.
+    it("lists a closed box opened with no terminal when queried with terminalId null", async () => {
+      await openBox(exec, "s1", "b1", "t0", null);
+      await closeBox(exec, "b1", "123456789012345675", "t1", null);
+
+      const listed = await listClosedBoxes(exec, "s1", null);
+      expect(listed.map((b) => b.boxId)).toEqual(["b1"]);
+    });
+
+    // Task 11 review, Finding: both boxes in the ordering test above have
+    // zero scanned items, so itemCount's COUNT(*) subquery is never actually
+    // exercised against real codes_mirror rows. This proves the count is
+    // correct for a box that held real scans before it closed.
+    it("computes itemCount from the codes actually scanned into the box before it closed", async () => {
+      await openBox(exec, "s1", "b1", "t0", "term-1");
+      await recordScan(exec, event("a"), code("aa", "b1"));
+      await recordScan(exec, event("b"), code("bb", "b1"));
+      await recordScan(exec, event("c"), code("cc", "b1"));
+      await closeBox(exec, "b1", "123456789012345675", "t1", null);
+
+      const listed = await listClosedBoxes(exec, "s1", "term-1");
+      expect(listed).toHaveLength(1);
+      expect(listed[0]!.itemCount).toBe(3);
     });
   });
 });

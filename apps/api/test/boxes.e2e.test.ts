@@ -33,6 +33,7 @@ describe.skipIf(!ready)("boxes e2e", () => {
 
   let agent: ReturnType<typeof request.agent>;
   let stationKey: string;
+  let stationDeviceId: string;
   /** A box with two live items, neither ever displaced. */
   let shiftId: string;
   /**
@@ -64,6 +65,8 @@ describe.skipIf(!ready)("boxes e2e", () => {
   let futureClockShiftId: string;
   /** The employee behind displacedShiftId's box b2 closure, for the field-mapping test below. */
   let operatorId: string;
+  /** Shared product every shift above opens against (see the beforeAll comment below). */
+  let productId: string;
 
   beforeAll(async () => {
     const env = loadEnv();
@@ -82,13 +85,15 @@ describe.skipIf(!ready)("boxes e2e", () => {
 
     agent = request.agent(app!.getHttpServer());
     await signUpAndActivate(agent);
-    stationKey = await deviceKey(agent);
+    const station = await deviceKey(agent);
+    stationKey = station.apiKey;
+    stationDeviceId = station.deviceId;
     // One product for every shift below: `openShift`'s own `createActiveProduct`
     // call would otherwise re-POST the same GTIN under the same tenant on
     // every invocation and 409 -- a single shared product is fine since
     // multiple shifts can share one product (see conflicts.e2e.test.ts's
     // `openShiftForProduct(agent, productId)` reuse for the same reason).
-    const productId = await createActiveProduct(agent);
+    productId = await createActiveProduct(agent);
     // A real `employees` row: `boxes.operator_id` carries a composite tenant
     // FK to it (see station-scans.e2e.test.ts's box-membership describe
     // block), so a non-null operatorId that doesn't resolve to one would
@@ -169,7 +174,7 @@ describe.skipIf(!ready)("boxes e2e", () => {
     // otherTenantShiftId: a second tenant entirely, with its own box.
     const other = request.agent(app!.getHttpServer());
     await signUpAndActivate(other);
-    const otherKey = await deviceKey(other);
+    const { apiKey: otherKey } = await deviceKey(other);
     otherTenantShiftId = await openShift(other);
     await postBatch(otherKey, [
       scan(otherTenantShiftId, "zz", "t1", "2026-07-01T10:00:00.000Z", "b9"),
@@ -180,9 +185,11 @@ describe.skipIf(!ready)("boxes e2e", () => {
     await app?.close();
   });
 
-  async function deviceKey(a: ReturnType<typeof request.agent>): Promise<string> {
+  async function deviceKey(
+    a: ReturnType<typeof request.agent>,
+  ): Promise<{ apiKey: string; deviceId: string }> {
     const device = await a.post("/station-devices").send({ name: "Line 1" }).expect(201);
-    return (device.body as { apiKey: string }).apiKey;
+    return device.body as { apiKey: string; deviceId: string };
   }
 
   // Same fixture as conflicts.e2e.test.ts / station-scans.e2e.test.ts.
@@ -317,5 +324,117 @@ describe.skipIf(!ready)("boxes e2e", () => {
   it("does not list another tenant's boxes", async () => {
     const res = await agent.get(`/boxes?shiftId=${otherTenantShiftId}`).expect(200);
     expect(res.body.items).toEqual([]);
+  });
+
+  // Task 7: `itemCount`'s aggregate used to exclude only displaced items
+  // (`filter (where displaced_at is null)`) -- a box item an operator
+  // removed via an "undo"/"clear" exception (`removed_at`, station-scans
+  // .service.ts's applyExceptions) was NOT displaced, so the old filter
+  // still counted it, overstating how many items the box actually holds.
+  // A dedicated shift/box, not the shared `shiftId` fixture above: mutating
+  // that box's own item via an exception here would retroactively change
+  // the "lists a shift's boxes with a live item count" test's own
+  // itemCount === 2 assertion (this describe's own doc comment: fixtures
+  // are built once in beforeAll and every `it` is meant to be a READ-ONLY
+  // assertion against them).
+  it("excludes operator-removed items from itemCount and surfaces disassembledAt", async () => {
+    const removedShiftId = await openShiftForProduct(agent, productId);
+    await postBatch(stationKey, [
+      scan(removedShiftId, "rr", stationDeviceId, "2026-07-01T10:00:00.000Z", "b5"),
+      scan(removedShiftId, "ss", stationDeviceId, "2026-07-01T10:00:01.000Z", "b5"),
+    ]);
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", stationKey)
+      .send({
+        batchId: `undo-batch-${randomUUID()}`,
+        items: [],
+        boxes: [],
+        exceptions: [
+          {
+            kind: "undo",
+            boxId: "b5",
+            codeHash: "rr".padEnd(64, "0"),
+            shiftId: removedShiftId,
+            terminalId: "t1",
+            operatorId: null,
+            reason: null,
+            occurredAt: new Date().toISOString(),
+          },
+        ],
+      })
+      .expect(201);
+
+    const res = await agent.get(`/boxes?shiftId=${removedShiftId}`).expect(200);
+    const box = res.body.items[0];
+    // Only "ss" remains live -- "rr" was removed by the undo exception. A
+    // filter matching only `displaced_at is null` (the pre-Task-7 aggregate)
+    // would still count "rr", since undo never touches displaced_at.
+    expect(box.itemCount).toBe(1);
+    expect(box.disassembledAt).toBeNull();
+  });
+
+  // Task review finding: the test above only proves `disassembledAt` is
+  // `null` for a box that was NEVER disassembled -- it never proves
+  // `BoxesService.listBoxes` actually surfaces a real, non-null
+  // `disassembledAt` through this HTTP endpoint for a box that WAS
+  // disassembled (station-scans.e2e.test.ts's own "disassemble" tests only
+  // check `schema.boxes` directly, bypassing `listBoxes`'s select/`toDto`
+  // mapping entirely). A dedicated shift/box, same reasoning as the test
+  // above: closing and disassembling its own box here must not retroactively
+  // change any other test's fixture or assertions.
+  it("surfaces a non-null disassembledAt for a disassembled box via GET /boxes", async () => {
+    const disassembledShiftId = await openShiftForProduct(agent, productId);
+    await postBatch(stationKey, [
+      scan(disassembledShiftId, "tt", stationDeviceId, "2026-07-01T10:00:00.000Z", "b6"),
+    ]);
+    await postBatch(
+      stationKey,
+      [],
+      [
+        {
+          boxId: "b6",
+          shiftId: disassembledShiftId,
+          terminalId: stationDeviceId,
+          sscc: "123456789012345690",
+          closedAt: "2026-01-02T00:00:00.000Z",
+          operatorId,
+        },
+      ],
+    );
+
+    // Captured right before the disassemble call: `disassembledAt` is
+    // server-assigned `now()` (station-scans.service.ts's "disassemble"
+    // branch), not the client-supplied `occurredAt`, so this is the correct
+    // lower bound to assert against.
+    const beforeDisassemble = new Date();
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", stationKey)
+      .send({
+        batchId: `disassemble-batch-${randomUUID()}`,
+        items: [],
+        boxes: [],
+        exceptions: [
+          {
+            kind: "disassemble",
+            boxId: "b6",
+            codeHash: null,
+            shiftId: disassembledShiftId,
+            terminalId: "t1",
+            operatorId: null,
+            reason: "packed for wrong customer",
+            occurredAt: new Date().toISOString(),
+          },
+        ],
+      })
+      .expect(201);
+
+    const res = await agent.get(`/boxes?shiftId=${disassembledShiftId}`).expect(200);
+    const box = res.body.items[0];
+    expect(box.disassembledAt).not.toBeNull();
+    const disassembledAt = new Date(box.disassembledAt);
+    expect(Number.isNaN(disassembledAt.getTime())).toBe(false);
+    expect(disassembledAt.getTime()).toBeGreaterThanOrEqual(beforeDisassemble.getTime() - 60_000);
   });
 });

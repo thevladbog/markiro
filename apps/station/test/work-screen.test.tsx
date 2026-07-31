@@ -110,11 +110,13 @@ interface RenderWorkScreenOverrides {
   exec?: SqlExecutor;
   shiftId?: string;
   terminalId?: string | null;
+  operatorId?: string;
   expectedGtin14?: string;
   productName?: string;
   counterpartyName?: string | null;
   source?: ScanSource;
   sound?: SoundSettings;
+  onScanRecorded?: () => void;
   onExit?: () => void;
   pendingSync?: number;
 }
@@ -124,11 +126,13 @@ function renderWorkScreen(overrides: RenderWorkScreenOverrides = {}) {
     exec = makeExec(),
     shiftId = "s1",
     terminalId = "dev-1",
+    operatorId = "operator-1",
     expectedGtin14 = "04600000000015",
     productName = "Water 0.5",
     counterpartyName = null,
     source = manualSource(),
     sound = { muted: true, volume: 1 },
+    onScanRecorded,
     onExit = () => {},
     pendingSync = 0,
   } = overrides;
@@ -138,11 +142,13 @@ function renderWorkScreen(overrides: RenderWorkScreenOverrides = {}) {
       exec={exec}
       shiftId={shiftId}
       terminalId={terminalId}
+      operatorId={operatorId}
       expectedGtin14={expectedGtin14}
       productName={productName}
       counterpartyName={counterpartyName}
       source={source}
       sound={sound}
+      {...(onScanRecorded ? { onScanRecorded } : {})}
       onExit={onExit}
       pendingSync={pendingSync}
       // None of the tests in this file's outer `describe` care about boxes:
@@ -165,6 +171,7 @@ const SEEDED_BOX_ID = "seeded-box";
 // A second valid KM for the SAME product, distinguished only by serial --
 // used where a test needs a fresh, non-duplicate accept after the first.
 const OTHER_KM = "0104600000000015215Ab2";
+const THIRD_KM = "0104600000000015215Ab3";
 
 const SSCC = buildSscc(0, TEST_ISSUER_PREFIX, 777);
 
@@ -241,11 +248,13 @@ function renderWork(overrides: RenderWorkOverrides = {}) {
     exec = makeExec(),
     shiftId = "s1",
     terminalId = "dev-1",
+    operatorId = "operator-1",
     expectedGtin14 = "04600000000015",
     productName = "Water 0.5",
     counterpartyName = null,
     source = manualSource(),
     sound = { muted: true, volume: 1 },
+    onScanRecorded,
     onExit = () => {},
     pendingSync = 0,
     issuerPrefix = TEST_ISSUER_PREFIX,
@@ -289,11 +298,13 @@ function renderWork(overrides: RenderWorkOverrides = {}) {
       exec={exec}
       shiftId={shiftId}
       terminalId={terminalId}
+      operatorId={operatorId}
       expectedGtin14={expectedGtin14}
       productName={productName}
       counterpartyName={counterpartyName}
       source={source}
       sound={sound}
+      {...(onScanRecorded ? { onScanRecorded } : {})}
       onExit={onExit}
       pendingSync={pendingSync}
       issuerPrefix={issuerPrefix}
@@ -524,6 +535,149 @@ describe("WorkScreen box progress, closing and printing", () => {
     activeSource = source as ScanSource & { emit: ScanListener };
     return renderWork({ ...overrides, source });
   }
+
+  async function seedClosedBox(
+    exec: SqlExecutor,
+    boxId = "closed-box",
+    sscc = SSCC,
+  ): Promise<void> {
+    await exec.run(
+      `INSERT INTO boxes_mirror
+         (box_id, shift_id, terminal_id, sscc, opened_at, closed_at)
+       VALUES (?,?,?,?,?,?)`,
+      [boxId, "s1", "dev-1", sscc, "2026-07-29T08:00:00.000Z", "2026-07-29T09:00:00.000Z"],
+    );
+    await exec.run(
+      `INSERT INTO codes_mirror (code_hash, shift_id, gtin14, serial, scanned_at, box_id)
+       VALUES (?,?,?,?,?,?)`,
+      [`code-${boxId}`, "s1", "04600000000015", "serial", "2026-07-29T08:30:00.000Z", boxId],
+    );
+  }
+
+  it("undoes the last accepted scan in the open box and queues its exception", async () => {
+    const exec = makeExec();
+    renderWorkTracked({ exec, boxItemCount: 0 });
+
+    act(() => scan(KM));
+    await waitFor(async () => {
+      expect(await exec.all("SELECT code_hash FROM codes_mirror")).toHaveLength(1);
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Отменить последний скан" }));
+
+    await waitFor(async () => {
+      expect(await exec.all("SELECT code_hash FROM codes_mirror")).toHaveLength(0);
+    });
+    expect(screen.queryByRole("button", { name: "Отменить последний скан" })).toBeNull();
+    const exceptions = await exec.all<{ kind: string; operator_id: string }>(
+      "SELECT kind, operator_id FROM box_exceptions_mirror",
+    );
+    expect(exceptions).toEqual([{ kind: "undo", operator_id: "operator-1" }]);
+  });
+
+  it("clears every scan from the open box only after confirmation", async () => {
+    const exec = makeExec();
+    const onScan = vi.fn();
+    renderWorkTracked({ exec, boxItemCount: 0, onScan });
+
+    act(() => scan(KM));
+    await waitFor(async () => {
+      expect(await exec.all("SELECT code_hash FROM codes_mirror")).toHaveLength(1);
+    });
+    act(() => scan(OTHER_KM));
+    await waitFor(async () => {
+      expect(await exec.all("SELECT code_hash FROM codes_mirror")).toHaveLength(2);
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Очистить короб" }));
+    act(() => scan(THIRD_KM));
+    expect(onScan).toHaveBeenCalledTimes(2);
+    expect(await exec.all("SELECT code_hash FROM codes_mirror")).toHaveLength(2);
+    fireEvent.click(await screen.findByRole("button", { name: "Подтвердить очистку" }));
+
+    await waitFor(async () => {
+      expect(await exec.all("SELECT code_hash FROM codes_mirror")).toHaveLength(0);
+    });
+    const exceptions = await exec.all<{ kind: string }>("SELECT kind FROM box_exceptions_mirror");
+    expect(exceptions).toEqual([{ kind: "clear" }]);
+
+    act(() => scan(KM));
+    await waitFor(async () => {
+      expect(await exec.all("SELECT code_hash FROM codes_mirror")).toHaveLength(1);
+    });
+  });
+
+  it("reprints a closed box and queues the supplied reason for sync", async () => {
+    const exec = makeExec();
+    await seedClosedBox(exec);
+    await seedLabelSpec(exec, "s1");
+    const print = vi.fn().mockResolvedValue(undefined);
+    const onScanRecorded = vi.fn();
+    renderWorkTracked({
+      exec,
+      printing: { target: PRINT_TARGET, language: "zpl", print },
+      onScanRecorded,
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Перепечатать" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Причина" }), {
+      target: { value: "Замятие этикетки" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Подтвердить" }));
+
+    await waitFor(() => expect(print).toHaveBeenCalledOnce());
+    await waitFor(async () => {
+      const rows = await exec.all<{ kind: string; reason: string }>(
+        "SELECT kind, reason FROM box_exceptions_mirror",
+      );
+      expect(rows).toEqual([{ kind: "reprint", reason: "Замятие этикетки" }]);
+    });
+    expect(onScanRecorded).toHaveBeenCalledOnce();
+  });
+
+  it("pauses ordinary scanning while a box-action reason dialog is open", async () => {
+    const exec = makeExec();
+    await seedClosedBox(exec);
+    const onScan = vi.fn();
+    renderWorkTracked({ exec, onScan });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Перепечатать" }));
+    act(() => scan(KM));
+    expect(onScan).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
+    act(() => scan(KM));
+    await waitFor(() => expect(onScan).toHaveBeenCalledOnce());
+  });
+
+  it("disassembles a closed box, removes its codes and refreshes the panel", async () => {
+    const exec = makeExec();
+    await seedClosedBox(exec);
+    const onScanRecorded = vi.fn();
+    renderWorkTracked({ exec, onScanRecorded });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Расформировать" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Причина" }), {
+      target: { value: "Чужой заказ" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Подтвердить" }));
+
+    await waitFor(async () => {
+      const rows = await exec.all<{ disassembled_at: string | null }>(
+        "SELECT disassembled_at FROM boxes_mirror WHERE box_id = 'closed-box'",
+      );
+      expect(rows[0]?.disassembled_at).not.toBeNull();
+      expect(
+        await exec.all("SELECT code_hash FROM codes_mirror WHERE box_id = 'closed-box'"),
+      ).toHaveLength(0);
+    });
+    expect(screen.queryByText(`SSCC ${SSCC}`)).toBeNull();
+    const exceptions = await exec.all<{ kind: string; reason: string }>(
+      "SELECT kind, reason FROM box_exceptions_mirror",
+    );
+    expect(exceptions).toEqual([{ kind: "disassemble", reason: "Чужой заказ" }]);
+    expect(onScanRecorded).toHaveBeenCalledOnce();
+  });
 
   it("shows how full the open box is", async () => {
     renderWorkTracked({ boxCapacity: 10, boxItemCount: 3 });

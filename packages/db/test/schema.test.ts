@@ -1,6 +1,8 @@
-import { describe, expect, it } from "vitest";
-import { getTableName } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { and, eq, getTableName } from "drizzle-orm";
 import { getTableConfig } from "drizzle-orm/pg-core";
+import { createDb, schema } from "../src/index.js";
 import {
   boxes,
   counterparties,
@@ -78,5 +80,97 @@ describe("platform schema", () => {
     expect(getTableName(ref.foreignTable)).toBe("station_devices");
     expect(ref.columns.map((c) => c.name)).toEqual(["tenant_id", "device_id"]);
     expect(ref.foreignColumns.map((c) => c.name)).toEqual(["tenant_id", "id"]);
+  });
+});
+
+const url = process.env.DATABASE_URL;
+
+describe.skipIf(!url)("box_items.removed_at / boxes.disassembled_at / box_exceptions", () => {
+  const { db, pool } = createDb(url!);
+  const org = {
+    id: `org-${randomUUID()}`,
+    name: "T",
+    slug: `t-${randomUUID()}`,
+    createdAt: new Date(),
+  };
+  const tenantId = org.id;
+  const productId = randomUUID();
+  const shiftId = randomUUID();
+  const boxId = randomUUID();
+  const codeHash = (randomUUID() + randomUUID()).replace(/-/g, "");
+
+  beforeAll(async () => {
+    await db.insert(schema.organization).values(org);
+    await db.insert(schema.products).values({
+      id: productId,
+      tenantId,
+      gtin14: "04600000000001",
+      name: "Test product",
+    });
+    await db.insert(schema.shifts).values({
+      id: shiftId,
+      tenantId,
+      productId,
+      mode: "validation",
+    });
+    await db.insert(schema.boxes).values({
+      id: boxId,
+      tenantId,
+      shiftId,
+      deviceBoxId: "device-box-1",
+    });
+    await db.insert(schema.boxItems).values({
+      tenantId,
+      boxId,
+      codeHash,
+      addedAt: new Date(),
+    });
+  });
+
+  afterAll(async () => {
+    await db.delete(schema.boxExceptions).where(eq(schema.boxExceptions.tenantId, tenantId));
+    await db.delete(schema.boxItems).where(eq(schema.boxItems.tenantId, tenantId));
+    await db.delete(schema.boxes).where(eq(schema.boxes.tenantId, tenantId));
+    await db.delete(schema.shifts).where(eq(schema.shifts.tenantId, tenantId));
+    await db.delete(schema.products).where(eq(schema.products.tenantId, tenantId));
+    await db.delete(schema.organization).where(eq(schema.organization.id, tenantId));
+    await pool.end();
+  });
+
+  it("round-trips removedAt, disassembledAt, and a box_exceptions row", async () => {
+    await db
+      .update(schema.boxItems)
+      .set({ removedAt: new Date() })
+      .where(and(eq(schema.boxItems.tenantId, tenantId), eq(schema.boxItems.boxId, boxId)));
+    await db
+      .update(schema.boxes)
+      .set({ disassembledAt: new Date() })
+      .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.id, boxId)));
+    const [exception] = await db
+      .insert(schema.boxExceptions)
+      .values({
+        tenantId,
+        kind: "disassemble",
+        boxId,
+        shiftId,
+        terminalId: null,
+        operatorId: null,
+        reason: "test reason",
+        occurredAt: new Date(),
+      })
+      .returning();
+    expect(exception?.kind).toBe("disassemble");
+
+    const [row] = await db.select().from(schema.boxes).where(eq(schema.boxes.id, boxId));
+    expect(row?.disassembledAt).not.toBeNull();
+
+    // Not asserted by the brief, but worth pinning down since the test name
+    // promises it: confirm removedAt actually persisted too, not just
+    // disassembledAt.
+    const [item] = await db
+      .select()
+      .from(schema.boxItems)
+      .where(and(eq(schema.boxItems.tenantId, tenantId), eq(schema.boxItems.boxId, boxId)));
+    expect(item?.removedAt).not.toBeNull();
   });
 });
