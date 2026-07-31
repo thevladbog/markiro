@@ -21,10 +21,14 @@ export interface ScanQueueDeps {
 
 export interface ScanQueue {
   enqueue(raw: string): void;
+  /** Runs a side-channel write in strict order with scans. */
+  enqueueJob(job: () => Promise<void>): void;
   /** Resolves once the queue has drained (tests await this instead of sleeping). */
   idle(): Promise<void>;
   pending(): number;
 }
+
+type QueueEntry = { type: "scan"; raw: string } | { type: "job"; run: () => Promise<void> };
 
 /**
  * Processes scans strictly one at a time.
@@ -42,7 +46,7 @@ export interface ScanQueue {
  * on a production line silently loses codes.
  */
 export function createScanQueue(deps: ScanQueueDeps): ScanQueue {
-  const buffer: string[] = [];
+  const buffer: QueueEntry[] = [];
   let draining = false;
   let idleResolvers: (() => void)[] = [];
 
@@ -57,7 +61,16 @@ export function createScanQueue(deps: ScanQueueDeps): ScanQueue {
     draining = true;
     try {
       while (buffer.length > 0) {
-        const raw = buffer.shift()!;
+        const entry = buffer.shift()!;
+        if (entry.type === "job") {
+          try {
+            await entry.run();
+          } catch (err) {
+            console.error("station: scan-queue job failed", err);
+          }
+          continue;
+        }
+        const { raw } = entry;
         let outcome: ScanOutcome;
         try {
           outcome = await deps.process(raw);
@@ -80,7 +93,11 @@ export function createScanQueue(deps: ScanQueueDeps): ScanQueue {
 
   return {
     enqueue(raw: string) {
-      buffer.push(raw);
+      buffer.push({ type: "scan", raw });
+      void drain();
+    },
+    enqueueJob(job: () => Promise<void>) {
+      buffer.push({ type: "job", run: job });
       void drain();
     },
     idle() {

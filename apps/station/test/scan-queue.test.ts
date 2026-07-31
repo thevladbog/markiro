@@ -50,6 +50,36 @@ describe("scan queue", () => {
     expect(seen).toEqual(["first", "second"]);
   });
 
+  it("runs side-channel jobs in strict order with scans, never concurrently", async () => {
+    const order: string[] = [];
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const queue = createScanQueue({
+      process: async (raw) => {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise((r) => setTimeout(r, 5));
+        order.push(`scan:${raw}`);
+        inFlight -= 1;
+        return outcome(raw);
+      },
+      onOutcome: () => {},
+    });
+
+    queue.enqueue("a");
+    queue.enqueueJob(async () => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      order.push("job");
+      inFlight -= 1;
+    });
+    queue.enqueue("b");
+    await queue.idle();
+
+    expect(order).toEqual(["scan:a", "job", "scan:b"]);
+    expect(maxInFlight).toBe(1);
+  });
+
   it("reports every outcome to onOutcome in order", async () => {
     const outcomes: string[] = [];
     const queue = createScanQueue({

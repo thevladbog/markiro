@@ -5,6 +5,11 @@ import { getInstallId } from "./install-id.js";
 import type { SqlExecutor } from "./mirror.js";
 import { ackThrough, oldestQueuedAt, outboxDepth, readBatch, type OutboxItem } from "./outbox.js";
 import { addRange, remaining, type PoolRange } from "./sscc-pool.js";
+import {
+  ackExceptionsThrough,
+  readExceptions,
+  type PendingException,
+} from "./box-exceptions-mirror.js";
 
 export { MAX_BOX_CLOSURES_PER_SYNC_BATCH };
 
@@ -154,6 +159,19 @@ function toPayload(items: OutboxItem[]) {
     code: i.code,
     boxId: i.boxId,
     operatorId: i.operatorId,
+  }));
+}
+
+function toExceptionPayload(exceptions: PendingException[]) {
+  return exceptions.map((exception) => ({
+    kind: exception.kind,
+    boxId: exception.boxId,
+    codeHash: exception.codeHash,
+    shiftId: exception.shiftId,
+    terminalId: exception.terminalId,
+    operatorId: exception.operatorId,
+    reason: exception.reason,
+    occurredAt: exception.at,
   }));
 }
 
@@ -381,6 +399,7 @@ const CEILING_META_KEY = "sync_pending_ceiling";
  * that closes afterward rides a later, distinct batch instead.
  */
 const BOX_CEILING_META_KEY = "sync_pending_box_ceiling";
+const EXCEPTION_CEILING_META_KEY = "sync_pending_exception_ceiling";
 
 /**
  * Reads back an in-flight batch's pinned ceiling (see `pendingCeiling`/
@@ -509,6 +528,10 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
   let pendingBoxCeiling: number | null = null;
   // `ceilingLoaded`'s exact counterpart for `pendingBoxCeiling`.
   let boxCeilingLoaded = false;
+  // Exception facts need the same persisted exact-set guarantee: otherwise
+  // a restart can replay an acknowledged audit fact under a newly-grown key.
+  let pendingExceptionCeiling: number | null = null;
+  let exceptionCeilingLoaded = false;
   // Resolved once per engine instance and cached: the install id never
   // changes for the life of a given local database, so there is no reason
   // to re-query `station_meta` for every batch.
@@ -534,6 +557,14 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
       boxCeilingLoaded = true;
     }
     return pendingBoxCeiling;
+  }
+
+  async function ensurePendingExceptionCeiling(): Promise<number | null> {
+    if (!exceptionCeilingLoaded) {
+      pendingExceptionCeiling = await loadPersistedCeiling(deps.exec, EXCEPTION_CEILING_META_KEY);
+      exceptionCeilingLoaded = true;
+    }
+    return pendingExceptionCeiling;
   }
 
   function settleIdle() {
@@ -613,8 +644,10 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
           MAX_BOX_CLOSURES_PER_SYNC_BATCH,
           boxCeiling,
         );
-        if (batch.length === 0 && boxes.length === 0) {
-          if (ceiling !== null || boxCeiling !== null) {
+        const exceptionCeiling = await ensurePendingExceptionCeiling();
+        const exceptions = await readExceptions(deps.exec, BATCH_SIZE, exceptionCeiling);
+        if (batch.length === 0 && boxes.length === 0 && exceptions.length === 0) {
+          if (ceiling !== null || boxCeiling !== null || exceptionCeiling !== null) {
             // Only reachable with a stale ceiling if the rows it pinned were
             // somehow removed without going through `ackThrough`/`ackBoxes`
             // below (or were already acknowledged by whichever process
@@ -626,8 +659,10 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
             // for the next nudge or the 15-second heartbeat.
             pendingCeiling = null;
             pendingBoxCeiling = null;
+            pendingExceptionCeiling = null;
             await clearPersistedCeiling(deps.exec, CEILING_META_KEY);
             await clearPersistedCeiling(deps.exec, BOX_CEILING_META_KEY);
+            await clearPersistedCeiling(deps.exec, EXCEPTION_CEILING_META_KEY);
             continue;
           }
           break;
@@ -640,6 +675,8 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
         const maxId = batch.length > 0 ? batch[batch.length - 1]!.id : null;
         // `null` exactly when this attempt carries no box closures at all.
         const newBoxCeiling = boxes.length > 0 ? boxes[boxes.length - 1]!.rowid : null;
+        const newExceptionCeiling =
+          exceptions.length > 0 ? exceptions[exceptions.length - 1]!.id : null;
         // Pin BEFORE sending — in memory AND in `station_meta` (a single
         // upsert; never a multi-statement transaction, see the module doc
         // comment) — so that if the post fails, or the whole process dies
@@ -655,12 +692,18 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
         if (newBoxCeiling !== null) {
           pendingBoxCeiling = newBoxCeiling;
         }
+        if (newExceptionCeiling !== null) {
+          pendingExceptionCeiling = newExceptionCeiling;
+        }
         try {
           if (maxId !== null) {
             await savePersistedCeiling(deps.exec, CEILING_META_KEY, maxId);
           }
           if (newBoxCeiling !== null) {
             await savePersistedCeiling(deps.exec, BOX_CEILING_META_KEY, newBoxCeiling);
+          }
+          if (newExceptionCeiling !== null) {
+            await savePersistedCeiling(deps.exec, EXCEPTION_CEILING_META_KEY, newExceptionCeiling);
           }
           const instId = await ensureInstallId();
           // A batch's box set (when non-empty) is folded into `batchId`
@@ -682,15 +725,18 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
           // outcome resolving (Task 13 review, second wave) -- see
           // `boxSetSignature`'s own doc comment.
           const boxSuffix = boxes.length > 0 ? `:box:${boxSetSignature(boxes)}` : "";
+          const exceptionSuffix =
+            newExceptionCeiling !== null ? `:exception:${newExceptionCeiling}` : "";
           const batchId =
             maxId !== null
-              ? `${deps.machineId}:${instId}:${maxId}${boxSuffix}`
-              : `${deps.machineId}:${instId}${boxSuffix}`;
+              ? `${deps.machineId}:${instId}:${maxId}${boxSuffix}${exceptionSuffix}`
+              : `${deps.machineId}:${instId}${boxSuffix}${exceptionSuffix}`;
           const serialsLeft = await computeSerialsLeft(deps.exec);
           const res = await deps.client.post<BatchResponse>("/station/scans", {
             batchId,
             items: toPayload(batch),
             boxes: toBoxPayload(boxes),
+            exceptions: toExceptionPayload(exceptions),
             serialsLeft,
           });
           if (!isBatchResponse(res)) {
@@ -790,6 +836,11 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
             await ackBoxes(deps.exec, boxes, new Date(now()).toISOString());
             pendingBoxCeiling = null;
             await clearPersistedCeiling(deps.exec, BOX_CEILING_META_KEY);
+          }
+          if (newExceptionCeiling !== null) {
+            await ackExceptionsThrough(deps.exec, newExceptionCeiling);
+            pendingExceptionCeiling = null;
+            await clearPersistedCeiling(deps.exec, EXCEPTION_CEILING_META_KEY);
           }
           lastSuccessAt = now();
           backoffMs = BACKOFF_START_MS;

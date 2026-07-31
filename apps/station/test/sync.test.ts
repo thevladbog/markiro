@@ -19,6 +19,11 @@ import {
 } from "../src/lib/boxes.js";
 import { recordScan, type AcceptedCode, type ScanEventRow } from "../src/lib/journal.js";
 import { outboxDepth } from "../src/lib/outbox.js";
+import {
+  insertException,
+  readExceptions,
+  type ExceptionInput,
+} from "../src/lib/box-exceptions-mirror.js";
 
 // Several tests below deliberately fail the POST (or the device DB) to
 // exercise the retry path, which logs through `console.error` by design.
@@ -1025,6 +1030,100 @@ describe("sync engine: pools and closures", () => {
     });
     await drainOnce();
     expect(JSON.parse(lastBody()).serialsLeft).toBe(3);
+  });
+
+  function exception(overrides: Partial<ExceptionInput> = {}): ExceptionInput {
+    return {
+      kind: "undo",
+      boxId: "b1",
+      codeHash: "h1",
+      shiftId: SHIFT,
+      terminalId: TERMINAL,
+      operatorId: null,
+      reason: null,
+      at: ISO,
+      ...overrides,
+    };
+  }
+
+  it("drains queued exceptions with items and deletes them only after acknowledgement", async () => {
+    await insertException(exec, exception());
+
+    await drainOnce();
+
+    expect(JSON.parse(lastBody()).exceptions).toEqual([
+      {
+        kind: "undo",
+        boxId: "b1",
+        codeHash: "h1",
+        shiftId: SHIFT,
+        terminalId: TERMINAL,
+        operatorId: null,
+        reason: null,
+        occurredAt: ISO,
+      },
+    ]);
+    expect(await readExceptions(exec, 10)).toEqual([]);
+  });
+
+  it("gives consecutive exception-only batches distinct ids so server dedup cannot swallow one", async () => {
+    await drainOnce(); // drain the default item first
+    await insertException(exec, exception({ boxId: "b1", codeHash: "h1" }));
+    await drainOnce();
+    const firstId = JSON.parse(lastBody()).batchId as string;
+
+    await insertException(exec, exception({ boxId: "b2", codeHash: "h2" }));
+    await drainOnce();
+    const secondId = JSON.parse(lastBody()).batchId as string;
+
+    expect(secondId).not.toBe(firstId);
+    expect(await readExceptions(exec, 10)).toEqual([]);
+  });
+
+  it("persists an exception batch ceiling so a restart retries its exact rows before newer facts", async () => {
+    await drainOnce(); // drain the default item first
+    await insertException(exec, exception({ boxId: "b1", codeHash: "h1" }));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const failedPost = vi.fn().mockRejectedValue(new Error("response lost"));
+    const firstEngine = createSyncEngine({
+      exec,
+      client: { post: failedPost },
+      machineId: "m1",
+      onState: () => {},
+    });
+    firstEngine.nudge();
+    await firstEngine.idle();
+    firstEngine.stop();
+    const firstBody = failedPost.mock.calls[0]![1] as {
+      batchId: string;
+      exceptions: Array<{ boxId: string }>;
+    };
+
+    await insertException(exec, exception({ boxId: "b2", codeHash: "h2" }));
+    const resumedPost = vi
+      .fn()
+      .mockResolvedValue({ applied: 0, alreadyApplied: true, conflicts: [] });
+    const resumedEngine = createSyncEngine({
+      exec,
+      client: { post: resumedPost },
+      machineId: "m1",
+      onState: () => {},
+    });
+    resumedEngine.nudge();
+    await resumedEngine.idle();
+    resumedEngine.stop();
+
+    expect(firstBody.exceptions.map((item) => item.boxId)).toEqual(["b1"]);
+    expect(resumedPost).toHaveBeenCalledTimes(2);
+    const retried = resumedPost.mock.calls[0]![1] as {
+      batchId: string;
+      exceptions: Array<{ boxId: string }>;
+    };
+    expect(retried.batchId).toBe(firstBody.batchId);
+    expect(retried.exceptions.map((item) => item.boxId)).toEqual(["b1"]);
+    const fresh = resumedPost.mock.calls[1]![1] as { exceptions: Array<{ boxId: string }> };
+    expect(fresh.exceptions.map((item) => item.boxId)).toEqual(["b2"]);
+    expect(await readExceptions(exec, 10)).toEqual([]);
   });
 
   it("sends a closed box with its serial", async () => {
