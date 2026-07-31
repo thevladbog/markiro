@@ -842,6 +842,8 @@
           "statusMappingLabel": "Сопоставление статусов",
           "statusMappingHint": "Внешнее значение реквизита → наш статус. Несопоставленное значение не двигает заявку.",
           "statusMappingExternalPlaceholder": "Внешнее значение",
+          "statusMappingExternalLabel": "Внешнее значение, строка {{row}}",
+          "statusMappingStatusLabel": "Внутренний статус, строка {{row}}",
           "statusMappingOption": {
             "punched": "Пробит",
             "writtenoff": "Списан",

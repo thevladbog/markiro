@@ -85,6 +85,14 @@ describe("channel registry", () => {
     expect(empty.success).toBe(false);
   });
 
+  it("commerceml схема принимает null как явную очистку строковых настроек", () => {
+    const cleared = describeChannel("commerceml").settingsSchema.safeParse({
+      writeoffDocumentType: null,
+      orderStatusField: null,
+    });
+    expect(cleared.success).toBe(true);
+  });
+
   it("commerceml схема принимает statusMapping только с известными значениями", () => {
     const ok = describeChannel("commerceml").settingsSchema.safeParse({
       statusMapping: { Оплачен: "punched", Списан: "writtenoff", Отменён: "cancelled" },

@@ -72,7 +72,7 @@ simply forgotten or genuinely unverified:
       per-configuration dictionary (спека §2), so there is no default this
       exchange can assume is right.
 
-## Already covered — do not re-spend the live session on these
+## Already covered for И-2 — do not re-spend the live session on these
 
 - ~~That an order held back because of an unlinked product does not silently
   vanish~~ — covered by `commerceml-order-export.test.ts`'s `planExport`

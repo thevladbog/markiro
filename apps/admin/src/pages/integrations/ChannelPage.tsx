@@ -162,8 +162,8 @@ function CommercemlSettingsForm({
         // a real "unset" representation server-side, not a client patch.
         ...(priceType ? { priceType } : {}),
         splitWriteoffDocument: values.splitWriteoffDocument,
-        ...(writeoffDocumentType ? { writeoffDocumentType } : {}),
-        ...(orderStatusField ? { orderStatusField } : {}),
+        writeoffDocumentType: writeoffDocumentType || null,
+        orderStatusField: orderStatusField || null,
         ...(Object.keys(statusMapping).length > 0 || hadSavedStatusMapping
           ? { statusMapping }
           : {}),
@@ -224,6 +224,9 @@ function CommercemlSettingsForm({
         {fields.map((field, index) => (
           <div key={field.id} style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <Input
+              aria-label={t("pages.integrations.channel.settings.statusMappingExternalLabel", {
+                row: index + 1,
+              })}
               placeholder={t(
                 "pages.integrations.channel.settings.statusMappingExternalPlaceholder",
               )}
@@ -234,6 +237,9 @@ function CommercemlSettingsForm({
               name={`statusMapping.${index}.value` as const}
               render={({ field: controllerField }) => (
                 <Select
+                  aria-label={t("pages.integrations.channel.settings.statusMappingStatusLabel", {
+                    row: index + 1,
+                  })}
                   options={STATUS_MAPPING_OPTIONS.map((option) => ({
                     value: option.value,
                     label: t(option.labelKey),

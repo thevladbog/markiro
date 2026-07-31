@@ -842,6 +842,8 @@
           "statusMappingLabel": "Status mapping",
           "statusMappingHint": "External requisite value → our status. An unmapped value never moves the order.",
           "statusMappingExternalPlaceholder": "External value",
+          "statusMappingExternalLabel": "External value, row {{row}}",
+          "statusMappingStatusLabel": "Internal status, row {{row}}",
           "statusMappingOption": {
             "punched": "Punched",
             "writtenoff": "Written off",

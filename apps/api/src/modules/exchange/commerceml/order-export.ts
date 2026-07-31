@@ -106,7 +106,7 @@ export function planExport(orders: ExportCandidateOrder[]): ExportPlan {
 
 export interface OrderDocumentSettings {
   splitWriteoffDocument: boolean;
-  writeoffDocumentType?: string | undefined;
+  writeoffDocumentType?: string | null | undefined;
 }
 
 const DEFAULT_DOCUMENT_TYPE = "Заказ товара";

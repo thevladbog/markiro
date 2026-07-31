@@ -1,0 +1,1 @@
+CREATE INDEX "pickup_orders_export_queue_idx" ON "pickup_orders" USING btree ("tenant_id","created_at") WHERE status = 'pending' and exported_at is null;

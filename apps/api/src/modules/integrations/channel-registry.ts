@@ -67,7 +67,7 @@ const commercemlSettings = z
      * ничего — `order-export.ts`'s `buildOrdersDocument` падает обратно на
      * единый тип документа по умолчанию, если это поле пусто.
      */
-    writeoffDocumentType: z.string().min(1).optional(),
+    writeoffDocumentType: z.string().min(1).nullable().optional(),
     /**
      * Название реквизита статуса заказа в ЭТОЙ конфигурации 1С (плана И-2,
      * спека §6). Стандартного названия нет — приёмочный чек-лист
@@ -75,7 +75,7 @@ const commercemlSettings = z
      * неизвестным до первого живого сеанса. Пусто — входящий статус вообще
      * не читается (спека §6: "по умолчанию слой выключен").
      */
-    orderStatusField: z.string().min(1).optional(),
+    orderStatusField: z.string().min(1).nullable().optional(),
     /**
      * Таблица «внешнее значение реквизита → наш статус» (спека §6: "данные, а
      * не код"). Значение — один из трёх терминальных статусов

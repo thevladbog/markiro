@@ -161,6 +161,31 @@ describe("integrations (cabinet)", () => {
     expect(res.body.settings.priceType).toBe("Розничная 3");
   });
 
+  it("явно очищает строковые настройки и пустое сопоставление с сохранением после GET", async () => {
+    await agent
+      .patch("/integrations/commerceml")
+      .send({
+        writeoffDocumentType: "Списание товара",
+        orderStatusField: "СтатусЗаказа",
+        statusMapping: { Оплачен: "punched" },
+      })
+      .expect(200);
+
+    await agent
+      .patch("/integrations/commerceml")
+      .send({ writeoffDocumentType: null, orderStatusField: null, statusMapping: {} })
+      .expect(200);
+
+    const reloaded = await agent.get("/integrations/commerceml").expect(200);
+    expect(reloaded.body.settings).toEqual(
+      expect.objectContaining({
+        writeoffDocumentType: null,
+        orderStatusField: null,
+        statusMapping: {},
+      }),
+    );
+  });
+
   it("silentAfterHours за пределами границ — 400, и сохранённое значение не трогает", async () => {
     await agent.patch("/integrations/commerceml").send({ silentAfterHours: 0 }).expect(400);
     await agent.patch("/integrations/commerceml").send({ silentAfterHours: -1 }).expect(400);

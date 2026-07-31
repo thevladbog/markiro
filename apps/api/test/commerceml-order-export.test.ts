@@ -102,6 +102,18 @@ describe("commerceml order-export: buildOrdersDocument", () => {
     });
     expect(split).toContain("<ХозОперация>Списание товара</ХозОперация>");
     expect(split).toContain("<Комментарий>Списание: Порча</Комментарий>");
+
+    const cleared = buildOrdersDocument(plan.eligible, {
+      splitWriteoffDocument: true,
+      writeoffDocumentType: null,
+    });
+    expect(cleared).toContain("<ХозОперация>Заказ товара</ХозОперация>");
+  });
+
+  it("при splitWriteoffDocument без типа использует тип документа по умолчанию", () => {
+    const plan = planExport([{ ...baseOrder, reason: "writeoff" }]);
+    const xml = buildOrdersDocument(plan.eligible, { splitWriteoffDocument: true });
+    expect(xml).toContain("<ХозОперация>Заказ товара</ХозОперация>");
   });
 
   it("экранирует & < > в текстовых полях", () => {

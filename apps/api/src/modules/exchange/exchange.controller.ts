@@ -810,7 +810,7 @@ export class ExchangeController {
         ),
       );
     const settings = (channelRow?.settings ?? {}) as {
-      orderStatusField?: string;
+      orderStatusField?: string | null;
       statusMapping?: Record<string, string>;
     };
 
@@ -822,7 +822,7 @@ export class ExchangeController {
 
     let documents: ReturnType<typeof parseOrderStatusDocuments>;
     try {
-      documents = parseOrderStatusDocuments(bytes, effectiveOrderStatusField ?? undefined);
+      documents = parseOrderStatusDocuments(bytes, effectiveOrderStatusField);
     } catch (cause) {
       const detail = cause instanceof Error ? cause.message : String(cause);
       await this.journal.append({
@@ -1149,7 +1149,7 @@ export class ExchangeController {
       );
     const settings = (channelRow?.settings ?? {}) as {
       splitWriteoffDocument?: boolean;
-      writeoffDocumentType?: string;
+      writeoffDocumentType?: string | null;
     };
 
     let xml = buildOrdersDocument(plan.eligible, {

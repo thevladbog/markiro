@@ -38,6 +38,11 @@ describe("commerceml order-status: parseOrderStatusDocuments", () => {
     expect(docs.every((d) => d.statusValue === null)).toBe(true);
   });
 
+  it("отдаёт null для каждого документа после явной очистки реквизита", () => {
+    const docs = parseOrderStatusDocuments(fixture, null);
+    expect(docs.every((d) => d.statusValue === null)).toBe(true);
+  });
+
   it("не падает на файле без документов", () => {
     const empty = Buffer.from(
       '<?xml version="1.0" encoding="UTF-8"?><КоммерческаяИнформация/>',
@@ -58,11 +63,16 @@ describe("commerceml order-status: resolveMappedStatus", () => {
     expect(resolveMappedStatus("Что-то ещё", mapping)).toBeNull();
   });
 
+  it("отдаёт null для неподдерживаемого сопоставления pending", () => {
+    expect(resolveMappedStatus("Ожидает", { Ожидает: "pending" })).toBeNull();
+  });
+
   it("отдаёт null, если значение отсутствует (null)", () => {
     expect(resolveMappedStatus(null, mapping)).toBeNull();
   });
 
   it("отдаёт null, если таблица сопоставления не задана", () => {
     expect(resolveMappedStatus("Оплачен", undefined)).toBeNull();
+    expect(resolveMappedStatus("Оплачен", {})).toBeNull();
   });
 });

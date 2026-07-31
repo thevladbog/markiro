@@ -20,7 +20,7 @@ export interface ParsedOrderStatusDocument {
  */
 export function parseOrderStatusDocuments(
   bytes: Buffer,
-  statusFieldName: string | undefined,
+  statusFieldName: string | null | undefined,
 ): ParsedOrderStatusDocument[] {
   const root = parseXml(bytes);
   const container = dig(root, "КоммерческаяИнформация", "ПакетДокументов");
@@ -32,7 +32,7 @@ export function parseOrderStatusDocuments(
     const entries = Array.isArray(rawValues) ? rawValues : [];
 
     let statusValue: string | null = null;
-    if (statusFieldName !== undefined) {
+    if (statusFieldName != null) {
       for (const rawEntry of entries) {
         const entry = asObject(rawEntry);
         if (textOf(entry["Наименование"]) === statusFieldName) {

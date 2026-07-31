@@ -526,6 +526,7 @@ export class PickupOrdersService {
           eq(schema.pickupOrders.tenantId, tenantId),
           eq(schema.pickupOrders.status, "pending"),
           isNull(schema.pickupOrders.exportedAt),
+          exists(this.activeItemSubquery(tenantId)),
           notExists(this.unlinkedItemSubquery(tenantId)),
         ),
       )
@@ -586,7 +587,7 @@ export class PickupOrdersService {
    */
   private unlinkedItemSubquery(tenantId: string) {
     return this.db
-      .select({ one: sql`1` })
+      .select({ one: sql<number>`1` })
       .from(schema.pickupOrderItems)
       .innerJoin(schema.products, eq(schema.products.id, schema.pickupOrderItems.productId))
       .where(
@@ -595,6 +596,19 @@ export class PickupOrdersService {
           eq(schema.pickupOrderItems.orderId, schema.pickupOrders.id),
           eq(schema.pickupOrderItems.voided, false),
           isNull(schema.products.externalRef),
+        ),
+      );
+  }
+
+  private activeItemSubquery(tenantId: string) {
+    return this.db
+      .select({ one: sql<number>`1` })
+      .from(schema.pickupOrderItems)
+      .where(
+        and(
+          eq(schema.pickupOrderItems.tenantId, tenantId),
+          eq(schema.pickupOrderItems.orderId, schema.pickupOrders.id),
+          eq(schema.pickupOrderItems.voided, false),
         ),
       );
   }
@@ -695,6 +709,7 @@ export class PickupOrdersService {
         productName: schema.products.name,
         externalRef: schema.products.externalRef,
         unitPrice: schema.pickupOrderItems.unitPrice,
+        voided: schema.pickupOrderItems.voided,
       })
       .from(schema.pickupOrderItems)
       .leftJoin(schema.products, eq(schema.products.id, schema.pickupOrderItems.productId))
@@ -707,7 +722,10 @@ export class PickupOrdersService {
 
     const exportHeldProductNames = [
       ...new Set(
-        itemRows.filter((item) => item.externalRef === null).map((item) => item.productName ?? ""),
+        itemRows
+          .filter((item) => !item.voided && item.externalRef === null)
+          .map((item) => item.productName)
+          .filter((name): name is string => Boolean(name)),
       ),
     ];
 
