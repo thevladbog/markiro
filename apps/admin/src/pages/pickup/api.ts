@@ -32,6 +32,7 @@ export interface PickupOrderRowDto {
   totalPrice: string | null;
   status: PickupOrderStatus;
   createdAt: string;
+  exportedAt: string | null;
   conflictCount: number;
 }
 
@@ -66,6 +67,7 @@ export interface PickupOrderDetailDto extends PickupOrderRowDto {
   receiptNo: string | null;
   actNo: string | null;
   syncConflicts: SyncConflict[];
+  exportHeldProductNames: string[];
 }
 
 export interface ListPickupOrdersParams {

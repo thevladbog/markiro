@@ -196,10 +196,24 @@ export const pickupOrders = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
     resolvedByUserId: text("resolved_by_user_id"),
+    /**
+     * Set once 1С confirms receipt of this order via `mode=success`
+     * (плана И-2 §5, exchange.controller.ts). `null` means "still eligible
+     * for `mode=query`" -- an order is offered EVERY round until this is set,
+     * per spec's "до него документ предлагается снова" (repeat-until-
+     * confirmed, not repeat-forever: once set, `findExportCandidates` never
+     * selects this row again). Orthogonal to `status`: an order is exported
+     * WHILE STILL `pending` (спека §5, "выгружаем сразу при создании"), well
+     * before any resolve/cancel/1С-status-reconciliation touches `status`.
+     */
+    exportedAt: timestamp("exported_at", { withTimezone: true }),
   },
   (t) => [
     unique("pickup_orders_tenant_id_uq").on(t.tenantId, t.id),
     unique("pickup_orders_tenant_order_no_uq").on(t.tenantId, t.orderNo),
+    index("pickup_orders_export_queue_idx")
+      .on(t.tenantId, t.createdAt)
+      .where(sql`status = 'pending' and exported_at is null`),
     // Idempotent sync: a (kiosk, deviceSeq) pair maps to one order. NULL
     // deviceSeq rows (admin-created, if ever) are exempt (MATCH SIMPLE).
     unique("pickup_orders_kiosk_device_seq_uq").on(t.tenantId, t.kioskId, t.deviceSeq),

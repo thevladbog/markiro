@@ -7,7 +7,21 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from "@nestjs/common";
-import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, sql, type SQL } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  exists,
+  gte,
+  inArray,
+  isNull,
+  lte,
+  ne,
+  notExists,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { formatPhc, PHC_ITERATIONS, validatePickupKm } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
@@ -25,6 +39,7 @@ import type {
   OrderConflict,
   PickupOrderDetailDto,
   PickupOrderRowDto,
+  PickupOrderStatus,
   ResolvePickupOrderDto,
 } from "./dto";
 
@@ -65,6 +80,41 @@ const CLIENT_CLOCK_BEHIND_TOLERANCE_MS = 7 * 24 * 60 * 60_000;
 type ParsedItem =
   | { rawKm: string; ok: true; gtin14: string; serial: string; key: string }
   | { rawKm: string; ok: false; conflictReason: "not_km" | "incomplete" };
+
+export type ApplyExternalStatusOutcome =
+  "applied" | "not_found" | "not_pending" | "missing_writeoff_reason";
+
+export interface ApplyExternalStatusResult {
+  outcome: ApplyExternalStatusOutcome;
+  currentStatus?: PickupOrderStatus;
+}
+
+/**
+ * One order `findExportCandidates` reports as held back this round because
+ * at least one of its (non-voided) items' products still has no 1С
+ * `external_ref` -- same shape `order-export.ts`'s own `planExport` produces
+ * for its `HeldOrder[]`, so `ExchangeController.query`'s journaling loop can
+ * consume either uniformly.
+ */
+export interface HeldExportOrder {
+  orderId: string;
+  orderNo: string;
+  unlinkedProductIds: string[];
+}
+
+/** `findExportCandidates`'s result -- see that method's own comment (Fix 4, final review) for why these are two separate queries. */
+export interface ExportCandidatesResult {
+  candidates: {
+    id: string;
+    orderNo: string;
+    createdAt: Date;
+    reason: "buy" | "writeoff";
+    writeoffReasonName: string | null;
+    totalPrice: string | null;
+    items: { productId: string; productExternalRef: string | null; unitPrice: string | null }[];
+  }[];
+  held: HeldExportOrder[];
+}
 
 @Injectable()
 export class PickupOrdersService {
@@ -411,6 +461,214 @@ export class PickupOrdersService {
     return { items: rows.map((row) => this.mapRowDto(row)) };
   }
 
+  /**
+   * Orders ready for `mode=query` this round, split into two INDEPENDENTLY
+   * queried sets -- see Fix 4's own explanation below for why they must be
+   * independent.
+   *
+   * `candidates`: `pending`, never yet exported (`exported_at is null`), AND
+   * -- via the `NOT EXISTS` condition below -- with every (non-voided)
+   * item's product ALREADY linked to a 1С `external_ref`. Ordered
+   * oldest-first and capped at `limit`, so a channel with more eligible
+   * orders than `limit` still makes steady progress across rounds rather
+   * than the same newest batch crowding out the rest forever. Guaranteed
+   * exportable by construction, so `planExport` (order-export.ts), which
+   * still runs over this result, will report every one of these `eligible`
+   * -- its own held-splitting logic simply never has anything left to hold.
+   *
+   * Fix 4 (final review): this `NOT EXISTS` is the entire fix, and it is
+   * what changed here. The PREVIOUS version of this method selected the
+   * oldest `limit` pending+unexported orders FIRST, un-filtered, and only
+   * AFTERWARDS -- in the caller, via `planExport` -- split that batch into
+   * eligible vs. held (held = has an item whose product lacks a 1С link).
+   * Once `limit` (200) or more orders were held, EVERY order this method
+   * surfaced, every round, was held, and no eligible order was ever selected
+   * again -- a real starvation bug, most likely to trigger on a tenant's
+   * very first exchange when its whole catalog is still unlinked. Excluding
+   * held orders IN THE QUERY, before `limit` is applied, is what breaks
+   * that: an eligible order can no longer be crowded out of the batch by
+   * however many held orders happen to be older than it.
+   *
+   * `held`: a SEPARATE, independently-limited query (`findHeldExportOrders`)
+   * -- pending+unexported orders WITH at least one unlinked item -- for
+   * `ExchangeController.query`'s held-order journaling ONLY. Once
+   * `candidates` above excludes held orders entirely, nothing else would
+   * ever learn about them, and that journaling would silently stop working
+   * -- not an acceptable side effect of the starvation fix. This query does
+   * NOT need to be exhaustive every round (a bounded top-N sample is fine
+   * for a journal entry); its whole point is that it must never gate or
+   * compete with the `candidates` query above the way the single combined
+   * query used to.
+   *
+   * Items for `candidates` are fetched in a SECOND query (keyed on the same
+   * order ids) rather than joined into the first, same shape `readJournal`
+   * already uses for sessions + events (`integrations.service.ts`) -- an
+   * order-to-items join would repeat every order column once per item row
+   * for no reason.
+   */
+  async findExportCandidates(tenantId: string, limit: number): Promise<ExportCandidatesResult> {
+    const orders = await this.db
+      .select({
+        id: schema.pickupOrders.id,
+        orderNo: schema.pickupOrders.orderNo,
+        createdAt: schema.pickupOrders.createdAt,
+        reason: schema.pickupOrders.reason,
+        writeoffReasonName: schema.pickupOrderReasons.name,
+        totalPrice: schema.pickupOrders.totalPrice,
+      })
+      .from(schema.pickupOrders)
+      .leftJoin(
+        schema.pickupOrderReasons,
+        eq(schema.pickupOrderReasons.id, schema.pickupOrders.writeoffReasonId),
+      )
+      .where(
+        and(
+          eq(schema.pickupOrders.tenantId, tenantId),
+          eq(schema.pickupOrders.status, "pending"),
+          isNull(schema.pickupOrders.exportedAt),
+          exists(this.activeItemSubquery(tenantId)),
+          notExists(this.unlinkedItemSubquery(tenantId)),
+        ),
+      )
+      .orderBy(asc(schema.pickupOrders.createdAt))
+      .limit(limit);
+
+    let candidates: ExportCandidatesResult["candidates"] = [];
+    if (orders.length > 0) {
+      const orderIds = orders.map((order) => order.id);
+      const items = await this.db
+        .select({
+          orderId: schema.pickupOrderItems.orderId,
+          productId: schema.pickupOrderItems.productId,
+          productExternalRef: schema.products.externalRef,
+          unitPrice: schema.pickupOrderItems.unitPrice,
+        })
+        .from(schema.pickupOrderItems)
+        .innerJoin(schema.products, eq(schema.products.id, schema.pickupOrderItems.productId))
+        .where(
+          and(
+            eq(schema.pickupOrderItems.tenantId, tenantId),
+            inArray(schema.pickupOrderItems.orderId, orderIds),
+            eq(schema.pickupOrderItems.voided, false),
+          ),
+        );
+
+      const itemsByOrder = new Map<
+        string,
+        { productId: string; productExternalRef: string | null; unitPrice: string | null }[]
+      >();
+      for (const item of items) {
+        const entry = {
+          productId: item.productId,
+          productExternalRef: item.productExternalRef,
+          unitPrice: item.unitPrice,
+        };
+        const bucket = itemsByOrder.get(item.orderId);
+        if (bucket) bucket.push(entry);
+        else itemsByOrder.set(item.orderId, [entry]);
+      }
+
+      candidates = orders.map((order) => ({ ...order, items: itemsByOrder.get(order.id) ?? [] }));
+    }
+
+    const held = await this.findHeldExportOrders(tenantId, limit);
+    return { candidates, held };
+  }
+
+  /**
+   * The correlated "this order has an unlinked item" subquery both
+   * `findExportCandidates` (as `NOT EXISTS`, to exclude) and
+   * `findHeldExportOrders` (as `EXISTS`, to include) build on -- centralised
+   * so the two queries can never quietly drift on what "held" means.
+   * Correlates on `schema.pickupOrders.id` from the OUTER query each caller
+   * already selects `FROM`; returns a fresh query builder on every call
+   * since a drizzle select builder is consumed by the `exists`/`notExists`
+   * wrapper that reads it, not reusable across two call sites.
+   */
+  private unlinkedItemSubquery(tenantId: string) {
+    return this.db
+      .select({ one: sql<number>`1` })
+      .from(schema.pickupOrderItems)
+      .innerJoin(schema.products, eq(schema.products.id, schema.pickupOrderItems.productId))
+      .where(
+        and(
+          eq(schema.pickupOrderItems.tenantId, tenantId),
+          eq(schema.pickupOrderItems.orderId, schema.pickupOrders.id),
+          eq(schema.pickupOrderItems.voided, false),
+          isNull(schema.products.externalRef),
+        ),
+      );
+  }
+
+  private activeItemSubquery(tenantId: string) {
+    return this.db
+      .select({ one: sql<number>`1` })
+      .from(schema.pickupOrderItems)
+      .where(
+        and(
+          eq(schema.pickupOrderItems.tenantId, tenantId),
+          eq(schema.pickupOrderItems.orderId, schema.pickupOrders.id),
+          eq(schema.pickupOrderItems.voided, false),
+        ),
+      );
+  }
+
+  /**
+   * A bounded (`limit`-sized) sample of pending, unexported orders that have
+   * at least one item whose product still lacks a 1С `external_ref` -- feeds
+   * `ExchangeController.query`'s held-order journaling ONLY. See
+   * `findExportCandidates`'s own comment (Fix 4, final review) for why this
+   * is deliberately a query separate from the one that actually feeds
+   * `planExport`: it must never gate or compete with that one.
+   */
+  private async findHeldExportOrders(tenantId: string, limit: number): Promise<HeldExportOrder[]> {
+    const orders = await this.db
+      .select({ id: schema.pickupOrders.id, orderNo: schema.pickupOrders.orderNo })
+      .from(schema.pickupOrders)
+      .where(
+        and(
+          eq(schema.pickupOrders.tenantId, tenantId),
+          eq(schema.pickupOrders.status, "pending"),
+          isNull(schema.pickupOrders.exportedAt),
+          exists(this.unlinkedItemSubquery(tenantId)),
+        ),
+      )
+      .orderBy(asc(schema.pickupOrders.createdAt))
+      .limit(limit);
+
+    if (orders.length === 0) return [];
+
+    const orderIds = orders.map((order) => order.id);
+    const unlinkedItems = await this.db
+      .select({
+        orderId: schema.pickupOrderItems.orderId,
+        productId: schema.pickupOrderItems.productId,
+      })
+      .from(schema.pickupOrderItems)
+      .innerJoin(schema.products, eq(schema.products.id, schema.pickupOrderItems.productId))
+      .where(
+        and(
+          eq(schema.pickupOrderItems.tenantId, tenantId),
+          inArray(schema.pickupOrderItems.orderId, orderIds),
+          eq(schema.pickupOrderItems.voided, false),
+          isNull(schema.products.externalRef),
+        ),
+      );
+
+    const unlinkedByOrder = new Map<string, Set<string>>();
+    for (const item of unlinkedItems) {
+      const bucket = unlinkedByOrder.get(item.orderId);
+      if (bucket) bucket.add(item.productId);
+      else unlinkedByOrder.set(item.orderId, new Set([item.productId]));
+    }
+
+    return orders.map((order) => ({
+      orderId: order.id,
+      orderNo: order.orderNo,
+      unlinkedProductIds: [...(unlinkedByOrder.get(order.id) ?? new Set<string>())],
+    }));
+  }
+
   /** Admin detail: joined row + the employee's active badge code + items (with product names). */
   async detail(tenantId: string, id: string): Promise<PickupOrderDetailDto> {
     const [row] = await this.db
@@ -449,7 +707,9 @@ export class PickupOrdersService {
         serial: schema.pickupOrderItems.serial,
         rawKm: schema.pickupOrderItems.rawKm,
         productName: schema.products.name,
+        externalRef: schema.products.externalRef,
         unitPrice: schema.pickupOrderItems.unitPrice,
+        voided: schema.pickupOrderItems.voided,
       })
       .from(schema.pickupOrderItems)
       .leftJoin(schema.products, eq(schema.products.id, schema.pickupOrderItems.productId))
@@ -459,6 +719,15 @@ export class PickupOrdersService {
           eq(schema.pickupOrderItems.orderId, id),
         ),
       );
+
+    const exportHeldProductNames = [
+      ...new Set(
+        itemRows
+          .filter((item) => !item.voided && item.externalRef === null)
+          .map((item) => item.productName)
+          .filter((name): name is string => Boolean(name)),
+      ),
+    ];
 
     return {
       ...this.mapRowDto(row),
@@ -474,6 +743,7 @@ export class PickupOrdersService {
       receiptNo: row.receiptNo,
       actNo: row.actNo,
       syncConflicts: (row.syncConflicts as OrderConflict[] | null) ?? [],
+      exportHeldProductNames,
     };
   }
 
@@ -710,6 +980,75 @@ export class PickupOrdersService {
   }
 
   /**
+   * Applies a status 1С reported for this tenant's order via the CommerceML
+   * `type=sale` reconciliation (спека §6, `order-status.ts`'s
+   * `resolveMappedStatus`). Same guarded `pending -> X` transition
+   * `resolve`/`cancel` above already enforce -- an order 1С reports as
+   * changed, but this server no longer sees as `pending` (an admin already
+   * resolved/cancelled it locally, or 1С already reported this exact change
+   * before), is a discrepancy for the CALLER to journal, never a thrown
+   * exception: one bad row inside a reconciliation batch must never abort
+   * the rest of it (same discipline `commerceml/apply.ts` already follows
+   * for a bad price).
+   */
+  async applyExternalStatus(
+    tenantId: string,
+    orderId: string,
+    mappedStatus: "punched" | "writtenoff" | "cancelled",
+  ): Promise<ApplyExternalStatusResult> {
+    const current = await this.findRow(tenantId, orderId);
+    if (!current) return { outcome: "not_found" };
+    if (current.status !== "pending") {
+      return { outcome: "not_pending", currentStatus: current.status };
+    }
+
+    const pendingCondition = and(
+      eq(schema.pickupOrders.tenantId, tenantId),
+      eq(schema.pickupOrders.id, orderId),
+      eq(schema.pickupOrders.status, "pending"),
+    );
+
+    if (mappedStatus === "cancelled") {
+      const cancelledId = await this.db.transaction(async (tx) => {
+        const [row] = await tx
+          .update(schema.pickupOrders)
+          .set({ status: "cancelled" })
+          .where(pendingCondition)
+          .returning({ id: schema.pickupOrders.id });
+        if (!row) return null;
+        await tx
+          .update(schema.pickupOrderItems)
+          .set({ voided: true })
+          .where(
+            and(
+              eq(schema.pickupOrderItems.tenantId, tenantId),
+              eq(schema.pickupOrderItems.orderId, orderId),
+            ),
+          );
+        return row.id;
+      });
+      return cancelledId ? { outcome: "applied" } : { outcome: "not_pending" };
+    }
+
+    if (mappedStatus === "writtenoff" && !current.writeoffReasonId) {
+      return { outcome: "missing_writeoff_reason" };
+    }
+
+    const resolvedAt = new Date();
+    const [row] = await this.db
+      .update(schema.pickupOrders)
+      .set(
+        mappedStatus === "punched"
+          ? { status: "punched", resolvedAt, resolvedByUserId: null }
+          : { status: "writtenoff", resolvedAt, resolvedByUserId: null },
+      )
+      .where(pendingCondition)
+      .returning({ id: schema.pickupOrders.id });
+
+    return row ? { outcome: "applied" } : { outcome: "not_pending" };
+  }
+
+  /**
    * A writeoffReasonId explicitly supplied to /resolve must belong to this
    * tenant and be non-archived — symmetric with the kiosk create path
    * (`resolveWriteoffReasonId`), so an archived reason can't be re-attached
@@ -778,6 +1117,7 @@ export class PickupOrdersService {
       totalPrice: schema.pickupOrders.totalPrice,
       status: schema.pickupOrders.status,
       createdAt: schema.pickupOrders.createdAt,
+      exportedAt: schema.pickupOrders.exportedAt,
       syncConflicts: schema.pickupOrders.syncConflicts,
     };
   }
@@ -793,6 +1133,7 @@ export class PickupOrdersService {
     totalPrice: string | null;
     status: "pending" | "punched" | "writtenoff" | "cancelled";
     createdAt: Date;
+    exportedAt: Date | null;
     syncConflicts: { rawKm: string; reason: string }[] | null;
   }): PickupOrderRowDto {
     return {
@@ -806,6 +1147,7 @@ export class PickupOrdersService {
       totalPrice: row.totalPrice,
       status: row.status,
       createdAt: row.createdAt,
+      exportedAt: row.exportedAt,
       conflictCount: row.syncConflicts?.length ?? 0,
     };
   }

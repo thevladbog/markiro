@@ -13,13 +13,19 @@ import {
 } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { schema, type Db } from "@markiro/db";
-import { and, eq, isNotNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import type { Response } from "express";
 import { DB } from "../../auth/auth.module";
 import type { IntegrationChannelType } from "../integrations/channel-registry";
 import { JournalService } from "../integrations/journal.service";
+import {
+  PickupOrdersService,
+  type ApplyExternalStatusResult,
+} from "../pickup-orders/pickup-orders.service";
 import { decideApplication, type KnownProduct } from "./commerceml/apply";
 import { parseCommerceMl } from "./commerceml/parse";
+import { parseOrderStatusDocuments, resolveMappedStatus } from "./commerceml/order-status";
+import { buildOrdersDocument, planExport } from "./commerceml/order-export";
 import {
   assertUnderCheckauthLimit,
   checkauthWindowStart,
@@ -49,6 +55,15 @@ import {
  */
 export const IMPORT_BATCH_SIZE = 500;
 
+/**
+ * Ceiling on how many orders `mode=query` offers in one round -- spec §5's
+ * outbound direction, mirroring `IMPORT_BATCH_SIZE`'s own reasoning: an order
+ * document is heavier than a single price row, so this batch is smaller.
+ * Picked comfortably larger than any fixture in this test suite; not tuned
+ * against a real large backlog yet.
+ */
+export const EXPORT_BATCH_SIZE = 200;
+
 /** One row of the plan this controller actually writes, in a fixed, stable order (see `handleImport`). */
 type ImportWorkItem =
   | { kind: "price"; productId: string; unitPrice: string }
@@ -76,6 +91,27 @@ function fingerprintOf(worklist: ImportWorkItem[]): string {
   );
   const hash = createHash("sha256").update(keys.join(" ")).digest("hex");
   return `${worklist.length}:${hash}`;
+}
+
+function saleFingerprint(
+  documents: ReturnType<typeof parseOrderStatusDocuments>,
+  orderStatusField: string | undefined,
+  statusMapping: Record<string, string> | undefined,
+): string {
+  const effectiveWork = documents.map((document) => ({
+    externalRef: document.externalRef,
+    statusValue: document.statusValue,
+    mapped: resolveMappedStatus(document.statusValue, statusMapping),
+  }));
+  const effectiveConfig = {
+    orderStatusField: orderStatusField ?? null,
+    statusMapping: Object.fromEntries(
+      Object.entries(statusMapping ?? {}).sort(([a], [b]) => a.localeCompare(b)),
+    ),
+  };
+  return createHash("sha256")
+    .update(JSON.stringify({ effectiveConfig, effectiveWork }))
+    .digest("hex");
 }
 
 /**
@@ -170,6 +206,25 @@ function isRequestBuffer(value: unknown): value is Buffer {
 const IMPORT_PARSE_FAILURE = "invalid file";
 
 /**
+ * Shape check for `type=sale&mode=import`'s per-document `<Ид>` -- raw text
+ * lifted from an untrusted 1С file, compared against `pickupOrders.id`, a
+ * `uuid` column. Checked BEFORE `applyExternalStatus` is ever called (see
+ * `importOrderStatuses`, Fix A re-review) rather than by catching the
+ * Postgres `22P02` a non-UUID value would otherwise throw: validating first
+ * lets a genuinely malformed id be skipped and journaled as a discrepancy
+ * without also swallowing a real transient failure (pool timeout, deadlock,
+ * serialization failure) from the SAME try/catch, which must be allowed to
+ * escape and abort the batch so 1С's own retry can recover it.
+ *
+ * Deliberately loose: case-insensitive, and not checking the version/variant
+ * nibbles RFC 4122 defines, since a 1С-supplied GUID isn't guaranteed to set
+ * them the way `gen_random_uuid()` (this column's own generator) does. Only
+ * the dashed 8-4-4-4-12 hex layout matters here -- anything shaped like that
+ * reaches the real lookup; anything else is refused up front.
+ */
+const UUID_SHAPE_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
  * Constant address 1С's "Обмен с сайтом" client calls (спека §3):
  * `checkauth` -> `init` -> `mode=file` (chunked upload), repeated. Parsing
  * and applying an assembled file (`mode=import`) is later work.
@@ -200,6 +255,7 @@ export class ExchangeController {
     @Inject(DB) private readonly db: Db,
     private readonly sessions: ExchangeSessionService,
     private readonly journal: JournalService,
+    private readonly pickupOrders: PickupOrdersService,
   ) {}
 
   @Get("1c_exchange")
@@ -266,7 +322,24 @@ export class ExchangeController {
     }
 
     if (mode === "import") {
-      await this.import(session, filename, res);
+      await this.import(session, type, filename, res);
+      return;
+    }
+
+    // Fix 2 (final review): the real 1С "Обмен с сайтом" protocol's
+    // order/sale direction (checkauth -> init -> query -> success) runs
+    // entirely over GET -- POST is used only for `mode=file` (the chunked
+    // file upload in the OTHER, catalog-import direction). `mode=success` was
+    // wired only into `post()` below; this is the same `success()` method, a
+    // second call site so a genuine GET-driven confirmation isn't refused as
+    // an unknown mode.
+    if (mode === "success") {
+      await this.success(session, res);
+      return;
+    }
+
+    if (mode === "query") {
+      await this.query(session, res);
       return;
     }
 
@@ -331,6 +404,11 @@ export class ExchangeController {
         details: { filename, bytes: body.length },
       });
       this.text(res, "success");
+      return;
+    }
+
+    if (mode === "success") {
+      await this.success(session, res);
       return;
     }
 
@@ -478,6 +556,7 @@ export class ExchangeController {
    */
   private async import(
     session: ResolvedExchangeSession,
+    type: string | undefined,
     filename: string | undefined,
     res: Response,
   ): Promise<void> {
@@ -497,6 +576,11 @@ export class ExchangeController {
     }
 
     const bytes = await this.sessions.assemble(session.id, filename);
+
+    if (type === "sale") {
+      await this.importOrderStatuses(session, filename, bytes, res);
+      return;
+    }
 
     let items: ReturnType<typeof parseCommerceMl>["items"];
     let offers: ReturnType<typeof parseCommerceMl>["offers"];
@@ -702,6 +786,247 @@ export class ExchangeController {
   }
 
   /**
+   * `type=sale&mode=import` -- спека §6, "Из 1С к нам". Reads changed-order
+   * documents 1С reports (Task 5's `parseOrderStatusDocuments`) and, for
+   * each, resolves its own status requisite through this connection's
+   * `statusMapping` (Task 5's `resolveMappedStatus`) into one of the three
+   * transitions `PickupOrdersService.applyExternalStatus` (Task 7) can
+   * apply. One row's outcome never aborts the round -- same discipline
+   * `apply.ts`'s price decisions already follow.
+   */
+  private async importOrderStatuses(
+    session: ResolvedExchangeSession,
+    filename: string,
+    bytes: Buffer,
+    res: Response,
+  ): Promise<void> {
+    const [channelRow] = await this.db
+      .select({ settings: schema.integrationChannels.settings })
+      .from(schema.integrationChannels)
+      .where(
+        and(
+          eq(schema.integrationChannels.tenantId, session.tenantId),
+          eq(schema.integrationChannels.type, session.channelType),
+        ),
+      );
+    const settings = (channelRow?.settings ?? {}) as {
+      orderStatusField?: string | null;
+      statusMapping?: Record<string, string>;
+    };
+
+    const stored = await this.sessions.readSaleImportCursor(session.id, filename);
+    const effectiveOrderStatusField =
+      stored && !stored.completed ? stored.orderStatusField : settings.orderStatusField;
+    const effectiveStatusMapping =
+      stored && !stored.completed ? stored.statusMapping : settings.statusMapping;
+
+    let documents: ReturnType<typeof parseOrderStatusDocuments>;
+    try {
+      documents = parseOrderStatusDocuments(bytes, effectiveOrderStatusField);
+    } catch (cause) {
+      const detail = cause instanceof Error ? cause.message : String(cause);
+      await this.journal.append({
+        tenantId: session.tenantId,
+        channelType: session.channelType,
+        sessionId: session.id,
+        direction: "in",
+        outcome: "error",
+        grain: "session",
+        message: `import (sale): ${detail}`,
+        details: { filename, raw: rawFailureBody(IMPORT_PARSE_FAILURE) },
+      });
+      this.fail(res, IMPORT_PARSE_FAILURE);
+      return;
+    }
+
+    const fingerprint = saleFingerprint(
+      documents,
+      effectiveOrderStatusField ?? undefined,
+      effectiveStatusMapping ?? undefined,
+    );
+    const sourceFingerprint = createHash("sha256").update(bytes).digest("hex");
+    // A lost final response must stay retryable even if an administrator
+    // changes the mapping before 1C repeats this call. The exact uploaded
+    // file already completed under the settings captured by `fingerprint`;
+    // re-evaluating it under new settings would apply the same external fact
+    // twice with potentially different meanings.
+    if (stored?.completed && stored.sourceFingerprint === sourceFingerprint) {
+      this.text(res, "success");
+      return;
+    }
+    if (stored && stored.fingerprint !== fingerprint) {
+      await this.journal.append({
+        tenantId: session.tenantId,
+        channelType: session.channelType,
+        sessionId: session.id,
+        direction: "in",
+        outcome: "error",
+        grain: "session",
+        message: `import (sale): список для «${filename}» изменился между кругами`,
+        details: { filename, previousOffset: stored.offset, raw: rawFailureBody("import changed") },
+      });
+      this.fail(res, "import changed");
+      return;
+    }
+
+    let applied = stored?.applied ?? 0;
+    let discrepancies = stored?.discrepancies ?? 0;
+    const offset = stored?.offset ?? 0;
+    const end = Math.min(offset + IMPORT_BATCH_SIZE, documents.length);
+    for (let index = offset; index < end; index++) {
+      const document = documents[index]!;
+      const mapped = resolveMappedStatus(document.statusValue, effectiveStatusMapping ?? undefined);
+      if (mapped === null) {
+        discrepancies++;
+        await this.journal
+          .append({
+            tenantId: session.tenantId,
+            channelType: session.channelType,
+            sessionId: session.id,
+            direction: "in",
+            outcome: "warn",
+            grain: "item",
+            message: `статус не сопоставлен: ${document.externalRef}`,
+            details: { externalRef: document.externalRef, statusValue: document.statusValue },
+          })
+          .catch((error: unknown) => {
+            this.logger.warn(
+              `import (sale): status-unmapped journal failed (continuing): ${document.externalRef} — ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+          });
+        continue;
+      }
+
+      // Fix A (re-review of final-review Fix 1): `document.externalRef` is
+      // raw text lifted from an untrusted 1С file, and `pickupOrders.id` is a
+      // `uuid` column -- a non-UUID (or empty) `externalRef` makes the
+      // underlying `eq(schema.pickupOrders.id, orderId)` comparison throw a
+      // Postgres `22P02`, not resolve to "no row". Validated HERE, before the
+      // call, rather than by wrapping `applyExternalStatus` in a try/catch:
+      // catching afterwards cannot tell this permanent, one-document shape
+      // failure apart from a genuine TRANSIENT failure (pool timeout,
+      // deadlock, serialization failure) -- and a transient failure must be
+      // allowed to escape and abort the rest of this batch, so 1С's own retry
+      // of the same file can recover it, rather than being converted into a
+      // permanent "success" that stops 1С from ever resending it. Skipped and
+      // journaled exactly like the `result.outcome !== "applied"` discrepancy
+      // below, just under a reason that names the shape failure itself rather
+      // than a resolved-but-wrong outcome.
+      if (!UUID_SHAPE_PATTERN.test(document.externalRef)) {
+        discrepancies++;
+        await this.journal
+          .append({
+            tenantId: session.tenantId,
+            channelType: session.channelType,
+            sessionId: session.id,
+            direction: "in",
+            outcome: "warn",
+            grain: "item",
+            message: `расхождение статуса (lookup_failed): ${document.externalRef} -> ${mapped}`,
+            details: {
+              externalRef: document.externalRef,
+              mapped,
+              outcome: "lookup_failed",
+              error: "externalRef is not UUID-shaped",
+            },
+          })
+          .catch((error: unknown) => {
+            this.logger.warn(
+              `import (sale): status-discrepancy journal failed (continuing): ${document.externalRef} — ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+          });
+        continue;
+      }
+
+      const result: ApplyExternalStatusResult = await this.pickupOrders.applyExternalStatus(
+        session.tenantId,
+        document.externalRef,
+        mapped,
+      );
+
+      // A transient failure can happen after an earlier item in this batch
+      // committed but before the cursor did. On retry that prefix is already
+      // terminal. The SAME mapped status means the external fact is already
+      // reconciled, not a discrepancy; treating it as success keeps retries
+      // idempotent without hiding a genuinely different terminal status.
+      if (
+        result.outcome === "applied" ||
+        (result.outcome === "not_pending" && result.currentStatus === mapped)
+      ) {
+        applied++;
+        continue;
+      }
+      discrepancies++;
+      await this.journal
+        .append({
+          tenantId: session.tenantId,
+          channelType: session.channelType,
+          sessionId: session.id,
+          direction: "in",
+          outcome: "warn",
+          grain: "item",
+          message: `расхождение статуса (${result.outcome}): ${document.externalRef} -> ${mapped}`,
+          details: { externalRef: document.externalRef, mapped, outcome: result.outcome },
+        })
+        .catch((error: unknown) => {
+          this.logger.warn(
+            `import (sale): status-discrepancy journal failed (continuing): ${document.externalRef} — ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        });
+    }
+
+    const completed = end >= documents.length;
+    await this.sessions.writeSaleImportCursor(session.id, filename, {
+      offset: end,
+      fingerprint,
+      sourceFingerprint,
+      orderStatusField: effectiveOrderStatusField ?? null,
+      statusMapping: effectiveStatusMapping ?? null,
+      applied,
+      discrepancies,
+      total: documents.length,
+      completed,
+    });
+
+    if (!completed) {
+      this.text(res, "progress");
+      return;
+    }
+
+    await this.journal.append({
+      tenantId: session.tenantId,
+      channelType: session.channelType,
+      sessionId: session.id,
+      direction: "in",
+      // "also" fix (final review): a `documents.length === 0` parse result is
+      // indistinguishable from "genuinely nothing changed" once it's logged
+      // as `outcome: "ok"` -- and this codebase's own assumed outbound XML
+      // envelope shape (`<КоммерческаяИнформация><ПакетДокументов><Документ>`)
+      // is unverified against a real 1С instance (see the acceptance
+      // checklist). `warn` here lets an operator tell "we understood the file
+      // and 0 things changed" apart from "we may not have understood the file
+      // at all".
+      //
+      // Fix B (re-review): `discrepancies > 0` added to the same condition --
+      // a round where EVERY document produced a discrepancy (unmapped status,
+      // non-UUID externalRef, or a genuine `applyExternalStatus` mismatch) is
+      // just as worth flagging as an empty file: `applied` would stay 0 with
+      // nothing above distinguishing it from a healthy, quiet round.
+      outcome: documents.length === 0 || discrepancies > 0 ? "warn" : "ok",
+      grain: "session",
+      message: `import (sale): файл «${filename}» применён`,
+      details: { filename, applied, discrepancies, total: documents.length },
+    });
+    this.text(res, "success");
+  }
+
+  /**
    * Writes exactly one planned row. The one rule this whole route exists to
    * hold literally: a price update touches `products.unit_price` and
    * NOTHING else on the row -- name, GTIN, ЕГАИС code, label template and
@@ -745,6 +1070,189 @@ export class ExchangeController {
         ],
         set: { name: work.name, article: work.article, unit: work.unit, lastSeenAt: now },
       });
+  }
+
+  /**
+   * `mode=query`: спека §5's outbound direction. Builds this round's
+   * eligible-order document (Task 4's `planExport`/`buildOrdersDocument`),
+   * remembers the exact batch it just offered (Task 8's session
+   * summary snapshot -- `mode=success` reads its IDs rather than
+   * trusting whatever 1С's own confirmation happens to say), and journals a
+   * held-order warning for every order this round is NOT offering because a
+   * product still lacks a 1С link (спека §5: "товар без связи придерживает
+   * заявку").
+   */
+  private async query(session: ResolvedExchangeSession, res: Response): Promise<void> {
+    const outstanding = await this.sessions.readOutstandingOrderQuery(session.id);
+    if (outstanding) {
+      await this.journal.append({
+        tenantId: session.tenantId,
+        channelType: session.channelType,
+        sessionId: session.id,
+        direction: "out",
+        outcome: "ok",
+        grain: "session",
+        message: `query: повторно предложено заявок: ${outstanding.orderIds.length}`,
+        details: { offered: outstanding.orderIds.length },
+      });
+      res.status(200).type("application/xml").send(outstanding.xml);
+      return;
+    }
+
+    // Fix 4 (final review): `findExportCandidates` now returns its
+    // `candidates` PRE-FILTERED to exclude held orders (a `NOT EXISTS` in
+    // the SQL itself, before `limit`, so a batch full of held orders can
+    // never starve out a genuinely eligible one -- see that method's own
+    // comment). `planExport` still runs over `candidates` and will report
+    // 100% of them `eligible`; the held set for journaling below comes from
+    // `findExportCandidates`'s own separately-queried `held`, not from
+    // `plan.held` (which is now always empty).
+    const { candidates, held } = await this.pickupOrders.findExportCandidates(
+      session.tenantId,
+      EXPORT_BATCH_SIZE,
+    );
+    const plan = planExport(candidates);
+
+    for (const heldOrder of held) {
+      await this.journal
+        .append({
+          tenantId: session.tenantId,
+          channelType: session.channelType,
+          sessionId: session.id,
+          direction: "out",
+          outcome: "warn",
+          grain: "item",
+          message: `заявка придержана — товар без связи с 1С: ${heldOrder.orderNo}`,
+          details: {
+            orderId: heldOrder.orderId,
+            orderNo: heldOrder.orderNo,
+            unlinkedProductIds: heldOrder.unlinkedProductIds,
+          },
+        })
+        .catch((error: unknown) => {
+          this.logger.warn(
+            `query: held-order journal failed (continuing): ${heldOrder.orderNo} — ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        });
+    }
+
+    const [channelRow] = await this.db
+      .select({ settings: schema.integrationChannels.settings })
+      .from(schema.integrationChannels)
+      .where(
+        and(
+          eq(schema.integrationChannels.tenantId, session.tenantId),
+          eq(schema.integrationChannels.type, session.channelType),
+        ),
+      );
+    const settings = (channelRow?.settings ?? {}) as {
+      splitWriteoffDocument?: boolean;
+      writeoffDocumentType?: string | null;
+    };
+
+    let xml = buildOrdersDocument(plan.eligible, {
+      splitWriteoffDocument: settings.splitWriteoffDocument ?? false,
+      writeoffDocumentType: settings.writeoffDocumentType,
+    });
+
+    const ensured = await this.sessions.ensureOutstandingOrderQuery(session.id, {
+      orderIds: plan.eligible.map((eligible) => eligible.order.id),
+      xml,
+    });
+    const orderIds = ensured.orderIds;
+    xml = ensured.xml;
+
+    await this.journal.append({
+      tenantId: session.tenantId,
+      channelType: session.channelType,
+      sessionId: session.id,
+      direction: "out",
+      outcome: "ok",
+      grain: "session",
+      message: `query: предложено заявок: ${orderIds.length}`,
+      // `held.length` -- the separately-queried set above -- NOT
+      // `plan.held.length`: `candidates` is now pre-filtered to exclude held
+      // orders (Fix 4), so `plan.held` is always empty and would misreport
+      // this as 0 regardless of how many orders are actually held.
+      //
+      // Fix C (re-review): `heldTruncated` mirrors the same convention
+      // `IntegrationsService.listCandidates`'s `truncated` field already
+      // established for `CandidatesPageDto` -- `findHeldExportOrders`
+      // (pickup-orders.service.ts) caps its result at this same
+      // `EXPORT_BATCH_SIZE` limit, so `held.length` is a SAMPLE, not a total,
+      // once a tenant has more held orders than that; without this flag
+      // `held: held.length` reads as an exact count when it may not be one.
+      details: {
+        offered: orderIds.length,
+        held: held.length,
+        heldTruncated: held.length === EXPORT_BATCH_SIZE,
+      },
+    });
+
+    res.status(200).type("application/xml").send(xml);
+  }
+
+  /**
+   * `mode=success`: спека §5's "подтверждение до пометки" -- marks EXACTLY
+   * the order ids the outstanding `mode=query` batch on THIS session
+   * offered (Task 8's summary snapshot, not whatever 1С's own success
+   * call happens to say) as exported: `tenantId` + `inArray(orderIds)` +
+   * `isNull(exportedAt)`.
+   *
+   * Fix 3 (final review): deliberately NOT also conditioned on
+   * `status = "pending"` any more. `orderIds` only ever holds ids THIS exact
+   * session's own `mode=query` call selected from pending, unexported orders
+   * in the first place (see `query()` above) -- so an additional `status`
+   * check in the WHERE clause here does not guard against marking the wrong
+   * order as exported, it only narrows which of THOSE SAME ids still get
+   * marked. If an admin resolves (punches/writes off) one of them locally
+   * between this session's `query` and `success` -- a real, reachable race,
+   * not a hypothetical one -- the order genuinely WAS sent to and accepted by
+   * 1С; excluding it here because it is no longer `pending` would leave
+   * `exportedAt` permanently unset on an order that isn't going to be
+   * re-queried (it's terminal now), so its admin-facing card would
+   * incorrectly show "not yet exported" forever. Dropping the `status` check
+   * lets `exportedAt` still get set in that case, which is what actually
+   * happened; `isNull(exportedAt)` alone is enough to keep this call
+   * idempotent against a stray repeat.
+   */
+  private async success(session: ResolvedExchangeSession, res: Response): Promise<void> {
+    const outstanding = await this.sessions.readOutstandingOrderQuery(session.id);
+    const orderIds = outstanding?.orderIds ?? [];
+    let confirmed = 0;
+
+    if (orderIds.length > 0) {
+      const updated = await this.db
+        .update(schema.pickupOrders)
+        .set({ exportedAt: new Date() })
+        .where(
+          and(
+            eq(schema.pickupOrders.tenantId, session.tenantId),
+            inArray(schema.pickupOrders.id, orderIds),
+            isNull(schema.pickupOrders.exportedAt),
+          ),
+        )
+        .returning({ id: schema.pickupOrders.id });
+      confirmed = updated.length;
+    }
+    if (outstanding) {
+      await this.sessions.writeOutstandingOrderQuery(session.id, null);
+    }
+
+    await this.journal.append({
+      tenantId: session.tenantId,
+      channelType: session.channelType,
+      sessionId: session.id,
+      direction: "out",
+      outcome: "ok",
+      grain: "session",
+      message: `success: подтверждено заявок: ${confirmed}`,
+      details: { confirmed, offered: orderIds.length },
+    });
+
+    this.text(res, "success");
   }
 
   private async unknownMode(

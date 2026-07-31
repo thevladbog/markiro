@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ChannelPage } from "../src/pages/integrations/ChannelPage.js";
+import i18n from "../src/i18n/index.js";
 import { channelDetailQueryKey, type JournalSessionDto } from "../src/pages/integrations/api.js";
 
 // Общего рендер-хелпера в этом репозитории НЕТ: каждый админ-тест объявляет
@@ -90,10 +91,17 @@ interface FetchMockOptions {
   settingsMode?: "ok" | "error";
   /** `POST /integrations/:type/credentials`. "network-error" throws instead of resolving a non-ok `Response`, to exercise the non-`ApiRequestError` fallback branch in `handleIssueCredentials`. */
   issueMode?: "ok" | "error" | "network-error";
+  detailSettings?: Record<string, unknown>;
 }
 
 function createFetchMock(options: FetchMockOptions = {}) {
-  const { journalMode = "ok", detailMode = "ok", settingsMode = "ok", issueMode = "ok" } = options;
+  const {
+    journalMode = "ok",
+    detailMode = "ok",
+    settingsMode = "ok",
+    issueMode = "ok",
+    detailSettings = {},
+  } = options;
   return vi.fn(async (url: string, init?: RequestInit) => {
     const path = url.replace(/^\/api/, "");
     const method = init?.method ?? "GET";
@@ -133,7 +141,7 @@ function createFetchMock(options: FetchMockOptions = {}) {
     if (detailMode === "pending") return new Promise<Response>(() => {});
     if (detailMode === "error") return jsonResponse(500, { message: "Internal error" });
     const type = path.split("/").pop()!;
-    return jsonResponse(200, defaultDetail(type));
+    return jsonResponse(200, { ...defaultDetail(type), settings: detailSettings });
   });
 }
 
@@ -420,6 +428,128 @@ describe("ChannelPage", () => {
   // channel (see `channel-registry.ts`'s `usesExchangeCredentials` and
   // `IntegrationsService.issueCredentials`'s guard on it). `public_api`'s
   // real "settings" are the key list, not this.
+  // Task 15 (И-2): the order-status-mapping sub-form -- a repeatable
+  // key/value editor backed by `useFieldArray`, whose value half is a
+  // `Controller`-wrapped `Select` (a controlled component), not a
+  // `register()`-bound native `<select>` (which react-hook-form cannot
+  // drive correctly for a controlled component like `@markiro/ui`'s `Select`).
+  it("сохраняет тип документа списания, реквизит статуса и сопоставление статусов", async () => {
+    renderChannel("commerceml");
+
+    await userEvent.type(
+      await screen.findByLabelText(/тип документа для списания/i),
+      "СписаниеТоваров",
+    );
+    await userEvent.type(await screen.findByLabelText(/реквизит статуса заказа/i), "Статус");
+
+    await userEvent.click(screen.getByRole("button", { name: /добавить строку/i }));
+    await userEvent.type(screen.getByPlaceholderText(/внешнее значение/i), "ЗаказВыполнен");
+    await userEvent.selectOptions(screen.getByRole("combobox"), "writtenoff");
+
+    await userEvent.click(screen.getByRole("button", { name: /сохранить/i }));
+
+    expect(patchSpy).toHaveBeenCalledWith(
+      "/integrations/commerceml",
+      expect.objectContaining({
+        writeoffDocumentType: "СписаниеТоваров",
+        orderStatusField: "Статус",
+        statusMapping: { ЗаказВыполнен: "writtenoff" },
+      }),
+    );
+  });
+
+  it("отбрасывает строки сопоставления статусов с пустым внешним значением", async () => {
+    renderChannel("commerceml");
+
+    await userEvent.click(await screen.findByRole("button", { name: /добавить строку/i }));
+    await userEvent.click(screen.getByRole("button", { name: /сохранить/i }));
+
+    const call = patchSpy.mock.calls.find((c) => c[0] === "/integrations/commerceml");
+    expect(call).toBeDefined();
+    expect(call?.[1]).not.toHaveProperty("statusMapping");
+  });
+
+  it("отправляет пустое сопоставление при удалении последней сохранённой строки", async () => {
+    const { queryClient } = renderChannel("commerceml");
+    await screen.findByLabelText(/тип цены/i);
+
+    await act(async () => {
+      queryClient.setQueryData(channelDetailQueryKey("commerceml"), {
+        ...defaultDetail("commerceml"),
+        settings: { statusMapping: { ЗаказВыполнен: "writtenoff" } },
+      });
+    });
+    await screen.findByDisplayValue("ЗаказВыполнен");
+
+    await userEvent.click(screen.getByRole("button", { name: /удалить/i }));
+    await userEvent.click(screen.getByRole("button", { name: /сохранить/i }));
+
+    expect(patchSpy).toHaveBeenCalledWith(
+      "/integrations/commerceml",
+      expect.objectContaining({ statusMapping: {} }),
+    );
+  });
+
+  it("явно очищает строковые настройки и восстанавливает очистку после перезагрузки", async () => {
+    const configured = {
+      writeoffDocumentType: "СписаниеТоваров",
+      orderStatusField: "Статус",
+      statusMapping: { ЗаказВыполнен: "writtenoff" },
+    };
+    const first = renderChannel("commerceml", { detailSettings: configured });
+    const writeoffInput = (await screen.findByLabelText(
+      /тип документа для списания/i,
+    )) as HTMLInputElement;
+    const statusFieldInput = screen.getByLabelText(/реквизит статуса заказа/i) as HTMLInputElement;
+
+    await userEvent.clear(writeoffInput);
+    await userEvent.clear(statusFieldInput);
+    await userEvent.click(screen.getByRole("button", { name: /удалить/i }));
+    await userEvent.click(screen.getByRole("button", { name: /сохранить/i }));
+
+    expect(patchSpy).toHaveBeenCalledWith(
+      "/integrations/commerceml",
+      expect.objectContaining({
+        writeoffDocumentType: null,
+        orderStatusField: null,
+        statusMapping: {},
+      }),
+    );
+
+    first.unmount();
+    renderChannel("commerceml", {
+      detailSettings: { writeoffDocumentType: null, orderStatusField: null, statusMapping: {} },
+    });
+    expect(
+      ((await screen.findByLabelText(/тип документа для списания/i)) as HTMLInputElement).value,
+    ).toBe("");
+    expect((screen.getByLabelText(/реквизит статуса заказа/i) as HTMLInputElement).value).toBe("");
+    expect(screen.queryByRole("button", { name: /удалить/i })).toBeNull();
+  });
+
+  it("даёт каждой паре сопоставления уникальные переведённые имена с номером строки", async () => {
+    renderChannel("commerceml");
+    await userEvent.click(await screen.findByRole("button", { name: /добавить строку/i }));
+    await userEvent.click(screen.getByRole("button", { name: /добавить строку/i }));
+
+    expect(screen.getByRole("textbox", { name: "Внешнее значение, строка 1" })).toBeDefined();
+    expect(screen.getByRole("combobox", { name: "Внутренний статус, строка 1" })).toBeDefined();
+    expect(screen.getByRole("textbox", { name: "Внешнее значение, строка 2" })).toBeDefined();
+    expect(screen.getByRole("combobox", { name: "Внутренний статус, строка 2" })).toBeDefined();
+
+    await act(async () => {
+      await i18n.changeLanguage("en");
+    });
+    expect(screen.getByRole("textbox", { name: "External value, row 1" })).toBeDefined();
+    expect(screen.getByRole("combobox", { name: "Internal status, row 1" })).toBeDefined();
+    expect(screen.getByRole("textbox", { name: "External value, row 2" })).toBeDefined();
+    expect(screen.getByRole("combobox", { name: "Internal status, row 2" })).toBeDefined();
+
+    await act(async () => {
+      await i18n.changeLanguage("ru");
+    });
+  });
+
   it("не показывает выпуск учётных данных обмена для канала без обмена (public_api)", async () => {
     renderChannel("public_api");
 

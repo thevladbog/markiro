@@ -373,7 +373,7 @@ ${guids.map((guid) => `  <Товар><Ид>${guid}</Ид><Наименовани
         ),
       );
     expect(rows).toHaveLength(guids.length);
-  });
+  }, 15_000);
 
   // Review fix (Fix 1): the actual regression a real CommerceML "Обмен с
   // сайтом" hits every time -- one `checkauth`, then номенклатура

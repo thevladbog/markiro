@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -52,12 +52,14 @@ const ORDER = {
   totalPrice: "178.00",
   status: "pending",
   createdAt: "2026-07-23T14:05:00.000Z",
+  exportedAt: null,
   employeeBadgeCode: null,
   items: [ITEM_A, ITEM_B],
   receiptNo: null,
   actNo: null,
   conflictCount: 0,
   syncConflicts: [],
+  exportHeldProductNames: [],
 };
 
 const REASONS = { items: [{ id: "r1", name: "Маркетинг", sortOrder: 0 }] };
@@ -144,6 +146,66 @@ describe("OrderDetailPage", () => {
 
     expect(await screen.findByText(ORDER.orderNo)).toBeDefined();
     expect(screen.queryByText(/Отклонено при синхронизации/)).toBeNull();
+  });
+
+  it("shows 'not yet exported' for an order 1С hasn't confirmed", async () => {
+    renderPage(defaultFetchMock());
+
+    expect(await screen.findByText("Ещё не выгружена")).toBeDefined();
+  });
+
+  it("shows the export timestamp once 1С has confirmed receipt", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      const path = String(url);
+      if (path === "/api/pickup-orders/o1") {
+        return jsonResponse(200, { ...ORDER, exportedAt: "2026-07-24T09:00:00.000Z" });
+      }
+      if (path === "/api/pickup-reasons") return jsonResponse(200, REASONS);
+      throw new Error(`unexpected fetch: ${path}`);
+    });
+    renderPage(fetchMock);
+
+    expect(await screen.findByText(/^Выгружена /)).toBeDefined();
+    expect(screen.queryByText("Ещё не выгружена")).toBeNull();
+  });
+
+  it("shows a held-order alert linking to the CommerceML channel page when a product carries no 1С link", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      const path = String(url);
+      if (path === "/api/pickup-orders/o1") {
+        return jsonResponse(200, { ...ORDER, exportHeldProductNames: ["Молоко 1л"] });
+      }
+      if (path === "/api/pickup-reasons") return jsonResponse(200, REASONS);
+      throw new Error(`unexpected fetch: ${path}`);
+    });
+    renderPage(fetchMock);
+
+    expect(await screen.findByText("Заявка придержана — 1 товар(ов) без связи с 1С")).toBeDefined();
+    // "Молоко 1л" also appears in the items table below, so scope this
+    // assertion to the alert itself rather than a bare `getByText`.
+    const alert = screen.getByRole("alert");
+    expect(within(alert).getByText("Молоко 1л")).toBeDefined();
+    const link = within(alert).getByText("Перейти к очереди сопоставления");
+    expect(link.closest("a")?.getAttribute("href")).toBe("/integrations/commerceml");
+  });
+
+  it("does not show the held-order alert once the order has already been exported", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      const path = String(url);
+      if (path === "/api/pickup-orders/o1") {
+        return jsonResponse(200, {
+          ...ORDER,
+          exportedAt: "2026-07-24T09:00:00.000Z",
+          exportHeldProductNames: ["Молоко 1л"],
+        });
+      }
+      if (path === "/api/pickup-reasons") return jsonResponse(200, REASONS);
+      throw new Error(`unexpected fetch: ${path}`);
+    });
+    renderPage(fetchMock);
+
+    await screen.findByText(/^Выгружена /);
+    expect(screen.queryByText(/Заявка придержана/)).toBeNull();
   });
 
   it("opens the receipt modal on 'Пробита на кассе' and POSTs resolve with action punch + receiptNo", async () => {

@@ -77,7 +77,21 @@ export interface ParsedCommerceMl {
  * hands back a bare object for a single `<Товар>` and an array for two or
  * more, and every caller would need to special-case the singular shape.
  */
-const REPEATING_TAGS = new Set(["Товар", "Предложение", "Цена", "ТипЦены"]);
+/**
+ * "Документ" and "ЗначениеРеквизита" added for плана И-2's outgoing/incoming
+ * order documents (`order-export.ts`/`order-status.ts`) -- `<ПакетДокументов>`
+ * carries zero or more `<Документ>`, and each `<Документ>`'s
+ * `<ЗначенияРеквизитов>` carries zero or more `<ЗначениеРеквизита>`, the same
+ * shape `<Товар>`/`<Предложение>`/`<Цена>` already have here.
+ */
+const REPEATING_TAGS = new Set([
+  "Товар",
+  "Предложение",
+  "Цена",
+  "ТипЦены",
+  "Документ",
+  "ЗначениеРеквизита",
+]);
 
 /**
  * 1С defaults to windows-1251 and only ever declares its real encoding in the
@@ -203,7 +217,7 @@ function decodePredefinedXmlEntities(text: string): string {
  * unrelated: it keeps leaf values un-coerced strings (see its own comment),
  * not entity substitution.
  */
-function parseXml(bytes: Buffer): unknown {
+export function parseXml(bytes: Buffer): unknown {
   const xml = decode(bytes);
   const parser = new XMLParser({
     ignoreAttributes: true,
@@ -222,12 +236,12 @@ function parseXml(bytes: Buffer): unknown {
   }
 }
 
-function asObject(value: unknown): Record<string, unknown> {
+export function asObject(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === "object" ? (value as Record<string, unknown>) : {};
 }
 
 /** Walks a dot-path of tag names, returning `{}` at any missing step. */
-function dig(root: unknown, ...path: string[]): Record<string, unknown> {
+export function dig(root: unknown, ...path: string[]): Record<string, unknown> {
   let current = asObject(root);
   for (const step of path) {
     current = asObject(current[step]);
@@ -241,7 +255,7 @@ function dig(root: unknown, ...path: string[]): Record<string, unknown> {
  * `Артикул`, `Представление`, ...) gets the same treatment regardless of
  * which caller reads it.
  */
-function textOf(value: unknown): string {
+export function textOf(value: unknown): string {
   if (typeof value === "string") return decodePredefinedXmlEntities(value);
   if (typeof value === "number" || typeof value === "boolean") return String(value);
   return "";

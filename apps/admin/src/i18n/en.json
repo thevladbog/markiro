@@ -534,6 +534,15 @@
         "reasonLabel": "Reason",
         "createdAtLabel": "Created",
         "totalLabel": "Total",
+        "exportStatusLabel": "1C export",
+        "exportStatus": {
+          "exported": "Exported {{time}}",
+          "notExported": "Not yet exported"
+        },
+        "exportHeld": {
+          "title": "Order held — {{count}} product(s) not linked to 1C",
+          "linkAction": "Go to the matching queue"
+        },
         "itemsTitle": "Marking codes",
         "table": {
           "code": "Code",
@@ -826,6 +835,22 @@
           "silentAfterHoursLabel": "Silence threshold, hours",
           "silentAfterHoursHint": "How many hours without events before the channel counts as gone silent.",
           "silentAfterHoursError": "Minimum 1 hour",
+          "writeoffDocumentTypeLabel": "Write-off document type",
+          "writeoffDocumentTypeHint": "The ХозОперация value for write-off orders, when document splitting is on.",
+          "orderStatusFieldLabel": "Order status requisite",
+          "orderStatusFieldHint": "The name 1C uses for its order-status requisite — ask the client's own 1C specialist.",
+          "statusMappingLabel": "Status mapping",
+          "statusMappingHint": "External requisite value → our status. An unmapped value never moves the order.",
+          "statusMappingExternalPlaceholder": "External value",
+          "statusMappingExternalLabel": "External value, row {{row}}",
+          "statusMappingStatusLabel": "Internal status, row {{row}}",
+          "statusMappingOption": {
+            "punched": "Punched",
+            "writtenoff": "Written off",
+            "cancelled": "Cancelled"
+          },
+          "statusMappingAddAction": "Add row",
+          "statusMappingRemoveAction": "Remove",
           "saveAction": "Save",
           "saveSuccess": "Settings saved",
           "saveError": "Could not save the settings",

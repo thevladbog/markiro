@@ -204,6 +204,8 @@ export interface PickupOrderRowDto {
   totalPrice: string | null;
   status: PickupOrderStatus;
   createdAt: Date;
+  /** Set once 1С confirms receipt over `/1c_exchange` `mode=success` (плана И-2). `null` — not yet exported. */
+  exportedAt: Date | null;
   /** How many scanned codes the server refused when this order synced. */
   conflictCount: number;
 }
@@ -230,6 +232,8 @@ export interface PickupOrderDetailDto extends PickupOrderRowDto {
   receiptNo: string | null;
   actNo: string | null;
   syncConflicts: OrderConflict[];
+  /** Products this order's items reference that carry no 1С link yet — non-empty means this order is held back from `mode=query` (плана И-2, спека §5). */
+  exportHeldProductNames: string[];
 }
 
 /** POST /pickup-orders/export body. */
