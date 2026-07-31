@@ -115,6 +115,7 @@ interface RenderWorkScreenOverrides {
   counterpartyName?: string | null;
   source?: ScanSource;
   sound?: SoundSettings;
+  onScanRecorded?: () => void;
   onExit?: () => void;
   pendingSync?: number;
 }
@@ -129,6 +130,7 @@ function renderWorkScreen(overrides: RenderWorkScreenOverrides = {}) {
     counterpartyName = null,
     source = manualSource(),
     sound = { muted: true, volume: 1 },
+    onScanRecorded,
     onExit = () => {},
     pendingSync = 0,
   } = overrides;
@@ -143,6 +145,7 @@ function renderWorkScreen(overrides: RenderWorkScreenOverrides = {}) {
       counterpartyName={counterpartyName}
       source={source}
       sound={sound}
+      {...(onScanRecorded ? { onScanRecorded } : {})}
       onExit={onExit}
       pendingSync={pendingSync}
       // None of the tests in this file's outer `describe` care about boxes:
@@ -247,6 +250,7 @@ function renderWork(overrides: RenderWorkOverrides = {}) {
     counterpartyName = null,
     source = manualSource(),
     sound = { muted: true, volume: 1 },
+    onScanRecorded,
     onExit = () => {},
     pendingSync = 0,
     issuerPrefix = TEST_ISSUER_PREFIX,
@@ -295,6 +299,7 @@ function renderWork(overrides: RenderWorkOverrides = {}) {
       counterpartyName={counterpartyName}
       source={source}
       sound={sound}
+      {...(onScanRecorded ? { onScanRecorded } : {})}
       onExit={onExit}
       pendingSync={pendingSync}
       issuerPrefix={issuerPrefix}
@@ -526,6 +531,24 @@ describe("WorkScreen box progress, closing and printing", () => {
     return renderWork({ ...overrides, source });
   }
 
+  async function seedClosedBox(
+    exec: SqlExecutor,
+    boxId = "closed-box",
+    sscc = SSCC,
+  ): Promise<void> {
+    await exec.run(
+      `INSERT INTO boxes_mirror
+         (box_id, shift_id, terminal_id, sscc, opened_at, closed_at)
+       VALUES (?,?,?,?,?,?)`,
+      [boxId, "s1", "dev-1", sscc, "2026-07-29T08:00:00.000Z", "2026-07-29T09:00:00.000Z"],
+    );
+    await exec.run(
+      `INSERT INTO codes_mirror (code_hash, shift_id, gtin14, serial, scanned_at, box_id)
+       VALUES (?,?,?,?,?,?)`,
+      [`code-${boxId}`, "s1", "04600000000015", "serial", "2026-07-29T08:30:00.000Z", boxId],
+    );
+  }
+
   it("undoes the last accepted scan in the open box and queues its exception", async () => {
     const exec = makeExec();
     renderWorkTracked({ exec, boxItemCount: 0 });
@@ -575,6 +598,63 @@ describe("WorkScreen box progress, closing and printing", () => {
     await waitFor(async () => {
       expect(await exec.all("SELECT code_hash FROM codes_mirror")).toHaveLength(1);
     });
+  });
+
+  it("reprints a closed box and queues the supplied reason for sync", async () => {
+    const exec = makeExec();
+    await seedClosedBox(exec);
+    await seedLabelSpec(exec, "s1");
+    const print = vi.fn().mockResolvedValue(undefined);
+    const onScanRecorded = vi.fn();
+    renderWorkTracked({
+      exec,
+      printing: { target: PRINT_TARGET, language: "zpl", print },
+      onScanRecorded,
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Перепечатать" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Причина" }), {
+      target: { value: "Замятие этикетки" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Подтвердить" }));
+
+    await waitFor(() => expect(print).toHaveBeenCalledOnce());
+    await waitFor(async () => {
+      const rows = await exec.all<{ kind: string; reason: string }>(
+        "SELECT kind, reason FROM box_exceptions_mirror",
+      );
+      expect(rows).toEqual([{ kind: "reprint", reason: "Замятие этикетки" }]);
+    });
+    expect(onScanRecorded).toHaveBeenCalledOnce();
+  });
+
+  it("disassembles a closed box, removes its codes and refreshes the panel", async () => {
+    const exec = makeExec();
+    await seedClosedBox(exec);
+    const onScanRecorded = vi.fn();
+    renderWorkTracked({ exec, onScanRecorded });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Расформировать" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Причина" }), {
+      target: { value: "Чужой заказ" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Подтвердить" }));
+
+    await waitFor(async () => {
+      const rows = await exec.all<{ disassembled_at: string | null }>(
+        "SELECT disassembled_at FROM boxes_mirror WHERE box_id = 'closed-box'",
+      );
+      expect(rows[0]?.disassembled_at).not.toBeNull();
+      expect(
+        await exec.all("SELECT code_hash FROM codes_mirror WHERE box_id = 'closed-box'"),
+      ).toHaveLength(0);
+    });
+    expect(screen.queryByText(`SSCC ${SSCC}`)).toBeNull();
+    const exceptions = await exec.all<{ kind: string; reason: string }>(
+      "SELECT kind, reason FROM box_exceptions_mirror",
+    );
+    expect(exceptions).toEqual([{ kind: "disassemble", reason: "Чужой заказ" }]);
+    expect(onScanRecorded).toHaveBeenCalledOnce();
   });
 
   it("shows how full the open box is", async () => {

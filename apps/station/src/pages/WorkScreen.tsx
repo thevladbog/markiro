@@ -9,12 +9,16 @@ import {
 } from "@markiro/domain";
 import { Alert, Button, SignalOverlay, type SignalTone } from "@markiro/ui";
 import { boxLabelFields } from "../lib/box-label.js";
+import { insertException } from "../lib/box-exceptions-mirror.js";
 import {
   clearBox,
   currentBox,
+  disassembleBox,
+  listClosedBoxes,
   markPrintSkipped,
   markPrintVerified,
   openBox,
+  type ClosedBoxSummary,
   type DeviceBox,
 } from "../lib/boxes.js";
 import { closeCurrentBox as closeCurrentBoxLib, type CloseBoxResult } from "../lib/close-box.js";
@@ -28,6 +32,7 @@ import { createScanQueue, type ScanOutcome } from "../lib/scan-queue.js";
 import type { ScanSource } from "../lib/scan-source.js";
 import { playSignalTone, type SoundSettings } from "../lib/signal-sound.js";
 import { PrintVerification } from "../ui/PrintVerification.js";
+import { ShiftBoxesPanel } from "../ui/ShiftBoxesPanel.js";
 
 export interface WorkScreenProps {
   exec: SqlExecutor;
@@ -114,6 +119,7 @@ export function WorkScreen({
   const [box, setBox] = useState<{ boxId: string; itemCount: number } | null>(null);
   const [lastScanned, setLastScanned] = useState<{ boxId: string; codeHash: string } | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [closedBoxes, setClosedBoxes] = useState<ClosedBoxSummary[]>([]);
   // `boxRef` is the box's SOURCE OF TRUTH for `process()` below, updated by
   // `updateBox` synchronously and directly -- never derived from `box` via a
   // separate effect. A scan can arrive (and be judged) the instant this
@@ -133,6 +139,22 @@ export function WorkScreen({
   // same way it already awaits `keysReady`, instead of racing a scan that
   // arrives before this screen's mount effects have settled.
   const boxReady = useRef<Promise<void> | null>(null);
+
+  const reloadClosedBoxes = useCallback(async (): Promise<void> => {
+    try {
+      setClosedBoxes(await listClosedBoxes(exec, shiftId, terminalId));
+    } catch (err) {
+      console.error("station: failed to list closed boxes", err);
+    }
+  }, [exec, shiftId, terminalId]);
+
+  useEffect(() => {
+    if (issuerPrefix === null) {
+      setClosedBoxes([]);
+      return;
+    }
+    void reloadClosedBoxes();
+  }, [issuerPrefix, reloadClosedBoxes]);
 
   const [noSerials, setNoSerials] = useState(false);
   // CodeRabbit PR33 review, Finding 4: `closeCurrentBox` burned a serial
@@ -492,6 +514,7 @@ export function WorkScreen({
         console.error("station: failed to open the next box after closing", err);
         updateBox(null);
       }
+      void reloadClosedBoxes();
 
       void printAndMaybeVerify(result, closingBoxId);
     } finally {
@@ -743,6 +766,46 @@ export function WorkScreen({
     });
   }
 
+  function handleReprint(boxId: string, reason: string): void {
+    const target = closedBoxes.find((candidate) => candidate.boxId === boxId);
+    if (!target) return;
+    queue.enqueueJob(async () => {
+      await printAndMaybeVerify({ sscc: target.sscc, itemCount: target.itemCount }, boxId);
+      await insertException(exec, {
+        kind: "reprint",
+        boxId,
+        codeHash: null,
+        shiftId,
+        terminalId,
+        operatorId: null,
+        reason,
+        at: new Date().toISOString(),
+      });
+      await reloadClosedBoxes();
+      live.current.onScanRecorded?.();
+    });
+  }
+
+  function handleDisassemble(boxId: string, reason: string): void {
+    queue.enqueueJob(async () => {
+      const releasedCodes = await exec.all<{ code_hash: string }>(
+        "SELECT code_hash FROM codes_mirror WHERE box_id = ?",
+        [boxId],
+      );
+      await disassembleBox(exec, {
+        boxId,
+        shiftId,
+        terminalId,
+        operatorId: null,
+        reason,
+        at: new Date().toISOString(),
+      });
+      for (const code of releasedCodes) keys.current.delete(code.code_hash);
+      await reloadClosedBoxes();
+      live.current.onScanRecorded?.();
+    });
+  }
+
   // Paused while print verification is up: that scan source is reading the
   // box label's SSCC, not a product KM, and feeding it into this ordinary
   // queue would misjudge it as an invalid code and flash an error signal
@@ -934,6 +997,13 @@ export function WorkScreen({
           {noSerials ? <Alert tone="warn" title={t("box.noSerials")} /> : null}
           {invalidSerial ? <Alert tone="warn" title={t("box.invalidSerial")} /> : null}
           {printUnavailable ? <Alert tone="warn" title={t("box.printNotAvailable")} /> : null}
+          {verification ? null : (
+            <ShiftBoxesPanel
+              boxes={closedBoxes}
+              onReprint={handleReprint}
+              onDisassemble={handleDisassemble}
+            />
+          )}
         </div>
       ) : null}
 
