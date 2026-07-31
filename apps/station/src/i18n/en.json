@@ -122,6 +122,12 @@
   "box": {
     "progress": "{{items}} / {{capacity}}",
     "close": "Close box",
+    "undoLastScan": "Undo last scan",
+    "clear": "Clear box",
+    "confirmClearTitle": "Clear this box?",
+    "confirmClearDetail": "Every scanned item will be removed from the open box.",
+    "confirmClear": "Confirm clear",
+    "cancelClear": "Cancel",
     "noSerials": "Box numbers have run out. Connect the station to the network to get more.",
     "printExpected": "Scan the printed label",
     "printMismatch": "This is a different label",

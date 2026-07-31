@@ -10,6 +10,7 @@ import {
 import { Alert, Button, SignalOverlay, type SignalTone } from "@markiro/ui";
 import { boxLabelFields } from "../lib/box-label.js";
 import {
+  clearBox,
   currentBox,
   markPrintSkipped,
   markPrintVerified,
@@ -19,7 +20,7 @@ import {
 import { closeCurrentBox as closeCurrentBoxLib, type CloseBoxResult } from "../lib/close-box.js";
 import type { PrintTarget } from "../lib/hardware.js";
 import type { PrinterLanguage } from "../lib/hardware-config.js";
-import { findFirstSeen, loadCodeKeys, recordScan } from "../lib/journal.js";
+import { findFirstSeen, loadCodeKeys, recordScan, undoLastScan } from "../lib/journal.js";
 import { readShiftMirror, type SqlExecutor } from "../lib/mirror.js";
 import { renderLabelBytes } from "../lib/print-label.js";
 import { rasterizeText } from "../lib/rasterizer.js";
@@ -111,6 +112,8 @@ export function WorkScreen({
   // device the server could not resolve an issuer prefix for, has no box
   // section to show.
   const [box, setBox] = useState<{ boxId: string; itemCount: number } | null>(null);
+  const [lastScanned, setLastScanned] = useState<{ boxId: string; codeHash: string } | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
   // `boxRef` is the box's SOURCE OF TRUTH for `process()` below, updated by
   // `updateBox` synchronously and directly -- never derived from `box` via a
   // separate effect. A scan can arrive (and be judged) the instant this
@@ -120,8 +123,10 @@ export function WorkScreen({
   // with `setBox` alongside it purely to drive the on-screen display.
   const boxRef = useRef<{ boxId: string; itemCount: number } | null>(null);
   function updateBox(next: { boxId: string; itemCount: number } | null): void {
+    const previousBoxId = boxRef.current?.boxId ?? null;
     boxRef.current = next;
     setBox(next);
+    if ((next?.boxId ?? null) !== previousBoxId) setLastScanned(null);
   }
   // Resolves once the current box has been loaded (or opened, or -- with no
   // `issuerPrefix` -- decided there is none) so `process()` can await it the
@@ -627,6 +632,7 @@ export function WorkScreen({
             // NOT awaited (see printAndMaybeVerify) -- only the fast SQL
             // bookkeeping is on this critical path.
             if (codeHash && boxId !== null) {
+              setLastScanned({ boxId, codeHash });
               await live.current.refreshBox(boxId);
             }
             return { raw, verdict, firstSeen: null };
@@ -695,6 +701,48 @@ export function WorkScreen({
     [exec, shiftId, terminalId, expectedGtin14],
   );
 
+  function handleUndo(): void {
+    const target = lastScanned;
+    if (!target) return;
+    setLastScanned(null);
+    queue.enqueueJob(async () => {
+      await undoLastScan(exec, {
+        boxId: target.boxId,
+        codeHash: target.codeHash,
+        shiftId,
+        terminalId,
+        operatorId: null,
+        at: new Date().toISOString(),
+      });
+      keys.current.delete(target.codeHash);
+      await live.current.refreshBox(target.boxId);
+      live.current.onScanRecorded?.();
+    });
+  }
+
+  function confirmClearBox(): void {
+    setConfirmClear(false);
+    const boxId = boxRef.current?.boxId;
+    if (!boxId) return;
+    setLastScanned(null);
+    queue.enqueueJob(async () => {
+      const clearedCodes = await exec.all<{ code_hash: string }>(
+        "SELECT code_hash FROM codes_mirror WHERE box_id = ?",
+        [boxId],
+      );
+      await clearBox(exec, {
+        boxId,
+        shiftId,
+        terminalId,
+        operatorId: null,
+        at: new Date().toISOString(),
+      });
+      for (const code of clearedCodes) keys.current.delete(code.code_hash);
+      await live.current.refreshBox(boxId);
+      live.current.onScanRecorded?.();
+    });
+  }
+
   // Paused while print verification is up: that scan source is reading the
   // box label's SSCC, not a product KM, and feeding it into this ordinary
   // queue would misjudge it as an invalid code and flash an error signal
@@ -702,9 +750,9 @@ export function WorkScreen({
   // to compete with anything is print verification itself, not a stray
   // rejection from the loop underneath it.
   useEffect(() => {
-    if (verification) return;
+    if (verification || confirmClear) return;
     return source.start((raw) => queue.enqueue(raw));
-  }, [source, queue, verification]);
+  }, [source, queue, verification, confirmClear]);
 
   useEffect(
     () => () => {
@@ -846,7 +894,42 @@ export function WorkScreen({
               >
                 {t("box.close")}
               </Button>
+              {lastScanned?.boxId === box.boxId ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  style={{ minHeight: 64 }}
+                  onClick={(event) => {
+                    handleUndo();
+                    event.currentTarget.blur();
+                  }}
+                >
+                  {t("box.undoLastScan")}
+                </Button>
+              ) : null}
+              <Button
+                type="button"
+                variant="secondary"
+                style={{ minHeight: 64 }}
+                onClick={(event) => {
+                  setConfirmClear(true);
+                  event.currentTarget.blur();
+                }}
+              >
+                {t("box.clear")}
+              </Button>
             </div>
+          ) : null}
+          {confirmClear ? (
+            <Alert tone="warn" title={t("box.confirmClearTitle")}>
+              <p>{t("box.confirmClearDetail")}</p>
+              <Button type="button" onClick={confirmClearBox}>
+                {t("box.confirmClear")}
+              </Button>
+              <Button type="button" variant="secondary" onClick={() => setConfirmClear(false)}>
+                {t("box.cancelClear")}
+              </Button>
+            </Alert>
           ) : null}
           {noSerials ? <Alert tone="warn" title={t("box.noSerials")} /> : null}
           {invalidSerial ? <Alert tone="warn" title={t("box.invalidSerial")} /> : null}

@@ -165,6 +165,7 @@ const SEEDED_BOX_ID = "seeded-box";
 // A second valid KM for the SAME product, distinguished only by serial --
 // used where a test needs a fresh, non-duplicate accept after the first.
 const OTHER_KM = "0104600000000015215Ab2";
+const THIRD_KM = "0104600000000015215Ab3";
 
 const SSCC = buildSscc(0, TEST_ISSUER_PREFIX, 777);
 
@@ -524,6 +525,57 @@ describe("WorkScreen box progress, closing and printing", () => {
     activeSource = source as ScanSource & { emit: ScanListener };
     return renderWork({ ...overrides, source });
   }
+
+  it("undoes the last accepted scan in the open box and queues its exception", async () => {
+    const exec = makeExec();
+    renderWorkTracked({ exec, boxItemCount: 0 });
+
+    act(() => scan(KM));
+    await waitFor(async () => {
+      expect(await exec.all("SELECT code_hash FROM codes_mirror")).toHaveLength(1);
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Отменить последний скан" }));
+
+    await waitFor(async () => {
+      expect(await exec.all("SELECT code_hash FROM codes_mirror")).toHaveLength(0);
+    });
+    expect(screen.queryByRole("button", { name: "Отменить последний скан" })).toBeNull();
+    const exceptions = await exec.all<{ kind: string }>("SELECT kind FROM box_exceptions_mirror");
+    expect(exceptions).toEqual([{ kind: "undo" }]);
+  });
+
+  it("clears every scan from the open box only after confirmation", async () => {
+    const exec = makeExec();
+    const onScan = vi.fn();
+    renderWorkTracked({ exec, boxItemCount: 0, onScan });
+
+    act(() => scan(KM));
+    await waitFor(async () => {
+      expect(await exec.all("SELECT code_hash FROM codes_mirror")).toHaveLength(1);
+    });
+    act(() => scan(OTHER_KM));
+    await waitFor(async () => {
+      expect(await exec.all("SELECT code_hash FROM codes_mirror")).toHaveLength(2);
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Очистить короб" }));
+    act(() => scan(THIRD_KM));
+    expect(onScan).toHaveBeenCalledTimes(2);
+    expect(await exec.all("SELECT code_hash FROM codes_mirror")).toHaveLength(2);
+    fireEvent.click(await screen.findByRole("button", { name: "Подтвердить очистку" }));
+
+    await waitFor(async () => {
+      expect(await exec.all("SELECT code_hash FROM codes_mirror")).toHaveLength(0);
+    });
+    const exceptions = await exec.all<{ kind: string }>("SELECT kind FROM box_exceptions_mirror");
+    expect(exceptions).toEqual([{ kind: "clear" }]);
+
+    act(() => scan(KM));
+    await waitFor(async () => {
+      expect(await exec.all("SELECT code_hash FROM codes_mirror")).toHaveLength(1);
+    });
+  });
 
   it("shows how full the open box is", async () => {
     renderWorkTracked({ boxCapacity: 10, boxItemCount: 3 });
