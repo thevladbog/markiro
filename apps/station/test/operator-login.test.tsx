@@ -1,10 +1,52 @@
 import { DatabaseSync } from "node:sqlite";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import i18n from "../src/i18n/index.js";
 import { applyMigrations, replaceOperatorsMirror, type SqlExecutor } from "../src/lib/mirror.js";
 import { hashSecret } from "../src/lib/crypto.js";
+import type { ScanListener, ScanSource } from "../src/lib/scan-source.js";
 import { OperatorLogin } from "../src/pages/OperatorLogin.js";
+
+const silentSource: ScanSource = { start: () => () => {} };
+
+function manualSource() {
+  let listener: ScanListener | null = null;
+  const source: ScanSource = {
+    start(next) {
+      listener = next;
+      return () => {
+        if (listener === next) listener = null;
+      };
+    },
+  };
+  return {
+    source,
+    scan(raw: string) {
+      listener?.(raw);
+    },
+    active() {
+      return listener !== null;
+    },
+  };
+}
+
+function retainedSource() {
+  let listener: ScanListener | null = null;
+  const source: ScanSource = {
+    start(next) {
+      listener = next;
+      // Deliberately retain the callback after cleanup to model an async
+      // native subscription whose final event was already in flight.
+      return () => {};
+    },
+  };
+  return {
+    source,
+    scanRetired(raw: string) {
+      listener?.(raw);
+    },
+  };
+}
 
 function makeExec(): SqlExecutor {
   const db = new DatabaseSync(":memory:");
@@ -38,7 +80,7 @@ describe("OperatorLogin", () => {
       },
     ]);
     const onAuthed = vi.fn();
-    render(<OperatorLogin exec={exec} onAuthed={onAuthed} />);
+    render(<OperatorLogin exec={exec} source={silentSource} onAuthed={onAuthed} />);
 
     // Stage 1: personnel number -> Next
     for (const digit of "1042") {
@@ -71,7 +113,7 @@ describe("OperatorLogin", () => {
       },
     ]);
     const onAuthed = vi.fn();
-    render(<OperatorLogin exec={exec} onAuthed={onAuthed} />);
+    render(<OperatorLogin exec={exec} source={silentSource} onAuthed={onAuthed} />);
 
     for (const digit of "1042") {
       fireEvent.click(screen.getByRole("button", { name: digit }));
@@ -97,7 +139,7 @@ describe("OperatorLogin", () => {
       all: () => Promise.reject(new Error("no such table: operators_mirror")),
     };
     const onAuthed = vi.fn();
-    render(<OperatorLogin exec={exec} onAuthed={onAuthed} />);
+    render(<OperatorLogin exec={exec} source={silentSource} onAuthed={onAuthed} />);
 
     for (const digit of "1042") {
       fireEvent.click(screen.getByRole("button", { name: digit }));
@@ -129,7 +171,7 @@ describe("OperatorLogin", () => {
       },
     ]);
     const onAuthed = vi.fn();
-    render(<OperatorLogin exec={exec} onAuthed={onAuthed} />);
+    render(<OperatorLogin exec={exec} source={silentSource} onAuthed={onAuthed} />);
 
     for (const digit of "1042") {
       fireEvent.click(screen.getByRole("button", { name: digit }));
@@ -164,7 +206,7 @@ describe("OperatorLogin", () => {
       all: async () => pending,
     };
     const onAuthed = vi.fn();
-    render(<OperatorLogin exec={exec} onAuthed={onAuthed} />);
+    render(<OperatorLogin exec={exec} source={silentSource} onAuthed={onAuthed} />);
 
     for (const digit of "1042") {
       fireEvent.click(screen.getByRole("button", { name: digit }));
@@ -199,5 +241,117 @@ describe("OperatorLogin", () => {
         false,
       ),
     );
+  });
+
+  it("signs in immediately when a known badge is scanned", async () => {
+    const exec = makeExec();
+    await applyMigrations(exec);
+    await replaceOperatorsMirror(exec, [
+      {
+        operatorId: "op-1",
+        name: "Смирнов А.",
+        login: "1042",
+        role: "operator",
+        pinHash: await hashSecret("4821"),
+        badgeHash: await hashSecret("badge-1"),
+        active: true,
+      },
+    ]);
+    const scanner = manualSource();
+    const onAuthed = vi.fn();
+    render(<OperatorLogin exec={exec} source={scanner.source} onAuthed={onAuthed} />);
+
+    expect(screen.getByText("Or scan your badge")).toBeDefined();
+    act(() => scanner.scan("badge-1"));
+
+    await waitFor(() => expect(onAuthed).toHaveBeenCalledTimes(1));
+    expect(onAuthed.mock.calls[0]![0]).toMatchObject({ operatorId: "op-1", login: "1042" });
+  });
+
+  it("shows a badge-specific error, preserves PIN fallback input, and allows a retry", async () => {
+    const exec = makeExec();
+    await applyMigrations(exec);
+    await replaceOperatorsMirror(exec, [
+      {
+        operatorId: "op-1",
+        name: "Смирнов А.",
+        login: "1042",
+        role: "operator",
+        pinHash: await hashSecret("4821"),
+        badgeHash: await hashSecret("badge-1"),
+        active: true,
+      },
+    ]);
+    const scanner = manualSource();
+    const onAuthed = vi.fn();
+    render(<OperatorLogin exec={exec} source={scanner.source} onAuthed={onAuthed} />);
+    fireEvent.click(screen.getByRole("button", { name: "1" }));
+
+    act(() => scanner.scan("unknown-badge"));
+    await waitFor(() => expect(screen.getByText("Badge not recognized")).toBeDefined());
+    expect(screen.getByLabelText("login").textContent).toBe("1");
+
+    act(() => scanner.scan("badge-1"));
+    await waitFor(() => expect(onAuthed).toHaveBeenCalledTimes(1));
+  });
+
+  it("unsubscribes a replaced scan source so only the current scanner can authenticate", async () => {
+    const exec = makeExec();
+    await applyMigrations(exec);
+    await replaceOperatorsMirror(exec, [
+      {
+        operatorId: "op-1",
+        name: "Смирнов А.",
+        login: "1042",
+        role: "operator",
+        pinHash: await hashSecret("4821"),
+        badgeHash: await hashSecret("badge-1"),
+        active: true,
+      },
+    ]);
+    const first = manualSource();
+    const second = manualSource();
+    const onAuthed = vi.fn();
+    const view = render(<OperatorLogin exec={exec} source={first.source} onAuthed={onAuthed} />);
+    expect(first.active()).toBe(true);
+
+    view.rerender(<OperatorLogin exec={exec} source={second.source} onAuthed={onAuthed} />);
+    expect(first.active()).toBe(false);
+    expect(second.active()).toBe(true);
+    act(() => first.scan("badge-1"));
+    expect(onAuthed).not.toHaveBeenCalled();
+
+    act(() => second.scan("badge-1"));
+    await waitFor(() => expect(onAuthed).toHaveBeenCalledTimes(1));
+    view.unmount();
+    expect(second.active()).toBe(false);
+  });
+
+  it("ignores a late event from a retired source before it can block the replacement", async () => {
+    const exec = makeExec();
+    await applyMigrations(exec);
+    await replaceOperatorsMirror(exec, [
+      {
+        operatorId: "op-1",
+        name: "Смирнов А.",
+        login: "1042",
+        role: "operator",
+        pinHash: await hashSecret("4821"),
+        badgeHash: await hashSecret("badge-1"),
+        active: true,
+      },
+    ]);
+    const retired = retainedSource();
+    const current = manualSource();
+    const onAuthed = vi.fn();
+    const view = render(<OperatorLogin exec={exec} source={retired.source} onAuthed={onAuthed} />);
+    view.rerender(<OperatorLogin exec={exec} source={current.source} onAuthed={onAuthed} />);
+
+    act(() => {
+      retired.scanRetired("badge-1");
+      current.scan("badge-1");
+    });
+
+    await waitFor(() => expect(onAuthed).toHaveBeenCalledTimes(1));
   });
 });
