@@ -70,8 +70,12 @@ describe.skipIf(!ready)("box-exceptions e2e", () => {
     // the endpoint really orders by `recordedAt DESC` (newest first) rather
     // than by an insertion order that would otherwise happen to coincide
     // with it.
-    await postExceptions(stationKey, [exception("undo", "b1", shiftId, codeHashFor("aa"))]);
-    await postExceptions(stationKey, [exception("undo", "b1", shiftId, codeHashFor("bb"))]);
+    await postExceptions(stationKey, [
+      exception("undo", "b1", shiftId, codeHashFor("aa"), "2026-07-01T10:00:00.000Z"),
+    ]);
+    await postExceptions(stationKey, [
+      exception("undo", "b1", shiftId, codeHashFor("bb"), "2026-07-01T10:00:01.000Z"),
+    ]);
   });
 
   afterAll(async () => {
@@ -138,6 +142,7 @@ describe.skipIf(!ready)("box-exceptions e2e", () => {
     kind: "undo" | "clear" | "disassemble" | "reprint";
     boxId: string;
     codeHash: string | null;
+    targetScannedAt: string | null;
     shiftId: string;
     terminalId: string | null;
     operatorId: string | null;
@@ -152,11 +157,13 @@ describe.skipIf(!ready)("box-exceptions e2e", () => {
     boxId: string,
     shiftIdArg: string,
     codeHash: string | null,
+    targetScannedAt: string | null = null,
   ): ExceptionFixture {
     return {
       kind,
       boxId,
       codeHash,
+      targetScannedAt,
       shiftId: shiftIdArg,
       terminalId: stationDeviceId,
       operatorId: null,
@@ -194,7 +201,9 @@ describe.skipIf(!ready)("box-exceptions e2e", () => {
     // Newest first: "bb"'s undo was recorded in the LATER of the two
     // separate batches above, so it must sort ahead of "aa"'s.
     expect(res.body.items[0].codeHash).toBe(codeHashFor("bb"));
+    expect(res.body.items[0].targetScannedAt).toBe("2026-07-01T10:00:01.000Z");
     expect(res.body.items[1].codeHash).toBe(codeHashFor("aa"));
+    expect(res.body.items[1].targetScannedAt).toBe("2026-07-01T10:00:00.000Z");
   });
 
   it("rejects a station device api-key with 403", async () => {

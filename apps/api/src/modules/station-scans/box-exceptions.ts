@@ -4,6 +4,8 @@ export interface ExceptionDto {
   boxId: string;
   /** Only set for "undo" -- the single code it targets. */
   codeHash: string | null;
+  /** Only set for "undo" -- the original scan claim it targets. */
+  targetScannedAt: string | null;
   shiftId: string;
   /** Informational wire field; the server always uses the authenticated device id. */
   terminalId: string | null;

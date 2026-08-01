@@ -183,6 +183,13 @@
       "when": 1785549378959,
       "tag": "0025_yellow_jazinda",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1785577535259,
+      "tag": "0026_groovy_blink",
+      "breakpoints": true
     }
   ]
 }

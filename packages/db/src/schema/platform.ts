@@ -278,6 +278,7 @@ export const boxExceptions = pgTable(
     kind: text("kind").notNull(),
     boxId: uuid("box_id").notNull(),
     codeHash: char("code_hash", { length: 64 }),
+    targetScannedAt: timestamp("target_scanned_at", { withTimezone: true }),
     shiftId: uuid("shift_id").notNull(),
     terminalId: text("terminal_id"),
     operatorId: uuid("operator_id"),
@@ -290,9 +291,9 @@ export const boxExceptions = pgTable(
     index("box_exceptions_tenant_shift_recorded_idx").on(t.tenantId, t.shiftId, t.recordedAt),
     check(
       "box_exceptions_kind_payload_check",
-      sql`(${t.kind} = 'undo' AND ${t.codeHash} IS NOT NULL AND ${t.reason} IS NULL)
-          OR (${t.kind} = 'clear' AND ${t.codeHash} IS NULL AND ${t.reason} IS NULL)
-          OR (${t.kind} IN ('disassemble', 'reprint') AND ${t.codeHash} IS NULL AND ${t.reason} IS NOT NULL)`,
+      sql`(${t.kind} = 'undo' AND ${t.codeHash} IS NOT NULL AND ${t.targetScannedAt} IS NOT NULL AND ${t.reason} IS NULL)
+          OR (${t.kind} = 'clear' AND ${t.codeHash} IS NULL AND ${t.targetScannedAt} IS NULL AND ${t.reason} IS NULL)
+          OR (${t.kind} IN ('disassemble', 'reprint') AND ${t.codeHash} IS NULL AND ${t.targetScannedAt} IS NULL AND ${t.reason} IS NOT NULL)`,
     ),
     check(
       "box_exceptions_hash_check",
@@ -536,10 +537,7 @@ export const boxItems = pgTable(
      * Set when the OPERATOR removed this item on purpose (an "undo" of a
      * single scan, or a "clear"/"disassemble" of the whole box) — distinct
      * from `displacedAt`, which means a different terminal's earlier scan won
-     * the ownership race (06b). Kept separate because the two are different
-     * facts for `contentsChangedAfterClose` and any later reporting: one is
-     * an operator decision, the other is a race outcome neither terminal
-     * controlled.
+     * the ownership race (06b).
      */
     removedAt: timestamp("removed_at", { withTimezone: true }),
   },

@@ -1,5 +1,5 @@
 import { BadRequestException, Inject, Injectable, Logger } from "@nestjs/common";
-import { and, eq, inArray, isNotNull, isNull, notInArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, lte, sql } from "drizzle-orm";
 import { ensurePartitions, schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
 import {
@@ -9,7 +9,7 @@ import {
   sameScan,
   type OwnerRow,
 } from "./conflict-resolution";
-import { displacedHashes, type MembershipRow } from "./box-membership";
+import { displacedMemberships, type MembershipRow } from "./box-membership";
 import { sortExceptions, type ExceptionDto } from "./box-exceptions";
 import { SsccService } from "../sscc/sscc.service";
 import type { BatchConflictDto, SyncBatchDto, SyncBatchResponseDto } from "./dto";
@@ -227,6 +227,78 @@ export class StationScansService {
       // batch that loses no claims of its own.
       let batchConflicts: BatchConflictDto[] = [];
 
+      // Serialize every mutation of a device box before taking any registry
+      // locks. The box row may not exist yet, so a transaction advisory lock
+      // on its stable wire identity is the only lock all scan/closure/
+      // exception paths can acquire consistently. Sorting prevents two
+      // multi-box batches from taking the same locks in opposite order.
+      const boxLockKeys = [
+        ...new Set(
+          [
+            ...body.items
+              .filter((item) => item.boxId !== null)
+              .map(
+                (item) => `${tenantId}|${item.shiftId}|${authenticatedTerminalId}|${item.boxId!}`,
+              ),
+            ...body.boxes.map(
+              (box) => `${tenantId}|${box.shiftId}|${authenticatedTerminalId}|${box.boxId}`,
+            ),
+            ...body.exceptions.map(
+              (exception) =>
+                `${tenantId}|${exception.shiftId}|${authenticatedTerminalId}|${exception.boxId}`,
+            ),
+          ].sort(),
+        ),
+      ];
+      for (const key of boxLockKeys) {
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`);
+      }
+      const codeLocks = new Set([
+        ...body.items.flatMap((item) => (item.code === null ? [] : [item.code.codeHash])),
+        ...body.exceptions.flatMap((exception) =>
+          exception.codeHash === null ? [] : [exception.codeHash],
+        ),
+      ]);
+      // Clear/disassemble do not carry their hashes on the wire. Their box
+      // locks are already held, so discover every candidate now and fold it
+      // into the same globally sorted code-lock acquisition as scans/undo.
+      for (const exception of sortExceptions(body.exceptions).filter(
+        (candidate) => candidate.kind === "clear" || candidate.kind === "disassemble",
+      )) {
+        const [targetBox] = await tx
+          .select({ id: schema.boxes.id })
+          .from(schema.boxes)
+          .where(
+            and(
+              eq(schema.boxes.tenantId, tenantId),
+              eq(schema.boxes.shiftId, exception.shiftId),
+              eq(schema.boxes.terminalId, authenticatedTerminalId),
+              eq(schema.boxes.deviceBoxId, exception.boxId),
+            ),
+          );
+        if (!targetBox) continue;
+        const candidates = await tx
+          .select({ codeHash: schema.boxItems.codeHash })
+          .from(schema.boxItems)
+          .where(
+            and(
+              eq(schema.boxItems.tenantId, tenantId),
+              eq(schema.boxItems.boxId, targetBox.id),
+              exception.kind === "clear"
+                ? lte(schema.boxItems.addedAt, new Date(exception.occurredAt))
+                : undefined,
+              isNull(schema.boxItems.displacedAt),
+              isNull(schema.boxItems.removedAt),
+            ),
+          );
+        for (const candidate of candidates) codeLocks.add(candidate.codeHash);
+      }
+      const codeLockHashes = [...codeLocks].sort();
+      for (const codeHash of codeLockHashes) {
+        const key = `${tenantId}|${codeHash}`;
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${key}, 1))`);
+      }
+
       if (body.items.length > 0) {
         const shiftIds = [...new Set(body.items.map((i) => i.shiftId))];
         const owned = await tx
@@ -439,19 +511,6 @@ export class StationScansService {
           // nested in.
           const boxed = coded.filter((i) => i.boxId !== null);
 
-          // This batch's own box ids -- populated only inside the
-          // `boxed.length > 0` branch below. Stays `[]` for a batch that
-          // boxed nothing itself (every item `boxId: null`, an ordinary
-          // unboxed scan per dto.ts), which is exactly the case the
-          // RETROACTIVE block further down (Finding 2) must still run for:
-          // an unboxed scan can still WIN ownership and displace an
-          // incumbent recorded elsewhere in a box, and `notInArray` on an
-          // empty array excludes nothing (verified against this drizzle-orm
-          // version's `notInArray` -- see its own comment below), so the
-          // retroactive UPDATE correctly considers every one of that
-          // incumbent's box items with no this-batch box to exempt.
-          let thisBatchBoxIds: string[] = [];
-
           if (boxed.length > 0) {
             const boxKey = (shiftId: string, terminalId: string | null, boxId: string): string =>
               `${shiftId}|${terminalId ?? ""}|${boxId}`;
@@ -514,6 +573,7 @@ export class StationScansService {
                 shiftId: schema.boxes.shiftId,
                 terminalId: schema.boxes.terminalId,
                 deviceBoxId: schema.boxes.deviceBoxId,
+                disassembledAt: schema.boxes.disassembledAt,
               })
               .from(schema.boxes)
               .where(
@@ -522,57 +582,76 @@ export class StationScansService {
                   inArray(schema.boxes.deviceBoxId, deviceBoxIds),
                 ),
               );
-            const boxIdByKey = new Map<string, string>();
+            const boxByKey = new Map<string, (typeof boxIdRows)[number]>();
             for (const row of boxIdRows) {
-              boxIdByKey.set(boxKey(row.shiftId, row.terminalId, row.deviceBoxId), row.id);
+              boxByKey.set(boxKey(row.shiftId, row.terminalId, row.deviceBoxId), row);
             }
 
-            const preBoxItems = boxed.map((i) => ({
-              boxId: boxIdByKey.get(boxKey(i.shiftId, i.terminalId, i.boxId!))!,
-              codeHash: i.code.codeHash,
-              addedAt: new Date(i.scannedAt),
-              shiftId: i.shiftId,
-              terminalId: i.terminalId,
-              scannedAt: new Date(i.scannedAt),
-            }));
+            const preBoxItems: Array<{
+              boxId: string;
+              codeHash: string;
+              addedAt: Date;
+              shiftId: string;
+              terminalId: string | null;
+              scannedAt: Date;
+            }> = [];
+            for (const i of boxed) {
+              const box = boxByKey.get(boxKey(i.shiftId, i.terminalId, i.boxId!));
+              const scannedAt = new Date(i.scannedAt);
+              if (!box) continue;
+              if (box.disassembledAt !== null) {
+                const ownerTerminalCondition =
+                  i.terminalId === null
+                    ? isNull(schema.boxes.terminalId)
+                    : eq(schema.boxes.terminalId, i.terminalId);
+                const activeRepresentations = await tx
+                  .select({ boxId: schema.boxItems.boxId })
+                  .from(schema.boxItems)
+                  .innerJoin(
+                    schema.boxes,
+                    and(
+                      eq(schema.boxes.tenantId, schema.boxItems.tenantId),
+                      eq(schema.boxes.id, schema.boxItems.boxId),
+                    ),
+                  )
+                  .where(
+                    and(
+                      eq(schema.boxItems.tenantId, tenantId),
+                      eq(schema.boxItems.codeHash, i.code.codeHash),
+                      eq(schema.boxItems.addedAt, scannedAt),
+                      isNull(schema.boxItems.displacedAt),
+                      isNull(schema.boxItems.removedAt),
+                      eq(schema.boxes.shiftId, i.shiftId),
+                      ownerTerminalCondition,
+                      isNull(schema.boxes.disassembledAt),
+                    ),
+                  );
+                if (activeRepresentations.length === 0) {
+                  await this.releaseCode(
+                    tx,
+                    tenantId,
+                    i.code.codeHash,
+                    i.shiftId,
+                    i.terminalId,
+                    scannedAt,
+                  );
+                }
+                continue;
+              }
+              preBoxItems.push({
+                boxId: box.id,
+                codeHash: i.code.codeHash,
+                addedAt: scannedAt,
+                shiftId: i.shiftId,
+                terminalId: i.terminalId,
+                scannedAt,
+              });
+            }
 
             // Sorted by (boxId, codeHash) -- same 40P01 reason as above -- and
             // A strictly newer rescan into the same box reactivates the
             // existing membership after undo/clear. An exact replay keeps
             // the row untouched, so a stale delivery cannot resurrect it.
-            const sortedBoxItems = [...preBoxItems].sort((a, b) =>
-              a.boxId === b.boxId
-                ? a.codeHash.localeCompare(b.codeHash)
-                : a.boxId.localeCompare(b.boxId),
-            );
-            await tx
-              .insert(schema.boxItems)
-              .values(
-                sortedBoxItems.map((p) => ({
-                  tenantId,
-                  boxId: p.boxId,
-                  codeHash: p.codeHash,
-                  addedAt: p.addedAt,
-                })),
-              )
-              .onConflictDoUpdate({
-                target: [schema.boxItems.tenantId, schema.boxItems.boxId, schema.boxItems.codeHash],
-                set: {
-                  addedAt: sql`excluded.added_at`,
-                  displacedAt: null,
-                  removedAt: null,
-                },
-                setWhere: sql`excluded.added_at > ${schema.boxItems.addedAt}`,
-              });
-
-            // THIS BATCH's own direction: a scan it just recorded might not be
-            // the code's owner (06b's rule: the earlier scannedAt wins), in
-            // which case this batch's OWN box item must be marked displaced.
-            // `ownerByHash` always has an entry for every one of these code
-            // hashes (every one came from `coded`, i.e. from `claimItems`);
-            // the `!!owner` fallback below is defensive only, and treats "no
-            // owner found" as "not the owner" -- the conservative direction,
-            // matching "a box may only count what its own scan owns".
             const membershipRows: MembershipRow[] = preBoxItems.map((p) => {
               const owner = ownerByHash.get(p.codeHash);
               const ownerIsThisScan =
@@ -587,18 +666,81 @@ export class StationScansService {
                 );
               return { boxId: p.boxId, codeHash: p.codeHash, addedAt: p.addedAt, ownerIsThisScan };
             });
-            const toMark = displacedHashes(membershipRows);
-            thisBatchBoxIds = [...new Set(preBoxItems.map((p) => p.boxId))];
-            if (toMark.length > 0) {
+
+            // If a malformed batch names two boxes for the exact same scan,
+            // retain one deterministic membership. code_registry cannot
+            // distinguish those claims because their ownership identity is
+            // otherwise identical.
+            const firstOwnerBoxByHash = new Map<string, string>();
+            for (const row of [...membershipRows]
+              .filter((candidate) => candidate.ownerIsThisScan)
+              .sort((a, b) => a.boxId.localeCompare(b.boxId))) {
+              if (!firstOwnerBoxByHash.has(row.codeHash)) {
+                firstOwnerBoxByHash.set(row.codeHash, row.boxId);
+              }
+            }
+            for (const row of membershipRows) {
+              if (row.ownerIsThisScan && firstOwnerBoxByHash.get(row.codeHash) !== row.boxId) {
+                row.ownerIsThisScan = false;
+              }
+            }
+
+            const sortedBoxItems = [...membershipRows].sort((a, b) =>
+              a.boxId === b.boxId
+                ? a.codeHash.localeCompare(b.codeHash)
+                : a.boxId.localeCompare(b.boxId),
+            );
+            for (const row of sortedBoxItems) {
+              const insert = tx.insert(schema.boxItems).values({
+                tenantId,
+                boxId: row.boxId,
+                codeHash: row.codeHash,
+                addedAt: row.addedAt,
+                ...(row.ownerIsThisScan ? {} : { displacedAt: sql`now()` }),
+              });
+              if (row.ownerIsThisScan) {
+                await insert.onConflictDoUpdate({
+                  target: [
+                    schema.boxItems.tenantId,
+                    schema.boxItems.boxId,
+                    schema.boxItems.codeHash,
+                  ],
+                  set: {
+                    addedAt: sql`excluded.added_at`,
+                    displacedAt: null,
+                    removedAt: null,
+                  },
+                  // An exact replay must not resurrect membership removed by
+                  // a later exception. A genuinely different authoritative
+                  // scan may be either earlier (late winner) or later
+                  // (post-release rescan), so inequality is intentional.
+                  setWhere: sql`excluded.added_at <> ${schema.boxItems.addedAt}`,
+                });
+              } else {
+                await insert.onConflictDoNothing();
+              }
+            }
+
+            // THIS BATCH's own direction: a scan it just recorded might not be
+            // the code's owner (06b's rule: the earlier scannedAt wins), in
+            // which case this batch's OWN box item must be marked displaced.
+            const toMark = displacedMemberships(membershipRows).sort((a, b) =>
+              a.boxId === b.boxId
+                ? a.codeHash.localeCompare(b.codeHash)
+                : a.boxId.localeCompare(b.boxId),
+            );
+            for (const row of toMark) {
               await tx
                 .update(schema.boxItems)
                 .set({ displacedAt: sql`now()` })
                 .where(
                   and(
                     eq(schema.boxItems.tenantId, tenantId),
-                    inArray(schema.boxItems.boxId, thisBatchBoxIds),
-                    inArray(schema.boxItems.codeHash, toMark),
+                    eq(schema.boxItems.boxId, row.boxId),
+                    eq(schema.boxItems.codeHash, row.codeHash),
+                    eq(schema.boxItems.addedAt, row.addedAt),
                     isNull(schema.boxItems.displacedAt),
+                    isNull(schema.boxItems.removedAt),
                   ),
                 );
             }
@@ -623,43 +765,84 @@ export class StationScansService {
           // displaced incumbent's box item live and its box counting an item
           // its own scan no longer owns (the bug this task exists to close).
           //
-          // `notInArray` on an empty `thisBatchBoxIds` (a batch that boxed
-          // nothing itself) resolves to `true` -- i.e. excludes nothing --
-          // verified against this project's drizzle-orm 0.45.2
-          // (`notInArray`'s empty-array branch returns `sql\`true\``, the
-          // same file's `inArray` returns `sql\`false\`` for the same case),
-          // so this correctly considers every one of the incumbent's box
-          // items with no this-batch box wrongly exempted from it.
-          const retroHashes = [...new Set(displaced.map((d) => d.codeHash))];
-          if (retroHashes.length > 0) {
+          for (const displacedScan of [...displaced].sort((a, b) =>
+            a.codeHash.localeCompare(b.codeHash),
+          )) {
+            const losingTerminalCondition =
+              displacedScan.losing.terminalId === null
+                ? isNull(schema.boxes.terminalId)
+                : eq(schema.boxes.terminalId, displacedScan.losing.terminalId);
+            const losingBoxIds = tx
+              .select({ id: schema.boxes.id })
+              .from(schema.boxes)
+              .where(
+                and(
+                  eq(schema.boxes.tenantId, tenantId),
+                  eq(schema.boxes.shiftId, displacedScan.losing.shiftId),
+                  losingTerminalCondition,
+                ),
+              );
             await tx
               .update(schema.boxItems)
               .set({ displacedAt: sql`now()` })
               .where(
                 and(
                   eq(schema.boxItems.tenantId, tenantId),
-                  inArray(schema.boxItems.codeHash, retroHashes),
+                  eq(schema.boxItems.codeHash, displacedScan.codeHash),
+                  eq(schema.boxItems.addedAt, displacedScan.losing.scannedAt),
+                  inArray(schema.boxItems.boxId, losingBoxIds),
                   isNull(schema.boxItems.displacedAt),
-                  notInArray(schema.boxItems.boxId, thisBatchBoxIds),
+                  isNull(schema.boxItems.removedAt),
                 ),
               );
           }
-        }
 
-        // Stamp only shifts that were already closed, and only the first time:
-        // the badge marks the shift, it does not track the latest straggler.
-        const closed = owned.filter((s) => s.status === "closed").map((s) => s.id);
-        if (closed.length > 0) {
-          await tx
-            .update(schema.shifts)
-            .set({ lateDataAt: sql`now()` })
-            .where(
-              and(
-                eq(schema.shifts.tenantId, tenantId),
-                inArray(schema.shifts.id, closed),
-                isNull(schema.shifts.lateDataAt),
-              ),
-            );
+          // Equal ownership identities can arrive in separate batches naming
+          // different boxes. Registry locking serializes those batches; this
+          // final pass leaves exactly one active membership deterministically.
+          for (const [codeHash, owner] of [...ownerByHash].sort(([a], [b]) => a.localeCompare(b))) {
+            const ownerTerminalCondition =
+              owner.terminalId === null
+                ? isNull(schema.boxes.terminalId)
+                : eq(schema.boxes.terminalId, owner.terminalId);
+            const activeOwnerMemberships = await tx
+              .select({ boxId: schema.boxItems.boxId })
+              .from(schema.boxItems)
+              .innerJoin(
+                schema.boxes,
+                and(
+                  eq(schema.boxes.tenantId, schema.boxItems.tenantId),
+                  eq(schema.boxes.id, schema.boxItems.boxId),
+                ),
+              )
+              .where(
+                and(
+                  eq(schema.boxItems.tenantId, tenantId),
+                  eq(schema.boxItems.codeHash, codeHash),
+                  eq(schema.boxItems.addedAt, owner.scannedAt),
+                  isNull(schema.boxItems.displacedAt),
+                  isNull(schema.boxItems.removedAt),
+                  eq(schema.boxes.shiftId, owner.shiftId),
+                  ownerTerminalCondition,
+                ),
+              )
+              .orderBy(schema.boxItems.boxId);
+            const duplicateBoxIds = activeOwnerMemberships.slice(1).map((row) => row.boxId);
+            if (duplicateBoxIds.length > 0) {
+              await tx
+                .update(schema.boxItems)
+                .set({ displacedAt: sql`now()` })
+                .where(
+                  and(
+                    eq(schema.boxItems.tenantId, tenantId),
+                    eq(schema.boxItems.codeHash, codeHash),
+                    inArray(schema.boxItems.boxId, duplicateBoxIds),
+                    isNull(schema.boxItems.displacedAt),
+                    isNull(schema.boxItems.removedAt),
+                  ),
+                );
+            }
+          }
         }
       }
 
@@ -868,6 +1051,30 @@ export class StationScansService {
         );
       }
 
+      // Any fact delivered after its shift closed is late data, not only a
+      // scan item. Exception-only and closure-only batches must surface the
+      // same cabinet badge as a delayed scan batch.
+      const touchedShiftIds = [
+        ...new Set([
+          ...body.items.map((item) => item.shiftId),
+          ...body.boxes.map((box) => box.shiftId),
+          ...body.exceptions.map((exception) => exception.shiftId),
+        ]),
+      ];
+      if (touchedShiftIds.length > 0) {
+        await tx
+          .update(schema.shifts)
+          .set({ lateDataAt: sql`now()` })
+          .where(
+            and(
+              eq(schema.shifts.tenantId, tenantId),
+              inArray(schema.shifts.id, touchedShiftIds),
+              eq(schema.shifts.status, "closed"),
+              isNull(schema.shifts.lateDataAt),
+            ),
+          );
+      }
+
       return { applied: body.items.length, alreadyApplied: false, conflicts: batchConflicts };
     });
   }
@@ -953,8 +1160,16 @@ export class StationScansService {
       }
       const resolvedBoxId = boxRow.id;
 
-      if (ex.kind === "undo" && ex.codeHash) {
-        await this.releaseCode(tx, tenantId, ex.codeHash, ex.shiftId, authenticatedTerminalId);
+      if (ex.kind === "undo" && ex.codeHash && ex.targetScannedAt) {
+        const targetScannedAt = new Date(ex.targetScannedAt);
+        await this.releaseCode(
+          tx,
+          tenantId,
+          ex.codeHash,
+          ex.shiftId,
+          authenticatedTerminalId,
+          targetScannedAt,
+        );
         await tx
           .update(schema.boxItems)
           .set({ removedAt: sql`now()` })
@@ -963,33 +1178,42 @@ export class StationScansService {
               eq(schema.boxItems.tenantId, tenantId),
               eq(schema.boxItems.boxId, resolvedBoxId),
               eq(schema.boxItems.codeHash, ex.codeHash),
+              eq(schema.boxItems.addedAt, targetScannedAt),
               isNull(schema.boxItems.displacedAt),
               isNull(schema.boxItems.removedAt),
             ),
           );
       } else if (ex.kind === "clear") {
-        // Guarded to a box that is STILL OPEN (`closedAt IS NULL`): "clear"
-        // empties a box the operator can keep packing into, never one
-        // that's already been closed and labelled -- reaching into a
-        // closed box is "disassemble" (Task 6), a distinct kind with its
-        // own guard. The resolution step above already confirmed
+        // A current clear acts on an open box. A delayed clear may also act
+        // after its later closure has already arrived, but only when its
+        // occurredAt is no later than closedAt; rows added after the clear
+        // remain protected by emptyBox's addedAt cutoff. A clear that really
+        // occurred after closure remains a no-op -- that action is
+        // "disassemble". The resolution step above already confirmed
         // `resolvedBoxId` names a real row for this exception's own
         // (tenantId, shiftId, terminalId, deviceBoxId); this second lookup
-        // exists only to read that row's CURRENT `closedAt`, not to
+        // exists only to read that row's event-time `closedAt`, not to
         // re-resolve identity, so it queries by `resolvedBoxId` (the
         // server UUID), never `ex.boxId` again.
         const [openBox] = await tx
-          .select({ id: schema.boxes.id })
+          .select({ id: schema.boxes.id, closedAt: schema.boxes.closedAt })
           .from(schema.boxes)
           .where(
             and(
               eq(schema.boxes.tenantId, tenantId),
               eq(schema.boxes.id, resolvedBoxId),
-              isNull(schema.boxes.closedAt),
+              isNull(schema.boxes.disassembledAt),
             ),
           );
-        if (openBox) {
-          await this.emptyBox(tx, tenantId, resolvedBoxId, ex.shiftId, authenticatedTerminalId);
+        if (openBox && (openBox.closedAt === null || new Date(ex.occurredAt) <= openBox.closedAt)) {
+          await this.emptyBox(
+            tx,
+            tenantId,
+            resolvedBoxId,
+            ex.shiftId,
+            authenticatedTerminalId,
+            new Date(ex.occurredAt),
+          );
         }
       } else if (ex.kind === "disassemble") {
         // Guarded to a box that is CLOSED (`closedAt IS NOT NULL`) and not
@@ -1019,7 +1243,14 @@ export class StationScansService {
             ),
           );
         if (closedBox) {
-          await this.emptyBox(tx, tenantId, resolvedBoxId, ex.shiftId, authenticatedTerminalId);
+          await this.emptyBox(
+            tx,
+            tenantId,
+            resolvedBoxId,
+            ex.shiftId,
+            authenticatedTerminalId,
+            null,
+          );
 
           // The box's own retirement. `sscc` is deliberately left
           // untouched -- it stays on the row as a historical record of what
@@ -1035,7 +1266,7 @@ export class StationScansService {
           // caller.
           await tx
             .update(schema.boxes)
-            .set({ disassembledAt: sql`now()` })
+            .set({ disassembledAt: new Date(ex.occurredAt) })
             .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.id, resolvedBoxId)));
         }
       }
@@ -1047,6 +1278,7 @@ export class StationScansService {
         kind: ex.kind,
         boxId: resolvedBoxId,
         codeHash: ex.codeHash,
+        targetScannedAt: ex.targetScannedAt === null ? null : new Date(ex.targetScannedAt),
         shiftId: ex.shiftId,
         terminalId: authenticatedTerminalId,
         operatorId: ex.operatorId,
@@ -1063,29 +1295,26 @@ export class StationScansService {
     resolvedBoxId: string,
     shiftId: string,
     terminalId: string,
+    occurredAt: Date | null,
   ): Promise<void> {
-    const activeHashes = tx
-      .select({ codeHash: schema.boxItems.codeHash })
+    // Another box's scan may have reconciled this code while this transaction
+    // waited for its globally ordered code locks. Read under those locks.
+    const activeItems = await tx
+      .select({ codeHash: schema.boxItems.codeHash, addedAt: schema.boxItems.addedAt })
       .from(schema.boxItems)
       .where(
         and(
           eq(schema.boxItems.tenantId, tenantId),
           eq(schema.boxItems.boxId, resolvedBoxId),
+          occurredAt === null ? undefined : lte(schema.boxItems.addedAt, occurredAt),
           isNull(schema.boxItems.displacedAt),
           isNull(schema.boxItems.removedAt),
         ),
       )
       .orderBy(schema.boxItems.codeHash);
-    await tx
-      .delete(schema.codeRegistry)
-      .where(
-        and(
-          eq(schema.codeRegistry.tenantId, tenantId),
-          inArray(schema.codeRegistry.codeHash, activeHashes),
-          eq(schema.codeRegistry.shiftId, shiftId),
-          eq(schema.codeRegistry.terminalId, terminalId),
-        ),
-      );
+    for (const item of activeItems) {
+      await this.releaseCode(tx, tenantId, item.codeHash, shiftId, terminalId, item.addedAt);
+    }
 
     await tx
       .update(schema.boxItems)
@@ -1094,6 +1323,7 @@ export class StationScansService {
         and(
           eq(schema.boxItems.tenantId, tenantId),
           eq(schema.boxItems.boxId, resolvedBoxId),
+          occurredAt === null ? undefined : lte(schema.boxItems.addedAt, occurredAt),
           isNull(schema.boxItems.displacedAt),
           isNull(schema.boxItems.removedAt),
         ),
@@ -1114,6 +1344,7 @@ export class StationScansService {
     codeHash: string,
     shiftId: string,
     terminalId: string | null,
+    scannedAt: Date,
   ): Promise<void> {
     const terminalCondition =
       terminalId === null
@@ -1127,6 +1358,7 @@ export class StationScansService {
           eq(schema.codeRegistry.codeHash, codeHash),
           eq(schema.codeRegistry.shiftId, shiftId),
           terminalCondition,
+          eq(schema.codeRegistry.scannedAt, scannedAt),
         ),
       );
   }

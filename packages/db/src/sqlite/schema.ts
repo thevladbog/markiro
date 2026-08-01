@@ -205,6 +205,7 @@ export const boxExceptionsMirror = sqliteTable(
     kind: text("kind").notNull(),
     boxId: text("box_id").notNull(),
     codeHash: text("code_hash"),
+    targetScannedAt: text("target_scanned_at"),
     shiftId: text("shift_id").notNull(),
     terminalId: text("terminal_id"),
     operatorId: text("operator_id"),
@@ -214,9 +215,9 @@ export const boxExceptionsMirror = sqliteTable(
   (t) => [
     check(
       "box_exceptions_mirror_kind_payload_check",
-      sql`(${t.kind} = 'undo' AND ${t.codeHash} IS NOT NULL AND ${t.reason} IS NULL)
-          OR (${t.kind} = 'clear' AND ${t.codeHash} IS NULL AND ${t.reason} IS NULL)
-          OR (${t.kind} IN ('disassemble', 'reprint') AND ${t.codeHash} IS NULL AND ${t.reason} IS NOT NULL)`,
+      sql`(${t.kind} = 'undo' AND ${t.codeHash} IS NOT NULL AND ${t.targetScannedAt} IS NOT NULL AND ${t.reason} IS NULL)
+          OR (${t.kind} = 'clear' AND ${t.codeHash} IS NULL AND ${t.targetScannedAt} IS NULL AND ${t.reason} IS NULL)
+          OR (${t.kind} IN ('disassemble', 'reprint') AND ${t.codeHash} IS NULL AND ${t.targetScannedAt} IS NULL AND ${t.reason} IS NOT NULL)`,
     ),
   ],
 );

@@ -169,6 +169,7 @@ function toExceptionPayload(exceptions: PendingException[]) {
     kind: exception.kind,
     boxId: exception.boxId,
     codeHash: exception.codeHash,
+    targetScannedAt: exception.targetScannedAt,
     shiftId: exception.shiftId,
     terminalId: exception.terminalId,
     operatorId: exception.operatorId,

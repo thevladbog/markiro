@@ -6,6 +6,8 @@ export interface ExceptionInput {
   boxId: string;
   /** Only set for "undo" -- the single code it targets. */
   codeHash: string | null;
+  /** Only set for "undo" -- the original accepted scan timestamp. */
+  targetScannedAt: string | null;
   shiftId: string;
   terminalId: string | null;
   operatorId: string | null;
@@ -23,6 +25,7 @@ interface ExceptionRow {
   kind: string;
   box_id: string;
   code_hash: string | null;
+  target_scanned_at: string | null;
   shift_id: string;
   terminal_id: string | null;
   operator_id: string | null;
@@ -34,9 +37,19 @@ interface ExceptionRow {
 export async function insertException(exec: SqlExecutor, e: ExceptionInput): Promise<void> {
   await exec.run(
     `INSERT INTO box_exceptions_mirror
-       (kind, box_id, code_hash, shift_id, terminal_id, operator_id, reason, at)
-     VALUES (?,?,?,?,?,?,?,?)`,
-    [e.kind, e.boxId, e.codeHash, e.shiftId, e.terminalId, e.operatorId, e.reason, e.at],
+       (kind, box_id, code_hash, target_scanned_at, shift_id, terminal_id, operator_id, reason, at)
+     VALUES (?,?,?,?,?,?,?,?,?)`,
+    [
+      e.kind,
+      e.boxId,
+      e.codeHash,
+      e.targetScannedAt,
+      e.shiftId,
+      e.terminalId,
+      e.operatorId,
+      e.reason,
+      e.at,
+    ],
   );
 }
 
@@ -61,12 +74,12 @@ export async function readExceptions(
   const rows =
     ceilingId != null
       ? await exec.all<ExceptionRow>(
-          `SELECT id, kind, box_id, code_hash, shift_id, terminal_id, operator_id, reason, at
+          `SELECT id, kind, box_id, code_hash, target_scanned_at, shift_id, terminal_id, operator_id, reason, at
              FROM box_exceptions_mirror WHERE id <= ? ORDER BY id LIMIT ?`,
           [ceilingId, limit],
         )
       : await exec.all<ExceptionRow>(
-          `SELECT id, kind, box_id, code_hash, shift_id, terminal_id, operator_id, reason, at
+          `SELECT id, kind, box_id, code_hash, target_scanned_at, shift_id, terminal_id, operator_id, reason, at
              FROM box_exceptions_mirror ORDER BY id LIMIT ?`,
           [limit],
         );
@@ -75,6 +88,7 @@ export async function readExceptions(
     kind: r.kind as ExceptionInput["kind"],
     boxId: r.box_id,
     codeHash: r.code_hash,
+    targetScannedAt: r.target_scanned_at,
     shiftId: r.shift_id,
     terminalId: r.terminal_id,
     operatorId: r.operator_id,

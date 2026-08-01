@@ -11,6 +11,7 @@ function ex(
     kind,
     boxId,
     codeHash,
+    targetScannedAt: kind === "undo" ? "2026-07-30T00:00:00.000Z" : null,
     shiftId: "s1",
     terminalId: null,
     operatorId: null,
@@ -44,5 +45,24 @@ describe("sortExceptions", () => {
       exceptions: [{ ...ex("b1", "reprint"), reason: "x".repeat(501) }],
     });
     expect(result.success).toBe(false);
+  });
+
+  it("requires an exact scan target only for undo", () => {
+    const batch = (exception: ExceptionDto) => ({
+      batchId: "b1",
+      items: [],
+      boxes: [],
+      exceptions: [exception],
+    });
+    expect(
+      syncBatchSchema.safeParse(
+        batch({ ...ex("b1", "undo", "a".repeat(64)), targetScannedAt: null }),
+      ).success,
+    ).toBe(false);
+    expect(
+      syncBatchSchema.safeParse(
+        batch({ ...ex("b1", "clear"), targetScannedAt: "2026-07-30T00:00:00.000Z" }),
+      ).success,
+    ).toBe(false);
   });
 });

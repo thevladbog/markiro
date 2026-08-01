@@ -24,6 +24,7 @@ export interface BoxExceptionDto {
   kind: ExceptionDto["kind"];
   boxId: string;
   codeHash: string | null;
+  targetScannedAt: Date | null;
   terminalId: string | null;
   operatorId: string | null;
   reason: string | null;
