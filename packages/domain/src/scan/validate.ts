@@ -1,4 +1,4 @@
-import { kmKey } from "../gs1/km.js";
+import { kmHash } from "../gs1/km.js";
 import { classifyScan } from "./classify.js";
 
 export type ScanVerdict =
@@ -23,6 +23,6 @@ export function validateShiftScan(raw: string, ctx: ShiftScanContext): ScanVerdi
       actualGtin14: scan.km.gtin14,
     };
   }
-  const key = kmKey(scan.km);
+  const key = kmHash(scan.km);
   return ctx.isDuplicate(key) ? { status: "duplicate", key } : { status: "ok", key };
 }

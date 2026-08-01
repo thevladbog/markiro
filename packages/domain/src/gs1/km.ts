@@ -1,7 +1,10 @@
+import { sha256 } from "@noble/hashes/sha2.js";
+import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
 import { DomainError } from "../errors.js";
 import { normalizeToGtin14 } from "./gtin.js";
 
 const GS = "\u001d";
+export const MAX_KM_UTF8_BYTES = 1024;
 
 export interface ParsedKm {
   gtin14: string;
@@ -63,14 +66,22 @@ export function parseKmSegments(raw: string): KmSegments {
   let rest = gsAt === -1 ? "" : s.slice(gsAt + 1);
   while (rest.length > 0) {
     if (rest.startsWith(GS)) {
-      rest = rest.slice(1);
-      continue;
+      throw new DomainError("KM_EMPTY_AI", "KM contains an empty trailing AI segment");
     }
-    if (rest.length <= 2) break;
+    if (rest.length <= 2) {
+      throw new DomainError("KM_BAD_AI", "KM contains an incomplete trailing AI segment");
+    }
     const ai = rest.slice(0, 2);
+    if (!/^\d{2}$/.test(ai)) {
+      throw new DomainError("KM_BAD_AI", "KM trailing AI must be two digits");
+    }
     const end = rest.indexOf(GS);
-    ais.push({ ai, value: end === -1 ? rest.slice(2) : rest.slice(2, end) });
-    rest = end === -1 ? "" : rest.slice(end);
+    const value = end === -1 ? rest.slice(2) : rest.slice(2, end);
+    if (value.length === 0) {
+      throw new DomainError("KM_EMPTY_AI", `KM trailing AI ${ai} has an empty value`);
+    }
+    ais.push({ ai, value });
+    rest = end === -1 ? "" : rest.slice(end + 1);
   }
   return { gtin14, serial, ais };
 }
@@ -85,6 +96,9 @@ export function parseKm(raw: string): ParsedKm {
   const gtin14 = normalizeToGtin14(segments.gtin14); // throws GTIN_INVALID
   const ais: Record<string, string> = {};
   for (const { ai, value } of segments.ais) {
+    if (Object.hasOwn(ais, ai)) {
+      throw new DomainError("KM_DUPLICATE_AI", `KM contains duplicate trailing AI ${ai}`);
+    }
     ais[ai] = value;
   }
   return { gtin14, serial: segments.serial, raw, ais };
@@ -93,4 +107,36 @@ export function parseKm(raw: string): ParsedKm {
 /** Canonical duplicate-detection identity of a KM. */
 export function kmKey(km: ParsedKm): string {
   return `01${km.gtin14}21${km.serial}`;
+}
+
+/** Stable storage/ownership identity; crypto tails are deliberately excluded. */
+export function kmHash(km: ParsedKm): string {
+  return bytesToHex(sha256(utf8ToBytes(kmKey(km))));
+}
+
+/**
+ * Converts scanner text into the accepted/export representation. Acquisition
+ * text remains a separate audit value; only a known AIM prefix and edge
+ * transport whitespace are removed here.
+ */
+export function canonicalizeKm(raw: string): ParsedKm {
+  let canonicalRaw = raw.replace(/^[\t ]+|[\t ]+$/g, "");
+  if (canonicalRaw.startsWith("]d2")) canonicalRaw = canonicalRaw.slice(3);
+  canonicalRaw = canonicalRaw.replace(/^[\t ]+|[\t ]+$/g, "");
+
+  const bytes = utf8ToBytes(canonicalRaw);
+  if (bytes.length > MAX_KM_UTF8_BYTES) {
+    throw new DomainError("KM_TOO_LONG", `KM exceeds the ${MAX_KM_UTF8_BYTES}-byte UTF-8 limit`);
+  }
+  if (canonicalRaw.includes("\ufffd")) {
+    throw new DomainError("KM_BAD_ENCODING", "KM contains a replacement character");
+  }
+  for (const char of canonicalRaw) {
+    const code = char.charCodeAt(0);
+    if ((code < 0x20 && char !== GS) || code === 0x7f) {
+      throw new DomainError("KM_BAD_CONTROL", "KM contains a forbidden control character");
+    }
+  }
+
+  return parseKm(canonicalRaw);
 }

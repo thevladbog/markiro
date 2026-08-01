@@ -5,7 +5,7 @@ import { Logger, type INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
-import { buildSscc } from "@markiro/domain";
+import { buildSscc, canonicalizeKm, kmHash } from "@markiro/domain";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
@@ -84,6 +84,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
   // GTIN14_CANONICAL_PADDED): POST /products validates the GS1 check digit
   // via normalizeToGtin14, and the field is `gtin`, not `gtin14`.
   const VALID_GTIN14 = "04006381333931";
+  const boxedCodeHash = (label: string) => kmHash(canonicalizeKm(`01${VALID_GTIN14}21S-${label}`));
 
   // productGroup + both capacities are required for the product to come
   // back "active" (see ProductsService.computeStatus); a "draft" product is
@@ -120,13 +121,15 @@ describe.skipIf(!ready)("station-scans e2e", () => {
   }
 
   function item(shiftId: string, n: number, overrides: Partial<ScanItemDto> = {}): ScanItemDto {
+    const raw = `01${VALID_GTIN14}21S${n}`;
+    const km = canonicalizeKm(raw);
     return {
       shiftId,
       terminalId: "t1",
-      raw: `RAW${n}`,
+      raw,
       verdict: "ok",
       scannedAt: `2026-07-28T10:00:0${n}.000Z`,
-      code: { codeHash: `h${n}`.padEnd(64, "0"), gtin14: VALID_GTIN14, serial: `S${n}` },
+      code: { codeHash: kmHash(km), gtin14: km.gtin14, serial: km.serial },
       boxId: null,
       operatorId: null,
       ...overrides,
@@ -203,6 +206,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
     const agent = request.agent(app!.getHttpServer());
     const tenantId = await signUpAndActivate(agent);
     const apiKey = await deviceKey(agent);
+    const deviceId = deviceIdsByKey.get(apiKey)!;
     const shiftId = await openShift(agent);
 
     const res = await request(app!.getHttpServer())
@@ -214,6 +218,19 @@ describe.skipIf(!ready)("station-scans e2e", () => {
     expect(res.body).toMatchObject({ applied: 2, alreadyApplied: false });
     expect(await scanEventsCount(tenantId, shiftId)).toBe(2);
     expect(await codesCount(tenantId, shiftId)).toBe(2);
+    const accepted = await db
+      .select({ canonicalRaw: schema.codes.canonicalRaw, codeHash: schema.codes.codeHash })
+      .from(schema.codes)
+      .where(and(eq(schema.codes.tenantId, tenantId), eq(schema.codes.shiftId, shiftId)));
+    expect(accepted.map((row) => row.canonicalRaw).sort()).toEqual(
+      [item(shiftId, 1).raw, item(shiftId, 2).raw].sort(),
+    );
+    expect(accepted.every((row) => /^[0-9a-f]{64}$/.test(row.codeHash))).toBe(true);
+    const terminals = await db
+      .select({ terminalId: schema.scanEvents.terminalId })
+      .from(schema.scanEvents)
+      .where(and(eq(schema.scanEvents.tenantId, tenantId), eq(schema.scanEvents.shiftId, shiftId)));
+    expect(terminals.every((row) => row.terminalId === deviceId)).toBe(true);
   });
 
   it("is idempotent: the same batchId applied twice stores one set of rows", async () => {
@@ -406,7 +423,10 @@ describe.skipIf(!ready)("station-scans e2e", () => {
     await request(app!.getHttpServer())
       .post("/station/scans")
       .set("x-api-key", apiKey)
-      .send({ batchId: "machine-1:700", items: [item(shiftId, 1, { code: null })] })
+      .send({
+        batchId: "machine-1:700",
+        items: [item(shiftId, 1, { verdict: "duplicate", code: null })],
+      })
       .expect(201);
 
     expect(await scanEventsCount(tenantId, shiftId)).toBe(1);
@@ -614,6 +634,15 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       .expect(401);
   });
 
+  it("rejects a browser session because terminal identity requires a station key", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+    await agent
+      .post("/station/scans")
+      .send({ batchId: "machine-1:session", items: [] })
+      .expect(403);
+  });
+
   it("gives an unowned code to the batch that sent it, with no conflict", async () => {
     const agent = request.agent(app!.getHttpServer());
     const tenantId = await signUpAndActivate(agent);
@@ -664,6 +693,8 @@ describe.skipIf(!ready)("station-scans e2e", () => {
     const agent = request.agent(app!.getHttpServer());
     await signUpAndActivate(agent);
     const apiKey = await deviceKey(agent);
+    const secondApiKey = await deviceKey(agent);
+    const firstDeviceId = deviceIdsByKey.get(apiKey)!;
     const shiftId = await openShift(agent);
 
     const first = item(shiftId, 1);
@@ -680,7 +711,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
     };
     const res = await request(app!.getHttpServer())
       .post("/station/scans")
-      .set("x-api-key", apiKey)
+      .set("x-api-key", secondApiKey)
       .send({ batchId: "m1:21", items: [later] })
       .expect(201);
 
@@ -694,7 +725,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
     // -- only `winningTerminalId` -- so a bug scrambling either field could
     // pass unnoticed.
     expect(conflicts[0]!.codeHash).toBe(first.code!.codeHash);
-    expect(conflicts[0]!.winningTerminalId).toBe("t1");
+    expect(conflicts[0]!.winningTerminalId).toBe(firstDeviceId);
     expect(conflicts[0]!.winningScannedAt).toBe(first.scannedAt);
   });
 
@@ -708,6 +739,8 @@ describe.skipIf(!ready)("station-scans e2e", () => {
     const agent = request.agent(app!.getHttpServer());
     const tenantId = await signUpAndActivate(agent);
     const apiKey = await deviceKey(agent);
+    const secondApiKey = await deviceKey(agent);
+    const firstDeviceId = deviceIdsByKey.get(apiKey)!;
     const shiftId = await openShift(agent);
 
     const first = { ...item(shiftId, 1), terminalId: "t1" };
@@ -722,24 +755,27 @@ describe.skipIf(!ready)("station-scans e2e", () => {
     const tied = { ...first, terminalId: "t2" };
     const res = await request(app!.getHttpServer())
       .post("/station/scans")
-      .set("x-api-key", apiKey)
+      .set("x-api-key", secondApiKey)
       .send({ batchId: "m1:61", items: [tied] })
       .expect(201);
 
     const owner = await registryOwner(tenantId, first.code!.codeHash);
-    expect(owner?.terminalId).toBe("t1");
+    expect(owner?.terminalId).toBe(firstDeviceId);
     expect(owner?.scannedAt.toISOString()).toBe(first.scannedAt);
 
     // The tied claim lost, so its own sender is told.
     const conflicts = (res.body as { conflicts: { winningTerminalId: string }[] }).conflicts;
     expect(conflicts).toHaveLength(1);
-    expect(conflicts[0]!.winningTerminalId).toBe("t1");
+    expect(conflicts[0]!.winningTerminalId).toBe(firstDeviceId);
   });
 
   it("lets an earlier scan displace the incumbent, and does not report that to the sender", async () => {
     const agent = request.agent(app!.getHttpServer());
     const tenantId = await signUpAndActivate(agent);
     const apiKey = await deviceKey(agent);
+    const secondApiKey = await deviceKey(agent);
+    const firstDeviceId = deviceIdsByKey.get(apiKey)!;
+    const secondDeviceId = deviceIdsByKey.get(secondApiKey)!;
     const shiftId = await openShift(agent);
 
     const late = { ...item(shiftId, 1), terminalId: "t1" };
@@ -756,7 +792,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
     };
     const res = await request(app!.getHttpServer())
       .post("/station/scans")
-      .set("x-api-key", apiKey)
+      .set("x-api-key", secondApiKey)
       .send({ batchId: "m1:31", items: [earlier] })
       .expect(201);
 
@@ -769,7 +805,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
     // registry's actual post-state directly: the owner must now be the
     // EARLIER terminal (t2), not the one that arrived first (t1).
     const owner = await registryOwner(tenantId, earlier.code!.codeHash);
-    expect(owner?.terminalId).toBe("t2");
+    expect(owner?.terminalId).toBe(secondDeviceId);
     expect(owner?.scannedAt.toISOString()).toBe(earlier.scannedAt);
 
     // The displaced scan (t1's) is deliberately never reported to any
@@ -780,8 +816,8 @@ describe.skipIf(!ready)("station-scans e2e", () => {
     // assertion stayed green.
     const rows = await conflictRows(tenantId, earlier.code!.codeHash);
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.losingTerminalId).toBe("t1");
-    expect(rows[0]!.winningTerminalId).toBe("t2");
+    expect(rows[0]!.losingTerminalId).toBe(firstDeviceId);
+    expect(rows[0]!.winningTerminalId).toBe(secondDeviceId);
     expect(rows[0]!.losingScannedAt.toISOString()).toBe(late.scannedAt);
   });
 
@@ -789,6 +825,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
     const agent = request.agent(app!.getHttpServer());
     await signUpAndActivate(agent);
     const apiKey = await deviceKey(agent);
+    const secondApiKey = await deviceKey(agent);
     const shiftId = await openShift(agent);
 
     const first = { ...item(shiftId, 1), terminalId: "t1" };
@@ -810,12 +847,12 @@ describe.skipIf(!ready)("station-scans e2e", () => {
     };
     await request(app!.getHttpServer())
       .post("/station/scans")
-      .set("x-api-key", apiKey)
+      .set("x-api-key", secondApiKey)
       .send(body)
       .expect(201);
     const replay = await request(app!.getHttpServer())
       .post("/station/scans")
-      .set("x-api-key", apiKey)
+      .set("x-api-key", secondApiKey)
       .send(body)
       .expect(201);
 
@@ -840,7 +877,9 @@ describe.skipIf(!ready)("station-scans e2e", () => {
     let agent: ReturnType<typeof request.agent>;
     let tenantId: string;
     let apiKey: string;
+    let secondApiKey: string;
     let deviceId: string;
+    let secondDeviceId: string;
     let shiftId: string;
     let OPERATOR_ID: string;
     let OTHER_OPERATOR_ID: string;
@@ -857,6 +896,8 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       tenantId = await signUpAndActivate(agent);
       apiKey = await deviceKey(agent);
       deviceId = deviceIdsByKey.get(apiKey)!;
+      secondApiKey = await deviceKey(agent);
+      secondDeviceId = deviceIdsByKey.get(secondApiKey)!;
       shiftId = await openShift(agent);
 
       // Real employees rows: boxes.operator_id and scan_events.operator_id
@@ -887,16 +928,17 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       return { batchId: `box-batch-${randomUUID()}`, items, boxes };
     }
 
-    async function postRaw(body: Record<string, unknown>) {
+    async function postRaw(body: Record<string, unknown>, key = apiKey) {
       return request(app!.getHttpServer())
         .post("/station/scans")
-        .set("x-api-key", apiKey)
+        .set("x-api-key", key)
         .send(body)
         .expect(201);
     }
 
     async function postBatchAs(terminalId: string, items: ScanItemDto[]) {
-      return postRaw(batchBody(items.map((i) => ({ ...i, terminalId }))));
+      const key = terminalId === "t2" ? secondApiKey : apiKey;
+      return postRaw(batchBody(items.map((i) => ({ ...i, terminalId }))), key);
     }
 
     async function postBatch(items: ScanItemDto[]) {
@@ -904,7 +946,8 @@ describe.skipIf(!ready)("station-scans e2e", () => {
     }
 
     async function postBatchWithBoxes(items: ScanItemDto[], boxes: ClosureFixture[]) {
-      return postRaw(batchBody(items, boxes));
+      const terminalId = items[0]?.terminalId ?? boxes[0]?.terminalId;
+      return postRaw(batchBody(items, boxes), terminalId === "t2" ? secondApiKey : apiKey);
     }
 
     /**
@@ -930,16 +973,18 @@ describe.skipIf(!ready)("station-scans e2e", () => {
         scannedAt?: string;
       } = {},
     ): ScanItemDto {
+      const raw = `01${VALID_GTIN14}21S-${codeLabel}`;
+      const km = canonicalizeKm(raw);
       return {
         shiftId,
         terminalId: overrides.terminalId === undefined ? "t1" : overrides.terminalId,
-        raw: `RAW-${codeLabel}`,
+        raw,
         verdict: "ok",
         scannedAt: `2026-07-29T${overrides.scannedAt ?? "10:00:00"}.000Z`,
         code: {
-          codeHash: codeLabel.padEnd(64, "0"),
-          gtin14: VALID_GTIN14,
-          serial: `S-${codeLabel}`,
+          codeHash: kmHash(km),
+          gtin14: km.gtin14,
+          serial: km.serial,
         },
         boxId: overrides.boxId ?? null,
         operatorId: overrides.operatorId ?? null,
@@ -965,7 +1010,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
         .where(
           and(
             eq(schema.boxItems.tenantId, forTenantId),
-            eq(schema.boxItems.codeHash, codeLabel.padEnd(64, "0")),
+            eq(schema.boxItems.codeHash, boxedCodeHash(codeLabel)),
           ),
         );
     }
@@ -1122,8 +1167,8 @@ describe.skipIf(!ready)("station-scans e2e", () => {
         .from(schema.scanEvents)
         .where(eq(schema.scanEvents.tenantId, tenantId));
       const byRaw = new Map(evs.map((e) => [e.raw, e.operatorId]));
-      expect(byRaw.get("RAW-aa")).toBe(OPERATOR_ID);
-      expect(byRaw.get("RAW-bb")).toBe(OTHER_OPERATOR_ID);
+      expect(byRaw.get(`01${VALID_GTIN14}21S-aa`)).toBe(OPERATOR_ID);
+      expect(byRaw.get(`01${VALID_GTIN14}21S-bb`)).toBe(OTHER_OPERATOR_ID);
     });
 
     it("marks the later terminal's box item displaced when an earlier scan wins", async () => {
@@ -1317,8 +1362,8 @@ describe.skipIf(!ready)("station-scans e2e", () => {
         .where(eq(schema.boxes.tenantId, tenantId));
       expect(rows).toHaveLength(2);
       const byTerminal = new Map(rows.map((r) => [r.terminalId, r.sscc]));
-      expect(byTerminal.get("t1")).toBe(ssccT1);
-      expect(byTerminal.get("t2")).toBe(ssccT2);
+      expect(byTerminal.get(deviceId)).toBe(ssccT1);
+      expect(byTerminal.get(secondDeviceId)).toBe(ssccT2);
     });
 
     // Regression for the defect this task fixes: the closure UPDATE used to
@@ -1712,7 +1757,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       it("undo releases the code from the registry and marks the box item removed", async () => {
         await postBatchAs(deviceId, [scan("aa", { boxId: "b1" })]);
         const boxId = await boxIdFor("b1");
-        const codeHash = "aa".padEnd(64, "0");
+        const codeHash = boxedCodeHash("aa");
 
         const undoRes = await postRaw({
           batchId: `undo-test-${randomUUID()}`,
@@ -1780,7 +1825,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       });
 
       it("reactivates box membership when the released code is scanned again later", async () => {
-        const codeHash = "aa".padEnd(64, "0");
+        const codeHash = boxedCodeHash("aa");
         await postBatchAs(deviceId, [scan("aa", { boxId: "b1", scannedAt: "10:00:00" })]);
         await postRaw({
           batchId: `undo-rescan-${randomUUID()}`,
@@ -1821,9 +1866,9 @@ describe.skipIf(!ready)("station-scans e2e", () => {
         await postBatchAs(deviceId, [scan("aa", { boxId: "b1", scannedAt: "10:00:05" })]);
         await postBatchAs("t2", [scan("aa", { boxId: "b2", scannedAt: "10:00:00" })]);
 
-        const codeHash = "aa".padEnd(64, "0");
+        const codeHash = boxedCodeHash("aa");
         const before = await registryOwner(tenantId, codeHash);
-        expect(before?.terminalId).toBe("t2");
+        expect(before?.terminalId).toBe(secondDeviceId);
 
         await postRaw({
           batchId: `undo-test-${randomUUID()}`,
@@ -1849,13 +1894,13 @@ describe.skipIf(!ready)("station-scans e2e", () => {
         });
 
         const after = await registryOwner(tenantId, codeHash);
-        expect(after?.terminalId).toBe("t2");
+        expect(after?.terminalId).toBe(secondDeviceId);
         expect(after?.scannedAt).toEqual(before?.scannedAt);
       });
 
       it("redelivering the same undo exception twice is idempotent", async () => {
         await postBatchAs(deviceId, [scan("aa", { boxId: "b1" })]);
-        const codeHash = "aa".padEnd(64, "0");
+        const codeHash = boxedCodeHash("aa");
 
         const body = {
           batchId: `undo-test-${randomUUID()}`,
@@ -1915,7 +1960,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
                 {
                   kind: "undo",
                   boxId: "ghost-box",
-                  codeHash: "aa".padEnd(64, "0"),
+                  codeHash: boxedCodeHash("aa"),
                   shiftId,
                   terminalId: "t1",
                   operatorId: null,
@@ -1945,8 +1990,8 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       it("clear removes every active item from a still-open box, closes none of it", async () => {
         await postBatchAs(deviceId, [scan("aa", { boxId: "b1" }), scan("bb", { boxId: "b1" })]);
         const boxId = await boxIdFor("b1");
-        const codeHash1 = "aa".padEnd(64, "0");
-        const codeHash2 = "bb".padEnd(64, "0");
+        const codeHash1 = boxedCodeHash("aa");
+        const codeHash2 = boxedCodeHash("bb");
 
         const res = await postRaw({
           batchId: `clear-test-${randomUUID()}`,
@@ -2004,7 +2049,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
 
       it("clear on an already-closed box is a no-op (guarded by closedAt IS NULL)", async () => {
         await postBatchAs(deviceId, [scan("aa", { boxId: "b1" })]);
-        const codeHash = "aa".padEnd(64, "0");
+        const codeHash = boxedCodeHash("aa");
         await postBatchWithBoxes(
           [],
           [
@@ -2082,8 +2127,8 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       // never reads `boxes` -- see sscc.e2e.test.ts's own lock-down test).
       it("disassemble retires a closed box: items released, box excluded from active listing", async () => {
         await postBatchAs(deviceId, [scan("aa", { boxId: "b1" }), scan("bb", { boxId: "b1" })]);
-        const codeHash1 = "aa".padEnd(64, "0");
-        const codeHash2 = "bb".padEnd(64, "0");
+        const codeHash1 = boxedCodeHash("aa");
+        const codeHash2 = boxedCodeHash("bb");
         await postBatchWithBoxes(
           [],
           [
@@ -2158,7 +2203,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
 
       it("disassemble on a still-open box is a no-op (guarded by closedAt IS NOT NULL)", async () => {
         await postBatchAs(deviceId, [scan("aa", { boxId: "b1" })]);
-        const codeHash = "aa".padEnd(64, "0");
+        const codeHash = boxedCodeHash("aa");
         const boxId = await boxIdFor("b1");
 
         await postRaw({
@@ -2330,8 +2375,8 @@ describe.skipIf(!ready)("station-scans e2e", () => {
           .where(and(eq(schema.boxItems.tenantId, tenantId), eq(schema.boxItems.boxId, boxId)));
         expect(itemsAfter).toEqual(itemsBefore);
 
-        const codeHash1 = "aa".padEnd(64, "0");
-        const codeHash2 = "bb".padEnd(64, "0");
+        const codeHash1 = boxedCodeHash("aa");
+        const codeHash2 = boxedCodeHash("bb");
         const registryRows = await db
           .select()
           .from(schema.codeRegistry)

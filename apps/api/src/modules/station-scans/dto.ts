@@ -1,34 +1,87 @@
 import { z } from "zod";
-import { MAX_BOX_CLOSURES_PER_SYNC_BATCH } from "@markiro/domain";
+import {
+  canonicalizeKm,
+  kmHash,
+  MAX_BOX_CLOSURES_PER_SYNC_BATCH,
+  MAX_KM_UTF8_BYTES,
+} from "@markiro/domain";
 
-const scanItemSchema = z.object({
-  // Normalised to lowercase here, at the boundary: Postgres's `uuid` type is
-  // case-insensitive on input but always renders lowercase on output, so a
-  // client-sent uppercase id would otherwise match the tenant-scoped shift
-  // guard (semantic uuid comparison in SQL) yet fail a same-value JS string
-  // comparison against a value read back from the database (e.g. `sameScan`
-  // in conflict-resolution.ts, comparing a fresh claim's shiftId against a
-  // registry row's). Normalising once here keeps every downstream string
-  // comparison correct without each of them having to know about this.
-  shiftId: z.string().uuid().toLowerCase(),
-  terminalId: z.string().nullable(),
-  raw: z.string().min(1),
-  verdict: z.string().min(1),
-  scannedAt: z.string().datetime(),
-  code: z
-    .object({
-      codeHash: z.string().length(64),
-      gtin14: z.string().length(14),
-      serial: z.string().min(1),
-    })
-    .nullable(),
-  // A null boxId is an ordinary scan not assigned to any box (06c's boxing
-  // is per-item, not a batch-wide setting).
-  boxId: z.string().min(1).max(64).nullable(),
-  // Per scan, not per batch: a drained batch can span a handover, and a
-  // per-batch attribution would credit one operator with another's work.
-  operatorId: z.string().uuid().toLowerCase().nullable(),
-});
+const scanItemSchema = z
+  .object({
+    // Normalised to lowercase here, at the boundary: Postgres's `uuid` type is
+    // case-insensitive on input but always renders lowercase on output, so a
+    // client-sent uppercase id would otherwise match the tenant-scoped shift
+    // guard (semantic uuid comparison in SQL) yet fail a same-value JS string
+    // comparison against a value read back from the database (e.g. `sameScan`
+    // in conflict-resolution.ts, comparing a fresh claim's shiftId against a
+    // registry row's). Normalising once here keeps every downstream string
+    // comparison correct without each of them having to know about this.
+    shiftId: z.string().uuid().toLowerCase(),
+    terminalId: z.string().nullable(),
+    raw: z
+      .string()
+      .min(1)
+      .max(MAX_KM_UTF8_BYTES)
+      .refine((value) => !value.includes("\0"), "raw must not contain NUL")
+      .refine(
+        (value) => Buffer.byteLength(value, "utf8") <= MAX_KM_UTF8_BYTES,
+        `raw must not exceed ${MAX_KM_UTF8_BYTES} UTF-8 bytes`,
+      ),
+    verdict: z.enum(["ok", "duplicate", "wrong_gtin", "invalid"]),
+    scannedAt: z.string().datetime(),
+    code: z
+      .object({
+        codeHash: z.string().regex(/^[0-9a-f]{64}$/),
+        gtin14: z.string().regex(/^\d{14}$/),
+        serial: z.string().min(1),
+      })
+      .nullable(),
+    // A null boxId is an ordinary scan not assigned to any box (06c's boxing
+    // is per-item, not a batch-wide setting).
+    boxId: z.string().min(1).max(64).nullable(),
+    // Per scan, not per batch: a drained batch can span a handover, and a
+    // per-batch attribution would credit one operator with another's work.
+    operatorId: z.string().uuid().toLowerCase().nullable(),
+  })
+  .superRefine((item, ctx) => {
+    const accepted = item.verdict === "ok";
+    if (accepted !== (item.code !== null)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["code"],
+        message: "code must be present if and only if verdict is ok",
+      });
+      return;
+    }
+    if (item.boxId !== null && item.code === null) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["boxId"],
+        message: "boxId requires an accepted code",
+      });
+    }
+    if (item.code === null) return;
+
+    try {
+      const km = canonicalizeKm(item.raw);
+      if (kmHash(km) !== item.code.codeHash) {
+        ctx.addIssue({ code: "custom", path: ["code", "codeHash"], message: "codeHash mismatch" });
+      }
+      if (km.gtin14 !== item.code.gtin14) {
+        ctx.addIssue({ code: "custom", path: ["code", "gtin14"], message: "gtin14 mismatch" });
+      }
+      if (km.serial !== item.code.serial) {
+        ctx.addIssue({ code: "custom", path: ["code", "serial"], message: "serial mismatch" });
+      }
+    } catch {
+      ctx.addIssue({ code: "custom", path: ["raw"], message: "Invalid accepted marking code" });
+    }
+  })
+  .transform((item) => {
+    if (item.code === null) return { ...item, code: null };
+    const km = canonicalizeKm(item.raw);
+    return { ...item, code: { ...item.code, canonicalRaw: km.raw } };
+  });
 
 export const syncBatchSchema = z.object({
   // Device-generated: "<machineId>:<per-installation id>:<highest outbox id
@@ -42,9 +95,9 @@ export const syncBatchSchema = z.object({
   // database (but kept its enrollment) cannot collide with a key already
   // recorded for the database it replaced.
   batchId: z.string().min(1).max(200),
-  // Bounded so a buggy or hostile device cannot submit an unbounded payload;
-  // the station's own batch size is 200.
-  items: z.array(scanItemSchema).max(500),
+  // Kept equal to the station drain size so the largest client-generated
+  // payload remains below the API's JSON body ceiling.
+  items: z.array(scanItemSchema).max(100),
   // Box closures carried by this batch. Independent of `items`: a box can
   // close well after its last item was drained, in a batch carrying no
   // items at all -- the drain is sequential, so the box row it refers to
@@ -96,7 +149,10 @@ export const syncBatchSchema = z.object({
         .object({
           kind: z.enum(["undo", "clear", "disassemble", "reprint"]),
           boxId: z.string().min(1).max(64),
-          codeHash: z.string().length(64).nullable(),
+          codeHash: z
+            .string()
+            .regex(/^[0-9a-f]{64}$/)
+            .nullable(),
           shiftId: z.string().uuid().toLowerCase(),
           terminalId: z.string().nullable(),
           operatorId: z.string().uuid().toLowerCase().nullable(),
@@ -130,8 +186,9 @@ export const syncBatchSchema = z.object({
     .default([]),
 });
 
-export type ScanItemDto = z.infer<typeof scanItemSchema>;
-export type SyncBatchDto = z.infer<typeof syncBatchSchema>;
+/** Wire shape before server-derived canonicalRaw is attached by the parser. */
+export type ScanItemDto = z.input<typeof scanItemSchema>;
+export type SyncBatchDto = z.output<typeof syncBatchSchema>;
 
 /** A code in THIS batch that lost ownership to an earlier scan elsewhere. */
 export interface BatchConflictDto {

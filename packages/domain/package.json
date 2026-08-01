@@ -28,6 +28,7 @@
     "zod": "4.4.3"
   },
   "dependencies": {
+    "@noble/hashes": "2.2.0",
     "bwip-js": "4.11.2"
   }
 }

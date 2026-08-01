@@ -16,7 +16,7 @@ import {
 export { MAX_BOX_CLOSURES_PER_SYNC_BATCH };
 
 /** Scans per request. Small enough to survive a flaky link and to retry cheaply. */
-export const BATCH_SIZE = 200;
+export const BATCH_SIZE = 100;
 /** How long a non-empty queue may stop moving before the operator is warned. */
 export const STUCK_AFTER_MS = 15 * 60 * 1000;
 /**

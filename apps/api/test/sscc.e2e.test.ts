@@ -5,7 +5,7 @@ import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
-import { buildSscc } from "@markiro/domain";
+import { buildSscc, canonicalizeKm, kmHash } from "@markiro/domain";
 import { schema, type Db } from "@markiro/db";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
@@ -610,7 +610,9 @@ describe.skipIf(!ready)("sscc e2e", () => {
       const block = await svc.allocate(tenantId, prefix, 0, deviceId, 20);
       const burnedSerial = block.fromSerial;
       const sscc = buildSscc(0, prefix, burnedSerial);
-      const codeHash = "d1".padEnd(64, "0");
+      const raw = `01${VALID_GTIN14}21S-d1`;
+      const km = canonicalizeKm(raw);
+      const codeHash = kmHash(km);
 
       await request(app!.getHttpServer())
         .post("/station/scans")
@@ -621,10 +623,10 @@ describe.skipIf(!ready)("sscc e2e", () => {
             {
               shiftId,
               terminalId: deviceId,
-              raw: "RAW-d1",
+              raw,
               verdict: "ok",
               scannedAt: new Date().toISOString(),
-              code: { codeHash, gtin14: VALID_GTIN14, serial: "S-d1" },
+              code: { codeHash, gtin14: km.gtin14, serial: km.serial },
               boxId: "b1",
               operatorId: null,
             },

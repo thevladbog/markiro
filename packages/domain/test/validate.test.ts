@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { kmHash, parseKm } from "../src/gs1/km.js";
 import { validateShiftScan } from "../src/scan/validate.js";
 
 const KM = "010460068200001321abcDEF1234567";
-const KEY = "010460068200001321abcDEF1234567";
+const KEY = kmHash(parseKm(KM));
 const ctx = (dupes: string[] = []) => ({
   expectedGtin14: "04600682000013",
   isDuplicate: (key: string) => dupes.includes(key),

@@ -21,7 +21,15 @@ This slice closes it: scans reach the server reliably and idempotently, the oper
 
 ## Device side: a separate outbox
 
-Every scan enqueues one row in a new `outbox` table (`INTEGER PRIMARY KEY AUTOINCREMENT`) carrying everything the server needs: shift id, terminal id, raw payload, verdict, timestamp, and — when the scan was accepted — the code hash, GTIN and serial. The drain reads in id order and acknowledges with a single `DELETE FROM outbox WHERE id <= ?`.
+Every scan enqueues one row in a new `outbox` table (`INTEGER PRIMARY KEY AUTOINCREMENT`) carrying everything the server needs: shift id, captured scanner payload, verdict, timestamp, and — when the scan was accepted — its lowercase SHA-256 code hash, GTIN and serial. The server derives the canonical GS1 payload from the captured value after verification. The drain reads in id order and acknowledges with a single `DELETE FROM outbox WHERE id <= ?`.
+
+The representations are deliberately distinct. `raw` is acquisition evidence
+after the scanner adapter's framing/decoding. `canonical_raw` removes only a
+known leading AIM `]d2` identifier and transport-edge whitespace while
+preserving literal GS separators and trailing AIs. `code_hash` is SHA-256 of
+`01<gtin14>21<serial>`, so AIs 91/92/93 do not create a second physical-item
+identity. The API reparses `canonical_raw`, recomputes all derived fields and
+rejects disagreement; a device is never authoritative for those values.
 
 **Why a separate table rather than marking the existing mirrors.** `codes_mirror` exists for offline duplicate detection and will be purged on a retention schedule in plan 09. If transport state lived in that table, retention could silently discard scans that were never delivered. Separating them means the mirror is governed by retention and the outbox only by server acknowledgement.
 
@@ -35,7 +43,7 @@ Every scan enqueues one row in a new `outbox` table (`INTEGER PRIMARY KEY AUTOIN
 
 One drain at a time, serialized — the same discipline the scan queue and the roster refresh already use, for the same reason: two concurrent drains would send overlapping batches and race their acknowledgements.
 
-- **Batch size 200 scans.** A device offline for a full shift holds thousands; 200 keeps a single request small enough to survive a flaky link and cheap enough to retry.
+- **Batch size 100 scans.** A device offline for a full shift holds thousands; 100 keeps a request below the API JSON-body ceiling even when every accepted KM is near the explicit raw-size bound, while successful batches still drain back-to-back.
 - **Triggers:** a new scan enqueued, the browser `online` event, and a 15-second heartbeat as the safety net. Consecutive successful batches drain back-to-back with no delay — an offline device that reconnects catches up as fast as the link allows.
 - **Backoff on failure:** exponential from 2s, doubling to a 60s cap, reset on the first success. Never a tight retry loop.
 - **Leaving a shift does not stop the drain.** The queue belongs to the device, not to the shift.
@@ -50,7 +58,12 @@ The server applies the whole batch **and** records the batch id in a new unparti
 
 Every insert is tenant-scoped in the statement itself, mutations included, per the project-wide rule. Every shift id in a batch is validated against the caller's tenant.
 
-**The route must be reachable by a station api-key** (`TenantGuard`, not `SessionOnlyGuard`) — it is the station's core job. `docs/device-key-surface.md` gains it in the reachable table, and it needs a positive regression test alongside the ones 05b-3 added, so a later hardening pass cannot quietly make it session-only and cost the station its whole purpose.
+**The route requires a station api-key.** `TenantGuard` still resolves the
+tenant, but a browser session is rejected: the authenticated station id is
+the authoritative terminal for scans, closures and exceptions, regardless of
+any stale or forged terminal value in a queued payload. This is the station's
+core job, so `docs/device-key-surface.md` keeps it in the device-key table and
+the boundary is pinned by both positive device-key and negative session tests.
 
 ## Late data for a closed shift
 

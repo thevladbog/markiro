@@ -4,6 +4,7 @@ import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { canonicalizeKm, kmHash } from "@markiro/domain";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
@@ -69,8 +70,8 @@ describe.skipIf(!ready)("box-exceptions e2e", () => {
     // the endpoint really orders by `recordedAt DESC` (newest first) rather
     // than by an insertion order that would otherwise happen to coincide
     // with it.
-    await postExceptions(stationKey, [exception("undo", "b1", shiftId, "aa".padEnd(64, "0"))]);
-    await postExceptions(stationKey, [exception("undo", "b1", shiftId, "bb".padEnd(64, "0"))]);
+    await postExceptions(stationKey, [exception("undo", "b1", shiftId, codeHashFor("aa"))]);
+    await postExceptions(stationKey, [exception("undo", "b1", shiftId, codeHashFor("bb"))]);
   });
 
   afterAll(async () => {
@@ -86,6 +87,7 @@ describe.skipIf(!ready)("box-exceptions e2e", () => {
 
   // Same fixture as boxes.e2e.test.ts / conflicts.e2e.test.ts / station-scans.e2e.test.ts.
   const VALID_GTIN14 = "04006381333931";
+  const codeHashFor = (label: string) => kmHash(canonicalizeKm(`01${VALID_GTIN14}21S-${label}`));
 
   async function createActiveProduct(a: ReturnType<typeof request.agent>): Promise<string> {
     const product = await a
@@ -118,13 +120,15 @@ describe.skipIf(!ready)("box-exceptions e2e", () => {
     scannedAt: string,
     boxId: string | null,
   ): ScanItemDto {
+    const raw = `01${VALID_GTIN14}21S-${codeLabel}`;
+    const km = canonicalizeKm(raw);
     return {
       shiftId: shiftIdArg,
       terminalId,
-      raw: `RAW-${codeLabel}`,
+      raw,
       verdict: "ok",
       scannedAt,
-      code: { codeHash: codeLabel.padEnd(64, "0"), gtin14: VALID_GTIN14, serial: `S-${codeLabel}` },
+      code: { codeHash: kmHash(km), gtin14: km.gtin14, serial: km.serial },
       boxId,
       operatorId: null,
     };
@@ -189,8 +193,8 @@ describe.skipIf(!ready)("box-exceptions e2e", () => {
     expect(res.body.items[0].kind).toBe("undo");
     // Newest first: "bb"'s undo was recorded in the LATER of the two
     // separate batches above, so it must sort ahead of "aa"'s.
-    expect(res.body.items[0].codeHash).toBe("bb".padEnd(64, "0"));
-    expect(res.body.items[1].codeHash).toBe("aa".padEnd(64, "0"));
+    expect(res.body.items[0].codeHash).toBe(codeHashFor("bb"));
+    expect(res.body.items[1].codeHash).toBe(codeHashFor("aa"));
   });
 
   it("rejects a station device api-key with 403", async () => {

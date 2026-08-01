@@ -6,7 +6,8 @@
 // DB-authoritative composite FK to shifts(tenant_id, id)
 // (codes_tenant_shift_fk / scan_events_tenant_shift_fk) enforcing that a
 // shift_id belongs to the same tenant as the code/scan event referencing it.
-import { char, pgTable, text, timestamp, uuid, primaryKey } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { char, check, pgTable, text, timestamp, uuid, primaryKey } from "drizzle-orm/pg-core";
 
 export const codes = pgTable(
   "codes",
@@ -16,9 +17,17 @@ export const codes = pgTable(
     shiftId: uuid("shift_id").notNull(),
     gtin14: char("gtin14", { length: 14 }).notNull(),
     serial: text("serial").notNull(),
+    canonicalRaw: text("canonical_raw").notNull(),
     scannedAt: timestamp("scanned_at", { withTimezone: true }).notNull(),
   },
-  (t) => [primaryKey({ columns: [t.tenantId, t.codeHash, t.scannedAt] })],
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.codeHash, t.scannedAt] }),
+    check("codes_hash_check", sql`${t.codeHash} ~ '^[0-9a-f]{64}$'`),
+    check(
+      "codes_canonical_raw_size_check",
+      sql`octet_length(${t.canonicalRaw}) BETWEEN 1 AND 1024`,
+    ),
+  ],
 );
 
 export const scanEvents = pgTable("scan_events", {
