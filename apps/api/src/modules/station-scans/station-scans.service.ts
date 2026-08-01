@@ -1,5 +1,5 @@
 import { BadRequestException, Inject, Injectable, Logger } from "@nestjs/common";
-import { and, eq, inArray, isNotNull, isNull, lte, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import { ensurePartitions, schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
 import {
@@ -9,7 +9,7 @@ import {
   sameScan,
   type OwnerRow,
 } from "./conflict-resolution";
-import { displacedMemberships, type MembershipRow } from "./box-membership";
+import type { MembershipRow } from "./box-membership";
 import { sortExceptions, type ExceptionDto } from "./box-exceptions";
 import { SsccService } from "../sscc/sscc.service";
 import type { BatchConflictDto, SyncBatchDto, SyncBatchResponseDto } from "./dto";
@@ -510,6 +510,12 @@ export class StationScansService {
           // `coded` in length) is empty, which is exactly the branch this is
           // nested in.
           const boxed = coded.filter((i) => i.boxId !== null);
+          const retiredBoxScans: Array<{
+            codeHash: string;
+            shiftId: string;
+            terminalId: string | null;
+            scannedAt: Date;
+          }> = [];
 
           if (boxed.length > 0) {
             const boxKey = (shiftId: string, terminalId: string | null, boxId: string): string =>
@@ -600,42 +606,14 @@ export class StationScansService {
               const scannedAt = new Date(i.scannedAt);
               if (!box) continue;
               if (box.disassembledAt !== null) {
-                const ownerTerminalCondition =
-                  i.terminalId === null
-                    ? isNull(schema.boxes.terminalId)
-                    : eq(schema.boxes.terminalId, i.terminalId);
-                const activeRepresentations = await tx
-                  .select({ boxId: schema.boxItems.boxId })
-                  .from(schema.boxItems)
-                  .innerJoin(
-                    schema.boxes,
-                    and(
-                      eq(schema.boxes.tenantId, schema.boxItems.tenantId),
-                      eq(schema.boxes.id, schema.boxItems.boxId),
-                    ),
-                  )
-                  .where(
-                    and(
-                      eq(schema.boxItems.tenantId, tenantId),
-                      eq(schema.boxItems.codeHash, i.code.codeHash),
-                      eq(schema.boxItems.addedAt, scannedAt),
-                      isNull(schema.boxItems.displacedAt),
-                      isNull(schema.boxItems.removedAt),
-                      eq(schema.boxes.shiftId, i.shiftId),
-                      ownerTerminalCondition,
-                      isNull(schema.boxes.disassembledAt),
-                    ),
-                  );
-                if (activeRepresentations.length === 0) {
-                  await this.releaseCode(
-                    tx,
-                    tenantId,
-                    i.code.codeHash,
-                    i.shiftId,
-                    i.terminalId,
-                    scannedAt,
-                  );
-                }
+                // Release is deferred until every live membership from this
+                // batch has been written and reconciled below.
+                retiredBoxScans.push({
+                  codeHash: i.code.codeHash,
+                  shiftId: i.shiftId,
+                  terminalId: i.terminalId,
+                  scannedAt,
+                });
                 continue;
               }
               preBoxItems.push({
@@ -690,16 +668,25 @@ export class StationScansService {
                 ? a.codeHash.localeCompare(b.codeHash)
                 : a.boxId.localeCompare(b.boxId),
             );
-            for (const row of sortedBoxItems) {
-              const insert = tx.insert(schema.boxItems).values({
-                tenantId,
-                boxId: row.boxId,
-                codeHash: row.codeHash,
-                addedAt: row.addedAt,
-                ...(row.ownerIsThisScan ? {} : { displacedAt: sql`now()` }),
-              });
-              if (row.ownerIsThisScan) {
-                await insert.onConflictDoUpdate({
+            const ownerRows = [
+              ...new Map(
+                sortedBoxItems
+                  .filter((row) => row.ownerIsThisScan)
+                  .map((row) => [`${row.boxId}|${row.codeHash}`, row]),
+              ).values(),
+            ];
+            if (ownerRows.length > 0) {
+              await tx
+                .insert(schema.boxItems)
+                .values(
+                  ownerRows.map((row) => ({
+                    tenantId,
+                    boxId: row.boxId,
+                    codeHash: row.codeHash,
+                    addedAt: row.addedAt,
+                  })),
+                )
+                .onConflictDoUpdate({
                   target: [
                     schema.boxItems.tenantId,
                     schema.boxItems.boxId,
@@ -716,31 +703,46 @@ export class StationScansService {
                   // (post-release rescan), so inequality is intentional.
                   setWhere: sql`excluded.added_at <> ${schema.boxItems.addedAt}`,
                 });
-              } else {
-                await insert.onConflictDoNothing();
-              }
             }
 
-            // THIS BATCH's own direction: a scan it just recorded might not be
-            // the code's owner (06b's rule: the earlier scannedAt wins), in
-            // which case this batch's OWN box item must be marked displaced.
-            const toMark = displacedMemberships(membershipRows).sort((a, b) =>
-              a.boxId === b.boxId
-                ? a.codeHash.localeCompare(b.codeHash)
-                : a.boxId.localeCompare(b.boxId),
-            );
-            for (const row of toMark) {
+            const displacedRows = [
+              ...new Map(
+                sortedBoxItems
+                  .filter((row) => !row.ownerIsThisScan)
+                  .map((row) => [`${row.boxId}|${row.codeHash}`, row]),
+              ).values(),
+            ];
+            if (displacedRows.length > 0) {
+              await tx
+                .insert(schema.boxItems)
+                .values(
+                  displacedRows.map((row) => ({
+                    tenantId,
+                    boxId: row.boxId,
+                    codeHash: row.codeHash,
+                    addedAt: row.addedAt,
+                    displacedAt: sql`now()`,
+                  })),
+                )
+                .onConflictDoNothing();
+
               await tx
                 .update(schema.boxItems)
                 .set({ displacedAt: sql`now()` })
                 .where(
                   and(
                     eq(schema.boxItems.tenantId, tenantId),
-                    eq(schema.boxItems.boxId, row.boxId),
-                    eq(schema.boxItems.codeHash, row.codeHash),
-                    eq(schema.boxItems.addedAt, row.addedAt),
                     isNull(schema.boxItems.displacedAt),
                     isNull(schema.boxItems.removedAt),
+                    or(
+                      ...displacedRows.map((row) =>
+                        and(
+                          eq(schema.boxItems.boxId, row.boxId),
+                          eq(schema.boxItems.codeHash, row.codeHash),
+                          eq(schema.boxItems.addedAt, row.addedAt),
+                        ),
+                      ),
+                    ),
                   ),
                 );
             }
@@ -797,50 +799,97 @@ export class StationScansService {
               );
           }
 
-          // Equal ownership identities can arrive in separate batches naming
-          // different boxes. Registry locking serializes those batches; this
-          // final pass leaves exactly one active membership deterministically.
-          for (const [codeHash, owner] of [...ownerByHash].sort(([a], [b]) => a.localeCompare(b))) {
-            const ownerTerminalCondition =
-              owner.terminalId === null
-                ? isNull(schema.boxes.terminalId)
-                : eq(schema.boxes.terminalId, owner.terminalId);
-            const activeOwnerMemberships = await tx
-              .select({ boxId: schema.boxItems.boxId })
-              .from(schema.boxItems)
-              .innerJoin(
-                schema.boxes,
-                and(
-                  eq(schema.boxes.tenantId, schema.boxItems.tenantId),
-                  eq(schema.boxes.id, schema.boxItems.boxId),
-                ),
+          // One read covers every owner in this batch. Besides avoiding a
+          // query per hash, it lets retired-box releases below see live
+          // memberships inserted by this same transaction.
+          const activeMemberships = await tx
+            .select({
+              boxId: schema.boxItems.boxId,
+              codeHash: schema.boxItems.codeHash,
+              addedAt: schema.boxItems.addedAt,
+              shiftId: schema.boxes.shiftId,
+              terminalId: schema.boxes.terminalId,
+            })
+            .from(schema.boxItems)
+            .innerJoin(
+              schema.boxes,
+              and(
+                eq(schema.boxes.tenantId, schema.boxItems.tenantId),
+                eq(schema.boxes.id, schema.boxItems.boxId),
+              ),
+            )
+            .where(
+              and(
+                eq(schema.boxItems.tenantId, tenantId),
+                inArray(schema.boxItems.codeHash, hashes),
+                isNull(schema.boxItems.displacedAt),
+                isNull(schema.boxItems.removedAt),
+                isNull(schema.boxes.disassembledAt),
+              ),
+            )
+            .orderBy(schema.boxItems.codeHash, schema.boxItems.boxId);
+          const activeOwnerMemberships = activeMemberships.filter((row) => {
+            const owner = ownerByHash.get(row.codeHash);
+            return (
+              owner !== undefined &&
+              sameScan(
+                { shiftId: row.shiftId, terminalId: row.terminalId, scannedAt: row.addedAt },
+                owner,
               )
+            );
+          });
+
+          // Equal ownership identities can arrive in separate batches naming
+          // different boxes. Registry locking serializes those batches; leave
+          // exactly the lowest box id active with one set-based update.
+          const firstBoxByHash = new Map<string, string>();
+          const duplicateMemberships = activeOwnerMemberships.filter((row) => {
+            if (!firstBoxByHash.has(row.codeHash)) {
+              firstBoxByHash.set(row.codeHash, row.boxId);
+              return false;
+            }
+            return true;
+          });
+          if (duplicateMemberships.length > 0) {
+            await tx
+              .update(schema.boxItems)
+              .set({ displacedAt: sql`now()` })
               .where(
                 and(
                   eq(schema.boxItems.tenantId, tenantId),
-                  eq(schema.boxItems.codeHash, codeHash),
-                  eq(schema.boxItems.addedAt, owner.scannedAt),
                   isNull(schema.boxItems.displacedAt),
                   isNull(schema.boxItems.removedAt),
-                  eq(schema.boxes.shiftId, owner.shiftId),
-                  ownerTerminalCondition,
-                ),
-              )
-              .orderBy(schema.boxItems.boxId);
-            const duplicateBoxIds = activeOwnerMemberships.slice(1).map((row) => row.boxId);
-            if (duplicateBoxIds.length > 0) {
-              await tx
-                .update(schema.boxItems)
-                .set({ displacedAt: sql`now()` })
-                .where(
-                  and(
-                    eq(schema.boxItems.tenantId, tenantId),
-                    eq(schema.boxItems.codeHash, codeHash),
-                    inArray(schema.boxItems.boxId, duplicateBoxIds),
-                    isNull(schema.boxItems.displacedAt),
-                    isNull(schema.boxItems.removedAt),
+                  or(
+                    ...duplicateMemberships.map((row) =>
+                      and(
+                        eq(schema.boxItems.boxId, row.boxId),
+                        eq(schema.boxItems.codeHash, row.codeHash),
+                        eq(schema.boxItems.addedAt, row.addedAt),
+                      ),
+                    ),
                   ),
-                );
+                ),
+              );
+          }
+
+          for (const retired of retiredBoxScans) {
+            const represented = activeOwnerMemberships.some(
+              (row) =>
+                row.codeHash === retired.codeHash &&
+                sameScan(
+                  { shiftId: row.shiftId, terminalId: row.terminalId, scannedAt: row.addedAt },
+                  retired,
+                ),
+            );
+            if (!represented) {
+              await this.releaseCode(
+                tx,
+                tenantId,
+                retired.codeHash,
+                retired.shiftId,
+                retired.terminalId,
+                retired.scannedAt,
+              );
             }
           }
         }
@@ -1332,7 +1381,7 @@ export class StationScansService {
 
   /**
    * Releases a code claim, scoped to the EXACT scan that still holds it
-   * (tenant + codeHash + shiftId + terminalId). If the code was displaced
+   * (tenant + codeHash + shiftId + terminalId + scannedAt). If the code was displaced
    * to another terminal in the meantime (06b), this WHERE matches nothing
    * -- a harmless no-op, since the code was never really this device's to
    * release once displaced (see the design spec's "Releasing a code"

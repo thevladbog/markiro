@@ -1251,6 +1251,9 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       const byBox = new Map(items.map((item) => [item.boxId, item]));
       expect(byBox.get(await boxIdFor("b1"))?.displacedAt).toBeNull();
       expect(byBox.get(await boxIdFor("b2"))?.displacedAt).not.toBeNull();
+      expect((await registryOwner(tenantId, boxedCodeHash("aa")))?.scannedAt.toISOString()).toBe(
+        "2026-07-29T10:00:00.000Z",
+      );
     });
 
     it("keeps exactly one membership for identical claims naming two boxes", async () => {
@@ -1261,6 +1264,9 @@ describe.skipIf(!ready)("station-scans e2e", () => {
 
       const items = await boxItemRows(tenantId, "aa");
       expect(items.filter((item) => item.displacedAt === null)).toHaveLength(1);
+      expect((await registryOwner(tenantId, boxedCodeHash("aa")))?.scannedAt.toISOString()).toBe(
+        "2026-07-29T10:00:00.000Z",
+      );
     });
 
     it("reconciles a late earlier winner into the same box membership", async () => {
@@ -2257,6 +2263,44 @@ describe.skipIf(!ready)("station-scans e2e", () => {
         expect(box?.closedAt?.toISOString()).toBe("2026-07-29T10:00:02.000Z");
       });
 
+      it("does not apply a post-close clear delivered with the closure", async () => {
+        const codeHash = boxedCodeHash("aa");
+        await postBatchAs(deviceId, [scan("aa", { boxId: "b1", scannedAt: "10:00:00" })]);
+
+        await postRaw({
+          batchId: `late-clear-with-close-${randomUUID()}`,
+          items: [],
+          boxes: [
+            {
+              boxId: "b1",
+              shiftId,
+              terminalId: deviceId,
+              sscc: SSCC,
+              closedAt: "2026-07-29T10:00:02.000Z",
+              operatorId: OPERATOR_ID,
+            },
+          ],
+          exceptions: [
+            {
+              kind: "clear",
+              boxId: "b1",
+              codeHash: null,
+              targetScannedAt: null,
+              shiftId,
+              terminalId: deviceId,
+              operatorId: null,
+              reason: null,
+              occurredAt: "2026-07-29T10:00:03.000Z",
+            },
+          ],
+        });
+
+        expect((await registryOwner(tenantId, codeHash))?.scannedAt.toISOString()).toBe(
+          "2026-07-29T10:00:00.000Z",
+        );
+        expect(await liveItemCount("b1")).toBe(1);
+      });
+
       it("clear on an already-closed box is a no-op (guarded by closedAt IS NULL)", async () => {
         await postBatchAs(deviceId, [scan("aa", { boxId: "b1" })]);
         const codeHash = boxedCodeHash("aa");
@@ -2516,6 +2560,54 @@ describe.skipIf(!ready)("station-scans e2e", () => {
           "2026-07-29T10:00:00.000Z",
         );
         expect(await liveItemCount("b1")).toBe(1);
+      });
+
+      it("keeps an equal live owner delivered with a retired-box scan in the same batch", async () => {
+        await postBatchAs(deviceId, [scan("bb", { boxId: "b2", scannedAt: "09:00:00" })]);
+        await postBatchWithBoxes(
+          [],
+          [
+            {
+              boxId: "b2",
+              shiftId,
+              terminalId: deviceId,
+              sscc: SSCC,
+              closedAt: ISO,
+              operatorId: OPERATOR_ID,
+            },
+          ],
+        );
+        await postRaw({
+          batchId: `disassemble-b2-${randomUUID()}`,
+          items: [],
+          boxes: [],
+          exceptions: [
+            {
+              kind: "disassemble",
+              boxId: "b2",
+              codeHash: null,
+              targetScannedAt: null,
+              shiftId,
+              terminalId: deviceId,
+              operatorId: null,
+              reason: "retire b2",
+              occurredAt: "2026-07-29T12:00:00.000Z",
+            },
+          ],
+        });
+
+        // Retired target first reproduces the ordering that used to release
+        // the registry claim before this batch inserted the live membership.
+        await postBatchAs(deviceId, [
+          scan("aa", { boxId: "b2", scannedAt: "10:00:00" }),
+          scan("aa", { boxId: "b1", scannedAt: "10:00:00" }),
+        ]);
+
+        expect((await registryOwner(tenantId, boxedCodeHash("aa")))?.scannedAt.toISOString()).toBe(
+          "2026-07-29T10:00:00.000Z",
+        );
+        expect(await liveItemCount("b1")).toBe(1);
+        expect(await liveItemCount("b2")).toBe(0);
       });
 
       it("serializes a concurrent late scan and disassembly without leaving live membership", async () => {
