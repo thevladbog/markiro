@@ -77,6 +77,12 @@ Verification needs only enough SSCC parsing to compare: strip a leading AIM iden
 
 Box closure travels on the transport built in 06a: the outbox gains a second event kind carrying the local box id, the serial and the closing time. Membership does not travel separately — every scan already carries its box's local id, so the server assembles the contents itself. Ordering needs no special handling: scans enter the queue before the closure and the drain is strictly sequential.
 
+The terminal carried by production rows is the station authenticated by the
+API key. A payload may retain a terminal field for local history while queued,
+but the server does not use that caller-controlled value for ownership or box
+identity. This prevents one enrolled station from attributing production to a
+different terminal.
+
 `boxes` and `box_items` are the server-side record. `(tenant, sscc)` is unique **by index rather than by a check in code**, because two devices holding overlapping pools is precisely the situation nothing else would reveal.
 
 A box row is created the moment its first item arrives, not when the closure event does. Items necessarily reach the server first — they were queued first — and a box that exists as soon as something claims membership needs no buffering and no out-of-order handling. The closure event then fills in the serial and the closing time. A box still carrying no serial is simply one whose closure has not arrived yet, which is also exactly what an open box on the device looks like.

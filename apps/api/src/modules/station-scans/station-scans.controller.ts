@@ -23,8 +23,8 @@ export class StationScansController {
     @Req() req: RequestWithTenant,
     @Body(new ZodValidationPipe(syncBatchSchema)) body: SyncBatchDto,
   ): Promise<SyncBatchResponseDto> {
-    if (body.exceptions.length > 0 && !req.deviceId) {
-      throw new ForbiddenException("Station device authentication required for exceptions");
+    if (!req.deviceId) {
+      throw new ForbiddenException("Station device authentication required");
     }
     return this.service.applyBatch(req.tenantId!, body, req.deviceId);
   }

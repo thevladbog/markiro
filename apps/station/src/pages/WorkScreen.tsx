@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   classifyScan,
-  kmKey,
   validateShiftScan,
   type LabelTemplateSpec,
   type ScanVerdict,
@@ -621,7 +620,7 @@ export function WorkScreen({
             const scan = classifyScan(raw);
             // `ok` is only produced for a parsed KM, so this branch always holds.
             const km = scan.kind === "km" ? scan.km : null;
-            const codeHash = km ? kmKey(km) : null;
+            const codeHash = km ? verdict.key : null;
             const result = await recordScan(
               exec,
               event,

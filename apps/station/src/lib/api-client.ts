@@ -29,7 +29,7 @@ export interface StationClient {
  * batch: queue left intact, backoff-and-retry scheduled.
  *
  * 30 seconds is chosen to comfortably survive the drain's own worst case: a
- * full `BATCH_SIZE` (200-scan) batch is at most a couple hundred KB of JSON,
+ * full `BATCH_SIZE` (100-scan) batch is at most a couple hundred KB of JSON,
  * which even a badly congested plant link (think a saturated shared Wi-Fi or
  * a cellular fallback measured in a few tens of Kbps, not a dead link) can
  * push in a few seconds, leaving over 20 seconds of slack for TLS handshake,

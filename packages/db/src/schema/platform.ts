@@ -214,6 +214,7 @@ export const codeRegistry = pgTable(
   },
   (t) => [
     primaryKey({ columns: [t.tenantId, t.codeHash] }),
+    check("code_registry_hash_check", sql`${t.codeHash} ~ '^[0-9a-f]{64}$'`),
     // Composite FK: shift_id must belong to the same tenant as the
     // registry row referencing it — same shape as shifts' own FKs to
     // products/lines/counterparties above.
@@ -243,6 +244,7 @@ export const codeConflicts = pgTable(
   },
   (t) => [
     index("code_conflicts_shift_idx").on(t.tenantId, t.losingShiftId),
+    check("code_conflicts_hash_check", sql`${t.codeHash} ~ '^[0-9a-f]{64}$'`),
     // Composite FKs: both the losing and winning shift must belong to the
     // same tenant as the conflict row itself — same shape as shifts' own
     // FKs to products/lines/counterparties above.
@@ -291,6 +293,10 @@ export const boxExceptions = pgTable(
       sql`(${t.kind} = 'undo' AND ${t.codeHash} IS NOT NULL AND ${t.reason} IS NULL)
           OR (${t.kind} = 'clear' AND ${t.codeHash} IS NULL AND ${t.reason} IS NULL)
           OR (${t.kind} IN ('disassemble', 'reprint') AND ${t.codeHash} IS NULL AND ${t.reason} IS NOT NULL)`,
+    ),
+    check(
+      "box_exceptions_hash_check",
+      sql`${t.codeHash} IS NULL OR ${t.codeHash} ~ '^[0-9a-f]{64}$'`,
     ),
     foreignKey({
       name: "box_exceptions_tenant_box_fk",
@@ -540,6 +546,7 @@ export const boxItems = pgTable(
   (t) => [
     primaryKey({ columns: [t.tenantId, t.boxId, t.codeHash] }),
     index("box_items_tenant_code_idx").on(t.tenantId, t.codeHash),
+    check("box_items_hash_check", sql`${t.codeHash} ~ '^[0-9a-f]{64}$'`),
     foreignKey({
       name: "box_items_tenant_box_fk",
       columns: [t.tenantId, t.boxId],

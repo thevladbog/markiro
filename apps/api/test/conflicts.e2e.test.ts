@@ -3,6 +3,7 @@ import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { canonicalizeKm, kmHash } from "@markiro/domain";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
@@ -76,13 +77,15 @@ describe.skipIf(!ready)("conflicts e2e", () => {
   }
 
   function item(shiftId: string, n: number, overrides: Partial<ScanItemDto> = {}): ScanItemDto {
+    const raw = `01${VALID_GTIN14}21S${n}`;
+    const km = canonicalizeKm(raw);
     return {
       shiftId,
       terminalId: "t1",
-      raw: `RAW${n}`,
+      raw,
       verdict: "ok",
       scannedAt: `2026-07-28T10:00:0${n}.000Z`,
-      code: { codeHash: `h${n}`.padEnd(64, "0"), gtin14: VALID_GTIN14, serial: `S${n}` },
+      code: { codeHash: kmHash(km), gtin14: km.gtin14, serial: km.serial },
       boxId: null,
       operatorId: null,
       ...overrides,
@@ -212,7 +215,16 @@ describe.skipIf(!ready)("conflicts e2e", () => {
   it("attributes a cross-shift conflict to the correct shift on each side", async () => {
     const agent = request.agent(app!.getHttpServer());
     await signUpAndActivate(agent);
-    const apiKey = await deviceKey(agent);
+    const deviceAResponse = await agent
+      .post("/station-devices")
+      .send({ name: "Terminal A" })
+      .expect(201);
+    const deviceA = deviceAResponse.body as { apiKey: string; deviceId: string };
+    const deviceBResponse = await agent
+      .post("/station-devices")
+      .send({ name: "Terminal B" })
+      .expect(201);
+    const deviceB = deviceBResponse.body as { apiKey: string; deviceId: string };
     const productId = await createActiveProduct(agent);
     const shift1 = await openShiftForProduct(agent, productId);
     const shift2 = await openShiftForProduct(agent, productId);
@@ -221,7 +233,7 @@ describe.skipIf(!ready)("conflicts e2e", () => {
     const scanA = { ...item(shift1, 5), terminalId: "A" };
     await request(app!.getHttpServer())
       .post("/station/scans")
-      .set("x-api-key", apiKey)
+      .set("x-api-key", deviceA.apiKey)
       .send({ batchId: "m1:110", items: [scanA] })
       .expect(201);
 
@@ -237,7 +249,7 @@ describe.skipIf(!ready)("conflicts e2e", () => {
     };
     await request(app!.getHttpServer())
       .post("/station/scans")
-      .set("x-api-key", apiKey)
+      .set("x-api-key", deviceB.apiKey)
       .send({ batchId: "m1:111", items: [scanB] })
       .expect(201);
 
@@ -256,8 +268,8 @@ describe.skipIf(!ready)("conflicts e2e", () => {
     expect(items[0]!.losingShiftId).toBe(shift1);
     expect(items[0]!.winningShiftId).toBe(shift2);
     expect(items[0]!.losingShiftId).not.toBe(items[0]!.winningShiftId);
-    expect(items[0]!.losingTerminalId).toBe("A");
-    expect(items[0]!.winningTerminalId).toBe("B");
+    expect(items[0]!.losingTerminalId).toBe(deviceA.deviceId);
+    expect(items[0]!.winningTerminalId).toBe(deviceB.deviceId);
   });
 
   it("filters the list by reviewed status", async () => {

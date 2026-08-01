@@ -58,13 +58,10 @@ beside each item.
 
 - [ ] Serial scanner: real device, baud negotiation, payload terminators.
 - [ ] Keyboard-wedge fallback works with a HID scanner and no setup.
-- [ ] Scanner AIM symbology identifier / prefix-suffix configuration: some
-      scanners emit an AIM prefix (e.g. `]d2` for a GS1 DataMatrix) before
-      every scanned string by default. If nobody disables that in the
-      scanner's own configuration (or strips it in code), every scan fails
-      `classifyScan` as invalid — this can burn an hour on the floor before
-      anyone thinks to check it. Confirm the scanner is configured to send
-      the bare payload, or that prefix stripping is handled.
+- [ ] Scanner AIM symbology identifier / prefix-suffix configuration: verify
+      both a bare GS1 payload and the standard `]d2` prefix. The parser accepts
+      `]d2` and canonical storage removes it; any other configured prefix must
+      be rejected rather than guessed away.
 - [ ] Connect the scanner, then in Setup type a nonexistent or wrong port
       and press Connect: the status bar drops to "No signal", an error is
       shown, and the scanner stops delivering scans (closing the previous

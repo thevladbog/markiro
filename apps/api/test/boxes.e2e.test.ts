@@ -4,6 +4,7 @@ import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { canonicalizeKm, kmHash } from "@markiro/domain";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
@@ -231,13 +232,15 @@ describe.skipIf(!ready)("boxes e2e", () => {
     scannedAt: string,
     boxId: string | null,
   ): ScanItemDto {
+    const raw = `01${VALID_GTIN14}21S-${codeLabel}`;
+    const km = canonicalizeKm(raw);
     return {
       shiftId,
       terminalId,
-      raw: `RAW-${codeLabel}`,
+      raw,
       verdict: "ok",
       scannedAt,
-      code: { codeHash: codeLabel.padEnd(64, "0"), gtin14: VALID_GTIN14, serial: `S-${codeLabel}` },
+      code: { codeHash: kmHash(km), gtin14: km.gtin14, serial: km.serial },
       boxId,
       operatorId: null,
     };
@@ -284,7 +287,7 @@ describe.skipIf(!ready)("boxes e2e", () => {
     const res = await agent.get(`/boxes?shiftId=${displacedShiftId}`).expect(200);
     const box = res.body.items[0];
     expect(box.sscc).toBe("123456789012345675");
-    expect(box.terminalId).toBe("t1");
+    expect(box.terminalId).toBe(stationDeviceId);
     expect(box.operatorId).toBe(operatorId);
     expect(box.closedAt).toBe("2026-01-01T00:00:00.000Z");
   });
@@ -354,7 +357,7 @@ describe.skipIf(!ready)("boxes e2e", () => {
           {
             kind: "undo",
             boxId: "b5",
-            codeHash: "rr".padEnd(64, "0"),
+            codeHash: kmHash(canonicalizeKm(`01${VALID_GTIN14}21S-rr`)),
             shiftId: removedShiftId,
             terminalId: "t1",
             operatorId: null,

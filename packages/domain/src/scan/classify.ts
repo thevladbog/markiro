@@ -1,5 +1,5 @@
 import { isValidGtin, normalizeToGtin14 } from "../gs1/gtin.js";
-import { parseKm, type ParsedKm } from "../gs1/km.js";
+import { canonicalizeKm, type ParsedKm } from "../gs1/km.js";
 import { isValidSscc } from "../gs1/sscc.js";
 
 export type ScanInput =
@@ -19,7 +19,7 @@ export function classifyScan(raw: string): ScanInput {
     return { kind: "gtin", gtin14: normalizeToGtin14(trimmed) };
   }
   try {
-    return { kind: "km", km: parseKm(trimmed) };
+    return { kind: "km", km: canonicalizeKm(raw) };
   } catch {
     return { kind: "unknown", raw };
   }

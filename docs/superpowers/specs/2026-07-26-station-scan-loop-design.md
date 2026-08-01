@@ -72,8 +72,8 @@ insert. This satisfies the domain contract and keeps the check instant.
 
 Per scan, as two independent statements — deliberately **not** one transaction:
 
-- **accepted** scans → `codes_mirror` FIRST (`code_hash` = the domain's
-  `kmKey`, `gtin14`, `serial`, `shift_id`, `scanned_at`);
+- **accepted** scans → `codes_mirror` FIRST (`code_hash` = lowercase SHA-256
+  of the domain's `kmKey`, `gtin14`, `serial`, `shift_id`, `scanned_at`);
 - **every** scan → `scan_events_mirror` SECOND (`raw`, `verdict`,
   `scanned_at`, `terminal_id`).
 
@@ -89,6 +89,16 @@ code insert runs first, and a UNIQUE/PRIMARY KEY constraint violation on it
 **is** the duplicate verdict rather than a write failure. The event row is
 still written afterwards either way, so the audit trail survives regardless
 of what the code insert did.
+
+`kmKey` remains the canonical physical-item identity
+`01<gtin14>21<serial>`; crypto AIs do not change that identity. The station
+stores and transports its lowercase 64-character SHA-256 digest as
+`code_hash`, rather than placing the readable key in a column whose server
+contract is `char(64)`. The accepted code also carries `canonical_raw`: the
+validated GS1 payload with a leading `]d2` and transport-edge whitespace
+removed, but literal GS separators and all trailing AIs preserved. The
+unmodified scanner-adapter string remains in `scan_events_mirror.raw` for
+diagnostics and is not the export authority.
 
 ### Hardware layer
 

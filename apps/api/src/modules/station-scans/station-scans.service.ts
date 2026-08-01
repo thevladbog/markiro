@@ -1,10 +1,4 @@
-import {
-  BadRequestException,
-  ForbiddenException,
-  Inject,
-  Injectable,
-  Logger,
-} from "@nestjs/common";
+import { BadRequestException, Inject, Injectable, Logger } from "@nestjs/common";
 import { and, eq, inArray, isNotNull, isNull, notInArray, sql } from "drizzle-orm";
 import { ensurePartitions, schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
@@ -132,11 +126,17 @@ export class StationScansService {
   async applyBatch(
     tenantId: string,
     body: SyncBatchDto,
-    authenticatedTerminalId?: string,
+    authenticatedTerminalId: string,
   ): Promise<SyncBatchResponseDto> {
-    if (body.exceptions.length > 0 && !authenticatedTerminalId) {
-      throw new ForbiddenException("Station device authentication required for exceptions");
-    }
+    body = {
+      ...body,
+      items: body.items.map((item) => ({ ...item, terminalId: authenticatedTerminalId })),
+      boxes: body.boxes.map((box) => ({ ...box, terminalId: authenticatedTerminalId })),
+      exceptions: body.exceptions.map((exception) => ({
+        ...exception,
+        terminalId: authenticatedTerminalId,
+      })),
+    };
     // Ensure the months this batch actually needs have partitions BEFORE
     // opening the transaction below. Only the scheduled job (JobsModule)
     // proactively maintains current+next month; a device offline across a
@@ -251,10 +251,11 @@ export class StationScansService {
             .values(
               coded.map((i) => ({
                 tenantId,
-                codeHash: i.code!.codeHash,
+                codeHash: i.code.codeHash,
                 shiftId: i.shiftId,
-                gtin14: i.code!.gtin14,
-                serial: i.code!.serial,
+                gtin14: i.code.gtin14,
+                serial: i.code.serial,
+                canonicalRaw: i.code.canonicalRaw,
                 scannedAt: new Date(i.scannedAt),
               })),
             )
@@ -278,7 +279,7 @@ export class StationScansService {
         // Ownership is decided next, on the codes this batch actually stored
         // -- NOT last: the late-data stamp below still follows it.
         const claimItems = coded.map((i) => ({
-          codeHash: i.code!.codeHash,
+          codeHash: i.code.codeHash,
           shiftId: i.shiftId,
           terminalId: i.terminalId,
           scannedAt: new Date(i.scannedAt),
@@ -528,7 +529,7 @@ export class StationScansService {
 
             const preBoxItems = boxed.map((i) => ({
               boxId: boxIdByKey.get(boxKey(i.shiftId, i.terminalId, i.boxId!))!,
-              codeHash: i.code!.codeHash,
+              codeHash: i.code.codeHash,
               addedAt: new Date(i.scannedAt),
               shiftId: i.shiftId,
               terminalId: i.terminalId,
@@ -862,7 +863,7 @@ export class StationScansService {
         await this.applyExceptions(
           tx,
           tenantId,
-          authenticatedTerminalId!,
+          authenticatedTerminalId,
           sortExceptions(body.exceptions),
         );
       }

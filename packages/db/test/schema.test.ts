@@ -4,7 +4,11 @@ import { and, eq, getTableName } from "drizzle-orm";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import { createDb, schema } from "../src/index.js";
 import {
+  boxExceptions,
+  boxItems,
   boxes,
+  codeConflicts,
+  codeRegistry,
   counterparties,
   lines,
   products,
@@ -12,6 +16,7 @@ import {
   ssccBlocks,
   ssccCounters,
 } from "../src/schema/platform.js";
+import { codes } from "../src/schema/codes.js";
 
 describe("platform schema", () => {
   it("exports the four tables", () => {
@@ -80,6 +85,23 @@ describe("platform schema", () => {
     expect(getTableName(ref.foreignTable)).toBe("station_devices");
     expect(ref.columns.map((c) => c.name)).toEqual(["tenant_id", "device_id"]);
     expect(ref.foreignColumns.map((c) => c.name)).toEqual(["tenant_id", "id"]);
+  });
+
+  it("declares canonical raw storage and lowercase SHA-256 checks", () => {
+    expect(Object.keys(codes)).toContain("canonicalRaw");
+    const checks = [codes, codeRegistry, codeConflicts, boxItems, boxExceptions].flatMap((table) =>
+      getTableConfig(table).checks.map((constraint) => constraint.name),
+    );
+    expect(checks).toEqual(
+      expect.arrayContaining([
+        "codes_hash_check",
+        "codes_canonical_raw_size_check",
+        "code_registry_hash_check",
+        "code_conflicts_hash_check",
+        "box_items_hash_check",
+        "box_exceptions_hash_check",
+      ]),
+    );
   });
 });
 

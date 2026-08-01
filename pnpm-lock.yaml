@@ -373,6 +373,9 @@ importers:
 
   packages/domain:
     dependencies:
+      '@noble/hashes':
+        specifier: 2.2.0
+        version: 2.2.0
       bwip-js:
         specifier: 4.11.2
         version: 4.11.2

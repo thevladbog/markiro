@@ -2,7 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { STATION_MIGRATIONS } from "@markiro/db";
-import { buildSscc, type LabelTemplateSpec } from "@markiro/domain";
+import { buildSscc, kmHash, parseKm, type LabelTemplateSpec } from "@markiro/domain";
 import i18n from "../src/i18n/index.js";
 import type { CloseBoxResult } from "../src/lib/close-box.js";
 import type { PrinterLanguage } from "../src/lib/hardware-config.js";
@@ -387,7 +387,7 @@ describe("WorkScreen", () => {
     await exec.run(
       `INSERT INTO codes_mirror (code_hash, shift_id, gtin14, serial, scanned_at)
        VALUES (?,?,?,?,?)`,
-      [KM, "earlier-shift", "04600000000015", "5Ab1", new Date(0).toISOString()],
+      [kmHash(parseKm(KM)), "earlier-shift", "04600000000015", "5Ab1", new Date(0).toISOString()],
     );
 
     renderWorkScreen({ source, exec });

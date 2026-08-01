@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DomainError } from "../src/errors.js";
-import { kmKey, parseKm, parseKmSegments } from "../src/gs1/km.js";
+import { canonicalizeKm, kmHash, kmKey, parseKm, parseKmSegments } from "../src/gs1/km.js";
 
 const GS = "\u001d";
 // Synthetic but structurally exact Chestny ZNAK beverage code:
@@ -22,10 +22,18 @@ describe("parseKm", () => {
     const km = parseKm("0104600682000013" + "21XyZ9");
     expect(km.serial).toBe("XyZ9");
   });
-  it("survives consecutive GS separators in the trailing AIs", () => {
-    const km = parseKm("0104600682000013" + "21XyZ9" + GS + GS + "93AbCd");
-    expect(km.serial).toBe("XyZ9");
-    expect(km.ais["93"]).toBe("AbCd");
+  it("rejects consecutive GS separators in the trailing AIs", () => {
+    expect(() => parseKm("0104600682000013" + "21XyZ9" + GS + GS + "93AbCd")).toThrowError(
+      expect.objectContaining({ code: "KM_EMPTY_AI" }),
+    );
+  });
+  it("rejects a terminal GS separator", () => {
+    expect(() => parseKm("0104600682000013" + "21XyZ9" + GS)).toThrowError(
+      expect.objectContaining({ code: "KM_EMPTY_AI" }),
+    );
+    expect(() => parseKm("0104600682000013" + "21XyZ9" + GS + "93AbCd" + GS)).toThrowError(
+      expect.objectContaining({ code: "KM_EMPTY_AI" }),
+    );
   });
   it("rejects empty input with KM_EMPTY", () => {
     expect(() => parseKm("")).toThrowError(expect.objectContaining({ code: "KM_EMPTY" }));
@@ -51,6 +59,53 @@ describe("parseKm", () => {
 describe("kmKey", () => {
   it("builds the canonical dedup key", () => {
     expect(kmKey(parseKm(RAW))).toBe("010460068200001321abcDEF1234567");
+  });
+});
+
+describe("kmHash", () => {
+  it("builds a lowercase SHA-256 identity", () => {
+    expect(kmHash(parseKm(RAW))).toBe(
+      "857a0dac39c8a99151a9829fb6235f723e165151e60118364e0a025cd50ade8b",
+    );
+  });
+
+  it("does not change when only the crypto tail changes", () => {
+    const otherTail = `010460068200001321abcDEF1234567${GS}93Other`;
+    expect(kmHash(parseKm(otherTail))).toBe(kmHash(parseKm(RAW)));
+  });
+});
+
+describe("canonicalizeKm", () => {
+  it("removes transport whitespace and ]d2 but preserves GS and trailing AIs", () => {
+    expect(canonicalizeKm(` \t]d2${RAW}\t `).raw).toBe(RAW);
+  });
+
+  it("rejects forbidden controls", () => {
+    expect(() => canonicalizeKm(`${RAW}\n`)).toThrowError(
+      expect.objectContaining({ code: "KM_BAD_CONTROL" }),
+    );
+    expect(() => canonicalizeKm(`${RAW}\0`)).toThrowError(
+      expect.objectContaining({ code: "KM_BAD_CONTROL" }),
+    );
+  });
+
+  it("rejects unpaired UTF-16 surrogates but accepts valid pairs", () => {
+    expect(() => canonicalizeKm(`010460068200001321serial\ud800`)).toThrowError(
+      expect.objectContaining({ code: "KM_BAD_ENCODING" }),
+    );
+    expect(() => canonicalizeKm(`010460068200001321serial\udc00`)).toThrowError(
+      expect.objectContaining({ code: "KM_BAD_ENCODING" }),
+    );
+    expect(canonicalizeKm(`010460068200001321serial😀`).serial).toBe("serial😀");
+  });
+
+  it("rejects malformed and duplicate trailing AIs", () => {
+    expect(() => canonicalizeKm(`${RAW}${GS}93Again`)).toThrowError(
+      expect.objectContaining({ code: "KM_DUPLICATE_AI" }),
+    );
+    expect(() => canonicalizeKm(`010460068200001321serial${GS}XXvalue`)).toThrowError(
+      expect.objectContaining({ code: "KM_BAD_AI" }),
+    );
   });
 });
 

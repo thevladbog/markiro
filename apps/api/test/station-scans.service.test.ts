@@ -15,14 +15,14 @@ vi.mock("@markiro/db", async (importOriginal) => {
 
 import { StationScansService } from "../src/modules/station-scans/station-scans.service";
 import type { SsccService } from "../src/modules/sscc/sscc.service";
-import type { ScanItemDto } from "../src/modules/station-scans/dto";
+import type { SyncBatchDto } from "../src/modules/station-scans/dto";
 
-function item(scannedAt: string): ScanItemDto {
+function item(scannedAt: string): SyncBatchDto["items"][number] {
   return {
     shiftId: "11111111-1111-1111-1111-111111111111",
     terminalId: "t1",
     raw: "RAW",
-    verdict: "ok",
+    verdict: "invalid",
     scannedAt,
     code: null,
     boxId: null,
@@ -90,12 +90,16 @@ describe("StationScansService.applyBatch month cap (Finding 2)", () => {
     const items = Array.from({ length: 30 }, (_, i) => item(monthsAgo(34 - i)));
 
     await expect(
-      service.applyBatch("tenant-1", {
-        batchId: "m1:install-1:200",
-        items,
-        boxes: [],
-        exceptions: [],
-      }),
+      service.applyBatch(
+        "tenant-1",
+        {
+          batchId: "m1:install-1:200",
+          items,
+          boxes: [],
+          exceptions: [],
+        },
+        "station-1",
+      ),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(ensurePartitionsMock).not.toHaveBeenCalled();
   });
@@ -129,12 +133,16 @@ describe("StationScansService.applyBatch month cap (Finding 2)", () => {
 
     const items = Array.from({ length: 3 }, (_, i) => item(`2026-0${i + 1}-15T00:00:00.000Z`));
 
-    const result = await service.applyBatch("tenant-1", {
-      batchId: "m1:install-1:200",
-      items,
-      boxes: [],
-      exceptions: [],
-    });
+    const result = await service.applyBatch(
+      "tenant-1",
+      {
+        batchId: "m1:install-1:200",
+        items,
+        boxes: [],
+        exceptions: [],
+      },
+      "station-1",
+    );
 
     expect(ensurePartitionsMock).toHaveBeenCalledTimes(1);
     expect(claimedTransaction).toBe(true);
@@ -171,12 +179,16 @@ describe("StationScansService.applyBatch shift-ownership guard ordering (Finding
     const ancientScannedAt = new Date(Date.now() - 20 * 365 * 24 * 60 * 60 * 1000).toISOString();
 
     await expect(
-      service.applyBatch("tenant-1", {
-        batchId: "m1:install-1:1",
-        items: [item(ancientScannedAt)],
-        boxes: [],
-        exceptions: [],
-      }),
+      service.applyBatch(
+        "tenant-1",
+        {
+          batchId: "m1:install-1:1",
+          items: [item(ancientScannedAt)],
+          boxes: [],
+          exceptions: [],
+        },
+        "station-1",
+      ),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(ensurePartitionsMock).not.toHaveBeenCalled();
   });
@@ -202,12 +214,16 @@ describe("StationScansService.applyBatch shift-ownership guard ordering (Finding
     const items = [item(new Date().toISOString())];
 
     await expect(
-      service.applyBatch("tenant-1", {
-        batchId: "m1:install-1:1",
-        items,
-        boxes: [],
-        exceptions: [],
-      }),
+      service.applyBatch(
+        "tenant-1",
+        {
+          batchId: "m1:install-1:1",
+          items,
+          boxes: [],
+          exceptions: [],
+        },
+        "station-1",
+      ),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(ensurePartitionsMock).not.toHaveBeenCalled();
   });

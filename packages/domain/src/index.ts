@@ -1,7 +1,7 @@
 export { gs1CheckDigit, hasValidCheckDigit } from "./gs1/check-digit.js";
 export { DomainError } from "./errors.js";
 export { gtinMatchesPrefix, isValidGtin, normalizeToGtin14 } from "./gs1/gtin.js";
-export { kmKey, parseKm } from "./gs1/km.js";
+export { canonicalizeKm, kmHash, kmKey, MAX_KM_UTF8_BYTES, parseKm } from "./gs1/km.js";
 export type { ParsedKm } from "./gs1/km.js";
 export {
   buildSscc,
