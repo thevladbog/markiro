@@ -27,6 +27,14 @@ describe("parseKm", () => {
       expect.objectContaining({ code: "KM_EMPTY_AI" }),
     );
   });
+  it("rejects a terminal GS separator", () => {
+    expect(() => parseKm("0104600682000013" + "21XyZ9" + GS)).toThrowError(
+      expect.objectContaining({ code: "KM_EMPTY_AI" }),
+    );
+    expect(() => parseKm("0104600682000013" + "21XyZ9" + GS + "93AbCd" + GS)).toThrowError(
+      expect.objectContaining({ code: "KM_EMPTY_AI" }),
+    );
+  });
   it("rejects empty input with KM_EMPTY", () => {
     expect(() => parseKm("")).toThrowError(expect.objectContaining({ code: "KM_EMPTY" }));
   });
@@ -79,6 +87,16 @@ describe("canonicalizeKm", () => {
     expect(() => canonicalizeKm(`${RAW}\0`)).toThrowError(
       expect.objectContaining({ code: "KM_BAD_CONTROL" }),
     );
+  });
+
+  it("rejects unpaired UTF-16 surrogates but accepts valid pairs", () => {
+    expect(() => canonicalizeKm(`010460068200001321serial\ud800`)).toThrowError(
+      expect.objectContaining({ code: "KM_BAD_ENCODING" }),
+    );
+    expect(() => canonicalizeKm(`010460068200001321serial\udc00`)).toThrowError(
+      expect.objectContaining({ code: "KM_BAD_ENCODING" }),
+    );
+    expect(canonicalizeKm(`010460068200001321serial😀`).serial).toBe("serial😀");
   });
 
   it("rejects malformed and duplicate trailing AIs", () => {

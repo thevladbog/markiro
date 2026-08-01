@@ -79,8 +79,12 @@ const scanItemSchema = z
   })
   .transform((item) => {
     if (item.code === null) return { ...item, code: null };
-    const km = canonicalizeKm(item.raw);
-    return { ...item, code: { ...item.code, canonicalRaw: km.raw } };
+    try {
+      const km = canonicalizeKm(item.raw);
+      return { ...item, code: { ...item.code, canonicalRaw: km.raw } };
+    } catch {
+      return { ...item, code: { ...item.code, canonicalRaw: item.raw } };
+    }
   });
 
 export const syncBatchSchema = z.object({

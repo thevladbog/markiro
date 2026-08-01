@@ -64,6 +64,9 @@ export function parseKmSegments(raw: string): KmSegments {
   }
   const ais: KmAi[] = [];
   let rest = gsAt === -1 ? "" : s.slice(gsAt + 1);
+  if (gsAt !== -1 && rest.length === 0) {
+    throw new DomainError("KM_EMPTY_AI", "KM contains an empty trailing AI segment");
+  }
   while (rest.length > 0) {
     if (rest.startsWith(GS)) {
       throw new DomainError("KM_EMPTY_AI", "KM contains an empty trailing AI segment");
@@ -79,6 +82,9 @@ export function parseKmSegments(raw: string): KmSegments {
     const value = end === -1 ? rest.slice(2) : rest.slice(2, end);
     if (value.length === 0) {
       throw new DomainError("KM_EMPTY_AI", `KM trailing AI ${ai} has an empty value`);
+    }
+    if (end === rest.length - 1) {
+      throw new DomainError("KM_EMPTY_AI", "KM contains an empty trailing AI segment");
     }
     ais.push({ ai, value });
     rest = end === -1 ? "" : rest.slice(end + 1);
@@ -120,22 +126,41 @@ export function kmHash(km: ParsedKm): string {
  * transport whitespace are removed here.
  */
 export function canonicalizeKm(raw: string): ParsedKm {
-  let canonicalRaw = raw.replace(/^[\t ]+|[\t ]+$/g, "");
+  let start = 0;
+  let end = raw.length;
+  while (start < end && (raw[start] === " " || raw[start] === "\t")) start += 1;
+  while (end > start && (raw[end - 1] === " " || raw[end - 1] === "\t")) end -= 1;
+  let canonicalRaw = raw.slice(start, end);
   if (canonicalRaw.startsWith("]d2")) canonicalRaw = canonicalRaw.slice(3);
-  canonicalRaw = canonicalRaw.replace(/^[\t ]+|[\t ]+$/g, "");
+  start = 0;
+  end = canonicalRaw.length;
+  while (start < end && (canonicalRaw[start] === " " || canonicalRaw[start] === "\t")) start += 1;
+  while (end > start && (canonicalRaw[end - 1] === " " || canonicalRaw[end - 1] === "\t")) end -= 1;
+  canonicalRaw = canonicalRaw.slice(start, end);
 
-  const bytes = utf8ToBytes(canonicalRaw);
-  if (bytes.length > MAX_KM_UTF8_BYTES) {
-    throw new DomainError("KM_TOO_LONG", `KM exceeds the ${MAX_KM_UTF8_BYTES}-byte UTF-8 limit`);
-  }
   if (canonicalRaw.includes("\ufffd")) {
     throw new DomainError("KM_BAD_ENCODING", "KM contains a replacement character");
   }
-  for (const char of canonicalRaw) {
-    const code = char.charCodeAt(0);
-    if ((code < 0x20 && char !== GS) || code === 0x7f) {
+  for (let i = 0; i < canonicalRaw.length; i += 1) {
+    const code = canonicalRaw.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = canonicalRaw.charCodeAt(i + 1);
+      if (i + 1 >= canonicalRaw.length || next < 0xdc00 || next > 0xdfff) {
+        throw new DomainError("KM_BAD_ENCODING", "KM contains an unpaired UTF-16 surrogate");
+      }
+      i += 1;
+      continue;
+    }
+    if (code >= 0xdc00 && code <= 0xdfff) {
+      throw new DomainError("KM_BAD_ENCODING", "KM contains an unpaired UTF-16 surrogate");
+    }
+    if ((code < 0x20 && code !== GS.charCodeAt(0)) || code === 0x7f) {
       throw new DomainError("KM_BAD_CONTROL", "KM contains a forbidden control character");
     }
+  }
+  const bytes = utf8ToBytes(canonicalRaw);
+  if (bytes.length > MAX_KM_UTF8_BYTES) {
+    throw new DomainError("KM_TOO_LONG", `KM exceeds the ${MAX_KM_UTF8_BYTES}-byte UTF-8 limit`);
   }
 
   return parseKm(canonicalRaw);

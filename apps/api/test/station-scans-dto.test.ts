@@ -66,4 +66,9 @@ describe("syncBatchSchema marking-code contract", () => {
         .success,
     ).toBe(false);
   });
+
+  it("returns validation errors instead of throwing for malformed accepted codes", () => {
+    expect(() => syncBatchSchema.safeParse(body({ raw: `${RAW}\ud800` }))).not.toThrow();
+    expect(syncBatchSchema.safeParse(body({ raw: `${RAW}\ud800` })).success).toBe(false);
+  });
 });
