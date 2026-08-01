@@ -103,6 +103,10 @@ describe("platform schema", () => {
       ]),
     );
   });
+
+  it("stores the exact scan targeted by an undo exception", () => {
+    expect(Object.keys(boxExceptions)).toContain("targetScannedAt");
+  });
 });
 
 const url = process.env.DATABASE_URL;

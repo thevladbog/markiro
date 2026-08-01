@@ -118,7 +118,11 @@ export function WorkScreen({
   // device the server could not resolve an issuer prefix for, has no box
   // section to show.
   const [box, setBox] = useState<{ boxId: string; itemCount: number } | null>(null);
-  const [lastScanned, setLastScanned] = useState<{ boxId: string; codeHash: string } | null>(null);
+  const [lastScanned, setLastScanned] = useState<{
+    boxId: string;
+    codeHash: string;
+    scannedAt: string;
+  } | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [closedBoxes, setClosedBoxes] = useState<ClosedBoxSummary[]>([]);
   // `boxRef` is the box's SOURCE OF TRUTH for `process()` below, updated by
@@ -652,7 +656,7 @@ export function WorkScreen({
             // NOT awaited (see printAndMaybeVerify) -- only the fast SQL
             // bookkeeping is on this critical path.
             if (codeHash && boxId !== null) {
-              setLastScanned({ boxId, codeHash });
+              setLastScanned({ boxId, codeHash, scannedAt });
               await live.current.refreshBox(boxId);
             }
             return { raw, verdict, firstSeen: null };
@@ -735,6 +739,7 @@ export function WorkScreen({
       await undoLastScan(exec, {
         boxId: target.boxId,
         codeHash: target.codeHash,
+        scannedAt: target.scannedAt,
         shiftId,
         terminalId,
         operatorId,

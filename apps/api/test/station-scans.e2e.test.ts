@@ -275,6 +275,48 @@ describe.skipIf(!ready)("station-scans e2e", () => {
     expect((shift.body as { lateDataAt: string | null }).lateDataAt).not.toBeNull();
   });
 
+  it("stamps a closed shift for an exception-only late batch", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+    const apiKey = await deviceKey(agent);
+    const shiftId = await openShift(agent);
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send({
+        batchId: `late-exception-seed-${randomUUID()}`,
+        items: [item(shiftId, 1, { boxId: "b1" })],
+      })
+      .expect(201);
+    await agent.post(`/shifts/${shiftId}/close`).send({ reason: "done shift" }).expect(200);
+
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send({
+        batchId: `late-exception-${randomUUID()}`,
+        items: [],
+        boxes: [],
+        exceptions: [
+          {
+            kind: "clear",
+            boxId: "b1",
+            codeHash: null,
+            targetScannedAt: null,
+            shiftId,
+            terminalId: "spoofed",
+            operatorId: null,
+            reason: null,
+            occurredAt: "2026-07-28T10:00:02.000Z",
+          },
+        ],
+      })
+      .expect(201);
+
+    const shift = await agent.get(`/shifts/${shiftId}`).expect(200);
+    expect((shift.body as { lateDataAt: string | null }).lateDataAt).not.toBeNull();
+  });
+
   it("leaves lateDataAt null for a batch delivered to an open (not closed) shift", async () => {
     const agent = request.agent(app!.getHttpServer());
     await signUpAndActivate(agent);
@@ -889,7 +931,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
     // check-digit-valid SSCC for the tests that merely assert it round-trips
     // into `boxes.sscc` unchanged.
     const SSCC = "123456789012345675";
-    const ISO = "2026-07-29T09:00:00.000Z";
+    const ISO = "2026-07-29T11:00:00.000Z";
 
     beforeEach(async () => {
       agent = request.agent(app!.getHttpServer());
@@ -1003,9 +1045,21 @@ describe.skipIf(!ready)("station-scans e2e", () => {
     async function boxItemRows(
       forTenantId: string,
       codeLabel: string,
-    ): Promise<{ boxId: string; displacedAt: Date | null }[]> {
+    ): Promise<
+      {
+        boxId: string;
+        addedAt: Date;
+        displacedAt: Date | null;
+        removedAt: Date | null;
+      }[]
+    > {
       return db
-        .select({ boxId: schema.boxItems.boxId, displacedAt: schema.boxItems.displacedAt })
+        .select({
+          boxId: schema.boxItems.boxId,
+          addedAt: schema.boxItems.addedAt,
+          displacedAt: schema.boxItems.displacedAt,
+          removedAt: schema.boxItems.removedAt,
+        })
         .from(schema.boxItems)
         .where(
           and(
@@ -1025,6 +1079,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
             eq(schema.boxItems.tenantId, tenantId),
             eq(schema.boxItems.boxId, boxId),
             isNull(schema.boxItems.displacedAt),
+            isNull(schema.boxItems.removedAt),
           ),
         );
       return rows.length;
@@ -1184,6 +1239,45 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       await postBatch([scan("aa", { boxId: "b1" })]);
       const items = await boxItemRows(tenantId, "aa");
       expect(items.every((i) => i.displacedAt === null)).toBe(true);
+    });
+
+    it("marks only the losing membership when one batch puts the same hash in two boxes", async () => {
+      await postBatch([
+        scan("aa", { boxId: "b1", scannedAt: "10:00:00" }),
+        scan("aa", { boxId: "b2", scannedAt: "10:00:01" }),
+      ]);
+
+      const items = await boxItemRows(tenantId, "aa");
+      const byBox = new Map(items.map((item) => [item.boxId, item]));
+      expect(byBox.get(await boxIdFor("b1"))?.displacedAt).toBeNull();
+      expect(byBox.get(await boxIdFor("b2"))?.displacedAt).not.toBeNull();
+      expect((await registryOwner(tenantId, boxedCodeHash("aa")))?.scannedAt.toISOString()).toBe(
+        "2026-07-29T10:00:00.000Z",
+      );
+    });
+
+    it("keeps exactly one membership for identical claims naming two boxes", async () => {
+      await postBatch([
+        scan("aa", { boxId: "b1", scannedAt: "10:00:00" }),
+        scan("aa", { boxId: "b2", scannedAt: "10:00:00" }),
+      ]);
+
+      const items = await boxItemRows(tenantId, "aa");
+      expect(items.filter((item) => item.displacedAt === null)).toHaveLength(1);
+      expect((await registryOwner(tenantId, boxedCodeHash("aa")))?.scannedAt.toISOString()).toBe(
+        "2026-07-29T10:00:00.000Z",
+      );
+    });
+
+    it("reconciles a late earlier winner into the same box membership", async () => {
+      await postBatch([scan("aa", { boxId: "b1", scannedAt: "10:00:05" })]);
+      await postBatch([scan("aa", { boxId: "b1", scannedAt: "10:00:00" })]);
+
+      const items = await boxItemRows(tenantId, "aa");
+      expect(items).toHaveLength(1);
+      expect(items[0]?.addedAt.toISOString()).toBe("2026-07-29T10:00:00.000Z");
+      expect(items[0]?.displacedAt).toBeNull();
+      expect(await liveItemCount("b1")).toBe(1);
     });
 
     it("counts a box's contents excluding displaced items", async () => {
@@ -1778,6 +1872,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
               // "invalid input syntax for type uuid").
               boxId: "b1",
               codeHash,
+              targetScannedAt: "2026-07-29T10:00:00.000Z",
               shiftId,
               terminalId: "t1",
               operatorId: null,
@@ -1817,6 +1912,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
           .where(eq(schema.boxExceptions.tenantId, tenantId));
         expect(auditRow?.kind).toBe("undo");
         expect(auditRow?.terminalId).toBe(deviceId);
+        expect(auditRow?.targetScannedAt?.toISOString()).toBe("2026-07-29T10:00:00.000Z");
         // The audit row's boxId is the RESOLVED server UUID, not the raw
         // "b1" the request carried -- proving the resolution step's output
         // actually flows into the box_exceptions write (and not just into
@@ -1836,6 +1932,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
               kind: "undo",
               boxId: "b1",
               codeHash,
+              targetScannedAt: "2026-07-29T10:00:00.000Z",
               shiftId,
               terminalId: "spoofed-terminal",
               operatorId: null,
@@ -1855,6 +1952,47 @@ describe.skipIf(!ready)("station-scans e2e", () => {
           );
         expect(membership?.removedAt).toBeNull();
         expect(membership?.addedAt.toISOString()).toBe("2026-07-29T10:00:02.000Z");
+      });
+
+      it("a stale undo cannot release or remove a newer rescan", async () => {
+        const codeHash = boxedCodeHash("aa");
+        await postBatchAs(deviceId, [scan("aa", { boxId: "b1", scannedAt: "10:00:00" })]);
+        const staleUndo = {
+          kind: "undo" as const,
+          boxId: "b1",
+          codeHash,
+          targetScannedAt: "2026-07-29T10:00:00.000Z",
+          shiftId,
+          terminalId: deviceId,
+          operatorId: null,
+          reason: null,
+          occurredAt: "2026-07-29T10:00:01.000Z",
+        };
+        await postRaw({
+          batchId: `undo-first-${randomUUID()}`,
+          items: [],
+          boxes: [],
+          exceptions: [staleUndo],
+        });
+        await postBatchAs(deviceId, [scan("aa", { boxId: "b1", scannedAt: "10:00:02" })]);
+        await postRaw({
+          batchId: `undo-stale-${randomUUID()}`,
+          items: [],
+          boxes: [],
+          exceptions: [staleUndo],
+        });
+
+        expect((await registryOwner(tenantId, codeHash))?.scannedAt.toISOString()).toBe(
+          "2026-07-29T10:00:02.000Z",
+        );
+        const [membership] = await db
+          .select({ addedAt: schema.boxItems.addedAt, removedAt: schema.boxItems.removedAt })
+          .from(schema.boxItems)
+          .where(
+            and(eq(schema.boxItems.tenantId, tenantId), eq(schema.boxItems.codeHash, codeHash)),
+          );
+        expect(membership?.addedAt.toISOString()).toBe("2026-07-29T10:00:02.000Z");
+        expect(membership?.removedAt).toBeNull();
       });
 
       // t1 claims "aa" first (a LATER scannedAt); t2's own later-arriving but
@@ -1884,6 +2022,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
               // code), not from a resolution failure.
               boxId: "b1",
               codeHash,
+              targetScannedAt: "2026-07-29T10:00:05.000Z",
               shiftId,
               terminalId: "t1",
               operatorId: null,
@@ -1912,6 +2051,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
               // Raw device-local id -- see the first test's comment.
               boxId: "b1",
               codeHash,
+              targetScannedAt: "2026-07-29T10:00:00.000Z",
               shiftId,
               terminalId: "t1",
               operatorId: null,
@@ -1961,6 +2101,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
                   kind: "undo",
                   boxId: "ghost-box",
                   codeHash: boxedCodeHash("aa"),
+                  targetScannedAt: "2026-07-29T10:00:00.000Z",
                   shiftId,
                   terminalId: "t1",
                   operatorId: null,
@@ -2045,6 +2186,119 @@ describe.skipIf(!ready)("station-scans e2e", () => {
         // Same proof as the "undo" test above: the audit row's boxId is the
         // RESOLVED server UUID, not the raw "b1" the request carried.
         expect(auditRow?.boxId).toBe(boxId);
+      });
+
+      it("a redelivered clear does not remove a rescan that happened later", async () => {
+        const codeHash = boxedCodeHash("aa");
+        await postBatchAs(deviceId, [scan("aa", { boxId: "b1", scannedAt: "10:00:00" })]);
+        const staleClear = {
+          kind: "clear" as const,
+          boxId: "b1",
+          codeHash: null,
+          targetScannedAt: null,
+          shiftId,
+          terminalId: deviceId,
+          operatorId: null,
+          reason: null,
+          occurredAt: "2026-07-29T10:00:01.000Z",
+        };
+        await postRaw({
+          batchId: `clear-first-${randomUUID()}`,
+          items: [],
+          boxes: [],
+          exceptions: [staleClear],
+        });
+        await postBatchAs(deviceId, [scan("aa", { boxId: "b1", scannedAt: "10:00:02" })]);
+        await postRaw({
+          batchId: `clear-stale-${randomUUID()}`,
+          items: [],
+          boxes: [],
+          exceptions: [staleClear],
+        });
+
+        expect((await registryOwner(tenantId, codeHash))?.scannedAt.toISOString()).toBe(
+          "2026-07-29T10:00:02.000Z",
+        );
+        expect(await liveItemCount("b1")).toBe(1);
+      });
+
+      it("applies a pre-close clear when its later closure arrives in the same batch", async () => {
+        const codeHash = boxedCodeHash("aa");
+        await postBatchAs(deviceId, [scan("aa", { boxId: "b1", scannedAt: "10:00:00" })]);
+
+        await postRaw({
+          batchId: `clear-with-close-${randomUUID()}`,
+          items: [],
+          boxes: [
+            {
+              boxId: "b1",
+              shiftId,
+              terminalId: deviceId,
+              sscc: SSCC,
+              closedAt: "2026-07-29T10:00:02.000Z",
+              operatorId: OPERATOR_ID,
+            },
+          ],
+          exceptions: [
+            {
+              kind: "clear",
+              boxId: "b1",
+              codeHash: null,
+              targetScannedAt: null,
+              shiftId,
+              terminalId: deviceId,
+              operatorId: null,
+              reason: null,
+              occurredAt: "2026-07-29T10:00:01.000Z",
+            },
+          ],
+        });
+
+        expect(await registryOwner(tenantId, codeHash)).toBeUndefined();
+        expect(await liveItemCount("b1")).toBe(0);
+        const [box] = await db
+          .select({ closedAt: schema.boxes.closedAt })
+          .from(schema.boxes)
+          .where(eq(schema.boxes.id, await boxIdFor("b1")));
+        expect(box?.closedAt?.toISOString()).toBe("2026-07-29T10:00:02.000Z");
+      });
+
+      it("does not apply a post-close clear delivered with the closure", async () => {
+        const codeHash = boxedCodeHash("aa");
+        await postBatchAs(deviceId, [scan("aa", { boxId: "b1", scannedAt: "10:00:00" })]);
+
+        await postRaw({
+          batchId: `late-clear-with-close-${randomUUID()}`,
+          items: [],
+          boxes: [
+            {
+              boxId: "b1",
+              shiftId,
+              terminalId: deviceId,
+              sscc: SSCC,
+              closedAt: "2026-07-29T10:00:02.000Z",
+              operatorId: OPERATOR_ID,
+            },
+          ],
+          exceptions: [
+            {
+              kind: "clear",
+              boxId: "b1",
+              codeHash: null,
+              targetScannedAt: null,
+              shiftId,
+              terminalId: deviceId,
+              operatorId: null,
+              reason: null,
+              occurredAt: "2026-07-29T10:00:03.000Z",
+            },
+          ],
+        });
+
+        expect((await registryOwner(tenantId, codeHash))?.scannedAt.toISOString()).toBe(
+          "2026-07-29T10:00:00.000Z",
+        );
+        expect(await liveItemCount("b1")).toBe(1);
       });
 
       it("clear on an already-closed box is a no-op (guarded by closedAt IS NULL)", async () => {
@@ -2199,6 +2453,11 @@ describe.skipIf(!ready)("station-scans e2e", () => {
         // boxId is the RESOLVED server UUID, not the raw "b1" the request
         // carried.
         expect(auditRow?.boxId).toBe(boxId);
+
+        // A pre-close scan delivered only after retirement must not
+        // reactivate membership in a disassembled box.
+        await postBatchAs(deviceId, [scan("cc", { boxId: "b1", scannedAt: "08:30:00" })]);
+        expect(await boxItemRows(tenantId, "cc")).toHaveLength(0);
       });
 
       it("disassemble on a still-open box is a no-op (guarded by closedAt IS NOT NULL)", async () => {
@@ -2254,6 +2513,143 @@ describe.skipIf(!ready)("station-scans e2e", () => {
           .from(schema.boxExceptions)
           .where(eq(schema.boxExceptions.tenantId, tenantId));
         expect(auditRow?.kind).toBe("disassemble");
+      });
+
+      it("does not release an equal owner represented by another active box", async () => {
+        await postBatchAs(deviceId, [
+          scan("aa", { boxId: "b1", scannedAt: "10:00:00" }),
+          scan("bb", { boxId: "b2", scannedAt: "10:00:01" }),
+        ]);
+        await postBatchWithBoxes(
+          [],
+          [
+            {
+              boxId: "b2",
+              shiftId,
+              terminalId: deviceId,
+              sscc: SSCC,
+              closedAt: ISO,
+              operatorId: OPERATOR_ID,
+            },
+          ],
+        );
+        await postRaw({
+          batchId: `disassemble-b2-${randomUUID()}`,
+          items: [],
+          boxes: [],
+          exceptions: [
+            {
+              kind: "disassemble",
+              boxId: "b2",
+              codeHash: null,
+              targetScannedAt: null,
+              shiftId,
+              terminalId: deviceId,
+              operatorId: null,
+              reason: "retire b2",
+              occurredAt: "2026-07-29T12:00:00.000Z",
+            },
+          ],
+        });
+
+        // Stale redelivery of aa's exact owner identity, but with the retired
+        // b2 as its claimed membership target.
+        await postBatchAs(deviceId, [scan("aa", { boxId: "b2", scannedAt: "10:00:00" })]);
+
+        expect((await registryOwner(tenantId, boxedCodeHash("aa")))?.scannedAt.toISOString()).toBe(
+          "2026-07-29T10:00:00.000Z",
+        );
+        expect(await liveItemCount("b1")).toBe(1);
+      });
+
+      it("keeps an equal live owner delivered with a retired-box scan in the same batch", async () => {
+        await postBatchAs(deviceId, [scan("bb", { boxId: "b2", scannedAt: "09:00:00" })]);
+        await postBatchWithBoxes(
+          [],
+          [
+            {
+              boxId: "b2",
+              shiftId,
+              terminalId: deviceId,
+              sscc: SSCC,
+              closedAt: ISO,
+              operatorId: OPERATOR_ID,
+            },
+          ],
+        );
+        await postRaw({
+          batchId: `disassemble-b2-${randomUUID()}`,
+          items: [],
+          boxes: [],
+          exceptions: [
+            {
+              kind: "disassemble",
+              boxId: "b2",
+              codeHash: null,
+              targetScannedAt: null,
+              shiftId,
+              terminalId: deviceId,
+              operatorId: null,
+              reason: "retire b2",
+              occurredAt: "2026-07-29T12:00:00.000Z",
+            },
+          ],
+        });
+
+        // Retired target first reproduces the ordering that used to release
+        // the registry claim before this batch inserted the live membership.
+        await postBatchAs(deviceId, [
+          scan("aa", { boxId: "b2", scannedAt: "10:00:00" }),
+          scan("aa", { boxId: "b1", scannedAt: "10:00:00" }),
+        ]);
+
+        expect((await registryOwner(tenantId, boxedCodeHash("aa")))?.scannedAt.toISOString()).toBe(
+          "2026-07-29T10:00:00.000Z",
+        );
+        expect(await liveItemCount("b1")).toBe(1);
+        expect(await liveItemCount("b2")).toBe(0);
+      });
+
+      it("serializes a concurrent late scan and disassembly without leaving live membership", async () => {
+        await postBatchAs(deviceId, [scan("aa", { boxId: "b1", scannedAt: "08:00:00" })]);
+        await postBatchWithBoxes(
+          [],
+          [
+            {
+              boxId: "b1",
+              shiftId,
+              terminalId: deviceId,
+              sscc: SSCC,
+              closedAt: ISO,
+              operatorId: OPERATOR_ID,
+            },
+          ],
+        );
+
+        await Promise.all([
+          postBatchAs(deviceId, [scan("bb", { boxId: "b1", scannedAt: "12:30:00" })]),
+          postRaw({
+            batchId: `disassemble-race-${randomUUID()}`,
+            items: [],
+            boxes: [],
+            exceptions: [
+              {
+                kind: "disassemble",
+                boxId: "b1",
+                codeHash: null,
+                targetScannedAt: null,
+                shiftId,
+                terminalId: deviceId,
+                operatorId: null,
+                reason: "race test",
+                occurredAt: "2026-07-29T12:00:00.000Z",
+              },
+            ],
+          }),
+        ]);
+
+        expect(await liveItemCount("b1")).toBe(0);
+        expect(await registryOwner(tenantId, boxedCodeHash("bb"))).toBeUndefined();
       });
 
       it(
@@ -2337,6 +2733,19 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       // else: no box_items update, no registry release, no box retirement.
       it("reprint writes only an audit row -- no box or item state changes", async () => {
         await postBatchAs(deviceId, [scan("aa", { boxId: "b1" }), scan("bb", { boxId: "b1" })]);
+        await postBatchWithBoxes(
+          [],
+          [
+            {
+              boxId: "b1",
+              shiftId,
+              terminalId: deviceId,
+              sscc: SSCC,
+              closedAt: ISO,
+              operatorId: OPERATOR_ID,
+            },
+          ],
+        );
         const boxId = await boxIdFor("b1");
         const [before] = await db.select().from(schema.boxes).where(eq(schema.boxes.id, boxId));
         const itemsBefore = await db

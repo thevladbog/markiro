@@ -358,6 +358,7 @@ describe.skipIf(!ready)("boxes e2e", () => {
             kind: "undo",
             boxId: "b5",
             codeHash: kmHash(canonicalizeKm(`01${VALID_GTIN14}21S-rr`)),
+            targetScannedAt: "2026-07-01T10:00:00.000Z",
             shiftId: removedShiftId,
             terminalId: "t1",
             operatorId: null,

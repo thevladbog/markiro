@@ -157,6 +157,7 @@ export const syncBatchSchema = z.object({
             .string()
             .regex(/^[0-9a-f]{64}$/)
             .nullable(),
+          targetScannedAt: z.string().datetime().nullable().default(null),
           shiftId: z.string().uuid().toLowerCase(),
           terminalId: z.string().nullable(),
           operatorId: z.string().uuid().toLowerCase().nullable(),
@@ -166,6 +167,10 @@ export const syncBatchSchema = z.object({
         .superRefine((exception, ctx) => {
           const codeShapeValid =
             exception.kind === "undo" ? exception.codeHash !== null : exception.codeHash === null;
+          const targetShapeValid =
+            exception.kind === "undo"
+              ? exception.targetScannedAt !== null
+              : exception.targetScannedAt === null;
           const reasonShapeValid =
             exception.kind === "undo" || exception.kind === "clear"
               ? exception.reason === null
@@ -182,6 +187,13 @@ export const syncBatchSchema = z.object({
               code: "custom",
               path: ["reason"],
               message: "Invalid reason for exception kind",
+            });
+          }
+          if (!targetShapeValid) {
+            ctx.addIssue({
+              code: "custom",
+              path: ["targetScannedAt"],
+              message: "Invalid targetScannedAt for exception kind",
             });
           }
         }),

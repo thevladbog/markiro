@@ -231,6 +231,7 @@ export async function recordScan(
 export interface UndoScanInput {
   boxId: string;
   codeHash: string;
+  scannedAt: string;
   shiftId: string;
   terminalId: string | null;
   operatorId: string | null;
@@ -253,6 +254,7 @@ export async function undoLastScan(exec: SqlExecutor, input: UndoScanInput): Pro
     kind: "undo",
     boxId: input.boxId,
     codeHash: input.codeHash,
+    targetScannedAt: input.scannedAt,
     shiftId: input.shiftId,
     terminalId: input.terminalId,
     operatorId: input.operatorId,

@@ -40,6 +40,7 @@ export class BoxExceptionsService {
         kind: r.kind as BoxExceptionDto["kind"],
         boxId: r.boxId,
         codeHash: r.codeHash,
+        targetScannedAt: r.targetScannedAt,
         terminalId: r.terminalId,
         operatorId: r.operatorId,
         reason: r.reason,

@@ -24,10 +24,12 @@ async function migratedExec(): Promise<SqlExecutor> {
 
 /** A minimal valid exception, overridable per-call the way outbox.test.ts's `seed` builds rows. */
 function makeException(overrides: Partial<ExceptionInput> = {}): ExceptionInput {
+  const kind = overrides.kind ?? "undo";
   return {
-    kind: "undo",
+    kind,
     boxId: "b1",
     codeHash: "hash1",
+    targetScannedAt: kind === "undo" ? "2026-07-30T00:00:00.000Z" : null,
     shiftId: "s1",
     terminalId: null,
     operatorId: null,
@@ -82,6 +84,7 @@ describe("box-exceptions-mirror", () => {
       kind: "disassemble",
       boxId: "b7",
       codeHash: null,
+      targetScannedAt: null,
       shiftId: "s9",
       terminalId: "t1",
       operatorId: "op1",

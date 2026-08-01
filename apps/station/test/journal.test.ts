@@ -684,6 +684,7 @@ describe("undoLastScan", () => {
     await undoLastScan(exec, {
       boxId: "b1",
       codeHash: "hash1",
+      scannedAt: "t1",
       shiftId: "s1",
       terminalId: null,
       operatorId: null,
@@ -700,5 +701,44 @@ describe("undoLastScan", () => {
 
     const pending = await exec.all("SELECT * FROM box_exceptions_mirror");
     expect(pending).toHaveLength(1);
+  });
+
+  it("does not delete a newer local rescan when an old undo target arrives", async () => {
+    const exec = makeExec();
+    await recordScan(
+      exec,
+      {
+        shiftId: "s1",
+        terminalId: null,
+        raw: "new scan",
+        verdict: "ok",
+        scannedAt: "t2",
+        operatorId: null,
+      },
+      {
+        codeHash: "hash1",
+        shiftId: "s1",
+        gtin14: "04006381333931",
+        serial: "1",
+        scannedAt: "t2",
+        boxId: "b1",
+      },
+    );
+
+    await undoLastScan(exec, {
+      boxId: "b1",
+      codeHash: "hash1",
+      scannedAt: "t1",
+      shiftId: "s1",
+      terminalId: null,
+      operatorId: null,
+      at: "t3",
+    });
+
+    const codes = await exec.all<{ scanned_at: string }>(
+      "SELECT scanned_at FROM codes_mirror WHERE code_hash = ?",
+      ["hash1"],
+    );
+    expect(codes).toEqual([{ scanned_at: "t2" }]);
   });
 });

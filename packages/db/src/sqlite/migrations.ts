@@ -188,26 +188,32 @@ export const STATION_MIGRATIONS: string[] = [
      kind TEXT NOT NULL,
      box_id TEXT NOT NULL,
      code_hash TEXT,
+     target_scanned_at TEXT,
      shift_id TEXT NOT NULL,
      terminal_id TEXT,
      operator_id TEXT,
      reason TEXT,
      at TEXT NOT NULL,
      CHECK (
-       (kind = 'undo' AND code_hash IS NOT NULL AND reason IS NULL)
-       OR (kind = 'clear' AND code_hash IS NULL AND reason IS NULL)
-       OR (kind IN ('disassemble', 'reprint') AND code_hash IS NULL AND reason IS NOT NULL)
-     )
+       (kind = 'undo' AND code_hash IS NOT NULL AND target_scanned_at IS NOT NULL AND reason IS NULL)
+       OR (kind = 'clear' AND code_hash IS NULL AND target_scanned_at IS NULL AND reason IS NULL)
+       OR (kind IN ('disassemble', 'reprint') AND code_hash IS NULL AND target_scanned_at IS NULL AND reason IS NOT NULL)
+      )
     );`,
+  `ALTER TABLE box_exceptions_mirror ADD COLUMN target_scanned_at TEXT;`,
   // One INSERT is the atomic unit available through tauri-plugin-sql's pool.
   // Keep the durable exception fact and its local state transition in that
   // same SQLite statement so a crash cannot leave only one side applied.
-  `CREATE TRIGGER IF NOT EXISTS box_exception_undo_local
+  `DROP TRIGGER IF EXISTS box_exception_undo_local;`,
+  `CREATE TRIGGER box_exception_undo_local
      AFTER INSERT ON box_exceptions_mirror
      WHEN NEW.kind = 'undo'
      BEGIN
-       DELETE FROM codes_mirror WHERE code_hash = NEW.code_hash;
-     END;`,
+       DELETE FROM codes_mirror
+        WHERE code_hash = NEW.code_hash
+          AND box_id = NEW.box_id
+          AND scanned_at = NEW.target_scanned_at;
+      END;`,
   `CREATE TRIGGER IF NOT EXISTS box_exception_clear_local
      AFTER INSERT ON box_exceptions_mirror
      WHEN NEW.kind = 'clear'
