@@ -12,8 +12,11 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
+import { CABINET_CAPABILITY } from "@markiro/domain";
+import { RequirePermissions } from "../../authorization/access-policy";
+import { AuthorizationGuard } from "../../authorization/authorization.guard";
+import { SecurityAuditService } from "../../authorization/security-audit.service";
 import { PairingService } from "../kiosk/pairing.service";
-import { SessionOnlyGuard } from "../../tenancy/session-only.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
@@ -35,19 +38,22 @@ import { KiosksService } from "./kiosks.service";
 // it (see docs/device-key-surface.md).
 @ApiTags("kiosks")
 @Controller("kiosks")
-@UseGuards(TenantGuard, SessionOnlyGuard)
+@UseGuards(TenantGuard, AuthorizationGuard)
 export class KiosksController {
   constructor(
     private readonly kiosksService: KiosksService,
     private readonly pairingService: PairingService,
+    private readonly audit: SecurityAuditService,
   ) {}
 
   @Get()
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
   async listKiosks(@Req() req: RequestWithTenant): Promise<ListKiosksResponseDto> {
     return this.kiosksService.listKiosks(req.tenantId!);
   }
 
   @Post()
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async createKiosk(
     @Req() req: RequestWithTenant,
     @Body(new ZodValidationPipe(createKioskSchema)) body: CreateKioskDto,
@@ -56,6 +62,7 @@ export class KiosksController {
   }
 
   @Patch(":id")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async updateKiosk(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
@@ -66,12 +73,14 @@ export class KiosksController {
 
   @Delete(":id")
   @HttpCode(204)
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async archiveKiosk(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<void> {
     return this.kiosksService.archiveKiosk(req.tenantId!, id);
   }
 
   @Put(":id/products")
   @HttpCode(200)
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async setProducts(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
@@ -82,19 +91,37 @@ export class KiosksController {
 
   @Post(":id/enroll")
   @HttpCode(200)
+  @RequirePermissions(CABINET_CAPABILITY.CREDENTIALS_MANAGE)
   async enroll(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
   ): Promise<EnrollKioskResponseDto> {
-    return this.kiosksService.enroll(req.tenantId!, id);
+    const result = await this.kiosksService.enroll(req.tenantId!, id);
+    this.audit.credentialMutation({
+      tenantId: req.tenantId!,
+      userId: req.userId!,
+      action: "kiosk.enroll",
+      resourceId: id,
+      outcome: "succeeded",
+    });
+    return result;
   }
 
-  /** Session-only: a stolen device must not be able to mint pairing codes. */
+  /** Credential-only: a stolen device must not be able to mint pairing codes. */
   @Post(":id/pairing-code")
+  @RequirePermissions(CABINET_CAPABILITY.CREDENTIALS_MANAGE)
   async issuePairingCode(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
   ): Promise<IssuePairingCodeResultDto> {
-    return this.pairingService.issueCode(req.tenantId!, id);
+    const result = await this.pairingService.issueCode(req.tenantId!, id);
+    this.audit.credentialMutation({
+      tenantId: req.tenantId!,
+      userId: req.userId!,
+      action: "kiosk_pairing_code.issue",
+      resourceId: id,
+      outcome: "succeeded",
+    });
+    return result;
   }
 }

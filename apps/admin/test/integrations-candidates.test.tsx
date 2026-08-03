@@ -4,6 +4,10 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { CABINET_CAPABILITY } from "@markiro/domain";
+
+import type { AccessDocument } from "../src/access/api.js";
+import { AccessProvider } from "../src/access/context.js";
 import { CatalogPage } from "../src/pages/catalog/index.js";
 import { ProductForm } from "../src/pages/catalog/ProductForm.js";
 import { CandidatesQueue } from "../src/pages/integrations/CandidatesQueue.js";
@@ -30,6 +34,18 @@ function newQueryClient() {
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
 }
+
+const ADMIN_ACCESS: AccessDocument = {
+  roles: ["admin"],
+  capabilities: [
+    CABINET_CAPABILITY.OPERATIONS_READ,
+    CABINET_CAPABILITY.OPERATIONS_WRITE,
+    CABINET_CAPABILITY.INTEGRATIONS_READ,
+    CABINET_CAPABILITY.INTEGRATIONS_WRITE,
+    CABINET_CAPABILITY.TENANT_SETTINGS_MANAGE,
+    CABINET_CAPABILITY.CREDENTIALS_MANAGE,
+  ],
+};
 
 interface CandidateFixture {
   id: string;
@@ -164,9 +180,11 @@ function renderCatalog() {
 
   return render(
     <QueryClientProvider client={newQueryClient()}>
-      <MemoryRouter>
-        <CatalogPage />
-      </MemoryRouter>
+      <AccessProvider value={ADMIN_ACCESS}>
+        <MemoryRouter>
+          <CatalogPage />
+        </MemoryRouter>
+      </AccessProvider>
     </QueryClientProvider>,
   );
 }
@@ -190,27 +208,29 @@ function renderProductCard({
 
   return render(
     <QueryClientProvider client={newQueryClient()}>
-      <ProductForm
-        open
-        mode="edit"
-        productId="p-1"
-        externalRef={externalRef}
-        initialValues={{
-          gtin: "04600000000018",
-          name: externalName,
-          productGroup: "",
-          boxCapacity: "",
-          palletCapacity: "",
-          unitPrice: "",
-          egaisCode: "",
-          defaultCounterpartyId: "",
-          defaultLabelTemplateId: "",
-        }}
-        counterparties={[]}
-        labelTemplates={[]}
-        onSubmit={() => {}}
-        onClose={() => {}}
-      />
+      <AccessProvider value={ADMIN_ACCESS}>
+        <ProductForm
+          open
+          mode="edit"
+          productId="p-1"
+          externalRef={externalRef}
+          initialValues={{
+            gtin: "04600000000018",
+            name: externalName,
+            productGroup: "",
+            boxCapacity: "",
+            palletCapacity: "",
+            unitPrice: "",
+            egaisCode: "",
+            defaultCounterpartyId: "",
+            defaultLabelTemplateId: "",
+          }}
+          counterparties={[]}
+          labelTemplates={[]}
+          onSubmit={() => {}}
+          onClose={() => {}}
+        />
+      </AccessProvider>
     </QueryClientProvider>,
   );
 }

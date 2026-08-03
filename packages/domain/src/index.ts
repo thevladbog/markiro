@@ -50,3 +50,9 @@ export {
 } from "./crypto/phc.js";
 export type { ParsedPhc } from "./crypto/phc.js";
 export { MAX_BOX_CLOSURES_PER_SYNC_BATCH } from "./sync/limits.js";
+export {
+  CABINET_CAPABILITY,
+  hasCabinetCapabilities,
+  resolveCabinetAccess,
+} from "./access/cabinet.js";
+export type { CabinetCapability, CabinetRole, ResolvedCabinetAccess } from "./access/cabinet.js";

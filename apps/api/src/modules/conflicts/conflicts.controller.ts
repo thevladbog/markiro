@@ -1,7 +1,9 @@
 import { Controller, Get, HttpCode, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
+import { CABINET_CAPABILITY } from "@markiro/domain";
+import { RequirePermissions } from "../../authorization/access-policy";
+import { AuthorizationGuard } from "../../authorization/authorization.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
-import { SessionOnlyGuard } from "../../tenancy/session-only.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
   listConflictsQuerySchema,
@@ -15,18 +17,19 @@ import { ConflictsService } from "./conflicts.service";
  * Manager-only: the losing side of a conflict is deliberately never told its
  * own scan lost (its batch was already acknowledged, and re-opening it would
  * undo slice 06a's delivery guarantee) -- this view is the only place a
- * human ever sees that class of conflict. `SessionOnlyGuard` keeps a station
+ * human ever sees that class of conflict. Cabinet authorization keeps a station
  * api-key out even though `TenantGuard` accepts it for tenant resolution --
  * see docs/device-key-surface.md and operators.controller.ts for the same
  * pattern.
  */
 @ApiTags("conflicts")
 @Controller("conflicts")
-@UseGuards(TenantGuard, SessionOnlyGuard)
+@UseGuards(TenantGuard, AuthorizationGuard)
 export class ConflictsController {
   constructor(private readonly conflictsService: ConflictsService) {}
 
   @Get()
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
   async listConflicts(
     @Req() req: RequestWithTenant,
     @Query(new ZodValidationPipe(listConflictsQuerySchema)) query: ListConflictsQueryDto,
@@ -36,6 +39,7 @@ export class ConflictsController {
 
   @Post(":id/review")
   @HttpCode(200)
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async reviewConflict(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,

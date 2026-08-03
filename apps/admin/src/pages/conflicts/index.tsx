@@ -4,6 +4,9 @@ import { useTranslation } from "react-i18next";
 import { Alert, Badge, Button, EmptyState, PageHeader, Select, Spinner, Table } from "@markiro/ui";
 import type { SelectOption, TableColumn } from "@markiro/ui";
 
+import { CABINET_CAPABILITY } from "@markiro/domain";
+
+import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
 import { formatCreatedAt, formatScanTime } from "../../lib/datetime.js";
 import { toast } from "../../lib/toast.js";
@@ -29,6 +32,7 @@ type ReviewedFilter = "unreviewed" | "reviewed" | "all";
  */
 export function ConflictsPage() {
   const { t, i18n } = useTranslation();
+  const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
 
   const [shiftFilter, setShiftFilter] = useState<string>("all");
   // Defaults to "unreviewed": without this, the list keeps every conflict
@@ -42,8 +46,6 @@ export function ConflictsPage() {
     ...(reviewedFilter !== "all" ? { reviewed: reviewedFilter === "reviewed" } : {}),
   });
   const { data: shiftsData } = useShifts();
-  const reviewMutation = useReviewConflict();
-
   const items = data ?? [];
   const shifts = shiftsData ?? [];
 
@@ -71,19 +73,7 @@ export function ConflictsPage() {
     [t],
   );
 
-  const handleReview = async (id: string) => {
-    try {
-      await reviewMutation.mutateAsync(id);
-      toast("ok", t("pages.conflicts.toasts.reviewSuccess"));
-    } catch (error) {
-      toast(
-        "error",
-        error instanceof ApiRequestError ? error.message : t("pages.conflicts.toasts.reviewError"),
-      );
-    }
-  };
-
-  const columns: TableColumn<ConflictDto>[] = useMemo(
+  const baseColumns: TableColumn<ConflictDto>[] = useMemo(
     () => [
       {
         key: "codeHash",
@@ -130,27 +120,8 @@ export function ConflictsPage() {
         title: t("pages.conflicts.table.detected"),
         render: (row) => formatCreatedAt(row.detectedAt, i18n.language),
       },
-      {
-        key: "actions",
-        title: t("pages.conflicts.table.actions"),
-        align: "right",
-        render: (row) =>
-          row.reviewedAt ? (
-            <Badge tone="neutral">{t("pages.conflicts.reviewed")}</Badge>
-          ) : (
-            <Button
-              type="button"
-              size="compact"
-              variant="secondary"
-              loading={reviewMutation.isPending && reviewMutation.variables === row.id}
-              onClick={() => void handleReview(row.id)}
-            >
-              {t("pages.conflicts.review")}
-            </Button>
-          ),
-      },
     ],
-    [t, i18n.language, reviewMutation.isPending, reviewMutation.variables, shiftsById],
+    [t, i18n.language, shiftsById],
   );
 
   return (
@@ -185,10 +156,78 @@ export function ConflictsPage() {
         <Alert tone="error">{t("common.loadError")}</Alert>
       ) : items.length === 0 ? (
         <EmptyState title={t("pages.conflicts.empty")} />
+      ) : canWrite ? (
+        <AuthorizedConflictsTable baseColumns={baseColumns} rows={items} />
       ) : (
-        <Table columns={columns} rows={items} />
+        <ConflictsTable baseColumns={baseColumns} rows={items} />
       )}
     </div>
+  );
+}
+
+interface ConflictsTableProps {
+  baseColumns: TableColumn<ConflictDto>[];
+  rows: ConflictDto[];
+  onReview?: (id: string) => Promise<void>;
+  pendingReviewId?: string;
+}
+
+function ConflictsTable({ baseColumns, rows, onReview, pendingReviewId }: ConflictsTableProps) {
+  const { t } = useTranslation();
+
+  const columns: TableColumn<ConflictDto>[] = [
+    ...baseColumns,
+    {
+      key: "actions",
+      title: t("pages.conflicts.table.actions"),
+      align: "right",
+      render: (row) =>
+        row.reviewedAt ? (
+          <Badge tone="neutral">{t("pages.conflicts.reviewed")}</Badge>
+        ) : onReview ? (
+          <Button
+            type="button"
+            size="compact"
+            variant="secondary"
+            disabled={pendingReviewId !== undefined}
+            loading={pendingReviewId === row.id}
+            onClick={() => void onReview(row.id)}
+          >
+            {t("pages.conflicts.review")}
+          </Button>
+        ) : null,
+    },
+  ];
+
+  return <Table columns={columns} rows={rows} />;
+}
+
+function AuthorizedConflictsTable({
+  baseColumns,
+  rows,
+}: Pick<ConflictsTableProps, "baseColumns" | "rows">) {
+  const { t } = useTranslation();
+  const reviewMutation = useReviewConflict();
+
+  const handleReview = async (id: string) => {
+    try {
+      await reviewMutation.mutateAsync(id);
+      toast("ok", t("pages.conflicts.toasts.reviewSuccess"));
+    } catch (error) {
+      toast(
+        "error",
+        error instanceof ApiRequestError ? error.message : t("pages.conflicts.toasts.reviewError"),
+      );
+    }
+  };
+
+  return (
+    <ConflictsTable
+      baseColumns={baseColumns}
+      rows={rows}
+      onReview={handleReview}
+      {...(reviewMutation.isPending ? { pendingReviewId: reviewMutation.variables } : {})}
+    />
   );
 }
 

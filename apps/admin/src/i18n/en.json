@@ -68,6 +68,18 @@
       "toggleLanguage": "Switch language"
     }
   },
+  "access": {
+    "loading": "Checking access…",
+    "loadErrorTitle": "Could not check access",
+    "loadErrorBody": "Try again in a moment. If the problem continues, sign in again.",
+    "retry": "Try again",
+    "noAccessTitle": "Cabinet access is not available yet",
+    "noAccessBody": "Ask an organization administrator to grant you access, or select another organization.",
+    "selectOrganization": "Select organization",
+    "forbiddenTitle": "This page is not available",
+    "forbiddenBody": "You do not have access to this section.",
+    "backToOverview": "Back to overview"
+  },
   "integrations": {
     "channel": {
       "commerceml": "1C exchange",
@@ -541,7 +553,8 @@
         },
         "exportHeld": {
           "title": "Order held — {{count}} product(s) not linked to 1C",
-          "linkAction": "Go to the matching queue"
+          "linkAction": "Go to the matching queue",
+          "noIntegrationAccess": "The matching queue is unavailable for your role."
         },
         "itemsTitle": "Marking codes",
         "table": {

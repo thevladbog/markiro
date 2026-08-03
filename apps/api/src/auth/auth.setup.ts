@@ -36,5 +36,8 @@ export type AuthSetup = ReturnType<typeof setupAuth>;
  * `{ bodyParser: false }`).
  */
 export function mountAuth(server: Express, auth: AuthSetup["auth"]) {
+  server.all("/api/auth/api-key/*splat", (_request, response) => {
+    response.sendStatus(404);
+  });
   server.all("/api/auth/*splat", toNodeHandler(auth));
 }

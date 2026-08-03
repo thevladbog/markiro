@@ -1,15 +1,39 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useRef } from "react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { CABINET_CAPABILITY } from "@markiro/domain";
+
+import type { AccessDocument } from "../src/access/api.js";
+import { AccessProvider } from "../src/access/context.js";
+import type * as RejectionsApiModule from "../src/pages/pickup/rejections-api.js";
 import { PickupPage } from "../src/pages/pickup/index.js";
 import { RejectionsPage } from "../src/pages/pickup/Rejections.js";
+
+const { writeHookMountSpy } = vi.hoisted(() => ({ writeHookMountSpy: vi.fn() }));
+
+vi.mock("../src/pages/pickup/rejections-api.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof RejectionsApiModule>();
+  return {
+    ...actual,
+    useAcknowledgeRejection: () => {
+      const counted = useRef(false);
+      if (!counted.current) {
+        writeHookMountSpy();
+        counted.current = true;
+      }
+      return actual.useAcknowledgeRejection();
+    },
+  };
+});
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  writeHookMountSpy.mockClear();
 });
 
 /** Minimal Response stand-in -- only what apps/admin/src/api/client.ts reads. */
@@ -43,13 +67,25 @@ const UNKNOWN_BADGE_REJECTION = {
   codes: [{ rawKm: "0104600682000013215Y", reason: "unknown_badge" }],
 };
 
-function renderWith(ui: React.ReactElement) {
+const OPERATIONS_READ_ONLY: AccessDocument = {
+  roles: [],
+  capabilities: [CABINET_CAPABILITY.OPERATIONS_READ],
+};
+
+const OPERATIONS_WRITE_ACCESS: AccessDocument = {
+  roles: [],
+  capabilities: [CABINET_CAPABILITY.OPERATIONS_READ, CABINET_CAPABILITY.OPERATIONS_WRITE],
+};
+
+function renderWith(ui: React.ReactElement, access: AccessDocument = OPERATIONS_WRITE_ACCESS) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter>{ui}</MemoryRouter>
+      <MemoryRouter>
+        <AccessProvider value={access}>{ui}</AccessProvider>
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
@@ -89,6 +125,73 @@ describe("rejections banner on the свод", () => {
 });
 
 describe("rejections page", () => {
+  it("keeps rejection rows readable while hiding acknowledge without operations.write", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(200, { items: [REJECTION], openCount: 1 })),
+    );
+
+    renderWith(<RejectionsPage />, OPERATIONS_READ_ONLY);
+
+    expect(await screen.findByText(REJECTION.employeeName)).toBeDefined();
+    expect(screen.getByRole("button", { name: "Показать коды" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Отработано" })).toBeNull();
+    expect(writeHookMountSpy).not.toHaveBeenCalled();
+  });
+
+  it("shares one acknowledge mutation observer across all writable rows", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(200, {
+          items: [REJECTION, UNKNOWN_BADGE_REJECTION],
+          openCount: 2,
+        }),
+      ),
+    );
+
+    renderWith(<RejectionsPage />);
+
+    expect(await screen.findAllByRole("button", { name: "Отработано" })).toHaveLength(2);
+    expect(writeHookMountSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks every acknowledge action while the shared mutation is pending", async () => {
+    const acknowledgeResult = new Promise<Response>(() => {});
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      const path = String(input);
+      if (path.includes("/pickup-rejections/r-1/acknowledge") && init?.method === "POST") {
+        return acknowledgeResult;
+      }
+      if (path.includes("/kiosks")) {
+        return jsonResponse(200, { items: [] });
+      }
+      return jsonResponse(200, {
+        items: [REJECTION, UNKNOWN_BADGE_REJECTION],
+        openCount: 2,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWith(<RejectionsPage />);
+
+    const buttons = (await screen.findAllByRole("button", {
+      name: "Отработано",
+    })) as HTMLButtonElement[];
+    fireEvent.click(buttons[0]!);
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+    });
+    expect(buttons[0]!.disabled).toBe(true);
+    expect(buttons[1]!.disabled).toBe(true);
+    expect(buttons[0]!.querySelector(".mk-spin")).not.toBeNull();
+    expect(buttons[1]!.querySelector(".mk-spin")).toBeNull();
+
+    fireEvent.click(buttons[1]!);
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  });
+
   it("lists a refused scan and reveals its codes", async () => {
     vi.stubGlobal(
       "fetch",
@@ -242,12 +345,14 @@ describe("routing", () => {
     });
     render(
       <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={["/pickup/rejections"]}>
-          <Routes>
-            <Route path="/pickup/rejections" element={<RejectionsPage />} />
-            <Route path="/pickup/:id" element={<div>order detail</div>} />
-          </Routes>
-        </MemoryRouter>
+        <AccessProvider value={OPERATIONS_WRITE_ACCESS}>
+          <MemoryRouter initialEntries={["/pickup/rejections"]}>
+            <Routes>
+              <Route path="/pickup/rejections" element={<RejectionsPage />} />
+              <Route path="/pickup/:id" element={<div>order detail</div>} />
+            </Routes>
+          </MemoryRouter>
+        </AccessProvider>
       </QueryClientProvider>,
     );
 

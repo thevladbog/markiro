@@ -5,10 +5,11 @@ import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
 
-import { isValidGtin } from "@markiro/domain";
+import { CABINET_CAPABILITY, isValidGtin } from "@markiro/domain";
 import { Alert, Button, Input, Modal, Select } from "@markiro/ui";
 import type { SelectOption } from "@markiro/ui";
 
+import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
 import { errorProp } from "../../lib/form-error.js";
 import { toast } from "../../lib/toast.js";
@@ -120,6 +121,44 @@ function translateFieldError(t: TFunction, message: string | undefined): string 
   return message ? t(message) : undefined;
 }
 
+function AuthorizedUnlinkProductAction({
+  productId,
+  onUnlinked,
+}: {
+  productId: string;
+  onUnlinked: () => void;
+}) {
+  const { t } = useTranslation();
+  const unlinkMutation = useUnlinkProduct();
+
+  const handleUnlink = async () => {
+    try {
+      await unlinkMutation.mutateAsync(productId);
+      onUnlinked();
+      toast("ok", t("pages.catalog.form.externalLink.unlinkSuccess"));
+    } catch (error) {
+      toast(
+        "error",
+        error instanceof ApiRequestError
+          ? error.message
+          : t("pages.catalog.form.externalLink.unlinkError"),
+      );
+    }
+  };
+
+  return (
+    <Button
+      type="button"
+      size="compact"
+      variant="secondary"
+      loading={unlinkMutation.isPending}
+      onClick={() => void handleUnlink()}
+    >
+      {t("pages.catalog.form.externalLink.unlinkAction")}
+    </Button>
+  );
+}
+
 export function ProductForm({
   open,
   mode,
@@ -134,8 +173,8 @@ export function ProductForm({
   onClose,
 }: ProductFormProps) {
   const { t } = useTranslation();
+  const canUnlinkIntegrations = useCan(CABINET_CAPABILITY.INTEGRATIONS_WRITE);
   const gtinCheckMutation = useGtinCheck();
-  const unlinkMutation = useUnlinkProduct();
   const [ownerHint, setOwnerHint] = useState<GtinCheckResult | null>(null);
   const lastCheckedGtinRef = useRef<string | null>(null);
   // Local mirror of `externalRef`, not read from it directly: a successful
@@ -176,22 +215,6 @@ export function ProductForm({
       setLinkedExternalRef(externalRef ?? null);
     }
   }, [open, initialValues, externalRef, reset]);
-
-  const handleUnlink = async () => {
-    if (!productId) return;
-    try {
-      await unlinkMutation.mutateAsync(productId);
-      setLinkedExternalRef(null);
-      toast("ok", t("pages.catalog.form.externalLink.unlinkSuccess"));
-    } catch (error) {
-      toast(
-        "error",
-        error instanceof ApiRequestError
-          ? error.message
-          : t("pages.catalog.form.externalLink.unlinkError"),
-      );
-    }
-  };
 
   // GTIN owner hint (design brief 03): only ever calls the check for a
   // checksum-valid GTIN (`isValidGtin`, client-side, before any network
@@ -282,17 +305,16 @@ export function ProductForm({
         {mode === "edit" && linkedExternalRef && (
           <Alert
             tone="info"
-            action={
-              <Button
-                type="button"
-                size="compact"
-                variant="secondary"
-                loading={unlinkMutation.isPending}
-                onClick={() => void handleUnlink()}
-              >
-                {t("pages.catalog.form.externalLink.unlinkAction")}
-              </Button>
-            }
+            {...(canUnlinkIntegrations && productId
+              ? {
+                  action: (
+                    <AuthorizedUnlinkProductAction
+                      productId={productId}
+                      onUnlinked={() => setLinkedExternalRef(null)}
+                    />
+                  ),
+                }
+              : {})}
           >
             {t("pages.catalog.form.externalLink.linkedText", { ref: linkedExternalRef })}
           </Alert>

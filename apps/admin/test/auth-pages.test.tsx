@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router";
@@ -35,17 +36,23 @@ function createFakeAuthClient(overrides: Partial<AuthClientLike> = {}): AuthClie
 }
 
 function renderRouted(client: AuthClientLike, initialPath: string, element: ReactElement) {
-  return render(
-    <MemoryRouter initialEntries={[initialPath]}>
-      <AuthClientProvider client={client}>
-        <Routes>
-          <Route path={initialPath} element={element} />
-          <Route path="/" element={<div>SHELL_PLACEHOLDER</div>} />
-          <Route path="/login" element={<div>LOGIN_PAGE</div>} />
-        </Routes>
-      </AuthClientProvider>
-    </MemoryRouter>,
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  const view = render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[initialPath]}>
+        <AuthClientProvider client={client}>
+          <Routes>
+            <Route path={initialPath} element={element} />
+            <Route path="/" element={<div>SHELL_PLACEHOLDER</div>} />
+            <Route path="/login" element={<div>LOGIN_PAGE</div>} />
+          </Routes>
+        </AuthClientProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
+  return { ...view, queryClient };
 }
 
 describe("LoginPage", () => {
@@ -118,6 +125,46 @@ describe("RegisterPage", () => {
 });
 
 describe("CreateOrgPage", () => {
+  it("clears tenant query data before organization creation can switch the tenant", async () => {
+    let resolveCreate!: (value: { data: { id: string }; error: null }) => void;
+    const createResult = new Promise<{ data: { id: string }; error: null }>((resolve) => {
+      resolveCreate = resolve;
+    });
+    let cachedTenantDataAtCreateCall: unknown = "CREATE_NOT_CALLED";
+    const client = createFakeAuthClient({
+      organization: {
+        create: vi.fn(() => createResult),
+        list: vi.fn(async () => ({ data: [] as OrganizationSummary[], error: null })),
+        setActive: vi.fn(async () => ({ data: {}, error: null })),
+      },
+    });
+    const { queryClient } = renderRouted(client, "/org/create", <CreateOrgPage />);
+    queryClient.setQueryData(["tenant-secret"], "OLD_ORG_SECRET");
+    expect(queryClient.getQueryData(["tenant-secret"])).toBe("OLD_ORG_SECRET");
+    vi.mocked(client.organization.create).mockImplementation(() => {
+      cachedTenantDataAtCreateCall = queryClient.getQueryData(["tenant-secret"]);
+      return createResult;
+    });
+
+    fireEvent.change(screen.getByLabelText("Название организации"), {
+      target: { value: "Acme Corp" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Создать" }));
+
+    await waitFor(() => {
+      expect(client.organization.create).toHaveBeenCalledWith({
+        name: "Acme Corp",
+        slug: "acme-corp",
+      });
+    });
+    expect(cachedTenantDataAtCreateCall).toBeUndefined();
+    expect(queryClient.getQueryData(["tenant-secret"])).toBeUndefined();
+    expect(screen.queryByText("SHELL_PLACEHOLDER")).toBeNull();
+
+    resolveCreate({ data: { id: "org_1" }, error: null });
+    await screen.findByText("SHELL_PLACEHOLDER");
+  });
+
   it("derives a slug from the name, creates, and activates the organization", async () => {
     const client = createFakeAuthClient();
     renderRouted(client, "/org/create", <CreateOrgPage />);
@@ -143,17 +190,22 @@ describe("CreateOrgPage", () => {
 
 describe("SelectOrgPage", () => {
   it("lists organizations from the auth client and activates the chosen one", async () => {
+    let resolveSetActive!: (value: { data: unknown; error: null }) => void;
+    const setActiveResult = new Promise<{ data: unknown; error: null }>((resolve) => {
+      resolveSetActive = resolve;
+    });
     const client = createFakeAuthClient({
       organization: {
         create: vi.fn(),
-        setActive: vi.fn(async () => ({ data: {}, error: null })),
+        setActive: vi.fn(() => setActiveResult),
         list: vi.fn(async () => ({
           data: [{ id: "org_1", name: "Acme Corp", slug: "acme-corp" }],
           error: null,
         })),
       },
     });
-    renderRouted(client, "/org/select", <SelectOrgPage />);
+    const { queryClient } = renderRouted(client, "/org/select", <SelectOrgPage />);
+    queryClient.setQueryData(["tenant-secret"], "OLD_ORG_SECRET");
 
     expect(await screen.findByText("Acme Corp")).toBeDefined();
 
@@ -162,6 +214,10 @@ describe("SelectOrgPage", () => {
     await waitFor(() => {
       expect(client.organization.setActive).toHaveBeenCalledWith({ organizationId: "org_1" });
     });
+    expect(queryClient.getQueryData(["tenant-secret"])).toBeUndefined();
+    expect(screen.queryByText("SHELL_PLACEHOLDER")).toBeNull();
+
+    resolveSetActive({ data: {}, error: null });
     await screen.findByText("SHELL_PLACEHOLDER");
   });
 

@@ -3,7 +3,7 @@ import express from "express";
 import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
-import { afterAll, beforeAll, describe, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
@@ -66,6 +66,24 @@ describe.skipIf(!ready)("station api-key auth e2e", () => {
 
     // A fresh (session-less) client authenticates purely by x-api-key.
     await request(app!.getHttpServer()).get("/shifts").set("x-api-key", created.key).expect(200);
+  });
+
+  it("keeps the station roster machine-only while preserving enrolled-device access", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+
+    await agent.get("/station/operators").expect(403);
+
+    const enrolled = await agent
+      .post("/station-devices")
+      .send({ name: "Roster terminal" })
+      .expect(201);
+    const roster = await request(app!.getHttpServer())
+      .get("/station/operators")
+      .set("x-api-key", enrolled.body.apiKey as string)
+      .expect(200);
+
+    expect(roster.body).toEqual({ items: [] });
   });
 
   it("a bad api-key and no session -> 401", async () => {

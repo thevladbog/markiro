@@ -135,10 +135,12 @@ function postCancelOrder(id: string): Promise<PickupOrderRowDto> {
 /** `GET /pickup-orders` -- the active tenant's pickup orders, optionally filtered. */
 export function usePickupOrders(
   params: ListPickupOrdersParams = {},
+  enabled = true,
 ): UseQueryResult<PickupOrderRowDto[]> {
   return useQuery({
     queryKey: pickupOrdersQueryKey(params),
     queryFn: () => fetchPickupOrders(params),
+    enabled,
   });
 }
 
@@ -155,8 +157,8 @@ export function usePickupOrder(id: string): UseQueryResult<PickupOrderDetailDto>
  * `usePickupOrders({ status: "pending" })` rather than its own endpoint --
  * returns 0 while the underlying query is loading (or has no data yet).
  */
-export function usePendingOrderCount(): number {
-  const { data } = usePickupOrders({ status: "pending" });
+export function usePendingOrderCount(enabled = true): number {
+  const { data } = usePickupOrders({ status: "pending" }, enabled);
   return data?.length ?? 0;
 }
 

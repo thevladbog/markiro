@@ -3,11 +3,34 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { CABINET_CAPABILITY } from "@markiro/domain";
+
+import type { AccessDocument } from "../src/access/api.js";
+import { AccessProvider } from "../src/access/context.js";
+import type * as PickupApiModule from "../src/pages/pickup/api.js";
 import { OrderDetailPage } from "../src/pages/pickup/OrderDetail.js";
+
+const { writeHookMountSpy } = vi.hoisted(() => ({ writeHookMountSpy: vi.fn() }));
+
+vi.mock("../src/pages/pickup/api.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof PickupApiModule>();
+  return {
+    ...actual,
+    useResolveOrder: () => {
+      writeHookMountSpy("resolve");
+      return actual.useResolveOrder();
+    },
+    useCancelOrder: () => {
+      writeHookMountSpy("cancel");
+      return actual.useCancelOrder();
+    },
+  };
+});
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  writeHookMountSpy.mockClear();
 });
 
 /** Minimal Response stand-in -- only what apps/admin/src/api/client.ts reads. */
@@ -64,7 +87,34 @@ const ORDER = {
 
 const REASONS = { items: [{ id: "r1", name: "Маркетинг", sortOrder: 0 }] };
 
-function renderPage(fetchMock: ReturnType<typeof vi.fn>) {
+const OPERATIONS_READ_ONLY: AccessDocument = {
+  roles: [],
+  capabilities: [CABINET_CAPABILITY.OPERATIONS_READ],
+};
+
+const OPERATIONS_WRITE_ACCESS: AccessDocument = {
+  roles: [],
+  capabilities: [CABINET_CAPABILITY.OPERATIONS_READ, CABINET_CAPABILITY.OPERATIONS_WRITE],
+};
+
+const OPERATIONS_WRITE_WITHOUT_INTEGRATIONS_READ: AccessDocument = {
+  roles: [],
+  capabilities: [CABINET_CAPABILITY.OPERATIONS_READ, CABINET_CAPABILITY.OPERATIONS_WRITE],
+};
+
+const OPERATIONS_WRITE_WITH_INTEGRATIONS_READ: AccessDocument = {
+  roles: [],
+  capabilities: [
+    CABINET_CAPABILITY.OPERATIONS_READ,
+    CABINET_CAPABILITY.OPERATIONS_WRITE,
+    CABINET_CAPABILITY.INTEGRATIONS_READ,
+  ],
+};
+
+function renderPage(
+  fetchMock: ReturnType<typeof vi.fn>,
+  access: AccessDocument = OPERATIONS_WRITE_ACCESS,
+) {
   vi.stubGlobal("fetch", fetchMock);
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -73,7 +123,14 @@ function renderPage(fetchMock: ReturnType<typeof vi.fn>) {
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={["/pickup/o1"]}>
         <Routes>
-          <Route path="/pickup/:id" element={<OrderDetailPage />} />
+          <Route
+            path="/pickup/:id"
+            element={
+              <AccessProvider value={access}>
+                <OrderDetailPage />
+              </AccessProvider>
+            }
+          />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -100,6 +157,18 @@ function defaultFetchMock() {
 }
 
 describe("OrderDetailPage", () => {
+  it("keeps order details readable while hiding resolution and cancel without operations.write", async () => {
+    renderPage(defaultFetchMock(), OPERATIONS_READ_ONLY);
+
+    expect(await screen.findByText(ORDER.employeeName)).toBeDefined();
+    expect(screen.getByText(ITEM_A.productName)).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Пробита на кассе" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Списать актом" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Отменить" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Печать" })).toBeDefined();
+    expect(writeHookMountSpy).not.toHaveBeenCalled();
+  });
+
   it("renders the employee name, both product names, and the full KM text", async () => {
     renderPage(defaultFetchMock());
 
@@ -178,7 +247,7 @@ describe("OrderDetailPage", () => {
       if (path === "/api/pickup-reasons") return jsonResponse(200, REASONS);
       throw new Error(`unexpected fetch: ${path}`);
     });
-    renderPage(fetchMock);
+    renderPage(fetchMock, OPERATIONS_WRITE_WITH_INTEGRATIONS_READ);
 
     expect(await screen.findByText("Заявка придержана — 1 товар(ов) без связи с 1С")).toBeDefined();
     // "Молоко 1л" also appears in the items table below, so scope this
@@ -187,6 +256,24 @@ describe("OrderDetailPage", () => {
     expect(within(alert).getByText("Молоко 1л")).toBeDefined();
     const link = within(alert).getByText("Перейти к очереди сопоставления");
     expect(link.closest("a")?.getAttribute("href")).toBe("/integrations/commerceml");
+  });
+
+  it("explains the held integration problem without a link when integrations.read is absent", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      const path = String(url);
+      if (path === "/api/pickup-orders/o1") {
+        return jsonResponse(200, { ...ORDER, exportHeldProductNames: ["Молоко 1л"] });
+      }
+      if (path === "/api/pickup-reasons") return jsonResponse(200, REASONS);
+      throw new Error(`unexpected fetch: ${path}`);
+    });
+    renderPage(fetchMock, OPERATIONS_WRITE_WITHOUT_INTEGRATIONS_READ);
+
+    const alert = await screen.findByRole("alert");
+    expect(
+      within(alert).getByText("Очередь сопоставления недоступна для вашей роли."),
+    ).toBeDefined();
+    expect(within(alert).queryByRole("link")).toBeNull();
   });
 
   it("does not show the held-order alert once the order has already been exported", async () => {

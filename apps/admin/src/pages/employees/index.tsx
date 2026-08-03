@@ -13,6 +13,9 @@ import {
 } from "@markiro/ui";
 import type { StatusChipStatus, TableColumn } from "@markiro/ui";
 
+import { CABINET_CAPABILITY } from "@markiro/domain";
+
+import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
 import { toast } from "../../lib/toast.js";
 import { EmployeeForm, type EmployeeFormValues } from "./EmployeeForm.js";
@@ -26,23 +29,144 @@ import {
   type EmployeeStatus,
 } from "./api.js";
 
-type FormModalState = { mode: "create" } | { mode: "edit"; employee: EmployeeDto } | null;
-
 const STATUS_TO_CHIP: Record<EmployeeStatus, StatusChipStatus> = {
   active: "ok",
   archived: "neutral",
 };
 
+function AuthorizedCreateEmployeeAction() {
+  const { t } = useTranslation();
+  const createMutation = useCreateEmployee();
+  const [open, setOpen] = useState(false);
+
+  const handleSubmit = async (input: CreateEmployeeInput) => {
+    try {
+      await createMutation.mutateAsync(input);
+      toast("ok", t("pages.employees.toasts.createSuccess"));
+      setOpen(false);
+    } catch (error) {
+      toast(
+        "error",
+        error instanceof ApiRequestError ? error.message : t("pages.employees.toasts.createError"),
+      );
+    }
+  };
+
+  return (
+    <>
+      <Button type="button" onClick={() => setOpen(true)}>
+        {t("pages.employees.addAction")}
+      </Button>
+      {open ? (
+        <EmployeeForm
+          open
+          mode="create"
+          submitting={createMutation.isPending}
+          onSubmit={handleSubmit}
+          onClose={() => setOpen(false)}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function AuthorizedEmployeeRowActions({ employee }: { employee: EmployeeDto }) {
+  const { t } = useTranslation();
+  const updateMutation = useUpdateEmployee();
+  const archiveMutation = useArchiveEmployee();
+  const [editing, setEditing] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+  const initialValues: EmployeeFormValues = {
+    fullName: employee.fullName,
+    role: employee.role ?? "",
+  };
+
+  const handleUpdate = async (input: CreateEmployeeInput) => {
+    try {
+      await updateMutation.mutateAsync({ id: employee.id, input });
+      toast("ok", t("pages.employees.toasts.updateSuccess"));
+      setEditing(false);
+    } catch (error) {
+      toast(
+        "error",
+        error instanceof ApiRequestError ? error.message : t("pages.employees.toasts.updateError"),
+      );
+    }
+  };
+
+  const handleArchive = async () => {
+    try {
+      await archiveMutation.mutateAsync(employee.id);
+      toast("ok", t("pages.employees.toasts.archiveSuccess"));
+      setArchiving(false);
+    } catch (error) {
+      toast(
+        "error",
+        error instanceof ApiRequestError ? error.message : t("pages.employees.toasts.archiveError"),
+      );
+    }
+  };
+
+  return (
+    <>
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+        <Button type="button" size="compact" variant="secondary" onClick={() => setEditing(true)}>
+          {t("pages.employees.edit")}
+        </Button>
+        {employee.status === "active" ? (
+          <Button
+            type="button"
+            size="compact"
+            variant="destructive"
+            onClick={() => setArchiving(true)}
+          >
+            {t("pages.employees.archive")}
+          </Button>
+        ) : null}
+      </div>
+      <EmployeeForm
+        open={editing}
+        mode="edit"
+        employee={employee}
+        initialValues={initialValues}
+        submitting={updateMutation.isPending}
+        onSubmit={handleUpdate}
+        onClose={() => setEditing(false)}
+      />
+      <Modal
+        open={archiving}
+        onClose={() => setArchiving(false)}
+        closeLabel={t("common.close")}
+        title={t("pages.employees.archiveConfirmTitle")}
+        footer={
+          <>
+            <Button type="button" variant="secondary" onClick={() => setArchiving(false)}>
+              {t("pages.employees.cancel")}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              loading={archiveMutation.isPending}
+              onClick={() => void handleArchive()}
+            >
+              {t("pages.employees.archiveConfirmAction")}
+            </Button>
+          </>
+        }
+      >
+        <p style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>
+          {t("pages.employees.archiveConfirmBody", { name: employee.fullName })}
+        </p>
+      </Modal>
+    </>
+  );
+}
+
 /** Admin employees CRUD screen -- Plan A Task 16 (list/create/edit/archive + badge issue/revoke). */
 export function EmployeesPage() {
   const { t } = useTranslation();
+  const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
   const { data, isPending, isError } = useEmployees();
-  const createMutation = useCreateEmployee();
-  const updateMutation = useUpdateEmployee();
-  const archiveMutation = useArchiveEmployee();
-
-  const [formState, setFormState] = useState<FormModalState>(null);
-  const [archiveTarget, setArchiveTarget] = useState<EmployeeDto | null>(null);
 
   const items = data ?? [];
 
@@ -74,80 +198,17 @@ export function EmployeesPage() {
         key: "actions",
         title: t("pages.employees.table.actions"),
         align: "right",
-        render: (row) => (
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <Button
-              type="button"
-              size="compact"
-              variant="secondary"
-              onClick={() => setFormState({ mode: "edit", employee: row })}
-            >
-              {t("pages.employees.edit")}
-            </Button>
-            {row.status === "active" && (
-              <Button
-                type="button"
-                size="compact"
-                variant="destructive"
-                onClick={() => setArchiveTarget(row)}
-              >
-                {t("pages.employees.archive")}
-              </Button>
-            )}
-          </div>
-        ),
+        render: (row) => (canWrite ? <AuthorizedEmployeeRowActions employee={row} /> : null),
       },
     ],
-    [t],
+    [t, canWrite],
   );
-
-  const editingEmployee = formState?.mode === "edit" ? formState.employee : undefined;
-  const initialValues: EmployeeFormValues | undefined = editingEmployee
-    ? { fullName: editingEmployee.fullName, role: editingEmployee.role ?? "" }
-    : undefined;
-
-  const handleSubmit = async (input: CreateEmployeeInput) => {
-    const isEdit = formState?.mode === "edit";
-    try {
-      if (formState?.mode === "edit") {
-        await updateMutation.mutateAsync({ id: formState.employee.id, input });
-        toast("ok", t("pages.employees.toasts.updateSuccess"));
-      } else {
-        await createMutation.mutateAsync(input);
-        toast("ok", t("pages.employees.toasts.createSuccess"));
-      }
-      setFormState(null);
-    } catch (error) {
-      const fallback = isEdit
-        ? t("pages.employees.toasts.updateError")
-        : t("pages.employees.toasts.createError");
-      toast("error", error instanceof ApiRequestError ? error.message : fallback);
-    }
-  };
-
-  const handleArchive = async () => {
-    if (!archiveTarget) return;
-    try {
-      await archiveMutation.mutateAsync(archiveTarget.id);
-      toast("ok", t("pages.employees.toasts.archiveSuccess"));
-      setArchiveTarget(null);
-    } catch (error) {
-      toast(
-        "error",
-        error instanceof ApiRequestError ? error.message : t("pages.employees.toasts.archiveError"),
-      );
-    }
-  };
 
   return (
     <div style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: 20 }}>
       <PageHeader
         title={t("pages.employees.title")}
-        actions={
-          <Button type="button" onClick={() => setFormState({ mode: "create" })}>
-            {t("pages.employees.addAction")}
-          </Button>
-        }
+        actions={canWrite ? <AuthorizedCreateEmployeeAction /> : null}
       />
 
       {isPending ? (
@@ -160,53 +221,11 @@ export function EmployeesPage() {
         <EmptyState
           title={t("pages.employees.emptyTitle")}
           hint={t("pages.employees.emptyHint")}
-          action={
-            <Button type="button" onClick={() => setFormState({ mode: "create" })}>
-              {t("pages.employees.addAction")}
-            </Button>
-          }
+          action={canWrite ? <AuthorizedCreateEmployeeAction /> : null}
         />
       ) : (
         <Table columns={columns} rows={items} />
       )}
-
-      <EmployeeForm
-        open={formState !== null}
-        mode={formState?.mode ?? "create"}
-        {...(editingEmployee ? { employee: editingEmployee } : {})}
-        {...(initialValues ? { initialValues } : {})}
-        submitting={createMutation.isPending || updateMutation.isPending}
-        onSubmit={handleSubmit}
-        onClose={() => setFormState(null)}
-      />
-
-      <Modal
-        open={archiveTarget !== null}
-        onClose={() => setArchiveTarget(null)}
-        closeLabel={t("common.close")}
-        title={t("pages.employees.archiveConfirmTitle")}
-        footer={
-          <>
-            <Button type="button" variant="secondary" onClick={() => setArchiveTarget(null)}>
-              {t("pages.employees.cancel")}
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              loading={archiveMutation.isPending}
-              onClick={() => void handleArchive()}
-            >
-              {t("pages.employees.archiveConfirmAction")}
-            </Button>
-          </>
-        }
-      >
-        {archiveTarget && (
-          <p style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>
-            {t("pages.employees.archiveConfirmBody", { name: archiveTarget.fullName })}
-          </p>
-        )}
-      </Modal>
     </div>
   );
 }

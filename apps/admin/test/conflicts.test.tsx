@@ -1,13 +1,37 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { CABINET_CAPABILITY } from "@markiro/domain";
+
+import type { AccessDocument } from "../src/access/api.js";
+import { AccessProvider } from "../src/access/context.js";
 import { formatScanTime } from "../src/lib/datetime.js";
+import type * as ConflictsApiModule from "../src/pages/conflicts/api.js";
 import { ConflictsPage } from "../src/pages/conflicts/index.js";
+
+const { writeHookMountSpy } = vi.hoisted(() => ({ writeHookMountSpy: vi.fn() }));
+
+vi.mock("../src/pages/conflicts/api.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof ConflictsApiModule>();
+  return {
+    ...actual,
+    useReviewConflict: () => {
+      const counted = useRef(false);
+      if (!counted.current) {
+        writeHookMountSpy();
+        counted.current = true;
+      }
+      return actual.useReviewConflict();
+    },
+  };
+});
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  writeHookMountSpy.mockClear();
 });
 
 /** Minimal Response stand-in -- only what apps/admin/src/api/client.ts reads. */
@@ -19,13 +43,25 @@ function jsonResponse(status: number, body: unknown): Response {
   } as Response;
 }
 
-function renderPage() {
+const OPERATIONS_READ_ONLY: AccessDocument = {
+  roles: [],
+  capabilities: [CABINET_CAPABILITY.OPERATIONS_READ],
+};
+
+const OPERATIONS_WRITE_ACCESS: AccessDocument = {
+  roles: [],
+  capabilities: [CABINET_CAPABILITY.OPERATIONS_READ, CABINET_CAPABILITY.OPERATIONS_WRITE],
+};
+
+function renderPage(access: AccessDocument = OPERATIONS_WRITE_ACCESS) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <ConflictsPage />
+      <AccessProvider value={access}>
+        <ConflictsPage />
+      </AccessProvider>
     </QueryClientProvider>,
   );
 }
@@ -53,6 +89,12 @@ const REVIEWED = {
   id: "c2",
   codeHash: "h2".padEnd(64, "0"),
   reviewedAt: "2026-07-28T11:00:00.000Z",
+};
+
+const SECOND_UNREVIEWED = {
+  ...UNREVIEWED,
+  id: "c3",
+  codeHash: "h3".padEnd(64, "0"),
 };
 
 /** Terminal ids are explicitly nullable -- this fixture exercises that case. */
@@ -122,6 +164,66 @@ function stubFetch(handlers: {
 }
 
 describe("ConflictsPage", () => {
+  it("keeps conflict details readable while hiding review without operations.write", async () => {
+    stubFetch({ conflicts: [UNREVIEWED], shifts: [SHIFT_S1] });
+
+    renderPage(OPERATIONS_READ_ONLY);
+
+    expect(
+      (await screen.findByRole("table")).querySelector(`[title="${UNREVIEWED.codeHash}"]`),
+    ).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Отметить рассмотренным" })).toBeNull();
+    expect(writeHookMountSpy).not.toHaveBeenCalled();
+  });
+
+  it("shares one review mutation observer across all writable rows", async () => {
+    stubFetch({ conflicts: [UNREVIEWED, SECOND_UNREVIEWED], shifts: [SHIFT_S1] });
+
+    renderPage();
+
+    expect(await screen.findAllByRole("button", { name: "Отметить рассмотренным" })).toHaveLength(
+      2,
+    );
+    expect(writeHookMountSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks every review action while the shared mutation is pending", async () => {
+    const reviewResult = new Promise<Response>(() => {});
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/conflicts/c1/review" && init?.method === "POST") {
+        return reviewResult;
+      }
+      if (path.startsWith("/api/conflicts")) {
+        return jsonResponse(200, { items: [UNREVIEWED, SECOND_UNREVIEWED] });
+      }
+      return jsonResponse(200, { items: [SHIFT_S1] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+
+    const buttons = (await screen.findAllByRole("button", {
+      name: "Отметить рассмотренным",
+    })) as HTMLButtonElement[];
+    fireEvent.click(buttons[0]!);
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.filter(
+          ([url, init]) => String(url) === "/api/conflicts/c1/review" && init?.method === "POST",
+        ),
+      ).toHaveLength(1);
+    });
+    expect(buttons[0]!.disabled).toBe(true);
+    expect(buttons[1]!.disabled).toBe(true);
+    expect(buttons[0]!.querySelector(".mk-spin")).not.toBeNull();
+    expect(buttons[1]!.querySelector(".mk-spin")).toBeNull();
+
+    fireEvent.click(buttons[1]!);
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  });
+
   it("renders conflicts from the mocked GET response with code, losing/winning terminals", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       const path = String(url);

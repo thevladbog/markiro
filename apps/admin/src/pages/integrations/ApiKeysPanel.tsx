@@ -4,6 +4,9 @@ import { useTranslation } from "react-i18next";
 import { Alert, Button, Card, EmptyState, Input, Modal, Spinner, Table } from "@markiro/ui";
 import type { TableColumn } from "@markiro/ui";
 
+import { CABINET_CAPABILITY } from "@markiro/domain";
+
+import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
 import { toast } from "../../lib/toast.js";
 import {
@@ -30,6 +33,22 @@ import {
  * props from `ChannelPage`.
  */
 export function ApiKeysPanel() {
+  const canManageCredentials = useCan(CABINET_CAPABILITY.CREDENTIALS_MANAGE);
+  return canManageCredentials ? <AuthorizedApiKeysPanel /> : <RestrictedApiKeysPanel />;
+}
+
+function RestrictedApiKeysPanel() {
+  const { t } = useTranslation();
+  return (
+    <Card title={t("pages.integrations.channel.apiKeys.title")}>
+      <p style={{ margin: 0, font: "var(--text-body)", color: "var(--fg-3)" }}>
+        {t("access.forbiddenBody")}
+      </p>
+    </Card>
+  );
+}
+
+function AuthorizedApiKeysPanel() {
   const { t, i18n } = useTranslation();
   const { data, isPending, isError } = useApiKeys();
   const keys = useMemo(() => data ?? [], [data]);

@@ -1,7 +1,9 @@
 import { Controller, Get, Query, Req, UseGuards } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
+import { CABINET_CAPABILITY } from "@markiro/domain";
+import { RequirePermissions } from "../../authorization/access-policy";
+import { AuthorizationGuard } from "../../authorization/authorization.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
-import { SessionOnlyGuard } from "../../tenancy/session-only.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
   listBoxExceptionsQuerySchema,
@@ -14,12 +16,13 @@ import { BoxExceptionsService } from "./box-exceptions.service";
  * Manager-only, same reasoning as boxes.controller.ts: a station has no
  * business browsing the exception ledger, its own or another terminal's --
  * this is the audit trail a manager reviews, not a floor concern.
- * `SessionOnlyGuard` keeps a station api-key out even though `TenantGuard`
+ * Cabinet authorization keeps a station api-key out even though `TenantGuard`
  * accepts it for tenant resolution -- see docs/device-key-surface.md.
  */
 @ApiTags("box-exceptions")
 @Controller("box-exceptions")
-@UseGuards(TenantGuard, SessionOnlyGuard)
+@UseGuards(TenantGuard, AuthorizationGuard)
+@RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
 export class BoxExceptionsController {
   constructor(private readonly boxExceptionsService: BoxExceptionsService) {}
 

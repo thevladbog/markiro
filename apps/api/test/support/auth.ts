@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
+import { schema, type Db } from "@markiro/db";
 import type request from "supertest";
 
 /**
@@ -40,4 +42,20 @@ export async function signUpAndActivate(agent: ReturnType<typeof request.agent>)
   const orgId = await signUpWithInactiveOrg(agent);
   await agent.post("/api/auth/organization/set-active").send({ organizationId: orgId }).expect(200);
   return orgId;
+}
+
+/** Replaces the fixture's sole membership role without changing its session. */
+export async function setOnlyOrganizationMemberRole(
+  db: Db,
+  organizationId: string,
+  role: string,
+): Promise<void> {
+  const rows = await db
+    .update(schema.member)
+    .set({ role })
+    .where(eq(schema.member.organizationId, organizationId))
+    .returning({ id: schema.member.id });
+  if (rows.length !== 1) {
+    throw new Error("Expected exactly one organization member in test fixture");
+  }
 }

@@ -8,6 +8,7 @@ import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { listenOnLoopback } from "./support/listen-loopback";
+import { signUpAndActivate } from "./support/auth";
 
 /**
  * Requires a reachable Postgres with the Better Auth + platform schema
@@ -74,5 +75,15 @@ describe.skipIf(!ready)("auth e2e", () => {
       .post("/api/auth/organization/create")
       .send({ name: "No Session", slug: `no-session-${randomUUID()}` })
       .expect(401);
+  });
+
+  it("does not expose Better Auth's generic API-key management endpoint", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const organizationId = await signUpAndActivate(agent);
+
+    await agent
+      .post("/api/auth/api-key/create")
+      .send({ configId: "station", organizationId, name: "bypass" })
+      .expect(404);
   });
 });

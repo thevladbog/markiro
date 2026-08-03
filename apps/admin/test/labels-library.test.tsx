@@ -26,8 +26,10 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { LabelTemplateSpec } from "@markiro/domain";
+import { CABINET_CAPABILITY, type LabelTemplateSpec } from "@markiro/domain";
 
+import type { AccessDocument } from "../src/access/api.js";
+import { AccessProvider } from "../src/access/context.js";
 import { LabelTemplatesPage } from "../src/pages/labels/index.js";
 
 afterEach(() => {
@@ -44,14 +46,26 @@ function jsonResponse(status: number, body: unknown): Response {
   } as Response;
 }
 
-function renderPage() {
+const OPERATIONS_READ_ONLY: AccessDocument = {
+  roles: [],
+  capabilities: [CABINET_CAPABILITY.OPERATIONS_READ],
+};
+
+const OPERATIONS_WRITE_ACCESS: AccessDocument = {
+  roles: [],
+  capabilities: [CABINET_CAPABILITY.OPERATIONS_READ, CABINET_CAPABILITY.OPERATIONS_WRITE],
+};
+
+function renderPage(access: AccessDocument = OPERATIONS_WRITE_ACCESS) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={["/labels"]}>
-        <LabelTemplatesPage />
+        <AccessProvider value={access}>
+          <LabelTemplatesPage />
+        </AccessProvider>
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -112,6 +126,17 @@ function stubFetch(
 }
 
 describe("LabelTemplatesPage", () => {
+  it("keeps template cards readable but removes editor links without operations.write", async () => {
+    stubFetch([BOX_SUMMARY]);
+
+    renderPage(OPERATIONS_READ_ONLY);
+
+    expect(await screen.findByText(BOX_SUMMARY.name)).toBeDefined();
+    expect(screen.queryByRole("link", { name: "+ Новый шаблон" })).toBeNull();
+    expect(screen.queryByRole("link", { name: /Короб 100×100 v3/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Новый шаблон" })).toBeNull();
+  });
+
   it("renders cards from the mocked GET response with name and size/DPI/language badges", async () => {
     stubFetch([BOX_SUMMARY, UNIT_SUMMARY]);
 

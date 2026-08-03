@@ -11,11 +11,14 @@ import { and, eq } from "drizzle-orm";
 import type { Request } from "express";
 import { schema, type Auth, type Db } from "@markiro/db";
 import { AUTH, DB } from "../auth/auth.module";
+import type { CabinetPrincipal } from "../authorization/authorization.service";
 
 /** Exported so guarded controllers can type `@Req()` without re-declaring this. */
 export interface RequestWithTenant extends Request {
   tenantId?: string;
   userId?: string;
+  authKind?: "session" | "station";
+  cabinetPrincipal?: CabinetPrincipal;
   /**
    * The calling station device's own id (`station_devices.id`), set only on
    * the api-key path below. A session-authenticated caller (admin/manager
@@ -52,6 +55,7 @@ export class TenantGuard implements CanActivate {
       const tenantId = session.session.activeOrganizationId;
       if (!tenantId) throw new ForbiddenException("No active organization");
       req.tenantId = tenantId;
+      req.authKind = "session";
       // Enrollment (Task 6) mints an org-owned key server-side and needs the
       // acting member's id as the key's `userId`; expose it on the request.
       req.userId = session.user.id;
@@ -70,6 +74,7 @@ export class TenantGuard implements CanActivate {
       });
       if (result.valid && result.key) {
         req.tenantId = result.key.referenceId;
+        req.authKind = "station";
         // Enrollment (station-devices.service.ts) mints exactly one api-key
         // per device and stores that key's id as station_devices.apiKeyId --
         // a 1:1 mapping, so this lookup is the one reliable way to learn

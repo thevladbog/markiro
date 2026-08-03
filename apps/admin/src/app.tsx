@@ -1,5 +1,9 @@
 import { BrowserRouter, Route, Routes } from "react-router";
 
+import { CABINET_CAPABILITY } from "@markiro/domain";
+
+import { RequireCapability } from "./access/context.js";
+import { AuthQueryBoundary } from "./query/AuthQueryBoundary.js";
 import { CreateOrgPage } from "./pages/auth/CreateOrg.js";
 import { LoginPage } from "./pages/auth/Login.js";
 import { RegisterPage } from "./pages/auth/Register.js";
@@ -31,34 +35,163 @@ import { ShellPage } from "./pages/Shell.js";
  * jsdom-based render tests (MemoryRouter drop-in, no router object to
  * construct per test).
  */
+const C = CABINET_CAPABILITY;
+
+export function AppRoutes() {
+  return (
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+      <Route path="/register" element={<RegisterPage />} />
+      <Route path="/org/create" element={<CreateOrgPage />} />
+      <Route path="/org/select" element={<SelectOrgPage />} />
+      <Route path="/" element={<ShellPage />}>
+        <Route
+          index
+          element={
+            <RequireCapability capability={C.OPERATIONS_READ}>
+              <DashboardPage />
+            </RequireCapability>
+          }
+        />
+        <Route
+          path="catalog"
+          element={
+            <RequireCapability capability={C.OPERATIONS_READ}>
+              <CatalogPage />
+            </RequireCapability>
+          }
+        />
+        <Route
+          path="shifts"
+          element={
+            <RequireCapability capability={C.OPERATIONS_READ}>
+              <ShiftsPage />
+            </RequireCapability>
+          }
+        />
+        <Route
+          path="boxes"
+          element={
+            <RequireCapability capability={C.OPERATIONS_READ}>
+              <BoxesPage />
+            </RequireCapability>
+          }
+        />
+        <Route
+          path="conflicts"
+          element={
+            <RequireCapability capability={C.OPERATIONS_READ}>
+              <ConflictsPage />
+            </RequireCapability>
+          }
+        />
+        <Route
+          path="counterparties"
+          element={
+            <RequireCapability capability={C.OPERATIONS_READ}>
+              <CounterpartiesPage />
+            </RequireCapability>
+          }
+        />
+        <Route
+          path="employees"
+          element={
+            <RequireCapability capability={C.OPERATIONS_READ}>
+              <EmployeesPage />
+            </RequireCapability>
+          }
+        />
+        <Route
+          path="kiosks"
+          element={
+            <RequireCapability capability={C.OPERATIONS_READ}>
+              <KiosksPage />
+            </RequireCapability>
+          }
+        />
+        <Route
+          path="integrations"
+          element={
+            <RequireCapability capability={C.INTEGRATIONS_READ}>
+              <IntegrationsPage />
+            </RequireCapability>
+          }
+        />
+        <Route
+          path="integrations/:type"
+          element={
+            <RequireCapability capability={C.INTEGRATIONS_READ}>
+              <ChannelPage />
+            </RequireCapability>
+          }
+        />
+        <Route
+          path="labels"
+          element={
+            <RequireCapability capability={C.OPERATIONS_READ}>
+              <LabelTemplatesPage />
+            </RequireCapability>
+          }
+        />
+        <Route
+          path="labels/new"
+          element={
+            <RequireCapability capability={C.OPERATIONS_WRITE}>
+              <LabelEditorPage />
+            </RequireCapability>
+          }
+        />
+        <Route
+          path="labels/:id"
+          element={
+            <RequireCapability capability={C.OPERATIONS_WRITE}>
+              <LabelEditorPage />
+            </RequireCapability>
+          }
+        />
+        <Route
+          path="pickup"
+          element={
+            <RequireCapability capability={C.OPERATIONS_READ}>
+              <PickupPage />
+            </RequireCapability>
+          }
+        />
+        <Route
+          path="pickup/rejections"
+          element={
+            <RequireCapability capability={C.OPERATIONS_READ}>
+              <RejectionsPage />
+            </RequireCapability>
+          }
+        />
+        <Route
+          path="pickup/:id"
+          element={
+            <RequireCapability capability={C.OPERATIONS_READ}>
+              <OrderDetailPage />
+            </RequireCapability>
+          }
+        />
+        <Route
+          path="settings"
+          element={
+            <RequireCapability capability={C.TENANT_SETTINGS_MANAGE}>
+              <SettingsPage />
+            </RequireCapability>
+          }
+        />
+      </Route>
+    </Routes>
+  );
+}
+
 export function App() {
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/register" element={<RegisterPage />} />
-        <Route path="/org/create" element={<CreateOrgPage />} />
-        <Route path="/org/select" element={<SelectOrgPage />} />
-        <Route path="/" element={<ShellPage />}>
-          <Route index element={<DashboardPage />} />
-          <Route path="catalog" element={<CatalogPage />} />
-          <Route path="shifts" element={<ShiftsPage />} />
-          <Route path="boxes" element={<BoxesPage />} />
-          <Route path="conflicts" element={<ConflictsPage />} />
-          <Route path="counterparties" element={<CounterpartiesPage />} />
-          <Route path="employees" element={<EmployeesPage />} />
-          <Route path="kiosks" element={<KiosksPage />} />
-          <Route path="integrations" element={<IntegrationsPage />} />
-          <Route path="integrations/:type" element={<ChannelPage />} />
-          <Route path="labels" element={<LabelTemplatesPage />} />
-          <Route path="labels/new" element={<LabelEditorPage />} />
-          <Route path="labels/:id" element={<LabelEditorPage />} />
-          <Route path="pickup" element={<PickupPage />} />
-          <Route path="pickup/rejections" element={<RejectionsPage />} />
-          <Route path="pickup/:id" element={<OrderDetailPage />} />
-          <Route path="settings" element={<SettingsPage />} />
-        </Route>
-      </Routes>
+      <AuthQueryBoundary>
+        <AppRoutes />
+      </AuthQueryBoundary>
     </BrowserRouter>
   );
 }

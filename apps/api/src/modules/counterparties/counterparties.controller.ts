@@ -12,8 +12,10 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
+import { CABINET_CAPABILITY } from "@markiro/domain";
+import { RequirePermissions } from "../../authorization/access-policy";
+import { AuthorizationGuard } from "../../authorization/authorization.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
-import { SessionOnlyGuard } from "../../tenancy/session-only.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
   createCounterpartySchema,
@@ -29,18 +31,20 @@ import { CounterpartiesService } from "./counterparties.service";
 
 @ApiTags("counterparties")
 @Controller("counterparties")
-// The station never calls this module. SessionOnlyGuard keeps a station
+// The station never calls this module. Cabinet authorization keeps a station
 // api-key out even though TenantGuard accepts it for tenant resolution.
-@UseGuards(TenantGuard, SessionOnlyGuard)
+@UseGuards(TenantGuard, AuthorizationGuard)
 export class CounterpartiesController {
   constructor(private readonly counterpartiesService: CounterpartiesService) {}
 
   @Get()
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
   async listCounterparties(@Req() req: RequestWithTenant): Promise<ListCounterpartiesResponseDto> {
     return this.counterpartiesService.listCounterparties(req.tenantId!);
   }
 
   @Get(":id")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
   async getCounterparty(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
@@ -49,6 +53,7 @@ export class CounterpartiesController {
   }
 
   @Post()
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async createCounterparty(
     @Req() req: RequestWithTenant,
     @Body(new ZodValidationPipe(createCounterpartySchema)) body: CreateCounterpartyDto,
@@ -57,6 +62,7 @@ export class CounterpartiesController {
   }
 
   @Patch(":id")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async updateCounterparty(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
@@ -67,16 +73,19 @@ export class CounterpartiesController {
 
   @Delete(":id")
   @HttpCode(204)
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async deleteCounterparty(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<void> {
     return this.counterpartiesService.deleteCounterparty(req.tenantId!, id);
   }
 
   @Get(":id/sscc")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
   async getSscc(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<SsccCounterDto> {
     return this.counterpartiesService.getSscc(req.tenantId!, id);
   }
 
   @Put(":id/sscc")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async putSscc(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,

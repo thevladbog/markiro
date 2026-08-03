@@ -10,7 +10,9 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
-import { SessionOnlyGuard } from "../../tenancy/session-only.guard";
+import { CABINET_CAPABILITY } from "@markiro/domain";
+import { RequirePermissions } from "../../authorization/access-policy";
+import { AuthorizationGuard } from "../../authorization/authorization.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
@@ -26,11 +28,12 @@ import { PickupRejectionsService } from "./pickup-rejections.service";
 // it (see docs/device-key-surface.md).
 @ApiTags("pickup-rejections")
 @Controller("pickup-rejections")
-@UseGuards(TenantGuard, SessionOnlyGuard)
+@UseGuards(TenantGuard, AuthorizationGuard)
 export class PickupRejectionsController {
   constructor(private readonly pickupRejectionsService: PickupRejectionsService) {}
 
   @Get()
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
   async list(
     @Req() req: RequestWithTenant,
     @Query(new ZodValidationPipe(listPickupRejectionsQuerySchema))
@@ -41,6 +44,7 @@ export class PickupRejectionsController {
 
   @Post(":id/acknowledge")
   @HttpCode(200)
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async acknowledge(
     @Req() req: RequestWithTenant,
     @Param("id", new ParseUUIDPipe()) id: string,

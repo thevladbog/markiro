@@ -2,12 +2,55 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { CABINET_CAPABILITY } from "@markiro/domain";
+
+import type { AccessDocument } from "../src/access/api.js";
+import { AccessProvider } from "../src/access/context.js";
+import type * as KiosksApiModule from "../src/pages/kiosks/api.js";
 import { KiosksPage } from "../src/pages/kiosks/index.js";
+
+const { writeHookMountSpy } = vi.hoisted(() => ({ writeHookMountSpy: vi.fn() }));
+
+vi.mock("../src/pages/kiosks/api.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof KiosksApiModule>();
+  return {
+    ...actual,
+    useCreateKiosk: () => {
+      writeHookMountSpy("create-kiosk");
+      return actual.useCreateKiosk();
+    },
+    useUpdateKiosk: () => {
+      writeHookMountSpy("update-kiosk");
+      return actual.useUpdateKiosk();
+    },
+    useArchiveKiosk: () => {
+      writeHookMountSpy("archive-kiosk");
+      return actual.useArchiveKiosk();
+    },
+    useSetKioskProducts: () => {
+      writeHookMountSpy("set-products");
+      return actual.useSetKioskProducts();
+    },
+    useCreateReason: () => {
+      writeHookMountSpy("create-reason");
+      return actual.useCreateReason();
+    },
+    useUpdateReason: () => {
+      writeHookMountSpy("update-reason");
+      return actual.useUpdateReason();
+    },
+    useArchiveReason: () => {
+      writeHookMountSpy("archive-reason");
+      return actual.useArchiveReason();
+    },
+  };
+});
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.useRealTimers();
+  writeHookMountSpy.mockClear();
 });
 
 /** Minimal Response stand-in -- only what apps/admin/src/api/client.ts reads. */
@@ -19,13 +62,42 @@ function jsonResponse(status: number, body: unknown): Response {
   } as Response;
 }
 
-function renderPage() {
+const ADMIN_ACCESS: AccessDocument = {
+  roles: ["admin"],
+  capabilities: [
+    CABINET_CAPABILITY.OPERATIONS_READ,
+    CABINET_CAPABILITY.OPERATIONS_WRITE,
+    CABINET_CAPABILITY.INTEGRATIONS_READ,
+    CABINET_CAPABILITY.INTEGRATIONS_WRITE,
+    CABINET_CAPABILITY.TENANT_SETTINGS_MANAGE,
+    CABINET_CAPABILITY.CREDENTIALS_MANAGE,
+  ],
+};
+
+const MANAGER_ACCESS: AccessDocument = {
+  roles: ["manager"],
+  capabilities: [CABINET_CAPABILITY.OPERATIONS_READ, CABINET_CAPABILITY.OPERATIONS_WRITE],
+};
+
+const OPERATIONS_READ_ONLY: AccessDocument = {
+  roles: [],
+  capabilities: [CABINET_CAPABILITY.OPERATIONS_READ],
+};
+
+const OPERATIONS_READ_CREDENTIALS_ACCESS: AccessDocument = {
+  roles: [],
+  capabilities: [CABINET_CAPABILITY.OPERATIONS_READ, CABINET_CAPABILITY.CREDENTIALS_MANAGE],
+};
+
+function renderPage(access: AccessDocument = ADMIN_ACCESS) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <KiosksPage />
+      <AccessProvider value={access}>
+        <KiosksPage />
+      </AccessProvider>
     </QueryClientProvider>,
   );
 }
@@ -129,6 +201,39 @@ function stubFetch(overrides: {
 }
 
 describe("KiosksPage", () => {
+  it("keeps kiosk rows readable while hiding operational mutations without operations.write", async () => {
+    const fetchMock = stubFetch({
+      kiosks: [ONLINE_KIOSK],
+      products: [PRODUCT_A],
+      reasons: [REASON_A],
+    });
+
+    renderPage(OPERATIONS_READ_ONLY);
+
+    expect(await screen.findByText(ONLINE_KIOSK.name)).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Добавить киоск" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Изменить" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "В архив" })).toBeNull();
+    expect(screen.getByText(REASON_A.name)).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Добавить причину" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Сохранить" })).toBeNull();
+    expect(
+      fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/pickup-reasons")),
+    ).toBe(true);
+    expect(writeHookMountSpy).not.toHaveBeenCalled();
+  });
+
+  it("keeps pairing independently available with credentials.manage", async () => {
+    stubFetch({ kiosks: [ONLINE_KIOSK], products: [PRODUCT_A] });
+
+    renderPage(OPERATIONS_READ_CREDENTIALS_ACCESS);
+
+    expect(await screen.findByText(ONLINE_KIOSK.name)).toBeDefined();
+    expect(screen.getByRole("button", { name: "Код привязки" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Изменить" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "В архив" })).toBeNull();
+  });
+
   it("renders the kiosks list with online/offline status derived from lastSeenAt", async () => {
     stubFetch({ kiosks: [ONLINE_KIOSK, OFFLINE_KIOSK], products: [PRODUCT_A, PRODUCT_B] });
 
@@ -222,6 +327,20 @@ describe("KiosksPage", () => {
     // only, and a space pasted into the kiosk's numeric keypad would not match.
     fireEvent.click(dialog.getByRole("button", { name: "Скопировать" }));
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith("12345678");
+  });
+
+  it("hides pairing from managers while keeping operational kiosk management visible", async () => {
+    const fetchMock = stubFetch({ kiosks: [ONLINE_KIOSK], products: [PRODUCT_A] });
+
+    renderPage(MANAGER_ACCESS);
+    await screen.findByText("Касса у входа");
+
+    expect(screen.queryByRole("button", { name: "Код привязки" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Изменить" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "В архив" })).toBeDefined();
+    expect(fetchMock.mock.calls.some(([path]) => String(path).includes("/pairing-code"))).toBe(
+      false,
+    );
   });
 
   it("renders the pairing code as a scannable barcode", async () => {

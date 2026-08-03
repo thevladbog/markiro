@@ -2,12 +2,39 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
+import { CABINET_CAPABILITY } from "@markiro/domain";
+
+import type { AccessDocument } from "../src/access/api.js";
+import { AccessProvider } from "../src/access/context.js";
 import i18n from "../src/i18n/index.js";
+import type * as EmployeesApiModule from "../src/pages/employees/api.js";
 import { EmployeesPage } from "../src/pages/employees/index.js";
+
+const { writeHookMountSpy } = vi.hoisted(() => ({ writeHookMountSpy: vi.fn() }));
+
+vi.mock("../src/pages/employees/api.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof EmployeesApiModule>();
+  return {
+    ...actual,
+    useCreateEmployee: () => {
+      writeHookMountSpy("create");
+      return actual.useCreateEmployee();
+    },
+    useUpdateEmployee: () => {
+      writeHookMountSpy("update");
+      return actual.useUpdateEmployee();
+    },
+    useArchiveEmployee: () => {
+      writeHookMountSpy("archive");
+      return actual.useArchiveEmployee();
+    },
+  };
+});
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  writeHookMountSpy.mockClear();
 });
 
 /** Minimal Response stand-in -- only what apps/admin/src/api/client.ts reads. */
@@ -19,13 +46,25 @@ function jsonResponse(status: number, body: unknown): Response {
   } as Response;
 }
 
-function renderPage() {
+const OPERATIONS_READ_ONLY: AccessDocument = {
+  roles: [],
+  capabilities: [CABINET_CAPABILITY.OPERATIONS_READ],
+};
+
+const OPERATIONS_WRITE_ACCESS: AccessDocument = {
+  roles: [],
+  capabilities: [CABINET_CAPABILITY.OPERATIONS_READ, CABINET_CAPABILITY.OPERATIONS_WRITE],
+};
+
+function renderPage(access: AccessDocument = OPERATIONS_WRITE_ACCESS) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <EmployeesPage />
+      <AccessProvider value={access}>
+        <EmployeesPage />
+      </AccessProvider>
     </QueryClientProvider>,
   );
 }
@@ -55,6 +94,27 @@ const JANE = {
 };
 
 describe("EmployeesPage", () => {
+  it("keeps employee rows readable while hiding all mutations without operations.write", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).startsWith("/api/employees")) {
+        return jsonResponse(200, { items: [JANE] });
+      }
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage(OPERATIONS_READ_ONLY);
+
+    expect(await screen.findByText(JANE.fullName)).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Добавить сотрудника" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Изменить" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "В архив" })).toBeNull();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/operators"))).toBe(
+      false,
+    );
+    expect(writeHookMountSpy).not.toHaveBeenCalled();
+  });
+
   it("renders employees from the mocked GET response, incl. role, status, and active-badge count", async () => {
     const fetchMock = vi.fn(async () => jsonResponse(200, { items: [JANE] }));
     vi.stubGlobal("fetch", fetchMock);

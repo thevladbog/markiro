@@ -16,10 +16,13 @@ import {
 } from "@markiro/ui";
 import type { SelectOption, StatusChipStatus, TableColumn } from "@markiro/ui";
 
+import { CABINET_CAPABILITY } from "@markiro/domain";
+
+import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
 import { formatCreatedAt } from "../../lib/datetime.js";
 import { toast } from "../../lib/toast.js";
-import { usePickupReasons } from "../kiosks/api.js";
+import { usePickupReasons, type ReasonDto } from "../kiosks/api.js";
 import {
   useCancelOrder,
   usePickupOrder,
@@ -35,7 +38,7 @@ const STATUS_TO_CHIP: Record<PickupOrderStatus, StatusChipStatus> = {
   cancelled: "error",
 };
 
-type ModalKind = "punch" | "writeoff" | "cancel" | null;
+type ResolveModalKind = "punch" | "writeoff" | null;
 
 /**
  * Lazily loaded so bwip-js (reached through `@markiro/domain`'s DataMatrix
@@ -53,29 +56,32 @@ function DetailField({ label, value }: { label: string; value: ReactNode }) {
   );
 }
 
-/**
- * Admin pickup-order detail card -- Plan A Task 15. Shows the order header
- * (employee/kiosk/reason/total/status), the per-item DataMatrix + raw KM
- * table, and the resolve/cancel/print action bar. Actions are only enabled
- * while the order is `pending` -- `punched`/`writtenoff`/`cancelled` orders
- * are read-only. Reached from `pages/pickup/index.tsx`'s `orderNo` link.
- */
-export function OrderDetailPage() {
-  const { t, i18n } = useTranslation();
-  const { id } = useParams();
-  const orderId = id ?? "";
-
-  const { data: order, isPending, isError } = usePickupOrder(orderId);
-  const { data: reasonsData } = usePickupReasons();
+function AuthorizedResolveOrderActions({
+  orderId,
+  pending,
+  reasons,
+}: {
+  orderId: string;
+  pending: boolean;
+  reasons: ReasonDto[];
+}) {
+  const { t } = useTranslation();
   const resolveMutation = useResolveOrder();
-  const cancelMutation = useCancelOrder();
-
-  const [activeModal, setActiveModal] = useState<ModalKind>(null);
+  const [activeModal, setActiveModal] = useState<ResolveModalKind>(null);
   const [receiptNo, setReceiptNo] = useState("");
   const [actNo, setActNo] = useState("");
   const [writeoffReasonId, setWriteoffReasonId] = useState("");
 
-  const reasons = reasonsData ?? [];
+  const reasonOptions: SelectOption[] =
+    reasons.length === 0
+      ? [
+          {
+            value: "",
+            label: t("pages.pickup.detail.writeoffModal.noReasonsHint"),
+            disabled: true,
+          },
+        ]
+      : reasons.map((reason) => ({ value: reason.id, label: reason.name }));
 
   const closeModal = () => setActiveModal(null);
 
@@ -111,11 +117,107 @@ export function OrderDetailPage() {
     }
   };
 
+  return (
+    <>
+      <Button
+        type="button"
+        variant="primary"
+        disabled={!pending}
+        onClick={() => {
+          setReceiptNo("");
+          setActiveModal("punch");
+        }}
+      >
+        {t("pages.pickup.detail.actions.punch")}
+      </Button>
+      <Button
+        type="button"
+        variant="secondary"
+        disabled={!pending}
+        onClick={() => {
+          setActNo("");
+          setWriteoffReasonId(reasons[0]?.id ?? "");
+          setActiveModal("writeoff");
+        }}
+      >
+        {t("pages.pickup.detail.actions.writeoff")}
+      </Button>
+      <Modal
+        open={activeModal === "punch"}
+        onClose={closeModal}
+        closeLabel={t("common.close")}
+        title={t("pages.pickup.detail.punchModal.title")}
+        footer={
+          <>
+            <Button type="button" variant="secondary" onClick={closeModal}>
+              {t("pages.pickup.detail.dismissAction")}
+            </Button>
+            <Button
+              type="button"
+              loading={resolveMutation.isPending}
+              disabled={receiptNo.trim().length === 0}
+              onClick={() => void handlePunch()}
+            >
+              {t("pages.pickup.detail.punchModal.submit")}
+            </Button>
+          </>
+        }
+      >
+        <Input
+          label={t("pages.pickup.detail.punchModal.receiptNoLabel")}
+          value={receiptNo}
+          onChange={(event) => setReceiptNo(event.target.value)}
+        />
+      </Modal>
+      <Modal
+        open={activeModal === "writeoff"}
+        onClose={closeModal}
+        closeLabel={t("common.close")}
+        title={t("pages.pickup.detail.writeoffModal.title")}
+        footer={
+          <>
+            <Button type="button" variant="secondary" onClick={closeModal}>
+              {t("pages.pickup.detail.dismissAction")}
+            </Button>
+            <Button
+              type="button"
+              loading={resolveMutation.isPending}
+              disabled={actNo.trim().length === 0 || writeoffReasonId.length === 0}
+              onClick={() => void handleWriteoff()}
+            >
+              {t("pages.pickup.detail.writeoffModal.submit")}
+            </Button>
+          </>
+        }
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <Input
+            label={t("pages.pickup.detail.writeoffModal.actNoLabel")}
+            value={actNo}
+            onChange={(event) => setActNo(event.target.value)}
+          />
+          <Select
+            label={t("pages.pickup.detail.writeoffModal.reasonLabel")}
+            options={reasonOptions}
+            value={writeoffReasonId}
+            onChange={setWriteoffReasonId}
+          />
+        </div>
+      </Modal>
+    </>
+  );
+}
+
+function AuthorizedCancelOrderAction({ orderId, pending }: { orderId: string; pending: boolean }) {
+  const { t } = useTranslation();
+  const cancelMutation = useCancelOrder();
+  const [open, setOpen] = useState(false);
+
   const handleCancel = async () => {
     try {
       await cancelMutation.mutateAsync(orderId);
       toast("ok", t("pages.pickup.toasts.cancelSuccess"));
-      closeModal();
+      setOpen(false);
     } catch (error) {
       toast(
         "error",
@@ -123,6 +225,59 @@ export function OrderDetailPage() {
       );
     }
   };
+
+  return (
+    <>
+      <Button type="button" variant="destructive" disabled={!pending} onClick={() => setOpen(true)}>
+        {t("pages.pickup.detail.actions.cancel")}
+      </Button>
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        closeLabel={t("common.close")}
+        title={t("pages.pickup.detail.cancelModal.title")}
+        footer={
+          <>
+            <Button type="button" variant="secondary" onClick={() => setOpen(false)}>
+              {t("pages.pickup.detail.dismissAction")}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              loading={cancelMutation.isPending}
+              onClick={() => void handleCancel()}
+            >
+              {t("pages.pickup.detail.cancelModal.confirmAction")}
+            </Button>
+          </>
+        }
+      >
+        <p style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>
+          {t("pages.pickup.detail.cancelModal.body")}
+        </p>
+      </Modal>
+    </>
+  );
+}
+
+/**
+ * Admin pickup-order detail card -- Plan A Task 15. Shows the order header
+ * (employee/kiosk/reason/total/status), the per-item DataMatrix + raw KM
+ * table, and the resolve/cancel/print action bar. Actions are only enabled
+ * while the order is `pending` -- `punched`/`writtenoff`/`cancelled` orders
+ * are read-only. Reached from `pages/pickup/index.tsx`'s `orderNo` link.
+ */
+export function OrderDetailPage() {
+  const { t, i18n } = useTranslation();
+  const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
+  const canReadIntegrations = useCan(CABINET_CAPABILITY.INTEGRATIONS_READ);
+  const { id } = useParams();
+  const orderId = id ?? "";
+
+  const { data: order, isPending, isError } = usePickupOrder(orderId);
+  const { data: reasonsData } = usePickupReasons();
+
+  const reasons = reasonsData ?? [];
 
   if (isPending) {
     return (
@@ -144,17 +299,6 @@ export function OrderDetailPage() {
   const reasonText = `${t(`pages.pickup.reason.${order.reason}`)}${
     order.writeoffReasonName ? ` · ${order.writeoffReasonName}` : ""
   }`;
-
-  const reasonOptions: SelectOption[] =
-    reasons.length === 0
-      ? [
-          {
-            value: "",
-            label: t("pages.pickup.detail.writeoffModal.noReasonsHint"),
-            disabled: true,
-          },
-        ]
-      : reasons.map((reason) => ({ value: reason.id, label: reason.name }));
 
   const itemColumns: TableColumn<PickupOrderItemDto>[] = [
     {
@@ -278,9 +422,13 @@ export function OrderDetailPage() {
               ))}
             </ul>
             <p style={{ font: "var(--text-caption)", color: "var(--fg-3)", marginTop: 8 }}>
-              <Link to="/integrations/commerceml">
-                {t("pages.pickup.detail.exportHeld.linkAction")}
-              </Link>
+              {canReadIntegrations ? (
+                <Link to="/integrations/commerceml">
+                  {t("pages.pickup.detail.exportHeld.linkAction")}
+                </Link>
+              ) : (
+                t("pages.pickup.detail.exportHeld.noIntegrationAccess")
+              )}
             </p>
           </Alert>
         )}
@@ -290,29 +438,13 @@ export function OrderDetailPage() {
       </Card>
 
       <div style={{ display: "flex", gap: 8 }}>
-        <Button
-          type="button"
-          variant="primary"
-          disabled={!isPendingOrder}
-          onClick={() => {
-            setReceiptNo("");
-            setActiveModal("punch");
-          }}
-        >
-          {t("pages.pickup.detail.actions.punch")}
-        </Button>
-        <Button
-          type="button"
-          variant="secondary"
-          disabled={!isPendingOrder}
-          onClick={() => {
-            setActNo("");
-            setWriteoffReasonId(reasons[0]?.id ?? "");
-            setActiveModal("writeoff");
-          }}
-        >
-          {t("pages.pickup.detail.actions.writeoff")}
-        </Button>
+        {canWrite ? (
+          <AuthorizedResolveOrderActions
+            orderId={orderId}
+            pending={isPendingOrder}
+            reasons={reasons}
+          />
+        ) : null}
         <Button
           type="button"
           variant="secondary"
@@ -323,105 +455,10 @@ export function OrderDetailPage() {
         >
           {t("pages.pickup.detail.actions.print")}
         </Button>
-        <Button
-          type="button"
-          variant="destructive"
-          disabled={!isPendingOrder}
-          onClick={() => setActiveModal("cancel")}
-        >
-          {t("pages.pickup.detail.actions.cancel")}
-        </Button>
+        {canWrite ? (
+          <AuthorizedCancelOrderAction orderId={orderId} pending={isPendingOrder} />
+        ) : null}
       </div>
-
-      <Modal
-        open={activeModal === "punch"}
-        onClose={closeModal}
-        closeLabel={t("common.close")}
-        title={t("pages.pickup.detail.punchModal.title")}
-        footer={
-          <>
-            <Button type="button" variant="secondary" onClick={closeModal}>
-              {t("pages.pickup.detail.dismissAction")}
-            </Button>
-            <Button
-              type="button"
-              loading={resolveMutation.isPending}
-              disabled={receiptNo.trim().length === 0}
-              onClick={() => void handlePunch()}
-            >
-              {t("pages.pickup.detail.punchModal.submit")}
-            </Button>
-          </>
-        }
-      >
-        <Input
-          label={t("pages.pickup.detail.punchModal.receiptNoLabel")}
-          value={receiptNo}
-          onChange={(event) => setReceiptNo(event.target.value)}
-        />
-      </Modal>
-
-      <Modal
-        open={activeModal === "writeoff"}
-        onClose={closeModal}
-        closeLabel={t("common.close")}
-        title={t("pages.pickup.detail.writeoffModal.title")}
-        footer={
-          <>
-            <Button type="button" variant="secondary" onClick={closeModal}>
-              {t("pages.pickup.detail.dismissAction")}
-            </Button>
-            <Button
-              type="button"
-              loading={resolveMutation.isPending}
-              disabled={actNo.trim().length === 0 || writeoffReasonId.length === 0}
-              onClick={() => void handleWriteoff()}
-            >
-              {t("pages.pickup.detail.writeoffModal.submit")}
-            </Button>
-          </>
-        }
-      >
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <Input
-            label={t("pages.pickup.detail.writeoffModal.actNoLabel")}
-            value={actNo}
-            onChange={(event) => setActNo(event.target.value)}
-          />
-          <Select
-            label={t("pages.pickup.detail.writeoffModal.reasonLabel")}
-            options={reasonOptions}
-            value={writeoffReasonId}
-            onChange={setWriteoffReasonId}
-          />
-        </div>
-      </Modal>
-
-      <Modal
-        open={activeModal === "cancel"}
-        onClose={closeModal}
-        closeLabel={t("common.close")}
-        title={t("pages.pickup.detail.cancelModal.title")}
-        footer={
-          <>
-            <Button type="button" variant="secondary" onClick={closeModal}>
-              {t("pages.pickup.detail.dismissAction")}
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              loading={cancelMutation.isPending}
-              onClick={() => void handleCancel()}
-            >
-              {t("pages.pickup.detail.cancelModal.confirmAction")}
-            </Button>
-          </>
-        }
-      >
-        <p style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>
-          {t("pages.pickup.detail.cancelModal.body")}
-        </p>
-      </Modal>
     </div>
   );
 }

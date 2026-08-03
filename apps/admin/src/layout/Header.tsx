@@ -1,10 +1,11 @@
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
 
 import { Button, useTheme } from "@markiro/ui";
 
 import { useAuthClient } from "../auth/client.js";
+import { useClearAuthQueryCache } from "../query/AuthQueryBoundary.js";
 import { useActiveOrg } from "./useActiveOrg.js";
 
 const ICON_BUTTON_STYLE: CSSProperties = {
@@ -33,18 +34,21 @@ export function Header() {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const authClient = useAuthClient();
+  const clearAuthQueryCache = useClearAuthQueryCache();
+  const [isSigningOut, setIsSigningOut] = useState(false);
   const { theme, setTheme } = useTheme();
   const { orgName } = useActiveOrg();
   const { data: session } = authClient.useSession();
 
-  const handleSignOut = () => {
-    // Fake clients in tests don't reactively update `useSession()` after
-    // `signOut()` resolves (unlike the real client's internal store), so the
-    // redirect is driven explicitly here rather than relying on
-    // `ShellPage`'s guard to react to a cleared session.
-    void authClient.signOut().then(() => {
+  const handleSignOut = async () => {
+    if (isSigningOut) return;
+    setIsSigningOut(true);
+    clearAuthQueryCache();
+    try {
+      await authClient.signOut();
+    } finally {
       void navigate("/login", { replace: true });
-    });
+    }
   };
 
   const handleToggleTheme = () => {
@@ -110,7 +114,12 @@ export function Header() {
         >
           {nextLanguage.toUpperCase()}
         </button>
-        <Button variant="secondary" size="compact" onClick={handleSignOut}>
+        <Button
+          variant="secondary"
+          size="compact"
+          loading={isSigningOut}
+          onClick={() => void handleSignOut()}
+        >
           {t("common.signOut")}
         </Button>
       </div>

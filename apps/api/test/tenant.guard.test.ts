@@ -32,6 +32,7 @@ interface FakeRequest {
   tenantId?: string;
   userId?: string;
   deviceId?: string;
+  authKind?: "session" | "station";
 }
 
 interface FakeDeviceRow {
@@ -127,6 +128,7 @@ describe("TenantGuard", () => {
     expect(req.tenantId).toBe("org_1");
     expect(req.userId).toBe("user_1");
     expect(req.deviceId).toBeUndefined();
+    expect(req.authKind).toBe("session");
   });
 });
 
@@ -154,6 +156,7 @@ describe("TenantGuard api-key path", () => {
 
     await expect(guard.canActivate(contextFor(req))).resolves.toBe(true);
     expect(req.tenantId).toBe("org_9");
+    expect(req.authKind).toBe("station");
   });
 
   it("throws Unauthorized for an invalid x-api-key and no session", async () => {

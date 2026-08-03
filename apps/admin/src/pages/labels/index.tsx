@@ -4,6 +4,9 @@ import { Link } from "react-router";
 
 import { Alert, Badge, EmptyState, PageHeader, Spinner } from "@markiro/ui";
 
+import { CABINET_CAPABILITY } from "@markiro/domain";
+
+import { useCan } from "../../access/context.js";
 import { useLabelTemplates, type LabelTemplateSummaryDto } from "./api.js";
 import { TemplateThumb } from "./TemplateThumb.js";
 
@@ -66,6 +69,27 @@ const NEW_TEMPLATE_CARD_STYLE: CSSProperties = {
   textAlign: "center",
 };
 
+function TemplateCard({ item }: { item: LabelTemplateSummaryDto }) {
+  const { t } = useTranslation();
+  return (
+    <div style={CARD_STYLE}>
+      <TemplateThumb id={item.id} widthMm={item.widthMm} heightMm={item.heightMm} />
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <span style={{ font: "600 14px/20px var(--font-ui)", color: "var(--fg-1)" }}>
+          {item.name}
+        </span>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <Badge>
+            {t("pages.labels.sizeBadge", { width: item.widthMm, height: item.heightMm })}
+          </Badge>
+          <Badge>{t("pages.labels.dpiBadge", { dpi: item.dpi })}</Badge>
+          <Badge>{LANGUAGE_LABEL[item.language]}</Badge>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /**
  * Admin label template library -- Plan 04 Task 8. Card grid: thumbnail
  * (Task 9's real renderer, via `TemplateThumb`), name, size/DPI/language
@@ -75,6 +99,7 @@ const NEW_TEMPLATE_CARD_STYLE: CSSProperties = {
  */
 export function LabelTemplatesPage() {
   const { t } = useTranslation();
+  const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
   const { data, isPending, isError } = useLabelTemplates();
   const items = data ?? [];
 
@@ -83,9 +108,11 @@ export function LabelTemplatesPage() {
       <PageHeader
         title={t("pages.labels.title")}
         actions={
-          <Link to="/labels/new" style={PRIMARY_LINK_STYLE}>
-            {t("pages.labels.addAction")}
-          </Link>
+          canWrite ? (
+            <Link to="/labels/new" style={PRIMARY_LINK_STYLE}>
+              {t("pages.labels.addAction")}
+            </Link>
+          ) : null
         }
       />
 
@@ -100,9 +127,11 @@ export function LabelTemplatesPage() {
           title={t("pages.labels.emptyTitle")}
           hint={t("pages.labels.emptyHint")}
           action={
-            <Link to="/labels/new" style={PRIMARY_LINK_STYLE}>
-              {t("pages.labels.addAction")}
-            </Link>
+            canWrite ? (
+              <Link to="/labels/new" style={PRIMARY_LINK_STYLE}>
+                {t("pages.labels.addAction")}
+              </Link>
+            ) : null
           }
         />
       ) : (
@@ -113,28 +142,20 @@ export function LabelTemplatesPage() {
             gap: 16,
           }}
         >
-          {items.map((item) => (
-            <Link key={item.id} to={`/labels/${item.id}`} style={CARD_LINK_STYLE}>
-              <div style={CARD_STYLE}>
-                <TemplateThumb id={item.id} widthMm={item.widthMm} heightMm={item.heightMm} />
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  <span style={{ font: "600 14px/20px var(--font-ui)", color: "var(--fg-1)" }}>
-                    {item.name}
-                  </span>
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    <Badge>
-                      {t("pages.labels.sizeBadge", { width: item.widthMm, height: item.heightMm })}
-                    </Badge>
-                    <Badge>{t("pages.labels.dpiBadge", { dpi: item.dpi })}</Badge>
-                    <Badge>{LANGUAGE_LABEL[item.language]}</Badge>
-                  </div>
-                </div>
-              </div>
+          {items.map((item) =>
+            canWrite ? (
+              <Link key={item.id} to={`/labels/${item.id}`} style={CARD_LINK_STYLE}>
+                <TemplateCard item={item} />
+              </Link>
+            ) : (
+              <TemplateCard key={item.id} item={item} />
+            ),
+          )}
+          {canWrite ? (
+            <Link to="/labels/new" style={NEW_TEMPLATE_CARD_STYLE}>
+              {t("pages.labels.newTemplateCard")}
             </Link>
-          ))}
-          <Link to="/labels/new" style={NEW_TEMPLATE_CARD_STYLE}>
-            {t("pages.labels.newTemplateCard")}
-          </Link>
+          ) : null}
         </div>
       )}
     </div>

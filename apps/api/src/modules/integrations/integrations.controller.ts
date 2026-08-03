@@ -13,7 +13,10 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
-import { SessionOnlyGuard } from "../../tenancy/session-only.guard";
+import { CABINET_CAPABILITY } from "@markiro/domain";
+import { RequirePermissions } from "../../authorization/access-policy";
+import { AuthorizationGuard } from "../../authorization/authorization.guard";
+import { SecurityAuditService } from "../../authorization/security-audit.service";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import type { IntegrationChannelType } from "./channel-registry";
@@ -36,16 +39,21 @@ import { IntegrationsService } from "./integrations.service";
 // (docs/device-key-surface.md).
 @ApiTags("integrations")
 @Controller("integrations")
-@UseGuards(TenantGuard, SessionOnlyGuard)
+@UseGuards(TenantGuard, AuthorizationGuard)
 export class IntegrationsController {
-  constructor(private readonly integrations: IntegrationsService) {}
+  constructor(
+    private readonly integrations: IntegrationsService,
+    private readonly audit: SecurityAuditService,
+  ) {}
 
   @Get()
+  @RequirePermissions(CABINET_CAPABILITY.INTEGRATIONS_READ)
   async list(@Req() req: RequestWithTenant): Promise<{ channels: ChannelSummaryDto[] }> {
     return this.integrations.listChannels(req.tenantId!, new Date());
   }
 
   @Get(":type")
+  @RequirePermissions(CABINET_CAPABILITY.INTEGRATIONS_READ)
   async detail(
     @Req() req: RequestWithTenant,
     @Param("type") type: IntegrationChannelType,
@@ -54,6 +62,7 @@ export class IntegrationsController {
   }
 
   @Patch(":type")
+  @RequirePermissions(CABINET_CAPABILITY.INTEGRATIONS_WRITE)
   async update(
     @Req() req: RequestWithTenant,
     @Param("type") type: IntegrationChannelType,
@@ -75,6 +84,7 @@ export class IntegrationsController {
   }
 
   @Get(":type/journal")
+  @RequirePermissions(CABINET_CAPABILITY.INTEGRATIONS_READ)
   async journal(
     @Req() req: RequestWithTenant,
     @Param("type") type: IntegrationChannelType,
@@ -85,14 +95,24 @@ export class IntegrationsController {
   // Секрет отдаётся ровно здесь и ровно один раз — ChannelDetailDto его
   // никогда не несёт (docs/device-key-surface.md).
   @Post(":type/credentials")
+  @RequirePermissions(CABINET_CAPABILITY.INTEGRATIONS_WRITE, CABINET_CAPABILITY.CREDENTIALS_MANAGE)
   async issueCredentials(
     @Req() req: RequestWithTenant,
     @Param("type") type: IntegrationChannelType,
   ): Promise<CredentialsIssuedDto> {
-    return this.integrations.issueCredentials(req.tenantId!, type);
+    const result = await this.integrations.issueCredentials(req.tenantId!, type);
+    this.audit.credentialMutation({
+      tenantId: req.tenantId!,
+      userId: req.userId!,
+      action: "integration_credentials.issue",
+      resourceId: type,
+      outcome: "succeeded",
+    });
+    return result;
   }
 
   @Get(":type/candidates")
+  @RequirePermissions(CABINET_CAPABILITY.INTEGRATIONS_READ)
   async listCandidates(
     @Req() req: RequestWithTenant,
     @Param("type") type: IntegrationChannelType,
@@ -103,6 +123,7 @@ export class IntegrationsController {
 
   @Post(":type/candidates/:id/link")
   @HttpCode(HttpStatus.OK)
+  @RequirePermissions(CABINET_CAPABILITY.INTEGRATIONS_WRITE)
   async linkCandidate(
     @Req() req: RequestWithTenant,
     @Param("type") type: IntegrationChannelType,
@@ -114,6 +135,7 @@ export class IntegrationsController {
 
   @Post(":type/candidates/:id/hide")
   @HttpCode(HttpStatus.OK)
+  @RequirePermissions(CABINET_CAPABILITY.INTEGRATIONS_WRITE)
   async hideCandidate(
     @Req() req: RequestWithTenant,
     @Param("type") type: IntegrationChannelType,
@@ -124,6 +146,7 @@ export class IntegrationsController {
 
   @Post(":type/candidates/:id/unhide")
   @HttpCode(HttpStatus.OK)
+  @RequirePermissions(CABINET_CAPABILITY.INTEGRATIONS_WRITE)
   async unhideCandidate(
     @Req() req: RequestWithTenant,
     @Param("type") type: IntegrationChannelType,
@@ -140,16 +163,17 @@ export class IntegrationsController {
  * маршрут не может быть параметризован типом канала. Реализация всё равно
  * здесь, в модуле кандидатов (Task 10), а не в `ProductsController` —
  * разрыв связи это часть того же кабинетного API, что и связывание/скрытие.
- * `TenantGuard` + `SessionOnlyGuard` — та же кабинетная граница
+ * `TenantGuard` + `AuthorizationGuard` — та же кабинетная граница
  * (docs/device-key-surface.md).
  */
 @ApiTags("products")
 @Controller("products")
-@UseGuards(TenantGuard, SessionOnlyGuard)
+@UseGuards(TenantGuard, AuthorizationGuard)
 export class ProductExternalLinkController {
   constructor(private readonly integrations: IntegrationsService) {}
 
   @Delete(":id/external-link")
+  @RequirePermissions(CABINET_CAPABILITY.INTEGRATIONS_WRITE)
   async unlink(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<void> {
     await this.integrations.unlinkProduct(req.tenantId!, id);
   }

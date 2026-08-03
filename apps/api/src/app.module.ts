@@ -25,6 +25,7 @@ import { PickupRejectionsModule } from "./modules/pickup-rejections/pickup-rejec
 import { SsccModule } from "./modules/sscc/sscc.module";
 import { BoxesModule } from "./modules/boxes/boxes.module";
 import { BoxExceptionsModule } from "./modules/box-exceptions/box-exceptions.module";
+import { AuthorizationModule } from "./authorization/authorization.module";
 
 @Module({ controllers: [HealthController] })
 export class AppModule {
@@ -46,6 +47,7 @@ export class AppModule {
       module: AppModule,
       imports: [
         AuthModule.forRoot(setup),
+        AuthorizationModule,
         JobsModule.forRoot(setup.databaseUrl),
         OrgProfileModule,
         CounterpartiesModule,

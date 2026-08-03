@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -43,7 +43,17 @@ beforeEach(() => {
   // the network.
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () => jsonResponse(200, { items: [] })),
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/access/me")) {
+        return jsonResponse(200, {
+          roles: ["manager"],
+          capabilities: ["operations.read", "operations.write"],
+        });
+      }
+      if (url.includes("/api/pickup-orders")) return jsonResponse(200, { items: [] });
+      throw new Error(`Unexpected request: ${url}`);
+    }),
   );
 });
 
@@ -110,7 +120,7 @@ function renderApp(client: AuthClientLike, initialPath = "/") {
 }
 
 describe("app shell layout", () => {
-  it("renders all seven nav items from the RU dictionary with correct hrefs", () => {
+  it("renders operational manager nav items and hides privileged sections", async () => {
     renderApp(createFakeAuthClient());
 
     const expectedLinks: Array<[string, string]> = [
@@ -120,44 +130,54 @@ describe("app shell layout", () => {
       ["Контрагенты", "/counterparties"],
       ["Этикетки", "/labels"],
       ["Для себя", "/pickup"],
-      ["Настройки", "/settings"],
     ];
     for (const [label, href] of expectedLinks) {
-      const link = screen.getByRole("link", { name: label });
+      const link = await screen.findByRole("link", { name: label });
       expect(link.getAttribute("href")).toBe(href);
     }
+    expect(screen.queryByRole("link", { name: "Интеграции" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Настройки" })).toBeNull();
   });
 
-  it("dashboard stub shows an EmptyState", () => {
+  it("dashboard stub shows an EmptyState", async () => {
     renderApp(createFakeAuthClient());
-    expect(screen.getByText("Пока нет данных")).toBeDefined();
+    expect(await screen.findByText("Пока нет данных")).toBeDefined();
   });
 
-  it("sign-out calls the injected auth client and redirects to /login", async () => {
-    const signOut = vi.fn(async () => ({ data: {}, error: null }));
+  it("waits for sign-out to settle before redirecting to /login", async () => {
+    let resolveSignOut!: (value: { data: unknown; error: null }) => void;
+    const signOutResult = new Promise<{ data: unknown; error: null }>((resolve) => {
+      resolveSignOut = resolve;
+    });
+    const signOut = vi.fn(() => signOutResult);
     renderApp(createFakeAuthClient({ signOut }));
 
-    fireEvent.click(screen.getByRole("button", { name: /Выйти|Sign out/i }));
+    const signOutButton = await screen.findByRole("button", { name: /Выйти|Sign out/i });
+    fireEvent.click(signOutButton);
+    fireEvent.click(signOutButton);
 
-    await waitFor(() => {
-      expect(screen.getByTestId("login-page")).toBeDefined();
-    });
     expect(signOut).toHaveBeenCalledTimes(1);
+    expect(signOutButton.querySelector(".mk-spin")).not.toBeNull();
+    expect(screen.queryByTestId("login-page")).toBeNull();
+
+    await act(async () => resolveSignOut({ data: {}, error: null }));
+
+    expect(await screen.findByTestId("login-page")).toBeDefined();
     expect(screen.getByTestId("location-pathname").textContent).toBe("/login");
   });
 
-  it("theme toggle flips documentElement data-theme", () => {
+  it("theme toggle flips documentElement data-theme", async () => {
     renderApp(createFakeAuthClient());
     expect(document.documentElement.dataset.theme).toBe("light");
 
-    fireEvent.click(screen.getByRole("button", { name: "Переключить тему" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Переключить тему" }));
 
     expect(document.documentElement.dataset.theme).toBe("dark");
   });
 
   it("lang toggle switches a visible label to EN", async () => {
     renderApp(createFakeAuthClient());
-    expect(screen.getByRole("link", { name: "Обзор" })).toBeDefined();
+    expect(await screen.findByRole("link", { name: "Обзор" })).toBeDefined();
 
     fireEvent.click(screen.getByRole("button", { name: "Переключить язык" }));
 
