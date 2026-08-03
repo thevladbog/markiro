@@ -10,10 +10,10 @@ export class ProfileAssetsReconciler implements OnModuleInit, OnModuleDestroy {
 
   constructor(private readonly profiles: ProfileService) {}
 
-  async onModuleInit(): Promise<void> {
-    await this.runOnce();
+  onModuleInit(): void {
     this.#timer = setInterval(() => void this.runOnce(), RECONCILE_INTERVAL_MS);
     this.#timer.unref();
+    void this.runOnce();
   }
 
   onModuleDestroy(): void {

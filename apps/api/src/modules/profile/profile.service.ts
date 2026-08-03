@@ -4,6 +4,7 @@ import {
   ConflictException,
   Inject,
   Injectable,
+  Logger,
   ServiceUnavailableException,
 } from "@nestjs/common";
 import { and, eq, inArray, isNull, lt, lte, notExists, sql } from "drizzle-orm";
@@ -15,6 +16,8 @@ import type { AvatarUrlDto, UpdateProfileDto, UserProfileDto } from "./dto";
 
 @Injectable()
 export class ProfileService {
+  private readonly logger = new Logger(ProfileService.name);
+
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly storage: ObjectStorageService,
@@ -35,10 +38,29 @@ export class ProfileService {
   }
 
   async updateProfile(userId: string, input: UpdateProfileDto): Promise<UserProfileDto> {
-    const before = await this.getProfile(userId);
     const middleName = input.middleName ?? null;
     const displayName = [input.lastName, input.firstName, middleName].filter(Boolean).join(" ");
     await this.db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select ${schema.user.id} from ${schema.user} where ${schema.user.id} = ${userId} for update`,
+      );
+      const [current] = await tx
+        .select({
+          firstName: schema.userProfiles.firstName,
+          lastName: schema.userProfiles.lastName,
+          middleName: schema.userProfiles.middleName,
+          avatarAssetId: schema.userProfiles.avatarAssetId,
+        })
+        .from(schema.userProfiles)
+        .where(eq(schema.userProfiles.userId, userId))
+        .limit(1);
+      const before = toProfileDto(current);
+      const after = {
+        firstName: input.firstName,
+        lastName: input.lastName,
+        middleName,
+        hasAvatar: before.hasAvatar,
+      } satisfies UserProfileDto;
       await tx
         .insert(schema.userProfiles)
         .values({
@@ -62,18 +84,22 @@ export class ProfileService {
         .where(eq(schema.user.id, userId))
         .returning({ id: schema.user.id });
       if (updated.length !== 1) throw new ConflictException("Profile account no longer exists");
-      await this.writeAudit(tx, userId, "profile.updated", before, {
-        firstName: input.firstName,
-        lastName: input.lastName,
-        middleName,
-        hasAvatar: before.hasAvatar,
-      });
+      const changedFields = (["firstName", "lastName", "middleName"] as const).filter(
+        (field) => before[field] !== after[field],
+      );
+      await this.writeAudit(
+        tx,
+        userId,
+        "profile.updated",
+        { changedFields: [] },
+        { changedFields },
+      );
     });
     return this.getProfile(userId);
   }
 
   async uploadAvatar(userId: string, source: Buffer): Promise<UserProfileDto> {
-    const before = await this.getRequiredProfile(userId);
+    await this.getRequiredProfile(userId, "Complete the profile before adding an avatar");
     let avatar: Awaited<ReturnType<typeof processAvatar>>;
     let previousAssetId: string | null = null;
     try {
@@ -98,7 +124,10 @@ export class ProfileService {
 
     try {
       await this.storage.put(objectKey, avatar.buffer, avatar.contentType);
-    } catch {
+    } catch (error) {
+      this.logger.error(
+        `Could not store avatar for user ${userId}, asset ${assetId}: ${errorMessage(error)}`,
+      );
       throw new ServiceUnavailableException("Avatar storage is unavailable");
     }
 
@@ -145,13 +174,19 @@ export class ProfileService {
               ),
             );
         }
-        await this.writeAudit(tx, userId, "avatar.uploaded", before, {
-          ...before,
-          hasAvatar: true,
-        });
+        await this.writeAudit(
+          tx,
+          userId,
+          "avatar.uploaded",
+          { hasAvatar: Boolean(previousAssetId) },
+          { hasAvatar: true },
+        );
       });
     } catch (error) {
       if (error instanceof ConflictException) throw error;
+      this.logger.error(
+        `Could not activate avatar for user ${userId}, asset ${assetId}: ${errorMessage(error)}`,
+      );
       throw new ServiceUnavailableException("Could not activate avatar");
     }
 
@@ -160,7 +195,7 @@ export class ProfileService {
   }
 
   async deleteAvatar(userId: string): Promise<void> {
-    const before = await this.getRequiredProfile(userId);
+    await this.getRequiredProfile(userId, "Complete the profile before removing an avatar");
     let previousAssetId: string | null = null;
     await this.db.transaction(async (tx) => {
       await tx.execute(
@@ -186,10 +221,13 @@ export class ProfileService {
             eq(schema.mediaAssets.ownerUserId, userId),
           ),
         );
-      await this.writeAudit(tx, userId, "avatar.deleted", before, {
-        ...before,
-        hasAvatar: false,
-      });
+      await this.writeAudit(
+        tx,
+        userId,
+        "avatar.deleted",
+        { hasAvatar: true },
+        { hasAvatar: false },
+      );
     });
     if (previousAssetId) await this.tryDeleteAsset(userId, previousAssetId);
   }
@@ -234,21 +272,19 @@ export class ProfileService {
 
     let reconciled = 0;
     for (const candidate of candidates) {
-      if (candidate.status === "staging") {
-        const claimed = await this.db
-          .update(schema.mediaAssets)
-          .set({ status: "deleting", updatedAt: now })
-          .where(
-            and(
-              eq(schema.mediaAssets.id, candidate.id),
-              eq(schema.mediaAssets.ownerUserId, candidate.ownerUserId),
-              eq(schema.mediaAssets.status, "staging"),
-              lte(schema.mediaAssets.updatedAt, staleBefore),
-            ),
-          )
-          .returning({ id: schema.mediaAssets.id });
-        if (claimed.length !== 1) continue;
-      }
+      const claimed = await this.db
+        .update(schema.mediaAssets)
+        .set({ status: "deleting", updatedAt: now })
+        .where(
+          and(
+            eq(schema.mediaAssets.id, candidate.id),
+            eq(schema.mediaAssets.ownerUserId, candidate.ownerUserId),
+            eq(schema.mediaAssets.status, candidate.status),
+            lte(schema.mediaAssets.updatedAt, staleBefore),
+          ),
+        )
+        .returning({ id: schema.mediaAssets.id });
+      if (claimed.length !== 1) continue;
 
       const [reference] = await this.db
         .select({ userId: schema.userProfiles.userId })
@@ -282,13 +318,13 @@ export class ProfileService {
     return reconciled;
   }
 
-  private async getRequiredProfile(userId: string): Promise<UserProfileDto> {
+  private async getRequiredProfile(userId: string, message: string): Promise<UserProfileDto> {
     const [profile] = await this.db
       .select({ userId: schema.userProfiles.userId })
       .from(schema.userProfiles)
       .where(eq(schema.userProfiles.userId, userId))
       .limit(1);
-    if (!profile) throw new ConflictException("Complete the profile before adding an avatar");
+    if (!profile) throw new ConflictException(message);
     return this.getProfile(userId);
   }
 
@@ -316,7 +352,10 @@ export class ProfileService {
             eq(schema.mediaAssets.status, "deleting"),
           ),
         );
-    } catch {
+    } catch (error) {
+      this.logger.warn(
+        `Deferred avatar cleanup for user ${userId}, asset ${assetId}: ${errorMessage(error)}`,
+      );
       // The durable `deleting` row remains for scheduled reconciliation.
     }
   }
@@ -325,8 +364,8 @@ export class ProfileService {
     tx: Parameters<Parameters<Db["transaction"]>[0]>[0],
     userId: string,
     action: string,
-    before: UserProfileDto,
-    after: UserProfileDto,
+    before: Record<string, unknown>,
+    after: Record<string, unknown>,
   ): Promise<void> {
     const memberships = await tx
       .select({ organizationId: schema.member.organizationId })
@@ -346,6 +385,10 @@ export class ProfileService {
       })),
     );
   }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "unknown error";
 }
 
 function toProfileDto(

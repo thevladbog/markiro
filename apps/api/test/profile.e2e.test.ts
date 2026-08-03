@@ -3,6 +3,7 @@ import sharp from "sharp";
 import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import { and, eq } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { schema, type Db } from "@markiro/db";
@@ -136,7 +137,11 @@ describe.skipIf(!ready)("global profile and private avatar e2e", () => {
     expect(user?.name).toBe("Петров Иван Сергеевич");
 
     const audit = await db
-      .select({ action: schema.tenantAuditEvents.action })
+      .select({
+        action: schema.tenantAuditEvents.action,
+        before: schema.tenantAuditEvents.before,
+        after: schema.tenantAuditEvents.after,
+      })
       .from(schema.tenantAuditEvents)
       .where(
         and(
@@ -145,6 +150,63 @@ describe.skipIf(!ready)("global profile and private avatar e2e", () => {
         ),
       );
     expect(audit.map((event) => event.action)).toContain("profile.updated");
+    expect(JSON.stringify(audit)).not.toContain("Иван");
+    expect(JSON.stringify(audit)).not.toContain("Петров");
+  });
+
+  it("fans global profile audit metadata out to every tenant membership", async () => {
+    const { agent, organizationId, userId } = await fixture();
+    const secondOrganizationId = randomUUID();
+    await db.insert(schema.organization).values({
+      id: secondOrganizationId,
+      name: "Second profile fixture organization",
+      slug: `profile-second-${randomUUID()}`,
+      createdAt: new Date(),
+    });
+    await db.insert(schema.member).values({
+      id: randomUUID(),
+      organizationId: secondOrganizationId,
+      userId,
+      role: "manager",
+      createdAt: new Date(),
+    });
+
+    await completeProfile(agent);
+
+    const audits = await db
+      .select({ organizationId: schema.tenantAuditEvents.organizationId })
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.targetId, userId),
+          eq(schema.tenantAuditEvents.action, "profile.updated"),
+        ),
+      );
+    expect(new Set(audits.map((event) => event.organizationId))).toEqual(
+      new Set([organizationId, secondOrganizationId]),
+    );
+  });
+
+  it("uses removal-specific guidance when no structured profile exists", async () => {
+    const { agent } = await fixture();
+
+    const response = await agent.delete("/profile/avatar").expect(409);
+
+    expect(response.body.message).toBe("Complete the profile before removing an avatar");
+  });
+
+  it("rejects invalid avatar content and reports a missing signed read", async () => {
+    const { agent } = await fixture();
+    await completeProfile(agent);
+
+    await agent.get("/profile/avatar-url").expect(200, { url: null });
+    await agent
+      .post("/profile/avatar")
+      .attach("avatar", Buffer.from("not an image"), {
+        filename: "bad.txt",
+        contentType: "text/plain",
+      })
+      .expect(400);
   });
 
   it("normalizes an avatar, stores it privately, and returns only a short signed read", async () => {

@@ -14,7 +14,7 @@ import {
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import { memoryStorage } from "multer";
-import { ApiTags } from "@nestjs/swagger";
+import { ApiBody, ApiConsumes, ApiTags } from "@nestjs/swagger";
 import type { RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
@@ -48,6 +48,14 @@ export class ProfileController {
   }
 
   @Post("avatar")
+  @ApiConsumes("multipart/form-data")
+  @ApiBody({
+    schema: {
+      type: "object",
+      required: ["avatar"],
+      properties: { avatar: { type: "string", format: "binary" } },
+    },
+  })
   @UseInterceptors(
     FileInterceptor("avatar", {
       storage: memoryStorage(),

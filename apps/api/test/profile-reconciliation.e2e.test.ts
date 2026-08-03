@@ -103,16 +103,22 @@ describe.skipIf(!ready)("profile asset reconciliation e2e", () => {
   });
 
   afterAll(async () => {
+    await db.delete(schema.userProfiles).where(eq(schema.userProfiles.userId, userId));
+    await db
+      .delete(schema.mediaAssets)
+      .where(inArray(schema.mediaAssets.id, [activeId, stagingId, deletingId]));
+    await db.delete(schema.user).where(eq(schema.user.id, userId));
     await app?.close();
   });
 
   it("removes stale cleanup intents while retaining the referenced active avatar", async () => {
-    const rows = await db
-      .select({ id: schema.mediaAssets.id, status: schema.mediaAssets.status })
-      .from(schema.mediaAssets)
-      .where(inArray(schema.mediaAssets.id, [activeId, stagingId, deletingId]));
-
-    expect(rows).toEqual([{ id: activeId, status: "active" }]);
+    await vi.waitFor(async () => {
+      const rows = await db
+        .select({ id: schema.mediaAssets.id, status: schema.mediaAssets.status })
+        .from(schema.mediaAssets)
+        .where(inArray(schema.mediaAssets.id, [activeId, stagingId, deletingId]));
+      expect(rows).toEqual([{ id: activeId, status: "active" }]);
+    });
     expect(deleteObject).toHaveBeenCalledTimes(2);
     expect(deleteObject).toHaveBeenCalledWith(`users/${userId}/avatars/${stagingId}.webp`);
     expect(deleteObject).toHaveBeenCalledWith(`users/${userId}/avatars/${deletingId}.webp`);
