@@ -74,7 +74,7 @@ export function RejectionsPage() {
     });
   };
 
-  const columns: TableColumn<PickupScanRejectionRowDto>[] = [
+  const baseColumns: TableColumn<PickupScanRejectionRowDto>[] = [
     {
       key: "syncedAt",
       title: t("pages.pickup.rejections.table.syncedAt"),
@@ -151,14 +151,6 @@ export function RejectionsPage() {
         />
       ),
     },
-    {
-      key: "actions",
-      title: t("pages.pickup.rejections.table.actions"),
-      render: (row) =>
-        row.acknowledgedAt || !canWrite ? null : (
-          <AuthorizedAcknowledgeRejectionAction id={row.id} />
-        ),
-    },
   ];
 
   return (
@@ -220,7 +212,11 @@ export function RejectionsPage() {
         />
       ) : (
         <>
-          <Table columns={columns} rows={items} />
+          {canWrite ? (
+            <AuthorizedRejectionsTable baseColumns={baseColumns} rows={items} />
+          ) : (
+            <RejectionsTable baseColumns={baseColumns} rows={items} />
+          )}
           {items
             .filter((row) => expanded.has(row.id))
             .map((row) => (
@@ -244,11 +240,51 @@ export function RejectionsPage() {
   );
 }
 
-function AuthorizedAcknowledgeRejectionAction({ id }: { id: string }) {
+interface RejectionsTableProps {
+  baseColumns: TableColumn<PickupScanRejectionRowDto>[];
+  rows: PickupScanRejectionRowDto[];
+  onAcknowledge?: (id: string) => Promise<void>;
+  pendingAcknowledgementId?: string;
+}
+
+function RejectionsTable({
+  baseColumns,
+  rows,
+  onAcknowledge,
+  pendingAcknowledgementId,
+}: RejectionsTableProps) {
+  const { t } = useTranslation();
+
+  const columns: TableColumn<PickupScanRejectionRowDto>[] = [
+    ...baseColumns,
+    {
+      key: "actions",
+      title: t("pages.pickup.rejections.table.actions"),
+      render: (row) =>
+        row.acknowledgedAt || !onAcknowledge ? null : (
+          <Button
+            type="button"
+            size="compact"
+            loading={pendingAcknowledgementId === row.id}
+            onClick={() => void onAcknowledge(row.id)}
+          >
+            {t("pages.pickup.rejections.acknowledgeAction")}
+          </Button>
+        ),
+    },
+  ];
+
+  return <Table columns={columns} rows={rows} />;
+}
+
+function AuthorizedRejectionsTable({
+  baseColumns,
+  rows,
+}: Pick<RejectionsTableProps, "baseColumns" | "rows">) {
   const { t } = useTranslation();
   const acknowledge = useAcknowledgeRejection();
 
-  const handleAcknowledge = async () => {
+  const handleAcknowledge = async (id: string) => {
     try {
       await acknowledge.mutateAsync(id);
       toast("ok", t("pages.pickup.rejections.toasts.acknowledged"));
@@ -258,13 +294,11 @@ function AuthorizedAcknowledgeRejectionAction({ id }: { id: string }) {
   };
 
   return (
-    <Button
-      type="button"
-      size="compact"
-      loading={acknowledge.isPending}
-      onClick={() => void handleAcknowledge()}
-    >
-      {t("pages.pickup.rejections.acknowledgeAction")}
-    </Button>
+    <RejectionsTable
+      baseColumns={baseColumns}
+      rows={rows}
+      onAcknowledge={handleAcknowledge}
+      {...(acknowledge.isPending ? { pendingAcknowledgementId: acknowledge.variables } : {})}
+    />
   );
 }

@@ -39,10 +39,13 @@ export function Header() {
   const { orgName } = useActiveOrg();
   const { data: session } = authClient.useSession();
 
-  const handleSignOut = () => {
+  const handleSignOut = async () => {
     clearAuthQueryCache();
-    void authClient.signOut();
-    void navigate("/login", { replace: true });
+    try {
+      await authClient.signOut();
+    } finally {
+      void navigate("/login", { replace: true });
+    }
   };
 
   const handleToggleTheme = () => {
@@ -108,7 +111,7 @@ export function Header() {
         >
           {nextLanguage.toUpperCase()}
         </button>
-        <Button variant="secondary" size="compact" onClick={handleSignOut}>
+        <Button variant="secondary" size="compact" onClick={() => void handleSignOut()}>
           {t("common.signOut")}
         </Button>
       </div>

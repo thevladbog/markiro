@@ -475,8 +475,11 @@ describe("ShellPage", () => {
 
     expect(signOut).toHaveBeenCalledTimes(1);
     expect(queryClient.getQueryData(["tenant-secret"])).toBeUndefined();
-    expect(screen.getByTestId("location-pathname").textContent).toBe("/login");
+    expect(screen.getByTestId("location-pathname").textContent).toBe("/shell");
 
     resolveSignOut({ data: {}, error: null });
+    await waitFor(() => {
+      expect(screen.getByTestId("location-pathname").textContent).toBe("/login");
+    });
   });
 });

@@ -73,7 +73,7 @@ export function ConflictsPage() {
     [t],
   );
 
-  const columns: TableColumn<ConflictDto>[] = useMemo(
+  const baseColumns: TableColumn<ConflictDto>[] = useMemo(
     () => [
       {
         key: "codeHash",
@@ -120,19 +120,8 @@ export function ConflictsPage() {
         title: t("pages.conflicts.table.detected"),
         render: (row) => formatCreatedAt(row.detectedAt, i18n.language),
       },
-      {
-        key: "actions",
-        title: t("pages.conflicts.table.actions"),
-        align: "right",
-        render: (row) =>
-          row.reviewedAt ? (
-            <Badge tone="neutral">{t("pages.conflicts.reviewed")}</Badge>
-          ) : canWrite ? (
-            <AuthorizedReviewConflictAction id={row.id} />
-          ) : null,
-      },
     ],
-    [t, i18n.language, canWrite, shiftsById],
+    [t, i18n.language, shiftsById],
   );
 
   return (
@@ -167,18 +156,59 @@ export function ConflictsPage() {
         <Alert tone="error">{t("common.loadError")}</Alert>
       ) : items.length === 0 ? (
         <EmptyState title={t("pages.conflicts.empty")} />
+      ) : canWrite ? (
+        <AuthorizedConflictsTable baseColumns={baseColumns} rows={items} />
       ) : (
-        <Table columns={columns} rows={items} />
+        <ConflictsTable baseColumns={baseColumns} rows={items} />
       )}
     </div>
   );
 }
 
-function AuthorizedReviewConflictAction({ id }: { id: string }) {
+interface ConflictsTableProps {
+  baseColumns: TableColumn<ConflictDto>[];
+  rows: ConflictDto[];
+  onReview?: (id: string) => Promise<void>;
+  pendingReviewId?: string;
+}
+
+function ConflictsTable({ baseColumns, rows, onReview, pendingReviewId }: ConflictsTableProps) {
+  const { t } = useTranslation();
+
+  const columns: TableColumn<ConflictDto>[] = [
+    ...baseColumns,
+    {
+      key: "actions",
+      title: t("pages.conflicts.table.actions"),
+      align: "right",
+      render: (row) =>
+        row.reviewedAt ? (
+          <Badge tone="neutral">{t("pages.conflicts.reviewed")}</Badge>
+        ) : onReview ? (
+          <Button
+            type="button"
+            size="compact"
+            variant="secondary"
+            loading={pendingReviewId === row.id}
+            onClick={() => void onReview(row.id)}
+          >
+            {t("pages.conflicts.review")}
+          </Button>
+        ) : null,
+    },
+  ];
+
+  return <Table columns={columns} rows={rows} />;
+}
+
+function AuthorizedConflictsTable({
+  baseColumns,
+  rows,
+}: Pick<ConflictsTableProps, "baseColumns" | "rows">) {
   const { t } = useTranslation();
   const reviewMutation = useReviewConflict();
 
-  const handleReview = async () => {
+  const handleReview = async (id: string) => {
     try {
       await reviewMutation.mutateAsync(id);
       toast("ok", t("pages.conflicts.toasts.reviewSuccess"));
@@ -191,15 +221,12 @@ function AuthorizedReviewConflictAction({ id }: { id: string }) {
   };
 
   return (
-    <Button
-      type="button"
-      size="compact"
-      variant="secondary"
-      loading={reviewMutation.isPending}
-      onClick={() => void handleReview()}
-    >
-      {t("pages.conflicts.review")}
-    </Button>
+    <ConflictsTable
+      baseColumns={baseColumns}
+      rows={rows}
+      onReview={handleReview}
+      {...(reviewMutation.isPending ? { pendingReviewId: reviewMutation.variables } : {})}
+    />
   );
 }
 

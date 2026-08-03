@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
@@ -17,7 +18,11 @@ vi.mock("../src/pages/conflicts/api.js", async (importOriginal) => {
   return {
     ...actual,
     useReviewConflict: () => {
-      writeHookMountSpy();
+      const counted = useRef(false);
+      if (!counted.current) {
+        writeHookMountSpy();
+        counted.current = true;
+      }
       return actual.useReviewConflict();
     },
   };
@@ -84,6 +89,12 @@ const REVIEWED = {
   id: "c2",
   codeHash: "h2".padEnd(64, "0"),
   reviewedAt: "2026-07-28T11:00:00.000Z",
+};
+
+const SECOND_UNREVIEWED = {
+  ...UNREVIEWED,
+  id: "c3",
+  codeHash: "h3".padEnd(64, "0"),
 };
 
 /** Terminal ids are explicitly nullable -- this fixture exercises that case. */
@@ -163,6 +174,17 @@ describe("ConflictsPage", () => {
     ).toBeDefined();
     expect(screen.queryByRole("button", { name: "Отметить рассмотренным" })).toBeNull();
     expect(writeHookMountSpy).not.toHaveBeenCalled();
+  });
+
+  it("shares one review mutation observer across all writable rows", async () => {
+    stubFetch({ conflicts: [UNREVIEWED, SECOND_UNREVIEWED], shifts: [SHIFT_S1] });
+
+    renderPage();
+
+    expect(await screen.findAllByRole("button", { name: "Отметить рассмотренным" })).toHaveLength(
+      2,
+    );
+    expect(writeHookMountSpy).toHaveBeenCalledTimes(1);
   });
 
   it("renders conflicts from the mocked GET response with code, losing/winning terminals", async () => {

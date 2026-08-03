@@ -18,10 +18,13 @@ export function NoCabinetAccess() {
     void navigate("/org/select");
   };
 
-  const handleSignOut = () => {
+  const handleSignOut = async () => {
     clearAuthQueryCache();
-    void authClient.signOut();
-    void navigate("/login", { replace: true });
+    try {
+      await authClient.signOut();
+    } finally {
+      void navigate("/login", { replace: true });
+    }
   };
 
   return (
@@ -34,7 +37,7 @@ export function NoCabinetAccess() {
             <Button type="button" onClick={handleSelectOrganization}>
               {t("access.selectOrganization")}
             </Button>
-            <Button type="button" variant="secondary" onClick={handleSignOut}>
+            <Button type="button" variant="secondary" onClick={() => void handleSignOut()}>
               {t("common.signOut")}
             </Button>
           </div>

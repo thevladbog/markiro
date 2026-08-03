@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useRef } from "react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -18,7 +19,11 @@ vi.mock("../src/pages/pickup/rejections-api.js", async (importOriginal) => {
   return {
     ...actual,
     useAcknowledgeRejection: () => {
-      writeHookMountSpy();
+      const counted = useRef(false);
+      if (!counted.current) {
+        writeHookMountSpy();
+        counted.current = true;
+      }
       return actual.useAcknowledgeRejection();
     },
   };
@@ -132,6 +137,23 @@ describe("rejections page", () => {
     expect(screen.getByRole("button", { name: "Показать коды" })).toBeDefined();
     expect(screen.queryByRole("button", { name: "Отработано" })).toBeNull();
     expect(writeHookMountSpy).not.toHaveBeenCalled();
+  });
+
+  it("shares one acknowledge mutation observer across all writable rows", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(200, {
+          items: [REJECTION, UNKNOWN_BADGE_REJECTION],
+          openCount: 2,
+        }),
+      ),
+    );
+
+    renderWith(<RejectionsPage />);
+
+    expect(await screen.findAllByRole("button", { name: "Отработано" })).toHaveLength(2);
+    expect(writeHookMountSpy).toHaveBeenCalledTimes(1);
   });
 
   it("lists a refused scan and reveals its codes", async () => {

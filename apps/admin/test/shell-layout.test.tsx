@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -144,16 +144,22 @@ describe("app shell layout", () => {
     expect(await screen.findByText("Пока нет данных")).toBeDefined();
   });
 
-  it("sign-out calls the injected auth client and redirects to /login", async () => {
-    const signOut = vi.fn(async () => ({ data: {}, error: null }));
+  it("waits for sign-out to settle before redirecting to /login", async () => {
+    let resolveSignOut!: (value: { data: unknown; error: null }) => void;
+    const signOutResult = new Promise<{ data: unknown; error: null }>((resolve) => {
+      resolveSignOut = resolve;
+    });
+    const signOut = vi.fn(() => signOutResult);
     renderApp(createFakeAuthClient({ signOut }));
 
     fireEvent.click(await screen.findByRole("button", { name: /Выйти|Sign out/i }));
 
-    await waitFor(() => {
-      expect(screen.getByTestId("login-page")).toBeDefined();
-    });
     expect(signOut).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("login-page")).toBeNull();
+
+    await act(async () => resolveSignOut({ data: {}, error: null }));
+
+    expect(await screen.findByTestId("login-page")).toBeDefined();
     expect(screen.getByTestId("location-pathname").textContent).toBe("/login");
   });
 
