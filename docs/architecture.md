@@ -125,6 +125,29 @@ registry, `save-exact`, `engine-strict`, `minimum-release-age=10080`
   with an org token; operators authenticate locally by numeric PIN or badge
   barcode against synced hashes.
 
+### Cabinet authorization
+
+Better Auth organization membership identifies a **cabinet user**; it is
+separate from the production operator identity used for station badge/PIN
+flows. On every cabinet request the API reloads the user's membership for the
+active organization, so removal and role changes take effect without waiting
+for a session refresh. A centralized resolver converts recognized membership
+roles into capabilities and fails closed for `member` and unknown roles.
+
+Controllers declare one explicit policy: `RequirePermissions` for
+cabinet-only capability checks, `AllowStationOrPermissions` for the product
+and shift routes shared with a station, or `RequireMembership` for the
+membership-only `/access/me` bootstrap. Station-only roster and scan routes
+use `StationOnlyGuard`. The admin loads `/access/me` and uses the returned
+capabilities for navigation, route, and control visibility; those UI checks
+are usability controls and never replace the server policy. Better Auth's
+organization mutation surface remains owner-only, and its generic HTTP API-key
+management endpoints are blocked.
+
+See the approved
+[capability-based cabinet RBAC design](superpowers/specs/2026-08-03-capability-rbac-design.md)
+and the [cabinet RBAC rollout runbook](runbooks/cabinet-rbac-rollout.md).
+
 ## 7. Tolling (contract manufacturing)
 
 - `counterparties` per tenant: name, GLN, INN, GS1 prefixes.
