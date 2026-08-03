@@ -38,7 +38,7 @@ There are two separate human concepts:
 - A **cabinet user** is a Better Auth `user` with a row in the organization's `member` table. The membership carries one or more comma-separated Better Auth roles in `member.role`; the roles recognized in this slice are `owner`, `admin`, `manager`, and `member`.
 - A production **operator** is a domain employee who works at a station using a badge/PIN flow. An operator does not need a Better Auth account or cabinet access.
 
-Better Auth's organization creator remains `owner`. The Better Auth organization configuration gains `manager` as an accepted organization role. Its custom access-control configuration must merge Better Auth's default organization statements and existing owner/admin/member policies rather than replacing them; the static role configuration is passed to both server and organization client plugins. `member` remains a valid technical role but receives no cabinet permissions and is not offered as a selectable cabinet role in product UI.
+Better Auth's organization creator remains `owner`. The Better Auth organization configuration gains `manager` as an accepted organization role. Its custom access-control configuration keeps Better Auth's default organization statement vocabulary, preserves the default owner policy, and intentionally gives `admin`, `manager`, and `member` only the non-mutating organization access needed by the client. This prevents Better Auth's built-in organization endpoints from bypassing the owner-only `members.manage` boundary. Because Better Auth requires `apiKey.create` even for server-side org-owned key issuance, `admin` also receives that one internal plugin permission; manager and member do not. The built-in `/api/auth/api-key/*` HTTP management surface is blocked so this internal permission cannot bypass the audited cabinet controllers. The static role configuration is passed to both server and organization client plugins. `member` remains a valid technical role but receives no cabinet permissions and is not offered as a selectable cabinet role in product UI.
 
 ## Capability model
 
@@ -54,13 +54,13 @@ Controllers declare capabilities, never roles. The initial capability vocabulary
 
 The initial role-to-capability mapping is centralized in code:
 
-| Role | Effective capabilities |
-|---|---|
-| `manager` | `operations.read`, `operations.write` |
-| `admin` | all manager capabilities, `integrations.read`, `integrations.write`, `tenant.settings.manage`, `credentials.manage` |
-| `owner` | all admin capabilities, `members.manage` |
-| `member` | none |
-| unknown role | none |
+| Role         | Effective capabilities                                                                                              |
+| ------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `manager`    | `operations.read`, `operations.write`                                                                               |
+| `admin`      | all manager capabilities, `integrations.read`, `integrations.write`, `tenant.settings.manage`, `credentials.manage` |
+| `owner`      | all admin capabilities, `members.manage`                                                                            |
+| `member`     | none                                                                                                                |
+| unknown role | none                                                                                                                |
 
 Role inheritance is resolved by one `AuthorizationService`; it is not duplicated in controllers or the UI. For a multi-role membership, the resolver trims and normalizes the comma-separated role list and returns the union of capabilities from recognized roles. Unknown role entries add no capabilities and never grant fallback access. The service exposes a stable capability-resolution interface. A later implementation may resolve capabilities from database-backed roles and individual grants while preserving controller annotations and client contracts.
 
@@ -109,6 +109,8 @@ Only administrators and owners can:
 
 Creating and configuring a kiosk and assigning its assortment remain operational. Turning that kiosk into an authenticated machine is an administrative credential operation.
 
+Better Auth's generic HTTP API-key management endpoints are not part of the product API and remain unreachable. Application controllers are the only human-facing path for issuing or revoking station/public credentials; device verification continues through the server-side plugin API.
+
 ### Organization members (`members.manage`)
 
 Only the owner can invite/remove organization members and assign or revoke administrator-level access. This capability is enforced when member-management endpoints are introduced. The owner cannot be demoted or removed through an administrator-only path.
@@ -124,7 +126,7 @@ For a cabinet request, the server performs the following steps in order:
 5. Attach a typed cabinet principal containing `userId`, `tenantId`, role, and capabilities to the request.
 6. Evaluate the capabilities declared by the handler through `@RequirePermissions(...)`.
 
-The cabinet boundary is implemented as a composed guard/decorator layer over the existing tenant resolution rather than embedding role checks in business services. Existing `SessionOnlyGuard` usages are migrated to this boundary. Mixed controllers used by both sessions and devices apply the cabinet boundary at method level only; their device-facing handlers remain on the existing API-key guard path.
+The cabinet boundary is implemented as a composed guard/decorator layer over the existing tenant resolution rather than embedding role checks in business services. Existing `SessionOnlyGuard` usages are migrated to this boundary. Mixed controllers used by both sessions and devices explicitly allow a station while requiring the corresponding capability from a session caller. Station-only roster and scan-ingest routes explicitly reject Better Auth sessions; their API-key behavior remains unchanged.
 
 Authorization fails closed:
 
