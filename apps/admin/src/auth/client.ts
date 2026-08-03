@@ -34,6 +34,7 @@ export interface AuthClientLike {
     data: SessionData | null | undefined;
     isPending: boolean;
     error: unknown;
+    refetch?: () => Promise<void>;
   };
   /**
    * Better Auth's `organizationClient()` plugin exposes a `listOrganizations`

@@ -56,4 +56,18 @@ describe("apiFetch error message parsing", () => {
       new ApiRequestError(400, "GLN check digit is invalid, name must be 1-200 characters"),
     );
   });
+
+  it.each([{ message: "" }, { message: [] }])(
+    "falls back when the parsed message is empty: %j",
+    async (body) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => jsonResponse(400, body)),
+      );
+
+      await expect(apiFetch("/counterparties")).rejects.toMatchObject(
+        new ApiRequestError(400, "HTTP 400"),
+      );
+    },
+  );
 });

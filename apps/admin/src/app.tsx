@@ -16,15 +16,18 @@ import { DashboardPage } from "./pages/dashboard/index.js";
 import { EmployeesPage } from "./pages/employees/index.js";
 import { ChannelPage } from "./pages/integrations/ChannelPage.js";
 import { IntegrationsPage } from "./pages/integrations/index.js";
+import { InvitationPage } from "./pages/invitations/InvitationPage.js";
 import { KiosksPage } from "./pages/kiosks/index.js";
 import { LabelEditorPage } from "./pages/labels/editor/index.js";
 import { LabelTemplatesPage } from "./pages/labels/index.js";
 import { OrderDetailPage } from "./pages/pickup/OrderDetail.js";
 import { RejectionsPage } from "./pages/pickup/Rejections.js";
 import { PickupPage } from "./pages/pickup/index.js";
+import { ProfilePage } from "./pages/profile/ProfilePage.js";
 import { SettingsPage } from "./pages/settings/index.js";
 import { ShiftsPage } from "./pages/shifts/index.js";
 import { ShellPage } from "./pages/Shell.js";
+import { TeamPage } from "./pages/team/TeamPage.js";
 
 /**
  * Component routing (<BrowserRouter>/<Routes>/<Route>) rather than a data
@@ -42,6 +45,8 @@ export function AppRoutes() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
+      <Route path="/invitations/:id" element={<InvitationPage />} />
+      <Route path="/profile" element={<ProfilePage />} />
       <Route path="/org/create" element={<CreateOrgPage />} />
       <Route path="/org/select" element={<SelectOrgPage />} />
       <Route path="/" element={<ShellPage />}>
@@ -178,6 +183,14 @@ export function AppRoutes() {
           element={
             <RequireCapability capability={C.TENANT_SETTINGS_MANAGE}>
               <SettingsPage />
+            </RequireCapability>
+          }
+        />
+        <Route
+          path="team"
+          element={
+            <RequireCapability capability={C.MEMBERS_MANAGE}>
+              <TeamPage />
             </RequireCapability>
           }
         />

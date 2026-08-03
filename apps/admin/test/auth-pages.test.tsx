@@ -62,6 +62,8 @@ describe("LoginPage", () => {
     expect(screen.getByLabelText("Электронная почта")).toBeDefined();
     expect(screen.getByLabelText("Пароль")).toBeDefined();
     expect(screen.getByRole("button", { name: "Войти" })).toBeDefined();
+    expect(screen.getByText("Доступ выдаёт администратор организации.")).toBeDefined();
+    expect(screen.getByRole("link", { name: "Как получить доступ" })).toBeDefined();
   });
 
   it("submits credentials through the injected auth client and navigates home", async () => {
@@ -102,25 +104,15 @@ describe("LoginPage", () => {
 });
 
 describe("RegisterPage", () => {
-  it("submits sign-up details and navigates home", async () => {
+  it("directs users to invitation links without offering free email registration", () => {
     const client = createFakeAuthClient();
     renderRouted(client, "/register", <RegisterPage />);
 
-    fireEvent.change(screen.getByLabelText("Имя"), { target: { value: "Ada" } });
-    fireEvent.change(screen.getByLabelText("Электронная почта"), {
-      target: { value: "ada@example.com" },
-    });
-    fireEvent.change(screen.getByLabelText("Пароль"), { target: { value: "hunter2!" } });
-    fireEvent.click(screen.getByRole("button", { name: "Зарегистрироваться" }));
-
-    await waitFor(() => {
-      expect(client.signUp.email).toHaveBeenCalledWith({
-        name: "Ada",
-        email: "ada@example.com",
-        password: "hunter2!",
-      });
-    });
-    await screen.findByText("SHELL_PLACEHOLDER");
+    expect(screen.getByText("Регистрация доступна по приглашению")).toBeDefined();
+    expect(screen.getByRole("link", { name: "Войти" })).toBeDefined();
+    expect(screen.queryByLabelText("Электронная почта")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Зарегистрироваться" })).toBeNull();
+    expect(client.signUp.email).not.toHaveBeenCalled();
   });
 });
 

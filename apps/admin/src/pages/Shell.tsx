@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { Navigate } from "react-router";
+import { Navigate, useLocation } from "react-router";
 
 import { Button, EmptyState, Spinner } from "@markiro/ui";
 
@@ -9,6 +9,7 @@ import { NoCabinetAccess } from "../access/NoCabinetAccess.js";
 import { ApiRequestError } from "../api/client.js";
 import { useAuthClient } from "../auth/client.js";
 import { AppShell } from "../layout/AppShell.js";
+import { useProfile } from "./profile/api.js";
 
 /**
  * Guarded root route: redirects to /login (no session) or /org/select
@@ -37,11 +38,33 @@ export function ShellPage() {
   }
 
   return (
-    <AccessGate
+    <ProfileCompletionGate
       userId={session.user.id}
       activeOrganizationId={session.session.activeOrganizationId}
     />
   );
+}
+
+function ProfileCompletionGate({
+  userId,
+  activeOrganizationId,
+}: {
+  userId: string;
+  activeOrganizationId: string;
+}) {
+  const location = useLocation();
+  const profile = useProfile();
+
+  if (profile.isPending) return <CenteredSpinner />;
+  if (profile.isError || !profile.data) {
+    return <AccessLoadError onRetry={() => void profile.refetch()} />;
+  }
+  if (!profile.data.firstName?.trim() || !profile.data.lastName?.trim()) {
+    const returnTo = `${location.pathname}${location.search}`;
+    return <Navigate to={`/profile?complete=1&returnTo=${encodeURIComponent(returnTo)}`} replace />;
+  }
+
+  return <AccessGate userId={userId} activeOrganizationId={activeOrganizationId} />;
 }
 
 function AccessGate({

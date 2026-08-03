@@ -30,6 +30,14 @@ beforeEach(() => {
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/api/profile")) {
+        return jsonResponse(200, {
+          firstName: "Test",
+          lastName: "User",
+          middleName: null,
+          hasAvatar: false,
+        });
+      }
       if (url.endsWith("/api/access/me")) {
         return jsonResponse(200, {
           roles: ["manager"],
@@ -179,12 +187,22 @@ describe("ShellPage", () => {
     expect(locationPathname.textContent).toBe("/shell");
   });
 
-  it("waits for access before mounting the operational shell", () => {
+  it("waits for access before mounting the operational shell", async () => {
     let resolveAccess: ((response: Response) => void) | undefined;
     vi.stubGlobal(
       "fetch",
       vi.fn((input: RequestInfo | URL) => {
         const url = String(input);
+        if (url.endsWith("/api/profile")) {
+          return Promise.resolve(
+            jsonResponse(200, {
+              firstName: "Test",
+              lastName: "User",
+              middleName: null,
+              hasAvatar: false,
+            }),
+          );
+        }
         if (url.endsWith("/api/access/me")) {
           return new Promise<Response>((resolve) => {
             resolveAccess = resolve;
@@ -210,8 +228,8 @@ describe("ShellPage", () => {
 
     expect(screen.getByRole("status")).toBeDefined();
     expect(screen.queryByRole("link", { name: "Обзор" })).toBeNull();
-    expect(fetch).toHaveBeenCalledTimes(1);
-    expect(String(vi.mocked(fetch).mock.calls[0]?.[0])).toContain("/api/access/me");
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(fetch).mock.calls.map(([input]) => String(input))).toContain("/api/access/me");
 
     resolveAccess?.(
       jsonResponse(200, {
@@ -226,6 +244,14 @@ describe("ShellPage", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
+        if (url.endsWith("/api/profile")) {
+          return jsonResponse(200, {
+            firstName: "Test",
+            lastName: "User",
+            middleName: null,
+            hasAvatar: false,
+          });
+        }
         if (url.endsWith("/api/access/me")) {
           return jsonResponse(200, { roles: ["member"], capabilities: [] });
         }
@@ -248,7 +274,7 @@ describe("ShellPage", () => {
 
     expect(await screen.findByText("Доступ к кабинету пока не открыт")).toBeDefined();
     expect(screen.queryByRole("link", { name: "Обзор" })).toBeNull();
-    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
   });
 
   it("treats a 403 access response as intentional no-access", async () => {
@@ -256,6 +282,14 @@ describe("ShellPage", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
+        if (url.endsWith("/api/profile")) {
+          return jsonResponse(200, {
+            firstName: "Test",
+            lastName: "User",
+            middleName: null,
+            hasAvatar: false,
+          });
+        }
         if (url.endsWith("/api/access/me")) return jsonResponse(403, { message: "Forbidden" });
         if (url.includes("/api/pickup-orders")) return jsonResponse(200, { items: [] });
         throw new Error(`Unexpected request: ${url}`);
@@ -277,7 +311,10 @@ describe("ShellPage", () => {
 
     expect(await screen.findByText("Доступ к кабинету пока не открыт")).toBeDefined();
     expect(screen.queryByRole("link", { name: "Обзор" })).toBeNull();
-    expect(vi.mocked(fetch).mock.calls.map(([input]) => String(input))).toEqual(["/api/access/me"]);
+    expect(vi.mocked(fetch).mock.calls.map(([input]) => String(input))).toEqual([
+      "/api/profile",
+      "/api/access/me",
+    ]);
   });
 
   it("shows a retryable load error for non-403 access failures", async () => {
@@ -286,6 +323,14 @@ describe("ShellPage", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
+        if (url.endsWith("/api/profile")) {
+          return jsonResponse(200, {
+            firstName: "Test",
+            lastName: "User",
+            middleName: null,
+            hasAvatar: false,
+          });
+        }
         if (url.endsWith("/api/access/me")) {
           accessCalls += 1;
           return jsonResponse(500, { message: "Server error" });
@@ -360,6 +405,16 @@ describe("ShellPage", () => {
       "fetch",
       vi.fn((input: RequestInfo | URL) => {
         const url = String(input);
+        if (url.endsWith("/api/profile")) {
+          return Promise.resolve(
+            jsonResponse(200, {
+              firstName: "Test",
+              lastName: "User",
+              middleName: null,
+              hasAvatar: false,
+            }),
+          );
+        }
         if (url.endsWith("/api/access/me")) {
           accessCalls += 1;
           if (accessCalls === 1) {
@@ -433,6 +488,14 @@ describe("ShellPage", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
+        if (url.endsWith("/api/profile")) {
+          return jsonResponse(200, {
+            firstName: "Test",
+            lastName: "User",
+            middleName: null,
+            hasAvatar: false,
+          });
+        }
         if (url.endsWith("/api/access/me")) {
           return jsonResponse(200, { roles: ["member"], capabilities: [] });
         }

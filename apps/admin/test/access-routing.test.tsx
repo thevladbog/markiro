@@ -42,6 +42,7 @@ const ADMIN_ACCESS: AccessDocument = {
     CABINET_CAPABILITY.INTEGRATIONS_WRITE,
     CABINET_CAPABILITY.TENANT_SETTINGS_MANAGE,
     CABINET_CAPABILITY.CREDENTIALS_MANAGE,
+    CABINET_CAPABILITY.MEMBERS_MANAGE,
   ],
 };
 
@@ -73,12 +74,22 @@ function createFakeAuthClient(): AuthClientLike {
   };
 }
 
-function renderAccessRoute(initialPath: string, access: AccessDocument) {
+function renderAccessRoute(
+  initialPath: string,
+  access: AccessDocument,
+  profile: {
+    firstName: string | null;
+    lastName: string | null;
+    middleName: string | null;
+    hasAvatar: boolean;
+  } = { firstName: "Елена", lastName: "Ким", middleName: null, hasAvatar: false },
+) {
   const requests: string[] = [];
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input);
+      if (path.endsWith("/api/profile")) return jsonResponse(200, profile);
       if (path.endsWith("/api/access/me")) return jsonResponse(200, access);
 
       requests.push(path);
@@ -165,6 +176,28 @@ it("shows integrations and settings navigation to administrators", async () => {
 
   expect(await screen.findByRole("link", { name: "Интеграции" })).toBeDefined();
   expect(screen.getByRole("link", { name: "Настройки" })).toBeDefined();
+  expect(screen.getByRole("link", { name: "Команда" })).toBeDefined();
+  expect(screen.getByRole("link", { name: "Открыть профиль Елена Ким" })).toBeDefined();
+});
+
+it("redirects legacy signed-in users to global profile completion and preserves the requested route", async () => {
+  renderAccessRoute("/catalog", MANAGER_ACCESS, {
+    firstName: null,
+    lastName: null,
+    middleName: null,
+    hasAvatar: false,
+  });
+
+  expect(await screen.findByRole("heading", { name: "Мой профиль" })).toBeDefined();
+  expect(screen.getByText("Заполните профиль")).toBeDefined();
+  expect(screen.queryByRole("heading", { name: "Каталог продукции" })).toBeNull();
+});
+
+it("hides Team from managers and forbids the direct route", async () => {
+  renderAccessRoute("/team", MANAGER_ACCESS);
+
+  expect(await screen.findByText("Эта страница недоступна")).toBeDefined();
+  expect(screen.queryByRole("link", { name: "Команда" })).toBeNull();
 });
 
 it("allows administrators to open integrations and settings directly", async () => {
