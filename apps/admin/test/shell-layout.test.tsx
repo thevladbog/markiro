@@ -45,6 +45,14 @@ beforeEach(() => {
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/api/profile")) {
+        return jsonResponse(200, {
+          firstName: "Елена",
+          lastName: "Ким",
+          middleName: null,
+          hasAvatar: false,
+        });
+      }
       if (url.endsWith("/api/access/me")) {
         return jsonResponse(200, {
           roles: ["manager"],

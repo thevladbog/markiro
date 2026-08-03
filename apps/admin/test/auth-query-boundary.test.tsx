@@ -149,6 +149,14 @@ describe("AuthQueryBoundary", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
+        if (url.endsWith("/api/profile")) {
+          return jsonResponse(200, {
+            firstName: "Test",
+            lastName: "User",
+            middleName: null,
+            hasAvatar: false,
+          });
+        }
         if (url.endsWith("/api/access/me")) return await accessResponses.shift()!;
         if (url.includes("/api/pickup-orders")) return jsonResponse(200, { items: [] });
         if (url.endsWith("/api/tenant-secret")) {
@@ -200,6 +208,14 @@ describe("AuthQueryBoundary", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
+        if (url.endsWith("/api/profile")) {
+          return jsonResponse(200, {
+            firstName: "Test",
+            lastName: "User",
+            middleName: null,
+            hasAvatar: false,
+          });
+        }
         if (url.endsWith("/api/access/me")) return await accessResponses.shift()!;
         if (url.includes("/api/pickup-orders")) return jsonResponse(200, { items: [] });
         if (url.endsWith("/api/tenant-secret")) {
@@ -248,6 +264,14 @@ describe("AuthQueryBoundary", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
+        if (url.endsWith("/api/profile")) {
+          return jsonResponse(200, {
+            firstName: "Test",
+            lastName: "User",
+            middleName: null,
+            hasAvatar: false,
+          });
+        }
         if (url.endsWith("/api/access/me")) return await accessResponses.shift()!;
         if (url.includes("/api/pickup-orders")) return jsonResponse(200, { items: [] });
         if (url.endsWith("/api/tenant-secret")) {

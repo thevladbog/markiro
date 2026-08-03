@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
-import { NavLink, Outlet } from "react-router";
+import { Link, NavLink, Outlet } from "react-router";
 
 import { CABINET_CAPABILITY, type CabinetCapability } from "@markiro/domain";
 import { Sidebar, cn, type SidebarItem } from "@markiro/ui";
@@ -8,6 +8,7 @@ import { Sidebar, cn, type SidebarItem } from "@markiro/ui";
 import { useCan } from "../access/context.js";
 import { useAuthClient } from "../auth/client.js";
 import { usePendingOrderCount } from "../pages/pickup/api.js";
+import { useAvatarUrl, useProfile } from "../pages/profile/api.js";
 import { Header } from "./Header.js";
 
 const C = CABINET_CAPABILITY;
@@ -28,6 +29,7 @@ export const NAV_ITEMS: ReadonlyArray<{
   { to: "/integrations", key: "nav.integrations", capability: C.INTEGRATIONS_READ },
   { to: "/labels", key: "nav.labels", capability: C.OPERATIONS_READ },
   { to: "/pickup", key: "nav.pickup", capability: C.OPERATIONS_READ },
+  { to: "/team", key: "nav.team", capability: C.MEMBERS_MANAGE },
   { to: "/settings", key: "nav.settings", capability: C.TENANT_SETTINGS_MANAGE },
 ];
 
@@ -51,12 +53,21 @@ export function AppShell() {
   const canReadOperations = useCan(C.OPERATIONS_READ);
   const canReadIntegrations = useCan(C.INTEGRATIONS_READ);
   const canManageSettings = useCan(C.TENANT_SETTINGS_MANAGE);
+  const canManageMembers = useCan(C.MEMBERS_MANAGE);
   const pendingOrderCount = usePendingOrderCount(canReadOperations);
+  const profile = useProfile();
+  const avatar = useAvatarUrl(Boolean(profile.data?.hasAvatar));
+  const profileName = profile.data
+    ? [profile.data.firstName, profile.data.middleName, profile.data.lastName]
+        .filter(Boolean)
+        .join(" ")
+    : null;
 
   const items: SidebarItem[] = NAV_ITEMS.filter(({ capability }) => {
     if (capability === C.OPERATIONS_READ) return canReadOperations;
     if (capability === C.INTEGRATIONS_READ) return canReadIntegrations;
     if (capability === C.TENANT_SETTINGS_MANAGE) return canManageSettings;
+    if (capability === C.MEMBERS_MANAGE) return canManageMembers;
     return false;
   }).map(({ to, key }) => ({
     to,
@@ -80,7 +91,16 @@ export function AppShell() {
             {content}
           </NavLink>
         )}
-        footer={<SidebarFooter name={session?.user.name} email={session?.user.email ?? ""} />}
+        footer={
+          <SidebarFooter
+            name={profileName || session?.user.name}
+            email={session?.user.email ?? ""}
+            avatarUrl={avatar.data?.url ?? null}
+            openLabel={t("profile.openNamed", {
+              name: profileName || session?.user.name || session?.user.email || "",
+            })}
+          />
+        }
       />
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
         <Header />
@@ -133,27 +153,51 @@ const EMAIL_STYLE: CSSProperties = {
  * user's email is shown instead, which is always present and avoids
  * fabricating data the session doesn't have.
  */
-function SidebarFooter({ name, email }: { name: string | null | undefined; email: string }) {
+function SidebarFooter({
+  name,
+  email,
+  avatarUrl,
+  openLabel,
+}: {
+  name: string | null | undefined;
+  email: string;
+  avatarUrl: string | null;
+  openLabel: string;
+}) {
   const displayName = name && name.trim().length > 0 ? name : email;
 
   return (
-    <div
+    <Link
+      to="/profile"
+      aria-label={openLabel}
       style={{
         display: "flex",
         alignItems: "center",
         gap: 10,
         padding: 10,
         borderTop: "1px solid var(--line)",
+        textDecoration: "none",
       }}
     >
-      <span aria-hidden="true" style={AVATAR_STYLE}>
-        {initialsOf(displayName)}
-      </span>
+      {avatarUrl ? (
+        <img
+          src={avatarUrl}
+          alt=""
+          aria-hidden="true"
+          width={32}
+          height={32}
+          style={{ ...AVATAR_STYLE, objectFit: "cover" }}
+        />
+      ) : (
+        <span aria-hidden="true" style={AVATAR_STYLE}>
+          {initialsOf(displayName)}
+        </span>
+      )}
       <span style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
         <span style={NAME_STYLE}>{displayName}</span>
         <span style={EMAIL_STYLE}>{email}</span>
       </span>
-    </div>
+    </Link>
   );
 }
 

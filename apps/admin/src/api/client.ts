@@ -13,11 +13,13 @@ const API_BASE = "/api";
 
 export class ApiRequestError extends Error {
   readonly status: number;
+  readonly code: string | null;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, code: string | null = null) {
     super(message);
     this.name = "ApiRequestError";
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -36,7 +38,7 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   });
 
   if (!response.ok) {
-    throw new ApiRequestError(response.status, await readErrorMessage(response));
+    throw await apiErrorFromResponse(response);
   }
 
   if (response.status === 204) {
@@ -46,31 +48,40 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   return (await response.json()) as T;
 }
 
-async function readErrorMessage(response: Response): Promise<string> {
+export async function apiErrorFromResponse(response: Response): Promise<ApiRequestError> {
+  let code: string | null = null;
+  let message: string | null = null;
   try {
     const body: unknown = await response.json();
-    if (body && typeof body === "object" && "message" in body) {
-      const message = (body as { message?: unknown }).message;
-      if (typeof message === "string") return message;
-      if (Array.isArray(message) && message.every((m) => typeof m === "string")) {
-        return message.join(", ");
+    if (body && typeof body === "object") {
+      if ("code" in body && typeof (body as { code?: unknown }).code === "string") {
+        code = (body as { code: string }).code;
+      }
+      const rawMessage = "message" in body ? (body as { message?: unknown }).message : null;
+      if (typeof rawMessage === "string") message = rawMessage;
+      if (Array.isArray(rawMessage) && rawMessage.every((item) => typeof item === "string")) {
+        message = rawMessage.join(", ");
       }
       // ZodValidationPipe (see ../../../api/src/zod.pipe.ts) reports 400s as
       // an array of `{ path, message }` issues rather than plain strings --
       // join their `message` fields so a validation error still surfaces as
       // readable text instead of falling through to the generic status text.
       if (
-        Array.isArray(message) &&
-        message.every((m) => m && typeof m === "object" && "message" in m)
+        Array.isArray(rawMessage) &&
+        rawMessage.every((item) => item && typeof item === "object" && "message" in item)
       ) {
-        const issues = message
+        const issues = rawMessage
           .map((m) => (m as { message?: unknown }).message)
           .filter((m): m is string => typeof m === "string");
-        if (issues.length > 0) return issues.join(", ");
+        if (issues.length > 0) message = issues.join(", ");
       }
     }
   } catch {
     // response body wasn't JSON (or was empty) -- fall through
   }
-  return response.statusText || `HTTP ${response.status}`;
+  return new ApiRequestError(
+    response.status,
+    message ?? (response.statusText || `HTTP ${response.status}`),
+    code,
+  );
 }

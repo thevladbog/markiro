@@ -26,6 +26,8 @@
       "submit": "Register",
       "haveAccount": "Already have an account?",
       "loginLink": "Sign in",
+      "inviteOnlyTitle": "Registration is invitation-only",
+      "inviteOnlyBody": "Ask your organization administrator for a personal link. Your email address will already be included in the invitation.",
       "genericError": "Could not register. Try a different email address."
     },
     "createOrg": {
@@ -46,6 +48,57 @@
       "genericError": "Could not load the organization list."
     }
   },
+  "invitation": {
+    "title": "Team invitation",
+    "pending": "Awaiting your decision",
+    "summary": "You were invited to {{organization}} as {{role}}.",
+    "email": "Email",
+    "firstName": "First name",
+    "lastName": "Last name",
+    "middleName": "Middle name",
+    "password": "Password",
+    "registerAndAccept": "Create account and accept",
+    "retryAccept": "Retry acceptance",
+    "signInHint": "An account already exists for this address. Enter your password to continue.",
+    "signIn": "Sign in to continue",
+    "accept": "Accept invitation",
+    "reject": "Reject",
+    "acceptedTitle": "Invitation accepted",
+    "acceptedBody": "The organization has been added to your cabinet. You can continue to work.",
+    "rejectedTitle": "Invitation rejected",
+    "rejectedBody": "Access was not added. The organization administrator will see the result.",
+    "toCabinet": "Open cabinet",
+    "wrongAccountTitle": "You are signed in to another account",
+    "wrongAccountBody": "You are currently signed in as {{email}}. Sign out and use the invited address.",
+    "unavailableTitle": "Link unavailable",
+    "unavailableBody": "This link may have expired, been canceled, or already used. Ask an administrator for a new invitation.",
+    "loadErrorTitle": "Could not load invitation",
+    "loadErrorBody": "The service is temporarily unavailable. Check your connection and try again.",
+    "rateLimitTitle": "Too many attempts",
+    "rateLimitBody": "Wait a moment, then try opening the invitation again.",
+    "retry": "Try again",
+    "genericError": "Could not process the invitation. Try again."
+  },
+  "profile": {
+    "title": "My profile",
+    "personalTitle": "Personal details",
+    "completeTitle": "Complete your profile",
+    "completeBody": "Your first and last name are used in invitations, audit history, and print forms. You will return to work after saving.",
+    "email": "Email",
+    "firstName": "First name",
+    "lastName": "Last name",
+    "middleName": "Middle name",
+    "save": "Save profile",
+    "loadError": "Could not load your profile.",
+    "saveError": "Could not save your profile.",
+    "saveSuccess": "Profile saved.",
+    "avatarAlt": "Profile photo",
+    "noAvatar": "No photo uploaded",
+    "uploadAvatar": "Upload photo",
+    "deleteAvatar": "Delete photo",
+    "avatarError": "Could not update the photo. The current image was preserved.",
+    "openNamed": "Open {{name}} profile"
+  },
   "nav": {
     "dashboard": "Overview",
     "catalog": "Catalog",
@@ -58,6 +111,7 @@
     "employees": "Employees",
     "kiosks": "Kiosks",
     "integrations": "Integrations",
+    "team": "Team",
     "settings": "Settings"
   },
   "shell": {
@@ -103,6 +157,90 @@
     "lastEvent": "Last event: {{time}}"
   },
   "pages": {
+    "team": {
+      "title": "Team",
+      "inviteAction": "Invite",
+      "loadError": "Could not load the team.",
+      "emptyTitle": "No team members yet",
+      "emptyHint": "Invite an organization administrator or manager.",
+      "membersTitle": "Members",
+      "invitationsTitle": "Invitations",
+      "noInvitationsTitle": "No active invitations",
+      "noInvitationsHint": "New invitations and their delivery status will appear here.",
+      "cancel": "Cancel",
+      "resend": "Send again",
+      "cancelInvitation": "Cancel invitation",
+      "cancelConfirmTitle": "Cancel invitation?",
+      "cancelConfirmBody": "The link for {{email}} will stop working. You can create a new invitation later if needed.",
+      "actionError": "Could not complete the action.",
+      "actionsUnavailable": "Actions unavailable",
+      "actionsUnavailableHint": "The invitation expired. Create a new invitation with the button above.",
+      "photoUploaded": "Photo uploaded",
+      "roles": {
+        "owner": "Owner",
+        "admin": "Administrator",
+        "manager": "Manager",
+        "member": "Member"
+      },
+      "table": {
+        "person": "User",
+        "email": "Email",
+        "role": "Role",
+        "position": "Position",
+        "operator": "Production work",
+        "access": "Access",
+        "delivery": "Email",
+        "actions": "Actions"
+      },
+      "operator": {
+        "employee": "Employee: {{name}}",
+        "enabled": "Operator access enabled",
+        "disabled": "Operator access disabled"
+      },
+      "employeeStatus": {
+        "active": "Employee active",
+        "archived": "Employee archived"
+      },
+      "access": {
+        "pending": "Awaiting acceptance",
+        "accepted": "Accepted",
+        "rejected": "Rejected",
+        "canceled": "Canceled",
+        "expired": "Expired"
+      },
+      "delivery": {
+        "none": "Not sent",
+        "queued": "Queued",
+        "sending": "Sending",
+        "sent": "Sent",
+        "delivered": "Delivered",
+        "failed": "Delivery failed",
+        "canceled": "Canceled"
+      },
+      "invite": {
+        "title": "Invite to team",
+        "email": "Email",
+        "role": "Role",
+        "position": "Position",
+        "employee": "Employee",
+        "noEmployee": "Do not link an employee",
+        "employeeLoadError": "The employee list is unavailable; you can still invite without a link.",
+        "submit": "Send invitation",
+        "genericError": "Could not send the invitation."
+      },
+      "member": {
+        "edit": "Edit",
+        "editNamed": "Edit {{name}}",
+        "editTitle": "Member access",
+        "save": "Save",
+        "saveError": "Could not save the member.",
+        "remove": "Remove",
+        "removeNamed": "Remove {{name}}",
+        "removeTitle": "Remove member?",
+        "removeBody": "{{name}} will lose access to this organization.",
+        "removeError": "Could not remove the member."
+      }
+    },
     "dashboard": {
       "title": "Overview",
       "emptyTitle": "No data yet",
