@@ -277,6 +277,7 @@ describe("ShellPage", () => {
 
     expect(await screen.findByText("Доступ к кабинету пока не открыт")).toBeDefined();
     expect(screen.queryByRole("link", { name: "Обзор" })).toBeNull();
+    expect(vi.mocked(fetch).mock.calls.map(([input]) => String(input))).toEqual(["/api/access/me"]);
   });
 
   it("shows a retryable load error for non-403 access failures", async () => {
