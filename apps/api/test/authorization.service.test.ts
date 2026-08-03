@@ -37,13 +37,24 @@ function matches(condition: FakeCondition, row: MembershipRow): boolean {
 }
 
 function fakeDb(rows: MembershipRow[]): Db {
+  const queriedLimits: number[] = [];
   return {
     select: () => ({
       from: () => ({
-        where: async (condition: FakeCondition) =>
-          rows.filter((row) => matches(condition, row)).map((row) => ({ role: row.role })),
+        where: (condition: FakeCondition) => {
+          const matched = rows
+            .filter((row) => matches(condition, row))
+            .map((row) => ({ role: row.role }));
+          return Object.assign(Promise.resolve(matched), {
+            limit: (count: number) => {
+              queriedLimits.push(count);
+              return Promise.resolve(matched.slice(0, count));
+            },
+          });
+        },
       }),
     }),
+    queriedLimits,
   } as unknown as Db;
 }
 
@@ -72,6 +83,21 @@ describe("AuthorizationService", () => {
 
   it("returns null when only a cross-tenant membership exists", async () => {
     await expect(service.resolvePrincipal("user_1", "org_missing")).resolves.toBeNull();
+  });
+
+  it("fails closed when the active tenant has duplicate memberships", async () => {
+    membershipRows.push({ userId: "user_1", organizationId: "org_1", role: "owner" });
+
+    await expect(service.resolvePrincipal("user_1", "org_1")).resolves.toBeNull();
+  });
+
+  it("reads at most two matching memberships to detect duplicates", async () => {
+    const db = fakeDb(membershipRows) as unknown as { queriedLimits: number[] };
+    service = new AuthorizationService(db as unknown as Db);
+
+    await service.resolvePrincipal("user_1", "org_1");
+
+    expect(db.queriedLimits).toEqual([2]);
   });
 
   it("reloads the role on every call", async () => {

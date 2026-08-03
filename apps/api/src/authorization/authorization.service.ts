@@ -14,11 +14,13 @@ export class AuthorizationService {
   constructor(@Inject(DB) private readonly db: Db) {}
 
   async resolvePrincipal(userId: string, tenantId: string): Promise<CabinetPrincipal | null> {
-    const [membership] = await this.db
+    const memberships = await this.db
       .select({ role: schema.member.role })
       .from(schema.member)
-      .where(and(eq(schema.member.userId, userId), eq(schema.member.organizationId, tenantId)));
-    if (!membership) return null;
+      .where(and(eq(schema.member.userId, userId), eq(schema.member.organizationId, tenantId)))
+      .limit(2);
+    if (memberships.length !== 1) return null;
+    const membership = memberships[0]!;
     return { userId, tenantId, ...resolveCabinetAccess(membership.role) };
   }
 }

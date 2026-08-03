@@ -58,6 +58,26 @@ JOIN "user" AS u ON u.id = m.user_id
 ORDER BY o.name, u.email;
 ```
 
+Before approving promotions or deploying the RBAC revision, run this separate
+read-only integrity check. It must return zero rows:
+
+```sql
+SELECT
+  user_id,
+  organization_id,
+  COUNT(*) AS membership_count
+FROM member
+GROUP BY user_id, organization_id
+HAVING COUNT(*) > 1
+ORDER BY organization_id, user_id;
+```
+
+Stop the rollout if it returns any group. Record the affected environment and
+membership ids in the protected change record, resolve the data incident under
+the applicable approval process, then re-run both the duplicate check and the
+membership inventory before continuing. Do not promote or deploy while a
+duplicate `(user_id, organization_id)` group exists.
+
 For every intended cabinet user whose current role is `member`, add one row to
 the protected approval record with the environment, `membership_id`,
 `organization_id`, current role, explicit target role (`manager`, `admin`, or

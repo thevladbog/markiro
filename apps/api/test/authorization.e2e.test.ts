@@ -185,6 +185,21 @@ describe.skipIf(!ready)("cabinet authorization e2e", () => {
     await agent.get("/integrations").expect(200);
   });
 
+  it("denies a request when its active tenant has duplicate memberships", async () => {
+    const { agent, organizationId } = await activeOrganizationFixture();
+    const member = await soleMember(organizationId);
+
+    await db.insert(schema.member).values({
+      id: randomUUID(),
+      organizationId,
+      userId: member.userId,
+      role: "owner",
+      createdAt: new Date(),
+    });
+
+    await agent.get("/access/me").expect(403);
+  });
+
   it("does not authorize an active tenant from a membership in another tenant", async () => {
     const { agent, organizationId } = await activeOrganizationFixture();
     const member = await soleMember(organizationId);
