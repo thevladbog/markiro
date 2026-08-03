@@ -6,6 +6,7 @@ import {
   boolean,
   integer,
   index,
+  unique,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 
@@ -111,6 +112,7 @@ export const member = pgTable(
   (table) => [
     index("member_organizationId_idx").on(table.organizationId),
     index("member_userId_idx").on(table.userId),
+    unique("member_organization_id_uq").on(table.organizationId, table.id),
   ],
 );
 
@@ -133,6 +135,7 @@ export const invitation = pgTable(
   (table) => [
     index("invitation_organizationId_idx").on(table.organizationId),
     index("invitation_email_idx").on(table.email),
+    unique("invitation_organization_id_uq").on(table.organizationId, table.id),
   ],
 );
 

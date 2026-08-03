@@ -190,6 +190,20 @@
       "when": 1785577535259,
       "tag": "0026_groovy_blink",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1785779485738,
+      "tag": "0027_tenant_team_mail_media",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1785786507980,
+      "tag": "0028_avatar-owner-integrity",
+      "breakpoints": true
     }
   ]
 }

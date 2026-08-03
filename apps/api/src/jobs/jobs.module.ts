@@ -11,8 +11,16 @@ import { PgBoss } from "pg-boss";
 import { sql } from "drizzle-orm";
 import { ensurePartitions, schema, type Db } from "@markiro/db";
 import { DB } from "../auth/auth.module";
+import type { Env } from "../env";
 import { ExchangeSessionService } from "../modules/exchange/exchange-session.service";
 import { JournalService } from "../modules/integrations/journal.service";
+import {
+  MailJobsService,
+  SEND_EMAIL_DELIVERY_QUEUE,
+  type MailQueue,
+} from "../modules/mail/mail-jobs.service";
+import { MailModule } from "../modules/mail/mail.module";
+import { MailRetentionService } from "../modules/mail/mail-retention.service";
 import { currentMonthUTC, nextMonthUTC } from "./months";
 
 export const PG_CONNECTION_STRING = "JOBS_PG_CONNECTION_STRING";
@@ -62,9 +70,16 @@ const PRUNE_EXCHANGE_ATTEMPTS_QUEUE_CRON = "0 * * * *";
 const PRUNE_INTEGRATION_JOURNAL_QUEUE_NAME = "prune-integration-journal";
 const PRUNE_INTEGRATION_JOURNAL_QUEUE_CRON = "0 3 * * *";
 
+const DISPATCH_EMAIL_OUTBOX_QUEUE_NAME = "dispatch-email-outbox";
+const DISPATCH_EMAIL_OUTBOX_QUEUE_CRON = "* * * * *";
+const RECONCILE_EMAIL_DELIVERIES_QUEUE_NAME = "reconcile-email-deliveries";
+const RECONCILE_EMAIL_DELIVERIES_QUEUE_CRON = "*/5 * * * *";
+const PRUNE_EMAIL_DELIVERIES_QUEUE_NAME = "prune-email-deliveries";
+const PRUNE_EMAIL_DELIVERIES_QUEUE_CRON = "30 2 * * *";
+
 /**
  * Boots a dedicated pg-boss instance (its own `pgboss` schema, same
- * database as the app) and runs five independent schedules on it:
+ * database as the app), one delivery worker, and eight schedules on it:
  *  - keeps the `codes`/`scan_events` monthly partitions ahead of traffic:
  *    ensures the current + next month exist once at startup, then again
  *    every day at 04:00 UTC.
@@ -81,6 +96,9 @@ const PRUNE_INTEGRATION_JOURNAL_QUEUE_CRON = "0 3 * * *";
  *  - prunes the integrations journal once at startup, then again every day
  *    at 03:00 UTC, per the per-grain retention described on
  *    `JournalService.prune`.
+ *  - dispatches the transactional email outbox every minute, reconciles lost
+ *    or stale delivery jobs every five minutes, and applies mail retention
+ *    daily at 02:30 UTC.
  *
  * pg-boss v12 requires a queue to be created (`createQueue`) before it can
  * be scheduled or worked -- scheduling against a queue that doesn't exist
@@ -99,6 +117,8 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     @Inject(PG_CONNECTION_STRING) private readonly connectionString: string,
     private readonly journal: JournalService,
     private readonly exchangeSessions: ExchangeSessionService,
+    private readonly mailJobs: MailJobsService,
+    private readonly mailRetention: MailRetentionService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -148,13 +168,54 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
         await this.runPruneIntegrationJournal();
       });
 
-      // Also run all five once immediately at boot rather than waiting for
-      // the first tick of any schedule.
+      await boss.createQueue(SEND_EMAIL_DELIVERY_QUEUE, {
+        policy: "key_strict_fifo",
+        retryLimit: 8,
+        retryDelay: 30,
+        retryBackoff: true,
+        retryDelayMax: 3600,
+        expireInSeconds: 60,
+        deleteAfterSeconds: 300,
+      });
+      await boss.work<{ deliveryId: string }>(
+        SEND_EMAIL_DELIVERY_QUEUE,
+        { includeMetadata: true },
+        async (jobs) => {
+          for (const job of jobs) await this.mailJobs.processDelivery(job.data.deliveryId);
+        },
+      );
+
+      await boss.createQueue(DISPATCH_EMAIL_OUTBOX_QUEUE_NAME);
+      await boss.schedule(DISPATCH_EMAIL_OUTBOX_QUEUE_NAME, DISPATCH_EMAIL_OUTBOX_QUEUE_CRON);
+      await boss.work(DISPATCH_EMAIL_OUTBOX_QUEUE_NAME, async () => {
+        await this.mailJobs.dispatchOutbox(this.mailQueue(boss));
+      });
+
+      await boss.createQueue(RECONCILE_EMAIL_DELIVERIES_QUEUE_NAME);
+      await boss.schedule(
+        RECONCILE_EMAIL_DELIVERIES_QUEUE_NAME,
+        RECONCILE_EMAIL_DELIVERIES_QUEUE_CRON,
+      );
+      await boss.work(RECONCILE_EMAIL_DELIVERIES_QUEUE_NAME, async () => {
+        await this.mailJobs.reconcile(this.mailQueue(boss));
+      });
+
+      await boss.createQueue(PRUNE_EMAIL_DELIVERIES_QUEUE_NAME);
+      await boss.schedule(PRUNE_EMAIL_DELIVERIES_QUEUE_NAME, PRUNE_EMAIL_DELIVERIES_QUEUE_CRON);
+      await boss.work(PRUNE_EMAIL_DELIVERIES_QUEUE_NAME, async () => {
+        await this.mailRetention.prune();
+      });
+
+      // Also run all eight maintenance paths once immediately at boot rather
+      // than waiting for the first tick of any schedule.
       await this.runEnsurePartitions();
       await this.runPruneKioskPairAttempts();
       await this.runPruneExchangeAttempts();
       await this.runSweepExpiredExchangeSessions();
       await this.runPruneIntegrationJournal();
+      await this.mailJobs.dispatchOutbox(this.mailQueue(boss));
+      await this.mailJobs.reconcile(this.mailQueue(boss));
+      await this.mailRetention.prune();
     } catch (e) {
       // Bootstrap failed partway through: stop whatever pg-boss managed to
       // start so it doesn't leak a connection/maintenance loop, then
@@ -235,14 +296,21 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     await this.journal.prune(new Date());
     this.logger.log("Pruned integrations journal");
   }
+
+  private mailQueue(boss: PgBoss): MailQueue {
+    return {
+      send: (name, data, options) => boss.send(name, data, options),
+    };
+  }
 }
 
 @Module({})
 export class JobsModule {
   /** `connectionString`: raw Postgres URL pg-boss uses for its own pool (separate from the app's Drizzle `Db`, which is injected globally via `AUTH`/`DB`'s `AuthModule`). */
-  static forRoot(connectionString: string): DynamicModule {
+  static forRoot(connectionString: string, env: Env): DynamicModule {
     return {
       module: JobsModule,
+      imports: [MailModule.forRoot(env)],
       providers: [
         { provide: PG_CONNECTION_STRING, useValue: connectionString },
         PgBossService,

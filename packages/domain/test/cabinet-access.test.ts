@@ -21,6 +21,7 @@ describe("resolveCabinetAccess", () => {
       C.INTEGRATIONS_WRITE,
       C.TENANT_SETTINGS_MANAGE,
       C.CREDENTIALS_MANAGE,
+      C.MEMBERS_MANAGE,
     ]);
     expect(resolveCabinetAccess("owner").capabilities).toEqual([
       C.OPERATIONS_READ,
@@ -48,6 +49,7 @@ describe("resolveCabinetAccess", () => {
         C.INTEGRATIONS_WRITE,
         C.TENANT_SETTINGS_MANAGE,
         C.CREDENTIALS_MANAGE,
+        C.MEMBERS_MANAGE,
       ],
     });
   });
@@ -55,6 +57,9 @@ describe("resolveCabinetAccess", () => {
   it("checks every required capability", () => {
     const admin = resolveCabinetAccess("admin").capabilities;
     expect(hasCabinetCapabilities(admin, [C.INTEGRATIONS_WRITE, C.CREDENTIALS_MANAGE])).toBe(true);
-    expect(hasCabinetCapabilities(admin, [C.MEMBERS_MANAGE])).toBe(false);
+    expect(hasCabinetCapabilities(admin, [C.MEMBERS_MANAGE])).toBe(true);
+    expect(
+      hasCabinetCapabilities(resolveCabinetAccess("manager").capabilities, [C.MEMBERS_MANAGE]),
+    ).toBe(false);
   });
 });

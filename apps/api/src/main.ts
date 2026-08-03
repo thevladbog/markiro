@@ -19,7 +19,7 @@ async function bootstrap() {
   // Better Auth needs the raw request body, so the Nest body parser is
   // disabled and express.json() is installed AFTER the auth handler below.
   const app = await NestFactory.create(
-    AppModule.forRoot({ ...setup, databaseUrl: env.DATABASE_URL }),
+    AppModule.forRoot({ ...setup, databaseUrl: env.DATABASE_URL, env }),
     { bodyParser: false },
   );
   // Enabled before mountAuth below so the CORS middleware (registered here

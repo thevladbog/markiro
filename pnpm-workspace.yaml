@@ -3,8 +3,20 @@ packages:
   - "packages/*"
 allowBuilds:
   esbuild: true
+  sharp: true
   "@scarf/scarf": false # telemetry postinstall — deliberately blocked
 overrides:
+  # React Email's preview CLI pulls Next.js as tooling. Keep that transitive
+  # runtime on the first 16.x release patched for the App Router DoS and SSRF
+  # advisories GHSA-m99w-x7hq-7vfj, GHSA-6gpp-xcg3-4w24,
+  # GHSA-p9j2-gv94-2wf4, and GHSA-89xv-2m56-2m9x.
+  next: "16.2.11"
+  sharp: "0.35.3"
+  postcss: "8.5.23"
+  js-yaml: "5.2.2"
+  undici: "7.29.0"
+  fast-uri: "3.1.5"
+
   # GHSA-67mh-4wv8-2f99: esbuild <=0.24.2 lets any website talk to its dev
   # server. Reached only through @esbuild-kit/*, which is deprecated upstream
   # and pinned to esbuild ~0.18 -- drizzle-kit 0.31.10 (latest) still depends
@@ -17,27 +29,23 @@ overrides:
 
   # GHSA-mh99-v99m-4gvg / CVE-2026-14257: brace-expansion <=5.0.7 expands
   # braces without an upper bound on total output *length* and can OOM the
-  # process -- fatally, since a V8 heap OOM is not catchable. 5.0.8 is the only
+  # process -- fatally, since a V8 heap OOM is not catchable. 5.0.9 is the only
   # release the advisory recognises as patched, and it is a breaking change:
   # the module went from `module.exports = expand` (callable) to a namespace
   # object exporting `expand`. minimatch 3 and 5 call the module directly, so a
-  # global `brace-expansion: 5.0.8` pin makes every *braced* pattern throw
+  # global `brace-expansion: 5.0.9` pin makes every *braced* pattern throw
   # "expand is not a function". Unbraced patterns take a fast path and still
   # work, so that breakage hides from a green build until some pattern happens
   # to use braces. Hence the scoped overrides below rather than one global pin.
   # Drop them once the parents ship their own bumps.
   #
-  # There *is* a 2.x backport (2.1.3, published 2026-07-28) that keeps the
-  # callable shape and carries the fix, but we do not use it: the advisory
-  # declares a single `<= 5.0.7` range, so 2.1.3 still scans as vulnerable.
-  # The 1.x line has no backport -- 1.1.16 is its head and ships an *unused*
-  # `dist/` that is byte-identical to 5.0.8's fixed build, but its `main` still
-  # points at the unpatched ES5 `index.js`, so at runtime it is fully
-  # vulnerable.
+  # 5.0.9 is the first release that covers both the original length-bound issue
+  # and its unbounded-intermediate-array bypass. Older major lines do not offer
+  # one release that satisfies the scanner and every consumer used here.
   #
-  # minimatch 10 already consumes the named export, so it takes 5.0.8 as-is.
+  # minimatch 10 already consumes the named export, so it takes 5.0.9 as-is.
   # The version is pinned exactly to match how every other override and
-  # dependency here is written; `^5` would also resolve to 5.0.8 today, since
+  # dependency here is written; `^5` would also resolve to 5.0.9 today, since
   # that is `latest`. (An earlier revision of this comment claimed the exact
   # pin was needed to defeat the 7-day `minimum-release-age` quarantine. It is
   # not: that key sits in `.npmrc` in kebab-case, and pnpm 11 reads only
@@ -45,7 +53,7 @@ overrides:
   # minimumReleaseAge` returns undefined, so the quarantine is inert. Once it
   # is moved to `minimumReleaseAge` here and actually takes effect, an exact
   # pin *will* be required to reach a patch younger than 7 days.)
-  "minimatch@10>brace-expansion": "5.0.8"
+  "minimatch@10>brace-expansion": "5.0.9"
 
   # ...and this moves the last brace-expansion 2.x consumer onto minimatch 10
   # so it picks up that patched line too. filelist is reached only through
@@ -66,9 +74,9 @@ overrides:
   # braced ones. So instead we give minimatch 3 the patched brace-expansion and
   # patch its single `require('brace-expansion')` to read the named export (see
   # patchedDependencies). minimatch 3 calls exactly one brace-expansion API,
-  # `expand(pattern)` with one argument, which 5.0.8 keeps compatible: a 20k
-  # pattern differential between 1.1.16 and 5.0.8 diverges on one input,
-  # `a${b,c}d{e,f}`, where 5.0.8 is the one that matches bash.
-  "minimatch@3>brace-expansion": "5.0.8"
+  # `expand(pattern)` with one argument, which 5.0.9 keeps compatible: a 20k
+  # pattern differential between 1.1.16 and 5.0.9 diverges on one input,
+  # `a${b,c}d{e,f}`, where 5.0.9 is the one that matches bash.
+  "minimatch@3>brace-expansion": "5.0.9"
 patchedDependencies:
   minimatch@3.1.5: patches/minimatch@3.1.5.patch
