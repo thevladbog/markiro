@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { ApiRequestError, apiErrorFromResponse, apiFetch } from "../../api/client.js";
+import { API_BASE, ApiRequestError, apiErrorFromResponse, apiFetch } from "../../api/client.js";
 
 export interface PublicInvitation {
   id: string;
@@ -46,7 +46,9 @@ export async function rejectInvitation(id: string): Promise<void> {
 }
 
 async function postInvitation(id: string, action: string, body?: unknown): Promise<void> {
-  const response = await fetch(`/api/invitations/${id}/${action}`, {
+  // These commands return an empty 200/201 response, while apiFetch expects
+  // JSON for every successful response except 204.
+  const response = await fetch(`${API_BASE}/invitations/${id}/${action}`, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },

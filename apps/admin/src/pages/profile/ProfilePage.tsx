@@ -61,10 +61,16 @@ function ProfileContent({ email }: { email: string }) {
     event.preventDefault();
     setSaveError(null);
     setSaved(false);
+    const normalizedFirstName = firstName.trim();
+    const normalizedLastName = lastName.trim();
+    if (!normalizedFirstName || !normalizedLastName) {
+      setSaveError(t("profile.nameRequired"));
+      return;
+    }
     try {
       await update.mutateAsync({
-        firstName: firstName.trim(),
-        lastName: lastName.trim(),
+        firstName: normalizedFirstName,
+        lastName: normalizedLastName,
         middleName: middleName.trim() || null,
       });
       const requested = searchParams.get("returnTo");

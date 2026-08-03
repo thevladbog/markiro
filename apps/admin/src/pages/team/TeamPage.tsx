@@ -31,6 +31,7 @@ import {
 const DELIVERY_TONE: Record<string, StatusChipStatus> = {
   queued: "info",
   sending: "info",
+  retrying: "warn",
   sent: "ok",
   delivered: "ok",
   failed: "error",
@@ -194,7 +195,6 @@ function PersonCell({ member }: { member: TeamMember }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
       <span
-        aria-label={member.avatarAssetId ? "avatar" : undefined}
         style={{
           width: 32,
           height: 32,

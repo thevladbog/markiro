@@ -26,7 +26,10 @@ function response(status: number, body?: unknown): Response {
     ok: status >= 200 && status < 300,
     status,
     statusText: status === 404 ? "Not Found" : "",
-    json: async () => body,
+    json: async () => {
+      if (body === undefined) throw new SyntaxError("Unexpected end of JSON input");
+      return body;
+    },
     text: async () => (body === undefined ? "" : JSON.stringify(body)),
   } as Response;
 }
@@ -218,6 +221,26 @@ describe("InvitationPage", () => {
 
     expect(await screen.findByText("CABINET_HOME")).toBeDefined();
     expect(events).toEqual(["register", "accept", "refetch"]);
+  });
+
+  it("rejects whitespace-only required names without calling registration", async () => {
+    const fetchMock = vi.fn(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/api/invitations/invite_1") && !init?.method) {
+        return response(200, INVITATION);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderInvitation();
+
+    fireEvent.change(await screen.findByLabelText("Имя"), { target: { value: "   " } });
+    fireEvent.change(screen.getByLabelText("Фамилия"), { target: { value: "Соколова" } });
+    fireEvent.change(screen.getByLabelText("Пароль"), { target: { value: "password-123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Создать аккаунт и принять" }));
+
+    expect(await screen.findByText("Укажите имя и фамилию.")).toBeDefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("lets the matching signed-in account accept and rejects a different account", async () => {

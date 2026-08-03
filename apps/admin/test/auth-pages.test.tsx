@@ -62,6 +62,8 @@ describe("LoginPage", () => {
     expect(screen.getByLabelText("Электронная почта")).toBeDefined();
     expect(screen.getByLabelText("Пароль")).toBeDefined();
     expect(screen.getByRole("button", { name: "Войти" })).toBeDefined();
+    expect(screen.getByText("Доступ выдаёт администратор организации.")).toBeDefined();
+    expect(screen.getByRole("link", { name: "Как получить доступ" })).toBeDefined();
   });
 
   it("submits credentials through the injected auth client and navigates home", async () => {

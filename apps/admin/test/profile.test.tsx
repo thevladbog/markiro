@@ -160,6 +160,33 @@ describe("ProfilePage", () => {
     );
   });
 
+  it("rejects whitespace-only required names without updating the profile", async () => {
+    const fetchMock = vi.fn(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/api/profile") && !init?.method) {
+        return response(200, {
+          firstName: "Анна",
+          lastName: "Соколова",
+          middleName: null,
+          hasAvatar: false,
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderProfile();
+
+    fireEvent.change(await screen.findByLabelText("Имя"), { target: { value: "   " } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить профиль" }));
+
+    expect(await screen.findByText("Укажите имя и фамилию.")).toBeDefined();
+    expect(
+      fetchMock.mock.calls.some(
+        ([input, init]) => String(input).endsWith("/api/profile") && init?.method === "PATCH",
+      ),
+    ).toBe(false);
+  });
+
   it("redirects anonymous users to sign in", async () => {
     vi.stubGlobal("fetch", vi.fn());
     renderProfile("/profile", false);

@@ -74,6 +74,19 @@ export function MemberActions({ member, team }: { member: TeamMember; team: Team
   const fullName = [member.firstName, member.middleName, member.lastName].filter(Boolean).join(" ");
   const busy = update.isPending || link.isPending || unlink.isPending;
 
+  const openEdit = () => {
+    setRole(member.role === "admin" ? "admin" : "manager");
+    setPosition(member.position ?? "");
+    setEmployeeId(member.employee?.id ?? "");
+    setError(null);
+    setEditing(true);
+  };
+
+  const openRemove = () => {
+    setError(null);
+    setRemoving(true);
+  };
+
   return (
     <>
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
@@ -81,7 +94,7 @@ export function MemberActions({ member, team }: { member: TeamMember; team: Team
           size="compact"
           variant="secondary"
           aria-label={t("pages.team.member.editNamed", { name: fullName || member.email })}
-          onClick={() => setEditing(true)}
+          onClick={openEdit}
         >
           {t("pages.team.member.edit")}
         </Button>
@@ -89,7 +102,7 @@ export function MemberActions({ member, team }: { member: TeamMember; team: Team
           size="compact"
           variant="destructive"
           aria-label={t("pages.team.member.removeNamed", { name: fullName || member.email })}
-          onClick={() => setRemoving(true)}
+          onClick={openRemove}
         >
           {t("pages.team.member.remove")}
         </Button>
@@ -134,11 +147,13 @@ export function MemberActions({ member, team }: { member: TeamMember; team: Team
           <Select
             label={t("pages.team.invite.employee")}
             value={employeeId}
+            disabled={employees.isPending || employees.isError}
             onChange={setEmployeeId}
             options={[
               { value: "", label: t("pages.team.invite.noEmployee") },
               ...available.map((employee) => ({ value: employee.id, label: employee.fullName })),
             ]}
+            {...(employees.isError ? { hint: t("pages.team.invite.employeeLoadError") } : {})}
           />
         </form>
       </Modal>

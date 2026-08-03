@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
+import type { UseMutationOptions, UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 
 import { apiFetch } from "../../api/client.js";
 import { ApiRequestError } from "../../api/client.js";
@@ -74,10 +74,12 @@ export function useTeam(): UseQueryResult<TeamResponse> {
 
 function useTeamMutation<TData, TVariables>(
   mutationFn: (variables: TVariables) => Promise<TData>,
+  options: Pick<UseMutationOptions<TData, Error, TVariables>, "retry" | "retryDelay"> = {},
 ): UseMutationResult<TData, Error, TVariables> {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn,
+    ...options,
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: TEAM_QUERY_KEY }),
   });
 }
@@ -92,27 +94,24 @@ export function useCreateInvitation() {
 }
 
 export function useResendInvitation() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) =>
-      apiFetch<TeamInvitation>(`/team/invitations/${id}/resend`, { method: "POST" }),
-    retry: (failureCount, error) =>
-      failureCount < 1 && error instanceof ApiRequestError && error.code === "delivery_in_flight",
-    retryDelay: 1_500,
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: TEAM_QUERY_KEY }),
-  });
+  return useTeamMutation(
+    (id: string) => apiFetch<TeamInvitation>(`/team/invitations/${id}/resend`, { method: "POST" }),
+    deliveryRetryOptions,
+  );
 }
 
 export function useCancelInvitation() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) => apiFetch<void>(`/team/invitations/${id}`, { method: "DELETE" }),
-    retry: (failureCount, error) =>
-      failureCount < 1 && error instanceof ApiRequestError && error.code === "delivery_in_flight",
-    retryDelay: 1_500,
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: TEAM_QUERY_KEY }),
-  });
+  return useTeamMutation(
+    (id: string) => apiFetch<void>(`/team/invitations/${id}`, { method: "DELETE" }),
+    deliveryRetryOptions,
+  );
 }
+
+const deliveryRetryOptions = {
+  retry: (failureCount: number, error: Error) =>
+    failureCount < 1 && error instanceof ApiRequestError && error.code === "delivery_in_flight",
+  retryDelay: 1_500,
+};
 
 export function useUpdateMember() {
   return useTeamMutation(({ id, input }: { id: string; input: UpdateMemberInput }) =>

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThemeProvider } from "@markiro/ui";
@@ -45,6 +45,19 @@ const TEAM = {
         operatorAccess: false,
       },
       createdAt: "2026-08-01T00:00:00.000Z",
+    },
+    {
+      id: "member_manager",
+      userId: "user_2",
+      email: "anna@example.com",
+      firstName: "Анна",
+      lastName: "Соколова",
+      middleName: null,
+      avatarAssetId: null,
+      role: "manager",
+      position: "Мастер смены",
+      employee: null,
+      createdAt: "2026-08-03T00:00:00.000Z",
     },
   ],
   invitations: [
@@ -233,5 +246,109 @@ describe("TeamPage", () => {
     expect(await screen.findByText("Действия недоступны")).toBeDefined();
     expect(screen.queryByRole("button", { name: "Отправить снова" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Отменить" })).toBeNull();
+  });
+
+  it("resets canceled member edits and performs update, employee link, and confirmed removal", async () => {
+    const mutations: Array<{ url: string; init: RequestInit | undefined }> = [];
+    renderTeam(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/api/team") && !init?.method) return response(200, TEAM);
+      if (url.endsWith("/api/employees?status=active")) return response(200, EMPLOYEES);
+      if (init?.method) mutations.push({ url, init });
+      if (url.endsWith("/api/team/members/member_manager") && init?.method === "PATCH") {
+        return response(200, { ...TEAM.members[2], role: "admin", position: "Начальник смены" });
+      }
+      if (url.endsWith("/api/team/members/member_manager/employee") && init?.method === "PUT") {
+        return response(200, { ...TEAM.members[2], employee: EMPLOYEES.items[1] });
+      }
+      if (url.endsWith("/api/team/members/member_manager") && init?.method === "DELETE") {
+        return response(204);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    const edit = await screen.findByRole("button", { name: "Изменить Анна Соколова" });
+    fireEvent.click(edit);
+    fireEvent.change(await screen.findByLabelText("Роль"), { target: { value: "admin" } });
+    fireEvent.change(screen.getByLabelText("Должность"), { target: { value: "Черновик" } });
+    fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
+
+    fireEvent.click(edit);
+    expect((screen.getByLabelText("Роль") as HTMLSelectElement).value).toBe("manager");
+    expect((screen.getByLabelText("Должность") as HTMLInputElement).value).toBe("Мастер смены");
+    fireEvent.change(screen.getByLabelText("Роль"), { target: { value: "admin" } });
+    fireEvent.change(screen.getByLabelText("Должность"), {
+      target: { value: "Начальник смены" },
+    });
+    fireEvent.change(screen.getByLabelText("Сотрудник"), {
+      target: { value: "22222222-2222-4222-8222-222222222222" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    await waitFor(() => {
+      expect(mutations.map(({ url, init }) => [url, init?.method])).toEqual([
+        ["/api/team/members/member_manager", "PATCH"],
+        ["/api/team/members/member_manager/employee", "PUT"],
+      ]);
+    });
+    expect(JSON.parse(String(mutations[0]?.init?.body))).toEqual({
+      role: "admin",
+      position: "Начальник смены",
+    });
+    expect(JSON.parse(String(mutations[1]?.init?.body))).toEqual({
+      employeeId: "22222222-2222-4222-8222-222222222222",
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Удалить Анна Соколова" }));
+    let dialog = screen.getByRole("dialog", { name: "Удалить участника?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Отмена" }));
+    expect(mutations).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole("button", { name: "Удалить Анна Соколова" }));
+    dialog = screen.getByRole("dialog", { name: "Удалить участника?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Удалить" }));
+    await waitFor(() => expect(mutations.at(-1)?.init?.method).toBe("DELETE"));
+  });
+
+  it("requires confirmation before canceling an invitation", async () => {
+    const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    renderTeam(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/api/team") && !init?.method) return response(200, TEAM);
+      if (url.endsWith("/api/team/invitations/invite_1") && init?.method === "DELETE") {
+        requests.push({ url, init });
+        return response(204);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Отменить" }));
+    let dialog = screen.getByRole("dialog", { name: "Отменить приглашение?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Отмена" }));
+    expect(requests).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Отменить" }));
+    dialog = screen.getByRole("dialog", { name: "Отменить приглашение?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Отменить" }));
+    await waitFor(() => expect(requests).toHaveLength(1));
+  });
+
+  it("renders a localized warning while delivery is retrying", async () => {
+    renderTeam(async (input) => {
+      if (String(input).endsWith("/api/team")) {
+        return response(200, {
+          ...TEAM,
+          invitations: [
+            {
+              ...TEAM.invitations[0],
+              delivery: { id: "delivery_2", status: "retrying", errorCategory: null },
+            },
+          ],
+        });
+      }
+      throw new Error(`Unexpected request: ${String(input)}`);
+    });
+
+    expect(await screen.findByText("Повторная отправка")).toBeDefined();
   });
 });

@@ -38,6 +38,11 @@ export function InvitationForm({
     (employee) => employee.status === "active" && !claimedIds.has(employee.id),
   );
 
+  const close = () => {
+    setError(null);
+    onClose();
+  };
+
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setError(null);
@@ -52,7 +57,7 @@ export function InvitationForm({
       setRole("manager");
       setPosition("");
       setEmployeeId("");
-      onClose();
+      close();
     } catch (caught) {
       setError(
         caught instanceof ApiRequestError ? caught.message : t("pages.team.invite.genericError"),
@@ -63,12 +68,12 @@ export function InvitationForm({
   return (
     <Modal
       open={open}
-      onClose={onClose}
+      onClose={close}
       closeLabel={t("common.close")}
       title={t("pages.team.invite.title")}
       footer={
         <>
-          <Button variant="secondary" onClick={onClose}>
+          <Button variant="secondary" onClick={close}>
             {t("pages.team.cancel")}
           </Button>
           <Button type="submit" form="team-invitation-form" loading={create.isPending}>

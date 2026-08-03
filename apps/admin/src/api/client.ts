@@ -9,7 +9,7 @@
  * server's root-mounted routes.
  */
 
-const API_BASE = "/api";
+export const API_BASE = "/api";
 
 export class ApiRequestError extends Error {
   readonly status: number;
@@ -58,8 +58,12 @@ export async function apiErrorFromResponse(response: Response): Promise<ApiReque
         code = (body as { code: string }).code;
       }
       const rawMessage = "message" in body ? (body as { message?: unknown }).message : null;
-      if (typeof rawMessage === "string") message = rawMessage;
-      if (Array.isArray(rawMessage) && rawMessage.every((item) => typeof item === "string")) {
+      if (typeof rawMessage === "string" && rawMessage.length > 0) message = rawMessage;
+      if (
+        Array.isArray(rawMessage) &&
+        rawMessage.length > 0 &&
+        rawMessage.every((item) => typeof item === "string")
+      ) {
         message = rawMessage.join(", ");
       }
       // ZodValidationPipe (see ../../../api/src/zod.pipe.ts) reports 400s as

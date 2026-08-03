@@ -143,11 +143,18 @@ function Registration({ invitation }: { invitation: PublicInvitation }) {
     setPending(true);
     setError(null);
     let registeredThisAttempt = false;
+    const normalizedFirstName = firstName.trim();
+    const normalizedLastName = lastName.trim();
+    if (!registered && (!normalizedFirstName || !normalizedLastName)) {
+      setError(t("invitation.nameRequired"));
+      setPending(false);
+      return;
+    }
     try {
       if (!registered) {
         await registerInvitation(invitation.id, {
-          firstName: firstName.trim(),
-          lastName: lastName.trim(),
+          firstName: normalizedFirstName,
+          lastName: normalizedLastName,
           middleName: middleName.trim() || null,
           password,
         });
@@ -292,7 +299,13 @@ function ExistingAccount({
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       {error ? <Alert tone="error">{error}</Alert> : null}
       {!session ? (
-        <>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void authenticate();
+          }}
+          style={{ display: "flex", flexDirection: "column", gap: 14 }}
+        >
           <Alert tone="info">{t("invitation.signInHint")}</Alert>
           <Input label={t("invitation.email")} value={invitation.email} readOnly />
           <Input
@@ -302,10 +315,10 @@ function ExistingAccount({
             value={password}
             onChange={(event) => setPassword(event.target.value)}
           />
-          <Button fullWidth loading={pending} onClick={() => void authenticate()}>
+          <Button type="submit" fullWidth loading={pending}>
             {t("invitation.signIn")}
           </Button>
-        </>
+        </form>
       ) : (
         <div style={{ display: "flex", gap: 8 }}>
           <Button loading={pending} onClick={() => void act("accept")} style={{ flex: 1 }}>
