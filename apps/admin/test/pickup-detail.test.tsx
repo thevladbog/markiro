@@ -97,6 +97,20 @@ const OPERATIONS_WRITE_ACCESS: AccessDocument = {
   capabilities: [CABINET_CAPABILITY.OPERATIONS_READ, CABINET_CAPABILITY.OPERATIONS_WRITE],
 };
 
+const OPERATIONS_WRITE_WITHOUT_INTEGRATIONS_READ: AccessDocument = {
+  roles: [],
+  capabilities: [CABINET_CAPABILITY.OPERATIONS_READ, CABINET_CAPABILITY.OPERATIONS_WRITE],
+};
+
+const OPERATIONS_WRITE_WITH_INTEGRATIONS_READ: AccessDocument = {
+  roles: [],
+  capabilities: [
+    CABINET_CAPABILITY.OPERATIONS_READ,
+    CABINET_CAPABILITY.OPERATIONS_WRITE,
+    CABINET_CAPABILITY.INTEGRATIONS_READ,
+  ],
+};
+
 function renderPage(
   fetchMock: ReturnType<typeof vi.fn>,
   access: AccessDocument = OPERATIONS_WRITE_ACCESS,
@@ -233,7 +247,7 @@ describe("OrderDetailPage", () => {
       if (path === "/api/pickup-reasons") return jsonResponse(200, REASONS);
       throw new Error(`unexpected fetch: ${path}`);
     });
-    renderPage(fetchMock);
+    renderPage(fetchMock, OPERATIONS_WRITE_WITH_INTEGRATIONS_READ);
 
     expect(await screen.findByText("Заявка придержана — 1 товар(ов) без связи с 1С")).toBeDefined();
     // "Молоко 1л" also appears in the items table below, so scope this
@@ -242,6 +256,24 @@ describe("OrderDetailPage", () => {
     expect(within(alert).getByText("Молоко 1л")).toBeDefined();
     const link = within(alert).getByText("Перейти к очереди сопоставления");
     expect(link.closest("a")?.getAttribute("href")).toBe("/integrations/commerceml");
+  });
+
+  it("explains the held integration problem without a link when integrations.read is absent", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      const path = String(url);
+      if (path === "/api/pickup-orders/o1") {
+        return jsonResponse(200, { ...ORDER, exportHeldProductNames: ["Молоко 1л"] });
+      }
+      if (path === "/api/pickup-reasons") return jsonResponse(200, REASONS);
+      throw new Error(`unexpected fetch: ${path}`);
+    });
+    renderPage(fetchMock, OPERATIONS_WRITE_WITHOUT_INTEGRATIONS_READ);
+
+    const alert = await screen.findByRole("alert");
+    expect(
+      within(alert).getByText("Очередь сопоставления недоступна для вашей роли."),
+    ).toBeDefined();
+    expect(within(alert).queryByRole("link")).toBeNull();
   });
 
   it("does not show the held-order alert once the order has already been exported", async () => {

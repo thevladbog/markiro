@@ -465,6 +465,7 @@ export function ChannelPage() {
   const { t, i18n } = useTranslation();
   const canWriteIntegrations = useCan(CABINET_CAPABILITY.INTEGRATIONS_WRITE);
   const canManageCredentials = useCan(CABINET_CAPABILITY.CREDENTIALS_MANAGE);
+  const canIssueCredentials = canWriteIntegrations && canManageCredentials;
 
   const { data: channel, isPending, isError } = useChannelDetail(type);
 
@@ -541,7 +542,7 @@ export function ChannelPage() {
          * the server ever checks for that channel (its actual
          * authentication is the separate keys list below, not this).
          */}
-        {channel.type === "commerceml" && canManageCredentials ? (
+        {channel.type === "commerceml" && canIssueCredentials ? (
           <AuthorizedCredentialsSection channel={channel} />
         ) : null}
       </Card>

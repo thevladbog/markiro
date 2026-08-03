@@ -270,6 +270,7 @@ function AuthorizedCancelOrderAction({ orderId, pending }: { orderId: string; pe
 export function OrderDetailPage() {
   const { t, i18n } = useTranslation();
   const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
+  const canReadIntegrations = useCan(CABINET_CAPABILITY.INTEGRATIONS_READ);
   const { id } = useParams();
   const orderId = id ?? "";
 
@@ -421,9 +422,13 @@ export function OrderDetailPage() {
               ))}
             </ul>
             <p style={{ font: "var(--text-caption)", color: "var(--fg-3)", marginTop: 8 }}>
-              <Link to="/integrations/commerceml">
-                {t("pages.pickup.detail.exportHeld.linkAction")}
-              </Link>
+              {canReadIntegrations ? (
+                <Link to="/integrations/commerceml">
+                  {t("pages.pickup.detail.exportHeld.linkAction")}
+                </Link>
+              ) : (
+                t("pages.pickup.detail.exportHeld.noIntegrationAccess")
+              )}
             </p>
           </Alert>
         )}

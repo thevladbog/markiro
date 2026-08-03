@@ -94,6 +94,37 @@ function AuthorizedCreateProductAction({ counterparties, labelTemplates }: Catal
   );
 }
 
+/**
+ * Keeps the integrations-only candidates query out of the catalog route for
+ * operators who can read products but not integrations. This must remain a
+ * child rather than an `enabled` option on the parent hook: cached candidate
+ * data must not be read into the catalog render tree before the capability
+ * check succeeds.
+ */
+function AuthorizedCandidatesPlaque() {
+  const { t } = useTranslation();
+  const { data: candidatesData } = useCandidates(CANDIDATES_CHANNEL_TYPE, false);
+  const candidatesCount = candidatesData?.length ?? 0;
+
+  if (candidatesCount === 0) return null;
+
+  return (
+    <Alert
+      tone="info"
+      action={
+        <Link
+          to={`/integrations/${CANDIDATES_CHANNEL_TYPE}`}
+          style={{ font: "600 13px/18px var(--font-ui)", color: "var(--info-fg)" }}
+        >
+          {t("pages.catalog.candidatesPlaque.action")}
+        </Link>
+      }
+    >
+      {t("pages.catalog.candidatesPlaque.text", { count: candidatesCount })}
+    </Alert>
+  );
+}
+
 function AuthorizedProductRowActions({
   product,
   counterparties,
@@ -220,6 +251,7 @@ function AuthorizedProductRowActions({
 export function CatalogPage() {
   const { t } = useTranslation();
   const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
+  const canReadIntegrations = useCan(CABINET_CAPABILITY.INTEGRATIONS_READ);
 
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -237,12 +269,6 @@ export function CatalogPage() {
   });
   const { data: counterpartiesData } = useCounterparties();
   const { data: labelTemplatesData } = useLabelTemplates();
-  // The unobtrusive plaque below, not a list of its own -- no dedicated
-  // loading/error rendering (brief 08's list-state rule governs the queue
-  // screen itself, `CandidatesQueue`, not this one-line nudge toward it).
-  const { data: candidatesData } = useCandidates(CANDIDATES_CHANNEL_TYPE, false);
-  const candidatesCount = candidatesData?.length ?? 0;
-
   const items = data ?? [];
   const counterparties = useMemo(() => counterpartiesData ?? [], [counterpartiesData]);
   const labelTemplates = useMemo(() => labelTemplatesData ?? [], [labelTemplatesData]);
@@ -317,21 +343,7 @@ export function CatalogPage() {
         }
       />
 
-      {candidatesCount > 0 && (
-        <Alert
-          tone="info"
-          action={
-            <Link
-              to={`/integrations/${CANDIDATES_CHANNEL_TYPE}`}
-              style={{ font: "600 13px/18px var(--font-ui)", color: "var(--info-fg)" }}
-            >
-              {t("pages.catalog.candidatesPlaque.action")}
-            </Link>
-          }
-        >
-          {t("pages.catalog.candidatesPlaque.text", { count: candidatesCount })}
-        </Alert>
-      )}
+      {canReadIntegrations ? <AuthorizedCandidatesPlaque /> : null}
 
       <div style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
         <div style={{ flex: 1, maxWidth: 320 }}>

@@ -10,7 +10,21 @@ import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider } from "../src/access/context.js";
 import { ChannelPage } from "../src/pages/integrations/ChannelPage.js";
 import i18n from "../src/i18n/index.js";
+import type * as IntegrationsApiModule from "../src/pages/integrations/api.js";
 import { channelDetailQueryKey, type JournalSessionDto } from "../src/pages/integrations/api.js";
+
+const { credentialHookMountSpy } = vi.hoisted(() => ({ credentialHookMountSpy: vi.fn() }));
+
+vi.mock("../src/pages/integrations/api.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof IntegrationsApiModule>();
+  return {
+    ...actual,
+    useIssueCredentials: (type: string) => {
+      credentialHookMountSpy(type);
+      return actual.useIssueCredentials(type);
+    },
+  };
+});
 
 // Общего рендер-хелпера в этом репозитории НЕТ: каждый админ-тест объявляет
 // свой `renderPage`/`render*` и глушит `fetch` -- см.
@@ -26,6 +40,7 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   patchSpy.mockClear();
+  credentialHookMountSpy.mockClear();
   journalSessions = [];
 });
 
@@ -166,6 +181,11 @@ const INTEGRATIONS_READ_ACCESS: AccessDocument = {
   capabilities: [CABINET_CAPABILITY.INTEGRATIONS_READ],
 };
 
+const INTEGRATIONS_READ_CREDENTIALS_MANAGE_ACCESS: AccessDocument = {
+  roles: [],
+  capabilities: [CABINET_CAPABILITY.INTEGRATIONS_READ, CABINET_CAPABILITY.CREDENTIALS_MANAGE],
+};
+
 function renderChannel(
   type: string,
   options: FetchMockOptions = {},
@@ -194,6 +214,26 @@ function renderChannel(
 }
 
 describe("ChannelPage", () => {
+  it("does not mount credential issuance for integrations.read + credentials.manage without integrations.write", async () => {
+    const { fetchMock } = renderChannel(
+      "commerceml",
+      {},
+      INTEGRATIONS_READ_CREDENTIALS_MANAGE_ACCESS,
+    );
+
+    expect(await screen.findByText("У вас нет доступа к этому разделу.")).toBeDefined();
+    expect(screen.queryByRole("button", { name: /выпустить/i })).toBeNull();
+    expect(credentialHookMountSpy).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/credentials"))).toBe(false);
+  });
+
+  it("mounts credential issuance only with integrations.write and credentials.manage", async () => {
+    renderChannel("commerceml");
+
+    expect(await screen.findByRole("button", { name: /выпустить/i })).toBeDefined();
+    expect(credentialHookMountSpy).toHaveBeenCalledWith("commerceml");
+  });
+
   it("hides integration mutations and credential issuance from read-only access", async () => {
     const { fetchMock } = renderChannel("commerceml", {}, INTEGRATIONS_READ_ACCESS);
 

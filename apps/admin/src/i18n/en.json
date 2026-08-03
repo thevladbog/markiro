@@ -553,7 +553,8 @@
         },
         "exportHeld": {
           "title": "Order held — {{count}} product(s) not linked to 1C",
-          "linkAction": "Go to the matching queue"
+          "linkAction": "Go to the matching queue",
+          "noIntegrationAccess": "The matching queue is unavailable for your role."
         },
         "itemsTitle": "Marking codes",
         "table": {

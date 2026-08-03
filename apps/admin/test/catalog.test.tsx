@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
@@ -8,6 +9,7 @@ import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider } from "../src/access/context.js";
 import type * as CatalogApiModule from "../src/pages/catalog/api.js";
 import { CatalogPage } from "../src/pages/catalog/index.js";
+import { candidatesQueryKey } from "../src/pages/integrations/api.js";
 
 const { unlinkHookMountSpy, writeHookMountSpy } = vi.hoisted(() => ({
   unlinkHookMountSpy: vi.fn(),
@@ -75,14 +77,22 @@ const OPERATIONS_READ_ONLY: AccessDocument = {
   capabilities: [CABINET_CAPABILITY.OPERATIONS_READ],
 };
 
-function renderPage(access: AccessDocument = ADMIN_ACCESS) {
-  const queryClient = new QueryClient({
+function newQueryClient() {
+  return new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+}
+
+function renderPage(
+  access: AccessDocument = ADMIN_ACCESS,
+  queryClient: QueryClient = newQueryClient(),
+) {
   return render(
     <QueryClientProvider client={queryClient}>
       <AccessProvider value={access}>
-        <CatalogPage />
+        <MemoryRouter>
+          <CatalogPage />
+        </MemoryRouter>
       </AccessProvider>
     </QueryClientProvider>,
   );
@@ -117,6 +127,53 @@ const ACTIVE_PRODUCT = {
 };
 
 describe("CatalogPage", () => {
+  it("does not request integration candidates for a manager without integrations.read", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      const path = String(url);
+      if (path === "/api/products") return jsonResponse(200, { items: [DRAFT_PRODUCT] });
+      if (path.includes("/candidates")) {
+        throw new Error("manager must not request integration candidates");
+      }
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage(MANAGER_ACCESS);
+
+    expect(await screen.findByText(DRAFT_PRODUCT.name)).toBeDefined();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/candidates"))).toBe(false);
+  });
+
+  it("does not reveal cached integration candidates to a manager without integrations.read", async () => {
+    const queryClient = newQueryClient();
+    queryClient.setQueryData(candidatesQueryKey("commerceml", false), [
+      {
+        id: "candidate-1",
+        externalRef: "1c-guid-1",
+        name: "Не сопоставленный товар",
+        article: null,
+        unit: null,
+        price: null,
+        priceType: null,
+        firstSeenAt: "2026-08-01T00:00:00.000Z",
+        lastSeenAt: "2026-08-01T00:00:00.000Z",
+        hidden: false,
+        suggestedProductId: null,
+      },
+    ]);
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url) === "/api/products") return jsonResponse(200, { items: [DRAFT_PRODUCT] });
+      throw new Error(`unexpected fetch: ${String(url)}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage(MANAGER_ACCESS, queryClient);
+
+    expect(await screen.findByText(DRAFT_PRODUCT.name)).toBeDefined();
+    expect(screen.queryByText(/В обмене появились новые товары/)).toBeNull();
+    expect(screen.queryByRole("link", { name: "Открыть очередь" })).toBeNull();
+  });
+
   it("keeps product rows readable while hiding mutations without operations.write", async () => {
     vi.stubGlobal(
       "fetch",
