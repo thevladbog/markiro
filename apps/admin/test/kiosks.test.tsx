@@ -40,6 +40,16 @@ const MANAGER_ACCESS: AccessDocument = {
   capabilities: [CABINET_CAPABILITY.OPERATIONS_READ, CABINET_CAPABILITY.OPERATIONS_WRITE],
 };
 
+const OPERATIONS_READ_ONLY: AccessDocument = {
+  roles: [],
+  capabilities: [CABINET_CAPABILITY.OPERATIONS_READ],
+};
+
+const OPERATIONS_READ_CREDENTIALS_ACCESS: AccessDocument = {
+  roles: [],
+  capabilities: [CABINET_CAPABILITY.OPERATIONS_READ, CABINET_CAPABILITY.CREDENTIALS_MANAGE],
+};
+
 function renderPage(access: AccessDocument = ADMIN_ACCESS) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -152,6 +162,36 @@ function stubFetch(overrides: {
 }
 
 describe("KiosksPage", () => {
+  it("keeps kiosk rows readable while hiding operational mutations without operations.write", async () => {
+    const fetchMock = stubFetch({
+      kiosks: [ONLINE_KIOSK],
+      products: [PRODUCT_A],
+      reasons: [REASON_A],
+    });
+
+    renderPage(OPERATIONS_READ_ONLY);
+
+    expect(await screen.findByText(ONLINE_KIOSK.name)).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Добавить киоск" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Изменить" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "В архив" })).toBeNull();
+    expect(screen.queryByText(REASON_A.name)).toBeNull();
+    expect(
+      fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/pickup-reasons")),
+    ).toBe(false);
+  });
+
+  it("keeps pairing independently available with credentials.manage", async () => {
+    stubFetch({ kiosks: [ONLINE_KIOSK], products: [PRODUCT_A] });
+
+    renderPage(OPERATIONS_READ_CREDENTIALS_ACCESS);
+
+    expect(await screen.findByText(ONLINE_KIOSK.name)).toBeDefined();
+    expect(screen.getByRole("button", { name: "Код привязки" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Изменить" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "В архив" })).toBeNull();
+  });
+
   it("renders the kiosks list with online/offline status derived from lastSeenAt", async () => {
     stubFetch({ kiosks: [ONLINE_KIOSK, OFFLINE_KIOSK], products: [PRODUCT_A, PRODUCT_B] });
 

@@ -2,6 +2,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { CABINET_CAPABILITY } from "@markiro/domain";
+
+import type { AccessDocument } from "../src/access/api.js";
+import { AccessProvider } from "../src/access/context.js";
 import { ShiftsPage } from "../src/pages/shifts/index.js";
 
 afterEach(() => {
@@ -18,13 +22,25 @@ function jsonResponse(status: number, body: unknown): Response {
   } as Response;
 }
 
-function renderPage() {
+const OPERATIONS_READ_ONLY: AccessDocument = {
+  roles: [],
+  capabilities: [CABINET_CAPABILITY.OPERATIONS_READ],
+};
+
+const OPERATIONS_WRITE_ACCESS: AccessDocument = {
+  roles: [],
+  capabilities: [CABINET_CAPABILITY.OPERATIONS_READ, CABINET_CAPABILITY.OPERATIONS_WRITE],
+};
+
+function renderPage(access: AccessDocument = OPERATIONS_WRITE_ACCESS) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <ShiftsPage />
+      <AccessProvider value={access}>
+        <ShiftsPage />
+      </AccessProvider>
     </QueryClientProvider>,
   );
 }
@@ -178,6 +194,27 @@ const CLOSED_SHIFT = {
 };
 
 describe("ShiftsPage", () => {
+  it("keeps shift rows readable while hiding mutations without operations.write", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (String(url).startsWith("/api/shifts")) {
+          return jsonResponse(200, { items: [PLANNED_SHIFT, ACTIVE_TOLLING_SHIFT] });
+        }
+        return jsonResponse(200, { items: [] });
+      }),
+    );
+
+    renderPage(OPERATIONS_READ_ONLY);
+
+    expect(await screen.findByText(PLANNED_SHIFT.productName)).toBeDefined();
+    expect(screen.getByText(ACTIVE_TOLLING_SHIFT.productName)).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Добавить смену" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Изменить" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Удалить" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Закрыть смену" })).toBeNull();
+  });
+
   it("renders shifts from the mocked GET response with joined fields, mode badges, the tolling label, and status chips", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       const path = String(url);

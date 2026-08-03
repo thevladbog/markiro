@@ -2,6 +2,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { CABINET_CAPABILITY } from "@markiro/domain";
+
+import type { AccessDocument } from "../src/access/api.js";
+import { AccessProvider } from "../src/access/context.js";
 import { formatScanTime } from "../src/lib/datetime.js";
 import { ConflictsPage } from "../src/pages/conflicts/index.js";
 
@@ -19,13 +23,25 @@ function jsonResponse(status: number, body: unknown): Response {
   } as Response;
 }
 
-function renderPage() {
+const OPERATIONS_READ_ONLY: AccessDocument = {
+  roles: [],
+  capabilities: [CABINET_CAPABILITY.OPERATIONS_READ],
+};
+
+const OPERATIONS_WRITE_ACCESS: AccessDocument = {
+  roles: [],
+  capabilities: [CABINET_CAPABILITY.OPERATIONS_READ, CABINET_CAPABILITY.OPERATIONS_WRITE],
+};
+
+function renderPage(access: AccessDocument = OPERATIONS_WRITE_ACCESS) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <ConflictsPage />
+      <AccessProvider value={access}>
+        <ConflictsPage />
+      </AccessProvider>
     </QueryClientProvider>,
   );
 }
@@ -122,6 +138,17 @@ function stubFetch(handlers: {
 }
 
 describe("ConflictsPage", () => {
+  it("keeps conflict details readable while hiding review without operations.write", async () => {
+    stubFetch({ conflicts: [UNREVIEWED], shifts: [SHIFT_S1] });
+
+    renderPage(OPERATIONS_READ_ONLY);
+
+    expect(
+      (await screen.findByRole("table")).querySelector(`[title="${UNREVIEWED.codeHash}"]`),
+    ).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Отметить рассмотренным" })).toBeNull();
+  });
+
   it("renders conflicts from the mocked GET response with code, losing/winning terminals", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       const path = String(url);

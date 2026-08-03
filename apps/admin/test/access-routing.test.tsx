@@ -28,6 +28,11 @@ const MANAGER_ACCESS: AccessDocument = {
   capabilities: [CABINET_CAPABILITY.OPERATIONS_READ, CABINET_CAPABILITY.OPERATIONS_WRITE],
 };
 
+const OPERATIONS_READ_ONLY: AccessDocument = {
+  roles: [],
+  capabilities: [CABINET_CAPABILITY.OPERATIONS_READ],
+};
+
 const ADMIN_ACCESS: AccessDocument = {
   roles: ["admin"],
   capabilities: [
@@ -140,6 +145,19 @@ it("allows a manager to open the catalog directly", async () => {
 
   expect(await screen.findByRole("heading", { name: "Каталог продукции" })).toBeDefined();
   expect(screen.queryByTestId("forbidden-page")).toBeNull();
+});
+
+it("keeps the label library readable but blocks editor routes", async () => {
+  renderAccessRoute("/labels", OPERATIONS_READ_ONLY);
+  expect(await screen.findByRole("heading", { name: "Шаблоны этикеток" })).toBeDefined();
+  cleanup();
+
+  renderAccessRoute("/labels/new", OPERATIONS_READ_ONLY);
+  expect(await screen.findByTestId("forbidden-page")).toBeDefined();
+  cleanup();
+
+  renderAccessRoute("/labels/template_1", OPERATIONS_READ_ONLY);
+  expect(await screen.findByTestId("forbidden-page")).toBeDefined();
 });
 
 it("shows integrations and settings navigation to administrators", async () => {

@@ -3,6 +3,9 @@ import { useTranslation } from "react-i18next";
 
 import { Alert, Button, Card, Input, Modal, Spinner } from "@markiro/ui";
 
+import { CABINET_CAPABILITY } from "@markiro/domain";
+
+import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
 import { toast } from "../../lib/toast.js";
 import {
@@ -35,6 +38,11 @@ function draftFrom(reason: ReasonDto): ReasonDraft {
  * control or a numeric `sortOrder` input -- this uses the latter.
  */
 export function ReasonsEditor() {
+  const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
+  return canWrite ? <AuthorizedReasonsEditor /> : null;
+}
+
+function AuthorizedReasonsEditor() {
   const { t } = useTranslation();
   const { data, isPending, isError } = usePickupReasons();
   const createMutation = useCreateReason();

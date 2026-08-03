@@ -3,6 +3,10 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { CABINET_CAPABILITY } from "@markiro/domain";
+
+import type { AccessDocument } from "../src/access/api.js";
+import { AccessProvider } from "../src/access/context.js";
 import { OrderDetailPage } from "../src/pages/pickup/OrderDetail.js";
 
 afterEach(() => {
@@ -64,7 +68,20 @@ const ORDER = {
 
 const REASONS = { items: [{ id: "r1", name: "Маркетинг", sortOrder: 0 }] };
 
-function renderPage(fetchMock: ReturnType<typeof vi.fn>) {
+const OPERATIONS_READ_ONLY: AccessDocument = {
+  roles: [],
+  capabilities: [CABINET_CAPABILITY.OPERATIONS_READ],
+};
+
+const OPERATIONS_WRITE_ACCESS: AccessDocument = {
+  roles: [],
+  capabilities: [CABINET_CAPABILITY.OPERATIONS_READ, CABINET_CAPABILITY.OPERATIONS_WRITE],
+};
+
+function renderPage(
+  fetchMock: ReturnType<typeof vi.fn>,
+  access: AccessDocument = OPERATIONS_WRITE_ACCESS,
+) {
   vi.stubGlobal("fetch", fetchMock);
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -73,7 +90,14 @@ function renderPage(fetchMock: ReturnType<typeof vi.fn>) {
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={["/pickup/o1"]}>
         <Routes>
-          <Route path="/pickup/:id" element={<OrderDetailPage />} />
+          <Route
+            path="/pickup/:id"
+            element={
+              <AccessProvider value={access}>
+                <OrderDetailPage />
+              </AccessProvider>
+            }
+          />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -100,6 +124,17 @@ function defaultFetchMock() {
 }
 
 describe("OrderDetailPage", () => {
+  it("keeps order details readable while hiding resolution and cancel without operations.write", async () => {
+    renderPage(defaultFetchMock(), OPERATIONS_READ_ONLY);
+
+    expect(await screen.findByText(ORDER.employeeName)).toBeDefined();
+    expect(screen.getByText(ITEM_A.productName)).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Пробита на кассе" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Списать актом" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Отменить" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Печать" })).toBeDefined();
+  });
+
   it("renders the employee name, both product names, and the full KM text", async () => {
     renderPage(defaultFetchMock());
 

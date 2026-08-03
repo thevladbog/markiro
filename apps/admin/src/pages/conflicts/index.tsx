@@ -4,6 +4,9 @@ import { useTranslation } from "react-i18next";
 import { Alert, Badge, Button, EmptyState, PageHeader, Select, Spinner, Table } from "@markiro/ui";
 import type { SelectOption, TableColumn } from "@markiro/ui";
 
+import { CABINET_CAPABILITY } from "@markiro/domain";
+
+import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
 import { formatCreatedAt, formatScanTime } from "../../lib/datetime.js";
 import { toast } from "../../lib/toast.js";
@@ -29,6 +32,7 @@ type ReviewedFilter = "unreviewed" | "reviewed" | "all";
  */
 export function ConflictsPage() {
   const { t, i18n } = useTranslation();
+  const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
 
   const [shiftFilter, setShiftFilter] = useState<string>("all");
   // Defaults to "unreviewed": without this, the list keeps every conflict
@@ -137,7 +141,7 @@ export function ConflictsPage() {
         render: (row) =>
           row.reviewedAt ? (
             <Badge tone="neutral">{t("pages.conflicts.reviewed")}</Badge>
-          ) : (
+          ) : canWrite ? (
             <Button
               type="button"
               size="compact"
@@ -147,10 +151,10 @@ export function ConflictsPage() {
             >
               {t("pages.conflicts.review")}
             </Button>
-          ),
+          ) : null,
       },
     ],
-    [t, i18n.language, reviewMutation.isPending, reviewMutation.variables, shiftsById],
+    [t, i18n.language, canWrite, reviewMutation.isPending, reviewMutation.variables, shiftsById],
   );
 
   return (

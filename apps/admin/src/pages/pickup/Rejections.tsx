@@ -15,6 +15,9 @@ import {
 } from "@markiro/ui";
 import type { SelectOption, TableColumn } from "@markiro/ui";
 
+import { CABINET_CAPABILITY } from "@markiro/domain";
+
+import { useCan } from "../../access/context.js";
 import { formatCreatedAt } from "../../lib/datetime.js";
 import { toast } from "../../lib/toast.js";
 import { useKiosks } from "../kiosks/api.js";
@@ -33,6 +36,7 @@ import {
  */
 export function RejectionsPage() {
   const { t, i18n } = useTranslation();
+  const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
 
   const [kioskId, setKioskId] = useState("all");
   const [stateFilter, setStateFilter] = useState<RejectionState>("all");
@@ -162,7 +166,7 @@ export function RejectionsPage() {
       key: "actions",
       title: t("pages.pickup.rejections.table.actions"),
       render: (row) =>
-        row.acknowledgedAt ? null : (
+        row.acknowledgedAt || !canWrite ? null : (
           <Button
             type="button"
             size="compact"

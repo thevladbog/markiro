@@ -16,6 +16,9 @@ import {
 } from "@markiro/ui";
 import type { SelectOption, StatusChipStatus, TableColumn } from "@markiro/ui";
 
+import { CABINET_CAPABILITY } from "@markiro/domain";
+
+import { useCan } from "../../access/context.js";
 import { formatCreatedAt } from "../../lib/datetime.js";
 import { toast } from "../../lib/toast.js";
 import {
@@ -47,6 +50,7 @@ const STATUS_TO_CHIP: Record<PickupOrderStatus, StatusChipStatus> = {
  */
 export function PickupPage() {
   const { t, i18n } = useTranslation();
+  const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [reasonFilter, setReasonFilter] = useState<ReasonFilter>("all");
@@ -172,37 +176,40 @@ export function PickupPage() {
     },
   ];
 
-  const columns: TableColumn<PickupOrderRowDto>[] = bulkMode
-    ? [
-        {
-          key: "select",
-          title: "",
-          width: 32,
-          render: (row) => (
-            <input
-              type="checkbox"
-              aria-label={t("pages.pickup.bulkExport.selectRow", { orderNo: row.orderNo })}
-              checked={selectedIds.has(row.id)}
-              onChange={() => toggleSelected(row.id)}
-            />
-          ),
-        },
-        ...baseColumns,
-      ]
-    : baseColumns;
+  const columns: TableColumn<PickupOrderRowDto>[] =
+    canWrite && bulkMode
+      ? [
+          {
+            key: "select",
+            title: "",
+            width: 32,
+            render: (row) => (
+              <input
+                type="checkbox"
+                aria-label={t("pages.pickup.bulkExport.selectRow", { orderNo: row.orderNo })}
+                checked={selectedIds.has(row.id)}
+                onChange={() => toggleSelected(row.id)}
+              />
+            ),
+          },
+          ...baseColumns,
+        ]
+      : baseColumns;
 
   return (
     <div style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: 20 }}>
       <PageHeader
         title={t("pages.pickup.title")}
         actions={
-          <Button
-            type="button"
-            variant={bulkMode ? "secondary" : "primary"}
-            onClick={handleToggleBulkMode}
-          >
-            {bulkMode ? t("pages.pickup.cancel") : t("pages.pickup.bulkExport.toggleAction")}
-          </Button>
+          canWrite ? (
+            <Button
+              type="button"
+              variant={bulkMode ? "secondary" : "primary"}
+              onClick={handleToggleBulkMode}
+            >
+              {bulkMode ? t("pages.pickup.cancel") : t("pages.pickup.bulkExport.toggleAction")}
+            </Button>
+          ) : null
         }
       />
 
@@ -258,7 +265,7 @@ export function PickupPage() {
         </div>
       </div>
 
-      {bulkMode && (
+      {canWrite && bulkMode ? (
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <span style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>
             {t("pages.pickup.bulkExport.selectedCount", { count: selectedIds.size })}
@@ -273,7 +280,7 @@ export function PickupPage() {
             {t("pages.pickup.bulkExport.exportAction")}
           </Button>
         </div>
-      )}
+      ) : null}
 
       {isPending ? (
         <div style={{ display: "flex", justifyContent: "center", padding: 48 }}>

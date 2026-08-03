@@ -54,6 +54,11 @@ const MANAGER_ACCESS: AccessDocument = {
   capabilities: [CABINET_CAPABILITY.OPERATIONS_READ, CABINET_CAPABILITY.OPERATIONS_WRITE],
 };
 
+const OPERATIONS_READ_ONLY: AccessDocument = {
+  roles: [],
+  capabilities: [CABINET_CAPABILITY.OPERATIONS_READ],
+};
+
 function renderPage(access: AccessDocument = ADMIN_ACCESS) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -96,6 +101,25 @@ const ACTIVE_PRODUCT = {
 };
 
 describe("CatalogPage", () => {
+  it("keeps product rows readable while hiding mutations without operations.write", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = String(url);
+        if (path === "/api/products") return jsonResponse(200, { items: [DRAFT_PRODUCT] });
+        if (path.includes("/candidates")) return jsonResponse(200, { candidates: [] });
+        return jsonResponse(200, { items: [] });
+      }),
+    );
+
+    renderPage(OPERATIONS_READ_ONLY);
+
+    expect(await screen.findByText(DRAFT_PRODUCT.name)).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Добавить продукт" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Изменить" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Удалить" })).toBeNull();
+  });
+
   it("renders products from the mocked GET response with a StatusChip per status", async () => {
     const fetchMock = vi.fn(async () =>
       jsonResponse(200, { items: [DRAFT_PRODUCT, ACTIVE_PRODUCT] }),

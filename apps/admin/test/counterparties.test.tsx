@@ -2,6 +2,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { CABINET_CAPABILITY } from "@markiro/domain";
+
+import type { AccessDocument } from "../src/access/api.js";
+import { AccessProvider } from "../src/access/context.js";
 import { CounterpartiesPage } from "../src/pages/counterparties/index.js";
 
 afterEach(() => {
@@ -18,13 +22,25 @@ function jsonResponse(status: number, body: unknown): Response {
   } as Response;
 }
 
-function renderPage() {
+const OPERATIONS_READ_ONLY: AccessDocument = {
+  roles: [],
+  capabilities: [CABINET_CAPABILITY.OPERATIONS_READ],
+};
+
+const OPERATIONS_WRITE_ACCESS: AccessDocument = {
+  roles: [],
+  capabilities: [CABINET_CAPABILITY.OPERATIONS_READ, CABINET_CAPABILITY.OPERATIONS_WRITE],
+};
+
+function renderPage(access: AccessDocument = OPERATIONS_WRITE_ACCESS) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <CounterpartiesPage />
+      <AccessProvider value={access}>
+        <CounterpartiesPage />
+      </AccessProvider>
     </QueryClientProvider>,
   );
 }
@@ -40,6 +56,20 @@ const ACME = {
 };
 
 describe("CounterpartiesPage", () => {
+  it("keeps counterparty rows readable while hiding mutations without operations.write", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(200, { items: [ACME] })),
+    );
+
+    renderPage(OPERATIONS_READ_ONLY);
+
+    expect(await screen.findByText(ACME.name)).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Добавить контрагента" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Изменить" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Удалить" })).toBeNull();
+  });
+
   it("renders counterparties from the mocked GET response", async () => {
     const fetchMock = vi.fn(async () => jsonResponse(200, { items: [ACME] }));
     vi.stubGlobal("fetch", fetchMock);

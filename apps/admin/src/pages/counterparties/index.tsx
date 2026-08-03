@@ -4,6 +4,9 @@ import { useTranslation } from "react-i18next";
 import { Alert, Button, EmptyState, Modal, PageHeader, Spinner, Table } from "@markiro/ui";
 import type { TableColumn } from "@markiro/ui";
 
+import { CABINET_CAPABILITY } from "@markiro/domain";
+
+import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
 import { toast } from "../../lib/toast.js";
 import { CounterpartyForm, type CounterpartyFormValues } from "./CounterpartyForm.js";
@@ -21,6 +24,7 @@ type FormModalState = { mode: "create" } | { mode: "edit"; counterparty: Counter
 /** Admin counterparties CRUD screen -- Plan 03 Task 11 (list/create/edit/delete). */
 export function CounterpartiesPage() {
   const { t } = useTranslation();
+  const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
   const { data, isPending, isError } = useCounterparties();
   const createMutation = useCreateCounterparty();
   const updateMutation = useUpdateCounterparty();
@@ -51,29 +55,30 @@ export function CounterpartiesPage() {
         key: "actions",
         title: t("pages.counterparties.table.actions"),
         align: "right",
-        render: (row) => (
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <Button
-              type="button"
-              size="compact"
-              variant="secondary"
-              onClick={() => setFormState({ mode: "edit", counterparty: row })}
-            >
-              {t("pages.counterparties.edit")}
-            </Button>
-            <Button
-              type="button"
-              size="compact"
-              variant="destructive"
-              onClick={() => setDeleteTarget(row)}
-            >
-              {t("pages.counterparties.delete")}
-            </Button>
-          </div>
-        ),
+        render: (row) =>
+          canWrite ? (
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <Button
+                type="button"
+                size="compact"
+                variant="secondary"
+                onClick={() => setFormState({ mode: "edit", counterparty: row })}
+              >
+                {t("pages.counterparties.edit")}
+              </Button>
+              <Button
+                type="button"
+                size="compact"
+                variant="destructive"
+                onClick={() => setDeleteTarget(row)}
+              >
+                {t("pages.counterparties.delete")}
+              </Button>
+            </div>
+          ) : null,
       },
     ],
-    [t],
+    [t, canWrite],
   );
 
   const editingCounterparty = formState?.mode === "edit" ? formState.counterparty : undefined;
@@ -127,9 +132,11 @@ export function CounterpartiesPage() {
       <PageHeader
         title={t("pages.counterparties.title")}
         actions={
-          <Button type="button" onClick={() => setFormState({ mode: "create" })}>
-            {t("pages.counterparties.addAction")}
-          </Button>
+          canWrite ? (
+            <Button type="button" onClick={() => setFormState({ mode: "create" })}>
+              {t("pages.counterparties.addAction")}
+            </Button>
+          ) : null
         }
       />
 
@@ -144,52 +151,58 @@ export function CounterpartiesPage() {
           title={t("pages.counterparties.emptyTitle")}
           hint={t("pages.counterparties.emptyHint")}
           action={
-            <Button type="button" onClick={() => setFormState({ mode: "create" })}>
-              {t("pages.counterparties.addAction")}
-            </Button>
+            canWrite ? (
+              <Button type="button" onClick={() => setFormState({ mode: "create" })}>
+                {t("pages.counterparties.addAction")}
+              </Button>
+            ) : null
           }
         />
       ) : (
         <Table columns={columns} rows={items} />
       )}
 
-      <CounterpartyForm
-        open={formState !== null}
-        mode={formState?.mode ?? "create"}
-        {...(initialValues ? { initialValues } : {})}
-        {...(editingCounterparty ? { counterpartyId: editingCounterparty.id } : {})}
-        submitting={createMutation.isPending || updateMutation.isPending}
-        onSubmit={handleSubmit}
-        onClose={() => setFormState(null)}
-      />
+      {canWrite ? (
+        <CounterpartyForm
+          open={formState !== null}
+          mode={formState?.mode ?? "create"}
+          {...(initialValues ? { initialValues } : {})}
+          {...(editingCounterparty ? { counterpartyId: editingCounterparty.id } : {})}
+          submitting={createMutation.isPending || updateMutation.isPending}
+          onSubmit={handleSubmit}
+          onClose={() => setFormState(null)}
+        />
+      ) : null}
 
-      <Modal
-        open={deleteTarget !== null}
-        onClose={() => setDeleteTarget(null)}
-        closeLabel={t("common.close")}
-        title={t("pages.counterparties.deleteConfirmTitle")}
-        footer={
-          <>
-            <Button type="button" variant="secondary" onClick={() => setDeleteTarget(null)}>
-              {t("pages.counterparties.cancel")}
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              loading={deleteMutation.isPending}
-              onClick={() => void handleDelete()}
-            >
-              {t("pages.counterparties.deleteConfirmAction")}
-            </Button>
-          </>
-        }
-      >
-        {deleteTarget && (
-          <p style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>
-            {t("pages.counterparties.deleteConfirmBody", { name: deleteTarget.name })}
-          </p>
-        )}
-      </Modal>
+      {canWrite ? (
+        <Modal
+          open={deleteTarget !== null}
+          onClose={() => setDeleteTarget(null)}
+          closeLabel={t("common.close")}
+          title={t("pages.counterparties.deleteConfirmTitle")}
+          footer={
+            <>
+              <Button type="button" variant="secondary" onClick={() => setDeleteTarget(null)}>
+                {t("pages.counterparties.cancel")}
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                loading={deleteMutation.isPending}
+                onClick={() => void handleDelete()}
+              >
+                {t("pages.counterparties.deleteConfirmAction")}
+              </Button>
+            </>
+          }
+        >
+          {deleteTarget && (
+            <p style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>
+              {t("pages.counterparties.deleteConfirmBody", { name: deleteTarget.name })}
+            </p>
+          )}
+        </Modal>
+      ) : null}
     </div>
   );
 }

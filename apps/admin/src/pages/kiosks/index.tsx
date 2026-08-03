@@ -61,6 +61,7 @@ function isKioskOnline(lastSeenAt: string | null): boolean {
  */
 export function KiosksPage() {
   const { t } = useTranslation();
+  const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
   const canManageCredentials = useCan(CABINET_CAPABILITY.CREDENTIALS_MANAGE);
   const { data, isPending, isError } = useKiosks();
   const { data: productsData } = useProducts({ status: "active" });
@@ -116,18 +117,20 @@ export function KiosksPage() {
         align: "right",
         render: (row) => (
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <Button
-              type="button"
-              size="compact"
-              variant="secondary"
-              onClick={() => setFormState({ mode: "edit", kiosk: row })}
-            >
-              {t("pages.kiosks.edit")}
-            </Button>
+            {canWrite ? (
+              <Button
+                type="button"
+                size="compact"
+                variant="secondary"
+                onClick={() => setFormState({ mode: "edit", kiosk: row })}
+              >
+                {t("pages.kiosks.edit")}
+              </Button>
+            ) : null}
             {row.status === "active" && canManageCredentials ? (
               <KioskPairingAction kiosk={row} />
             ) : null}
-            {row.status === "active" && (
+            {row.status === "active" && canWrite ? (
               <Button
                 type="button"
                 size="compact"
@@ -136,12 +139,12 @@ export function KiosksPage() {
               >
                 {t("pages.kiosks.archive")}
               </Button>
-            )}
+            ) : null}
           </div>
         ),
       },
     ],
-    [t, canManageCredentials],
+    [t, canWrite, canManageCredentials],
   );
 
   const editingKiosk = formState?.mode === "edit" ? formState.kiosk : undefined;
@@ -207,9 +210,11 @@ export function KiosksPage() {
       <PageHeader
         title={t("pages.kiosks.title")}
         actions={
-          <Button type="button" onClick={() => setFormState({ mode: "create" })}>
-            {t("pages.kiosks.addAction")}
-          </Button>
+          canWrite ? (
+            <Button type="button" onClick={() => setFormState({ mode: "create" })}>
+              {t("pages.kiosks.addAction")}
+            </Button>
+          ) : null
         }
       />
 
@@ -224,57 +229,63 @@ export function KiosksPage() {
           title={t("pages.kiosks.emptyTitle")}
           hint={t("pages.kiosks.emptyHint")}
           action={
-            <Button type="button" onClick={() => setFormState({ mode: "create" })}>
-              {t("pages.kiosks.addAction")}
-            </Button>
+            canWrite ? (
+              <Button type="button" onClick={() => setFormState({ mode: "create" })}>
+                {t("pages.kiosks.addAction")}
+              </Button>
+            ) : null
           }
         />
       ) : (
         <Table columns={columns} rows={items} />
       )}
 
-      <ReasonsEditor />
+      {canWrite ? <ReasonsEditor /> : null}
 
-      <KioskForm
-        open={formState !== null}
-        mode={formState?.mode ?? "create"}
-        {...(editingKiosk ? { kiosk: editingKiosk } : {})}
-        {...(initialValues ? { initialValues } : {})}
-        products={activeProducts}
-        submitting={createMutation.isPending || updateMutation.isPending}
-        savingProducts={setProductsMutation.isPending}
-        onSubmit={handleSubmit}
-        onSaveProducts={handleSaveProducts}
-        onClose={() => setFormState(null)}
-      />
+      {canWrite ? (
+        <KioskForm
+          open={formState !== null}
+          mode={formState?.mode ?? "create"}
+          {...(editingKiosk ? { kiosk: editingKiosk } : {})}
+          {...(initialValues ? { initialValues } : {})}
+          products={activeProducts}
+          submitting={createMutation.isPending || updateMutation.isPending}
+          savingProducts={setProductsMutation.isPending}
+          onSubmit={handleSubmit}
+          onSaveProducts={handleSaveProducts}
+          onClose={() => setFormState(null)}
+        />
+      ) : null}
 
-      <Modal
-        open={archiveTarget !== null}
-        onClose={() => setArchiveTarget(null)}
-        closeLabel={t("common.close")}
-        title={t("pages.kiosks.archiveConfirmTitle")}
-        footer={
-          <>
-            <Button type="button" variant="secondary" onClick={() => setArchiveTarget(null)}>
-              {t("pages.kiosks.cancel")}
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              loading={archiveMutation.isPending}
-              onClick={() => void handleArchive()}
-            >
-              {t("pages.kiosks.archiveConfirmAction")}
-            </Button>
-          </>
-        }
-      >
-        {archiveTarget && (
-          <p style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>
-            {t("pages.kiosks.archiveConfirmBody", { name: archiveTarget.name })}
-          </p>
-        )}
-      </Modal>
+      {canWrite ? (
+        <Modal
+          open={archiveTarget !== null}
+          onClose={() => setArchiveTarget(null)}
+          closeLabel={t("common.close")}
+          title={t("pages.kiosks.archiveConfirmTitle")}
+          footer={
+            <>
+              <Button type="button" variant="secondary" onClick={() => setArchiveTarget(null)}>
+                {t("pages.kiosks.cancel")}
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                loading={archiveMutation.isPending}
+                onClick={() => void handleArchive()}
+              >
+                {t("pages.kiosks.archiveConfirmAction")}
+              </Button>
+            </>
+          }
+        >
+          {archiveTarget && (
+            <p style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>
+              {t("pages.kiosks.archiveConfirmBody", { name: archiveTarget.name })}
+            </p>
+          )}
+        </Modal>
+      ) : null}
     </div>
   );
 }

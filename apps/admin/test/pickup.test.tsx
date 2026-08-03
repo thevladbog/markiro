@@ -3,6 +3,10 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { CABINET_CAPABILITY } from "@markiro/domain";
+
+import type { AccessDocument } from "../src/access/api.js";
+import { AccessProvider } from "../src/access/context.js";
 import { PickupPage } from "../src/pages/pickup/index.js";
 
 afterEach(() => {
@@ -48,14 +52,26 @@ function textResponseWithHeaders(
   } as Response;
 }
 
-function renderPage() {
+const OPERATIONS_READ_ONLY: AccessDocument = {
+  roles: [],
+  capabilities: [CABINET_CAPABILITY.OPERATIONS_READ],
+};
+
+const OPERATIONS_WRITE_ACCESS: AccessDocument = {
+  roles: [],
+  capabilities: [CABINET_CAPABILITY.OPERATIONS_READ, CABINET_CAPABILITY.OPERATIONS_WRITE],
+};
+
+function renderPage(access: AccessDocument = OPERATIONS_WRITE_ACCESS) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
-        <PickupPage />
+        <AccessProvider value={access}>
+          <PickupPage />
+        </AccessProvider>
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -88,6 +104,25 @@ const ORDER_B = {
 };
 
 describe("PickupPage", () => {
+  it("keeps order rows readable while hiding bulk export without operations.write", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (String(url).startsWith("/api/pickup-orders")) {
+          return jsonResponse(200, { items: [ORDER_A, ORDER_B] });
+        }
+        return jsonResponse(200, { items: [], openCount: 0 });
+      }),
+    );
+
+    renderPage(OPERATIONS_READ_ONLY);
+
+    expect(await screen.findByText(ORDER_A.employeeName)).toBeDefined();
+    expect(screen.getByRole("link", { name: ORDER_A.orderNo })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Массовая выгрузка" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Выгрузить коды" })).toBeNull();
+  });
+
   it("renders both orders from the mocked GET response in the table", async () => {
     const fetchMock = vi.fn(async () => jsonResponse(200, { items: [ORDER_A, ORDER_B] }));
     vi.stubGlobal("fetch", fetchMock);

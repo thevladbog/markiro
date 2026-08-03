@@ -13,6 +13,9 @@ import {
 } from "@markiro/ui";
 import type { StatusChipStatus, TableColumn } from "@markiro/ui";
 
+import { CABINET_CAPABILITY } from "@markiro/domain";
+
+import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
 import { toast } from "../../lib/toast.js";
 import { EmployeeForm, type EmployeeFormValues } from "./EmployeeForm.js";
@@ -36,6 +39,7 @@ const STATUS_TO_CHIP: Record<EmployeeStatus, StatusChipStatus> = {
 /** Admin employees CRUD screen -- Plan A Task 16 (list/create/edit/archive + badge issue/revoke). */
 export function EmployeesPage() {
   const { t } = useTranslation();
+  const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
   const { data, isPending, isError } = useEmployees();
   const createMutation = useCreateEmployee();
   const updateMutation = useUpdateEmployee();
@@ -74,31 +78,32 @@ export function EmployeesPage() {
         key: "actions",
         title: t("pages.employees.table.actions"),
         align: "right",
-        render: (row) => (
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <Button
-              type="button"
-              size="compact"
-              variant="secondary"
-              onClick={() => setFormState({ mode: "edit", employee: row })}
-            >
-              {t("pages.employees.edit")}
-            </Button>
-            {row.status === "active" && (
+        render: (row) =>
+          canWrite ? (
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <Button
                 type="button"
                 size="compact"
-                variant="destructive"
-                onClick={() => setArchiveTarget(row)}
+                variant="secondary"
+                onClick={() => setFormState({ mode: "edit", employee: row })}
               >
-                {t("pages.employees.archive")}
+                {t("pages.employees.edit")}
               </Button>
-            )}
-          </div>
-        ),
+              {row.status === "active" && (
+                <Button
+                  type="button"
+                  size="compact"
+                  variant="destructive"
+                  onClick={() => setArchiveTarget(row)}
+                >
+                  {t("pages.employees.archive")}
+                </Button>
+              )}
+            </div>
+          ) : null,
       },
     ],
-    [t],
+    [t, canWrite],
   );
 
   const editingEmployee = formState?.mode === "edit" ? formState.employee : undefined;
@@ -144,9 +149,11 @@ export function EmployeesPage() {
       <PageHeader
         title={t("pages.employees.title")}
         actions={
-          <Button type="button" onClick={() => setFormState({ mode: "create" })}>
-            {t("pages.employees.addAction")}
-          </Button>
+          canWrite ? (
+            <Button type="button" onClick={() => setFormState({ mode: "create" })}>
+              {t("pages.employees.addAction")}
+            </Button>
+          ) : null
         }
       />
 
@@ -161,52 +168,58 @@ export function EmployeesPage() {
           title={t("pages.employees.emptyTitle")}
           hint={t("pages.employees.emptyHint")}
           action={
-            <Button type="button" onClick={() => setFormState({ mode: "create" })}>
-              {t("pages.employees.addAction")}
-            </Button>
+            canWrite ? (
+              <Button type="button" onClick={() => setFormState({ mode: "create" })}>
+                {t("pages.employees.addAction")}
+              </Button>
+            ) : null
           }
         />
       ) : (
         <Table columns={columns} rows={items} />
       )}
 
-      <EmployeeForm
-        open={formState !== null}
-        mode={formState?.mode ?? "create"}
-        {...(editingEmployee ? { employee: editingEmployee } : {})}
-        {...(initialValues ? { initialValues } : {})}
-        submitting={createMutation.isPending || updateMutation.isPending}
-        onSubmit={handleSubmit}
-        onClose={() => setFormState(null)}
-      />
+      {canWrite ? (
+        <EmployeeForm
+          open={formState !== null}
+          mode={formState?.mode ?? "create"}
+          {...(editingEmployee ? { employee: editingEmployee } : {})}
+          {...(initialValues ? { initialValues } : {})}
+          submitting={createMutation.isPending || updateMutation.isPending}
+          onSubmit={handleSubmit}
+          onClose={() => setFormState(null)}
+        />
+      ) : null}
 
-      <Modal
-        open={archiveTarget !== null}
-        onClose={() => setArchiveTarget(null)}
-        closeLabel={t("common.close")}
-        title={t("pages.employees.archiveConfirmTitle")}
-        footer={
-          <>
-            <Button type="button" variant="secondary" onClick={() => setArchiveTarget(null)}>
-              {t("pages.employees.cancel")}
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              loading={archiveMutation.isPending}
-              onClick={() => void handleArchive()}
-            >
-              {t("pages.employees.archiveConfirmAction")}
-            </Button>
-          </>
-        }
-      >
-        {archiveTarget && (
-          <p style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>
-            {t("pages.employees.archiveConfirmBody", { name: archiveTarget.fullName })}
-          </p>
-        )}
-      </Modal>
+      {canWrite ? (
+        <Modal
+          open={archiveTarget !== null}
+          onClose={() => setArchiveTarget(null)}
+          closeLabel={t("common.close")}
+          title={t("pages.employees.archiveConfirmTitle")}
+          footer={
+            <>
+              <Button type="button" variant="secondary" onClick={() => setArchiveTarget(null)}>
+                {t("pages.employees.cancel")}
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                loading={archiveMutation.isPending}
+                onClick={() => void handleArchive()}
+              >
+                {t("pages.employees.archiveConfirmAction")}
+              </Button>
+            </>
+          }
+        >
+          {archiveTarget && (
+            <p style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>
+              {t("pages.employees.archiveConfirmBody", { name: archiveTarget.fullName })}
+            </p>
+          )}
+        </Modal>
+      ) : null}
     </div>
   );
 }

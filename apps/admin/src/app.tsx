@@ -135,7 +135,7 @@ export function AppRoutes() {
         <Route
           path="labels/new"
           element={
-            <RequireCapability capability={C.OPERATIONS_READ}>
+            <RequireCapability capability={C.OPERATIONS_WRITE}>
               <LabelEditorPage />
             </RequireCapability>
           }
@@ -143,7 +143,7 @@ export function AppRoutes() {
         <Route
           path="labels/:id"
           element={
-            <RequireCapability capability={C.OPERATIONS_READ}>
+            <RequireCapability capability={C.OPERATIONS_WRITE}>
               <LabelEditorPage />
             </RequireCapability>
           }

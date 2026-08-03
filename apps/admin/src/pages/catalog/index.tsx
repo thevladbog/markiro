@@ -16,6 +16,9 @@ import {
 } from "@markiro/ui";
 import type { SelectOption, TableColumn } from "@markiro/ui";
 
+import { CABINET_CAPABILITY } from "@markiro/domain";
+
+import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
 import { toast } from "../../lib/toast.js";
 import { useCounterparties } from "../counterparties/api.js";
@@ -52,6 +55,7 @@ const SEARCH_DEBOUNCE_MS = 300;
 /** Admin product catalog CRUD screen -- Plan 03 Task 12 (list/create/edit/delete + GTIN owner hint). */
 export function CatalogPage() {
   const { t } = useTranslation();
+  const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
 
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -128,29 +132,30 @@ export function CatalogPage() {
         key: "actions",
         title: t("pages.catalog.table.actions"),
         align: "right",
-        render: (row) => (
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <Button
-              type="button"
-              size="compact"
-              variant="secondary"
-              onClick={() => setFormState({ mode: "edit", product: row })}
-            >
-              {t("pages.catalog.edit")}
-            </Button>
-            <Button
-              type="button"
-              size="compact"
-              variant="destructive"
-              onClick={() => setDeleteTarget(row)}
-            >
-              {t("pages.catalog.delete")}
-            </Button>
-          </div>
-        ),
+        render: (row) =>
+          canWrite ? (
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <Button
+                type="button"
+                size="compact"
+                variant="secondary"
+                onClick={() => setFormState({ mode: "edit", product: row })}
+              >
+                {t("pages.catalog.edit")}
+              </Button>
+              <Button
+                type="button"
+                size="compact"
+                variant="destructive"
+                onClick={() => setDeleteTarget(row)}
+              >
+                {t("pages.catalog.delete")}
+              </Button>
+            </div>
+          ) : null,
       },
     ],
-    [t],
+    [t, canWrite],
   );
 
   const editingProduct = formState?.mode === "edit" ? formState.product : undefined;
@@ -224,9 +229,11 @@ export function CatalogPage() {
       <PageHeader
         title={t("pages.catalog.title")}
         actions={
-          <Button type="button" onClick={() => setFormState({ mode: "create" })}>
-            {t("pages.catalog.addAction")}
-          </Button>
+          canWrite ? (
+            <Button type="button" onClick={() => setFormState({ mode: "create" })}>
+              {t("pages.catalog.addAction")}
+            </Button>
+          ) : null
         }
       />
 
@@ -276,57 +283,63 @@ export function CatalogPage() {
           title={t("pages.catalog.emptyTitle")}
           hint={t("pages.catalog.emptyHint")}
           action={
-            <Button type="button" onClick={() => setFormState({ mode: "create" })}>
-              {t("pages.catalog.addAction")}
-            </Button>
+            canWrite ? (
+              <Button type="button" onClick={() => setFormState({ mode: "create" })}>
+                {t("pages.catalog.addAction")}
+              </Button>
+            ) : null
           }
         />
       ) : (
         <Table columns={columns} rows={items} />
       )}
 
-      <ProductForm
-        open={formState !== null}
-        mode={formState?.mode ?? "create"}
-        {...(initialValues ? { initialValues } : {})}
-        {...(editingProduct ? { productStatus: editingProduct.status } : {})}
-        {...(editingProduct
-          ? { productId: editingProduct.id, externalRef: editingProduct.externalRef }
-          : {})}
-        counterparties={counterparties}
-        labelTemplates={labelTemplates}
-        submitting={createMutation.isPending || updateMutation.isPending}
-        onSubmit={handleSubmit}
-        onClose={() => setFormState(null)}
-      />
+      {canWrite ? (
+        <ProductForm
+          open={formState !== null}
+          mode={formState?.mode ?? "create"}
+          {...(initialValues ? { initialValues } : {})}
+          {...(editingProduct ? { productStatus: editingProduct.status } : {})}
+          {...(editingProduct
+            ? { productId: editingProduct.id, externalRef: editingProduct.externalRef }
+            : {})}
+          counterparties={counterparties}
+          labelTemplates={labelTemplates}
+          submitting={createMutation.isPending || updateMutation.isPending}
+          onSubmit={handleSubmit}
+          onClose={() => setFormState(null)}
+        />
+      ) : null}
 
-      <Modal
-        open={deleteTarget !== null}
-        onClose={() => setDeleteTarget(null)}
-        closeLabel={t("common.close")}
-        title={t("pages.catalog.deleteConfirmTitle")}
-        footer={
-          <>
-            <Button type="button" variant="secondary" onClick={() => setDeleteTarget(null)}>
-              {t("pages.catalog.cancel")}
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              loading={deleteMutation.isPending}
-              onClick={() => void handleDelete()}
-            >
-              {t("pages.catalog.deleteConfirmAction")}
-            </Button>
-          </>
-        }
-      >
-        {deleteTarget && (
-          <p style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>
-            {t("pages.catalog.deleteConfirmBody", { name: deleteTarget.name })}
-          </p>
-        )}
-      </Modal>
+      {canWrite ? (
+        <Modal
+          open={deleteTarget !== null}
+          onClose={() => setDeleteTarget(null)}
+          closeLabel={t("common.close")}
+          title={t("pages.catalog.deleteConfirmTitle")}
+          footer={
+            <>
+              <Button type="button" variant="secondary" onClick={() => setDeleteTarget(null)}>
+                {t("pages.catalog.cancel")}
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                loading={deleteMutation.isPending}
+                onClick={() => void handleDelete()}
+              >
+                {t("pages.catalog.deleteConfirmAction")}
+              </Button>
+            </>
+          }
+        >
+          {deleteTarget && (
+            <p style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>
+              {t("pages.catalog.deleteConfirmBody", { name: deleteTarget.name })}
+            </p>
+          )}
+        </Modal>
+      ) : null}
     </div>
   );
 }

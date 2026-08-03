@@ -16,6 +16,9 @@ import {
 } from "@markiro/ui";
 import type { BadgeTone, SelectOption, StatusChipStatus, TableColumn } from "@markiro/ui";
 
+import { CABINET_CAPABILITY } from "@markiro/domain";
+
+import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
 import { toast } from "../../lib/toast.js";
 import { useProducts } from "../catalog/api.js";
@@ -52,6 +55,7 @@ const MODE_TO_BADGE_TONE: Record<ShiftDto["mode"], BadgeTone> = {
 /** Admin shift-planning screen -- Plan 03 Task 13 (list/create/edit/delete/close). */
 export function ShiftsPage() {
   const { t } = useTranslation();
+  const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [fromDate, setFromDate] = useState("");
@@ -153,46 +157,47 @@ export function ShiftsPage() {
         key: "actions",
         title: t("pages.shifts.table.actions"),
         align: "right",
-        render: (row) => (
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            {row.status === "planned" && (
-              <>
+        render: (row) =>
+          canWrite ? (
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              {row.status === "planned" && (
+                <>
+                  <Button
+                    type="button"
+                    size="compact"
+                    variant="secondary"
+                    onClick={() => setFormState({ mode: "edit", shift: row })}
+                  >
+                    {t("pages.shifts.edit")}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="compact"
+                    variant="destructive"
+                    onClick={() => setDeleteTarget(row)}
+                  >
+                    {t("pages.shifts.delete")}
+                  </Button>
+                </>
+              )}
+              {row.status === "active" && (
                 <Button
                   type="button"
                   size="compact"
                   variant="secondary"
-                  onClick={() => setFormState({ mode: "edit", shift: row })}
+                  onClick={() => {
+                    setCloseReason("");
+                    setCloseTarget(row);
+                  }}
                 >
-                  {t("pages.shifts.edit")}
+                  {t("pages.shifts.close")}
                 </Button>
-                <Button
-                  type="button"
-                  size="compact"
-                  variant="destructive"
-                  onClick={() => setDeleteTarget(row)}
-                >
-                  {t("pages.shifts.delete")}
-                </Button>
-              </>
-            )}
-            {row.status === "active" && (
-              <Button
-                type="button"
-                size="compact"
-                variant="secondary"
-                onClick={() => {
-                  setCloseReason("");
-                  setCloseTarget(row);
-                }}
-              >
-                {t("pages.shifts.close")}
-              </Button>
-            )}
-          </div>
-        ),
+              )}
+            </div>
+          ) : null,
       },
     ],
-    [t],
+    [t, canWrite],
   );
 
   const editingShift = formState?.mode === "edit" ? formState.shift : undefined;
@@ -267,9 +272,11 @@ export function ShiftsPage() {
       <PageHeader
         title={t("pages.shifts.title")}
         actions={
-          <Button type="button" onClick={() => setFormState({ mode: "create" })}>
-            {t("pages.shifts.addAction")}
-          </Button>
+          canWrite ? (
+            <Button type="button" onClick={() => setFormState({ mode: "create" })}>
+              {t("pages.shifts.addAction")}
+            </Button>
+          ) : null
         }
       />
 
@@ -311,84 +318,92 @@ export function ShiftsPage() {
           title={t("pages.shifts.emptyTitle")}
           hint={t("pages.shifts.emptyHint")}
           action={
-            <Button type="button" onClick={() => setFormState({ mode: "create" })}>
-              {t("pages.shifts.addAction")}
-            </Button>
+            canWrite ? (
+              <Button type="button" onClick={() => setFormState({ mode: "create" })}>
+                {t("pages.shifts.addAction")}
+              </Button>
+            ) : null
           }
         />
       ) : (
         <Table columns={columns} rows={items} />
       )}
 
-      <ShiftForm
-        open={formState !== null}
-        mode={formState?.mode ?? "create"}
-        {...(initialValues ? { initialValues } : {})}
-        products={products}
-        lines={lines}
-        counterparties={counterparties}
-        labelTemplates={labelTemplates}
-        submitting={createMutation.isPending || updateMutation.isPending}
-        onSubmit={handleSubmit}
-        onClose={() => setFormState(null)}
-      />
-
-      <Modal
-        open={deleteTarget !== null}
-        onClose={() => setDeleteTarget(null)}
-        closeLabel={t("common.close")}
-        title={t("pages.shifts.deleteConfirmTitle")}
-        footer={
-          <>
-            <Button type="button" variant="secondary" onClick={() => setDeleteTarget(null)}>
-              {t("pages.shifts.cancel")}
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              loading={deleteMutation.isPending}
-              onClick={() => void handleDelete()}
-            >
-              {t("pages.shifts.deleteConfirmAction")}
-            </Button>
-          </>
-        }
-      >
-        {deleteTarget && (
-          <p style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>
-            {t("pages.shifts.deleteConfirmBody", { name: deleteTarget.productName ?? "" })}
-          </p>
-        )}
-      </Modal>
-
-      <Modal
-        open={closeTarget !== null}
-        onClose={() => setCloseTarget(null)}
-        closeLabel={t("common.close")}
-        title={t("pages.shifts.closeModal.title")}
-        footer={
-          <>
-            <Button type="button" variant="secondary" onClick={() => setCloseTarget(null)}>
-              {t("pages.shifts.closeModal.cancel")}
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              loading={closeMutation.isPending}
-              disabled={closeReason.trim().length < 3}
-              onClick={() => void handleCloseShift()}
-            >
-              {t("pages.shifts.closeModal.submit")}
-            </Button>
-          </>
-        }
-      >
-        <Input
-          label={t("pages.shifts.closeModal.reasonLabel")}
-          value={closeReason}
-          onChange={(event) => setCloseReason(event.target.value)}
+      {canWrite ? (
+        <ShiftForm
+          open={formState !== null}
+          mode={formState?.mode ?? "create"}
+          {...(initialValues ? { initialValues } : {})}
+          products={products}
+          lines={lines}
+          counterparties={counterparties}
+          labelTemplates={labelTemplates}
+          submitting={createMutation.isPending || updateMutation.isPending}
+          onSubmit={handleSubmit}
+          onClose={() => setFormState(null)}
         />
-      </Modal>
+      ) : null}
+
+      {canWrite ? (
+        <Modal
+          open={deleteTarget !== null}
+          onClose={() => setDeleteTarget(null)}
+          closeLabel={t("common.close")}
+          title={t("pages.shifts.deleteConfirmTitle")}
+          footer={
+            <>
+              <Button type="button" variant="secondary" onClick={() => setDeleteTarget(null)}>
+                {t("pages.shifts.cancel")}
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                loading={deleteMutation.isPending}
+                onClick={() => void handleDelete()}
+              >
+                {t("pages.shifts.deleteConfirmAction")}
+              </Button>
+            </>
+          }
+        >
+          {deleteTarget && (
+            <p style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>
+              {t("pages.shifts.deleteConfirmBody", { name: deleteTarget.productName ?? "" })}
+            </p>
+          )}
+        </Modal>
+      ) : null}
+
+      {canWrite ? (
+        <Modal
+          open={closeTarget !== null}
+          onClose={() => setCloseTarget(null)}
+          closeLabel={t("common.close")}
+          title={t("pages.shifts.closeModal.title")}
+          footer={
+            <>
+              <Button type="button" variant="secondary" onClick={() => setCloseTarget(null)}>
+                {t("pages.shifts.closeModal.cancel")}
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                loading={closeMutation.isPending}
+                disabled={closeReason.trim().length < 3}
+                onClick={() => void handleCloseShift()}
+              >
+                {t("pages.shifts.closeModal.submit")}
+              </Button>
+            </>
+          }
+        >
+          <Input
+            label={t("pages.shifts.closeModal.reasonLabel")}
+            value={closeReason}
+            onChange={(event) => setCloseReason(event.target.value)}
+          />
+        </Modal>
+      ) : null}
     </div>
   );
 }

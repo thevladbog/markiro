@@ -16,6 +16,9 @@ import {
 } from "@markiro/ui";
 import type { SelectOption, StatusChipStatus, TableColumn } from "@markiro/ui";
 
+import { CABINET_CAPABILITY } from "@markiro/domain";
+
+import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
 import { formatCreatedAt } from "../../lib/datetime.js";
 import { toast } from "../../lib/toast.js";
@@ -62,6 +65,7 @@ function DetailField({ label, value }: { label: string; value: ReactNode }) {
  */
 export function OrderDetailPage() {
   const { t, i18n } = useTranslation();
+  const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
   const { id } = useParams();
   const orderId = id ?? "";
 
@@ -290,29 +294,33 @@ export function OrderDetailPage() {
       </Card>
 
       <div style={{ display: "flex", gap: 8 }}>
-        <Button
-          type="button"
-          variant="primary"
-          disabled={!isPendingOrder}
-          onClick={() => {
-            setReceiptNo("");
-            setActiveModal("punch");
-          }}
-        >
-          {t("pages.pickup.detail.actions.punch")}
-        </Button>
-        <Button
-          type="button"
-          variant="secondary"
-          disabled={!isPendingOrder}
-          onClick={() => {
-            setActNo("");
-            setWriteoffReasonId(reasons[0]?.id ?? "");
-            setActiveModal("writeoff");
-          }}
-        >
-          {t("pages.pickup.detail.actions.writeoff")}
-        </Button>
+        {canWrite ? (
+          <Button
+            type="button"
+            variant="primary"
+            disabled={!isPendingOrder}
+            onClick={() => {
+              setReceiptNo("");
+              setActiveModal("punch");
+            }}
+          >
+            {t("pages.pickup.detail.actions.punch")}
+          </Button>
+        ) : null}
+        {canWrite ? (
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={!isPendingOrder}
+            onClick={() => {
+              setActNo("");
+              setWriteoffReasonId(reasons[0]?.id ?? "");
+              setActiveModal("writeoff");
+            }}
+          >
+            {t("pages.pickup.detail.actions.writeoff")}
+          </Button>
+        ) : null}
         <Button
           type="button"
           variant="secondary"
@@ -323,105 +331,113 @@ export function OrderDetailPage() {
         >
           {t("pages.pickup.detail.actions.print")}
         </Button>
-        <Button
-          type="button"
-          variant="destructive"
-          disabled={!isPendingOrder}
-          onClick={() => setActiveModal("cancel")}
-        >
-          {t("pages.pickup.detail.actions.cancel")}
-        </Button>
+        {canWrite ? (
+          <Button
+            type="button"
+            variant="destructive"
+            disabled={!isPendingOrder}
+            onClick={() => setActiveModal("cancel")}
+          >
+            {t("pages.pickup.detail.actions.cancel")}
+          </Button>
+        ) : null}
       </div>
 
-      <Modal
-        open={activeModal === "punch"}
-        onClose={closeModal}
-        closeLabel={t("common.close")}
-        title={t("pages.pickup.detail.punchModal.title")}
-        footer={
-          <>
-            <Button type="button" variant="secondary" onClick={closeModal}>
-              {t("pages.pickup.detail.dismissAction")}
-            </Button>
-            <Button
-              type="button"
-              loading={resolveMutation.isPending}
-              disabled={receiptNo.trim().length === 0}
-              onClick={() => void handlePunch()}
-            >
-              {t("pages.pickup.detail.punchModal.submit")}
-            </Button>
-          </>
-        }
-      >
-        <Input
-          label={t("pages.pickup.detail.punchModal.receiptNoLabel")}
-          value={receiptNo}
-          onChange={(event) => setReceiptNo(event.target.value)}
-        />
-      </Modal>
-
-      <Modal
-        open={activeModal === "writeoff"}
-        onClose={closeModal}
-        closeLabel={t("common.close")}
-        title={t("pages.pickup.detail.writeoffModal.title")}
-        footer={
-          <>
-            <Button type="button" variant="secondary" onClick={closeModal}>
-              {t("pages.pickup.detail.dismissAction")}
-            </Button>
-            <Button
-              type="button"
-              loading={resolveMutation.isPending}
-              disabled={actNo.trim().length === 0 || writeoffReasonId.length === 0}
-              onClick={() => void handleWriteoff()}
-            >
-              {t("pages.pickup.detail.writeoffModal.submit")}
-            </Button>
-          </>
-        }
-      >
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {canWrite ? (
+        <Modal
+          open={activeModal === "punch"}
+          onClose={closeModal}
+          closeLabel={t("common.close")}
+          title={t("pages.pickup.detail.punchModal.title")}
+          footer={
+            <>
+              <Button type="button" variant="secondary" onClick={closeModal}>
+                {t("pages.pickup.detail.dismissAction")}
+              </Button>
+              <Button
+                type="button"
+                loading={resolveMutation.isPending}
+                disabled={receiptNo.trim().length === 0}
+                onClick={() => void handlePunch()}
+              >
+                {t("pages.pickup.detail.punchModal.submit")}
+              </Button>
+            </>
+          }
+        >
           <Input
-            label={t("pages.pickup.detail.writeoffModal.actNoLabel")}
-            value={actNo}
-            onChange={(event) => setActNo(event.target.value)}
+            label={t("pages.pickup.detail.punchModal.receiptNoLabel")}
+            value={receiptNo}
+            onChange={(event) => setReceiptNo(event.target.value)}
           />
-          <Select
-            label={t("pages.pickup.detail.writeoffModal.reasonLabel")}
-            options={reasonOptions}
-            value={writeoffReasonId}
-            onChange={setWriteoffReasonId}
-          />
-        </div>
-      </Modal>
+        </Modal>
+      ) : null}
 
-      <Modal
-        open={activeModal === "cancel"}
-        onClose={closeModal}
-        closeLabel={t("common.close")}
-        title={t("pages.pickup.detail.cancelModal.title")}
-        footer={
-          <>
-            <Button type="button" variant="secondary" onClick={closeModal}>
-              {t("pages.pickup.detail.dismissAction")}
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              loading={cancelMutation.isPending}
-              onClick={() => void handleCancel()}
-            >
-              {t("pages.pickup.detail.cancelModal.confirmAction")}
-            </Button>
-          </>
-        }
-      >
-        <p style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>
-          {t("pages.pickup.detail.cancelModal.body")}
-        </p>
-      </Modal>
+      {canWrite ? (
+        <Modal
+          open={activeModal === "writeoff"}
+          onClose={closeModal}
+          closeLabel={t("common.close")}
+          title={t("pages.pickup.detail.writeoffModal.title")}
+          footer={
+            <>
+              <Button type="button" variant="secondary" onClick={closeModal}>
+                {t("pages.pickup.detail.dismissAction")}
+              </Button>
+              <Button
+                type="button"
+                loading={resolveMutation.isPending}
+                disabled={actNo.trim().length === 0 || writeoffReasonId.length === 0}
+                onClick={() => void handleWriteoff()}
+              >
+                {t("pages.pickup.detail.writeoffModal.submit")}
+              </Button>
+            </>
+          }
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <Input
+              label={t("pages.pickup.detail.writeoffModal.actNoLabel")}
+              value={actNo}
+              onChange={(event) => setActNo(event.target.value)}
+            />
+            <Select
+              label={t("pages.pickup.detail.writeoffModal.reasonLabel")}
+              options={reasonOptions}
+              value={writeoffReasonId}
+              onChange={setWriteoffReasonId}
+            />
+          </div>
+        </Modal>
+      ) : null}
+
+      {canWrite ? (
+        <Modal
+          open={activeModal === "cancel"}
+          onClose={closeModal}
+          closeLabel={t("common.close")}
+          title={t("pages.pickup.detail.cancelModal.title")}
+          footer={
+            <>
+              <Button type="button" variant="secondary" onClick={closeModal}>
+                {t("pages.pickup.detail.dismissAction")}
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                loading={cancelMutation.isPending}
+                onClick={() => void handleCancel()}
+              >
+                {t("pages.pickup.detail.cancelModal.confirmAction")}
+              </Button>
+            </>
+          }
+        >
+          <p style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>
+            {t("pages.pickup.detail.cancelModal.body")}
+          </p>
+        </Modal>
+      ) : null}
     </div>
   );
 }
