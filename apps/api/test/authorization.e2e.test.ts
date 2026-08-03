@@ -109,6 +109,10 @@ describe.skipIf(!ready)("cabinet authorization e2e", () => {
     const { agent, organizationId } = await activeOrganizationFixture();
     await setOnlyOrganizationMemberRole(db, organizationId, "manager");
 
+    expect((await agent.get("/access/me").expect(200)).body).toEqual({
+      roles: ["manager"],
+      capabilities: ["operations.read", "operations.write"],
+    });
     await agent.get("/products").expect(200);
     await agent.post("/kiosks").send(VALID_KIOSK).expect(201);
     await agent.get("/integrations").expect(403);
@@ -121,10 +125,15 @@ describe.skipIf(!ready)("cabinet authorization e2e", () => {
     const { agent, organizationId } = await activeOrganizationFixture();
     await setOnlyOrganizationMemberRole(db, organizationId, "admin");
 
+    expect((await agent.get("/access/me").expect(200)).body).toEqual({
+      roles: ["admin"],
+      capabilities: ADMIN_CAPABILITIES,
+    });
     await agent.get("/products").expect(200);
     await agent.get("/integrations").expect(200);
     await agent.get("/org/profile").expect(200);
     await agent.get("/station-devices").expect(200);
+    await agent.get("/integrations/public_api/keys").expect(200);
   });
 
   it("lets a member read its empty access document but not operate", async () => {
