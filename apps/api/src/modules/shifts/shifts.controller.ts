@@ -12,8 +12,13 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
+import { CABINET_CAPABILITY } from "@markiro/domain";
+import {
+  AllowStationOrPermissions,
+  RequirePermissions,
+} from "../../authorization/access-policy";
+import { AuthorizationGuard } from "../../authorization/authorization.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
-import { SessionOnlyGuard } from "../../tenancy/session-only.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
   closeShiftSchema,
@@ -32,11 +37,12 @@ import { ShiftsService } from "./shifts.service";
 
 @ApiTags("shifts")
 @Controller("shifts")
-@UseGuards(TenantGuard)
+@UseGuards(TenantGuard, AuthorizationGuard)
 export class ShiftsController {
   constructor(private readonly shiftsService: ShiftsService) {}
 
   @Get()
+  @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_READ)
   async listShifts(
     @Req() req: RequestWithTenant,
     @Query(new ZodValidationPipe(listShiftsQuerySchema)) query: ListShiftsQueryDto,
@@ -44,16 +50,17 @@ export class ShiftsController {
     return this.shiftsService.listShifts(req.tenantId!, query);
   }
 
-  // Session-only: not one of the station's four routes (list, create, open,
+  // Cabinet-only: not one of the station's four routes (list, create, open,
   // bundle) below. A device reading an arbitrary shift by id has no
   // legitimate use once it can already list/open/bundle its own.
   @Get(":id")
-  @UseGuards(SessionOnlyGuard)
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
   async getShift(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<ShiftDto> {
     return this.shiftsService.getShift(req.tenantId!, id);
   }
 
   @Post()
+  @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async createShift(
     @Req() req: RequestWithTenant,
     @Body(new ZodValidationPipe(createShiftSchema)) body: CreateShiftDto,
@@ -62,7 +69,7 @@ export class ShiftsController {
   }
 
   @Patch(":id")
-  @UseGuards(SessionOnlyGuard)
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async updateShift(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
@@ -73,16 +80,16 @@ export class ShiftsController {
 
   @Delete(":id")
   @HttpCode(204)
-  @UseGuards(SessionOnlyGuard)
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async deleteShift(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<void> {
     return this.shiftsService.deleteShift(req.tenantId!, id);
   }
 
-  // Session-only: closing a shift from the station is deliberately not a
+  // Cabinet-only: closing a shift from the station is deliberately not a
   // station action (see docs/device-key-surface.md).
   @Post(":id/close")
   @HttpCode(200)
-  @UseGuards(SessionOnlyGuard)
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async closeShift(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
@@ -93,11 +100,13 @@ export class ShiftsController {
 
   @Post(":id/open")
   @HttpCode(200)
+  @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async openShift(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<ShiftDto> {
     return this.shiftsService.openShift(req.tenantId!, id);
   }
 
   @Get(":id/bundle")
+  @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_READ)
   async getBundle(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<ShiftBundleDto> {
     return this.shiftsService.getBundle(req.tenantId!, id, req.deviceId ?? null);
   }

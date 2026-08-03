@@ -11,8 +11,10 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
+import { CABINET_CAPABILITY } from "@markiro/domain";
 import type { Response } from "express";
-import { SessionOnlyGuard } from "../../tenancy/session-only.guard";
+import { RequirePermissions } from "../../authorization/access-policy";
+import { AuthorizationGuard } from "../../authorization/authorization.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { renderPickupSlipHtml } from "../../pickup/slip";
 import { ZodValidationPipe } from "../../zod.pipe";
@@ -35,11 +37,12 @@ import { PickupOrdersService } from "./pickup-orders.service";
 // it (see docs/device-key-surface.md).
 @ApiTags("pickup-orders")
 @Controller("pickup-orders")
-@UseGuards(TenantGuard, SessionOnlyGuard)
+@UseGuards(TenantGuard, AuthorizationGuard)
 export class PickupOrdersController {
   constructor(private readonly pickupOrdersService: PickupOrdersService) {}
 
   @Get()
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
   async list(
     @Req() req: RequestWithTenant,
     @Query(new ZodValidationPipe(listPickupOrdersQuerySchema)) query: ListPickupOrdersQueryDto,
@@ -48,6 +51,7 @@ export class PickupOrdersController {
   }
 
   @Get(":id")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
   async detail(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
@@ -57,6 +61,7 @@ export class PickupOrdersController {
 
   /** Print-ready A4 "Ведомость отбора по заявке": DataMatrix per item, badge QR, footer Code128 of the order number. */
   @Get(":id/slip")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
   async slip(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
@@ -69,6 +74,7 @@ export class PickupOrdersController {
 
   @Post(":id/resolve")
   @HttpCode(200)
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async resolve(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
@@ -79,12 +85,14 @@ export class PickupOrdersController {
 
   @Post(":id/cancel")
   @HttpCode(200)
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async cancel(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<PickupOrderRowDto> {
     return this.pickupOrdersService.cancel(req.tenantId!, id);
   }
 
   @Post("export")
   @HttpCode(200)
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async export(
     @Req() req: RequestWithTenant,
     @Res({ passthrough: true }) res: Response,
