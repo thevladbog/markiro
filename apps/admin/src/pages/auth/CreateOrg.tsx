@@ -9,6 +9,7 @@ import { Alert, Button, Input } from "@markiro/ui";
 
 import { useAuthClient } from "../../auth/client.js";
 import { errorProp } from "../../lib/form-error.js";
+import { useClearAuthQueryCache } from "../../query/AuthQueryBoundary.js";
 import { AuthLayout } from "./AuthLayout.js";
 
 // The validation messages below are i18n keys (resolved through `t()` at
@@ -36,6 +37,7 @@ export function CreateOrgPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const authClient = useAuthClient();
+  const clearAuthQueryCache = useClearAuthQueryCache();
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [slugTouched, setSlugTouched] = useState(false);
 
@@ -67,6 +69,7 @@ export function CreateOrgPage() {
       setSubmitError(error?.message ?? t("auth.createOrg.genericError"));
       return;
     }
+    clearAuthQueryCache();
     await authClient.organization.setActive({ organizationId: data.id });
     void navigate("/", { replace: true });
   });

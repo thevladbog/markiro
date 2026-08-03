@@ -3,6 +3,7 @@ import { BrowserRouter, Route, Routes } from "react-router";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 
 import { RequireCapability } from "./access/context.js";
+import { AuthQueryBoundary } from "./query/AuthQueryBoundary.js";
 import { CreateOrgPage } from "./pages/auth/CreateOrg.js";
 import { LoginPage } from "./pages/auth/Login.js";
 import { RegisterPage } from "./pages/auth/Register.js";
@@ -188,7 +189,9 @@ export function AppRoutes() {
 export function App() {
   return (
     <BrowserRouter>
-      <AppRoutes />
+      <AuthQueryBoundary>
+        <AppRoutes />
+      </AuthQueryBoundary>
     </BrowserRouter>
   );
 }

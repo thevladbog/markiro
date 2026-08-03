@@ -8,10 +8,13 @@ export interface AccessDocument {
   capabilities: CabinetCapability[];
 }
 
-/** Gets the effective cabinet access for one active organization. */
-export function useAccessDocument(activeOrganizationId: string): UseQueryResult<AccessDocument> {
+/** Gets effective cabinet access for one authenticated user and active organization. */
+export function useAccessDocument(
+  userId: string,
+  activeOrganizationId: string,
+): UseQueryResult<AccessDocument> {
   return useQuery({
-    queryKey: ["cabinet-access", activeOrganizationId],
+    queryKey: ["cabinet-access", userId, activeOrganizationId],
     queryFn: () => apiFetch<AccessDocument>("/access/me"),
     retry: false,
     staleTime: 0,

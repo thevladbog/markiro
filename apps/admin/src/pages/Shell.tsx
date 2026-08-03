@@ -36,11 +36,22 @@ export function ShellPage() {
     return <Navigate to="/org/select" replace />;
   }
 
-  return <AccessGate activeOrganizationId={session.session.activeOrganizationId} />;
+  return (
+    <AccessGate
+      userId={session.user.id}
+      activeOrganizationId={session.session.activeOrganizationId}
+    />
+  );
 }
 
-function AccessGate({ activeOrganizationId }: { activeOrganizationId: string }) {
-  const access = useAccessDocument(activeOrganizationId);
+function AccessGate({
+  userId,
+  activeOrganizationId,
+}: {
+  userId: string;
+  activeOrganizationId: string;
+}) {
+  const access = useAccessDocument(userId, activeOrganizationId);
 
   if (access.isPending) return <CenteredSpinner />;
   if (access.error instanceof ApiRequestError && access.error.status === 403) {

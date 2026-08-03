@@ -351,4 +351,132 @@ describe("ShellPage", () => {
       expect(requestedUrls.filter((url) => url.endsWith("/api/access/me"))).toHaveLength(2);
     });
   });
+
+  it("keeps the shell pending when the user changes inside the same organization", async () => {
+    let userId = "admin_a";
+    let resolveNextAccess!: (response: Response) => void;
+    let accessCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/api/access/me")) {
+          accessCalls += 1;
+          if (accessCalls === 1) {
+            return Promise.resolve(
+              jsonResponse(200, {
+                roles: ["admin"],
+                capabilities: [
+                  "operations.read",
+                  "operations.write",
+                  "integrations.read",
+                  "integrations.write",
+                  "tenant.settings.manage",
+                  "credentials.manage",
+                ],
+              }),
+            );
+          }
+          return new Promise<Response>((resolve) => {
+            resolveNextAccess = resolve;
+          });
+        }
+        if (url.includes("/api/pickup-orders")) {
+          return Promise.resolve(jsonResponse(200, { items: [] }));
+        }
+        return Promise.reject(new Error(`Unexpected request: ${url}`));
+      }),
+    );
+    const client = createFakeAuthClient({
+      useSession: () => ({
+        data: {
+          session: { activeOrganizationId: "org_1" },
+          user: { id: userId, email: `${userId}@example.com`, name: userId },
+        },
+        isPending: false,
+        error: null,
+      }),
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    const renderForUser = () => (
+      <QueryClientProvider client={queryClient}>
+        <ThemeProvider defaultTheme="light">
+          <MemoryRouter initialEntries={["/shell"]}>
+            <AuthClientProvider client={client}>
+              <Routes>
+                <Route path="/shell" element={<ShellPage />} />
+              </Routes>
+            </AuthClientProvider>
+          </MemoryRouter>
+        </ThemeProvider>
+      </QueryClientProvider>
+    );
+    const rendered = render(renderForUser());
+
+    expect(await screen.findByRole("link", { name: "Интеграции" })).toBeDefined();
+
+    userId = "member_b";
+    rendered.rerender(renderForUser());
+
+    expect(screen.getByRole("status")).toBeDefined();
+    expect(screen.queryByRole("link", { name: "Интеграции" })).toBeNull();
+    expect(accessCalls).toBe(2);
+
+    resolveNextAccess(jsonResponse(200, { roles: ["member"], capabilities: [] }));
+    expect(await screen.findByText("Доступ к кабинету пока не открыт")).toBeDefined();
+  });
+
+  it("clears cached tenant data before no-access recovery actions leave the organization", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/api/access/me")) {
+          return jsonResponse(200, { roles: ["member"], capabilities: [] });
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+    let resolveSignOut!: (value: { data: unknown; error: null }) => void;
+    const signOutResult = new Promise<{ data: unknown; error: null }>((resolve) => {
+      resolveSignOut = resolve;
+    });
+    const signOut = vi.fn(() => signOutResult);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    queryClient.setQueryData(["tenant-secret"], "ORG_1_SECRET");
+    const client = createFakeAuthClient({
+      useSession: () => ({
+        data: {
+          session: { activeOrganizationId: "org_1" },
+          user: { id: "member_1", email: "member@example.com", name: "Member" },
+        },
+        isPending: false,
+        error: null,
+      }),
+      signOut,
+    });
+    const first = renderShell(client, queryClient);
+
+    expect(await screen.findByText("Доступ к кабинету пока не открыт")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Выбрать организацию" }));
+
+    expect(queryClient.getQueryData(["tenant-secret"])).toBeUndefined();
+    expect(screen.getByTestId("location-pathname").textContent).toBe("/org/select");
+    first.unmount();
+
+    queryClient.setQueryData(["tenant-secret"], "ORG_1_SECRET");
+    renderShell(client, queryClient);
+    expect(await screen.findByText("Доступ к кабинету пока не открыт")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: /Выйти|Sign out/i }));
+
+    expect(signOut).toHaveBeenCalledTimes(1);
+    expect(queryClient.getQueryData(["tenant-secret"])).toBeUndefined();
+    expect(screen.getByTestId("location-pathname").textContent).toBe("/login");
+
+    resolveSignOut({ data: {}, error: null });
+  });
 });

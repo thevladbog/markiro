@@ -5,6 +5,7 @@ import { useNavigate } from "react-router";
 import { Button, useTheme } from "@markiro/ui";
 
 import { useAuthClient } from "../auth/client.js";
+import { useClearAuthQueryCache } from "../query/AuthQueryBoundary.js";
 import { useActiveOrg } from "./useActiveOrg.js";
 
 const ICON_BUTTON_STYLE: CSSProperties = {
@@ -33,18 +34,15 @@ export function Header() {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const authClient = useAuthClient();
+  const clearAuthQueryCache = useClearAuthQueryCache();
   const { theme, setTheme } = useTheme();
   const { orgName } = useActiveOrg();
   const { data: session } = authClient.useSession();
 
   const handleSignOut = () => {
-    // Fake clients in tests don't reactively update `useSession()` after
-    // `signOut()` resolves (unlike the real client's internal store), so the
-    // redirect is driven explicitly here rather than relying on
-    // `ShellPage`'s guard to react to a cleared session.
-    void authClient.signOut().then(() => {
-      void navigate("/login", { replace: true });
-    });
+    clearAuthQueryCache();
+    void authClient.signOut();
+    void navigate("/login", { replace: true });
   };
 
   const handleToggleTheme = () => {

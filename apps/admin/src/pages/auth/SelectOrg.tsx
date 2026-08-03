@@ -5,12 +5,14 @@ import { Link, useNavigate } from "react-router";
 import { Alert, Button, Spinner } from "@markiro/ui";
 
 import { useAuthClient, type OrganizationSummary } from "../../auth/client.js";
+import { useClearAuthQueryCache } from "../../query/AuthQueryBoundary.js";
 import { AuthLayout } from "./AuthLayout.js";
 
 export function SelectOrgPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const authClient = useAuthClient();
+  const clearAuthQueryCache = useClearAuthQueryCache();
 
   const [organizations, setOrganizations] = useState<OrganizationSummary[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -43,6 +45,7 @@ export function SelectOrgPage() {
   const handleSelect = async (organizationId: string) => {
     setSelectingId(organizationId);
     setSelectError(null);
+    clearAuthQueryCache();
     const { error } = await authClient.organization.setActive({ organizationId });
     if (error) {
       setSelectError(error.message ?? t("auth.selectOrg.genericError"));
