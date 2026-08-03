@@ -30,6 +30,7 @@ import { loadEnv, type Env } from "./env";
 import { TeamModule } from "./modules/team/team.module";
 import { InvitationsModule } from "./modules/invitations/invitations.module";
 import { StorageModule } from "./modules/storage/storage.module";
+import { ProfileModule } from "./modules/profile/profile.module";
 
 @Module({ controllers: [HealthController] })
 export class AppModule {
@@ -76,9 +77,10 @@ export class AppModule {
         SsccModule,
         BoxesModule,
         BoxExceptionsModule,
+        StorageModule.forRoot(env),
         TeamModule.forRoot(env.ADMIN_ORIGIN),
         InvitationsModule,
-        StorageModule.forRoot(env),
+        ProfileModule,
       ],
       controllers: [HealthController],
     };
