@@ -106,6 +106,7 @@ export class IntegrationsController {
       userId: req.userId!,
       action: "integration_credentials.issue",
       resourceId: type,
+      outcome: "succeeded",
     });
     return result;
   }

@@ -52,6 +52,7 @@ export class ApiKeysController {
       userId: req.userId!,
       action: "public_api_key.issue",
       resourceId: result.id,
+      outcome: "succeeded",
     });
     return result;
   }
@@ -64,6 +65,7 @@ export class ApiKeysController {
       userId: req.userId!,
       action: "public_api_key.revoke",
       resourceId: id,
+      outcome: "succeeded",
     });
   }
 }

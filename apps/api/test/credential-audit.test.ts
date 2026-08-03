@@ -33,6 +33,7 @@ describe("credential mutation audit", () => {
       userId: "user_1",
       action: "public_api_key.issue",
       resourceId: "key_1",
+      outcome: "succeeded",
     });
     expect(JSON.stringify(audit.credentialMutation.mock.calls)).not.toContain("mk_plaintext");
   });
@@ -49,6 +50,7 @@ describe("credential mutation audit", () => {
       userId: "user_1",
       action: "public_api_key.revoke",
       resourceId: "key_2",
+      outcome: "succeeded",
     });
   });
 
@@ -80,6 +82,7 @@ describe("credential mutation audit", () => {
       userId: "user_1",
       action: "station_device.enroll",
       resourceId: "station_1",
+      outcome: "succeeded",
     });
     expect(JSON.stringify(audit.credentialMutation.mock.calls)).not.toContain("station-plaintext");
   });
@@ -96,6 +99,7 @@ describe("credential mutation audit", () => {
       userId: "user_1",
       action: "station_device.revoke",
       resourceId: "station_2",
+      outcome: "succeeded",
     });
   });
 
@@ -124,6 +128,7 @@ describe("credential mutation audit", () => {
       userId: "user_1",
       action: "kiosk.enroll",
       resourceId: "kiosk_1",
+      outcome: "succeeded",
     });
     expect(JSON.stringify(audit.credentialMutation.mock.calls)).not.toContain("plain-token");
   });
@@ -145,6 +150,7 @@ describe("credential mutation audit", () => {
       userId: "user_1",
       action: "kiosk_pairing_code.issue",
       resourceId: "kiosk_2",
+      outcome: "succeeded",
     });
     expect(JSON.stringify(audit.credentialMutation.mock.calls)).not.toContain("12345678");
   });
@@ -174,6 +180,7 @@ describe("credential mutation audit", () => {
       userId: "user_1",
       action: "integration_credentials.issue",
       resourceId: "commerceml",
+      outcome: "succeeded",
     });
     const auditCalls = JSON.stringify(audit.credentialMutation.mock.calls);
     expect(auditCalls).not.toContain("plain-login");

@@ -99,6 +99,14 @@ describe("AuthorizationGuard", () => {
     await expect(
       guard.canActivate(contextFor({ ...sessionRequest }, unclassifiedHandler)),
     ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(audit.authorizationDenied).toHaveBeenCalledWith({
+      tenantId: "org_1",
+      userId: "user_1",
+      action: "PolicyController.unclassified",
+      reason: "missing_policy",
+      required: [],
+      outcome: "denied",
+    });
   });
 
   it("lets a station use only a station-or-cabinet policy", async () => {
@@ -118,6 +126,14 @@ describe("AuthorizationGuard", () => {
     await expect(
       guard.canActivate(contextFor({ ...sessionRequest }, credentialHandler)),
     ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(audit.authorizationDenied).toHaveBeenCalledWith({
+      tenantId: "org_1",
+      userId: "user_1",
+      action: "PolicyController.credential",
+      reason: "insufficient_permission",
+      required: ["operations.read", "credentials.manage"],
+      outcome: "denied",
+    });
   });
 
   it("allows member to call only the membership bootstrap policy", async () => {

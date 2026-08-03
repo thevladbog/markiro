@@ -102,6 +102,7 @@ export class KiosksController {
       userId: req.userId!,
       action: "kiosk.enroll",
       resourceId: id,
+      outcome: "succeeded",
     });
     return result;
   }
@@ -119,6 +120,7 @@ export class KiosksController {
       userId: req.userId!,
       action: "kiosk_pairing_code.issue",
       resourceId: id,
+      outcome: "succeeded",
     });
     return result;
   }

@@ -21,11 +21,17 @@ describe("SecurityAuditService", () => {
     const eventWithUnsafeExtras = {
       tenantId: "org_1",
       userId: "user_1",
+      action: "ProductsController.listProducts",
       reason: "insufficient_permission",
       required: ["credentials.manage"],
+      outcome: "denied",
       key: "mk_plaintext",
       secret: "super-secret",
       authorization: "Bearer session-token",
+      url: "/products?api_key=mk_plaintext",
+      query: { api_key: "mk_plaintext" },
+      headers: { authorization: "Bearer session-token" },
+      body: { token: "session-token" },
     } as const;
     service.authorizationDenied(eventWithUnsafeExtras);
 
@@ -33,6 +39,8 @@ describe("SecurityAuditService", () => {
     const serialized = log.mock.calls[0]![0];
     expect(typeof serialized).toBe("string");
     expect(Object.keys(JSON.parse(serialized as string)).sort()).toEqual([
+      "action",
+      "outcome",
       "reason",
       "required",
       "tenantId",
@@ -47,10 +55,15 @@ describe("SecurityAuditService", () => {
       userId: "user_1",
       action: "rotate",
       resourceId: "integration_1",
+      outcome: "succeeded",
       token: "session-token",
       code: "pair-code",
       cookie: "session-cookie",
-    };
+      url: "/integrations?token=session-token",
+      query: { token: "session-token" },
+      headers: { cookie: "session-cookie" },
+      body: { secret: "super-secret" },
+    } as const;
     service.credentialMutation(eventWithUnsafeExtras);
 
     expect(log).toHaveBeenCalledTimes(1);
@@ -58,6 +71,7 @@ describe("SecurityAuditService", () => {
     expect(typeof serialized).toBe("string");
     expect(Object.keys(JSON.parse(serialized as string)).sort()).toEqual([
       "action",
+      "outcome",
       "resourceId",
       "tenantId",
       "userId",

@@ -63,6 +63,7 @@ export class StationDevicesController {
       userId: req.userId!,
       action: "station_device.enroll",
       resourceId: result.deviceId,
+      outcome: "succeeded",
     });
     return result;
   }
@@ -76,6 +77,7 @@ export class StationDevicesController {
       userId: req.userId!,
       action: "station_device.revoke",
       resourceId: id,
+      outcome: "succeeded",
     });
   }
 }
