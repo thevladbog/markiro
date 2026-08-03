@@ -6,7 +6,11 @@ export type AssignableTeamRoleDto = z.infer<typeof assignableTeamRoleSchema>;
 const nullablePosition = z.string().trim().min(1).max(120).nullable().optional();
 
 export const createTeamInvitationSchema = z.object({
-  email: z.email().transform((value) => value.trim().toLocaleLowerCase("en-US")),
+  email: z
+    .string()
+    .trim()
+    .pipe(z.email())
+    .transform((value) => value.toLowerCase()),
   role: assignableTeamRoleSchema,
   position: nullablePosition,
   employeeId: z.uuid().nullable().optional(),

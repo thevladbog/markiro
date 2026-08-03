@@ -62,4 +62,27 @@ describe("object storage environment", () => {
       S3_FORCE_PATH_STYLE: true,
     });
   });
+
+  it("treats blank development storage variables as unset and keeps MinIO defaults", () => {
+    const env = loadEnv({
+      DATABASE_URL: "postgres://user:pass@localhost/db",
+      BETTER_AUTH_SECRET: "insecure-test-placeholder",
+      BETTER_AUTH_URL: "http://localhost:3000",
+      PAIRING_CODE_PEPPER: "insecure-test-pairing-pepper",
+      S3_ENDPOINT: "",
+      S3_REGION: "",
+      S3_BUCKET: "",
+      S3_ACCESS_KEY_ID: "",
+      S3_SECRET_ACCESS_KEY: "",
+      S3_FORCE_PATH_STYLE: "",
+    } as NodeJS.ProcessEnv);
+
+    expect(env).toMatchObject({
+      S3_ENDPOINT: "http://localhost:9000/",
+      S3_REGION: "us-east-1",
+      S3_BUCKET: "markiro-private",
+      S3_ACCESS_KEY_ID: "markiro",
+      S3_FORCE_PATH_STYLE: true,
+    });
+  });
 });

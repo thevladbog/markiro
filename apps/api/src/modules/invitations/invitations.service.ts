@@ -3,10 +3,11 @@ import {
   ForbiddenException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
   UnauthorizedException,
 } from "@nestjs/common";
-import { and, desc, eq, gt, inArray, isNotNull, isNull, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, or } from "drizzle-orm";
 import { schema, type Auth, type Db } from "@markiro/db";
 import { AUTH, DB } from "../../auth/auth.module";
 import { MailJobsService } from "../mail/mail-jobs.service";
@@ -14,6 +15,7 @@ import type { PublicInvitationDto, RegisterInvitationDto } from "./dto";
 
 @Injectable()
 export class InvitationsService {
+  readonly #logger = new Logger(InvitationsService.name);
   constructor(
     @Inject(AUTH) private readonly auth: Auth,
     @Inject(DB) private readonly db: Db,
@@ -216,12 +218,14 @@ export class InvitationsService {
             inArray(schema.emailDeliveries.status, ["queued", "retrying"]),
           ),
         );
-      await tx.delete(schema.tenantInvitationProfiles).where(
-        and(
-          eq(schema.tenantInvitationProfiles.organizationId, invitation.organizationId),
-          eq(schema.tenantInvitationProfiles.invitationId, invitationId),
-        ),
-      );
+      await tx
+        .delete(schema.tenantInvitationProfiles)
+        .where(
+          and(
+            eq(schema.tenantInvitationProfiles.organizationId, invitation.organizationId),
+            eq(schema.tenantInvitationProfiles.invitationId, invitationId),
+          ),
+        );
       await tx.insert(schema.tenantAuditEvents).values({
         organizationId: invitation.organizationId,
         actorUserId: userId,
@@ -241,10 +245,7 @@ export class InvitationsService {
         email: schema.user.email,
       })
       .from(schema.invitation)
-      .innerJoin(
-        schema.member,
-        eq(schema.member.organizationId, schema.invitation.organizationId),
-      )
+      .innerJoin(schema.member, eq(schema.member.organizationId, schema.invitation.organizationId))
       .innerJoin(schema.user, eq(schema.user.id, schema.member.userId))
       .leftJoin(
         schema.tenantMemberProfiles,
@@ -264,11 +265,22 @@ export class InvitationsService {
           ),
         ),
       )
+      .orderBy(asc(schema.invitation.id))
       .limit(limit);
+    let reconciled = 0;
     for (const row of rows) {
-      await this.finalizeAccepted(row.invitationId, row.userId, row.email);
+      try {
+        await this.finalizeAccepted(row.invitationId, row.userId, row.email);
+        reconciled += 1;
+      } catch (error) {
+        this.#logger.error(
+          `Could not reconcile accepted invitation ${row.invitationId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
     }
-    return rows.length;
+    return reconciled;
   }
 
   private async cleanupRejected(invitationId: string, organizationId: string, userId: string) {

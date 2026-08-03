@@ -3,7 +3,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { renderEmail, type EmailTemplateInput, type RenderedEmail } from "@markiro/email";
 import { z } from "zod";
 import { MailCryptoService } from "./mail-crypto.service";
-import type { EncryptedMailPayload, MailTransport } from "./mail.types";
+import type { MailTransport } from "./mail.types";
 
 export const SEND_EMAIL_DELIVERY_QUEUE = "send-email-delivery";
 const MAX_DELIVERY_ATTEMPTS = 5;
@@ -46,7 +46,7 @@ interface OutboxRow {
   deliveryId: string;
 }
 
-interface DeliveryRow extends EncryptedMailPayload {
+interface DeliveryRow {
   id: string;
   tenantId: string | null;
   userId: string | null;
@@ -54,11 +54,15 @@ interface DeliveryRow extends EncryptedMailPayload {
   kind: string;
   sourceId: string | null;
   attemptCount: number;
+  encryptedPayload: Buffer | null;
+  payloadNonce: Buffer | null;
+  payloadTag: Buffer | null;
 }
 
 export interface ClassifiedMailFailure {
   category:
     | "authentication"
+    | "data_integrity"
     | "message"
     | "network"
     | "smtp_permanent"
@@ -188,8 +192,23 @@ export class MailJobsService {
 
       let template: EmailTemplateInput;
       let rendered: RenderedEmail;
+      if (!delivery.encryptedPayload || !delivery.payloadNonce || !delivery.payloadTag) {
+        await this.markPermanentFailure(client, delivery.id, {
+          category: "data_integrity",
+          code: "PAYLOAD_MISSING",
+          diagnostic: "data_integrity:PAYLOAD_MISSING",
+          transient: false,
+        });
+        return;
+      }
       try {
-        template = emailTemplateSchema.parse(this.crypto.decrypt(delivery.id, delivery));
+        template = emailTemplateSchema.parse(
+          this.crypto.decrypt(delivery.id, {
+            encryptedPayload: delivery.encryptedPayload,
+            payloadNonce: delivery.payloadNonce,
+            payloadTag: delivery.payloadTag,
+          }),
+        );
         rendered = await this.renderer(template);
       } catch {
         await this.markPermanentFailure(client, delivery.id, {

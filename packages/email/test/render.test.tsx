@@ -18,6 +18,23 @@ describe("renderEmail", () => {
     expect(output.text).toContain("Ирина приглашает вас присоединиться к Завод");
     expect(output.text).toContain("https://cabinet.example/invitations/inv_1");
     expect(output.text).toContain("10 августа 2026");
+    expect(output.text).toContain("00:00");
+    expect(output.text).toContain("UTC");
+    expect(output.text).not.toContain("включительно");
+  });
+
+  it.each([
+    { minutes: 1, expected: "1 минуту" },
+    { minutes: 2, expected: "2 минуты" },
+    { minutes: 5, expected: "5 минут" },
+  ])("renders password-reset duration as $expected", async ({ minutes, expected }) => {
+    const output = await renderEmail({
+      kind: "password-reset",
+      recipientName: "Алексей",
+      actionUrl: "https://cabinet.example/reset/token",
+      expiresInMinutes: minutes,
+    });
+    expect(output.text).toContain(expected);
   });
 
   it("renders a password reset without leaking markup into the subject", async () => {
@@ -46,5 +63,19 @@ describe("renderEmail", () => {
     expect(output.html).toContain("Подтвердите адрес электронной почты");
     expect(output.text).toContain("https://cabinet.example/verify/token-2");
     expect(output.text).toContain("60 минут");
+  });
+
+  it.each([
+    { minutes: 1, expected: "1 минуту" },
+    { minutes: 2, expected: "2 минуты" },
+    { minutes: 5, expected: "5 минут" },
+  ])("renders verification duration as $expected", async ({ minutes, expected }) => {
+    const output = await renderEmail({
+      kind: "email-verification",
+      recipientName: "Мария",
+      actionUrl: "https://cabinet.example/verify/token",
+      expiresInMinutes: minutes,
+    });
+    expect(output.text).toContain(expected);
   });
 });

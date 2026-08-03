@@ -112,6 +112,7 @@ describe.skipIf(!ready)("auth e2e", () => {
 
     for (const path of mutationPaths) {
       await agent.post(`/api/auth/organization/${path}`).send({ organizationId }).expect(404);
+      await agent.post(`/api/auth/organization/${path}/`).send({ organizationId }).expect(404);
     }
   });
 

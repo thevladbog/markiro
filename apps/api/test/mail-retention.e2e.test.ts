@@ -19,7 +19,7 @@ describe.skipIf(!ready)("MailRetentionService", () => {
   beforeAll(async () => {
     setup = setupAuth(loadEnv());
     db = setup.db;
-    service = new MailRetentionService(setup.pool as never);
+    service = new MailRetentionService(setup.pool);
     await db.insert(schema.user).values({
       id: userId,
       name: "Mail Retention",

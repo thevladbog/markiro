@@ -8,10 +8,7 @@ export class TeamModule {
     return {
       module: TeamModule,
       controllers: [TeamController],
-      providers: [
-        TeamService,
-        { provide: TEAM_INVITATION_BASE_URL, useValue: invitationBaseUrl },
-      ],
+      providers: [TeamService, { provide: TEAM_INVITATION_BASE_URL, useValue: invitationBaseUrl }],
     };
   }
 }

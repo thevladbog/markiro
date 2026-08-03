@@ -21,17 +21,14 @@ import { z } from "zod";
  * `file://` document -- allowlisting it would hand access to every opaque
  * origin at once.
  */
-const browserOriginSchema = z
-  .string()
-  .url()
-  .transform((value, ctx) => {
-    const url = new URL(value);
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
-      ctx.addIssue({ code: "custom", message: "must be an http(s) origin" });
-      return z.NEVER;
-    }
-    return url.origin;
-  });
+const browserOriginSchema = z.url().transform((value, ctx) => {
+  const url = new URL(value);
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    ctx.addIssue({ code: "custom", message: "must be an http(s) origin" });
+    return z.NEVER;
+  }
+  return url.origin;
+});
 
 const explicitBooleanSchema = z.enum(["true", "false"]).transform((value) => value === "true");
 
@@ -62,7 +59,7 @@ const DEVELOPMENT_STORAGE_DEFAULTS = {
   S3_FORCE_PATH_STYLE: "true",
 } satisfies NodeJS.ProcessEnv;
 
-const storageEndpointSchema = z.string().url().transform((value, ctx) => {
+const storageEndpointSchema = z.url().transform((value, ctx) => {
   const url = new URL(value);
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     ctx.addIssue({ code: "custom", message: "must be an http(s) endpoint" });
@@ -76,7 +73,7 @@ const EnvSchema = z
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
     DATABASE_URL: z.string().min(1),
     BETTER_AUTH_SECRET: z.string().min(16),
-    BETTER_AUTH_URL: z.string().url(),
+    BETTER_AUTH_URL: z.url(),
     // The default is returned as written, not canonicalized: zod's `.default()`
     // short-circuits parsing entirely when the input is undefined, so the
     // transform above never sees it. Harmless only because the literal is
@@ -169,14 +166,22 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
   // would get a boot failure ("Invalid url") instead of "no kiosk configured".
   const mailDefaults = source.NODE_ENV === "production" ? {} : DEVELOPMENT_MAIL_DEFAULTS;
   const storageDefaults = source.NODE_ENV === "production" ? {} : DEVELOPMENT_STORAGE_DEFAULTS;
+  const normalizedSource = { ...source };
+  for (const name of [
+    ...Object.keys(DEVELOPMENT_MAIL_DEFAULTS),
+    "SMTP_SECURE",
+    "SMTP_USER",
+    "SMTP_PASSWORD",
+    "SMTP_REPLY_TO",
+    ...Object.keys(DEVELOPMENT_STORAGE_DEFAULTS),
+  ]) {
+    if (normalizedSource[name]?.trim() === "") delete normalizedSource[name];
+  }
   return EnvSchema.parse({
     ...mailDefaults,
     ...storageDefaults,
-    ...source,
-    KIOSK_ORIGIN: source.KIOSK_ORIGIN || undefined,
-    SMTP_USER: source.SMTP_USER || undefined,
-    SMTP_PASSWORD: source.SMTP_PASSWORD || undefined,
-    SMTP_REPLY_TO: source.SMTP_REPLY_TO || undefined,
+    ...normalizedSource,
+    KIOSK_ORIGIN: normalizedSource.KIOSK_ORIGIN || undefined,
   });
 }
 

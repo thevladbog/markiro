@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Req, Res } from "@nestjs/common";
+import { Body, Controller, Get, Ip, Param, Post, Req, Res } from "@nestjs/common";
 import type { Request, Response as ExpressResponse } from "express";
 import { fromNodeHeaders } from "better-auth/node";
 import { ZodValidationPipe } from "../../zod.pipe";
@@ -8,13 +8,18 @@ import {
   type RegisterInvitationDto,
 } from "./dto";
 import { InvitationsService } from "./invitations.service";
+import { InvitationLookupRateLimiter } from "./invitation-lookup-rate-limiter";
 
 @Controller("invitations")
 export class InvitationsController {
-  constructor(private readonly invitations: InvitationsService) {}
+  constructor(
+    private readonly invitations: InvitationsService,
+    private readonly lookupRateLimiter: InvitationLookupRateLimiter,
+  ) {}
 
   @Get(":id")
-  getPublic(@Param("id") id: string): Promise<PublicInvitationDto> {
+  getPublic(@Param("id") id: string, @Ip() source: string): Promise<PublicInvitationDto> {
+    this.lookupRateLimiter.assertAllowed(source, id);
     return this.invitations.getPublic(id);
   }
 
@@ -25,7 +30,11 @@ export class InvitationsController {
     @Req() request: Request,
     @Res() response: ExpressResponse,
   ): Promise<void> {
-    const authResponse = await this.invitations.register(id, body, fromNodeHeaders(request.headers));
+    const authResponse = await this.invitations.register(
+      id,
+      body,
+      fromNodeHeaders(request.headers),
+    );
     await forwardAuthResponse(authResponse, response, 201);
   }
 

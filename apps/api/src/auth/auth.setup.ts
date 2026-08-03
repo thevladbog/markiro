@@ -16,7 +16,9 @@ type DbConnection = ReturnType<typeof createDb>;
 /** Builds the DB pool + Better Auth instance from validated env. */
 export function setupAuth(env: Env): DbConnection & { auth: Auth } {
   const { db, pool } = createDb(env.DATABASE_URL);
-  const mailDelivery = new MailDeliveryService(new MailCryptoService(env.MAIL_PAYLOAD_ENCRYPTION_KEY));
+  const mailDelivery = new MailDeliveryService(
+    new MailCryptoService(env.MAIL_PAYLOAD_ENCRYPTION_KEY),
+  );
   const auth = buildAuth(db, {
     secret: env.BETTER_AUTH_SECRET,
     baseURL: env.BETTER_AUTH_URL,
@@ -95,7 +97,8 @@ export function mountAuth(
     response.sendStatus(404);
   });
   server.all("/api/auth/organization/*splat", (request, response, next) => {
-    if (TEAM_MUTATION_PATHS.has(request.path)) {
+    const normalizedPath = request.path.replace(/\/+$/, "");
+    if (TEAM_MUTATION_PATHS.has(normalizedPath)) {
       response.sendStatus(404);
       return;
     }

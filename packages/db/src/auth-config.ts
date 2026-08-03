@@ -19,10 +19,7 @@ import * as authSchema from "./schema/auth.js";
 // is derived from the literal `Options` type, not the runtime plugin list.
 // `buildAuth`/`Auth` below restore that one contract with a narrow companion
 // type layered back on top, without reintroducing the unnameable-type problem.
-function buildAuthImpl(
-  db: Db,
-  opts: BuildAuthOptions,
-) {
+function buildAuthImpl(db: Db, opts: BuildAuthOptions) {
   return betterAuth<BetterAuthOptions>({
     secret: opts.secret,
     baseURL: opts.baseURL,
@@ -151,10 +148,7 @@ export type Auth = Omit<AuthBase, "api"> & {
   };
 };
 
-export function buildAuth(
-  db: Db,
-  opts: BuildAuthOptions,
-): Auth {
+export function buildAuth(db: Db, opts: BuildAuthOptions): Auth {
   return buildAuthImpl(db, opts) as unknown as Auth;
 }
 

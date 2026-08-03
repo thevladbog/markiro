@@ -2,13 +2,16 @@ import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { Worker } from "node:worker_threads";
 import sharp from "sharp";
+import { BoundedConcurrencyLimiter } from "./bounded-concurrency";
 
 const MAX_SOURCE_BYTES = 5 * 1024 * 1024;
 const MAX_DIMENSION = 8192;
 const MAX_PIXELS = 25_000_000;
 const WORKER_TIMEOUT_MS = 5_000;
 const MAX_CONCURRENCY = 2;
+const MAX_QUEUE_DEPTH = 8;
 const sharpPath = createRequire(__filename).resolve("sharp");
+const workerLimiter = new BoundedConcurrencyLimiter(MAX_CONCURRENCY, MAX_QUEUE_DEPTH);
 
 export interface ProcessedAvatar {
   buffer: Buffer;
@@ -41,7 +44,7 @@ export async function processAvatar(input: Buffer): Promise<ProcessedAvatar> {
   }
   if (width * height > MAX_PIXELS) throw new Error("Avatar exceeds 25 million pixels");
 
-  const buffer = await withWorkerSlot(() => normalizeInWorker(input));
+  const buffer = await workerLimiter.run(() => normalizeInWorker(input));
   return {
     buffer,
     contentType: "image/webp",
@@ -52,25 +55,13 @@ export async function processAvatar(input: Buffer): Promise<ProcessedAvatar> {
   };
 }
 
-let activeWorkers = 0;
-const waiting: Array<() => void> = [];
-
-async function withWorkerSlot<T>(action: () => Promise<T>): Promise<T> {
-  if (activeWorkers >= MAX_CONCURRENCY) await new Promise<void>((resolve) => waiting.push(resolve));
-  activeWorkers += 1;
-  try {
-    return await action();
-  } finally {
-    activeWorkers -= 1;
-    waiting.shift()?.();
-  }
-}
-
 async function normalizeInWorker(input: Buffer): Promise<Buffer> {
   return new Promise<Buffer>((resolve, reject) => {
     const worker = new Worker(WORKER_SOURCE, {
       eval: true,
       workerData: { input, sharpPath, maxPixels: MAX_PIXELS },
+      // This caps only the worker's V8 heap. Sharp/libvips allocates native
+      // decode memory, which is bounded by processAvatar's dimensions/pixels.
       resourceLimits: { maxOldGenerationSizeMb: 128 },
     });
     const timeout = setTimeout(() => {
@@ -79,6 +70,8 @@ async function normalizeInWorker(input: Buffer): Promise<Buffer> {
     }, WORKER_TIMEOUT_MS);
     worker.once("message", (message: { ok: boolean; buffer?: Uint8Array; error?: string }) => {
       clearTimeout(timeout);
+      worker.removeAllListeners("exit");
+      void worker.terminate();
       if (message.ok && message.buffer) resolve(Buffer.from(message.buffer));
       else reject(new Error(message.error ?? "Avatar processing failed"));
     });
@@ -112,6 +105,10 @@ const sharp = require(workerData.sharpPath);
       .toBuffer({ resolveWithObject: true });
     parentPort.postMessage({ ok: true, buffer: data });
   } catch (error) {
+    console.error(
+      "avatar normalization failed",
+      error instanceof Error ? error.message : String(error),
+    );
     parentPort.postMessage({ ok: false, error: "Avatar normalization failed" });
   }
 })();

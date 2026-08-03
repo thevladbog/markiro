@@ -13,6 +13,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "3.1101.0",
     "@aws-sdk/s3-request-presigner": "3.1101.0",
+    "@smithy/node-http-handler": "4.9.13",
     "@markiro/db": "workspace:*",
     "@markiro/domain": "workspace:*",
     "@markiro/email": "workspace:*",
@@ -26,7 +27,7 @@
     "drizzle-orm": "0.45.2",
     "express": "5.2.1",
     "fast-xml-parser": "5.10.1",
-    "multer": "2.0.2",
+    "multer": "2.2.0",
     "nodemailer": "9.0.3",
     "pg-boss": "12.25.1",
     "reflect-metadata": "^0.2.2",

@@ -1,5 +1,6 @@
 import { Button, Link, Section, Text } from "react-email";
 import { EmailLayout, emailStyles } from "./layout.js";
+import { formatRussianMinutes } from "./duration.js";
 
 export interface PasswordResetEmailProps {
   recipientName: string;
@@ -26,7 +27,9 @@ export function PasswordResetEmail({
           Сбросить пароль
         </Button>
       </Section>
-      <Text style={emailStyles.muted}>Ссылка действует {expiresInMinutes} минут.</Text>
+      <Text style={emailStyles.muted}>
+        Ссылка действует {formatRussianMinutes(expiresInMinutes)}.
+      </Text>
       <Text style={emailStyles.fallback}>
         Если кнопка не работает, откройте ссылку:{" "}
         <Link href={actionUrl} style={emailStyles.fallbackLink}>

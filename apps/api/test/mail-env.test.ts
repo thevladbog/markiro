@@ -81,4 +81,24 @@ describe("mail environment", () => {
     expect(env.SMTP_PASSWORD).toBeUndefined();
     expect(env.MAIL_PAYLOAD_ENCRYPTION_KEY).toHaveLength(32);
   });
+
+  it("treats blank development mail variables as unset and keeps Mailpit defaults", () => {
+    const env = loadEnv({
+      DATABASE_URL: "postgres://user:pass@localhost/db",
+      BETTER_AUTH_SECRET: "insecure-test-placeholder",
+      BETTER_AUTH_URL: "http://localhost:3000",
+      PAIRING_CODE_PEPPER: "insecure-test-pairing-pepper",
+      SMTP_HOST: "",
+      SMTP_PORT: "",
+      SMTP_FROM_EMAIL: "",
+      SMTP_FROM_NAME: "",
+    } as NodeJS.ProcessEnv);
+
+    expect(env).toMatchObject({
+      SMTP_HOST: "localhost",
+      SMTP_PORT: 1025,
+      SMTP_FROM_EMAIL: "no-reply@markiro.local",
+      SMTP_FROM_NAME: "Маркиро",
+    });
+  });
 });

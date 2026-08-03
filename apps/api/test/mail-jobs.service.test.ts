@@ -236,6 +236,89 @@ describe("MailJobsService delivery claim", () => {
     ).toBe(true);
   });
 
+  it("cancels when an invitation becomes invalid after rendering but before send", async () => {
+    const crypto = new MailCryptoService(Buffer.alloc(32, 9));
+    const encrypted = crypto.encrypt(DELIVERY_ID, {
+      kind: "organization-invitation",
+      recipientName: "Ирина",
+      organizationName: "Завод",
+      inviterName: "Олег",
+      actionUrl: "https://cabinet.example/invitations/secret",
+      expiresAt: "2026-08-10T00:00:00.000Z",
+    });
+    let validationCount = 0;
+    const { pool, calls } = fakePool(({ text }) => {
+      if (text.includes("pg_try_advisory_lock")) return { rows: [{ locked: true }] };
+      if (text.includes("RETURNING") && text.includes("email_deliveries")) {
+        return {
+          rows: [
+            {
+              id: DELIVERY_ID,
+              tenantId: "tenant-1",
+              userId: null,
+              recipient: "admin@example.test",
+              kind: "organization-invitation",
+              sourceId: "invitation-1",
+              attemptCount: 1,
+              ...encrypted,
+            },
+          ],
+        };
+      }
+      if (text.includes("FROM invitation")) {
+        validationCount += 1;
+        return { rows: [{ valid: validationCount === 1 }] };
+      }
+      return {};
+    });
+    const { service, renderer, transport } = createService(pool);
+
+    await service.processDelivery(DELIVERY_ID);
+
+    expect(renderer).toHaveBeenCalledOnce();
+    expect(transport.send).not.toHaveBeenCalled();
+    expect(calls.some(({ text }) => text.includes("status = 'canceled'"))).toBe(true);
+  });
+
+  it("marks a delivery with missing encrypted payload as a data-integrity failure", async () => {
+    const { pool, calls } = fakePool(({ text }) => {
+      if (text.includes("pg_try_advisory_lock")) return { rows: [{ locked: true }] };
+      if (text.includes("RETURNING") && text.includes("email_deliveries")) {
+        return {
+          rows: [
+            {
+              id: DELIVERY_ID,
+              tenantId: null,
+              userId: "user-1",
+              recipient: "user@example.test",
+              kind: "password-reset",
+              sourceId: "reset-1",
+              attemptCount: 1,
+              encryptedPayload: null,
+              payloadNonce: null,
+              payloadTag: null,
+            },
+          ],
+        };
+      }
+      return {};
+    });
+    const { service, renderer, transport } = createService(pool);
+
+    await service.processDelivery(DELIVERY_ID);
+
+    expect(renderer).not.toHaveBeenCalled();
+    expect(transport.send).not.toHaveBeenCalled();
+    const failureUpdate = calls.find(({ text }) => text.includes("error_category = $3"));
+    expect(failureUpdate?.values).toEqual([
+      DELIVERY_ID,
+      "failed",
+      "data_integrity",
+      "PAYLOAD_MISSING",
+      "data_integrity:PAYLOAD_MISSING",
+    ]);
+  });
+
   it("marks a transient transport error retrying and fails the pg-boss attempt", async () => {
     let encrypted = {} as ReturnType<MailCryptoService["encrypt"]>;
     const { pool, calls } = fakePool(({ text }) => {
@@ -277,6 +360,51 @@ describe("MailJobsService delivery claim", () => {
     expect(failureUpdate?.values).toEqual([
       DELIVERY_ID,
       "retrying",
+      "network",
+      "ETIMEDOUT",
+      "network:ETIMEDOUT",
+    ]);
+  });
+
+  it("fails a transient error permanently after the maximum delivery attempt", async () => {
+    let encrypted = {} as ReturnType<MailCryptoService["encrypt"]>;
+    const { pool, calls } = fakePool(({ text }) => {
+      if (text.includes("pg_try_advisory_lock")) return { rows: [{ locked: true }] };
+      if (text.includes("RETURNING") && text.includes("email_deliveries")) {
+        return {
+          rows: [
+            {
+              id: DELIVERY_ID,
+              tenantId: null,
+              userId: "user-1",
+              recipient: "user@example.test",
+              kind: "password-reset",
+              sourceId: "reset-1",
+              attemptCount: 5,
+              ...encrypted,
+            },
+          ],
+        };
+      }
+      return {};
+    });
+    const created = createService(pool, {
+      send: async () => {
+        throw Object.assign(new Error("timeout"), { code: "ETIMEDOUT" });
+      },
+    });
+    encrypted = created.crypto.encrypt(DELIVERY_ID, {
+      kind: "password-reset",
+      recipientName: "Ирина",
+      actionUrl: "https://cabinet.example/reset/secret",
+      expiresInMinutes: 30,
+    });
+
+    await expect(created.service.processDelivery(DELIVERY_ID)).resolves.toBeUndefined();
+    const failureUpdate = calls.find(({ text }) => text.includes("error_category = $3"));
+    expect(failureUpdate?.values).toEqual([
+      DELIVERY_ID,
+      "failed",
       "network",
       "ETIMEDOUT",
       "network:ETIMEDOUT",

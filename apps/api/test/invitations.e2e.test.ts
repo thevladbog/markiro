@@ -3,7 +3,7 @@ import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import { and, eq } from "drizzle-orm";
 import request from "supertest";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { schema, type Db } from "@markiro/db";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
@@ -39,11 +39,7 @@ describe.skipIf(!ready)("invitation lifecycle e2e", () => {
     await app?.close();
   });
 
-  async function invite(
-    email: string,
-    position: string | null = null,
-    linkEmployee = false,
-  ) {
+  async function invite(email: string, position: string | null = null, linkEmployee = false) {
     const owner = request.agent(app!.getHttpServer());
     const organizationId = await signUpAndActivate(owner);
     const [employee] = linkEmployee
@@ -56,7 +52,12 @@ describe.skipIf(!ready)("invitation lifecycle e2e", () => {
       .post("/team/invitations")
       .send({ email, role: "manager", position, employeeId: employee?.id })
       .expect(201);
-    return { owner, organizationId, invitationId: response.body.id as string, employeeId: employee?.id };
+    return {
+      owner,
+      organizationId,
+      invitationId: response.body.id as string,
+      employeeId: employee?.id,
+    };
   }
 
   it("registers only the locked invitation email and finalizes its membership", async () => {
@@ -71,7 +72,7 @@ describe.skipIf(!ready)("invitation lifecycle e2e", () => {
       role: "manager",
       state: "pending",
     });
-    expect(publicState.body.organizationName).not.toBe("Test Plant");
+    expect(publicState.body.organizationName).toBe("T••••••••");
 
     const invitee = request.agent(app!.getHttpServer());
     await invitee
@@ -85,10 +86,7 @@ describe.skipIf(!ready)("invitation lifecycle e2e", () => {
       .expect(201);
     await invitee.post(`/invitations/${invited.invitationId}/accept`).expect(200);
 
-    const [user] = await db
-      .select()
-      .from(schema.user)
-      .where(eq(schema.user.email, email));
+    const [user] = await db.select().from(schema.user).where(eq(schema.user.email, email));
     expect(user).toMatchObject({ emailVerified: true });
     const [profile] = await db
       .select()
@@ -180,5 +178,76 @@ describe.skipIf(!ready)("invitation lifecycle e2e", () => {
     await request(app!.getHttpServer())
       .get(`/invitations/${canceled.invitationId}`)
       .expect(404, { code: "invitation_unavailable" });
+  });
+
+  it("rate-limits repeated public lookups for the same invitation and source", async () => {
+    const invited = await invite(`lookup-limit-${crypto.randomUUID()}@example.com`);
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await request(app!.getHttpServer()).get(`/invitations/${invited.invitationId}`).expect(200);
+    }
+    await request(app!.getHttpServer()).get(`/invitations/${invited.invitationId}`).expect(429);
+  });
+
+  it("continues accepted-invitation reconciliation after one row fails", async () => {
+    const invited = await invite(`reconcile-org-${crypto.randomUUID()}@example.com`);
+    const [ownerMember] = await db
+      .select({ userId: schema.member.userId })
+      .from(schema.member)
+      .where(eq(schema.member.organizationId, invited.organizationId));
+    const firstId = `reconcile-a-${crypto.randomUUID()}`;
+    const secondId = `reconcile-b-${crypto.randomUUID()}`;
+    const firstUserId = `reconcile-user-a-${crypto.randomUUID()}`;
+    const secondUserId = `reconcile-user-b-${crypto.randomUUID()}`;
+    const firstEmail = `${firstUserId}@example.com`;
+    const secondEmail = `${secondUserId}@example.com`;
+    await db.insert(schema.user).values([
+      { id: firstUserId, name: "First", email: firstEmail, emailVerified: true },
+      { id: secondUserId, name: "Second", email: secondEmail, emailVerified: true },
+    ]);
+    await db.insert(schema.member).values([
+      {
+        id: `member-a-${crypto.randomUUID()}`,
+        organizationId: invited.organizationId,
+        userId: firstUserId,
+        role: "manager",
+        createdAt: new Date(),
+      },
+      {
+        id: `member-b-${crypto.randomUUID()}`,
+        organizationId: invited.organizationId,
+        userId: secondUserId,
+        role: "manager",
+        createdAt: new Date(),
+      },
+    ]);
+    await db.insert(schema.invitation).values([
+      {
+        id: firstId,
+        organizationId: invited.organizationId,
+        email: firstEmail,
+        role: "manager",
+        status: "accepted",
+        expiresAt: new Date(Date.now() + 86_400_000),
+        inviterId: ownerMember!.userId,
+      },
+      {
+        id: secondId,
+        organizationId: invited.organizationId,
+        email: secondEmail,
+        role: "manager",
+        status: "accepted",
+        expiresAt: new Date(Date.now() + 86_400_000),
+        inviterId: ownerMember!.userId,
+      },
+    ]);
+    const service = app!.get(InvitationsService);
+    const finalize = vi
+      .spyOn(service, "finalizeAccepted")
+      .mockRejectedValueOnce(new Error("broken extension row"))
+      .mockResolvedValueOnce();
+
+    await expect(service.reconcileAccepted(2)).resolves.toBe(1);
+    expect(finalize).toHaveBeenCalledTimes(2);
+    finalize.mockRestore();
   });
 });

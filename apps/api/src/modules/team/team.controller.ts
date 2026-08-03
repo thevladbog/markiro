@@ -83,10 +83,7 @@ export class TeamController {
   }
 
   @Delete("members/:id/employee")
-  unlinkEmployee(
-    @Req() req: RequestWithTenant,
-    @Param("id") id: string,
-  ): Promise<TeamMemberDto> {
+  unlinkEmployee(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<TeamMemberDto> {
     return this.team.unlinkEmployee(req.tenantId!, req.userId!, id);
   }
 

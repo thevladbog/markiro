@@ -13,6 +13,10 @@ const dateFormatter = new Intl.DateTimeFormat("ru-RU", {
   day: "numeric",
   month: "long",
   year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+  timeZoneName: "short",
   timeZone: "UTC",
 });
 
@@ -35,7 +39,7 @@ export function OrganizationInvitationEmail({
         </Button>
       </Section>
       <Text style={emailStyles.muted}>
-        Приглашение действительно до {dateFormatter.format(expiresAt)} включительно.
+        Приглашение действительно до {dateFormatter.format(expiresAt)}.
       </Text>
       <Text style={emailStyles.fallback}>
         Если кнопка не работает, откройте ссылку:{" "}

@@ -39,106 +39,123 @@ export class TeamService {
   ) {}
 
   async getTeam(organizationId: string): Promise<TeamResponseDto> {
-    const memberRows = await this.db
-      .select({
-        id: schema.member.id,
-        userId: schema.member.userId,
-        email: schema.user.email,
-        role: schema.member.role,
-        createdAt: schema.member.createdAt,
-        firstName: schema.userProfiles.firstName,
-        lastName: schema.userProfiles.lastName,
-        middleName: schema.userProfiles.middleName,
-        avatarAssetId: schema.userProfiles.avatarAssetId,
-        position: schema.tenantMemberProfiles.position,
-        employeeId: schema.employees.id,
-        employeeName: schema.employees.fullName,
-        employeeStatus: schema.employees.status,
-        operatorActive: schema.operatorCredentials.active,
-      })
-      .from(schema.member)
-      .innerJoin(schema.user, eq(schema.user.id, schema.member.userId))
-      .leftJoin(schema.userProfiles, eq(schema.userProfiles.userId, schema.member.userId))
-      .leftJoin(
-        schema.tenantMemberProfiles,
-        and(
-          eq(schema.tenantMemberProfiles.organizationId, organizationId),
-          eq(schema.tenantMemberProfiles.memberId, schema.member.id),
-        ),
-      )
-      .leftJoin(
-        schema.cabinetEmployeeLinks,
-        and(
-          eq(schema.cabinetEmployeeLinks.organizationId, organizationId),
-          eq(schema.cabinetEmployeeLinks.memberId, schema.member.id),
-        ),
-      )
-      .leftJoin(
-        schema.employees,
-        and(
-          eq(schema.employees.tenantId, organizationId),
-          eq(schema.employees.id, schema.cabinetEmployeeLinks.employeeId),
-        ),
-      )
-      .leftJoin(
-        schema.operatorCredentials,
-        and(
-          eq(schema.operatorCredentials.tenantId, organizationId),
-          eq(schema.operatorCredentials.employeeId, schema.employees.id),
-        ),
-      )
-      .where(eq(schema.member.organizationId, organizationId))
-      .orderBy(schema.user.email);
+    return this.queryTeam(organizationId);
+  }
 
-    const invitationRows = await this.db
-      .select({
-        id: schema.invitation.id,
-        email: schema.invitation.email,
-        role: schema.invitation.role,
-        status: schema.invitation.status,
-        expiresAt: schema.invitation.expiresAt,
-        position: schema.tenantInvitationProfiles.position,
-        employeeId: schema.employees.id,
-        employeeName: schema.employees.fullName,
-        employeeStatus: schema.employees.status,
-        operatorActive: schema.operatorCredentials.active,
-      })
-      .from(schema.invitation)
-      .leftJoin(
-        schema.tenantInvitationProfiles,
-        and(
-          eq(schema.tenantInvitationProfiles.organizationId, organizationId),
-          eq(schema.tenantInvitationProfiles.invitationId, schema.invitation.id),
-        ),
-      )
-      .leftJoin(
-        schema.cabinetEmployeeLinks,
-        and(
-          eq(schema.cabinetEmployeeLinks.organizationId, organizationId),
-          eq(schema.cabinetEmployeeLinks.invitationId, schema.invitation.id),
-        ),
-      )
-      .leftJoin(
-        schema.employees,
-        and(
-          eq(schema.employees.tenantId, organizationId),
-          eq(schema.employees.id, schema.cabinetEmployeeLinks.employeeId),
-        ),
-      )
-      .leftJoin(
-        schema.operatorCredentials,
-        and(
-          eq(schema.operatorCredentials.tenantId, organizationId),
-          eq(schema.operatorCredentials.employeeId, schema.employees.id),
-        ),
-      )
-      .where(
-        and(
-          eq(schema.invitation.organizationId, organizationId),
-          eq(schema.invitation.status, "pending"),
-        ),
-      )
-      .orderBy(desc(schema.invitation.createdAt));
+  private async queryTeam(
+    organizationId: string,
+    filter: { memberId?: string; invitationId?: string } = {},
+  ): Promise<TeamResponseDto> {
+    const memberRows = filter.invitationId
+      ? []
+      : await this.db
+          .select({
+            id: schema.member.id,
+            userId: schema.member.userId,
+            email: schema.user.email,
+            role: schema.member.role,
+            createdAt: schema.member.createdAt,
+            firstName: schema.userProfiles.firstName,
+            lastName: schema.userProfiles.lastName,
+            middleName: schema.userProfiles.middleName,
+            avatarAssetId: schema.userProfiles.avatarAssetId,
+            position: schema.tenantMemberProfiles.position,
+            employeeId: schema.employees.id,
+            employeeName: schema.employees.fullName,
+            employeeStatus: schema.employees.status,
+            operatorActive: schema.operatorCredentials.active,
+          })
+          .from(schema.member)
+          .innerJoin(schema.user, eq(schema.user.id, schema.member.userId))
+          .leftJoin(schema.userProfiles, eq(schema.userProfiles.userId, schema.member.userId))
+          .leftJoin(
+            schema.tenantMemberProfiles,
+            and(
+              eq(schema.tenantMemberProfiles.organizationId, organizationId),
+              eq(schema.tenantMemberProfiles.memberId, schema.member.id),
+            ),
+          )
+          .leftJoin(
+            schema.cabinetEmployeeLinks,
+            and(
+              eq(schema.cabinetEmployeeLinks.organizationId, organizationId),
+              eq(schema.cabinetEmployeeLinks.memberId, schema.member.id),
+            ),
+          )
+          .leftJoin(
+            schema.employees,
+            and(
+              eq(schema.employees.tenantId, organizationId),
+              eq(schema.employees.id, schema.cabinetEmployeeLinks.employeeId),
+            ),
+          )
+          .leftJoin(
+            schema.operatorCredentials,
+            and(
+              eq(schema.operatorCredentials.tenantId, organizationId),
+              eq(schema.operatorCredentials.employeeId, schema.employees.id),
+            ),
+          )
+          .where(
+            and(
+              eq(schema.member.organizationId, organizationId),
+              filter.memberId ? eq(schema.member.id, filter.memberId) : undefined,
+            ),
+          )
+          .orderBy(schema.user.email);
+
+    const invitationRows = filter.memberId
+      ? []
+      : await this.db
+          .select({
+            id: schema.invitation.id,
+            email: schema.invitation.email,
+            role: schema.invitation.role,
+            status: schema.invitation.status,
+            expiresAt: schema.invitation.expiresAt,
+            position: schema.tenantInvitationProfiles.position,
+            employeeId: schema.employees.id,
+            employeeName: schema.employees.fullName,
+            employeeStatus: schema.employees.status,
+            operatorActive: schema.operatorCredentials.active,
+          })
+          .from(schema.invitation)
+          .leftJoin(
+            schema.tenantInvitationProfiles,
+            and(
+              eq(schema.tenantInvitationProfiles.organizationId, organizationId),
+              eq(schema.tenantInvitationProfiles.invitationId, schema.invitation.id),
+            ),
+          )
+          .leftJoin(
+            schema.cabinetEmployeeLinks,
+            and(
+              eq(schema.cabinetEmployeeLinks.organizationId, organizationId),
+              eq(schema.cabinetEmployeeLinks.invitationId, schema.invitation.id),
+            ),
+          )
+          .leftJoin(
+            schema.employees,
+            and(
+              eq(schema.employees.tenantId, organizationId),
+              eq(schema.employees.id, schema.cabinetEmployeeLinks.employeeId),
+            ),
+          )
+          .leftJoin(
+            schema.operatorCredentials,
+            and(
+              eq(schema.operatorCredentials.tenantId, organizationId),
+              eq(schema.operatorCredentials.employeeId, schema.employees.id),
+            ),
+          )
+          .where(
+            and(
+              eq(schema.invitation.organizationId, organizationId),
+              eq(schema.invitation.status, "pending"),
+              filter.invitationId ? eq(schema.invitation.id, filter.invitationId) : undefined,
+            ),
+          )
+          .orderBy(desc(schema.invitation.createdAt));
 
     const invitationIds = invitationRows.map((row) => row.id);
     const deliveries = invitationIds.length
@@ -312,14 +329,13 @@ export class TeamService {
     memberId: string,
     input: UpdateTeamMemberDto,
   ): Promise<TeamMemberDto> {
-    const { target } = await this.assertMutableTarget(
-      organizationId,
-      actorUserId,
-      memberId,
-    );
+    const { target } = await this.assertMutableTarget(organizationId, actorUserId, memberId);
     await this.db.transaction(async (tx) => {
       if (input.role !== undefined) {
-        await tx.update(schema.member).set({ role: input.role }).where(eq(schema.member.id, memberId));
+        await tx
+          .update(schema.member)
+          .set({ role: input.role })
+          .where(eq(schema.member.id, memberId));
       }
       if (input.position !== undefined) {
         await tx
@@ -410,11 +426,7 @@ export class TeamService {
     return this.getMember(organizationId, memberId);
   }
 
-  async removeMember(
-    organizationId: string,
-    actorUserId: string,
-    memberId: string,
-  ): Promise<void> {
+  async removeMember(organizationId: string, actorUserId: string, memberId: string): Promise<void> {
     const { target } = await this.assertMutableTarget(organizationId, actorUserId, memberId);
     await this.db.transaction(async (tx) => {
       await tx
@@ -551,8 +563,8 @@ export class TeamService {
         );
         if ((result.rowCount ?? 0) !== 1) throw new NotFoundException("Invitation not found");
         await client.query(
-          "UPDATE email_deliveries SET status = 'canceled', encrypted_payload = null, payload_nonce = null, payload_tag = null, attempt_id = null, attempt_deadline = null, terminal_at = now(), updated_at = now() WHERE tenant_id = $1 AND source_id = $2 AND status IN ('queued','retrying','sending')",
-          [organizationId, invitationId],
+          "UPDATE email_deliveries SET status = 'canceled', encrypted_payload = null, payload_nonce = null, payload_tag = null, attempt_id = null, attempt_deadline = null, terminal_at = now(), updated_at = now() WHERE tenant_id = $1 AND source_id = $2 AND status = ANY($3::email_delivery_status[])",
+          [organizationId, invitationId, [...ACTIVE_DELIVERY_STATUSES]],
         );
         await client.query(
           "DELETE FROM cabinet_employee_links WHERE organization_id = $1 AND invitation_id = $2",
@@ -641,10 +653,7 @@ export class TeamService {
       .select({ id: schema.member.id, role: schema.member.role })
       .from(schema.member)
       .where(
-        and(
-          eq(schema.member.organizationId, organizationId),
-          eq(schema.member.id, targetMemberId),
-        ),
+        and(eq(schema.member.organizationId, organizationId), eq(schema.member.id, targetMemberId)),
       )
       .limit(1);
     if (!actor) throw new ForbiddenException("Tenant membership not found");
@@ -699,7 +708,11 @@ export class TeamService {
     actorUserId: string,
     email: string,
   ): Promise<void> {
-    const result = await this.pool.query<{ actor_count: string; tenant_count: string; email_count: string }>(
+    const result = await this.pool.query<{
+      actor_count: string;
+      tenant_count: string;
+      email_count: string;
+    }>(
       [
         "SELECT",
         "  count(*) FILTER (WHERE actor_user_id = $2 AND created_at > now() - interval '1 hour')::text AS actor_count,",
@@ -721,14 +734,14 @@ export class TeamService {
   }
 
   private async getMember(organizationId: string, memberId: string) {
-    const team = await this.getTeam(organizationId);
+    const team = await this.queryTeam(organizationId, { memberId });
     const member = team.members.find((value) => value.id === memberId);
     if (!member) throw new NotFoundException("Team member not found");
     return member;
   }
 
   private async getInvitation(organizationId: string, invitationId: string) {
-    const team = await this.getTeam(organizationId);
+    const team = await this.queryTeam(organizationId, { invitationId });
     const invitation = team.invitations.find((value) => value.id === invitationId);
     if (!invitation) throw new NotFoundException("Invitation not found");
     return invitation;

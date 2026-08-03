@@ -14,10 +14,7 @@ export function canMutateTeamTarget(target: TeamMutationTarget): boolean {
   return target.targetRole !== "owner";
 }
 
-export function canAssignTeamRole(
-  actorRole: TeamActorRole,
-  nextRole: AssignableTeamRole,
-): boolean {
+export function canAssignTeamRole(actorRole: TeamActorRole, nextRole: AssignableTeamRole): boolean {
   if (actorRole !== "owner" && actorRole !== "admin") return false;
   return nextRole === "admin" || nextRole === "manager";
 }

@@ -46,8 +46,15 @@ describe("mail and media schema", () => {
       ]),
     );
     expect(Object.keys(schema.userProfiles)).toContain("avatarAssetId");
+    expect(Object.keys(schema.userProfiles)).toContain("avatarAssetOwnerUserId");
     expect(
       getTableConfig(schema.mediaAssets).uniqueConstraints.map((item) => item.getName()),
-    ).toContain("media_assets_object_key_uq");
+    ).toEqual(expect.arrayContaining(["media_assets_object_key_uq", "media_assets_owner_id_uq"]));
+    expect(
+      getTableConfig(schema.userProfiles).foreignKeys.map((foreignKey) => foreignKey.getName()),
+    ).toContain("user_profiles_avatar_owner_fk");
+    expect(
+      getTableConfig(schema.userProfiles).checks.map((constraint) => constraint.name),
+    ).toContain("user_profiles_avatar_owner_matches_user");
   });
 });

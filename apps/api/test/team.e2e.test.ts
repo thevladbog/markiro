@@ -183,10 +183,7 @@ describe.skipIf(!ready)("tenant team e2e", () => {
 
     await owner.agent.delete(`/team/members/${targetMemberId}`).expect(204);
     expect(
-      await db
-        .select()
-        .from(schema.member)
-        .where(eq(schema.member.id, targetMemberId)),
+      await db.select().from(schema.member).where(eq(schema.member.id, targetMemberId)),
     ).toHaveLength(0);
     expect(
       await db

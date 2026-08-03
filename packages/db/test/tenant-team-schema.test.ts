@@ -82,8 +82,9 @@ describe("tenant team schema", () => {
     expect(Object.keys(schema.tenantAuditEvents)).toEqual(
       expect.arrayContaining(["organizationId", "actorUserId", "action", "outcome", "targetId"]),
     );
-    expect(Object.keys(schema.tenantAuditEvents)).not.toEqual(
-      expect.arrayContaining(["recipient", "message", "payload"]),
-    );
+    const auditColumns = Object.keys(schema.tenantAuditEvents);
+    for (const forbidden of ["recipient", "message", "payload"]) {
+      expect(auditColumns).not.toContain(forbidden);
+    }
   });
 });
