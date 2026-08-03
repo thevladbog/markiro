@@ -46,8 +46,6 @@ export function ConflictsPage() {
     ...(reviewedFilter !== "all" ? { reviewed: reviewedFilter === "reviewed" } : {}),
   });
   const { data: shiftsData } = useShifts();
-  const reviewMutation = useReviewConflict();
-
   const items = data ?? [];
   const shifts = shiftsData ?? [];
 
@@ -74,18 +72,6 @@ export function ConflictsPage() {
     ],
     [t],
   );
-
-  const handleReview = async (id: string) => {
-    try {
-      await reviewMutation.mutateAsync(id);
-      toast("ok", t("pages.conflicts.toasts.reviewSuccess"));
-    } catch (error) {
-      toast(
-        "error",
-        error instanceof ApiRequestError ? error.message : t("pages.conflicts.toasts.reviewError"),
-      );
-    }
-  };
 
   const columns: TableColumn<ConflictDto>[] = useMemo(
     () => [
@@ -142,19 +128,11 @@ export function ConflictsPage() {
           row.reviewedAt ? (
             <Badge tone="neutral">{t("pages.conflicts.reviewed")}</Badge>
           ) : canWrite ? (
-            <Button
-              type="button"
-              size="compact"
-              variant="secondary"
-              loading={reviewMutation.isPending && reviewMutation.variables === row.id}
-              onClick={() => void handleReview(row.id)}
-            >
-              {t("pages.conflicts.review")}
-            </Button>
+            <AuthorizedReviewConflictAction id={row.id} />
           ) : null,
       },
     ],
-    [t, i18n.language, canWrite, reviewMutation.isPending, reviewMutation.variables, shiftsById],
+    [t, i18n.language, canWrite, shiftsById],
   );
 
   return (
@@ -193,6 +171,35 @@ export function ConflictsPage() {
         <Table columns={columns} rows={items} />
       )}
     </div>
+  );
+}
+
+function AuthorizedReviewConflictAction({ id }: { id: string }) {
+  const { t } = useTranslation();
+  const reviewMutation = useReviewConflict();
+
+  const handleReview = async () => {
+    try {
+      await reviewMutation.mutateAsync(id);
+      toast("ok", t("pages.conflicts.toasts.reviewSuccess"));
+    } catch (error) {
+      toast(
+        "error",
+        error instanceof ApiRequestError ? error.message : t("pages.conflicts.toasts.reviewError"),
+      );
+    }
+  };
+
+  return (
+    <Button
+      type="button"
+      size="compact"
+      variant="secondary"
+      loading={reviewMutation.isPending}
+      onClick={() => void handleReview()}
+    >
+      {t("pages.conflicts.review")}
+    </Button>
   );
 }
 

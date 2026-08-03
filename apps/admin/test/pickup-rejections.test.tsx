@@ -7,13 +7,28 @@ import { CABINET_CAPABILITY } from "@markiro/domain";
 
 import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider } from "../src/access/context.js";
+import type * as RejectionsApiModule from "../src/pages/pickup/rejections-api.js";
 import { PickupPage } from "../src/pages/pickup/index.js";
 import { RejectionsPage } from "../src/pages/pickup/Rejections.js";
+
+const { writeHookMountSpy } = vi.hoisted(() => ({ writeHookMountSpy: vi.fn() }));
+
+vi.mock("../src/pages/pickup/rejections-api.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof RejectionsApiModule>();
+  return {
+    ...actual,
+    useAcknowledgeRejection: () => {
+      writeHookMountSpy();
+      return actual.useAcknowledgeRejection();
+    },
+  };
+});
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  writeHookMountSpy.mockClear();
 });
 
 /** Minimal Response stand-in -- only what apps/admin/src/api/client.ts reads. */
@@ -116,6 +131,7 @@ describe("rejections page", () => {
     expect(await screen.findByText(REJECTION.employeeName)).toBeDefined();
     expect(screen.getByRole("button", { name: "Показать коды" })).toBeDefined();
     expect(screen.queryByRole("button", { name: "Отработано" })).toBeNull();
+    expect(writeHookMountSpy).not.toHaveBeenCalled();
   });
 
   it("lists a refused scan and reveals its codes", async () => {

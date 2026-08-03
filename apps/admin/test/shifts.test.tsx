@@ -6,11 +6,38 @@ import { CABINET_CAPABILITY } from "@markiro/domain";
 
 import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider } from "../src/access/context.js";
+import type * as ShiftsApiModule from "../src/pages/shifts/api.js";
 import { ShiftsPage } from "../src/pages/shifts/index.js";
+
+const { writeHookMountSpy } = vi.hoisted(() => ({ writeHookMountSpy: vi.fn() }));
+
+vi.mock("../src/pages/shifts/api.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof ShiftsApiModule>();
+  return {
+    ...actual,
+    useCreateShift: () => {
+      writeHookMountSpy("create");
+      return actual.useCreateShift();
+    },
+    useUpdateShift: () => {
+      writeHookMountSpy("update");
+      return actual.useUpdateShift();
+    },
+    useDeleteShift: () => {
+      writeHookMountSpy("delete");
+      return actual.useDeleteShift();
+    },
+    useCloseShift: () => {
+      writeHookMountSpy("close");
+      return actual.useCloseShift();
+    },
+  };
+});
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  writeHookMountSpy.mockClear();
 });
 
 /** Minimal Response stand-in -- only what apps/admin/src/api/client.ts reads. */
@@ -213,6 +240,7 @@ describe("ShiftsPage", () => {
     expect(screen.queryByRole("button", { name: "Изменить" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Удалить" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Закрыть смену" })).toBeNull();
+    expect(writeHookMountSpy).not.toHaveBeenCalled();
   });
 
   it("renders shifts from the mocked GET response with joined fields, mode badges, the tolling label, and status chips", async () => {

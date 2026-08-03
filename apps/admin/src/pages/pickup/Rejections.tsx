@@ -52,8 +52,6 @@ export function RejectionsPage() {
     ...(fromDate ? { from: fromDate } : {}),
     ...(toDate ? { to: toDate } : {}),
   });
-  const acknowledge = useAcknowledgeRejection();
-
   const items = data?.items ?? [];
 
   const kioskOptions: SelectOption[] = [
@@ -74,15 +72,6 @@ export function RejectionsPage() {
       else next.add(id);
       return next;
     });
-  };
-
-  const handleAcknowledge = async (id: string) => {
-    try {
-      await acknowledge.mutateAsync(id);
-      toast("ok", t("pages.pickup.rejections.toasts.acknowledged"));
-    } catch {
-      toast("error", t("pages.pickup.rejections.toasts.acknowledgeError"));
-    }
   };
 
   const columns: TableColumn<PickupScanRejectionRowDto>[] = [
@@ -167,14 +156,7 @@ export function RejectionsPage() {
       title: t("pages.pickup.rejections.table.actions"),
       render: (row) =>
         row.acknowledgedAt || !canWrite ? null : (
-          <Button
-            type="button"
-            size="compact"
-            loading={acknowledge.isPending && acknowledge.variables === row.id}
-            onClick={() => void handleAcknowledge(row.id)}
-          >
-            {t("pages.pickup.rejections.acknowledgeAction")}
-          </Button>
+          <AuthorizedAcknowledgeRejectionAction id={row.id} />
         ),
     },
   ];
@@ -259,5 +241,30 @@ export function RejectionsPage() {
         </>
       )}
     </div>
+  );
+}
+
+function AuthorizedAcknowledgeRejectionAction({ id }: { id: string }) {
+  const { t } = useTranslation();
+  const acknowledge = useAcknowledgeRejection();
+
+  const handleAcknowledge = async () => {
+    try {
+      await acknowledge.mutateAsync(id);
+      toast("ok", t("pages.pickup.rejections.toasts.acknowledged"));
+    } catch {
+      toast("error", t("pages.pickup.rejections.toasts.acknowledgeError"));
+    }
+  };
+
+  return (
+    <Button
+      type="button"
+      size="compact"
+      loading={acknowledge.isPending}
+      onClick={() => void handleAcknowledge()}
+    >
+      {t("pages.pickup.rejections.acknowledgeAction")}
+    </Button>
   );
 }

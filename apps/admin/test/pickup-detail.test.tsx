@@ -7,11 +7,30 @@ import { CABINET_CAPABILITY } from "@markiro/domain";
 
 import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider } from "../src/access/context.js";
+import type * as PickupApiModule from "../src/pages/pickup/api.js";
 import { OrderDetailPage } from "../src/pages/pickup/OrderDetail.js";
+
+const { writeHookMountSpy } = vi.hoisted(() => ({ writeHookMountSpy: vi.fn() }));
+
+vi.mock("../src/pages/pickup/api.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof PickupApiModule>();
+  return {
+    ...actual,
+    useResolveOrder: () => {
+      writeHookMountSpy("resolve");
+      return actual.useResolveOrder();
+    },
+    useCancelOrder: () => {
+      writeHookMountSpy("cancel");
+      return actual.useCancelOrder();
+    },
+  };
+});
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  writeHookMountSpy.mockClear();
 });
 
 /** Minimal Response stand-in -- only what apps/admin/src/api/client.ts reads. */
@@ -133,6 +152,7 @@ describe("OrderDetailPage", () => {
     expect(screen.queryByRole("button", { name: "Списать актом" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Отменить" })).toBeNull();
     expect(screen.getByRole("button", { name: "Печать" })).toBeDefined();
+    expect(writeHookMountSpy).not.toHaveBeenCalled();
   });
 
   it("renders the employee name, both product names, and the full KM text", async () => {

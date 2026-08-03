@@ -21,9 +21,9 @@ import { CABINET_CAPABILITY } from "@markiro/domain";
 import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
 import { toast } from "../../lib/toast.js";
-import { useCounterparties } from "../counterparties/api.js";
+import { useCounterparties, type CounterpartyDto } from "../counterparties/api.js";
 import { useCandidates } from "../integrations/api.js";
-import { useLabelTemplates } from "../labels/api.js";
+import { useLabelTemplates, type LabelTemplateSummaryDto } from "../labels/api.js";
 import { ProductForm, type ProductFormValues } from "./ProductForm.js";
 import {
   useCreateProduct,
@@ -46,11 +46,175 @@ import {
  */
 const CANDIDATES_CHANNEL_TYPE = "commerceml";
 
-type FormModalState = { mode: "create" } | { mode: "edit"; product: ProductDto } | null;
 type StatusFilter = "all" | ProductStatus;
 
 /** Debounce delay (ms) between the last keystroke in the search box and the refetch. */
 const SEARCH_DEBOUNCE_MS = 300;
+
+interface CatalogFormOptions {
+  counterparties: CounterpartyDto[];
+  labelTemplates: LabelTemplateSummaryDto[];
+}
+
+function AuthorizedCreateProductAction({ counterparties, labelTemplates }: CatalogFormOptions) {
+  const { t } = useTranslation();
+  const createMutation = useCreateProduct();
+  const [open, setOpen] = useState(false);
+
+  const handleSubmit = async (input: CreateProductInput) => {
+    try {
+      await createMutation.mutateAsync(input);
+      toast("ok", t("pages.catalog.toasts.createSuccess"));
+      setOpen(false);
+    } catch (error) {
+      toast(
+        "error",
+        error instanceof ApiRequestError ? error.message : t("pages.catalog.toasts.createError"),
+      );
+    }
+  };
+
+  return (
+    <>
+      <Button type="button" onClick={() => setOpen(true)}>
+        {t("pages.catalog.addAction")}
+      </Button>
+      {open ? (
+        <ProductForm
+          open
+          mode="create"
+          counterparties={counterparties}
+          labelTemplates={labelTemplates}
+          submitting={createMutation.isPending}
+          onSubmit={handleSubmit}
+          onClose={() => setOpen(false)}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function AuthorizedProductRowActions({
+  product,
+  counterparties,
+  labelTemplates,
+}: CatalogFormOptions & { product: ProductDto }) {
+  const { t } = useTranslation();
+  const updateMutation = useUpdateProduct();
+  const deleteMutation = useDeleteProduct();
+  const [editingProduct, setEditingProduct] = useState<ProductDto | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const initialValues: ProductFormValues | undefined = useMemo(
+    () =>
+      editingProduct
+        ? {
+            gtin: editingProduct.gtin14,
+            name: editingProduct.name,
+            productGroup: editingProduct.productGroup ?? "",
+            boxCapacity:
+              editingProduct.boxCapacity !== null ? String(editingProduct.boxCapacity) : "",
+            palletCapacity:
+              editingProduct.palletCapacity !== null ? String(editingProduct.palletCapacity) : "",
+            unitPrice: editingProduct.unitPrice ?? "",
+            egaisCode: editingProduct.egaisCode ?? "",
+            defaultCounterpartyId: editingProduct.defaultCounterpartyId ?? "",
+            defaultLabelTemplateId: editingProduct.defaultLabelTemplateId ?? "",
+          }
+        : undefined,
+    [editingProduct],
+  );
+
+  const handleUpdate = async (input: CreateProductInput) => {
+    if (!editingProduct) return;
+    try {
+      await updateMutation.mutateAsync({ id: editingProduct.id, input });
+      toast("ok", t("pages.catalog.toasts.updateSuccess"));
+      setEditingProduct(null);
+    } catch (error) {
+      toast(
+        "error",
+        error instanceof ApiRequestError ? error.message : t("pages.catalog.toasts.updateError"),
+      );
+    }
+  };
+
+  const handleDelete = async () => {
+    try {
+      await deleteMutation.mutateAsync(product.id);
+      toast("ok", t("pages.catalog.toasts.deleteSuccess"));
+      setDeleting(false);
+    } catch (error) {
+      toast(
+        "error",
+        error instanceof ApiRequestError ? error.message : t("pages.catalog.toasts.deleteError"),
+      );
+    }
+  };
+
+  return (
+    <>
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+        <Button
+          type="button"
+          size="compact"
+          variant="secondary"
+          onClick={() => setEditingProduct(product)}
+        >
+          {t("pages.catalog.edit")}
+        </Button>
+        <Button
+          type="button"
+          size="compact"
+          variant="destructive"
+          onClick={() => setDeleting(true)}
+        >
+          {t("pages.catalog.delete")}
+        </Button>
+      </div>
+      {editingProduct && initialValues ? (
+        <ProductForm
+          open
+          mode="edit"
+          initialValues={initialValues}
+          productStatus={editingProduct.status}
+          productId={editingProduct.id}
+          externalRef={editingProduct.externalRef}
+          counterparties={counterparties}
+          labelTemplates={labelTemplates}
+          submitting={updateMutation.isPending}
+          onSubmit={handleUpdate}
+          onClose={() => setEditingProduct(null)}
+        />
+      ) : null}
+      <Modal
+        open={deleting}
+        onClose={() => setDeleting(false)}
+        closeLabel={t("common.close")}
+        title={t("pages.catalog.deleteConfirmTitle")}
+        footer={
+          <>
+            <Button type="button" variant="secondary" onClick={() => setDeleting(false)}>
+              {t("pages.catalog.cancel")}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              loading={deleteMutation.isPending}
+              onClick={() => void handleDelete()}
+            >
+              {t("pages.catalog.deleteConfirmAction")}
+            </Button>
+          </>
+        }
+      >
+        <p style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>
+          {t("pages.catalog.deleteConfirmBody", { name: product.name })}
+        </p>
+      </Modal>
+    </>
+  );
+}
 
 /** Admin product catalog CRUD screen -- Plan 03 Task 12 (list/create/edit/delete + GTIN owner hint). */
 export function CatalogPage() {
@@ -78,16 +242,10 @@ export function CatalogPage() {
   // screen itself, `CandidatesQueue`, not this one-line nudge toward it).
   const { data: candidatesData } = useCandidates(CANDIDATES_CHANNEL_TYPE, false);
   const candidatesCount = candidatesData?.length ?? 0;
-  const createMutation = useCreateProduct();
-  const updateMutation = useUpdateProduct();
-  const deleteMutation = useDeleteProduct();
-
-  const [formState, setFormState] = useState<FormModalState>(null);
-  const [deleteTarget, setDeleteTarget] = useState<ProductDto | null>(null);
 
   const items = data ?? [];
-  const counterparties = counterpartiesData ?? [];
-  const labelTemplates = labelTemplatesData ?? [];
+  const counterparties = useMemo(() => counterpartiesData ?? [], [counterpartiesData]);
+  const labelTemplates = useMemo(() => labelTemplatesData ?? [], [labelTemplatesData]);
 
   const statusFilterOptions: SelectOption[] = [
     { value: "all", label: t("pages.catalog.statusFilter.all") },
@@ -134,95 +292,16 @@ export function CatalogPage() {
         align: "right",
         render: (row) =>
           canWrite ? (
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <Button
-                type="button"
-                size="compact"
-                variant="secondary"
-                onClick={() => setFormState({ mode: "edit", product: row })}
-              >
-                {t("pages.catalog.edit")}
-              </Button>
-              <Button
-                type="button"
-                size="compact"
-                variant="destructive"
-                onClick={() => setDeleteTarget(row)}
-              >
-                {t("pages.catalog.delete")}
-              </Button>
-            </div>
+            <AuthorizedProductRowActions
+              product={row}
+              counterparties={counterparties}
+              labelTemplates={labelTemplates}
+            />
           ) : null,
       },
     ],
-    [t, canWrite],
+    [t, canWrite, counterparties, labelTemplates],
   );
-
-  const editingProduct = formState?.mode === "edit" ? formState.product : undefined;
-  // Fix (review, Task 14 follow-up): this used to be a plain object literal
-  // rebuilt on every `CatalogPage` render. `ProductForm`'s resync effect
-  // depends on it *referentially*, so any unrelated parent re-render -- most
-  // notably the one `useUnlinkProduct`'s own `invalidateQueries` triggers
-  // once the products list refetch lands -- handed that effect a "new"
-  // `initialValues` object and made it refire with the still-stale
-  // `externalRef` prop (`editingProduct` is a snapshot captured when
-  // "Изменить" was clicked; it does not track the refetched row), silently
-  // restoring a link the operator had just torn down. Memoizing on
-  // `editingProduct`'s own identity keeps this reference stable across
-  // renders that don't actually change which product (or snapshot of it) is
-  // being edited.
-  const initialValues: ProductFormValues | undefined = useMemo(
-    () =>
-      editingProduct
-        ? {
-            gtin: editingProduct.gtin14,
-            name: editingProduct.name,
-            productGroup: editingProduct.productGroup ?? "",
-            boxCapacity:
-              editingProduct.boxCapacity !== null ? String(editingProduct.boxCapacity) : "",
-            palletCapacity:
-              editingProduct.palletCapacity !== null ? String(editingProduct.palletCapacity) : "",
-            unitPrice: editingProduct.unitPrice ?? "",
-            egaisCode: editingProduct.egaisCode ?? "",
-            defaultCounterpartyId: editingProduct.defaultCounterpartyId ?? "",
-            defaultLabelTemplateId: editingProduct.defaultLabelTemplateId ?? "",
-          }
-        : undefined,
-    [editingProduct],
-  );
-
-  const handleSubmit = async (input: CreateProductInput) => {
-    const isEdit = formState?.mode === "edit";
-    try {
-      if (formState?.mode === "edit") {
-        await updateMutation.mutateAsync({ id: formState.product.id, input });
-        toast("ok", t("pages.catalog.toasts.updateSuccess"));
-      } else {
-        await createMutation.mutateAsync(input);
-        toast("ok", t("pages.catalog.toasts.createSuccess"));
-      }
-      setFormState(null);
-    } catch (error) {
-      const fallback = isEdit
-        ? t("pages.catalog.toasts.updateError")
-        : t("pages.catalog.toasts.createError");
-      toast("error", error instanceof ApiRequestError ? error.message : fallback);
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!deleteTarget) return;
-    try {
-      await deleteMutation.mutateAsync(deleteTarget.id);
-      toast("ok", t("pages.catalog.toasts.deleteSuccess"));
-      setDeleteTarget(null);
-    } catch (error) {
-      toast(
-        "error",
-        error instanceof ApiRequestError ? error.message : t("pages.catalog.toasts.deleteError"),
-      );
-    }
-  };
 
   return (
     <div style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: 20 }}>
@@ -230,9 +309,10 @@ export function CatalogPage() {
         title={t("pages.catalog.title")}
         actions={
           canWrite ? (
-            <Button type="button" onClick={() => setFormState({ mode: "create" })}>
-              {t("pages.catalog.addAction")}
-            </Button>
+            <AuthorizedCreateProductAction
+              counterparties={counterparties}
+              labelTemplates={labelTemplates}
+            />
           ) : null
         }
       />
@@ -284,62 +364,16 @@ export function CatalogPage() {
           hint={t("pages.catalog.emptyHint")}
           action={
             canWrite ? (
-              <Button type="button" onClick={() => setFormState({ mode: "create" })}>
-                {t("pages.catalog.addAction")}
-              </Button>
+              <AuthorizedCreateProductAction
+                counterparties={counterparties}
+                labelTemplates={labelTemplates}
+              />
             ) : null
           }
         />
       ) : (
         <Table columns={columns} rows={items} />
       )}
-
-      {canWrite ? (
-        <ProductForm
-          open={formState !== null}
-          mode={formState?.mode ?? "create"}
-          {...(initialValues ? { initialValues } : {})}
-          {...(editingProduct ? { productStatus: editingProduct.status } : {})}
-          {...(editingProduct
-            ? { productId: editingProduct.id, externalRef: editingProduct.externalRef }
-            : {})}
-          counterparties={counterparties}
-          labelTemplates={labelTemplates}
-          submitting={createMutation.isPending || updateMutation.isPending}
-          onSubmit={handleSubmit}
-          onClose={() => setFormState(null)}
-        />
-      ) : null}
-
-      {canWrite ? (
-        <Modal
-          open={deleteTarget !== null}
-          onClose={() => setDeleteTarget(null)}
-          closeLabel={t("common.close")}
-          title={t("pages.catalog.deleteConfirmTitle")}
-          footer={
-            <>
-              <Button type="button" variant="secondary" onClick={() => setDeleteTarget(null)}>
-                {t("pages.catalog.cancel")}
-              </Button>
-              <Button
-                type="button"
-                variant="destructive"
-                loading={deleteMutation.isPending}
-                onClick={() => void handleDelete()}
-              >
-                {t("pages.catalog.deleteConfirmAction")}
-              </Button>
-            </>
-          }
-        >
-          {deleteTarget && (
-            <p style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>
-              {t("pages.catalog.deleteConfirmBody", { name: deleteTarget.name })}
-            </p>
-          )}
-        </Modal>
-      ) : null}
     </div>
   );
 }

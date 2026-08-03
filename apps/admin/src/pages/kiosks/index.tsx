@@ -18,7 +18,7 @@ import { CABINET_CAPABILITY } from "@markiro/domain";
 import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
 import { toast } from "../../lib/toast.js";
-import { useProducts } from "../catalog/api.js";
+import { useProducts, type ProductDto } from "../catalog/api.js";
 import { KioskForm, type KioskFormValues } from "./KioskForm.js";
 import { PairingCodeModal } from "./PairingCodeModal.js";
 import { ReasonsEditor } from "./ReasonsEditor.js";
@@ -34,8 +34,6 @@ import {
   type UpdateKioskInput,
 } from "./api.js";
 
-type FormModalState = { mode: "create" } | { mode: "edit"; kiosk: KioskDto } | null;
-
 /**
  * The live pairing reveal. Holds the plaintext code, which the server returns
  * exactly once and stores only as a hash -- dropping this state is what makes
@@ -49,6 +47,162 @@ const ONLINE_THRESHOLD_MS = 2 * 60 * 1000;
 function isKioskOnline(lastSeenAt: string | null): boolean {
   if (!lastSeenAt) return false;
   return Date.now() - new Date(lastSeenAt).getTime() <= ONLINE_THRESHOLD_MS;
+}
+
+function AuthorizedCreateKioskAction({ products }: { products: ProductDto[] }) {
+  const { t } = useTranslation();
+  const createMutation = useCreateKiosk();
+  const [open, setOpen] = useState(false);
+
+  const handleSubmit = async (input: CreateKioskInput | UpdateKioskInput) => {
+    try {
+      await createMutation.mutateAsync(input as CreateKioskInput);
+      toast("ok", t("pages.kiosks.toasts.createSuccess"));
+      setOpen(false);
+    } catch (error) {
+      toast(
+        "error",
+        error instanceof ApiRequestError ? error.message : t("pages.kiosks.toasts.createError"),
+      );
+    }
+  };
+
+  return (
+    <>
+      <Button type="button" onClick={() => setOpen(true)}>
+        {t("pages.kiosks.addAction")}
+      </Button>
+      {open ? (
+        <KioskForm
+          open
+          mode="create"
+          products={products}
+          submitting={createMutation.isPending}
+          onSubmit={handleSubmit}
+          onClose={() => setOpen(false)}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function AuthorizedKioskRowActions({
+  kiosk,
+  products,
+}: {
+  kiosk: KioskDto;
+  products: ProductDto[];
+}) {
+  const { t } = useTranslation();
+  const updateMutation = useUpdateKiosk();
+  const archiveMutation = useArchiveKiosk();
+  const setProductsMutation = useSetKioskProducts();
+  const [editing, setEditing] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+
+  const initialValues: KioskFormValues = {
+    name: kiosk.name,
+    location: kiosk.location ?? "",
+    dayLimitPerEmployee: String(kiosk.dayLimitPerEmployee),
+    showPrices: kiosk.showPrices,
+  };
+
+  const handleUpdate = async (input: CreateKioskInput | UpdateKioskInput) => {
+    try {
+      await updateMutation.mutateAsync({ id: kiosk.id, input });
+      toast("ok", t("pages.kiosks.toasts.updateSuccess"));
+      setEditing(false);
+    } catch (error) {
+      toast(
+        "error",
+        error instanceof ApiRequestError ? error.message : t("pages.kiosks.toasts.updateError"),
+      );
+    }
+  };
+
+  const handleSaveProducts = async (productIds: string[]) => {
+    try {
+      await setProductsMutation.mutateAsync({ id: kiosk.id, productIds });
+      toast("ok", t("pages.kiosks.toasts.setProductsSuccess"));
+    } catch (error) {
+      toast(
+        "error",
+        error instanceof ApiRequestError
+          ? error.message
+          : t("pages.kiosks.toasts.setProductsError"),
+      );
+    }
+  };
+
+  const handleArchive = async () => {
+    try {
+      await archiveMutation.mutateAsync(kiosk.id);
+      toast("ok", t("pages.kiosks.toasts.archiveSuccess"));
+      setArchiving(false);
+    } catch (error) {
+      toast(
+        "error",
+        error instanceof ApiRequestError ? error.message : t("pages.kiosks.toasts.archiveError"),
+      );
+    }
+  };
+
+  return (
+    <>
+      <Button type="button" size="compact" variant="secondary" onClick={() => setEditing(true)}>
+        {t("pages.kiosks.edit")}
+      </Button>
+      {kiosk.status === "active" ? (
+        <Button
+          type="button"
+          size="compact"
+          variant="destructive"
+          onClick={() => setArchiving(true)}
+        >
+          {t("pages.kiosks.archive")}
+        </Button>
+      ) : null}
+      {editing ? (
+        <KioskForm
+          open
+          mode="edit"
+          kiosk={kiosk}
+          initialValues={initialValues}
+          products={products}
+          submitting={updateMutation.isPending}
+          savingProducts={setProductsMutation.isPending}
+          onSubmit={handleUpdate}
+          onSaveProducts={handleSaveProducts}
+          onClose={() => setEditing(false)}
+        />
+      ) : null}
+      <Modal
+        open={archiving}
+        onClose={() => setArchiving(false)}
+        closeLabel={t("common.close")}
+        title={t("pages.kiosks.archiveConfirmTitle")}
+        footer={
+          <>
+            <Button type="button" variant="secondary" onClick={() => setArchiving(false)}>
+              {t("pages.kiosks.cancel")}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              loading={archiveMutation.isPending}
+              onClick={() => void handleArchive()}
+            >
+              {t("pages.kiosks.archiveConfirmAction")}
+            </Button>
+          </>
+        }
+      >
+        <p style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>
+          {t("pages.kiosks.archiveConfirmBody", { name: kiosk.name })}
+        </p>
+      </Modal>
+    </>
+  );
 }
 
 /**
@@ -66,16 +220,8 @@ export function KiosksPage() {
   const { data, isPending, isError } = useKiosks();
   const { data: productsData } = useProducts({ status: "active" });
 
-  const createMutation = useCreateKiosk();
-  const updateMutation = useUpdateKiosk();
-  const archiveMutation = useArchiveKiosk();
-  const setProductsMutation = useSetKioskProducts();
-
-  const [formState, setFormState] = useState<FormModalState>(null);
-  const [archiveTarget, setArchiveTarget] = useState<KioskDto | null>(null);
-
   const items = data ?? [];
-  const activeProducts = productsData ?? [];
+  const activeProducts = useMemo(() => productsData ?? [], [productsData]);
 
   const columns: TableColumn<KioskDto>[] = useMemo(
     () => [
@@ -117,105 +263,22 @@ export function KiosksPage() {
         align: "right",
         render: (row) => (
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            {canWrite ? (
-              <Button
-                type="button"
-                size="compact"
-                variant="secondary"
-                onClick={() => setFormState({ mode: "edit", kiosk: row })}
-              >
-                {t("pages.kiosks.edit")}
-              </Button>
-            ) : null}
+            {canWrite ? <AuthorizedKioskRowActions kiosk={row} products={activeProducts} /> : null}
             {row.status === "active" && canManageCredentials ? (
               <KioskPairingAction kiosk={row} />
-            ) : null}
-            {row.status === "active" && canWrite ? (
-              <Button
-                type="button"
-                size="compact"
-                variant="destructive"
-                onClick={() => setArchiveTarget(row)}
-              >
-                {t("pages.kiosks.archive")}
-              </Button>
             ) : null}
           </div>
         ),
       },
     ],
-    [t, canWrite, canManageCredentials],
+    [t, canWrite, canManageCredentials, activeProducts],
   );
-
-  const editingKiosk = formState?.mode === "edit" ? formState.kiosk : undefined;
-  const initialValues: KioskFormValues | undefined = editingKiosk
-    ? {
-        name: editingKiosk.name,
-        location: editingKiosk.location ?? "",
-        dayLimitPerEmployee: String(editingKiosk.dayLimitPerEmployee),
-        showPrices: editingKiosk.showPrices,
-      }
-    : undefined;
-
-  const handleSubmit = async (input: CreateKioskInput | UpdateKioskInput) => {
-    const isEdit = formState?.mode === "edit";
-    try {
-      if (formState?.mode === "edit") {
-        await updateMutation.mutateAsync({ id: formState.kiosk.id, input });
-        toast("ok", t("pages.kiosks.toasts.updateSuccess"));
-      } else {
-        await createMutation.mutateAsync(input as CreateKioskInput);
-        toast("ok", t("pages.kiosks.toasts.createSuccess"));
-      }
-      setFormState(null);
-    } catch (error) {
-      const fallback = isEdit
-        ? t("pages.kiosks.toasts.updateError")
-        : t("pages.kiosks.toasts.createError");
-      toast("error", error instanceof ApiRequestError ? error.message : fallback);
-    }
-  };
-
-  const handleSaveProducts = async (productIds: string[]) => {
-    if (formState?.mode !== "edit") return;
-    try {
-      await setProductsMutation.mutateAsync({ id: formState.kiosk.id, productIds });
-      toast("ok", t("pages.kiosks.toasts.setProductsSuccess"));
-    } catch (error) {
-      toast(
-        "error",
-        error instanceof ApiRequestError
-          ? error.message
-          : t("pages.kiosks.toasts.setProductsError"),
-      );
-    }
-  };
-
-  const handleArchive = async () => {
-    if (!archiveTarget) return;
-    try {
-      await archiveMutation.mutateAsync(archiveTarget.id);
-      toast("ok", t("pages.kiosks.toasts.archiveSuccess"));
-      setArchiveTarget(null);
-    } catch (error) {
-      toast(
-        "error",
-        error instanceof ApiRequestError ? error.message : t("pages.kiosks.toasts.archiveError"),
-      );
-    }
-  };
 
   return (
     <div style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: 20 }}>
       <PageHeader
         title={t("pages.kiosks.title")}
-        actions={
-          canWrite ? (
-            <Button type="button" onClick={() => setFormState({ mode: "create" })}>
-              {t("pages.kiosks.addAction")}
-            </Button>
-          ) : null
-        }
+        actions={canWrite ? <AuthorizedCreateKioskAction products={activeProducts} /> : null}
       />
 
       {isPending ? (
@@ -228,64 +291,13 @@ export function KiosksPage() {
         <EmptyState
           title={t("pages.kiosks.emptyTitle")}
           hint={t("pages.kiosks.emptyHint")}
-          action={
-            canWrite ? (
-              <Button type="button" onClick={() => setFormState({ mode: "create" })}>
-                {t("pages.kiosks.addAction")}
-              </Button>
-            ) : null
-          }
+          action={canWrite ? <AuthorizedCreateKioskAction products={activeProducts} /> : null}
         />
       ) : (
         <Table columns={columns} rows={items} />
       )}
 
-      {canWrite ? <ReasonsEditor /> : null}
-
-      {canWrite ? (
-        <KioskForm
-          open={formState !== null}
-          mode={formState?.mode ?? "create"}
-          {...(editingKiosk ? { kiosk: editingKiosk } : {})}
-          {...(initialValues ? { initialValues } : {})}
-          products={activeProducts}
-          submitting={createMutation.isPending || updateMutation.isPending}
-          savingProducts={setProductsMutation.isPending}
-          onSubmit={handleSubmit}
-          onSaveProducts={handleSaveProducts}
-          onClose={() => setFormState(null)}
-        />
-      ) : null}
-
-      {canWrite ? (
-        <Modal
-          open={archiveTarget !== null}
-          onClose={() => setArchiveTarget(null)}
-          closeLabel={t("common.close")}
-          title={t("pages.kiosks.archiveConfirmTitle")}
-          footer={
-            <>
-              <Button type="button" variant="secondary" onClick={() => setArchiveTarget(null)}>
-                {t("pages.kiosks.cancel")}
-              </Button>
-              <Button
-                type="button"
-                variant="destructive"
-                loading={archiveMutation.isPending}
-                onClick={() => void handleArchive()}
-              >
-                {t("pages.kiosks.archiveConfirmAction")}
-              </Button>
-            </>
-          }
-        >
-          {archiveTarget && (
-            <p style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>
-              {t("pages.kiosks.archiveConfirmBody", { name: archiveTarget.name })}
-            </p>
-          )}
-        </Modal>
-      ) : null}
+      <ReasonsEditor />
     </div>
   );
 }

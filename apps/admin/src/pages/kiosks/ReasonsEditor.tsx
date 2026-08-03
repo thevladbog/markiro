@@ -38,13 +38,55 @@ function draftFrom(reason: ReasonDto): ReasonDraft {
  * control or a numeric `sortOrder` input -- this uses the latter.
  */
 export function ReasonsEditor() {
+  const { t } = useTranslation();
   const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
-  return canWrite ? <AuthorizedReasonsEditor /> : null;
+  const { data, isPending, isError } = usePickupReasons();
+  const items = data ?? [];
+
+  if (isPending) {
+    return (
+      <Card title={t("pages.kiosks.reasons.title")}>
+        <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
+          <Spinner label={t("common.loading")} />
+        </div>
+      </Card>
+    );
+  }
+
+  if (isError) {
+    return (
+      <Card title={t("pages.kiosks.reasons.title")}>
+        <Alert tone="error">{t("common.loadError")}</Alert>
+      </Card>
+    );
+  }
+
+  return canWrite ? (
+    <AuthorizedReasonsEditor items={items} />
+  ) : (
+    <Card title={t("pages.kiosks.reasons.title")}>
+      {items.length === 0 ? (
+        <p style={{ font: "var(--text-body)", color: "var(--fg-3)" }}>
+          {t("pages.kiosks.reasons.emptyHint")}
+        </p>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {items.map((reason) => (
+            <div key={reason.id} style={{ display: "flex", justifyContent: "space-between" }}>
+              <span>{reason.name}</span>
+              <span style={{ font: "var(--text-caption)", color: "var(--fg-3)" }}>
+                {reason.sortOrder}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
 }
 
-function AuthorizedReasonsEditor() {
+function AuthorizedReasonsEditor({ items }: { items: ReasonDto[] }) {
   const { t } = useTranslation();
-  const { data, isPending, isError } = usePickupReasons();
   const createMutation = useCreateReason();
   const updateMutation = useUpdateReason();
   const archiveMutation = useArchiveReason();
@@ -52,8 +94,6 @@ function AuthorizedReasonsEditor() {
   const [newName, setNewName] = useState("");
   const [drafts, setDrafts] = useState<Record<string, ReasonDraft>>({});
   const [archiveTarget, setArchiveTarget] = useState<ReasonDto | null>(null);
-
-  const items = data ?? [];
 
   // Re-seed the per-row drafts whenever the list refetches (e.g. after a
   // successful create/update/archive invalidates the query) -- keeps the
@@ -65,8 +105,7 @@ function AuthorizedReasonsEditor() {
       next[reason.id] = draftFrom(reason);
     }
     setDrafts(next);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `items` is `data ?? []`, a fresh array each render; depending on it would re-seed the drafts on every render and discard in-progress edits.
-  }, [data]);
+  }, [items]);
 
   const handleAdd = async () => {
     const name = newName.trim();
@@ -134,71 +173,61 @@ function AuthorizedReasonsEditor() {
     <>
       <Card title={t("pages.kiosks.reasons.title")}>
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {isPending ? (
-            <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
-              <Spinner label={t("common.loading")} />
-            </div>
-          ) : isError ? (
-            <Alert tone="error">{t("common.loadError")}</Alert>
-          ) : (
-            <>
-              {items.length === 0 && (
-                <p style={{ font: "var(--text-body)", color: "var(--fg-3)" }}>
-                  {t("pages.kiosks.reasons.emptyHint")}
-                </p>
-              )}
-              {items.map((reason) => {
-                const draft = drafts[reason.id] ?? draftFrom(reason);
-                return (
-                  <div key={reason.id} style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
-                    <div style={{ flex: 1 }}>
-                      <Input
-                        label={t("pages.kiosks.reasons.nameLabel")}
-                        value={draft.name}
-                        onChange={(event) =>
-                          setDrafts((prev) => ({
-                            ...prev,
-                            [reason.id]: { ...draft, name: event.target.value },
-                          }))
-                        }
-                      />
-                    </div>
-                    <div style={{ width: 100 }}>
-                      <Input
-                        label={t("pages.kiosks.reasons.sortOrderLabel")}
-                        mono
-                        inputMode="numeric"
-                        value={draft.sortOrder}
-                        onChange={(event) =>
-                          setDrafts((prev) => ({
-                            ...prev,
-                            [reason.id]: { ...draft, sortOrder: event.target.value },
-                          }))
-                        }
-                      />
-                    </div>
-                    <Button
-                      type="button"
-                      size="compact"
-                      variant="secondary"
-                      loading={updateMutation.isPending}
-                      onClick={() => void handleSave(reason)}
-                    >
-                      {t("pages.kiosks.reasons.saveAction")}
-                    </Button>
-                    <Button
-                      type="button"
-                      size="compact"
-                      variant="destructive"
-                      onClick={() => setArchiveTarget(reason)}
-                    >
-                      {t("pages.kiosks.reasons.archiveAction")}
-                    </Button>
-                  </div>
-                );
-              })}
-            </>
+          {items.length === 0 && (
+            <p style={{ font: "var(--text-body)", color: "var(--fg-3)" }}>
+              {t("pages.kiosks.reasons.emptyHint")}
+            </p>
           )}
+          {items.map((reason) => {
+            const draft = drafts[reason.id] ?? draftFrom(reason);
+            return (
+              <div key={reason.id} style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+                <div style={{ flex: 1 }}>
+                  <Input
+                    label={t("pages.kiosks.reasons.nameLabel")}
+                    value={draft.name}
+                    onChange={(event) =>
+                      setDrafts((prev) => ({
+                        ...prev,
+                        [reason.id]: { ...draft, name: event.target.value },
+                      }))
+                    }
+                  />
+                </div>
+                <div style={{ width: 100 }}>
+                  <Input
+                    label={t("pages.kiosks.reasons.sortOrderLabel")}
+                    mono
+                    inputMode="numeric"
+                    value={draft.sortOrder}
+                    onChange={(event) =>
+                      setDrafts((prev) => ({
+                        ...prev,
+                        [reason.id]: { ...draft, sortOrder: event.target.value },
+                      }))
+                    }
+                  />
+                </div>
+                <Button
+                  type="button"
+                  size="compact"
+                  variant="secondary"
+                  loading={updateMutation.isPending}
+                  onClick={() => void handleSave(reason)}
+                >
+                  {t("pages.kiosks.reasons.saveAction")}
+                </Button>
+                <Button
+                  type="button"
+                  size="compact"
+                  variant="destructive"
+                  onClick={() => setArchiveTarget(reason)}
+                >
+                  {t("pages.kiosks.reasons.archiveAction")}
+                </Button>
+              </div>
+            );
+          })}
 
           <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
             <div style={{ flex: 1 }}>

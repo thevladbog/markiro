@@ -6,12 +6,51 @@ import { CABINET_CAPABILITY } from "@markiro/domain";
 
 import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider } from "../src/access/context.js";
+import type * as KiosksApiModule from "../src/pages/kiosks/api.js";
 import { KiosksPage } from "../src/pages/kiosks/index.js";
+
+const { writeHookMountSpy } = vi.hoisted(() => ({ writeHookMountSpy: vi.fn() }));
+
+vi.mock("../src/pages/kiosks/api.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof KiosksApiModule>();
+  return {
+    ...actual,
+    useCreateKiosk: () => {
+      writeHookMountSpy("create-kiosk");
+      return actual.useCreateKiosk();
+    },
+    useUpdateKiosk: () => {
+      writeHookMountSpy("update-kiosk");
+      return actual.useUpdateKiosk();
+    },
+    useArchiveKiosk: () => {
+      writeHookMountSpy("archive-kiosk");
+      return actual.useArchiveKiosk();
+    },
+    useSetKioskProducts: () => {
+      writeHookMountSpy("set-products");
+      return actual.useSetKioskProducts();
+    },
+    useCreateReason: () => {
+      writeHookMountSpy("create-reason");
+      return actual.useCreateReason();
+    },
+    useUpdateReason: () => {
+      writeHookMountSpy("update-reason");
+      return actual.useUpdateReason();
+    },
+    useArchiveReason: () => {
+      writeHookMountSpy("archive-reason");
+      return actual.useArchiveReason();
+    },
+  };
+});
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.useRealTimers();
+  writeHookMountSpy.mockClear();
 });
 
 /** Minimal Response stand-in -- only what apps/admin/src/api/client.ts reads. */
@@ -175,10 +214,13 @@ describe("KiosksPage", () => {
     expect(screen.queryByRole("button", { name: "Добавить киоск" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Изменить" })).toBeNull();
     expect(screen.queryByRole("button", { name: "В архив" })).toBeNull();
-    expect(screen.queryByText(REASON_A.name)).toBeNull();
+    expect(screen.getByText(REASON_A.name)).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Добавить причину" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Сохранить" })).toBeNull();
     expect(
       fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/pickup-reasons")),
-    ).toBe(false);
+    ).toBe(true);
+    expect(writeHookMountSpy).not.toHaveBeenCalled();
   });
 
   it("keeps pairing independently available with credentials.manage", async () => {

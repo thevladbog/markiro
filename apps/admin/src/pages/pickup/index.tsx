@@ -40,53 +40,35 @@ const STATUS_TO_CHIP: Record<PickupOrderStatus, StatusChipStatus> = {
   cancelled: "error",
 };
 
-/**
- * Admin «Для себя» (self-pickup) orders list -- Plan A Task 14. Filterable
- * summary table of every self-pickup order (status/reason/date-range),
- * mirroring `pages/catalog/index.tsx`'s list pattern, plus a bulk-export
- * mode that reveals a per-row selection checkbox and posts the checked
- * order ids to `POST /pickup-orders/export` (Task 4/9's `useExportCodes`).
- * Row `orderNo` links to `/pickup/:id`, the order-detail route Task 15 adds.
- */
-export function PickupPage() {
-  const { t, i18n } = useTranslation();
-  const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
+interface PickupPageContentProps {
+  statusFilter: StatusFilter;
+  onStatusFilterChange: (value: StatusFilter) => void;
+  reasonFilter: ReasonFilter;
+  onReasonFilterChange: (value: ReasonFilter) => void;
+  fromDate: string;
+  onFromDateChange: (value: string) => void;
+  toDate: string;
+  onToDateChange: (value: string) => void;
+  items: PickupOrderRowDto[];
+  isPending: boolean;
+  isError: boolean;
+  rejections: { openCount: number; kioskNames: string[] };
+}
 
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [reasonFilter, setReasonFilter] = useState<ReasonFilter>("all");
-  const [fromDate, setFromDate] = useState("");
-  const [toDate, setToDate] = useState("");
+interface PickupWriteControls {
+  bulkMode: boolean;
+  selectedIds: Set<string>;
+  exporting: boolean;
+  onToggleBulkMode: () => void;
+  onToggleSelected: (id: string) => void;
+  onExport: () => void;
+}
 
+function AuthorizedPickupContent(props: PickupPageContentProps) {
+  const { t } = useTranslation();
+  const exportMutation = useExportCodes();
   const [bulkMode, setBulkMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-
-  const { data, isPending, isError } = usePickupOrders({
-    ...(statusFilter !== "all" ? { status: statusFilter } : {}),
-    ...(reasonFilter !== "all" ? { reason: reasonFilter } : {}),
-    ...(fromDate ? { from: fromDate } : {}),
-    ...(toDate ? { to: toDate } : {}),
-  });
-  const exportMutation = useExportCodes();
-
-  const rejections = useOpenRejectionSummary();
-  const shownKiosks = rejections.kioskNames.slice(0, 3);
-  const hiddenKioskCount = rejections.kioskNames.length - shownKiosks.length;
-
-  const items = data ?? [];
-
-  const statusOptions: SelectOption[] = [
-    { value: "all", label: t("pages.pickup.filters.status.all") },
-    { value: "pending", label: t("pages.pickup.filters.status.pending") },
-    { value: "punched", label: t("pages.pickup.filters.status.punched") },
-    { value: "writtenoff", label: t("pages.pickup.filters.status.writtenoff") },
-    { value: "cancelled", label: t("pages.pickup.filters.status.cancelled") },
-  ];
-
-  const reasonOptions: SelectOption[] = [
-    { value: "all", label: t("pages.pickup.filters.reason.all") },
-    { value: "buy", label: t("pages.pickup.filters.reason.buy") },
-    { value: "writeoff", label: t("pages.pickup.filters.reason.writeoff") },
-  ];
 
   const handleToggleBulkMode = () => {
     setBulkMode((prev) => !prev);
@@ -114,6 +96,54 @@ export function PickupPage() {
       toast("error", t("pages.pickup.toasts.exportError"));
     }
   };
+
+  return (
+    <PickupPageContent
+      {...props}
+      write={{
+        bulkMode,
+        selectedIds,
+        exporting: exportMutation.isPending,
+        onToggleBulkMode: handleToggleBulkMode,
+        onToggleSelected: toggleSelected,
+        onExport: () => void handleExport(),
+      }}
+    />
+  );
+}
+
+function PickupPageContent({
+  statusFilter,
+  onStatusFilterChange,
+  reasonFilter,
+  onReasonFilterChange,
+  fromDate,
+  onFromDateChange,
+  toDate,
+  onToDateChange,
+  items,
+  isPending,
+  isError,
+  rejections,
+  write,
+}: PickupPageContentProps & { write?: PickupWriteControls }) {
+  const { t, i18n } = useTranslation();
+  const shownKiosks = rejections.kioskNames.slice(0, 3);
+  const hiddenKioskCount = rejections.kioskNames.length - shownKiosks.length;
+
+  const statusOptions: SelectOption[] = [
+    { value: "all", label: t("pages.pickup.filters.status.all") },
+    { value: "pending", label: t("pages.pickup.filters.status.pending") },
+    { value: "punched", label: t("pages.pickup.filters.status.punched") },
+    { value: "writtenoff", label: t("pages.pickup.filters.status.writtenoff") },
+    { value: "cancelled", label: t("pages.pickup.filters.status.cancelled") },
+  ];
+
+  const reasonOptions: SelectOption[] = [
+    { value: "all", label: t("pages.pickup.filters.reason.all") },
+    { value: "buy", label: t("pages.pickup.filters.reason.buy") },
+    { value: "writeoff", label: t("pages.pickup.filters.reason.writeoff") },
+  ];
 
   const baseColumns: TableColumn<PickupOrderRowDto>[] = [
     {
@@ -177,7 +207,7 @@ export function PickupPage() {
   ];
 
   const columns: TableColumn<PickupOrderRowDto>[] =
-    canWrite && bulkMode
+    write?.bulkMode === true
       ? [
           {
             key: "select",
@@ -187,8 +217,8 @@ export function PickupPage() {
               <input
                 type="checkbox"
                 aria-label={t("pages.pickup.bulkExport.selectRow", { orderNo: row.orderNo })}
-                checked={selectedIds.has(row.id)}
-                onChange={() => toggleSelected(row.id)}
+                checked={write.selectedIds.has(row.id)}
+                onChange={() => write.onToggleSelected(row.id)}
               />
             ),
           },
@@ -201,13 +231,15 @@ export function PickupPage() {
       <PageHeader
         title={t("pages.pickup.title")}
         actions={
-          canWrite ? (
+          write ? (
             <Button
               type="button"
-              variant={bulkMode ? "secondary" : "primary"}
-              onClick={handleToggleBulkMode}
+              variant={write.bulkMode ? "secondary" : "primary"}
+              onClick={write.onToggleBulkMode}
             >
-              {bulkMode ? t("pages.pickup.cancel") : t("pages.pickup.bulkExport.toggleAction")}
+              {write.bulkMode
+                ? t("pages.pickup.cancel")
+                : t("pages.pickup.bulkExport.toggleAction")}
             </Button>
           ) : null
         }
@@ -236,7 +268,7 @@ export function PickupPage() {
             label={t("pages.pickup.filters.statusLabel")}
             options={statusOptions}
             value={statusFilter}
-            onChange={(value) => setStatusFilter(value as StatusFilter)}
+            onChange={(value) => onStatusFilterChange(value as StatusFilter)}
           />
         </div>
         <div style={{ width: 200 }}>
@@ -244,7 +276,7 @@ export function PickupPage() {
             label={t("pages.pickup.filters.reasonLabel")}
             options={reasonOptions}
             value={reasonFilter}
-            onChange={(value) => setReasonFilter(value as ReasonFilter)}
+            onChange={(value) => onReasonFilterChange(value as ReasonFilter)}
           />
         </div>
         <div style={{ width: 180 }}>
@@ -252,7 +284,7 @@ export function PickupPage() {
             label={t("pages.pickup.filters.fromLabel")}
             type="date"
             value={fromDate}
-            onChange={(event) => setFromDate(event.target.value)}
+            onChange={(event) => onFromDateChange(event.target.value)}
           />
         </div>
         <div style={{ width: 180 }}>
@@ -260,22 +292,22 @@ export function PickupPage() {
             label={t("pages.pickup.filters.toLabel")}
             type="date"
             value={toDate}
-            onChange={(event) => setToDate(event.target.value)}
+            onChange={(event) => onToDateChange(event.target.value)}
           />
         </div>
       </div>
 
-      {canWrite && bulkMode ? (
+      {write?.bulkMode === true ? (
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <span style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>
-            {t("pages.pickup.bulkExport.selectedCount", { count: selectedIds.size })}
+            {t("pages.pickup.bulkExport.selectedCount", { count: write.selectedIds.size })}
           </span>
           <Button
             type="button"
             size="compact"
-            disabled={selectedIds.size === 0}
-            loading={exportMutation.isPending}
-            onClick={() => void handleExport()}
+            disabled={write.selectedIds.size === 0}
+            loading={write.exporting}
+            onClick={write.onExport}
           >
             {t("pages.pickup.bulkExport.exportAction")}
           </Button>
@@ -295,4 +327,45 @@ export function PickupPage() {
       )}
     </div>
   );
+}
+
+/**
+ * Admin «Для себя» (self-pickup) orders list -- Plan A Task 14. Filterable
+ * summary table of every self-pickup order (status/reason/date-range),
+ * mirroring `pages/catalog/index.tsx`'s list pattern, plus a bulk-export
+ * mode that reveals a per-row selection checkbox and posts the checked
+ * order ids to `POST /pickup-orders/export` (Task 4/9's `useExportCodes`).
+ * Row `orderNo` links to `/pickup/:id`, the order-detail route Task 15 adds.
+ */
+export function PickupPage() {
+  const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
+
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [reasonFilter, setReasonFilter] = useState<ReasonFilter>("all");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+
+  const { data, isPending, isError } = usePickupOrders({
+    ...(statusFilter !== "all" ? { status: statusFilter } : {}),
+    ...(reasonFilter !== "all" ? { reason: reasonFilter } : {}),
+    ...(fromDate ? { from: fromDate } : {}),
+    ...(toDate ? { to: toDate } : {}),
+  });
+  const rejections = useOpenRejectionSummary();
+  const props: PickupPageContentProps = {
+    statusFilter,
+    onStatusFilterChange: setStatusFilter,
+    reasonFilter,
+    onReasonFilterChange: setReasonFilter,
+    fromDate,
+    onFromDateChange: setFromDate,
+    toDate,
+    onToDateChange: setToDate,
+    items: data ?? [],
+    isPending,
+    isError,
+    rejections,
+  };
+
+  return canWrite ? <AuthorizedPickupContent {...props} /> : <PickupPageContent {...props} />;
 }

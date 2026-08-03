@@ -6,11 +6,34 @@ import { CABINET_CAPABILITY } from "@markiro/domain";
 
 import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider } from "../src/access/context.js";
+import type * as CounterpartiesApiModule from "../src/pages/counterparties/api.js";
 import { CounterpartiesPage } from "../src/pages/counterparties/index.js";
+
+const { writeHookMountSpy } = vi.hoisted(() => ({ writeHookMountSpy: vi.fn() }));
+
+vi.mock("../src/pages/counterparties/api.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof CounterpartiesApiModule>();
+  return {
+    ...actual,
+    useCreateCounterparty: () => {
+      writeHookMountSpy("create");
+      return actual.useCreateCounterparty();
+    },
+    useUpdateCounterparty: () => {
+      writeHookMountSpy("update");
+      return actual.useUpdateCounterparty();
+    },
+    useDeleteCounterparty: () => {
+      writeHookMountSpy("delete");
+      return actual.useDeleteCounterparty();
+    },
+  };
+});
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  writeHookMountSpy.mockClear();
 });
 
 /** Minimal Response stand-in -- only what apps/admin/src/api/client.ts reads. */
@@ -68,6 +91,7 @@ describe("CounterpartiesPage", () => {
     expect(screen.queryByRole("button", { name: "Добавить контрагента" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Изменить" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Удалить" })).toBeNull();
+    expect(writeHookMountSpy).not.toHaveBeenCalled();
   });
 
   it("renders counterparties from the mocked GET response", async () => {

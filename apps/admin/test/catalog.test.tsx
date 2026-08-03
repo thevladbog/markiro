@@ -9,12 +9,27 @@ import { AccessProvider } from "../src/access/context.js";
 import type * as CatalogApiModule from "../src/pages/catalog/api.js";
 import { CatalogPage } from "../src/pages/catalog/index.js";
 
-const { unlinkHookMountSpy } = vi.hoisted(() => ({ unlinkHookMountSpy: vi.fn() }));
+const { unlinkHookMountSpy, writeHookMountSpy } = vi.hoisted(() => ({
+  unlinkHookMountSpy: vi.fn(),
+  writeHookMountSpy: vi.fn(),
+}));
 
 vi.mock("../src/pages/catalog/api.js", async (importOriginal) => {
   const actual = await importOriginal<typeof CatalogApiModule>();
   return {
     ...actual,
+    useCreateProduct: () => {
+      writeHookMountSpy("create");
+      return actual.useCreateProduct();
+    },
+    useUpdateProduct: () => {
+      writeHookMountSpy("update");
+      return actual.useUpdateProduct();
+    },
+    useDeleteProduct: () => {
+      writeHookMountSpy("delete");
+      return actual.useDeleteProduct();
+    },
     useUnlinkProduct: () => {
       unlinkHookMountSpy();
       return actual.useUnlinkProduct();
@@ -26,6 +41,7 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   unlinkHookMountSpy.mockClear();
+  writeHookMountSpy.mockClear();
 });
 
 /** Minimal Response stand-in -- only what apps/admin/src/api/client.ts reads. */
@@ -118,6 +134,7 @@ describe("CatalogPage", () => {
     expect(screen.queryByRole("button", { name: "Добавить продукт" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Изменить" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Удалить" })).toBeNull();
+    expect(writeHookMountSpy).not.toHaveBeenCalled();
   });
 
   it("renders products from the mocked GET response with a StatusChip per status", async () => {

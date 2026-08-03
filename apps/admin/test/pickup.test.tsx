@@ -7,7 +7,21 @@ import { CABINET_CAPABILITY } from "@markiro/domain";
 
 import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider } from "../src/access/context.js";
+import type * as PickupApiModule from "../src/pages/pickup/api.js";
 import { PickupPage } from "../src/pages/pickup/index.js";
+
+const { writeHookMountSpy } = vi.hoisted(() => ({ writeHookMountSpy: vi.fn() }));
+
+vi.mock("../src/pages/pickup/api.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof PickupApiModule>();
+  return {
+    ...actual,
+    useExportCodes: () => {
+      writeHookMountSpy();
+      return actual.useExportCodes();
+    },
+  };
+});
 
 afterEach(() => {
   cleanup();
@@ -18,6 +32,7 @@ afterEach(() => {
   // shared global, not scoped per-test the way `vi.stubGlobal("fetch", ...)`
   // is.
   vi.restoreAllMocks();
+  writeHookMountSpy.mockClear();
 });
 
 /** Minimal Response stand-in -- only what apps/admin/src/api/client.ts reads. */
@@ -121,6 +136,7 @@ describe("PickupPage", () => {
     expect(screen.getByRole("link", { name: ORDER_A.orderNo })).toBeDefined();
     expect(screen.queryByRole("button", { name: "Массовая выгрузка" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Выгрузить коды" })).toBeNull();
+    expect(writeHookMountSpy).not.toHaveBeenCalled();
   });
 
   it("renders both orders from the mocked GET response in the table", async () => {

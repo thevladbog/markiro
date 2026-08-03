@@ -7,11 +7,26 @@ import { CABINET_CAPABILITY } from "@markiro/domain";
 import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider } from "../src/access/context.js";
 import { formatScanTime } from "../src/lib/datetime.js";
+import type * as ConflictsApiModule from "../src/pages/conflicts/api.js";
 import { ConflictsPage } from "../src/pages/conflicts/index.js";
+
+const { writeHookMountSpy } = vi.hoisted(() => ({ writeHookMountSpy: vi.fn() }));
+
+vi.mock("../src/pages/conflicts/api.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof ConflictsApiModule>();
+  return {
+    ...actual,
+    useReviewConflict: () => {
+      writeHookMountSpy();
+      return actual.useReviewConflict();
+    },
+  };
+});
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  writeHookMountSpy.mockClear();
 });
 
 /** Minimal Response stand-in -- only what apps/admin/src/api/client.ts reads. */
@@ -147,6 +162,7 @@ describe("ConflictsPage", () => {
       (await screen.findByRole("table")).querySelector(`[title="${UNREVIEWED.codeHash}"]`),
     ).toBeDefined();
     expect(screen.queryByRole("button", { name: "Отметить рассмотренным" })).toBeNull();
+    expect(writeHookMountSpy).not.toHaveBeenCalled();
   });
 
   it("renders conflicts from the mocked GET response with code, losing/winning terminals", async () => {

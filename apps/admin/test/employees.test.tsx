@@ -7,11 +7,34 @@ import { CABINET_CAPABILITY } from "@markiro/domain";
 import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider } from "../src/access/context.js";
 import i18n from "../src/i18n/index.js";
+import type * as EmployeesApiModule from "../src/pages/employees/api.js";
 import { EmployeesPage } from "../src/pages/employees/index.js";
+
+const { writeHookMountSpy } = vi.hoisted(() => ({ writeHookMountSpy: vi.fn() }));
+
+vi.mock("../src/pages/employees/api.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof EmployeesApiModule>();
+  return {
+    ...actual,
+    useCreateEmployee: () => {
+      writeHookMountSpy("create");
+      return actual.useCreateEmployee();
+    },
+    useUpdateEmployee: () => {
+      writeHookMountSpy("update");
+      return actual.useUpdateEmployee();
+    },
+    useArchiveEmployee: () => {
+      writeHookMountSpy("archive");
+      return actual.useArchiveEmployee();
+    },
+  };
+});
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  writeHookMountSpy.mockClear();
 });
 
 /** Minimal Response stand-in -- only what apps/admin/src/api/client.ts reads. */
@@ -89,6 +112,7 @@ describe("EmployeesPage", () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/operators"))).toBe(
       false,
     );
+    expect(writeHookMountSpy).not.toHaveBeenCalled();
   });
 
   it("renders employees from the mocked GET response, incl. role, status, and active-badge count", async () => {
