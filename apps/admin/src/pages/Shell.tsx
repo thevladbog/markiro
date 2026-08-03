@@ -1,7 +1,12 @@
+import { useTranslation } from "react-i18next";
 import { Navigate } from "react-router";
 
-import { Spinner } from "@markiro/ui";
+import { Button, EmptyState, Spinner } from "@markiro/ui";
 
+import { useAccessDocument } from "../access/api.js";
+import { AccessProvider } from "../access/context.js";
+import { NoCabinetAccess } from "../access/NoCabinetAccess.js";
+import { ApiRequestError } from "../api/client.js";
 import { useAuthClient } from "../auth/client.js";
 import { AppShell } from "../layout/AppShell.js";
 
@@ -31,5 +36,47 @@ export function ShellPage() {
     return <Navigate to="/org/select" replace />;
   }
 
-  return <AppShell />;
+  return <AccessGate activeOrganizationId={session.session.activeOrganizationId} />;
+}
+
+function AccessGate({ activeOrganizationId }: { activeOrganizationId: string }) {
+  const access = useAccessDocument(activeOrganizationId);
+
+  if (access.isPending) return <CenteredSpinner />;
+  if (access.error instanceof ApiRequestError && access.error.status === 403) {
+    return <NoCabinetAccess />;
+  }
+  if (access.isError || !access.data)
+    return <AccessLoadError onRetry={() => void access.refetch()} />;
+  if (access.data.capabilities.length === 0) return <NoCabinetAccess />;
+
+  return (
+    <AccessProvider value={access.data}>
+      <AppShell />
+    </AccessProvider>
+  );
+}
+
+function CenteredSpinner() {
+  const { t } = useTranslation();
+
+  return (
+    <div style={{ display: "flex", justifyContent: "center", paddingTop: 96 }}>
+      <Spinner label={t("access.loading")} />
+    </div>
+  );
+}
+
+function AccessLoadError({ onRetry }: { onRetry: () => void }) {
+  const { t } = useTranslation();
+
+  return (
+    <div style={{ padding: "48px 32px" }}>
+      <EmptyState
+        title={t("access.loadErrorTitle")}
+        hint={t("access.loadErrorBody")}
+        action={<Button onClick={onRetry}>{t("access.retry")}</Button>}
+      />
+    </div>
+  );
 }
