@@ -243,14 +243,21 @@ An admin or owner supplies:
 - optional tenant-local position;
 - optional existing employee from the active tenant.
 
-Creation performs policy checks and employee reservation, creates a Better Auth
-invitation valid for seven days, writes the audit event, creates an email
-delivery, and enqueues its id. The HTTP response does not wait for SMTP.
+Creation performs policy checks and, in one PostgreSQL transaction, reserves
+the employee, creates a Better Auth invitation valid for seven days, writes the
+audit event and email-delivery row, and appends a transactional-outbox event.
+The HTTP response returns after that commit and does not wait for pg-boss or
+SMTP. An outbox dispatcher publishes the delivery id to pg-boss with a stable
+idempotency key derived from that delivery. If the dispatcher crashes after
+enqueueing but before marking the outbox row published, replay targets the same
+job identity instead of creating another logical delivery. A periodic
+reconciler republishes committed `queued` deliveries whose outbox event or job
+is missing, so a valid invitation cannot remain permanently unenqueued.
 
 The UI exposes two independent states:
 
 - access: pending, accepted, rejected, canceled, or expired;
-- delivery: queued, sending, sent, or failed.
+- delivery: queued, sending, retrying, sent, failed, or canceled.
 
 SMTP failure never invalidates an otherwise valid invitation. An admin may
 resend the same pending invitation; resend refreshes delivery and, by product
@@ -290,8 +297,27 @@ profile/claim and does not create a second membership.
 Cancellation is available to team administrators. Rejection is available to
 the invitee. Both invalidate the link, release an employee reservation, cancel
 unsent delivery, and create an audit event. Expiry does the same through cleanup
-or lazy reconciliation. A mail worker rechecks invitation state immediately
-before sending and refuses a canceled, accepted, rejected, or expired link.
+or lazy reconciliation.
+
+Rechecking state alone does not close the race with SMTP. Before an attempt, the
+worker acquires a dedicated PostgreSQL session advisory lock for the delivery,
+then uses a row-level compare-and-set to change an eligible `queued` or
+`retrying` delivery to `sending` with an attempt id and deadline. It rechecks
+the invitation after acquiring the lock and immediately before invoking SMTP.
+The advisory lock is held across the bounded SMTP call, but no database
+transaction is held open. Strict connection/socket deadlines are shorter than
+the delivery deadline.
+
+Cancellation/rejection takes the same delivery advisory lock before changing
+invitation, reservation, or delivery state. If a live sender owns the lock, the
+operation returns a specific `delivery_in_flight` conflict (or waits only for a
+short bounded interval) and commits no cancellation; the UI keeps the action
+pending and retries. Once the lock is acquired, the operation atomically marks
+the invitation and delivery canceled and releases the reservation, after which
+no sender can pass the locked recheck. A worker crash closes its database
+session and releases the advisory lock; reconciliation may reclaim a stale
+`sending` row only after confirming the lock is free and the attempt deadline
+has passed.
 
 ### Initial owner provisioning
 
@@ -393,16 +419,43 @@ domain/auth event
 ```
 
 `email_deliveries` persists UI/operations state independently of pg-boss job
-retention. It records kind, recipient, source reference, status, attempt/error
-classification, and timestamps. Sensitive template properties such as reset or
-verification links are encrypted at rest behind the delivery id and removed
-after successful delivery or terminal expiry. Jobs and logs never contain SMTP
-passwords, invitation/reset tokens, signed object URLs, or complete message
-bodies.
+retention. It records scope (`tenantId` for invitation/tenant mail or `userId`
+for global account mail), kind, recipient, source reference, status,
+attempt/error classification, and timestamps. Every tenant-facing lookup is
+scoped by the authenticated active tenant; tenant admins can see only that
+tenant's deliveries. Password-reset and verification deliveries are never
+exposed through tenant team APIs. Database foreign keys/cascades and service
+queries both preserve that boundary.
+
+Sensitive template properties such as reset or verification links are
+encrypted at rest behind the delivery id. They are erased immediately after a
+successful send, when the source token/invitation becomes invalid, or within 24
+hours of a terminal failure, whichever happens first. Jobs and logs never
+contain SMTP passwords, invitation/reset tokens, signed object URLs, or complete
+message bodies. Error storage is bounded and allowlisted to transport category,
+SMTP response class/code, attempt count, and sanitized diagnostic text; it
+cannot retain headers, recipient-supplied content, message bodies, or tokens.
+
+PII retention is explicit: successful, canceled, rejected, and expired delivery
+metadata is deleted after 30 days; terminally failed metadata is deleted after
+90 days for operations diagnosis. Aggregate metrics keep only non-identifying
+counts. Tenant deletion cancels unsent work and erases its encrypted payloads
+and delivery PII in the deletion transaction/outbox workflow. Account deletion
+does the same for global account mail and removes or anonymizes any remaining
+recipient/source fields within 24 hours. Audit events follow their separate
+retention policy and contain ids/actions, not recipient addresses or message
+content. A scheduled retention job is idempotent and emits counts rather than
+deleted PII.
 
 Transient SMTP errors retry with bounded exponential backoff. Permanent errors
 become `failed` and are visible to an authorized administrator. Resend creates a
 new delivery attempt for the still-valid source rather than mutating history.
+
+The invitation/delivery/audit/outbox rows are committed together. The outbox
+dispatcher claims unpublished rows with `FOR UPDATE SKIP LOCKED`, enqueues by
+stable delivery identity, and marks publication only after pg-boss accepts it.
+The queued-delivery reconciler is a second recovery path, not the normal
+publisher.
 
 SMTP is inherently at-least-once at the application boundary: if the server
 accepts a message and the connection fails before acknowledgement is observed,
@@ -468,12 +521,34 @@ receives the image so it can enforce policy and normalize it before storage:
 
 - accepted source formats: JPEG, PNG, and WebP;
 - maximum source size: 5 MiB;
-- decode and validate actual content, not only filename/MIME headers;
+- inspect decoder metadata before full decode and validate actual content, not
+  only filename/MIME headers;
+- reject animation/multiple pages, either dimension above 8192 pixels, or more
+  than 25 million total pixels before auto-orientation or pixel allocation;
+- run decoding/normalization in a bounded worker with a 128 MiB memory budget,
+  a five-second wall-clock deadline, and capped process-wide concurrency;
 - auto-orient, strip EXIF/metadata, resize to 512 x 512, and encode WebP;
 - compute checksum and store dimensions/size;
-- update the profile only after the new object is durable;
+- create and commit a `media_assets` row in `staging` state, with generated
+  object key and intended owner, before uploading bytes;
+- upload the object, then switch the profile and mark the new asset `active` in
+  a separate transaction only after the object is durable;
 - delete the previous asset asynchronously after the database switch;
-- collect upload orphans left by interrupted operations.
+- collect stale `staging` assets and objects left by interrupted operations.
+
+The resource bounds apply inside the decoder as well as in application-level
+metadata checks, so a forged header cannot bypass them. On a timeout or memory
+limit, the isolated worker is terminated and the upload fails without changing
+the profile.
+
+The committed staging row is the durable cleanup intent. If upload or the
+profile-switch transaction fails, the old avatar remains referenced and the
+staging row survives for an idempotent sweeper to delete any uploaded object and
+then its metadata row. If the process dies after the profile switch, the new
+asset is already `active`, while the previous asset is marked `deleting` and is
+retried independently. A periodic reconciliation of stale asset states is the
+backstop; correctness does not depend on an in-memory cleanup callback or on a
+rolled-back profile transaction.
 
 Only the account owner can upload or delete the global avatar. Tenant admins
 may view it through team data but cannot replace it.
@@ -539,8 +614,18 @@ profiles on sign-in before using profile-dependent UI.
   and UI shows failure after exhaustion.
 - Mail render failure: terminal delivery error with no SMTP attempt; source
   invitation remains valid.
-- Invitation canceled while queued: worker recheck cancels delivery without
-  sending.
+- Outbox dispatcher unavailable after invitation commit: the committed outbox
+  row remains publishable, and queued-delivery reconciliation restores a
+  missing job without creating a second logical delivery.
+- Invitation canceled while queued: cancellation takes the delivery advisory
+  lock and atomically changes the delivery to `canceled`; a later worker cannot
+  claim it.
+- Invitation cancellation races an active SMTP send: cancellation does not
+  commit while the sender owns the delivery lock; the API returns
+  `delivery_in_flight`, and the UI retries after the bounded send completes.
+- Mail worker crashes in `sending`: the session lock is released; reconciliation
+  can reclaim the attempt only after its deadline and only while the lock is
+  free.
 - Acceptance finalizer interrupted: idempotent reconciliation repairs member
   profile/employee claim.
 - Employee archived while invitation pending: acceptance may create cabinet
@@ -550,8 +635,9 @@ profiles on sign-in before using profile-dependent UI.
   no second link or invitation reservation is created.
 - S3 unavailable during upload: existing avatar stays active and profile data
   is unchanged.
-- Database update fails after new object upload: object is recorded for orphan
-  cleanup; old avatar remains active.
+- Profile switch fails after new object upload: the committed `staging` asset
+  survives as cleanup intent, the old avatar remains active, and the sweeper
+  deletes the orphaned object and metadata idempotently.
 - Old-object deletion fails after replacement: new avatar remains active and
   deletion retries asynchronously.
 
@@ -563,11 +649,18 @@ profiles on sign-in before using profile-dependent UI.
   member do not.
 - Owner/self target-policy matrix for every team mutation.
 - Email normalization, invitation expiry, resend, and delivery-state mapping.
+- Transactional-outbox replay, stable delivery idempotency, and stale
+  queued-delivery reconciliation.
+- Delivery claim/deadline transitions and cancellation behavior for queued and
+  in-flight sends.
+- Mail error sanitization plus encrypted-payload and PII retention cutoffs.
 - React Email templates render escaped HTML and useful plain text with required
   links/content.
 - SMTP error classification and retry policy with a fake Nodemailer transport.
 - Avatar decoding, real-format validation, metadata stripping, resize, and
-  object-key generation.
+  object-key generation, including dimension, pixel, frame, memory, and timeout
+  rejection.
+- Media-asset state transitions and idempotent stale-staging cleanup.
 
 ### Database and API tests
 
@@ -585,9 +678,22 @@ profiles on sign-in before using profile-dependent UI.
 - Raw Better Auth mutation routes cannot bypass application policy.
 - Public signup without a valid invitation fails in production configuration.
 - Existing-user and new-user acceptance require exact normalized email.
-- Mail worker skips invalidated invitations and records retry/failure state.
+- Invitation, audit, delivery, and outbox creation commit or roll back together.
+- Dispatcher retries, including a crash after enqueue and before publication is
+  marked, retain one logical job per delivery; reconciliation repairs missing
+  publication.
+- A real concurrent cancel-versus-send test proves cancellation either wins
+  before SMTP starts or returns `delivery_in_flight` without reporting a false
+  cancellation.
+- Mail worker skips invalidated invitations and records retry/failure state;
+  stale `sending` recovery observes both the attempt deadline and advisory
+  lock.
+- Tenant delivery queries cannot read another tenant or global account mail;
+  retention and tenant/account deletion purge payloads and PII at their stated
+  boundaries.
 - Avatar access is owner-authorized, cross-user/tenant reads fail, and failed
-  replacement preserves the previous asset.
+  replacement preserves the previous asset while durable staging cleanup
+  removes any uploaded orphan.
 
 ### Browser E2E
 
@@ -626,9 +732,16 @@ profiles on sign-in before using profile-dependent UI.
   position, employee, login, PIN, and badge assignments.
 - Invitation, reset, and verification email render through `@markiro/email`,
   retry through pg-boss, and send through generic Nodemailer SMTP.
+- Committed mail cannot be stranded between domain state and queue publication;
+  concurrent cancellation never reports success while an SMTP send is in
+  flight.
+- Delivery payloads and metadata follow tenant-safe access, bounded diagnostics,
+  deletion, and retention rules.
 - Mailpit and MinIO provide complete local email and object-storage workflows.
 - Users can maintain global structured names and upload a normalized private
-  avatar; tenant admins cannot edit another user's global profile.
+  avatar within enforced decoder resource limits; tenant admins cannot edit
+  another user's global profile, and interrupted uploads remain durably
+  cleanable.
 - Security-sensitive team/profile actions are capability-checked, tenant-scoped,
   audited, and unavailable through a weaker Better Auth route.
 - The object-storage boundary is explicitly reusable for a later product-image
