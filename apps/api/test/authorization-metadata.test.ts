@@ -6,7 +6,9 @@ import {
   ROUTE_ACCESS_POLICY,
   type RouteAccessPolicy,
 } from "../src/authorization/access-policy";
+import { AccessController } from "../src/authorization/access.controller";
 import { AuthorizationGuard } from "../src/authorization/authorization.guard";
+import { ApiKeysController } from "../src/modules/api-keys/api-keys.controller";
 import { BoxExceptionsController } from "../src/modules/box-exceptions/box-exceptions.controller";
 import { BoxesController } from "../src/modules/boxes/boxes.controller";
 import { ConflictsController } from "../src/modules/conflicts/conflicts.controller";
@@ -14,13 +16,20 @@ import { CounterpartiesController } from "../src/modules/counterparties/counterp
 import { EmployeesController } from "../src/modules/employees/employees.controller";
 import { LabelTemplatesController } from "../src/modules/label-templates/label-templates.controller";
 import { LinesController } from "../src/modules/lines/lines.controller";
+import {
+  IntegrationsController,
+  ProductExternalLinkController,
+} from "../src/modules/integrations/integrations.controller";
+import { KiosksController } from "../src/modules/kiosks/kiosks.controller";
 import { OperatorsController } from "../src/modules/operators/operators.controller";
+import { OrgProfileController } from "../src/modules/org-profile/org-profile.controller";
 import { StationOperatorsController } from "../src/modules/operators/station-operators.controller";
 import { PickupOrdersController } from "../src/modules/pickup-orders/pickup-orders.controller";
 import { PickupReasonsController } from "../src/modules/pickup-reasons/pickup-reasons.controller";
 import { PickupRejectionsController } from "../src/modules/pickup-rejections/pickup-rejections.controller";
 import { ProductsController } from "../src/modules/products/products.controller";
 import { ShiftsController } from "../src/modules/shifts/shifts.controller";
+import { StationDevicesController } from "../src/modules/station-devices/station-devices.controller";
 import { StationScansController } from "../src/modules/station-scans/station-scans.controller";
 import { StationOnlyGuard } from "../src/tenancy/station-only.guard";
 import { TenantGuard } from "../src/tenancy/tenant.guard";
@@ -45,6 +54,29 @@ const sharedReadPolicy = {
 const sharedWritePolicy = {
   mode: "station-or-cabinet",
   capabilities: ["operations.write"],
+} satisfies RouteAccessPolicy;
+const membershipPolicy = {
+  mode: "membership",
+} satisfies RouteAccessPolicy;
+const settingsPolicy = {
+  mode: "cabinet",
+  capabilities: ["tenant.settings.manage"],
+} satisfies RouteAccessPolicy;
+const integrationsReadPolicy = {
+  mode: "cabinet",
+  capabilities: ["integrations.read"],
+} satisfies RouteAccessPolicy;
+const integrationsWritePolicy = {
+  mode: "cabinet",
+  capabilities: ["integrations.write"],
+} satisfies RouteAccessPolicy;
+const integrationCredentialsPolicy = {
+  mode: "cabinet",
+  capabilities: ["integrations.write", "credentials.manage"],
+} satisfies RouteAccessPolicy;
+const credentialsPolicy = {
+  mode: "cabinet",
+  capabilities: ["credentials.manage"],
 } satisfies RouteAccessPolicy;
 
 const OPERATIONAL_CONTROLLERS: readonly [
@@ -153,6 +185,57 @@ const OPERATIONAL_CONTROLLERS: readonly [
   ],
 ];
 
+const ADMINISTRATIVE_CONTROLLERS: readonly [
+  ControllerClass,
+  Readonly<Record<string, RouteAccessPolicy>>,
+][] = [
+  [AccessController, { me: membershipPolicy }],
+  [
+    OrgProfileController,
+    {
+      getProfile: settingsPolicy,
+      putProfile: settingsPolicy,
+      getSscc: settingsPolicy,
+      putSscc: settingsPolicy,
+    },
+  ],
+  [
+    IntegrationsController,
+    {
+      list: integrationsReadPolicy,
+      detail: integrationsReadPolicy,
+      update: integrationsWritePolicy,
+      journal: integrationsReadPolicy,
+      issueCredentials: integrationCredentialsPolicy,
+      listCandidates: integrationsReadPolicy,
+      linkCandidate: integrationsWritePolicy,
+      hideCandidate: integrationsWritePolicy,
+      unhideCandidate: integrationsWritePolicy,
+    },
+  ],
+  [ProductExternalLinkController, { unlink: integrationsWritePolicy }],
+  [
+    ApiKeysController,
+    { list: credentialsPolicy, create: credentialsPolicy, revoke: credentialsPolicy },
+  ],
+  [
+    StationDevicesController,
+    { list: credentialsPolicy, enroll: credentialsPolicy, revoke: credentialsPolicy },
+  ],
+  [
+    KiosksController,
+    {
+      listKiosks: readPolicy,
+      createKiosk: writePolicy,
+      updateKiosk: writePolicy,
+      archiveKiosk: writePolicy,
+      setProducts: writePolicy,
+      enroll: credentialsPolicy,
+      issuePairingCode: credentialsPolicy,
+    },
+  ],
+];
+
 const STATION_ONLY_CONTROLLERS: readonly [ControllerClass, readonly string[]][] = [
   [StationOperatorsController, ["listRoster"]],
   [StationScansController, ["ingest"]],
@@ -168,8 +251,8 @@ function routeMethods(controller: ControllerClass): string[] {
   });
 }
 
-describe("operational route authorization metadata", () => {
-  it.each(OPERATIONAL_CONTROLLERS)(
+describe("cabinet route authorization metadata", () => {
+  it.each([...OPERATIONAL_CONTROLLERS, ...ADMINISTRATIVE_CONTROLLERS])(
     "%s declares the exact policy for every route",
     (controller, expectedPolicies) => {
       const classGuards = Reflect.getMetadata(GUARDS_METADATA, controller) ?? [];

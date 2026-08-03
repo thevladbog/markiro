@@ -194,7 +194,7 @@ export class PickupOrdersService {
     // 403 would have been the same mistake in a different digit — it also
     // speaks about the CALLER's authority, which is not what is wrong here, and
     // this codebase already uses it that way (`TenantGuard`,
-    // `SessionOnlyGuard`). 422 is already in the kiosk's terminal allowlist
+    // `AuthorizationGuard`). 422 is already in the kiosk's terminal allowlist
     // (`TERMINAL_STATUSES`, apps/kiosk/src/sync/worker.ts), so the queue
     // unblocks the moment this ships, including on a device still running an
     // older bundle.

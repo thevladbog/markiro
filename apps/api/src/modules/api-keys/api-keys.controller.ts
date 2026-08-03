@@ -1,7 +1,10 @@
 import { Body, Controller, Delete, Get, Param, Post, Req, UseGuards } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
+import { CABINET_CAPABILITY } from "@markiro/domain";
 import { z } from "zod";
-import { SessionOnlyGuard } from "../../tenancy/session-only.guard";
+import { RequirePermissions } from "../../authorization/access-policy";
+import { AuthorizationGuard } from "../../authorization/authorization.guard";
+import { SecurityAuditService } from "../../authorization/security-audit.service";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import { ApiKeysService, type ApiKeyIssuedDto, type ApiKeySummaryDto } from "./api-keys.service";
@@ -18,14 +21,18 @@ type CreateApiKeyDto = z.infer<typeof createApiKeySchema>;
  * Маршруты закреплены под литеральным `public_api/keys`, а не под общим
  * `:type` из `IntegrationsController`, потому что выпуск/отзыв ключей — это
  * операция, которая существует только для этого одного канала. Кабинетный
- * раздел: `TenantGuard` + `SessionOnlyGuard`, ключ станции или киоска сюда
+ * раздел: `TenantGuard` + `AuthorizationGuard`, ключ станции или киоска сюда
  * не доходит (docs/device-key-surface.md).
  */
 @ApiTags("integrations")
 @Controller("integrations/public_api/keys")
-@UseGuards(TenantGuard, SessionOnlyGuard)
+@UseGuards(TenantGuard, AuthorizationGuard)
+@RequirePermissions(CABINET_CAPABILITY.CREDENTIALS_MANAGE)
 export class ApiKeysController {
-  constructor(private readonly service: ApiKeysService) {}
+  constructor(
+    private readonly service: ApiKeysService,
+    private readonly audit: SecurityAuditService,
+  ) {}
 
   @Get()
   async list(@Req() req: RequestWithTenant): Promise<{ keys: ApiKeySummaryDto[] }> {
@@ -39,11 +46,24 @@ export class ApiKeysController {
     @Req() req: RequestWithTenant,
     @Body(new ZodValidationPipe(createApiKeySchema)) body: CreateApiKeyDto,
   ): Promise<ApiKeyIssuedDto> {
-    return this.service.create(req.tenantId!, req.userId!, body.name);
+    const result = await this.service.create(req.tenantId!, req.userId!, body.name);
+    this.audit.credentialMutation({
+      tenantId: req.tenantId!,
+      userId: req.userId!,
+      action: "public_api_key.issue",
+      resourceId: result.id,
+    });
+    return result;
   }
 
   @Delete(":id")
   async revoke(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<void> {
     await this.service.revoke(req.tenantId!, id);
+    this.audit.credentialMutation({
+      tenantId: req.tenantId!,
+      userId: req.userId!,
+      action: "public_api_key.revoke",
+      resourceId: id,
+    });
   }
 }

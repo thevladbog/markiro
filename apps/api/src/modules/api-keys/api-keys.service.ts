@@ -78,8 +78,8 @@ export class ApiKeysService {
    * `userId` is required by the plugin's `references: "organization"` path
    * (it checks that user is a member of `organizationId` with permission to
    * manage api-keys) -- the caller passes `req.userId`, set by `TenantGuard`
-   * on its session branch, which `SessionOnlyGuard` on this controller
-   * guarantees is present.
+   * on its session branch, which `AuthorizationGuard` on this controller
+   * requires before resolving cabinet permissions.
    */
   async create(tenantId: string, userId: string, name: string): Promise<ApiKeyIssuedDto> {
     const created = await this.auth.api.createApiKey({

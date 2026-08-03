@@ -130,7 +130,7 @@ const REPEATED_PARAM_MESSAGE = "repeated query parameter";
  * and bracket syntax (`?filename[x]=y`) comes back a nested object.
  * Something a genuine 1С "Обмен с сайтом" client never sends -- спека §3
  * addresses one value per key, always -- but this route carries neither
- * `TenantGuard` nor `SessionOnlyGuard` (see the class-level comment: it is
+ * `TenantGuard` nor the cabinet `AuthorizationGuard` (see the class-level comment: it is
  * the one cabinet-adjacent route reachable with no credential at all), so
  * whatever shows up here is externally controlled input a reader cannot
  * assume away.
@@ -229,7 +229,7 @@ const UUID_SHAPE_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-
  * `checkauth` -> `init` -> `mode=file` (chunked upload), repeated. Parsing
  * and applying an assembled file (`mode=import`) is later work.
  *
- * Deliberately carries NEITHER `TenantGuard` NOR `SessionOnlyGuard`. This is
+ * Deliberately carries NEITHER `TenantGuard` NOR `AuthorizationGuard`. This is
  * not an oversight -- it is the one cabinet-adjacent route that cannot use
  * either: the tenant is resolved from the exchange's OWN machine credentials
  * (Basic auth on `checkauth`, then a session cookie this controller itself

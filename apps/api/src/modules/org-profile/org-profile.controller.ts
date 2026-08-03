@@ -1,7 +1,9 @@
 import { Body, Controller, Get, Put, Req, UseGuards } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
+import { CABINET_CAPABILITY } from "@markiro/domain";
+import { RequirePermissions } from "../../authorization/access-policy";
+import { AuthorizationGuard } from "../../authorization/authorization.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
-import { SessionOnlyGuard } from "../../tenancy/session-only.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
   putOrgProfileSchema,
@@ -14,9 +16,8 @@ import { OrgProfileService } from "./org-profile.service";
 
 @ApiTags("org-profile")
 @Controller("org/profile")
-// The station never calls this module. SessionOnlyGuard keeps a station
-// api-key out even though TenantGuard accepts it for tenant resolution.
-@UseGuards(TenantGuard, SessionOnlyGuard)
+@UseGuards(TenantGuard, AuthorizationGuard)
+@RequirePermissions(CABINET_CAPABILITY.TENANT_SETTINGS_MANAGE)
 export class OrgProfileController {
   constructor(private readonly orgProfileService: OrgProfileService) {}
 
