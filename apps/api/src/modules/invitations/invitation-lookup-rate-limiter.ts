@@ -16,12 +16,17 @@ export class InvitationLookupRateLimiter {
 
   assertAllowed(source: string, invitationId: string, now = Date.now()): void {
     const normalizedSource = source.trim().slice(0, 128) || "unknown";
-    this.#charge(`source:${normalizedSource}`, SOURCE_BUDGET, now);
-    this.#charge(`invitation:${normalizedSource}:${invitationId}`, INVITATION_BUDGET, now);
+    this.#charge(`source:${normalizedSource}`, "overflow:source", SOURCE_BUDGET, now);
+    this.#charge(
+      `invitation:${normalizedSource}:${invitationId}`,
+      "overflow:invitation",
+      INVITATION_BUDGET,
+      now,
+    );
   }
 
-  #charge(rawKey: string, budget: number, now: number): void {
-    const key = this.#boundedKey(rawKey, now);
+  #charge(rawKey: string, overflowKey: string, budget: number, now: number): void {
+    const key = this.#boundedKey(rawKey, overflowKey, now);
     const current = this.#counters.get(key);
     const window =
       !current || now - current.startedAt >= WINDOW_MS ? { startedAt: now, count: 0 } : current;
@@ -35,11 +40,11 @@ export class InvitationLookupRateLimiter {
     }
   }
 
-  #boundedKey(rawKey: string, now: number): string {
+  #boundedKey(rawKey: string, overflowKey: string, now: number): string {
     if (this.#counters.has(rawKey) || this.#counters.size < MAX_TRACKED_WINDOWS) return rawKey;
     for (const [key, value] of this.#counters) {
       if (now - value.startedAt >= WINDOW_MS) this.#counters.delete(key);
     }
-    return this.#counters.size < MAX_TRACKED_WINDOWS ? rawKey : "overflow";
+    return this.#counters.size < MAX_TRACKED_WINDOWS ? rawKey : overflowKey;
   }
 }
