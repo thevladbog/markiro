@@ -125,6 +125,39 @@ describe("RegisterPage", () => {
 });
 
 describe("CreateOrgPage", () => {
+  it("clears tenant query data before organization creation can switch the tenant", async () => {
+    let resolveCreate!: (value: { data: { id: string }; error: null }) => void;
+    const createResult = new Promise<{ data: { id: string }; error: null }>((resolve) => {
+      resolveCreate = resolve;
+    });
+    const client = createFakeAuthClient({
+      organization: {
+        create: vi.fn(() => createResult),
+        list: vi.fn(async () => ({ data: [] as OrganizationSummary[], error: null })),
+        setActive: vi.fn(async () => ({ data: {}, error: null })),
+      },
+    });
+    const { queryClient } = renderRouted(client, "/org/create", <CreateOrgPage />);
+    queryClient.setQueryData(["tenant-secret"], "OLD_ORG_SECRET");
+
+    fireEvent.change(screen.getByLabelText("Название организации"), {
+      target: { value: "Acme Corp" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Создать" }));
+
+    await waitFor(() => {
+      expect(client.organization.create).toHaveBeenCalledWith({
+        name: "Acme Corp",
+        slug: "acme-corp",
+      });
+    });
+    expect(queryClient.getQueryData(["tenant-secret"])).toBeUndefined();
+    expect(screen.queryByText("SHELL_PLACEHOLDER")).toBeNull();
+
+    resolveCreate({ data: { id: "org_1" }, error: null });
+    await screen.findByText("SHELL_PLACEHOLDER");
+  });
+
   it("derives a slug from the name, creates, and activates the organization", async () => {
     const client = createFakeAuthClient();
     renderRouted(client, "/org/create", <CreateOrgPage />);

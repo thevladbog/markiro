@@ -64,12 +64,12 @@ export function CreateOrgPage() {
 
   const onSubmit = handleSubmit(async (values) => {
     setSubmitError(null);
+    clearAuthQueryCache();
     const { data, error } = await authClient.organization.create(values);
     if (error || !data) {
       setSubmitError(error?.message ?? t("auth.createOrg.genericError"));
       return;
     }
-    clearAuthQueryCache();
     await authClient.organization.setActive({ organizationId: data.id });
     void navigate("/", { replace: true });
   });
