@@ -62,6 +62,10 @@ export interface AuthClientLike {
       name: string;
     }) => Promise<AuthActionResult<unknown>>;
   };
+  resetPassword: (input: {
+    newPassword: string;
+    token: string;
+  }) => Promise<AuthActionResult<{ status: boolean }>>;
   signOut: () => Promise<AuthActionResult<unknown>>;
   organization: {
     create: (input: { name: string; slug: string }) => Promise<AuthActionResult<{ id: string }>>;

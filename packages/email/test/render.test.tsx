@@ -51,6 +51,23 @@ describe("renderEmail", () => {
     expect(output.text).toContain("30 минут");
   });
 
+  it("renders first-owner activation copy instead of claiming a reset was requested", async () => {
+    const output = await renderEmail({
+      kind: "tenant-owner-activation",
+      recipientName: "Владелец",
+      organizationName: "Первый завод",
+      actionUrl: "https://cabinet.example/activate-owner#token=setup-token",
+      expiresInMinutes: 60,
+    });
+
+    expect(output.subject).toBe("Доступ к Первый завод — Маркиро");
+    expect(output.html).toContain("Активировать доступ");
+    expect(output.text).toContain("пароль останется без изменений");
+    expect(output.text).toContain("Для вас создан кабинет организации Первый завод");
+    expect(output.text).toContain("https://cabinet.example/activate-owner#token=setup-token");
+    expect(output.text).not.toContain("получили запрос на смену пароля");
+  });
+
   it("renders email verification with useful preview and plain text", async () => {
     const output = await renderEmail({
       kind: "email-verification",

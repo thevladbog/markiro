@@ -10,6 +10,43 @@ The authorization design is documented in
 [`Capability-Based Cabinet RBAC`](../superpowers/specs/2026-08-03-capability-rbac-design.md).
 No schema migration or permissive authorization flag is part of this rollout.
 
+## 0. Provision the first tenant owner
+
+For a new SaaS tenant, provision exactly one initial owner before the role
+smokes below. Supply production SMTP, payload-encryption, database, and S3
+settings through the approved secret manager; do not place them in command
+history or this repository. Apply database migrations first, then run:
+
+```sh
+pnpm --silent --filter @markiro/api provision:tenant-owner -- \
+  --email owner@example.com \
+  --tenant-name 'Первый завод' \
+  --tenant-slug first-factory
+```
+
+The command intentionally has no password argument. It transactionally creates
+the organization, global account/profile, owner membership, one-time setup
+token, durable activation delivery, and a token-free
+`tenant.owner.provisioned` audit event. Repeating the exact command returns the
+same identifiers and does not enqueue another email. Its stdout contains only
+`tenantId`, `userId`, `memberId`, and `deliveryId`; retain those identifiers in
+the protected rollout record, never the setup link or token. A new global
+account chooses its first password during activation. An existing multi-tenant
+account confirms the address without changing its shared password.
+
+If the unused link expires, run the exact command again with the standalone
+`--renew-activation` switch. This invalidates the old token and queues one new
+delivery without changing the tenant, user, membership, or password. The
+switch is rejected while a delivery is actively sending and after the address
+has already been verified; wait for the worker in the former case and use the
+normal password-recovery flow in the latter. Do not repair activation rows by
+hand.
+
+Confirm the delivery reached the intended mailbox, the link opens the cabinet
+owner-activation screen, and the owner is forced to complete their structured
+profile after signing in. Stop if the slug already belongs to a different
+first member or if delivery reaches an unexpected address.
+
 ## Before the maintenance window
 
 - Select one tested application revision. Record its immutable commit SHA and

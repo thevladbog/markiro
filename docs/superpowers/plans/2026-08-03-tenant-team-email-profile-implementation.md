@@ -493,7 +493,7 @@ Commit: `feat(admin): add team invitations and profile flows`
 **Interfaces:**
 
 - Local ports: Mailpit SMTP `1025`, Mailpit UI `8025`, MinIO S3 `9000`, MinIO console `9001`.
-- CLI: `pnpm --filter @markiro/api provision:tenant-owner -- --email <address> --tenant-name <name> --tenant-slug <slug>`; no password argument.
+- CLI: `pnpm --silent --filter @markiro/api provision:tenant-owner -- --email <address> --tenant-name <name> --tenant-slug <slug>`; no password argument. Silent mode prevents the package runner from echoing forbidden input before the CLI can reject it.
 
 - [ ] **Step 1: Write provisioning RED test**
 

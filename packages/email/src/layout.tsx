@@ -4,10 +4,11 @@ import { Body, Container, Head, Heading, Hr, Html, Preview, Section, Text } from
 interface EmailLayoutProps {
   preview: string;
   heading: string;
+  footer?: string;
   children: ReactNode;
 }
 
-export function EmailLayout({ preview, heading, children }: EmailLayoutProps) {
+export function EmailLayout({ preview, heading, footer, children }: EmailLayoutProps) {
   return (
     <Html lang="ru">
       <Head />
@@ -23,8 +24,8 @@ export function EmailLayout({ preview, heading, children }: EmailLayoutProps) {
             {children}
             <Hr style={styles.divider} />
             <Text style={styles.footer}>
-              Это автоматическое письмо от Маркиро. Если вы не запрашивали это действие, письмо
-              можно удалить.
+              {footer ??
+                "Это автоматическое письмо от Маркиро. Если вы не запрашивали это действие, письмо можно удалить."}
             </Text>
           </Section>
         </Container>
