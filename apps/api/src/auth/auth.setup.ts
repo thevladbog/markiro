@@ -2,6 +2,8 @@ import { toNodeHandler } from "better-auth/node";
 import type { Express } from "express";
 import { buildAuth, createDb, type Auth } from "@markiro/db";
 import { sessionAllowedOrigins, type Env } from "../env";
+import { MailCryptoService } from "../modules/mail/mail-crypto.service";
+import { MailDeliveryService } from "../modules/mail/mail-delivery.service";
 
 // `DbConnection` re-uses createDb's own return type by reference (rather
 // than spelling out `NodePgDatabase`/`pg.Pool`, which live in @markiro/db's
@@ -14,6 +16,7 @@ type DbConnection = ReturnType<typeof createDb>;
 /** Builds the DB pool + Better Auth instance from validated env. */
 export function setupAuth(env: Env): DbConnection & { auth: Auth } {
   const { db, pool } = createDb(env.DATABASE_URL);
+  const mailDelivery = new MailDeliveryService(new MailCryptoService(env.MAIL_PAYLOAD_ENCRYPTION_KEY));
   const auth = buildAuth(db, {
     secret: env.BETTER_AUTH_SECRET,
     baseURL: env.BETTER_AUTH_URL,
@@ -24,20 +27,79 @@ export function setupAuth(env: Env): DbConnection & { auth: Auth } {
     // (it authenticates with a device token), so trusting it would only widen
     // what an attacker on that origin can do with an admin's session.
     trustedOrigins: sessionAllowedOrigins(env),
+    sendResetPassword: async ({ user, url }) => {
+      await db.transaction((tx) =>
+        mailDelivery.enqueue(tx, {
+          scope: { userId: user.id },
+          recipient: user.email,
+          template: {
+            kind: "password-reset",
+            recipientName: user.name || "Пользователь",
+            actionUrl: url,
+            expiresInMinutes: 60,
+          },
+        }),
+      );
+    },
+    sendVerificationEmail: async ({ user, url }) => {
+      await db.transaction((tx) =>
+        mailDelivery.enqueue(tx, {
+          scope: { userId: user.id },
+          recipient: user.email,
+          template: {
+            kind: "email-verification",
+            recipientName: user.name || "Пользователь",
+            actionUrl: url,
+            expiresInMinutes: 60,
+          },
+        }),
+      );
+    },
   });
   return { db, pool, auth };
 }
 
 export type AuthSetup = ReturnType<typeof setupAuth>;
 
+const TEAM_MUTATION_PATHS = new Set([
+  "/api/auth/organization/invite-member",
+  "/api/auth/organization/cancel-invitation",
+  "/api/auth/organization/accept-invitation",
+  "/api/auth/organization/reject-invitation",
+  "/api/auth/organization/remove-member",
+  "/api/auth/organization/update-member-role",
+]);
+
 /**
  * Better Auth needs the raw (unparsed) request body — mount BEFORE any json
  * body parser is installed on the server (see main.ts: app created with
  * `{ bodyParser: false }`).
  */
-export function mountAuth(server: Express, auth: AuthSetup["auth"]) {
+export function mountAuth(
+  server: Express,
+  auth: AuthSetup["auth"],
+  options: { allowTestSignUp?: boolean } = {},
+) {
+  const allowTestSignUp = options.allowTestSignUp ?? process.env.NODE_ENV === "test";
+  if (allowTestSignUp && process.env.NODE_ENV !== "test") {
+    throw new Error("allowTestSignUp is restricted to NODE_ENV=test");
+  }
+  server.all("/api/auth/sign-up/email", (_request, response, next) => {
+    if (allowTestSignUp) {
+      next();
+      return;
+    }
+    response.sendStatus(404);
+  });
   server.all("/api/auth/api-key/*splat", (_request, response) => {
     response.sendStatus(404);
+  });
+  server.all("/api/auth/organization/*splat", (request, response, next) => {
+    if (TEAM_MUTATION_PATHS.has(request.path)) {
+      response.sendStatus(404);
+      return;
+    }
+    next();
   });
   server.all("/api/auth/*splat", toNodeHandler(auth));
 }

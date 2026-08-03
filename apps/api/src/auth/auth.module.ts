@@ -10,7 +10,7 @@ import type { AuthSetup } from "./auth.setup";
 
 export const AUTH = "AUTH";
 export const DB = "DB";
-const POOL = "AUTH_POOL";
+export const DB_POOL = "DB_POOL";
 
 // Reuses setupAuth's own `pool` type by reference instead of importing
 // `pg.Pool` directly (that type lives in @markiro/db's own node_modules and
@@ -28,7 +28,7 @@ type Pool = AuthSetup["pool"];
  */
 @Injectable()
 class AuthPoolCloser implements OnModuleDestroy {
-  constructor(@Inject(POOL) private readonly pool: Pool) {}
+  constructor(@Inject(DB_POOL) private readonly pool: Pool) {}
 
   async onModuleDestroy(): Promise<void> {
     await this.pool.end();
@@ -50,10 +50,10 @@ export class AuthModule {
       providers: [
         { provide: AUTH, useValue: setup.auth },
         { provide: DB, useValue: setup.db },
-        { provide: POOL, useValue: setup.pool },
+        { provide: DB_POOL, useValue: setup.pool },
         AuthPoolCloser,
       ],
-      exports: [AUTH, DB],
+      exports: [AUTH, DB, DB_POOL],
     };
   }
 }

@@ -5,6 +5,8 @@ import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule } from "../src/app.module";
+import { schema } from "@markiro/db";
+import { and, eq, inArray } from "drizzle-orm";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { listenOnLoopback } from "./support/listen-loopback";
@@ -70,6 +72,15 @@ describe.skipIf(!ready)("auth e2e", () => {
     expect(org.body.id).toBeTruthy();
   });
 
+  it("blocks ordinary public signup outside the explicit test bootstrap", async () => {
+    const lockedServer = express();
+    mountAuth(lockedServer, setup.auth, { allowTestSignUp: false });
+    await request(lockedServer)
+      .post("/api/auth/sign-up/email")
+      .send({ email: `blocked-${randomUUID()}@example.com`, password: "not-used", name: "Blocked" })
+      .expect(404);
+  });
+
   it("organization create without a session is unauthorized", async () => {
     await request(app!.getHttpServer())
       .post("/api/auth/organization/create")
@@ -85,5 +96,57 @@ describe.skipIf(!ready)("auth e2e", () => {
       .post("/api/auth/api-key/create")
       .send({ configId: "station", organizationId, name: "bypass" })
       .expect(404);
+  });
+
+  it("does not expose raw organization membership mutations beside Team API", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const organizationId = await signUpAndActivate(agent);
+    const mutationPaths = [
+      "invite-member",
+      "cancel-invitation",
+      "accept-invitation",
+      "reject-invitation",
+      "remove-member",
+      "update-member-role",
+    ];
+
+    for (const path of mutationPaths) {
+      await agent.post(`/api/auth/organization/${path}`).send({ organizationId }).expect(404);
+    }
+  });
+
+  it("queues password-reset and verification emails without SMTP in the request", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const organizationId = await signUpAndActivate(agent);
+    const [member] = await setup.db
+      .select({ userId: schema.member.userId })
+      .from(schema.member)
+      .where(eq(schema.member.organizationId, organizationId));
+    const [user] = await setup.db
+      .select({ email: schema.user.email })
+      .from(schema.user)
+      .where(eq(schema.user.id, member!.userId));
+
+    await agent
+      .post("/api/auth/request-password-reset")
+      .send({ email: user!.email, redirectTo: "http://localhost:5173/reset-password" })
+      .expect(200);
+    await agent
+      .post("/api/auth/send-verification-email")
+      .send({ email: user!.email, callbackURL: "http://localhost:5173/profile" })
+      .expect(200);
+
+    const deliveries = await setup.db
+      .select({ kind: schema.emailDeliveries.kind, userId: schema.emailDeliveries.userId })
+      .from(schema.emailDeliveries)
+      .where(
+        and(
+          eq(schema.emailDeliveries.userId, member!.userId),
+          inArray(schema.emailDeliveries.kind, ["password-reset", "email-verification"]),
+        ),
+      );
+    expect(new Set(deliveries.map((delivery) => delivery.kind))).toEqual(
+      new Set(["password-reset", "email-verification"]),
+    );
   });
 });

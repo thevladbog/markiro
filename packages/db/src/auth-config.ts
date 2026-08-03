@@ -21,7 +21,7 @@ import * as authSchema from "./schema/auth.js";
 // type layered back on top, without reintroducing the unnameable-type problem.
 function buildAuthImpl(
   db: Db,
-  opts: { secret: string; baseURL: string; trustedOrigins?: string[] },
+  opts: BuildAuthOptions,
 ) {
   return betterAuth<BetterAuthOptions>({
     secret: opts.secret,
@@ -32,7 +32,13 @@ function buildAuthImpl(
     // enforcement whenever it detects a test runner).
     trustedOrigins: opts.trustedOrigins,
     database: drizzleAdapter(db, { provider: "pg", schema: authSchema }),
-    emailAndPassword: { enabled: true },
+    emailAndPassword: {
+      enabled: true,
+      ...(opts.sendResetPassword ? { sendResetPassword: opts.sendResetPassword } : {}),
+    },
+    emailVerification: opts.sendVerificationEmail
+      ? { sendVerificationEmail: opts.sendVerificationEmail }
+      : undefined,
     plugins: [
       organization({
         ac: organizationAccessControl,
@@ -132,12 +138,42 @@ export type Auth = Omit<AuthBase, "api"> & {
         metadata?: Record<string, unknown>;
       };
     }): Promise<CreatedApiKey>;
+    acceptInvitation(input: {
+      body: { invitationId: string };
+      headers: Headers;
+      asResponse: true;
+    }): Promise<Response>;
+    rejectInvitation(input: {
+      body: { invitationId: string };
+      headers: Headers;
+      asResponse: true;
+    }): Promise<Response>;
   };
 };
 
 export function buildAuth(
   db: Db,
-  opts: { secret: string; baseURL: string; trustedOrigins?: string[] },
+  opts: BuildAuthOptions,
 ): Auth {
   return buildAuthImpl(db, opts) as unknown as Auth;
+}
+
+interface AuthEmailUser {
+  id: string;
+  email: string;
+  name: string;
+}
+
+export interface BuildAuthOptions {
+  secret: string;
+  baseURL: string;
+  trustedOrigins?: string[];
+  sendResetPassword?: (
+    data: { user: AuthEmailUser; url: string; token: string },
+    request?: Request,
+  ) => Promise<void>;
+  sendVerificationEmail?: (
+    data: { user: AuthEmailUser; url: string; token: string },
+    request?: Request,
+  ) => Promise<void>;
 }

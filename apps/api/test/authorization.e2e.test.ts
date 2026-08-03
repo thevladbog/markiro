@@ -44,6 +44,7 @@ const ADMIN_CAPABILITIES = [
   "integrations.write",
   "tenant.settings.manage",
   "credentials.manage",
+  "members.manage",
 ];
 
 describe.skipIf(!ready)("cabinet authorization e2e", () => {
@@ -223,7 +224,7 @@ describe.skipIf(!ready)("cabinet authorization e2e", () => {
     await agent.get("/access/me").expect(403);
   });
 
-  it("keeps Better Auth organization mutations owner-only", async () => {
+  it("keeps organization settings owner-only and team mutations behind Team API", async () => {
     const { agent, organizationId } = await activeOrganizationFixture();
     const member = await soleMember(organizationId);
 
@@ -241,11 +242,11 @@ describe.skipIf(!ready)("cabinet authorization e2e", () => {
     await agent
       .post("/api/auth/organization/update-member-role")
       .send({ organizationId, memberId: member.id, role: "manager" })
-      .expect(403);
+      .expect(404);
     await agent
       .post("/api/auth/organization/invite-member")
       .send({ organizationId, email: `invite-${randomUUID()}@example.com`, role: "manager" })
-      .expect(403);
+      .expect(404);
 
     const rows = await db
       .select({ name: schema.organization.name, role: schema.member.role })

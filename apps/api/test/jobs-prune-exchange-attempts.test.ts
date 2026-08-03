@@ -7,6 +7,8 @@ import { setupAuth } from "../src/auth/auth.setup";
 import { PgBossService } from "../src/jobs/jobs.module";
 import { JournalService } from "../src/modules/integrations/journal.service";
 import { ExchangeSessionService } from "../src/modules/exchange/exchange-session.service";
+import type { MailJobsService } from "../src/modules/mail/mail-jobs.service";
+import type { MailRetentionService } from "../src/modules/mail/mail-retention.service";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -35,7 +37,16 @@ describe.skipIf(!ready)("PgBossService: prune exchange_attempts", () => {
     db = setup.db;
     const journal = new JournalService(db);
     const exchangeSessions = new ExchangeSessionService(db, journal);
-    service = new PgBossService(db, "unused-in-this-test", journal, exchangeSessions);
+    const mailJobs = {} as MailJobsService;
+    const mailRetention = {} as MailRetentionService;
+    service = new PgBossService(
+      db,
+      "unused-in-this-test",
+      journal,
+      exchangeSessions,
+      mailJobs,
+      mailRetention,
+    );
   });
 
   afterAll(async () => {

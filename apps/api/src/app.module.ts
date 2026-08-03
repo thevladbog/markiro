@@ -26,6 +26,10 @@ import { SsccModule } from "./modules/sscc/sscc.module";
 import { BoxesModule } from "./modules/boxes/boxes.module";
 import { BoxExceptionsModule } from "./modules/box-exceptions/box-exceptions.module";
 import { AuthorizationModule } from "./authorization/authorization.module";
+import { loadEnv, type Env } from "./env";
+import { TeamModule } from "./modules/team/team.module";
+import { InvitationsModule } from "./modules/invitations/invitations.module";
+import { StorageModule } from "./modules/storage/storage.module";
 
 @Module({ controllers: [HealthController] })
 export class AppModule {
@@ -41,14 +45,15 @@ export class AppModule {
    * a DB connection since it never needs AUTH/DB/jobs/feature modules.
    */
   static forRoot(
-    setup: Pick<AuthSetup, "auth" | "db" | "pool"> & { databaseUrl: string },
+    setup: Pick<AuthSetup, "auth" | "db" | "pool"> & { databaseUrl: string; env?: Env },
   ): DynamicModule {
+    const env = setup.env ?? loadEnv();
     return {
       module: AppModule,
       imports: [
         AuthModule.forRoot(setup),
         AuthorizationModule,
-        JobsModule.forRoot(setup.databaseUrl),
+        JobsModule.forRoot(setup.databaseUrl, env),
         OrgProfileModule,
         CounterpartiesModule,
         ProductsModule,
@@ -71,6 +76,9 @@ export class AppModule {
         SsccModule,
         BoxesModule,
         BoxExceptionsModule,
+        TeamModule.forRoot(env.ADMIN_ORIGIN),
+        InvitationsModule,
+        StorageModule.forRoot(env),
       ],
       controllers: [HealthController],
     };

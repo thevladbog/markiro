@@ -13,6 +13,8 @@ export const organizationRoles = {
   }),
   admin: organizationAccessControl.newRole({
     ...memberAc.statements,
+    invitation: ["create", "cancel"],
+    member: ["create", "update", "delete"],
     apiKey: ["create"],
   }),
   manager: organizationAccessControl.newRole({

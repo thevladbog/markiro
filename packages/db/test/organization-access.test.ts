@@ -2,15 +2,15 @@ import { describe, expect, it } from "vitest";
 import { organizationRoles } from "../src/organization-access.js";
 
 describe("Better Auth organization roles", () => {
-  it("allows only owner to mutate the organization and members", () => {
+  it("keeps organization ownership owner-only while allowing admins to manage team access", () => {
     expect(organizationRoles.owner.authorize({ organization: ["update"] }).success).toBe(true);
     expect(organizationRoles.owner.authorize({ member: ["update"] }).success).toBe(true);
 
-    for (const role of [
-      organizationRoles.admin,
-      organizationRoles.manager,
-      organizationRoles.member,
-    ]) {
+    expect(organizationRoles.admin.authorize({ organization: ["update"] }).success).toBe(false);
+    expect(organizationRoles.admin.authorize({ invitation: ["create"] }).success).toBe(true);
+    expect(organizationRoles.admin.authorize({ member: ["update", "delete"] }).success).toBe(true);
+
+    for (const role of [organizationRoles.manager, organizationRoles.member]) {
       expect(role.authorize({ organization: ["update"] }).success).toBe(false);
       expect(role.authorize({ member: ["update"] }).success).toBe(false);
       expect(role.authorize({ invitation: ["create"] }).success).toBe(false);

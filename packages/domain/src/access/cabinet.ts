@@ -37,6 +37,7 @@ const ROLE_CAPABILITIES: Record<CabinetRole, readonly CabinetCapability[]> = {
     C.INTEGRATIONS_WRITE,
     C.TENANT_SETTINGS_MANAGE,
     C.CREDENTIALS_MANAGE,
+    C.MEMBERS_MANAGE,
   ],
   owner: CAPABILITY_ORDER,
 };
