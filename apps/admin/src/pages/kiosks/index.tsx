@@ -13,6 +13,9 @@ import {
 } from "@markiro/ui";
 import type { TableColumn } from "@markiro/ui";
 
+import { CABINET_CAPABILITY } from "@markiro/domain";
+
+import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
 import { toast } from "../../lib/toast.js";
 import { useProducts } from "../catalog/api.js";
@@ -58,6 +61,7 @@ function isKioskOnline(lastSeenAt: string | null): boolean {
  */
 export function KiosksPage() {
   const { t } = useTranslation();
+  const canManageCredentials = useCan(CABINET_CAPABILITY.CREDENTIALS_MANAGE);
   const { data, isPending, isError } = useKiosks();
   const { data: productsData } = useProducts({ status: "active" });
 
@@ -65,11 +69,9 @@ export function KiosksPage() {
   const updateMutation = useUpdateKiosk();
   const archiveMutation = useArchiveKiosk();
   const setProductsMutation = useSetKioskProducts();
-  const pairingMutation = useIssueKioskPairingCode();
 
   const [formState, setFormState] = useState<FormModalState>(null);
   const [archiveTarget, setArchiveTarget] = useState<KioskDto | null>(null);
-  const [pairing, setPairing] = useState<PairingState>(null);
 
   const items = data ?? [];
   const activeProducts = productsData ?? [];
@@ -122,16 +124,9 @@ export function KiosksPage() {
             >
               {t("pages.kiosks.edit")}
             </Button>
-            {row.status === "active" && (
-              <Button
-                type="button"
-                size="compact"
-                variant="secondary"
-                onClick={() => void handleIssuePairingCode(row)}
-              >
-                {t("pages.kiosks.pairing.action")}
-              </Button>
-            )}
+            {row.status === "active" && canManageCredentials ? (
+              <KioskPairingAction kiosk={row} />
+            ) : null}
             {row.status === "active" && (
               <Button
                 type="button"
@@ -146,8 +141,7 @@ export function KiosksPage() {
         ),
       },
     ],
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- the row handlers close over setState setters and TanStack's stable `mutateAsync`, so the columns only need to be rebuilt when the labels change.
-    [t],
+    [t, canManageCredentials],
   );
 
   const editingKiosk = formState?.mode === "edit" ? formState.kiosk : undefined;
@@ -204,24 +198,6 @@ export function KiosksPage() {
       toast(
         "error",
         error instanceof ApiRequestError ? error.message : t("pages.kiosks.toasts.archiveError"),
-      );
-    }
-  };
-
-  /**
-   * Also serves the modal's "regenerate": the endpoint retires whatever code
-   * was live for the kiosk, so re-issuing is the same call and simply replaces
-   * the revealed code in place.
-   */
-  const handleIssuePairingCode = async (kiosk: KioskDto) => {
-    try {
-      const result = await pairingMutation.mutateAsync(kiosk.id);
-      setPairing({ kiosk, code: result.code, expiresAt: result.expiresAt });
-      toast("ok", t("pages.kiosks.toasts.pairingSuccess"));
-    } catch (error) {
-      toast(
-        "error",
-        error instanceof ApiRequestError ? error.message : t("pages.kiosks.toasts.pairingError"),
       );
     }
   };
@@ -299,17 +275,49 @@ export function KiosksPage() {
           </p>
         )}
       </Modal>
+    </div>
+  );
+}
 
-      {pairing && (
+/** Owns the credential mutation so it never mounts for an unauthorized manager. */
+function KioskPairingAction({ kiosk }: { kiosk: KioskDto }) {
+  const { t } = useTranslation();
+  const pairingMutation = useIssueKioskPairingCode();
+  const [pairing, setPairing] = useState<PairingState>(null);
+
+  const handleIssuePairingCode = async () => {
+    try {
+      const result = await pairingMutation.mutateAsync(kiosk.id);
+      setPairing({ kiosk, code: result.code, expiresAt: result.expiresAt });
+      toast("ok", t("pages.kiosks.toasts.pairingSuccess"));
+    } catch (error) {
+      toast(
+        "error",
+        error instanceof ApiRequestError ? error.message : t("pages.kiosks.toasts.pairingError"),
+      );
+    }
+  };
+
+  return (
+    <>
+      <Button
+        type="button"
+        size="compact"
+        variant="secondary"
+        onClick={() => void handleIssuePairingCode()}
+      >
+        {t("pages.kiosks.pairing.action")}
+      </Button>
+      {pairing ? (
         <PairingCodeModal
           kioskName={pairing.kiosk.name}
           code={pairing.code}
           expiresAt={pairing.expiresAt}
           regenerating={pairingMutation.isPending}
-          onRegenerate={() => void handleIssuePairingCode(pairing.kiosk)}
+          onRegenerate={() => void handleIssuePairingCode()}
           onClose={() => setPairing(null)}
         />
-      )}
-    </div>
+      ) : null}
+    </>
   );
 }

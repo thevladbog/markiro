@@ -2,6 +2,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { CABINET_CAPABILITY } from "@markiro/domain";
+
+import type { AccessDocument } from "../src/access/api.js";
+import { AccessProvider } from "../src/access/context.js";
 import { KiosksPage } from "../src/pages/kiosks/index.js";
 
 afterEach(() => {
@@ -19,13 +23,32 @@ function jsonResponse(status: number, body: unknown): Response {
   } as Response;
 }
 
-function renderPage() {
+const ADMIN_ACCESS: AccessDocument = {
+  roles: ["admin"],
+  capabilities: [
+    CABINET_CAPABILITY.OPERATIONS_READ,
+    CABINET_CAPABILITY.OPERATIONS_WRITE,
+    CABINET_CAPABILITY.INTEGRATIONS_READ,
+    CABINET_CAPABILITY.INTEGRATIONS_WRITE,
+    CABINET_CAPABILITY.TENANT_SETTINGS_MANAGE,
+    CABINET_CAPABILITY.CREDENTIALS_MANAGE,
+  ],
+};
+
+const MANAGER_ACCESS: AccessDocument = {
+  roles: ["manager"],
+  capabilities: [CABINET_CAPABILITY.OPERATIONS_READ, CABINET_CAPABILITY.OPERATIONS_WRITE],
+};
+
+function renderPage(access: AccessDocument = ADMIN_ACCESS) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <KiosksPage />
+      <AccessProvider value={access}>
+        <KiosksPage />
+      </AccessProvider>
     </QueryClientProvider>,
   );
 }
@@ -222,6 +245,20 @@ describe("KiosksPage", () => {
     // only, and a space pasted into the kiosk's numeric keypad would not match.
     fireEvent.click(dialog.getByRole("button", { name: "Скопировать" }));
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith("12345678");
+  });
+
+  it("hides pairing from managers while keeping operational kiosk management visible", async () => {
+    const fetchMock = stubFetch({ kiosks: [ONLINE_KIOSK], products: [PRODUCT_A] });
+
+    renderPage(MANAGER_ACCESS);
+    await screen.findByText("Касса у входа");
+
+    expect(screen.queryByRole("button", { name: "Код привязки" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Изменить" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "В архив" })).toBeDefined();
+    expect(fetchMock.mock.calls.some(([path]) => String(path).includes("/pairing-code"))).toBe(
+      false,
+    );
   });
 
   it("renders the pairing code as a scannable barcode", async () => {

@@ -120,7 +120,7 @@ function renderApp(client: AuthClientLike, initialPath = "/") {
 }
 
 describe("app shell layout", () => {
-  it("renders all seven nav items from the RU dictionary with correct hrefs", async () => {
+  it("renders operational manager nav items and hides privileged sections", async () => {
     renderApp(createFakeAuthClient());
 
     const expectedLinks: Array<[string, string]> = [
@@ -130,12 +130,13 @@ describe("app shell layout", () => {
       ["Контрагенты", "/counterparties"],
       ["Этикетки", "/labels"],
       ["Для себя", "/pickup"],
-      ["Настройки", "/settings"],
     ];
     for (const [label, href] of expectedLinks) {
       const link = await screen.findByRole("link", { name: label });
       expect(link.getAttribute("href")).toBe(href);
     }
+    expect(screen.queryByRole("link", { name: "Интеграции" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Настройки" })).toBeNull();
   });
 
   it("dashboard stub shows an EmptyState", async () => {

@@ -2,25 +2,33 @@ import type { CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { NavLink, Outlet } from "react-router";
 
+import { CABINET_CAPABILITY, type CabinetCapability } from "@markiro/domain";
 import { Sidebar, cn, type SidebarItem } from "@markiro/ui";
 
+import { useCan } from "../access/context.js";
 import { useAuthClient } from "../auth/client.js";
 import { usePendingOrderCount } from "../pages/pickup/api.js";
 import { Header } from "./Header.js";
 
-const NAV_ITEMS: ReadonlyArray<{ to: string; key: string }> = [
-  { to: "/", key: "nav.dashboard" },
-  { to: "/catalog", key: "nav.catalog" },
-  { to: "/shifts", key: "nav.shifts" },
-  { to: "/boxes", key: "nav.boxes" },
-  { to: "/conflicts", key: "nav.conflicts" },
-  { to: "/counterparties", key: "nav.counterparties" },
-  { to: "/employees", key: "nav.employees" },
-  { to: "/kiosks", key: "nav.kiosks" },
-  { to: "/integrations", key: "nav.integrations" },
-  { to: "/labels", key: "nav.labels" },
-  { to: "/pickup", key: "nav.pickup" },
-  { to: "/settings", key: "nav.settings" },
+const C = CABINET_CAPABILITY;
+
+export const NAV_ITEMS: ReadonlyArray<{
+  to: string;
+  key: string;
+  capability: CabinetCapability;
+}> = [
+  { to: "/", key: "nav.dashboard", capability: C.OPERATIONS_READ },
+  { to: "/catalog", key: "nav.catalog", capability: C.OPERATIONS_READ },
+  { to: "/shifts", key: "nav.shifts", capability: C.OPERATIONS_READ },
+  { to: "/boxes", key: "nav.boxes", capability: C.OPERATIONS_READ },
+  { to: "/conflicts", key: "nav.conflicts", capability: C.OPERATIONS_READ },
+  { to: "/counterparties", key: "nav.counterparties", capability: C.OPERATIONS_READ },
+  { to: "/employees", key: "nav.employees", capability: C.OPERATIONS_READ },
+  { to: "/kiosks", key: "nav.kiosks", capability: C.OPERATIONS_READ },
+  { to: "/integrations", key: "nav.integrations", capability: C.INTEGRATIONS_READ },
+  { to: "/labels", key: "nav.labels", capability: C.OPERATIONS_READ },
+  { to: "/pickup", key: "nav.pickup", capability: C.OPERATIONS_READ },
+  { to: "/settings", key: "nav.settings", capability: C.TENANT_SETTINGS_MANAGE },
 ];
 
 /**
@@ -40,9 +48,17 @@ export function AppShell() {
   const { t } = useTranslation();
   const authClient = useAuthClient();
   const { data: session } = authClient.useSession();
-  const pendingOrderCount = usePendingOrderCount();
+  const canReadOperations = useCan(C.OPERATIONS_READ);
+  const canReadIntegrations = useCan(C.INTEGRATIONS_READ);
+  const canManageSettings = useCan(C.TENANT_SETTINGS_MANAGE);
+  const pendingOrderCount = usePendingOrderCount(canReadOperations);
 
-  const items: SidebarItem[] = NAV_ITEMS.map(({ to, key }) => ({
+  const items: SidebarItem[] = NAV_ITEMS.filter(({ capability }) => {
+    if (capability === C.OPERATIONS_READ) return canReadOperations;
+    if (capability === C.INTEGRATIONS_READ) return canReadIntegrations;
+    if (capability === C.TENANT_SETTINGS_MANAGE) return canManageSettings;
+    return false;
+  }).map(({ to, key }) => ({
     to,
     labelKey: t(key),
     ...(to === "/pickup" && pendingOrderCount > 0 ? { badge: pendingOrderCount } : {}),

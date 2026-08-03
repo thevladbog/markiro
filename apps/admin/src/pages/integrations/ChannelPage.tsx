@@ -3,7 +3,10 @@ import { Controller, useFieldArray, useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router";
 
+import { CABINET_CAPABILITY } from "@markiro/domain";
 import { Alert, Button, Card, Input, PageHeader, Select, Spinner, StatusChip } from "@markiro/ui";
+
+import { useCan } from "../../access/context.js";
 import type { StatusChipStatus } from "@markiro/ui";
 
 import { ApiRequestError } from "../../api/client.js";
@@ -373,29 +376,9 @@ function CredentialsSection({
   );
 }
 
-/**
- * Admin channel page -- Plan I-1 Task 13 (+ Task 14's candidates queue).
- * One page per channel, regions per brief 08 ("Channel page"): header
- * (identity/state/last event), settings (the channel's own form plus its
- * exchange credentials), the candidates queue (only for channels that
- * actually import data -- see `CandidatesQueue` below), the public API keys
- * panel (only for `public_api` -- see `ApiKeysPanel` below), and journal
- * (`JournalList`). Kept as visually separate `Card`s rather than one merged
- * block deliberately -- each channel-specific area slots in as one more
- * region on this same page, and that only stays simple if these regions
- * never fuse into one.
- */
-export function ChannelPage() {
-  const { type: typeParam } = useParams<{ type: string }>();
-  const type = typeParam ?? "";
-  const { t, i18n } = useTranslation();
-
-  const { data: channel, isPending, isError } = useChannelDetail(type);
-  const updateSettings = useUpdateChannelSettings(type);
-  const issueCredentials = useIssueCredentials(type);
-
-  const [issued, setIssued] = useState<CredentialsIssuedDto | null>(null);
-  const [issuing, setIssuing] = useState(false);
+function AuthorizedCommercemlSettings({ channel }: { channel: ChannelDetailDto }) {
+  const { t } = useTranslation();
+  const updateSettings = useUpdateChannelSettings(channel.type);
 
   const handleSaveSettings = async (patch: Record<string, unknown>) => {
     try {
@@ -408,12 +391,24 @@ export function ChannelPage() {
           ? error.message
           : t("pages.integrations.channel.settings.saveError"),
       );
-      // Re-thrown so `CommercemlSettingsForm`'s `submit` can tell a failed
-      // save apart from a successful one -- it must keep the operator's
-      // (unsaved) values and dirty flag on failure instead of resetting them.
       throw error;
     }
   };
+
+  return (
+    <CommercemlSettingsForm
+      channel={channel}
+      onSave={handleSaveSettings}
+      saving={updateSettings.isPending}
+    />
+  );
+}
+
+function AuthorizedCredentialsSection({ channel }: { channel: ChannelDetailDto }) {
+  const { t } = useTranslation();
+  const issueCredentials = useIssueCredentials(channel.type);
+  const [issued, setIssued] = useState<CredentialsIssuedDto | null>(null);
+  const [issuing, setIssuing] = useState(false);
 
   const handleIssueCredentials = async () => {
     setIssuing(true);
@@ -432,6 +427,46 @@ export function ChannelPage() {
       setIssuing(false);
     }
   };
+
+  return (
+    <CredentialsSection
+      channel={channel}
+      onIssue={() => void handleIssueCredentials()}
+      issuing={issuing}
+      issued={issued}
+    />
+  );
+}
+
+function RestrictedChannelSettingsNotice() {
+  const { t } = useTranslation();
+  return (
+    <p style={{ margin: 0, font: "var(--text-body)", color: "var(--fg-3)" }}>
+      {t("access.forbiddenBody")}
+    </p>
+  );
+}
+
+/**
+ * Admin channel page -- Plan I-1 Task 13 (+ Task 14's candidates queue).
+ * One page per channel, regions per brief 08 ("Channel page"): header
+ * (identity/state/last event), settings (the channel's own form plus its
+ * exchange credentials), the candidates queue (only for channels that
+ * actually import data -- see `CandidatesQueue` below), the public API keys
+ * panel (only for `public_api` -- see `ApiKeysPanel` below), and journal
+ * (`JournalList`). Kept as visually separate `Card`s rather than one merged
+ * block deliberately -- each channel-specific area slots in as one more
+ * region on this same page, and that only stays simple if these regions
+ * never fuse into one.
+ */
+export function ChannelPage() {
+  const { type: typeParam } = useParams<{ type: string }>();
+  const type = typeParam ?? "";
+  const { t, i18n } = useTranslation();
+  const canWriteIntegrations = useCan(CABINET_CAPABILITY.INTEGRATIONS_WRITE);
+  const canManageCredentials = useCan(CABINET_CAPABILITY.CREDENTIALS_MANAGE);
+
+  const { data: channel, isPending, isError } = useChannelDetail(type);
 
   if (isPending) {
     return (
@@ -483,11 +518,11 @@ export function ChannelPage() {
 
       <Card title={t("pages.integrations.channel.settings.title")}>
         {channel.type === "commerceml" ? (
-          <CommercemlSettingsForm
-            channel={channel}
-            onSave={handleSaveSettings}
-            saving={updateSettings.isPending}
-          />
+          canWriteIntegrations ? (
+            <AuthorizedCommercemlSettings channel={channel} />
+          ) : (
+            <RestrictedChannelSettingsNotice />
+          )
         ) : (
           <p style={{ font: "var(--text-body)", color: "var(--fg-3)" }}>
             {t("pages.integrations.channel.settings.noSettings")}
@@ -506,14 +541,9 @@ export function ChannelPage() {
          * the server ever checks for that channel (its actual
          * authentication is the separate keys list below, not this).
          */}
-        {channel.type === "commerceml" && (
-          <CredentialsSection
-            channel={channel}
-            onIssue={() => void handleIssueCredentials()}
-            issuing={issuing}
-            issued={issued}
-          />
-        )}
+        {channel.type === "commerceml" && canManageCredentials ? (
+          <AuthorizedCredentialsSection channel={channel} />
+        ) : null}
       </Card>
 
       {/*
@@ -522,7 +552,9 @@ export function ChannelPage() {
        * gated the same way `CommercemlSettingsForm` above is, so a channel
        * that imports nothing doesn't grow an always-empty queue card.
        */}
-      {channel.type === "commerceml" && <CandidatesQueue type={type} />}
+      {channel.type === "commerceml" && canWriteIntegrations ? (
+        <CandidatesQueue type={type} />
+      ) : null}
 
       {/*
        * `public_api` is a channel without a schedule (Task 15, task-15-brief.md):

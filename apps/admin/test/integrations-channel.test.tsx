@@ -4,6 +4,10 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { CABINET_CAPABILITY } from "@markiro/domain";
+
+import type { AccessDocument } from "../src/access/api.js";
+import { AccessProvider } from "../src/access/context.js";
 import { ChannelPage } from "../src/pages/integrations/ChannelPage.js";
 import i18n from "../src/i18n/index.js";
 import { channelDetailQueryKey, type JournalSessionDto } from "../src/pages/integrations/api.js";
@@ -145,27 +149,61 @@ function createFetchMock(options: FetchMockOptions = {}) {
   });
 }
 
-function renderChannel(type: string, options: FetchMockOptions = {}) {
-  vi.stubGlobal("fetch", createFetchMock(options));
+const ADMIN_ACCESS: AccessDocument = {
+  roles: ["admin"],
+  capabilities: [
+    CABINET_CAPABILITY.OPERATIONS_READ,
+    CABINET_CAPABILITY.OPERATIONS_WRITE,
+    CABINET_CAPABILITY.INTEGRATIONS_READ,
+    CABINET_CAPABILITY.INTEGRATIONS_WRITE,
+    CABINET_CAPABILITY.TENANT_SETTINGS_MANAGE,
+    CABINET_CAPABILITY.CREDENTIALS_MANAGE,
+  ],
+};
+
+const INTEGRATIONS_READ_ACCESS: AccessDocument = {
+  roles: ["member"],
+  capabilities: [CABINET_CAPABILITY.INTEGRATIONS_READ],
+};
+
+function renderChannel(
+  type: string,
+  options: FetchMockOptions = {},
+  access: AccessDocument = ADMIN_ACCESS,
+) {
+  const fetchMock = createFetchMock(options);
+  vi.stubGlobal("fetch", fetchMock);
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   const view = render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[`/integrations/${type}`]}>
-        <Routes>
-          <Route path="/integrations/:type" element={<ChannelPage />} />
-        </Routes>
-      </MemoryRouter>
+      <AccessProvider value={access}>
+        <MemoryRouter initialEntries={[`/integrations/${type}`]}>
+          <Routes>
+            <Route path="/integrations/:type" element={<ChannelPage />} />
+          </Routes>
+        </MemoryRouter>
+      </AccessProvider>
     </QueryClientProvider>,
   );
   // Most tests only need `screen`; the resync/mutation-cache tests below also
   // need direct access to `queryClient` (to simulate an external update, or to
   // inspect the mutation cache after `unmount()`).
-  return { ...view, queryClient };
+  return { ...view, queryClient, fetchMock };
 }
 
 describe("ChannelPage", () => {
+  it("hides integration mutations and credential issuance from read-only access", async () => {
+    const { fetchMock } = renderChannel("commerceml", {}, INTEGRATIONS_READ_ACCESS);
+
+    expect(await screen.findByText("У вас нет доступа к этому разделу.")).toBeDefined();
+    expect(screen.queryByRole("button", { name: /сохранить/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /выпустить/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /добавить строку/i })).toBeNull();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/candidates"))).toBe(false);
+  });
+
   it("показывает секрет обмена один раз и больше никогда", async () => {
     renderChannel("commerceml");
     await userEvent.click(await screen.findByRole("button", { name: /выпустить/i }));

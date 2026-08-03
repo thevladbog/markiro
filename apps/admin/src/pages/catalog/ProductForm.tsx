@@ -5,10 +5,11 @@ import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
 
-import { isValidGtin } from "@markiro/domain";
+import { CABINET_CAPABILITY, isValidGtin } from "@markiro/domain";
 import { Alert, Button, Input, Modal, Select } from "@markiro/ui";
 import type { SelectOption } from "@markiro/ui";
 
+import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
 import { errorProp } from "../../lib/form-error.js";
 import { toast } from "../../lib/toast.js";
@@ -134,6 +135,7 @@ export function ProductForm({
   onClose,
 }: ProductFormProps) {
   const { t } = useTranslation();
+  const canUnlinkIntegrations = useCan(CABINET_CAPABILITY.INTEGRATIONS_WRITE);
   const gtinCheckMutation = useGtinCheck();
   const unlinkMutation = useUnlinkProduct();
   const [ownerHint, setOwnerHint] = useState<GtinCheckResult | null>(null);
@@ -282,17 +284,21 @@ export function ProductForm({
         {mode === "edit" && linkedExternalRef && (
           <Alert
             tone="info"
-            action={
-              <Button
-                type="button"
-                size="compact"
-                variant="secondary"
-                loading={unlinkMutation.isPending}
-                onClick={() => void handleUnlink()}
-              >
-                {t("pages.catalog.form.externalLink.unlinkAction")}
-              </Button>
-            }
+            {...(canUnlinkIntegrations
+              ? {
+                  action: (
+                    <Button
+                      type="button"
+                      size="compact"
+                      variant="secondary"
+                      loading={unlinkMutation.isPending}
+                      onClick={() => void handleUnlink()}
+                    >
+                      {t("pages.catalog.form.externalLink.unlinkAction")}
+                    </Button>
+                  ),
+                }
+              : {})}
           >
             {t("pages.catalog.form.externalLink.linkedText", { ref: linkedExternalRef })}
           </Alert>

@@ -3,6 +3,10 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { CABINET_CAPABILITY } from "@markiro/domain";
+
+import type { AccessDocument } from "../src/access/api.js";
+import { AccessProvider } from "../src/access/context.js";
 import { ApiKeysPanel } from "../src/pages/integrations/ApiKeysPanel.js";
 
 // Общего рендер-хелпера в этом репозитории нет -- каждый админ-тест пишет
@@ -80,7 +84,24 @@ function stubKeys(fixtures: KeyFixture[]): void {
   keysFixture = fixtures;
 }
 
-function renderPanel() {
+const ADMIN_ACCESS: AccessDocument = {
+  roles: ["admin"],
+  capabilities: [
+    CABINET_CAPABILITY.OPERATIONS_READ,
+    CABINET_CAPABILITY.OPERATIONS_WRITE,
+    CABINET_CAPABILITY.INTEGRATIONS_READ,
+    CABINET_CAPABILITY.INTEGRATIONS_WRITE,
+    CABINET_CAPABILITY.TENANT_SETTINGS_MANAGE,
+    CABINET_CAPABILITY.CREDENTIALS_MANAGE,
+  ],
+};
+
+const INTEGRATIONS_READ_ACCESS: AccessDocument = {
+  roles: ["member"],
+  capabilities: [CABINET_CAPABILITY.INTEGRATIONS_READ],
+};
+
+function renderPanel(access: AccessDocument = ADMIN_ACCESS) {
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     const path = String(url).replace(/^\/api/, "");
     const method = init?.method ?? "GET";
@@ -111,14 +132,25 @@ function renderPanel() {
 
   vi.stubGlobal("fetch", fetchMock);
 
-  return render(
+  const view = render(
     <QueryClientProvider client={newQueryClient()}>
-      <ApiKeysPanel />
+      <AccessProvider value={access}>
+        <ApiKeysPanel />
+      </AccessProvider>
     </QueryClientProvider>,
   );
+  return { ...view, fetchMock };
 }
 
 describe("ApiKeysPanel", () => {
+  it("renders a translated restriction without mounting key requests for read-only access", async () => {
+    const { fetchMock } = renderPanel(INTEGRATIONS_READ_ACCESS);
+
+    expect(await screen.findByText("У вас нет доступа к этому разделу.")).toBeDefined();
+    expect(screen.queryByRole("button", { name: /выпустить/i })).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("показывает выпущенный ключ один раз и предупреждает об этом", async () => {
     renderPanel();
     await userEvent.type(await screen.findByLabelText(/название/i), "Склад");
