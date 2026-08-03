@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./organization-access": {
+      "types": "./dist/organization-access.d.ts",
+      "default": "./dist/organization-access.js"
     }
   },
   "scripts": {

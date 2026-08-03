@@ -1,5 +1,7 @@
 import { createAuthClient } from "better-auth/react";
 import { organizationClient } from "better-auth/client/plugins";
+import type { AccessControl } from "better-auth/plugins/access";
+import { organizationAccessControl, organizationRoles } from "@markiro/db/organization-access";
 import { createContext, createElement, useContext, type ReactNode } from "react";
 
 /**
@@ -81,7 +83,16 @@ export interface AuthClientLike {
  * session cookie is sent without extra config.
  */
 const realAuthClient = createAuthClient({
-  plugins: [organizationClient()],
+  plugins: [
+    organizationClient({
+      // Better Auth's client option is declared as the non-generic base
+      // `AccessControl`, while the shared configuration keeps its narrower
+      // statement set for role authorization. Widen only at this client
+      // boundary; `organizationRoles` retains the concrete manager role.
+      ac: organizationAccessControl as AccessControl,
+      roles: organizationRoles,
+    }),
+  ],
 }) as unknown as AuthClientLike;
 
 export { realAuthClient as authClient };

@@ -3,6 +3,7 @@ import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { organization } from "better-auth/plugins";
 import type { Db } from "./client.js";
+import { organizationAccessControl, organizationRoles } from "./organization-access.js";
 import * as authSchema from "./schema/auth.js";
 
 // The explicit `<BetterAuthOptions>` type argument (instead of letting it be
@@ -33,7 +34,10 @@ function buildAuthImpl(
     database: drizzleAdapter(db, { provider: "pg", schema: authSchema }),
     emailAndPassword: { enabled: true },
     plugins: [
-      organization(),
+      organization({
+        ac: organizationAccessControl,
+        roles: organizationRoles,
+      }),
       apiKey([
         {
           configId: "station",
