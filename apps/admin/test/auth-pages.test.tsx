@@ -130,6 +130,7 @@ describe("CreateOrgPage", () => {
     const createResult = new Promise<{ data: { id: string }; error: null }>((resolve) => {
       resolveCreate = resolve;
     });
+    let cachedTenantDataAtCreateCall: unknown = "CREATE_NOT_CALLED";
     const client = createFakeAuthClient({
       organization: {
         create: vi.fn(() => createResult),
@@ -139,6 +140,11 @@ describe("CreateOrgPage", () => {
     });
     const { queryClient } = renderRouted(client, "/org/create", <CreateOrgPage />);
     queryClient.setQueryData(["tenant-secret"], "OLD_ORG_SECRET");
+    expect(queryClient.getQueryData(["tenant-secret"])).toBe("OLD_ORG_SECRET");
+    vi.mocked(client.organization.create).mockImplementation(() => {
+      cachedTenantDataAtCreateCall = queryClient.getQueryData(["tenant-secret"]);
+      return createResult;
+    });
 
     fireEvent.change(screen.getByLabelText("Название организации"), {
       target: { value: "Acme Corp" },
@@ -151,6 +157,7 @@ describe("CreateOrgPage", () => {
         slug: "acme-corp",
       });
     });
+    expect(cachedTenantDataAtCreateCall).toBeUndefined();
     expect(queryClient.getQueryData(["tenant-secret"])).toBeUndefined();
     expect(screen.queryByText("SHELL_PLACEHOLDER")).toBeNull();
 
