@@ -161,9 +161,7 @@ describe("credential mutation audit", () => {
 
   it("audits integration credential issuance without the plaintext login or secret", async () => {
     const integrations = {
-      issueCredentials: vi
-        .fn()
-        .mockResolvedValue({ login: "plain-login", secret: "plain-secret" }),
+      issueCredentials: vi.fn().mockResolvedValue({ login: "plain-login", secret: "plain-secret" }),
     };
     const audit = auditDouble();
     const controller = new IntegrationsController(integrations as never, audit as never);
@@ -189,9 +187,7 @@ describe("credential mutation audit", () => {
     const audit = auditDouble();
     const controller = new IntegrationsController(integrations as never, audit as never);
 
-    await expect(controller.issueCredentials(req, "commerceml")).rejects.toThrow(
-      "issuance failed",
-    );
+    await expect(controller.issueCredentials(req, "commerceml")).rejects.toThrow("issuance failed");
     expect(audit.credentialMutation).not.toHaveBeenCalled();
   });
 });

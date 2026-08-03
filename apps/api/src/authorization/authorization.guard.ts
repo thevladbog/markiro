@@ -5,15 +5,9 @@ import {
   type ExecutionContext,
 } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
-import {
-  hasCabinetCapabilities,
-  type CabinetCapability,
-} from "@markiro/domain";
+import { hasCabinetCapabilities, type CabinetCapability } from "@markiro/domain";
 import type { RequestWithTenant } from "../tenancy/tenant.guard";
-import {
-  ROUTE_ACCESS_POLICY,
-  type RouteAccessPolicy,
-} from "./access-policy";
+import { ROUTE_ACCESS_POLICY, type RouteAccessPolicy } from "./access-policy";
 import { AuthorizationService } from "./authorization.service";
 import { SecurityAuditService } from "./security-audit.service";
 

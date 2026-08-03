@@ -20,8 +20,7 @@ interface MembershipRow {
 }
 
 type FakeCondition =
-  | { __op: "eq"; column: unknown; value: unknown }
-  | { __op: "and"; conditions: FakeCondition[] };
+  { __op: "eq"; column: unknown; value: unknown } | { __op: "and"; conditions: FakeCondition[] };
 
 const COLUMN_FIELD = new Map<unknown, keyof MembershipRow>([
   [schema.member.userId, "userId"],

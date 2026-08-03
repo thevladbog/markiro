@@ -95,10 +95,7 @@ export class IntegrationsController {
   // Секрет отдаётся ровно здесь и ровно один раз — ChannelDetailDto его
   // никогда не несёт (docs/device-key-surface.md).
   @Post(":type/credentials")
-  @RequirePermissions(
-    CABINET_CAPABILITY.INTEGRATIONS_WRITE,
-    CABINET_CAPABILITY.CREDENTIALS_MANAGE,
-  )
+  @RequirePermissions(CABINET_CAPABILITY.INTEGRATIONS_WRITE, CABINET_CAPABILITY.CREDENTIALS_MANAGE)
   async issueCredentials(
     @Req() req: RequestWithTenant,
     @Param("type") type: IntegrationChannelType,

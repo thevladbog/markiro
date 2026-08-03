@@ -2,10 +2,7 @@ import type { Type } from "@nestjs/common";
 import { GUARDS_METADATA, PATH_METADATA } from "@nestjs/common/constants";
 import { Reflector } from "@nestjs/core";
 import { describe, expect, it } from "vitest";
-import {
-  ROUTE_ACCESS_POLICY,
-  type RouteAccessPolicy,
-} from "../src/authorization/access-policy";
+import { ROUTE_ACCESS_POLICY, type RouteAccessPolicy } from "../src/authorization/access-policy";
 import { AccessController } from "../src/authorization/access.controller";
 import { AuthorizationGuard } from "../src/authorization/authorization.guard";
 import { ApiKeysController } from "../src/modules/api-keys/api-keys.controller";
@@ -262,10 +259,7 @@ describe("cabinet route authorization metadata", () => {
       const methodNames = routeMethods(controller);
       expect(methodNames.sort()).toEqual(Object.keys(expectedPolicies).sort());
 
-      const prototype = controller.prototype as Record<
-        string,
-        (...args: never[]) => unknown
-      >;
+      const prototype = controller.prototype as Record<string, (...args: never[]) => unknown>;
       for (const methodName of methodNames) {
         const handler = prototype[methodName]!;
         const methodGuards = Reflect.getMetadata(GUARDS_METADATA, handler) ?? [];

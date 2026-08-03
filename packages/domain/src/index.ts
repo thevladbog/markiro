@@ -55,8 +55,4 @@ export {
   hasCabinetCapabilities,
   resolveCabinetAccess,
 } from "./access/cabinet.js";
-export type {
-  CabinetCapability,
-  CabinetRole,
-  ResolvedCabinetAccess,
-} from "./access/cabinet.js";
+export type { CabinetCapability, CabinetRole, ResolvedCabinetAccess } from "./access/cabinet.js";
