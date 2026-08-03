@@ -6,11 +6,26 @@ import { CABINET_CAPABILITY } from "@markiro/domain";
 
 import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider } from "../src/access/context.js";
+import type * as CatalogApiModule from "../src/pages/catalog/api.js";
 import { CatalogPage } from "../src/pages/catalog/index.js";
+
+const { unlinkHookMountSpy } = vi.hoisted(() => ({ unlinkHookMountSpy: vi.fn() }));
+
+vi.mock("../src/pages/catalog/api.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof CatalogApiModule>();
+  return {
+    ...actual,
+    useUnlinkProduct: () => {
+      unlinkHookMountSpy();
+      return actual.useUnlinkProduct();
+    },
+  };
+});
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  unlinkHookMountSpy.mockClear();
 });
 
 /** Minimal Response stand-in -- only what apps/admin/src/api/client.ts reads. */
@@ -653,5 +668,6 @@ describe("CatalogPage", () => {
     expect(await screen.findByText(/Связано с 1С: 1C-GUID-READONLY/)).toBeDefined();
     expect(screen.queryByRole("button", { name: "Разорвать связь" })).toBeNull();
     expect(screen.getByRole("button", { name: "Сохранить" })).toBeDefined();
+    expect(unlinkHookMountSpy).not.toHaveBeenCalled();
   });
 });
