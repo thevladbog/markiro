@@ -187,6 +187,43 @@ describe("ConflictsPage", () => {
     expect(writeHookMountSpy).toHaveBeenCalledTimes(1);
   });
 
+  it("blocks every review action while the shared mutation is pending", async () => {
+    const reviewResult = new Promise<Response>(() => {});
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/conflicts/c1/review" && init?.method === "POST") {
+        return reviewResult;
+      }
+      if (path.startsWith("/api/conflicts")) {
+        return jsonResponse(200, { items: [UNREVIEWED, SECOND_UNREVIEWED] });
+      }
+      return jsonResponse(200, { items: [SHIFT_S1] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+
+    const buttons = (await screen.findAllByRole("button", {
+      name: "Отметить рассмотренным",
+    })) as HTMLButtonElement[];
+    fireEvent.click(buttons[0]!);
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.filter(
+          ([url, init]) => String(url) === "/api/conflicts/c1/review" && init?.method === "POST",
+        ),
+      ).toHaveLength(1);
+    });
+    expect(buttons[0]!.disabled).toBe(true);
+    expect(buttons[1]!.disabled).toBe(true);
+    expect(buttons[0]!.querySelector(".mk-spin")).not.toBeNull();
+    expect(buttons[1]!.querySelector(".mk-spin")).toBeNull();
+
+    fireEvent.click(buttons[1]!);
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  });
+
   it("renders conflicts from the mocked GET response with code, losing/winning terminals", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       const path = String(url);

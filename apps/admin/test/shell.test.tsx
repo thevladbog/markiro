@@ -471,9 +471,12 @@ describe("ShellPage", () => {
     queryClient.setQueryData(["tenant-secret"], "ORG_1_SECRET");
     renderShell(client, queryClient);
     expect(await screen.findByText("Доступ к кабинету пока не открыт")).toBeDefined();
-    fireEvent.click(screen.getByRole("button", { name: /Выйти|Sign out/i }));
+    const signOutButton = screen.getByRole("button", { name: /Выйти|Sign out/i });
+    fireEvent.click(signOutButton);
+    fireEvent.click(signOutButton);
 
     expect(signOut).toHaveBeenCalledTimes(1);
+    expect(signOutButton.querySelector(".mk-spin")).not.toBeNull();
     expect(queryClient.getQueryData(["tenant-secret"])).toBeUndefined();
     expect(screen.getByTestId("location-pathname").textContent).toBe("/shell");
 

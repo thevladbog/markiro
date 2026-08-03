@@ -265,6 +265,7 @@ function RejectionsTable({
           <Button
             type="button"
             size="compact"
+            disabled={pendingAcknowledgementId !== undefined}
             loading={pendingAcknowledgementId === row.id}
             onClick={() => void onAcknowledge(row.id)}
           >

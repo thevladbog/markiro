@@ -156,6 +156,42 @@ describe("rejections page", () => {
     expect(writeHookMountSpy).toHaveBeenCalledTimes(1);
   });
 
+  it("blocks every acknowledge action while the shared mutation is pending", async () => {
+    const acknowledgeResult = new Promise<Response>(() => {});
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      const path = String(input);
+      if (path.includes("/pickup-rejections/r-1/acknowledge") && init?.method === "POST") {
+        return acknowledgeResult;
+      }
+      if (path.includes("/kiosks")) {
+        return jsonResponse(200, { items: [] });
+      }
+      return jsonResponse(200, {
+        items: [REJECTION, UNKNOWN_BADGE_REJECTION],
+        openCount: 2,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWith(<RejectionsPage />);
+
+    const buttons = (await screen.findAllByRole("button", {
+      name: "Отработано",
+    })) as HTMLButtonElement[];
+    fireEvent.click(buttons[0]!);
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+    });
+    expect(buttons[0]!.disabled).toBe(true);
+    expect(buttons[1]!.disabled).toBe(true);
+    expect(buttons[0]!.querySelector(".mk-spin")).not.toBeNull();
+    expect(buttons[1]!.querySelector(".mk-spin")).toBeNull();
+
+    fireEvent.click(buttons[1]!);
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  });
+
   it("lists a refused scan and reveals its codes", async () => {
     vi.stubGlobal(
       "fetch",

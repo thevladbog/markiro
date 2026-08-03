@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
 
@@ -12,6 +13,7 @@ export function NoCabinetAccess() {
   const navigate = useNavigate();
   const authClient = useAuthClient();
   const clearAuthQueryCache = useClearAuthQueryCache();
+  const [isSigningOut, setIsSigningOut] = useState(false);
 
   const handleSelectOrganization = () => {
     clearAuthQueryCache();
@@ -19,6 +21,8 @@ export function NoCabinetAccess() {
   };
 
   const handleSignOut = async () => {
+    if (isSigningOut) return;
+    setIsSigningOut(true);
     clearAuthQueryCache();
     try {
       await authClient.signOut();
@@ -37,7 +41,12 @@ export function NoCabinetAccess() {
             <Button type="button" onClick={handleSelectOrganization}>
               {t("access.selectOrganization")}
             </Button>
-            <Button type="button" variant="secondary" onClick={() => void handleSignOut()}>
+            <Button
+              type="button"
+              variant="secondary"
+              loading={isSigningOut}
+              onClick={() => void handleSignOut()}
+            >
               {t("common.signOut")}
             </Button>
           </div>

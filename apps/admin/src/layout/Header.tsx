@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
 
@@ -35,11 +35,14 @@ export function Header() {
   const navigate = useNavigate();
   const authClient = useAuthClient();
   const clearAuthQueryCache = useClearAuthQueryCache();
+  const [isSigningOut, setIsSigningOut] = useState(false);
   const { theme, setTheme } = useTheme();
   const { orgName } = useActiveOrg();
   const { data: session } = authClient.useSession();
 
   const handleSignOut = async () => {
+    if (isSigningOut) return;
+    setIsSigningOut(true);
     clearAuthQueryCache();
     try {
       await authClient.signOut();
@@ -111,7 +114,12 @@ export function Header() {
         >
           {nextLanguage.toUpperCase()}
         </button>
-        <Button variant="secondary" size="compact" onClick={() => void handleSignOut()}>
+        <Button
+          variant="secondary"
+          size="compact"
+          loading={isSigningOut}
+          onClick={() => void handleSignOut()}
+        >
           {t("common.signOut")}
         </Button>
       </div>

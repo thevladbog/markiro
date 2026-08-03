@@ -189,6 +189,7 @@ function ConflictsTable({ baseColumns, rows, onReview, pendingReviewId }: Confli
             type="button"
             size="compact"
             variant="secondary"
+            disabled={pendingReviewId !== undefined}
             loading={pendingReviewId === row.id}
             onClick={() => void onReview(row.id)}
           >

@@ -152,9 +152,12 @@ describe("app shell layout", () => {
     const signOut = vi.fn(() => signOutResult);
     renderApp(createFakeAuthClient({ signOut }));
 
-    fireEvent.click(await screen.findByRole("button", { name: /Выйти|Sign out/i }));
+    const signOutButton = await screen.findByRole("button", { name: /Выйти|Sign out/i });
+    fireEvent.click(signOutButton);
+    fireEvent.click(signOutButton);
 
     expect(signOut).toHaveBeenCalledTimes(1);
+    expect(signOutButton.querySelector(".mk-spin")).not.toBeNull();
     expect(screen.queryByTestId("login-page")).toBeNull();
 
     await act(async () => resolveSignOut({ data: {}, error: null }));
