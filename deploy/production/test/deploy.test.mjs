@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, stat } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { deployRelease } from "../deploy.mjs";
+import { deployRelease, writeRelease } from "../deploy.mjs";
 
 const tag = "0123456789abcdef0123456789abcdef01234567";
 const environment = {
@@ -243,32 +243,130 @@ test("emits the full lifecycle trace without environment values", async () => {
     trace.push(operation);
     return run(command, args, childEnvironment);
   };
-  dependencies.log = (event) => trace.push(event);
+  const realWriter = writeRelease;
+  dependencies.writeRelease = async (directory, release) => {
+    trace.push(`write ${release.state}`);
+    await realWriter(directory, release);
+  };
   dependencies.runSmoke = async () => trace.push("public smoke");
 
   await deployRelease({ environment, releaseDirectory, readinessAttempts: 1 }, dependencies);
 
   assert.deepEqual(trace, [
     "preflight",
-    "preflight",
-    "docker",
     "pull",
-    "docker",
     "inspect",
-    "docker",
     "inspect",
-    "release pending",
-    "docker",
+    "write pending",
     "migrate",
-    "docker",
     "api up",
     "readiness",
-    "docker",
-    "docker",
     "edge up",
     "public smoke",
-    "release healthy",
+    "write healthy",
   ]);
+});
+
+test("writes a failed release record through the injected atomic writer", async () => {
+  const { dependencies, releaseDirectory } = await fixture({
+    smokeError: new Error("private smoke failure"),
+  });
+  const writes = [];
+  const realWriter = writeRelease;
+  dependencies.writeRelease = async (directory, release) => {
+    writes.push(release.state);
+    await realWriter(directory, release);
+  };
+
+  await assert.rejects(
+    deployRelease({ environment, releaseDirectory, readinessAttempts: 1 }, dependencies),
+    /Public smoke failed/,
+  );
+
+  assert.deepEqual(writes, ["pending", "failed"]);
+});
+
+function releaseFileName(record) {
+  return `${record.createdAt.replace(/[:.]/g, "-")}-${record.tag}.json`;
+}
+
+function healthyRecord({ tag, createdAt }) {
+  return {
+    tag,
+    previousTag: null,
+    apiDigest: `ghcr.io/thevladbog/markiro-api@sha256:${"a".repeat(64)}`,
+    edgeDigest: `ghcr.io/thevladbog/markiro-edge@sha256:${"b".repeat(64)}`,
+    state: "healthy",
+    createdAt,
+  };
+}
+
+async function persistCandidate(
+  directory,
+  record,
+  { filename = releaseFileName(record), mode = 0o600 } = {},
+) {
+  const path = join(directory, filename);
+  await writeFile(path, JSON.stringify(record), { mode });
+  await chmod(path, mode);
+}
+
+test("chooses only the newest structurally valid private release record", async () => {
+  const { dependencies, releaseDirectory } = await fixture({ priorTag: null });
+  const oldTag = "1".repeat(40);
+  const newestTag = "2".repeat(40);
+  await persistCandidate(
+    releaseDirectory,
+    healthyRecord({ tag: oldTag, createdAt: "2026-08-01T00:00:00.000Z" }),
+  );
+  await persistCandidate(
+    releaseDirectory,
+    healthyRecord({ tag: newestTag, createdAt: "2026-08-03T00:00:00.000Z" }),
+  );
+  const malformed = healthyRecord({ tag: "3".repeat(40), createdAt: "2026-08-04T00:00:00.000Z" });
+  malformed.apiDigest = `ghcrXio/thevladbog/markiro-api@sha256:${"a".repeat(64)}`;
+  await persistCandidate(releaseDirectory, malformed);
+  await persistCandidate(
+    releaseDirectory,
+    healthyRecord({ tag: "4".repeat(40), createdAt: "2026-08-05T00:00:00.000Z" }),
+    { filename: "renamed.json" },
+  );
+  await persistCandidate(
+    releaseDirectory,
+    healthyRecord({ tag: "5".repeat(40), createdAt: "2026-08-06T00:00:00.000Z" }),
+    { mode: 0o644 },
+  );
+  await persistCandidate(
+    releaseDirectory,
+    healthyRecord({ tag: "6".repeat(40), createdAt: "2026-08-07T00:00:00.000Z" }),
+    { filename: "2026-08-08T00-00-00-000Z-666.json" },
+  );
+
+  const release = await deployRelease(
+    { environment, releaseDirectory, readinessAttempts: 1 },
+    dependencies,
+  );
+
+  assert.equal(release.previousTag, newestTag);
+});
+
+test("rejects a deceptive repository name in image inspect output", async () => {
+  const { dependencies, releaseDirectory, runner } = await fixture({ priorTag: null });
+  const run = runner.run;
+  runner.run = async (command, args, childEnvironment) => {
+    if (args.includes("image") && args.includes("inspect"))
+      return {
+        code: 0,
+        stdout: `ghcrXio/thevladbog/markiro-api@sha256:${"a".repeat(64)}`,
+        stderr: "private",
+      };
+    return run(command, args, childEnvironment);
+  };
+
+  await assert.rejects(
+    deployRelease({ environment, releaseDirectory }, dependencies),
+    /image digest is invalid/,
+  );
 });
 
 test("does not switch either service when migration fails", async () => {

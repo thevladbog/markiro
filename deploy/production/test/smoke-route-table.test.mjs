@@ -307,3 +307,73 @@ test("reports a restore failure after attempting shutdown", async () => {
   assert.ok(calls.some((args) => args[0] === "stop"));
   assert.ok(calls.some((args) => args.includes("up") && args.at(-1) === "api"));
 });
+
+test("surfaces both sanitized shutdown and restoration failures", async () => {
+  const docker = {
+    async run(command, args) {
+      if (args.includes("port")) return { code: 1, stdout: "", stderr: "" };
+      if (args.includes("id")) return { code: 0, stdout: "10001\n", stderr: "" };
+      if (args.includes("ps")) return { code: 0, stdout: "container-id\n", stderr: "" };
+      if (args[0] === "stop") return { code: 1, stdout: "", stderr: "secret stop stderr" };
+      if (args.includes("up")) return { code: 1, stdout: "", stderr: "secret restore stderr" };
+      return { code: args.includes("test") ? 1 : 0, stdout: "", stderr: "" };
+    },
+  };
+
+  await assert.rejects(
+    runSmoke(
+      {
+        baseUrl: "https://app.markiro.example",
+        assetName: "main.js",
+        environment: { SMOKE_ASSERT_SHUTDOWN: "1" },
+      },
+      smokeClient(),
+      docker,
+    ),
+    (error) => {
+      assert.ok(error instanceof AggregateError);
+      assert.match(error.message, /gracefully/);
+      assert.match(error.message, /not restored/);
+      assert.doesNotMatch(error.message, /secret/);
+      return true;
+    },
+  );
+});
+
+test("rejects an unknown route with an HTML content type and structurally distinguishes the shell", async () => {
+  const docker = {
+    run: async (command, args) =>
+      args.includes("id")
+        ? { code: 0, stdout: "10001\n", stderr: "" }
+        : { code: 1, stdout: "", stderr: "" },
+  };
+  const html404 = smokeClient();
+  const original404 = html404.request;
+  html404.request = async (url, init) =>
+    new URL(url).pathname === "/unknown"
+      ? response({ status: 404, body: "not found", headers: { "content-type": "text/html" } })
+      : original404(url, init);
+  await assert.rejects(
+    runSmoke(
+      { baseUrl: "https://app.markiro.example", assetName: "main.js", environment: {} },
+      html404,
+      docker,
+    ),
+    /non-HTML/,
+  );
+
+  const structured = smokeClient();
+  const originalStructured = structured.request;
+  structured.request = async (url, init) =>
+    new URL(url).pathname === "/docs"
+      ? response({
+          body: '<html><title>Markiro</title><script src="/assets/other.js" type="module"></script><p>/assets/main.js</p></html>',
+          headers: { "content-type": "text/html" },
+        })
+      : originalStructured(url, init);
+  await runSmoke(
+    { baseUrl: "https://app.markiro.example", assetName: "main.js", environment: {} },
+    structured,
+    docker,
+  );
+});

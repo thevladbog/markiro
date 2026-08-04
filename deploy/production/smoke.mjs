@@ -4,6 +4,7 @@ import process from "node:process";
 const CSP =
   "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'";
 const COMMAND_TIMEOUT_MS = 30_000;
+const TERMINATION_GRACE_MS = 1_000;
 
 function timeoutError(command, timeoutMs) {
   return new Error(`${command} timed out after ${timeoutMs}ms`);
@@ -89,10 +90,12 @@ export const ROUTE_CHECKS = Object.freeze([
 
 function dockerRunner(environment, timeoutMs) {
   return {
+    handlesDeadline: true,
     run(command, args) {
       return new Promise((resolve, reject) => {
         const startedAt = Date.now();
         let timedOut = false;
+        let killTimer;
         const child = spawn(command, args, {
           env: { ...process.env, ...environment },
           shell: false,
@@ -103,18 +106,20 @@ function dockerRunner(environment, timeoutMs) {
         const timer = setTimeout(() => {
           timedOut = true;
           child.kill("SIGTERM");
-          reject(timeoutError(command, timeoutMs));
+          killTimer = setTimeout(() => child.kill("SIGKILL"), TERMINATION_GRACE_MS);
         }, timeoutMs);
         child.stdout.on("data", (chunk) => (stdout += chunk));
         child.stderr.on("data", (chunk) => (stderr += chunk));
         child.once("error", () => {
           clearTimeout(timer);
-          if (!timedOut) reject(new Error(`${command} failed`));
+          if (killTimer) clearTimeout(killTimer);
+          reject(timedOut ? timeoutError(command, timeoutMs) : new Error(`${command} failed`));
         });
         child.once("close", (code) => {
           clearTimeout(timer);
-          if (!timedOut)
-            resolve({ code: code ?? 1, stdout, stderr, durationMs: Date.now() - startedAt });
+          if (killTimer) clearTimeout(killTimer);
+          if (timedOut) reject(timeoutError(command, timeoutMs));
+          else resolve({ code: code ?? 1, stdout, stderr, durationMs: Date.now() - startedAt });
         });
       });
     },
@@ -185,10 +190,12 @@ async function publicRequest(client, url, init) {
 }
 
 function assertRoute(check, response, body, signature) {
+  const candidateSignature = shellSignature(body);
   const isShell = Boolean(
     signature &&
-    shellSignature(body)?.title === signature.title &&
-    body.includes(signature.modulePath),
+    candidateSignature &&
+    candidateSignature.title === signature.title &&
+    candidateSignature.modulePath === signature.modulePath,
   );
   if (check.kind !== "admin-shell" && isShell)
     throw new Error(`${check.path} returned the admin shell`);
@@ -260,13 +267,21 @@ function assertRoute(check, response, body, signature) {
       isShell)
   )
     throw new Error("1C exchange did not reach the API");
-  if (check.kind === "not-found" && (response.status !== 404 || /<html/i.test(body)))
+  if (
+    check.kind === "not-found" &&
+    (response.status !== 404 ||
+      /<html/i.test(body) ||
+      /text\/html/i.test(response.headers.get("content-type") || ""))
+  )
     throw new Error("unknown POST must be a non-HTML 404");
 }
 
 async function runDocker(docker, args, commandTimeoutMs) {
   try {
-    return await withDeadline(docker.run("docker", args), "docker", commandTimeoutMs);
+    const result = docker.run("docker", args);
+    return docker.handlesDeadline
+      ? await result
+      : await withDeadline(result, "docker", commandTimeoutMs);
   } catch (error) {
     if (error?.message === `docker timed out after ${commandTimeoutMs}ms`) throw error;
     throw new Error("docker failed");
@@ -356,7 +371,11 @@ async function runtimeSmoke(environment, docker, client, baseUrl, options) {
     }
   }
   if (stopError) {
-    if (restoreError) stopError.restoreError = restoreError;
+    if (restoreError)
+      throw new AggregateError(
+        [stopError, restoreError],
+        `API shutdown failed: ${stopError.message}; restoration failed: ${restoreError.message}`,
+      );
     throw stopError;
   }
   if (restoreError) throw restoreError;
