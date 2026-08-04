@@ -1,4 +1,13 @@
 services:
+  migrate:
+    image: ghcr.io/thevladbog/markiro-api:${MARKIRO_IMAGE_TAG:?MARKIRO_IMAGE_TAG is required}
+
+  api:
+    image: ghcr.io/thevladbog/markiro-api:${MARKIRO_IMAGE_TAG:?MARKIRO_IMAGE_TAG is required}
+
+  edge:
+    image: ghcr.io/thevladbog/markiro-edge:${MARKIRO_IMAGE_TAG:?MARKIRO_IMAGE_TAG is required}
+
   postgres:
     image: postgres:17-alpine
     environment:

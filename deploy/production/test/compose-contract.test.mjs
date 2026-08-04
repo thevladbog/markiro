@@ -7,6 +7,24 @@ import { load as loadYaml } from "js-yaml";
 const productionCompose = "compose.production.yml";
 const ciCompose = "deploy/production/compose.ci.yml";
 const envExample = ".env.production.example";
+const apiDigest = `sha256:${"a".repeat(64)}`;
+const edgeDigest = `sha256:${"b".repeat(64)}`;
+
+function assertDigestImageRefs(compose) {
+  const model = loadYaml(compose);
+  assert.equal(
+    model.services.migrate.image,
+    "ghcr.io/thevladbog/markiro-api@${MARKIRO_API_IMAGE_DIGEST:?MARKIRO_API_IMAGE_DIGEST is required}",
+  );
+  assert.equal(
+    model.services.api.image,
+    "ghcr.io/thevladbog/markiro-api@${MARKIRO_API_IMAGE_DIGEST:?MARKIRO_API_IMAGE_DIGEST is required}",
+  );
+  assert.equal(
+    model.services.edge.image,
+    "ghcr.io/thevladbog/markiro-edge@${MARKIRO_EDGE_IMAGE_DIGEST:?MARKIRO_EDGE_IMAGE_DIGEST is required}",
+  );
+}
 
 test("production application services use exact restart policies", async () => {
   const model = loadYaml(await readFile(productionCompose, "utf8"));
@@ -39,6 +57,8 @@ test("merged CI Compose config preserves production restart policies", () => {
         MARKIRO_DOMAIN: "localhost",
         MARKIRO_ENV_FILE: envExample,
         MARKIRO_IMAGE_TAG: "contract-test",
+        MARKIRO_API_IMAGE_DIGEST: apiDigest,
+        MARKIRO_EDGE_IMAGE_DIGEST: edgeDigest,
       },
     },
   );
@@ -51,6 +71,7 @@ test("merged CI Compose config preserves production restart policies", () => {
 
 test("production Compose contains only hardened application services", async () => {
   const compose = await readFile(productionCompose, "utf8");
+  assertDigestImageRefs(compose);
 
   const serviceBlock = compose.match(/^services:\n([\s\S]*?)^volumes:/m)?.[1] ?? "";
   const services = serviceBlock.match(/^  ([a-z][a-z-]*):$/gm)?.map((entry) => entry.trim());
@@ -61,15 +82,15 @@ test("production Compose contains only hardened application services", async () 
 
   assert.match(
     migrate,
-    /^    image: ghcr\.io\/thevladbog\/markiro-api:\$\{MARKIRO_IMAGE_TAG:\?MARKIRO_IMAGE_TAG is required\}$/m,
+    /^    image: ghcr\.io\/thevladbog\/markiro-api@\$\{MARKIRO_API_IMAGE_DIGEST:\?MARKIRO_API_IMAGE_DIGEST is required\}$/m,
   );
   assert.match(
     api,
-    /^    image: ghcr\.io\/thevladbog\/markiro-api:\$\{MARKIRO_IMAGE_TAG:\?MARKIRO_IMAGE_TAG is required\}$/m,
+    /^    image: ghcr\.io\/thevladbog\/markiro-api@\$\{MARKIRO_API_IMAGE_DIGEST:\?MARKIRO_API_IMAGE_DIGEST is required\}$/m,
   );
   assert.match(
     edge,
-    /^    image: ghcr\.io\/thevladbog\/markiro-edge:\$\{MARKIRO_IMAGE_TAG:\?MARKIRO_IMAGE_TAG is required\}$/m,
+    /^    image: ghcr\.io\/thevladbog\/markiro-edge@\$\{MARKIRO_EDGE_IMAGE_DIGEST:\?MARKIRO_EDGE_IMAGE_DIGEST is required\}$/m,
   );
   assert.match(compose, /condition: service_completed_successfully/);
   assert.match(compose, /condition: service_healthy/);
@@ -102,21 +123,92 @@ test("production Compose contains only hardened application services", async () 
   }
 });
 
-test("CI overlay supplies only pinned test dependencies", async () => {
+test("production Compose contract rejects a SHA-tag fallback mutation", async () => {
+  const compose = await readFile(productionCompose, "utf8");
+  const mutated = compose.replace(
+    "ghcr.io/thevladbog/markiro-api@${MARKIRO_API_IMAGE_DIGEST:?MARKIRO_API_IMAGE_DIGEST is required}",
+    "ghcr.io/thevladbog/markiro-api:${MARKIRO_IMAGE_TAG:?MARKIRO_IMAGE_TAG is required}",
+  );
+  assert.notEqual(mutated, compose);
+  assert.throws(
+    () => assertDigestImageRefs(mutated),
+    /ghcr\.io\/thevladbog\/markiro-api@\$\{MARKIRO_API_IMAGE_DIGEST/,
+  );
+});
+
+test("CI overlay supplies only local image selectors and pinned test dependencies", async () => {
   const compose = await readFile(ciCompose, "utf8");
   const services = compose.match(/^  ([a-z][a-z-]*):$/gm)?.map((entry) => entry.trim());
 
-  assert.deepEqual(services, ["postgres:", "mailpit:", "minio:", "minio-init:"]);
+  assert.deepEqual(services, [
+    "migrate:",
+    "api:",
+    "edge:",
+    "postgres:",
+    "mailpit:",
+    "minio:",
+    "minio-init:",
+  ]);
   assert.match(compose, /image: postgres:17-alpine/);
   assert.match(compose, /image: axllent\/mailpit:v1\.30\.0/);
   assert.match(compose, /MP_DATABASE: \/tmp\/mailpit\.db/);
   assert.match(compose, /image: minio\/minio:RELEASE\.2025-09-07T16-13-09Z/);
   assert.match(compose, /image: minio\/mc:RELEASE\.2025-08-13T08-35-41Z/);
   assert.match(compose, /^  minio-init:$/m);
-  assert.doesNotMatch(compose, /^  edge:$/m);
   assert.doesNotMatch(compose, /^\s+ports:/m);
   assert.doesNotMatch(compose, /read_only: false/);
   assert.doesNotMatch(compose, /cap_drop: \[\]/);
+  assert.match(
+    compose,
+    /image: ghcr\.io\/thevladbog\/markiro-api:\$\{MARKIRO_IMAGE_TAG:\?MARKIRO_IMAGE_TAG is required\}/,
+  );
+  assert.match(
+    compose,
+    /image: ghcr\.io\/thevladbog\/markiro-edge:\$\{MARKIRO_IMAGE_TAG:\?MARKIRO_IMAGE_TAG is required\}/,
+  );
+});
+
+test("merged CI Compose uses local SHA-tagged images while validating dummy base digests", () => {
+  const configured = execFileSync(
+    "docker",
+    [
+      "compose",
+      "--env-file",
+      envExample,
+      "-f",
+      productionCompose,
+      "-f",
+      ciCompose,
+      "config",
+      "--format",
+      "json",
+    ],
+    {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        ACME_EMAIL: "ops@example.test",
+        MARKIRO_DOMAIN: "localhost",
+        MARKIRO_ENV_FILE: envExample,
+        MARKIRO_IMAGE_TAG: "0123456789abcdef0123456789abcdef01234567",
+        MARKIRO_API_IMAGE_DIGEST: apiDigest,
+        MARKIRO_EDGE_IMAGE_DIGEST: edgeDigest,
+      },
+    },
+  );
+  const model = JSON.parse(configured);
+  assert.equal(
+    model.services.migrate.image,
+    "ghcr.io/thevladbog/markiro-api:0123456789abcdef0123456789abcdef01234567",
+  );
+  assert.equal(
+    model.services.api.image,
+    "ghcr.io/thevladbog/markiro-api:0123456789abcdef0123456789abcdef01234567",
+  );
+  assert.equal(
+    model.services.edge.image,
+    "ghcr.io/thevladbog/markiro-edge:0123456789abcdef0123456789abcdef01234567",
+  );
 });
 
 test("production environment example is a blank loadEnv inventory", async () => {

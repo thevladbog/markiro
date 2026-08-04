@@ -6,6 +6,8 @@ import { composeQuiet, runPreflight } from "../preflight.mjs";
 
 const release = {
   MARKIRO_IMAGE_TAG: "0123456789abcdef0123456789abcdef01234567",
+  MARKIRO_API_IMAGE_DIGEST: `sha256:${"a".repeat(64)}`,
+  MARKIRO_EDGE_IMAGE_DIGEST: `sha256:${"b".repeat(64)}`,
   MARKIRO_DOMAIN: "app.markiro.example",
   ACME_EMAIL: "ops@example.test",
 };
@@ -33,16 +35,31 @@ async function assertRejected(environment, expectedMessage) {
   });
 }
 
-test("accepts immutable release inputs and a private environment file", async () => {
+test("accepts digest-pinned release inputs and a private environment file", async () => {
   const result = await runPreflight(release, dependencies());
 
   assert.deepEqual(result, {
     imageTag: release.MARKIRO_IMAGE_TAG,
+    apiImageDigest: release.MARKIRO_API_IMAGE_DIGEST,
+    edgeImageDigest: release.MARKIRO_EDGE_IMAGE_DIGEST,
     domain: release.MARKIRO_DOMAIN,
     acmeEmail: release.ACME_EMAIL,
     envFile: ".env.production",
   });
 });
+
+for (const [variable, value] of [
+  ["MARKIRO_API_IMAGE_DIGEST", undefined],
+  ["MARKIRO_EDGE_IMAGE_DIGEST", undefined],
+  ["MARKIRO_API_IMAGE_DIGEST", "sha256:abc"],
+  ["MARKIRO_EDGE_IMAGE_DIGEST", `sha256:${"A".repeat(64)}`],
+  ["MARKIRO_API_IMAGE_DIGEST", `SHA256:${"a".repeat(64)}`],
+  ["MARKIRO_EDGE_IMAGE_DIGEST", `ghcr.io/thevladbog/markiro-edge@sha256:${"b".repeat(64)}`],
+  ["MARKIRO_API_IMAGE_DIGEST", "0123456789abcdef0123456789abcdef01234567"],
+]) {
+  test(`rejects malformed or missing ${variable} without disclosing it`, () =>
+    assertRejected({ ...release, [variable]: value }, `${variable} is invalid`));
+}
 
 for (const [name, imageTag] of [
   ["latest", "latest"],

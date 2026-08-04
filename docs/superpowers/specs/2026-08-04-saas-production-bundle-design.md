@@ -17,7 +17,7 @@ images, reverse-proxy routes, runtime migrations, production health gates, or
 container-level smoke tests.
 
 The first customer should not be deployed from a developer checkout or by
-running pnpm directly on a VM. A release must be an immutable pair of images
+running pnpm directly on a VM. A release must be a digest-addressed pair of images
 plus a Compose contract whose startup, migrations, routing, failure behavior,
 and rollback can be exercised before any Yandex Cloud credentials exist.
 
@@ -28,7 +28,7 @@ are the next slice and consume the interfaces defined here.
 
 ## Goals
 
-- Build immutable production images for the Nest API and the admin/Caddy edge.
+- Build reproducible production images for the Nest API and the admin/Caddy edge.
 - Run one explicit migration job before an API version becomes healthy.
 - Serve the cabinet and every existing public API/device route from one TLS
   endpoint without changing client contracts.
@@ -106,13 +106,15 @@ public redirect.
 
 Caddy's `/data` and `/config` directories use named volumes so ACME account and
 certificate state survive container replacement. The admin assets are part of
-the immutable image. No source or host-directory bind mount is allowed in the
+the digest-pinned image. No source or host-directory bind mount is allowed in the
 production Compose file.
 
-The repository records exact base tags. Published Markiro images use the git
-commit SHA as their immutable tag; production refuses an empty or mutable
-`MARKIRO_IMAGE_TAG`. A release record stores the resolved API and edge image
-digests before deployment.
+The repository records exact base tags. Published Markiro images receive a full
+git commit SHA tag for release identity, but GHCR SHA tags are mutable selectors,
+not an immutable deployment boundary. Production selects only preapproved
+repository digests (`repo@sha256:...`) taken from trusted GitHub Actions release
+evidence after both pushes succeed. A release record stores those exact approved
+API and edge references before migration or service replacement.
 
 ## Public route contract
 
@@ -196,7 +198,9 @@ release success signal until the API is ready and the cabinet root responds.
 
 `compose.production.yml` accepts non-secret release variables from the shell:
 
-- `MARKIRO_IMAGE_TAG` — required immutable git SHA;
+- `MARKIRO_IMAGE_TAG` — required lowercase 40-character release identity;
+- `MARKIRO_API_IMAGE_DIGEST` — required lowercase API `sha256:` selector;
+- `MARKIRO_EDGE_IMAGE_DIGEST` — required lowercase edge `sha256:` selector;
 - `MARKIRO_DOMAIN` — required public hostname;
 - `ACME_EMAIL` — required certificate account contact;
 - `MARKIRO_ENV_FILE` — optional path, default `.env.production`.
@@ -241,21 +245,30 @@ Caddy provides a feature it does not ship.
 The bundle's runbook defines this order:
 
 1. verify the environment file permissions and required variables;
-2. record API/edge image digests and the current deployed tag;
+2. verify trusted release evidence and record the approved API/edge image
+   digests plus the current release SHA;
 3. confirm a fresh managed-PostgreSQL backup and object-storage policy in the
    cloud environment;
-4. pull both images by the approved immutable tag;
+4. pull both images by the approved repository digests;
 5. run `migrate` once and stop on any non-zero exit;
 6. recreate `api`, wait for readiness, then recreate `edge`;
 7. smoke the cabinet, auth boundary, device route, and first-owner workflow;
 8. retain the previous tag and release record until the observation window
    ends.
 
-Application rollback restores the previous API and edge image tag without
+Application rollback restores the previous API and edge repository digests without
 reversing migrations. It is permitted only while the release's migrations are
-backward-compatible. If readiness fails, the edge is not switched to the new
-API. If a post-switch smoke fails, restore the previous immutable images and
-preserve logs; never edit production containers or database rows by hand.
+backward-compatible. If readiness fails, the edge image is not recreated, but
+the old edge may still proxy the unavailable candidate API service identity. If
+a post-switch smoke fails, restore the previous digest pair and preserve logs;
+never edit production containers or database rows by hand.
+
+The single-VM Compose topology has one `api` identity and one `edge` identity.
+Replacing API can leave the old edge proxying an unavailable candidate, and
+replacing edge can interrupt active requests, so this design does not guarantee
+zero downtime. Rollback recreates the previous digest pair. A separately
+addressable blue/green topology is the next availability slice, not part of this
+implementation.
 
 ## CI verification
 
@@ -276,6 +289,10 @@ following against the exact Compose/Docker sources committed for production:
 10. stop the API with SIGTERM and assert a clean bounded exit;
 11. show sanitized container logs only on failure and remove test volumes in an
     unconditional cleanup step.
+
+Main-branch publication keeps the 40-character SHA tag for discovery and writes
+both validated build-push digest outputs plus `github.sha` to the successful job
+summary. That trusted Actions evidence is the operator input boundary.
 
 The normal repository verify, tenant-team infrastructure, CodeQL, dependency,
 Rust, and Windows jobs remain unchanged. The production-bundle job is an
@@ -316,6 +333,8 @@ additional gate, not a replacement.
   degraded report without exposing provider details.
 - CI boots and tests the real production bundle, including migration replay and
   shutdown.
+- Production Compose selects both application images by exact preapproved
+  repository digest, while CI uses an explicit local SHA-tag override.
 - The operator runbook defines deploy, smoke, rollback, secret handling, and
   the external edge-rate-limit go-live gate.
 
@@ -353,7 +372,7 @@ docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml -f deplo
 docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml -f deploy/production/compose.ci.yml run --rm migrate
 docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml -f deploy/production/compose.ci.yml run --rm migrate
 docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml -f deploy/production/compose.ci.yml up -d --wait --wait-timeout 120 --no-deps api edge
-SMOKE_ASSERT_SHUTDOWN=1 node deploy/production/smoke.mjs
+MARKIRO_SMOKE_CI_OVERLAY=1 SMOKE_ASSERT_SHUTDOWN=1 node deploy/production/smoke.mjs
 docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml -f deploy/production/compose.ci.yml down --volumes --remove-orphans
 ```
 
@@ -364,6 +383,23 @@ and
 [`30897398557`](https://github.com/thevladbog/markiro/actions/runs/30897398557).
 This is evidence for those two runs only; it is not a claim that the latest
 whole workflow or every unrelated repository job is currently green.
+
+The later digest-identity review correction replaced production SHA-tag
+selection with preapproved repository digests, retained explicit local tags only
+in the CI overlay, added build-push digest evidence, and documented the actual
+single-service downtime model. Its current local evidence is:
+
+```text
+affected digest/Compose/deploy/smoke/workflow/runbook contracts: 95 passed
+complete production-bundle contract suite: 117 passed
+release workflow YAML parse: passed
+production and merged CI Compose config --quiet: passed
+fresh disposable CI-overlay bundle, migrations twice, shutdown/restore: passed
+```
+
+The complete contract suite required local container-engine and loopback access.
+No new GitHub-hosted result is claimed for this correction until the branch is
+pushed and the PR checks complete.
 
 ## External references
 

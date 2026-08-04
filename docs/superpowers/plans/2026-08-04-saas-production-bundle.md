@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build, publish, and continuously smoke-test an immutable production bundle for the Markiro API and admin edge, with runtime migrations, bounded readiness, and an operator-safe deploy/rollback path.
+**Goal:** Build, publish, and continuously smoke-test a digest-pinned production bundle for the Markiro API and admin edge, with runtime migrations, bounded readiness, and an operator-safe deploy/rollback path.
 
 **Architecture:** A compiled runtime migrator and the Nest API share one pinned Node image; a separately pinned Caddy image contains the built admin SPA and owns the public TLS endpoint. Production Compose contains only `migrate`, `api`, and `edge`, while a CI overlay supplies PostgreSQL, Mailpit, and MinIO to exercise the exact production images and routes.
 
@@ -11,7 +11,8 @@
 ## Global Constraints
 
 - Use exact builder base `node:24.19.0-bookworm-slim` and exact edge runtime `caddy:2.11.4-alpine`; do not use floating `latest` tags.
-- Production images are `ghcr.io/thevladbog/markiro-api:${MARKIRO_IMAGE_TAG}` and `ghcr.io/thevladbog/markiro-edge:${MARKIRO_IMAGE_TAG}`; preflight requires `MARKIRO_IMAGE_TAG` to be a lowercase 40-character git SHA.
+- The 40-character `MARKIRO_IMAGE_TAG` is release identity only. GHCR SHA tags are mutable selectors. Production images are selected by preapproved `ghcr.io/thevladbog/markiro-api@${MARKIRO_API_IMAGE_DIGEST}` and `ghcr.io/thevladbog/markiro-edge@${MARKIRO_EDGE_IMAGE_DIGEST}` references, with strict lowercase `sha256:` plus 64-hex inputs from trusted Actions evidence.
+- The one-API/one-edge Compose identity does not guarantee zero downtime: candidate recreation can make the old edge unavailable, and rollback recreates the previous digest pair. A separately addressable blue/green topology is the next slice, not part of this plan.
 - Run production containers as unprivileged users with read-only root filesystems, dropped Linux capabilities, `no-new-privileges`, and a bounded `/tmp` tmpfs.
 - Keep the API on the private Compose network; only `edge` may publish host ports 80 and 443 in the production defaults.
 - Keep PostgreSQL, SMTP, and S3 external to `compose.production.yml`; local substitutes are allowed only in `deploy/production/compose.ci.yml`.
@@ -41,12 +42,12 @@
 - `deploy/production/Caddyfile` — ordered route, SPA, cache, compression, and security-header policy.
 - `compose.production.yml` — three-service production topology and hardening contract.
 - `deploy/production/compose.ci.yml` — CI-only PostgreSQL, Mailpit, MinIO, and test port overlay.
-- `deploy/production/preflight.mjs` — immutable-tag, hostname, email, secret-file-mode, and Compose validation.
+- `deploy/production/preflight.mjs` — release-SHA, image-digest, hostname, email, secret-file-mode, and Compose validation.
 - `deploy/production/deploy.mjs` — pull, digest record, migrate, API readiness gate, and edge switch orchestration.
 - `deploy/production/smoke.mjs` — route/header/runtime/shutdown checks against the built bundle.
 - `deploy/production/test/*.test.mjs` — dependency-free contract and orchestration tests.
 - `.github/workflows/ci.yml` — production-bundle build and smoke gate.
-- `.github/workflows/release-images.yml` — main-branch SHA-only GHCR publication.
+- `.github/workflows/release-images.yml` — main-branch SHA-tag GHCR publication with validated digest evidence.
 - `.env.production.example` — complete key inventory with blank values only.
 - `docs/runbooks/saas-production-deploy.md` — backup, deploy, smoke, rollback, and go-live gate.
 
@@ -794,7 +795,7 @@ Export a dependency-injected function so tests need no real files or Docker:
  */
 ```
 
-Test acceptance of a lowercase 40-hex SHA, DNS hostname `app.markiro.example`, ordinary email, and mode `0o600`. Test rejection of `latest`, 7/39/41-character hashes, uppercase hashes, a domain with scheme/path/port, invalid email, missing file, mode 0644, and any failed quiet Compose validation. Assert error messages name only the invalid variable or file mode and never contain environment values.
+Test acceptance of a lowercase 40-hex SHA, two lowercase `sha256:` plus 64-hex digest selectors, DNS hostname `app.markiro.example`, ordinary email, and mode `0o600`. Test rejection of missing, uppercase, malformed, full-repository, or tag-only digest inputs; `latest`; 7/39/41-character hashes; uppercase hashes; a domain with scheme/path/port; invalid email; missing file; mode 0644; and any failed quiet Compose validation. Assert error messages name only the invalid variable or file mode and never contain environment values.
 
 - [ ] **Step 3: Run focused tests and verify RED**
 
@@ -806,11 +807,11 @@ Expected: FAIL because production Compose and preflight do not exist.
 
 Use these service contracts:
 
-- `migrate`: API SHA image, `env_file`, `restart: "no"`, command `node node_modules/@markiro/db/dist/migrate-cli.js`, read-only root, 64 MiB `/tmp`, all capabilities dropped, no-new-privileges.
+- `migrate`: API digest image, `env_file`, `restart: "no"`, command `node node_modules/@markiro/db/dist/migrate-cli.js`, read-only root, 64 MiB `/tmp`, all capabilities dropped, no-new-privileges.
 - `api`: same image/env/hardening, `depends_on.migrate.condition: service_completed_successfully`, healthcheck `node /opt/markiro/healthcheck.mjs` every 10 seconds with 3-second timeout, 12 retries, 20-second start period, private `expose: ["3000"]`, no `ports`, and 30-second stop grace.
-- `edge`: edge SHA image, only `MARKIRO_DOMAIN` and `ACME_EMAIL` environment, `depends_on.api.condition: service_healthy`, unprivileged UID/GID 10001, read-only root with writable named `/data` and `/config`, 64 MiB `/tmp`, all capabilities dropped, no-new-privileges, and default host mappings `${MARKIRO_HTTP_PORT:-80}:8080` and `${MARKIRO_HTTPS_PORT:-443}:8443`.
+- `edge`: edge digest image, only `MARKIRO_DOMAIN` and `ACME_EMAIL` environment, `depends_on.api.condition: service_healthy`, unprivileged UID/GID 10001, read-only root with writable named `/data` and `/config`, 64 MiB `/tmp`, all capabilities dropped, no-new-privileges, and default host mappings `${MARKIRO_HTTP_PORT:-80}:8080` and `${MARKIRO_HTTPS_PORT:-443}:8443`.
 
-Both image references must use `${MARKIRO_IMAGE_TAG:?MARKIRO_IMAGE_TAG is required}`. Env file interpolation must be `${MARKIRO_ENV_FILE:-.env.production}`.
+Production image references must use exact repository digest interpolation. The CI overlay alone replaces them with local `${MARKIRO_IMAGE_TAG:?MARKIRO_IMAGE_TAG is required}` tags so the bundle gate never pulls registry images. Env file interpolation must be `${MARKIRO_ENV_FILE:-.env.production}`.
 
 - [ ] **Step 5: Implement the CI-only overlay and blank env inventory**
 
@@ -846,13 +847,13 @@ Set `NODE_ENV=production`, `PORT=3000`, and `TRUST_PROXY_HOPS=1` directly on API
 
 - [ ] **Step 6: Implement preflight and ignore private local state**
 
-Validate tag with `/^[0-9a-f]{40}$/`, domain with `/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/`, and email with a single-`@` plus non-empty local/domain parts. Resolve env file from `MARKIRO_ENV_FILE || ".env.production"`; require `(mode & 0o777) === 0o600`. Spawn only:
+Validate tag with `/^[0-9a-f]{40}$/`, each digest selector with `/^sha256:[0-9a-f]{64}$/`, domain with `/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/`, and email with a single-`@` plus non-empty local/domain parts. Resolve env file from `MARKIRO_ENV_FILE || ".env.production"`; require `(mode & 0o777) === 0o600`. Spawn only:
 
 ```text
 docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml config --quiet
 ```
 
-Pass the four non-secret release variables through the child environment, inherit no stdout, capture stderr without echoing it, and throw the stable message `Compose validation failed` on non-zero exit.
+Pass the six non-secret release variables through the child environment, inherit no stdout, capture stderr without echoing it, and throw the stable message `Compose validation failed` on non-zero exit.
 
 Add these ignores:
 
@@ -872,7 +873,7 @@ Expected: PASS.
 Create a mode-0600 temporary env file from the example with test-only values, then run:
 
 ```bash
-MARKIRO_IMAGE_TAG=0123456789abcdef0123456789abcdef01234567 MARKIRO_DOMAIN=localhost ACME_EMAIL=ops@example.test MARKIRO_ENV_FILE="$temp_env" node deploy/production/preflight.mjs
+MARKIRO_IMAGE_TAG=0123456789abcdef0123456789abcdef01234567 MARKIRO_API_IMAGE_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa MARKIRO_EDGE_IMAGE_DIGEST=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb MARKIRO_DOMAIN=localhost ACME_EMAIL=ops@example.test MARKIRO_ENV_FILE="$temp_env" node deploy/production/preflight.mjs
 ```
 
 Expected: exit 0 and one stable `Production bundle preflight passed` line; no expanded environment or Compose document is printed.
@@ -895,7 +896,7 @@ git commit -m "build: define production compose contract"
 
 **Interfaces:**
 
-- Consumes: successful `runPreflight`; production/CI Compose files; SHA-tagged images; public edge URL.
+- Consumes: successful `runPreflight`; production/CI Compose files; approved repository digests; public edge URL.
 - Produces: `deployRelease(options, runner): Promise<ReleaseRecord>` and `runSmoke(options, client, docker): Promise<void>`.
 
 - [ ] **Step 1: Write failing deploy-order tests**
@@ -905,8 +906,8 @@ Use an injected runner that records `command`, `args`, and redacted environment 
 ```text
 preflight
 docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml pull api edge
-docker image inspect --format {{index .RepoDigests 0}} ghcr.io/thevladbog/markiro-api:${MARKIRO_IMAGE_TAG}
-docker image inspect --format {{index .RepoDigests 0}} ghcr.io/thevladbog/markiro-edge:${MARKIRO_IMAGE_TAG}
+docker image inspect --format {{json .RepoDigests}} ghcr.io/thevladbog/markiro-api@${MARKIRO_API_IMAGE_DIGEST}
+docker image inspect --format {{json .RepoDigests}} ghcr.io/thevladbog/markiro-edge@${MARKIRO_EDGE_IMAGE_DIGEST}
 write release record with state=pending
 docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml run --rm migrate
 docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml up -d --no-deps api
@@ -1009,7 +1010,7 @@ git add deploy/production/deploy.mjs deploy/production/smoke.mjs deploy/producti
 git commit -m "feat: add production deploy and smoke tooling"
 ```
 
-### Task 7: CI bundle gate and SHA-only image publication
+### Task 7: CI bundle gate and digest-evidenced image publication
 
 **Files:**
 
@@ -1020,7 +1021,7 @@ git commit -m "feat: add production deploy and smoke tooling"
 **Interfaces:**
 
 - Consumes: both Dockerfiles, both Compose files, smoke tooling, GitHub commit SHA, GHCR credentials supplied by GitHub Actions.
-- Produces: PR production-bundle gate and main-branch immutable API/edge images.
+- Produces: PR production-bundle gate and main-branch API/edge SHA tags with trusted digest evidence.
 
 - [ ] **Step 1: Write failing workflow contracts**
 
@@ -1030,7 +1031,7 @@ Read both workflow files as text and assert:
 - CI builds both images using the current `${{ github.sha }}` as the only tag.
 - CI creates a temporary environment file with mode 0600 without echoing secrets to logs.
 - CI starts only CI dependency services first, runs `migrate` twice, then starts API/edge, runs smoke with shutdown assertion, shows `docker compose logs --no-color` only on failure, and always runs `down --volumes --remove-orphans`.
-- Release workflow triggers only on pushes to `main`, grants `contents: read` and `packages: write`, logs into `ghcr.io` with `GITHUB_TOKEN`, builds from the exact Dockerfiles, and pushes only `${{ github.sha }}` tags.
+- Release workflow triggers only on pushes to `main`, grants `contents: read` and `packages: write`, logs into `ghcr.io` with `GITHUB_TOKEN`, builds from the exact Dockerfiles, pushes only `${{ github.sha }}` tags, and records validated build-push digest outputs after both pushes.
 - Neither workflow contains `:latest`, a branch-name image tag, `docker compose config` without `--quiet`, or a command that prints `.env.production`.
 
 - [ ] **Step 2: Run the workflow contract and verify RED**
@@ -1052,13 +1053,13 @@ Use existing pinned checkout, pnpm setup, and Node setup action SHAs. The job mu
 7. start `postgres mailpit minio`, wait healthy, and run `minio-init` through the CI overlay;
 8. run `migrate` twice as one-off containers;
 9. start API and edge with `up -d --wait --wait-timeout 120`;
-10. run `SMOKE_ASSERT_SHUTDOWN=1 node deploy/production/smoke.mjs`;
+10. run `MARKIRO_SMOKE_CI_OVERLAY=1 SMOKE_ASSERT_SHUTDOWN=1 node deploy/production/smoke.mjs` so shutdown restoration retains the fixed local-image override;
 11. emit sanitized Compose logs only under `if: failure()`;
 12. remove containers and volumes under `if: always()`.
 
 Use GitHub secret masking commands for every generated test credential before any Docker command. Generated values are CI-only and must not be copied into `.env.production.example`.
 
-- [ ] **Step 4: Add SHA-only main publication**
+- [ ] **Step 4: Add SHA-tag main publication and digest evidence**
 
 Create one workflow job using these immutable action revisions:
 
@@ -1076,6 +1077,12 @@ ghcr.io/thevladbog/markiro-edge:${{ github.sha }}
 ```
 
 Do not publish `latest`, `main`, a short SHA, or an unpinned semver alias. Add action-SHA comments with the upstream major version, matching existing workflow style.
+
+Give both build-push steps stable IDs. After both pushes succeed, validate that
+each `digest` output is lowercase `sha256:` plus 64 hex characters and write the
+full SHA plus both repository digest references to `$GITHUB_STEP_SUMMARY`.
+This successful Actions evidence is the production trust boundary; the SHA tag
+itself remains mutable.
 
 - [ ] **Step 5: Validate workflow contracts and YAML parsing**
 
@@ -1123,7 +1130,7 @@ Assert the runbook contains explicit commands and stop conditions for:
 
 - validating mode 0600 without printing the file;
 - verifying managed-PostgreSQL backup freshness and object-storage retention/versioning;
-- pinning and recording the 40-character SHA plus both resolved digests;
+- pinning and recording the 40-character SHA plus both preapproved digests;
 - running preflight and `deploy.mjs`;
 - cabinet root, auth boundary, device route, and first-owner smoke;
 - provisioning the first tenant owner with the existing CLI after health is green;
@@ -1145,7 +1152,9 @@ Use concrete commands with absolute operator variables, for example:
 
 ```bash
 read -r -p 'Approved 40-character git SHA: ' MARKIRO_IMAGE_TAG
-export MARKIRO_IMAGE_TAG
+read -r -p 'Approved API digest (sha256:...): ' MARKIRO_API_IMAGE_DIGEST
+read -r -p 'Approved edge digest (sha256:...): ' MARKIRO_EDGE_IMAGE_DIGEST
+export MARKIRO_IMAGE_TAG MARKIRO_API_IMAGE_DIGEST MARKIRO_EDGE_IMAGE_DIGEST
 export MARKIRO_DOMAIN=app.example.ru
 export ACME_EMAIL=ops@example.ru
 export MARKIRO_ENV_FILE=/etc/markiro/production.env
@@ -1155,7 +1164,7 @@ node deploy/production/preflight.mjs
 node deploy/production/deploy.mjs
 ```
 
-State that preflight rejects anything except the approved full lowercase SHA. Link first-owner semantics to `docs/runbooks/cabinet-rbac-rollout.md`, collect the three non-secret inputs without putting them in shell history, and run the compiled CLI from the same immutable API image:
+State that preflight rejects anything except the approved full lowercase SHA and both approved digest selectors. Link first-owner semantics to `docs/runbooks/cabinet-rbac-rollout.md`, collect the three non-secret inputs without putting them in shell history, and run the compiled CLI from the same digest-pinned API image:
 
 ```bash
 read -r -p 'Owner email: ' OWNER_EMAIL

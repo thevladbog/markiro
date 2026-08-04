@@ -3,6 +3,8 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const RUNBOOK = "docs/runbooks/saas-production-deploy.md";
+const DESIGN = "docs/superpowers/specs/2026-08-04-saas-production-bundle-design.md";
+const PLAN = "docs/superpowers/plans/2026-08-04-saas-production-bundle.md";
 
 const DEPLOY_BLOCK = `node deploy/production/preflight.mjs
 node deploy/production/deploy.mjs
@@ -86,6 +88,7 @@ test "$MIGRATIONS_BACKWARD_COMPATIBLE" = yes || {
   exit 1
 }
 
+read -r MARKIRO_API_IMAGE_DIGEST MARKIRO_EDGE_IMAGE_DIGEST <<< "$(
 node - "$MARKIRO_ROOT/.markiro-releases" "$FAILED_RELEASE_RECORD" "$PREVIOUS_RELEASE_RECORD" "$MARKIRO_IMAGE_TAG" "$PREVIOUS_TAG" <<'NODE'
 const { lstatSync, readFileSync, realpathSync } = require("node:fs");
 const { basename, dirname } = require("node:path");
@@ -138,23 +141,24 @@ if (
   !digest("ghcr.io/thevladbog/markiro-api", previous.apiDigest) ||
   !digest("ghcr.io/thevladbog/markiro-edge", previous.edgeDigest)
 ) {
-  throw new Error("STOP: previous release record is not the selected healthy immutable pair");
+  throw new Error("STOP: previous release record is not the selected healthy digest pair");
 }
-console.log("rollback release records verified");
+console.log(previous.apiDigest.slice("ghcr.io/thevladbog/markiro-api@".length), previous.edgeDigest.slice("ghcr.io/thevladbog/markiro-edge@".length));
 NODE
+)"
 
 MARKIRO_IMAGE_TAG="$PREVIOUS_TAG"
-export MARKIRO_IMAGE_TAG
+export MARKIRO_IMAGE_TAG MARKIRO_API_IMAGE_DIGEST MARKIRO_EDGE_IMAGE_DIGEST
 node deploy/production/preflight.mjs`;
 
 const ROLLBACK_EXECUTION_BLOCK = `docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml pull api edge
 
-ACTUAL_API_DIGEST="$(docker image inspect --format '{{index .RepoDigests 0}}' "ghcr.io/thevladbog/markiro-api:\${PREVIOUS_TAG}")"
-ACTUAL_EDGE_DIGEST="$(docker image inspect --format '{{index .RepoDigests 0}}' "ghcr.io/thevladbog/markiro-edge:\${PREVIOUS_TAG}")"
-node - "$MARKIRO_ROOT/.markiro-releases" "$PREVIOUS_RELEASE_RECORD" "$PREVIOUS_TAG" "$ACTUAL_API_DIGEST" "$ACTUAL_EDGE_DIGEST" <<'NODE'
+ACTUAL_API_DIGESTS="$(docker image inspect --format '{{json .RepoDigests}}' "ghcr.io/thevladbog/markiro-api@\${MARKIRO_API_IMAGE_DIGEST}")"
+ACTUAL_EDGE_DIGESTS="$(docker image inspect --format '{{json .RepoDigests}}' "ghcr.io/thevladbog/markiro-edge@\${MARKIRO_EDGE_IMAGE_DIGEST}")"
+node - "$MARKIRO_ROOT/.markiro-releases" "$PREVIOUS_RELEASE_RECORD" "$PREVIOUS_TAG" "$ACTUAL_API_DIGESTS" "$ACTUAL_EDGE_DIGESTS" <<'NODE'
 const { lstatSync, readFileSync, realpathSync } = require("node:fs");
 const { dirname } = require("node:path");
-const [directoryInput, previousPath, expectedTag, actualApi, actualEdge] = process.argv.slice(2);
+const [directoryInput, previousPath, expectedTag, actualApiJson, actualEdgeJson] = process.argv.slice(2);
 const metadata = lstatSync(previousPath);
 if (metadata.isSymbolicLink() || !metadata.isFile() || (metadata.mode & 0o777) !== 0o600) {
   throw new Error("STOP: previous release record changed after validation");
@@ -164,11 +168,23 @@ if (dirname(canonicalPath) !== realpathSync(directoryInput)) {
   throw new Error("STOP: previous release record left the protected release directory");
 }
 const record = JSON.parse(readFileSync(canonicalPath, "utf8"));
+let actualApi;
+let actualEdge;
+try {
+  actualApi = JSON.parse(actualApiJson);
+  actualEdge = JSON.parse(actualEdgeJson);
+} catch {
+  throw new Error("STOP: pulled rollback image digest evidence is invalid");
+}
+const expectedApi = record.apiDigest;
+const expectedEdge = record.edgeDigest;
 if (
   record.state !== "healthy" ||
   record.tag !== expectedTag ||
-  record.apiDigest !== actualApi ||
-  record.edgeDigest !== actualEdge
+  !Array.isArray(actualApi) ||
+  !actualApi.includes(expectedApi) ||
+  !Array.isArray(actualEdge) ||
+  !actualEdge.includes(expectedEdge)
 ) {
   throw new Error("STOP: pulled rollback image digest differs from the protected release record");
 }
@@ -229,6 +245,17 @@ function assertRunbook(source) {
   const rollback = section(source, "Rollback");
   const observation = section(source, "Observation window");
   const goLive = section(source, "Public DNS go-live gate");
+
+  invariant(
+    common.includes("MARKIRO_API_IMAGE_DIGEST") &&
+      common.includes("MARKIRO_EDGE_IMAGE_DIGEST") &&
+      common.includes("^sha256:[0-9a-f]{64}$"),
+    "common setup must validate and export both approved digest selectors",
+  );
+  invariant(
+    /trusted GitHub Actions release\s+evidence[\s\S]{0,120}trust\s+boundary/i.test(common),
+    "trusted Actions digest evidence trust boundary is missing",
+  );
 
   invariant(
     blockContaining(common, "ENV_FILE_MODE", "environment mode") === MODE_BLOCK,
@@ -299,6 +326,14 @@ function assertRunbook(source) {
     validation === ROLLBACK_VALIDATION_BLOCK,
     "rollback validation block must be exact and fail closed before pull",
   );
+  invariant(
+    validation.includes("MARKIRO_API_IMAGE_DIGEST") &&
+      validation.includes("MARKIRO_EDGE_IMAGE_DIGEST") &&
+      validation.includes(
+        "export MARKIRO_IMAGE_TAG MARKIRO_API_IMAGE_DIGEST MARKIRO_EDGE_IMAGE_DIGEST",
+      ),
+    "rollback must derive and export both digest selectors before preflight",
+  );
 
   const execution = blockContaining(rollback, "ACTUAL_API_DIGEST", "rollback execution");
   invariant(
@@ -310,6 +345,10 @@ function assertRunbook(source) {
   invariant(
     execution === ROLLBACK_EXECUTION_BLOCK,
     "rollback command sequence must be exact with no reordered or extra commands",
+  );
+  invariant(
+    execution.includes("{{json .RepoDigests}}") && execution.includes(".includes(expectedApi)"),
+    "rollback must verify exact digest membership without array-order assumptions",
   );
 
   invariant(source.includes("Never reverse migrations"), "reverse migrations must be forbidden");
@@ -352,6 +391,29 @@ function assertRunbook(source) {
     /docs\/runbooks\/cabinet-rbac-rollout\.md/.test(source),
     "cabinet RBAC runbook link is missing",
   );
+  invariant(
+    source.includes("does not guarantee zero downtime") &&
+      source.includes("blue/green") &&
+      /recreate the previous digest\s+pair/.test(source),
+    "single-service downtime and rollback semantics must be explicit",
+  );
+}
+
+function assertIdentityClaims(runbook, design, plan) {
+  const combined = `${runbook}\n${design}\n${plan}`;
+  invariant(
+    combined.includes("SHA tags are mutable selectors") &&
+      combined.includes("preapproved repository digest"),
+    "digest trust boundary and mutable SHA-tag selector must be documented",
+  );
+  invariant(
+    !/(?:SHA|git SHA|SHA-only)[^\n.]{0,80}(?:immutable tag|immutable image)/i.test(combined),
+    "SHA-tag selectors must not be described as immutable images",
+  );
+  invariant(
+    !/\b(?:guarantees|provides) zero downtime/i.test(combined),
+    "single-service deployment must not claim zero downtime",
+  );
 }
 
 function replaceUnique(source, needle, replacement) {
@@ -367,6 +429,27 @@ function rejectsMutation(source, name, needle, replacement, message) {
 
 test("the parsed runbook has exact fail-closed deploy, owner, and rollback procedures", async () => {
   assertRunbook(await readFile(RUNBOOK, "utf8"));
+});
+
+test("runbook, design, and plan describe digest identity and single-service downtime truthfully", async () => {
+  assertIdentityClaims(
+    await readFile(RUNBOOK, "utf8"),
+    await readFile(DESIGN, "utf8"),
+    await readFile(PLAN, "utf8"),
+  );
+});
+
+test("documentation contract rejects a false zero-downtime claim mutation", async () => {
+  const runbook = await readFile(RUNBOOK, "utf8");
+  const design = await readFile(DESIGN, "utf8");
+  const plan = await readFile(PLAN, "utf8");
+  const truthful = "does not guarantee zero downtime";
+  const mutated = runbook.replace(truthful, "guarantees zero downtime");
+  assert.notEqual(mutated, runbook, "truthful downtime statement must exist");
+  assert.throws(
+    () => assertIdentityClaims(mutated, design, plan),
+    /single-service deployment must not claim zero downtime/,
+  );
 });
 
 test("the contract rejects each portability, record-safety, linkage, and command mutation for its own reason", async () => {

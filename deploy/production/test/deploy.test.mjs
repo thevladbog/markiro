@@ -7,8 +7,14 @@ import test from "node:test";
 import { deployRelease, writeRelease } from "../deploy.mjs";
 
 const tag = "0123456789abcdef0123456789abcdef01234567";
+const apiImageDigest = `sha256:${"a".repeat(64)}`;
+const edgeImageDigest = `sha256:${"b".repeat(64)}`;
+const apiImage = `ghcr.io/thevladbog/markiro-api@${apiImageDigest}`;
+const edgeImage = `ghcr.io/thevladbog/markiro-edge@${edgeImageDigest}`;
 const environment = {
   MARKIRO_IMAGE_TAG: tag,
+  MARKIRO_API_IMAGE_DIGEST: apiImageDigest,
+  MARKIRO_EDGE_IMAGE_DIGEST: edgeImageDigest,
   MARKIRO_ENV_FILE: "/private/production.env",
   MARKIRO_DOMAIN: "app.markiro.example",
   ACME_EMAIL: "ops@example.test",
@@ -25,10 +31,9 @@ function fakeRunner({ failures = {} } = {}) {
       if (failures[key]) return { code: failures[key], stdout: "", stderr: "private stderr" };
       if (args.includes("image") && args.includes("inspect")) {
         const image = args.at(-1);
-        const marker = image.includes("markiro-api") ? "a" : "b";
         return {
           code: 0,
-          stdout: `${image.replace(`:${tag}`, "")}@sha256:${marker.repeat(64)}`,
+          stdout: JSON.stringify([`ghcr.io/example/unrelated@sha256:${"f".repeat(64)}`, image]),
           stderr: "",
         };
       }
@@ -62,7 +67,12 @@ async function fixture({ failures, readiness, smokeError, priorTag = previousTag
   let readinessCall = 0;
   const logs = [];
   const dependencies = {
-    runPreflight: async () => ({ imageTag: tag, envFile: environment.MARKIRO_ENV_FILE }),
+    runPreflight: async () => ({
+      imageTag: tag,
+      apiImageDigest,
+      edgeImageDigest,
+      envFile: environment.MARKIRO_ENV_FILE,
+    }),
     runner,
     runSmoke: async () => {
       if (smokeError) throw smokeError;
@@ -83,7 +93,7 @@ const compose = [
   "compose.production.yml",
 ];
 
-test("deploys immutable images in migration, readiness, edge, and public-smoke order", async () => {
+test("deploys approved digest-backed images in migration, readiness, edge, and public-smoke order", async () => {
   const { dependencies, releaseDirectory, runner } = await fixture();
 
   const release = await deployRelease(
@@ -95,26 +105,8 @@ test("deploys immutable images in migration, readiness, edge, and public-smoke o
     runner.calls.map(({ command, args }) => [command, args]),
     [
       ["docker", [...compose, "pull", "api", "edge"]],
-      [
-        "docker",
-        [
-          "image",
-          "inspect",
-          "--format",
-          "{{index .RepoDigests 0}}",
-          `ghcr.io/thevladbog/markiro-api:${tag}`,
-        ],
-      ],
-      [
-        "docker",
-        [
-          "image",
-          "inspect",
-          "--format",
-          "{{index .RepoDigests 0}}",
-          `ghcr.io/thevladbog/markiro-edge:${tag}`,
-        ],
-      ],
+      ["docker", ["image", "inspect", "--format", "{{json .RepoDigests}}", apiImage]],
+      ["docker", ["image", "inspect", "--format", "{{json .RepoDigests}}", edgeImage]],
       ["docker", [...compose, "run", "--rm", "migrate"]],
       ["docker", [...compose, "up", "-d", "--no-deps", "api"]],
       ["docker", [...compose, "exec", "-T", "api", "node", "/opt/markiro/healthcheck.mjs"]],
@@ -124,8 +116,8 @@ test("deploys immutable images in migration, readiness, edge, and public-smoke o
   assert.equal(release.state, "healthy");
   assert.equal(release.tag, tag);
   assert.equal(release.previousTag, previousTag);
-  assert.match(release.apiDigest, /markiro-api/);
-  assert.match(release.edgeDigest, /markiro-edge/);
+  assert.equal(release.apiDigest, apiImage);
+  assert.equal(release.edgeDigest, edgeImage);
   const files = await readdir(releaseDirectory);
   assert.equal(files.length, 2);
   assert.equal(
@@ -171,18 +163,76 @@ test("uses only a structurally valid newest healthy release as the previous tag"
   assert.equal(release.previousTag, null);
 });
 
-test("rejects an inspect value that is not the expected immutable digest", async () => {
+test("rejects an inspect value that does not contain the approved digest", async () => {
   const { dependencies, releaseDirectory, runner } = await fixture({ priorTag: null });
   const run = runner.run;
   runner.run = async (command, args, childEnvironment) => {
     if (args.includes("image") && args.includes("inspect"))
-      return { code: 0, stdout: "<no value>", stderr: "private output" };
+      return {
+        code: 0,
+        stdout: JSON.stringify([`ghcr.io/example/other@sha256:${"c".repeat(64)}`]),
+        stderr: "private output",
+      };
     return run(command, args, childEnvironment);
   };
 
   await assert.rejects(
     deployRelease({ environment, releaseDirectory }, dependencies),
-    /image digest is invalid/,
+    /approved image digest is not present/,
+  );
+  assert.equal(
+    runner.calls.some(({ args }) => args.includes("migrate")),
+    false,
+  );
+});
+
+test("accepts the approved digest anywhere in the inspect RepoDigests array", async () => {
+  const { dependencies, releaseDirectory, runner } = await fixture({ priorTag: null });
+  const run = runner.run;
+  runner.run = async (command, args, childEnvironment) => {
+    if (args.includes("image") && args.includes("inspect")) {
+      const expected = args.at(-1);
+      return {
+        code: 0,
+        stdout: JSON.stringify([
+          `ghcr.io/example/unrelated@sha256:${"e".repeat(64)}`,
+          expected,
+          `ghcr.io/example/another@sha256:${"f".repeat(64)}`,
+        ]),
+        stderr: "",
+      };
+    }
+    return run(command, args, childEnvironment);
+  };
+
+  const release = await deployRelease(
+    { environment, releaseDirectory, readinessAttempts: 1 },
+    dependencies,
+  );
+  assert.equal(release.apiDigest, apiImage);
+  assert.equal(release.edgeDigest, edgeImage);
+});
+
+test("rejects swapped API and edge digests before migrations", async () => {
+  const { dependencies, releaseDirectory, runner } = await fixture({ priorTag: null });
+  dependencies.runPreflight = async () => ({
+    imageTag: tag,
+    apiImageDigest: edgeImageDigest,
+    edgeImageDigest: apiImageDigest,
+    envFile: environment.MARKIRO_ENV_FILE,
+  });
+  const run = runner.run;
+  runner.run = async (command, args, childEnvironment) => {
+    if (args.includes("image") && args.includes("inspect")) {
+      const actual = args.at(-1).includes("markiro-api") ? apiImage : edgeImage;
+      return { code: 0, stdout: JSON.stringify([actual]), stderr: "" };
+    }
+    return run(command, args, childEnvironment);
+  };
+
+  await assert.rejects(
+    deployRelease({ environment, releaseDirectory }, dependencies),
+    /approved image digest is not present/,
   );
   assert.equal(
     runner.calls.some(({ args }) => args.includes("migrate")),
@@ -357,7 +407,7 @@ test("rejects a deceptive repository name in image inspect output", async () => 
     if (args.includes("image") && args.includes("inspect"))
       return {
         code: 0,
-        stdout: `ghcrXio/thevladbog/markiro-api@sha256:${"a".repeat(64)}`,
+        stdout: JSON.stringify([`ghcrXio/thevladbog/markiro-api@sha256:${"a".repeat(64)}`]),
         stderr: "private",
       };
     return run(command, args, childEnvironment);
@@ -365,7 +415,7 @@ test("rejects a deceptive repository name in image inspect output", async () => 
 
   await assert.rejects(
     deployRelease({ environment, releaseDirectory }, dependencies),
-    /image digest is invalid/,
+    /approved image digest is not present/,
   );
 });
 

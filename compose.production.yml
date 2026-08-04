@@ -1,6 +1,6 @@
 services:
   migrate:
-    image: ghcr.io/thevladbog/markiro-api:${MARKIRO_IMAGE_TAG:?MARKIRO_IMAGE_TAG is required}
+    image: ghcr.io/thevladbog/markiro-api@${MARKIRO_API_IMAGE_DIGEST:?MARKIRO_API_IMAGE_DIGEST is required}
     env_file:
       - ${MARKIRO_ENV_FILE:-.env.production}
     environment:
@@ -18,7 +18,7 @@ services:
       - no-new-privileges:true
 
   api:
-    image: ghcr.io/thevladbog/markiro-api:${MARKIRO_IMAGE_TAG:?MARKIRO_IMAGE_TAG is required}
+    image: ghcr.io/thevladbog/markiro-api@${MARKIRO_API_IMAGE_DIGEST:?MARKIRO_API_IMAGE_DIGEST is required}
     restart: unless-stopped
     env_file:
       - ${MARKIRO_ENV_FILE:-.env.production}
@@ -47,7 +47,7 @@ services:
       - no-new-privileges:true
 
   edge:
-    image: ghcr.io/thevladbog/markiro-edge:${MARKIRO_IMAGE_TAG:?MARKIRO_IMAGE_TAG is required}
+    image: ghcr.io/thevladbog/markiro-edge@${MARKIRO_EDGE_IMAGE_DIGEST:?MARKIRO_EDGE_IMAGE_DIGEST is required}
     restart: unless-stopped
     environment:
       MARKIRO_DOMAIN: ${MARKIRO_DOMAIN:?MARKIRO_DOMAIN is required}

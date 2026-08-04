@@ -143,13 +143,16 @@ function requestClient() {
 }
 
 function composeArgs(environment) {
-  return [
+  const args = [
     "compose",
     "--env-file",
     environment.MARKIRO_ENV_FILE || ".env.production",
     "-f",
     "compose.production.yml",
   ];
+  if (environment.MARKIRO_SMOKE_CI_OVERLAY === "1")
+    args.push("-f", "deploy/production/compose.ci.yml");
+  return args;
 }
 
 function assertHeaders(response, requiresHsts) {

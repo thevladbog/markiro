@@ -61,6 +61,8 @@ const GENERATE_ENVIRONMENT =
 
 const PRODUCTION_BUNDLE_ENV = {
   MARKIRO_IMAGE_TAG: "${{ github.sha }}",
+  MARKIRO_API_IMAGE_DIGEST: `sha256:${"a".repeat(64)}`,
+  MARKIRO_EDGE_IMAGE_DIGEST: `sha256:${"b".repeat(64)}`,
   MARKIRO_DOMAIN: "localhost",
   MARKIRO_HTTP_PORT: "18080",
   MARKIRO_HTTPS_PORT: "18443",
@@ -79,7 +81,7 @@ const PRODUCTION_BUNDLE_STEPS = [
   { name: "Verify production bundle contracts", run: "pnpm test:production-bundle:contract" },
   { name: "Generate masked test-only environment", run: GENERATE_ENVIRONMENT },
   {
-    name: "Build immutable local production images",
+    name: "Build local SHA-tagged production images",
     run:
       'docker build --file deploy/production/api.Dockerfile --tag "ghcr.io/thevladbog/markiro-api:${{ github.sha }}" .\n' +
       'docker build --file deploy/production/edge.Dockerfile --tag "ghcr.io/thevladbog/markiro-edge:${{ github.sha }}" .\n',
@@ -101,7 +103,7 @@ const PRODUCTION_BUNDLE_STEPS = [
   {
     name: "Smoke the production bundle",
     env: { NODE_TLS_REJECT_UNAUTHORIZED: "0" },
-    run: "SMOKE_ASSERT_SHUTDOWN=1 node deploy/production/smoke.mjs",
+    run: "MARKIRO_SMOKE_CI_OVERLAY=1 SMOKE_ASSERT_SHUTDOWN=1 node deploy/production/smoke.mjs",
   },
   {
     name: "Show sanitized production-bundle logs on failure",
@@ -127,7 +129,8 @@ const RELEASE_STEPS = [
     },
   },
   {
-    name: "Publish immutable API image",
+    name: "Publish API SHA tag",
+    id: "api-image",
     uses: BUILD_PUSH,
     with: {
       context: ".",
@@ -137,7 +140,8 @@ const RELEASE_STEPS = [
     },
   },
   {
-    name: "Publish immutable edge image",
+    name: "Publish edge SHA tag",
+    id: "edge-image",
     uses: BUILD_PUSH,
     with: {
       context: ".",
@@ -145,6 +149,28 @@ const RELEASE_STEPS = [
       push: true,
       tags: "ghcr.io/thevladbog/markiro-edge:${{ github.sha }}",
     },
+  },
+  {
+    name: "Record trusted image digest evidence",
+    env: {
+      RELEASE_SHA: "${{ github.sha }}",
+      API_DIGEST: "${{ steps.api-image.outputs.digest }}",
+      EDGE_DIGEST: "${{ steps.edge-image.outputs.digest }}",
+    },
+    run:
+      "set -euo pipefail\n" +
+      'release_sha="$RELEASE_SHA"\n' +
+      'api_digest="$API_DIGEST"\n' +
+      'edge_digest="$EDGE_DIGEST"\n' +
+      '[[ "$release_sha" =~ ^[0-9a-f]{40}$ ]]\n' +
+      '[[ "$api_digest" =~ ^sha256:[0-9a-f]{64}$ ]]\n' +
+      '[[ "$edge_digest" =~ ^sha256:[0-9a-f]{64}$ ]]\n' +
+      "{\n" +
+      "  printf '### Markiro production image evidence\\n\\n'\n" +
+      "  printf -- '- Commit SHA: `%s`\\n' \"$release_sha\"\n" +
+      "  printf -- '- API: `ghcr.io/thevladbog/markiro-api@%s`\\n' \"$api_digest\"\n" +
+      "  printf -- '- Edge: `ghcr.io/thevladbog/markiro-edge@%s`\\n' \"$edge_digest\"\n" +
+      '} >> "$GITHUB_STEP_SUMMARY"\n',
   },
 ];
 
@@ -349,7 +375,7 @@ test("CI structurally verifies the production bundle and secret-safe cleanup", a
   assertCiWorkflow(await source(".github/workflows/ci.yml"));
 });
 
-test("main publication structurally pushes only immutable GHCR SHA tags", async () => {
+test("main publication structurally pushes SHA tags and records trusted digest evidence", async () => {
   assertReleaseWorkflow(
     await source(".github/workflows/release-images.yml"),
     await source(".github/workflows/ci.yml"),
@@ -361,7 +387,8 @@ test("CI contract rejects each hidden-step, shell, log, and cleanup mutation for
   const install =
     "      - run: pnpm install --frozen-lockfile\n" +
     "      - name: Define temporary production environment path";
-  const smoke = "        run: SMOKE_ASSERT_SHUTDOWN=1 node deploy/production/smoke.mjs";
+  const smoke =
+    "        run: MARKIRO_SMOKE_CI_OVERLAY=1 SMOKE_ASSERT_SHUTDOWN=1 node deploy/production/smoke.mjs";
   const build =
     '          docker build --file deploy/production/api.Dockerfile --tag "ghcr.io/thevladbog/markiro-api:${{ github.sha }}" .';
   const logsIf =
@@ -407,19 +434,19 @@ test("CI contract rejects each hidden-step, shell, log, and cleanup mutation for
       name: "absolute Docker executable",
       search: build,
       replacement: build.replace("docker build", "/usr/bin/docker build"),
-      expected: /unexpected Build immutable local production images step/,
+      expected: /unexpected Build local SHA-tagged production images step/,
     },
     {
       name: "shell-composed Docker build",
       search: build,
       replacement: build.replace("docker build", "true && docker build"),
-      expected: /unexpected Build immutable local production images step/,
+      expected: /unexpected Build local SHA-tagged production images step/,
     },
     {
       name: "extra buildx tag",
       search: build,
       replacement: `${build}\n          docker buildx build -t other:extra .`,
-      expected: /unexpected Build immutable local production images step/,
+      expected: /unexpected Build local SHA-tagged production images step/,
     },
     {
       name: "unconditional failure logs",
@@ -448,9 +475,11 @@ test("release contract rejects each trigger, permission, job, step, and tag muta
   const release = await source(".github/workflows/release-images.yml");
   const ci = await source(".github/workflows/ci.yml");
   const apiTags = "          tags: ghcr.io/thevladbog/markiro-api:${{ github.sha }}";
-  const edgeStep = "      - name: Publish immutable edge image";
+  const edgeStep = "      - name: Publish edge SHA tag";
   const edgeBuildPushComment =
-    `      - name: Publish immutable edge image\n` + `        uses: ${BUILD_PUSH} # v6.18.0`;
+    `      - name: Publish edge SHA tag\n` +
+    `        id: edge-image\n` +
+    `        uses: ${BUILD_PUSH} # v6.18.0`;
 
   for (const mutation of [
     {
@@ -487,7 +516,8 @@ test("release contract rejects each trigger, permission, job, step, and tag muta
     },
     {
       name: "altered production-bundle smoke step",
-      search: "        run: SMOKE_ASSERT_SHUTDOWN=1 node deploy/production/smoke.mjs",
+      search:
+        "        run: MARKIRO_SMOKE_CI_OVERLAY=1 SMOKE_ASSERT_SHUTDOWN=1 node deploy/production/smoke.mjs",
       replacement: "        run: node deploy/production/smoke.mjs",
       expected: /unexpected Smoke the production bundle step/,
     },
@@ -518,7 +548,10 @@ test("release contract rejects each trigger, permission, job, step, and tag muta
     {
       name: "missing revision comment on second repeated action",
       search: edgeBuildPushComment,
-      replacement: `      - name: Publish immutable edge image\n` + `        uses: ${BUILD_PUSH}`,
+      replacement:
+        `      - name: Publish edge SHA tag\n` +
+        `        id: edge-image\n` +
+        `        uses: ${BUILD_PUSH}`,
       expected: /missing v6\.18\.0 revision comment.*occurrence 2/,
     },
     {
@@ -546,7 +579,19 @@ test("release contract rejects each trigger, permission, job, step, and tag muta
         "          tags:\n" +
         "            - ghcr.io/thevladbog/markiro-api:${{ github.sha }}\n" +
         "            - ghcr.io/thevladbog/markiro-api:extra",
-      expected: /unexpected Publish immutable API image step/,
+      expected: /unexpected Publish API SHA tag step/,
+    },
+    {
+      name: "missing API build output id",
+      search: "        id: api-image\n",
+      replacement: "",
+      expected: /unexpected Publish API SHA tag step/,
+    },
+    {
+      name: "missing trusted digest evidence",
+      search: "      - name: Record trusted image digest evidence\n",
+      replacement: "      - name: Omit trusted image digest evidence\n",
+      expected: /unexpected release publish steps/,
     },
   ])
     expectRejected((mutated) => assertReleaseWorkflow(mutated, ci), release, mutation);

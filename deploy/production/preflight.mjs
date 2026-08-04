@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import process from "node:process";
 
 const IMAGE_TAG_PATTERN = /^[0-9a-f]{40}$/;
+const IMAGE_DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const DOMAIN_PATTERN =
   /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const COMPOSE_TIMEOUT_MS = 30_000;
@@ -42,6 +43,8 @@ export async function composeQuiet(environment, supplied = {}) {
     PATH: process.env.PATH,
     HOME: process.env.HOME,
     MARKIRO_IMAGE_TAG: environment.MARKIRO_IMAGE_TAG,
+    MARKIRO_API_IMAGE_DIGEST: environment.MARKIRO_API_IMAGE_DIGEST,
+    MARKIRO_EDGE_IMAGE_DIGEST: environment.MARKIRO_EDGE_IMAGE_DIGEST,
     MARKIRO_DOMAIN: environment.MARKIRO_DOMAIN,
     ACME_EMAIL: environment.ACME_EMAIL,
     MARKIRO_ENV_FILE: environment.MARKIRO_ENV_FILE,
@@ -132,6 +135,8 @@ export async function composeQuiet(environment, supplied = {}) {
 /**
  * @typedef {object} PreflightResult
  * @property {string} imageTag
+ * @property {string} apiImageDigest
+ * @property {string} edgeImageDigest
  * @property {string} domain
  * @property {string} acmeEmail
  * @property {string} envFile
@@ -153,11 +158,17 @@ export async function runPreflight(
   },
 ) {
   const imageTag = environment.MARKIRO_IMAGE_TAG;
+  const apiImageDigest = environment.MARKIRO_API_IMAGE_DIGEST;
+  const edgeImageDigest = environment.MARKIRO_EDGE_IMAGE_DIGEST;
   const domain = environment.MARKIRO_DOMAIN;
   const acmeEmail = environment.ACME_EMAIL;
   const envFile = environment.MARKIRO_ENV_FILE || ".env.production";
 
   if (!imageTag || !IMAGE_TAG_PATTERN.test(imageTag)) throw invalid("MARKIRO_IMAGE_TAG");
+  if (!apiImageDigest || !IMAGE_DIGEST_PATTERN.test(apiImageDigest))
+    throw invalid("MARKIRO_API_IMAGE_DIGEST");
+  if (!edgeImageDigest || !IMAGE_DIGEST_PATTERN.test(edgeImageDigest))
+    throw invalid("MARKIRO_EDGE_IMAGE_DIGEST");
   if (!domain || !DOMAIN_PATTERN.test(domain)) throw invalid("MARKIRO_DOMAIN");
   if (!acmeEmail || !isEmail(acmeEmail)) throw invalid("ACME_EMAIL");
 
@@ -173,6 +184,8 @@ export async function runPreflight(
   try {
     await dependencies.composeQuiet({
       MARKIRO_IMAGE_TAG: imageTag,
+      MARKIRO_API_IMAGE_DIGEST: apiImageDigest,
+      MARKIRO_EDGE_IMAGE_DIGEST: edgeImageDigest,
       MARKIRO_DOMAIN: domain,
       ACME_EMAIL: acmeEmail,
       MARKIRO_ENV_FILE: envFile,
@@ -181,7 +194,7 @@ export async function runPreflight(
     throw new Error("Compose validation failed");
   }
 
-  return { imageTag, domain, acmeEmail, envFile };
+  return { imageTag, apiImageDigest, edgeImageDigest, domain, acmeEmail, envFile };
 }
 
 if (import.meta.main) {

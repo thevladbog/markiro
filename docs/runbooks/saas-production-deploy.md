@@ -1,6 +1,6 @@
 # SaaS production deploy and rollback
 
-This runbook deploys one immutable Markiro API/edge pair to the single-VM SaaS
+This runbook deploys one digest-pinned Markiro API/edge pair to the single-VM SaaS
 production bundle. Run it from a protected deployment checkout at the approved
 revision. It does not create cloud resources or authorize public exposure by
 itself.
@@ -21,7 +21,7 @@ sanitized command failures rather than provider stderr.
   `node deploy/production/preflight.mjs`; it invokes quiet Compose validation
   without printing the result.
 - Do not hand-edit containers. Do not hand-edit production rows to repair a
-  rollout or first-owner activation. Build a new immutable release or use the
+  rollout or first-owner activation. Build a new digest-pinned release or use the
   documented CLI/workflow.
 - Migrations are forward-only. Never reverse migrations and never run reverse
   SQL during application rollback.
@@ -45,12 +45,22 @@ export MARKIRO_DOMAIN=app.example.ru
 export ACME_EMAIL=ops@example.ru
 
 read -r -p 'Approved 40-character git SHA: ' MARKIRO_IMAGE_TAG
-export MARKIRO_IMAGE_TAG
+read -r -p 'Approved API digest (sha256:...): ' MARKIRO_API_IMAGE_DIGEST
+read -r -p 'Approved edge digest (sha256:...): ' MARKIRO_EDGE_IMAGE_DIGEST
+export MARKIRO_IMAGE_TAG MARKIRO_API_IMAGE_DIGEST MARKIRO_EDGE_IMAGE_DIGEST
 
 [[ "$MARKIRO_ROOT" = /* ]]
 [[ "$MARKIRO_ENV_FILE" = /* ]]
 [[ "$MARKIRO_IMAGE_TAG" =~ ^[0-9a-f]{40}$ ]] || {
   echo 'STOP: the approved release must be a full lowercase 40-character SHA' >&2
+  exit 1
+}
+[[ "$MARKIRO_API_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+  echo 'STOP: approved API digest must be lowercase sha256 plus 64 hex characters' >&2
+  exit 1
+}
+[[ "$MARKIRO_EDGE_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+  echo 'STOP: approved edge digest must be lowercase sha256 plus 64 hex characters' >&2
   exit 1
 }
 
@@ -64,10 +74,15 @@ test "$(git rev-parse HEAD)" = "$MARKIRO_IMAGE_TAG" || {
 install -d -m 0700 .markiro-releases
 ```
 
-Preflight rejects anything except the approved full lowercase SHA, an accepted
-hostname/email, an accessible environment file at mode `0600`, and a quiet,
-valid Compose model. Inspect metadata only; never print the file. The branch
-below is executable under `set -e` on either supported operator platform.
+Copy the SHA and both digest values only from the trusted GitHub Actions release
+evidence created after both image pushes succeed. That evidence is the trust
+boundary for selecting a preapproved repository digest. SHA tags are mutable
+selectors and are retained only as the 40-character release identity; never
+substitute a tag for either approved digest. Preflight rejects anything except
+the approved full lowercase SHA, two lowercase `sha256:` digest selectors, an
+accepted hostname/email, an accessible environment file at mode `0600`, and a
+quiet, valid Compose model. Inspect metadata only; never print the file. The
+branch below is executable under `set -e` on either supported operator platform.
 
 ```bash
 case "$(uname -s)" in
@@ -155,12 +170,13 @@ node deploy/production/smoke.mjs
 
 Any non-zero migration, readiness, or smoke result rejects the release. Do not
 provision a tenant and do not point public DNS at the host. `deploy.mjs` pulls
-both images, resolves both digests, writes a pending local release record, runs
+both preapproved repository digests, verifies the exact pulled identities,
+writes a pending local release record, runs
 the migration, starts API, waits for readiness, switches edge, runs public
 smoke, and marks the record healthy only after every gate passes.
 
 After success, select the record for this SHA and validate that it contains the
-approved tag plus the two resolved immutable digests. The values are
+approved SHA plus the two exact approved digests. The values are
 non-secret, but the complete record remains in the protected directory. Their
 canonical prefixes are `ghcr.io/thevladbog/markiro-api@sha256:` and
 `ghcr.io/thevladbog/markiro-edge@sha256:`; a tag-only value is not a digest.
@@ -169,13 +185,13 @@ canonical prefixes are `ghcr.io/thevladbog/markiro-api@sha256:` and
 RELEASE_RECORD="$(find .markiro-releases -maxdepth 1 -type f -name "*-${MARKIRO_IMAGE_TAG}.json" -print | sort | tail -n 1)"
 test -n "$RELEASE_RECORD"
 chmod 600 "$RELEASE_RECORD"
-node - "$RELEASE_RECORD" "$MARKIRO_IMAGE_TAG" <<'NODE'
+node - "$RELEASE_RECORD" "$MARKIRO_IMAGE_TAG" "$MARKIRO_API_IMAGE_DIGEST" "$MARKIRO_EDGE_IMAGE_DIGEST" <<'NODE'
 const { readFileSync } = require("node:fs");
-const [recordPath, approvedTag] = process.argv.slice(2);
+const [recordPath, approvedTag, approvedApiDigest, approvedEdgeDigest] = process.argv.slice(2);
 const record = JSON.parse(readFileSync(recordPath, "utf8"));
-const api = /^ghcr\.io\/thevladbog\/markiro-api@sha256:[0-9a-f]{64}$/;
-const edge = /^ghcr\.io\/thevladbog\/markiro-edge@sha256:[0-9a-f]{64}$/;
-if (record.tag !== approvedTag || record.state !== "healthy" || !api.test(record.apiDigest) || !edge.test(record.edgeDigest)) {
+const api = `ghcr.io/thevladbog/markiro-api@${approvedApiDigest}`;
+const edge = `ghcr.io/thevladbog/markiro-edge@${approvedEdgeDigest}`;
+if (record.tag !== approvedTag || record.state !== "healthy" || record.apiDigest !== api || record.edgeDigest !== edge) {
   throw new Error("STOP: healthy release record does not match the approved tag and both digests");
 }
 console.log(`release record verified: ${record.tag} ${record.apiDigest} ${record.edgeDigest}`);
@@ -193,7 +209,7 @@ smoke above are green. The semantics, idempotency, activation renewal, and role
 checks are defined in
 [`docs/runbooks/cabinet-rbac-rollout.md`](cabinet-rbac-rollout.md). Collect the
 three non-secret inputs with `read`, so their values are not typed as a command,
-and run the compiled CLI from the same immutable API image:
+and run the compiled CLI from the same digest-pinned API image:
 
 ```bash
 read -r -p 'Owner email: ' OWNER_EMAIL
@@ -235,10 +251,10 @@ runbook fails.
 
 ## Routine deploy
 
-Before changing `MARKIRO_IMAGE_TAG`, locate the newest healthy `0600` release
+Before changing the release SHA or either digest selector, locate the newest healthy `0600` release
 record, copy its `tag` into the protected change record as `previousTag`, and
 keep both the file and image available through the observation window. Do not
-select a failed/pending record or infer a tag from a mutable registry label.
+select a failed/pending record or infer a digest from a registry tag.
 
 Complete all common backup, object-storage, permissions, revision, and
 backward-compatibility gates for the new SHA, then run:
@@ -260,6 +276,13 @@ the cabinet RBAC runbook before closing the change.
 Reject the release immediately if pull, migration, API readiness, edge start,
 or smoke fails. Do not mark it healthy manually and do not provision another
 first owner as part of a routine deploy.
+
+The current Compose project has one `api` service identity and one `edge`
+service identity. Recreating the candidate API can leave the old edge proxying
+an unavailable service, and replacing edge itself can interrupt requests. This
+does not guarantee zero downtime. Rollback means recreate the previous digest
+pair after the compatibility gate; a separately addressable blue/green
+topology is the next availability slice and is not implemented here.
 
 ## Failure decision table
 
@@ -283,7 +306,8 @@ fix; image rollback is not safe merely because a previous tag exists.
 
 ## Rollback
 
-Rollback changes both images to the exact `previousTag`; it never reverses
+Rollback changes both images to the exact digests in the previous protected
+release record; the previous SHA remains audit identity only. It never reverses
 migrations. Before any rollback command, retrieve the failed candidate record
 and the recorded previous healthy release from `.markiro-releases/`. Verify
 both files are regular `0600` records and that the failed release's migrations
@@ -304,6 +328,7 @@ test "$MIGRATIONS_BACKWARD_COMPATIBLE" = yes || {
   exit 1
 }
 
+read -r MARKIRO_API_IMAGE_DIGEST MARKIRO_EDGE_IMAGE_DIGEST <<< "$(
 node - "$MARKIRO_ROOT/.markiro-releases" "$FAILED_RELEASE_RECORD" "$PREVIOUS_RELEASE_RECORD" "$MARKIRO_IMAGE_TAG" "$PREVIOUS_TAG" <<'NODE'
 const { lstatSync, readFileSync, realpathSync } = require("node:fs");
 const { basename, dirname } = require("node:path");
@@ -356,13 +381,14 @@ if (
   !digest("ghcr.io/thevladbog/markiro-api", previous.apiDigest) ||
   !digest("ghcr.io/thevladbog/markiro-edge", previous.edgeDigest)
 ) {
-  throw new Error("STOP: previous release record is not the selected healthy immutable pair");
+  throw new Error("STOP: previous release record is not the selected healthy digest pair");
 }
-console.log("rollback release records verified");
+console.log(previous.apiDigest.slice("ghcr.io/thevladbog/markiro-api@".length), previous.edgeDigest.slice("ghcr.io/thevladbog/markiro-edge@".length));
 NODE
+)"
 
 MARKIRO_IMAGE_TAG="$PREVIOUS_TAG"
-export MARKIRO_IMAGE_TAG
+export MARKIRO_IMAGE_TAG MARKIRO_API_IMAGE_DIGEST MARKIRO_EDGE_IMAGE_DIGEST
 node deploy/production/preflight.mjs
 ```
 
@@ -374,12 +400,12 @@ order—forward migrator, API, bounded readiness, edge, smoke:
 ```bash
 docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml pull api edge
 
-ACTUAL_API_DIGEST="$(docker image inspect --format '{{index .RepoDigests 0}}' "ghcr.io/thevladbog/markiro-api:${PREVIOUS_TAG}")"
-ACTUAL_EDGE_DIGEST="$(docker image inspect --format '{{index .RepoDigests 0}}' "ghcr.io/thevladbog/markiro-edge:${PREVIOUS_TAG}")"
-node - "$MARKIRO_ROOT/.markiro-releases" "$PREVIOUS_RELEASE_RECORD" "$PREVIOUS_TAG" "$ACTUAL_API_DIGEST" "$ACTUAL_EDGE_DIGEST" <<'NODE'
+ACTUAL_API_DIGESTS="$(docker image inspect --format '{{json .RepoDigests}}' "ghcr.io/thevladbog/markiro-api@${MARKIRO_API_IMAGE_DIGEST}")"
+ACTUAL_EDGE_DIGESTS="$(docker image inspect --format '{{json .RepoDigests}}' "ghcr.io/thevladbog/markiro-edge@${MARKIRO_EDGE_IMAGE_DIGEST}")"
+node - "$MARKIRO_ROOT/.markiro-releases" "$PREVIOUS_RELEASE_RECORD" "$PREVIOUS_TAG" "$ACTUAL_API_DIGESTS" "$ACTUAL_EDGE_DIGESTS" <<'NODE'
 const { lstatSync, readFileSync, realpathSync } = require("node:fs");
 const { dirname } = require("node:path");
-const [directoryInput, previousPath, expectedTag, actualApi, actualEdge] = process.argv.slice(2);
+const [directoryInput, previousPath, expectedTag, actualApiJson, actualEdgeJson] = process.argv.slice(2);
 const metadata = lstatSync(previousPath);
 if (metadata.isSymbolicLink() || !metadata.isFile() || (metadata.mode & 0o777) !== 0o600) {
   throw new Error("STOP: previous release record changed after validation");
@@ -389,11 +415,23 @@ if (dirname(canonicalPath) !== realpathSync(directoryInput)) {
   throw new Error("STOP: previous release record left the protected release directory");
 }
 const record = JSON.parse(readFileSync(canonicalPath, "utf8"));
+let actualApi;
+let actualEdge;
+try {
+  actualApi = JSON.parse(actualApiJson);
+  actualEdge = JSON.parse(actualEdgeJson);
+} catch {
+  throw new Error("STOP: pulled rollback image digest evidence is invalid");
+}
+const expectedApi = record.apiDigest;
+const expectedEdge = record.edgeDigest;
 if (
   record.state !== "healthy" ||
   record.tag !== expectedTag ||
-  record.apiDigest !== actualApi ||
-  record.edgeDigest !== actualEdge
+  !Array.isArray(actualApi) ||
+  !actualApi.includes(expectedApi) ||
+  !Array.isArray(actualEdge) ||
+  !actualEdge.includes(expectedEdge)
 ) {
   throw new Error("STOP: pulled rollback image digest differs from the protected release record");
 }

@@ -548,6 +548,49 @@ test(
   },
 );
 
+test("restores the API through the fixed CI image override when requested", async () => {
+  const calls = [];
+  const docker = {
+    async run(command, args) {
+      calls.push(args);
+      if (args[0] === "inspect") return { code: 0, stdout: "{}\n", stderr: "" };
+      if (args.includes("id")) return { code: 0, stdout: "10001\n", stderr: "" };
+      if (args.includes("ps")) return { code: 0, stdout: "container-id\n", stderr: "" };
+      if (args[0] === "stop") return { code: 0, stdout: "", stderr: "" };
+      return { code: args.includes("test") ? 1 : 0, stdout: "", stderr: "" };
+    },
+  };
+
+  await runSmoke(
+    {
+      baseUrl: "https://app.markiro.example",
+      assetName: "main.js",
+      environment: {
+        MARKIRO_ENV_FILE: "/private/ci.env",
+        MARKIRO_SMOKE_CI_OVERLAY: "1",
+        SMOKE_ASSERT_SHUTDOWN: "1",
+      },
+    },
+    smokeClient(),
+    docker,
+  );
+
+  const restored = calls.find((args) => args.includes("up") && args.at(-1) === "api");
+  assert.deepEqual(restored, [
+    "compose",
+    "--env-file",
+    "/private/ci.env",
+    "-f",
+    "compose.production.yml",
+    "-f",
+    "deploy/production/compose.ci.yml",
+    "up",
+    "-d",
+    "--no-deps",
+    "api",
+  ]);
+});
+
 test("reports a restore failure after attempting shutdown", async () => {
   const calls = [];
   const docker = {

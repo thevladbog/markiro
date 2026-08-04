@@ -131,9 +131,20 @@ function isDigestFor(repository, digest) {
   );
 }
 
-function requireDigest(repository, digest) {
-  if (!isDigestFor(repository, digest)) throw new Error("image digest is invalid");
-  return digest;
+function requireApprovedDigest(expected, output) {
+  let repoDigests;
+  try {
+    repoDigests = JSON.parse(output);
+  } catch {
+    throw new Error("approved image digest is not present");
+  }
+  if (
+    !Array.isArray(repoDigests) ||
+    !repoDigests.every((value) => typeof value === "string") ||
+    !repoDigests.includes(expected)
+  )
+    throw new Error("approved image digest is not present");
+  return expected;
 }
 
 function isValidIsoDate(value) {
@@ -238,6 +249,8 @@ export async function deployRelease(options, supplied = {}) {
   const releaseDirectory = options.releaseDirectory || ".markiro-releases";
   const compose = composeArgs(environment);
   const tag = preflight.imageTag;
+  const approvedApiImage = `${apiRepository}@${preflight.apiImageDigest}`;
+  const approvedEdgeImage = `${edgeRepository}@${preflight.edgeImageDigest}`;
   let release;
 
   try {
@@ -245,20 +258,20 @@ export async function deployRelease(options, supplied = {}) {
     const api = await mustRun(
       dependencies,
       "docker",
-      ["image", "inspect", "--format", "{{index .RepoDigests 0}}", `${apiRepository}:${tag}`],
+      ["image", "inspect", "--format", "{{json .RepoDigests}}", approvedApiImage],
       environment,
     );
     const edge = await mustRun(
       dependencies,
       "docker",
-      ["image", "inspect", "--format", "{{index .RepoDigests 0}}", `${edgeRepository}:${tag}`],
+      ["image", "inspect", "--format", "{{json .RepoDigests}}", approvedEdgeImage],
       environment,
     );
     release = {
       tag,
       previousTag: await latestHealthyRelease(releaseDirectory),
-      apiDigest: requireDigest(apiRepository, api.stdout.trim()),
-      edgeDigest: requireDigest(edgeRepository, edge.stdout.trim()),
+      apiDigest: requireApprovedDigest(approvedApiImage, api.stdout.trim()),
+      edgeDigest: requireApprovedDigest(approvedEdgeImage, edge.stdout.trim()),
       state: "pending",
       createdAt: dependencies.now().toISOString(),
     };
