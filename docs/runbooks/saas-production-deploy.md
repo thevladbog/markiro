@@ -160,20 +160,117 @@ rollback would not be authorized.
 For a new environment, complete the common gates, authenticate Docker to GHCR
 through the approved credential helper, and confirm no unrecorded Markiro
 containers are being adopted. There is no previous application tag on the
-first deploy.
+first deploy. Complete the **Public DNS go-live gate** below before changing
+DNS. In particular, the protected ingress must already enforce the approved
+rate limits and maintenance/deny policy while allowing only the recorded
+operator or synthetic source used by deployment smoke.
+
+Record the pre-DNS controls. `caddy-acme` means Caddy terminates TLS, so the
+provider must transparently pass the ACME HTTP-01 challenge on public port 80
+to Caddy without authentication, redirects, or a maintenance response on that
+challenge path. `provider-preprovisioned` means the provider terminates TLS;
+that path is permitted only with separately reviewed evidence for its
+pre-provisioned certificate and custom-edge procedure.
+
+```bash
+read -r -p 'Rate-limit verification evidence ID: ' RATE_LIMIT_EVIDENCE_ID
+read -r -p 'Per-source and global anonymous-route limits tested (yes/no): ' RATE_LIMITS_VERIFIED
+test -n "$RATE_LIMIT_EVIDENCE_ID"
+test "$RATE_LIMITS_VERIFIED" = yes
+
+read -r -p 'Maintenance/deny policy evidence ID: ' MAINTENANCE_DENY_EVIDENCE_ID
+read -r -p 'Public application traffic is denied while ACME remains possible (yes/no): ' MAINTENANCE_DENY_VERIFIED
+test -n "$MAINTENANCE_DENY_EVIDENCE_ID"
+test "$MAINTENANCE_DENY_VERIFIED" = yes
+
+read -r -p 'Allowlisted smoke source evidence ID: ' SMOKE_SOURCE_EVIDENCE_ID
+read -r -p 'Operator/synthetic smoke source is allowlisted (yes/no): ' SMOKE_SOURCE_ALLOWLISTED
+test -n "$SMOKE_SOURCE_EVIDENCE_ID"
+test "$SMOKE_SOURCE_ALLOWLISTED" = yes
+
+read -r -p 'TLS termination mode (caddy-acme/provider-preprovisioned): ' TLS_TERMINATION_MODE
+case "$TLS_TERMINATION_MODE" in
+  caddy-acme)
+    read -r -p 'ACME HTTP-01 pass-through evidence ID: ' ACME_PASSTHROUGH_EVIDENCE_ID
+    read -r -p 'ACME HTTP-01 challenge pass-through verified on public port 80 (yes/no): ' ACME_PASSTHROUGH_VERIFIED
+    test -n "$ACME_PASSTHROUGH_EVIDENCE_ID"
+    test "$ACME_PASSTHROUGH_VERIFIED" = yes
+    ;;
+  provider-preprovisioned)
+    read -r -p 'Pre-provisioned certificate evidence ID: ' PREPROVISIONED_CERT_EVIDENCE_ID
+    read -r -p 'Reviewed custom-edge procedure evidence ID: ' CUSTOM_EDGE_PROCEDURE_EVIDENCE_ID
+    test -n "$PREPROVISIONED_CERT_EVIDENCE_ID"
+    test -n "$CUSTOM_EDGE_PROCEDURE_EVIDENCE_ID"
+    ;;
+  *) echo 'STOP: TLS bootstrap path is not approved' >&2; exit 1 ;;
+esac
+TLS_BOOTSTRAP_VERIFIED=yes
+```
+
+Only after those checks are green, use the approved provider procedure to
+create or switch DNS to the protected ingress. This repository intentionally
+contains no provider mutation command. Record the change, then verify the
+expected answer through both the authoritative server and an approved public
+resolver. Both loops are bounded; a mismatch stops before edge start.
+
+```bash
+read -r -p 'DNS change evidence ID: ' DNS_CHANGE_EVIDENCE_ID
+read -r -p 'Authoritative DNS server: ' AUTHORITATIVE_DNS_SERVER
+read -r -p 'Approved public DNS resolver: ' PUBLIC_DNS_RESOLVER
+read -r -p 'DNS record type (A/AAAA/CNAME): ' DNS_RECORD_TYPE
+read -r -p 'Expected protected-ingress DNS answer: ' EXPECTED_DNS_ANSWER
+test -n "$DNS_CHANGE_EVIDENCE_ID"
+case "$DNS_RECORD_TYPE" in A|AAAA|CNAME) ;; *) exit 1 ;; esac
+
+AUTHORITATIVE_DNS_READY=0
+for attempt in $(seq 1 30); do
+  if dig +short +time=2 +tries=1 "@$AUTHORITATIVE_DNS_SERVER" "$MARKIRO_DOMAIN" "$DNS_RECORD_TYPE" | grep -Fx -- "$EXPECTED_DNS_ANSWER"; then
+    AUTHORITATIVE_DNS_READY=1
+    break
+  fi
+  sleep 2
+done
+test "$AUTHORITATIVE_DNS_READY" = 1 || {
+  echo 'STOP: authoritative DNS did not converge to the protected ingress' >&2
+  exit 1
+}
+
+PUBLIC_DNS_READY=0
+for attempt in $(seq 1 30); do
+  if dig +short +time=2 +tries=1 "@$PUBLIC_DNS_RESOLVER" "$MARKIRO_DOMAIN" "$DNS_RECORD_TYPE" | grep -Fx -- "$EXPECTED_DNS_ANSWER"; then
+    PUBLIC_DNS_READY=1
+    break
+  fi
+  sleep 2
+done
+test "$PUBLIC_DNS_READY" = 1 || {
+  echo 'STOP: public DNS did not converge to the protected ingress' >&2
+  exit 1
+}
+```
+
+Ports 80 and 443 at the protected ingress must now reach the selected TLS
+bootstrap path. Start the release exactly once:
 
 ```bash
 node deploy/production/preflight.mjs
 node deploy/production/deploy.mjs
-node deploy/production/smoke.mjs
 ```
 
-Any non-zero migration, readiness, or smoke result rejects the release. Do not
-provision a tenant and do not point public DNS at the host. `deploy.mjs` pulls
-both preapproved repository digests, verifies the exact pulled identities,
-writes a pending local release record, runs
-the migration, starts API, waits for readiness, switches edge, runs public
-smoke, and marks the record healthy only after every gate passes.
+`deploy.mjs` pulls both preapproved repository digests, verifies the exact
+pulled identities, writes a pending local release record, runs the migration,
+starts API, waits for readiness, starts edge, then performs bounded edge/TLS
+readiness polling against `/health/live`. Transient connection, TLS, and HTTP
+status failures are retried within that stage's 180-second default budget.
+Only after readiness is green does it run exactly one full production smoke
+from the allowlisted source and mark the record healthy. Do not invoke
+`smoke.mjs` separately in this sequence.
+
+Any non-zero migration, API readiness, edge start, edge/TLS readiness, or smoke
+result rejects the release. Do not provision a tenant and do not open public
+application traffic. On failure, leave maintenance/deny active or withdraw DNS
+with the approved provider procedure; never expose a failed or unverified
+release.
 
 After success, select the record for this SHA and validate that it contains the
 approved SHA plus the two exact approved digests. The values are
@@ -201,6 +298,15 @@ NODE
 Attach the 40-character SHA, API digest, edge digest, release-record protected
 path, backup/policy evidence IDs, operator, and UTC time to the protected
 rollout record. Do not copy the environment file or secrets.
+
+Only after the healthy record is verified may an operator use the approved
+provider procedure to open public application traffic. Record that separately;
+the repository deliberately supplies no fictional provider command.
+
+```bash
+read -r -p 'Public traffic opened evidence ID: ' PUBLIC_TRAFFIC_OPENED_EVIDENCE_ID
+test -n "$PUBLIC_TRAFFIC_OPENED_EVIDENCE_ID"
+```
 
 ### First-owner provisioning and smoke
 
@@ -251,6 +357,12 @@ runbook fails.
 
 ## Routine deploy
 
+Routine deploy assumes public DNS and valid TLS already exist at the protected
+ingress. It also assumes the approved provider/WAF or reviewed custom-Caddy
+rate limits remain enforced. If DNS, TLS termination, ACME routing, ingress
+policy, or the allowlist changes, treat that as a separately approved
+infrastructure change and re-enter the relevant first-deploy gates.
+
 Before changing the release SHA or either digest selector, locate the newest healthy `0600` release
 record, copy its `tag` into the protected change record as `previousTag`, and
 keep both the file and image available through the observation window. Do not
@@ -262,10 +374,10 @@ backward-compatibility gates for the new SHA, then run:
 ```bash
 node deploy/production/preflight.mjs
 node deploy/production/deploy.mjs
-node deploy/production/smoke.mjs
 ```
 
-The bundled smoke verifies the cabinet root and assets, the auth boundary, and
+After edge/TLS readiness is green, `deploy.mjs` runs exactly one full smoke. It
+verifies the cabinet root and assets, the auth boundary, and
 that a station device route and kiosk route are not SPA fallbacks, plus health,
 docs/OpenAPI, 1C protocol reachability, security headers, private/non-root API
 runtime, and read-only root filesystem. It sends the exact unauthenticated 1C
@@ -274,8 +386,8 @@ customer-specific authenticated station/kiosk and cabinet role smokes from
 the cabinet RBAC runbook before closing the change.
 
 Reject the release immediately if pull, migration, API readiness, edge start,
-or smoke fails. Do not mark it healthy manually and do not provision another
-first owner as part of a routine deploy.
+edge/TLS readiness, or smoke fails. Do not mark it healthy manually and do not
+provision another first owner as part of a routine deploy.
 
 The `migrate` service uses the exact same digest-pinned API image as `api`. If
 migration fails before service replacement, `api` and `edge` containers are not
@@ -297,13 +409,14 @@ provider endpoints, cookies, personal data, and payloads before placing a
 minimal excerpt in the protected incident record; never paste raw logs into
 tickets or chat.
 
-| Failure phase     | What remains running                                                                                                                                               | Safe local evidence                                                                                                                                                                           | Rollback                                                                                                                                            | Exact next command                                                                                                                                                                                 |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Pull              | The previous API and edge are unchanged; no candidate release record exists if digest resolution never completed.                                                  | `docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml ps` and the sanitized deploy error.                                                                                  | Not needed; production images were not switched.                                                                                                    | After registry/network access is fixed and the same SHA remains approved: `node deploy/production/preflight.mjs`, then `node deploy/production/deploy.mjs`.                                        |
-| Migration         | Previous API and edge remain running. A candidate record is `failed`; some forward migrations may already be committed.                                            | `docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml logs --no-color --tail 200 migrate`; migration logs contain lifecycle/tag output, but still review before recording. | Do not reverse SQL. An image rollback is relevant only if another phase changed an image, and is allowed only with backward-compatibility evidence. | `docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml logs --no-color --tail 200 migrate`; investigate database state and ship a reviewed forward fix—do not restart in a loop. |
-| API readiness     | The candidate API container was recreated but is not ready; the existing edge image was not deliberately switched and may proxy the unavailable candidate service. | `docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml ps` and `docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml logs --no-color --tail 200 api`.    | Allowed only after the compatibility gate below.                                                                                                    | `docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml logs --no-color --tail 200 api`; then enter **Rollback** if authorized.                                                   |
-| Edge start        | The candidate API is ready; edge may be failed/stopped or partly replaced and public service is not accepted.                                                      | `docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml ps` and `docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml logs --no-color --tail 200 edge`.   | Allowed only after the compatibility gate below.                                                                                                    | `docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml logs --no-color --tail 200 edge`; then enter **Rollback** if authorized.                                                  |
-| Post-switch smoke | Candidate API and edge are running, but the release record is `failed` and the release is rejected.                                                                | Re-run `node deploy/production/smoke.mjs` once only to capture the stable failing gate; collect reviewed `api`/`edge` log tails locally.                                                      | Allowed only after the compatibility gate below.                                                                                                    | `node deploy/production/smoke.mjs`; if it remains non-zero, enter **Rollback** if authorized.                                                                                                      |
+| Failure phase      | What remains running                                                                                                                                               | Safe local evidence                                                                                                                                                                           | Rollback                                                                                                                                            | Exact next command                                                                                                                                                                                 |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pull               | The previous API and edge are unchanged; no candidate release record exists if digest resolution never completed.                                                  | `docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml ps` and the sanitized deploy error.                                                                                  | Not needed; production images were not switched.                                                                                                    | After registry/network access is fixed and the same SHA remains approved: `node deploy/production/preflight.mjs`, then `node deploy/production/deploy.mjs`.                                        |
+| Migration          | Previous API and edge remain running. A candidate record is `failed`; some forward migrations may already be committed.                                            | `docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml logs --no-color --tail 200 migrate`; migration logs contain lifecycle/tag output, but still review before recording. | Do not reverse SQL. An image rollback is relevant only if another phase changed an image, and is allowed only with backward-compatibility evidence. | `docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml logs --no-color --tail 200 migrate`; investigate database state and ship a reviewed forward fix—do not restart in a loop. |
+| API readiness      | The candidate API container was recreated but is not ready; the existing edge image was not deliberately switched and may proxy the unavailable candidate service. | `docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml ps` and `docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml logs --no-color --tail 200 api`.    | Allowed only after the compatibility gate below.                                                                                                    | `docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml logs --no-color --tail 200 api`; then enter **Rollback** if authorized.                                                   |
+| Edge start         | The candidate API is ready; edge may be failed/stopped or partly replaced and public service is not accepted.                                                      | `docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml ps` and `docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml logs --no-color --tail 200 edge`.   | Allowed only after the compatibility gate below.                                                                                                    | `docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml logs --no-color --tail 200 edge`; then enter **Rollback** if authorized.                                                  |
+| Edge/TLS readiness | Candidate API and edge were started, but the public HTTPS liveness endpoint did not become ready inside its bounded stage timeout.                                 | The sanitized deploy error's last cause (`HTTP nnn` or connection/TLS) and reviewed `edge` log tails; do not copy certificate account data.                                                   | Allowed only after the compatibility gate below.                                                                                                    | Keep maintenance/deny active; inspect `docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml logs --no-color --tail 200 edge`, then enter **Rollback** if authorized.            |
+| Post-switch smoke  | Candidate API and edge are HTTPS-ready, but the single deploy-owned full smoke failed; the release record is `failed` and the release is rejected.                 | Retain the sanitized failed-smoke gate and collect reviewed `api`/`edge` log tails locally. Do not run another full smoke against the rejected release.                                       | Allowed only after the compatibility gate below.                                                                                                    | Keep maintenance/deny active and enter **Rollback** if authorized.                                                                                                                                 |
 
 For every phase, a non-zero migration, readiness, or smoke result means reject,
 not “accept with warning.” If migration compatibility cannot be proved, keep
@@ -482,8 +595,10 @@ production change policy. Through that time:
   first-owner identifier evidence in the protected rollout location;
 - watch API readiness, edge availability/TLS, job failures, mail delivery, S3
   errors, error rate, and customer-critical station/kiosk flows;
-- re-run `node deploy/production/smoke.mjs` after any infrastructure change;
-- keep public DNS blocked unless the separate gate below is satisfied.
+- require a separately approved, allowlisted smoke after any later
+  infrastructure change;
+- keep maintenance/deny active until the healthy release and traffic-open
+  evidence are both recorded.
 
 Only the approved retention process may remove previous release artifacts
 after the observation window and incident-free sign-off.
@@ -491,8 +606,9 @@ after the observation window and incident-free sign-off.
 ## Public DNS go-live gate
 
 The standard Caddy image cannot satisfy the public abuse-control gate: it has
-no standard rate-limit directive. Do not create or switch public DNS until one
-of these alternatives is deployed and evidenced in front of anonymous routes:
+no standard rate-limit directive. Before a first-deploy DNS change, one of
+these alternatives must be deployed and evidenced in front of anonymous
+routes:
 
 1. a provider/WAF policy with both per-source limits and a global
    anonymous-route limit; or
@@ -504,6 +620,15 @@ configured thresholds, UTC test time, and observed allow/throttle behavior.
 Application-specific database limits are only a backstop and do not satisfy
 this gate. A successful production smoke alone does not satisfy it.
 
+Before DNS changes, the same protected ingress must enforce maintenance/deny
+for public application traffic, allowlist the operator or synthetic smoke
+source, and keep the required certificate bootstrap path reachable. If Caddy
+terminates TLS, the ACME HTTP-01 challenge must be transparent pass-through on
+public port 80 to Caddy. If the provider terminates TLS, use a separately
+verified pre-provisioned certificate and reviewed custom-edge procedure. The
+repository intentionally provides no DNS, WAF, certificate, or other provider
+command.
+
 ```bash
 read -r -p 'Rate-limit control (provider-waf/reviewed-custom-caddy): ' RATE_LIMIT_CONTROL
 case "$RATE_LIMIT_CONTROL" in
@@ -514,13 +639,13 @@ read -r -p 'Rate-limit verification evidence ID: ' RATE_LIMIT_EVIDENCE_ID
 read -r -p 'Per-source and global anonymous-route limits tested (yes/no): ' RATE_LIMITS_VERIFIED
 test -n "$RATE_LIMIT_EVIDENCE_ID"
 test "$RATE_LIMITS_VERIFIED" = yes || {
-  echo 'STOP: do not publish public DNS without verified rate limits' >&2
+  echo 'STOP: verified rate limits are required before the DNS change' >&2
   exit 1
 }
-node deploy/production/smoke.mjs
 ```
 
-After this gate is green, use the separately approved provider DNS change
-procedure. This repository intentionally provides no fictional provider
-command. Record the DNS change, rate-limit evidence, and post-change smoke in
-the protected rollout record.
+After this gate is green, follow the exact first-deploy sequence: verify the
+maintenance/deny and allowlist controls, verify the selected TLS bootstrap,
+change DNS through the approved provider procedure, perform bounded
+authoritative and public DNS verification, and only then run `deploy.mjs`.
+Public application traffic opens only after its healthy release record exists.

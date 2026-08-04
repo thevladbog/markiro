@@ -924,11 +924,18 @@ docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml run --rm
 docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml up -d --no-deps api
 poll docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml exec -T api node /opt/markiro/healthcheck.mjs
 docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml up -d --no-deps edge
-run public smoke
+poll the HTTPS liveness endpoint for bounded edge/TLS readiness
+run exactly one full smoke
 write release record with state=healthy
 ```
 
-Add failure tests proving migration failure never calls either `up`, API readiness failure never calls edge `up`, and public-smoke failure writes state `failed` while preserving both image digests and previous tag. Assert runner logs contain no environment values.
+The edge/TLS readiness probe is dependency-injected. It retries transient
+connection, TLS, and HTTP-status failures within a stage-specific timeout and
+reports only a sanitized last cause. Add failure tests proving migration
+failure never calls either `up`, API readiness failure never calls edge `up`,
+edge/TLS failure never calls smoke, and public-smoke failure writes state
+`failed` while preserving both image digests and previous tag. Assert runner
+logs contain no environment values.
 
 - [ ] **Step 2: Write the complete route-smoke table as data**
 
@@ -1149,7 +1156,16 @@ Assert the runbook contains explicit commands and stop conditions for:
 - rollback by setting the recorded previous tag and re-running preflight/migrate/API/edge in order;
 - explicitly forbidding reverse migrations, hand-edited containers, hand-edited production rows, rendered Compose output, and secret values in tickets/chat;
 - retaining the previous tag and release record through the observation window;
-- blocking public DNS until provider/WAF rate limiting or the separately reviewed custom-Caddy alternative is verified.
+- verifying provider/WAF rate limiting or the separately reviewed custom-Caddy
+  alternative before DNS, with public application maintenance/deny active and
+  the operator or synthetic smoke source allowlisted;
+- transparently passing the ACME HTTP-01 challenge when Caddy terminates TLS,
+  or requiring a separately verified pre-provisioned certificate/custom-edge
+  procedure when the provider terminates TLS;
+- switching DNS only through an approved external procedure, then bounded
+  authoritative and public DNS verification before edge start;
+- bounded edge/TLS readiness, exactly one full smoke, and public traffic open
+  only after the healthy release record exists.
 
 - [ ] **Step 2: Run the contract and verify RED**
 
@@ -1195,7 +1211,15 @@ Require a green API/edge smoke before this command and retain only its four non-
 
 For each failure phase—pull, migration, API readiness, edge start, post-switch smoke—state what remains running, which logs are safe to collect, whether rollback is allowed, and the exact next command. Rollback is allowed only after confirming the failed release's migrations are backward-compatible with the previous image. Never instruct the operator to reverse SQL.
 
-Add a separate public-go-live checklist whose final hard gate is an evidenced provider/WAF per-source and global anonymous-route limit, or the separately reviewed reproducible custom Caddy image. The standard Caddy bundle alone cannot satisfy that gate.
+Add a separate public-go-live checklist whose final pre-DNS hard gate is an
+evidenced provider/WAF per-source and global anonymous-route limit, or the
+separately reviewed reproducible custom Caddy image. The standard Caddy bundle
+alone cannot satisfy that gate. The first-deploy order is maintenance/deny and
+allowlist evidence, ACME HTTP-01 pass-through (or the verified provider TLS
+alternative), approved DNS switch, bounded authoritative and public DNS
+verification, edge/TLS readiness, exactly one full smoke, healthy record, and
+only then public traffic open. Routine deploy explicitly assumes DNS and valid
+TLS already exist. Do not add fictional provider commands.
 
 - [ ] **Step 5: Mark the design implemented only after all evidence exists**
 

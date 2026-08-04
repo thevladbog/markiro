@@ -82,7 +82,9 @@ async function fixture({ failures, readiness, smokeError, priorTag = previousTag
     runSmoke: async () => {
       if (smokeError) throw smokeError;
     },
+    probeEdgeTls: async () => ({ status: 200 }),
     sleep: async () => undefined,
+    monotonicNow: () => 0,
     now: () => new Date("2026-08-04T10:20:30.000Z"),
     log: (message) => logs.push(message),
   };
@@ -206,6 +208,11 @@ test(
 test("passes the configured non-standard HTTPS port to public smoke", async () => {
   const { dependencies, releaseDirectory } = await fixture();
   let smokeBaseUrl;
+  let readinessUrl;
+  dependencies.probeEdgeTls = async ({ url }) => {
+    readinessUrl = url;
+    return { status: 200 };
+  };
   dependencies.runSmoke = async ({ baseUrl }) => {
     smokeBaseUrl = baseUrl;
   };
@@ -220,6 +227,7 @@ test("passes the configured non-standard HTTPS port to public smoke", async () =
   );
 
   assert.equal(smokeBaseUrl, "https://app.markiro.example:18443");
+  assert.equal(readinessUrl, "https://app.markiro.example:18443/health/live");
 });
 
 test("uses only a structurally valid newest healthy release as the previous tag", async () => {
@@ -369,6 +377,10 @@ test("emits the full lifecycle trace without environment values", async () => {
     trace.push(`write ${release.state}`);
     await realWriter(directory, release);
   };
+  dependencies.probeEdgeTls = async () => {
+    trace.push("edge TLS readiness");
+    return { status: 200 };
+  };
   dependencies.runSmoke = async () => trace.push("public smoke");
 
   await deployRelease({ environment, releaseDirectory, readinessAttempts: 1 }, dependencies);
@@ -383,9 +395,117 @@ test("emits the full lifecycle trace without environment values", async () => {
     "api up",
     "readiness",
     "edge up",
+    "edge TLS readiness",
     "public smoke",
     "write healthy",
   ]);
+});
+
+test("retries transient edge connection, TLS, and status failures before one full smoke", async () => {
+  const { dependencies, releaseDirectory } = await fixture();
+  const trace = [];
+  const results = [new Error("private certificate detail"), { status: 503 }, { status: 200 }];
+  dependencies.probeEdgeTls = async ({ url, timeoutMs }) => {
+    trace.push(["probe", url, timeoutMs]);
+    const result = results.shift();
+    if (result instanceof Error) throw result;
+    return result;
+  };
+  dependencies.sleep = async (milliseconds) => trace.push(["sleep", milliseconds]);
+  dependencies.runSmoke = async () => trace.push(["smoke"]);
+
+  const release = await deployRelease(
+    {
+      environment,
+      releaseDirectory,
+      readinessAttempts: 1,
+      edgeReadinessAttempts: 3,
+      edgeReadinessIntervalMs: 11,
+      edgeReadinessTimeoutMs: 17_000,
+    },
+    dependencies,
+  );
+
+  assert.equal(release.state, "healthy");
+  assert.deepEqual(trace, [
+    ["probe", "https://app.markiro.example/health/live", 17_000],
+    ["sleep", 11],
+    ["probe", "https://app.markiro.example/health/live", 17_000],
+    ["sleep", 11],
+    ["probe", "https://app.markiro.example/health/live", 17_000],
+    ["smoke"],
+  ]);
+});
+
+test("fails closed after bounded edge readiness with a sanitized last status and no smoke", async () => {
+  const { dependencies, logs, releaseDirectory } = await fixture();
+  let smokeCalls = 0;
+  let probes = 0;
+  dependencies.probeEdgeTls = async () => {
+    probes += 1;
+    if (probes === 1) throw new Error("private TLS certificate and hostname detail");
+    return { status: 503 };
+  };
+  dependencies.runSmoke = async () => {
+    smokeCalls += 1;
+  };
+
+  await assert.rejects(
+    deployRelease(
+      {
+        environment,
+        releaseDirectory,
+        readinessAttempts: 1,
+        edgeReadinessAttempts: 2,
+        edgeReadinessIntervalMs: 1,
+        edgeReadinessTimeoutMs: 9_000,
+      },
+      dependencies,
+    ),
+    (error) => error.message === "Edge/TLS readiness failed after 9000ms (last cause: HTTP 503)",
+  );
+
+  assert.equal(probes, 2);
+  assert.equal(smokeCalls, 0);
+  assert.doesNotMatch(JSON.stringify(logs), /private TLS|certificate|hostname/);
+  const files = await readdir(releaseDirectory);
+  const record = JSON.parse(
+    await readFile(
+      join(
+        releaseDirectory,
+        files.find((file) => file.includes(tag)),
+      ),
+      "utf8",
+    ),
+  );
+  assert.equal(record.state, "failed");
+});
+
+test("edge readiness stops at its stage timeout and preserves the deployment failure", async () => {
+  const { dependencies, releaseDirectory } = await fixture();
+  const clock = [0, 0, 5_001];
+  const originalWriter = dependencies.writeRelease ?? writeRelease;
+  dependencies.monotonicNow = () => clock.shift() ?? 5_001;
+  dependencies.probeEdgeTls = async () => ({ status: 502 });
+  dependencies.writeRelease = async (directory, release) => {
+    if (release.state === "failed") throw new Error("private failed-state persistence detail");
+    await originalWriter(directory, release);
+  };
+
+  await assert.rejects(
+    deployRelease(
+      {
+        environment,
+        releaseDirectory,
+        readinessAttempts: 1,
+        edgeReadinessAttempts: 30,
+        edgeReadinessIntervalMs: 2_000,
+        edgeReadinessTimeoutMs: 5_000,
+      },
+      dependencies,
+    ),
+    (error) => error.message === "Edge/TLS readiness failed after 5000ms (last cause: HTTP 502)",
+  );
 });
 
 test("writes a failed release record through the injected atomic writer", async () => {

@@ -23,6 +23,8 @@ function composeArgs(environment) {
 const COMMAND_TIMEOUT_MS = 30_000;
 const PULL_TIMEOUT_MS = 600_000;
 const SERVICE_TIMEOUT_MS = 300_000;
+const EDGE_READINESS_TIMEOUT_MS = 180_000;
+const EDGE_READINESS_INTERVAL_MS = 2_000;
 const TERMINATION_GRACE_MS = 1_000;
 const SHA256 = "[0-9a-f]{64}";
 
@@ -85,6 +87,18 @@ function processRunner() {
       });
     },
   };
+}
+
+async function probeEdgeTls({ url, timeoutMs }) {
+  const response = await fetch(url, {
+    method: "GET",
+    headers: { accept: "application/json" },
+    redirect: "manual",
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  const status = response.status;
+  await response.body?.cancel();
+  return { status };
 }
 
 async function latestHealthyRelease(directory) {
@@ -207,6 +221,51 @@ function bestEffortLog(dependencies, message) {
   }
 }
 
+function positiveInteger(value, fallback) {
+  return Number.isSafeInteger(value) && value > 0 ? value : fallback;
+}
+
+async function waitForEdgeTls(dependencies, options, baseUrl) {
+  const timeoutMs = positiveInteger(options.edgeReadinessTimeoutMs, EDGE_READINESS_TIMEOUT_MS);
+  const intervalMs = positiveInteger(options.edgeReadinessIntervalMs, EDGE_READINESS_INTERVAL_MS);
+  const maximumAttempts = positiveInteger(
+    options.edgeReadinessAttempts,
+    Math.ceil(timeoutMs / intervalMs) + 1,
+  );
+  const startedAt = dependencies.monotonicNow();
+  const endpoint = new URL("/health/live", baseUrl).href;
+  let lastCause = "no successful response";
+
+  for (let attempt = 0; attempt < maximumAttempts; attempt += 1) {
+    const remaining = timeoutMs - (dependencies.monotonicNow() - startedAt);
+    if (remaining <= 0) break;
+    try {
+      const probeTimeoutMs = Math.max(
+        1,
+        Math.floor(Math.min(dependencies.timeouts.command, remaining)),
+      );
+      const result = await withDeadline(
+        dependencies.probeEdgeTls({ url: endpoint, timeoutMs: probeTimeoutMs }),
+        "edge/TLS probe",
+        probeTimeoutMs,
+      );
+      if (result?.status === 200) return;
+      lastCause = Number.isSafeInteger(result?.status)
+        ? `HTTP ${result.status}`
+        : "invalid HTTP status";
+    } catch {
+      lastCause = "connection or TLS error";
+    }
+
+    const remainingAfterProbe = timeoutMs - (dependencies.monotonicNow() - startedAt);
+    if (remainingAfterProbe <= 0 || attempt + 1 >= maximumAttempts) break;
+    const delay = Math.min(intervalMs, remainingAfterProbe);
+    await withDeadline(dependencies.sleep(delay), "edge/TLS readiness", remainingAfterProbe);
+  }
+
+  throw new Error(`Edge/TLS readiness failed after ${timeoutMs}ms (last cause: ${lastCause})`);
+}
+
 /**
  * @typedef {object} ReleaseRecord
  * @property {string} tag
@@ -226,12 +285,15 @@ function bestEffortLog(dependencies, message) {
  * @property {number=} commandTimeoutMs
  * @property {number=} pullTimeoutMs
  * @property {number=} serviceTimeoutMs
+ * @property {number=} edgeReadinessAttempts
+ * @property {number=} edgeReadinessIntervalMs
+ * @property {number=} edgeReadinessTimeoutMs
  */
 
 /**
  * Pull, migrate, and switch a release. This intentionally never rolls back.
  * @param {DeployOptions} options
- * @param {{runPreflight?: typeof runPreflight, runner?: ReturnType<typeof processRunner>, runSmoke?: typeof runSmoke, writeRelease?: typeof writeRelease, isReady?: () => Promise<boolean>, sleep?: (milliseconds: number) => Promise<void>, now?: () => Date, log?: (message: string) => void}=} supplied
+ * @param {{runPreflight?: typeof runPreflight, runner?: ReturnType<typeof processRunner>, runSmoke?: typeof runSmoke, writeRelease?: typeof writeRelease, isReady?: () => Promise<boolean>, probeEdgeTls?: (options: {url: string, timeoutMs: number}) => Promise<{status: number}>, sleep?: (milliseconds: number) => Promise<void>, monotonicNow?: () => number, now?: () => Date, log?: (message: string) => void}=} supplied
  * @returns {Promise<ReleaseRecord>}
  */
 export async function deployRelease(options, supplied = {}) {
@@ -241,7 +303,9 @@ export async function deployRelease(options, supplied = {}) {
     runSmoke,
     writeRelease,
     isReady: undefined,
+    probeEdgeTls,
     sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+    monotonicNow: () => performance.now(),
     now: () => new Date(),
     log: (event) => console.log(event),
     timeouts: {
@@ -346,8 +410,10 @@ export async function deployRelease(options, supplied = {}) {
       environment,
       dependencies.timeouts.service,
     );
+    const baseUrl = productionBaseUrl(environment);
+    await waitForEdgeTls(dependencies, options, baseUrl);
     try {
-      await dependencies.runSmoke({ environment, baseUrl: productionBaseUrl(environment) });
+      await dependencies.runSmoke({ environment, baseUrl });
     } catch {
       throw new Error("Public smoke failed");
     }

@@ -14,8 +14,7 @@ const UNSWITCHED_CONTAINER_CLAIM = "`api` and `edge` containers are not switched
 const MIGRATION_GATE_CLAIM = "compatibility and rollback gate still applies";
 
 const DEPLOY_BLOCK = `node deploy/production/preflight.mjs
-node deploy/production/deploy.mjs
-node deploy/production/smoke.mjs`;
+node deploy/production/deploy.mjs`;
 
 const MODE_BLOCK = `case "$(uname -s)" in
   Darwin)
@@ -244,6 +243,15 @@ function blockContaining(sectionSource, token, label) {
   return matches[0];
 }
 
+function assertOrdered(source, tokens, message) {
+  let cursor = -1;
+  for (const token of tokens) {
+    const next = source.indexOf(token, cursor + 1);
+    invariant(next > cursor, `${message}: missing or reordered ${token}`);
+    cursor = next;
+  }
+}
+
 function assertRunbook(source) {
   const common = section(source, "Common setup and hard gates");
   const first = section(source, "First deploy");
@@ -300,7 +308,14 @@ function assertRunbook(source) {
     "first-owner provisioning block must be exact and retain only the protected result file",
   );
 
-  for (const phase of ["Pull", "Migration", "API readiness", "Edge start", "Post-switch smoke"])
+  for (const phase of [
+    "Pull",
+    "Migration",
+    "API readiness",
+    "Edge start",
+    "Edge/TLS readiness",
+    "Post-switch smoke",
+  ])
     invariant(
       new RegExp(`\\|\\s*${phase}\\s*\\|`, "i").test(failure),
       `missing ${phase} failure row`,
@@ -393,7 +408,54 @@ function assertRunbook(source) {
     /separately reviewed reproducible custom Caddy image/i.test(goLive),
     "reviewed custom-Caddy alternative is missing",
   );
-  invariant(/Do not create or switch public DNS/i.test(goLive), "public DNS hard gate is missing");
+  invariant(
+    /maintenance[/]deny/i.test(goLive) && /allowlist/i.test(goLive),
+    "pre-DNS maintenance deny and smoke allowlist gates are missing",
+  );
+  invariant(
+    /ACME HTTP-01 challenge/i.test(goLive) && /pass-through/i.test(goLive),
+    "Caddy ACME pass-through gate is missing",
+  );
+  invariant(
+    /provider terminates TLS/i.test(goLive) && /pre-provisioned certificate/i.test(goLive),
+    "provider-terminated TLS alternative is missing",
+  );
+  invariant(
+    /repository intentionally provides no[\s\S]{0,100}provider\s+command/i.test(goLive),
+    "provider-specific commands must remain outside the repository",
+  );
+  invariant(
+    !/Do not create or switch public DNS/i.test(source),
+    "obsolete no-DNS-before-deploy sequence must be removed",
+  );
+  assertOrdered(
+    first,
+    [
+      "RATE_LIMITS_VERIFIED",
+      "MAINTENANCE_DENY_VERIFIED",
+      "SMOKE_SOURCE_ALLOWLISTED",
+      "TLS_BOOTSTRAP_VERIFIED",
+      "DNS_CHANGE_EVIDENCE_ID",
+      "AUTHORITATIVE_DNS_READY",
+      "PUBLIC_DNS_READY",
+      "node deploy/production/deploy.mjs",
+      "PUBLIC_TRAFFIC_OPENED_EVIDENCE_ID",
+    ],
+    "first-deploy DNS/ACME sequence",
+  );
+  invariant(
+    /bounded edge[/]TLS\s+readiness/i.test(first) &&
+      /exactly one full production smoke/i.test(first),
+    "deploy-owned edge readiness and exactly-once smoke are missing",
+  );
+  invariant(
+    /leave maintenance[/]deny active or withdraw DNS/i.test(first),
+    "first-deploy failure must remain fail closed",
+  );
+  invariant(
+    /assumes public DNS and valid TLS already exist/i.test(routine),
+    "routine deploy must state its DNS/TLS precondition",
+  );
   invariant(
     /docs\/runbooks\/cabinet-rbac-rollout\.md/.test(source),
     "cabinet RBAC runbook link is missing",
@@ -492,6 +554,26 @@ test("runbook, design, and plan describe digest identity and single-service down
   assertPlanPreflightInterface(plan);
 });
 
+test("runbook, design, and plan share the safe first-deploy DNS and ACME ordering", async () => {
+  for (const [label, path] of [
+    ["runbook", RUNBOOK],
+    ["design", DESIGN],
+    ["plan", PLAN],
+  ]) {
+    const source = await readFile(path, "utf8");
+    assert.doesNotMatch(source, /Do not create or switch public DNS/i, `${label} is obsolete`);
+    assert.match(source, /maintenance\/deny/i, `${label} lacks the pre-DNS deny gate`);
+    assert.match(source, /ACME HTTP-01/i, `${label} lacks the Caddy ACME path`);
+    assert.match(source, /authoritative.*public DNS/is, `${label} lacks bounded DNS verification`);
+    assert.match(source, /edge\/TLS readiness/i, `${label} lacks edge TLS readiness`);
+    assert.match(
+      source,
+      /exactly one full (?:production )?smoke/i,
+      `${label} lacks one full smoke`,
+    );
+  }
+});
+
 test("each documentation contract rejects its own stale identity and migration claims", async (t) => {
   for (const [label, path] of [
     ["runbook", RUNBOOK],
@@ -532,6 +614,28 @@ test("the contract rejects each portability, record-safety, linkage, and command
     'docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml run --rm migrate';
   const api =
     'docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml up -d --no-deps api';
+
+  const reorderedDns = source
+    .replaceAll("PUBLIC_DNS_READY", "PUBLIC_DNS_REORDERED")
+    .replace("AUTHORITATIVE_DNS_READY=0", "PUBLIC_DNS_READY=0\nAUTHORITATIVE_DNS_READY=0");
+  assert.throws(
+    () => assertRunbook(reorderedDns),
+    /first-deploy DNS\/ACME sequence/,
+    "public DNS cannot be accepted before authoritative DNS",
+  );
+  assert.throws(
+    () => assertRunbook(`${source}\nDo not create or switch public DNS before deploy.\n`),
+    /obsolete no-DNS-before-deploy sequence/,
+    "the former contradictory DNS prohibition cannot return",
+  );
+  assert.throws(
+    () =>
+      assertRunbook(
+        source.replace(DEPLOY_BLOCK, `${DEPLOY_BLOCK}\nnode deploy/production/smoke.mjs`),
+      ),
+    /first-deploy commands must be exact/,
+    "first deploy cannot run a second full smoke",
+  );
 
   rejectsMutation(
     source,

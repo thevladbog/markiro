@@ -242,21 +242,42 @@ infrastructure, not authorization to expose anonymous routes to the internet.
 This makes the current limitation explicit rather than claiming that standard
 Caddy provides a feature it does not ship.
 
+First deployment uses the protected ingress fail closed before DNS changes:
+the approved rate limits and maintenance/deny response are active, the single
+operator or synthetic smoke source is allowlisted, and the certificate path is
+evidenced. When Caddy terminates TLS, the provider transparently passes the
+ACME HTTP-01 challenge on port 80 to Caddy. When the provider terminates TLS,
+deployment instead requires a separately verified pre-provisioned certificate
+and custom-edge procedure; this repository does not invent provider commands.
+
 ## Deploy and rollback procedure
 
-The bundle's runbook defines this order:
+For first deploy, the bundle's runbook defines this order:
 
 1. verify the environment file permissions and required variables;
 2. verify trusted release evidence and record the approved API/edge image
    digests plus the current release SHA;
 3. confirm a fresh managed-PostgreSQL backup and object-storage policy in the
    cloud environment;
-4. pull both images by the approved repository digests;
-5. run `migrate` once and stop on any non-zero exit;
-6. recreate `api`, wait for readiness, then recreate `edge`;
-7. smoke the cabinet, auth boundary, device route, and first-owner workflow;
-8. retain the previous tag and release record until the observation window
-   ends.
+4. evidence provider/WAF or reviewed custom-Caddy rate limits, maintenance/deny,
+   the allowlisted smoke source, and the selected certificate bootstrap;
+5. switch DNS to the protected ingress through the approved external
+   procedure, then verify authoritative and public DNS with bounded polling;
+6. pull both images by the approved repository digests;
+7. run `migrate` once and stop on any non-zero exit;
+8. recreate `api`, wait for readiness, then recreate `edge`;
+9. poll the HTTPS liveness endpoint for bounded edge/TLS readiness, retrying
+   transient connection, TLS, and HTTP-status failures;
+10. run exactly one full production smoke from the allowlisted source, mark the
+    release healthy, and only then open public application traffic;
+11. retain the previous tag and release record until the observation window
+    ends.
+
+Failure leaves maintenance/deny active or withdraws DNS through the approved
+external procedure; it never opens public application traffic. Routine deploy
+assumes DNS and valid TLS already exist and therefore starts at release
+verification while retaining the same edge/TLS readiness and exactly one full
+smoke gates.
 
 Application rollback restores the previous API and edge repository digests without
 reversing migrations. It is permitted only while the release's migrations are
