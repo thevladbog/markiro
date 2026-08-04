@@ -47,6 +47,61 @@ jobs:
       - run: pnpm --filter @markiro/db db:migrate
       - run: pnpm turbo lint typecheck test build
 
+  tenant-team-infrastructure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      NODE_ENV: test
+      LOCAL_INFRA_SMOKE: "1"
+      DATABASE_URL: postgres://markiro:markiro@127.0.0.1:5432/markiro
+      BETTER_AUTH_SECRET: insecure-dummy-ci-placeholder-not-a-secret
+      BETTER_AUTH_URL: http://127.0.0.1:3000
+      ADMIN_ORIGIN: http://127.0.0.1:5173
+      PAIRING_CODE_PEPPER: insecure-dummy-ci-pairing-pepper-not-a-secret
+      SMTP_HOST: 127.0.0.1
+      SMTP_PORT: "1025"
+      SMTP_SECURE: "false"
+      SMTP_FROM_EMAIL: no-reply@markiro.local
+      SMTP_FROM_NAME: Markiro
+      MAIL_PAYLOAD_ENCRYPTION_KEY: bW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW0=
+      S3_ENDPOINT: http://127.0.0.1:9000
+      S3_REGION: us-east-1
+      S3_BUCKET: markiro-private
+      S3_ACCESS_KEY_ID: markiro
+      S3_SECRET_ACCESS_KEY: markiro-development-only
+      S3_FORCE_PATH_STYLE: "true"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Start PostgreSQL, Mailpit, and MinIO
+        run: >-
+          docker compose -f docker-compose.dev.yml up -d --wait --wait-timeout 120
+          postgres mailpit minio
+      - name: Initialize the private development bucket
+        run: docker compose -f docker-compose.dev.yml run --rm minio-init
+      - run: pnpm --filter @markiro/db db:migrate
+      - name: Build API workspace dependencies
+        run: pnpm turbo build --filter '@markiro/api...'
+      - name: Run real SMTP and object-storage smoke
+        run: >-
+          pnpm --filter @markiro/api exec vitest run
+          test/provision-tenant-owner.e2e.test.ts
+          test/tenant-owner-activation.e2e.test.ts
+          test/local-infrastructure.e2e.test.ts
+      - name: Show infrastructure logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.dev.yml logs --no-color
+      - name: Stop local infrastructure
+        if: always()
+        run: docker compose -f docker-compose.dev.yml down --volumes
+
   station-rust:
     runs-on: ubuntu-latest
     # WebKit pulls a large dependency tree and GitHub's Azure apt mirror can

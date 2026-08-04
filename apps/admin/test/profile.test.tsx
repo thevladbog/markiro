@@ -33,6 +33,7 @@ function client(signedIn = true): AuthClientLike {
     useListOrganizations: () => ({ data: [], isPending: false, error: null }),
     signIn: { email: vi.fn() },
     signUp: { email: vi.fn() },
+    resetPassword: vi.fn(),
     signOut: vi.fn(),
     organization: { create: vi.fn(), list: vi.fn(), setActive: vi.fn() },
   };

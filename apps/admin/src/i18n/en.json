@@ -30,6 +30,33 @@
       "inviteOnlyBody": "Ask your organization administrator for a personal link. Your email address will already be included in the invitation.",
       "genericError": "Could not register. Try a different email address."
     },
+    "resetPassword": {
+      "title": "Set your password",
+      "passwordLabel": "New password",
+      "confirmationLabel": "Repeat password",
+      "passwordHint": "Use at least 8 characters.",
+      "mismatch": "Passwords do not match.",
+      "submit": "Set password",
+      "genericError": "Could not set the password. Request a new link.",
+      "invalidTitle": "Invalid link",
+      "invalidBody": "The link has no one-time token. Request another activation email.",
+      "toLogin": "Return to sign in"
+    },
+    "activateOwner": {
+      "title": "Activate owner access",
+      "passwordLabel": "New password",
+      "confirmationLabel": "Repeat password",
+      "passwordHint": "The password must contain at least 8 characters.",
+      "mismatch": "Passwords do not match.",
+      "submit": "Activate access",
+      "existingAccountBody": "You already have an account. Confirm the email address; your current password will not change.",
+      "confirm": "Confirm and continue",
+      "genericError": "Access could not be activated. Request a new link.",
+      "loadError": "The link could not be checked. Try again later.",
+      "invalidTitle": "Invalid link",
+      "invalidBody": "The link may have expired or already been used. Contact the service administrator.",
+      "toLogin": "Return to sign in"
+    },
     "createOrg": {
       "title": "Create organization",
       "nameLabel": "Organization name",

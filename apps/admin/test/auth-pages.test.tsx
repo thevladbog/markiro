@@ -10,12 +10,15 @@ import {
   type OrganizationSummary,
 } from "../src/auth/client.js";
 import { CreateOrgPage } from "../src/pages/auth/CreateOrg.js";
+import { ActivateOwnerPage } from "../src/pages/auth/ActivateOwner.js";
 import { LoginPage } from "../src/pages/auth/Login.js";
 import { RegisterPage } from "../src/pages/auth/Register.js";
+import { ResetPasswordPage } from "../src/pages/auth/ResetPassword.js";
 import { SelectOrgPage } from "../src/pages/auth/SelectOrg.js";
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
 });
 
 /** A fully-fake AuthClientLike -- no network, no better-auth internals. */
@@ -25,6 +28,7 @@ function createFakeAuthClient(overrides: Partial<AuthClientLike> = {}): AuthClie
     useListOrganizations: () => ({ data: [], isPending: false, error: null }),
     signIn: { email: vi.fn(async () => ({ data: {}, error: null })) },
     signUp: { email: vi.fn(async () => ({ data: {}, error: null })) },
+    resetPassword: vi.fn(async () => ({ data: { status: true }, error: null })),
     signOut: vi.fn(async () => ({ data: {}, error: null })),
     organization: {
       create: vi.fn(async () => ({ data: { id: "org_1" }, error: null })),
@@ -35,7 +39,12 @@ function createFakeAuthClient(overrides: Partial<AuthClientLike> = {}): AuthClie
   };
 }
 
-function renderRouted(client: AuthClientLike, initialPath: string, element: ReactElement) {
+function renderRouted(
+  client: AuthClientLike,
+  initialPath: string,
+  element: ReactElement,
+  routePath = initialPath,
+) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -44,7 +53,7 @@ function renderRouted(client: AuthClientLike, initialPath: string, element: Reac
       <MemoryRouter initialEntries={[initialPath]}>
         <AuthClientProvider client={client}>
           <Routes>
-            <Route path={initialPath} element={element} />
+            <Route path={routePath} element={element} />
             <Route path="/" element={<div>SHELL_PLACEHOLDER</div>} />
             <Route path="/login" element={<div>LOGIN_PAGE</div>} />
           </Routes>
@@ -54,6 +63,102 @@ function renderRouted(client: AuthClientLike, initialPath: string, element: Reac
   );
   return { ...view, queryClient };
 }
+
+describe("ResetPasswordPage", () => {
+  it("sets the first password from the emailed token and returns to sign in", async () => {
+    const resetPassword = vi.fn(async () => ({ data: { status: true }, error: null }));
+    const client = Object.assign(createFakeAuthClient(), { resetPassword });
+    renderRouted(
+      client,
+      "/reset-password?token=one-time-setup-token",
+      <ResetPasswordPage />,
+      "/reset-password",
+    );
+
+    fireEvent.change(screen.getByLabelText("Новый пароль"), {
+      target: { value: "a-secure-password" },
+    });
+    fireEvent.change(screen.getByLabelText("Повторите пароль"), {
+      target: { value: "a-secure-password" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Установить пароль" }));
+
+    await waitFor(() => {
+      expect(resetPassword).toHaveBeenCalledWith({
+        newPassword: "a-secure-password",
+        token: "one-time-setup-token",
+      });
+    });
+    await screen.findByText("LOGIN_PAGE");
+  });
+
+  it("does not show a password form when the activation token is missing", () => {
+    renderRouted(
+      createFakeAuthClient(),
+      "/reset-password",
+      <ResetPasswordPage />,
+      "/reset-password",
+    );
+
+    expect(screen.getByText("Ссылка недействительна")).toBeDefined();
+    expect(screen.queryByLabelText("Новый пароль")).toBeNull();
+  });
+});
+
+describe("ActivateOwnerPage", () => {
+  it("sets a password only for a fresh global account", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ hasAccount: false }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    renderRouted(
+      createFakeAuthClient(),
+      "/activate-owner#token=one-time-owner-token",
+      <ActivateOwnerPage />,
+      "/activate-owner",
+    );
+
+    fireEvent.change(await screen.findByLabelText("Новый пароль"), {
+      target: { value: "fresh-password-123" },
+    });
+    fireEvent.change(screen.getByLabelText("Повторите пароль"), {
+      target: { value: "fresh-password-123" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Активировать доступ" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(JSON.parse(String(fetchMock.mock.calls[1]![1]?.body))).toEqual({
+      token: "one-time-owner-token",
+      password: "fresh-password-123",
+    });
+    await screen.findByText("LOGIN_PAGE");
+  });
+
+  it("preserves the password for an existing multi-tenant account", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ hasAccount: true }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    renderRouted(
+      createFakeAuthClient(),
+      "/activate-owner#token=existing-owner-token",
+      <ActivateOwnerPage />,
+      "/activate-owner",
+    );
+
+    expect(await screen.findByText(/текущий пароль останется без изменений/i)).toBeDefined();
+    expect(screen.queryByLabelText("Новый пароль")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Подтвердить и продолжить" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(JSON.parse(String(fetchMock.mock.calls[1]![1]?.body))).toEqual({
+      token: "existing-owner-token",
+    });
+    await screen.findByText("LOGIN_PAGE");
+  });
+});
 
 describe("LoginPage", () => {
   it("renders labels from the RU dictionary", () => {

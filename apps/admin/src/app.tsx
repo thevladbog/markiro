@@ -5,8 +5,10 @@ import { CABINET_CAPABILITY } from "@markiro/domain";
 import { RequireCapability } from "./access/context.js";
 import { AuthQueryBoundary } from "./query/AuthQueryBoundary.js";
 import { CreateOrgPage } from "./pages/auth/CreateOrg.js";
+import { ActivateOwnerPage } from "./pages/auth/ActivateOwner.js";
 import { LoginPage } from "./pages/auth/Login.js";
 import { RegisterPage } from "./pages/auth/Register.js";
+import { ResetPasswordPage } from "./pages/auth/ResetPassword.js";
 import { SelectOrgPage } from "./pages/auth/SelectOrg.js";
 import { BoxesPage } from "./pages/boxes/index.js";
 import { CatalogPage } from "./pages/catalog/index.js";
@@ -45,6 +47,8 @@ export function AppRoutes() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
+      <Route path="/activate-owner" element={<ActivateOwnerPage />} />
       <Route path="/invitations/:id" element={<InvitationPage />} />
       <Route path="/profile" element={<ProfilePage />} />
       <Route path="/org/create" element={<CreateOrgPage />} />

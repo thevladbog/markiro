@@ -6,6 +6,7 @@
     "build": "nest build",
     "dev": "nest start --watch",
     "start": "node dist/main.js",
+    "provision:tenant-owner": "node scripts/provision-tenant-owner.mjs",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"

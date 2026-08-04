@@ -6,10 +6,15 @@ import {
   type OrganizationInvitationEmailProps,
 } from "./invitation.js";
 import { PasswordResetEmail, type PasswordResetEmailProps } from "./password-reset.js";
+import {
+  TenantOwnerActivationEmail,
+  type TenantOwnerActivationEmailProps,
+} from "./tenant-owner-activation.js";
 
 export type EmailTemplateInput =
   | ({ kind: "organization-invitation" } & OrganizationInvitationEmailProps)
   | ({ kind: "password-reset" } & PasswordResetEmailProps)
+  | ({ kind: "tenant-owner-activation" } & TenantOwnerActivationEmailProps)
   | ({ kind: "email-verification" } & EmailVerificationEmailProps);
 
 export interface RenderedEmail {
@@ -48,6 +53,17 @@ function resolveTemplate(input: EmailTemplateInput): { subject: string; element:
         }),
       };
     }
+    case "tenant-owner-activation": {
+      return {
+        subject: "Доступ к " + input.organizationName + " — Маркиро",
+        element: createElement(TenantOwnerActivationEmail, {
+          recipientName: input.recipientName,
+          organizationName: input.organizationName,
+          actionUrl: input.actionUrl,
+          expiresInMinutes: input.expiresInMinutes,
+        }),
+      };
+    }
     case "email-verification": {
       return {
         subject: "Подтвердите email — Маркиро",
@@ -65,4 +81,5 @@ export type {
   EmailVerificationEmailProps,
   OrganizationInvitationEmailProps,
   PasswordResetEmailProps,
+  TenantOwnerActivationEmailProps,
 };

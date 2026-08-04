@@ -31,6 +31,7 @@ import { TeamModule } from "./modules/team/team.module";
 import { InvitationsModule } from "./modules/invitations/invitations.module";
 import { StorageModule } from "./modules/storage/storage.module";
 import { ProfileModule } from "./modules/profile/profile.module";
+import { TenantOwnerActivationModule } from "./modules/tenant-owner-activation/tenant-owner-activation.module";
 
 @Module({ controllers: [HealthController] })
 export class AppModule {
@@ -81,6 +82,7 @@ export class AppModule {
         TeamModule.forRoot(env.ADMIN_ORIGIN),
         InvitationsModule,
         ProfileModule,
+        TenantOwnerActivationModule,
       ],
       controllers: [HealthController],
     };

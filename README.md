@@ -22,6 +22,33 @@ pnpm --filter @markiro/api dev
 
 Note: Drizzle Kit reads `DATABASE_URL` from its own working directory (hence the inline variable for migrate); the API dev server also requires these exports to connect to the database at startup.
 
+The local stack also starts Mailpit (SMTP `localhost:1025`, UI
+`http://localhost:8025`) and a private MinIO bucket (S3 `localhost:9000`,
+console `http://localhost:9001`). Credentials and API defaults are documented
+in `.env.example` and are development-only.
+
+To create the first tenant owner without putting a password in a shell or log,
+build the API and run:
+
+```bash
+pnpm --silent --filter @markiro/api provision:tenant-owner -- \
+  --email owner@example.com \
+  --tenant-name "Первый завод" \
+  --tenant-slug first-factory
+```
+
+The command is idempotent for the same tenant/email and prints only tenant,
+user, membership, and delivery IDs. The one-time link verifies possession of
+the address. A new global account chooses its first password; an existing
+multi-tenant account keeps its current password and only confirms the new
+owner access.
+
+If an unused activation expires, repeat the same command with
+`--renew-activation`. This explicit recovery switch cancels and scrubs an
+unsent delivery, invalidates the old token, and queues one replacement. It is
+refused after the address has already been verified; use normal password
+recovery in that case.
+
 ### Admin app
 
 ```bash

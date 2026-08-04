@@ -62,6 +62,7 @@ function createFakeAuthClient(overrides: Partial<AuthClientLike> = {}): AuthClie
     useListOrganizations: () => ({ data: [], isPending: false, error: null }),
     signIn: { email: async () => ({ data: {}, error: null }) },
     signUp: { email: async () => ({ data: {}, error: null }) },
+    resetPassword: async () => ({ data: { status: true }, error: null }),
     signOut: async () => ({ data: {}, error: null }),
     organization: {
       create: async () => ({ data: { id: "org_1" }, error: null }),
