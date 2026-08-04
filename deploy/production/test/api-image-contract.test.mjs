@@ -39,6 +39,9 @@ test("API image keeps the production runtime closure minimal and hardened", asyn
   assert.match(source, /-prune -exec rm -rf \{\} \+/);
   assert.match(source, /-name nest-cli\.json/);
   assert.match(source, /-name 'tsconfig\*\.json'/);
+  assert.match(source, /find \/out\/api\/dist -type f/);
+  assert.match(source, /find -L \/out\/api\/node_modules\/@markiro -type f/);
+  assert.match(source, /rm -f \/out\/api\/turbo\.json/);
   assert.doesNotMatch(source, /drizzle-kit|pnpm install[^\n]*--prod/);
 });
 

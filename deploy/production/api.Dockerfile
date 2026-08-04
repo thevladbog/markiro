@@ -19,6 +19,9 @@ RUN find /out/api -type f \( -name '*.ts' -o -name '*.tsx' -o -name '*.mts' -o -
  && rm -rf /out/api/src /out/api/test /out/api/tests /out/api/scripts /out/api/.turbo \
  && find /out/api -type d \( -name test -o -name tests -o -name scripts -o -name .turbo \) -prune -exec rm -rf {} + \
  && find /out/api -type f \( -name nest-cli.json -o -name 'tsconfig*.json' \) -delete \
+ && find /out/api/dist -type f \( -name '*.d.ts' -o -name '*.d.tsx' -o -name '*.d.mts' -o -name '*.d.cts' \) -delete \
+ && find -L /out/api/node_modules/@markiro -type f \( -name '*.d.ts' -o -name '*.d.tsx' -o -name '*.d.mts' -o -name '*.d.cts' \) -delete \
+ && rm -f /out/api/turbo.json \
  && find /out/api -type d -empty -delete
 
 FROM node:24.19.0-bookworm-slim AS runtime
