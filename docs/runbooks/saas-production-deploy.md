@@ -210,44 +210,39 @@ TLS_BOOTSTRAP_VERIFIED=yes
 Only after those checks are green, use the approved provider procedure to
 create or switch DNS to the protected ingress. This repository intentionally
 contains no provider mutation command. Record the change, then verify the
-expected answer through both the authoritative server and an approved public
-resolver. Both loops are bounded; a mismatch stops before edge start.
+exact normalized A and AAAA answer sets through both an explicit authoritative
+server and every approved public recursive resolver. Enter unique,
+comma-separated addresses, or the exact word `none` for an unused address
+family; at least one family must contain an address. CNAME is not supported by
+this procedure. If the protected ingress requires CNAME, stop and obtain a
+separately reviewed verifier and rollout policy rather than silently accepting
+a different record shape.
 
 ```bash
 read -r -p 'DNS change evidence ID: ' DNS_CHANGE_EVIDENCE_ID
-read -r -p 'Authoritative DNS server: ' AUTHORITATIVE_DNS_SERVER
-read -r -p 'Approved public DNS resolver: ' PUBLIC_DNS_RESOLVER
-read -r -p 'DNS record type (A/AAAA/CNAME): ' DNS_RECORD_TYPE
-read -r -p 'Expected protected-ingress DNS answer: ' EXPECTED_DNS_ANSWER
+read -r -p 'Authoritative DNS server: ' MARKIRO_AUTHORITATIVE_DNS_SERVER
+read -r -p 'Approved public DNS resolvers (comma-separated): ' MARKIRO_PUBLIC_DNS_RESOLVERS
+read -r -p 'Approved A addresses (comma-separated or none): ' MARKIRO_APPROVED_DNS_A
+read -r -p 'Approved AAAA addresses (comma-separated or none): ' MARKIRO_APPROVED_DNS_AAAA
 test -n "$DNS_CHANGE_EVIDENCE_ID"
-case "$DNS_RECORD_TYPE" in A|AAAA|CNAME) ;; *) exit 1 ;; esac
-
-AUTHORITATIVE_DNS_READY=0
-for attempt in $(seq 1 30); do
-  if dig +short +time=2 +tries=1 "@$AUTHORITATIVE_DNS_SERVER" "$MARKIRO_DOMAIN" "$DNS_RECORD_TYPE" | grep -Fx -- "$EXPECTED_DNS_ANSWER"; then
-    AUTHORITATIVE_DNS_READY=1
-    break
-  fi
-  sleep 2
-done
-test "$AUTHORITATIVE_DNS_READY" = 1 || {
-  echo 'STOP: authoritative DNS did not converge to the protected ingress' >&2
-  exit 1
-}
-
-PUBLIC_DNS_READY=0
-for attempt in $(seq 1 30); do
-  if dig +short +time=2 +tries=1 "@$PUBLIC_DNS_RESOLVER" "$MARKIRO_DOMAIN" "$DNS_RECORD_TYPE" | grep -Fx -- "$EXPECTED_DNS_ANSWER"; then
-    PUBLIC_DNS_READY=1
-    break
-  fi
-  sleep 2
-done
-test "$PUBLIC_DNS_READY" = 1 || {
-  echo 'STOP: public DNS did not converge to the protected ingress' >&2
-  exit 1
-}
+export MARKIRO_AUTHORITATIVE_DNS_SERVER MARKIRO_PUBLIC_DNS_RESOLVERS
+export MARKIRO_APPROVED_DNS_A MARKIRO_APPROVED_DNS_AAAA
+node deploy/production/verify-dns.mjs
+unset MARKIRO_AUTHORITATIVE_DNS_SERVER MARKIRO_PUBLIC_DNS_RESOLVERS
+unset MARKIRO_APPROVED_DNS_A MARKIRO_APPROVED_DNS_AAAA
 ```
+
+The verifier queries both address families. Its authoritative queries use
+`+norecurse` and require `NOERROR` plus the AA flag; a recursive/cache answer,
+referral, missing header, or `SERVFAIL` fails closed. Public queries use
+`+recurse`, and every listed resolver must return the same exact approved set.
+Comparison is address-normalized, order-independent, and TTL-independent;
+missing or extra addresses fail. Repeated identical DNS answer rows normalize
+to one set member, while duplicate approved operator inputs are rejected.
+Unsupported answer types, including CNAME, fail. Verification retries the
+complete gate at most 30 times with a two-second interval, and each `dig`
+process is bounded to five seconds. A mismatch after that budget stops before
+edge start.
 
 Ports 80 and 443 at the protected ingress must now reach the selected TLS
 bootstrap path. Start the release exactly once:

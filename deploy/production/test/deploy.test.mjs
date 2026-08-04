@@ -17,6 +17,7 @@ const environment = {
   MARKIRO_EDGE_IMAGE_DIGEST: edgeImageDigest,
   MARKIRO_ENV_FILE: "/private/production.env",
   MARKIRO_DOMAIN: "app.markiro.example",
+  MARKIRO_HTTPS_PORT: "443",
   ACME_EMAIL: "ops@example.test",
   DATABASE_URL: "postgres://private:password@database/markiro",
 };

@@ -1135,12 +1135,16 @@ git commit -m "ci: verify and publish production images"
 
 - Create: `docs/runbooks/saas-production-deploy.md`
 - Create: `deploy/production/test/runbook-contract.test.mjs`
+- Create: `deploy/production/verify-dns.mjs`
+- Create: `deploy/production/test/dns-verification.test.mjs`
 - Modify: `docs/superpowers/specs/2026-08-04-saas-production-bundle-design.md`
 
 **Interfaces:**
 
 - Consumes: `preflight.mjs`, `deploy.mjs`, `smoke.mjs`, local release records, cabinet RBAC provisioning runbook.
-- Produces: an executable first-deploy, routine-deploy, failure-triage, rollback, and public-go-live procedure.
+- Produces: an executable first-deploy, routine-deploy, failure-triage,
+  rollback, and public-go-live procedure, plus a bounded injected DNS verifier
+  for exact authoritative/public A and AAAA sets.
 
 - [ ] **Step 1: Write the failing runbook contract**
 
@@ -1163,7 +1167,11 @@ Assert the runbook contains explicit commands and stop conditions for:
   or requiring a separately verified pre-provisioned certificate/custom-edge
   procedure when the provider terminates TLS;
 - switching DNS only through an approved external procedure, then bounded
-  authoritative and public DNS verification before edge start;
+  authoritative and public DNS verification before edge start. The executable
+  verifier compares the exact normalized A and AAAA sets, uses `+norecurse`
+  and requires the AA flag at the explicit authoritative server, and requires
+  every listed public recursive resolver to have neither missing nor extra
+  addresses. Unsupported CNAME/other answer shapes fail closed;
 - bounded edge/TLS readiness, exactly one full smoke, and public traffic open
   only after the healthy release record exists.
 
@@ -1217,9 +1225,12 @@ separately reviewed reproducible custom Caddy image. The standard Caddy bundle
 alone cannot satisfy that gate. The first-deploy order is maintenance/deny and
 allowlist evidence, ACME HTTP-01 pass-through (or the verified provider TLS
 alternative), approved DNS switch, bounded authoritative and public DNS
-verification, edge/TLS readiness, exactly one full smoke, healthy record, and
-only then public traffic open. Routine deploy explicitly assumes DNS and valid
-TLS already exist. Do not add fictional provider commands.
+verification of the exact normalized A and AAAA sets (`+norecurse` plus AA flag
+at the authoritative server, then every public recursive resolver), edge/TLS
+readiness, exactly one full smoke, healthy record, and only then public traffic
+open. CNAME is outside this procedure and fails closed. Routine deploy
+explicitly assumes DNS and valid TLS already exist. Do not add fictional
+provider commands.
 
 - [ ] **Step 5: Mark the design implemented only after all evidence exists**
 

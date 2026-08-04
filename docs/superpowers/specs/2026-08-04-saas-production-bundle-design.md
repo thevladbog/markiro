@@ -262,7 +262,11 @@ For first deploy, the bundle's runbook defines this order:
 4. evidence provider/WAF or reviewed custom-Caddy rate limits, maintenance/deny,
    the allowlisted smoke source, and the selected certificate bootstrap;
 5. switch DNS to the protected ingress through the approved external
-   procedure, then verify authoritative and public DNS with bounded polling;
+   procedure, then use the executable DNS verifier for bounded authoritative
+   and public DNS polling. It compares the exact normalized A and AAAA sets:
+   authoritative queries use `+norecurse` and require the AA flag, while every
+   listed public recursive resolver must converge without missing or extra
+   addresses. CNAME and other unapproved answer shapes fail closed;
 6. pull both images by the approved repository digests;
 7. run `migrate` once and stop on any non-zero exit;
 8. recreate `api`, wait for readiness, then recreate `edge`;

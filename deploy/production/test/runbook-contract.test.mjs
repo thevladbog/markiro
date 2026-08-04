@@ -307,6 +307,22 @@ function assertRunbook(source) {
     owner === OWNER_BLOCK,
     "first-owner provisioning block must be exact and retain only the protected result file",
   );
+  const dnsVerification = blockContaining(
+    first,
+    "node deploy/production/verify-dns.mjs",
+    "DNS verification",
+  );
+  invariant(
+    dnsVerification.includes("MARKIRO_APPROVED_DNS_A") &&
+      dnsVerification.includes("MARKIRO_APPROVED_DNS_AAAA") &&
+      dnsVerification.includes("MARKIRO_AUTHORITATIVE_DNS_SERVER") &&
+      dnsVerification.includes("MARKIRO_PUBLIC_DNS_RESOLVERS"),
+    "DNS verifier inputs must explicitly cover authoritative/public A and AAAA sets",
+  );
+  invariant(
+    !/dig\s|grep\s+-F/.test(dnsVerification),
+    "runbook must delegate DNS response parsing to the executable verifier",
+  );
 
   for (const phase of [
     "Pull",
@@ -436,8 +452,11 @@ function assertRunbook(source) {
       "SMOKE_SOURCE_ALLOWLISTED",
       "TLS_BOOTSTRAP_VERIFIED",
       "DNS_CHANGE_EVIDENCE_ID",
-      "AUTHORITATIVE_DNS_READY",
-      "PUBLIC_DNS_READY",
+      "MARKIRO_AUTHORITATIVE_DNS_SERVER",
+      "MARKIRO_PUBLIC_DNS_RESOLVERS",
+      "MARKIRO_APPROVED_DNS_A",
+      "MARKIRO_APPROVED_DNS_AAAA",
+      "node deploy/production/verify-dns.mjs",
       "node deploy/production/deploy.mjs",
       "PUBLIC_TRAFFIC_OPENED_EVIDENCE_ID",
     ],
@@ -565,6 +584,16 @@ test("runbook, design, and plan share the safe first-deploy DNS and ACME orderin
     assert.match(source, /maintenance\/deny/i, `${label} lacks the pre-DNS deny gate`);
     assert.match(source, /ACME HTTP-01/i, `${label} lacks the Caddy ACME path`);
     assert.match(source, /authoritative.*public DNS/is, `${label} lacks bounded DNS verification`);
+    assert.match(
+      source,
+      /exact normalized[\s\S]{0,120}A and AAAA/i,
+      `${label} lacks exact normalized address-set verification`,
+    );
+    assert.match(
+      source,
+      /\+norecurse[\s\S]{0,100}AA flag/i,
+      `${label} lacks non-recursive authoritative validation`,
+    );
     assert.match(source, /edge\/TLS readiness/i, `${label} lacks edge TLS readiness`);
     assert.match(
       source,
@@ -616,8 +645,11 @@ test("the contract rejects each portability, record-safety, linkage, and command
     'docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml up -d --no-deps api';
 
   const reorderedDns = source
-    .replaceAll("PUBLIC_DNS_READY", "PUBLIC_DNS_REORDERED")
-    .replace("AUTHORITATIVE_DNS_READY=0", "PUBLIC_DNS_READY=0\nAUTHORITATIVE_DNS_READY=0");
+    .replaceAll("MARKIRO_PUBLIC_DNS_RESOLVERS", "PUBLIC_DNS_REORDERED")
+    .replace(
+      "MARKIRO_AUTHORITATIVE_DNS_SERVER",
+      "MARKIRO_PUBLIC_DNS_RESOLVERS MARKIRO_AUTHORITATIVE_DNS_SERVER",
+    );
   assert.throws(
     () => assertRunbook(reorderedDns),
     /first-deploy DNS\/ACME sequence/,
