@@ -329,6 +329,16 @@ test("requires the pruned API runtime to exclude Playwright and OpenTelemetry", 
       /forbidden tooling or telemetry dependency/,
     );
   });
+
+  await t.test(
+    "reports an indeterminate dependency scan separately from a forbidden match",
+    async () => {
+      await assert.rejects(
+        runSmoke(options, smokeClient(), dockerForProbe(2)),
+        /runtime dependency scan failed/,
+      );
+    },
+  );
 });
 
 test("rejects every unavailable API container ID before inspect", async (t) => {

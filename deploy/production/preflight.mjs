@@ -2,6 +2,8 @@ import { stat } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import process from "node:process";
 
+import { isMainModule } from "./cli-main.mjs";
+
 const IMAGE_TAG_PATTERN = /^[0-9a-f]{40}$/;
 const IMAGE_DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const DOMAIN_PATTERN =
@@ -214,7 +216,7 @@ export async function runPreflight(
   return { imageTag, apiImageDigest, edgeImageDigest, domain, acmeEmail, envFile };
 }
 
-if (import.meta.main) {
+if (isMainModule(import.meta.url)) {
   try {
     await runPreflight(process.env);
     console.log("Production bundle preflight passed");

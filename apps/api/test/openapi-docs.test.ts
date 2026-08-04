@@ -43,7 +43,7 @@ function scriptElements(html: string): Array<{ attributes: string; body: string 
 function scriptSources(html: string): string[] {
   return scriptElements(html).map(({ attributes, body }) => {
     if (body.trim()) throw new Error("documentation HTML contains an inline script");
-    const source = attributes.match(/\bsrc=["']([^"']+)["']/i)?.[1];
+    const source = attributes.match(/(?:^|\s)src\s*=\s*["']([^"']+)["']/i)?.[1];
     if (!source) throw new Error("documentation HTML contains an inline script");
     return source;
   });
@@ -56,6 +56,12 @@ describe("self-hosted OpenAPI documentation", () => {
     expect(scriptSources('<script src="/docs/scalar.js"></script   >')).toEqual([
       "/docs/scalar.js",
     ]);
+  });
+
+  it("does not mistake data-src for the executable script src attribute", () => {
+    expect(() => scriptSources('<script data-src="/docs/scalar.js"></script>')).toThrow(
+      /inline script/,
+    );
   });
 
   beforeAll(async () => {

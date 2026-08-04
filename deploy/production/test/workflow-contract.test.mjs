@@ -393,7 +393,11 @@ function assertCiWorkflow(ciSource) {
   assert.equal(job["timeout-minutes"], 20, "unexpected production-bundle timeout");
   assert.deepEqual(job.env, PRODUCTION_BUNDLE_ENV, "unexpected production-bundle environment");
   assertExactSteps(job.steps, PRODUCTION_BUNDLE_STEPS, "production-bundle");
-  assert.notEqual(workflow.permissions?.packages, "write", "CI must not grant packages: write");
+  assert.deepEqual(
+    workflow.permissions,
+    { contents: "read" },
+    "CI workflow permissions must be contents: read only",
+  );
   assertPinnedComments(ciSource, CHECKOUT, "v4");
   assertPinnedComments(ciSource, PNPM_SETUP, "v4");
   assertPinnedComments(ciSource, NODE_SETUP, "v4");
@@ -562,6 +566,18 @@ test("CI contract rejects each hidden-step, shell, log, and cleanup mutation for
     "          -f deploy/production/compose.ci.yml down --volumes --remove-orphans";
 
   for (const mutation of [
+    {
+      name: "workflow-wide write-all permissions scalar",
+      search: "permissions:\n  contents: read",
+      replacement: "permissions: write-all",
+      expected: /CI workflow permissions must be contents: read only/,
+    },
+    {
+      name: "workflow-wide permissions sequence",
+      search: "permissions:\n  contents: read",
+      replacement: "permissions:\n  - contents: read",
+      expected: /CI workflow permissions must be contents: read only/,
+    },
     {
       name: "old default HTTPS port in generated auth origin",
       search: `          printf '%s\\n' "BETTER_AUTH_URL=https://localhost:18443"`,

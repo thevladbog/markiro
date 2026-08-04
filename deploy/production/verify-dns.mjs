@@ -2,6 +2,8 @@ import { execFile } from "node:child_process";
 import { isIP } from "node:net";
 import process from "node:process";
 
+import { isMainModule } from "./cli-main.mjs";
+
 const DOMAIN_PATTERN =
   /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const DIG_TIMEOUT_MS = 5_000;
@@ -276,7 +278,7 @@ export async function verifyDnsConvergence(options, supplied = {}) {
   );
 }
 
-if (import.meta.main) {
+if (isMainModule(import.meta.url)) {
   try {
     await verifyDnsConvergence(dnsOptionsFromEnvironment(process.env));
     console.log("DNS answer sets verified");

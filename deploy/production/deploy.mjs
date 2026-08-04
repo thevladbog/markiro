@@ -4,6 +4,7 @@ import { join } from "node:path";
 import process from "node:process";
 import { randomUUID } from "node:crypto";
 
+import { isMainModule } from "./cli-main.mjs";
 import { runPreflight } from "./preflight.mjs";
 import { productionBaseUrl, runSmoke } from "./smoke.mjs";
 
@@ -435,7 +436,7 @@ export async function deployRelease(options, supplied = {}) {
   }
 }
 
-if (import.meta.main) {
+if (isMainModule(import.meta.url)) {
   try {
     await deployRelease({ environment: process.env });
   } catch (error) {

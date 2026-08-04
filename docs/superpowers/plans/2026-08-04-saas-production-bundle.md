@@ -1263,7 +1263,7 @@ Expected: PASS.
 - [ ] **Step 7: Commit the runbook**
 
 ```bash
-git add docs/runbooks/saas-production-deploy.md docs/superpowers/specs/2026-08-04-saas-production-bundle-design.md deploy/production/test/runbook-contract.test.mjs
+git add docs/runbooks/saas-production-deploy.md docs/superpowers/specs/2026-08-04-saas-production-bundle-design.md deploy/production/test/runbook-contract.test.mjs deploy/production/verify-dns.mjs deploy/production/test/dns-verification.test.mjs
 git commit -m "docs: add SaaS production deploy runbook"
 ```
 

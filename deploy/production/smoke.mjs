@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import process from "node:process";
 
+import { isMainModule } from "./cli-main.mjs";
 import { RUNTIME_DEPENDENCY_PROBE_SOURCE } from "./runtime-dependency-probe.mjs";
 
 const CSP =
@@ -495,8 +496,9 @@ async function runtimeSmoke(environment, docker, client, baseUrl, options) {
       ],
       options.commandTimeoutMs,
     );
-    if (dependencyIsolation.code !== 0)
+    if (dependencyIsolation.code === 1)
       throw new Error("API runtime contains a forbidden tooling or telemetry dependency");
+    if (dependencyIsolation.code !== 0) throw new Error("API runtime dependency scan failed");
   }
 
   if (environment.SMOKE_ASSERT_SHUTDOWN !== "1") return;
@@ -616,7 +618,7 @@ export async function runSmoke(options, client = requestClient(), docker) {
   await runtimeSmoke(environment, dockerClient, client, baseUrl, runtimeOptions);
 }
 
-if (import.meta.main) {
+if (isMainModule(import.meta.url)) {
   try {
     await runSmoke({ baseUrl: productionBaseUrl(process.env), environment: process.env });
   } catch (error) {

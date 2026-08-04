@@ -638,6 +638,12 @@ test("runbook, design, and plan share the safe first-deploy DNS and ACME orderin
       `${label} lacks one full smoke`,
     );
   }
+  const plan = await readFile(PLAN, "utf8");
+  assert.match(
+    plan,
+    /git add[^\n]*deploy\/production\/verify-dns\.mjs[^\n]*deploy\/production\/test\/dns-verification\.test\.mjs/,
+    "plan Task 8 commit must stage the DNS verifier and its executable contract",
+  );
 });
 
 test("each DNS documentation contract rejects truncated and mixed-authority mutations", async (t) => {
