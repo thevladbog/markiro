@@ -3,9 +3,10 @@ import { readFile, readdir, realpath, stat } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 
 const forbiddenDependencies = new Set(["@playwright/test", "@opentelemetry/api"]);
-// Legacy pnpm deploy creates this virtual-store hoist as an external workspace
-// self-link. It is not a runtime dependency; every real store entry is scanned.
-const ignoredCentralHoistPackages = new Set(["@markiro/api"]);
+// Legacy pnpm deploy leaves this virtual-store self-link dangling after the
+// build workspace is omitted from the runtime image. Resolved links are never
+// exempt: in-root targets are scanned and external targets fail containment.
+const optionalDanglingCentralHoistPackages = new Set(["@markiro/api"]);
 const forbiddenDependency = Symbol("forbiddenDependency");
 const maximumTasks = 50_000;
 const maximumEntries = 100_000;
@@ -79,11 +80,17 @@ async function scanPackage(path) {
 }
 
 async function scanTask(task) {
-  const path = await canonicalDirectory(task.path);
+  let path;
+  try {
+    path = await canonicalDirectory(task.path);
+  } catch (error) {
+    if (task.kind === "optionalDanglingPackage" && error?.code === "ENOENT") return;
+    throw error;
+  }
   if (visited.has(path)) return;
   visited.add(path);
 
-  if (task.kind === "package") {
+  if (task.kind === "package" || task.kind === "optionalDanglingPackage") {
     await scanPackage(path);
     return;
   }
@@ -100,21 +107,26 @@ async function scanTask(task) {
       else if (entry.name === ".bin" || entry.name.startsWith(".")) continue;
       else if (entry.name.startsWith("@"))
         enqueue(task.kind === "centralNodeModules" ? "centralScope" : "scope", child, entry.name);
-      else if (
-        task.kind !== "centralNodeModules" ||
-        !entry.isSymbolicLink() ||
-        !ignoredCentralHoistPackages.has(entry.name)
-      )
-        enqueue("package", child);
+      else
+        enqueue(
+          task.kind === "centralNodeModules" &&
+            entry.isSymbolicLink() &&
+            optionalDanglingCentralHoistPackages.has(entry.name)
+            ? "optionalDanglingPackage"
+            : "package",
+          child,
+        );
     } else if (task.kind === "scope" || task.kind === "centralScope") {
       const packageName = task.packageName + "/" + entry.name;
-      if (
-        !entry.name.startsWith(".") &&
-        (task.kind !== "centralScope" ||
-          !entry.isSymbolicLink() ||
-          !ignoredCentralHoistPackages.has(packageName))
-      )
-        enqueue("package", child);
+      if (!entry.name.startsWith("."))
+        enqueue(
+          task.kind === "centralScope" &&
+            entry.isSymbolicLink() &&
+            optionalDanglingCentralHoistPackages.has(packageName)
+            ? "optionalDanglingPackage"
+            : "package",
+          child,
+        );
     } else if (task.kind === "store") {
       if (entry.name === "node_modules") enqueue("centralNodeModules", child);
       else if (!entry.name.startsWith(".")) enqueue("storeEntry", child);

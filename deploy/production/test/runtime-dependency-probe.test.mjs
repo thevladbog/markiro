@@ -40,10 +40,9 @@ test("runtime dependency probe scans nested pnpm manifests and fails closed", as
     const nestedModules = join(packageDirectory, "node_modules");
     await mkdir(nestedModules, { recursive: true });
     await symlink(modules, join(nestedModules, "loop"), "dir");
-    const workspacePackage = await packageManifest(fixture, "workspace-api", "@markiro/api");
     const virtualStoreHoist = join(modules, ".pnpm/node_modules/@markiro");
     await mkdir(virtualStoreHoist, { recursive: true });
-    await symlink(workspacePackage, join(virtualStoreHoist, "api"), "dir");
+    await symlink(join(fixture, "missing-workspace-api"), join(virtualStoreHoist, "api"), "dir");
 
     const result = runProbe(modules);
     assert.equal(result.status, 0, result.stderr);
@@ -79,7 +78,38 @@ test("runtime dependency probe scans nested pnpm manifests and fails closed", as
       assert.equal(result.stdout, "");
       assert.equal(result.stderr, "");
     });
+
+    await t.test(`scans an in-root @markiro/api self-link containing ${dependency}`, async () => {
+      const isolatedFixture = await mkdtemp(join(tmpdir(), "markiro-runtime-self-link-"));
+      const isolatedModules = join(isolatedFixture, "node_modules");
+      const selfTarget = await packageManifest(isolatedModules, ".self-target", "@markiro/api");
+      const centralScope = join(isolatedModules, ".pnpm/node_modules/@markiro");
+      t.after(() => rm(isolatedFixture, { recursive: true, force: true }));
+      await packageManifest(selfTarget, `node_modules/${dependency}`, dependency);
+      await mkdir(centralScope, { recursive: true });
+      await symlink(selfTarget, join(centralScope, "api"), "dir");
+
+      const result = runProbe(isolatedModules);
+      assert.equal(result.status, 1, result.stderr);
+      assert.equal(result.stdout, "");
+      assert.equal(result.stderr, "");
+    });
   }
+
+  await t.test("rejects a resolved external @markiro/api self-link", async () => {
+    const isolatedFixture = await mkdtemp(join(tmpdir(), "markiro-runtime-external-self-"));
+    const isolatedModules = join(isolatedFixture, "node_modules");
+    const externalSelf = await packageManifest(isolatedFixture, "workspace-api", "@markiro/api");
+    const centralScope = join(isolatedModules, ".pnpm/node_modules/@markiro");
+    t.after(() => rm(isolatedFixture, { recursive: true, force: true }));
+    await mkdir(centralScope, { recursive: true });
+    await symlink(externalSelf, join(centralScope, "api"), "dir");
+
+    const result = runProbe(isolatedModules);
+    assert.equal(result.status, 2);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "");
+  });
 
   await t.test("rejects a package manifest symlink that escapes the scan root", async () => {
     const isolatedFixture = await mkdtemp(join(tmpdir(), "markiro-runtime-manifest-link-"));
