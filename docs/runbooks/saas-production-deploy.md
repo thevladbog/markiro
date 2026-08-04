@@ -66,21 +66,25 @@ install -d -m 0700 .markiro-releases
 
 Preflight rejects anything except the approved full lowercase SHA, an accepted
 hostname/email, an accessible environment file at mode `0600`, and a quiet,
-valid Compose model. Inspect metadata only; never print the file. Run the two
-display commands below only on their matching operating system, then run that
-system's assertion.
+valid Compose model. Inspect metadata only; never print the file. The branch
+below is executable under `set -e` on either supported operator platform.
 
 ```bash
-# macOS inspection and assertion
-stat -f '%Lp %N' "$MARKIRO_ENV_FILE"
-test "$(stat -f '%Lp' "$MARKIRO_ENV_FILE")" = 600 || {
-  echo 'STOP: MARKIRO_ENV_FILE mode is not 0600' >&2
-  exit 1
-}
-
-# Linux inspection and assertion
-stat -c '%a %n' "$MARKIRO_ENV_FILE"
-test "$(stat -c '%a' "$MARKIRO_ENV_FILE")" = 600 || {
+case "$(uname -s)" in
+  Darwin)
+    stat -f '%Lp %N' "$MARKIRO_ENV_FILE"
+    ENV_FILE_MODE="$(stat -f '%Lp' "$MARKIRO_ENV_FILE")"
+    ;;
+  Linux)
+    stat -c '%a %n' "$MARKIRO_ENV_FILE"
+    ENV_FILE_MODE="$(stat -c '%a' "$MARKIRO_ENV_FILE")"
+    ;;
+  *)
+    echo 'STOP: unsupported operating system for mode inspection' >&2
+    exit 1
+    ;;
+esac
+test "$ENV_FILE_MODE" = 600 || {
   echo 'STOP: MARKIRO_ENV_FILE mode is not 0600' >&2
   exit 1
 }
@@ -96,13 +100,18 @@ then enforce the approved maximum age locally:
 ```bash
 export BACKUP_MAX_AGE_SECONDS=86400
 read -r -p 'Verified managed PostgreSQL backup evidence ID: ' DB_BACKUP_EVIDENCE_ID
-read -r -p 'Verified backup creation time (ISO-8601 UTC): ' DB_BACKUP_CREATED_AT
+read -r -p 'Verified backup creation time (YYYY-MM-DDTHH:mm:ss.sssZ): ' DB_BACKUP_CREATED_AT
 test -n "$DB_BACKUP_EVIDENCE_ID"
 node -e '
-  const created = Date.parse(process.argv[1]);
+  const value = process.argv[1];
   const maximumAge = Number(process.argv[2]);
-  const age = Date.now() - created;
-  if (!Number.isFinite(created) || !Number.isFinite(maximumAge) || age < 0 || age > maximumAge * 1000) {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) {
+    console.error("STOP: backup timestamp must be strict ISO-8601 UTC ending in Z");
+    process.exit(1);
+  }
+  const created = new Date(value);
+  const age = Date.now() - created.getTime();
+  if (created.toISOString() !== value || !Number.isFinite(maximumAge) || age < 0 || age > maximumAge * 1000) {
     console.error("STOP: managed PostgreSQL backup is invalid or stale");
     process.exit(1);
   }
@@ -193,7 +202,7 @@ read -r -p 'Tenant slug: ' TENANT_SLUG
 
 export PROTECTED_ROLLOUT_DIR=/var/lib/markiro/rollout-records
 install -d -m 0700 "$PROTECTED_ROLLOUT_DIR"
-OWNER_RESULT_FILE="$(mktemp "$PROTECTED_ROLLOUT_DIR/first-owner.XXXXXX.json")"
+OWNER_RESULT_FILE="$(mktemp "$PROTECTED_ROLLOUT_DIR/first-owner.XXXXXX")"
 chmod 600 "$OWNER_RESULT_FILE"
 
 docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml run --rm --no-deps api \
@@ -282,38 +291,79 @@ are backward-compatible with the previous API image. Record the compatibility
 review ID.
 
 ```bash
+read -r -p 'Failed candidate release record path: ' FAILED_RELEASE_RECORD
+read -r -p 'Previous healthy release record path: ' PREVIOUS_RELEASE_RECORD
 read -r -p 'Recorded previous healthy 40-character tag: ' PREVIOUS_TAG
-read -r -p 'Absolute path to its protected release record: ' PREVIOUS_RELEASE_RECORD
 read -r -p 'Backward-compatibility review evidence ID: ' MIGRATION_COMPATIBILITY_EVIDENCE_ID
 read -r -p 'Failed migrations are compatible with the previous API image (yes/no): ' MIGRATIONS_BACKWARD_COMPATIBLE
 
 [[ "$PREVIOUS_TAG" =~ ^[0-9a-f]{40}$ ]]
-case "$PREVIOUS_RELEASE_RECORD" in
-  "$MARKIRO_ROOT"/.markiro-releases/*.json) ;;
-  *) echo 'STOP: previous release record is outside the protected release directory' >&2; exit 1 ;;
-esac
-test -f "$PREVIOUS_RELEASE_RECORD"
-test "$(stat -c '%a' "$PREVIOUS_RELEASE_RECORD")" = 600
 test -n "$MIGRATION_COMPATIBILITY_EVIDENCE_ID"
 test "$MIGRATIONS_BACKWARD_COMPATIBLE" = yes || {
   echo 'STOP: rollback is forbidden without migration compatibility evidence' >&2
   exit 1
 }
 
+node - "$MARKIRO_ROOT/.markiro-releases" "$FAILED_RELEASE_RECORD" "$PREVIOUS_RELEASE_RECORD" "$MARKIRO_IMAGE_TAG" "$PREVIOUS_TAG" <<'NODE'
+const { lstatSync, readFileSync, realpathSync } = require("node:fs");
+const { basename, dirname } = require("node:path");
+
+const [releaseDirectoryInput, failedPath, previousPath, expectedFailedTag, expectedPreviousTag] = process.argv.slice(2);
+const releaseDirectory = realpathSync(releaseDirectoryInput);
+const sha = /^[0-9a-f]{40}$/;
+const digest = (repository, value) => {
+  const prefix = `${repository}@sha256:`;
+  return typeof value === "string" && value.startsWith(prefix) && /^[0-9a-f]{64}$/.test(value.slice(prefix.length));
+};
+
+function readProtectedRecord(label, path) {
+  const metadata = lstatSync(path);
+  if (metadata.isSymbolicLink() || !metadata.isFile() || (metadata.mode & 0o777) !== 0o600) {
+    throw new Error(`STOP: ${label} release record must be a regular non-symlink 0600 file`);
+  }
+  const canonicalPath = realpathSync(path);
+  if (dirname(canonicalPath) !== releaseDirectory) {
+    throw new Error(`STOP: ${label} release record is outside the protected release directory`);
+  }
+  const record = JSON.parse(readFileSync(canonicalPath, "utf8"));
+  if (
+    typeof record.createdAt !== "string" ||
+    new Date(record.createdAt).toISOString() !== record.createdAt ||
+    basename(canonicalPath) !== `${record.createdAt.replace(/[:.]/g, "-")}-${record.tag}.json`
+  ) {
+    throw new Error(`STOP: ${label} release record filename or timestamp is invalid`);
+  }
+  return record;
+}
+
+const failed = readProtectedRecord("failed", failedPath);
+const previous = readProtectedRecord("previous", previousPath);
+if (
+  failed.state !== "failed" ||
+  failed.tag !== expectedFailedTag ||
+  !sha.test(expectedFailedTag) ||
+  failed.previousTag !== previous.tag ||
+  !digest("ghcr.io/thevladbog/markiro-api", failed.apiDigest) ||
+  !digest("ghcr.io/thevladbog/markiro-edge", failed.edgeDigest)
+) {
+  throw new Error("STOP: failed release record is invalid or not linked to the previous release");
+}
+if (
+  previous.state !== "healthy" ||
+  previous.tag !== expectedPreviousTag ||
+  !sha.test(previous.tag) ||
+  (previous.previousTag !== null && !sha.test(previous.previousTag)) ||
+  !digest("ghcr.io/thevladbog/markiro-api", previous.apiDigest) ||
+  !digest("ghcr.io/thevladbog/markiro-edge", previous.edgeDigest)
+) {
+  throw new Error("STOP: previous release record is not the selected healthy immutable pair");
+}
+console.log("rollback release records verified");
+NODE
+
 MARKIRO_IMAGE_TAG="$PREVIOUS_TAG"
 export MARKIRO_IMAGE_TAG
 node deploy/production/preflight.mjs
-
-node - "$PREVIOUS_RELEASE_RECORD" "$PREVIOUS_TAG" <<'NODE'
-const { readFileSync } = require("node:fs");
-const record = JSON.parse(readFileSync(process.argv[2], "utf8"));
-const tag = process.argv[3];
-const api = /^ghcr\.io\/thevladbog\/markiro-api@sha256:[0-9a-f]{64}$/;
-const edge = /^ghcr\.io\/thevladbog\/markiro-edge@sha256:[0-9a-f]{64}$/;
-if (record.tag !== tag || record.state !== "healthy" || !api.test(record.apiDigest) || !edge.test(record.edgeDigest)) {
-  throw new Error("STOP: previous release record is not the selected healthy immutable pair");
-}
-NODE
 ```
 
 Pull the previous images, then confirm their resolved digests still match the
@@ -326,13 +376,28 @@ docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml pull api
 
 ACTUAL_API_DIGEST="$(docker image inspect --format '{{index .RepoDigests 0}}' "ghcr.io/thevladbog/markiro-api:${PREVIOUS_TAG}")"
 ACTUAL_EDGE_DIGEST="$(docker image inspect --format '{{index .RepoDigests 0}}' "ghcr.io/thevladbog/markiro-edge:${PREVIOUS_TAG}")"
-node - "$PREVIOUS_RELEASE_RECORD" "$ACTUAL_API_DIGEST" "$ACTUAL_EDGE_DIGEST" <<'NODE'
-const { readFileSync } = require("node:fs");
-const record = JSON.parse(readFileSync(process.argv[2], "utf8"));
-if (record.apiDigest !== process.argv[3] || record.edgeDigest !== process.argv[4]) {
+node - "$MARKIRO_ROOT/.markiro-releases" "$PREVIOUS_RELEASE_RECORD" "$PREVIOUS_TAG" "$ACTUAL_API_DIGEST" "$ACTUAL_EDGE_DIGEST" <<'NODE'
+const { lstatSync, readFileSync, realpathSync } = require("node:fs");
+const { dirname } = require("node:path");
+const [directoryInput, previousPath, expectedTag, actualApi, actualEdge] = process.argv.slice(2);
+const metadata = lstatSync(previousPath);
+if (metadata.isSymbolicLink() || !metadata.isFile() || (metadata.mode & 0o777) !== 0o600) {
+  throw new Error("STOP: previous release record changed after validation");
+}
+const canonicalPath = realpathSync(previousPath);
+if (dirname(canonicalPath) !== realpathSync(directoryInput)) {
+  throw new Error("STOP: previous release record left the protected release directory");
+}
+const record = JSON.parse(readFileSync(canonicalPath, "utf8"));
+if (
+  record.state !== "healthy" ||
+  record.tag !== expectedTag ||
+  record.apiDigest !== actualApi ||
+  record.edgeDigest !== actualEdge
+) {
   throw new Error("STOP: pulled rollback image digest differs from the protected release record");
 }
-console.log(`rollback digests verified: ${record.apiDigest} ${record.edgeDigest}`);
+console.log("rollback image digests verified");
 NODE
 
 docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml run --rm migrate

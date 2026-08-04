@@ -4,72 +4,460 @@ import test from "node:test";
 
 const RUNBOOK = "docs/runbooks/saas-production-deploy.md";
 
-test("the SaaS production runbook is an executable, fail-closed deploy and rollback procedure", async () => {
-  const source = await readFile(RUNBOOK, "utf8");
+const DEPLOY_BLOCK = `node deploy/production/preflight.mjs
+node deploy/production/deploy.mjs
+node deploy/production/smoke.mjs`;
 
-  for (const heading of [
-    "First deploy",
-    "Routine deploy",
-    "Failure decision table",
-    "Rollback",
-    "Observation window",
-    "Public DNS go-live gate",
-  ]) {
-    assert.match(source, new RegExp(`^## .*${heading}`, "im"), `missing ${heading} section`);
+const MODE_BLOCK = `case "$(uname -s)" in
+  Darwin)
+    stat -f '%Lp %N' "$MARKIRO_ENV_FILE"
+    ENV_FILE_MODE="$(stat -f '%Lp' "$MARKIRO_ENV_FILE")"
+    ;;
+  Linux)
+    stat -c '%a %n' "$MARKIRO_ENV_FILE"
+    ENV_FILE_MODE="$(stat -c '%a' "$MARKIRO_ENV_FILE")"
+    ;;
+  *)
+    echo 'STOP: unsupported operating system for mode inspection' >&2
+    exit 1
+    ;;
+esac
+test "$ENV_FILE_MODE" = 600 || {
+  echo 'STOP: MARKIRO_ENV_FILE mode is not 0600' >&2
+  exit 1
+}`;
+
+const BACKUP_BLOCK = `export BACKUP_MAX_AGE_SECONDS=86400
+read -r -p 'Verified managed PostgreSQL backup evidence ID: ' DB_BACKUP_EVIDENCE_ID
+read -r -p 'Verified backup creation time (YYYY-MM-DDTHH:mm:ss.sssZ): ' DB_BACKUP_CREATED_AT
+test -n "$DB_BACKUP_EVIDENCE_ID"
+node -e '
+  const value = process.argv[1];
+  const maximumAge = Number(process.argv[2]);
+  if (!/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$/.test(value)) {
+    console.error("STOP: backup timestamp must be strict ISO-8601 UTC ending in Z");
+    process.exit(1);
   }
+  const created = new Date(value);
+  const age = Date.now() - created.getTime();
+  if (created.toISOString() !== value || !Number.isFinite(maximumAge) || age < 0 || age > maximumAge * 1000) {
+    console.error("STOP: managed PostgreSQL backup is invalid or stale");
+    process.exit(1);
+  }
+' "$DB_BACKUP_CREATED_AT" "$BACKUP_MAX_AGE_SECONDS"`;
 
-  assert.match(source, /stat -f '%Lp %N' "\$MARKIRO_ENV_FILE"/);
-  assert.match(source, /stat -c '%a %n' "\$MARKIRO_ENV_FILE"/);
-  assert.match(source, /mode `0600`/i);
-  assert.match(source, /managed PostgreSQL backup/i);
-  assert.match(source, /backup[\s\S]{0,240}fresh/i);
-  assert.match(source, /object storage.*versioning/i);
-  assert.match(source, /retention/i);
-  assert.match(source, /stop/i);
+const OWNER_BLOCK = `read -r -p 'Owner email: ' OWNER_EMAIL
+read -r -p 'Tenant display name: ' TENANT_NAME
+read -r -p 'Tenant slug: ' TENANT_SLUG
 
-  assert.match(source, /Approved 40-character git SHA/);
-  assert.match(source, /\^\[0-9a-f\]\{40\}\$/);
-  assert.match(source, /node deploy\/production\/preflight\.mjs/);
-  assert.match(source, /node deploy\/production\/deploy\.mjs/);
-  assert.match(source, /node deploy\/production\/smoke\.mjs/);
-  assert.match(source, /ghcr\.io\/thevladbog\/markiro-api@sha256:/);
-  assert.match(source, /ghcr\.io\/thevladbog\/markiro-edge@sha256:/);
+export PROTECTED_ROLLOUT_DIR=/var/lib/markiro/rollout-records
+install -d -m 0700 "$PROTECTED_ROLLOUT_DIR"
+OWNER_RESULT_FILE="$(mktemp "$PROTECTED_ROLLOUT_DIR/first-owner.XXXXXX")"
+chmod 600 "$OWNER_RESULT_FILE"
 
-  assert.match(source, /cabinet root/i);
-  assert.match(source, /auth boundary/i);
-  assert.match(source, /device route/i);
-  assert.match(source, /first-owner/i);
-  assert.match(source, /docs\/runbooks\/cabinet-rbac-rollout\.md/);
-  assert.match(source, /read -r -p 'Owner email: ' OWNER_EMAIL/);
-  assert.match(source, /node dist\/cli\/provision-tenant-owner\.js/);
-  assert.match(source, /--email "\$OWNER_EMAIL"/);
-  assert.match(source, /--tenant-name "\$TENANT_NAME"/);
-  assert.match(source, /--tenant-slug "\$TENANT_SLUG"/);
-  assert.match(source, /unset OWNER_EMAIL TENANT_NAME TENANT_SLUG/);
-  assert.match(source, /tenantId.*userId.*memberId.*deliveryId/is);
+docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml run --rm --no-deps api \\
+  node dist/cli/provision-tenant-owner.js \\
+  --email "$OWNER_EMAIL" \\
+  --tenant-name "$TENANT_NAME" \\
+  --tenant-slug "$TENANT_SLUG" > "$OWNER_RESULT_FILE"
+unset OWNER_EMAIL TENANT_NAME TENANT_SLUG
+
+node - "$OWNER_RESULT_FILE" <<'NODE'
+const { readFileSync } = require("node:fs");
+const result = JSON.parse(readFileSync(process.argv[2], "utf8"));
+const expected = ["deliveryId", "memberId", "tenantId", "userId"];
+if (JSON.stringify(Object.keys(result).sort()) !== JSON.stringify(expected) ||
+    expected.some((key) => typeof result[key] !== "string" || result[key].length === 0)) {
+  throw new Error("STOP: owner provisioning did not return exactly four identifiers");
+}
+console.log("first-owner identifiers verified");
+NODE`;
+
+const ROLLBACK_VALIDATION_BLOCK = `read -r -p 'Failed candidate release record path: ' FAILED_RELEASE_RECORD
+read -r -p 'Previous healthy release record path: ' PREVIOUS_RELEASE_RECORD
+read -r -p 'Recorded previous healthy 40-character tag: ' PREVIOUS_TAG
+read -r -p 'Backward-compatibility review evidence ID: ' MIGRATION_COMPATIBILITY_EVIDENCE_ID
+read -r -p 'Failed migrations are compatible with the previous API image (yes/no): ' MIGRATIONS_BACKWARD_COMPATIBLE
+
+[[ "$PREVIOUS_TAG" =~ ^[0-9a-f]{40}$ ]]
+test -n "$MIGRATION_COMPATIBILITY_EVIDENCE_ID"
+test "$MIGRATIONS_BACKWARD_COMPATIBLE" = yes || {
+  echo 'STOP: rollback is forbidden without migration compatibility evidence' >&2
+  exit 1
+}
+
+node - "$MARKIRO_ROOT/.markiro-releases" "$FAILED_RELEASE_RECORD" "$PREVIOUS_RELEASE_RECORD" "$MARKIRO_IMAGE_TAG" "$PREVIOUS_TAG" <<'NODE'
+const { lstatSync, readFileSync, realpathSync } = require("node:fs");
+const { basename, dirname } = require("node:path");
+
+const [releaseDirectoryInput, failedPath, previousPath, expectedFailedTag, expectedPreviousTag] = process.argv.slice(2);
+const releaseDirectory = realpathSync(releaseDirectoryInput);
+const sha = /^[0-9a-f]{40}$/;
+const digest = (repository, value) => {
+  const prefix = \`\${repository}@sha256:\`;
+  return typeof value === "string" && value.startsWith(prefix) && /^[0-9a-f]{64}$/.test(value.slice(prefix.length));
+};
+
+function readProtectedRecord(label, path) {
+  const metadata = lstatSync(path);
+  if (metadata.isSymbolicLink() || !metadata.isFile() || (metadata.mode & 0o777) !== 0o600) {
+    throw new Error(\`STOP: \${label} release record must be a regular non-symlink 0600 file\`);
+  }
+  const canonicalPath = realpathSync(path);
+  if (dirname(canonicalPath) !== releaseDirectory) {
+    throw new Error(\`STOP: \${label} release record is outside the protected release directory\`);
+  }
+  const record = JSON.parse(readFileSync(canonicalPath, "utf8"));
+  if (
+    typeof record.createdAt !== "string" ||
+    new Date(record.createdAt).toISOString() !== record.createdAt ||
+    basename(canonicalPath) !== \`\${record.createdAt.replace(/[:.]/g, "-")}-\${record.tag}.json\`
+  ) {
+    throw new Error(\`STOP: \${label} release record filename or timestamp is invalid\`);
+  }
+  return record;
+}
+
+const failed = readProtectedRecord("failed", failedPath);
+const previous = readProtectedRecord("previous", previousPath);
+if (
+  failed.state !== "failed" ||
+  failed.tag !== expectedFailedTag ||
+  !sha.test(expectedFailedTag) ||
+  failed.previousTag !== previous.tag ||
+  !digest("ghcr.io/thevladbog/markiro-api", failed.apiDigest) ||
+  !digest("ghcr.io/thevladbog/markiro-edge", failed.edgeDigest)
+) {
+  throw new Error("STOP: failed release record is invalid or not linked to the previous release");
+}
+if (
+  previous.state !== "healthy" ||
+  previous.tag !== expectedPreviousTag ||
+  !sha.test(previous.tag) ||
+  (previous.previousTag !== null && !sha.test(previous.previousTag)) ||
+  !digest("ghcr.io/thevladbog/markiro-api", previous.apiDigest) ||
+  !digest("ghcr.io/thevladbog/markiro-edge", previous.edgeDigest)
+) {
+  throw new Error("STOP: previous release record is not the selected healthy immutable pair");
+}
+console.log("rollback release records verified");
+NODE
+
+MARKIRO_IMAGE_TAG="$PREVIOUS_TAG"
+export MARKIRO_IMAGE_TAG
+node deploy/production/preflight.mjs`;
+
+const ROLLBACK_EXECUTION_BLOCK = `docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml pull api edge
+
+ACTUAL_API_DIGEST="$(docker image inspect --format '{{index .RepoDigests 0}}' "ghcr.io/thevladbog/markiro-api:\${PREVIOUS_TAG}")"
+ACTUAL_EDGE_DIGEST="$(docker image inspect --format '{{index .RepoDigests 0}}' "ghcr.io/thevladbog/markiro-edge:\${PREVIOUS_TAG}")"
+node - "$MARKIRO_ROOT/.markiro-releases" "$PREVIOUS_RELEASE_RECORD" "$PREVIOUS_TAG" "$ACTUAL_API_DIGEST" "$ACTUAL_EDGE_DIGEST" <<'NODE'
+const { lstatSync, readFileSync, realpathSync } = require("node:fs");
+const { dirname } = require("node:path");
+const [directoryInput, previousPath, expectedTag, actualApi, actualEdge] = process.argv.slice(2);
+const metadata = lstatSync(previousPath);
+if (metadata.isSymbolicLink() || !metadata.isFile() || (metadata.mode & 0o777) !== 0o600) {
+  throw new Error("STOP: previous release record changed after validation");
+}
+const canonicalPath = realpathSync(previousPath);
+if (dirname(canonicalPath) !== realpathSync(directoryInput)) {
+  throw new Error("STOP: previous release record left the protected release directory");
+}
+const record = JSON.parse(readFileSync(canonicalPath, "utf8"));
+if (
+  record.state !== "healthy" ||
+  record.tag !== expectedTag ||
+  record.apiDigest !== actualApi ||
+  record.edgeDigest !== actualEdge
+) {
+  throw new Error("STOP: pulled rollback image digest differs from the protected release record");
+}
+console.log("rollback image digests verified");
+NODE
+
+docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml run --rm migrate
+docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml up -d --no-deps api
+
+READY=0
+for attempt in $(seq 1 30); do
+  if docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml exec -T api \\
+    node /opt/markiro/healthcheck.mjs; then
+    READY=1
+    break
+  fi
+  sleep 2
+done
+test "$READY" = 1 || {
+  echo 'STOP: previous API image did not become ready' >&2
+  exit 1
+}
+
+docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml up -d --no-deps edge
+node deploy/production/smoke.mjs`;
+
+function invariant(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+function section(source, heading) {
+  const marker = `## ${heading}`;
+  const start = source.indexOf(marker);
+  invariant(
+    start >= 0 && (start === 0 || source[start - 1] === "\n"),
+    `missing ${heading} section`,
+  );
+  const bodyStart = source.indexOf("\n", start + marker.length);
+  const next = source.indexOf("\n## ", bodyStart + 1);
+  return source.slice(bodyStart + 1, next < 0 ? source.length : next);
+}
+
+function bashBlocks(sectionSource) {
+  return [...sectionSource.matchAll(/^```bash\n([\s\S]*?)\n```$/gm)].map((match) => match[1]);
+}
+
+function blockContaining(sectionSource, token, label) {
+  const matches = bashBlocks(sectionSource).filter((block) => block.includes(token));
+  invariant(matches.length === 1, `${label} must have exactly one matching fenced shell block`);
+  return matches[0];
+}
+
+function assertRunbook(source) {
+  const common = section(source, "Common setup and hard gates");
+  const first = section(source, "First deploy");
+  const routine = section(source, "Routine deploy");
+  const failure = section(source, "Failure decision table");
+  const rollback = section(source, "Rollback");
+  const observation = section(source, "Observation window");
+  const goLive = section(source, "Public DNS go-live gate");
+
+  invariant(
+    blockContaining(common, "ENV_FILE_MODE", "environment mode") === MODE_BLOCK,
+    "environment mode inspection must branch exactly for macOS and Linux",
+  );
+  invariant(
+    blockContaining(common, "BACKUP_MAX_AGE_SECONDS", "backup freshness") === BACKUP_BLOCK,
+    "backup timestamp validation must require canonical ISO-8601 UTC ending in Z",
+  );
+  invariant(
+    first.includes("managed\nPostgreSQL") || common.includes("managed\nPostgreSQL"),
+    "missing managed PostgreSQL backup gate",
+  );
+  invariant(
+    common.includes("object storage policy") && common.includes("Versioning"),
+    "missing object-storage policy gate",
+  );
+  invariant(
+    blockContaining(first, "node deploy/production/deploy.mjs", "first deploy") === DEPLOY_BLOCK,
+    "first-deploy commands must be exact",
+  );
+  invariant(
+    blockContaining(routine, "node deploy/production/deploy.mjs", "routine deploy") ===
+      DEPLOY_BLOCK,
+    "routine-deploy commands must be exact",
+  );
+
+  const owner = blockContaining(first, "OWNER_RESULT_FILE", "first-owner provisioning");
+  invariant(
+    owner.includes('mktemp "$PROTECTED_ROLLOUT_DIR/first-owner.XXXXXX"'),
+    "first-owner mktemp template must end in XXXXXX",
+  );
+  invariant(
+    owner === OWNER_BLOCK,
+    "first-owner provisioning block must be exact and retain only the protected result file",
+  );
 
   for (const phase of ["Pull", "Migration", "API readiness", "Edge start", "Post-switch smoke"])
-    assert.match(source, new RegExp(`\\|\\s*${phase}\\s*\\|`, "i"), `missing ${phase} failure row`);
-  assert.match(source, /migration.*readiness.*smoke.*reject/is);
-  assert.match(source, /backward-compatible/i);
-  assert.match(source, /PREVIOUS_RELEASE_RECORD/);
-  assert.match(source, /MARKIRO_IMAGE_TAG="\$PREVIOUS_TAG"/);
-  assert.match(source, /docker image inspect --format '\{\{index \.RepoDigests 0\}\}'/);
-  assert.match(
-    source,
-    /node deploy\/production\/preflight\.mjs[\s\S]*docker compose[^\n]*run --rm migrate[\s\S]*docker compose[^\n]*up -d --no-deps api[\s\S]*docker compose[^\n]*up -d --no-deps edge/,
-  );
-  assert.match(source, /never reverse migrations/i);
-  assert.match(source, /do not hand-edit containers/i);
-  assert.match(source, /do not hand-edit production rows/i);
-  assert.match(source, /never.*docker compose config(?! --quiet)/i);
-  assert.match(source, /secret values.*tickets.*chat/i);
-  assert.match(source, /previous tag.*release record.*observation window/is);
+    invariant(
+      new RegExp(`\\|\\s*${phase}\\s*\\|`, "i").test(failure),
+      `missing ${phase} failure row`,
+    );
 
-  assert.match(source, /provider\/WAF/i);
-  assert.match(source, /per-source/i);
-  assert.match(source, /global anonymous-route/i);
-  assert.match(source, /separately reviewed.*custom Caddy/i);
-  assert.match(source, /standard Caddy.*cannot satisfy/i);
-  assert.match(source, /do not.*public DNS/i);
+  const validation = blockContaining(rollback, "FAILED_RELEASE_RECORD", "rollback validation");
+  invariant(
+    validation.includes("const metadata = lstatSync(path);") &&
+      validation.includes("metadata.isSymbolicLink()"),
+    "rollback record validation must reject symlinks with lstatSync",
+  );
+  invariant(
+    validation.includes("dirname(canonicalPath) !== releaseDirectory"),
+    "rollback record containment must compare the canonical parent exactly",
+  );
+  invariant(
+    validation.includes("failed.previousTag !== previous.tag"),
+    "rollback records must link failed.previousTag to previous.tag",
+  );
+  invariant(
+    validation.includes("failed.tag !== expectedFailedTag"),
+    "rollback failed record must match the approved candidate SHA",
+  );
+  invariant(
+    validation.includes("value.startsWith(prefix)") &&
+      validation.includes("value.slice(prefix.length)"),
+    "rollback release digests must use an exact repository prefix",
+  );
+  invariant(
+    validation === ROLLBACK_VALIDATION_BLOCK,
+    "rollback validation block must be exact and fail closed before pull",
+  );
+
+  const execution = blockContaining(rollback, "ACTUAL_API_DIGEST", "rollback execution");
+  invariant(
+    execution.includes("const metadata = lstatSync(previousPath);") &&
+      execution.includes("dirname(canonicalPath) !== realpathSync(directoryInput)"),
+    "rollback digest check must revalidate the protected record without following symlinks",
+  );
+  invariant(!/run --rm migrate\s*(?:\|\||;)/.test(execution), "rollback migrate must fail closed");
+  invariant(
+    execution === ROLLBACK_EXECUTION_BLOCK,
+    "rollback command sequence must be exact with no reordered or extra commands",
+  );
+
+  invariant(source.includes("Never reverse migrations"), "reverse migrations must be forbidden");
+  invariant(
+    source.includes("Do not hand-edit containers"),
+    "hand-edited containers must be forbidden",
+  );
+  invariant(
+    source.includes("Do not hand-edit production rows"),
+    "hand-edited production rows must be forbidden",
+  );
+  invariant(
+    !bashBlocks(source).some((block) => /docker compose[^\n]* config(?! --quiet)/.test(block)),
+    "fenced commands must not render Compose configuration",
+  );
+  invariant(
+    /secret values[\s\S]{0,80}tickets, chat/i.test(source),
+    "secret sharing prohibition is missing",
+  );
+  invariant(
+    /previous tag[\s\S]*release record[\s\S]*observation window/i.test(observation),
+    "observation window must retain previous release evidence",
+  );
+  invariant(
+    /provider\/WAF/i.test(goLive) &&
+      /per-source/i.test(goLive) &&
+      /global\s+anonymous-route/i.test(goLive),
+    "provider/WAF rate-limit gate is incomplete",
+  );
+  invariant(
+    /standard Caddy image cannot satisfy/i.test(goLive),
+    "standard Caddy limitation is missing",
+  );
+  invariant(
+    /separately reviewed reproducible custom Caddy image/i.test(goLive),
+    "reviewed custom-Caddy alternative is missing",
+  );
+  invariant(/Do not create or switch public DNS/i.test(goLive), "public DNS hard gate is missing");
+  invariant(
+    /docs\/runbooks\/cabinet-rbac-rollout\.md/.test(source),
+    "cabinet RBAC runbook link is missing",
+  );
+}
+
+function replaceUnique(source, needle, replacement) {
+  const occurrences = source.split(needle).length - 1;
+  assert.equal(occurrences, 1, `mutation fixture must occur once: ${needle}`);
+  return source.replace(needle, replacement);
+}
+
+function rejectsMutation(source, name, needle, replacement, message) {
+  const mutated = replaceUnique(source, needle, replacement);
+  assert.throws(() => assertRunbook(mutated), { message }, name);
+}
+
+test("the parsed runbook has exact fail-closed deploy, owner, and rollback procedures", async () => {
+  assertRunbook(await readFile(RUNBOOK, "utf8"));
+});
+
+test("the contract rejects each portability, record-safety, linkage, and command mutation for its own reason", async () => {
+  const source = await readFile(RUNBOOK, "utf8");
+  const migrate =
+    'docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml run --rm migrate';
+  const api =
+    'docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml up -d --no-deps api';
+
+  rejectsMutation(
+    source,
+    "mktemp suffix",
+    "first-owner.XXXXXX",
+    "first-owner.XXXXXX.json",
+    "first-owner mktemp template must end in XXXXXX",
+  );
+  rejectsMutation(
+    source,
+    "platform branch",
+    'case "$(uname -s)" in',
+    "stat -f '%Lp %N' \"$MARKIRO_ENV_FILE\"",
+    "environment mode inspection must branch exactly for macOS and Linux",
+  );
+  rejectsMutation(
+    source,
+    "UTC suffix",
+    "\\.\\d{3}Z$/",
+    "\\.\\d{3}(?:Z|[+-]\\d{2}:\\d{2})$/",
+    "backup timestamp validation must require canonical ISO-8601 UTC ending in Z",
+  );
+  rejectsMutation(
+    source,
+    "test -e record",
+    'node - "$MARKIRO_ROOT/.markiro-releases" "$FAILED_RELEASE_RECORD" "$PREVIOUS_RELEASE_RECORD" "$MARKIRO_IMAGE_TAG" "$PREVIOUS_TAG" <<\'NODE\'',
+    'test -e "$FAILED_RELEASE_RECORD"\nnode - "$MARKIRO_ROOT/.markiro-releases" "$FAILED_RELEASE_RECORD" "$PREVIOUS_RELEASE_RECORD" "$MARKIRO_IMAGE_TAG" "$PREVIOUS_TAG" <<\'NODE\'',
+    "rollback validation block must be exact and fail closed before pull",
+  );
+  rejectsMutation(
+    source,
+    "symlink-unsafe stat",
+    "const metadata = lstatSync(path);",
+    "const metadata = statSync(path);",
+    "rollback record validation must reject symlinks with lstatSync",
+  );
+  rejectsMutation(
+    source,
+    "prefix-collision containment",
+    "dirname(canonicalPath) !== releaseDirectory",
+    "!dirname(canonicalPath).startsWith(releaseDirectory)",
+    "rollback record containment must compare the canonical parent exactly",
+  );
+  rejectsMutation(
+    source,
+    "missing failed linkage",
+    "  failed.previousTag !== previous.tag ||\n",
+    "",
+    "rollback records must link failed.previousTag to previous.tag",
+  );
+  rejectsMutation(
+    source,
+    "wrong failed candidate",
+    "  failed.tag !== expectedFailedTag ||\n",
+    "",
+    "rollback failed record must match the approved candidate SHA",
+  );
+  rejectsMutation(
+    source,
+    "deceptive digest repository",
+    "value.startsWith(prefix)",
+    "value.includes(prefix)",
+    "rollback release digests must use an exact repository prefix",
+  );
+  rejectsMutation(
+    source,
+    "ignored migration failure",
+    migrate,
+    `${migrate} || true`,
+    "rollback migrate must fail closed",
+  );
+  rejectsMutation(
+    source,
+    "reordered migration and API",
+    `${migrate}\n${api}`,
+    `${api}\n${migrate}`,
+    "rollback command sequence must be exact with no reordered or extra commands",
+  );
+  rejectsMutation(
+    source,
+    "extra rollback command",
+    `${migrate}\n${api}`,
+    `${migrate}\ndocker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml restart\n${api}`,
+    "rollback command sequence must be exact with no reordered or extra commands",
+  );
 });
