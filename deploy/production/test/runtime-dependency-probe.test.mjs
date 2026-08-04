@@ -67,7 +67,66 @@ test("runtime dependency probe scans nested pnpm manifests and fails closed", as
       assert.equal(result.stdout, "");
       assert.equal(result.stderr, "");
     });
+
+    await t.test(`rejects virtual-store-hoisted ${dependency}`, async () => {
+      const isolatedFixture = await mkdtemp(join(tmpdir(), "markiro-runtime-hoist-"));
+      const isolatedModules = join(isolatedFixture, "node_modules");
+      t.after(() => rm(isolatedFixture, { recursive: true, force: true }));
+      await packageManifest(isolatedModules, `.pnpm/node_modules/${dependency}`, dependency);
+
+      const result = runProbe(isolatedModules);
+      assert.equal(result.status, 1, result.stderr);
+      assert.equal(result.stdout, "");
+      assert.equal(result.stderr, "");
+    });
   }
+
+  await t.test("rejects a package manifest symlink that escapes the scan root", async () => {
+    const isolatedFixture = await mkdtemp(join(tmpdir(), "markiro-runtime-manifest-link-"));
+    const isolatedModules = join(isolatedFixture, "node_modules");
+    const packageDirectory = join(isolatedModules, ".pnpm/linked@1.0.0/node_modules/linked");
+    const externalManifest = join(isolatedFixture, "outside-package.json");
+    t.after(() => rm(isolatedFixture, { recursive: true, force: true }));
+    await mkdir(packageDirectory, { recursive: true });
+    await writeFile(externalManifest, '{"name":"linked","version":"1.0.0"}\n');
+    await symlink(externalManifest, join(packageDirectory, "package.json"));
+
+    const result = runProbe(isolatedModules);
+    assert.equal(result.status, 2);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "");
+  });
+
+  await t.test("rejects a package directory symlink that escapes the scan root", async () => {
+    const isolatedFixture = await mkdtemp(join(tmpdir(), "markiro-runtime-package-link-"));
+    const isolatedModules = join(isolatedFixture, "node_modules");
+    const externalPackage = await packageManifest(isolatedFixture, "outside-package", "linked");
+    const storeModules = join(isolatedModules, ".pnpm/linked@1.0.0/node_modules");
+    t.after(() => rm(isolatedFixture, { recursive: true, force: true }));
+    await mkdir(storeModules, { recursive: true });
+    await symlink(externalPackage, join(storeModules, "linked"), "dir");
+
+    const result = runProbe(isolatedModules);
+    assert.equal(result.status, 2);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "");
+  });
+
+  await t.test("rejects broken and looping package manifest symlinks", async () => {
+    for (const target of ["missing-package.json", "package.json"]) {
+      const isolatedFixture = await mkdtemp(join(tmpdir(), "markiro-runtime-broken-link-"));
+      const isolatedModules = join(isolatedFixture, "node_modules");
+      const packageDirectory = join(isolatedModules, ".pnpm/linked@1.0.0/node_modules/linked");
+      t.after(() => rm(isolatedFixture, { recursive: true, force: true }));
+      await mkdir(packageDirectory, { recursive: true });
+      await symlink(target, join(packageDirectory, "package.json"));
+
+      const result = runProbe(isolatedModules);
+      assert.equal(result.status, 2);
+      assert.equal(result.stdout, "");
+      assert.equal(result.stderr, "");
+    }
+  });
 
   await t.test(
     "rejects an invalid encountered package manifest without disclosing it",
