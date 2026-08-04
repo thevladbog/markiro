@@ -12,14 +12,21 @@ test("production Compose contains only hardened application services", async () 
   const serviceBlock = compose.match(/^services:\n([\s\S]*?)^volumes:/m)?.[1] ?? "";
   const services = serviceBlock.match(/^  ([a-z][a-z-]*):$/gm)?.map((entry) => entry.trim());
   assert.deepEqual(services, ["migrate:", "api:", "edge:"]);
+  const migrate = serviceBlock.match(/^  migrate:\n([\s\S]*?)(?=^  api:)/m)?.[1] ?? "";
+  const api = serviceBlock.match(/^  api:\n([\s\S]*?)(?=^  edge:)/m)?.[1] ?? "";
+  const edge = serviceBlock.match(/^  edge:\n([\s\S]*)$/m)?.[1] ?? "";
 
   assert.match(
-    compose,
-    /ghcr\.io\/markiro\/api:\$\{MARKIRO_IMAGE_TAG:\?MARKIRO_IMAGE_TAG is required\}/,
+    migrate,
+    /^    image: ghcr\.io\/thevladbog\/markiro-api:\$\{MARKIRO_IMAGE_TAG:\?MARKIRO_IMAGE_TAG is required\}$/m,
   );
   assert.match(
-    compose,
-    /ghcr\.io\/markiro\/edge:\$\{MARKIRO_IMAGE_TAG:\?MARKIRO_IMAGE_TAG is required\}/,
+    api,
+    /^    image: ghcr\.io\/thevladbog\/markiro-api:\$\{MARKIRO_IMAGE_TAG:\?MARKIRO_IMAGE_TAG is required\}$/m,
+  );
+  assert.match(
+    edge,
+    /^    image: ghcr\.io\/thevladbog\/markiro-edge:\$\{MARKIRO_IMAGE_TAG:\?MARKIRO_IMAGE_TAG is required\}$/m,
   );
   assert.match(compose, /condition: service_completed_successfully/);
   assert.match(compose, /condition: service_healthy/);
@@ -33,6 +40,10 @@ test("production Compose contains only hardened application services", async () 
   assert.match(compose, /\$\{MARKIRO_HTTP_PORT:-80\}:8080/);
   assert.match(compose, /\$\{MARKIRO_HTTPS_PORT:-443\}:8443/);
   assert.match(compose, /expose:\n\s+- "3000"/);
+
+  assert.doesNotMatch(migrate, /^    ports:/m);
+  assert.doesNotMatch(api, /^    ports:/m);
+  assert.match(edge, /^    ports:/m);
 
   for (const forbidden of [
     /postgres:/,
@@ -50,14 +61,16 @@ test("production Compose contains only hardened application services", async () 
 
 test("CI overlay supplies only pinned test dependencies", async () => {
   const compose = await readFile(ciCompose, "utf8");
+  const services = compose.match(/^  ([a-z][a-z-]*):$/gm)?.map((entry) => entry.trim());
 
+  assert.deepEqual(services, ["postgres:", "mailpit:", "minio:", "minio-init:"]);
   assert.match(compose, /image: postgres:17-alpine/);
   assert.match(compose, /image: axllent\/mailpit:v1\.30\.0/);
   assert.match(compose, /image: minio\/minio:RELEASE\.2025-09-07T16-13-09Z/);
   assert.match(compose, /image: minio\/mc:RELEASE\.2025-08-13T08-35-41Z/);
   assert.match(compose, /^  minio-init:$/m);
-  assert.match(compose, /\$\{MARKIRO_HTTP_PORT:-18080\}:8080/);
-  assert.match(compose, /\$\{MARKIRO_HTTPS_PORT:-18443\}:8443/);
+  assert.doesNotMatch(compose, /^  edge:$/m);
+  assert.doesNotMatch(compose, /^\s+ports:/m);
   assert.doesNotMatch(compose, /read_only: false/);
   assert.doesNotMatch(compose, /cap_drop: \[\]/);
 });

@@ -1,6 +1,6 @@
 services:
   migrate:
-    image: ghcr.io/markiro/api:${MARKIRO_IMAGE_TAG:?MARKIRO_IMAGE_TAG is required}
+    image: ghcr.io/thevladbog/markiro-api:${MARKIRO_IMAGE_TAG:?MARKIRO_IMAGE_TAG is required}
     env_file:
       - ${MARKIRO_ENV_FILE:-.env.production}
     environment:
@@ -18,7 +18,7 @@ services:
       - no-new-privileges:true
 
   api:
-    image: ghcr.io/markiro/api:${MARKIRO_IMAGE_TAG:?MARKIRO_IMAGE_TAG is required}
+    image: ghcr.io/thevladbog/markiro-api:${MARKIRO_IMAGE_TAG:?MARKIRO_IMAGE_TAG is required}
     env_file:
       - ${MARKIRO_ENV_FILE:-.env.production}
     environment:
@@ -46,7 +46,7 @@ services:
       - no-new-privileges:true
 
   edge:
-    image: ghcr.io/markiro/edge:${MARKIRO_IMAGE_TAG:?MARKIRO_IMAGE_TAG is required}
+    image: ghcr.io/thevladbog/markiro-edge:${MARKIRO_IMAGE_TAG:?MARKIRO_IMAGE_TAG is required}
     environment:
       MARKIRO_DOMAIN: ${MARKIRO_DOMAIN:?MARKIRO_DOMAIN is required}
       ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL is required}
