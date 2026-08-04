@@ -398,6 +398,123 @@ test("does not switch edge when API readiness never succeeds", async () => {
   );
 });
 
+test("readiness retries transient timeout and spawn throws through the attempt budget", async () => {
+  const { dependencies, runner, releaseDirectory } = await fixture();
+  const run = runner.run.bind(runner);
+  let probes = 0;
+  let sleeps = 0;
+  runner.run = async (command, args, childEnvironment) => {
+    if (args.some((argument) => argument.includes("healthcheck"))) {
+      probes += 1;
+      if (probes === 1) throw new Error("docker timed out after 17ms");
+      if (probes === 2) throw new Error("private readiness spawn failure");
+    }
+    return run(command, args, childEnvironment);
+  };
+  dependencies.sleep = async () => {
+    sleeps += 1;
+  };
+
+  const release = await deployRelease(
+    {
+      environment,
+      releaseDirectory,
+      readinessAttempts: 3,
+      readinessIntervalMs: 1,
+      commandTimeoutMs: 17,
+    },
+    dependencies,
+  );
+
+  assert.equal(release.state, "healthy");
+  assert.equal(probes, 3);
+  assert.equal(sleeps, 2);
+  assert.equal(
+    runner.calls.some(({ args }) => args.at(-1) === "edge" && args.includes("up")),
+    true,
+  );
+});
+
+test("all thrown readiness probes exhaust retries without switching edge or leaking details", async () => {
+  const { dependencies, logs, runner, releaseDirectory } = await fixture();
+  const run = runner.run.bind(runner);
+  let probes = 0;
+  let sleeps = 0;
+  runner.run = async (command, args, childEnvironment) => {
+    if (args.some((argument) => argument.includes("healthcheck"))) {
+      probes += 1;
+      throw new Error(`private readiness failure ${probes}`);
+    }
+    return run(command, args, childEnvironment);
+  };
+  dependencies.sleep = async () => {
+    sleeps += 1;
+  };
+
+  await assert.rejects(
+    deployRelease(
+      { environment, releaseDirectory, readinessAttempts: 3, readinessIntervalMs: 1 },
+      dependencies,
+    ),
+    (error) => error.message === "API readiness failed",
+  );
+
+  assert.equal(probes, 3);
+  assert.equal(sleeps, 2);
+  assert.equal(
+    runner.calls.some(({ args }) => args.at(-1) === "edge" && args.includes("up")),
+    false,
+  );
+  assert.doesNotMatch(JSON.stringify(logs), /private readiness failure/);
+  const files = await readdir(releaseDirectory);
+  const record = JSON.parse(
+    await readFile(
+      join(
+        releaseDirectory,
+        files.find((file) => file.includes(tag)),
+      ),
+      "utf8",
+    ),
+  );
+  assert.equal(record.state, "failed");
+});
+
+test("a failed-state write cannot mask the original deployment error", async () => {
+  const { dependencies, logs, releaseDirectory } = await fixture({ readiness: [false] });
+  const originalError = new Error("readiness retry scheduling failed");
+  const rawWriteError = new Error("private failed-record write detail");
+  const realWriter = writeRelease;
+  const log = dependencies.log;
+  let failedStateSeen = false;
+  dependencies.sleep = async () => {
+    throw originalError;
+  };
+  dependencies.writeRelease = async (directory, release) => {
+    if (release.state === "failed") {
+      failedStateSeen = true;
+      throw rawWriteError;
+    }
+    await realWriter(directory, release);
+  };
+  dependencies.log = (message) => {
+    log(message);
+    if (message === "failed release record write failed")
+      throw new Error("private failed-record log detail");
+  };
+
+  await assert.rejects(
+    deployRelease(
+      { environment, releaseDirectory, readinessAttempts: 2, readinessIntervalMs: 1 },
+      dependencies,
+    ),
+    (error) => error === originalError && error.message === originalError.message,
+  );
+
+  assert.equal(failedStateSeen, true);
+  assert.equal(logs.includes("failed release record write failed"), true);
+  assert.doesNotMatch(JSON.stringify(logs), /private failed-record (?:write|log) detail/);
+});
+
 test("records a failed public smoke with image evidence and never rolls back", async () => {
   const { dependencies, logs, releaseDirectory, runner } = await fixture({
     smokeError: new Error("private smoke detail"),

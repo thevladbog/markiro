@@ -182,6 +182,14 @@ async function mustRun(dependencies, command, args, environment) {
   return result;
 }
 
+function bestEffortLog(dependencies, message) {
+  try {
+    dependencies.log(message);
+  } catch {
+    // Failure reporting must not replace the deployment error being reported.
+  }
+}
+
 /**
  * @typedef {object} ReleaseRecord
  * @property {string} tag
@@ -268,16 +276,20 @@ export async function deployRelease(options, supplied = {}) {
     const interval = options.readinessIntervalMs ?? 2_000;
     let ready = false;
     for (let attempt = 0; attempt < attempts; attempt += 1) {
-      if (dependencies.isReady) ready = await dependencies.isReady();
-      else {
-        const check = await runCommand(
-          dependencies,
-          "docker",
-          [...compose, "exec", "-T", "api", "node", "/opt/markiro/healthcheck.mjs"],
-          environment,
-        );
-        dependencies.log("docker");
-        ready = check.code === 0;
+      try {
+        if (dependencies.isReady) ready = await dependencies.isReady();
+        else {
+          const check = await runCommand(
+            dependencies,
+            "docker",
+            [...compose, "exec", "-T", "api", "node", "/opt/markiro/healthcheck.mjs"],
+            environment,
+          );
+          dependencies.log("docker");
+          ready = check.code === 0;
+        }
+      } catch {
+        ready = false;
       }
       if (ready) break;
       if (attempt + 1 < attempts) await dependencies.sleep(interval);
@@ -302,8 +314,12 @@ export async function deployRelease(options, supplied = {}) {
   } catch (error) {
     if (release) {
       release.state = "failed";
-      await dependencies.writeRelease(releaseDirectory, release);
-      dependencies.log("release failed");
+      try {
+        await dependencies.writeRelease(releaseDirectory, release);
+      } catch {
+        bestEffortLog(dependencies, "failed release record write failed");
+      }
+      bestEffortLog(dependencies, "release failed");
     }
     throw error;
   }

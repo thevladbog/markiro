@@ -5,6 +5,9 @@ import process from "node:process";
 const IMAGE_TAG_PATTERN = /^[0-9a-f]{40}$/;
 const DOMAIN_PATTERN =
   /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+const COMPOSE_TIMEOUT_MS = 30_000;
+const TERMINATION_GRACE_MS = 1_000;
+const STDERR_LIMIT_BYTES = 8 * 1024;
 
 function isEmail(value) {
   const at = value.indexOf("@");
@@ -15,7 +18,26 @@ function invalid(variable) {
   return new Error(`${variable} is invalid`);
 }
 
-async function composeQuiet(environment) {
+/**
+ * Run quiet Compose validation with a bounded child-process lifetime and output buffer.
+ * @param {PreflightEnvironment} environment
+ * @param {{
+ *   spawn?: typeof spawn,
+ *   schedule?: typeof setTimeout,
+ *   cancel?: typeof clearTimeout,
+ *   timeoutMs?: number,
+ *   terminationGraceMs?: number
+ * }=} supplied
+ */
+export async function composeQuiet(environment, supplied = {}) {
+  const dependencies = {
+    spawn,
+    schedule: setTimeout,
+    cancel: clearTimeout,
+    timeoutMs: COMPOSE_TIMEOUT_MS,
+    terminationGraceMs: TERMINATION_GRACE_MS,
+    ...supplied,
+  };
   const childEnvironment = {
     PATH: process.env.PATH,
     HOME: process.env.HOME,
@@ -26,28 +48,80 @@ async function composeQuiet(environment) {
   };
 
   await new Promise((resolve, reject) => {
-    const child = spawn(
-      "docker",
-      [
-        "compose",
-        "--env-file",
-        environment.MARKIRO_ENV_FILE,
-        "-f",
-        "compose.production.yml",
-        "config",
-        "--quiet",
-      ],
-      { env: childEnvironment, stdio: ["ignore", "ignore", "pipe"] },
-    );
-    let stderr = "";
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk;
-    });
-    child.once("error", reject);
-    child.once("close", (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(stderr));
-    });
+    let child;
+    try {
+      child = dependencies.spawn(
+        "docker",
+        [
+          "compose",
+          "--env-file",
+          environment.MARKIRO_ENV_FILE,
+          "-f",
+          "compose.production.yml",
+          "config",
+          "--quiet",
+        ],
+        { env: childEnvironment, stdio: ["ignore", "ignore", "pipe"] },
+      );
+    } catch {
+      reject(new Error("Compose validation failed"));
+      return;
+    }
+
+    let deadlineTimer;
+    let killTimer;
+    let settled = false;
+    let timedOut = false;
+    let stderr = Buffer.alloc(0);
+
+    const cleanup = () => {
+      if (deadlineTimer) dependencies.cancel(deadlineTimer);
+      if (killTimer) dependencies.cancel(killTimer);
+      child.stderr.removeListener("data", onStderr);
+      child.removeListener("error", onError);
+      child.removeListener("close", onClose);
+      stderr = Buffer.alloc(0);
+    };
+    const settle = (error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (error) reject(error);
+      else resolve();
+    };
+    const fail = () => settle(new Error("Compose validation failed"));
+    const onStderr = (chunk) => {
+      const remaining = STDERR_LIMIT_BYTES - stderr.length;
+      if (remaining <= 0) return;
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+      stderr = Buffer.concat([stderr, bytes.subarray(0, remaining)]);
+    };
+    const onError = () => fail();
+    const onClose = (code) => {
+      if (timedOut || code !== 0) fail();
+      else settle();
+    };
+
+    child.stderr.on("data", onStderr);
+    child.once("error", onError);
+    child.once("close", onClose);
+    deadlineTimer = dependencies.schedule(() => {
+      timedOut = true;
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        // Continue to the bounded hard-kill deadline.
+      }
+      if (settled) return;
+      killTimer = dependencies.schedule(() => {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          // The stable validation failure below is authoritative.
+        }
+        fail();
+      }, dependencies.terminationGraceMs);
+    }, dependencies.timeoutMs);
   });
 }
 
