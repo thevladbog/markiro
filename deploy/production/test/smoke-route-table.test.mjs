@@ -154,12 +154,72 @@ test("rejects an API container with an actual host port binding", async () => {
   }
 });
 
+test("accepts only exact no-binding PortBindings shapes", async (t) => {
+  for (const [name, binding] of [
+    ["top-level null", "null\n"],
+    ["empty object", "{}\n"],
+    ["object containing only null values", '{"3000/tcp":null,"3001/tcp":null}\n'],
+  ]) {
+    await t.test(name, async () => {
+      const docker = {
+        async run(command, args) {
+          if (args.includes("ps")) return { code: 0, stdout: "container-id\n", stderr: "" };
+          if (args[0] === "inspect") return { code: 0, stdout: binding, stderr: "" };
+          if (args.includes("id")) return { code: 0, stdout: "10001\n", stderr: "" };
+          return { code: 1, stdout: "", stderr: "" };
+        },
+      };
+
+      await runSmoke(
+        { baseUrl: "https://app.markiro.example", assetName: "main.js", environment: {} },
+        smokeClient(),
+        docker,
+      );
+    });
+  }
+});
+
+test("rejects every non-null PortBindings value, including empty arrays", async (t) => {
+  for (const [name, binding] of [
+    ["empty array", '{"3000/tcp":[]}\n'],
+    ["nonempty binding array", '{"3000/tcp":[{"HostIp":"","HostPort":"3000"}]}\n'],
+    ["object", '{"3000/tcp":{}}\n'],
+    ["string", '{"3000/tcp":""}\n'],
+    ["number", '{"3000/tcp":0}\n'],
+    ["boolean", '{"3000/tcp":false}\n'],
+  ]) {
+    await t.test(name, async () => {
+      const docker = {
+        async run(command, args) {
+          if (args.includes("ps")) return { code: 0, stdout: "container-id\n", stderr: "" };
+          if (args[0] === "inspect") return { code: 0, stdout: binding, stderr: "" };
+          if (args.includes("id")) return { code: 0, stdout: "10001\n", stderr: "" };
+          return { code: 1, stdout: "", stderr: "" };
+        },
+      };
+
+      await assert.rejects(
+        runSmoke(
+          { baseUrl: "https://app.markiro.example", assetName: "main.js", environment: {} },
+          smokeClient(),
+          docker,
+        ),
+        /published/,
+      );
+    });
+  }
+});
+
 test("rejects missing or invalid API host-port inspection output", async () => {
   for (const inspect of [
     { code: 1, stdout: "", stderr: "inspect failed" },
     { code: 0, stdout: "", stderr: "" },
     { code: 0, stdout: "not json", stderr: "" },
     { code: 0, stdout: "[]", stderr: "" },
+    { code: 0, stdout: "[null]", stderr: "" },
+    { code: 0, stdout: '"value"', stderr: "" },
+    { code: 0, stdout: "0", stderr: "" },
+    { code: 0, stdout: "false", stderr: "" },
   ]) {
     const docker = {
       async run(command, args) {
@@ -177,6 +237,35 @@ test("rejects missing or invalid API host-port inspection output", async () => {
       ),
       /port inspection/,
     );
+  }
+});
+
+test("rejects every unavailable API container ID before inspect", async (t) => {
+  for (const [name, ps] of [
+    ["nonzero compose ps", { code: 1, stdout: "container-id\n", stderr: "ps failed" }],
+    ["empty compose ps", { code: 0, stdout: "", stderr: "" }],
+    ["whitespace compose ps", { code: 0, stdout: " \t\n", stderr: "" }],
+  ]) {
+    await t.test(name, async () => {
+      let inspected = false;
+      const docker = {
+        async run(command, args) {
+          if (args.includes("ps")) return ps;
+          if (args[0] === "inspect") inspected = true;
+          return { code: 1, stdout: "", stderr: "" };
+        },
+      };
+
+      await assert.rejects(
+        runSmoke(
+          { baseUrl: "https://app.markiro.example", assetName: "main.js", environment: {} },
+          smokeClient(),
+          docker,
+        ),
+        /container ID is unavailable/,
+      );
+      assert.equal(inspected, false);
+    });
   }
 });
 

@@ -350,13 +350,9 @@ async function runtimeSmoke(environment, docker, client, baseUrl, options) {
   } catch {
     throw new Error("API port inspection failed");
   }
-  if (!bindings || typeof bindings !== "object" || Array.isArray(bindings))
+  if (bindings !== null && (typeof bindings !== "object" || Array.isArray(bindings)))
     throw new Error("API port inspection failed");
-  if (
-    Object.values(bindings).some(
-      (value) => value !== null && (!Array.isArray(value) || value.length > 0),
-    )
-  )
+  if (bindings !== null && Object.values(bindings).some((value) => value !== null))
     throw new Error("API is published on the host");
   const uid = await runDocker(
     docker,
