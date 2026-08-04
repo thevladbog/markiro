@@ -34,7 +34,33 @@ function normalizeDnsName(value) {
   return value.replace(/[.]$/, "").toLowerCase();
 }
 
+function isDnsNameAtOrBelow(name, possibleAncestor) {
+  const normalizedName = normalizeDnsName(name);
+  const normalizedAncestor = normalizeDnsName(possibleAncestor);
+  return (
+    normalizedAncestor === "" ||
+    normalizedName === normalizedAncestor ||
+    normalizedName.endsWith(`.${normalizedAncestor}`)
+  );
+}
+
+function isValidDnsName(value, allowRoot = false) {
+  const normalized = normalizeDnsName(value);
+  return (allowRoot && normalized === "") || DOMAIN_PATTERN.test(normalized);
+}
+
+function isValidSoaData(value) {
+  const fields = value.trim().split(/\s+/);
+  if (fields.length !== 7) return false;
+  if (!isValidDnsName(fields[0]) || !isValidDnsName(fields[1])) return false;
+  return fields.slice(2).every((field) => {
+    if (!/^\d+$/.test(field)) return false;
+    return BigInt(field) <= 4_294_967_295n;
+  });
+}
+
 function parseHeader(output) {
+  if (typeof output !== "string") return { status: "missing", flags: [] };
   const lines = output.split("\n");
   const header = lines.find((line) => line.startsWith(";; ->>HEADER<<-"));
   const status = header?.match(/(?:^|,\s*)status:\s*([A-Z]+)(?:,|$)/i)?.[1]?.toUpperCase();
@@ -44,29 +70,73 @@ function parseHeader(output) {
       ?.match(/^;; flags:\s*([^;]*);/)?.[1]
       ?.trim()
       .split(/\s+/) ?? [];
-  return { status: status ?? "missing", flags };
+  const counts = flagsLine?.match(
+    /;\s*QUERY:\s*(\d+),\s*ANSWER:\s*(\d+),\s*AUTHORITY:\s*(\d+),\s*ADDITIONAL:\s*(\d+)\s*$/i,
+  );
+  return {
+    status: status ?? "missing",
+    flags,
+    queryCount: counts ? Number(counts[1]) : undefined,
+    answerCount: counts ? Number(counts[2]) : undefined,
+    authorityCount: counts ? Number(counts[3]) : undefined,
+  };
 }
 
-function parseResponse(output, type, requireAuthoritative, requireRecursion, label, domain) {
-  const { status, flags } = parseHeader(output);
+function parseResponse(
+  output,
+  type,
+  requireAuthoritative,
+  requireRecursion,
+  label,
+  domain,
+  approved,
+) {
+  if (/^(?:;;\s*)?Warning:/im.test(output))
+    throw new Error(`${label} ${type} dig output contains a parser warning`);
+  const { status, flags, queryCount, answerCount, authorityCount } = parseHeader(output);
   if (status !== "NOERROR")
     throw new Error(`${label} ${type} status is ${status}, expected NOERROR`);
+  if (!flags.includes("qr")) throw new Error(`${label} ${type} response does not have the QR flag`);
   if (requireAuthoritative && !flags.includes("aa"))
     throw new Error(`authoritative ${type} response does not have the AA flag`);
   if (requireRecursion && !flags.includes("ra"))
     throw new Error(`${label} ${type} response does not have the RA flag`);
-  const answers = [];
+  if (queryCount !== 1 || answerCount === undefined || authorityCount === undefined)
+    throw new Error(`${label} ${type} response has malformed DNS section counts`);
+  const records = [];
   for (const line of output.split("\n")) {
     if (!line.trim() || line.startsWith(";")) continue;
     const match = line.match(/^(\S+)\s+\d+\s+IN\s+(\S+)\s+(.+?)\s*$/i);
-    if (!match) throw new Error(`${type} DNS response contains a malformed answer`);
-    if (normalizeDnsName(match[1]) !== normalizeDnsName(domain))
+    if (!match) throw new Error(`${label} ${type} DNS response contains a malformed record`);
+    records.push({ owner: match[1], type: match[2].toUpperCase(), value: match[3] });
+  }
+  if (records.length !== answerCount + authorityCount)
+    throw new Error(`${label} ${type} DNS section counts do not match the emitted records`);
+  const answers = [];
+  for (const record of records.slice(0, answerCount)) {
+    if (normalizeDnsName(record.owner) !== normalizeDnsName(domain))
       throw new Error(`${label} ${type} answer owner does not match the requested domain`);
-    if (match[2].toUpperCase() !== type)
+    if (record.type !== type)
+      throw new Error(`${label} ${type} response contains unsupported ${record.type} data`);
+    answers.push(normalizeAddress(record.value, type));
+  }
+  if (approved.length === 0) {
+    if (answerCount !== 0)
+      throw new Error(`${label} ${type} NODATA response contains answer records`);
+    const authority = records.slice(answerCount, answerCount + authorityCount);
+    const soaRecords = authority.filter((record) => record.type === "SOA");
+    if (soaRecords.length === 0)
+      throw new Error(`${label} ${type} NODATA response does not contain an SOA record`);
+    if (
+      soaRecords.some(
+        (record) => !isValidDnsName(record.owner, true) || !isValidSoaData(record.value),
+      )
+    )
+      throw new Error(`${label} ${type} NODATA response contains malformed SOA data`);
+    if (soaRecords.some((record) => !isDnsNameAtOrBelow(domain, record.owner)))
       throw new Error(
-        `${label} ${type} response contains unsupported ${match[2].toUpperCase()} data`,
+        `${label} ${type} NODATA SOA owner is not the requested domain or its ancestor`,
       );
-    answers.push(normalizeAddress(match[3], type));
   }
   return [...new Set(answers)].sort();
 }
@@ -155,6 +225,7 @@ export async function verifyDnsOnce(options, dependencies) {
         "+noall",
         "+comments",
         "+answer",
+        "+authority",
         options.domain,
         type,
       ]);
@@ -166,6 +237,7 @@ export async function verifyDnsOnce(options, dependencies) {
         scope.requireRecursion,
         scope.label,
         options.domain,
+        approved[type],
       );
       if (!sameSet(actual, approved[type]))
         throw new Error(`${scope.label} ${type} answer set differs from the approved set`);

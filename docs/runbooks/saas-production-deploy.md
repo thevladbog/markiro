@@ -232,19 +232,24 @@ unset MARKIRO_AUTHORITATIVE_DNS_SERVER MARKIRO_PUBLIC_DNS_RESOLVERS
 unset MARKIRO_APPROVED_DNS_A MARKIRO_APPROVED_DNS_AAAA
 ```
 
-The verifier queries both address families. Its authoritative queries use
-`+norecurse` and require `NOERROR` plus the AA flag; a recursive/cache answer,
-referral, missing header, or `SERVFAIL` fails closed. Public queries use
-`+recurse` and require the RA flag on every public A and AAAA response,
-including an approved empty address family; a non-recursive referral fails.
-Every A/AAAA RR owner must match the requested domain after case-insensitive
-comparison and optional trailing-dot normalization. Comparison is
-address-normalized, order-independent, and TTL-independent; missing or extra
-addresses fail. Repeated identical DNS answer rows normalize to one set
-member, while duplicate approved operator inputs are rejected. Unsupported
-answer types, including CNAME, fail. Verification retries the complete gate at
-most 30 times with a two-second interval, and each `dig` process is bounded to
-five seconds. A mismatch after that budget stops before edge start.
+The verifier queries both address families and requests answer and authority
+sections. Its authoritative queries use `+norecurse` and require `NOERROR` plus
+the QR and AA flags. Public queries use `+recurse` and require `NOERROR` plus
+the QR and RA flags on every public A and AAAA response. For a non-empty
+approved family, every A/AAAA RR owner must match the requested domain after
+case-insensitive comparison and optional trailing-dot normalization, and the
+normalized address set must match exactly. For an approved empty family, both
+the authoritative and public response must instead prove NODATA: zero answer
+records and an authority SOA whose owner is the requested domain or a
+label-boundary ancestor. An NS-only referral is not NODATA proof. A cache
+answer at the authoritative gate, unrelated or suffix-confusion SOA owner,
+missing or inconsistent header counts, parser warning, `SERVFAIL`, malformed
+record, and unsupported answer type including CNAME all fail closed.
+Comparison is order-independent and TTL-independent; repeated identical DNS
+answer rows normalize to one set member, while duplicate approved operator
+inputs are rejected. Verification retries the complete gate at most 30 times
+with a two-second interval, and each `dig` process is bounded to five seconds.
+A mismatch after that budget stops before edge start.
 
 Ports 80 and 443 at the protected ingress must now reach the selected TLS
 bootstrap path. Start the release exactly once:

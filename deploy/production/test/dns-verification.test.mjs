@@ -9,15 +9,25 @@ function digOutput({
   status = "NOERROR",
   flags = ["qr", "aa"],
   answers = [],
-  authorityCount = 0,
+  authority = [],
+  queryCount = 1,
+  answerCount = answers.length,
+  authorityCount = authority.length,
 } = {}) {
   return [
     `;; ->>HEADER<<- opcode: QUERY, status: ${status}, id: 1234`,
-    `;; flags: ${flags.join(" ")}; QUERY: 1, ANSWER: ${answers.length}, AUTHORITY: ${authorityCount}, ADDITIONAL: 0`,
+    `;; flags: ${flags.join(" ")}; QUERY: ${queryCount}, ANSWER: ${answerCount}, AUTHORITY: ${authorityCount}, ADDITIONAL: 0`,
     ...answers.map(({ type, value, owner = `${domain}.` }) => `${owner} 60 IN ${type} ${value}`),
+    ...authority.map(({ type, value, owner = `${domain}.` }) => `${owner} 60 IN ${type} ${value}`),
     "",
   ].join("\n");
 }
+
+const soa = {
+  type: "SOA",
+  owner: "markiro.example.",
+  value: "ns1.markiro.example. hostmaster.markiro.example. 1 3600 600 86400 60",
+};
 
 test("rejects an extra stale authoritative address instead of accepting set membership", async () => {
   const outputs = [
@@ -65,6 +75,69 @@ test("rejects a recursive cached response at the authoritative gate when AA is a
   );
 });
 
+test("rejects authoritative and recursive responses when the QR response flag is absent", async () => {
+  await assert.rejects(
+    verifyDnsOnce(
+      {
+        domain,
+        authoritativeServer: "ns1.example.test",
+        publicResolvers: ["resolver.example.test"],
+        approvedA: ["203.0.113.10"],
+        approvedAaaa: [],
+      },
+      {
+        runDig: async () => ({
+          code: 0,
+          stdout: digOutput({
+            flags: ["aa"],
+            answers: [{ type: "A", value: "203.0.113.10" }],
+          }),
+        }),
+      },
+    ),
+    /authoritative A response does not have the QR flag/,
+  );
+
+  const outputs = [
+    digOutput({ answers: [{ type: "A", value: "203.0.113.10" }] }),
+    digOutput({ authority: [soa] }),
+    digOutput({ flags: ["rd", "ra"], answers: [{ type: "A", value: "203.0.113.10" }] }),
+  ];
+  await assert.rejects(
+    verifyDnsOnce(
+      {
+        domain,
+        authoritativeServer: "ns1.example.test",
+        publicResolvers: ["resolver.example.test"],
+        approvedA: ["203.0.113.10"],
+        approvedAaaa: [],
+      },
+      { runDig: async () => ({ code: 0, stdout: outputs.shift() }) },
+    ),
+    /public resolver resolver\.example\.test A response does not have the QR flag/,
+  );
+});
+
+test("rejects dig parser warnings even when the response otherwise looks approved", async () => {
+  const warned = digOutput({
+    answers: [{ type: "A", value: "203.0.113.10" }],
+  }).replace(";; flags:", ";; Warning: query response not set\n;; flags:");
+
+  await assert.rejects(
+    verifyDnsOnce(
+      {
+        domain,
+        authoritativeServer: "ns1.example.test",
+        publicResolvers: ["resolver.example.test"],
+        approvedA: ["203.0.113.10"],
+        approvedAaaa: [],
+      },
+      { runDig: async () => ({ code: 0, stdout: warned }) },
+    ),
+    /authoritative A dig output contains a parser warning/,
+  );
+});
+
 test("requires the exact order-insensitive A and AAAA sets from authoritative and public DNS", async () => {
   const outputs = [
     digOutput({
@@ -72,6 +145,7 @@ test("requires the exact order-insensitive A and AAAA sets from authoritative an
         { type: "A", value: "203.0.113.11" },
         { type: "A", value: "203.0.113.10" },
       ],
+      authority: [soa],
     }),
     digOutput({ answers: [{ type: "AAAA", value: "2001:db8::10" }] }),
     digOutput({
@@ -80,6 +154,7 @@ test("requires the exact order-insensitive A and AAAA sets from authoritative an
         { type: "A", value: "203.0.113.10" },
         { type: "A", value: "203.0.113.11" },
       ],
+      authority: [soa],
     }),
     digOutput({
       flags: ["qr", "rd", "ra"],
@@ -105,11 +180,70 @@ test("requires the exact order-insensitive A and AAAA sets from authoritative an
   );
 
   assert.deepEqual(calls, [
-    ["@ns1.example.test", "+norecurse", "+noall", "+comments", "+answer", domain, "A"],
-    ["@ns1.example.test", "+norecurse", "+noall", "+comments", "+answer", domain, "AAAA"],
-    ["@resolver.example.test", "+recurse", "+noall", "+comments", "+answer", domain, "A"],
-    ["@resolver.example.test", "+recurse", "+noall", "+comments", "+answer", domain, "AAAA"],
+    [
+      "@ns1.example.test",
+      "+norecurse",
+      "+noall",
+      "+comments",
+      "+answer",
+      "+authority",
+      domain,
+      "A",
+    ],
+    [
+      "@ns1.example.test",
+      "+norecurse",
+      "+noall",
+      "+comments",
+      "+answer",
+      "+authority",
+      domain,
+      "AAAA",
+    ],
+    [
+      "@resolver.example.test",
+      "+recurse",
+      "+noall",
+      "+comments",
+      "+answer",
+      "+authority",
+      domain,
+      "A",
+    ],
+    [
+      "@resolver.example.test",
+      "+recurse",
+      "+noall",
+      "+comments",
+      "+answer",
+      "+authority",
+      domain,
+      "AAAA",
+    ],
   ]);
+});
+
+test("accepts an empty approved family only when authoritative and recursive DNS prove NODATA with SOA", async () => {
+  const outputs = [
+    digOutput({ answers: [{ type: "A", value: "203.0.113.10" }] }),
+    digOutput({ authority: [soa] }),
+    digOutput({
+      flags: ["qr", "rd", "ra"],
+      answers: [{ type: "A", value: "203.0.113.10" }],
+    }),
+    digOutput({ flags: ["qr", "rd", "ra"], authority: [soa] }),
+  ];
+
+  await verifyDnsOnce(
+    {
+      domain,
+      authoritativeServer: "ns1.example.test",
+      publicResolvers: ["resolver.example.test"],
+      approvedA: ["203.0.113.10"],
+      approvedAaaa: [],
+    },
+    { runDig: async () => ({ code: 0, stdout: outputs.shift() }) },
+  );
 });
 
 test("rejects SERVFAIL even when an injected response contains an approved-looking answer", async () => {
@@ -159,7 +293,7 @@ test("rejects CNAME answer shapes instead of silently validating only their addr
 test("rejects a stale extra address from a public recursive resolver", async () => {
   const outputs = [
     digOutput({ answers: [{ type: "A", value: "203.0.113.10" }] }),
-    digOutput(),
+    digOutput({ authority: [soa] }),
     digOutput({
       flags: ["qr", "rd", "ra"],
       answers: [
@@ -187,12 +321,12 @@ test("rejects a stale extra address from a public recursive resolver", async () 
 test("requires every explicitly approved public resolver to converge", async () => {
   const outputs = [
     digOutput({ answers: [{ type: "A", value: "203.0.113.10" }] }),
-    digOutput(),
+    digOutput({ authority: [soa] }),
     digOutput({
       flags: ["qr", "rd", "ra"],
       answers: [{ type: "A", value: "203.0.113.10" }],
     }),
-    digOutput({ flags: ["qr", "rd", "ra"] }),
+    digOutput({ flags: ["qr", "rd", "ra"], authority: [soa] }),
     digOutput({
       flags: ["qr", "rd", "ra"],
       answers: [{ type: "A", value: "203.0.113.99" }],
@@ -217,12 +351,15 @@ test("requires every explicitly approved public resolver to converge", async () 
 test("rejects a non-recursive public referral for an approved empty AAAA set", async () => {
   const outputs = [
     digOutput({ answers: [{ type: "A", value: "203.0.113.10" }] }),
-    digOutput(),
+    digOutput({ authority: [soa] }),
     digOutput({
       flags: ["qr", "rd", "ra"],
       answers: [{ type: "A", value: "203.0.113.10" }],
     }),
-    digOutput({ flags: ["qr", "rd"], authorityCount: 1 }),
+    digOutput({
+      flags: ["qr", "rd"],
+      authority: [{ type: "NS", value: "ns1.markiro.example." }],
+    }),
   ];
 
   await assert.rejects(
@@ -240,17 +377,137 @@ test("rejects a non-recursive public referral for an approved empty AAAA set", a
   );
 });
 
+test("rejects a recursive public referral for an approved empty AAAA set", async () => {
+  const outputs = [
+    digOutput({ answers: [{ type: "A", value: "203.0.113.10" }] }),
+    digOutput({ authority: [soa] }),
+    digOutput({
+      flags: ["qr", "rd", "ra"],
+      answers: [{ type: "A", value: "203.0.113.10" }],
+    }),
+    digOutput({
+      flags: ["qr", "rd", "ra"],
+      authority: [{ type: "NS", value: "ns1.markiro.example." }],
+    }),
+  ];
+
+  await assert.rejects(
+    verifyDnsOnce(
+      {
+        domain,
+        authoritativeServer: "ns1.example.test",
+        publicResolvers: ["resolver.example.test"],
+        approvedA: ["203.0.113.10"],
+        approvedAaaa: [],
+      },
+      { runDig: async () => ({ code: 0, stdout: outputs.shift() }) },
+    ),
+    /public resolver resolver\.example\.test AAAA NODATA response does not contain an SOA record/,
+  );
+});
+
+test("rejects unrelated and suffix-confusion SOA owners as NODATA proof", async () => {
+  for (const owner of ["unrelated.example.test.", "iro.example."]) {
+    const outputs = [
+      digOutput({ answers: [{ type: "A", value: "203.0.113.10" }] }),
+      digOutput({ authority: [{ ...soa, owner }] }),
+    ];
+
+    await assert.rejects(
+      verifyDnsOnce(
+        {
+          domain,
+          authoritativeServer: "ns1.example.test",
+          publicResolvers: ["resolver.example.test"],
+          approvedA: ["203.0.113.10"],
+          approvedAaaa: [],
+        },
+        { runDig: async () => ({ code: 0, stdout: outputs.shift() }) },
+      ),
+      /authoritative AAAA NODATA SOA owner is not the requested domain or its ancestor/,
+    );
+  }
+});
+
+test("rejects DNS output whose section counts do not match the emitted records", async () => {
+  const outputs = [
+    digOutput({ answers: [{ type: "A", value: "203.0.113.10" }] }),
+    digOutput({ authority: [soa], authorityCount: 2 }),
+  ];
+
+  await assert.rejects(
+    verifyDnsOnce(
+      {
+        domain,
+        authoritativeServer: "ns1.example.test",
+        publicResolvers: ["resolver.example.test"],
+        approvedA: ["203.0.113.10"],
+        approvedAaaa: [],
+      },
+      { runDig: async () => ({ code: 0, stdout: outputs.shift() }) },
+    ),
+    /authoritative AAAA DNS section counts do not match the emitted records/,
+  );
+});
+
+test("rejects a DNS header whose query count is inconsistent with the verifier request", async () => {
+  await assert.rejects(
+    verifyDnsOnce(
+      {
+        domain,
+        authoritativeServer: "ns1.example.test",
+        publicResolvers: ["resolver.example.test"],
+        approvedA: ["203.0.113.10"],
+        approvedAaaa: [],
+      },
+      {
+        runDig: async () => ({
+          code: 0,
+          stdout: digOutput({
+            queryCount: 0,
+            answers: [{ type: "A", value: "203.0.113.10" }],
+          }),
+        }),
+      },
+    ),
+    /authoritative A response has malformed DNS section counts/,
+  );
+});
+
+test("rejects malformed SOA authority data instead of treating it as NODATA proof", async () => {
+  const outputs = [
+    digOutput({ answers: [{ type: "A", value: "203.0.113.10" }] }),
+    digOutput({
+      authority: [{ ...soa, value: "ns1.markiro.example. hostmaster.markiro.example." }],
+    }),
+  ];
+
+  await assert.rejects(
+    verifyDnsOnce(
+      {
+        domain,
+        authoritativeServer: "ns1.example.test",
+        publicResolvers: ["resolver.example.test"],
+        approvedA: ["203.0.113.10"],
+        approvedAaaa: [],
+      },
+      { runDig: async () => ({ code: 0, stdout: outputs.shift() }) },
+    ),
+    /authoritative AAAA NODATA response contains malformed SOA data/,
+  );
+});
+
 test("rejects an approved address attached to an unrelated RR owner", async () => {
   const outputs = [
     digOutput({
       answers: [{ type: "A", value: "203.0.113.10", owner: "unrelated.example.test." }],
     }),
-    digOutput(),
+    digOutput({ authority: [soa] }),
     digOutput({
       flags: ["qr", "rd", "ra"],
       answers: [{ type: "A", value: "203.0.113.10" }],
     }),
-    digOutput({ flags: ["qr", "rd", "ra"] }),
+    digOutput({ flags: ["qr", "rd", "ra"], authority: [soa] }),
   ];
 
   await assert.rejects(
@@ -273,12 +530,12 @@ test("accepts the requested RR owner case-insensitively with or without a traili
     digOutput({
       answers: [{ type: "A", value: "203.0.113.10", owner: "APP.MARKIRO.EXAMPLE" }],
     }),
-    digOutput(),
+    digOutput({ authority: [soa] }),
     digOutput({
       flags: ["qr", "rd", "ra"],
       answers: [{ type: "A", value: "203.0.113.10", owner: "App.Markiro.Example." }],
     }),
-    digOutput({ flags: ["qr", "rd", "ra"] }),
+    digOutput({ flags: ["qr", "rd", "ra"], authority: [soa] }),
   ];
 
   await verifyDnsOnce(
@@ -318,12 +575,12 @@ test("retries the complete verification within a bounded convergence budget", as
       ],
     }),
     digOutput({ answers: [{ type: "A", value: "203.0.113.10" }] }),
-    digOutput(),
+    digOutput({ authority: [soa] }),
     digOutput({
       flags: ["qr", "rd", "ra"],
       answers: [{ type: "A", value: "203.0.113.10" }],
     }),
-    digOutput({ flags: ["qr", "rd", "ra"] }),
+    digOutput({ flags: ["qr", "rd", "ra"], authority: [soa] }),
   ];
   const sleeps = [];
 

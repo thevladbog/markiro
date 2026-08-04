@@ -264,12 +264,15 @@ For first deploy, the bundle's runbook defines this order:
 5. switch DNS to the protected ingress through the approved external
    procedure, then use the executable DNS verifier for bounded authoritative
    and public DNS polling. It compares the exact normalized A and AAAA sets:
-   authoritative queries use `+norecurse` and require the AA flag, while every
-   listed public recursive resolver must return the RA flag on both A and AAAA
-   responses and converge without missing or extra addresses. Every A/AAAA RR
-   owner must match the requested domain case-insensitively after optional
-   trailing-dot normalization. CNAME and other unapproved answer shapes fail
-   closed;
+   authoritative queries use `+norecurse` and require the QR and AA flags,
+   while every listed public recursive resolver must return the QR and RA flags
+   on both A and AAAA responses and converge without missing or extra
+   addresses. Every A/AAAA RR owner must match the requested domain
+   case-insensitively after optional trailing-dot normalization. For an empty
+   approved family, zero answers are accepted only as NODATA proof with an
+   authority SOA owned by the requested domain or a label-boundary ancestor;
+   referrals, unrelated or suffix-confusion owners, malformed output, CNAME,
+   and other unapproved response shapes fail closed;
 6. pull both images by the approved repository digests;
 7. run `migrate` once and stop on any non-zero exit;
 8. recreate `api`, wait for readiness, then recreate `edge`;

@@ -599,6 +599,17 @@ test("runbook, design, and plan share the safe first-deploy DNS and ACME orderin
       /public[\s\S]{0,140}RA flag/i,
       `${label} lacks recursive public-response validation`,
     );
+    assert.match(source, /QR\b/i, `${label} lacks the DNS response-packet validation contract`);
+    assert.match(
+      source,
+      /empty[\s\S]{0,240}NODATA/i,
+      `${label} lacks the empty-family NODATA proof contract`,
+    );
+    assert.match(
+      source,
+      /SOA[\s\S]{0,180}ancestor/i,
+      `${label} lacks the SOA owner ancestor contract`,
+    );
     assert.match(
       source,
       /RR\s+owner[\s\S]{0,120}requested domain/i,

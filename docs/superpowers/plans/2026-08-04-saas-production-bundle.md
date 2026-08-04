@@ -1169,12 +1169,14 @@ Assert the runbook contains explicit commands and stop conditions for:
 - switching DNS only through an approved external procedure, then bounded
   authoritative and public DNS verification before edge start. The executable
   verifier compares the exact normalized A and AAAA sets, uses `+norecurse`
-  and requires the AA flag at the explicit authoritative server, and requires
-  every listed public recursive resolver to return the RA flag for both
-  families and have neither missing nor extra addresses. Every A/AAAA RR owner
-  must match the requested domain case-insensitively after optional
-  trailing-dot normalization. Unsupported CNAME/other answer shapes fail
-  closed;
+  and requires the QR and AA flags at the explicit authoritative server, and
+  requires every listed public recursive resolver to return the QR and RA flags
+  for both families and have neither missing nor extra addresses. Every
+  A/AAAA RR owner must match the requested domain case-insensitively after
+  optional trailing-dot normalization. For an empty approved family, zero
+  answers require NODATA proof from an authority SOA owned by the requested
+  domain or a label-boundary ancestor. Referrals, malformed output,
+  suffix-confusion SOA owners, CNAME, and other unsupported shapes fail closed;
 - bounded edge/TLS readiness, exactly one full smoke, and public traffic open
   only after the healthy release record exists.
 
@@ -1228,10 +1230,12 @@ separately reviewed reproducible custom Caddy image. The standard Caddy bundle
 alone cannot satisfy that gate. The first-deploy order is maintenance/deny and
 allowlist evidence, ACME HTTP-01 pass-through (or the verified provider TLS
 alternative), approved DNS switch, bounded authoritative and public DNS
-verification of the exact normalized A and AAAA sets (`+norecurse` plus AA flag
-at the authoritative server, then the RA flag from every public recursive
-resolver). Every A/AAAA RR owner must match the requested domain after
-case-insensitive/trailing-dot normalization. Next come edge/TLS readiness,
+verification of the exact normalized A and AAAA sets (`+norecurse` plus QR and
+AA flags at the authoritative server, then the QR and RA flags from every
+public recursive resolver). Every A/AAAA RR owner must match the requested
+domain after case-insensitive/trailing-dot normalization. An empty approved
+family requires zero-answer NODATA proof with an authority SOA owned by the
+requested domain or a label-boundary ancestor. Next come edge/TLS readiness,
 exactly one full smoke, the healthy record, and only then public traffic open.
 CNAME is outside this procedure and fails closed. Routine deploy explicitly
 assumes DNS and valid TLS already exist. Do not add fictional provider
