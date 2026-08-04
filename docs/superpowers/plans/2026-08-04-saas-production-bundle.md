@@ -391,7 +391,6 @@ git commit -m "feat: add bounded production readiness"
 - Create: `packages/db/src/migrate-cli.ts`
 - Create: `packages/db/test/runtime-migrate.test.ts`
 - Modify: `packages/db/package.json`
-- Modify: `packages/db/src/index.ts`
 
 **Interfaces:**
 
@@ -470,7 +469,7 @@ runRuntimeMigrations({ databaseUrl, migrationsFolder })
   });
 ```
 
-Do not print the caught error. Export `runRuntimeMigrations` and its types from `src/index.ts`. Add `"db:migrate:runtime": "node dist/migrate-cli.js"` to `packages/db/package.json`; do not change the development `db:migrate` script.
+Do not print the caught error. Export `runRuntimeMigrations` and its types only through the explicit server-only `@markiro/db/runtime-migrate` package subpath; do not re-export them from `src/index.ts`, because browser clients consume the root barrel. Add `"db:migrate:runtime": "node dist/migrate-cli.js"` to `packages/db/package.json`; do not change the development `db:migrate` script.
 
 - [ ] **Step 5: Verify unit behavior and compiled artifact layout**
 
@@ -500,7 +499,7 @@ Expected: both commands exit 0; the second creates no duplicate objects and logs
 - [ ] **Step 7: Commit the migrator**
 
 ```bash
-git add packages/db/package.json packages/db/src/index.ts packages/db/src/runtime-migrate.ts packages/db/src/migrate-cli.ts packages/db/test/runtime-migrate.test.ts
+git add packages/db/package.json packages/db/src/runtime-migrate.ts packages/db/src/migrate-cli.ts packages/db/test/runtime-migrate.test.ts
 git commit -m "feat: add runtime database migrator"
 ```
 
