@@ -260,11 +260,27 @@ function assertRoute(check, response, body, signature) {
       !/application\/json/i.test(response.headers.get("content-type") || "")
     )
       throw new Error("station bootstrap did not return an upstream JSON response");
+    let payload;
     try {
-      JSON.parse(body);
+      payload = JSON.parse(body);
     } catch {
       throw new Error("station bootstrap did not return valid JSON");
     }
+    if (
+      response.status === 404 &&
+      (payload === null ||
+        typeof payload !== "object" ||
+        Array.isArray(payload) ||
+        Object.getPrototypeOf(payload) !== Object.prototype ||
+        !Object.hasOwn(payload, "statusCode") ||
+        !Object.hasOwn(payload, "message") ||
+        !Object.hasOwn(payload, "error") ||
+        Object.keys(payload).length !== 3 ||
+        payload.statusCode !== 404 ||
+        payload.message !== "Cannot GET /station/bootstrap" ||
+        payload.error !== "Not Found")
+    )
+      throw new Error("station bootstrap did not return the exact Nest 11 JSON 404");
   }
   if (check.kind === "proxy") {
     if (

@@ -325,14 +325,14 @@ test("rejects an external origin in the built root", async () => {
   );
 });
 
-test("accepts a Nest JSON 404 only for the absent station bootstrap endpoint", async () => {
+test("accepts the exact Nest 11 JSON 404 for the absent station bootstrap endpoint", async () => {
   const client = smokeClient();
   const original = client.request;
   client.request = async (url, init) =>
     new URL(url).pathname === "/station/bootstrap"
       ? response({
           status: 404,
-          body: '{"statusCode":404,"message":"Not Found"}',
+          body: '{"statusCode":404,"message":"Cannot GET /station/bootstrap","error":"Not Found"}',
           headers: { "content-type": "application/json" },
         })
       : original(url, init);
@@ -352,6 +352,84 @@ test("accepts a Nest JSON 404 only for the absent station bootstrap endpoint", a
     client,
     docker,
   );
+});
+
+test("preserves valid JSON 200, 401, and 403 station responses", async (t) => {
+  for (const status of [200, 401, 403]) {
+    await t.test(String(status), async () => {
+      const client = smokeClient();
+      const original = client.request;
+      client.request = async (url, init) =>
+        new URL(url).pathname === "/station/bootstrap"
+          ? response({
+              status,
+              body: '{"upstream":true}',
+              headers: { "content-type": "application/json; charset=utf-8" },
+            })
+          : original(url, init);
+      const docker = {
+        run: async (command, args) =>
+          args.includes("ps")
+            ? { code: 0, stdout: "container-id\n", stderr: "" }
+            : args[0] === "inspect"
+              ? { code: 0, stdout: "{}\n", stderr: "" }
+              : args.includes("id")
+                ? { code: 0, stdout: "10001\n", stderr: "" }
+                : { code: 1, stdout: "", stderr: "" },
+      };
+
+      await runSmoke(
+        { baseUrl: "https://app.markiro.example", assetName: "main.js", environment: {} },
+        client,
+        docker,
+      );
+    });
+  }
+});
+
+test("rejects arbitrary JSON 404 bodies for station bootstrap", async (t) => {
+  for (const [name, body] of [
+    ["generic Nest message", '{"statusCode":404,"message":"Not Found","error":"Not Found"}'],
+    [
+      "wrong request path",
+      '{"statusCode":404,"message":"Cannot GET /station/other","error":"Not Found"}',
+    ],
+    ["missing error", '{"statusCode":404,"message":"Cannot GET /station/bootstrap"}'],
+    [
+      "extra property",
+      '{"statusCode":404,"message":"Cannot GET /station/bootstrap","error":"Not Found","path":"/station/bootstrap"}',
+    ],
+    ["array", '[{"statusCode":404}]'],
+    ["primitive", "404"],
+  ]) {
+    await t.test(name, async () => {
+      const client = smokeClient();
+      const original = client.request;
+      client.request = async (url, init) =>
+        new URL(url).pathname === "/station/bootstrap"
+          ? response({ status: 404, body, headers: { "content-type": "application/json" } })
+          : original(url, init);
+      const docker = {
+        run: async (command, args) =>
+          args.includes("ps")
+            ? { code: 0, stdout: "container-id\n", stderr: "" }
+            : args[0] === "inspect"
+              ? { code: 0, stdout: "{}\n", stderr: "" }
+              : args.includes("id")
+                ? { code: 0, stdout: "10001\n", stderr: "" }
+                : { code: 1, stdout: "", stderr: "" },
+      };
+
+      await assert.rejects(
+        runSmoke(
+          { baseUrl: "https://app.markiro.example", assetName: "main.js", environment: {} },
+          client,
+          docker,
+        ),
+        /station bootstrap/,
+      );
+    });
+  }
 });
 
 test("rejects an edge 404 for station bootstrap and proxy 404s elsewhere", async () => {

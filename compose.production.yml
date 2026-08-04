@@ -19,6 +19,7 @@ services:
 
   api:
     image: ghcr.io/thevladbog/markiro-api:${MARKIRO_IMAGE_TAG:?MARKIRO_IMAGE_TAG is required}
+    restart: unless-stopped
     env_file:
       - ${MARKIRO_ENV_FILE:-.env.production}
     environment:
@@ -47,6 +48,7 @@ services:
 
   edge:
     image: ghcr.io/thevladbog/markiro-edge:${MARKIRO_IMAGE_TAG:?MARKIRO_IMAGE_TAG is required}
+    restart: unless-stopped
     environment:
       MARKIRO_DOMAIN: ${MARKIRO_DOMAIN:?MARKIRO_DOMAIN is required}
       ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL is required}

@@ -1,10 +1,53 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { load as loadYaml } from "js-yaml";
 
 const productionCompose = "compose.production.yml";
 const ciCompose = "deploy/production/compose.ci.yml";
 const envExample = ".env.production.example";
+
+test("production application services use exact restart policies", async () => {
+  const model = loadYaml(await readFile(productionCompose, "utf8"));
+
+  assert.equal(model.services.migrate.restart, "no");
+  assert.equal(model.services.api.restart, "unless-stopped");
+  assert.equal(model.services.edge.restart, "unless-stopped");
+});
+
+test("merged CI Compose config preserves production restart policies", () => {
+  const configured = execFileSync(
+    "docker",
+    [
+      "compose",
+      "--env-file",
+      envExample,
+      "-f",
+      productionCompose,
+      "-f",
+      ciCompose,
+      "config",
+      "--format",
+      "json",
+    ],
+    {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        ACME_EMAIL: "ops@example.test",
+        MARKIRO_DOMAIN: "localhost",
+        MARKIRO_ENV_FILE: envExample,
+        MARKIRO_IMAGE_TAG: "contract-test",
+      },
+    },
+  );
+  const model = JSON.parse(configured);
+
+  assert.equal(model.services.migrate.restart, "no");
+  assert.equal(model.services.api.restart, "unless-stopped");
+  assert.equal(model.services.edge.restart, "unless-stopped");
+});
 
 test("production Compose contains only hardened application services", async () => {
   const compose = await readFile(productionCompose, "utf8");
