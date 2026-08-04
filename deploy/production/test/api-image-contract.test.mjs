@@ -22,15 +22,23 @@ test("API image keeps the production runtime closure minimal and hardened", asyn
   assert.match(source, /USER node/);
   assert.match(source, /ENTRYPOINT \["\/usr\/bin\/tini", "--"\]/);
   assert.match(source, /CMD \["node", "dist\/main\.js"\]/);
-  assert.match(source, /find \/out\/api -type f -name '\*\.ts' ! -name '\*\.d\.ts' -delete/);
+  for (const extension of ["ts", "tsx", "mts", "cts"]) {
+    assert.match(source, new RegExp(`-name '\\*\\.${extension}'`));
+  }
   assert.match(
     source,
-    /rm -rf \/out\/api\/src \/out\/api\/test \/out\/api\/scripts \/out\/api\/\.turbo/,
+    /! -name '\*\.d\.ts' ! -name '\*\.d\.tsx' ! -name '\*\.d\.mts' ! -name '\*\.d\.cts' -delete/,
   );
   assert.match(
     source,
-    /rm -f \/out\/api\/nest-cli\.json \/out\/api\/tsconfig\.build\.json \/out\/api\/tsconfig\.json/,
+    /rm -rf \/out\/api\/src \/out\/api\/test \/out\/api\/tests \/out\/api\/scripts \/out\/api\/\.turbo/,
   );
+  for (const directory of ["test", "tests", "scripts", ".turbo"]) {
+    assert.match(source, new RegExp(`-name ${directory.replace(".", "\\.")}`));
+  }
+  assert.match(source, /-prune -exec rm -rf \{\} \+/);
+  assert.match(source, /-name nest-cli\.json/);
+  assert.match(source, /-name 'tsconfig\*\.json'/);
   assert.doesNotMatch(source, /drizzle-kit|pnpm install[^\n]*--prod/);
 });
 
