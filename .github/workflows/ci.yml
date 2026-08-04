@@ -125,10 +125,6 @@ jobs:
         run: echo "MARKIRO_ENV_FILE=$RUNNER_TEMP/markiro-production-test.env" >> "$GITHUB_ENV"
       - name: Verify production bundle contracts
         run: pnpm test:production-bundle:contract
-      - name: Build immutable local production images
-        run: |
-          docker build --file deploy/production/api.Dockerfile --tag "ghcr.io/thevladbog/markiro-api:${{ github.sha }}" .
-          docker build --file deploy/production/edge.Dockerfile --tag "ghcr.io/thevladbog/markiro-edge:${{ github.sha }}" .
       - name: Generate masked test-only environment
         run: |
           set -euo pipefail
@@ -174,6 +170,10 @@ jobs:
             printf '%s\n' "S3_FORCE_PATH_STYLE=true"
           } > "$MARKIRO_ENV_FILE"
           chmod 600 "$MARKIRO_ENV_FILE"
+      - name: Build immutable local production images
+        run: |
+          docker build --file deploy/production/api.Dockerfile --tag "ghcr.io/thevladbog/markiro-api:${{ github.sha }}" .
+          docker build --file deploy/production/edge.Dockerfile --tag "ghcr.io/thevladbog/markiro-edge:${{ github.sha }}" .
       - name: Validate the production bundle
         run: node deploy/production/preflight.mjs
       - name: Start production-bundle dependencies
