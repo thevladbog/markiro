@@ -66,6 +66,7 @@ test("CI overlay supplies only pinned test dependencies", async () => {
   assert.deepEqual(services, ["postgres:", "mailpit:", "minio:", "minio-init:"]);
   assert.match(compose, /image: postgres:17-alpine/);
   assert.match(compose, /image: axllent\/mailpit:v1\.30\.0/);
+  assert.match(compose, /MP_DATABASE: \/tmp\/mailpit\.db/);
   assert.match(compose, /image: minio\/minio:RELEASE\.2025-09-07T16-13-09Z/);
   assert.match(compose, /image: minio\/mc:RELEASE\.2025-08-13T08-35-41Z/);
   assert.match(compose, /^  minio-init:$/m);
