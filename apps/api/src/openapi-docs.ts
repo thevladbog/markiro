@@ -7,7 +7,20 @@ const scalarBundlePath = join(
   "browser",
   "standalone.js",
 );
-const scalarBundle = readFileSync(scalarBundlePath, "utf8");
+const scalarDynamicCodeProbe = "try{return Function(``),!0}catch{return!1}";
+
+export function disableScalarDynamicCodeProbe(bundle: string): string {
+  // Zod's runtime feature probe emits a CSP violation even though it catches the blocked call.
+  // Scalar's standalone bundle does not expose the shared Zod instance needed to set `jitless`.
+  // Keep this exact-version transform fail-closed until https://github.com/colinhacks/zod/issues/4461
+  // is resolved upstream or Scalar exposes a CSP-safe browser bundle.
+  const parts = bundle.split(scalarDynamicCodeProbe);
+  if (parts.length !== 2)
+    throw new Error("Scalar browser bundle must contain exactly one known dynamic-code probe");
+  return `${parts[0]}return!1${parts[1]}`;
+}
+
+const scalarBundle = disableScalarDynamicCodeProbe(readFileSync(scalarBundlePath, "utf8"));
 
 const docsHtml = `<!doctype html>
 <html lang="ru">
@@ -28,7 +41,10 @@ const bootstrapScript = `Scalar.createApiReference("#app", {
   telemetry: false,
   withDefaultFonts: false,
   hideClientButton: true,
-  showDeveloperTools: "never"
+  hideTestRequestButton: true,
+  showDeveloperTools: "never",
+  agent: { disabled: true },
+  mcp: { disabled: true }
 });\n`;
 
 function sendHtml(_request: Request, response: Response): void {

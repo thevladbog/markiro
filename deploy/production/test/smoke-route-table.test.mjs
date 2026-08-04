@@ -8,7 +8,17 @@ const csp =
 const shell =
   '<html><head><title>Markiro</title><script type="module" src="/assets/main.js"></script></head><body></body></html>';
 const docsShell =
-  '<!doctype html><html><head><title>API docs</title></head><body><div id="app"></div><script src="/docs/scalar.js"></script><script src="/docs/bootstrap.js"></script></body></html>';
+  '<!doctype html><html><head><title>API docs</title></head><body><div id="app"></div><script src="/docs/scalar.js"></script ><script src="/docs/bootstrap.js"></script   ></body></html>';
+const docsBootstrap = `Scalar.createApiReference("#app", {
+  url: "/openapi.json",
+  telemetry: false,
+  withDefaultFonts: false,
+  hideClientButton: true,
+  hideTestRequestButton: true,
+  showDeveloperTools: "never",
+  agent: { disabled: true },
+  mcp: { disabled: true }
+});`;
 
 test("uses the configured HTTPS port for production-bundle smoke", () => {
   assert.equal(
@@ -67,7 +77,7 @@ function smokeClient() {
         });
       if (path === "/docs/bootstrap.js")
         return response({
-          body: 'Scalar.createApiReference("#app", { url: "/openapi.json" });',
+          body: docsBootstrap,
           headers: { "content-type": "application/javascript" },
         });
       if (path === "/unknown")
@@ -850,6 +860,15 @@ test("rejects unavailable documentation scripts and a bootstrap with the wrong d
       /browser global/,
     ],
     [
+      "Scalar dynamic code probe",
+      "/docs/scalar.js",
+      response({
+        body: "window.Scalar = { createApiReference: () => Function(``) };",
+        headers: { "content-type": "application/javascript" },
+      }),
+      /dynamic code/,
+    ],
+    [
       "wrong OpenAPI target",
       "/docs/bootstrap.js",
       response({
@@ -857,6 +876,15 @@ test("rejects unavailable documentation scripts and a bootstrap with the wrong d
         headers: { "content-type": "application/javascript" },
       }),
       /openapi\.json/,
+    ],
+    [
+      "missing disabled interactive integrations",
+      "/docs/bootstrap.js",
+      response({
+        body: 'Scalar.createApiReference("#app", { url: "/openapi.json" });',
+        headers: { "content-type": "application/javascript" },
+      }),
+      /safe Scalar configuration/,
     ],
   ]) {
     await t.test(name, async () => {

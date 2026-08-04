@@ -79,6 +79,10 @@ const PRODUCTION_BUNDLE_STEPS = [
   { uses: NODE_SETUP, with: { "node-version": 24, cache: "pnpm" } },
   { run: "pnpm install --frozen-lockfile" },
   {
+    name: "Install Chromium for production documentation smoke",
+    run: "pnpm exec playwright install --with-deps chromium",
+  },
+  {
     name: "Define temporary production environment path",
     run: 'echo "MARKIRO_ENV_FILE=$RUNNER_TEMP/markiro-production-test.env" >> "$GITHUB_ENV"',
   },
@@ -108,6 +112,10 @@ const PRODUCTION_BUNDLE_STEPS = [
     name: "Smoke the production bundle",
     env: { NODE_TLS_REJECT_UNAUTHORIZED: "0" },
     run: "MARKIRO_SMOKE_CI_OVERLAY=1 SMOKE_ASSERT_SHUTDOWN=1 node deploy/production/smoke.mjs",
+  },
+  {
+    name: "Browser-smoke production API documentation",
+    run: "pnpm test:production-docs:browser",
   },
   {
     name: "Show sanitized production-bundle logs on failure",
@@ -513,9 +521,17 @@ test("CI contract rejects each hidden-step, shell, log, and cleanup mutation for
   const ci = await source(".github/workflows/ci.yml");
   const install =
     "      - run: pnpm install --frozen-lockfile\n" +
+    "      - name: Install Chromium for production documentation smoke\n" +
+    "        run: pnpm exec playwright install --with-deps chromium\n" +
     "      - name: Define temporary production environment path";
   const smoke =
     "        run: MARKIRO_SMOKE_CI_OVERLAY=1 SMOKE_ASSERT_SHUTDOWN=1 node deploy/production/smoke.mjs";
+  const chromiumInstall =
+    "      - name: Install Chromium for production documentation smoke\n" +
+    "        run: pnpm exec playwright install --with-deps chromium\n";
+  const browserSmoke =
+    "      - name: Browser-smoke production API documentation\n" +
+    "        run: pnpm test:production-docs:browser\n";
   const build =
     '          docker build --file deploy/production/api.Dockerfile --tag "ghcr.io/thevladbog/markiro-api:${{ github.sha }}" .';
   const logsIf =
@@ -536,6 +552,8 @@ test("CI contract rejects each hidden-step, shell, log, and cleanup mutation for
       search: install,
       replacement:
         "      - run: pnpm install --frozen-lockfile\n" +
+        "      - name: Install Chromium for production documentation smoke\n" +
+        "        run: pnpm exec playwright install --with-deps chromium\n" +
         "      - id: hidden-environment-reader\n" +
         `        run: node -e "require('node:fs').readFileSync(process.env.RUNNER_TEMP + '/markiro-production-test.env')"\n` +
         "      - name: Define temporary production environment path",
@@ -546,6 +564,8 @@ test("CI contract rejects each hidden-step, shell, log, and cleanup mutation for
       search: install,
       replacement:
         "      - run: pnpm install --frozen-lockfile\n" +
+        "      - name: Install Chromium for production documentation smoke\n" +
+        "        run: pnpm exec playwright install --with-deps chromium\n" +
         "      - if: always()\n" +
         "        run: true\n" +
         "      - name: Define temporary production environment path",
@@ -556,6 +576,18 @@ test("CI contract rejects each hidden-step, shell, log, and cleanup mutation for
       search: smoke,
       replacement: `${smoke}; node -e "require('node:fs').readFileSync(process.env.RUNNER_TEMP + '/markiro-production-test.env')"`,
       expected: /unexpected Smoke the production bundle step/,
+    },
+    {
+      name: "Chromium install removed",
+      search: chromiumInstall,
+      replacement: "",
+      expected: /unexpected production-bundle steps/,
+    },
+    {
+      name: "browser documentation gate removed",
+      search: browserSmoke,
+      replacement: "",
+      expected: /unexpected production-bundle steps/,
     },
     {
       name: "absolute Docker executable",

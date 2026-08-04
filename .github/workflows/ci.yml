@@ -123,6 +123,8 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Install Chromium for production documentation smoke
+        run: pnpm exec playwright install --with-deps chromium
       - name: Define temporary production environment path
         run: echo "MARKIRO_ENV_FILE=$RUNNER_TEMP/markiro-production-test.env" >> "$GITHUB_ENV"
       - name: Verify production bundle contracts
@@ -199,6 +201,8 @@ jobs:
         env:
           NODE_TLS_REJECT_UNAUTHORIZED: "0"
         run: MARKIRO_SMOKE_CI_OVERLAY=1 SMOKE_ASSERT_SHUTDOWN=1 node deploy/production/smoke.mjs
+      - name: Browser-smoke production API documentation
+        run: pnpm test:production-docs:browser
       - name: Show sanitized production-bundle logs on failure
         if: failure()
         run: >-

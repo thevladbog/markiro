@@ -195,10 +195,46 @@ function assertNoExternalOrigins(html, baseUrl) {
   }
 }
 
+function scriptElements(html) {
+  const lower = html.toLowerCase();
+  const elements = [];
+  let cursor = 0;
+
+  while (cursor < html.length) {
+    const opening = lower.indexOf("<script", cursor);
+    if (opening === -1) break;
+    const openingBoundary = lower[opening + "<script".length];
+    if (openingBoundary !== ">" && !/\s/.test(openingBoundary ?? "")) {
+      cursor = opening + "<script".length;
+      continue;
+    }
+    const openingEnd = lower.indexOf(">", opening + "<script".length);
+    if (openingEnd === -1) throw new Error("docs contains an unclosed script tag");
+
+    let closing = lower.indexOf("</script", openingEnd + 1);
+    let closingEnd = -1;
+    while (closing !== -1) {
+      closingEnd = closing + "</script".length;
+      while (/\s/.test(lower[closingEnd] ?? "")) closingEnd += 1;
+      if (lower[closingEnd] === ">") break;
+      closing = lower.indexOf("</script", closing + "</script".length);
+    }
+    if (closing === -1) throw new Error("docs contains an unclosed script element");
+
+    elements.push({
+      attributes: html.slice(opening + "<script".length, openingEnd),
+      body: html.slice(openingEnd + 1, closing),
+    });
+    cursor = closingEnd + 1;
+  }
+
+  return elements;
+}
+
 function documentationScripts(html, baseUrl) {
-  const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)].map((match) => {
-    if (match[2]?.trim()) throw new Error("docs contains an inline script");
-    const source = match[1]?.match(/\bsrc\s*=\s*["']([^"']+)["']/i)?.[1];
+  const scripts = scriptElements(html).map(({ attributes, body }) => {
+    if (body.trim()) throw new Error("docs contains an inline script");
+    const source = attributes.match(/\bsrc\s*=\s*["']([^"']+)["']/i)?.[1];
     if (!source) throw new Error("docs contains an inline script");
     if (source.startsWith("//")) throw new Error("docs contains an external origin");
     const url = new URL(source, baseUrl);
@@ -228,8 +264,26 @@ async function assertDocumentation(client, html, baseUrl) {
       !/window\.Scalar\s*=\s*\{\s*createApiReference\s*:/.test(body)
     )
       throw new Error("Scalar browser global is unavailable");
-    if (url.pathname === "/docs/bootstrap.js" && !/\burl\s*:\s*["']\/openapi\.json["']/.test(body))
-      throw new Error("docs bootstrap does not target /openapi.json");
+    if (url.pathname === "/docs/scalar.js" && body.includes("Function(``)"))
+      throw new Error("Scalar browser bundle retains dynamic code evaluation");
+    if (url.pathname === "/docs/bootstrap.js") {
+      if (!/\burl\s*:\s*["']\/openapi\.json["']/.test(body))
+        throw new Error("docs bootstrap does not target /openapi.json");
+      const safeScalarConfiguration = [
+        /\btelemetry\s*:\s*false\b/,
+        /\bwithDefaultFonts\s*:\s*false\b/,
+        /\bhideClientButton\s*:\s*true\b/,
+        /\bhideTestRequestButton\s*:\s*true\b/,
+        /\bshowDeveloperTools\s*:\s*["']never["']/,
+        /\bagent\s*:\s*\{\s*disabled\s*:\s*true\s*\}/,
+        /\bmcp\s*:\s*\{\s*disabled\s*:\s*true\s*\}/,
+      ];
+      if (
+        safeScalarConfiguration.some((setting) => !setting.test(body)) ||
+        /\bshowToolbar\s*:/.test(body)
+      )
+        throw new Error("docs bootstrap does not use the safe Scalar configuration");
+    }
   }
 }
 
