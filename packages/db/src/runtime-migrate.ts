@@ -40,25 +40,21 @@ export async function runRuntimeMigrations(
     }
 
     pool = new pg.Pool({ connectionString: options.databaseUrl });
-    const db = drizzle(pool);
     client = await pool.connect();
-    let lockAcquired = false;
+    const db = drizzle(client);
     let migrationError: unknown;
     let unlockError: unknown;
 
     try {
       await client.query("SELECT pg_advisory_lock($1, $2)", advisoryLockKeys);
-      lockAcquired = true;
       await migrate(db, { migrationsFolder: options.migrationsFolder });
     } catch (error) {
       migrationError = error;
     } finally {
-      if (lockAcquired) {
-        try {
-          await client.query("SELECT pg_advisory_unlock($1, $2)", advisoryLockKeys);
-        } catch (error) {
-          unlockError = error;
-        }
+      try {
+        await client.query("SELECT pg_advisory_unlock($1, $2)", advisoryLockKeys);
+      } catch (error) {
+        unlockError = error;
       }
     }
 

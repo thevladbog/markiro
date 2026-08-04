@@ -2,6 +2,8 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 const harness = vi.hoisted(() => {
   const calls: unknown[][] = [];
+  const db = {};
+  const drizzle = vi.fn(() => db);
   const migration = vi.fn();
   const readFile = vi.fn();
   const client = {
@@ -25,11 +27,11 @@ const harness = vi.hoisted(() => {
     return pool;
   });
 
-  return { Pool, calls, client, migration, pool, readFile };
+  return { Pool, calls, client, db, drizzle, migration, pool, readFile };
 });
 
 vi.mock("pg", () => ({ default: { Pool: harness.Pool } }));
-vi.mock("drizzle-orm/node-postgres", () => ({ drizzle: vi.fn(() => ({})) }));
+vi.mock("drizzle-orm/node-postgres", () => ({ drizzle: harness.drizzle }));
 vi.mock("drizzle-orm/node-postgres/migrator", () => ({
   migrate: harness.migration,
 }));
@@ -46,8 +48,12 @@ const lockKeys = [1296126539, 1230131023];
 function resetHarness() {
   harness.calls.splice(0);
   harness.Pool.mockClear();
-  harness.client.query.mockClear();
+  harness.client.query.mockReset();
+  harness.client.query.mockImplementation(async (query: string, values?: unknown[]) => {
+    harness.calls.push(["query", query, values]);
+  });
   harness.client.release.mockClear();
+  harness.drizzle.mockClear();
   harness.migration.mockClear();
   harness.pool.connect.mockClear();
   harness.pool.end.mockClear();
@@ -82,6 +88,8 @@ describe("runRuntimeMigrations", () => {
       ["release"],
       ["pool.end"],
     ]);
+    expect(harness.drizzle).toHaveBeenCalledWith(harness.client);
+    expect(harness.migration).toHaveBeenCalledWith(harness.db, { migrationsFolder });
     expect(result).toEqual({
       packaged: ["0028_avatar-owner-integrity"],
       completedAt: "2026-08-04T12:00:00.000Z",
@@ -120,6 +128,36 @@ describe("runRuntimeMigrations", () => {
     ).rejects.toBe(migrationError);
     expect(harness.client.release).toHaveBeenCalledOnce();
     expect(harness.pool.end).toHaveBeenCalledOnce();
+  });
+
+  test("unlocks and closes resources when advisory lock acquisition fails", async () => {
+    const logs: string[] = [];
+    const lockError = new Error("provider says " + databaseUrl);
+    harness.client.query.mockImplementationOnce(async (query: string, values?: unknown[]) => {
+      harness.calls.push(["query", query, values]);
+      throw lockError;
+    }).mockImplementationOnce(async (query: string, values?: unknown[]) => {
+      harness.calls.push(["query", query, values]);
+      throw new Error("unlock failed");
+    });
+
+    await expect(
+      runRuntimeMigrations({ databaseUrl, migrationsFolder, log: (message) => logs.push(message) }),
+    ).rejects.toBe(lockError);
+
+    expect(harness.calls).toEqual([
+      ["connect"],
+      ["query", lockQuery, lockKeys],
+      ["query", unlockQuery, lockKeys],
+      ["release"],
+      ["pool.end"],
+    ]);
+    expect(logs).toEqual([
+      "runtime migration started",
+      "migration packaged: 0028_avatar-owner-integrity",
+      "runtime migration failed",
+    ]);
+    expect(logs.join("\n")).not.toContain(databaseUrl);
   });
 
   test("logs packaged tags without SQL or connection secrets", async () => {
