@@ -31,6 +31,15 @@ const expectedRuntimeExport = {
   types: "./dist/runtime-migrate.d.ts",
   default: "./dist/runtime-migrate.js",
 };
+const expectedRootValueExports = [
+  "STATION_MIGRATIONS",
+  "buildAuth",
+  "createDb",
+  "ensurePartitions",
+  "partitionName",
+  "schema",
+  "sqliteSchema",
+];
 const sharedDistBefore = await snapshotDirectory(sourceDist);
 
 let fixtureRoot;
@@ -69,22 +78,7 @@ before(async () => {
   ).href;
 
   consumerRoot = await createConsumer("actual", isolatedPackageRoot);
-  const probe = spawnSync(
-    process.execPath,
-    [
-      "--input-type=module",
-      "--eval",
-      `const root = await import("@markiro/db");
-       const runtime = await import("@markiro/db/runtime-migrate");
-       console.log(JSON.stringify({
-         rootMigrationExports: Object.keys(root).filter((name) => /runtime.*migrat/i.test(name)),
-         runtimeExportType: typeof runtime.runRuntimeMigrations,
-       }));`,
-    ],
-    { cwd: consumerRoot, encoding: "utf8" },
-  );
-  assert.equal(probe.status, 0, `${probe.stdout}\n${probe.stderr}`);
-  packageProbe = JSON.parse(probe.stdout);
+  packageProbe = probePackageRuntime(consumerRoot);
 
   runtimeHook = join(fixtureRoot, "runtime-hook.mjs");
   await writeFile(
@@ -123,6 +117,12 @@ function assertRuntimeExportContract(manifest) {
   assert.deepEqual(manifest.exports["./runtime-migrate"], expectedRuntimeExport);
 }
 
+function assertRootRuntimeValueContract(actualExports) {
+  const unexpected = actualExports.filter((name) => !expectedRootValueExports.includes(name));
+  assert.deepEqual(unexpected, [], `unexpected root runtime export: ${unexpected.join(", ")}`);
+  assert.deepEqual(actualExports, expectedRootValueExports);
+}
+
 async function assertMappedArtifactsExist(packageRoot, mapping = expectedRuntimeExport) {
   for (const target of Object.values(mapping)) {
     const metadata = await stat(join(packageRoot, target));
@@ -145,6 +145,54 @@ async function copyIsolatedPackage(name) {
   await cp(join(isolatedPackageRoot, "dist"), join(target, "dist"), { recursive: true });
   await symlink(sourceNodeModules, join(target, "node_modules"), "dir");
   return target;
+}
+
+async function buildSourceMutation(name, mutation) {
+  const target = join(fixtureRoot, "packages", name);
+  await mkdir(target, { recursive: true });
+  await cp(join(sourcePackageRoot, "src"), join(target, "src"), { recursive: true });
+  await mutation(join(target, "src"));
+  await writeFile(join(target, "package.json"), `${JSON.stringify(packageJson, null, 2)}\n`);
+  await writeFile(
+    join(target, "tsconfig.json"),
+    `${JSON.stringify(
+      {
+        extends: join(sourcePackageRoot, "tsconfig.json"),
+        compilerOptions: { outDir: "./dist", rootDir: "./src" },
+        include: ["src"],
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  await symlink(sourceNodeModules, join(target, "node_modules"), "dir");
+
+  const build = spawnSync(
+    process.execPath,
+    [compiler, "--project", join(target, "tsconfig.json")],
+    { cwd: target, encoding: "utf8" },
+  );
+  assert.equal(build.status, 0, `${build.stdout}\n${build.stderr}`);
+  return target;
+}
+
+function probePackageRuntime(currentConsumer) {
+  const probe = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "--eval",
+      `const root = await import("@markiro/db");
+       const runtime = await import("@markiro/db/runtime-migrate");
+       console.log(JSON.stringify({
+         rootValueExports: Object.keys(root).sort(),
+         runtimeExportType: typeof runtime.runRuntimeMigrations,
+       }));`,
+    ],
+    { cwd: currentConsumer, encoding: "utf8" },
+  );
+  assert.equal(probe.status, 0, `${probe.stdout}\n${probe.stderr}`);
+  return JSON.parse(probe.stdout);
 }
 
 async function compileFixture(currentConsumer, filename, source) {
@@ -217,7 +265,23 @@ async function snapshotDirectory(directory) {
 }
 
 test("the isolated package root cannot expose the server-only runtime migrator", () => {
-  assert.deepEqual(packageProbe.rootMigrationExports, []);
+  assertRootRuntimeValueContract(packageProbe.rootValueExports);
+});
+
+test("the root value probe detects an adversarially renamed runtime migrator", async () => {
+  const mutatedPackage = await buildSourceMutation("renamed-runtime-export", async (source) => {
+    await appendFile(
+      join(source, "index.ts"),
+      'export { runRuntimeMigrations as executeUpgrade } from "./runtime-migrate.js";\n',
+    );
+  });
+  const mutatedConsumer = await createConsumer("renamed-runtime-export", mutatedPackage);
+  const mutatedProbe = probePackageRuntime(mutatedConsumer);
+
+  assert.throws(
+    () => assertRootRuntimeValueContract(mutatedProbe.rootValueExports),
+    /unexpected root runtime export: executeUpgrade/,
+  );
 });
 
 test("the isolated runtime-migrate subpath exports the built migration function", () => {
@@ -252,9 +316,14 @@ test("the isolated package exposes runtime migration values and types only from 
   const subpath = await compileFixture(
     consumerRoot,
     "subpath.ts",
-    `import { runRuntimeMigrations, type RuntimeMigrationOptions } from "@markiro/db/runtime-migrate";
+    `import {
+  runRuntimeMigrations,
+  type RuntimeMigrationOptions,
+  type RuntimeMigrationResult,
+} from "@markiro/db/runtime-migrate";
 const options: RuntimeMigrationOptions = { databaseUrl: "", migrationsFolder: "" };
-void runRuntimeMigrations(options);
+const result: Promise<RuntimeMigrationResult> = runRuntimeMigrations(options);
+void result;
 `,
   );
   assert.equal(subpath.status, 0, `${subpath.stdout}\n${subpath.stderr}`);
@@ -262,33 +331,39 @@ void runRuntimeMigrations(options);
   const rootImport = await compileFixture(
     consumerRoot,
     "root.ts",
-    `import { runRuntimeMigrations, type RuntimeMigrationOptions } from "@markiro/db";
+    `import {
+  runRuntimeMigrations,
+  type RuntimeMigrationOptions,
+  type RuntimeMigrationResult,
+} from "@markiro/db";
 const options: RuntimeMigrationOptions = { databaseUrl: "", migrationsFolder: "" };
-void runRuntimeMigrations(options);
+const result: Promise<RuntimeMigrationResult> = runRuntimeMigrations(options);
+void result;
 `,
   );
   assertMissingRootExport(rootImport, "runRuntimeMigrations");
   assertMissingRootExport(rootImport, "RuntimeMigrationOptions");
+  assertMissingRootExport(rootImport, "RuntimeMigrationResult");
 });
 
 test("the root type probe detects an adversarial type-only runtime export", async () => {
   const mutatedPackage = await copyIsolatedPackage("type-only-root-export");
   await appendFile(
     join(mutatedPackage, "dist/index.d.ts"),
-    'export type { RuntimeMigrationOptions } from "./runtime-migrate.js";\n',
+    'export type { RuntimeMigrationResult } from "./runtime-migrate.js";\n',
   );
   const mutatedConsumer = await createConsumer("type-only-root-export", mutatedPackage);
   const result = await compileFixture(
     mutatedConsumer,
     "root-type.ts",
-    `import type { RuntimeMigrationOptions } from "@markiro/db";
-const options = {} as RuntimeMigrationOptions;
-void options;
+    `import type { RuntimeMigrationResult } from "@markiro/db";
+const migrationResult = {} as RuntimeMigrationResult;
+void migrationResult;
 `,
   );
 
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
-  assert.throws(() => assertMissingRootExport(result, "RuntimeMigrationOptions"));
+  assert.throws(() => assertMissingRootExport(result, "RuntimeMigrationResult"));
 });
 
 test("the isolated migration CLI loads and calls the exact server implementation without DB access", () => {
