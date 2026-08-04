@@ -30,7 +30,11 @@ test("CI verifies the production bundle with scoped, secret-safe Docker cleanup"
   assert.match(bundle, /MARKIRO_DOMAIN: localhost/);
   assert.match(bundle, /MARKIRO_HTTP_PORT: "18080"/);
   assert.match(bundle, /MARKIRO_HTTPS_PORT: "18443"/);
-  assert.match(bundle, /MARKIRO_ENV_FILE: \$\{\{ runner\.temp \}\}\/markiro-production-test\.env/);
+  assert.doesNotMatch(bundle, /^      MARKIRO_ENV_FILE:/m);
+  assert.match(
+    bundle,
+    /name: Define temporary production environment path[\s\S]*?echo "MARKIRO_ENV_FILE=\$RUNNER_TEMP\/markiro-production-test\.env" >> "\$GITHUB_ENV"/,
+  );
   assert.match(bundle, /pnpm install --frozen-lockfile/);
   assert.match(bundle, /pnpm test:production-bundle:contract/);
   assert.match(
@@ -51,13 +55,16 @@ test("CI verifies the production bundle with scoped, secret-safe Docker cleanup"
   assert.match(bundle, /node deploy\/production\/preflight\.mjs/);
 
   const dependencies = bundle.indexOf("postgres mailpit minio");
+  const environmentPath = bundle.indexOf("Define temporary production environment path");
   const init = bundle.indexOf("minio-init");
   const firstMigration = bundle.indexOf("run --rm migrate");
   const secondMigration = bundle.indexOf("run --rm migrate", firstMigration + 1);
   const app = bundle.search(/up -d --wait --wait-timeout 120 --no-deps\s+api edge/);
   const smoke = bundle.indexOf("SMOKE_ASSERT_SHUTDOWN=1 node deploy/production/smoke.mjs");
   assert.ok(
-    dependencies >= 0 &&
+    environmentPath >= 0 &&
+      environmentPath < dependencies &&
+      dependencies >= 0 &&
       init > dependencies &&
       firstMigration > init &&
       secondMigration > firstMigration,

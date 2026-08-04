@@ -110,7 +110,6 @@ jobs:
       MARKIRO_DOMAIN: localhost
       MARKIRO_HTTP_PORT: "18080"
       MARKIRO_HTTPS_PORT: "18443"
-      MARKIRO_ENV_FILE: ${{ runner.temp }}/markiro-production-test.env
       ACME_EMAIL: ci@markiro.local
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -122,6 +121,8 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Define temporary production environment path
+        run: echo "MARKIRO_ENV_FILE=$RUNNER_TEMP/markiro-production-test.env" >> "$GITHUB_ENV"
       - name: Verify production bundle contracts
         run: pnpm test:production-bundle:contract
       - name: Build immutable local production images
