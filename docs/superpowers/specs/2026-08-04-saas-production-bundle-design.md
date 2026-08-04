@@ -1,7 +1,7 @@
 # SaaS Production Bundle — Design Spec
 
 **Date:** 2026-08-04
-**Status:** Approved
+**Status:** Implemented and verified
 **Slice of:** Markiro MVP roadmap plan 08, deployment foundation
 **Related:** `docs/architecture.md`,
 `docs/superpowers/specs/2026-08-03-tenant-team-email-profile-design.md`,
@@ -313,6 +313,52 @@ additional gate, not a replacement.
   shutdown.
 - The operator runbook defines deploy, smoke, rollback, secret handling, and
   the external edge-rate-limit go-live gate.
+
+## Implementation evidence
+
+Tasks 1–7 were completed and reviewed on the production-bundle branch before
+this status changed. Their final cumulative commits are:
+
+| Task                 | Verified result                                                                                                             | Final cumulative commit                    |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| 1 — readiness        | Focused readiness/health tests plus API lint and typecheck passed.                                                          | `357f701f52d5e6d79bf55a855f07e64adb7e2528` |
+| 2 — runtime migrator | Unit/build/typecheck gates passed; the controller also ran the packaged migrator twice against fresh PostgreSQL 17.         | `d2c07c200c905192703442d9fac5330db8b760e9` |
+| 3 — API image        | Contract, production image build, runtime closure, non-root, migrator, and source-removal probes passed.                    | `25553e0203025ee5938f8f4428c0a48db9bd9340` |
+| 4 — edge image       | Caddy adaptation, route contract, and production edge image build passed.                                                   | `645304af0a8fa3f4fd3821f6f574ad90e173d953` |
+| 5 — Compose          | Production/CI Compose contracts and the real disposable dependency stack passed, including the writable Mailpit correction. | `bd3de1ef29b4ead7226d23bcbccf680e209ed99d` |
+| 6 — deploy/smoke     | Deploy lifecycle and route/runtime/shutdown contracts passed, including exact Docker `PortBindings` validation.             | `9badd3490ad3f55dcb5e7d2c7ab27f9928cae78f` |
+| 7 — CI/release       | Structural workflow contracts and the complete production bundle passed locally.                                            | `590c6610079d2fb84e369747a8b42ef828c7e05e` |
+
+The final local contract command at Task 7 was:
+
+```bash
+corepack pnpm test:production-bundle:contract
+```
+
+It passed all 69 production-bundle contracts. The real disposable local bundle
+was also exercised with the production sources in the same sequence as the CI
+job (the temporary environment was mode `0600` and removed afterward):
+
+```bash
+docker build --load --file deploy/production/api.Dockerfile --tag "ghcr.io/thevladbog/markiro-api:${MARKIRO_IMAGE_TAG}" .
+docker build --load --file deploy/production/edge.Dockerfile --tag "ghcr.io/thevladbog/markiro-edge:${MARKIRO_IMAGE_TAG}" .
+node deploy/production/preflight.mjs
+docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml -f deploy/production/compose.ci.yml up -d --wait --wait-timeout 120 postgres mailpit minio
+docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml -f deploy/production/compose.ci.yml run --rm minio-init
+docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml -f deploy/production/compose.ci.yml run --rm migrate
+docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml -f deploy/production/compose.ci.yml run --rm migrate
+docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml -f deploy/production/compose.ci.yml up -d --wait --wait-timeout 120 --no-deps api edge
+SMOKE_ASSERT_SHUTDOWN=1 node deploy/production/smoke.mjs
+docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml -f deploy/production/compose.ci.yml down --volumes --remove-orphans
+```
+
+On GitHub-hosted runners, the `production-bundle` job was observed green in
+runs
+[`30896434986`](https://github.com/thevladbog/markiro/actions/runs/30896434986)
+and
+[`30897398557`](https://github.com/thevladbog/markiro/actions/runs/30897398557).
+This is evidence for those two runs only; it is not a claim that the latest
+whole workflow or every unrelated repository job is currently green.
 
 ## External references
 
