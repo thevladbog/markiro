@@ -9,6 +9,8 @@
 !apps/
 !apps/api/
 !apps/api/**
+!apps/admin/
+!apps/admin/**
 !packages/
 !packages/db/
 !packages/db/**
@@ -16,9 +18,12 @@
 !packages/domain/**
 !packages/email/
 !packages/email/**
+!packages/ui/
+!packages/ui/**
 !packages/db/migrations/**
 !deploy/
 !deploy/production/
+!deploy/production/Caddyfile
 !deploy/production/healthcheck.mjs
 
 .git
