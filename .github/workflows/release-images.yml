@@ -11,6 +11,8 @@ jobs:
   production-bundle:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    outputs:
+      verified-images-artifact-id: ${{ steps.verified-images-artifact.outputs.artifact-id }}
     permissions:
       contents: read
     env:
@@ -141,13 +143,15 @@ jobs:
             > "$manifest_path"
           chmod 600 "$archive_path" "$manifest_path"
       - name: Upload the verified production images
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        id: verified-images-artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: markiro-production-images-${{ github.sha }}
           path: ${{ runner.temp }}/markiro-release-images
           if-no-files-found: error
           retention-days: 1
           compression-level: 0
+          overwrite: true
       - name: Show sanitized production-bundle logs on failure
         if: failure()
         run: >-
@@ -168,9 +172,9 @@ jobs:
       packages: write
     steps:
       - name: Download the verified production images
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: markiro-production-images-${{ github.sha }}
+          artifact-ids: ${{ needs.production-bundle.outputs.verified-images-artifact-id }}
           path: ${{ runner.temp }}/markiro-release-images
       - name: Load and validate the verified production images
         env:

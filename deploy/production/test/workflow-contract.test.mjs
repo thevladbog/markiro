@@ -7,8 +7,12 @@ const CHECKOUT = "actions/checkout@11d5960a326750d5838078e36cf38b85af677262";
 const PNPM_SETUP = "pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1";
 const NODE_SETUP = "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020";
 const LOGIN = "docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1";
-const UPLOAD_ARTIFACT = "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02";
-const DOWNLOAD_ARTIFACT = "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093";
+const UPLOAD_ARTIFACT = "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a";
+const DOWNLOAD_ARTIFACT = "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c";
+const RELEASE_ARTIFACT_NAME = "markiro-production-images-${{ github.sha }}";
+const RELEASE_ARTIFACT_OUTPUTS = {
+  "verified-images-artifact-id": "${{ steps.verified-images-artifact.outputs.artifact-id }}",
+};
 const COMPOSE =
   'docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml -f deploy/production/compose.ci.yml';
 
@@ -157,13 +161,15 @@ const RELEASE_VERIFICATION_STEPS = [
   },
   {
     name: "Upload the verified production images",
+    id: "verified-images-artifact",
     uses: UPLOAD_ARTIFACT,
     with: {
-      name: "markiro-production-images-${{ github.sha }}",
+      name: RELEASE_ARTIFACT_NAME,
       path: "${{ runner.temp }}/markiro-release-images",
       "if-no-files-found": "error",
       "retention-days": 1,
       "compression-level": 0,
+      overwrite: true,
     },
   },
   ...PRODUCTION_BUNDLE_STEPS.slice(-2),
@@ -238,7 +244,7 @@ const RELEASE_STEPS = [
     name: "Download the verified production images",
     uses: DOWNLOAD_ARTIFACT,
     with: {
-      name: "markiro-production-images-${{ github.sha }}",
+      "artifact-ids": "${{ needs.production-bundle.outputs.verified-images-artifact-id }}",
       path: "${{ runner.temp }}/markiro-release-images",
     },
   },
@@ -403,7 +409,7 @@ function assertReleaseWorkflow(releaseSource, ciSource) {
   );
   assert.deepEqual(
     Object.keys(verification).sort(),
-    ["env", "permissions", "runs-on", "steps", "timeout-minutes"].sort(),
+    ["env", "outputs", "permissions", "runs-on", "steps", "timeout-minutes"].sort(),
     "unexpected release production-bundle job keys",
   );
   assert.deepEqual(
@@ -421,6 +427,11 @@ function assertReleaseWorkflow(releaseSource, ciSource) {
     verification.env,
     PRODUCTION_BUNDLE_ENV,
     "unexpected release production-bundle environment",
+  );
+  assert.deepEqual(
+    verification.outputs,
+    RELEASE_ARTIFACT_OUTPUTS,
+    "release verification must expose the exact uploaded artifact id",
   );
   assertExactSteps(verification.steps, RELEASE_VERIFICATION_STEPS, "release production-bundle");
 
@@ -458,8 +469,8 @@ function assertReleaseWorkflow(releaseSource, ciSource) {
   assertPinnedComments(releaseSource, PNPM_SETUP, "v4");
   assertPinnedComments(releaseSource, NODE_SETUP, "v4");
   assertPinnedComments(releaseSource, LOGIN, "v3.5.0");
-  assertPinnedComments(releaseSource, UPLOAD_ARTIFACT, "v4.6.2");
-  assertPinnedComments(releaseSource, DOWNLOAD_ARTIFACT, "v4.3.0");
+  assertPinnedComments(releaseSource, UPLOAD_ARTIFACT, "v7.0.1");
+  assertPinnedComments(releaseSource, DOWNLOAD_ARTIFACT, "v8.0.1");
   assert.doesNotMatch(releaseSource, /build-push-action|setup-buildx-action/);
   assertNoForbiddenWorkflowText(releaseSource, "release workflow");
 }
@@ -654,9 +665,9 @@ test("release contract rejects verification, artifact identity, publication, and
     },
     {
       name: "incorrect upload-artifact revision comment",
-      search: `${UPLOAD_ARTIFACT} # v4.6.2`,
+      search: `${UPLOAD_ARTIFACT} # v7.0.1`,
       replacement: `${UPLOAD_ARTIFACT} # v4.6.X`,
-      expected: /missing v4\.6\.2 revision comment/,
+      expected: /missing v7\.0\.1 revision comment/,
     },
     {
       name: "changed download-artifact pin",
@@ -695,15 +706,40 @@ test("release contract rejects verification, artifact identity, publication, and
       expected: /unexpected Upload the verified production images step/,
     },
     {
-      name: "download asks for a different artifact",
+      name: "download falls back to ambiguous name lookup",
       search:
-        `        uses: ${DOWNLOAD_ARTIFACT} # v4.3.0\n` +
+        `        uses: ${DOWNLOAD_ARTIFACT} # v8.0.1\n` +
         "        with:\n" +
-        "          name: markiro-production-images-${{ github.sha }}",
+        "          artifact-ids: ${{ needs.production-bundle.outputs.verified-images-artifact-id }}",
       replacement:
-        `        uses: ${DOWNLOAD_ARTIFACT} # v4.3.0\n` +
+        `        uses: ${DOWNLOAD_ARTIFACT} # v8.0.1\n` +
         "        with:\n" +
-        "          name: unverified-production-images-${{ github.sha }}",
+        `          name: ${RELEASE_ARTIFACT_NAME}`,
+      expected: /unexpected Download the verified production images step/,
+    },
+    {
+      name: "upload omits the artifact output step id",
+      search:
+        "      - name: Upload the verified production images\n" +
+        "        id: verified-images-artifact\n",
+      replacement: "      - name: Upload the verified production images\n",
+      expected: /unexpected Upload the verified production images step/,
+    },
+    {
+      name: "job output references an untrusted artifact field",
+      search:
+        "    outputs:\n" +
+        "      verified-images-artifact-id: ${{ steps.verified-images-artifact.outputs.artifact-id }}",
+      replacement:
+        "    outputs:\n" +
+        "      verified-images-artifact-id: ${{ steps.verified-images-artifact.outputs.artifact-url }}",
+      expected: /release verification must expose the exact uploaded artifact id/,
+    },
+    {
+      name: "download does not use the verification job artifact id",
+      search:
+        "          artifact-ids: ${{ needs.production-bundle.outputs.verified-images-artifact-id }}",
+      replacement: "          artifact-ids: 12345",
       expected: /unexpected Download the verified production images step/,
     },
     {
