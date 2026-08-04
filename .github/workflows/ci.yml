@@ -102,6 +102,126 @@ jobs:
         if: always()
         run: docker compose -f docker-compose.dev.yml down --volumes
 
+  production-bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      MARKIRO_IMAGE_TAG: ${{ github.sha }}
+      MARKIRO_API_IMAGE_DIGEST: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      MARKIRO_EDGE_IMAGE_DIGEST: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+      MARKIRO_DOMAIN: localhost
+      MARKIRO_HTTP_PORT: "18080"
+      MARKIRO_HTTPS_PORT: "18443"
+      ACME_EMAIL: ci@markiro.local
+    steps:
+      - name: Initialize protected production environment
+        run: |
+          set -euo pipefail
+          env_file="$RUNNER_TEMP/markiro-production-test.env"
+          umask 077
+          : > "$env_file"
+          chmod 600 "$env_file"
+          printf '%s\n' "MARKIRO_ENV_FILE=$env_file" >> "$GITHUB_ENV"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install Chromium for production documentation smoke
+        run: |
+          pnpm --dir tools/production-browser --ignore-workspace install --frozen-lockfile
+          pnpm --dir tools/production-browser --ignore-workspace exec playwright install --with-deps chromium
+      - name: Verify production bundle contracts
+        run: pnpm test:production-bundle:contract
+      - name: Generate masked test-only environment
+        run: |
+          set -euo pipefail
+          better_auth_secret="$(openssl rand -base64 48)"
+          pairing_code_pepper="$(openssl rand -hex 32)"
+          mail_payload_key="$(openssl rand -base64 32)"
+          smtp_user="markiro-ci"
+          smtp_password="$(openssl rand -hex 24)"
+          database_url="postgresql://markiro:markiro@postgres:5432/markiro"
+          for credential in \
+            "$better_auth_secret" \
+            "$pairing_code_pepper" \
+            "$mail_payload_key" \
+            "$smtp_user" \
+            "$smtp_password" \
+            "$database_url" \
+            "markiro" \
+            "markiro-development-only"; do
+            echo "::add-mask::$credential"
+          done
+          umask 077
+          {
+            printf '%s\n' "DATABASE_URL=$database_url"
+            printf '%s\n' "BETTER_AUTH_SECRET=$better_auth_secret"
+            printf '%s\n' "BETTER_AUTH_URL=https://localhost:18443"
+            printf '%s\n' "ADMIN_ORIGIN=https://localhost:18443"
+            printf '%s\n' "KIOSK_ORIGIN=https://localhost:18443"
+            printf '%s\n' "PAIRING_CODE_PEPPER=$pairing_code_pepper"
+            printf '%s\n' "SMTP_HOST=mailpit"
+            printf '%s\n' "SMTP_PORT=1025"
+            printf '%s\n' "SMTP_SECURE=false"
+            printf '%s\n' "SMTP_USER=$smtp_user"
+            printf '%s\n' "SMTP_PASSWORD=$smtp_password"
+            printf '%s\n' "SMTP_FROM_EMAIL=no-reply@markiro.local"
+            printf '%s\n' "SMTP_FROM_NAME=Markiro CI"
+            printf '%s\n' "SMTP_REPLY_TO="
+            printf '%s\n' "MAIL_PAYLOAD_ENCRYPTION_KEY=$mail_payload_key"
+            printf '%s\n' "S3_ENDPOINT=http://minio:9000"
+            printf '%s\n' "S3_REGION=us-east-1"
+            printf '%s\n' "S3_BUCKET=markiro-private"
+            printf '%s\n' "S3_ACCESS_KEY_ID=markiro"
+            printf '%s\n' "S3_SECRET_ACCESS_KEY=markiro-development-only"
+            printf '%s\n' "S3_FORCE_PATH_STYLE=true"
+          } > "$MARKIRO_ENV_FILE"
+          chmod 600 "$MARKIRO_ENV_FILE"
+      - name: Build local SHA-tagged production images
+        run: |
+          docker build --file deploy/production/api.Dockerfile --tag "ghcr.io/thevladbog/markiro-api:${{ github.sha }}" .
+          docker build --file deploy/production/edge.Dockerfile --tag "ghcr.io/thevladbog/markiro-edge:${{ github.sha }}" .
+      - name: Validate the production bundle
+        run: node deploy/production/preflight.mjs
+      - name: Start production-bundle dependencies
+        run: >-
+          docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml
+          -f deploy/production/compose.ci.yml up -d --wait --wait-timeout 120
+          postgres mailpit minio
+      - name: Initialize the test bucket
+        run: >-
+          docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml
+          -f deploy/production/compose.ci.yml run --rm minio-init
+      - name: Run production migrations twice
+        run: |
+          docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml -f deploy/production/compose.ci.yml run --rm migrate
+          docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml -f deploy/production/compose.ci.yml run --rm migrate
+      - name: Start the API and edge
+        run: >-
+          docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml
+          -f deploy/production/compose.ci.yml up -d --wait --wait-timeout 120 --no-deps api edge
+      - name: Smoke the production bundle
+        env:
+          NODE_TLS_REJECT_UNAUTHORIZED: "0"
+        run: MARKIRO_SMOKE_CI_OVERLAY=1 SMOKE_ASSERT_DEPENDENCY_ISOLATION=1 SMOKE_ASSERT_SHUTDOWN=1 node deploy/production/smoke.mjs
+      - name: Browser-smoke production API documentation
+        run: pnpm test:production-docs:browser
+      - name: Show sanitized production-bundle logs on failure
+        if: failure()
+        run: >-
+          docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml
+          -f deploy/production/compose.ci.yml logs --no-color
+      - name: Remove production-bundle containers and volumes
+        if: always()
+        run: >-
+          docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml
+          -f deploy/production/compose.ci.yml down --volumes --remove-orphans
+
   station-rust:
     runs-on: ubuntu-latest
     # WebKit pulls a large dependency tree and GitHub's Azure apt mirror can

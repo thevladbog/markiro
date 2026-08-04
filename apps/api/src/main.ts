@@ -3,12 +3,12 @@ import express, { type Express } from "express";
 import { Logger } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
-import { apiReference } from "@scalar/nestjs-api-reference";
 import { AppModule } from "./app.module";
 import { mountAuth, setupAuth } from "./auth/auth.setup";
 import { corsDelegate } from "./cors";
 import { loadEnv } from "./env";
 import { excludeExchangeRoute } from "./modules/exchange/exchange.module";
+import { mountOpenApiDocs } from "./openapi-docs";
 
 const logger = new Logger("bootstrap");
 
@@ -68,15 +68,17 @@ async function bootstrap() {
   // Without this, SIGINT/SIGTERM kill the process directly and Nest never
   // runs onModuleDestroy — so PgBossService.onModuleDestroy (boss.stop())
   // would never fire and pg-boss's connection pool would be torn down
-  // abruptly instead of closing cleanly.
-  app.enableShutdownHooks();
+  // abruptly instead of closing cleanly. Nest 11 otherwise re-sends the
+  // original signal after successful hooks, which makes Docker report 143;
+  // process-exit mode reports hook success as 0 and hook failure as 1.
+  app.enableShutdownHooks([], { useProcessExit: true });
 
   const doc = SwaggerModule.createDocument(
     app,
     new DocumentBuilder().setTitle("Markiro API").setVersion("0.1").build(),
   );
   app.use("/openapi.json", (_req: unknown, res: { json(b: unknown): void }) => res.json(doc));
-  app.use("/docs", apiReference({ content: doc }));
+  mountOpenApiDocs(server);
   await app.listen(env.PORT);
 }
 void bootstrap();

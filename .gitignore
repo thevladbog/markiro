@@ -5,6 +5,10 @@ dist/
 coverage/
 install.log
 .env
+.env.production
+.markiro-releases/
+deploy/production/.caddy-data/
+deploy/production/.caddy-config/
 
 # Sibling agent worktrees (also in .prettierignore)
 .worktrees/

@@ -1,0 +1,283 @@
+name: Publish production images
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  production-bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      verified-images-artifact-id: ${{ steps.verified-images-artifact.outputs.artifact-id }}
+    permissions:
+      contents: read
+    env:
+      MARKIRO_IMAGE_TAG: ${{ github.sha }}
+      MARKIRO_API_IMAGE_DIGEST: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      MARKIRO_EDGE_IMAGE_DIGEST: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+      MARKIRO_DOMAIN: localhost
+      MARKIRO_HTTP_PORT: "18080"
+      MARKIRO_HTTPS_PORT: "18443"
+      ACME_EMAIL: ci@markiro.local
+    steps:
+      - name: Initialize protected production environment
+        run: |
+          set -euo pipefail
+          env_file="$RUNNER_TEMP/markiro-production-test.env"
+          umask 077
+          : > "$env_file"
+          chmod 600 "$env_file"
+          printf '%s\n' "MARKIRO_ENV_FILE=$env_file" >> "$GITHUB_ENV"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install Chromium for production documentation smoke
+        run: |
+          pnpm --dir tools/production-browser --ignore-workspace install --frozen-lockfile
+          pnpm --dir tools/production-browser --ignore-workspace exec playwright install --with-deps chromium
+      - name: Verify production bundle contracts
+        run: pnpm test:production-bundle:contract
+      - name: Generate masked test-only environment
+        run: |
+          set -euo pipefail
+          better_auth_secret="$(openssl rand -base64 48)"
+          pairing_code_pepper="$(openssl rand -hex 32)"
+          mail_payload_key="$(openssl rand -base64 32)"
+          smtp_user="markiro-ci"
+          smtp_password="$(openssl rand -hex 24)"
+          database_url="postgresql://markiro:markiro@postgres:5432/markiro"
+          for credential in \
+            "$better_auth_secret" \
+            "$pairing_code_pepper" \
+            "$mail_payload_key" \
+            "$smtp_user" \
+            "$smtp_password" \
+            "$database_url" \
+            "markiro" \
+            "markiro-development-only"; do
+            echo "::add-mask::$credential"
+          done
+          umask 077
+          {
+            printf '%s\n' "DATABASE_URL=$database_url"
+            printf '%s\n' "BETTER_AUTH_SECRET=$better_auth_secret"
+            printf '%s\n' "BETTER_AUTH_URL=https://localhost:18443"
+            printf '%s\n' "ADMIN_ORIGIN=https://localhost:18443"
+            printf '%s\n' "KIOSK_ORIGIN=https://localhost:18443"
+            printf '%s\n' "PAIRING_CODE_PEPPER=$pairing_code_pepper"
+            printf '%s\n' "SMTP_HOST=mailpit"
+            printf '%s\n' "SMTP_PORT=1025"
+            printf '%s\n' "SMTP_SECURE=false"
+            printf '%s\n' "SMTP_USER=$smtp_user"
+            printf '%s\n' "SMTP_PASSWORD=$smtp_password"
+            printf '%s\n' "SMTP_FROM_EMAIL=no-reply@markiro.local"
+            printf '%s\n' "SMTP_FROM_NAME=Markiro CI"
+            printf '%s\n' "SMTP_REPLY_TO="
+            printf '%s\n' "MAIL_PAYLOAD_ENCRYPTION_KEY=$mail_payload_key"
+            printf '%s\n' "S3_ENDPOINT=http://minio:9000"
+            printf '%s\n' "S3_REGION=us-east-1"
+            printf '%s\n' "S3_BUCKET=markiro-private"
+            printf '%s\n' "S3_ACCESS_KEY_ID=markiro"
+            printf '%s\n' "S3_SECRET_ACCESS_KEY=markiro-development-only"
+            printf '%s\n' "S3_FORCE_PATH_STYLE=true"
+          } > "$MARKIRO_ENV_FILE"
+          chmod 600 "$MARKIRO_ENV_FILE"
+      - name: Build local SHA-tagged production images
+        run: |
+          docker build --file deploy/production/api.Dockerfile --tag "ghcr.io/thevladbog/markiro-api:${{ github.sha }}" .
+          docker build --file deploy/production/edge.Dockerfile --tag "ghcr.io/thevladbog/markiro-edge:${{ github.sha }}" .
+      - name: Validate the production bundle
+        run: node deploy/production/preflight.mjs
+      - name: Start production-bundle dependencies
+        run: >-
+          docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml
+          -f deploy/production/compose.ci.yml up -d --wait --wait-timeout 120
+          postgres mailpit minio
+      - name: Initialize the test bucket
+        run: >-
+          docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml
+          -f deploy/production/compose.ci.yml run --rm minio-init
+      - name: Run production migrations twice
+        run: |
+          docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml -f deploy/production/compose.ci.yml run --rm migrate
+          docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml -f deploy/production/compose.ci.yml run --rm migrate
+      - name: Start the API and edge
+        run: >-
+          docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml
+          -f deploy/production/compose.ci.yml up -d --wait --wait-timeout 120 --no-deps api edge
+      - name: Smoke the production bundle
+        env:
+          NODE_TLS_REJECT_UNAUTHORIZED: "0"
+        run: MARKIRO_SMOKE_CI_OVERLAY=1 SMOKE_ASSERT_DEPENDENCY_ISOLATION=1 SMOKE_ASSERT_SHUTDOWN=1 node deploy/production/smoke.mjs
+      - name: Browser-smoke production API documentation
+        run: pnpm test:production-docs:browser
+      - name: Package the verified production images
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          artifact_dir="$RUNNER_TEMP/markiro-release-images"
+          manifest_path="$artifact_dir/manifest.json"
+          archive_path="$artifact_dir/images.tar"
+          release_sha="$RELEASE_SHA"
+          api_tag="ghcr.io/thevladbog/markiro-api:$release_sha"
+          edge_tag="ghcr.io/thevladbog/markiro-edge:$release_sha"
+          [[ "$release_sha" =~ ^[0-9a-f]{40}$ ]]
+          test ! -e "$artifact_dir"
+          umask 077
+          install -d -m 700 "$artifact_dir"
+          api_image_id="$(docker image inspect --format '{{.Id}}' "$api_tag")"
+          edge_image_id="$(docker image inspect --format '{{.Id}}' "$edge_tag")"
+          [[ "$api_image_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$edge_image_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+          docker save --output "$archive_path" "$api_tag" "$edge_tag"
+          test -s "$archive_path"
+          archive_sha256="$(sha256sum "$archive_path" | cut -d' ' -f1)"
+          [[ "$archive_sha256" =~ ^[0-9a-f]{64}$ ]]
+          jq -n \
+            --arg release_sha "$release_sha" \
+            --arg archive_sha256 "$archive_sha256" \
+            --arg api_tag "$api_tag" \
+            --arg api_image_id "$api_image_id" \
+            --arg edge_tag "$edge_tag" \
+            --arg edge_image_id "$edge_image_id" \
+            '{release_sha: $release_sha, archive_sha256: $archive_sha256, images: {api: {tag: $api_tag, id: $api_image_id}, edge: {tag: $edge_tag, id: $edge_image_id}}}' \
+            > "$manifest_path"
+          chmod 600 "$archive_path" "$manifest_path"
+      - name: Upload the verified production images
+        id: verified-images-artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: markiro-production-images-${{ github.sha }}
+          path: ${{ runner.temp }}/markiro-release-images
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+          overwrite: true
+      - name: Show sanitized production-bundle logs on failure
+        if: failure()
+        run: >-
+          docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml
+          -f deploy/production/compose.ci.yml logs --no-color
+      - name: Remove production-bundle containers and volumes
+        if: always()
+        run: >-
+          docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml
+          -f deploy/production/compose.ci.yml down --volumes --remove-orphans
+
+  publish:
+    needs: production-bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Download the verified production images
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.production-bundle.outputs.verified-images-artifact-id }}
+          path: ${{ runner.temp }}/markiro-release-images
+      - name: Load and validate the verified production images
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          artifact_dir="$RUNNER_TEMP/markiro-release-images"
+          manifest_path="$artifact_dir/manifest.json"
+          archive_path="$artifact_dir/images.tar"
+          expected_sha="$RELEASE_SHA"
+          expected_api_tag="ghcr.io/thevladbog/markiro-api:$expected_sha"
+          expected_edge_tag="ghcr.io/thevladbog/markiro-edge:$expected_sha"
+          [[ "$expected_sha" =~ ^[0-9a-f]{40}$ ]]
+          test -f "$manifest_path"
+          test ! -L "$manifest_path"
+          test -s "$archive_path"
+          test ! -L "$archive_path"
+          jq -e 'type == "object" and (keys == ["archive_sha256", "images", "release_sha"]) and (.release_sha | type == "string") and (.archive_sha256 | type == "string") and (.images | type == "object" and (keys == ["api", "edge"])) and ([.images.api, .images.edge] | all(type == "object" and (keys == ["id", "tag"]) and (.id | type == "string") and (.tag | type == "string")))' "$manifest_path" > /dev/null
+          release_sha="$(jq -er '.release_sha' "$manifest_path")"
+          archive_sha256="$(jq -er '.archive_sha256' "$manifest_path")"
+          api_tag="$(jq -er '.images.api.tag' "$manifest_path")"
+          api_image_id="$(jq -er '.images.api.id' "$manifest_path")"
+          edge_tag="$(jq -er '.images.edge.tag' "$manifest_path")"
+          edge_image_id="$(jq -er '.images.edge.id' "$manifest_path")"
+          [[ "$release_sha" == "$expected_sha" ]]
+          [[ "$api_tag" == "$expected_api_tag" ]]
+          [[ "$edge_tag" == "$expected_edge_tag" ]]
+          [[ "$archive_sha256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$api_image_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$edge_image_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$(sha256sum "$archive_path" | cut -d' ' -f1)" == "$archive_sha256" ]]
+          docker load --input "$archive_path"
+          [[ "$(docker image inspect --format '{{.Id}}' "$expected_api_tag")" == "$api_image_id" ]]
+          [[ "$(docker image inspect --format '{{.Id}}' "$expected_edge_tag")" == "$edge_image_id" ]]
+      - uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 # v3.5.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish the exact verified production images
+        id: published-images
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          manifest_path="$RUNNER_TEMP/markiro-release-images/manifest.json"
+          release_sha="$RELEASE_SHA"
+          api_tag="ghcr.io/thevladbog/markiro-api:$release_sha"
+          edge_tag="ghcr.io/thevladbog/markiro-edge:$release_sha"
+          api_image_id="$(jq -er '.images.api.id' "$manifest_path")"
+          edge_image_id="$(jq -er '.images.edge.id' "$manifest_path")"
+          [[ "$(docker image inspect --format '{{.Id}}' "$api_tag")" == "$api_image_id" ]]
+          [[ "$(docker image inspect --format '{{.Id}}' "$edge_tag")" == "$edge_image_id" ]]
+          docker push "$api_tag"
+          docker push "$edge_tag"
+          api_repository="ghcr.io/thevladbog/markiro-api"
+          edge_repository="ghcr.io/thevladbog/markiro-edge"
+          mapfile -t api_repo_digests < <(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$api_tag")
+          mapfile -t edge_repo_digests < <(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$edge_tag")
+          api_digests=()
+          edge_digests=()
+          for repository_digest in "${api_repo_digests[@]}"; do
+            if [[ "$repository_digest" == "$api_repository@"* ]]; then api_digests+=("${repository_digest#"$api_repository@"}"); fi
+          done
+          for repository_digest in "${edge_repo_digests[@]}"; do
+            if [[ "$repository_digest" == "$edge_repository@"* ]]; then edge_digests+=("${repository_digest#"$edge_repository@"}"); fi
+          done
+          [[ "${#api_digests[@]}" -eq 1 ]]
+          [[ "${#edge_digests[@]}" -eq 1 ]]
+          api_digest="${api_digests[0]}"
+          edge_digest="${edge_digests[0]}"
+          [[ "$api_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$edge_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          printf 'api_digest=%s\n' "$api_digest" >> "$GITHUB_OUTPUT"
+          printf 'edge_digest=%s\n' "$edge_digest" >> "$GITHUB_OUTPUT"
+      - name: Record trusted image digest evidence
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+          API_DIGEST: ${{ steps.published-images.outputs.api_digest }}
+          EDGE_DIGEST: ${{ steps.published-images.outputs.edge_digest }}
+        run: |
+          set -euo pipefail
+          release_sha="$RELEASE_SHA"
+          api_digest="$API_DIGEST"
+          edge_digest="$EDGE_DIGEST"
+          [[ "$release_sha" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$api_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$edge_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          {
+            printf '### Markiro production image evidence\n\n'
+            printf -- '- Commit SHA: `%s`\n' "$release_sha"
+            printf -- '- API: `ghcr.io/thevladbog/markiro-api@%s`\n' "$api_digest"
+            printf -- '- Edge: `ghcr.io/thevladbog/markiro-edge@%s`\n' "$edge_digest"
+          } >> "$GITHUB_STEP_SUMMARY"

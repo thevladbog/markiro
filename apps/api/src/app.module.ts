@@ -1,8 +1,9 @@
 import { Module, type DynamicModule } from "@nestjs/common";
 import { HealthController } from "./health.controller";
-import { AuthModule } from "./auth/auth.module";
+import { ReadinessService } from "./health/readiness.service";
+import { AuthModule, DB_POOL } from "./auth/auth.module";
 import type { AuthSetup } from "./auth/auth.setup";
-import { JobsModule } from "./jobs/jobs.module";
+import { JobsModule, PgBossService } from "./jobs/jobs.module";
 import { OrgProfileModule } from "./modules/org-profile/org-profile.module";
 import { CounterpartiesModule } from "./modules/counterparties/counterparties.module";
 import { ProductsModule } from "./modules/products/products.module";
@@ -32,8 +33,10 @@ import { InvitationsModule } from "./modules/invitations/invitations.module";
 import { StorageModule } from "./modules/storage/storage.module";
 import { ProfileModule } from "./modules/profile/profile.module";
 import { TenantOwnerActivationModule } from "./modules/tenant-owner-activation/tenant-owner-activation.module";
+import { MailTransportService } from "./modules/mail/mail-transport.service";
+import { ObjectStorageService } from "./modules/storage/object-storage.service";
 
-@Module({ controllers: [HealthController] })
+@Module({})
 export class AppModule {
   /**
    * Registers the already-constructed auth/db instances (see
@@ -42,9 +45,9 @@ export class AppModule {
    * (needs the raw `databaseUrl` for its own connection, separate from the
    * Drizzle `db`), and wires up tenant-guarded feature modules (OrgProfile,
    * and later plan-03 tasks) that depend on the `DB`/`AUTH` tokens. Used by
-   * `main.ts` and by tests that exercise the auth routes; plain
-   * `imports: [AppModule]` (e.g. the health e2e test) keeps working without
-   * a DB connection since it never needs AUTH/DB/jobs/feature modules.
+   * `main.ts` and by tests that exercise production dependencies. Health
+   * route tests instantiate the controller with a fake readiness service,
+   * keeping liveness tests independent from external infrastructure.
    */
   static forRoot(
     setup: Pick<AuthSetup, "auth" | "db" | "pool"> & { databaseUrl: string; env?: Env },
@@ -85,6 +88,34 @@ export class AppModule {
         TenantOwnerActivationModule,
       ],
       controllers: [HealthController],
+      providers: [
+        {
+          provide: ReadinessService,
+          inject: [DB_POOL, PgBossService, MailTransportService, ObjectStorageService],
+          useFactory: (
+            pool: AuthSetup["pool"],
+            jobs: PgBossService,
+            mail: MailTransportService,
+            storage: ObjectStorageService,
+          ) =>
+            new ReadinessService({
+              database: async () => {
+                await pool.query("SELECT 1");
+              },
+              jobs: async () => {
+                await jobs.checkReady();
+              },
+              smtp: async () => {
+                await mail.verify();
+                return { status: mail.health.status };
+              },
+              storage: async () => {
+                await storage.ensureBucket();
+              },
+              now: () => new Date(),
+            }),
+        },
+      ],
     };
   }
 }
