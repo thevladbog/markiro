@@ -179,12 +179,20 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function assertPinnedComment(sourceText, action, comment) {
-  assert.match(
-    sourceText,
-    new RegExp(`uses: ${escapeRegExp(action)} # ${escapeRegExp(comment)}(?:\\s|$)`),
-    `missing ${comment} revision comment for ${action}`,
+function assertPinnedComments(sourceText, action, comment) {
+  const actionLine = new RegExp(`^\\s*(?:-\\s+)?uses:\\s+${escapeRegExp(action)}(?:\\s|$)`);
+  const pinnedLine = new RegExp(
+    `^\\s*(?:-\\s+)?uses:\\s+${escapeRegExp(action)} # ${escapeRegExp(comment)}\\s*$`,
   );
+  const occurrences = sourceText.split("\n").filter((line) => actionLine.test(line));
+
+  assert.ok(occurrences.length > 0, `missing action occurrence for ${action}`);
+  for (const [index, line] of occurrences.entries())
+    assert.match(
+      line,
+      pinnedLine,
+      `missing ${comment} revision comment for ${action} at occurrence ${index + 1}`,
+    );
 }
 
 function assertNoForbiddenWorkflowText(sourceText, label) {
@@ -230,9 +238,9 @@ function assertCiWorkflow(ciSource) {
   );
   assertExactSteps(job.steps, CI_STEPS, "production-bundle");
   assert.notEqual(workflow.permissions?.packages, "write", "CI must not grant packages: write");
-  assertPinnedComment(ciSource, CHECKOUT, "v4");
-  assertPinnedComment(ciSource, PNPM_SETUP, "v4");
-  assertPinnedComment(ciSource, NODE_SETUP, "v4");
+  assertPinnedComments(ciSource, CHECKOUT, "v4");
+  assertPinnedComments(ciSource, PNPM_SETUP, "v4");
+  assertPinnedComments(ciSource, NODE_SETUP, "v4");
   assertNoForbiddenWorkflowText(ciSource, "CI workflow");
 }
 
@@ -262,10 +270,10 @@ function assertReleaseWorkflow(releaseSource) {
   assert.equal(publish["runs-on"], "ubuntu-latest", "unexpected publish runner");
   assert.equal(publish["timeout-minutes"], 20, "unexpected publish timeout");
   assertExactSteps(publish.steps, RELEASE_STEPS, "release publish");
-  assertPinnedComment(releaseSource, CHECKOUT, "v4");
-  assertPinnedComment(releaseSource, BUILDX, "v3.11.1");
-  assertPinnedComment(releaseSource, LOGIN, "v3.5.0");
-  assertPinnedComment(releaseSource, BUILD_PUSH, "v6.18.0");
+  assertPinnedComments(releaseSource, CHECKOUT, "v4");
+  assertPinnedComments(releaseSource, BUILDX, "v3.11.1");
+  assertPinnedComments(releaseSource, LOGIN, "v3.5.0");
+  assertPinnedComments(releaseSource, BUILD_PUSH, "v6.18.0");
   assertNoForbiddenWorkflowText(releaseSource, "release workflow");
 }
 
@@ -386,6 +394,8 @@ test("release contract rejects each trigger, permission, job, step, and tag muta
   const release = await source(".github/workflows/release-images.yml");
   const apiTags = "          tags: ghcr.io/thevladbog/markiro-api:${{ github.sha }}";
   const edgeStep = "      - name: Publish immutable edge image";
+  const edgeBuildPushComment =
+    `      - name: Publish immutable edge image\n` + `        uses: ${BUILD_PUSH} # v6.18.0`;
 
   for (const mutation of [
     {
@@ -405,6 +415,12 @@ test("release contract rejects each trigger, permission, job, step, and tag muta
       search: `${BUILDX} # v3.11.1`,
       replacement: `${BUILDX} # v3.11X1`,
       expected: /missing v3\.11\.1 revision comment/,
+    },
+    {
+      name: "missing revision comment on second repeated action",
+      search: edgeBuildPushComment,
+      replacement: `      - name: Publish immutable edge image\n` + `        uses: ${BUILD_PUSH}`,
+      expected: /missing v6\.18\.0 revision comment.*occurrence 2/,
     },
     {
       name: "quoted extra release job",
