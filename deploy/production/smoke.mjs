@@ -400,6 +400,28 @@ async function runtimeSmoke(environment, docker, client, baseUrl, options) {
     );
     if (stopped.code !== 0 || (stopped.durationMs ?? 0) > 30_000)
       throw new Error("API did not stop gracefully");
+    const inspected = await runDocker(
+      docker,
+      ["inspect", "--format", "{{json .State}}", containerId],
+      options.commandTimeoutMs,
+    );
+    let state;
+    try {
+      state = JSON.parse(inspected.stdout);
+    } catch {
+      throw new Error("API did not stop cleanly");
+    }
+    if (
+      inspected.code !== 0 ||
+      state === null ||
+      typeof state !== "object" ||
+      Array.isArray(state) ||
+      state.Status !== "exited" ||
+      state.ExitCode !== 0 ||
+      state.OOMKilled !== false ||
+      state.Error !== ""
+    )
+      throw new Error("API did not stop cleanly");
   } catch (error) {
     stopError = error;
   } finally {

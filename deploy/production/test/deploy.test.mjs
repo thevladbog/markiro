@@ -25,8 +25,13 @@ function fakeRunner({ failures = {} } = {}) {
   const calls = [];
   return {
     calls,
-    async run(command, args, childEnvironment) {
-      calls.push({ command, args, environmentKeys: Object.keys(childEnvironment).sort() });
+    async run(command, args, childEnvironment, timeoutMs) {
+      calls.push({
+        command,
+        args,
+        environmentKeys: Object.keys(childEnvironment).sort(),
+        timeoutMs,
+      });
       const key = [command, ...args].join(" ");
       if (failures[key]) return { code: failures[key], stdout: "", stderr: "private stderr" };
       if (args.includes("image") && args.includes("inspect")) {
@@ -143,6 +148,80 @@ test("deploys approved digest-backed images in migration, readiness, edge, and p
   assert.equal(releaseStat.mode & 0o777, 0o600);
 });
 
+test("uses stage-specific deadlines while leaving migration completion to database bounds", async () => {
+  const { dependencies, releaseDirectory, runner } = await fixture();
+
+  await deployRelease({ environment, releaseDirectory, readinessAttempts: 1 }, dependencies);
+
+  const timeoutFor = (predicate) => runner.calls.find(({ args }) => predicate(args))?.timeoutMs;
+  assert.equal(
+    timeoutFor((args) => args.includes("pull")),
+    600_000,
+  );
+  assert.equal(
+    timeoutFor((args) => args.includes("image") && args.includes("inspect")),
+    30_000,
+  );
+  assert.equal(
+    timeoutFor((args) => args.includes("migrate")),
+    null,
+  );
+  assert.equal(
+    timeoutFor((args) => args.includes("up") && args.at(-1) === "api"),
+    300_000,
+  );
+  assert.equal(
+    timeoutFor((args) => args.some((argument) => argument.includes("healthcheck"))),
+    30_000,
+  );
+  assert.equal(
+    timeoutFor((args) => args.includes("up") && args.at(-1) === "edge"),
+    300_000,
+  );
+});
+
+test(
+  "does not apply the short command deadline to a database-bounded migration",
+  { timeout: 200 },
+  async () => {
+    const { dependencies, releaseDirectory, runner } = await fixture();
+    const run = runner.run.bind(runner);
+    runner.run = async (command, args, childEnvironment, timeoutMs) => {
+      if (args.includes("migrate")) {
+        await new Promise((resolve) => setTimeout(resolve, 15));
+      }
+      return run(command, args, childEnvironment, timeoutMs);
+    };
+
+    const release = await deployRelease(
+      { environment, releaseDirectory, readinessAttempts: 1, commandTimeoutMs: 5 },
+      dependencies,
+    );
+
+    assert.equal(release.state, "healthy");
+    assert.equal(runner.calls.find(({ args }) => args.includes("migrate"))?.timeoutMs, null);
+  },
+);
+
+test("passes the configured non-standard HTTPS port to public smoke", async () => {
+  const { dependencies, releaseDirectory } = await fixture();
+  let smokeBaseUrl;
+  dependencies.runSmoke = async ({ baseUrl }) => {
+    smokeBaseUrl = baseUrl;
+  };
+
+  await deployRelease(
+    {
+      environment: { ...environment, MARKIRO_HTTPS_PORT: "18443" },
+      releaseDirectory,
+      readinessAttempts: 1,
+    },
+    dependencies,
+  );
+
+  assert.equal(smokeBaseUrl, "https://app.markiro.example:18443");
+});
+
 test("uses only a structurally valid newest healthy release as the previous tag", async () => {
   const { dependencies, releaseDirectory } = await fixture({
     previous: {
@@ -240,34 +319,26 @@ test("rejects swapped API and edge digests before migrations", async () => {
   );
 });
 
-test(
-  "marks the pending record failed after a timed out injected migration command",
-  { timeout: 100 },
-  async () => {
-    const { dependencies, releaseDirectory, runner } = await fixture({ priorTag: null });
-    const run = runner.run;
-    runner.run = async (command, args, childEnvironment) => {
-      if (args.includes("migrate")) return new Promise(() => undefined);
-      return run(command, args, childEnvironment);
-    };
+test("marks the pending record failed when the database-bounded migration exits non-zero", async () => {
+  const failures = { [`docker ${[...compose, "run", "--rm", "migrate"].join(" ")}`]: 1 };
+  const { dependencies, releaseDirectory } = await fixture({ failures, priorTag: null });
 
-    await assert.rejects(
-      deployRelease({ environment, releaseDirectory, commandTimeoutMs: 5 }, dependencies),
-      /docker timed out after 5ms/,
-    );
-    const files = await readdir(releaseDirectory);
-    const record = JSON.parse(
-      await readFile(
-        join(
-          releaseDirectory,
-          files.find((file) => file.includes(tag)),
-        ),
-        "utf8",
+  await assert.rejects(
+    deployRelease({ environment, releaseDirectory, commandTimeoutMs: 5 }, dependencies),
+    /docker failed with exit 1/,
+  );
+  const files = await readdir(releaseDirectory);
+  const record = JSON.parse(
+    await readFile(
+      join(
+        releaseDirectory,
+        files.find((file) => file.includes(tag)),
       ),
-    );
-    assert.equal(record.state, "failed");
-  },
-);
+      "utf8",
+    ),
+  );
+  assert.equal(record.state, "failed");
+});
 
 test("emits the full lifecycle trace without environment values", async () => {
   const { dependencies, releaseDirectory, runner } = await fixture();

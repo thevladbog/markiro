@@ -43,7 +43,10 @@ const databaseUrl = "postgres://user:secret@db.internal/markiro";
 const migrationsFolder = "/bundle/migrations";
 const lockQuery = "SELECT pg_advisory_lock($1, $2)";
 const unlockQuery = "SELECT pg_advisory_unlock($1, $2)";
+const configureTimeoutsQuery =
+  "SELECT set_config('lock_timeout', $1, false), set_config('statement_timeout', $2, false)";
 const lockKeys = [1296126539, 1230131023];
+const timeoutValues = ["120000ms", "900000ms"];
 
 function resetHarness() {
   harness.calls.splice(0);
@@ -54,7 +57,7 @@ function resetHarness() {
   });
   harness.client.release.mockClear();
   harness.drizzle.mockClear();
-  harness.migration.mockClear();
+  harness.migration.mockReset();
   harness.pool.connect.mockClear();
   harness.pool.end.mockClear();
   harness.readFile.mockReset();
@@ -84,6 +87,7 @@ describe("runRuntimeMigrations", () => {
 
     expect(harness.calls).toEqual([
       ["connect"],
+      ["query", configureTimeoutsQuery, timeoutValues],
       ["query", lockQuery, lockKeys],
       ["migrate", migrationsFolder],
       ["query", unlockQuery, lockKeys],
@@ -92,6 +96,10 @@ describe("runRuntimeMigrations", () => {
     ]);
     expect(harness.drizzle).toHaveBeenCalledWith(harness.client);
     expect(harness.migration).toHaveBeenCalledWith(harness.db, { migrationsFolder });
+    expect(harness.Pool).toHaveBeenCalledWith({
+      connectionString: databaseUrl,
+      connectionTimeoutMillis: 30_000,
+    });
     expect(result).toEqual({
       packaged: ["0028_avatar-owner-integrity"],
       completedAt: "2026-08-04T12:00:00.000Z",
@@ -108,6 +116,7 @@ describe("runRuntimeMigrations", () => {
 
     expect(harness.calls).toEqual([
       ["connect"],
+      ["query", configureTimeoutsQuery, timeoutValues],
       ["query", lockQuery, lockKeys],
       ["query", unlockQuery, lockKeys],
       ["release"],
@@ -119,6 +128,9 @@ describe("runRuntimeMigrations", () => {
     const migrationError = new Error("migration failed");
     harness.migration.mockRejectedValueOnce(migrationError);
     harness.client.query
+      .mockImplementationOnce(async (query: string, values?: unknown[]) => {
+        harness.calls.push(["query", query, values]);
+      })
       .mockImplementationOnce(async (query: string, values?: unknown[]) => {
         harness.calls.push(["query", query, values]);
       })
@@ -140,6 +152,9 @@ describe("runRuntimeMigrations", () => {
     harness.client.query
       .mockImplementationOnce(async (query: string, values?: unknown[]) => {
         harness.calls.push(["query", query, values]);
+      })
+      .mockImplementationOnce(async (query: string, values?: unknown[]) => {
+        harness.calls.push(["query", query, values]);
         throw lockError;
       })
       .mockImplementationOnce(async (query: string, values?: unknown[]) => {
@@ -153,6 +168,7 @@ describe("runRuntimeMigrations", () => {
 
     expect(harness.calls).toEqual([
       ["connect"],
+      ["query", configureTimeoutsQuery, timeoutValues],
       ["query", lockQuery, lockKeys],
       ["query", unlockQuery, lockKeys],
       ["release"],
@@ -164,6 +180,23 @@ describe("runRuntimeMigrations", () => {
       "runtime migration failed",
     ]);
     expect(logs.join("\n")).not.toContain(databaseUrl);
+  });
+
+  test("uses explicit database-side bounds supplied for a production migration", async () => {
+    await runRuntimeMigrations({
+      databaseUrl,
+      migrationsFolder,
+      connectionTimeoutMs: 12_000,
+      advisoryLockTimeoutMs: 34_000,
+      statementTimeoutMs: 56_000,
+      log: vi.fn(),
+    });
+
+    expect(harness.Pool).toHaveBeenCalledWith({
+      connectionString: databaseUrl,
+      connectionTimeoutMillis: 12_000,
+    });
+    expect(harness.calls).toContainEqual(["query", configureTimeoutsQuery, ["34000ms", "56000ms"]]);
   });
 
   test("logs packaged tags without SQL or connection secrets", async () => {

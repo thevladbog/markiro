@@ -5,7 +5,7 @@ import process from "node:process";
 import { randomUUID } from "node:crypto";
 
 import { runPreflight } from "./preflight.mjs";
-import { runSmoke } from "./smoke.mjs";
+import { productionBaseUrl, runSmoke } from "./smoke.mjs";
 
 const apiRepository = "ghcr.io/thevladbog/markiro-api";
 const edgeRepository = "ghcr.io/thevladbog/markiro-edge";
@@ -21,6 +21,8 @@ function composeArgs(environment) {
 }
 
 const COMMAND_TIMEOUT_MS = 30_000;
+const PULL_TIMEOUT_MS = 600_000;
+const SERVICE_TIMEOUT_MS = 300_000;
 const TERMINATION_GRACE_MS = 1_000;
 const SHA256 = "[0-9a-f]{64}";
 
@@ -29,6 +31,7 @@ function timeoutError(command, timeoutMs) {
 }
 
 function withDeadline(promise, command, timeoutMs) {
+  if (timeoutMs === null) return Promise.resolve(promise);
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(timeoutError(command, timeoutMs)), timeoutMs);
     Promise.resolve(promise).then(
@@ -44,10 +47,10 @@ function withDeadline(promise, command, timeoutMs) {
   });
 }
 
-function processRunner(timeoutMs) {
+function processRunner() {
   return {
     handlesDeadline: true,
-    run(command, args, environment) {
+    run(command, args, environment, timeoutMs) {
       return new Promise((resolve, reject) => {
         let timedOut = false;
         let killTimer;
@@ -58,11 +61,14 @@ function processRunner(timeoutMs) {
         });
         let stdout = "";
         let stderr = "";
-        const timer = setTimeout(() => {
-          timedOut = true;
-          child.kill("SIGTERM");
-          killTimer = setTimeout(() => child.kill("SIGKILL"), TERMINATION_GRACE_MS);
-        }, timeoutMs);
+        const timer =
+          timeoutMs === null
+            ? undefined
+            : setTimeout(() => {
+                timedOut = true;
+                child.kill("SIGTERM");
+                killTimer = setTimeout(() => child.kill("SIGKILL"), TERMINATION_GRACE_MS);
+              }, timeoutMs);
         child.stdout.on("data", (chunk) => (stdout += chunk));
         child.stderr.on("data", (chunk) => (stderr += chunk));
         child.once("error", () => {
@@ -173,22 +179,22 @@ function commandError(command, result) {
   return new Error(`${command} failed with exit ${result.code}`);
 }
 
-async function runCommand(dependencies, command, args, environment) {
+async function runCommand(dependencies, command, args, environment, timeoutMs) {
   try {
-    const result = dependencies.runner.run(command, args, environment);
+    const result = dependencies.runner.run(command, args, environment, timeoutMs);
     return dependencies.runner.handlesDeadline
       ? await result
-      : await withDeadline(result, command, dependencies.commandTimeoutMs);
+      : await withDeadline(result, command, timeoutMs);
   } catch (error) {
-    if (error?.message === `${command} timed out after ${dependencies.commandTimeoutMs}ms`)
+    if (timeoutMs !== null && error?.message === `${command} timed out after ${timeoutMs}ms`)
       throw error;
     throw new Error(`${command} failed`);
   }
 }
 
-async function mustRun(dependencies, command, args, environment) {
+async function mustRun(dependencies, command, args, environment, timeoutMs) {
   dependencies.log(command);
-  const result = await runCommand(dependencies, command, args, environment);
+  const result = await runCommand(dependencies, command, args, environment, timeoutMs);
   if (result.code !== 0) throw commandError(command, result);
   return result;
 }
@@ -218,6 +224,8 @@ function bestEffortLog(dependencies, message) {
  * @property {number=} readinessAttempts
  * @property {number=} readinessIntervalMs
  * @property {number=} commandTimeoutMs
+ * @property {number=} pullTimeoutMs
+ * @property {number=} serviceTimeoutMs
  */
 
 /**
@@ -229,14 +237,18 @@ function bestEffortLog(dependencies, message) {
 export async function deployRelease(options, supplied = {}) {
   const dependencies = {
     runPreflight,
-    runner: processRunner(options.commandTimeoutMs ?? COMMAND_TIMEOUT_MS),
+    runner: processRunner(),
     runSmoke,
     writeRelease,
     isReady: undefined,
     sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
     now: () => new Date(),
     log: (event) => console.log(event),
-    commandTimeoutMs: options.commandTimeoutMs ?? COMMAND_TIMEOUT_MS,
+    timeouts: {
+      command: options.commandTimeoutMs ?? COMMAND_TIMEOUT_MS,
+      pull: options.pullTimeoutMs ?? PULL_TIMEOUT_MS,
+      service: options.serviceTimeoutMs ?? SERVICE_TIMEOUT_MS,
+    },
     ...supplied,
   };
   dependencies.log("preflight");
@@ -254,18 +266,26 @@ export async function deployRelease(options, supplied = {}) {
   let release;
 
   try {
-    await mustRun(dependencies, "docker", [...compose, "pull", "api", "edge"], environment);
+    await mustRun(
+      dependencies,
+      "docker",
+      [...compose, "pull", "api", "edge"],
+      environment,
+      dependencies.timeouts.pull,
+    );
     const api = await mustRun(
       dependencies,
       "docker",
       ["image", "inspect", "--format", "{{json .RepoDigests}}", approvedApiImage],
       environment,
+      dependencies.timeouts.command,
     );
     const edge = await mustRun(
       dependencies,
       "docker",
       ["image", "inspect", "--format", "{{json .RepoDigests}}", approvedEdgeImage],
       environment,
+      dependencies.timeouts.command,
     );
     release = {
       tag,
@@ -278,12 +298,21 @@ export async function deployRelease(options, supplied = {}) {
     await dependencies.writeRelease(releaseDirectory, release);
     dependencies.log("release pending");
 
-    await mustRun(dependencies, "docker", [...compose, "run", "--rm", "migrate"], environment);
+    await mustRun(
+      dependencies,
+      "docker",
+      [...compose, "run", "--rm", "migrate"],
+      environment,
+      // The migrator bounds connection, advisory-lock, and statement work at PostgreSQL.
+      // Killing only the Compose client here could leave the transaction outcome unknown.
+      null,
+    );
     await mustRun(
       dependencies,
       "docker",
       [...compose, "up", "-d", "--no-deps", "api"],
       environment,
+      dependencies.timeouts.service,
     );
     const attempts = options.readinessAttempts ?? 30;
     const interval = options.readinessIntervalMs ?? 2_000;
@@ -297,6 +326,7 @@ export async function deployRelease(options, supplied = {}) {
             "docker",
             [...compose, "exec", "-T", "api", "node", "/opt/markiro/healthcheck.mjs"],
             environment,
+            dependencies.timeouts.command,
           );
           dependencies.log("docker");
           ready = check.code === 0;
@@ -314,9 +344,10 @@ export async function deployRelease(options, supplied = {}) {
       "docker",
       [...compose, "up", "-d", "--no-deps", "edge"],
       environment,
+      dependencies.timeouts.service,
     );
     try {
-      await dependencies.runSmoke({ environment, baseUrl: `https://${preflight.domain}` });
+      await dependencies.runSmoke({ environment, baseUrl: productionBaseUrl(environment) });
     } catch {
       throw new Error("Public smoke failed");
     }

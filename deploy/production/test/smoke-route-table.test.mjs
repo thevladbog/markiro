@@ -71,6 +71,25 @@ function smokeClient() {
   };
 }
 
+const cleanStoppedState = Object.freeze({
+  Status: "exited",
+  Running: false,
+  Paused: false,
+  Restarting: false,
+  OOMKilled: false,
+  Dead: false,
+  Pid: 0,
+  ExitCode: 0,
+  Error: "",
+  StartedAt: "2026-08-04T10:00:00.000000000Z",
+  FinishedAt: "2026-08-04T10:00:01.000000000Z",
+});
+
+function shutdownInspect(args, state = cleanStoppedState) {
+  const value = args.includes("{{json .State}}") ? state : {};
+  return { code: 0, stdout: `${JSON.stringify(value)}\n`, stderr: "" };
+}
+
 test("defines the complete immutable public-route smoke contract", () => {
   assert.ok(Object.isFrozen(ROUTE_CHECKS));
   assert.deepEqual(
@@ -489,7 +508,7 @@ test(
       const docker = {
         async run(command, args) {
           calls.push(args);
-          if (args[0] === "inspect") return { code: 0, stdout: "{}\n", stderr: "" };
+          if (args[0] === "inspect") return shutdownInspect(args);
           if (args.includes("id")) return { code: 0, stdout: "10001\n", stderr: "" };
           if (args.includes("ps")) return { code: 0, stdout: "container-id\n", stderr: "" };
           if (args[0] === "stop") return stop();
@@ -516,7 +535,7 @@ test(
     const docker = {
       restored: false,
       async run(command, args) {
-        if (args[0] === "inspect") return { code: 0, stdout: "{}\n", stderr: "" };
+        if (args[0] === "inspect") return shutdownInspect(args);
         if (args.includes("id")) return { code: 0, stdout: "10001\n", stderr: "" };
         if (args.includes("ps")) return { code: 0, stdout: "container-id\n", stderr: "" };
         if (args[0] === "stop") return { code: 0, stdout: "", stderr: "" };
@@ -553,7 +572,7 @@ test("restores the API through the fixed CI image override when requested", asyn
   const docker = {
     async run(command, args) {
       calls.push(args);
-      if (args[0] === "inspect") return { code: 0, stdout: "{}\n", stderr: "" };
+      if (args[0] === "inspect") return shutdownInspect(args);
       if (args.includes("id")) return { code: 0, stdout: "10001\n", stderr: "" };
       if (args.includes("ps")) return { code: 0, stdout: "container-id\n", stderr: "" };
       if (args[0] === "stop") return { code: 0, stdout: "", stderr: "" };
@@ -596,7 +615,7 @@ test("reports a restore failure after attempting shutdown", async () => {
   const docker = {
     async run(command, args) {
       calls.push(args);
-      if (args[0] === "inspect") return { code: 0, stdout: "{}\n", stderr: "" };
+      if (args[0] === "inspect") return shutdownInspect(args);
       if (args.includes("id")) return { code: 0, stdout: "10001\n", stderr: "" };
       if (args.includes("ps")) return { code: 0, stdout: "container-id\n", stderr: "" };
       if (args[0] === "stop") return { code: 0, stdout: "", stderr: "" };
@@ -625,7 +644,7 @@ test("reports a restore failure after attempting shutdown", async () => {
 test("surfaces both sanitized shutdown and restoration failures", async () => {
   const docker = {
     async run(command, args) {
-      if (args[0] === "inspect") return { code: 0, stdout: "{}\n", stderr: "" };
+      if (args[0] === "inspect") return shutdownInspect(args);
       if (args.includes("id")) return { code: 0, stdout: "10001\n", stderr: "" };
       if (args.includes("ps")) return { code: 0, stdout: "container-id\n", stderr: "" };
       if (args[0] === "stop") return { code: 1, stdout: "", stderr: "secret stop stderr" };
@@ -652,6 +671,45 @@ test("surfaces both sanitized shutdown and restoration failures", async () => {
       return true;
     },
   );
+});
+
+test("rejects unclean stopped container states and always restores the API", async () => {
+  for (const state of [
+    { ...cleanStoppedState, ExitCode: 137 },
+    { ...cleanStoppedState, OOMKilled: true },
+    { ...cleanStoppedState, Error: "secret engine state detail" },
+  ]) {
+    const calls = [];
+    const docker = {
+      async run(command, args) {
+        calls.push(args);
+        if (args[0] === "inspect") return shutdownInspect(args, state);
+        if (args.includes("id")) return { code: 0, stdout: "10001\n", stderr: "" };
+        if (args.includes("ps")) return { code: 0, stdout: "container-id\n", stderr: "" };
+        if (args[0] === "stop") return { code: 0, stdout: "", stderr: "", durationMs: 1 };
+        return { code: args.includes("test") ? 1 : 0, stdout: "", stderr: "" };
+      },
+    };
+
+    await assert.rejects(
+      runSmoke(
+        {
+          baseUrl: "https://app.markiro.example",
+          assetName: "main.js",
+          environment: { SMOKE_ASSERT_SHUTDOWN: "1" },
+        },
+        smokeClient(),
+        docker,
+      ),
+      (error) => {
+        assert.match(error.message, /cleanly/);
+        assert.doesNotMatch(error.message, /secret engine/);
+        return true;
+      },
+    );
+    assert.ok(calls.some((args) => args.includes("{{json .State}}")));
+    assert.ok(calls.some((args) => args.includes("up") && args.at(-1) === "api"));
+  }
 });
 
 test("rejects an unknown route with an HTML content type and structurally distinguishes the shell", async () => {

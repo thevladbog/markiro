@@ -5,6 +5,9 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
 
 const advisoryLockKeys = [1296126539, 1230131023];
+const connectionTimeoutMs = 30_000;
+const advisoryLockTimeoutMs = 120_000;
+const statementTimeoutMs = 900_000;
 
 export type RuntimeMigrationResult = {
   packaged: readonly string[];
@@ -16,6 +19,9 @@ export type RuntimeMigrationOptions = {
   migrationsFolder: string;
   log?: (message: string) => void;
   now?: () => Date;
+  connectionTimeoutMs?: number;
+  advisoryLockTimeoutMs?: number;
+  statementTimeoutMs?: number;
 };
 
 export async function runRuntimeMigrations(
@@ -39,13 +45,23 @@ export async function runRuntimeMigrations(
       log(`migration packaged: ${tag}`);
     }
 
-    pool = new pg.Pool({ connectionString: options.databaseUrl });
+    pool = new pg.Pool({
+      connectionString: options.databaseUrl,
+      connectionTimeoutMillis: options.connectionTimeoutMs ?? connectionTimeoutMs,
+    });
     client = await pool.connect();
     const db = drizzle(client);
     let migrationError: unknown;
     let unlockError: unknown;
 
     try {
+      await client.query(
+        "SELECT set_config('lock_timeout', $1, false), set_config('statement_timeout', $2, false)",
+        [
+          `${options.advisoryLockTimeoutMs ?? advisoryLockTimeoutMs}ms`,
+          `${options.statementTimeoutMs ?? statementTimeoutMs}ms`,
+        ],
+      );
       await client.query("SELECT pg_advisory_lock($1, $2)", advisoryLockKeys);
       await migrate(db, { migrationsFolder: options.migrationsFolder });
     } catch (error) {
