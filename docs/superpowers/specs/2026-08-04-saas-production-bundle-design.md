@@ -270,9 +270,11 @@ For first deploy, the bundle's runbook defines this order:
    addresses. Every A/AAAA RR owner must match the requested domain
    case-insensitively after optional trailing-dot normalization. For an empty
    approved family, zero answers are accepted only as NODATA proof with an
-   authority SOA owned by the requested domain or a label-boundary ancestor;
-   referrals, unrelated or suffix-confusion owners, malformed output, CNAME,
-   and other unapproved response shapes fail closed;
+   SOA-only authority section whose SOA owners are the requested domain or a
+   label-boundary ancestor. Only a final non-truncated response is accepted;
+   the TC flag, truncation/retry diagnostics, mixed SOA-plus-NS referrals,
+   unrelated or suffix-confusion owners, malformed output, CNAME, and other
+   unapproved response shapes fail closed;
 6. pull both images by the approved repository digests;
 7. run `migrate` once and stop on any non-zero exit;
 8. recreate `api`, wait for readiness, then recreate `edge`;

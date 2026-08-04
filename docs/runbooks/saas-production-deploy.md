@@ -240,11 +240,14 @@ approved family, every A/AAAA RR owner must match the requested domain after
 case-insensitive comparison and optional trailing-dot normalization, and the
 normalized address set must match exactly. For an approved empty family, both
 the authoritative and public response must instead prove NODATA: zero answer
-records and an authority SOA whose owner is the requested domain or a
-label-boundary ancestor. An NS-only referral is not NODATA proof. A cache
-answer at the authoritative gate, unrelated or suffix-confusion SOA owner,
-missing or inconsistent header counts, parser warning, `SERVFAIL`, malformed
-record, and unsupported answer type including CNAME all fail closed.
+records and a SOA-only authority section containing one or more SOA records;
+every SOA owner must be the requested domain or a label-boundary ancestor. An
+NS-only or mixed SOA-plus-NS referral is not NODATA proof. Every accepted result
+must be the final non-truncated response: the TC flag or a `dig`
+truncation/retry diagnostic fails. A cache answer at the authoritative gate,
+unrelated or suffix-confusion SOA owner, missing or inconsistent header counts,
+parser warning, `SERVFAIL`, malformed record, and unsupported answer type
+including CNAME all fail closed.
 Comparison is order-independent and TTL-independent; repeated identical DNS
 answer rows normalize to one set member, while duplicate approved operator
 inputs are rejected. Verification retries the complete gate at most 30 times

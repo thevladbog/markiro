@@ -118,6 +118,52 @@ test("rejects authoritative and recursive responses when the QR response flag is
   );
 });
 
+test("rejects truncated authoritative and recursive responses even when their RRsets look approved", async () => {
+  await assert.rejects(
+    verifyDnsOnce(
+      {
+        domain,
+        authoritativeServer: "ns1.example.test",
+        publicResolvers: ["resolver.example.test"],
+        approvedA: ["203.0.113.10"],
+        approvedAaaa: [],
+      },
+      {
+        runDig: async () => ({
+          code: 0,
+          stdout: digOutput({
+            flags: ["qr", "aa", "tc"],
+            answers: [{ type: "A", value: "203.0.113.10" }],
+          }),
+        }),
+      },
+    ),
+    /authoritative A response has the TC flag/,
+  );
+
+  const outputs = [
+    digOutput({ answers: [{ type: "A", value: "203.0.113.10" }] }),
+    digOutput({ authority: [soa] }),
+    digOutput({
+      flags: ["qr", "rd", "ra", "tc"],
+      answers: [{ type: "A", value: "203.0.113.10" }],
+    }),
+  ];
+  await assert.rejects(
+    verifyDnsOnce(
+      {
+        domain,
+        authoritativeServer: "ns1.example.test",
+        publicResolvers: ["resolver.example.test"],
+        approvedA: ["203.0.113.10"],
+        approvedAaaa: [],
+      },
+      { runDig: async () => ({ code: 0, stdout: outputs.shift() }) },
+    ),
+    /public resolver resolver\.example\.test A response has the TC flag/,
+  );
+});
+
 test("rejects dig parser warnings even when the response otherwise looks approved", async () => {
   const warned = digOutput({
     answers: [{ type: "A", value: "203.0.113.10" }],
@@ -135,6 +181,26 @@ test("rejects dig parser warnings even when the response otherwise looks approve
       { runDig: async () => ({ code: 0, stdout: warned }) },
     ),
     /authoritative A dig output contains a parser warning/,
+  );
+});
+
+test("rejects dig truncation retry diagnostics even when the final-looking RRset is approved", async () => {
+  const truncated = digOutput({
+    answers: [{ type: "A", value: "203.0.113.10" }],
+  }).replace(";; flags:", ";; Truncated, retrying in TCP mode.\n;; flags:");
+
+  await assert.rejects(
+    verifyDnsOnce(
+      {
+        domain,
+        authoritativeServer: "ns1.example.test",
+        publicResolvers: ["resolver.example.test"],
+        approvedA: ["203.0.113.10"],
+        approvedAaaa: [],
+      },
+      { runDig: async () => ({ code: 0, stdout: truncated }) },
+    ),
+    /authoritative A dig output contains a truncation retry diagnostic/,
   );
 });
 
@@ -244,6 +310,32 @@ test("accepts an empty approved family only when authoritative and recursive DNS
     },
     { runDig: async () => ({ code: 0, stdout: outputs.shift() }) },
   );
+});
+
+test("rejects non-SOA authority records mixed into an empty-family NODATA proof", async () => {
+  for (const extra of [
+    { type: "NS", value: "ns1.markiro.example." },
+    { type: "TYPE65280", value: "\\# 1 00" },
+  ]) {
+    const outputs = [
+      digOutput({ answers: [{ type: "A", value: "203.0.113.10" }] }),
+      digOutput({ authority: [soa, extra] }),
+    ];
+
+    await assert.rejects(
+      verifyDnsOnce(
+        {
+          domain,
+          authoritativeServer: "ns1.example.test",
+          publicResolvers: ["resolver.example.test"],
+          approvedA: ["203.0.113.10"],
+          approvedAaaa: [],
+        },
+        { runDig: async () => ({ code: 0, stdout: outputs.shift() }) },
+      ),
+      new RegExp(`authoritative AAAA NODATA authority contains unsupported ${extra.type} data`),
+    );
+  }
 });
 
 test("rejects SERVFAIL even when an injected response contains an approved-looking answer", async () => {

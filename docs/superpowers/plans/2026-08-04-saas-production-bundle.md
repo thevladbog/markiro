@@ -1174,9 +1174,11 @@ Assert the runbook contains explicit commands and stop conditions for:
   for both families and have neither missing nor extra addresses. Every
   A/AAAA RR owner must match the requested domain case-insensitively after
   optional trailing-dot normalization. For an empty approved family, zero
-  answers require NODATA proof from an authority SOA owned by the requested
-  domain or a label-boundary ancestor. Referrals, malformed output,
-  suffix-confusion SOA owners, CNAME, and other unsupported shapes fail closed;
+  answers require NODATA proof from a SOA-only authority section whose SOA
+  owners are the requested domain or a label-boundary ancestor. Only a final
+  non-truncated response is accepted; the TC flag, truncation/retry diagnostics,
+  mixed SOA-plus-NS referrals, malformed output, suffix-confusion SOA owners,
+  CNAME, and other unsupported shapes fail closed;
 - bounded edge/TLS readiness, exactly one full smoke, and public traffic open
   only after the healthy release record exists.
 
@@ -1234,8 +1236,10 @@ verification of the exact normalized A and AAAA sets (`+norecurse` plus QR and
 AA flags at the authoritative server, then the QR and RA flags from every
 public recursive resolver). Every A/AAAA RR owner must match the requested
 domain after case-insensitive/trailing-dot normalization. An empty approved
-family requires zero-answer NODATA proof with an authority SOA owned by the
-requested domain or a label-boundary ancestor. Next come edge/TLS readiness,
+family requires zero-answer NODATA proof with a SOA-only authority section whose
+SOA owners are the requested domain or a label-boundary ancestor. The verifier
+accepts only a final non-truncated response and rejects the TC flag and
+truncation/retry diagnostics. Next come edge/TLS readiness,
 exactly one full smoke, the healthy record, and only then public traffic open.
 CNAME is outside this procedure and fails closed. Routine deploy explicitly
 assumes DNS and valid TLS already exist. Do not add fictional provider

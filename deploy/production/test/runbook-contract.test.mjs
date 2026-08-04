@@ -13,6 +13,21 @@ const PARTIAL_MIGRATION_CLAIM =
 const UNSWITCHED_CONTAINER_CLAIM = "`api` and `edge` containers are not switched";
 const MIGRATION_GATE_CLAIM = "compatibility and rollback gate still applies";
 
+function assertDnsFinalResponseClaims(source, label) {
+  assert.match(source, /non-truncated/i, `${label} lacks the final non-truncated DNS contract`);
+  assert.match(source, /SOA-only/i, `${label} lacks the SOA-only authority contract`);
+  assert.doesNotMatch(
+    source,
+    /truncated DNS responses? (?:may|can) be accepted/i,
+    `${label} must reject truncated DNS responses`,
+  );
+  assert.doesNotMatch(
+    source,
+    /non-SOA authority records? (?:are|is) allowed/i,
+    `${label} must reject non-SOA empty-family authority records`,
+  );
+}
+
 const DEPLOY_BLOCK = `node deploy/production/preflight.mjs
 node deploy/production/deploy.mjs`;
 
@@ -610,6 +625,7 @@ test("runbook, design, and plan share the safe first-deploy DNS and ACME orderin
       /SOA[\s\S]{0,180}ancestor/i,
       `${label} lacks the SOA owner ancestor contract`,
     );
+    assertDnsFinalResponseClaims(source, label);
     assert.match(
       source,
       /RR\s+owner[\s\S]{0,120}requested domain/i,
@@ -621,6 +637,38 @@ test("runbook, design, and plan share the safe first-deploy DNS and ACME orderin
       /exactly one full (?:production )?smoke/i,
       `${label} lacks one full smoke`,
     );
+  }
+});
+
+test("each DNS documentation contract rejects truncated and mixed-authority mutations", async (t) => {
+  for (const [label, path] of [
+    ["runbook", RUNBOOK],
+    ["design", DESIGN],
+    ["plan", PLAN],
+  ]) {
+    const source = await readFile(path, "utf8");
+
+    await t.test(`${label}: truncated response mutation`, () => {
+      assert.throws(
+        () =>
+          assertDnsFinalResponseClaims(
+            `${source}\nTruncated DNS responses may be accepted.\n`,
+            label,
+          ),
+        new RegExp(`${label} must reject truncated DNS responses`),
+      );
+    });
+
+    await t.test(`${label}: mixed authority mutation`, () => {
+      assert.throws(
+        () =>
+          assertDnsFinalResponseClaims(
+            `${source}\nNon-SOA authority records are allowed for an empty family.\n`,
+            label,
+          ),
+        new RegExp(`${label} must reject non-SOA empty-family authority records`),
+      );
+    });
   }
 });
 

@@ -93,10 +93,13 @@ function parseResponse(
 ) {
   if (/^(?:;;\s*)?Warning:/im.test(output))
     throw new Error(`${label} ${type} dig output contains a parser warning`);
+  if (/^;;\s*Truncated\b/im.test(output))
+    throw new Error(`${label} ${type} dig output contains a truncation retry diagnostic`);
   const { status, flags, queryCount, answerCount, authorityCount } = parseHeader(output);
   if (status !== "NOERROR")
     throw new Error(`${label} ${type} status is ${status}, expected NOERROR`);
   if (!flags.includes("qr")) throw new Error(`${label} ${type} response does not have the QR flag`);
+  if (flags.includes("tc")) throw new Error(`${label} ${type} response has the TC flag`);
   if (requireAuthoritative && !flags.includes("aa"))
     throw new Error(`authoritative ${type} response does not have the AA flag`);
   if (requireRecursion && !flags.includes("ra"))
@@ -127,6 +130,11 @@ function parseResponse(
     const soaRecords = authority.filter((record) => record.type === "SOA");
     if (soaRecords.length === 0)
       throw new Error(`${label} ${type} NODATA response does not contain an SOA record`);
+    const unsupportedAuthority = authority.find((record) => record.type !== "SOA");
+    if (unsupportedAuthority)
+      throw new Error(
+        `${label} ${type} NODATA authority contains unsupported ${unsupportedAuthority.type} data`,
+      );
     if (
       soaRecords.some(
         (record) => !isValidDnsName(record.owner, true) || !isValidSoaData(record.value),
