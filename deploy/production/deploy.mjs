@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
-import { chmod, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import process from "node:process";
+import { randomUUID } from "node:crypto";
 
 import { runPreflight } from "./preflight.mjs";
 import { runSmoke } from "./smoke.mjs";
@@ -19,10 +20,34 @@ function composeArgs(environment) {
   ];
 }
 
-function processRunner() {
+const COMMAND_TIMEOUT_MS = 30_000;
+const SHA256 = "[0-9a-f]{64}";
+
+function timeoutError(command, timeoutMs) {
+  return new Error(`${command} timed out after ${timeoutMs}ms`);
+}
+
+function withDeadline(promise, command, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(timeoutError(command, timeoutMs)), timeoutMs);
+    Promise.resolve(promise).then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+function processRunner(timeoutMs) {
   return {
     run(command, args, environment) {
       return new Promise((resolve, reject) => {
+        let timedOut = false;
         const child = spawn(command, args, {
           env: environment,
           shell: false,
@@ -30,10 +55,21 @@ function processRunner() {
         });
         let stdout = "";
         let stderr = "";
+        const timer = setTimeout(() => {
+          timedOut = true;
+          child.kill("SIGTERM");
+          reject(timeoutError(command, timeoutMs));
+        }, timeoutMs);
         child.stdout.on("data", (chunk) => (stdout += chunk));
         child.stderr.on("data", (chunk) => (stderr += chunk));
-        child.once("error", reject);
-        child.once("close", (code) => resolve({ code: code ?? 1, stdout, stderr }));
+        child.once("error", () => {
+          clearTimeout(timer);
+          if (!timedOut) reject(new Error(`${command} failed`));
+        });
+        child.once("close", (code) => {
+          clearTimeout(timer);
+          if (!timedOut) resolve({ code: code ?? 1, stdout, stderr });
+        });
       });
     },
   };
@@ -48,7 +84,7 @@ async function latestHealthyRelease(directory) {
     for (const file of files) {
       try {
         const release = JSON.parse(await readFile(join(directory, file), "utf8"));
-        if (release.state === "healthy" && typeof release.tag === "string") return release.tag;
+        if (isHealthyRelease(release)) return release.tag;
       } catch {
         // A malformed local record cannot be used to select a rollback target.
       }
@@ -66,17 +102,67 @@ function releaseFileName(createdAt, tag) {
 async function writeRelease(directory, release) {
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const path = join(directory, releaseFileName(release.createdAt, release.tag));
-  await writeFile(path, `${JSON.stringify(release)}\n`, { mode: 0o600 });
-  await chmod(path, 0o600);
+  const temporaryPath = join(directory, `.${release.tag}-${randomUUID()}.tmp`);
+  try {
+    await writeFile(temporaryPath, `${JSON.stringify(release)}\n`, { mode: 0o600 });
+    await chmod(temporaryPath, 0o600);
+    await rename(temporaryPath, path);
+    await chmod(path, 0o600);
+  } catch (error) {
+    await unlink(temporaryPath).catch(() => undefined);
+    throw error;
+  }
+}
+
+function isDigestFor(repository, digest) {
+  return typeof digest === "string" && new RegExp(`^${repository}@sha256:${SHA256}$`).test(digest);
+}
+
+function requireDigest(repository, digest) {
+  if (!isDigestFor(repository, digest)) throw new Error("image digest is invalid");
+  return digest;
+}
+
+function isValidIsoDate(value) {
+  if (typeof value !== "string") return false;
+  const date = new Date(value);
+  return !Number.isNaN(date.getTime()) && date.toISOString() === value;
+}
+
+function isHealthyRelease(release) {
+  return (
+    release &&
+    release.state === "healthy" &&
+    typeof release.tag === "string" &&
+    /^[0-9a-f]{40}$/.test(release.tag) &&
+    (release.previousTag === null || /^[0-9a-f]{40}$/.test(release.previousTag)) &&
+    isDigestFor(apiRepository, release.apiDigest) &&
+    isDigestFor(edgeRepository, release.edgeDigest) &&
+    isValidIsoDate(release.createdAt)
+  );
 }
 
 function commandError(command, result) {
   return new Error(`${command} failed with exit ${result.code}`);
 }
 
+async function runCommand(dependencies, command, args, environment) {
+  try {
+    return await withDeadline(
+      dependencies.runner.run(command, args, environment),
+      command,
+      dependencies.commandTimeoutMs,
+    );
+  } catch (error) {
+    if (error?.message === `${command} timed out after ${dependencies.commandTimeoutMs}ms`)
+      throw error;
+    throw new Error(`${command} failed`);
+  }
+}
+
 async function mustRun(dependencies, command, args, environment) {
   dependencies.log(command);
-  const result = await dependencies.runner.run(command, args, environment);
+  const result = await runCommand(dependencies, command, args, environment);
   if (result.code !== 0) throw commandError(command, result);
   return result;
 }
@@ -97,6 +183,7 @@ async function mustRun(dependencies, command, args, environment) {
  * @property {string=} releaseDirectory
  * @property {number=} readinessAttempts
  * @property {number=} readinessIntervalMs
+ * @property {number=} commandTimeoutMs
  */
 
 /**
@@ -108,12 +195,13 @@ async function mustRun(dependencies, command, args, environment) {
 export async function deployRelease(options, supplied = {}) {
   const dependencies = {
     runPreflight,
-    runner: processRunner(),
+    runner: processRunner(options.commandTimeoutMs ?? COMMAND_TIMEOUT_MS),
     runSmoke,
     isReady: undefined,
     sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
     now: () => new Date(),
     log: () => undefined,
+    commandTimeoutMs: options.commandTimeoutMs ?? COMMAND_TIMEOUT_MS,
     ...supplied,
   };
   dependencies.log("preflight");
@@ -145,8 +233,8 @@ export async function deployRelease(options, supplied = {}) {
     release = {
       tag,
       previousTag: await latestHealthyRelease(releaseDirectory),
-      apiDigest: api.stdout.trim(),
-      edgeDigest: edge.stdout.trim(),
+      apiDigest: requireDigest(apiRepository, api.stdout.trim()),
+      edgeDigest: requireDigest(edgeRepository, edge.stdout.trim()),
       state: "pending",
       createdAt: dependencies.now().toISOString(),
     };
@@ -166,7 +254,8 @@ export async function deployRelease(options, supplied = {}) {
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       if (dependencies.isReady) ready = await dependencies.isReady();
       else {
-        const check = await dependencies.runner.run(
+        const check = await runCommand(
+          dependencies,
           "docker",
           [...compose, "exec", "-T", "api", "node", "/opt/markiro/healthcheck.mjs"],
           environment,

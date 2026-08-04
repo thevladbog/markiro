@@ -56,11 +56,9 @@ function smokeClient() {
           body: "not found",
           headers: { "content-type": "text/plain" },
         });
-      return response({
-        status: path === "/1c_exchange" ? 401 : 200,
-        body: '{"status":"ok"}',
-        headers: { "content-type": "application/json" },
-      });
+      if (path === "/1c_exchange")
+        return response({ body: "failure\n", headers: { "content-type": "text/plain" } });
+      return response({ body: '{"status":"ok"}', headers: { "content-type": "application/json" } });
     },
   };
 }
@@ -68,22 +66,22 @@ function smokeClient() {
 test("defines the complete immutable public-route smoke contract", () => {
   assert.ok(Object.isFrozen(ROUTE_CHECKS));
   assert.deepEqual(
-    ROUTE_CHECKS.map(({ method, path, kind }) => [method, path, kind]),
+    ROUTE_CHECKS.map(({ method, path, kind, expected }) => [method, path, kind, expected]),
     [
-      ["GET", "/", "admin-shell"],
-      ["GET", "/assets/${assetName}", "asset"],
-      ["GET", "/team/deep-link", "admin-shell"],
-      ["GET", "/api/auth/get-session", "proxy"],
-      ["GET", "/api/health/live", "json"],
-      ["GET", "/api/health/ready", "ready-json"],
-      ["GET", "/station/bootstrap", "proxy"],
-      ["GET", "/kiosk/bootstrap", "proxy"],
-      ["POST", "/1c_exchange", "commerce-ml"],
-      ["GET", "/health/live", "json"],
-      ["GET", "/health/ready", "ready-json"],
-      ["GET", "/openapi.json", "json"],
-      ["GET", "/docs", "proxy-html"],
-      ["POST", "/unknown", "not-found"],
+      ["GET", "/", "admin-shell", "200 HTML admin shell"],
+      ["GET", "/assets/${assetName}", "asset", "200, immutable cache"],
+      ["GET", "/team/deep-link", "admin-shell", "200 admin shell, no-cache"],
+      ["GET", "/api/auth/get-session", "proxy", "not SPA; upstream path retains /api/auth/"],
+      ["GET", "/api/health/live", "json", "200 JSON from upstream /health/live"],
+      ["GET", "/api/health/ready", "ready-json", "200 JSON from upstream /health/ready"],
+      ["GET", "/station/bootstrap", "proxy", "not SPA"],
+      ["GET", "/kiosk/bootstrap", "proxy", "not SPA"],
+      ["POST", "/1c_exchange", "commerce-ml", "not SPA and request body reaches API unchanged"],
+      ["GET", "/health/live", "json", "200 JSON"],
+      ["GET", "/health/ready", "ready-json", "200 JSON ok or degraded"],
+      ["GET", "/openapi.json", "json", "200 JSON"],
+      ["GET", "/docs", "proxy-html", "upstream HTML, not admin shell"],
+      ["POST", "/unknown", "not-found", "404, not HTML"],
     ],
   );
   for (const check of ROUTE_CHECKS) assert.ok(Object.isFrozen(check));
@@ -166,4 +164,146 @@ test("rejects an external origin in the built root", async () => {
     ),
     /external origin/,
   );
+});
+
+test("rejects a 404 proxy route and malformed JSON or CommerceML protocol responses", async () => {
+  const docker = {
+    run: async (command, args) =>
+      args.includes("id")
+        ? { code: 0, stdout: "10001\n", stderr: "" }
+        : { code: 1, stdout: "", stderr: "" },
+  };
+  for (const [path, altered, expected] of [
+    [
+      "/station/bootstrap",
+      response({ status: 404, headers: { "content-type": "application/json" } }),
+      /proxy/,
+    ],
+    [
+      "/api/health/live",
+      response({ body: "not json", headers: { "content-type": "application/json" } }),
+      /JSON/,
+    ],
+    [
+      "/1c_exchange",
+      response({ body: '{"status":"failure"}', headers: { "content-type": "application/json" } }),
+      /1C exchange/,
+    ],
+  ]) {
+    const client = smokeClient();
+    const original = client.request;
+    client.request = async (url, init) =>
+      new URL(url).pathname === path ? altered : original(url, init);
+    await assert.rejects(
+      runSmoke(
+        { baseUrl: "https://app.markiro.example", assetName: "main.js", environment: {} },
+        client,
+        docker,
+      ),
+      expected,
+    );
+  }
+});
+
+test(
+  "restores API after a failed or timed-out shutdown and rejects false-positive readiness",
+  { timeout: 200 },
+  async () => {
+    for (const stop of [
+      async () => ({ code: 1, stdout: "", stderr: "" }),
+      async () => ({ code: 0, stdout: "", stderr: "", durationMs: 30_001 }),
+      async () => new Promise(() => undefined),
+    ]) {
+      const calls = [];
+      const docker = {
+        async run(command, args) {
+          calls.push(args);
+          if (args.includes("port")) return { code: 1, stdout: "", stderr: "" };
+          if (args.includes("id")) return { code: 0, stdout: "10001\n", stderr: "" };
+          if (args.includes("ps")) return { code: 0, stdout: "container-id\n", stderr: "" };
+          if (args[0] === "stop") return stop();
+          return { code: args.includes("test") ? 1 : 0, stdout: "", stderr: "" };
+        },
+      };
+      await assert.rejects(
+        runSmoke(
+          {
+            baseUrl: "https://app.markiro.example",
+            assetName: "main.js",
+            environment: { SMOKE_ASSERT_SHUTDOWN: "1" },
+            commandTimeoutMs: 5,
+          },
+          smokeClient(),
+          docker,
+        ),
+        /stop|timed out|gracefully/,
+      );
+      assert.ok(calls.some((args) => args.includes("up") && args.at(-1) === "api"));
+    }
+
+    const client = smokeClient();
+    const docker = {
+      restored: false,
+      async run(command, args) {
+        if (args.includes("port")) return { code: 1, stdout: "", stderr: "" };
+        if (args.includes("id")) return { code: 0, stdout: "10001\n", stderr: "" };
+        if (args.includes("ps")) return { code: 0, stdout: "container-id\n", stderr: "" };
+        if (args[0] === "stop") return { code: 0, stdout: "", stderr: "" };
+        if (args.includes("up")) this.restored = true;
+        return { code: args.includes("test") ? 1 : 0, stdout: "", stderr: "" };
+      },
+    };
+    const original = client.request;
+    client.request = async (url, init) =>
+      docker.restored && new URL(url).pathname === "/health/ready"
+        ? response({ body: shell, headers: { "content-type": "text/html" } })
+        : original(url, init);
+    await assert.rejects(
+      runSmoke(
+        {
+          baseUrl: "https://app.markiro.example",
+          assetName: "main.js",
+          environment: { SMOKE_ASSERT_SHUTDOWN: "1" },
+          commandTimeoutMs: 5,
+          readinessAttempts: 1,
+          readinessIntervalMs: 0,
+          sleep: async () => undefined,
+        },
+        client,
+        docker,
+      ),
+      /ready/,
+    );
+  },
+);
+
+test("reports a restore failure after attempting shutdown", async () => {
+  const calls = [];
+  const docker = {
+    async run(command, args) {
+      calls.push(args);
+      if (args.includes("port")) return { code: 1, stdout: "", stderr: "" };
+      if (args.includes("id")) return { code: 0, stdout: "10001\n", stderr: "" };
+      if (args.includes("ps")) return { code: 0, stdout: "container-id\n", stderr: "" };
+      if (args[0] === "stop") return { code: 0, stdout: "", stderr: "" };
+      if (args.includes("up")) return { code: 1, stdout: "", stderr: "" };
+      return { code: args.includes("test") ? 1 : 0, stdout: "", stderr: "" };
+    },
+  };
+
+  await assert.rejects(
+    runSmoke(
+      {
+        baseUrl: "https://app.markiro.example",
+        assetName: "main.js",
+        environment: { SMOKE_ASSERT_SHUTDOWN: "1" },
+        commandTimeoutMs: 5,
+      },
+      smokeClient(),
+      docker,
+    ),
+    /not restored/,
+  );
+  assert.ok(calls.some((args) => args[0] === "stop"));
+  assert.ok(calls.some((args) => args.includes("up") && args.at(-1) === "api"));
 });

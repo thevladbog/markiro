@@ -3,6 +3,27 @@ import process from "node:process";
 
 const CSP =
   "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'";
+const COMMAND_TIMEOUT_MS = 30_000;
+
+function timeoutError(command, timeoutMs) {
+  return new Error(`${command} timed out after ${timeoutMs}ms`);
+}
+
+function withDeadline(promise, command, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(timeoutError(command, timeoutMs)), timeoutMs);
+    Promise.resolve(promise).then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
 
 export const ROUTE_CHECKS = Object.freeze([
   Object.freeze({
@@ -15,13 +36,13 @@ export const ROUTE_CHECKS = Object.freeze([
     method: "GET",
     path: "/assets/${assetName}",
     kind: "asset",
-    expected: "200 immutable cache",
+    expected: "200, immutable cache",
   }),
   Object.freeze({
     method: "GET",
     path: "/team/deep-link",
     kind: "admin-shell",
-    expected: "200 admin shell no-cache",
+    expected: "200 admin shell, no-cache",
   }),
   Object.freeze({
     method: "GET",
@@ -61,25 +82,40 @@ export const ROUTE_CHECKS = Object.freeze([
     method: "GET",
     path: "/docs",
     kind: "proxy-html",
-    expected: "upstream HTML not admin shell",
+    expected: "upstream HTML, not admin shell",
   }),
-  Object.freeze({ method: "POST", path: "/unknown", kind: "not-found", expected: "404 not HTML" }),
+  Object.freeze({ method: "POST", path: "/unknown", kind: "not-found", expected: "404, not HTML" }),
 ]);
 
-function dockerRunner() {
+function dockerRunner(environment, timeoutMs) {
   return {
     run(command, args) {
       return new Promise((resolve, reject) => {
         const startedAt = Date.now();
-        const child = spawn(command, args, { shell: false, stdio: ["ignore", "pipe", "pipe"] });
+        let timedOut = false;
+        const child = spawn(command, args, {
+          env: { ...process.env, ...environment },
+          shell: false,
+          stdio: ["ignore", "pipe", "pipe"],
+        });
         let stdout = "";
         let stderr = "";
+        const timer = setTimeout(() => {
+          timedOut = true;
+          child.kill("SIGTERM");
+          reject(timeoutError(command, timeoutMs));
+        }, timeoutMs);
         child.stdout.on("data", (chunk) => (stdout += chunk));
         child.stderr.on("data", (chunk) => (stderr += chunk));
-        child.once("error", reject);
-        child.once("close", (code) =>
-          resolve({ code: code ?? 1, stdout, stderr, durationMs: Date.now() - startedAt }),
-        );
+        child.once("error", () => {
+          clearTimeout(timer);
+          if (!timedOut) reject(new Error(`${command} failed`));
+        });
+        child.once("close", (code) => {
+          clearTimeout(timer);
+          if (!timedOut)
+            resolve({ code: code ?? 1, stdout, stderr, durationMs: Date.now() - startedAt });
+        });
       });
     },
   };
@@ -116,16 +152,26 @@ function assertHeaders(response, requiresHsts) {
 
 function shellSignature(html) {
   const title = html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1]?.trim();
-  const modulePath = html.match(/<script[^>]+type=["']module["'][^>]+src=["']([^"']+)["']/i)?.[1];
+  const modulePath = [...html.matchAll(/<script\b([^>]*)>/gi)]
+    .map((match) => match[1])
+    .find((attributes) => /\btype\s*=\s*["']module["']/i.test(attributes))
+    ?.match(/\bsrc\s*=\s*["']([^"']+)["']/i)?.[1];
   return title && modulePath?.startsWith("/assets/") ? { title, modulePath } : null;
 }
 
 function assertNoExternalOrigins(html, baseUrl) {
-  for (const match of html.matchAll(/(?:src|href|action|poster)=["']([^"']+)["']/gi)) {
-    const value = match[1];
+  const assertUrl = (value) => {
     if (value.startsWith("//")) throw new Error("built index contains an external origin");
     if (/^https?:\/\//i.test(value) && new URL(value).origin !== new URL(baseUrl).origin)
       throw new Error("built index contains an external origin");
+  };
+  for (const match of html.matchAll(
+    /\b(?:src|href|action|poster|formaction)\s*=\s*["']([^"']+)["']/gi,
+  )) {
+    assertUrl(match[1]);
+  }
+  for (const match of html.matchAll(/\bsrcset\s*=\s*["']([^"']+)["']/gi)) {
+    for (const source of match[1].split(",")) assertUrl(source.trim().split(/\s+/, 1)[0]);
   }
 }
 
@@ -147,7 +193,11 @@ function assertRoute(check, response, body, signature) {
   if (check.kind !== "admin-shell" && isShell)
     throw new Error(`${check.path} returned the admin shell`);
   if (check.kind === "admin-shell") {
-    if (response.status !== 200 || !isShell)
+    if (
+      response.status !== 200 ||
+      !/text\/html/i.test(response.headers.get("content-type") || "") ||
+      !isShell
+    )
       throw new Error(`${check.path} did not return the admin shell`);
     if (response.headers.get("cache-control") !== "no-cache")
       throw new Error(`${check.path} must be no-cache`);
@@ -159,81 +209,175 @@ function assertRoute(check, response, body, signature) {
     )
       throw new Error("asset cache contract failed");
   }
-  if (
-    check.kind === "json" &&
-    (response.status !== 200 ||
-      !/application\/json/i.test(response.headers.get("content-type") || ""))
-  )
-    throw new Error(`${check.path} did not return JSON`);
+  if (check.kind === "json") {
+    if (
+      response.status !== 200 ||
+      !/application\/json/i.test(response.headers.get("content-type") || "")
+    )
+      throw new Error(`${check.path} did not return JSON`);
+    try {
+      JSON.parse(body);
+    } catch {
+      throw new Error(`${check.path} did not return valid JSON`);
+    }
+  }
   if (check.kind === "ready-json") {
+    let readiness;
+    try {
+      readiness = JSON.parse(body);
+    } catch {
+      throw new Error(`${check.path} did not return valid JSON`);
+    }
     if (
       response.status !== 200 ||
       !/application\/json/i.test(response.headers.get("content-type") || "") ||
-      !["ok", "degraded"].includes(JSON.parse(body).status)
+      !["ok", "degraded"].includes(readiness.status)
     )
       throw new Error(`${check.path} did not return an acceptable readiness report`);
+  }
+  if (check.kind === "proxy") {
+    if (
+      ![200, 401, 403].includes(response.status) ||
+      !/application\/json/i.test(response.headers.get("content-type") || "")
+    )
+      throw new Error(`${check.path} did not return an upstream JSON proxy response`);
+    try {
+      JSON.parse(body);
+    } catch {
+      throw new Error(`${check.path} did not return valid JSON`);
+    }
   }
   if (
     check.kind === "proxy-html" &&
     (response.status !== 200 || !/text\/html/i.test(response.headers.get("content-type") || ""))
   )
     throw new Error("docs did not return upstream HTML");
-  if (check.kind === "commerce-ml" && (response.status >= 500 || isShell))
+  if (
+    check.kind === "commerce-ml" &&
+    (response.status !== 200 ||
+      !/text\/plain/i.test(response.headers.get("content-type") || "") ||
+      !/^(success|failure)/i.test(body) ||
+      isShell)
+  )
     throw new Error("1C exchange did not reach the API");
   if (check.kind === "not-found" && (response.status !== 404 || /<html/i.test(body)))
     throw new Error("unknown POST must be a non-HTML 404");
 }
 
-async function runtimeSmoke(environment, docker, client, baseUrl) {
-  const compose = composeArgs(environment);
-  const port = await docker.run("docker", [...compose, "port", "api", "3000"]);
-  if (port.code === 0 && port.stdout.trim()) throw new Error("API is published on the host");
-  const uid = await docker.run("docker", [...compose, "exec", "-T", "api", "id", "-u"]);
-  if (uid.code !== 0 || !uid.stdout.trim() || uid.stdout.trim() === "0")
-    throw new Error("API is running as root");
-  const rootWritable = await docker.run("docker", [
-    ...compose,
-    "exec",
-    "-T",
-    "api",
-    "test",
-    "-w",
-    "/",
-  ]);
-  if (rootWritable.code === 0) throw new Error("API root filesystem is writable");
+async function runDocker(docker, args, commandTimeoutMs) {
+  try {
+    return await withDeadline(docker.run("docker", args), "docker", commandTimeoutMs);
+  } catch (error) {
+    if (error?.message === `docker timed out after ${commandTimeoutMs}ms`) throw error;
+    throw new Error("docker failed");
+  }
+}
 
-  if (environment.SMOKE_ASSERT_SHUTDOWN !== "1") return;
-  const id = await docker.run("docker", [...compose, "ps", "-q", "api"]);
-  const containerId = id.stdout.trim();
-  if (id.code !== 0 || !containerId) throw new Error("API container ID is unavailable");
-  const stopped = await docker.run("docker", ["stop", "--time", "25", containerId]);
-  if (stopped.code !== 0 || (stopped.durationMs ?? 0) > 30_000)
-    throw new Error("API did not stop gracefully");
-  const restored = await docker.run("docker", [...compose, "up", "-d", "--no-deps", "api"]);
-  if (restored.code !== 0) throw new Error("API was not restored after shutdown smoke");
-  let ready = false;
-  for (let attempt = 0; attempt < 30; attempt += 1) {
+async function waitForRestoredReadiness(client, baseUrl, attempts, intervalMs, sleep) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
       const response = await publicRequest(client, new URL("/health/ready", baseUrl), {
         method: "GET",
       });
-      ready = response.status === 200;
+      const body = await response.text();
+      if (
+        response.status === 200 &&
+        /application\/json/i.test(response.headers.get("content-type") || "") &&
+        ["ok", "degraded"].includes(JSON.parse(body).status)
+      )
+        return;
     } catch {
-      ready = false;
+      // The restored API may still be accepting its first connection.
     }
-    if (ready) break;
-    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    if (attempt + 1 < attempts) await sleep(intervalMs);
   }
-  if (!ready) throw new Error("API did not become ready after shutdown smoke");
+  throw new Error("API did not become ready after shutdown smoke");
+}
+
+async function runtimeSmoke(environment, docker, client, baseUrl, options) {
+  const compose = composeArgs(environment);
+  const port = await runDocker(
+    docker,
+    [...compose, "port", "api", "3000"],
+    options.commandTimeoutMs,
+  );
+  if (port.code === 0 && port.stdout.trim()) throw new Error("API is published on the host");
+  const uid = await runDocker(
+    docker,
+    [...compose, "exec", "-T", "api", "id", "-u"],
+    options.commandTimeoutMs,
+  );
+  if (uid.code !== 0 || !uid.stdout.trim() || uid.stdout.trim() === "0")
+    throw new Error("API is running as root");
+  const rootWritable = await runDocker(
+    docker,
+    [...compose, "exec", "-T", "api", "test", "-w", "/"],
+    options.commandTimeoutMs,
+  );
+  if (rootWritable.code === 0) throw new Error("API root filesystem is writable");
+
+  if (environment.SMOKE_ASSERT_SHUTDOWN !== "1") return;
+  const id = await runDocker(docker, [...compose, "ps", "-q", "api"], options.commandTimeoutMs);
+  const containerId = id.stdout.trim();
+  if (id.code !== 0 || !containerId) throw new Error("API container ID is unavailable");
+  let stopError;
+  let restoreError;
+  let stopAttempted = false;
+  try {
+    stopAttempted = true;
+    const stopped = await runDocker(
+      docker,
+      ["stop", "--time", "25", containerId],
+      options.commandTimeoutMs,
+    );
+    if (stopped.code !== 0 || (stopped.durationMs ?? 0) > 30_000)
+      throw new Error("API did not stop gracefully");
+  } catch (error) {
+    stopError = error;
+  } finally {
+    if (stopAttempted) {
+      try {
+        const restored = await runDocker(
+          docker,
+          [...compose, "up", "-d", "--no-deps", "api"],
+          options.commandTimeoutMs,
+        );
+        if (restored.code !== 0) throw new Error("API was not restored after shutdown smoke");
+        await waitForRestoredReadiness(
+          client,
+          baseUrl,
+          options.readinessAttempts,
+          options.readinessIntervalMs,
+          options.sleep,
+        );
+      } catch (error) {
+        restoreError = error;
+      }
+    }
+  }
+  if (stopError) {
+    if (restoreError) stopError.restoreError = restoreError;
+    throw stopError;
+  }
+  if (restoreError) throw restoreError;
 }
 
 /**
- * @param {{baseUrl: string, assetName?: string, environment?: Record<string, string | undefined>}} options
+ * @param {{baseUrl: string, assetName?: string, environment?: Record<string, string | undefined>, commandTimeoutMs?: number, readinessAttempts?: number, readinessIntervalMs?: number, sleep?: (milliseconds: number) => Promise<void>}} options
  * @param {{request(url: string | URL, init: RequestInit): Promise<{status: number, headers: Headers, text(): Promise<string>}>}=} client
  * @param {{run(command: string, args: string[]): Promise<{code: number, stdout: string, stderr: string, durationMs?: number}>}=} docker
  */
-export async function runSmoke(options, client = requestClient(), docker = dockerRunner()) {
+export async function runSmoke(options, client = requestClient(), docker) {
   const environment = options.environment || process.env;
+  const runtimeOptions = {
+    commandTimeoutMs: options.commandTimeoutMs ?? COMMAND_TIMEOUT_MS,
+    readinessAttempts: options.readinessAttempts ?? 30,
+    readinessIntervalMs: options.readinessIntervalMs ?? 2_000,
+    sleep:
+      options.sleep ||
+      ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))),
+  };
+  const dockerClient = docker || dockerRunner(environment, runtimeOptions.commandTimeoutMs);
   const baseUrl = options.baseUrl.replace(/\/$/, "");
   const root = await publicRequest(client, new URL("/", baseUrl), { method: "GET" });
   const rootHtml = await getText(root);
@@ -262,7 +406,7 @@ export async function runSmoke(options, client = requestClient(), docker = docke
     assertHeaders(response, new URL(baseUrl).protocol === "https:");
     assertRoute(check, response, body, signature);
   }
-  await runtimeSmoke(environment, docker, client, baseUrl);
+  await runtimeSmoke(environment, dockerClient, client, baseUrl, runtimeOptions);
 }
 
 if (import.meta.main) {
