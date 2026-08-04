@@ -11,7 +11,8 @@
     "typecheck": "turbo run typecheck",
     "lint": "turbo run lint",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "test:production-bundle:contract": "node --test deploy/production/test/*.test.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
