@@ -63,7 +63,12 @@ export const ROUTE_CHECKS = Object.freeze([
     kind: "ready-json",
     expected: "200 JSON from upstream /health/ready",
   }),
-  Object.freeze({ method: "GET", path: "/station/bootstrap", kind: "proxy", expected: "not SPA" }),
+  Object.freeze({
+    method: "GET",
+    path: "/station/bootstrap",
+    kind: "station-proxy",
+    expected: "not SPA",
+  }),
   Object.freeze({ method: "GET", path: "/kiosk/bootstrap", kind: "proxy", expected: "not SPA" }),
   Object.freeze({
     method: "POST",
@@ -87,6 +92,13 @@ export const ROUTE_CHECKS = Object.freeze([
   }),
   Object.freeze({ method: "POST", path: "/unknown", kind: "not-found", expected: "404, not HTML" }),
 ]);
+
+export function productionBaseUrl(environment) {
+  const port = environment.MARKIRO_HTTPS_PORT;
+  const authority =
+    port && port !== "443" ? `${environment.MARKIRO_DOMAIN}:${port}` : environment.MARKIRO_DOMAIN;
+  return `https://${authority}`;
+}
 
 function dockerRunner(environment, timeoutMs) {
   return {
@@ -241,6 +253,18 @@ function assertRoute(check, response, body, signature) {
       !["ok", "degraded"].includes(readiness.status)
     )
       throw new Error(`${check.path} did not return an acceptable readiness report`);
+  }
+  if (check.kind === "station-proxy") {
+    if (
+      ![200, 401, 403, 404].includes(response.status) ||
+      !/application\/json/i.test(response.headers.get("content-type") || "")
+    )
+      throw new Error("station bootstrap did not return an upstream JSON response");
+    try {
+      JSON.parse(body);
+    } catch {
+      throw new Error("station bootstrap did not return valid JSON");
+    }
   }
   if (check.kind === "proxy") {
     if (
@@ -430,7 +454,7 @@ export async function runSmoke(options, client = requestClient(), docker) {
 
 if (import.meta.main) {
   try {
-    await runSmoke({ baseUrl: `https://${process.env.MARKIRO_DOMAIN}`, environment: process.env });
+    await runSmoke({ baseUrl: productionBaseUrl(process.env), environment: process.env });
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;

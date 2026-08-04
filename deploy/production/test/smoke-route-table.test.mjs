@@ -1,12 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ROUTE_CHECKS, runSmoke } from "../smoke.mjs";
+import { productionBaseUrl, ROUTE_CHECKS, runSmoke } from "../smoke.mjs";
 
 const csp =
   "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'";
 const shell =
   '<html><head><title>Markiro</title><script type="module" src="/assets/main.js"></script></head><body></body></html>';
+
+test("uses the configured HTTPS port for production-bundle smoke", () => {
+  assert.equal(
+    productionBaseUrl({ MARKIRO_DOMAIN: "localhost", MARKIRO_HTTPS_PORT: "18443" }),
+    "https://localhost:18443",
+  );
+  assert.equal(productionBaseUrl({ MARKIRO_DOMAIN: "markiro.example" }), "https://markiro.example");
+});
 
 function response({ status = 200, body = "{}", headers = {} } = {}) {
   return {
@@ -74,7 +82,7 @@ test("defines the complete immutable public-route smoke contract", () => {
       ["GET", "/api/auth/get-session", "proxy", "not SPA; upstream path retains /api/auth/"],
       ["GET", "/api/health/live", "json", "200 JSON from upstream /health/live"],
       ["GET", "/api/health/ready", "ready-json", "200 JSON from upstream /health/ready"],
-      ["GET", "/station/bootstrap", "proxy", "not SPA"],
+      ["GET", "/station/bootstrap", "station-proxy", "not SPA"],
       ["GET", "/kiosk/bootstrap", "proxy", "not SPA"],
       ["POST", "/1c_exchange", "commerce-ml", "not SPA and request body reaches API unchanged"],
       ["GET", "/health/live", "json", "200 JSON"],
@@ -127,7 +135,12 @@ test("rejects an admin shell on an API response", async () => {
       return response({ body: shell, headers: { "content-type": "text/html" } });
     return original(url, init);
   };
-  const docker = { run: async () => ({ code: 1, stdout: "", stderr: "" }) };
+  const docker = {
+    run: async (command, args) =>
+      args.includes("id")
+        ? { code: 0, stdout: "10001\n", stderr: "" }
+        : { code: 1, stdout: "", stderr: "" },
+  };
 
   await assert.rejects(
     runSmoke(
@@ -166,7 +179,32 @@ test("rejects an external origin in the built root", async () => {
   );
 });
 
-test("rejects a 404 proxy route and malformed JSON or CommerceML protocol responses", async () => {
+test("accepts a Nest JSON 404 only for the absent station bootstrap endpoint", async () => {
+  const client = smokeClient();
+  const original = client.request;
+  client.request = async (url, init) =>
+    new URL(url).pathname === "/station/bootstrap"
+      ? response({
+          status: 404,
+          body: '{"statusCode":404,"message":"Not Found"}',
+          headers: { "content-type": "application/json" },
+        })
+      : original(url, init);
+  const docker = {
+    run: async (command, args) =>
+      args.includes("id")
+        ? { code: 0, stdout: "10001\n", stderr: "" }
+        : { code: 1, stdout: "", stderr: "" },
+  };
+
+  await runSmoke(
+    { baseUrl: "https://app.markiro.example", assetName: "main.js", environment: {} },
+    client,
+    docker,
+  );
+});
+
+test("rejects an edge 404 for station bootstrap and proxy 404s elsewhere", async () => {
   const docker = {
     run: async (command, args) =>
       args.includes("id")
@@ -176,6 +214,11 @@ test("rejects a 404 proxy route and malformed JSON or CommerceML protocol respon
   for (const [path, altered, expected] of [
     [
       "/station/bootstrap",
+      response({ status: 404, body: "not found", headers: { "content-type": "text/plain" } }),
+      /station bootstrap/,
+    ],
+    [
+      "/kiosk/bootstrap",
       response({ status: 404, headers: { "content-type": "application/json" } }),
       /proxy/,
     ],
