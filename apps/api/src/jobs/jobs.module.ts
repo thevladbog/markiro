@@ -111,6 +111,7 @@ const PRUNE_EMAIL_DELIVERIES_QUEUE_CRON = "30 2 * * *";
 export class PgBossService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PgBossService.name);
   private boss?: PgBoss;
+  private started = false;
 
   constructor(
     @Inject(DB) private readonly db: Db,
@@ -216,19 +217,27 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       await this.mailJobs.dispatchOutbox(this.mailQueue(boss));
       await this.mailJobs.reconcile(this.mailQueue(boss));
       await this.mailRetention.prune();
+      this.started = true;
     } catch (e) {
       // Bootstrap failed partway through: stop whatever pg-boss managed to
       // start so it doesn't leak a connection/maintenance loop, then
       // rethrow so Nest surfaces the original failure.
+      this.started = false;
       await boss.stop({ graceful: false }).catch(() => undefined);
       throw e;
     }
   }
 
   async onModuleDestroy(): Promise<void> {
+    this.started = false;
     if (!this.boss) return;
     await this.boss.stop();
     this.logger.log("pg-boss stopped");
+  }
+
+  async checkReady(): Promise<void> {
+    if (!this.started || !this.boss) throw new Error("pg-boss is not started");
+    await this.boss.getDb().executeSql("SELECT 1");
   }
 
   private async runEnsurePartitions(): Promise<void> {
@@ -317,6 +326,7 @@ export class JobsModule {
         JournalService,
         ExchangeSessionService,
       ],
+      exports: [PgBossService],
     };
   }
 }

@@ -2,23 +2,63 @@ import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { AppModule } from "../src/app.module";
 import { loadEnv } from "../src/env";
+import { HealthController } from "../src/health.controller";
+import { ReadinessService } from "../src/health/readiness.service";
 import { listenOnLoopback } from "./support/listen-loopback";
 
 describe("GET /health", () => {
   let app: INestApplication;
+  const unavailableReport = {
+    status: "unavailable" as const,
+    checkedAt: "2026-08-04T09:00:00.000Z",
+    checks: {
+      database: {
+        status: "unavailable" as const,
+        category: "database_unavailable" as const,
+        checkedAt: "2026-08-04T09:00:00.000Z",
+      },
+      jobs: {
+        status: "healthy" as const,
+        checkedAt: "2026-08-04T09:00:00.000Z",
+      },
+      smtp: {
+        status: "degraded" as const,
+        category: "smtp_unavailable" as const,
+        checkedAt: "2026-08-04T09:00:00.000Z",
+      },
+      storage: {
+        status: "healthy" as const,
+        checkedAt: "2026-08-04T09:00:00.000Z",
+      },
+    },
+  };
+
   beforeAll(async () => {
-    const ref = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    const ref = await Test.createTestingModule({
+      controllers: [HealthController],
+      providers: [
+        {
+          provide: ReadinessService,
+          useValue: {
+            live: () => ({ status: "ok" }),
+            ready: async () => unavailableReport,
+          },
+        },
+      ],
+    }).compile();
     app = ref.createNestApplication();
     await app.init();
     await listenOnLoopback(app);
   });
   afterAll(() => app.close());
 
-  it("returns ok", async () => {
-    const res = await request(app.getHttpServer()).get("/health").expect(200);
-    expect(res.body).toEqual({ status: "ok" });
+  it("returns liveness and readiness reports with their intended status codes", async () => {
+    const server = app.getHttpServer();
+    await request(server).get("/health").expect(200, { status: "ok" });
+    await request(server).get("/health/live").expect(200, { status: "ok" });
+    const ready = await request(server).get("/health/ready").expect(503);
+    expect(ready.body).toEqual(unavailableReport);
   });
 });
 
