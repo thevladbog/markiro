@@ -24,6 +24,14 @@ jobs:
       MARKIRO_HTTPS_PORT: "18443"
       ACME_EMAIL: ci@markiro.local
     steps:
+      - name: Initialize protected production environment
+        run: |
+          set -euo pipefail
+          env_file="$RUNNER_TEMP/markiro-production-test.env"
+          umask 077
+          : > "$env_file"
+          chmod 600 "$env_file"
+          printf '%s\n' "MARKIRO_ENV_FILE=$env_file" >> "$GITHUB_ENV"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
@@ -37,8 +45,6 @@ jobs:
         run: |
           pnpm --dir tools/production-browser --ignore-workspace install --frozen-lockfile
           pnpm --dir tools/production-browser --ignore-workspace exec playwright install --with-deps chromium
-      - name: Define temporary production environment path
-        run: echo "MARKIRO_ENV_FILE=$RUNNER_TEMP/markiro-production-test.env" >> "$GITHUB_ENV"
       - name: Verify production bundle contracts
         run: pnpm test:production-bundle:contract
       - name: Generate masked test-only environment

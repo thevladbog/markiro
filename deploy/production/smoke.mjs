@@ -1,19 +1,12 @@
 import { spawn } from "node:child_process";
 import process from "node:process";
 
+import { RUNTIME_DEPENDENCY_PROBE_SOURCE } from "./runtime-dependency-probe.mjs";
+
 const CSP =
   "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'";
 const COMMAND_TIMEOUT_MS = 30_000;
 const TERMINATION_GRACE_MS = 1_000;
-const FORBIDDEN_RUNTIME_DEPENDENCY_PROBE = `for (const dependency of ["@playwright/test", "@opentelemetry/api"]) {
-  try {
-    require.resolve(dependency);
-    process.exit(1);
-  } catch (error) {
-    if (error?.code !== "MODULE_NOT_FOUND") throw error;
-  }
-}`;
-
 function timeoutError(command, timeoutMs) {
   return new Error(`${command} timed out after ${timeoutMs}ms`);
 }
@@ -489,7 +482,17 @@ async function runtimeSmoke(environment, docker, client, baseUrl, options) {
   if (environment.SMOKE_ASSERT_DEPENDENCY_ISOLATION === "1") {
     const dependencyIsolation = await runDocker(
       docker,
-      [...compose, "exec", "-T", "api", "node", "-e", FORBIDDEN_RUNTIME_DEPENDENCY_PROBE],
+      [
+        ...compose,
+        "exec",
+        "-T",
+        "api",
+        "node",
+        "--input-type=module",
+        "--eval",
+        RUNTIME_DEPENDENCY_PROBE_SOURCE,
+        "/app/node_modules",
+      ],
       options.commandTimeoutMs,
     );
     if (dependencyIsolation.code !== 0)

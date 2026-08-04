@@ -30,9 +30,11 @@ test("Playwright lives only in the isolated production-browser tooling workspace
   const workspace = load(await readFile(new URL("pnpm-workspace.yaml", root), "utf8"));
   const rootPackage = await json("package.json");
   const browserPackage = await json("tools/production-browser/package.json");
-  const browserLock = load(
-    await readFile(new URL("tools/production-browser/pnpm-lock.yaml", root), "utf8"),
+  const browserLockSource = await readFile(
+    new URL("tools/production-browser/pnpm-lock.yaml", root),
+    "utf8",
   );
+  const browserLock = load(browserLockSource);
 
   assert.deepEqual(workspace.packages, ["apps/*", "packages/*"]);
   assert.equal(workspace.overrides?.["@scalar/api-reference>@scalar/agent-chat"], "-");
@@ -43,11 +45,17 @@ test("Playwright lives only in the isolated production-browser tooling workspace
   );
   assert.equal(browserPackage.name, "@markiro/production-browser");
   assert.equal(browserPackage.private, true);
-  assert.equal(browserPackage.devDependencies?.["@playwright/test"], "1.61.1");
+  assert.equal(browserPackage.devDependencies?.["@playwright/test"], "1.62.0");
   assert.equal(
     browserLock.importers?.["."]?.devDependencies?.["@playwright/test"]?.specifier,
-    "1.61.1",
+    "1.62.0",
   );
+  for (const match of browserLockSource.matchAll(/https?:\/\/[^\s'"}\]]+/g))
+    assert.equal(
+      new URL(match[0]).origin,
+      "https://registry.npmjs.org",
+      `standalone browser lock references a non-public registry: ${match[0]}`,
+    );
 });
 
 test("production API and DB dependency graphs contain neither Playwright nor OpenTelemetry", () => {

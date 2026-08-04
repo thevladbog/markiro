@@ -316,9 +316,11 @@ test("requires the pruned API runtime to exclude Playwright and OpenTelemetry", 
 
     const probe = calls.find(([, args]) => args.includes("node"));
     assert.ok(probe);
-    assert.deepEqual(probe[1].slice(-4, -1), ["api", "node", "-e"]);
-    assert.match(probe[1].at(-1), /@playwright\/test/);
-    assert.match(probe[1].at(-1), /@opentelemetry\/api/);
+    assert.deepEqual(probe[1].slice(-5, -2), ["node", "--input-type=module", "--eval"]);
+    assert.equal(probe[1].at(-1), "/app/node_modules");
+    assert.match(probe[1].at(-2), /@playwright\/test/);
+    assert.match(probe[1].at(-2), /@opentelemetry\/api/);
+    assert.doesNotMatch(probe[1].at(-2), /require\.resolve/);
   });
 
   await t.test("rejects a runtime containing either dependency", async () => {

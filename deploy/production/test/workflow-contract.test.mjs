@@ -16,6 +16,14 @@ const RELEASE_ARTIFACT_OUTPUTS = {
 const COMPOSE =
   'docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml -f deploy/production/compose.ci.yml';
 
+const INITIALIZE_ENVIRONMENT =
+  "set -euo pipefail\n" +
+  'env_file="$RUNNER_TEMP/markiro-production-test.env"\n' +
+  "umask 077\n" +
+  ': > "$env_file"\n' +
+  'chmod 600 "$env_file"\n' +
+  `printf '%s\\n' "MARKIRO_ENV_FILE=$env_file" >> "$GITHUB_ENV"\n`;
+
 const GENERATE_ENVIRONMENT =
   [
     "set -euo pipefail",
@@ -74,6 +82,7 @@ const PRODUCTION_BUNDLE_ENV = {
 };
 
 const PRODUCTION_BUNDLE_STEPS = [
+  { name: "Initialize protected production environment", run: INITIALIZE_ENVIRONMENT },
   { uses: CHECKOUT, with: { "persist-credentials": false } },
   { uses: PNPM_SETUP },
   { uses: NODE_SETUP, with: { "node-version": 24, cache: "pnpm" } },
@@ -83,10 +92,6 @@ const PRODUCTION_BUNDLE_STEPS = [
     run:
       "pnpm --dir tools/production-browser --ignore-workspace install --frozen-lockfile\n" +
       "pnpm --dir tools/production-browser --ignore-workspace exec playwright install --with-deps chromium\n",
-  },
-  {
-    name: "Define temporary production environment path",
-    run: 'echo "MARKIRO_ENV_FILE=$RUNNER_TEMP/markiro-production-test.env" >> "$GITHUB_ENV"',
   },
   { name: "Verify production bundle contracts", run: "pnpm test:production-bundle:contract" },
   { name: "Generate masked test-only environment", run: GENERATE_ENVIRONMENT },
@@ -526,8 +531,16 @@ test("CI contract rejects each hidden-step, shell, log, and cleanup mutation for
     "      - name: Install Chromium for production documentation smoke\n" +
     "        run: |\n" +
     "          pnpm --dir tools/production-browser --ignore-workspace install --frozen-lockfile\n" +
-    "          pnpm --dir tools/production-browser --ignore-workspace exec playwright install --with-deps chromium\n" +
-    "      - name: Define temporary production environment path";
+    "          pnpm --dir tools/production-browser --ignore-workspace exec playwright install --with-deps chromium\n";
+  const initializeEnvironment =
+    "      - name: Initialize protected production environment\n" +
+    "        run: |\n" +
+    "          set -euo pipefail\n" +
+    '          env_file="$RUNNER_TEMP/markiro-production-test.env"\n' +
+    "          umask 077\n" +
+    '          : > "$env_file"\n' +
+    '          chmod 600 "$env_file"\n' +
+    `          printf '%s\\n' "MARKIRO_ENV_FILE=$env_file" >> "$GITHUB_ENV"\n`;
   const smoke =
     "        run: MARKIRO_SMOKE_CI_OVERLAY=1 SMOKE_ASSERT_DEPENDENCY_ISOLATION=1 SMOKE_ASSERT_SHUTDOWN=1 node deploy/production/smoke.mjs";
   const chromiumInstall =
@@ -559,29 +572,28 @@ test("CI contract rejects each hidden-step, shell, log, and cleanup mutation for
       name: "valid YAML id step",
       search: install,
       replacement:
-        "      - run: pnpm install --frozen-lockfile\n" +
-        "      - name: Install Chromium for production documentation smoke\n" +
-        "        run: |\n" +
-        "          pnpm --dir tools/production-browser --ignore-workspace install --frozen-lockfile\n" +
-        "          pnpm --dir tools/production-browser --ignore-workspace exec playwright install --with-deps chromium\n" +
+        install +
         "      - id: hidden-environment-reader\n" +
-        `        run: node -e "require('node:fs').readFileSync(process.env.RUNNER_TEMP + '/markiro-production-test.env')"\n` +
-        "      - name: Define temporary production environment path",
+        `        run: node -e "require('node:fs').readFileSync(process.env.RUNNER_TEMP + '/markiro-production-test.env')"\n`,
       expected: /unexpected production-bundle steps/,
     },
     {
       name: "valid YAML if step",
       search: install,
-      replacement:
-        "      - run: pnpm install --frozen-lockfile\n" +
-        "      - name: Install Chromium for production documentation smoke\n" +
-        "        run: |\n" +
-        "          pnpm --dir tools/production-browser --ignore-workspace install --frozen-lockfile\n" +
-        "          pnpm --dir tools/production-browser --ignore-workspace exec playwright install --with-deps chromium\n" +
-        "      - if: always()\n" +
-        "        run: true\n" +
-        "      - name: Define temporary production environment path",
+      replacement: install + "      - if: always()\n" + "        run: true\n",
       expected: /unexpected production-bundle steps/,
+    },
+    {
+      name: "protected environment initialization removed",
+      search: initializeEnvironment,
+      replacement: "",
+      expected: /unexpected production-bundle steps/,
+    },
+    {
+      name: "environment file protection removed",
+      search: '          chmod 600 "$env_file"',
+      replacement: '          chmod 644 "$env_file"',
+      expected: /unexpected Initialize protected production environment step/,
     },
     {
       name: "command appended to smoke",
