@@ -1,7 +1,7 @@
 # SaaS Production Bundle — Design Spec
 
 **Date:** 2026-08-04
-**Status:** Approved in design discussion; written-spec review pending
+**Status:** Approved
 **Slice of:** Markiro MVP roadmap plan 08, deployment foundation
 **Related:** `docs/architecture.md`,
 `docs/superpowers/specs/2026-08-03-tenant-team-email-profile-design.md`,
@@ -96,7 +96,13 @@ pg-boss and PostgreSQL pools close before the container grace period expires.
 The edge image builds `@markiro/admin...` with the same pinned Node builder,
 then copies only `apps/admin/dist` and the production Caddyfile into the exact
 official `caddy:2.11.4-alpine` image. It contains no pnpm store, source tree,
-Node runtime, or secrets.
+Node runtime, or secrets. It creates a dedicated unprivileged UID/GID 10001 and
+runs on internal ports 8080/8443; Compose maps public 80/443 to those ports so
+all capabilities can remain dropped. The derived image removes the official
+binary's low-port file capability because it is unnecessary at 8080/8443 and
+would conflict with the all-capabilities-dropped runtime. Caddy uses an
+explicit HTTP-to-HTTPS redirect so the internal 8443 port never appears in a
+public redirect.
 
 Caddy's `/data` and `/config` directories use named volumes so ACME account and
 certificate state survive container replacement. The admin assets are part of
