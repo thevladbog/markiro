@@ -335,12 +335,29 @@ async function waitForRestoredReadiness(client, baseUrl, attempts, intervalMs, s
 
 async function runtimeSmoke(environment, docker, client, baseUrl, options) {
   const compose = composeArgs(environment);
-  const port = await runDocker(
+  const apiId = await runDocker(docker, [...compose, "ps", "-q", "api"], options.commandTimeoutMs);
+  const containerId = apiId.stdout.trim();
+  if (apiId.code !== 0 || !containerId) throw new Error("API container ID is unavailable");
+  const ports = await runDocker(
     docker,
-    [...compose, "port", "api", "3000"],
+    ["inspect", "--format", "{{json .HostConfig.PortBindings}}", containerId],
     options.commandTimeoutMs,
   );
-  if (port.code === 0 && port.stdout.trim()) throw new Error("API is published on the host");
+  if (ports.code !== 0 || !ports.stdout.trim()) throw new Error("API port inspection failed");
+  let bindings;
+  try {
+    bindings = JSON.parse(ports.stdout);
+  } catch {
+    throw new Error("API port inspection failed");
+  }
+  if (!bindings || typeof bindings !== "object" || Array.isArray(bindings))
+    throw new Error("API port inspection failed");
+  if (
+    Object.values(bindings).some(
+      (value) => value !== null && (!Array.isArray(value) || value.length > 0),
+    )
+  )
+    throw new Error("API is published on the host");
   const uid = await runDocker(
     docker,
     [...compose, "exec", "-T", "api", "id", "-u"],
@@ -356,9 +373,6 @@ async function runtimeSmoke(environment, docker, client, baseUrl, options) {
   if (rootWritable.code === 0) throw new Error("API root filesystem is writable");
 
   if (environment.SMOKE_ASSERT_SHUTDOWN !== "1") return;
-  const id = await runDocker(docker, [...compose, "ps", "-q", "api"], options.commandTimeoutMs);
-  const containerId = id.stdout.trim();
-  if (id.code !== 0 || !containerId) throw new Error("API container ID is unavailable");
   let stopError;
   let restoreError;
   let stopAttempted = false;

@@ -101,7 +101,8 @@ test("smokes public routing, headers, and unprivileged runtime without accepting
   const docker = {
     async run(command, args) {
       dockerCalls.push([command, args]);
-      if (args.includes("port")) return { code: 1, stdout: "", stderr: "" };
+      if (args.includes("ps")) return { code: 0, stdout: "container-id\n", stderr: "" };
+      if (args[0] === "inspect") return { code: 0, stdout: '{"3000/tcp":null}\n', stderr: "" };
       if (args.includes("id")) return { code: 0, stdout: "10001\n", stderr: "" };
       return { code: 1, stdout: "", stderr: "" };
     },
@@ -120,11 +121,63 @@ test("smokes public routing, headers, and unprivileged runtime without accepting
   assert.deepEqual(
     dockerCalls.map(([command, args]) => [command, args.slice(-4)]),
     [
-      ["docker", ["compose.production.yml", "port", "api", "3000"]],
+      ["docker", ["compose.production.yml", "ps", "-q", "api"]],
+      ["docker", ["inspect", "--format", "{{json .HostConfig.PortBindings}}", "container-id"]],
       ["docker", ["-T", "api", "id", "-u"]],
       ["docker", ["api", "test", "-w", "/"]],
     ],
   );
+});
+
+test("rejects an API container with an actual host port binding", async () => {
+  for (const binding of [
+    '{"3000/tcp":[{"HostIp":"0.0.0.0","HostPort":"3000"}]}\n',
+    '{"3000/tcp":{"HostIp":"0.0.0.0","HostPort":"3000"}}\n',
+  ]) {
+    const docker = {
+      async run(command, args) {
+        if (args.includes("ps")) return { code: 0, stdout: "container-id\n", stderr: "" };
+        if (args[0] === "inspect") return { code: 0, stdout: binding, stderr: "" };
+        if (args.includes("id")) return { code: 0, stdout: "10001\n", stderr: "" };
+        return { code: 1, stdout: "", stderr: "" };
+      },
+    };
+
+    await assert.rejects(
+      runSmoke(
+        { baseUrl: "https://app.markiro.example", assetName: "main.js", environment: {} },
+        smokeClient(),
+        docker,
+      ),
+      /published/,
+    );
+  }
+});
+
+test("rejects missing or invalid API host-port inspection output", async () => {
+  for (const inspect of [
+    { code: 1, stdout: "", stderr: "inspect failed" },
+    { code: 0, stdout: "", stderr: "" },
+    { code: 0, stdout: "not json", stderr: "" },
+    { code: 0, stdout: "[]", stderr: "" },
+  ]) {
+    const docker = {
+      async run(command, args) {
+        if (args.includes("ps")) return { code: 0, stdout: "container-id\n", stderr: "" };
+        if (args[0] === "inspect") return inspect;
+        if (args.includes("id")) return { code: 0, stdout: "10001\n", stderr: "" };
+        return { code: 1, stdout: "", stderr: "" };
+      },
+    };
+    await assert.rejects(
+      runSmoke(
+        { baseUrl: "https://app.markiro.example", assetName: "main.js", environment: {} },
+        smokeClient(),
+        docker,
+      ),
+      /port inspection/,
+    );
+  }
 });
 
 test("rejects an admin shell on an API response", async () => {
@@ -137,9 +190,13 @@ test("rejects an admin shell on an API response", async () => {
   };
   const docker = {
     run: async (command, args) =>
-      args.includes("id")
-        ? { code: 0, stdout: "10001\n", stderr: "" }
-        : { code: 1, stdout: "", stderr: "" },
+      args.includes("ps")
+        ? { code: 0, stdout: "container-id\n", stderr: "" }
+        : args[0] === "inspect"
+          ? { code: 0, stdout: "{}\n", stderr: "" }
+          : args.includes("id")
+            ? { code: 0, stdout: "10001\n", stderr: "" }
+            : { code: 1, stdout: "", stderr: "" },
   };
 
   await assert.rejects(
@@ -192,9 +249,13 @@ test("accepts a Nest JSON 404 only for the absent station bootstrap endpoint", a
       : original(url, init);
   const docker = {
     run: async (command, args) =>
-      args.includes("id")
-        ? { code: 0, stdout: "10001\n", stderr: "" }
-        : { code: 1, stdout: "", stderr: "" },
+      args.includes("ps")
+        ? { code: 0, stdout: "container-id\n", stderr: "" }
+        : args[0] === "inspect"
+          ? { code: 0, stdout: "{}\n", stderr: "" }
+          : args.includes("id")
+            ? { code: 0, stdout: "10001\n", stderr: "" }
+            : { code: 1, stdout: "", stderr: "" },
   };
 
   await runSmoke(
@@ -261,7 +322,7 @@ test(
       const docker = {
         async run(command, args) {
           calls.push(args);
-          if (args.includes("port")) return { code: 1, stdout: "", stderr: "" };
+          if (args[0] === "inspect") return { code: 0, stdout: "{}\n", stderr: "" };
           if (args.includes("id")) return { code: 0, stdout: "10001\n", stderr: "" };
           if (args.includes("ps")) return { code: 0, stdout: "container-id\n", stderr: "" };
           if (args[0] === "stop") return stop();
@@ -288,7 +349,7 @@ test(
     const docker = {
       restored: false,
       async run(command, args) {
-        if (args.includes("port")) return { code: 1, stdout: "", stderr: "" };
+        if (args[0] === "inspect") return { code: 0, stdout: "{}\n", stderr: "" };
         if (args.includes("id")) return { code: 0, stdout: "10001\n", stderr: "" };
         if (args.includes("ps")) return { code: 0, stdout: "container-id\n", stderr: "" };
         if (args[0] === "stop") return { code: 0, stdout: "", stderr: "" };
@@ -325,7 +386,7 @@ test("reports a restore failure after attempting shutdown", async () => {
   const docker = {
     async run(command, args) {
       calls.push(args);
-      if (args.includes("port")) return { code: 1, stdout: "", stderr: "" };
+      if (args[0] === "inspect") return { code: 0, stdout: "{}\n", stderr: "" };
       if (args.includes("id")) return { code: 0, stdout: "10001\n", stderr: "" };
       if (args.includes("ps")) return { code: 0, stdout: "container-id\n", stderr: "" };
       if (args[0] === "stop") return { code: 0, stdout: "", stderr: "" };
@@ -354,7 +415,7 @@ test("reports a restore failure after attempting shutdown", async () => {
 test("surfaces both sanitized shutdown and restoration failures", async () => {
   const docker = {
     async run(command, args) {
-      if (args.includes("port")) return { code: 1, stdout: "", stderr: "" };
+      if (args[0] === "inspect") return { code: 0, stdout: "{}\n", stderr: "" };
       if (args.includes("id")) return { code: 0, stdout: "10001\n", stderr: "" };
       if (args.includes("ps")) return { code: 0, stdout: "container-id\n", stderr: "" };
       if (args[0] === "stop") return { code: 1, stdout: "", stderr: "secret stop stderr" };
@@ -386,9 +447,13 @@ test("surfaces both sanitized shutdown and restoration failures", async () => {
 test("rejects an unknown route with an HTML content type and structurally distinguishes the shell", async () => {
   const docker = {
     run: async (command, args) =>
-      args.includes("id")
-        ? { code: 0, stdout: "10001\n", stderr: "" }
-        : { code: 1, stdout: "", stderr: "" },
+      args.includes("ps")
+        ? { code: 0, stdout: "container-id\n", stderr: "" }
+        : args[0] === "inspect"
+          ? { code: 0, stdout: "{}\n", stderr: "" }
+          : args.includes("id")
+            ? { code: 0, stdout: "10001\n", stderr: "" }
+            : { code: 1, stdout: "", stderr: "" },
   };
   const html404 = smokeClient();
   const original404 = html404.request;
