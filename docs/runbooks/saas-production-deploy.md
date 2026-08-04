@@ -235,14 +235,16 @@ unset MARKIRO_APPROVED_DNS_A MARKIRO_APPROVED_DNS_AAAA
 The verifier queries both address families. Its authoritative queries use
 `+norecurse` and require `NOERROR` plus the AA flag; a recursive/cache answer,
 referral, missing header, or `SERVFAIL` fails closed. Public queries use
-`+recurse`, and every listed resolver must return the same exact approved set.
-Comparison is address-normalized, order-independent, and TTL-independent;
-missing or extra addresses fail. Repeated identical DNS answer rows normalize
-to one set member, while duplicate approved operator inputs are rejected.
-Unsupported answer types, including CNAME, fail. Verification retries the
-complete gate at most 30 times with a two-second interval, and each `dig`
-process is bounded to five seconds. A mismatch after that budget stops before
-edge start.
+`+recurse` and require the RA flag on every public A and AAAA response,
+including an approved empty address family; a non-recursive referral fails.
+Every A/AAAA RR owner must match the requested domain after case-insensitive
+comparison and optional trailing-dot normalization. Comparison is
+address-normalized, order-independent, and TTL-independent; missing or extra
+addresses fail. Repeated identical DNS answer rows normalize to one set
+member, while duplicate approved operator inputs are rejected. Unsupported
+answer types, including CNAME, fail. Verification retries the complete gate at
+most 30 times with a two-second interval, and each `dig` process is bounded to
+five seconds. A mismatch after that budget stops before edge start.
 
 Ports 80 and 443 at the protected ingress must now reach the selected TLS
 bootstrap path. Start the release exactly once:

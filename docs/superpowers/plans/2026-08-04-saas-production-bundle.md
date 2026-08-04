@@ -1170,8 +1170,11 @@ Assert the runbook contains explicit commands and stop conditions for:
   authoritative and public DNS verification before edge start. The executable
   verifier compares the exact normalized A and AAAA sets, uses `+norecurse`
   and requires the AA flag at the explicit authoritative server, and requires
-  every listed public recursive resolver to have neither missing nor extra
-  addresses. Unsupported CNAME/other answer shapes fail closed;
+  every listed public recursive resolver to return the RA flag for both
+  families and have neither missing nor extra addresses. Every A/AAAA RR owner
+  must match the requested domain case-insensitively after optional
+  trailing-dot normalization. Unsupported CNAME/other answer shapes fail
+  closed;
 - bounded edge/TLS readiness, exactly one full smoke, and public traffic open
   only after the healthy release record exists.
 
@@ -1226,11 +1229,13 @@ alone cannot satisfy that gate. The first-deploy order is maintenance/deny and
 allowlist evidence, ACME HTTP-01 pass-through (or the verified provider TLS
 alternative), approved DNS switch, bounded authoritative and public DNS
 verification of the exact normalized A and AAAA sets (`+norecurse` plus AA flag
-at the authoritative server, then every public recursive resolver), edge/TLS
-readiness, exactly one full smoke, healthy record, and only then public traffic
-open. CNAME is outside this procedure and fails closed. Routine deploy
-explicitly assumes DNS and valid TLS already exist. Do not add fictional
-provider commands.
+at the authoritative server, then the RA flag from every public recursive
+resolver). Every A/AAAA RR owner must match the requested domain after
+case-insensitive/trailing-dot normalization. Next come edge/TLS readiness,
+exactly one full smoke, the healthy record, and only then public traffic open.
+CNAME is outside this procedure and fails closed. Routine deploy explicitly
+assumes DNS and valid TLS already exist. Do not add fictional provider
+commands.
 
 - [ ] **Step 5: Mark the design implemented only after all evidence exists**
 

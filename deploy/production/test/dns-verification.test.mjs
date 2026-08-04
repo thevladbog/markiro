@@ -5,11 +5,16 @@ import { dnsOptionsFromEnvironment, verifyDnsConvergence, verifyDnsOnce } from "
 
 const domain = "app.markiro.example";
 
-function digOutput({ status = "NOERROR", flags = ["qr", "aa"], answers = [] } = {}) {
+function digOutput({
+  status = "NOERROR",
+  flags = ["qr", "aa"],
+  answers = [],
+  authorityCount = 0,
+} = {}) {
   return [
     `;; ->>HEADER<<- opcode: QUERY, status: ${status}, id: 1234`,
-    `;; flags: ${flags.join(" ")}; QUERY: 1, ANSWER: ${answers.length}, AUTHORITY: 0, ADDITIONAL: 0`,
-    ...answers.map(({ type, value }) => `${domain}. 60 IN ${type} ${value}`),
+    `;; flags: ${flags.join(" ")}; QUERY: 1, ANSWER: ${answers.length}, AUTHORITY: ${authorityCount}, ADDITIONAL: 0`,
+    ...answers.map(({ type, value, owner = `${domain}.` }) => `${owner} 60 IN ${type} ${value}`),
     "",
   ].join("\n");
 }
@@ -206,6 +211,85 @@ test("requires every explicitly approved public resolver to converge", async () 
       { runDig: async () => ({ code: 0, stdout: outputs.shift() }) },
     ),
     /public resolver resolver-two\.example\.test A answer set differs from the approved set/,
+  );
+});
+
+test("rejects a non-recursive public referral for an approved empty AAAA set", async () => {
+  const outputs = [
+    digOutput({ answers: [{ type: "A", value: "203.0.113.10" }] }),
+    digOutput(),
+    digOutput({
+      flags: ["qr", "rd", "ra"],
+      answers: [{ type: "A", value: "203.0.113.10" }],
+    }),
+    digOutput({ flags: ["qr", "rd"], authorityCount: 1 }),
+  ];
+
+  await assert.rejects(
+    verifyDnsOnce(
+      {
+        domain,
+        authoritativeServer: "ns1.example.test",
+        publicResolvers: ["resolver.example.test"],
+        approvedA: ["203.0.113.10"],
+        approvedAaaa: [],
+      },
+      { runDig: async () => ({ code: 0, stdout: outputs.shift() }) },
+    ),
+    /public resolver resolver\.example\.test AAAA response does not have the RA flag/,
+  );
+});
+
+test("rejects an approved address attached to an unrelated RR owner", async () => {
+  const outputs = [
+    digOutput({
+      answers: [{ type: "A", value: "203.0.113.10", owner: "unrelated.example.test." }],
+    }),
+    digOutput(),
+    digOutput({
+      flags: ["qr", "rd", "ra"],
+      answers: [{ type: "A", value: "203.0.113.10" }],
+    }),
+    digOutput({ flags: ["qr", "rd", "ra"] }),
+  ];
+
+  await assert.rejects(
+    verifyDnsOnce(
+      {
+        domain,
+        authoritativeServer: "ns1.example.test",
+        publicResolvers: ["resolver.example.test"],
+        approvedA: ["203.0.113.10"],
+        approvedAaaa: [],
+      },
+      { runDig: async () => ({ code: 0, stdout: outputs.shift() }) },
+    ),
+    /authoritative A answer owner does not match the requested domain/,
+  );
+});
+
+test("accepts the requested RR owner case-insensitively with or without a trailing dot", async () => {
+  const outputs = [
+    digOutput({
+      answers: [{ type: "A", value: "203.0.113.10", owner: "APP.MARKIRO.EXAMPLE" }],
+    }),
+    digOutput(),
+    digOutput({
+      flags: ["qr", "rd", "ra"],
+      answers: [{ type: "A", value: "203.0.113.10", owner: "App.Markiro.Example." }],
+    }),
+    digOutput({ flags: ["qr", "rd", "ra"] }),
+  ];
+
+  await verifyDnsOnce(
+    {
+      domain,
+      authoritativeServer: "ns1.example.test",
+      publicResolvers: ["resolver.example.test"],
+      approvedA: ["203.0.113.10"],
+      approvedAaaa: [],
+    },
+    { runDig: async () => ({ code: 0, stdout: outputs.shift() }) },
   );
 });
 

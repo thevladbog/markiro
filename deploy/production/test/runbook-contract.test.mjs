@@ -594,6 +594,16 @@ test("runbook, design, and plan share the safe first-deploy DNS and ACME orderin
       /\+norecurse[\s\S]{0,100}AA flag/i,
       `${label} lacks non-recursive authoritative validation`,
     );
+    assert.match(
+      source,
+      /public[\s\S]{0,140}RA flag/i,
+      `${label} lacks recursive public-response validation`,
+    );
+    assert.match(
+      source,
+      /RR\s+owner[\s\S]{0,120}requested domain/i,
+      `${label} lacks answer-owner validation`,
+    );
     assert.match(source, /edge\/TLS readiness/i, `${label} lacks edge TLS readiness`);
     assert.match(
       source,

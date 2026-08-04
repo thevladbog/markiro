@@ -265,8 +265,11 @@ For first deploy, the bundle's runbook defines this order:
    procedure, then use the executable DNS verifier for bounded authoritative
    and public DNS polling. It compares the exact normalized A and AAAA sets:
    authoritative queries use `+norecurse` and require the AA flag, while every
-   listed public recursive resolver must converge without missing or extra
-   addresses. CNAME and other unapproved answer shapes fail closed;
+   listed public recursive resolver must return the RA flag on both A and AAAA
+   responses and converge without missing or extra addresses. Every A/AAAA RR
+   owner must match the requested domain case-insensitively after optional
+   trailing-dot normalization. CNAME and other unapproved answer shapes fail
+   closed;
 6. pull both images by the approved repository digests;
 7. run `migrate` once and stop on any non-zero exit;
 8. recreate `api`, wait for readiness, then recreate `edge`;

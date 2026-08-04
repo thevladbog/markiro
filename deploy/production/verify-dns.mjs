@@ -30,27 +30,43 @@ function normalizeAddress(value, type) {
   throw new Error(`${type} address is invalid`);
 }
 
-function parseResponse(output, type, requireAuthoritative, label) {
-  const status = output.match(/status:\s*([A-Z]+),/i)?.[1]?.toUpperCase() ?? "missing";
-  if (status !== "NOERROR")
-    throw new Error(`${label} ${type} status is ${status}, expected NOERROR`);
+function normalizeDnsName(value) {
+  return value.replace(/[.]$/, "").toLowerCase();
+}
+
+function parseHeader(output) {
+  const lines = output.split("\n");
+  const header = lines.find((line) => line.startsWith(";; ->>HEADER<<-"));
+  const status = header?.match(/(?:^|,\s*)status:\s*([A-Z]+)(?:,|$)/i)?.[1]?.toUpperCase();
+  const flagsLine = lines.find((line) => line.startsWith(";; flags:"));
   const flags =
-    output
-      .match(/^;; flags:\s*([^;]*);/m)?.[1]
+    flagsLine
+      ?.match(/^;; flags:\s*([^;]*);/)?.[1]
       ?.trim()
       .split(/\s+/) ?? [];
+  return { status: status ?? "missing", flags };
+}
+
+function parseResponse(output, type, requireAuthoritative, requireRecursion, label, domain) {
+  const { status, flags } = parseHeader(output);
+  if (status !== "NOERROR")
+    throw new Error(`${label} ${type} status is ${status}, expected NOERROR`);
   if (requireAuthoritative && !flags.includes("aa"))
     throw new Error(`authoritative ${type} response does not have the AA flag`);
+  if (requireRecursion && !flags.includes("ra"))
+    throw new Error(`${label} ${type} response does not have the RA flag`);
   const answers = [];
   for (const line of output.split("\n")) {
     if (!line.trim() || line.startsWith(";")) continue;
-    const match = line.match(/^\S+\s+\d+\s+IN\s+(\S+)\s+(.+?)\s*$/i);
+    const match = line.match(/^(\S+)\s+\d+\s+IN\s+(\S+)\s+(.+?)\s*$/i);
     if (!match) throw new Error(`${type} DNS response contains a malformed answer`);
-    if (match[1].toUpperCase() !== type)
+    if (normalizeDnsName(match[1]) !== normalizeDnsName(domain))
+      throw new Error(`${label} ${type} answer owner does not match the requested domain`);
+    if (match[2].toUpperCase() !== type)
       throw new Error(
-        `${label} ${type} response contains unsupported ${match[1].toUpperCase()} data`,
+        `${label} ${type} response contains unsupported ${match[2].toUpperCase()} data`,
       );
-    answers.push(normalizeAddress(match[2], type));
+    answers.push(normalizeAddress(match[3], type));
   }
   return [...new Set(answers)].sort();
 }
@@ -120,12 +136,14 @@ export async function verifyDnsOnce(options, dependencies) {
       server: options.authoritativeServer,
       recursion: "+norecurse",
       requireAuthoritative: true,
+      requireRecursion: false,
     },
     ...options.publicResolvers.map((server) => ({
       label: `public resolver ${server}`,
       server,
       recursion: "+recurse",
       requireAuthoritative: false,
+      requireRecursion: true,
     })),
   ];
 
@@ -141,7 +159,14 @@ export async function verifyDnsOnce(options, dependencies) {
         type,
       ]);
       if (result.code !== 0) throw new Error(`${scope.label} ${type} query failed`);
-      const actual = parseResponse(result.stdout, type, scope.requireAuthoritative, scope.label);
+      const actual = parseResponse(
+        result.stdout,
+        type,
+        scope.requireAuthoritative,
+        scope.requireRecursion,
+        scope.label,
+        options.domain,
+      );
       if (!sameSet(actual, approved[type]))
         throw new Error(`${scope.label} ${type} answer set differs from the approved set`);
     }
