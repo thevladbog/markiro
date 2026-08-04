@@ -1,5 +1,10 @@
 export { createDb } from "./client.js";
 export type { Db } from "./client.js";
+export { runRuntimeMigrations } from "./runtime-migrate.js";
+export type {
+  RuntimeMigrationOptions,
+  RuntimeMigrationResult,
+} from "./runtime-migrate.js";
 export * as schema from "./schema.js";
 export { buildAuth } from "./auth-config.js";
 export type { Auth, SessionWithActiveOrg } from "./auth-config.js";
