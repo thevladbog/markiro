@@ -22,6 +22,15 @@ test("API image keeps the production runtime closure minimal and hardened", asyn
   assert.match(source, /USER node/);
   assert.match(source, /ENTRYPOINT \["\/usr\/bin\/tini", "--"\]/);
   assert.match(source, /CMD \["node", "dist\/main\.js"\]/);
+  assert.match(source, /find \/out\/api -type f -name '\*\.ts' ! -name '\*\.d\.ts' -delete/);
+  assert.match(
+    source,
+    /rm -rf \/out\/api\/src \/out\/api\/test \/out\/api\/scripts \/out\/api\/\.turbo/,
+  );
+  assert.match(
+    source,
+    /rm -f \/out\/api\/nest-cli\.json \/out\/api\/tsconfig\.build\.json \/out\/api\/tsconfig\.json/,
+  );
   assert.doesNotMatch(source, /drizzle-kit|pnpm install[^\n]*--prod/);
 });
 
