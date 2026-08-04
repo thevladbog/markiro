@@ -61,9 +61,11 @@ function resetHarness() {
   harness.readFile.mockResolvedValue(
     JSON.stringify({ entries: [{ tag: "0028_avatar-owner-integrity" }] }),
   );
-  harness.migration.mockImplementation(async (_db: unknown, config: { migrationsFolder: string }) => {
-    harness.calls.push(["migrate", config.migrationsFolder]);
-  });
+  harness.migration.mockImplementation(
+    async (_db: unknown, config: { migrationsFolder: string }) => {
+      harness.calls.push(["migrate", config.migrationsFolder]);
+    },
+  );
 }
 
 afterEach(resetHarness);
@@ -116,12 +118,14 @@ describe("runRuntimeMigrations", () => {
   test("preserves the migration error when unlock also fails", async () => {
     const migrationError = new Error("migration failed");
     harness.migration.mockRejectedValueOnce(migrationError);
-    harness.client.query.mockImplementationOnce(async (query: string, values?: unknown[]) => {
-      harness.calls.push(["query", query, values]);
-    }).mockImplementationOnce(async (query: string, values?: unknown[]) => {
-      harness.calls.push(["query", query, values]);
-      throw new Error("unlock failed");
-    });
+    harness.client.query
+      .mockImplementationOnce(async (query: string, values?: unknown[]) => {
+        harness.calls.push(["query", query, values]);
+      })
+      .mockImplementationOnce(async (query: string, values?: unknown[]) => {
+        harness.calls.push(["query", query, values]);
+        throw new Error("unlock failed");
+      });
 
     await expect(
       runRuntimeMigrations({ databaseUrl, migrationsFolder, log: vi.fn() }),
@@ -133,13 +137,15 @@ describe("runRuntimeMigrations", () => {
   test("unlocks and closes resources when advisory lock acquisition fails", async () => {
     const logs: string[] = [];
     const lockError = new Error("provider says " + databaseUrl);
-    harness.client.query.mockImplementationOnce(async (query: string, values?: unknown[]) => {
-      harness.calls.push(["query", query, values]);
-      throw lockError;
-    }).mockImplementationOnce(async (query: string, values?: unknown[]) => {
-      harness.calls.push(["query", query, values]);
-      throw new Error("unlock failed");
-    });
+    harness.client.query
+      .mockImplementationOnce(async (query: string, values?: unknown[]) => {
+        harness.calls.push(["query", query, values]);
+        throw lockError;
+      })
+      .mockImplementationOnce(async (query: string, values?: unknown[]) => {
+        harness.calls.push(["query", query, values]);
+        throw new Error("unlock failed");
+      });
 
     await expect(
       runRuntimeMigrations({ databaseUrl, migrationsFolder, log: (message) => logs.push(message) }),
@@ -168,7 +174,11 @@ describe("runRuntimeMigrations", () => {
       }),
     );
 
-    await runRuntimeMigrations({ databaseUrl, migrationsFolder, log: (message) => logs.push(message) });
+    await runRuntimeMigrations({
+      databaseUrl,
+      migrationsFolder,
+      log: (message) => logs.push(message),
+    });
 
     expect(logs).toContain("migration packaged: 0028_avatar-owner-integrity");
     expect(logs.join("\n")).not.toContain("secret migration SQL");
