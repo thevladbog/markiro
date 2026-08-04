@@ -68,8 +68,10 @@ async function bootstrap() {
   // Without this, SIGINT/SIGTERM kill the process directly and Nest never
   // runs onModuleDestroy — so PgBossService.onModuleDestroy (boss.stop())
   // would never fire and pg-boss's connection pool would be torn down
-  // abruptly instead of closing cleanly.
-  app.enableShutdownHooks();
+  // abruptly instead of closing cleanly. Nest 11 otherwise re-sends the
+  // original signal after successful hooks, which makes Docker report 143;
+  // process-exit mode reports hook success as 0 and hook failure as 1.
+  app.enableShutdownHooks([], { useProcessExit: true });
 
   const doc = SwaggerModule.createDocument(
     app,

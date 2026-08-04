@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import ts from "typescript";
 
 const root = new URL("../../..", import.meta.url);
 
@@ -82,4 +83,39 @@ test("Docker build context excludes local state while retaining required build i
   const lastSourceInclude = source.lastIndexOf("!packages/db/**");
   assert.ok(source.lastIndexOf("**/node_modules") > lastSourceInclude);
   assert.ok(source.lastIndexOf("**/dist/") > lastSourceInclude);
+});
+
+test("API shutdown hooks exit with the hook outcome instead of re-sending the signal", async () => {
+  const sourceText = await readFile(new URL("apps/api/src/main.ts", root), "utf8");
+  const source = ts.createSourceFile(
+    "main.ts",
+    sourceText,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const calls = [];
+  const visit = (node) => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.expression.name.text === "enableShutdownHooks"
+    )
+      calls.push(node);
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].arguments.length, 2);
+  const [signals, options] = calls[0].arguments;
+  assert.ok(ts.isArrayLiteralExpression(signals));
+  assert.equal(signals.elements.length, 0);
+  assert.ok(ts.isObjectLiteralExpression(options));
+  const useProcessExit = options.properties.find(
+    (property) =>
+      ts.isPropertyAssignment(property) && property.name.getText(source) === "useProcessExit",
+  );
+  assert.ok(useProcessExit);
+  assert.equal(useProcessExit.initializer.kind, ts.SyntaxKind.TrueKeyword);
 });

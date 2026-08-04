@@ -23,6 +23,8 @@ test("documents every digest selector input and output in the preflight interfac
     "MARKIRO_DOMAIN",
     "ACME_EMAIL",
     "MARKIRO_ENV_FILE",
+    "MARKIRO_HTTP_PORT",
+    "MARKIRO_HTTPS_PORT",
   ])
     assert.match(source, new RegExp(`@property \\{string \\| undefined\\} ${input}`));
 
@@ -71,6 +73,37 @@ test("accepts digest-pinned release inputs and a private environment file", asyn
     acmeEmail: release.ACME_EMAIL,
     envFile: ".env.production",
   });
+});
+
+test("passes optional host port overrides unchanged to Compose validation", async () => {
+  let validatedEnvironment;
+
+  await runPreflight(
+    { ...release, MARKIRO_HTTP_PORT: "18080", MARKIRO_HTTPS_PORT: "18443" },
+    {
+      mode: async () => 0o600,
+      composeQuiet: async (environment) => {
+        validatedEnvironment = environment;
+      },
+    },
+  );
+
+  assert.equal(validatedEnvironment.MARKIRO_HTTP_PORT, "18080");
+  assert.equal(validatedEnvironment.MARKIRO_HTTPS_PORT, "18443");
+});
+
+test("does not inject absent optional host ports into Compose validation", async () => {
+  let validatedEnvironment;
+
+  await runPreflight(release, {
+    mode: async () => 0o600,
+    composeQuiet: async (environment) => {
+      validatedEnvironment = environment;
+    },
+  });
+
+  assert.equal(Object.hasOwn(validatedEnvironment, "MARKIRO_HTTP_PORT"), false);
+  assert.equal(Object.hasOwn(validatedEnvironment, "MARKIRO_HTTPS_PORT"), false);
 });
 
 for (const [variable, value] of [
@@ -150,6 +183,49 @@ function fakeChild() {
   };
   return child;
 }
+
+test("passes optional host port overrides to the Compose child without other environment values", async () => {
+  const child = fakeChild();
+  let childEnvironment;
+  const validation = composeQuiet(
+    {
+      ...release,
+      MARKIRO_ENV_FILE: "/private/production.env",
+      MARKIRO_HTTP_PORT: "18080",
+      MARKIRO_HTTPS_PORT: "18443",
+    },
+    {
+      spawn: (_command, _args, options) => {
+        childEnvironment = options.env;
+        return child;
+      },
+    },
+  );
+  child.emit("close", 0);
+  await validation;
+
+  assert.equal(childEnvironment.MARKIRO_HTTP_PORT, "18080");
+  assert.equal(childEnvironment.MARKIRO_HTTPS_PORT, "18443");
+});
+
+test("does not add undefined host port keys to the Compose child environment", async () => {
+  const child = fakeChild();
+  let childEnvironment;
+  const validation = composeQuiet(
+    { ...release, MARKIRO_ENV_FILE: "/private/production.env" },
+    {
+      spawn: (_command, _args, options) => {
+        childEnvironment = options.env;
+        return child;
+      },
+    },
+  );
+  child.emit("close", 0);
+  await validation;
+
+  assert.equal(Object.hasOwn(childEnvironment, "MARKIRO_HTTP_PORT"), false);
+  assert.equal(Object.hasOwn(childEnvironment, "MARKIRO_HTTPS_PORT"), false);
+});
 
 function fakeClock() {
   const timers = [];

@@ -49,6 +49,10 @@ export async function composeQuiet(environment, supplied = {}) {
     ACME_EMAIL: environment.ACME_EMAIL,
     MARKIRO_ENV_FILE: environment.MARKIRO_ENV_FILE,
   };
+  if (environment.MARKIRO_HTTP_PORT !== undefined)
+    childEnvironment.MARKIRO_HTTP_PORT = environment.MARKIRO_HTTP_PORT;
+  if (environment.MARKIRO_HTTPS_PORT !== undefined)
+    childEnvironment.MARKIRO_HTTPS_PORT = environment.MARKIRO_HTTPS_PORT;
 
   await new Promise((resolve, reject) => {
     let child;
@@ -136,6 +140,8 @@ export async function composeQuiet(environment, supplied = {}) {
  * @property {string | undefined} MARKIRO_DOMAIN
  * @property {string | undefined} ACME_EMAIL
  * @property {string | undefined} MARKIRO_ENV_FILE
+ * @property {string | undefined} MARKIRO_HTTP_PORT
+ * @property {string | undefined} MARKIRO_HTTPS_PORT
  */
 
 /**
@@ -188,14 +194,19 @@ export async function runPreflight(
   }
 
   try {
-    await dependencies.composeQuiet({
+    const composeEnvironment = {
       MARKIRO_IMAGE_TAG: imageTag,
       MARKIRO_API_IMAGE_DIGEST: apiImageDigest,
       MARKIRO_EDGE_IMAGE_DIGEST: edgeImageDigest,
       MARKIRO_DOMAIN: domain,
       ACME_EMAIL: acmeEmail,
       MARKIRO_ENV_FILE: envFile,
-    });
+    };
+    if (environment.MARKIRO_HTTP_PORT !== undefined)
+      composeEnvironment.MARKIRO_HTTP_PORT = environment.MARKIRO_HTTP_PORT;
+    if (environment.MARKIRO_HTTPS_PORT !== undefined)
+      composeEnvironment.MARKIRO_HTTPS_PORT = environment.MARKIRO_HTTPS_PORT;
+    await dependencies.composeQuiet(composeEnvironment);
   } catch {
     throw new Error("Compose validation failed");
   }
