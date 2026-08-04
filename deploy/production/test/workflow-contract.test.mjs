@@ -6,9 +6,9 @@ import { load } from "js-yaml";
 const CHECKOUT = "actions/checkout@11d5960a326750d5838078e36cf38b85af677262";
 const PNPM_SETUP = "pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1";
 const NODE_SETUP = "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020";
-const BUILDX = "docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435";
 const LOGIN = "docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1";
-const BUILD_PUSH = "docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83";
+const UPLOAD_ARTIFACT = "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02";
+const DOWNLOAD_ARTIFACT = "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093";
 const COMPOSE =
   'docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml -f deploy/production/compose.ci.yml';
 
@@ -117,9 +117,136 @@ const PRODUCTION_BUNDLE_STEPS = [
   },
 ];
 
+const PACKAGE_VERIFIED_IMAGES =
+  "set -euo pipefail\n" +
+  'artifact_dir="$RUNNER_TEMP/markiro-release-images"\n' +
+  'manifest_path="$artifact_dir/manifest.json"\n' +
+  'archive_path="$artifact_dir/images.tar"\n' +
+  'release_sha="$RELEASE_SHA"\n' +
+  'api_tag="ghcr.io/thevladbog/markiro-api:$release_sha"\n' +
+  'edge_tag="ghcr.io/thevladbog/markiro-edge:$release_sha"\n' +
+  '[[ "$release_sha" =~ ^[0-9a-f]{40}$ ]]\n' +
+  'test ! -e "$artifact_dir"\n' +
+  "umask 077\n" +
+  'install -d -m 700 "$artifact_dir"\n' +
+  'api_image_id="$(docker image inspect --format \'{{.Id}}\' "$api_tag")"\n' +
+  'edge_image_id="$(docker image inspect --format \'{{.Id}}\' "$edge_tag")"\n' +
+  '[[ "$api_image_id" =~ ^sha256:[0-9a-f]{64}$ ]]\n' +
+  '[[ "$edge_image_id" =~ ^sha256:[0-9a-f]{64}$ ]]\n' +
+  'docker save --output "$archive_path" "$api_tag" "$edge_tag"\n' +
+  'test -s "$archive_path"\n' +
+  'archive_sha256="$(sha256sum "$archive_path" | cut -d\' \' -f1)"\n' +
+  '[[ "$archive_sha256" =~ ^[0-9a-f]{64}$ ]]\n' +
+  "jq -n \\\n" +
+  '  --arg release_sha "$release_sha" \\\n' +
+  '  --arg archive_sha256 "$archive_sha256" \\\n' +
+  '  --arg api_tag "$api_tag" \\\n' +
+  '  --arg api_image_id "$api_image_id" \\\n' +
+  '  --arg edge_tag "$edge_tag" \\\n' +
+  '  --arg edge_image_id "$edge_image_id" \\\n' +
+  "  '{release_sha: $release_sha, archive_sha256: $archive_sha256, images: {api: {tag: $api_tag, id: $api_image_id}, edge: {tag: $edge_tag, id: $edge_image_id}}}' \\\n" +
+  '  > "$manifest_path"\n' +
+  'chmod 600 "$archive_path" "$manifest_path"\n';
+
+const RELEASE_VERIFICATION_STEPS = [
+  ...PRODUCTION_BUNDLE_STEPS.slice(0, -2),
+  {
+    name: "Package the verified production images",
+    env: { RELEASE_SHA: "${{ github.sha }}" },
+    run: PACKAGE_VERIFIED_IMAGES,
+  },
+  {
+    name: "Upload the verified production images",
+    uses: UPLOAD_ARTIFACT,
+    with: {
+      name: "markiro-production-images-${{ github.sha }}",
+      path: "${{ runner.temp }}/markiro-release-images",
+      "if-no-files-found": "error",
+      "retention-days": 1,
+      "compression-level": 0,
+    },
+  },
+  ...PRODUCTION_BUNDLE_STEPS.slice(-2),
+];
+
+const VALIDATE_ARTIFACT =
+  "set -euo pipefail\n" +
+  'artifact_dir="$RUNNER_TEMP/markiro-release-images"\n' +
+  'manifest_path="$artifact_dir/manifest.json"\n' +
+  'archive_path="$artifact_dir/images.tar"\n' +
+  'expected_sha="$RELEASE_SHA"\n' +
+  'expected_api_tag="ghcr.io/thevladbog/markiro-api:$expected_sha"\n' +
+  'expected_edge_tag="ghcr.io/thevladbog/markiro-edge:$expected_sha"\n' +
+  '[[ "$expected_sha" =~ ^[0-9a-f]{40}$ ]]\n' +
+  'test -f "$manifest_path"\n' +
+  'test ! -L "$manifest_path"\n' +
+  'test -s "$archive_path"\n' +
+  'test ! -L "$archive_path"\n' +
+  'jq -e \'type == "object" and (keys == ["archive_sha256", "images", "release_sha"]) and (.release_sha | type == "string") and (.archive_sha256 | type == "string") and (.images | type == "object" and (keys == ["api", "edge"])) and ([.images.api, .images.edge] | all(type == "object" and (keys == ["id", "tag"]) and (.id | type == "string") and (.tag | type == "string")))\' "$manifest_path" > /dev/null\n' +
+  'release_sha="$(jq -er \'.release_sha\' "$manifest_path")"\n' +
+  'archive_sha256="$(jq -er \'.archive_sha256\' "$manifest_path")"\n' +
+  'api_tag="$(jq -er \'.images.api.tag\' "$manifest_path")"\n' +
+  'api_image_id="$(jq -er \'.images.api.id\' "$manifest_path")"\n' +
+  'edge_tag="$(jq -er \'.images.edge.tag\' "$manifest_path")"\n' +
+  'edge_image_id="$(jq -er \'.images.edge.id\' "$manifest_path")"\n' +
+  '[[ "$release_sha" == "$expected_sha" ]]\n' +
+  '[[ "$api_tag" == "$expected_api_tag" ]]\n' +
+  '[[ "$edge_tag" == "$expected_edge_tag" ]]\n' +
+  '[[ "$archive_sha256" =~ ^[0-9a-f]{64}$ ]]\n' +
+  '[[ "$api_image_id" =~ ^sha256:[0-9a-f]{64}$ ]]\n' +
+  '[[ "$edge_image_id" =~ ^sha256:[0-9a-f]{64}$ ]]\n' +
+  '[[ "$(sha256sum "$archive_path" | cut -d\' \' -f1)" == "$archive_sha256" ]]\n' +
+  'docker load --input "$archive_path"\n' +
+  '[[ "$(docker image inspect --format \'{{.Id}}\' "$expected_api_tag")" == "$api_image_id" ]]\n' +
+  '[[ "$(docker image inspect --format \'{{.Id}}\' "$expected_edge_tag")" == "$edge_image_id" ]]\n';
+
+const PUSH_VERIFIED_IMAGES =
+  "set -euo pipefail\n" +
+  'manifest_path="$RUNNER_TEMP/markiro-release-images/manifest.json"\n' +
+  'release_sha="$RELEASE_SHA"\n' +
+  'api_tag="ghcr.io/thevladbog/markiro-api:$release_sha"\n' +
+  'edge_tag="ghcr.io/thevladbog/markiro-edge:$release_sha"\n' +
+  'api_image_id="$(jq -er \'.images.api.id\' "$manifest_path")"\n' +
+  'edge_image_id="$(jq -er \'.images.edge.id\' "$manifest_path")"\n' +
+  '[[ "$(docker image inspect --format \'{{.Id}}\' "$api_tag")" == "$api_image_id" ]]\n' +
+  '[[ "$(docker image inspect --format \'{{.Id}}\' "$edge_tag")" == "$edge_image_id" ]]\n' +
+  'docker push "$api_tag"\n' +
+  'docker push "$edge_tag"\n' +
+  'api_repository="ghcr.io/thevladbog/markiro-api"\n' +
+  'edge_repository="ghcr.io/thevladbog/markiro-edge"\n' +
+  "mapfile -t api_repo_digests < <(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' \"$api_tag\")\n" +
+  "mapfile -t edge_repo_digests < <(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' \"$edge_tag\")\n" +
+  "api_digests=()\n" +
+  "edge_digests=()\n" +
+  'for repository_digest in "${api_repo_digests[@]}"; do\n' +
+  '  if [[ "$repository_digest" == "$api_repository@"* ]]; then api_digests+=("${repository_digest#"$api_repository@"}"); fi\n' +
+  "done\n" +
+  'for repository_digest in "${edge_repo_digests[@]}"; do\n' +
+  '  if [[ "$repository_digest" == "$edge_repository@"* ]]; then edge_digests+=("${repository_digest#"$edge_repository@"}"); fi\n' +
+  "done\n" +
+  '[[ "${#api_digests[@]}" -eq 1 ]]\n' +
+  '[[ "${#edge_digests[@]}" -eq 1 ]]\n' +
+  'api_digest="${api_digests[0]}"\n' +
+  'edge_digest="${edge_digests[0]}"\n' +
+  '[[ "$api_digest" =~ ^sha256:[0-9a-f]{64}$ ]]\n' +
+  '[[ "$edge_digest" =~ ^sha256:[0-9a-f]{64}$ ]]\n' +
+  'printf \'api_digest=%s\\n\' "$api_digest" >> "$GITHUB_OUTPUT"\n' +
+  'printf \'edge_digest=%s\\n\' "$edge_digest" >> "$GITHUB_OUTPUT"\n';
+
 const RELEASE_STEPS = [
-  { uses: CHECKOUT, with: { "persist-credentials": false } },
-  { uses: BUILDX },
+  {
+    name: "Download the verified production images",
+    uses: DOWNLOAD_ARTIFACT,
+    with: {
+      name: "markiro-production-images-${{ github.sha }}",
+      path: "${{ runner.temp }}/markiro-release-images",
+    },
+  },
+  {
+    name: "Load and validate the verified production images",
+    env: { RELEASE_SHA: "${{ github.sha }}" },
+    run: VALIDATE_ARTIFACT,
+  },
   {
     uses: LOGIN,
     with: {
@@ -129,33 +256,17 @@ const RELEASE_STEPS = [
     },
   },
   {
-    name: "Publish API SHA tag",
-    id: "api-image",
-    uses: BUILD_PUSH,
-    with: {
-      context: ".",
-      file: "deploy/production/api.Dockerfile",
-      push: true,
-      tags: "ghcr.io/thevladbog/markiro-api:${{ github.sha }}",
-    },
-  },
-  {
-    name: "Publish edge SHA tag",
-    id: "edge-image",
-    uses: BUILD_PUSH,
-    with: {
-      context: ".",
-      file: "deploy/production/edge.Dockerfile",
-      push: true,
-      tags: "ghcr.io/thevladbog/markiro-edge:${{ github.sha }}",
-    },
+    name: "Publish the exact verified production images",
+    id: "published-images",
+    env: { RELEASE_SHA: "${{ github.sha }}" },
+    run: PUSH_VERIFIED_IMAGES,
   },
   {
     name: "Record trusted image digest evidence",
     env: {
       RELEASE_SHA: "${{ github.sha }}",
-      API_DIGEST: "${{ steps.api-image.outputs.digest }}",
-      EDGE_DIGEST: "${{ steps.edge-image.outputs.digest }}",
+      API_DIGEST: "${{ steps.published-images.outputs.api_digest }}",
+      EDGE_DIGEST: "${{ steps.published-images.outputs.edge_digest }}",
     },
     run:
       "set -euo pipefail\n" +
@@ -311,11 +422,15 @@ function assertReleaseWorkflow(releaseSource, ciSource) {
     PRODUCTION_BUNDLE_ENV,
     "unexpected release production-bundle environment",
   );
-  assertExactSteps(verification.steps, PRODUCTION_BUNDLE_STEPS, "release production-bundle");
+  assertExactSteps(verification.steps, RELEASE_VERIFICATION_STEPS, "release production-bundle");
 
   const ciWorkflow = parseWorkflow(ciSource, "CI workflow");
   assert.deepEqual(
-    verification.steps,
+    verification.steps.filter(
+      (step) =>
+        step.name !== "Package the verified production images" &&
+        step.name !== "Upload the verified production images",
+    ),
     ciWorkflow.jobs?.["production-bundle"]?.steps,
     "release production-bundle verification must exactly match CI",
   );
@@ -342,9 +457,10 @@ function assertReleaseWorkflow(releaseSource, ciSource) {
   assertPinnedComments(releaseSource, CHECKOUT, "v4");
   assertPinnedComments(releaseSource, PNPM_SETUP, "v4");
   assertPinnedComments(releaseSource, NODE_SETUP, "v4");
-  assertPinnedComments(releaseSource, BUILDX, "v3.11.1");
   assertPinnedComments(releaseSource, LOGIN, "v3.5.0");
-  assertPinnedComments(releaseSource, BUILD_PUSH, "v6.18.0");
+  assertPinnedComments(releaseSource, UPLOAD_ARTIFACT, "v4.6.2");
+  assertPinnedComments(releaseSource, DOWNLOAD_ARTIFACT, "v4.3.0");
+  assert.doesNotMatch(releaseSource, /build-push-action|setup-buildx-action/);
   assertNoForbiddenWorkflowText(releaseSource, "release workflow");
 }
 
@@ -471,15 +587,12 @@ test("CI contract rejects each hidden-step, shell, log, and cleanup mutation for
     expectRejected(assertCiWorkflow, ci, mutation);
 });
 
-test("release contract rejects each trigger, permission, job, step, and tag mutation for its own reason", async () => {
+test("release contract rejects verification, artifact identity, publication, and evidence mutations", async () => {
   const release = await source(".github/workflows/release-images.yml");
   const ci = await source(".github/workflows/ci.yml");
-  const apiTags = "          tags: ghcr.io/thevladbog/markiro-api:${{ github.sha }}";
-  const edgeStep = "      - name: Publish edge SHA tag";
-  const edgeBuildPushComment =
-    `      - name: Publish edge SHA tag\n` +
-    `        id: edge-image\n` +
-    `        uses: ${BUILD_PUSH} # v6.18.0`;
+  const publishStep = "      - name: Publish the exact verified production images";
+  const cleanupIf =
+    "      - name: Remove production-bundle containers and volumes\n" + "        if: always()";
 
   for (const mutation of [
     {
@@ -540,19 +653,16 @@ test("release contract rejects each trigger, permission, job, step, and tag muta
       expected: /release publish permissions must scope packages: write to publication/,
     },
     {
-      name: "incorrect buildx revision comment",
-      search: `${BUILDX} # v3.11.1`,
-      replacement: `${BUILDX} # v3.11X1`,
-      expected: /missing v3\.11\.1 revision comment/,
+      name: "incorrect upload-artifact revision comment",
+      search: `${UPLOAD_ARTIFACT} # v4.6.2`,
+      replacement: `${UPLOAD_ARTIFACT} # v4.6.X`,
+      expected: /missing v4\.6\.2 revision comment/,
     },
     {
-      name: "missing revision comment on second repeated action",
-      search: edgeBuildPushComment,
-      replacement:
-        `      - name: Publish edge SHA tag\n` +
-        `        id: edge-image\n` +
-        `        uses: ${BUILD_PUSH}`,
-      expected: /missing v6\.18\.0 revision comment.*occurrence 2/,
+      name: "changed download-artifact pin",
+      search: DOWNLOAD_ARTIFACT,
+      replacement: "actions/download-artifact@main",
+      expected: /unexpected Download the verified production images step/,
     },
     {
       name: "quoted extra release job",
@@ -567,25 +677,62 @@ test("release contract rejects each trigger, permission, job, step, and tag muta
       expected: /unexpected release job names/,
     },
     {
-      name: "extra release shell step",
-      search: edgeStep,
-      replacement: "      - run: docker buildx build -t other:extra .\n" + edgeStep,
+      name: "reintroduced publish rebuild",
+      search: publishStep,
+      replacement: "      - run: docker build -t unverified:latest .\n" + publishStep,
       expected: /unexpected release publish steps/,
     },
     {
-      name: "multiple API image tags",
-      search: apiTags,
-      replacement:
-        "          tags:\n" +
-        "            - ghcr.io/thevladbog/markiro-api:${{ github.sha }}\n" +
-        "            - ghcr.io/thevladbog/markiro-api:extra",
-      expected: /unexpected Publish API SHA tag step/,
+      name: "packaged manifest omits the API image identity",
+      search: '          --arg api_image_id "$api_image_id" \\',
+      replacement: "          --arg api_image_id \"sha256:${'0'.repeat(64)}\" \\",
+      expected: /unexpected Package the verified production images step/,
     },
     {
-      name: "missing API build output id",
-      search: "        id: api-image\n",
-      replacement: "",
-      expected: /unexpected Publish API SHA tag step/,
+      name: "artifact upload tolerates missing files",
+      search: "          if-no-files-found: error",
+      replacement: "          if-no-files-found: ignore",
+      expected: /unexpected Upload the verified production images step/,
+    },
+    {
+      name: "download asks for a different artifact",
+      search:
+        `        uses: ${DOWNLOAD_ARTIFACT} # v4.3.0\n` +
+        "        with:\n" +
+        "          name: markiro-production-images-${{ github.sha }}",
+      replacement:
+        `        uses: ${DOWNLOAD_ARTIFACT} # v4.3.0\n` +
+        "        with:\n" +
+        "          name: unverified-production-images-${{ github.sha }}",
+      expected: /unexpected Download the verified production images step/,
+    },
+    {
+      name: "downloaded archive checksum validation removed",
+      search:
+        '          [[ "$(sha256sum "$archive_path" | cut -d\' \' -f1)" == "$archive_sha256" ]]',
+      replacement: "          true # archive checksum omitted",
+      expected: /unexpected Load and validate the verified production images step/,
+    },
+    {
+      name: "loaded API image identity validation removed",
+      search:
+        '          [[ "$(docker image inspect --format \'{{.Id}}\' "$expected_api_tag")" == "$api_image_id" ]]',
+      replacement: "          true # loaded API identity omitted",
+      expected: /unexpected Load and validate the verified production images step/,
+    },
+    {
+      name: "pre-push API image identity validation removed",
+      search:
+        '          [[ "$(docker image inspect --format \'{{.Id}}\' "$api_tag")" == "$api_image_id" ]]',
+      replacement: "          true # pre-push API identity omitted",
+      expected: /unexpected Publish the exact verified production images step/,
+    },
+    {
+      name: "cleanup no longer runs after artifact failures",
+      search: cleanupIf,
+      replacement:
+        "      - name: Remove production-bundle containers and volumes\n" + "        if: success()",
+      expected: /unexpected Remove production-bundle containers and volumes step/,
     },
     {
       name: "missing trusted digest evidence",

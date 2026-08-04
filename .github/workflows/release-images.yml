@@ -107,6 +107,47 @@ jobs:
         env:
           NODE_TLS_REJECT_UNAUTHORIZED: "0"
         run: MARKIRO_SMOKE_CI_OVERLAY=1 SMOKE_ASSERT_SHUTDOWN=1 node deploy/production/smoke.mjs
+      - name: Package the verified production images
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          artifact_dir="$RUNNER_TEMP/markiro-release-images"
+          manifest_path="$artifact_dir/manifest.json"
+          archive_path="$artifact_dir/images.tar"
+          release_sha="$RELEASE_SHA"
+          api_tag="ghcr.io/thevladbog/markiro-api:$release_sha"
+          edge_tag="ghcr.io/thevladbog/markiro-edge:$release_sha"
+          [[ "$release_sha" =~ ^[0-9a-f]{40}$ ]]
+          test ! -e "$artifact_dir"
+          umask 077
+          install -d -m 700 "$artifact_dir"
+          api_image_id="$(docker image inspect --format '{{.Id}}' "$api_tag")"
+          edge_image_id="$(docker image inspect --format '{{.Id}}' "$edge_tag")"
+          [[ "$api_image_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$edge_image_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+          docker save --output "$archive_path" "$api_tag" "$edge_tag"
+          test -s "$archive_path"
+          archive_sha256="$(sha256sum "$archive_path" | cut -d' ' -f1)"
+          [[ "$archive_sha256" =~ ^[0-9a-f]{64}$ ]]
+          jq -n \
+            --arg release_sha "$release_sha" \
+            --arg archive_sha256 "$archive_sha256" \
+            --arg api_tag "$api_tag" \
+            --arg api_image_id "$api_image_id" \
+            --arg edge_tag "$edge_tag" \
+            --arg edge_image_id "$edge_image_id" \
+            '{release_sha: $release_sha, archive_sha256: $archive_sha256, images: {api: {tag: $api_tag, id: $api_image_id}, edge: {tag: $edge_tag, id: $edge_image_id}}}' \
+            > "$manifest_path"
+          chmod 600 "$archive_path" "$manifest_path"
+      - name: Upload the verified production images
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: markiro-production-images-${{ github.sha }}
+          path: ${{ runner.temp }}/markiro-release-images
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
       - name: Show sanitized production-bundle logs on failure
         if: failure()
         run: >-
@@ -126,36 +167,90 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Download the verified production images
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          persist-credentials: false
-      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+          name: markiro-production-images-${{ github.sha }}
+          path: ${{ runner.temp }}/markiro-release-images
+      - name: Load and validate the verified production images
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          artifact_dir="$RUNNER_TEMP/markiro-release-images"
+          manifest_path="$artifact_dir/manifest.json"
+          archive_path="$artifact_dir/images.tar"
+          expected_sha="$RELEASE_SHA"
+          expected_api_tag="ghcr.io/thevladbog/markiro-api:$expected_sha"
+          expected_edge_tag="ghcr.io/thevladbog/markiro-edge:$expected_sha"
+          [[ "$expected_sha" =~ ^[0-9a-f]{40}$ ]]
+          test -f "$manifest_path"
+          test ! -L "$manifest_path"
+          test -s "$archive_path"
+          test ! -L "$archive_path"
+          jq -e 'type == "object" and (keys == ["archive_sha256", "images", "release_sha"]) and (.release_sha | type == "string") and (.archive_sha256 | type == "string") and (.images | type == "object" and (keys == ["api", "edge"])) and ([.images.api, .images.edge] | all(type == "object" and (keys == ["id", "tag"]) and (.id | type == "string") and (.tag | type == "string")))' "$manifest_path" > /dev/null
+          release_sha="$(jq -er '.release_sha' "$manifest_path")"
+          archive_sha256="$(jq -er '.archive_sha256' "$manifest_path")"
+          api_tag="$(jq -er '.images.api.tag' "$manifest_path")"
+          api_image_id="$(jq -er '.images.api.id' "$manifest_path")"
+          edge_tag="$(jq -er '.images.edge.tag' "$manifest_path")"
+          edge_image_id="$(jq -er '.images.edge.id' "$manifest_path")"
+          [[ "$release_sha" == "$expected_sha" ]]
+          [[ "$api_tag" == "$expected_api_tag" ]]
+          [[ "$edge_tag" == "$expected_edge_tag" ]]
+          [[ "$archive_sha256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$api_image_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$edge_image_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$(sha256sum "$archive_path" | cut -d' ' -f1)" == "$archive_sha256" ]]
+          docker load --input "$archive_path"
+          [[ "$(docker image inspect --format '{{.Id}}' "$expected_api_tag")" == "$api_image_id" ]]
+          [[ "$(docker image inspect --format '{{.Id}}' "$expected_edge_tag")" == "$edge_image_id" ]]
       - uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 # v3.5.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Publish API SHA tag
-        id: api-image
-        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
-        with:
-          context: .
-          file: deploy/production/api.Dockerfile
-          push: true
-          tags: ghcr.io/thevladbog/markiro-api:${{ github.sha }}
-      - name: Publish edge SHA tag
-        id: edge-image
-        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
-        with:
-          context: .
-          file: deploy/production/edge.Dockerfile
-          push: true
-          tags: ghcr.io/thevladbog/markiro-edge:${{ github.sha }}
+      - name: Publish the exact verified production images
+        id: published-images
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          manifest_path="$RUNNER_TEMP/markiro-release-images/manifest.json"
+          release_sha="$RELEASE_SHA"
+          api_tag="ghcr.io/thevladbog/markiro-api:$release_sha"
+          edge_tag="ghcr.io/thevladbog/markiro-edge:$release_sha"
+          api_image_id="$(jq -er '.images.api.id' "$manifest_path")"
+          edge_image_id="$(jq -er '.images.edge.id' "$manifest_path")"
+          [[ "$(docker image inspect --format '{{.Id}}' "$api_tag")" == "$api_image_id" ]]
+          [[ "$(docker image inspect --format '{{.Id}}' "$edge_tag")" == "$edge_image_id" ]]
+          docker push "$api_tag"
+          docker push "$edge_tag"
+          api_repository="ghcr.io/thevladbog/markiro-api"
+          edge_repository="ghcr.io/thevladbog/markiro-edge"
+          mapfile -t api_repo_digests < <(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$api_tag")
+          mapfile -t edge_repo_digests < <(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$edge_tag")
+          api_digests=()
+          edge_digests=()
+          for repository_digest in "${api_repo_digests[@]}"; do
+            if [[ "$repository_digest" == "$api_repository@"* ]]; then api_digests+=("${repository_digest#"$api_repository@"}"); fi
+          done
+          for repository_digest in "${edge_repo_digests[@]}"; do
+            if [[ "$repository_digest" == "$edge_repository@"* ]]; then edge_digests+=("${repository_digest#"$edge_repository@"}"); fi
+          done
+          [[ "${#api_digests[@]}" -eq 1 ]]
+          [[ "${#edge_digests[@]}" -eq 1 ]]
+          api_digest="${api_digests[0]}"
+          edge_digest="${edge_digests[0]}"
+          [[ "$api_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$edge_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          printf 'api_digest=%s\n' "$api_digest" >> "$GITHUB_OUTPUT"
+          printf 'edge_digest=%s\n' "$edge_digest" >> "$GITHUB_OUTPUT"
       - name: Record trusted image digest evidence
         env:
           RELEASE_SHA: ${{ github.sha }}
-          API_DIGEST: ${{ steps.api-image.outputs.digest }}
-          EDGE_DIGEST: ${{ steps.edge-image.outputs.digest }}
+          API_DIGEST: ${{ steps.published-images.outputs.api_digest }}
+          EDGE_DIGEST: ${{ steps.published-images.outputs.edge_digest }}
         run: |
           set -euo pipefail
           release_sha="$RELEASE_SHA"
