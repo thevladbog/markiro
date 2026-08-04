@@ -7,6 +7,8 @@ const csp =
   "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'";
 const shell =
   '<html><head><title>Markiro</title><script type="module" src="/assets/main.js"></script></head><body></body></html>';
+const docsShell =
+  '<!doctype html><html><head><title>API docs</title></head><body><div id="app"></div><script src="/docs/scalar.js"></script><script src="/docs/bootstrap.js"></script></body></html>';
 
 test("uses the configured HTTPS port for production-bundle smoke", () => {
   assert.equal(
@@ -55,8 +57,18 @@ function smokeClient() {
         });
       if (path === "/docs")
         return response({
-          body: "<html><title>API docs</title></html>",
+          body: docsShell,
           headers: { "content-type": "text/html" },
+        });
+      if (path === "/docs/scalar.js")
+        return response({
+          body: "window.Scalar={createApiReference:()=>{}}",
+          headers: { "content-type": "application/javascript" },
+        });
+      if (path === "/docs/bootstrap.js")
+        return response({
+          body: 'Scalar.createApiReference("#app", { url: "/openapi.json" });',
+          headers: { "content-type": "application/javascript" },
         });
       if (path === "/unknown")
         return response({
@@ -107,7 +119,7 @@ test("defines the complete immutable public-route smoke contract", () => {
       ["GET", "/health/live", "json", "200 JSON"],
       ["GET", "/health/ready", "ready-json", "200 JSON ok or degraded"],
       ["GET", "/openapi.json", "json", "200 JSON"],
-      ["GET", "/docs", "proxy-html", "upstream HTML, not admin shell"],
+      ["GET", "/docs", "docs", "same-origin executable documentation shell"],
       ["POST", "/unknown", "not-found", "404, not HTML"],
     ],
   );
@@ -133,7 +145,13 @@ test("smokes public routing, headers, and unprivileged runtime without accepting
     docker,
   );
 
-  assert.equal(client.requests.length, ROUTE_CHECKS.length);
+  assert.equal(client.requests.length, ROUTE_CHECKS.length + 2);
+  assert.deepEqual(
+    client.requests
+      .map(({ url }) => new URL(url).pathname)
+      .filter((path) => path.startsWith("/docs/")),
+    ["/docs/scalar.js", "/docs/bootstrap.js"],
+  );
   const commerceMl = client.requests.find(({ url }) => new URL(url).pathname === "/1c_exchange");
   assert.equal(commerceMl.init.body, "type=catalog&mode=checkauth");
   assert.equal(commerceMl.init.headers["content-type"], "application/x-www-form-urlencoded");
@@ -743,7 +761,7 @@ test("rejects an unknown route with an HTML content type and structurally distin
   structured.request = async (url, init) =>
     new URL(url).pathname === "/docs"
       ? response({
-          body: '<html><title>Markiro</title><script src="/assets/other.js" type="module"></script><p>/assets/main.js</p></html>',
+          body: `<html><title>Markiro</title><p>/assets/main.js</p><script src="/docs/scalar.js"></script><script src="/docs/bootstrap.js"></script></html>`,
           headers: { "content-type": "text/html" },
         })
       : originalStructured(url, init);
@@ -752,4 +770,108 @@ test("rejects an unknown route with an HTML content type and structurally distin
     structured,
     docker,
   );
+});
+
+test("rejects documentation that cannot execute under the production CSP", async (t) => {
+  const docker = {
+    run: async (command, args) =>
+      args.includes("ps")
+        ? { code: 0, stdout: "container-id\n", stderr: "" }
+        : args[0] === "inspect"
+          ? { code: 0, stdout: "{}\n", stderr: "" }
+          : args.includes("id")
+            ? { code: 0, stdout: "10001\n", stderr: "" }
+            : { code: 1, stdout: "", stderr: "" },
+  };
+
+  for (const [name, docs, expected] of [
+    [
+      "inline initializer",
+      '<html><script src="/docs/scalar.js"></script><script>Scalar.createApiReference()</script></html>',
+      /inline script/,
+    ],
+    [
+      "external bundle",
+      '<html><script src="https://cdn.example/scalar.js"></script><script src="/docs/bootstrap.js"></script></html>',
+      /external origin/,
+    ],
+  ]) {
+    await t.test(name, async () => {
+      const client = smokeClient();
+      const original = client.request;
+      client.request = async (url, init) =>
+        new URL(url).pathname === "/docs"
+          ? response({ body: docs, headers: { "content-type": "text/html" } })
+          : original(url, init);
+      await assert.rejects(
+        runSmoke(
+          { baseUrl: "https://app.markiro.example", assetName: "main.js", environment: {} },
+          client,
+          docker,
+        ),
+        expected,
+      );
+    });
+  }
+});
+
+test("rejects unavailable documentation scripts and a bootstrap with the wrong document target", async (t) => {
+  const docker = {
+    run: async (command, args) =>
+      args.includes("ps")
+        ? { code: 0, stdout: "container-id\n", stderr: "" }
+        : args[0] === "inspect"
+          ? { code: 0, stdout: "{}\n", stderr: "" }
+          : args.includes("id")
+            ? { code: 0, stdout: "10001\n", stderr: "" }
+            : { code: 1, stdout: "", stderr: "" },
+  };
+
+  for (const [name, path, overridden, expected] of [
+    [
+      "wrong script content type",
+      "/docs/scalar.js",
+      response({ body: "window.Scalar={}", headers: { "content-type": "text/html" } }),
+      /JavaScript/,
+    ],
+    [
+      "empty script",
+      "/docs/scalar.js",
+      response({ body: "", headers: { "content-type": "application/javascript" } }),
+      /empty/,
+    ],
+    [
+      "missing Scalar browser global",
+      "/docs/scalar.js",
+      response({
+        body: "function createApiReference() {}",
+        headers: { "content-type": "application/javascript" },
+      }),
+      /browser global/,
+    ],
+    [
+      "wrong OpenAPI target",
+      "/docs/bootstrap.js",
+      response({
+        body: 'Scalar.createApiReference("#app", { url: "/private.json" });',
+        headers: { "content-type": "application/javascript" },
+      }),
+      /openapi\.json/,
+    ],
+  ]) {
+    await t.test(name, async () => {
+      const client = smokeClient();
+      const original = client.request;
+      client.request = async (url, init) =>
+        new URL(url).pathname === path ? overridden : original(url, init);
+      await assert.rejects(
+        runSmoke(
+          { baseUrl: "https://app.markiro.example", assetName: "main.js", environment: {} },
+          client,
+          docker,
+        ),
+        expected,
+      );
+    });
+  }
 });

@@ -3,12 +3,12 @@ import express, { type Express } from "express";
 import { Logger } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
-import { apiReference } from "@scalar/nestjs-api-reference";
 import { AppModule } from "./app.module";
 import { mountAuth, setupAuth } from "./auth/auth.setup";
 import { corsDelegate } from "./cors";
 import { loadEnv } from "./env";
 import { excludeExchangeRoute } from "./modules/exchange/exchange.module";
+import { mountOpenApiDocs } from "./openapi-docs";
 
 const logger = new Logger("bootstrap");
 
@@ -78,7 +78,7 @@ async function bootstrap() {
     new DocumentBuilder().setTitle("Markiro API").setVersion("0.1").build(),
   );
   app.use("/openapi.json", (_req: unknown, res: { json(b: unknown): void }) => res.json(doc));
-  app.use("/docs", apiReference({ content: doc }));
+  mountOpenApiDocs(server);
   await app.listen(env.PORT);
 }
 void bootstrap();

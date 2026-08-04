@@ -87,8 +87,8 @@ export const ROUTE_CHECKS = Object.freeze([
   Object.freeze({
     method: "GET",
     path: "/docs",
-    kind: "proxy-html",
-    expected: "upstream HTML, not admin shell",
+    kind: "docs",
+    expected: "same-origin executable documentation shell",
   }),
   Object.freeze({ method: "POST", path: "/unknown", kind: "not-found", expected: "404, not HTML" }),
 ]);
@@ -195,6 +195,44 @@ function assertNoExternalOrigins(html, baseUrl) {
   }
 }
 
+function documentationScripts(html, baseUrl) {
+  const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)].map((match) => {
+    if (match[2]?.trim()) throw new Error("docs contains an inline script");
+    const source = match[1]?.match(/\bsrc\s*=\s*["']([^"']+)["']/i)?.[1];
+    if (!source) throw new Error("docs contains an inline script");
+    if (source.startsWith("//")) throw new Error("docs contains an external origin");
+    const url = new URL(source, baseUrl);
+    if (url.origin !== new URL(baseUrl).origin) throw new Error("docs contains an external origin");
+    return url;
+  });
+  const paths = scripts.map((url) => url.pathname);
+  if (paths.length !== 2 || paths[0] !== "/docs/scalar.js" || paths[1] !== "/docs/bootstrap.js")
+    throw new Error("docs does not load the required same-origin scripts");
+  return scripts;
+}
+
+async function assertDocumentation(client, html, baseUrl) {
+  assertNoExternalOrigins(html, baseUrl);
+  for (const url of documentationScripts(html, baseUrl)) {
+    const response = await publicRequest(client, url, { method: "GET" });
+    const body = await getText(response);
+    assertHeaders(response, new URL(baseUrl).protocol === "https:");
+    if (
+      response.status !== 200 ||
+      !/(?:application|text)\/javascript/i.test(response.headers.get("content-type") || "")
+    )
+      throw new Error(`${url.pathname} did not return JavaScript`);
+    if (!body.trim()) throw new Error(`${url.pathname} returned an empty script`);
+    if (
+      url.pathname === "/docs/scalar.js" &&
+      !/window\.Scalar\s*=\s*\{\s*createApiReference\s*:/.test(body)
+    )
+      throw new Error("Scalar browser global is unavailable");
+    if (url.pathname === "/docs/bootstrap.js" && !/\burl\s*:\s*["']\/openapi\.json["']/.test(body))
+      throw new Error("docs bootstrap does not target /openapi.json");
+  }
+}
+
 async function getText(response) {
   return response.text();
 }
@@ -298,7 +336,7 @@ function assertRoute(check, response, body, signature) {
     }
   }
   if (
-    check.kind === "proxy-html" &&
+    check.kind === "docs" &&
     (response.status !== 200 || !/text\/html/i.test(response.headers.get("content-type") || ""))
   )
     throw new Error("docs did not return upstream HTML");
@@ -499,6 +537,7 @@ export async function runSmoke(options, client = requestClient(), docker) {
     const body = check.path === "/" ? rootHtml : await getText(response);
     assertHeaders(response, new URL(baseUrl).protocol === "https:");
     assertRoute(check, response, body, signature);
+    if (check.kind === "docs") await assertDocumentation(client, body, baseUrl);
   }
   await runtimeSmoke(environment, dockerClient, client, baseUrl, runtimeOptions);
 }

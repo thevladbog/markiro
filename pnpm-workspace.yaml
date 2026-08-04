@@ -5,6 +5,7 @@ allowBuilds:
   esbuild: true
   sharp: true
   "@scarf/scarf": false # telemetry postinstall — deliberately blocked
+  vue-demi: false # browser runtime is prebuilt; do not run its postinstall switcher
 overrides:
   # React Email's preview CLI pulls Next.js as tooling. Keep that transitive
   # runtime on the first 16.x release patched for the App Router DoS and SSRF
