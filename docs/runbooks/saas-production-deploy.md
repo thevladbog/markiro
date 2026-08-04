@@ -277,6 +277,12 @@ Reject the release immediately if pull, migration, API readiness, edge start,
 or smoke fails. Do not mark it healthy manually and do not provision another
 first owner as part of a routine deploy.
 
+The `migrate` service uses the exact same digest-pinned API image as `api`. If
+migration fails before service replacement, `api` and `edge` containers are not
+switched, but the migrator may already have committed a prefix of forward
+migrations to the shared database. Treat that database as changed: the
+compatibility and rollback gate still applies.
+
 The current Compose project has one `api` service identity and one `edge`
 service identity. Recreating the candidate API can leave the old edge proxying
 an unavailable service, and replacing edge itself can interrupt requests. This

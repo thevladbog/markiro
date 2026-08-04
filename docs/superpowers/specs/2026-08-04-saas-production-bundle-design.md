@@ -159,11 +159,13 @@ compiled runtime CLI around Drizzle's PostgreSQL migrator. It reads only
 advisory lock, applies pending migrations, and releases the lock on success or
 failure. It emits migration identifiers and status, never the connection URL.
 
-The `migrate` service uses the exact same API image tag that will be started.
-Compose requires `service_completed_successfully` before starting `api`. A
-failed migration blocks the release and leaves the previous running deployment
-untouched when the deploy procedure is followed; operators inspect the
-migration log and database state rather than restarting in a loop.
+The `migrate` service uses the exact same digest-pinned API image as `api`.
+Compose requires `service_completed_successfully` before starting `api`. If
+migration fails before service replacement, `api` and `edge` containers are not
+switched, but the migrator may already have committed a prefix of forward
+migrations to the shared database. Treat that database as changed: the
+compatibility and rollback gate still applies. Operators inspect the migration
+log and database state rather than restarting in a loop.
 
 Migrations committed in one release must be backward-compatible with the
 immediately previous API image. Destructive cleanup is a later release after

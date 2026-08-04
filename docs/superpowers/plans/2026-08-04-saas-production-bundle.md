@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Use exact builder base `node:24.19.0-bookworm-slim` and exact edge runtime `caddy:2.11.4-alpine`; do not use floating `latest` tags.
-- The 40-character `MARKIRO_IMAGE_TAG` is release identity only. GHCR SHA tags are mutable selectors. Production images are selected by preapproved `ghcr.io/thevladbog/markiro-api@${MARKIRO_API_IMAGE_DIGEST}` and `ghcr.io/thevladbog/markiro-edge@${MARKIRO_EDGE_IMAGE_DIGEST}` references, with strict lowercase `sha256:` plus 64-hex inputs from trusted Actions evidence.
+- The 40-character `MARKIRO_IMAGE_TAG` is release identity only. GHCR SHA tags are mutable selectors. Production images are selected by preapproved repository digests: `ghcr.io/thevladbog/markiro-api@${MARKIRO_API_IMAGE_DIGEST}` and `ghcr.io/thevladbog/markiro-edge@${MARKIRO_EDGE_IMAGE_DIGEST}`, with strict lowercase `sha256:` plus 64-hex inputs from trusted Actions evidence.
 - The one-API/one-edge Compose identity does not guarantee zero downtime: candidate recreation can make the old edge unavailable, and rollback recreates the previous digest pair. A separately addressable blue/green topology is the next slice, not part of this plan.
 - Run production containers as unprivileged users with read-only root filesystems, dropped Linux capabilities, `no-new-privileges`, and a bounded `/tmp` tmpfs.
 - Keep the API on the private Compose network; only `edge` may publish host ports 80 and 443 in the production defaults.
@@ -19,6 +19,7 @@
 - Preserve `/api/auth/*` exactly, strip one `/api` prefix for other admin calls, preserve every station, kiosk, 1C, health, docs, and OpenAPI path, and never route an unknown non-GET request to the SPA.
 - Preserve the exact CSP from the approved design and do not add external script, style, font, image, or connection origins.
 - Do not install or execute `drizzle-kit` in production; migrations use the compiled Drizzle ORM runtime migrator under a fixed PostgreSQL advisory lock.
+- The `migrate` service uses the exact same digest-pinned API image as `api`. If migration fails before service replacement, `api` and `edge` containers are not switched, but the migrator may already have committed a prefix of forward migrations to the shared database. Treat that database as changed: the compatibility and rollback gate still applies.
 - Keep `GET /health` as the liveness compatibility alias; required PostgreSQL or pg-boss failure makes `/health/ready` return 503, while SMTP or S3 failure returns a 200 degraded report.
 - Probe timeouts are 2,000 ms, successful and failed probe results are cached for 10,000 ms, and raw provider errors, endpoints, and credentials never appear in responses or logs.
 - Do not add a generic request-body limit at Caddy because `/1c_exchange` accepts large CommerceML uploads.
@@ -756,8 +757,8 @@ git commit -m "build: add production admin edge"
 
 **Interfaces:**
 
-- Consumes: `MARKIRO_IMAGE_TAG`, `MARKIRO_DOMAIN`, `ACME_EMAIL`, optional `MARKIRO_ENV_FILE`, and the complete validated API environment.
-- Produces: hardened `migrate`/`api`/`edge` production services, CI-only dependency services, and `runPreflight(environment, stat, compose): Promise<PreflightResult>`.
+- Consumes: `MARKIRO_IMAGE_TAG`, `MARKIRO_API_IMAGE_DIGEST`, `MARKIRO_EDGE_IMAGE_DIGEST`, `MARKIRO_DOMAIN`, `ACME_EMAIL`, optional `MARKIRO_ENV_FILE`, and the complete validated API environment.
+- Produces: hardened `migrate`/`api`/`edge` production services, CI-only dependency services, and `runPreflight(environment, dependencies): Promise<PreflightResult>` returning a `PreflightResult` with `imageTag`, `apiImageDigest`, `edgeImageDigest`, `domain`, `acmeEmail`, and `envFile`.
 
 - [ ] **Step 1: Write failing static Compose contracts**
 
@@ -776,10 +777,20 @@ Assert the CI overlay adds `postgres:17-alpine`, `axllent/mailpit:v1.30.0`, the 
 Export a dependency-injected function so tests need no real files or Docker:
 
 ```js
-/** @typedef {Record<string, string | undefined>} PreflightEnvironment */
+/**
+ * @typedef {object} PreflightEnvironment
+ * @property {string | undefined} MARKIRO_IMAGE_TAG
+ * @property {string | undefined} MARKIRO_API_IMAGE_DIGEST
+ * @property {string | undefined} MARKIRO_EDGE_IMAGE_DIGEST
+ * @property {string | undefined} MARKIRO_DOMAIN
+ * @property {string | undefined} ACME_EMAIL
+ * @property {string | undefined} MARKIRO_ENV_FILE
+ */
 /**
  * @typedef {object} PreflightResult
  * @property {string} imageTag
+ * @property {string} apiImageDigest
+ * @property {string} edgeImageDigest
  * @property {string} domain
  * @property {string} acmeEmail
  * @property {string} envFile

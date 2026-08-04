@@ -6,6 +6,13 @@ const RUNBOOK = "docs/runbooks/saas-production-deploy.md";
 const DESIGN = "docs/superpowers/specs/2026-08-04-saas-production-bundle-design.md";
 const PLAN = "docs/superpowers/plans/2026-08-04-saas-production-bundle.md";
 
+const DIGEST_PINNED_MIGRATE_CLAIM =
+  "The `migrate` service uses the exact same digest-pinned API image as `api`.";
+const PARTIAL_MIGRATION_CLAIM =
+  "may already have committed a prefix of forward migrations to the shared database";
+const UNSWITCHED_CONTAINER_CLAIM = "`api` and `edge` containers are not switched";
+const MIGRATION_GATE_CLAIM = "compatibility and rollback gate still applies";
+
 const DEPLOY_BLOCK = `node deploy/production/preflight.mjs
 node deploy/production/deploy.mjs
 node deploy/production/smoke.mjs`;
@@ -399,21 +406,67 @@ function assertRunbook(source) {
   );
 }
 
-function assertIdentityClaims(runbook, design, plan) {
-  const combined = `${runbook}\n${design}\n${plan}`;
+function assertIdentityClaims(source, label) {
+  const normalized = source.replace(/\s+/g, " ");
   invariant(
-    combined.includes("SHA tags are mutable selectors") &&
-      combined.includes("preapproved repository digest"),
-    "digest trust boundary and mutable SHA-tag selector must be documented",
+    normalized.includes("SHA tags are mutable selectors") &&
+      /preapproved.{0,160}repository digest/i.test(normalized),
+    `${label} must document the digest trust boundary and mutable SHA-tag selector`,
   );
   invariant(
-    !/(?:SHA|git SHA|SHA-only)[^\n.]{0,80}(?:immutable tag|immutable image)/i.test(combined),
-    "SHA-tag selectors must not be described as immutable images",
+    !/(?:SHA|git SHA|SHA-only)[^\n.]{0,80}(?:immutable tag|immutable image)/i.test(source),
+    `${label} must not describe SHA-tag selectors as immutable images`,
   );
   invariant(
-    !/\b(?:guarantees|provides) zero downtime/i.test(combined),
-    "single-service deployment must not claim zero downtime",
+    !/\b(?:guarantees|provides) zero downtime/i.test(source),
+    `${label} must not claim zero downtime for the single-service deployment`,
   );
+  invariant(
+    normalized.includes("does not guarantee zero downtime"),
+    `${label} must state the single-service downtime limitation explicitly`,
+  );
+  invariant(
+    !/same API image tag/i.test(source),
+    `${label} must identify the migrate image by digest, not by a mutable tag`,
+  );
+  invariant(
+    !/previous deployment untouched/i.test(source),
+    `${label} must not claim a failed migration leaves the previous deployment untouched`,
+  );
+  invariant(
+    normalized.includes(DIGEST_PINNED_MIGRATE_CLAIM) &&
+      normalized.includes(PARTIAL_MIGRATION_CLAIM) &&
+      normalized.includes(UNSWITCHED_CONTAINER_CLAIM) &&
+      normalized.includes(MIGRATION_GATE_CLAIM),
+    `${label} must describe digest-pinned migration identity and partial-commit failure semantics`,
+  );
+}
+
+function assertPlanPreflightInterface(source) {
+  invariant(
+    source.includes(
+      "Consumes: `MARKIRO_IMAGE_TAG`, `MARKIRO_API_IMAGE_DIGEST`, `MARKIRO_EDGE_IMAGE_DIGEST`, `MARKIRO_DOMAIN`, `ACME_EMAIL`, optional `MARKIRO_ENV_FILE`",
+    ),
+    "plan preflight interface must list both digest selector inputs",
+  );
+  invariant(
+    source.includes(
+      "`PreflightResult` with `imageTag`, `apiImageDigest`, `edgeImageDigest`, `domain`, `acmeEmail`, and `envFile`",
+    ),
+    "plan preflight interface must list both digest selector outputs",
+  );
+  for (const property of [
+    "MARKIRO_API_IMAGE_DIGEST",
+    "MARKIRO_EDGE_IMAGE_DIGEST",
+    "apiImageDigest",
+    "edgeImageDigest",
+  ])
+    invariant(
+      new RegExp(
+        `@property \\{string \\| undefined\\} ${property}|@property \\{string\\} ${property}`,
+      ).test(source),
+      `plan preflight JSDoc must list ${property}`,
+    );
 }
 
 function replaceUnique(source, needle, replacement) {
@@ -432,24 +485,45 @@ test("the parsed runbook has exact fail-closed deploy, owner, and rollback proce
 });
 
 test("runbook, design, and plan describe digest identity and single-service downtime truthfully", async () => {
-  assertIdentityClaims(
-    await readFile(RUNBOOK, "utf8"),
-    await readFile(DESIGN, "utf8"),
-    await readFile(PLAN, "utf8"),
-  );
+  assertIdentityClaims(await readFile(RUNBOOK, "utf8"), "runbook");
+  assertIdentityClaims(await readFile(DESIGN, "utf8"), "design");
+  const plan = await readFile(PLAN, "utf8");
+  assertIdentityClaims(plan, "plan");
+  assertPlanPreflightInterface(plan);
 });
 
-test("documentation contract rejects a false zero-downtime claim mutation", async () => {
-  const runbook = await readFile(RUNBOOK, "utf8");
-  const design = await readFile(DESIGN, "utf8");
-  const plan = await readFile(PLAN, "utf8");
-  const truthful = "does not guarantee zero downtime";
-  const mutated = runbook.replace(truthful, "guarantees zero downtime");
-  assert.notEqual(mutated, runbook, "truthful downtime statement must exist");
-  assert.throws(
-    () => assertIdentityClaims(mutated, design, plan),
-    /single-service deployment must not claim zero downtime/,
-  );
+test("each documentation contract rejects its own stale identity and migration claims", async (t) => {
+  for (const [label, path] of [
+    ["runbook", RUNBOOK],
+    ["design", DESIGN],
+    ["plan", PLAN],
+  ]) {
+    const source = await readFile(path, "utf8");
+
+    await t.test(`${label}: false zero-downtime mutation`, () => {
+      const mutated = `${source}\nThis single-service deployment guarantees zero downtime.\n`;
+      assert.throws(
+        () => assertIdentityClaims(mutated, label),
+        new RegExp(`${label} must not claim zero downtime`),
+      );
+    });
+
+    await t.test(`${label}: mutable API-tag migration identity mutation`, () => {
+      const mutated = `${source}\nThe migrate service uses the same API image tag.\n`;
+      assert.throws(
+        () => assertIdentityClaims(mutated, label),
+        new RegExp(`${label} must identify the migrate image by digest`),
+      );
+    });
+
+    await t.test(`${label}: previous-deployment-untouched mutation`, () => {
+      const mutated = `${source}\nA failed migration leaves the previous deployment untouched.\n`;
+      assert.throws(
+        () => assertIdentityClaims(mutated, label),
+        new RegExp(`${label} must not claim a failed migration`),
+      );
+    });
+  }
 });
 
 test("the contract rejects each portability, record-safety, linkage, and command mutation for its own reason", async () => {

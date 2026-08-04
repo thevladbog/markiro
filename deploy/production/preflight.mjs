@@ -129,7 +129,13 @@ export async function composeQuiet(environment, supplied = {}) {
 }
 
 /**
- * @typedef {Record<string, string | undefined>} PreflightEnvironment
+ * @typedef {object} PreflightEnvironment
+ * @property {string | undefined} MARKIRO_IMAGE_TAG
+ * @property {string | undefined} MARKIRO_API_IMAGE_DIGEST
+ * @property {string | undefined} MARKIRO_EDGE_IMAGE_DIGEST
+ * @property {string | undefined} MARKIRO_DOMAIN
+ * @property {string | undefined} ACME_EMAIL
+ * @property {string | undefined} MARKIRO_ENV_FILE
  */
 
 /**

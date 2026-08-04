@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { composeQuiet, runPreflight } from "../preflight.mjs";
@@ -11,6 +12,30 @@ const release = {
   MARKIRO_DOMAIN: "app.markiro.example",
   ACME_EMAIL: "ops@example.test",
 };
+
+test("documents every digest selector input and output in the preflight interface", async () => {
+  const source = await readFile(new URL("../preflight.mjs", import.meta.url), "utf8");
+
+  for (const input of [
+    "MARKIRO_IMAGE_TAG",
+    "MARKIRO_API_IMAGE_DIGEST",
+    "MARKIRO_EDGE_IMAGE_DIGEST",
+    "MARKIRO_DOMAIN",
+    "ACME_EMAIL",
+    "MARKIRO_ENV_FILE",
+  ])
+    assert.match(source, new RegExp(`@property \\{string \\| undefined\\} ${input}`));
+
+  for (const output of [
+    "imageTag",
+    "apiImageDigest",
+    "edgeImageDigest",
+    "domain",
+    "acmeEmail",
+    "envFile",
+  ])
+    assert.match(source, new RegExp(`@property \\{string\\} ${output}`));
+});
 
 function dependencies({ mode = 0o600, composeError } = {}) {
   return {
