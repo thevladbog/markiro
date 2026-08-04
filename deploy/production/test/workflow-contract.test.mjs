@@ -1,321 +1,438 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { load } from "js-yaml";
+
+const CHECKOUT = "actions/checkout@11d5960a326750d5838078e36cf38b85af677262";
+const PNPM_SETUP = "pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1";
+const NODE_SETUP = "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020";
+const BUILDX = "docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435";
+const LOGIN = "docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1";
+const BUILD_PUSH = "docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83";
+const COMPOSE =
+  'docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml -f deploy/production/compose.ci.yml';
+
+const GENERATE_ENVIRONMENT =
+  [
+    "set -euo pipefail",
+    'better_auth_secret="$(openssl rand -base64 48)"',
+    'pairing_code_pepper="$(openssl rand -hex 32)"',
+    'mail_payload_key="$(openssl rand -base64 32)"',
+    'smtp_user="markiro-ci"',
+    'smtp_password="$(openssl rand -hex 24)"',
+    'database_url="postgresql://markiro:markiro@postgres:5432/markiro"',
+    "for credential in \\",
+    '  "$better_auth_secret" \\',
+    '  "$pairing_code_pepper" \\',
+    '  "$mail_payload_key" \\',
+    '  "$smtp_user" \\',
+    '  "$smtp_password" \\',
+    '  "$database_url" \\',
+    '  "markiro" \\',
+    '  "markiro-development-only"; do',
+    '  echo "::add-mask::$credential"',
+    "done",
+    "umask 077",
+    "{",
+    `  printf '%s\\n' "DATABASE_URL=$database_url"`,
+    `  printf '%s\\n' "BETTER_AUTH_SECRET=$better_auth_secret"`,
+    `  printf '%s\\n' "BETTER_AUTH_URL=https://localhost"`,
+    `  printf '%s\\n' "ADMIN_ORIGIN=https://localhost"`,
+    `  printf '%s\\n' "KIOSK_ORIGIN=https://localhost"`,
+    `  printf '%s\\n' "PAIRING_CODE_PEPPER=$pairing_code_pepper"`,
+    `  printf '%s\\n' "SMTP_HOST=mailpit"`,
+    `  printf '%s\\n' "SMTP_PORT=1025"`,
+    `  printf '%s\\n' "SMTP_SECURE=false"`,
+    `  printf '%s\\n' "SMTP_USER=$smtp_user"`,
+    `  printf '%s\\n' "SMTP_PASSWORD=$smtp_password"`,
+    `  printf '%s\\n' "SMTP_FROM_EMAIL=no-reply@markiro.local"`,
+    `  printf '%s\\n' "SMTP_FROM_NAME=Markiro CI"`,
+    `  printf '%s\\n' "SMTP_REPLY_TO="`,
+    `  printf '%s\\n' "MAIL_PAYLOAD_ENCRYPTION_KEY=$mail_payload_key"`,
+    `  printf '%s\\n' "S3_ENDPOINT=http://minio:9000"`,
+    `  printf '%s\\n' "S3_REGION=us-east-1"`,
+    `  printf '%s\\n' "S3_BUCKET=markiro-private"`,
+    `  printf '%s\\n' "S3_ACCESS_KEY_ID=markiro"`,
+    `  printf '%s\\n' "S3_SECRET_ACCESS_KEY=markiro-development-only"`,
+    `  printf '%s\\n' "S3_FORCE_PATH_STYLE=true"`,
+    '} > "$MARKIRO_ENV_FILE"',
+    'chmod 600 "$MARKIRO_ENV_FILE"',
+  ].join("\n") + "\n";
+
+const CI_STEPS = [
+  { uses: CHECKOUT, with: { "persist-credentials": false } },
+  { uses: PNPM_SETUP },
+  { uses: NODE_SETUP, with: { "node-version": 24, cache: "pnpm" } },
+  { run: "pnpm install --frozen-lockfile" },
+  {
+    name: "Define temporary production environment path",
+    run: 'echo "MARKIRO_ENV_FILE=$RUNNER_TEMP/markiro-production-test.env" >> "$GITHUB_ENV"',
+  },
+  { name: "Verify production bundle contracts", run: "pnpm test:production-bundle:contract" },
+  { name: "Generate masked test-only environment", run: GENERATE_ENVIRONMENT },
+  {
+    name: "Build immutable local production images",
+    run:
+      'docker build --file deploy/production/api.Dockerfile --tag "ghcr.io/thevladbog/markiro-api:${{ github.sha }}" .\n' +
+      'docker build --file deploy/production/edge.Dockerfile --tag "ghcr.io/thevladbog/markiro-edge:${{ github.sha }}" .\n',
+  },
+  { name: "Validate the production bundle", run: "node deploy/production/preflight.mjs" },
+  {
+    name: "Start production-bundle dependencies",
+    run: `${COMPOSE} up -d --wait --wait-timeout 120 postgres mailpit minio`,
+  },
+  { name: "Initialize the test bucket", run: `${COMPOSE} run --rm minio-init` },
+  {
+    name: "Run production migrations twice",
+    run: `${COMPOSE} run --rm migrate\n${COMPOSE} run --rm migrate\n`,
+  },
+  {
+    name: "Start the API and edge",
+    run: `${COMPOSE} up -d --wait --wait-timeout 120 --no-deps api edge`,
+  },
+  {
+    name: "Smoke the production bundle",
+    env: { NODE_TLS_REJECT_UNAUTHORIZED: "0" },
+    run: "SMOKE_ASSERT_SHUTDOWN=1 node deploy/production/smoke.mjs",
+  },
+  {
+    name: "Show sanitized production-bundle logs on failure",
+    if: "failure()",
+    run: `${COMPOSE} logs --no-color`,
+  },
+  {
+    name: "Remove production-bundle containers and volumes",
+    if: "always()",
+    run: `${COMPOSE} down --volumes --remove-orphans`,
+  },
+];
+
+const RELEASE_STEPS = [
+  { uses: CHECKOUT, with: { "persist-credentials": false } },
+  { uses: BUILDX },
+  {
+    uses: LOGIN,
+    with: {
+      registry: "ghcr.io",
+      username: "${{ github.actor }}",
+      password: "${{ secrets.GITHUB_TOKEN }}",
+    },
+  },
+  {
+    name: "Publish immutable API image",
+    uses: BUILD_PUSH,
+    with: {
+      context: ".",
+      file: "deploy/production/api.Dockerfile",
+      push: true,
+      tags: "ghcr.io/thevladbog/markiro-api:${{ github.sha }}",
+    },
+  },
+  {
+    name: "Publish immutable edge image",
+    uses: BUILD_PUSH,
+    with: {
+      context: ".",
+      file: "deploy/production/edge.Dockerfile",
+      push: true,
+      tags: "ghcr.io/thevladbog/markiro-edge:${{ github.sha }}",
+    },
+  },
+];
 
 async function source(path) {
-  try {
-    return await readFile(path, "utf8");
-  } catch (error) {
-    if (error?.code === "ENOENT") return "";
-    throw error;
-  }
+  return readFile(path, "utf8");
 }
 
-function job(source, name) {
-  const marker = `  ${name}:\n`;
-  const start = source.indexOf(marker);
-  if (start < 0) return "";
-  const content = source.slice(start + marker.length);
-  const nextJob = content.search(/^  [A-Za-z_][A-Za-z0-9_-]*:\n/m);
-  return nextJob < 0 ? content : content.slice(0, nextJob);
-}
-
-function namedStep(source, name) {
-  const marker = `      - name: ${name}\n`;
-  const start = source.indexOf(marker);
-  assert.notEqual(start, -1, `missing step: ${name}`);
-  const content = source.slice(start + marker.length);
-  const nextStep = content.search(/^      - (?:name|uses):/m);
-  return nextStep < 0 ? content : content.slice(0, nextStep);
-}
-
-function count(source, expression) {
-  return [...source.matchAll(expression)].length;
-}
-
-function assertCiBundleStructure(bundle) {
-  const initialize = namedStep(bundle, "Define temporary production environment path");
-  const generate = namedStep(bundle, "Generate masked test-only environment");
-  const logs = namedStep(bundle, "Show sanitized production-bundle logs on failure");
-  const cleanup = namedStep(bundle, "Remove production-bundle containers and volumes");
-  const firstDocker = bundle.search(
-    /(?:^|[\s;|&])(?:sudo\s+|command\s+|env(?:\s+[^\s]+)*\s+)?docker\b/m,
-  );
-  const initializeAt = bundle.indexOf("Define temporary production environment path");
-  const generateAt = bundle.indexOf("Generate masked test-only environment");
-  const preflightAt = bundle.indexOf("node deploy/production/preflight.mjs");
-  const smokeAt = bundle.indexOf("SMOKE_ASSERT_SHUTDOWN=1 node deploy/production/smoke.mjs");
-  const logsAt = bundle.indexOf("Show sanitized production-bundle logs on failure");
-  const cleanupAt = bundle.indexOf("Remove production-bundle containers and volumes");
-
-  assert.deepEqual(bundle.match(/^      - (?:name|uses|run):.*$/gm), [
-    "      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4",
-    "      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4",
-    "      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4",
-    "      - run: pnpm install --frozen-lockfile",
-    "      - name: Define temporary production environment path",
-    "      - name: Verify production bundle contracts",
-    "      - name: Generate masked test-only environment",
-    "      - name: Build immutable local production images",
-    "      - name: Validate the production bundle",
-    "      - name: Start production-bundle dependencies",
-    "      - name: Initialize the test bucket",
-    "      - name: Run production migrations twice",
-    "      - name: Start the API and edge",
-    "      - name: Smoke the production bundle",
-    "      - name: Show sanitized production-bundle logs on failure",
-    "      - name: Remove production-bundle containers and volumes",
-  ]);
-
-  assert.match(
-    initialize,
-    /^        run: echo "MARKIRO_ENV_FILE=\$RUNNER_TEMP\/markiro-production-test\.env" >> "\$GITHUB_ENV"$/m,
-  );
-  assert.ok(initializeAt < generateAt && generateAt < firstDocker && firstDocker < preflightAt);
-  assert.match(generate, /chmod 600 "\$MARKIRO_ENV_FILE"/);
-  const maskLoop = generate.match(/for credential in \\\n([\s\S]*?)          done/)?.[1] || "";
-  for (const value of [
-    "$better_auth_secret",
-    "$pairing_code_pepper",
-    "$mail_payload_key",
-    "$smtp_user",
-    "$smtp_password",
-    "$database_url",
-    '"markiro"',
-    '"markiro-development-only"',
-  ])
-    assert.ok(maskLoop.includes(value), `unmasked test credential source: ${value}`);
-  assert.match(generate, /for credential in[\s\S]*?echo "::add-mask::\$credential"/);
-
-  for (const line of bundle.split("\n").filter((line) => line.includes("MARKIRO_ENV_FILE")))
-    assert.match(
-      line,
-      /(?:MARKIRO_ENV_FILE=\$RUNNER_TEMP\/markiro-production-test\.env" >> "\$GITHUB_ENV|}\s*> "\$MARKIRO_ENV_FILE"|chmod 600 "\$MARKIRO_ENV_FILE"|docker compose --env-file "\$MARKIRO_ENV_FILE")/,
-    );
-
-  assert.equal(count(bundle, /\bdocker build\b/g), 2);
-  const imageBuilds = [
-    ...bundle.matchAll(
-      /^          docker build --file (deploy\/production\/(?:api|edge)\.Dockerfile) --tag "(ghcr\.io\/thevladbog\/markiro-(?:api|edge):\$\{\{ github\.sha \}\})" \.$/gm,
-    ),
-  ].map((match) => [match[1], match[2]]);
-  assert.deepEqual(imageBuilds, [
-    ["deploy/production/api.Dockerfile", "ghcr.io/thevladbog/markiro-api:${{ github.sha }}"],
-    ["deploy/production/edge.Dockerfile", "ghcr.io/thevladbog/markiro-edge:${{ github.sha }}"],
-  ]);
-  assert.doesNotMatch(bundle, /:latest|github\.ref_name|github\.sha\s*\}\}\[:/);
-  assert.doesNotMatch(bundle, /\bdocker(?:\s+image)?\s+tag\b/);
-  assert.deepEqual(
-    bundle.match(
-      /ghcr\.io\/thevladbog\/markiro-(?:api|edge):(?:\$\{\{ github\.sha \}\}|[A-Za-z0-9._-]+)/g,
-    ),
-    [
-      "ghcr.io/thevladbog/markiro-api:${{ github.sha }}",
-      "ghcr.io/thevladbog/markiro-edge:${{ github.sha }}",
-    ],
-  );
-  assert.doesNotMatch(
-    bundle,
-    /\b(?:cat|sed|awk|head|tail|grep|less|more)\b[^\n]*(?:\$MARKIRO_ENV_FILE|\$\{MARKIRO_ENV_FILE\})/,
-  );
-  assert.doesNotMatch(bundle, /\bdocker compose[\s\S]{0,240}\bconfig\b/);
-
-  assert.ok(smokeAt < logsAt && logsAt < cleanupAt);
-  assert.match(logs, /^        if: failure\(\)$/m);
-  assert.equal(count(bundle, /\blogs --no-color\b/g), 1);
-  assert.match(cleanup, /^        if: always\(\)$/m);
-  assert.match(cleanup, /down --volumes --remove-orphans/);
-  assert.equal(
-    bundle
-      .slice(cleanupAt + "Remove production-bundle containers and volumes".length)
-      .search(/^      - /m),
-    -1,
-  );
-}
-
-function assertReleaseStructure(release) {
-  const trigger = release.match(/^on:\n([\s\S]*?)^permissions:/m)?.[1] || "";
-  const permissions = release.match(/^permissions:\n([\s\S]*?)^jobs:/m)?.[1] || "";
-  const jobs = release.match(/^jobs:\n([\s\S]*)$/m)?.[1] || "";
-  const publish = job(release, "publish");
-  const api = namedStep(publish, "Publish immutable API image");
-  const edge = namedStep(publish, "Publish immutable edge image");
-
-  assert.equal(trigger.trim(), "push:\n    branches: [main]");
-  assert.equal(permissions.trim(), "contents: read\n  packages: write");
-  assert.equal((jobs.match(/^  [A-Za-z_][A-Za-z0-9_-]*:$/gm) || []).length, 1);
-  assert.doesNotMatch(publish, /^    permissions:/m);
-  assert.equal(
-    count(release, /uses: docker\/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83/g),
-    2,
-  );
-  assert.match(api, /file: deploy\/production\/api\.Dockerfile/);
-  assert.match(api, /^          tags: ghcr\.io\/thevladbog\/markiro-api:\$\{\{ github\.sha \}\}$/m);
-  assert.match(edge, /file: deploy\/production\/edge\.Dockerfile/);
-  assert.match(
-    edge,
-    /^          tags: ghcr\.io\/thevladbog\/markiro-edge:\$\{\{ github\.sha \}\}$/m,
-  );
-  assert.deepEqual(release.match(/^          tags: .+$/gm), [
-    "          tags: ghcr.io/thevladbog/markiro-api:${{ github.sha }}",
-    "          tags: ghcr.io/thevladbog/markiro-edge:${{ github.sha }}",
-  ]);
-  assert.doesNotMatch(release, /:latest|github\.ref_name|github\.sha\s*\}\}\[:|\bdocker push\b/);
-}
-
-test("CI verifies the production bundle with scoped, secret-safe Docker cleanup", async () => {
-  const ci = await source(".github/workflows/ci.yml");
-  const bundle = job(ci, "production-bundle");
-
-  assert.match(bundle, /^    timeout-minutes: 20$/m);
-  assert.doesNotMatch(bundle, /^    permissions:\n(?:.*\n)*?      packages: write$/m);
-  assert.match(bundle, /MARKIRO_IMAGE_TAG: \$\{\{ github\.sha \}\}/);
-  assert.match(bundle, /MARKIRO_DOMAIN: localhost/);
-  assert.match(bundle, /MARKIRO_HTTP_PORT: "18080"/);
-  assert.match(bundle, /MARKIRO_HTTPS_PORT: "18443"/);
-  assert.doesNotMatch(bundle, /^      MARKIRO_ENV_FILE:/m);
-  assert.match(
-    bundle,
-    /name: Define temporary production environment path[\s\S]*?echo "MARKIRO_ENV_FILE=\$RUNNER_TEMP\/markiro-production-test\.env" >> "\$GITHUB_ENV"/,
-  );
-  assert.match(bundle, /pnpm install --frozen-lockfile/);
-  assert.match(bundle, /pnpm test:production-bundle:contract/);
-  assert.match(
-    bundle,
-    /docker build[\s\S]*?deploy\/production\/api\.Dockerfile[\s\S]*?ghcr\.io\/thevladbog\/markiro-api:\$\{\{ github\.sha \}\}/,
-  );
-  assert.match(
-    bundle,
-    /docker build[\s\S]*?deploy\/production\/edge\.Dockerfile[\s\S]*?ghcr\.io\/thevladbog\/markiro-edge:\$\{\{ github\.sha \}\}/,
-  );
-  assert.match(bundle, /chmod 600 "\$MARKIRO_ENV_FILE"/);
-  assert.match(bundle, /::add-mask::/);
-  assert.match(bundle, /database_url="postgresql:\/\/markiro:markiro@postgres:5432\/markiro"/);
-  assert.match(bundle, /smtp_user="markiro-ci"/);
-  assert.match(bundle, /smtp_password="\$\(openssl rand -hex 24\)"/);
-  assert.match(bundle, /"SMTP_USER=\$smtp_user"/);
-  assert.match(bundle, /"SMTP_PASSWORD=\$smtp_password"/);
-  assert.match(bundle, /node deploy\/production\/preflight\.mjs/);
-
-  const dependencies = bundle.indexOf("postgres mailpit minio");
-  const environmentPath = bundle.indexOf("Define temporary production environment path");
-  const init = bundle.indexOf("minio-init");
-  const firstMigration = bundle.indexOf("run --rm migrate");
-  const secondMigration = bundle.indexOf("run --rm migrate", firstMigration + 1);
-  const app = bundle.search(/up -d --wait --wait-timeout 120 --no-deps\s+api edge/);
-  const smoke = bundle.indexOf("SMOKE_ASSERT_SHUTDOWN=1 node deploy/production/smoke.mjs");
+function parseWorkflow(workflowSource, label) {
+  let workflow;
+  assert.doesNotThrow(() => {
+    workflow = load(workflowSource);
+  }, `${label} must be valid YAML`);
   assert.ok(
-    environmentPath >= 0 &&
-      environmentPath < dependencies &&
-      dependencies >= 0 &&
-      init > dependencies &&
-      firstMigration > init &&
-      secondMigration > firstMigration,
+    workflow && typeof workflow === "object" && !Array.isArray(workflow),
+    `${label} must be a mapping`,
   );
-  assert.ok(app > secondMigration && smoke > app);
-  assert.match(bundle, /if: failure\(\)[\s\S]*?docker compose[\s\S]*?logs --no-color/);
-  assert.match(bundle, /if: always\(\)[\s\S]*?down --volumes --remove-orphans/);
-  assert.doesNotMatch(bundle, /docker compose[^\n]* config(?! --quiet)/);
-  assert.doesNotMatch(bundle, /(?:cat|printenv|env)[^\n]*\.env\.production/);
-  assertCiBundleStructure(bundle);
-});
+  return workflow;
+}
 
-test("main publication pushes only immutable GHCR SHA tags", async () => {
-  const release = await source(".github/workflows/release-images.yml");
+function stepLabel(step, index) {
+  return step?.name || step?.uses || `step ${index + 1}`;
+}
 
-  assert.match(release, /push:\n    branches: \[main\]/);
-  assert.doesNotMatch(release, /pull_request:/);
-  assert.match(release, /contents: read/);
-  assert.match(release, /packages: write/);
-  assert.match(
-    release,
-    /docker\/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3\.11\.1/,
+function assertExactSteps(actual, expected, workflowLabel) {
+  assert.ok(Array.isArray(actual), `${workflowLabel} steps must be a sequence`);
+  assert.deepEqual(
+    actual.map(stepLabel),
+    expected.map(stepLabel),
+    `unexpected ${workflowLabel} steps`,
   );
-  assert.match(release, /docker\/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 # v3\.5\.0/);
-  assert.match(release, /registry: ghcr\.io/);
-  assert.match(release, /username: \$\{\{ github\.actor \}\}/);
-  assert.match(release, /password: \$\{\{ secrets\.GITHUB_TOKEN \}\}/);
+  for (const [index, expectedStep] of expected.entries())
+    assert.deepEqual(
+      actual[index],
+      expectedStep,
+      `unexpected ${stepLabel(expectedStep, index)} step`,
+    );
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function assertPinnedComment(sourceText, action, comment) {
   assert.match(
-    release,
-    /docker\/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6\.18\.0/g,
+    sourceText,
+    new RegExp(`uses: ${escapeRegExp(action)} # ${escapeRegExp(comment)}(?:\\s|$)`),
+    `missing ${comment} revision comment for ${action}`,
   );
-  assert.match(release, /file: deploy\/production\/api\.Dockerfile/);
-  assert.match(release, /file: deploy\/production\/edge\.Dockerfile/);
-  assert.match(release, /push: true/);
-  assert.match(release, /ghcr\.io\/thevladbog\/markiro-api:\$\{\{ github\.sha \}\}/);
-  assert.match(release, /ghcr\.io\/thevladbog\/markiro-edge:\$\{\{ github\.sha \}\}/);
+}
+
+function assertNoForbiddenWorkflowText(sourceText, label) {
   assert.doesNotMatch(
-    release,
-    /:latest|:\$\{\{ github\.ref_name \}\}|:\$\{\{ github\.sha \}\}\[:|\.env\.production|docker compose[^\n]* config(?! --quiet)/,
+    sourceText,
+    /:latest|github\.ref_name|github\.sha\s*\}\}\[:/,
+    `${label} has a mutable image tag`,
   );
-  assertReleaseStructure(release);
+  assert.doesNotMatch(
+    sourceText,
+    /docker compose[^\n]* config(?! --quiet)/,
+    `${label} runs a non-quiet Compose config command`,
+  );
+  assert.doesNotMatch(
+    sourceText,
+    /(?:cat|printenv|env)[^\n]*\.env\.production/,
+    `${label} prints .env.production`,
+  );
+}
+
+function assertCiWorkflow(ciSource) {
+  const workflow = parseWorkflow(ciSource, "CI workflow");
+  const job = workflow.jobs?.["production-bundle"];
+
+  assert.ok(job, "missing production-bundle job");
+  assert.deepEqual(
+    Object.keys(job).sort(),
+    ["env", "runs-on", "steps", "timeout-minutes"].sort(),
+    "unexpected production-bundle job keys",
+  );
+  assert.equal(job["runs-on"], "ubuntu-latest", "unexpected production-bundle runner");
+  assert.equal(job["timeout-minutes"], 20, "unexpected production-bundle timeout");
+  assert.deepEqual(
+    job.env,
+    {
+      MARKIRO_IMAGE_TAG: "${{ github.sha }}",
+      MARKIRO_DOMAIN: "localhost",
+      MARKIRO_HTTP_PORT: "18080",
+      MARKIRO_HTTPS_PORT: "18443",
+      ACME_EMAIL: "ci@markiro.local",
+    },
+    "unexpected production-bundle environment",
+  );
+  assertExactSteps(job.steps, CI_STEPS, "production-bundle");
+  assert.notEqual(workflow.permissions?.packages, "write", "CI must not grant packages: write");
+  assertPinnedComment(ciSource, CHECKOUT, "v4");
+  assertPinnedComment(ciSource, PNPM_SETUP, "v4");
+  assertPinnedComment(ciSource, NODE_SETUP, "v4");
+  assertNoForbiddenWorkflowText(ciSource, "CI workflow");
+}
+
+function assertReleaseWorkflow(releaseSource) {
+  const workflow = parseWorkflow(releaseSource, "release workflow");
+
+  assert.deepEqual(
+    Object.keys(workflow).sort(),
+    ["jobs", "name", "on", "permissions"].sort(),
+    "unexpected release workflow keys",
+  );
+  assert.equal(workflow.name, "Publish production images", "unexpected release workflow name");
+  assert.deepEqual(workflow.on, { push: { branches: ["main"] } }, "unexpected release triggers");
+  assert.deepEqual(
+    workflow.permissions,
+    { contents: "read", packages: "write" },
+    "unexpected release permissions",
+  );
+  assert.deepEqual(Object.keys(workflow.jobs || {}), ["publish"], "unexpected release job names");
+
+  const publish = workflow.jobs.publish;
+  assert.deepEqual(
+    Object.keys(publish || {}).sort(),
+    ["runs-on", "steps", "timeout-minutes"].sort(),
+    "unexpected publish job keys",
+  );
+  assert.equal(publish["runs-on"], "ubuntu-latest", "unexpected publish runner");
+  assert.equal(publish["timeout-minutes"], 20, "unexpected publish timeout");
+  assertExactSteps(publish.steps, RELEASE_STEPS, "release publish");
+  assertPinnedComment(releaseSource, CHECKOUT, "v4");
+  assertPinnedComment(releaseSource, BUILDX, "v3.11.1");
+  assertPinnedComment(releaseSource, LOGIN, "v3.5.0");
+  assertPinnedComment(releaseSource, BUILD_PUSH, "v6.18.0");
+  assertNoForbiddenWorkflowText(releaseSource, "release workflow");
+}
+
+function replaceExactlyOnce(sourceText, search, replacement, mutationName) {
+  const first = sourceText.indexOf(search);
+  assert.notEqual(first, -1, `${mutationName}: mutation target must exist`);
+  assert.equal(
+    sourceText.indexOf(search, first + search.length),
+    -1,
+    `${mutationName}: mutation target must be unique`,
+  );
+  const mutated = sourceText.replace(search, replacement);
+  assert.notEqual(mutated, sourceText, `${mutationName}: mutation must change the fixture`);
+  return mutated;
+}
+
+function expectRejected(validator, sourceText, mutation) {
+  const mutated = replaceExactlyOnce(
+    sourceText,
+    mutation.search,
+    mutation.replacement,
+    mutation.name,
+  );
+  assert.throws(() => validator(mutated), mutation.expected, mutation.name);
+}
+
+test("CI structurally verifies the production bundle and secret-safe cleanup", async () => {
+  assertCiWorkflow(await source(".github/workflows/ci.yml"));
 });
 
-test("workflow contracts reject unsafe tag, mask, path, executable, log, and trigger mutations", async () => {
+test("main publication structurally pushes only immutable GHCR SHA tags", async () => {
+  assertReleaseWorkflow(await source(".github/workflows/release-images.yml"));
+});
+
+test("CI contract rejects each hidden-step, shell, log, and cleanup mutation for its own reason", async () => {
   const ci = await source(".github/workflows/ci.yml");
-  const bundle = job(ci, "production-bundle");
+  const install =
+    "      - run: pnpm install --frozen-lockfile\n" +
+    "      - name: Define temporary production environment path";
+  const smoke = "        run: SMOKE_ASSERT_SHUTDOWN=1 node deploy/production/smoke.mjs";
+  const build =
+    '          docker build --file deploy/production/api.Dockerfile --tag "ghcr.io/thevladbog/markiro-api:${{ github.sha }}" .';
+  const logsIf =
+    "      - name: Show sanitized production-bundle logs on failure\n" + "        if: failure()";
+  const logsRun = "          -f deploy/production/compose.ci.yml logs --no-color";
+  const cleanupRun =
+    "          -f deploy/production/compose.ci.yml down --volumes --remove-orphans";
+
+  for (const mutation of [
+    {
+      name: "valid YAML id step",
+      search: install,
+      replacement:
+        "      - run: pnpm install --frozen-lockfile\n" +
+        "      - id: hidden-environment-reader\n" +
+        `        run: node -e "require('node:fs').readFileSync(process.env.RUNNER_TEMP + '/markiro-production-test.env')"\n` +
+        "      - name: Define temporary production environment path",
+      expected: /unexpected production-bundle steps/,
+    },
+    {
+      name: "valid YAML if step",
+      search: install,
+      replacement:
+        "      - run: pnpm install --frozen-lockfile\n" +
+        "      - if: always()\n" +
+        "        run: true\n" +
+        "      - name: Define temporary production environment path",
+      expected: /unexpected production-bundle steps/,
+    },
+    {
+      name: "command appended to smoke",
+      search: smoke,
+      replacement: `${smoke}; node -e "require('node:fs').readFileSync(process.env.RUNNER_TEMP + '/markiro-production-test.env')"`,
+      expected: /unexpected Smoke the production bundle step/,
+    },
+    {
+      name: "absolute Docker executable",
+      search: build,
+      replacement: build.replace("docker build", "/usr/bin/docker build"),
+      expected: /unexpected Build immutable local production images step/,
+    },
+    {
+      name: "shell-composed Docker build",
+      search: build,
+      replacement: build.replace("docker build", "true && docker build"),
+      expected: /unexpected Build immutable local production images step/,
+    },
+    {
+      name: "extra buildx tag",
+      search: build,
+      replacement: `${build}\n          docker buildx build -t other:extra .`,
+      expected: /unexpected Build immutable local production images step/,
+    },
+    {
+      name: "unconditional failure logs",
+      search: logsIf,
+      replacement:
+        "      - name: Show sanitized production-bundle logs on failure\n" + "        if: always()",
+      expected: /unexpected Show sanitized production-bundle logs on failure step/,
+    },
+    {
+      name: "command appended to failure logs",
+      search: logsRun,
+      replacement: `${logsRun}; docker compose ps`,
+      expected: /unexpected Show sanitized production-bundle logs on failure step/,
+    },
+    {
+      name: "command after cleanup",
+      search: cleanupRun,
+      replacement: `${cleanupRun}; docker compose ps`,
+      expected: /unexpected Remove production-bundle containers and volumes step/,
+    },
+  ])
+    expectRejected(assertCiWorkflow, ci, mutation);
+});
+
+test("release contract rejects each trigger, permission, job, step, and tag mutation for its own reason", async () => {
   const release = await source(".github/workflows/release-images.yml");
+  const apiTags = "          tags: ghcr.io/thevladbog/markiro-api:${{ github.sha }}";
+  const edgeStep = "      - name: Publish immutable edge image";
 
   for (const mutation of [
-    bundle.replace('"markiro-development-only"', '"markiro-development-only-removed"'),
-    bundle.replace(
-      'docker build --file deploy/production/api.Dockerfile --tag "ghcr.io/thevladbog/markiro-api:${{ github.sha }}" .',
-      'docker build --file deploy/production/api.Dockerfile --tag "ghcr.io/thevladbog/markiro-api:${{ github.sha }}" --tag "ghcr.io/thevladbog/markiro-api:latest" .',
-    ),
-    bundle.replace(
-      'docker build --file deploy/production/edge.Dockerfile --tag "ghcr.io/thevladbog/markiro-edge:${{ github.sha }}" .',
-      'docker build --file deploy/production/edge.Dockerfile --tag "ghcr.io/thevladbog/markiro-edge:${{ github.sha }}" --tag "ghcr.io/thevladbog/markiro-edge:extra" .',
-    ),
-    bundle.replace(
-      "      - run: pnpm install --frozen-lockfile",
-      "      - run: sudo docker version",
-    ),
-    bundle.replace(
-      "      - run: pnpm install --frozen-lockfile",
-      "      - run: command docker version",
-    ),
-    bundle.replace(
-      "      - run: pnpm install --frozen-lockfile",
-      "      - run: env CI=1 docker version",
-    ),
-    bundle.replace(
-      'chmod 600 "$MARKIRO_ENV_FILE"',
-      'node -e "process.stdout.write(process.env.MARKIRO_ENV_FILE)"\n          chmod 600 "$MARKIRO_ENV_FILE"',
-    ),
-    bundle.replace(
-      'chmod 600 "$MARKIRO_ENV_FILE"',
-      "perl -e 'print $ENV{MARKIRO_ENV_FILE}'\n          chmod 600 \"$MARKIRO_ENV_FILE\"",
-    ),
-    bundle.replace(
-      'chmod 600 "$MARKIRO_ENV_FILE"',
-      'for path in "$MARKIRO_ENV_FILE"; do printf \'%s\' "$path"; done\n          chmod 600 "$MARKIRO_ENV_FILE"',
-    ),
-    bundle.replace(
-      "-f deploy/production/compose.ci.yml up -d --wait --wait-timeout 120",
-      "-f deploy/production/compose.ci.yml\\n          config --quiet",
-    ),
-    bundle.replace(
-      'chmod 600 "$MARKIRO_ENV_FILE"',
-      'chmod 600 "$MARKIRO_ENV_FILE"\n          docker tag source target',
-    ),
-    `${bundle}\n      - name: Leak temporary environment\n        run: cat "$MARKIRO_ENV_FILE"\n`,
-    `${bundle}\n      - name: Unconditional logs\n        run: docker compose logs --no-color\n`,
+    {
+      name: "extra release trigger",
+      search: "  push:\n    branches: [main]",
+      replacement: "  push:\n    branches: [main]\n  workflow_dispatch:",
+      expected: /unexpected release triggers/,
+    },
+    {
+      name: "expanded release permission",
+      search: "  packages: write",
+      replacement: "  packages: write\n  id-token: write",
+      expected: /unexpected release permissions/,
+    },
+    {
+      name: "incorrect buildx revision comment",
+      search: `${BUILDX} # v3.11.1`,
+      replacement: `${BUILDX} # v3.11X1`,
+      expected: /missing v3\.11\.1 revision comment/,
+    },
+    {
+      name: "quoted extra release job",
+      search: "jobs:\n  publish:",
+      replacement: 'jobs:\n  "shadow": { runs-on: ubuntu-latest }\n  publish:',
+      expected: /unexpected release job names/,
+    },
+    {
+      name: "inline extra release job",
+      search: "jobs:\n  publish:",
+      replacement: "jobs:\n  shadow: { runs-on: ubuntu-latest }\n  publish:",
+      expected: /unexpected release job names/,
+    },
+    {
+      name: "extra release shell step",
+      search: edgeStep,
+      replacement: "      - run: docker buildx build -t other:extra .\n" + edgeStep,
+      expected: /unexpected release publish steps/,
+    },
+    {
+      name: "multiple API image tags",
+      search: apiTags,
+      replacement:
+        "          tags:\n" +
+        "            - ghcr.io/thevladbog/markiro-api:${{ github.sha }}\n" +
+        "            - ghcr.io/thevladbog/markiro-api:extra",
+      expected: /unexpected Publish immutable API image step/,
+    },
   ])
-    assert.throws(() => assertCiBundleStructure(mutation));
-
-  for (const mutation of [
-    release.replace("  push:\n", "  push:\n  workflow_dispatch:\n"),
-    release.replace("  packages: write", "  packages: write\n  id-token: write"),
-    `${release}\n  publish_2:\n    runs-on: ubuntu-latest\n`,
-    release.replace(
-      "          tags: ghcr.io/thevladbog/markiro-edge:${{ github.sha }}",
-      "          tags: ghcr.io/thevladbog/markiro-edge:latest",
-    ),
-    release.replace(
-      "          tags: ghcr.io/thevladbog/markiro-api:${{ github.sha }}",
-      "          tags: ghcr.io/thevladbog/markiro-api:${{ github.sha }}\n          tags: ghcr.io/thevladbog/markiro-api:extra",
-    ),
-    `${release}\n      - run: docker push ghcr.io/thevladbog/markiro-api:extra\n`,
-  ])
-    assert.throws(() => assertReleaseStructure(mutation));
+    expectRejected(assertReleaseWorkflow, release, mutation);
 });
