@@ -36,9 +36,9 @@ const GENERATE_ENVIRONMENT =
     "{",
     `  printf '%s\\n' "DATABASE_URL=$database_url"`,
     `  printf '%s\\n' "BETTER_AUTH_SECRET=$better_auth_secret"`,
-    `  printf '%s\\n' "BETTER_AUTH_URL=https://localhost"`,
-    `  printf '%s\\n' "ADMIN_ORIGIN=https://localhost"`,
-    `  printf '%s\\n' "KIOSK_ORIGIN=https://localhost"`,
+    `  printf '%s\\n' "BETTER_AUTH_URL=https://localhost:18443"`,
+    `  printf '%s\\n' "ADMIN_ORIGIN=https://localhost:18443"`,
+    `  printf '%s\\n' "KIOSK_ORIGIN=https://localhost:18443"`,
     `  printf '%s\\n' "PAIRING_CODE_PEPPER=$pairing_code_pepper"`,
     `  printf '%s\\n' "SMTP_HOST=mailpit"`,
     `  printf '%s\\n' "SMTP_PORT=1025"`,
@@ -59,7 +59,15 @@ const GENERATE_ENVIRONMENT =
     'chmod 600 "$MARKIRO_ENV_FILE"',
   ].join("\n") + "\n";
 
-const CI_STEPS = [
+const PRODUCTION_BUNDLE_ENV = {
+  MARKIRO_IMAGE_TAG: "${{ github.sha }}",
+  MARKIRO_DOMAIN: "localhost",
+  MARKIRO_HTTP_PORT: "18080",
+  MARKIRO_HTTPS_PORT: "18443",
+  ACME_EMAIL: "ci@markiro.local",
+};
+
+const PRODUCTION_BUNDLE_STEPS = [
   { uses: CHECKOUT, with: { "persist-credentials": false } },
   { uses: PNPM_SETUP },
   { uses: NODE_SETUP, with: { "node-version": 24, cache: "pnpm" } },
@@ -225,18 +233,8 @@ function assertCiWorkflow(ciSource) {
   );
   assert.equal(job["runs-on"], "ubuntu-latest", "unexpected production-bundle runner");
   assert.equal(job["timeout-minutes"], 20, "unexpected production-bundle timeout");
-  assert.deepEqual(
-    job.env,
-    {
-      MARKIRO_IMAGE_TAG: "${{ github.sha }}",
-      MARKIRO_DOMAIN: "localhost",
-      MARKIRO_HTTP_PORT: "18080",
-      MARKIRO_HTTPS_PORT: "18443",
-      ACME_EMAIL: "ci@markiro.local",
-    },
-    "unexpected production-bundle environment",
-  );
-  assertExactSteps(job.steps, CI_STEPS, "production-bundle");
+  assert.deepEqual(job.env, PRODUCTION_BUNDLE_ENV, "unexpected production-bundle environment");
+  assertExactSteps(job.steps, PRODUCTION_BUNDLE_STEPS, "production-bundle");
   assert.notEqual(workflow.permissions?.packages, "write", "CI must not grant packages: write");
   assertPinnedComments(ciSource, CHECKOUT, "v4");
   assertPinnedComments(ciSource, PNPM_SETUP, "v4");
@@ -244,7 +242,7 @@ function assertCiWorkflow(ciSource) {
   assertNoForbiddenWorkflowText(ciSource, "CI workflow");
 }
 
-function assertReleaseWorkflow(releaseSource) {
+function assertReleaseWorkflow(releaseSource, ciSource) {
   const workflow = parseWorkflow(releaseSource, "release workflow");
 
   assert.deepEqual(
@@ -256,21 +254,68 @@ function assertReleaseWorkflow(releaseSource) {
   assert.deepEqual(workflow.on, { push: { branches: ["main"] } }, "unexpected release triggers");
   assert.deepEqual(
     workflow.permissions,
-    { contents: "read", packages: "write" },
-    "unexpected release permissions",
+    { contents: "read" },
+    "release workflow must default to contents: read only",
   );
-  assert.deepEqual(Object.keys(workflow.jobs || {}), ["publish"], "unexpected release job names");
+  const verification = workflow.jobs?.["production-bundle"];
+  assert.ok(verification, "missing release production-bundle verification job");
+  assert.deepEqual(
+    Object.keys(workflow.jobs || {}),
+    ["production-bundle", "publish"],
+    "unexpected release job names",
+  );
+  assert.deepEqual(
+    Object.keys(verification).sort(),
+    ["env", "permissions", "runs-on", "steps", "timeout-minutes"].sort(),
+    "unexpected release production-bundle job keys",
+  );
+  assert.deepEqual(
+    verification.permissions,
+    { contents: "read" },
+    "release production-bundle permissions must be contents: read only",
+  );
+  assert.equal(
+    verification["runs-on"],
+    "ubuntu-latest",
+    "unexpected release production-bundle runner",
+  );
+  assert.equal(verification["timeout-minutes"], 20, "unexpected release production-bundle timeout");
+  assert.deepEqual(
+    verification.env,
+    PRODUCTION_BUNDLE_ENV,
+    "unexpected release production-bundle environment",
+  );
+  assertExactSteps(verification.steps, PRODUCTION_BUNDLE_STEPS, "release production-bundle");
+
+  const ciWorkflow = parseWorkflow(ciSource, "CI workflow");
+  assert.deepEqual(
+    verification.steps,
+    ciWorkflow.jobs?.["production-bundle"]?.steps,
+    "release production-bundle verification must exactly match CI",
+  );
 
   const publish = workflow.jobs.publish;
+  assert.equal(
+    publish?.needs,
+    "production-bundle",
+    "release publish must need exactly the production-bundle verification job",
+  );
   assert.deepEqual(
     Object.keys(publish || {}).sort(),
-    ["runs-on", "steps", "timeout-minutes"].sort(),
+    ["needs", "permissions", "runs-on", "steps", "timeout-minutes"].sort(),
     "unexpected publish job keys",
+  );
+  assert.deepEqual(
+    publish.permissions,
+    { contents: "read", packages: "write" },
+    "release publish permissions must scope packages: write to publication",
   );
   assert.equal(publish["runs-on"], "ubuntu-latest", "unexpected publish runner");
   assert.equal(publish["timeout-minutes"], 20, "unexpected publish timeout");
   assertExactSteps(publish.steps, RELEASE_STEPS, "release publish");
   assertPinnedComments(releaseSource, CHECKOUT, "v4");
+  assertPinnedComments(releaseSource, PNPM_SETUP, "v4");
+  assertPinnedComments(releaseSource, NODE_SETUP, "v4");
   assertPinnedComments(releaseSource, BUILDX, "v3.11.1");
   assertPinnedComments(releaseSource, LOGIN, "v3.5.0");
   assertPinnedComments(releaseSource, BUILD_PUSH, "v6.18.0");
@@ -305,7 +350,10 @@ test("CI structurally verifies the production bundle and secret-safe cleanup", a
 });
 
 test("main publication structurally pushes only immutable GHCR SHA tags", async () => {
-  assertReleaseWorkflow(await source(".github/workflows/release-images.yml"));
+  assertReleaseWorkflow(
+    await source(".github/workflows/release-images.yml"),
+    await source(".github/workflows/ci.yml"),
+  );
 });
 
 test("CI contract rejects each hidden-step, shell, log, and cleanup mutation for its own reason", async () => {
@@ -323,6 +371,12 @@ test("CI contract rejects each hidden-step, shell, log, and cleanup mutation for
     "          -f deploy/production/compose.ci.yml down --volumes --remove-orphans";
 
   for (const mutation of [
+    {
+      name: "old default HTTPS port in generated auth origin",
+      search: `          printf '%s\\n' "BETTER_AUTH_URL=https://localhost:18443"`,
+      replacement: `          printf '%s\\n' "BETTER_AUTH_URL=https://localhost"`,
+      expected: /unexpected Generate masked test-only environment step/,
+    },
     {
       name: "valid YAML id step",
       search: install,
@@ -392,6 +446,7 @@ test("CI contract rejects each hidden-step, shell, log, and cleanup mutation for
 
 test("release contract rejects each trigger, permission, job, step, and tag mutation for its own reason", async () => {
   const release = await source(".github/workflows/release-images.yml");
+  const ci = await source(".github/workflows/ci.yml");
   const apiTags = "          tags: ghcr.io/thevladbog/markiro-api:${{ github.sha }}";
   const edgeStep = "      - name: Publish immutable edge image";
   const edgeBuildPushComment =
@@ -399,16 +454,60 @@ test("release contract rejects each trigger, permission, job, step, and tag muta
 
   for (const mutation of [
     {
+      name: "removed production-bundle verification job",
+      search: "jobs:\n  production-bundle:",
+      replacement: "jobs:\n  removed-production-bundle:",
+      expected: /missing release production-bundle verification job/,
+    },
+    {
+      name: "removed publication dependency",
+      search: "    needs: production-bundle\n",
+      replacement: "",
+      expected: /release publish must need exactly the production-bundle verification job/,
+    },
+    {
+      name: "weakened publication dependency",
+      search: "    needs: production-bundle",
+      replacement: "    needs: [production-bundle, optional-check]",
+      expected: /release publish must need exactly the production-bundle verification job/,
+    },
+    {
+      name: "workflow-wide package publication permission",
+      search: "permissions:\n  contents: read\n\njobs:",
+      replacement: "permissions:\n  contents: read\n  packages: write\n\njobs:",
+      expected: /release workflow must default to contents: read only/,
+    },
+    {
+      name: "omitted production-bundle contract verification step",
+      search:
+        "      - name: Verify production bundle contracts\n" +
+        "        run: pnpm test:production-bundle:contract\n",
+      replacement: "",
+      expected: /unexpected release production-bundle steps/,
+    },
+    {
+      name: "altered production-bundle smoke step",
+      search: "        run: SMOKE_ASSERT_SHUTDOWN=1 node deploy/production/smoke.mjs",
+      replacement: "        run: node deploy/production/smoke.mjs",
+      expected: /unexpected Smoke the production bundle step/,
+    },
+    {
+      name: "old default HTTPS port in release verification origin",
+      search: `          printf '%s\\n' "BETTER_AUTH_URL=https://localhost:18443"`,
+      replacement: `          printf '%s\\n' "BETTER_AUTH_URL=https://localhost"`,
+      expected: /unexpected Generate masked test-only environment step/,
+    },
+    {
       name: "extra release trigger",
       search: "  push:\n    branches: [main]",
       replacement: "  push:\n    branches: [main]\n  workflow_dispatch:",
       expected: /unexpected release triggers/,
     },
     {
-      name: "expanded release permission",
-      search: "  packages: write",
-      replacement: "  packages: write\n  id-token: write",
-      expected: /unexpected release permissions/,
+      name: "expanded publish permission",
+      search: "      packages: write",
+      replacement: "      packages: write\n      id-token: write",
+      expected: /release publish permissions must scope packages: write to publication/,
     },
     {
       name: "incorrect buildx revision comment",
@@ -424,14 +523,14 @@ test("release contract rejects each trigger, permission, job, step, and tag muta
     },
     {
       name: "quoted extra release job",
-      search: "jobs:\n  publish:",
-      replacement: 'jobs:\n  "shadow": { runs-on: ubuntu-latest }\n  publish:',
+      search: "jobs:\n  production-bundle:",
+      replacement: 'jobs:\n  "shadow": { runs-on: ubuntu-latest }\n  production-bundle:',
       expected: /unexpected release job names/,
     },
     {
       name: "inline extra release job",
-      search: "jobs:\n  publish:",
-      replacement: "jobs:\n  shadow: { runs-on: ubuntu-latest }\n  publish:",
+      search: "jobs:\n  production-bundle:",
+      replacement: "jobs:\n  shadow: { runs-on: ubuntu-latest }\n  production-bundle:",
       expected: /unexpected release job names/,
     },
     {
@@ -450,5 +549,5 @@ test("release contract rejects each trigger, permission, job, step, and tag muta
       expected: /unexpected Publish immutable API image step/,
     },
   ])
-    expectRejected(assertReleaseWorkflow, release, mutation);
+    expectRejected((mutated) => assertReleaseWorkflow(mutated, ci), release, mutation);
 });
