@@ -28,6 +28,11 @@ overrides:
   # @esbuild-kit.
   "@esbuild-kit/core-utils>esbuild": "0.25.12"
 
+  # Scalar's standalone browser asset is prebuilt, and the production docs
+  # explicitly disable Agent. Do not deploy the unused agent-chat/AI tree,
+  # which otherwise adds OpenTelemetry to the API runtime.
+  "@scalar/api-reference>@scalar/agent-chat": "-"
+
   # GHSA-mh99-v99m-4gvg / CVE-2026-14257: brace-expansion <=5.0.7 expands
   # braces without an upper bound on total output *length* and can OOM the
   # process -- fatally, since a V8 heap OOM is not catchable. 5.0.9 is the only

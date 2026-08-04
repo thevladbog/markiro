@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 export default defineConfig({
-  testDir: "./browser",
+  testDir: "./tests",
   outputDir: join(tmpdir(), "markiro-production-docs-playwright"),
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),

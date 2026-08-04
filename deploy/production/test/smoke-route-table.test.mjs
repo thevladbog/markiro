@@ -287,6 +287,48 @@ test("rejects missing or invalid API host-port inspection output", async () => {
   }
 });
 
+test("requires the pruned API runtime to exclude Playwright and OpenTelemetry", async (t) => {
+  const dockerForProbe = (probeExitCode) => ({
+    async run(_command, args) {
+      if (args.includes("ps")) return { code: 0, stdout: "container-id\n", stderr: "" };
+      if (args[0] === "inspect") return { code: 0, stdout: '{"3000/tcp":null}\n', stderr: "" };
+      if (args.includes("id")) return { code: 0, stdout: "10001\n", stderr: "" };
+      if (args.includes("node")) return { code: probeExitCode, stdout: "", stderr: "" };
+      return { code: 1, stdout: "", stderr: "" };
+    },
+  });
+  const options = {
+    baseUrl: "https://app.markiro.example",
+    assetName: "main.js",
+    environment: { SMOKE_ASSERT_DEPENDENCY_ISOLATION: "1" },
+  };
+
+  await t.test("accepts an isolated runtime", async () => {
+    const calls = [];
+    const docker = dockerForProbe(0);
+    const run = docker.run.bind(docker);
+    docker.run = async (command, args) => {
+      calls.push([command, args]);
+      return run(command, args);
+    };
+
+    await runSmoke(options, smokeClient(), docker);
+
+    const probe = calls.find(([, args]) => args.includes("node"));
+    assert.ok(probe);
+    assert.deepEqual(probe[1].slice(-4, -1), ["api", "node", "-e"]);
+    assert.match(probe[1].at(-1), /@playwright\/test/);
+    assert.match(probe[1].at(-1), /@opentelemetry\/api/);
+  });
+
+  await t.test("rejects a runtime containing either dependency", async () => {
+    await assert.rejects(
+      runSmoke(options, smokeClient(), dockerForProbe(1)),
+      /forbidden tooling or telemetry dependency/,
+    );
+  });
+});
+
 test("rejects every unavailable API container ID before inspect", async (t) => {
   for (const [name, ps] of [
     ["nonzero compose ps", { code: 1, stdout: "container-id\n", stderr: "ps failed" }],
