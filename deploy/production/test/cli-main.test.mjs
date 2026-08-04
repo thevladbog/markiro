@@ -19,15 +19,20 @@ test("portable main-module detection matches the resolved CLI path and handles a
   assert.equal(isMainModule(moduleUrl, ["node"]), false);
   assert.equal(isMainModule(moduleUrl, null), false);
   assert.equal(isMainModule(moduleUrl, ["node", "deploy/production/does-not-exist.mjs"]), false);
+  assert.equal(isMainModule("data:text/javascript,export default 1", ["node", entry]), false);
 
   const denied = Object.assign(new Error("permission denied"), { code: "EACCES" });
+  let canonicalizeCalls = 0;
   assert.throws(
     () =>
       isMainModule(moduleUrl, ["node", entry], () => {
+        canonicalizeCalls += 1;
+        if (canonicalizeCalls === 1) return entry;
         throw denied;
       }),
     denied,
   );
+  assert.equal(canonicalizeCalls, 2);
 });
 
 test("every production CLI uses the portable detector instead of import.meta.main", async () => {
@@ -64,4 +69,26 @@ test("a production CLI invoked through a symlink still executes its entrypoint",
 
   assert.equal(result.status, 1);
   assert.equal(result.stderr.trim(), "MARKIRO_DOMAIN is invalid");
+});
+
+test("a directory-symlinked CLI executes when Node preserves the main symlink", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "markiro preserved main "));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const linkedProduction = join(directory, "production link");
+  await symlink(resolve("deploy/production"), linkedProduction, "dir");
+  const linkedCli = join(linkedProduction, "verify-dns.mjs");
+
+  for (const invocation of [
+    { args: ["--preserve-symlinks-main", linkedCli], env: {} },
+    { args: [linkedCli], env: { NODE_OPTIONS: "--preserve-symlinks-main" } },
+  ]) {
+    const result = spawnSync(process.execPath, invocation.args, {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      env: invocation.env,
+    });
+
+    assert.equal(result.status, 1);
+    assert.equal(result.stderr.trim(), "MARKIRO_DOMAIN is invalid");
+  }
 });
