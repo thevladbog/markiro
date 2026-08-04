@@ -1,5 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
-import { ReadinessService } from "../src/health/readiness.service";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  PROBE_CACHE_MS,
+  PROBE_TIMEOUT_MS,
+  ReadinessService,
+} from "../src/health/readiness.service";
 
 const NOW = new Date("2026-08-04T09:00:00.000Z");
 
@@ -15,7 +19,19 @@ function healthyDependencies() {
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 describe("ReadinessService", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("reports every healthy dependency without provider details", async () => {
     const service = new ReadinessService(healthyDependencies());
     await expect(service.ready()).resolves.toEqual({
@@ -75,6 +91,20 @@ describe("ReadinessService", () => {
     });
   });
 
+  it("normalizes an unknown SMTP health state to a sanitized degraded report", async () => {
+    const dependencies = healthyDependencies();
+    dependencies.smtp.mockResolvedValue({ status: "unknown" });
+
+    const report = await new ReadinessService(dependencies).ready();
+
+    expect(report.status).toBe("degraded");
+    expect(report.checks.smtp).toEqual({
+      status: "degraded",
+      category: "smtp_unavailable",
+      checkedAt: NOW.toISOString(),
+    });
+  });
+
   it("coalesces concurrent calls and caches the report for ten seconds", async () => {
     const dependencies = healthyDependencies();
     const service = new ReadinessService(dependencies);
@@ -95,6 +125,55 @@ describe("ReadinessService", () => {
       status: "unavailable",
       checks: { database: { category: "database_timeout" } },
     });
-    vi.useRealTimers();
+  });
+
+  it("keeps one unresolved database call across repeated timeout and cache cycles", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const database = deferred<void>();
+    const dependencies = healthyDependencies();
+    dependencies.now.mockImplementation(() => new Date());
+    dependencies.database.mockImplementation(() => database.promise);
+    const service = new ReadinessService(dependencies);
+
+    for (let cycle = 0; cycle < 3; cycle += 1) {
+      const result = service.ready();
+      await vi.advanceTimersByTimeAsync(PROBE_TIMEOUT_MS);
+      await expect(result).resolves.toMatchObject({
+        checks: { database: { category: "database_timeout" } },
+      });
+      if (cycle < 2) await vi.advanceTimersByTimeAsync(PROBE_CACHE_MS);
+    }
+
+    expect(dependencies.database).toHaveBeenCalledTimes(1);
+    expect(dependencies.jobs).toHaveBeenCalledTimes(3);
+    expect(dependencies.smtp).toHaveBeenCalledTimes(3);
+    expect(dependencies.storage).toHaveBeenCalledTimes(3);
+
+    database.resolve(undefined);
+    await vi.runAllTicks();
+    await vi.advanceTimersByTimeAsync(PROBE_CACHE_MS);
+
+    await expect(service.ready()).resolves.toMatchObject({
+      checks: { database: { status: "healthy" } },
+    });
+    expect(dependencies.database).toHaveBeenCalledTimes(2);
+  });
+
+  it("expires a cached report at the exact ten-second boundary", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const dependencies = healthyDependencies();
+    dependencies.now.mockImplementation(() => new Date());
+    const service = new ReadinessService(dependencies);
+
+    await service.ready();
+    await vi.advanceTimersByTimeAsync(PROBE_CACHE_MS - 1);
+    await service.ready();
+    expect(dependencies.database).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await service.ready();
+    expect(dependencies.database).toHaveBeenCalledTimes(2);
   });
 });

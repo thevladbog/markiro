@@ -288,10 +288,15 @@ additional gate, not a replacement.
 - A migration failure prevents API startup and returns a non-zero job status.
 - PostgreSQL loss makes readiness 503; liveness stays 200 while the process can
   still serve, allowing orchestration to distinguish restart from dependency
-  outage.
+  outage. Each dependency has at most one unresolved underlying probe at a
+  time: later reports reuse that promise until it actually settles. The
+  two-second response bound does not claim to cancel provider calls that do not
+  support cancellation.
 - SMTP or S3 loss makes readiness degraded but does not take unrelated factory
-  operations offline. Their own operations continue to return explicit errors
-  or durable retry states.
+  operations offline. SMTP `unknown` is normalized to the same sanitized
+  degraded state, and storage readiness exposes only healthy or degraded.
+  Their own operations continue to return explicit errors or durable retry
+  states.
 - API unavailability produces a proxy 502/503, never the admin SPA shell.
 - Missing frontend files return SPA fallback only for GET/HEAD routes.
 - ACME state survives edge replacement; certificate issuance failure is

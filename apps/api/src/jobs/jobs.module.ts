@@ -112,6 +112,7 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PgBossService.name);
   private boss?: PgBoss;
   private started = false;
+  private workerIds: string[] = [];
 
   constructor(
     @Inject(DB) private readonly db: Db,
@@ -123,6 +124,8 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   async onModuleInit(): Promise<void> {
+    this.started = false;
+    this.workerIds = [];
     const boss = new PgBoss(this.connectionString);
     // PgBoss extends EventEmitter; an "error" event with no listener throws
     // and crashes the process, so this must be registered before start().
@@ -135,39 +138,49 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       await boss.start();
       await boss.createQueue(QUEUE_NAME);
       await boss.schedule(QUEUE_NAME, QUEUE_CRON);
-      await boss.work(QUEUE_NAME, async () => {
-        await this.runEnsurePartitions();
-      });
+      this.workerIds.push(
+        await boss.work(QUEUE_NAME, async () => {
+          await this.runEnsurePartitions();
+        }),
+      );
 
       await boss.createQueue(PRUNE_PAIR_ATTEMPTS_QUEUE_NAME);
       await boss.schedule(PRUNE_PAIR_ATTEMPTS_QUEUE_NAME, PRUNE_PAIR_ATTEMPTS_QUEUE_CRON);
-      await boss.work(PRUNE_PAIR_ATTEMPTS_QUEUE_NAME, async () => {
-        await this.runPruneKioskPairAttempts();
-      });
+      this.workerIds.push(
+        await boss.work(PRUNE_PAIR_ATTEMPTS_QUEUE_NAME, async () => {
+          await this.runPruneKioskPairAttempts();
+        }),
+      );
 
       await boss.createQueue(PRUNE_EXCHANGE_ATTEMPTS_QUEUE_NAME);
       await boss.schedule(PRUNE_EXCHANGE_ATTEMPTS_QUEUE_NAME, PRUNE_EXCHANGE_ATTEMPTS_QUEUE_CRON);
-      await boss.work(PRUNE_EXCHANGE_ATTEMPTS_QUEUE_NAME, async () => {
-        await this.runPruneExchangeAttempts();
-      });
+      this.workerIds.push(
+        await boss.work(PRUNE_EXCHANGE_ATTEMPTS_QUEUE_NAME, async () => {
+          await this.runPruneExchangeAttempts();
+        }),
+      );
 
       await boss.createQueue(SWEEP_EXPIRED_EXCHANGE_SESSIONS_QUEUE_NAME);
       await boss.schedule(
         SWEEP_EXPIRED_EXCHANGE_SESSIONS_QUEUE_NAME,
         SWEEP_EXPIRED_EXCHANGE_SESSIONS_QUEUE_CRON,
       );
-      await boss.work(SWEEP_EXPIRED_EXCHANGE_SESSIONS_QUEUE_NAME, async () => {
-        await this.runSweepExpiredExchangeSessions();
-      });
+      this.workerIds.push(
+        await boss.work(SWEEP_EXPIRED_EXCHANGE_SESSIONS_QUEUE_NAME, async () => {
+          await this.runSweepExpiredExchangeSessions();
+        }),
+      );
 
       await boss.createQueue(PRUNE_INTEGRATION_JOURNAL_QUEUE_NAME);
       await boss.schedule(
         PRUNE_INTEGRATION_JOURNAL_QUEUE_NAME,
         PRUNE_INTEGRATION_JOURNAL_QUEUE_CRON,
       );
-      await boss.work(PRUNE_INTEGRATION_JOURNAL_QUEUE_NAME, async () => {
-        await this.runPruneIntegrationJournal();
-      });
+      this.workerIds.push(
+        await boss.work(PRUNE_INTEGRATION_JOURNAL_QUEUE_NAME, async () => {
+          await this.runPruneIntegrationJournal();
+        }),
+      );
 
       await boss.createQueue(SEND_EMAIL_DELIVERY_QUEUE, {
         policy: "key_strict_fifo",
@@ -178,34 +191,42 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
         expireInSeconds: 60,
         deleteAfterSeconds: 300,
       });
-      await boss.work<{ deliveryId: string }>(
-        SEND_EMAIL_DELIVERY_QUEUE,
-        { includeMetadata: true },
-        async (jobs) => {
-          for (const job of jobs) await this.mailJobs.processDelivery(job.data.deliveryId);
-        },
+      this.workerIds.push(
+        await boss.work<{ deliveryId: string }>(
+          SEND_EMAIL_DELIVERY_QUEUE,
+          { includeMetadata: true },
+          async (jobs) => {
+            for (const job of jobs) await this.mailJobs.processDelivery(job.data.deliveryId);
+          },
+        ),
       );
 
       await boss.createQueue(DISPATCH_EMAIL_OUTBOX_QUEUE_NAME);
       await boss.schedule(DISPATCH_EMAIL_OUTBOX_QUEUE_NAME, DISPATCH_EMAIL_OUTBOX_QUEUE_CRON);
-      await boss.work(DISPATCH_EMAIL_OUTBOX_QUEUE_NAME, async () => {
-        await this.mailJobs.dispatchOutbox(this.mailQueue(boss));
-      });
+      this.workerIds.push(
+        await boss.work(DISPATCH_EMAIL_OUTBOX_QUEUE_NAME, async () => {
+          await this.mailJobs.dispatchOutbox(this.mailQueue(boss));
+        }),
+      );
 
       await boss.createQueue(RECONCILE_EMAIL_DELIVERIES_QUEUE_NAME);
       await boss.schedule(
         RECONCILE_EMAIL_DELIVERIES_QUEUE_NAME,
         RECONCILE_EMAIL_DELIVERIES_QUEUE_CRON,
       );
-      await boss.work(RECONCILE_EMAIL_DELIVERIES_QUEUE_NAME, async () => {
-        await this.mailJobs.reconcile(this.mailQueue(boss));
-      });
+      this.workerIds.push(
+        await boss.work(RECONCILE_EMAIL_DELIVERIES_QUEUE_NAME, async () => {
+          await this.mailJobs.reconcile(this.mailQueue(boss));
+        }),
+      );
 
       await boss.createQueue(PRUNE_EMAIL_DELIVERIES_QUEUE_NAME);
       await boss.schedule(PRUNE_EMAIL_DELIVERIES_QUEUE_NAME, PRUNE_EMAIL_DELIVERIES_QUEUE_CRON);
-      await boss.work(PRUNE_EMAIL_DELIVERIES_QUEUE_NAME, async () => {
-        await this.mailRetention.prune();
-      });
+      this.workerIds.push(
+        await boss.work(PRUNE_EMAIL_DELIVERIES_QUEUE_NAME, async () => {
+          await this.mailRetention.prune();
+        }),
+      );
 
       // Also run all eight maintenance paths once immediately at boot rather
       // than waiting for the first tick of any schedule.
@@ -223,21 +244,43 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       // start so it doesn't leak a connection/maintenance loop, then
       // rethrow so Nest surfaces the original failure.
       this.started = false;
+      this.workerIds = [];
       await boss.stop({ graceful: false }).catch(() => undefined);
+      delete this.boss;
       throw e;
     }
   }
 
   async onModuleDestroy(): Promise<void> {
     this.started = false;
-    if (!this.boss) return;
-    await this.boss.stop();
+    this.workerIds = [];
+    const boss = this.boss;
+    delete this.boss;
+    if (!boss) return;
+    await boss.stop();
     this.logger.log("pg-boss stopped");
   }
 
   async checkReady(): Promise<void> {
     if (!this.started || !this.boss) throw new Error("pg-boss is not started");
-    await this.boss.getDb().executeSql("SELECT 1");
+    try {
+      await this.boss.getDb().executeSql("SELECT 1");
+    } catch {
+      throw new Error("pg-boss database probe failed");
+    }
+    if (
+      this.workerIds.length !== 9 ||
+      this.workerIds.some((id) => id.length === 0) ||
+      new Set(this.workerIds).size !== this.workerIds.length
+    ) {
+      throw new Error("pg-boss workers are not active");
+    }
+    const wip = this.boss.getWipData();
+    const workersActive = this.workerIds.every((id) => {
+      const matches = wip.filter((worker) => worker.id === id);
+      return matches.length === 1 && matches[0]?.state === "active";
+    });
+    if (!workersActive) throw new Error("pg-boss workers are not active");
   }
 
   private async runEnsurePartitions(): Promise<void> {

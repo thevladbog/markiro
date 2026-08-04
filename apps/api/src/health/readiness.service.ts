@@ -30,9 +30,13 @@ export type ReadinessDependencies = {
   now(): Date;
 };
 
+type DependencyName = "database" | "jobs" | "smtp" | "storage";
+type ProbeOutcome = { ok: true } | { ok: false };
+
 export class ReadinessService {
   private cached?: { expiresAt: number; report: ReadinessReport };
   private inFlight?: Promise<ReadinessReport>;
+  private readonly dependencyCalls: Partial<Record<DependencyName, Promise<ProbeOutcome>>> = {};
 
   constructor(private readonly dependencies: ReadinessDependencies) {}
 
@@ -59,6 +63,7 @@ export class ReadinessService {
     const checkedAt = this.dependencies.now().toISOString();
     const [database, jobs, smtp, storage] = await Promise.all([
       this.bounded(
+        "database",
         () => this.dependencies.database(),
         checkedAt,
         "unavailable",
@@ -66,6 +71,7 @@ export class ReadinessService {
         "database_timeout",
       ),
       this.bounded(
+        "jobs",
         () => this.dependencies.jobs(),
         checkedAt,
         "unavailable",
@@ -73,6 +79,7 @@ export class ReadinessService {
         "jobs_timeout",
       ),
       this.bounded(
+        "smtp",
         async () => {
           const result = await this.dependencies.smtp();
           if (result.status !== "healthy") throw new Error("smtp degraded");
@@ -83,6 +90,7 @@ export class ReadinessService {
         "smtp_timeout",
       ),
       this.bounded(
+        "storage",
         () => this.dependencies.storage(),
         checkedAt,
         "degraded",
@@ -100,6 +108,7 @@ export class ReadinessService {
   }
 
   private async bounded(
+    dependency: DependencyName,
     run: () => Promise<void>,
     checkedAt: string,
     failureStatus: "degraded" | "unavailable",
@@ -107,23 +116,40 @@ export class ReadinessService {
     timeoutCategory: NonNullable<ComponentReport["category"]>,
   ): Promise<ComponentReport> {
     let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      await Promise.race([
-        Promise.resolve().then(run),
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new ProbeTimeout()), PROBE_TIMEOUT_MS);
-        }),
-      ]);
-      return { status: "healthy", checkedAt };
-    } catch (error) {
-      return {
-        status: failureStatus,
-        category: error instanceof ProbeTimeout ? timeoutCategory : failureCategory,
-        checkedAt,
-      };
-    } finally {
-      if (timer) clearTimeout(timer);
+    const outcome = await Promise.race([
+      this.callDependency(dependency, run),
+      new Promise<ProbeTimeout>((resolve) => {
+        timer = setTimeout(() => resolve(new ProbeTimeout()), PROBE_TIMEOUT_MS);
+      }),
+    ]);
+    if (timer) clearTimeout(timer);
+    if (outcome instanceof ProbeTimeout) {
+      return { status: failureStatus, category: timeoutCategory, checkedAt };
     }
+    if (outcome.ok) {
+      return { status: "healthy", checkedAt };
+    }
+    return { status: failureStatus, category: failureCategory, checkedAt };
+  }
+
+  private callDependency(
+    dependency: DependencyName,
+    run: () => Promise<void>,
+  ): Promise<ProbeOutcome> {
+    const existing = this.dependencyCalls[dependency];
+    if (existing) return existing;
+
+    const pending = Promise.resolve()
+      .then(run)
+      .then<ProbeOutcome, ProbeOutcome>(
+        () => ({ ok: true }),
+        () => ({ ok: false }),
+      );
+    this.dependencyCalls[dependency] = pending;
+    void pending.then(() => {
+      if (this.dependencyCalls[dependency] === pending) delete this.dependencyCalls[dependency];
+    });
+    return pending;
   }
 }
 
