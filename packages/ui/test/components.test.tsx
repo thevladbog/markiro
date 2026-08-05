@@ -345,7 +345,7 @@ describe("IconButton", () => {
     expect(button.querySelector("svg")).not.toBeNull();
   });
 
-  it("shows a tokenised focus-visible state after keyboard focus", async () => {
+  it("uses a tokenised focus-visible CSS rule for keyboard focus", async () => {
     const user = userEvent.setup();
     render(<IconButton aria-label="Открыть уведомления" icon={<svg aria-hidden="true" />} />);
 
@@ -353,8 +353,12 @@ describe("IconButton", () => {
 
     const button = screen.getByRole("button", { name: "Открыть уведомления" });
     expect(document.activeElement).toBe(button);
-    expect(button.getAttribute("data-focus-visible")).toBe("true");
-    expect(button.style.outline).toBe("2px solid var(--focus-ring)");
+
+    const focusRule = Array.from(document.styleSheets)
+      .flatMap((sheet) => Array.from(sheet.cssRules))
+      .find((rule) => rule.cssText.startsWith(".mk-icon-button:focus-visible"));
+    expect(focusRule).toBeDefined();
+    expect(focusRule!.cssText).toContain("outline: 2px solid var(--focus-ring);");
   });
 });
 
