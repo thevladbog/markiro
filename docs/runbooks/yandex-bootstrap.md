@@ -18,7 +18,8 @@ independent approval is absent. Do not perform a live apply from CI.
    shell with `set -euo pipefail` and `umask 077`; never enable shell tracing.
 4. Confirm the exact IDs, domain ownership, KMS key, subnet ranges, bucket
    names, notification destination, and protected GitHub environments:
-   `production`, `production-infrastructure`, and `production-public-dns`.
+   `production`, `production-infrastructure`, `production-public-dns`, and
+   `production-postgres-owner`.
 5. Install only the vendor-verified Terraform `1.15.8` release through the
    approved workstation package process. Verify the vendor signature and
    checksum before installation, then expose the executable as stable

@@ -153,6 +153,9 @@ Terraform service account and federation:
 
 - `production` is reserved for the deployment controller.
 - `production-infrastructure` is reserved for Terraform plan and apply jobs.
+- `production-postgres-owner` is reserved for the database-only approval that
+  attests the completed cluster apply, exact owner creation, and runtime
+  Lockbox write before the database plan is created.
 
 Configure `github_infrastructure_environment = "production-infrastructure"`
 when bootstrapping. In GitHub, protect the `production-infrastructure`
@@ -161,6 +164,12 @@ Configure a second protected `production-public-dns` environment with the
 separate reviewers authorized to approve public DNS cutover. The boolean
 `enable_public_dns` input never substitutes for that approval: a true request
 must pass the DNS environment before the infrastructure plan is generated.
+Protect `production-postgres-owner` with reviewers authorized to verify that
+the cluster plan applied, the exact `database_name` owner exists, and its
+credential was written to runtime Lockbox. This database-only approval emits
+the current GitHub run identity and non-secret snake_case change record
+reference into saved-plan evidence; it does not inspect external record
+contents.
 
 The infrastructure environment supplies repository/environment variables, not
 long-lived secrets. Required identity and state variables are

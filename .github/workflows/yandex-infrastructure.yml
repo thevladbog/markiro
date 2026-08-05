@@ -22,8 +22,8 @@ name: Yandex infrastructure
         type: choice
         default: none
         options: [none, cluster, database]
-      postgres_owner_boundary:
-        description: Protected evidence ID proving the cluster, owner, and Lockbox boundary
+      postgres_owner_change_reference:
+        description: Protected non-secret change record reference for the database-owner boundary
         required: true
         type: string
         default: none
@@ -99,12 +99,38 @@ jobs:
       - name: Record separate public DNS approval
         run: printf '%s\n' 'Public DNS approval granted; the protected plan will still default explicitly.'
 
+  postgres_owner_approval:
+    if: github.event_name == 'workflow_dispatch' && inputs.postgres_provisioning_phase == 'database'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production-postgres-owner
+    permissions:
+      contents: read
+    outputs:
+      run-id: ${{ steps.attest.outputs.run_id }}
+      run-attempt: ${{ steps.attest.outputs.run_attempt }}
+      change-reference: ${{ steps.attest.outputs.change_reference }}
+    steps:
+      - name: Attest cluster apply, exact owner creation, and runtime Lockbox write
+        id: attest
+        env:
+          POSTGRES_OWNER_CHANGE_REFERENCE: ${{ inputs.postgres_owner_change_reference }}
+        run: |
+          set -euo pipefail
+          [[ "$POSTGRES_OWNER_CHANGE_REFERENCE" =~ ^[a-z][a-z0-9_]{2,63}$ ]]
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          printf 'run_id=%s\n' "$GITHUB_RUN_ID" >> "$GITHUB_OUTPUT"
+          printf 'run_attempt=%s\n' "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          printf 'change_reference=%s\n' "$POSTGRES_OWNER_CHANGE_REFERENCE" >> "$GITHUB_OUTPUT"
+
   plan:
-    needs: [dns_approval]
+    needs: [dns_approval, postgres_owner_approval]
     if: >-
       always() &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
-      (needs.dns_approval.result == 'success' || needs.dns_approval.result == 'skipped')
+      (needs.dns_approval.result == 'success' || needs.dns_approval.result == 'skipped') &&
+      (needs.postgres_owner_approval.result == 'success' || needs.postgres_owner_approval.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: production-infrastructure
@@ -117,7 +143,11 @@ jobs:
     env:
       ENABLE_PUBLIC_DNS: ${{ github.event_name == 'workflow_dispatch' && inputs.enable_public_dns || false }}
       POSTGRES_PROVISIONING_PHASE: ${{ github.event_name == 'workflow_dispatch' && inputs.postgres_provisioning_phase || 'none' }}
-      POSTGRES_OWNER_BOUNDARY: ${{ github.event_name == 'workflow_dispatch' && inputs.postgres_owner_boundary || 'none' }}
+      POSTGRES_OWNER_CHANGE_REFERENCE: ${{ github.event_name == 'workflow_dispatch' && inputs.postgres_owner_change_reference || 'none' }}
+      POSTGRES_OWNER_APPROVAL_RESULT: ${{ needs.postgres_owner_approval.result }}
+      POSTGRES_OWNER_APPROVAL_RUN_ID: ${{ needs.postgres_owner_approval.outputs.run-id || 'none' }}
+      POSTGRES_OWNER_APPROVAL_RUN_ATTEMPT: ${{ needs.postgres_owner_approval.outputs.run-attempt || 'none' }}
+      POSTGRES_OWNER_APPROVAL_CHANGE_REFERENCE: ${{ needs.postgres_owner_approval.outputs.change-reference || 'none' }}
       TARGET_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.target_sha || github.sha }}
       YC_CLOUD_ID: ${{ vars.YC_CLOUD_ID }}
       YC_FOLDER_ID: ${{ vars.YC_FOLDER_ID }}
@@ -230,17 +260,29 @@ jobs:
           fi
           case "$POSTGRES_PROVISIONING_PHASE" in
             none)
-              [[ "$POSTGRES_OWNER_BOUNDARY" == none ]]
+              [[ "$POSTGRES_OWNER_CHANGE_REFERENCE" == none ]]
+              [[ "$POSTGRES_OWNER_APPROVAL_RESULT" == skipped ]]
+              [[ "$POSTGRES_OWNER_APPROVAL_RUN_ID" == none ]]
+              [[ "$POSTGRES_OWNER_APPROVAL_RUN_ATTEMPT" == none ]]
+              [[ "$POSTGRES_OWNER_APPROVAL_CHANGE_REFERENCE" == none ]]
               terraform_targets=()
               ;;
             cluster)
               [[ "$public_dns_enabled" == false ]]
-              [[ "$POSTGRES_OWNER_BOUNDARY" == none ]]
+              [[ "$POSTGRES_OWNER_CHANGE_REFERENCE" == none ]]
+              [[ "$POSTGRES_OWNER_APPROVAL_RESULT" == skipped ]]
+              [[ "$POSTGRES_OWNER_APPROVAL_RUN_ID" == none ]]
+              [[ "$POSTGRES_OWNER_APPROVAL_RUN_ATTEMPT" == none ]]
+              [[ "$POSTGRES_OWNER_APPROVAL_CHANGE_REFERENCE" == none ]]
               terraform_targets=(-target=module.postgres.yandex_mdb_postgresql_cluster.production)
               ;;
             database)
               [[ "$public_dns_enabled" == false ]]
-              [[ "$POSTGRES_OWNER_BOUNDARY" =~ ^change-[A-Za-z0-9][A-Za-z0-9._-]{7,127}$ ]]
+              [[ "$POSTGRES_OWNER_CHANGE_REFERENCE" =~ ^[a-z][a-z0-9_]{2,63}$ ]]
+              [[ "$POSTGRES_OWNER_APPROVAL_RESULT" == success ]]
+              [[ "$POSTGRES_OWNER_APPROVAL_RUN_ID" == "$GITHUB_RUN_ID" ]]
+              [[ "$POSTGRES_OWNER_APPROVAL_RUN_ATTEMPT" == "$GITHUB_RUN_ATTEMPT" ]]
+              [[ "$POSTGRES_OWNER_APPROVAL_CHANGE_REFERENCE" == "$POSTGRES_OWNER_CHANGE_REFERENCE" ]]
               terraform_targets=(-target=module.postgres.yandex_mdb_postgresql_database.application)
               ;;
             *) exit 1 ;;
@@ -313,10 +355,13 @@ jobs:
             --arg commit_sha "$target_sha" \
             --arg plan_sha256 "$plan_sha256" \
             --arg summary_sha256 "$summary_sha256" \
-            --arg postgres_owner_boundary "$POSTGRES_OWNER_BOUNDARY" \
+            --arg github_run_id "$GITHUB_RUN_ID" \
+            --arg github_run_attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg postgres_owner_approval_result "$POSTGRES_OWNER_APPROVAL_RESULT" \
+            --arg postgres_owner_change_reference "$POSTGRES_OWNER_CHANGE_REFERENCE" \
             --arg postgres_provisioning_phase "$POSTGRES_PROVISIONING_PHASE" \
             --argjson public_dns_enabled "$public_dns_enabled" \
-            '{commit_sha: $commit_sha, plan_sha256: $plan_sha256, postgres_owner_boundary: $postgres_owner_boundary, postgres_provisioning_phase: $postgres_provisioning_phase, public_dns_enabled: $public_dns_enabled, summary_sha256: $summary_sha256}' \
+            '{commit_sha: $commit_sha, github_run_attempt: $github_run_attempt, github_run_id: $github_run_id, plan_sha256: $plan_sha256, postgres_owner_approval_result: $postgres_owner_approval_result, postgres_owner_change_reference: $postgres_owner_change_reference, postgres_provisioning_phase: $postgres_provisioning_phase, public_dns_enabled: $public_dns_enabled, summary_sha256: $summary_sha256}' \
             > "$evidence_path"
           chmod 600 "$plan_path" "$summary_path" "$evidence_path"
           printf 'target_sha=%s\n' "$target_sha" >> "$GITHUB_OUTPUT"
@@ -355,7 +400,7 @@ jobs:
     env:
       ENABLE_PUBLIC_DNS: ${{ inputs.enable_public_dns }}
       POSTGRES_PROVISIONING_PHASE: ${{ inputs.postgres_provisioning_phase }}
-      POSTGRES_OWNER_BOUNDARY: ${{ inputs.postgres_owner_boundary }}
+      POSTGRES_OWNER_CHANGE_REFERENCE: ${{ inputs.postgres_owner_change_reference }}
       TARGET_SHA: ${{ inputs.target_sha }}
       YC_CLOUD_ID: ${{ vars.YC_CLOUD_ID }}
       YC_FOLDER_ID: ${{ vars.YC_FOLDER_ID }}
@@ -460,10 +505,13 @@ jobs:
           test ! -L "$evidence_path"
           jq -e '
             type == "object" and
-            (keys | sort) == ["commit_sha", "plan_sha256", "postgres_owner_boundary", "postgres_provisioning_phase", "public_dns_enabled", "summary_sha256"] and
+            (keys | sort) == ["commit_sha", "github_run_attempt", "github_run_id", "plan_sha256", "postgres_owner_approval_result", "postgres_owner_change_reference", "postgres_provisioning_phase", "public_dns_enabled", "summary_sha256"] and
             (.commit_sha | type == "string") and
+            (.github_run_attempt | type == "string" and test("^[1-9][0-9]*$")) and
+            (.github_run_id | type == "string" and test("^[1-9][0-9]*$")) and
             (.plan_sha256 | type == "string") and
-            (.postgres_owner_boundary | type == "string") and
+            (.postgres_owner_approval_result | type == "string" and (. == "success" or . == "skipped")) and
+            (.postgres_owner_change_reference | type == "string") and
             (.postgres_provisioning_phase | type == "string") and
             (.public_dns_enabled | type == "boolean") and
             (.summary_sha256 | type == "string")
@@ -471,7 +519,10 @@ jobs:
           evidence_commit="$(jq -er '.commit_sha' "$evidence_path")"
           artifact_sha256="$(jq -er '.plan_sha256' "$evidence_path")"
           summary_sha256="$(jq -er '.summary_sha256' "$evidence_path")"
-          evidence_postgres_owner_boundary="$(jq -er '.postgres_owner_boundary' "$evidence_path")"
+          evidence_github_run_attempt="$(jq -er '.github_run_attempt' "$evidence_path")"
+          evidence_github_run_id="$(jq -er '.github_run_id' "$evidence_path")"
+          evidence_postgres_owner_approval_result="$(jq -er '.postgres_owner_approval_result' "$evidence_path")"
+          evidence_postgres_owner_change_reference="$(jq -er '.postgres_owner_change_reference' "$evidence_path")"
           evidence_postgres_provisioning_phase="$(jq -er '.postgres_provisioning_phase' "$evidence_path")"
           evidence_public_dns="$(jq -er '.public_dns_enabled' "$evidence_path")"
           [[ "$evidence_commit" == "$target_sha" ]]
@@ -479,11 +530,19 @@ jobs:
           [[ "$summary_sha256" =~ ^[0-9a-f]{64}$ ]]
           [[ "$(sha256sum "$plan_path" | cut -d' ' -f1)" == "$artifact_sha256" ]]
           [[ "$(sha256sum "$summary_path" | cut -d' ' -f1)" == "$summary_sha256" ]]
-          [[ "$evidence_postgres_owner_boundary" == "$POSTGRES_OWNER_BOUNDARY" ]]
+          [[ "$evidence_github_run_id" == "$GITHUB_RUN_ID" ]]
+          [[ "$evidence_github_run_attempt" == "$GITHUB_RUN_ATTEMPT" ]]
+          [[ "$evidence_postgres_owner_change_reference" == "$POSTGRES_OWNER_CHANGE_REFERENCE" ]]
           [[ "$evidence_postgres_provisioning_phase" == "$POSTGRES_PROVISIONING_PHASE" ]]
           case "$POSTGRES_PROVISIONING_PHASE" in
-            none|cluster) [[ "$POSTGRES_OWNER_BOUNDARY" == none ]] ;;
-            database) [[ "$POSTGRES_OWNER_BOUNDARY" =~ ^change-[A-Za-z0-9][A-Za-z0-9._-]{7,127}$ ]] ;;
+            none|cluster)
+              [[ "$POSTGRES_OWNER_CHANGE_REFERENCE" == none ]]
+              [[ "$evidence_postgres_owner_approval_result" == skipped ]]
+              ;;
+            database)
+              [[ "$POSTGRES_OWNER_CHANGE_REFERENCE" =~ ^[a-z][a-z0-9_]{2,63}$ ]]
+              [[ "$evidence_postgres_owner_approval_result" == success ]]
+              ;;
             *) exit 1 ;;
           esac
           case "$ENABLE_PUBLIC_DNS" in

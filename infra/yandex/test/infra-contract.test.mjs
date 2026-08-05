@@ -1367,24 +1367,49 @@ function assertProtectedInfrastructureWorkflow(source) {
     default: "none",
     options: ["none", "cluster", "database"],
   });
-  assert.deepEqual(dispatchInputs.postgres_owner_boundary, {
-    description: "Protected evidence ID proving the cluster, owner, and Lockbox boundary",
+  assert.deepEqual(dispatchInputs.postgres_owner_change_reference, {
+    description: "Protected non-secret change record reference for the database-owner boundary",
     required: true,
     type: "string",
     default: "none",
   });
 
-  const { apply, dns_approval: dnsApproval, plan, validate } = workflow.jobs;
+  const {
+    apply,
+    dns_approval: dnsApproval,
+    plan,
+    postgres_owner_approval: postgresOwnerApproval,
+    validate,
+  } = workflow.jobs;
   assert.deepEqual(validate.permissions, { contents: "read" });
   assert.deepEqual(plan.permissions, { contents: "read", "id-token": "write" });
   assert.deepEqual(apply.permissions, { contents: "read", "id-token": "write" });
   assert.equal(plan.environment, "production-infrastructure");
   assert.equal(apply.environment, "production-infrastructure");
   assert.equal(dnsApproval.environment, "production-public-dns");
+  assert.equal(postgresOwnerApproval.environment, "production-postgres-owner");
+  assert.deepEqual(postgresOwnerApproval.permissions, { contents: "read" });
+  assert.match(postgresOwnerApproval.if, /postgres_provisioning_phase\s*==\s*'database'/);
+  assert.match(postgresOwnerApproval.outputs["run-id"], /steps\.attest\.outputs\.run_id/);
+  assert.match(postgresOwnerApproval.outputs["run-attempt"], /steps\.attest\.outputs\.run_attempt/);
+  assert.match(
+    postgresOwnerApproval.outputs["change-reference"],
+    /steps\.attest\.outputs\.change_reference/,
+  );
   assert.match(dnsApproval.if, /enable_public_dns\s*==\s*true/);
   assert.match(plan.if, /needs\.dns_approval\.result/);
+  assert.match(plan.if, /needs\.postgres_owner_approval\.result/);
+  assert.deepEqual(plan.needs, ["dns_approval", "postgres_owner_approval"]);
   assert.match(apply.if, /github\.event_name\s*==\s*'workflow_dispatch'/);
   assert.deepEqual(apply.needs, ["plan"]);
+  const postgresOwnerApprovalCommands = workflowCommands(postgresOwnerApproval);
+  assert.match(
+    postgresOwnerApprovalCommands,
+    /POSTGRES_OWNER_CHANGE_REFERENCE.*\^\[a-z\]\[a-z0-9_\]/s,
+  );
+  assert.match(postgresOwnerApprovalCommands, /GITHUB_RUN_ID/);
+  assert.match(postgresOwnerApprovalCommands, /GITHUB_RUN_ATTEMPT/);
+  assert.match(postgresOwnerApprovalCommands, /GITHUB_OUTPUT/);
 
   const validateSource = JSON.stringify(validate);
   assert.doesNotMatch(
@@ -1442,11 +1467,20 @@ function assertProtectedInfrastructureWorkflow(source) {
   assert.match(planCommands, /terraform -chdir=infra\/yandex\/production init/);
   assert.match(planCommands, /terraform -chdir=infra\/yandex\/production plan -json/);
   assert.match(planCommands, /POSTGRES_PROVISIONING_PHASE/);
-  assert.match(planCommands, /POSTGRES_OWNER_BOUNDARY/);
-  assert.match(planCommands, /\^change-\[A-Za-z0-9\]/);
+  assert.match(planCommands, /POSTGRES_OWNER_CHANGE_REFERENCE/);
+  assert.match(planCommands, /POSTGRES_OWNER_APPROVAL_RUN_ID/);
+  assert.match(planCommands, /POSTGRES_OWNER_APPROVAL_RUN_ATTEMPT/);
+  assert.match(planCommands, /POSTGRES_OWNER_APPROVAL_RESULT/);
+  assert.match(planCommands, /\[\[ "\$POSTGRES_OWNER_APPROVAL_RUN_ID" == "\$GITHUB_RUN_ID" \]\]/);
+  assert.match(
+    planCommands,
+    /\[\[ "\$POSTGRES_OWNER_APPROVAL_RUN_ATTEMPT" == "\$GITHUB_RUN_ATTEMPT" \]\]/,
+  );
+  assert.match(planCommands, /\^\[a-z\]\[a-z0-9_\]/);
   assert.match(planCommands, /module\.postgres\.yandex_mdb_postgresql_cluster\.production/);
   assert.match(planCommands, /module\.postgres\.yandex_mdb_postgresql_database\.application/);
-  assert.match(planCommands, /postgres_provisioning_phase/);
+  assert.match(planCommands, /postgres_owner_change_reference/);
+  assert.match(planCommands, /github_run_attempt/);
   assert.match(planCommands, /validate-plan-summary\.mjs/);
   assert.match(planCommands, /sha256sum/);
 
@@ -1494,9 +1528,12 @@ function assertProtectedInfrastructureWorkflow(source) {
   assert.match(applyCommands, /terraform -chdir=infra\/yandex\/production apply/);
   assert.match(applyCommands, /saved\.tfplan/);
   assert.match(applyCommands, /POSTGRES_PROVISIONING_PHASE/);
-  assert.match(applyCommands, /POSTGRES_OWNER_BOUNDARY/);
+  assert.match(applyCommands, /POSTGRES_OWNER_CHANGE_REFERENCE/);
   assert.match(applyCommands, /evidence_postgres_provisioning_phase/);
-  assert.match(applyCommands, /evidence_postgres_owner_boundary/);
+  assert.match(applyCommands, /evidence_postgres_owner_change_reference/);
+  assert.match(applyCommands, /evidence_github_run_id/);
+  assert.match(applyCommands, /evidence_github_run_attempt/);
+  assert.match(applyCommands, /evidence_postgres_owner_approval_result/);
 
   const allCommands = [validateCommands, planCommands, applyCommands].join("\n");
   assert.doesNotMatch(allCommands, /pull_request_target/);
@@ -1572,7 +1609,16 @@ test("infrastructure workflow contract rejects security-boundary mutations", asy
     ["stale commit", source.replace('[[ "$target_sha" == "$dispatch_sha" ]]\n', "")],
     ["unmasked HMAC", source.replace('echo "::add-mask::$aws_secret_access_key"\n', "")],
     ["DNS default true", source.replace("default: false", "default: true")],
-    ["database phase without recorded owner boundary", source.replace("^change-", "^unsafe-")],
+    [
+      "database phase without protected owner approval",
+      mutateWorkflowSource(source, (workflow) => {
+        delete workflow.jobs.postgres_owner_approval.environment;
+      }),
+    ],
+    [
+      "database phase without immutable owner approval identity",
+      source.replace('[[ "$POSTGRES_OWNER_APPROVAL_RUN_ID" == "$GITHUB_RUN_ID" ]]\n', ""),
+    ],
     [
       "unbounded PostgreSQL target",
       source.replace("module.postgres.yandex_mdb_postgresql_cluster.production", "module.postgres"),

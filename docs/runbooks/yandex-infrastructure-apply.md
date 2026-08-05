@@ -16,9 +16,10 @@ Local production apply is prohibited.
    approved provenance review. The `yc` SHA-256 is a measured repository pin,
    not vendor-attested provenance.
 3. Confirm access uses the exact protected environments: `production` for the
-   deployment controller, `production-infrastructure` for Terraform, and
-   `production-public-dns` for public DNS approval. Do not treat a boolean as
-   environment approval.
+   deployment controller, `production-infrastructure` for Terraform,
+   `production-public-dns` for public DNS approval, and
+   `production-postgres-owner` for the database-owner boundary. Do not treat a
+   boolean or a change-record reference as environment approval.
 4. Set `public_dns_enabled=false` unless this is the separately approved final
    DNS operation. Never use an automatic approval flag for public DNS.
 
@@ -30,10 +31,10 @@ Local production apply is prohibited.
    current `main` commit with these exact inputs.
 
 ```text
-target_sha=<CURRENT_MAIN_SHA>
+target_sha=current_main_sha
 enable_public_dns=false
 postgres_provisioning_phase=none
-postgres_owner_boundary=none
+postgres_owner_change_reference=none
 ```
 
 2. Approve only the `production-infrastructure` environment after checking the
@@ -59,31 +60,38 @@ postgres_owner_boundary=none
    following inputs. This creates only the cluster saved plan.
 
 ```text
-target_sha=<CURRENT_MAIN_SHA>
+target_sha=current_main_sha
 enable_public_dns=false
 postgres_provisioning_phase=cluster
-postgres_owner_boundary=none
+postgres_owner_change_reference=none
 ```
 
 4. Approve and apply that exact cluster plan. Create the owner named exactly as
    `database_name` through the approved database administration surface. Write
-   its credential directly to runtime Lockbox. Record the cluster apply, owner
-   creation, and Lockbox write under one protected, non-secret change evidence
-   ID beginning `change-`. Terraform must never receive the owner password.
+   its credential directly to runtime Lockbox. Record the cluster apply, exact
+   owner creation, and runtime Lockbox write under one protected, non-secret
+   snake_case change record reference. Terraform must never receive the owner
+   password.
 5. Dispatch a new protected workflow for the same current main SHA with these
-   exact inputs. Replace the placeholder with the recorded protected change
-   evidence ID; the workflow rejects a missing or malformed boundary and binds
-   it to the saved-plan evidence.
+   exact inputs. Replace `protected_change_record_id` with the recorded
+   snake_case change reference. The database-only
+   `production-postgres-owner` approval job attests the completed boundary and
+   binds its current GitHub run ID, run attempt, approval outcome, and change
+   reference to the saved-plan evidence.
 
 ```text
-target_sha=<CURRENT_MAIN_SHA>
+target_sha=current_main_sha
 enable_public_dns=false
 postgres_provisioning_phase=database
-postgres_owner_boundary=<PROTECTED_CHANGE_EVIDENCE_ID>
+postgres_owner_change_reference=protected_change_record_id
 ```
 
-6. Approve and apply that exact database plan only after the protected record
-   confirms the cluster, owner, and Lockbox boundary.
+6. Approve the `production-postgres-owner` job only after independently
+   confirming the cluster apply, exact owner creation, and runtime Lockbox
+   write in the protected record. Then approve and apply that exact database
+   plan. The apply job rechecks the saved run identity, attempt, approval
+   outcome, and change reference; it does not query or validate external record
+   contents.
 7. Create Monitoring alerts manually from `alert_specs`; provider `0.215.0`
    cannot mutate alerts. Enter the exact resulting IDs and notification channel
    ID in protected infrastructure variables, then run a new reviewed plan.

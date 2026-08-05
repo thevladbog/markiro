@@ -228,8 +228,11 @@ retention policy. The shared media bucket remains private and separates avatar
 and future product-image keys by prefix; the application controls access.
 
 Runbooks require the exact protected GitHub environments `production`,
-`production-infrastructure`, and `production-public-dns`. Public DNS stays
-false until the separately approved first go-live procedure passes. The
+`production-infrastructure`, `production-public-dns`, and
+`production-postgres-owner`. Public DNS stays false until the separately
+approved first go-live procedure passes. The database-only owner environment
+attests the completed cluster apply, exact owner creation, and runtime Lockbox
+write before the saved database plan can proceed. The
 production controller uses serial-console host-key evidence and OS Login for
 the private app host; it does not trust a static SSH key.
 

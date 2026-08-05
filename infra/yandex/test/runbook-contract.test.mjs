@@ -109,17 +109,105 @@ function ordered(source, values, label) {
   }
 }
 
+function markerProcedure(source, marker) {
+  const start = source.indexOf(`<!-- runbook-contract:${marker} -->`);
+  assert.ok(start >= 0, `missing marker ${marker}`);
+  const next = source.indexOf("<!-- runbook-contract:", start + 1);
+  return source.slice(start, next === -1 ? source.length : next);
+}
+
+const markerProcedures = {
+  "docs/runbooks/yandex-secrets.md": {
+    "secrets-inventory": [
+      "protected change record",
+      "runtime Lockbox payload",
+      "AWS_ACCESS_KEY_ID",
+      "GITHUB_RUNNER_ADMIN_TOKEN",
+      "protected operational system",
+    ],
+    "secrets-runtime-payload": [
+      "Disable terminal recording",
+      "input or a protected descriptor",
+      "mode `0600`",
+      "every and only the keys from",
+      "S3 credentials",
+      "SMTP credentials",
+      "GHCR credentials",
+    ],
+    "secrets-mode-verification": [
+      "expected key names",
+      "/etc/markiro/production.env` at mode `0600`",
+      "node deploy/production/preflight.mjs",
+      "config --quiet",
+      "sanitized readiness state",
+    ],
+    "secrets-rotation": [
+      "approved rotation record",
+      "standard input or a protected descriptor",
+      "Restart or redeploy",
+      "Revoke the previous credential",
+      "GITHUB_RUNNER_ADMIN_TOKEN",
+      "Remove temporary protected files",
+    ],
+  },
+  "docs/runbooks/yandex-recovery.md": {
+    "recovery-prerequisites": [
+      "approved incident or drill record",
+      "target timestamp",
+      "distinct temporary PostgreSQL cluster",
+      "Disable tracing",
+    ],
+    "recovery-postgres-pitr": [
+      "PITR restore",
+      "Create the application owner",
+      "normal forward migration command",
+      "Verify tenant isolation",
+    ],
+    "recovery-media-version": [
+      "Select the required object version",
+      "Restore that version",
+      "Verify object metadata",
+    ],
+    "recovery-state-version": [
+      "Select a prior version",
+      "Copy it only into an isolated recovery location",
+      "Do not initialize a production backend",
+    ],
+    "recovery-vm": [
+      "new reviewed infrastructure plan",
+      "no public IP",
+      "last known healthy digest pair",
+      "single-VM limitation",
+    ],
+    "recovery-evidence": [
+      "observed RTO/RPO",
+      "remediation change",
+      "separate cleanup approval",
+      "cleanup evidence separately",
+    ],
+  },
+};
+
 function assertRunbookContract({ documents, verifier, workflow }) {
   for (const [runbook, markers] of Object.entries(runbooks)) {
     const source = documents[runbook];
     markersAppearInOrder(source, markers);
     assert.ok(commandBlocks(source).length > 0 || !runbook.includes("bootstrap"));
-    for (const pattern of forbidden) {
-      assert.doesNotMatch(source, pattern, `${runbook} contains a forbidden command`);
+    for (const commands of commandBlocks(source)) {
+      for (const pattern of forbidden) {
+        assert.doesNotMatch(commands, pattern, `${runbook} contains a forbidden command`);
+      }
+    }
+  }
+
+  for (const [runbook, procedures] of Object.entries(markerProcedures)) {
+    for (const [marker, values] of Object.entries(procedures)) {
+      ordered(markerProcedure(documents[runbook], marker), values, `${runbook}:${marker}`);
     }
   }
 
   const bootstrap = documents["docs/runbooks/yandex-bootstrap.md"];
+  assert.match(bootstrap, /production-postgres-owner/);
   assert.match(bootstrap, /install .*Terraform `1\.15\.8`/i);
   assert.match(bootstrap, /terraform version -json/);
   assert.match(bootstrap, /node infra\/yandex\/scripts\/check-toolchain\.mjs/);
@@ -136,31 +224,34 @@ function assertRunbookContract({ documents, verifier, workflow }) {
   );
 
   const infrastructure = documents["docs/runbooks/yandex-infrastructure-apply.md"];
+  assert.match(infrastructure, /production-postgres-owner/);
   for (const input of [
     "target_sha",
     "enable_public_dns=false",
     "postgres_provisioning_phase=cluster",
-    "postgres_owner_boundary=none",
+    "postgres_owner_change_reference=none",
     "postgres_provisioning_phase=database",
-    "postgres_owner_boundary=<PROTECTED_CHANGE_EVIDENCE_ID>",
+    "postgres_owner_change_reference=protected_change_record_id",
   ]) {
     assert.match(infrastructure, new RegExp(input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
   ordered(
     infrastructure,
     [
-      "postgres_provisioning_phase=cluster\npostgres_owner_boundary=none",
+      "postgres_provisioning_phase=cluster\npostgres_owner_change_reference=none",
       "Create the owner",
       "runtime Lockbox",
-      "postgres_provisioning_phase=database\npostgres_owner_boundary=<PROTECTED_CHANGE_EVIDENCE_ID>",
+      "postgres_owner_change_reference=protected_change_record_id",
     ],
     "two-phase PostgreSQL procedure",
   );
   for (const workflowInterface of [
     "postgres_provisioning_phase:",
-    "postgres_owner_boundary:",
-    "POSTGRES_OWNER_BOUNDARY",
-    "evidence_postgres_owner_boundary",
+    "postgres_owner_change_reference:",
+    "postgres_owner_approval:",
+    "POSTGRES_OWNER_CHANGE_REFERENCE",
+    "evidence_postgres_owner_change_reference",
+    "github_run_attempt",
   ]) {
     assert.match(workflow, new RegExp(workflowInterface.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
@@ -190,9 +281,11 @@ test("runbook contract rejects every unsafe command and missing DNS verifier inp
   const firstRunbook = "docs/runbooks/yandex-bootstrap.md";
 
   for (const command of forbiddenCommands) {
-    const mutated = structuredClone(current);
-    mutated.documents[firstRunbook] += `\n\`\`\`console\n${command}\n\`\`\`\n`;
-    assert.throws(() => assertRunbookContract(mutated), command);
+    for (const fenceType of ["", "console"]) {
+      const mutated = structuredClone(current);
+      mutated.documents[firstRunbook] += `\n\`\`\`${fenceType}\n${command}\n\`\`\`\n`;
+      assert.throws(() => assertRunbookContract(mutated), `${fenceType}:${command}`);
+    }
   }
 
   for (const input of verifierInputs) {
@@ -201,5 +294,28 @@ test("runbook contract rejects every unsafe command and missing DNS verifier inp
       "docs/runbooks/yandex-first-go-live.md"
     ].replaceAll(input, `REMOVED_${input}`);
     assert.throws(() => assertRunbookContract(mutated), input);
+  }
+
+  for (const [runbook, procedures] of Object.entries(markerProcedures)) {
+    for (const [marker, values] of Object.entries(procedures)) {
+      const mutated = structuredClone(current);
+      const missingProcedure = markerProcedure(mutated.documents[runbook], marker);
+      mutated.documents[runbook] = mutated.documents[runbook].replace(
+        missingProcedure,
+        missingProcedure.replace(values[0], "REMOVED_REQUIRED_SEMANTIC"),
+      );
+      assert.throws(() => assertRunbookContract(mutated), `${runbook}:${marker}:missing`);
+
+      const reordered = structuredClone(current);
+      const procedure = markerProcedure(reordered.documents[runbook], marker);
+      const first = values[0];
+      const second = values[1];
+      const swapped = procedure
+        .replace(first, "RUNBOOK_ORDER_SENTINEL")
+        .replace(second, first)
+        .replace("RUNBOOK_ORDER_SENTINEL", second);
+      reordered.documents[runbook] = reordered.documents[runbook].replace(procedure, swapped);
+      assert.throws(() => assertRunbookContract(reordered), `${runbook}:${marker}:reordered`);
+    }
   }
 });
