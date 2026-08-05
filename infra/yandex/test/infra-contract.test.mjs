@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+
+import { scanRepositoryLeaks } from "../scripts/scan-repository-leaks.mjs";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "../../..");
 const terraformRoots = ["bootstrap", "production"];
@@ -11,13 +14,31 @@ async function readRepositoryFile(relativePath) {
   return readFile(path.join(repositoryRoot, relativePath), "utf8");
 }
 
-function candidateRepositoryFiles() {
+function candidateRepositoryFiles(root = repositoryRoot) {
   return execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], {
-    cwd: repositoryRoot,
+    cwd: root,
     encoding: "utf8",
   })
     .split("\0")
     .filter(Boolean);
+}
+
+async function scanFixture(relativePath, contents = "fixture") {
+  const fixtureRoot = await mkdtemp(path.join(tmpdir(), "markiro-infra-contract-"));
+  const fixturePath = path.join(fixtureRoot, relativePath);
+
+  try {
+    execFileSync("git", ["init", "--quiet"], { cwd: fixtureRoot, stdio: "pipe" });
+    await mkdir(path.dirname(fixturePath), { recursive: true });
+    await writeFile(fixturePath, contents, "utf8");
+    execFileSync("git", ["add", "--force", "--", relativePath], {
+      cwd: fixtureRoot,
+      stdio: "pipe",
+    });
+    return await scanRepositoryLeaks(fixtureRoot, candidateRepositoryFiles(fixtureRoot));
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
 }
 
 test("both Terraform roots pin the exact supported toolchain", async () => {
@@ -85,36 +106,62 @@ test("Yandex infrastructure ignores local Terraform artifacts but keeps contract
 
 test("repository candidates contain no state, plans, or credential material", async () => {
   const files = candidateRepositoryFiles();
-  const leakedArtifacts = files.filter((file) =>
-    /(?:\.tfstate(?:\.|$)|\.tfplan$|(?:^|\/)backend\.hcl$)/.test(file),
-  );
+  const violations = await scanRepositoryLeaks(repositoryRoot, files);
 
-  assert.deepEqual(leakedArtifacts, []);
+  assert.deepEqual(violations, []);
+});
 
-  for (const relativePath of files.filter((candidate) =>
-    /\.(?:tf|hcl|tfvars|md|mjs|json|ya?ml|sh)$/.test(candidate),
-  )) {
-    const file = path.join(repositoryRoot, relativePath);
-    const contents = await readFile(file, "utf8");
-    const hasLiteralCredential =
-      /(?:access_key|secret_key|token)\s*=\s*["'][^"'\s$<>]+["']/i.test(contents) ||
-      /(?:AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|YC_TOKEN)\s*=\s*["']?[^\s"'$<>]+/i.test(contents);
-    const hasNonblankSecretDefault =
-      /variable\s+"(?:token|access_key|secret_key|password)"\s*{[^}]*default\s*=\s*["'][^"'\s]+["']/is.test(
-        contents,
-      );
+test("repository scanner rejects a committed Terraform state", async () => {
+  assert.deepEqual(await scanFixture("infra/yandex/terraform.tfstate"), [
+    {
+      relativePath: "infra/yandex/terraform.tfstate",
+      reason: "forbidden Terraform artifact",
+    },
+  ]);
+});
 
-    assert.equal(
-      hasLiteralCredential,
-      false,
-      `${relativePath} contains literal credential material`,
-    );
-    assert.equal(
-      hasNonblankSecretDefault,
-      false,
-      `${relativePath} contains a nonblank secret variable default`,
-    );
-  }
+test("repository scanner rejects a committed Terraform plan", async () => {
+  assert.deepEqual(await scanFixture("infra/yandex/release.tfplan"), [
+    {
+      relativePath: "infra/yandex/release.tfplan",
+      reason: "forbidden Terraform artifact",
+    },
+  ]);
+});
+
+test("repository scanner rejects generated backend configuration", async () => {
+  assert.deepEqual(await scanFixture("infra/yandex/production/backend.hcl"), [
+    {
+      relativePath: "infra/yandex/production/backend.hcl",
+      reason: "forbidden Terraform artifact",
+    },
+  ]);
+});
+
+test("repository scanner rejects literal credentials in an unlisted extension", async () => {
+  const credentialAssignment = `${["to", "ken"].join("")} = ${JSON.stringify(
+    ["test", "only", "placeholder"].join("-"),
+  )}`;
+
+  assert.deepEqual(await scanFixture("infra/yandex/credentials.txt", credentialAssignment), [
+    {
+      relativePath: "infra/yandex/credentials.txt",
+      reason: "literal credential material",
+    },
+  ]);
+});
+
+test("repository scanner rejects a nonblank secret variable default", async () => {
+  const secretVariable = `variable ${JSON.stringify(
+    ["to", "ken"].join(""),
+  )} { default = ${JSON.stringify(["test", "only", "placeholder"].join("-"))} }`;
+
+  assert.deepEqual(await scanFixture("infra/yandex/variables.tf", secretVariable), [
+    {
+      relativePath: "infra/yandex/variables.tf",
+      reason: "nonblank secret variable default",
+    },
+  ]);
 });
 
 test("toolchain checker accepts the committed exact-version locks", () => {

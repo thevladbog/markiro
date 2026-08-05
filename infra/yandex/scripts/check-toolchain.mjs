@@ -6,9 +6,10 @@ import path from "node:path";
 const repositoryRoot = path.resolve(import.meta.dirname, "../../..");
 const expectedTerraformVersion = "1.15.8";
 const expectedProviderVersion = "0.215.0";
-const requiredPlatformHashes = new Map([
-  ["linux_amd64", "XcpKtZSqo9Z2NyMvwXfDcFCzbZkGTF8q4q2otcLgsEs="],
-  ["darwin_arm64", "D5dxRfp+hEos4MOTLb1riN455KNtdpNeP5MEtA9wX+o="],
+const requiredPlatforms = ["linux_amd64", "darwin_arm64"];
+const requiredProviderHashes = new Set([
+  "XcpKtZSqo9Z2NyMvwXfDcFCzbZkGTF8q4q2otcLgsEs=",
+  "D5dxRfp+hEos4MOTLb1riN455KNtdpNeP5MEtA9wX+o=",
 ]);
 const terraformRoots = ["bootstrap", "production"];
 
@@ -43,8 +44,8 @@ assert.equal(
   `Terraform must be exactly ${expectedTerraformVersion}`,
 );
 assert.ok(
-  requiredPlatformHashes.has(version.platform),
-  `Terraform must run on ${[...requiredPlatformHashes.keys()].join(" or ")}`,
+  requiredPlatforms.includes(version.platform),
+  `Terraform must run on ${requiredPlatforms.join(" or ")}`,
 );
 
 for (const root of terraformRoots) {
@@ -67,11 +68,11 @@ for (const root of terraformRoots) {
   );
   assert.deepEqual(
     new Set(platformHashes),
-    new Set(requiredPlatformHashes.values()),
-    `${root} must contain the pinned ${[...requiredPlatformHashes.keys()].join(" and ")} hashes`,
+    requiredProviderHashes,
+    `${root} must contain the exact hashes generated for ${requiredPlatforms.join(" and ")}`,
   );
 }
 
 console.log(
-  `Terraform ${expectedTerraformVersion} and Yandex provider ${expectedProviderVersion} locks verified for ${[...requiredPlatformHashes.keys()].join(", ")}.`,
+  `Terraform ${expectedTerraformVersion} and Yandex provider ${expectedProviderVersion} locks verified for ${requiredPlatforms.join(", ")}.`,
 );
