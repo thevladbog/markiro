@@ -59,13 +59,14 @@ resource "yandex_lockbox_secret" "runner_registration" {
 module "iam" {
   source = "../modules/iam"
 
-  folder_id                     = var.folder_id
-  organization_id               = var.organization_id
-  github_repository             = var.github_repository
-  github_environment            = var.github_environment
-  state_bucket_name             = yandex_storage_bucket.state.bucket
-  runtime_secret_id             = yandex_lockbox_secret.runtime.id
-  state_backend_secret_id       = yandex_lockbox_secret.state_backend.id
-  runner_registration_secret_id = yandex_lockbox_secret.runner_registration.id
-  labels                        = local.labels
+  folder_id                         = var.folder_id
+  organization_id                   = var.organization_id
+  github_repository                 = var.github_repository
+  github_environment                = var.github_environment
+  github_infrastructure_environment = var.github_infrastructure_environment
+  state_bucket_name                 = yandex_storage_bucket.state.bucket
+  runtime_secret_id                 = yandex_lockbox_secret.runtime.id
+  state_backend_secret_id           = yandex_lockbox_secret.state_backend.id
+  runner_registration_secret_id     = yandex_lockbox_secret.runner_registration.id
+  labels                            = local.labels
 }

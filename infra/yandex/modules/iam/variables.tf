@@ -32,6 +32,17 @@ variable "github_environment" {
   }
 }
 
+variable "github_infrastructure_environment" {
+  description = "Exact protected GitHub environment allowed to manage Terraform infrastructure."
+  type        = string
+  nullable    = false
+
+  validation {
+    condition     = var.github_infrastructure_environment == "production-infrastructure"
+    error_message = "github_infrastructure_environment must be exactly production-infrastructure."
+  }
+}
+
 variable "state_bucket_name" {
   description = "Name of the protected Terraform state bucket."
   type        = string

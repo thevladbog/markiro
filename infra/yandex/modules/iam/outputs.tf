@@ -11,7 +11,7 @@ output "service_account_ids" {
 }
 
 output "workload_identity_federation_id" {
-  description = "ID of the repository-and-environment-restricted GitHub OIDC federation."
+  description = "ID of the GitHub OIDC federation with exact deployment and infrastructure subjects."
   value       = yandex_iam_workload_identity_oidc_federation.github.id
   sensitive   = true
 }

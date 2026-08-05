@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
+import * as yaml from "js-yaml";
+
 import { scanRepositoryLeaks } from "../scripts/scan-repository-leaks.mjs";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "../../..");
@@ -311,8 +313,8 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, variables }) {
   );
   assert.equal(
     (iam.match(/resource\s+"yandex_iam_workload_identity_federated_credential"\s+/g) ?? []).length,
-    1,
-    "exactly one repository-and-environment credential is required",
+    2,
+    "exact deployment and infrastructure repository/environment credentials are required",
   );
 
   assert.doesNotMatch(
@@ -352,8 +354,16 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, variables }) {
     /variable\s+"github_environment"\s*\{[\s\S]*?condition\s*=\s*var\.github_environment\s*==\s*"production"/,
   );
   assert.match(
+    variables,
+    /variable\s+"github_infrastructure_environment"\s*\{[\s\S]*?condition\s*=\s*var\.github_infrastructure_environment\s*==\s*"production-infrastructure"/,
+  );
+  assert.match(
     iam,
     /github_subject\s*=\s*"repo:\$\{var\.github_repository\}:environment:\$\{var\.github_environment\}"/,
+  );
+  assert.match(
+    iam,
+    /github_infrastructure_subject\s*=\s*"repo:\$\{var\.github_repository\}:environment:\$\{var\.github_infrastructure_environment\}"/,
   );
 
   const federation = terraformResourceBlock(
@@ -380,6 +390,24 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, variables }) {
     /federation_id\s*=\s*yandex_iam_workload_identity_oidc_federation\.github\.id/,
   );
   assert.match(credential, /external_subject_id\s*=\s*local\.github_subject/);
+
+  const infrastructureCredential = terraformResourceBlock(
+    iam,
+    "yandex_iam_workload_identity_federated_credential",
+    "github_infrastructure",
+  );
+  assert.match(
+    infrastructureCredential,
+    /service_account_id\s*=\s*yandex_iam_service_account\.terraform\.id/,
+  );
+  assert.match(
+    infrastructureCredential,
+    /federation_id\s*=\s*yandex_iam_workload_identity_oidc_federation\.github\.id/,
+  );
+  assert.match(
+    infrastructureCredential,
+    /external_subject_id\s*=\s*local\.github_infrastructure_subject/,
+  );
 
   const federationUse = terraformResourceBlock(
     iam,
@@ -1308,6 +1336,171 @@ async function reviewedNonUtf8Violations() {
 
   return violations.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
 }
+
+function workflowCommands(job) {
+  return (job.steps ?? [])
+    .filter((step) => typeof step.run === "string")
+    .map((step) => step.run)
+    .join("\n");
+}
+
+function assertProtectedInfrastructureWorkflow(source) {
+  const workflow = yaml.load(source, { schema: yaml.JSON_SCHEMA });
+
+  assert.deepEqual(workflow.permissions, { contents: "read" });
+  assert.equal(workflow.concurrency.group, "markiro-yandex-production-state");
+  assert.equal(workflow.concurrency["cancel-in-progress"], false);
+  assert.equal("pull_request_target" in workflow.on, false);
+  assert.deepEqual(workflow.on.pull_request.branches, ["main"]);
+  assert.deepEqual(workflow.on.push.branches, ["main"]);
+
+  const dispatchInputs = workflow.on.workflow_dispatch.inputs;
+  assert.deepEqual(dispatchInputs.target_sha, {
+    description: "Exact current main commit to plan and apply",
+    required: true,
+    type: "string",
+  });
+  assert.equal(dispatchInputs.enable_public_dns.type, "boolean");
+  assert.equal(dispatchInputs.enable_public_dns.default, false);
+  assert.equal(dispatchInputs.enable_public_dns.required, true);
+
+  const { apply, dns_approval: dnsApproval, plan, validate } = workflow.jobs;
+  assert.deepEqual(validate.permissions, { contents: "read" });
+  assert.deepEqual(plan.permissions, { contents: "read", "id-token": "write" });
+  assert.deepEqual(apply.permissions, { contents: "read", "id-token": "write" });
+  assert.equal(plan.environment, "production-infrastructure");
+  assert.equal(apply.environment, "production-infrastructure");
+  assert.equal(dnsApproval.environment, "production-public-dns");
+  assert.match(dnsApproval.if, /enable_public_dns\s*==\s*true/);
+  assert.match(plan.if, /needs\.dns_approval\.result/);
+  assert.match(apply.if, /github\.event_name\s*==\s*'workflow_dispatch'/);
+  assert.deepEqual(apply.needs, ["plan"]);
+
+  const validateSource = JSON.stringify(validate);
+  assert.doesNotMatch(
+    validateSource,
+    /id-token|secrets\.|vars\.|ACTIONS_ID_TOKEN|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|YC_TOKEN|lockbox|auth\.yandex/i,
+  );
+  const validateCommands = workflowCommands(validate);
+  assert.match(validateCommands, /terraform fmt -check -recursive infra\/yandex/);
+  assert.match(validateCommands, /check-toolchain\.mjs/);
+  assert.equal((validateCommands.match(/init -backend=false -lockfile=readonly/g) ?? []).length, 2);
+  assert.equal(
+    (
+      validateCommands.match(
+        /terraform -chdir=infra\/yandex\/(?:bootstrap|production) validate/g,
+      ) ?? []
+    ).length,
+    2,
+  );
+  assert.match(validateCommands, /pnpm test:yandex-infra:contract/);
+
+  const planCommands = workflowCommands(plan);
+  assert.match(planCommands, /git rev-parse HEAD/);
+  assert.match(planCommands, /refs\/heads\/main/);
+  assert.match(planCommands, /\[\[ "\$target_sha" == "\$dispatch_sha" \]\]/);
+  assert.match(planCommands, /ACTIONS_ID_TOKEN_REQUEST_URL/);
+  assert.match(planCommands, /https:\/\/auth\.yandex\.cloud\/oauth\/token/);
+  assert.match(
+    planCommands,
+    /https:\/\/payload\.lockbox\.api\.cloud\.yandex\.net\/lockbox\/v1\/secrets/,
+  );
+  assert.match(planCommands, /entries \| type == "array" and length == 2/);
+  assert.match(planCommands, /::add-mask::\$aws_access_key_id/);
+  assert.match(planCommands, /::add-mask::\$aws_secret_access_key/);
+  assert.match(planCommands, /trap cleanup EXIT/);
+  assert.match(planCommands, /unset [^\n]*YC_TOKEN AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY/);
+  assert.match(planCommands, /terraform -chdir=infra\/yandex\/production init/);
+  assert.match(planCommands, /terraform -chdir=infra\/yandex\/production plan -json/);
+  assert.match(planCommands, /validate-plan-summary\.mjs/);
+  assert.match(planCommands, /sha256sum/);
+
+  const applyCommands = workflowCommands(apply);
+  assert.match(applyCommands, /git rev-parse HEAD/);
+  assert.match(applyCommands, /\[\[ "\$target_sha" == "\$dispatch_sha" \]\]/);
+  assert.match(applyCommands, /artifact_sha256/);
+  assert.match(applyCommands, /sha256sum/);
+  assert.match(applyCommands, /trap cleanup EXIT/);
+  assert.match(applyCommands, /unset [^\n]*YC_TOKEN AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY/);
+  assert.match(applyCommands, /terraform -chdir=infra\/yandex\/production apply/);
+  assert.match(applyCommands, /saved\.tfplan/);
+
+  const allCommands = [validateCommands, planCommands, applyCommands].join("\n");
+  assert.doesNotMatch(allCommands, /pull_request_target/);
+  assert.doesNotMatch(allCommands, /-auto-approve/);
+  assert.doesNotMatch(allCommands, /terraform\s+(?:-[^\s]+\s+)*output\b/);
+  assert.doesNotMatch(allCommands, /terraform\s+(?:-[^\s]+\s+)*show\s+-json\b/);
+  assert.doesNotMatch(allCommands, /-var=["']?public_dns_enabled=true/);
+  assert.match(planCommands, /public_dns_enabled=\$public_dns_enabled/);
+  assert.match(planCommands, /ENABLE_PUBLIC_DNS/);
+
+  for (const job of Object.values(workflow.jobs)) {
+    for (const step of job.steps ?? []) {
+      if (typeof step.uses !== "string") continue;
+      assert.match(
+        step.uses,
+        /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+@[0-9a-f]{40}$/,
+        `action must use an immutable commit SHA: ${step.uses}`,
+      );
+    }
+  }
+
+  return workflow;
+}
+
+test("infrastructure workflow keeps PR validation untrusted and state operations protected", async () => {
+  assertProtectedInfrastructureWorkflow(
+    await readRepositoryFile(".github/workflows/yandex-infrastructure.yml"),
+  );
+});
+
+test("infrastructure workflow contract rejects security-boundary mutations", async () => {
+  const source = await readRepositoryFile(".github/workflows/yandex-infrastructure.yml");
+  const mutations = new Map([
+    [
+      "PR credentials",
+      source.replace(
+        "validate:\n",
+        'validate:\n    permissions:\n      contents: read\n      id-token: "write"\n',
+      ),
+    ],
+    [
+      "cancellable concurrency",
+      source.replace("cancel-in-progress: false", "cancel-in-progress: true"),
+    ],
+    [
+      "PR apply",
+      source.replace(
+        "if: github.event_name == 'workflow_dispatch' && needs.plan.result == 'success'",
+        "if: github.event_name == 'pull_request' && needs.plan.result == 'success'",
+      ),
+    ],
+    [
+      "missing environment",
+      source.replace("environment: production-infrastructure", "environment: unprotected", 1),
+    ],
+    ["stale commit", source.replace('[[ "$target_sha" == "$dispatch_sha" ]]\n', "")],
+    ["unmasked HMAC", source.replace('echo "::add-mask::$aws_secret_access_key"\n', "")],
+    ["DNS default true", source.replace("default: false", "default: true")],
+    [
+      "broad permissions",
+      source.replace("permissions:\n  contents: read", "permissions:\n  contents: write"),
+    ],
+    [
+      "mutable action",
+      source.replace(
+        "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+        "actions/checkout@v4",
+      ),
+    ],
+    ["missing cleanup", source.replace("trap cleanup EXIT\n", "", 1)],
+  ]);
+
+  for (const [name, mutation] of mutations) {
+    assert.notEqual(mutation, source, "security mutation fixture must change the workflow");
+    assert.throws(() => assertProtectedInfrastructureWorkflow(mutation), name);
+  }
+});
 
 test("both Terraform roots pin the exact supported toolchain", async () => {
   for (const root of terraformRoots) {

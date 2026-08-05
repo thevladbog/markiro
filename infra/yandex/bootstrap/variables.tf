@@ -53,6 +53,17 @@ variable "github_environment" {
   }
 }
 
+variable "github_infrastructure_environment" {
+  description = "Exact protected GitHub environment permitted to exchange infrastructure automation tokens."
+  type        = string
+  nullable    = false
+
+  validation {
+    condition     = var.github_infrastructure_environment == "production-infrastructure"
+    error_message = "github_infrastructure_environment must be exactly production-infrastructure."
+  }
+}
+
 variable "state_bucket_name" {
   description = "Globally unique Object Storage bucket name for protected Terraform state."
   type        = string

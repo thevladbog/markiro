@@ -141,6 +141,51 @@ arguments, or retain terminal/session logs containing secret material.
    and delete the local binary plan as well. The remote versioned object is now
    the sole authoritative bootstrap state.
 
+## Protected GitHub infrastructure workflow
+
+`.github/workflows/yandex-infrastructure.yml` keeps pull-request validation
+credential-free. Pull requests run Terraform formatting, exact lock/toolchain
+checks, `init -backend=false`, validation, and infrastructure contracts without
+OIDC, environment variables, Lockbox, or a remote backend.
+
+The bootstrap root preserves two exact GitHub workload subjects on the same
+Terraform service account and federation:
+
+- `production` is reserved for the deployment controller.
+- `production-infrastructure` is reserved for Terraform plan and apply jobs.
+
+Configure `github_infrastructure_environment = "production-infrastructure"`
+when bootstrapping. In GitHub, protect the `production-infrastructure`
+environment with required reviewers and main-branch deployment restrictions.
+Configure a second protected `production-public-dns` environment with the
+separate reviewers authorized to approve public DNS cutover. The boolean
+`enable_public_dns` input never substitutes for that approval: a true request
+must pass the DNS environment before the infrastructure plan is generated.
+
+The infrastructure environment supplies repository/environment variables, not
+long-lived secrets. Required identity and state variables are
+`YC_CLOUD_ID`, `YC_FOLDER_ID`, `YC_OIDC_AUDIENCE`,
+`YC_TERRAFORM_SERVICE_ACCOUNT_ID`, `YC_STATE_BACKEND_SECRET_ID`, and
+`YC_STATE_BUCKET_NAME`. It also supplies the non-secret `YC_*`/`MARKIRO_DOMAIN`
+values mapped to the production root's `TF_VAR_*` inputs; collection variables
+such as `YC_LOCKBOX_SECRET_IDS` and `YC_ALERT_IDS` use valid Terraform
+expression syntax.
+
+On a trusted run, the job requests a GitHub OIDC token for the configured
+audience, exchanges it for a short-lived Yandex IAM token, and reads only the
+state-backend Lockbox container. That container must have exactly two text
+entries named `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`. Values are masked
+before export and unset by an exit trap; the workflow never prints state,
+Terraform outputs, or full plan JSON.
+
+Pushes to `main` create a read-only plan. Manual apply requires the exact
+current 40-character main commit in `target_sha`; the workflow regenerates a
+binary plan for that commit, uploads the plan with commit and SHA256 evidence,
+and the protected apply job rechecks the artifact hashes, checkout, dispatch
+commit, and live repository main before running `terraform apply saved.tfplan`.
+Saved-plan artifacts are potentially sensitive and therefore have one-day
+retention.
+
 ## Toolchain contract
 
 Regenerate provider locks only with the exact pinned Terraform release and both

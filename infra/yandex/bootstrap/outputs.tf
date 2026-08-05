@@ -5,7 +5,7 @@ output "service_account_ids" {
 }
 
 output "workload_identity_federation_id" {
-  description = "Workload identity federation restricted to the production GitHub subject."
+  description = "Workload identity federation restricted to exact deployment and infrastructure GitHub subjects."
   value       = module.iam.workload_identity_federation_id
   sensitive   = true
 }
