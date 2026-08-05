@@ -139,17 +139,8 @@ resource "yandex_sws_security_profile" "markiro" {
   }
 
   security_rule {
-    name     = "baseline-smart-protection"
-    priority = 100
-
-    smart_protection {
-      mode = "API"
-    }
-  }
-
-  security_rule {
     name     = "waf-api"
-    priority = 200
+    priority = 100
 
     waf {
       mode           = "API"

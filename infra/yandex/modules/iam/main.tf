@@ -124,18 +124,28 @@ resource "yandex_lockbox_secret_iam_member" "deployment_controller_runner_regist
 # primitive editor/admin role and cannot change IAM bindings beyond services that
 # explicitly require their own administrative role.
 locals {
-  terraform_folder_roles = toset([
-    "alb.admin",
-    "audit-trails.editor",
-    "certificate-manager.editor",
-    "compute.admin",
-    "dns.editor",
-    "logging.editor",
-    "managed-postgresql.editor",
-    "smart-web-security.editor",
-    "storage.admin",
-    "vpc.admin",
-  ])
+  # This action-to-role map is kept explicit so every resource action in the
+  # production graph has a reviewable least-privilege grant.
+  terraform_production_action_roles = {
+    "alb.resources.manage"                                  = "alb.editor"
+    "audit-trails.trails.manage"                            = "audit-trails.editor"
+    "certificate-manager.certificates.download-for-alb-tls" = "certificate-manager.certificates.downloader"
+    "certificate-manager.certificates.manage"               = "certificate-manager.editor"
+    "compute.instances-and-access.manage"                   = "compute.admin"
+    "dns.recordsets.manage"                                 = "dns.editor"
+    "logging.groups.manage"                                 = "logging.editor"
+    "managed-postgresql.resources.manage"                   = "managed-postgresql.editor"
+    "monitoring.dashboards.manage"                          = "monitoring.editor"
+    "smart-web-security.resources.manage"                   = "smart-web-security.editor"
+    "storage.buckets-and-policies.manage"                   = "storage.admin"
+    "vpc.gateways.attach-to-routes"                         = "vpc.gateways.user"
+    "vpc.gateways.manage"                                   = "vpc.gateways.editor"
+    "vpc.networks-subnets-routes.manage"                    = "vpc.privateAdmin"
+    "vpc.public-addresses.manage"                           = "vpc.publicAdmin"
+    "vpc.resources.use"                                     = "vpc.user"
+    "vpc.security-groups.manage"                            = "vpc.securityGroups.admin"
+  }
+  terraform_folder_roles = toset(values(local.terraform_production_action_roles))
 }
 
 resource "yandex_resourcemanager_folder_iam_member" "terraform_service_role" {

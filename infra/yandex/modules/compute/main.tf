@@ -107,6 +107,12 @@ resource "yandex_compute_instance_iam_binding" "runner_operator" {
   members     = ["serviceAccount:${var.deployment_controller_service_account_id}"]
 }
 
+resource "yandex_compute_instance_iam_binding" "deployment_controller_app_viewer" {
+  instance_id = yandex_compute_instance.app.id
+  role        = "compute.viewer"
+  members     = ["serviceAccount:${var.deployment_controller_service_account_id}"]
+}
+
 resource "yandex_compute_instance_iam_binding" "runner_app_os_login" {
   instance_id = yandex_compute_instance.app.id
   role        = "compute.osAdminLogin"

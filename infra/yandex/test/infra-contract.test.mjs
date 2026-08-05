@@ -138,6 +138,13 @@ function terraformObjectEntry(source, name) {
   assert.fail(`unterminated object entry ${name}`);
 }
 
+function terraformStringMap(source, name) {
+  const block = terraformObjectEntry(source, name);
+  return Object.fromEntries(
+    [...block.matchAll(/^\s*"([^"]+)"\s*=\s*"([^"]+)"\s*$/gm)].map((match) => [match[1], match[2]]),
+  );
+}
+
 function hasPublicCidr(ingress) {
   for (const list of ingress.matchAll(
     /\b(?:v4_cidr_blocks|v6_cidr_blocks)\s*=\s*\[([\s\S]*?)\]/g,
@@ -293,7 +300,60 @@ function parseTerraformLiteral(source) {
   return parsed;
 }
 
-function assertProtectedBootstrap({ bootstrap, iam, outputs, variables }) {
+const productionResourceActionRoles = {
+  yandex_alb_backend_group: ["alb.resources.manage"],
+  yandex_alb_http_router: ["alb.resources.manage"],
+  yandex_alb_load_balancer: [
+    "alb.resources.manage",
+    "certificate-manager.certificates.download-for-alb-tls",
+    "vpc.resources.use",
+  ],
+  yandex_alb_target_group: ["alb.resources.manage"],
+  yandex_alb_virtual_host: ["alb.resources.manage"],
+  yandex_audit_trails_trail: ["audit-trails.trails.manage"],
+  yandex_cm_certificate: ["certificate-manager.certificates.manage"],
+  yandex_compute_instance: ["compute.instances-and-access.manage", "vpc.resources.use"],
+  yandex_compute_instance_iam_binding: ["compute.instances-and-access.manage"],
+  yandex_dns_recordset: ["dns.recordsets.manage"],
+  yandex_logging_group: ["logging.groups.manage"],
+  yandex_mdb_postgresql_cluster: ["managed-postgresql.resources.manage", "vpc.resources.use"],
+  yandex_mdb_postgresql_database: ["managed-postgresql.resources.manage"],
+  yandex_monitoring_dashboard: ["monitoring.dashboards.manage"],
+  yandex_storage_bucket: ["storage.buckets-and-policies.manage"],
+  yandex_storage_bucket_policy: ["storage.buckets-and-policies.manage"],
+  yandex_sws_advanced_rate_limiter_profile: ["smart-web-security.resources.manage"],
+  yandex_sws_security_profile: ["smart-web-security.resources.manage"],
+  yandex_sws_waf_profile: ["smart-web-security.resources.manage"],
+  yandex_vpc_address: ["vpc.public-addresses.manage"],
+  yandex_vpc_gateway: ["vpc.gateways.manage"],
+  yandex_vpc_network: ["vpc.networks-subnets-routes.manage"],
+  yandex_vpc_route_table: ["vpc.networks-subnets-routes.manage", "vpc.gateways.attach-to-routes"],
+  yandex_vpc_security_group: ["vpc.security-groups.manage"],
+  yandex_vpc_subnet: ["vpc.networks-subnets-routes.manage"],
+};
+
+const expectedProductionActionRoles = {
+  "alb.resources.manage": "alb.editor",
+  "audit-trails.trails.manage": "audit-trails.editor",
+  "certificate-manager.certificates.download-for-alb-tls":
+    "certificate-manager.certificates.downloader",
+  "certificate-manager.certificates.manage": "certificate-manager.editor",
+  "compute.instances-and-access.manage": "compute.admin",
+  "dns.recordsets.manage": "dns.editor",
+  "logging.groups.manage": "logging.editor",
+  "managed-postgresql.resources.manage": "managed-postgresql.editor",
+  "monitoring.dashboards.manage": "monitoring.editor",
+  "smart-web-security.resources.manage": "smart-web-security.editor",
+  "storage.buckets-and-policies.manage": "storage.admin",
+  "vpc.gateways.attach-to-routes": "vpc.gateways.user",
+  "vpc.gateways.manage": "vpc.gateways.editor",
+  "vpc.networks-subnets-routes.manage": "vpc.privateAdmin",
+  "vpc.public-addresses.manage": "vpc.publicAdmin",
+  "vpc.resources.use": "vpc.user",
+  "vpc.security-groups.manage": "vpc.securityGroups.admin",
+};
+
+function assertProtectedBootstrap({ bootstrap, iam, outputs, productionResources, variables }) {
   const allHcl = [bootstrap, iam, outputs, variables].join("\n");
   const serviceAccounts = [...iam.matchAll(/resource\s+"yandex_iam_service_account"\s+"([^"]+)"/g)]
     .map((match) => match[1])
@@ -329,6 +389,26 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, variables }) {
     /yandex_iam_service_account_(?:static_)?access_key/,
     "Terraform must not create long-lived service-account access keys",
   );
+
+  const actionRoles = terraformStringMap(iam, "terraform_production_action_roles");
+  assert.deepEqual(actionRoles, expectedProductionActionRoles);
+  const resourceTypes = [
+    ...new Set(
+      productionResources.flatMap((source) =>
+        [...source.matchAll(/^resource\s+"([^"]+)"\s+"[^"]+"\s*\{/gm)].map((match) => match[1]),
+      ),
+    ),
+  ].sort();
+  assert.deepEqual(resourceTypes, Object.keys(productionResourceActionRoles).sort());
+  for (const resourceType of resourceTypes) {
+    for (const action of productionResourceActionRoles[resourceType])
+      assert.ok(actionRoles[action], `${resourceType} action ${action} has no explicit IAM grant`);
+  }
+  assert.match(
+    iam,
+    /terraform_folder_roles\s*=\s*toset\(values\(local\.terraform_production_action_roles\)\)/,
+  );
+  assert.doesNotMatch(iam, /"(?:alb|vpc)\.admin"/);
   assert.doesNotMatch(
     allHcl,
     /yandex_lockbox_secret_version/,
@@ -391,7 +471,10 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, variables }) {
     "yandex_iam_workload_identity_federated_credential",
     "github_production_controller",
   );
-  assert.match(credential, /service_account_id\s*=\s*yandex_iam_service_account\.deployment_controller\.id/);
+  assert.match(
+    credential,
+    /service_account_id\s*=\s*yandex_iam_service_account\.deployment_controller\.id/,
+  );
   assert.match(
     credential,
     /federation_id\s*=\s*yandex_iam_workload_identity_oidc_federation\.github\.id/,
@@ -466,7 +549,11 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, variables }) {
     /resource\s+"yandex_iam_workload_identity_federated_credential"\s+"github_production_controller"[\s\S]*?service_account_id\s*=\s*yandex_iam_service_account\.deployment_controller\.id[\s\S]*?external_subject_id\s*=\s*local\.github_subject/,
   );
   assert.doesNotMatch(
-    terraformResourceBlock(iam, "yandex_iam_workload_identity_federated_credential", "github_infrastructure"),
+    terraformResourceBlock(
+      iam,
+      "yandex_iam_workload_identity_federated_credential",
+      "github_infrastructure",
+    ),
     /local\.github_subject/,
     "Terraform federation must remain limited to the infrastructure environment",
   );
@@ -525,14 +612,67 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, variables }) {
 }
 
 async function bootstrapContractSources() {
-  const [bootstrap, iam, outputs, variables] = await Promise.all([
+  const [bootstrap, iam, outputs, variables, ...productionResources] = await Promise.all([
     readRepositoryFile("infra/yandex/bootstrap/main.tf"),
     readRepositoryFile("infra/yandex/modules/iam/main.tf"),
     readRepositoryFile("infra/yandex/bootstrap/outputs.tf"),
     readRepositoryFile("infra/yandex/bootstrap/variables.tf"),
+    ...["compute", "ingress", "network", "object-storage", "observability", "postgres"].map(
+      (module) => readRepositoryFile(`infra/yandex/modules/${module}/main.tf`),
+    ),
   ]);
 
-  return { bootstrap, iam, outputs, variables };
+  return { bootstrap, iam, outputs, productionResources, variables };
+}
+
+function assertRunnerControllerProviderGrants({ compute, controller, iam }) {
+  const providerCalls = [
+    ...controller.matchAll(/`(https:\/\/(?:compute|mdb|alb)\.api\.cloud\.yandex\.net\/[^`]+)`/g),
+  ]
+    .map((match) => match[1])
+    .sort();
+  assert.deepEqual(providerCalls, [
+    "https://alb.api.cloud.yandex.net/apploadbalancer/v1/loadBalancers/${loadBalancerId}/targetStates/${backendGroupId}/${targetGroupId}",
+    "https://compute.api.cloud.yandex.net/compute/v1/instances/${appInstanceId}",
+    "https://compute.api.cloud.yandex.net/compute/v1/instances/${appInstanceId}:serialPortOutput?port=1",
+    "https://compute.api.cloud.yandex.net/compute/v1/instances/${id}",
+    "https://compute.api.cloud.yandex.net/compute/v1/instances/${id}:start",
+    "https://compute.api.cloud.yandex.net/compute/v1/instances/${id}:stop",
+    "https://mdb.api.cloud.yandex.net/managed-postgresql/v1/clusters/${postgresClusterId}/backups",
+  ]);
+
+  const runnerOperator = terraformResourceBlock(
+    compute,
+    "yandex_compute_instance_iam_binding",
+    "runner_operator",
+  );
+  assert.match(runnerOperator, /instance_id\s*=\s*yandex_compute_instance\.runner\.id/);
+  assert.match(runnerOperator, /role\s*=\s*"compute\.operator"/);
+  assert.match(
+    runnerOperator,
+    /serviceAccount:\$\{var\.deployment_controller_service_account_id\}/,
+  );
+
+  const appViewer = terraformResourceBlock(
+    compute,
+    "yandex_compute_instance_iam_binding",
+    "deployment_controller_app_viewer",
+  );
+  assert.match(appViewer, /instance_id\s*=\s*yandex_compute_instance\.app\.id/);
+  assert.match(appViewer, /role\s*=\s*"compute\.viewer"/);
+  assert.match(appViewer, /serviceAccount:\$\{var\.deployment_controller_service_account_id\}/);
+
+  for (const [name, role] of [
+    ["deployment_controller_alb_viewer", "alb.viewer"],
+    ["deployment_controller_postgres_viewer", "managed-postgresql.viewer"],
+  ]) {
+    const grant = terraformResourceBlock(iam, "yandex_resourcemanager_folder_iam_member", name);
+    assert.match(grant, new RegExp(`role\\s*=\\s*"${role.replace(".", "\\.")}"`));
+    assert.match(
+      grant,
+      /serviceAccount:\$\{yandex_iam_service_account\.deployment_controller\.id\}/,
+    );
+  }
 }
 
 function assertPrivateNetworkAndCompute({
@@ -799,11 +939,21 @@ function assertProtectedIngress({
     /advanced_rate_limiter_profile_id\s*=\s*yandex_sws_advanced_rate_limiter_profile\.markiro\.id/,
   );
   const wafProfile = terraformResourceBlock(ingress, "yandex_sws_waf_profile", "markiro");
-  assert.match(wafProfile, /rule_set\s*\{[\s\S]*?action\s*=\s*"DENY"[\s\S]*?is_enabled\s*=\s*true[\s\S]*?core_rule_set\s*\{[\s\S]*?inbound_anomaly_score\s*=\s*5/);
-  assert.match(wafProfile, /rule_set\s*\{[\s\S]*?name\s*=\s*"OWASP Core Ruleset"[\s\S]*?version\s*=\s*"4\.0\.0"/);
+  assert.match(
+    wafProfile,
+    /rule_set\s*\{[\s\S]*?action\s*=\s*"DENY"[\s\S]*?is_enabled\s*=\s*true[\s\S]*?core_rule_set\s*\{[\s\S]*?inbound_anomaly_score\s*=\s*5/,
+  );
+  assert.match(
+    wafProfile,
+    /rule_set\s*\{[\s\S]*?name\s*=\s*"OWASP Core Ruleset"[\s\S]*?version\s*=\s*"4\.0\.0"/,
+  );
   const rules = terraformNestedBlocks(securityProfile, "security_rule");
-  assert.ok(rules.some((rule) => /name\s*=\s*"baseline-smart-protection"[\s\S]*?smart_protection\s*\{[\s\S]*?mode\s*=\s*"API"/.test(rule)));
-  assert.ok(rules.some((rule) => /name\s*=\s*"waf-api"[\s\S]*?waf\s*\{[\s\S]*?mode\s*=\s*"API"[\s\S]*?waf_profile_id\s*=\s*yandex_sws_waf_profile\.markiro\.id/.test(rule)));
+  assert.equal(rules.length, 1, "all traffic must reach one unconditional WAF rule");
+  assert.match(
+    rules[0],
+    /name\s*=\s*"waf-api"[\s\S]*?waf\s*\{[\s\S]*?mode\s*=\s*"API"[\s\S]*?waf_profile_id\s*=\s*yandex_sws_waf_profile\.markiro\.id/,
+  );
+  assert.doesNotMatch(securityProfile, /smart_protection\s*\{/);
   assert.doesNotMatch(securityProfile, /analyze_request_body|size_limit/i);
 
   const publicDns = terraformResourceBlock(ingress, "yandex_dns_recordset", "application");
@@ -1159,7 +1309,10 @@ function assertProtectedObservability({
     2,
     "one-destination provider schema requires exactly two trails",
   );
-  assert.match(trails[0], /logging_destination\s*\{[\s\S]*?log_group_id\s*=\s*var\.audit_log_group_id/);
+  assert.match(
+    trails[0],
+    /logging_destination\s*\{[\s\S]*?log_group_id\s*=\s*var\.audit_log_group_id/,
+  );
   assert.doesNotMatch(trails[0], /storage_destination\s*\{/);
   assert.match(
     trails[1],
@@ -1807,9 +1960,18 @@ test("bootstrap starts with the local backend and introduces S3 only for migrati
 
   assert.doesNotMatch(versions, /backend\s+"s3"/);
   assert.match(backendTemplate, /backend\s+"s3"\s*\{\s*}/s);
-  assert.match(runbook, /cp infra\/yandex\/bootstrap\/backend\.tf\.example infra\/yandex\/bootstrap\/backend\.tf/);
-  assert.match(runbook, /terraform -chdir=infra\/yandex\/bootstrap init -input=false -lockfile=readonly/);
-  assert.match(runbook, /terraform -chdir=infra\/yandex\/bootstrap init -migrate-state -backend-config=backend\.hcl -lockfile=readonly/);
+  assert.match(
+    runbook,
+    /cp infra\/yandex\/bootstrap\/backend\.tf\.example infra\/yandex\/bootstrap\/backend\.tf/,
+  );
+  assert.match(
+    runbook,
+    /terraform -chdir=infra\/yandex\/bootstrap init -input=false -lockfile=readonly/,
+  );
+  assert.match(
+    runbook,
+    /terraform -chdir=infra\/yandex\/bootstrap init -migrate-state -backend-config=backend\.hcl -lockfile=readonly/,
+  );
 });
 
 test("bootstrap protects state, exact workload identity, secrets, and least privilege", async () => {
@@ -1830,14 +1992,20 @@ test("deployment runner uses exact production federation, VM-scoped operator, an
     "infra/yandex/modules/compute/cloud-init-app.yaml.tftpl",
   );
   const remoteDeploy = await readRepositoryFile("deploy/yandex/remote-deploy.mjs");
+  const controller = await readRepositoryFile("deploy/yandex/runner-control.mjs");
   const unit = await readRepositoryFile("deploy/yandex/systemd/markiro-runner.service");
+
+  assertRunnerControllerProviderGrants({ compute, controller, iam });
 
   const credential = terraformResourceBlock(
     iam,
     "yandex_iam_workload_identity_federated_credential",
     "github_production_controller",
   );
-  assert.match(credential, /service_account_id\s*=\s*yandex_iam_service_account\.deployment_controller\.id/);
+  assert.match(
+    credential,
+    /service_account_id\s*=\s*yandex_iam_service_account\.deployment_controller\.id/,
+  );
   assert.match(credential, /external_subject_id\s*=\s*local\.github_subject/);
   const federationUse = terraformResourceBlock(
     iam,
@@ -2049,6 +2217,23 @@ test("production ingress contract rejects bypasses, computed certificate keys, f
     (block) => block.replace(/\n\s*route_options\s*\{[\s\S]*?\n\s*\}/, ""),
   );
   assert.throws(() => assertProtectedIngress(missingSws));
+
+  const shadowedWaf = await protectedIngressSources();
+  shadowedWaf.ingress = replaceTerraformResource(
+    shadowedWaf.ingress,
+    "yandex_sws_security_profile",
+    "markiro",
+    (block) =>
+      block.replace(
+        /\n\s*security_rule\s*\{/,
+        '\n  security_rule {\n    name = "shadowing-smart-protection"\n    priority = 1\n    smart_protection { mode = "API" }\n  }\n\n  security_rule {',
+      ),
+  );
+  assert.throws(() => assertProtectedIngress(shadowedWaf), /one unconditional WAF rule/);
+
+  const noWaf = await protectedIngressSources();
+  noWaf.ingress = noWaf.ingress.replace("waf {", "smart_protection {");
+  assert.throws(() => assertProtectedIngress(noWaf));
 
   const apiBypass = await protectedIngressSources();
   apiBypass.ingress = replaceTerraformResource(
@@ -2516,6 +2701,38 @@ test("bootstrap contract rejects primitive editor for the app runtime", async ()
   assert.throws(() => assertProtectedBootstrap(sources), /lockbox\\.payloadViewer|primitive/);
 });
 
+test("bootstrap contract rejects an incomplete or broadened production action-role matrix", async () => {
+  const missingGatewayGrant = await bootstrapContractSources();
+  missingGatewayGrant.iam = missingGatewayGrant.iam.replace(
+    /^\s*"vpc\.gateways\.manage"\s*=\s*"vpc\.gateways\.editor"\s*$/m,
+    "",
+  );
+  assert.throws(() => assertProtectedBootstrap(missingGatewayGrant));
+
+  const broadAlbGrant = await bootstrapContractSources();
+  broadAlbGrant.iam = broadAlbGrant.iam.replace('"alb.editor"', '"alb.admin"');
+  assert.throws(() => assertProtectedBootstrap(broadAlbGrant));
+});
+
+test("runner-controller provider-call contract rejects a missing app grant or unknown provider call", async () => {
+  const [compute, controller, iam] = await Promise.all([
+    readRepositoryFile("infra/yandex/modules/compute/main.tf"),
+    readRepositoryFile("deploy/yandex/runner-control.mjs"),
+    readRepositoryFile("infra/yandex/modules/iam/main.tf"),
+  ]);
+  const missingViewer = compute.replace(
+    /resource\s+"yandex_compute_instance_iam_binding"\s+"deployment_controller_app_viewer"\s*\{[\s\S]*?\n\}/,
+    "",
+  );
+  assert.throws(() =>
+    assertRunnerControllerProviderGrants({ compute: missingViewer, controller, iam }),
+  );
+  const unknownCall = `${controller}\nconst unsafe = \`https://compute.api.cloud.yandex.net/compute/v1/disks/\${diskId}\`;\n`;
+  assert.throws(() =>
+    assertRunnerControllerProviderGrants({ compute, controller: unknownCall, iam }),
+  );
+});
+
 test("bootstrap contract rejects disabled state versioning", async () => {
   const sources = await bootstrapContractSources();
   sources.bootstrap = replaceTerraformResource(
@@ -2541,7 +2758,10 @@ test("bootstrap contract rejects removal of state prevent_destroy", async () => 
 });
 
 test("bootstrap state migration is ordered, credential-safe, and never prints state", async () => {
-  const readme = await readRepositoryFile("infra/yandex/README.md");
+  const [readme, smoke] = await Promise.all([
+    readRepositoryFile("infra/yandex/README.md"),
+    readRepositoryFile("infra/yandex/test/bootstrap-state-migration.smoke.mjs"),
+  ]);
   const orderedBoundaries = [
     "Local bootstrap plan",
     "Approved bootstrap apply",
@@ -2568,6 +2788,13 @@ test("bootstrap state migration is ordered, credential-safe, and never prints st
     readme,
     /(?:access_key|secret_key|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY)=\S+/i,
   );
+  assert.match(smoke, /import\s+\{\s*assertManagedResourceInState\s*\}/);
+  assert.match(smoke, /'terraform \{\\n  backend "s3" \{\}\\n\}\\n'/);
+  assert.match(
+    smoke,
+    /"init",\s*"-migrate-state",\s*"-force-copy",\s*"-input=false",\s*"-backend-config=backend\.hcl"/s,
+  );
+  assert.equal((smoke.match(/assertManagedResourceInState\(/g) ?? []).length, 2);
 });
 
 test("Yandex infrastructure ignores local Terraform artifacts but keeps contracts", async () => {
