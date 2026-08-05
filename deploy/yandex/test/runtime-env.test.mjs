@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { copyFile, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 
 import {
   environmentKeysFromExample,
@@ -247,6 +250,91 @@ test("a failed atomic write removes its sibling temporary file without replacing
   assert.equal(
     fs.operations.some(([operation]) => operation === "rename"),
     false,
+  );
+});
+
+test("directory fsync after rename keeps the new environment and reports only a sanitized durability warning", async () => {
+  const fs = fakeFilesystem(
+    new Map([["/etc/markiro/production.env", { text: "DATABASE_URL=old\n", mode: 0o600 }]]),
+  );
+  fs.openDirectory = async (path) => ({
+    async sync() {
+      fs.operations.push(["fsyncDirectoryFailure", path]);
+      throw new Error("directory /etc/markiro could not sync");
+    },
+    async close() {
+      fs.operations.push(["closeDirectory", path]);
+    },
+  });
+  const warnings = [];
+
+  await materializeRuntimeEnv({
+    destination: "/etc/markiro/production.env",
+    fs,
+    inventoryText: INVENTORY,
+    onWarning: (warning) => warnings.push(warning),
+    secretId: "runtime-secret-id",
+    fetchIamToken: async () => "iam-token",
+    fetchSecretPayload: async () =>
+      Object.entries(VALUES).map(([key, textValue]) => ({ key, textValue })),
+    temporaryName: () => ".production.env.runtime.tmp",
+  });
+
+  assert.deepEqual(fs.files.get("/etc/markiro/production.env"), {
+    mode: 0o600,
+    text:
+      "DATABASE_URL=postgres://markiro:password@db.example.test/markiro\n" +
+      "S3_ENDPOINT=https://storage.example.test\n" +
+      "SMTP_PASSWORD=mail-password\n",
+  });
+  assert.deepEqual(warnings, ["runtime environment durability is indeterminate"]);
+  assert.doesNotMatch(warnings[0], /\/etc\/markiro/);
+  assert.equal(fs.files.has("/etc/markiro/.production.env.runtime.tmp"), false);
+});
+
+test("installed-layout helpers resolve their colocated inventory and preserve symlink-safe CLI detection", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "markiro runtime layout "));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  for (const file of ["runtime-env.mjs", "readiness-observer.mjs", "cli-main.mjs"]) {
+    await copyFile(resolve("deploy/yandex", file), join(directory, file));
+  }
+  await copyFile(resolve(".env.production.example"), join(directory, ".env.production.example"));
+
+  const installedRuntime = await import(pathToFileURL(join(directory, "runtime-env.mjs")).href);
+  const installedObserver = await import(
+    pathToFileURL(join(directory, "readiness-observer.mjs")).href
+  );
+  const installedCli = await import(pathToFileURL(join(directory, "cli-main.mjs")).href);
+  const linkedRuntime = join(directory, "runtime link.mjs");
+  await symlink(join(directory, "runtime-env.mjs"), linkedRuntime);
+  const fs = fakeFilesystem();
+  fs.readFile = readFile;
+  const inventory = installedRuntime.environmentKeysFromExample(
+    await readFile(join(directory, ".env.production.example"), "utf8"),
+  );
+
+  await installedRuntime.materializeRuntimeEnv({
+    destination: "/etc/markiro/production.env",
+    fs,
+    secretId: "runtime-secret-id",
+    fetchIamToken: async () => "iam-token",
+    fetchSecretPayload: async () => inventory.map((key) => ({ key, textValue: "installed-value" })),
+    temporaryName: () => ".production.env.runtime.tmp",
+  });
+
+  assert.match(fs.files.get("/etc/markiro/production.env").text, /^DATABASE_URL=installed-value$/m);
+  assert.equal(
+    installedCli.isMainModule(pathToFileURL(join(directory, "runtime-env.mjs")).href, [
+      process.execPath,
+      linkedRuntime,
+    ]),
+    true,
+  );
+  assert.deepEqual(
+    await installedObserver.observeReadiness({
+      fetch: async () => ({ ok: true, json: async () => ({ status: "ok", checks: {} }) }),
+    }),
+    { category: "ok", exitCode: 0 },
   );
 });
 

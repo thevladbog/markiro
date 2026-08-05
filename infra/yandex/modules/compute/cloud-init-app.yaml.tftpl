@@ -4,6 +4,7 @@ packages:
   - ca-certificates
   - curl
   - docker.io
+  - xz-utils
 users:
   - name: markiro-monitor
     system: true
@@ -19,6 +20,16 @@ write_files:
     permissions: "0755"
     encoding: b64
     content: ${readiness_observer_script_b64}
+  - path: /usr/local/lib/markiro/cli-main.mjs
+    owner: root:root
+    permissions: "0644"
+    encoding: b64
+    content: ${cli_main_script_b64}
+  - path: /usr/local/lib/markiro/.env.production.example
+    owner: root:root
+    permissions: "0644"
+    encoding: b64
+    content: ${environment_inventory_b64}
   - path: /etc/systemd/system/markiro-runtime-env.service
     owner: root:root
     permissions: "0644"
@@ -34,6 +45,16 @@ write_files:
     permissions: "0644"
     encoding: b64
     content: ${readiness_observer_timer_b64}
+  - path: /etc/systemd/system/markiro-compose.service.d/runtime-env.conf
+    owner: root:root
+    permissions: "0644"
+    encoding: b64
+    content: ${compose_runtime_dropin_b64}
+  - path: /etc/systemd/system/markiro-deploy.service.d/runtime-env.conf
+    owner: root:root
+    permissions: "0644"
+    encoding: b64
+    content: ${deploy_runtime_dropin_b64}
   - path: /etc/markiro/runtime-secret-id
     owner: root:root
     permissions: "0600"
@@ -45,10 +66,27 @@ runcmd:
   - chown root:root /etc/markiro /etc/markiro/runtime-secret-id
   - chmod 0700 /etc/markiro
   - chmod 0600 /etc/markiro/runtime-secret-id
+  - |
+      set -eu
+      NODE_VERSION=24.11.1
+      NODE_ARCH=x64
+      NODE_SHA256=60e3b0a8500819514aca603487c254298cd776de0698d3cd08f11dba5b8289a8
+      test "$(uname -m)" = "x86_64"
+      test "$(dpkg --print-architecture)" = "amd64"
+      node_archive="node-v$${NODE_VERSION}-linux-$${NODE_ARCH}.tar.xz"
+      node_root="/opt/markiro/node-v$${NODE_VERSION}-linux-$${NODE_ARCH}"
+      node_workdir="$(mktemp -d)"
+      trap 'rm -rf "$${node_workdir}"' EXIT
+      curl --fail --location --proto '=https' --tlsv1.2 --output "$${node_workdir}/$${node_archive}" "https://nodejs.org/dist/v$${NODE_VERSION}/$${node_archive}"
+      printf '%s  %s\n' "$${NODE_SHA256}" "$${node_workdir}/$${node_archive}" | sha256sum --check --status
+      tar -xJf "$${node_workdir}/$${node_archive}" -C "$${node_workdir}"
+      mv "$${node_workdir}/node-v$${NODE_VERSION}-linux-$${NODE_ARCH}" "$${node_root}"
+      ln -sfn "$${node_root}/bin/node" /usr/bin/node
+      test "$(/usr/bin/node --version)" = "v$${NODE_VERSION}"
   - systemctl enable docker.service
   - systemctl daemon-reload
   - systemctl enable markiro-runtime-env.service
   - systemctl start markiro-runtime-env.service
-  - systemctl is-active --quiet markiro-runtime-env.service
+  - test -f /etc/markiro/production.env
   - systemctl enable --now markiro-readiness-observer.timer
   - systemctl start docker.service

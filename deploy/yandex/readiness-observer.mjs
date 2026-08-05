@@ -1,6 +1,6 @@
 import process from "node:process";
 
-import { isMainModule } from "../production/cli-main.mjs";
+import { isMainModule } from "./cli-main.mjs";
 
 export const READY_URL = "http://127.0.0.1:3000/health/ready";
 export const REQUEST_TIMEOUT_MS = 2_000;

@@ -1848,23 +1848,63 @@ test("production private-compute contract rejects public NAT, CIDR SSH, public a
   assert.throws(() => assertPrivateNetworkAndCompute(embeddedMetadataCredential));
 });
 
-test("runtime secret materialization is installed with only its Lockbox identifier and a hardened observer", async () => {
-  const [compute, cloudInit, runtimeUnit, observerUnit, observerTimer] = await Promise.all([
+function assertRuntimeNodeProvisioning(cloudInit) {
+  assert.match(cloudInit, /NODE_VERSION=24\.11\.1/);
+  assert.match(
+    cloudInit,
+    /NODE_SHA256=60e3b0a8500819514aca603487c254298cd776de0698d3cd08f11dba5b8289a8/,
+  );
+  assert.match(cloudInit, /NODE_ARCH=x64/);
+  assert.match(cloudInit, /test "\$\(uname -m\)" = "x86_64"/);
+  assert.match(cloudInit, /test "\$\(dpkg --print-architecture\)" = "amd64"/);
+  assert.match(cloudInit, /sha256sum --check --status/);
+  assert.match(cloudInit, /test "\$\(\/usr\/bin\/node --version\)" = "v\$\$\{NODE_VERSION\}"/);
+  assert.doesNotMatch(cloudInit, /curl[^\n]*\|/);
+}
+
+test("runtime secret materialization installs coherent assets, verified Node, and reactivating service dependencies", async () => {
+  const [
+    compute,
+    cloudInit,
+    runtimeUnit,
+    observerUnit,
+    observerTimer,
+    composeDropIn,
+    deployDropIn,
+  ] = await Promise.all([
     readRepositoryFile("infra/yandex/modules/compute/main.tf"),
     readRepositoryFile("infra/yandex/modules/compute/cloud-init-app.yaml.tftpl"),
     readRepositoryFile("deploy/yandex/systemd/markiro-runtime-env.service"),
     readRepositoryFile("deploy/yandex/systemd/markiro-readiness-observer.service"),
     readRepositoryFile("deploy/yandex/systemd/markiro-readiness-observer.timer"),
+    readRepositoryFile("deploy/yandex/systemd/markiro-compose.service.d/runtime-env.conf"),
+    readRepositoryFile("deploy/yandex/systemd/markiro-deploy.service.d/runtime-env.conf"),
   ]);
 
   assert.match(compute, /runtime_secret_id\s*=\s*var\.runtime_secret_id/);
+  for (const asset of [
+    "runtime-env.mjs",
+    "readiness-observer.mjs",
+    "cli-main.mjs",
+    ".env.production.example",
+  ])
+    assert.match(
+      compute,
+      new RegExp(`deploy/yandex/${asset.replace(".", "\\.")}|${asset.replace(".", "\\.")}`),
+    );
   assert.match(cloudInit, /MARKIRO_RUNTIME_SECRET_ID=\$\{runtime_secret_id\}/);
   assert.match(cloudInit, /owner:\s*root:root/g);
   assert.match(cloudInit, /permissions:\s*"0600"/);
   assert.doesNotMatch(cloudInit, /(?:DATABASE_URL|SMTP_PASSWORD|S3_SECRET_ACCESS_KEY)\s*=/);
+  assertRuntimeNodeProvisioning(cloudInit);
   assert.match(runtimeUnit, /Before=markiro-compose\.service markiro-deploy\.service/);
   assert.match(runtimeUnit, /ReadWritePaths=\/etc\/markiro/);
   assert.match(runtimeUnit, /NoNewPrivileges=true/);
+  assert.doesNotMatch(runtimeUnit, /RemainAfterExit=true/);
+  for (const dropIn of [composeDropIn, deployDropIn]) {
+    assert.match(dropIn, /Requires=markiro-runtime-env\.service/);
+    assert.match(dropIn, /After=markiro-runtime-env\.service/);
+  }
   assert.match(observerUnit, /User=markiro-monitor/);
   assert.match(
     observerUnit,
@@ -1872,6 +1912,28 @@ test("runtime secret materialization is installed with only its Lockbox identifi
   );
   assert.match(observerTimer, /OnUnitActiveSec=1min/);
   assert.match(observerTimer, /Persistent=true/);
+});
+
+test("runtime Node provisioning contract rejects missing checksum or version verification", async () => {
+  const cloudInit = await readRepositoryFile(
+    "infra/yandex/modules/compute/cloud-init-app.yaml.tftpl",
+  );
+  const withoutChecksum = cloudInit.replace(
+    "NODE_SHA256=60e3b0a8500819514aca603487c254298cd776de0698d3cd08f11dba5b8289a8\n",
+    "",
+  );
+  const withoutChecksumVerification = cloudInit.replace(" | sha256sum --check --status", "");
+  const withoutVersionVerification = cloudInit.replace(
+    '      test "$(/usr/bin/node --version)" = "v$${NODE_VERSION}"\n',
+    "",
+  );
+
+  for (const unsafeCloudInit of [
+    withoutChecksum,
+    withoutChecksumVerification,
+    withoutVersionVerification,
+  ])
+    assert.throws(() => assertRuntimeNodeProvisioning(unsafeCloudInit));
 });
 
 test("bootstrap contract rejects a Terraform-managed static access key", async () => {

@@ -49,9 +49,13 @@ resource "yandex_compute_instance" "app" {
       runtime_secret_id             = var.runtime_secret_id
       runtime_env_script_b64        = base64encode(file("${path.module}/../../../../deploy/yandex/runtime-env.mjs"))
       readiness_observer_script_b64 = base64encode(file("${path.module}/../../../../deploy/yandex/readiness-observer.mjs"))
+      cli_main_script_b64           = base64encode(file("${path.module}/../../../../deploy/yandex/cli-main.mjs"))
+      environment_inventory_b64     = base64encode(file("${path.module}/../../../../.env.production.example"))
       runtime_env_unit_b64          = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-runtime-env.service"))
       readiness_observer_unit_b64   = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-readiness-observer.service"))
       readiness_observer_timer_b64  = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-readiness-observer.timer"))
+      compose_runtime_dropin_b64    = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-compose.service.d/runtime-env.conf"))
+      deploy_runtime_dropin_b64     = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-deploy.service.d/runtime-env.conf"))
     })
   }
 }

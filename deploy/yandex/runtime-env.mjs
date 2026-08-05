@@ -4,7 +4,7 @@ import { basename, dirname, join } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { isMainModule } from "../production/cli-main.mjs";
+import { isMainModule } from "./cli-main.mjs";
 
 const IAM_TOKEN_URL =
   "http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token";
@@ -129,9 +129,18 @@ async function syncDirectory(filesystem, directory) {
   }
 }
 
-async function atomicWrite({ destination, filesystem, temporaryPath, text }) {
+function warnDurability(onWarning) {
+  try {
+    onWarning("runtime environment durability is indeterminate");
+  } catch {
+    // The durable replacement has already committed; warnings cannot roll it back.
+  }
+}
+
+async function atomicWrite({ destination, filesystem, onWarning, temporaryPath, text }) {
   const directory = dirname(destination);
   let file;
+  let renamed = false;
   try {
     await filesystem.mkdir(directory, { recursive: true, mode: 0o700 });
     file = await filesystem.open(temporaryPath, "wx", 0o600);
@@ -141,10 +150,15 @@ async function atomicWrite({ destination, filesystem, temporaryPath, text }) {
     file = undefined;
     await filesystem.chmod(temporaryPath, 0o600);
     await filesystem.rename(temporaryPath, destination);
-    await syncDirectory(filesystem, directory);
+    renamed = true;
+    try {
+      await syncDirectory(filesystem, directory);
+    } catch {
+      warnDurability(onWarning);
+    }
   } catch (error) {
     await closeQuietly(file);
-    await filesystem.unlink(temporaryPath).catch(() => undefined);
+    if (!renamed) await filesystem.unlink(temporaryPath).catch(() => undefined);
     throw error;
   }
 }
@@ -165,6 +179,7 @@ export async function materializeRuntimeEnv({
   fetchSecretPayload: loadSecretPayload = fetchSecretPayload,
   fs: filesystem = defaultFilesystem,
   inventoryText,
+  onWarning = () => undefined,
   secretId,
   temporaryName = defaultTemporaryName,
 } = {}) {
@@ -172,7 +187,7 @@ export async function materializeRuntimeEnv({
     const keys = environmentKeysFromExample(
       inventoryText ??
         (await filesystem.readFile(
-          fileURLToPath(new URL("../../.env.production.example", import.meta.url)),
+          fileURLToPath(new URL("./.env.production.example", import.meta.url)),
           "utf8",
         )),
     );
@@ -182,7 +197,7 @@ export async function materializeRuntimeEnv({
     const temporaryPath = join(dirname(destination), temporaryName(destination));
     if (dirname(temporaryPath) !== dirname(destination) || temporaryPath === destination)
       throw new Error("temporary destination is invalid");
-    await atomicWrite({ destination, filesystem, temporaryPath, text });
+    await atomicWrite({ destination, filesystem, onWarning, temporaryPath, text });
   } catch {
     throw asMaterializationFailure();
   }
