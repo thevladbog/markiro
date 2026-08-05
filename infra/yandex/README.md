@@ -152,10 +152,17 @@ credential-free. Pull requests run Terraform formatting, exact lock/toolchain
 checks, `init -backend=false`, validation, and infrastructure contracts without
 OIDC, environment variables, Lockbox, or a remote backend.
 
-The bootstrap root preserves two exact GitHub workload subjects on one
-federation, with separate service accounts:
+The combined bootstrap/foundation must preserve separate GitHub workload
+subjects on the shared federation:
 
-- `production` is reserved for the least-privileged deployment controller.
+- `production-controller` is reserved for the GitHub-hosted deployment
+  controller and may federate only as the deployment-controller service
+  account.
+- `production-cleanup` is reserved for the independent GitHub-hosted cleanup
+  job and may federate only as the deployment-controller service account.
+- `production-deploy` protects the self-hosted deployment job. That job has
+  `id-token: none`, and this subject must not have a Yandex federated
+  credential.
 - `production-infrastructure` is reserved for Terraform plan and apply jobs.
 - `production-postgres-owner` is reserved for the database-only approval that
   attests the completed cluster apply, exact owner creation, and runtime
@@ -174,6 +181,16 @@ credential was written to runtime Lockbox. This database-only approval emits
 the current GitHub run identity and non-secret snake_case change record
 reference into saved-plan evidence; it does not inspect external record
 contents.
+
+Protect `production-controller`, `production-deploy`, and
+`production-cleanup` independently with main-branch deployment restrictions.
+Use distinct required-reviewer policies for controller and cleanup so approval
+of one privileged subject cannot authorize the other. The exact external
+subjects are `repo:thevladbog/q:environment:production-controller`,
+`repo:thevladbog/q:environment:production-deploy`, and
+`repo:thevladbog/q:environment:production-cleanup`; only the first and third
+receive deployment-controller credentials. Neither may exchange for the
+Terraform service account.
 
 The infrastructure environment supplies repository/environment variables, not
 long-lived secrets. Required identity and state variables are

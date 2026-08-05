@@ -5,13 +5,23 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-User=root
-Group=root
+User=markiro-monitor
+Group=markiro-monitor
 UMask=0077
-EnvironmentFile=/etc/markiro/monitoring.conf
+EnvironmentFile=/etc/markiro-monitor/monitoring.conf
 ExecStart=/usr/bin/node /usr/local/lib/markiro/monitoring-producer.mjs runner
 NoNewPrivileges=true
 PrivateTmp=true
+PrivateDevices=true
 ProtectHome=true
 ProtectSystem=strict
-ReadOnlyPaths=/proc/uptime
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadOnlyPaths=/etc/markiro-monitor/monitoring.conf /proc/uptime

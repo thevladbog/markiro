@@ -22,6 +22,17 @@ variable "kms_key_id" {
   nullable    = false
 }
 
+variable "application_log_group_id" {
+  description = "Terraform-managed Cloud Logging group receiving sanitized VM application logs."
+  type        = string
+  nullable    = false
+
+  validation {
+    condition     = length(trimspace(var.application_log_group_id)) > 0
+    error_message = "application_log_group_id must not be empty."
+  }
+}
+
 variable "app_service_account_id" {
   description = "Runtime service-account ID attached to the application instance."
   type        = string

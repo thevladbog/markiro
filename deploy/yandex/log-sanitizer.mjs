@@ -1,5 +1,6 @@
-import { appendFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
+import { open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import path from "node:path";
 import process from "node:process";
 import { promisify } from "node:util";
 
@@ -16,11 +17,69 @@ const ALLOWED_UNITS = new Set([
   "markiro-runtime-env.service",
 ]);
 
-function redact(message) {
+const SENSITIVE_KEY =
+  /(?:authorization|password|passwd|secret|token|cookie|api[-_]?key|credential|session)/i;
+
+function redactText(message) {
   return message
-    .replace(/\b(authorization|password|secret|token)=\S+/gi, "$1=[REDACTED]")
-    .replace(/Bearer\s+\S+/gi, "Bearer [REDACTED]")
+    .replace(/\b(Cookie|Set-Cookie)\s*[:=]\s*.*$/gi, (_match, name) => `${name}: [REDACTED]`)
+    .replace(
+      /\b(Authorization\s*[:=]\s*)(?:"(?:\\.|[^"])*"|'(?:\\.|[^'])*'|(?:Basic|Bearer)\s+\S+|\S+)/gi,
+      "$1[REDACTED]",
+    )
+    .replace(/\b(Basic|Bearer)\s+\S+/gi, "$1 [REDACTED]")
+    .replace(
+      /\b(authorization|password|passwd|secret|token|cookie|api[-_]?key|credential|session|client_secret|access_token|refresh_token)\s*[:=]\s*(?:"(?:\\.|[^"])*"|'(?:\\.|[^'])*'|\S+)/gi,
+      "$1=[REDACTED]",
+    )
+    .replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@"']+:[^\s/@"']+@/gi, "$1[REDACTED]@")
+    .replace(
+      /([?&](?:authorization|password|secret|token|api[-_]?key|credential|session|client_secret|access_token|refresh_token)=)[^&#\s"']+/gi,
+      "$1[REDACTED]",
+    )
     .replace(/postgres(?:ql)?:\/\/\S+/gi, "postgresql://[REDACTED]");
+}
+
+function redactStructured(value, depth = 0) {
+  if (depth > 20) return "[REDACTED]";
+  if (Array.isArray(value)) return value.map((item) => redactStructured(item, depth + 1));
+  if (typeof value === "string") return redactText(value);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [
+      key,
+      SENSITIVE_KEY.test(key) ? "[REDACTED]" : redactStructured(item, depth + 1),
+    ]),
+  );
+}
+
+function redactJson(message) {
+  const trimmed = message.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return undefined;
+  try {
+    return JSON.stringify(redactStructured(JSON.parse(trimmed)));
+  } catch {
+    return undefined;
+  }
+}
+
+function redact(message) {
+  const singleLine = message.replace(/[\r\n]+/g, " ");
+  const structured = redactJson(singleLine);
+  if (structured !== undefined) return structured;
+  return redactText(singleLine);
+}
+
+function truncateUtf8(value, maxBytes) {
+  const encoded = Buffer.from(value, "utf8");
+  if (encoded.length <= maxBytes) return value;
+  for (let end = maxBytes; end >= Math.max(0, maxBytes - 4); end -= 1)
+    try {
+      return new TextDecoder("utf-8", { fatal: true }).decode(encoded.subarray(0, end));
+    } catch {
+      // Try the preceding UTF-8 boundary.
+    }
+  return "";
 }
 
 export function sanitizeJournal(entries, { maxBytes = 64 * 1024, maxLineBytes = 1024 } = {}) {
@@ -30,15 +89,132 @@ export function sanitizeJournal(entries, { maxBytes = 64 * 1024, maxLineBytes = 
     if (!ALLOWED_UNITS.has(entry?.unit) || typeof entry.message !== "string") continue;
     const prefix = `${entry.unit} `;
     const available = Math.max(0, maxLineBytes - Buffer.byteLength(prefix) - 1);
-    const message = Buffer.from(redact(entry.message), "utf8")
-      .subarray(0, available)
-      .toString("utf8");
+    const message = truncateUtf8(redact(entry.message), available);
     const line = `${prefix}${message}\n`;
     if (bytes + Buffer.byteLength(line) > maxBytes) break;
     lines.push(line);
     bytes += Buffer.byteLength(line);
   }
   return lines.join("");
+}
+
+async function optionalStat(file) {
+  try {
+    return await stat(file);
+  } catch (error) {
+    if (error?.code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
+async function readTimestamp(file) {
+  try {
+    const value = Number(await readFile(file, "utf8"));
+    return Number.isFinite(value) && value >= 0 ? value : undefined;
+  } catch (error) {
+    if (error?.code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
+async function syncPath(file) {
+  const handle = await open(file, "r");
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
+async function durableTimestamp(file, timestamp) {
+  const temporary = `${file}.${process.pid}.tmp`;
+  await writeFile(temporary, `${timestamp}\n`, { encoding: "utf8", mode: 0o600 });
+  await syncPath(temporary);
+  await rename(temporary, file);
+  await syncPath(path.dirname(file));
+}
+
+export async function writeBoundedSpool(
+  spoolPath,
+  payload,
+  {
+    maxBytes = 4 * 1024 * 1024,
+    maxAgeMs = 24 * 60 * 60 * 1_000,
+    now = Date.now(),
+    markerPath = `${spoolPath}.started-at`,
+  } = {},
+) {
+  if (
+    typeof spoolPath !== "string" ||
+    spoolPath.length === 0 ||
+    typeof payload !== "string" ||
+    !Number.isSafeInteger(maxBytes) ||
+    maxBytes <= 0 ||
+    !Number.isFinite(maxAgeMs) ||
+    maxAgeMs <= 0 ||
+    !Number.isFinite(now) ||
+    now < 0
+  )
+    throw new Error("invalid spool bounds");
+  if (Buffer.byteLength(payload) > maxBytes) throw new Error("spool payload exceeds bound");
+
+  const rotatedPath = `${spoolPath}.1`;
+  const rotatedMarkerPath = `${rotatedPath}.rotated-at`;
+  let active = await optionalStat(spoolPath);
+  if (!active) {
+    const handle = await open(spoolPath, "a", 0o640);
+    await handle.close();
+    await syncPath(spoolPath);
+    await syncPath(path.dirname(spoolPath));
+    active = await stat(spoolPath);
+  }
+
+  let startedAt = await readTimestamp(markerPath);
+  if (startedAt === undefined) {
+    startedAt = active.size === 0 ? now : Math.min(now, active.birthtimeMs || active.ctimeMs);
+    await durableTimestamp(markerPath, startedAt);
+  }
+
+  const rotated = await optionalStat(rotatedPath);
+  if (rotated) {
+    const rotatedAt =
+      (await readTimestamp(rotatedMarkerPath)) ??
+      Math.min(now, rotated.birthtimeMs || rotated.ctimeMs);
+    if (now - rotatedAt >= maxAgeMs) {
+      await rm(rotatedPath, { force: true });
+      await rm(rotatedMarkerPath, { force: true });
+      await syncPath(path.dirname(spoolPath));
+    } else if ((await readTimestamp(rotatedMarkerPath)) === undefined) {
+      await durableTimestamp(rotatedMarkerPath, rotatedAt);
+    }
+  } else {
+    await rm(rotatedMarkerPath, { force: true });
+  }
+
+  const shouldRotate =
+    active.size > 0 &&
+    (active.size + Buffer.byteLength(payload) > maxBytes || now - startedAt >= maxAgeMs);
+  if (shouldRotate) {
+    await rm(rotatedPath, { force: true });
+    await rm(rotatedMarkerPath, { force: true });
+    await rename(spoolPath, rotatedPath);
+    await durableTimestamp(rotatedMarkerPath, now);
+    const handle = await open(spoolPath, "a", 0o640);
+    await handle.close();
+    await syncPath(spoolPath);
+    await durableTimestamp(markerPath, now);
+    await syncPath(path.dirname(spoolPath));
+  }
+
+  if (payload) {
+    const handle = await open(spoolPath, "a", 0o640);
+    try {
+      await handle.writeFile(payload, "utf8");
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+  }
 }
 
 async function runCli() {
@@ -64,12 +240,7 @@ async function runCli() {
         return [];
       }
     });
-  const sanitized = sanitizeJournal(entries);
-  if (sanitized)
-    await appendFile("/var/log/markiro/observability.log", sanitized, {
-      encoding: "utf8",
-      mode: 0o640,
-    });
+  await writeBoundedSpool("/var/log/markiro/observability.log", sanitizeJournal(entries));
 }
 
 if (isMainModule(import.meta.url))

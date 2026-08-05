@@ -1,6 +1,6 @@
 output "application_log_group_id" {
-  description = "Cloud Logging group ID for ALB application traffic."
-  value       = yandex_logging_group.application.id
+  description = "Cloud Logging group ID shared by ALB access logs and sanitized VM application logs."
+  value       = var.application_log_group_id
 }
 
 output "security_log_group_id" {

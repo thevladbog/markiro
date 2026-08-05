@@ -6,6 +6,15 @@ locals {
   }
 }
 
+# Kept outside the observability module so both VM cloud-init templates can
+# target the retained group without introducing a compute/observability cycle.
+resource "yandex_logging_group" "application" {
+  name             = "markiro-production-application"
+  folder_id        = var.folder_id
+  retention_period = "336h"
+  labels           = local.labels
+}
+
 module "network" {
   source = "../modules/network"
 
@@ -25,6 +34,7 @@ module "compute" {
   zone                                     = var.zone
   ubuntu_lts_image_family                  = var.ubuntu_lts_image_family
   kms_key_id                               = var.kms_key_id
+  application_log_group_id                 = yandex_logging_group.application.id
   app_service_account_id                   = var.app_service_account_id
   runtime_secret_id                        = var.runtime_secret_id
   runner_service_account_id                = var.runner_service_account_id
@@ -87,6 +97,7 @@ module "observability" {
   source = "../modules/observability"
 
   folder_id                = var.folder_id
+  application_log_group_id = yandex_logging_group.application.id
   audit_service_account_id = var.audit_service_account_id
   audit_log_group_id       = var.audit_log_group_id
   state_bucket_name        = var.state_bucket_name

@@ -16,10 +16,7 @@ on:
     types: [completed]
     branches: [main]
 
-permissions:
-  actions: read
-  contents: read
-  id-token: write
+permissions: {}
 
 concurrency:
   group: markiro-production-deployment
@@ -30,7 +27,11 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    environment: production
+    environment: production-controller
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
     outputs:
       deployment-id: ${{ steps.runner.outputs.deployment-id }}
       app-host-keys-b64: ${{ steps.runner.outputs.app-host-keys-b64 }}
@@ -148,7 +149,11 @@ jobs:
     if: needs.controller.result == 'success'
     runs-on: [self-hosted, linux, "${{ needs.controller.outputs.runner-label }}"]
     timeout-minutes: 40
-    environment: production
+    environment: production-deploy
+    permissions:
+      actions: read
+      contents: read
+      id-token: "none"
     env:
       EXPECTED_RELEASE_RUN_ID: ${{ needs.controller.outputs.release-run-id }}
       EXPECTED_RELEASE_SHA: ${{ needs.controller.outputs.release-sha }}
@@ -193,7 +198,10 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    environment: production
+    environment: production-cleanup
+    permissions:
+      contents: read
+      id-token: write
     env:
       DEPLOYMENT_ID: ${{ needs.controller.outputs.deployment-id }}
       RUNNER_ID: ${{ needs.controller.outputs.runner-id }}

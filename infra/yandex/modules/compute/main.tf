@@ -64,12 +64,15 @@ resource "yandex_compute_instance" "app" {
       monitoring_timer_b64           = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-monitoring-producer.timer"))
       log_sanitizer_unit_b64         = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-log-sanitizer.service"))
       log_sanitizer_timer_b64        = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-log-sanitizer.timer"))
-      unified_agent_logs_b64         = base64encode(templatefile("${path.module}/../../../../deploy/yandex/unified-agent-logs.yaml.tftpl", { folder_id = var.folder_id }))
-      runtime_env_unit_b64           = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-runtime-env.service"))
-      readiness_observer_unit_b64    = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-readiness-observer.service"))
-      readiness_observer_timer_b64   = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-readiness-observer.timer"))
-      compose_runtime_dropin_b64     = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-compose.service.d/runtime-env.conf"))
-      deploy_runtime_dropin_b64      = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-deploy.service.d/runtime-env.conf"))
+      unified_agent_logs_b64 = base64encode(templatefile("${path.module}/../../../../deploy/yandex/unified-agent-logs.yaml.tftpl", {
+        folder_id                = var.folder_id
+        application_log_group_id = var.application_log_group_id
+      }))
+      runtime_env_unit_b64         = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-runtime-env.service"))
+      readiness_observer_unit_b64  = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-readiness-observer.service"))
+      readiness_observer_timer_b64 = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-readiness-observer.timer"))
+      compose_runtime_dropin_b64   = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-compose.service.d/runtime-env.conf"))
+      deploy_runtime_dropin_b64    = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-deploy.service.d/runtime-env.conf"))
     })
   }
 }
@@ -116,11 +119,14 @@ resource "yandex_compute_instance" "runner" {
       runner_monitoring_timer_b64 = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-runner-monitoring.timer"))
       log_sanitizer_unit_b64      = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-log-sanitizer.service"))
       log_sanitizer_timer_b64     = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-log-sanitizer.timer"))
-      unified_agent_logs_b64      = base64encode(templatefile("${path.module}/../../../../deploy/yandex/unified-agent-logs.yaml.tftpl", { folder_id = var.folder_id }))
-      cli_main_script_b64         = base64encode(file("${path.module}/../../../../deploy/yandex/cli-main.mjs"))
-      container_installer_b64     = base64encode(file("${path.module}/../../../../deploy/yandex/install-container-runtime.sh"))
-      docker_unit_b64             = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/docker.service"))
-      folder_id                   = var.folder_id
+      unified_agent_logs_b64 = base64encode(templatefile("${path.module}/../../../../deploy/yandex/unified-agent-logs.yaml.tftpl", {
+        folder_id                = var.folder_id
+        application_log_group_id = var.application_log_group_id
+      }))
+      cli_main_script_b64     = base64encode(file("${path.module}/../../../../deploy/yandex/cli-main.mjs"))
+      container_installer_b64 = base64encode(file("${path.module}/../../../../deploy/yandex/install-container-runtime.sh"))
+      docker_unit_b64         = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/docker.service"))
+      folder_id               = var.folder_id
     })
   }
 }

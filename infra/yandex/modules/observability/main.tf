@@ -216,13 +216,6 @@ locals {
   }
 }
 
-resource "yandex_logging_group" "application" {
-  name             = "markiro-production-application"
-  folder_id        = var.folder_id
-  retention_period = "336h"
-  labels           = var.labels
-}
-
 resource "yandex_logging_group" "security" {
   name             = "markiro-production-security"
   folder_id        = var.folder_id

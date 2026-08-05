@@ -4,6 +4,17 @@ variable "folder_id" {
   nullable    = false
 }
 
+variable "application_log_group_id" {
+  description = "Retained Cloud Logging group created independently so VM bootstrap can target it without a module dependency cycle."
+  type        = string
+  nullable    = false
+
+  validation {
+    condition     = length(trimspace(var.application_log_group_id)) > 0
+    error_message = "application_log_group_id must not be empty."
+  }
+}
+
 variable "audit_service_account_id" {
   description = "Service account used by both Audit Trails destinations."
   type        = string

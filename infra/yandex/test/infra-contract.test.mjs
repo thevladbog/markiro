@@ -1298,6 +1298,7 @@ const requiredObservabilityAlerts = [
 ];
 
 function assertProtectedObservability({
+  bootstrap,
   observability,
   observabilityOutputs,
   observabilityVariables,
@@ -1314,14 +1315,20 @@ function assertProtectedObservability({
     /required_providers\s*\{[\s\S]*?source\s*=\s*"yandex-cloud\/yandex"[\s\S]*?version\s*=\s*"= 0\.215\.0"/,
   );
 
-  for (const groupName of ["application", "security"]) {
-    const group = terraformResourceBlock(observability, "yandex_logging_group", groupName);
+  for (const [source, groupName] of [
+    [production, "application"],
+    [observability, "security"],
+    [bootstrap, "audit"],
+  ]) {
+    const group = terraformResourceBlock(source, "yandex_logging_group", groupName);
     assert.match(group, /retention_period\s*=\s*"336h"/);
   }
   assert.equal(
-    [...observability.matchAll(/resource\s+"yandex_logging_group"\s+"([^"]+)"/g)].length,
-    2,
-    "application and security logging groups must remain production-root resources",
+    [bootstrap, production, observability].flatMap((source) => [
+      ...source.matchAll(/resource\s+"yandex_logging_group"\s+"([^"]+)"/g),
+    ]).length,
+    3,
+    "application, security, and audit must use separate log groups",
   );
 
   const auditBucket = terraformResourceBlock(storage, "yandex_storage_bucket", "audit");
@@ -1486,6 +1493,7 @@ function assertProtectedObservability({
 
 async function observabilitySources() {
   const [
+    bootstrap,
     observability,
     observabilityOutputs,
     observabilityVariables,
@@ -1497,6 +1505,7 @@ async function observabilitySources() {
     productionVariables,
     readme,
   ] = await Promise.all([
+    readRepositoryFile("infra/yandex/bootstrap/main.tf"),
     readRepositoryFile("infra/yandex/modules/observability/main.tf"),
     readRepositoryFile("infra/yandex/modules/observability/outputs.tf"),
     readRepositoryFile("infra/yandex/modules/observability/variables.tf"),
@@ -1510,6 +1519,7 @@ async function observabilitySources() {
   ]);
 
   return {
+    bootstrap,
     observability,
     observabilityOutputs,
     observabilityVariables,
@@ -2263,6 +2273,164 @@ test("runtime foundation pins containers and telemetry and isolates deploy-only 
   assert.doesNotMatch(appCloudInit, /registry-secret-id|YC_REGISTRY_SECRET_ID/);
 });
 
+function assertOperationalApplicationLogDelivery({
+  production,
+  compute,
+  computeVariables,
+  observability,
+  observabilityVariables,
+  agentConfig,
+  appCloudInit,
+  runnerCloudInit,
+}) {
+  const applicationGroup = terraformResourceBlock(
+    production,
+    "yandex_logging_group",
+    "application",
+  );
+  assert.match(applicationGroup, /name\s*=\s*"markiro-production-application"/);
+  assert.match(applicationGroup, /retention_period\s*=\s*"336h"/);
+  assert.match(computeVariables, /variable\s+"application_log_group_id"/);
+  assert.match(observabilityVariables, /variable\s+"application_log_group_id"/);
+  assert.match(
+    production,
+    /module\s+"compute"[\s\S]*?application_log_group_id\s*=\s*yandex_logging_group\.application\.id/,
+  );
+  assert.match(
+    production,
+    /module\s+"observability"[\s\S]*?application_log_group_id\s*=\s*yandex_logging_group\.application\.id/,
+  );
+  assert.equal(
+    (compute.match(/application_log_group_id\s*=\s*var\.application_log_group_id/g) ?? []).length,
+    2,
+    "both VM templates must receive the exact retained application log group",
+  );
+  assert.match(agentConfig, /log_group_id:\s*\$\{application_log_group_id\}/);
+  assert.doesNotMatch(agentConfig, /plugin:\s*yc_logs[\s\S]*?folder_id:/);
+  assert.match(agentConfig, /state_directory:\s*\/var\/lib\/yandex\/unified_agent\/markiro/);
+
+  for (const [name, cloudInit] of [
+    ["app", appCloudInit],
+    ["runner", runnerCloudInit],
+  ]) {
+    assert.match(cloudInit, /install -d -m 2750 -o root -g unified_agent \/var\/log\/markiro/);
+    assert.match(cloudInit, /chown root:unified_agent \/var\/log\/markiro\/observability\.log/);
+    assert.match(
+      cloudInit,
+      /runuser --user unified_agent -- test -r \/var\/log\/markiro\/observability\.log/,
+      `${name} bootstrap must prove readability as the exact packaged agent identity`,
+    );
+    assert.match(
+      cloudInit,
+      /chown root:unified_agent \/etc\/yandex\/unified_agent\/conf\.d\/markiro-logs\.yml/,
+      `${name} bootstrap must make its imported configuration readable to the service`,
+    );
+    assert.match(
+      cloudInit,
+      /runuser --user unified_agent -- \/usr\/bin\/unified_agent --config \/etc\/yandex\/unified_agent\/config\.yml check-config/,
+      `${name} bootstrap must validate the complete imported agent configuration`,
+    );
+    assert.match(cloudInit, /systemctl enable --now unified-agent\.service/);
+    assert.match(cloudInit, /systemctl is-active --quiet unified-agent\.service/);
+  }
+
+  assert.ok(
+    runnerCloudInit.indexOf("check-config") <
+      runnerCloudInit.indexOf("markiro-runner-bootstrap-complete"),
+    "runner check-config must precede its completion marker",
+  );
+  assert.ok(
+    runnerCloudInit.indexOf("systemctl is-active --quiet unified-agent.service") <
+      runnerCloudInit.indexOf("markiro-runner-bootstrap-complete"),
+    "runner service verification must precede its completion marker",
+  );
+  assert.doesNotMatch(observability, /resource\s+"yandex_logging_group"\s+"application"/);
+}
+
+test("application and runner logs are readable by Unified Agent and target the retained application group", async () => {
+  const [
+    production,
+    compute,
+    computeVariables,
+    observability,
+    observabilityVariables,
+    agentConfig,
+    appCloudInit,
+    runnerCloudInit,
+  ] = await Promise.all([
+    readRepositoryFile("infra/yandex/production/main.tf"),
+    readRepositoryFile("infra/yandex/modules/compute/main.tf"),
+    readRepositoryFile("infra/yandex/modules/compute/variables.tf"),
+    readRepositoryFile("infra/yandex/modules/observability/main.tf"),
+    readRepositoryFile("infra/yandex/modules/observability/variables.tf"),
+    readRepositoryFile("deploy/yandex/unified-agent-logs.yaml.tftpl"),
+    readRepositoryFile("infra/yandex/modules/compute/cloud-init-app.yaml.tftpl"),
+    readRepositoryFile("infra/yandex/modules/compute/cloud-init-runner.yaml.tftpl"),
+  ]);
+
+  assertOperationalApplicationLogDelivery({
+    production,
+    compute,
+    computeVariables,
+    observability,
+    observabilityVariables,
+    agentConfig,
+    appCloudInit,
+    runnerCloudInit,
+  });
+});
+
+test("custom metric producers run as dedicated non-login users with least filesystem access", async () => {
+  const [appCloudInit, runnerCloudInit, appUnit, runnerUnit] = await Promise.all([
+    readRepositoryFile("infra/yandex/modules/compute/cloud-init-app.yaml.tftpl"),
+    readRepositoryFile("infra/yandex/modules/compute/cloud-init-runner.yaml.tftpl"),
+    readRepositoryFile("deploy/yandex/systemd/markiro-monitoring-producer.service"),
+    readRepositoryFile("deploy/yandex/systemd/markiro-runner-monitoring.service"),
+  ]);
+
+  for (const [name, cloudInit] of [
+    ["app", appCloudInit],
+    ["runner", runnerCloudInit],
+  ]) {
+    assert.match(
+      cloudInit,
+      /name:\s*markiro-monitor[\s\S]*?system:\s*true[\s\S]*?shell:\s*\/usr\/sbin\/nologin/,
+      `${name} image must provision the dedicated non-login producer identity`,
+    );
+    assert.match(
+      cloudInit,
+      /path:\s*\/etc\/markiro-monitor\/monitoring\.conf[\s\S]*?owner:\s*root:root[\s\S]*?permissions:\s*"0600"/,
+      `${name} write_files must not depend on an account created later in cloud-init`,
+    );
+    assert.match(
+      cloudInit,
+      /install -d -m 0750 -o root -g markiro-monitor \/etc\/markiro-monitor[\s\S]*?chown root:markiro-monitor \/etc\/markiro-monitor\/monitoring\.conf[\s\S]*?chmod 0640 \/etc\/markiro-monitor\/monitoring\.conf/,
+      `${name} runcmd must grant only the dedicated producer read access`,
+    );
+    assert.match(
+      cloudInit,
+      /monitoring-producer\.mjs[\s\S]*?permissions:\s*"0755"/,
+      `${name} producer executable must be readable without root`,
+    );
+  }
+
+  for (const unit of [appUnit, runnerUnit]) {
+    assert.match(unit, /^User=markiro-monitor$/m);
+    assert.match(unit, /^Group=markiro-monitor$/m);
+    assert.match(unit, /^EnvironmentFile=\/etc\/markiro-monitor\/monitoring\.conf$/m);
+    assert.match(unit, /^CapabilityBoundingSet=$/m);
+    assert.match(unit, /^PrivateDevices=true$/m);
+    assert.match(unit, /^ProtectKernelModules=true$/m);
+    assert.match(unit, /^ProtectKernelTunables=true$/m);
+    assert.match(unit, /^ProtectControlGroups=true$/m);
+    assert.match(unit, /^RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6$/m);
+    assert.match(
+      unit,
+      /^ReadOnlyPaths=\/etc\/markiro-monitor\/monitoring\.conf(?: \/proc\/uptime)?$/m,
+    );
+  }
+});
+
 test("production managed PostgreSQL and object storage protect durable data", async () => {
   assertProtectedManagedData(await managedDataSources());
 });
@@ -2277,8 +2445,8 @@ test("production observability separates logs and audit destinations and defines
 
 test("observability contract rejects missing categories, unsafe retention, audit recursion, and incomplete alert wiring", async () => {
   const missingGroup = await observabilitySources();
-  missingGroup.observability = missingGroup.observability.replace(
-    terraformResourceBlock(missingGroup.observability, "yandex_logging_group", "application"),
+  missingGroup.production = missingGroup.production.replace(
+    terraformResourceBlock(missingGroup.production, "yandex_logging_group", "application"),
     "",
   );
   assert.throws(() => assertProtectedObservability(missingGroup));

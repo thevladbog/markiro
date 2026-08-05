@@ -24,7 +24,7 @@ write_files:
     content: ${container_runtime_script_b64}
   - path: /usr/local/lib/markiro/monitoring-producer.mjs
     owner: root:root
-    permissions: "0700"
+    permissions: "0755"
     encoding: b64
     content: ${monitoring_producer_script_b64}
   - path: /usr/local/lib/markiro/log-sanitizer.mjs
@@ -127,7 +127,7 @@ write_files:
     permissions: "0600"
     content: |
       MARKIRO_RUNTIME_SECRET_ID=${runtime_secret_id}
-  - path: /etc/markiro/monitoring.conf
+  - path: /etc/markiro-monitor/monitoring.conf
     owner: root:root
     permissions: "0600"
     content: |
@@ -135,14 +135,13 @@ write_files:
 runcmd:
   - install -d -m 0755 /opt/markiro /usr/local/lib/markiro
   - install -d -m 0700 /etc/markiro
-  - install -d -m 0750 -o root -g adm /var/log/markiro
+  - install -d -m 0750 -o root -g markiro-monitor /etc/markiro-monitor
   - install -d -m 0700 /var/lib/markiro/monitoring /run/markiro-registry-auth
-  - touch /var/log/markiro/observability.log
-  - chown root:adm /var/log/markiro/observability.log
-  - chmod 0640 /var/log/markiro/observability.log
-  - chown root:root /etc/markiro /etc/markiro/runtime-secret-id /etc/markiro/monitoring.conf
+  - chown root:root /etc/markiro /etc/markiro/runtime-secret-id
   - chmod 0700 /etc/markiro
-  - chmod 0600 /etc/markiro/runtime-secret-id /etc/markiro/monitoring.conf /etc/markiro/compose-contract.env
+  - chmod 0600 /etc/markiro/runtime-secret-id /etc/markiro/compose-contract.env
+  - chown root:markiro-monitor /etc/markiro-monitor/monitoring.conf
+  - chmod 0640 /etc/markiro-monitor/monitoring.conf
   - /usr/local/lib/markiro/install-container-runtime
   - |
       set -eu
@@ -173,7 +172,15 @@ runcmd:
       dpkg -i "$${package}"
       rm -f "$${package}"
       test "$(dpkg-query -W -f='$${Version}' yandex-unified-agent)" = "$${UA_VERSION}"
-      /usr/bin/unified_agent --config /etc/yandex/unified_agent/config.yml check-config > /dev/null
+      install -d -m 2750 -o root -g unified_agent /var/log/markiro
+      install -d -m 0750 -o unified_agent -g unified_agent /var/lib/yandex/unified_agent/markiro
+      touch /var/log/markiro/observability.log
+      chown root:unified_agent /var/log/markiro/observability.log
+      chmod 0640 /var/log/markiro/observability.log
+      chown root:unified_agent /etc/yandex/unified_agent/conf.d/markiro-logs.yml
+      chmod 0640 /etc/yandex/unified_agent/conf.d/markiro-logs.yml
+      runuser --user unified_agent -- test -r /var/log/markiro/observability.log
+      runuser --user unified_agent -- /usr/bin/unified_agent --config /etc/yandex/unified_agent/config.yml check-config > /dev/null
   - |
       set -eu
       for host_key in /etc/ssh/ssh_host_ed25519_key.pub /etc/ssh/ssh_host_rsa_key.pub; do
@@ -185,6 +192,7 @@ runcmd:
   - systemctl enable --now docker.service
   - /usr/bin/node /usr/local/lib/markiro/container-runtime.mjs
   - systemctl enable --now unified-agent.service
+  - systemctl is-active --quiet unified-agent.service
   - systemctl enable markiro-runtime-env.service
   - systemctl start markiro-runtime-env.service
   - test -f /etc/markiro/production.env

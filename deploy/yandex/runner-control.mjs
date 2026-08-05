@@ -91,6 +91,50 @@ export async function createJitRegistration(dependencies) {
   return { deploymentId: dependencies.deploymentId, label };
 }
 
+function validateOperation(operation, expectedId) {
+  if (
+    !operation ||
+    typeof operation !== "object" ||
+    typeof operation.id !== "string" ||
+    operation.id.length === 0 ||
+    (expectedId !== undefined && operation.id !== expectedId) ||
+    typeof operation.done !== "boolean" ||
+    (operation.error !== undefined &&
+      (!operation.error || typeof operation.error !== "object" || Array.isArray(operation.error)))
+  )
+    throw new Error("invalid Yandex operation response");
+  if (operation.error !== undefined) throw new Error("Yandex operation failed");
+  return operation;
+}
+
+export async function waitForOperation(initialOperation, dependencies) {
+  if (!dependencies || typeof dependencies.getOperation !== "function")
+    throw new Error("invalid Yandex operation dependencies");
+  const timeoutMs = dependencies.timeoutMs ?? 60_000;
+  const pollIntervalMs = dependencies.pollIntervalMs ?? 1_000;
+  const now = dependencies.clock?.now ?? (() => performance.now());
+  const sleep =
+    dependencies.clock?.sleep ??
+    ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
+  if (
+    !Number.isFinite(timeoutMs) ||
+    timeoutMs <= 0 ||
+    !Number.isFinite(pollIntervalMs) ||
+    pollIntervalMs <= 0
+  )
+    throw new Error("invalid Yandex operation bounds");
+
+  let operation = validateOperation(initialOperation);
+  const operationId = operation.id;
+  const deadline = now() + timeoutMs;
+  while (!operation.done) {
+    if (now() >= deadline) throw new Error("Yandex operation timed out");
+    await sleep(Math.min(pollIntervalMs, Math.max(0, deadline - now())));
+    operation = validateOperation(await dependencies.getOperation(operationId), operationId);
+  }
+  return operation;
+}
+
 function decodeBase64(value) {
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(value) || value.length % 4 === 1)
     throw new Error("authenticated SSH host keys are invalid");
@@ -195,6 +239,12 @@ export async function startRunner(dependencies) {
     throw new Error("registered deployment runner already exists");
 
   await dependencies.yandex.startInstance(dependencies.instanceId);
+}
+
+export async function prepareAndStartRunner(dependencies) {
+  const registration = await createJitRegistration(dependencies);
+  await startRunner(dependencies);
+  return registration;
 }
 
 export async function waitForRunner(dependencies) {
@@ -338,7 +388,7 @@ async function cliClients() {
         });
       },
       async updateMetadata(id, update) {
-        await requestJson(
+        const operation = await requestJson(
           `https://compute.api.cloud.yandex.net/compute/v1/instances/${id}/updateMetadata`,
           {
             method: "POST",
@@ -346,6 +396,14 @@ async function cliClients() {
             body: JSON.stringify(update),
           },
         );
+        await waitForOperation(operation, {
+          async getOperation(operationId) {
+            return requestJson(
+              `https://operation.api.cloud.yandex.net/operations/${encodeURIComponent(operationId)}`,
+              { headers: bearer(yandexToken) },
+            );
+          },
+        });
       },
     },
     github: {
@@ -440,15 +498,11 @@ async function runCli(command) {
     const gateToken = requiredEnvironment("YC_GATE_IAM_TOKEN");
     await verifyControllerGates(gateToken);
     const appHostKeys = await authenticatedAppHostKeys(gateToken);
-    const status = await clients.yandex.getInstanceStatus(clients.instanceId);
-    if (status !== "STOPPED") throw new Error("runner VM must be STOPPED");
-    if (deploymentRunners(await clients.github.listRunners()).length !== 0)
-      throw new Error("registered deployment runner already exists");
     const deploymentId = randomUUID();
-    const { label } = await createJitRegistration({ ...clients, deploymentId });
+    let label;
     let runner;
     try {
-      await clients.yandex.startInstance(clients.instanceId);
+      ({ label } = await prepareAndStartRunner({ ...clients, deploymentId }));
       ({ runner } = await discoverRunner(clients));
     } catch (error) {
       await clients.yandex

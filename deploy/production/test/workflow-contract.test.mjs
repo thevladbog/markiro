@@ -575,8 +575,18 @@ function assertProductionDeploymentWorkflow(
     branches: ["main"],
   });
   assert.equal("pull_request" in workflow.on, false);
-  assert.deepEqual(workflow.permissions, {
+  assert.deepEqual(workflow.permissions, {});
+  assert.deepEqual(workflow.jobs.controller.permissions, {
     actions: "read",
+    contents: "read",
+    "id-token": "write",
+  });
+  assert.deepEqual(workflow.jobs.deploy.permissions, {
+    actions: "read",
+    contents: "read",
+    "id-token": "none",
+  });
+  assert.deepEqual(workflow.jobs.cleanup.permissions, {
     contents: "read",
     "id-token": "write",
   });
@@ -592,7 +602,18 @@ function assertProductionDeploymentWorkflow(
     2,
   );
   assert.match(deploymentSource, /run-id:\s*\$\{\{[^}]*release-run-id[^}]*\}\}/);
-  assert.match(deploymentSource, /environment:\s*production/);
+  assert.equal(workflow.jobs.controller.environment, "production-controller");
+  assert.equal(workflow.jobs.deploy.environment, "production-deploy");
+  assert.equal(workflow.jobs.cleanup.environment, "production-cleanup");
+  assert.equal(
+    new Set([
+      workflow.jobs.controller.environment,
+      workflow.jobs.deploy.environment,
+      workflow.jobs.cleanup.environment,
+    ]).size,
+    3,
+    "controller, deploy, and cleanup must never share an OIDC environment subject",
+  );
   assert.match(
     deploymentSource,
     /runs-on:\s*\[self-hosted, linux, "\$\{\{ needs\.controller\.outputs\.runner-label \}\}"\]/,
@@ -600,7 +621,11 @@ function assertProductionDeploymentWorkflow(
   assert.doesNotMatch(deploymentSource, /runs-on:\s*\[self-hosted, linux, markiro-production\]/);
   assert.match(deploymentSource, /GITHUB_RUNNER_ADMIN_TOKEN/);
   assert.match(deploymentSource, /YC_DEPLOYMENT_CONTROLLER_SERVICE_ACCOUNT_ID/);
-  assert.doesNotMatch(deploymentSource, /YC_TERRAFORM_SERVICE_ACCOUNT_ID/);
+  assert.doesNotMatch(
+    deploymentSource,
+    /YC_TERRAFORM_SERVICE_ACCOUNT_ID/,
+    "deployment controller subjects must never exchange for the infrastructure identity",
+  );
   assert.doesNotMatch(deploymentSource, /YC_RUNNER_SERVICE_ACCOUNT_ID/);
   assert.match(
     deploymentSource,
@@ -656,6 +681,16 @@ test("production deployment contract rejects trigger, label, cleanup, and gate m
       name: "tag-shaped manifest artifact",
       search: "name: markiro-release-manifest-${{ steps.release.outputs.release-sha }}",
       replacement: "name: markiro-release-manifest-main",
+    },
+    {
+      name: "self-hosted deploy OIDC permission",
+      search: '      id-token: "none"',
+      replacement: "      id-token: write",
+    },
+    {
+      name: "shared controller and cleanup privileged subject",
+      search: "environment: production-cleanup",
+      replacement: "environment: production-controller",
     },
   ]) {
     const mutated = replaceExactlyOnce(

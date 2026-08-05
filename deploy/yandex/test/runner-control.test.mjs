@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
+import * as runnerControl from "../runner-control.mjs";
+
+const {
   createJitRegistration,
   deploymentRunnerLabel,
   parseSerialHostKeys,
@@ -9,7 +11,7 @@ import {
   startRunner,
   waitForRunner,
   withRunner,
-} from "../runner-control.mjs";
+} = runnerControl;
 
 const DEPLOYMENT_ID = "deploy-123456789";
 const INSTANCE_ID = "fv4runner123";
@@ -74,6 +76,113 @@ test("controller rejects mismatched JIT responses and never writes metadata", as
     /invalid JIT registration response/,
   );
   assert.equal(writes, 0);
+});
+
+test("metadata operations poll to bounded success and reject provider failure or malformed state", async () => {
+  assert.equal(typeof runnerControl.waitForOperation, "function");
+  let now = 0;
+  const calls = [];
+  const operation = await runnerControl.waitForOperation(
+    { id: "operation-123", done: false },
+    {
+      timeoutMs: 1_000,
+      pollIntervalMs: 100,
+      clock: {
+        now: () => now,
+        async sleep(milliseconds) {
+          calls.push(`sleep:${milliseconds}`);
+          now += milliseconds;
+        },
+      },
+      async getOperation(id) {
+        calls.push(`get:${id}`);
+        return calls.filter((value) => value.startsWith("get:")).length === 1
+          ? { id, done: false }
+          : { id, done: true, response: {} };
+      },
+    },
+  );
+  assert.deepEqual(operation, { id: "operation-123", done: true, response: {} });
+  assert.deepEqual(calls, ["sleep:100", "get:operation-123", "sleep:100", "get:operation-123"]);
+
+  await assert.rejects(
+    runnerControl.waitForOperation(
+      { id: "operation-error", done: true, error: { code: 7, message: "sensitive" } },
+      { getOperation: async () => assert.fail("completed operations must not poll") },
+    ),
+    /^Error: Yandex operation failed$/,
+  );
+  for (const malformed of [
+    {},
+    { id: "", done: false },
+    { id: "operation-malformed" },
+    { id: "operation-malformed", done: "true" },
+    { id: "operation-malformed", done: true, error: "bad" },
+  ])
+    await assert.rejects(
+      runnerControl.waitForOperation(malformed, { getOperation: async () => ({}) }),
+      /invalid Yandex operation response/,
+    );
+});
+
+test("metadata operation timeout prevents runner start", async () => {
+  assert.equal(typeof runnerControl.prepareAndStartRunner, "function");
+  let now = 0;
+  const calls = [];
+  const dependencies = {
+    deploymentId: DEPLOYMENT_ID,
+    instanceId: INSTANCE_ID,
+    github: {
+      async generateJitConfig(request) {
+        return {
+          runner: { name: request.name, labels: request.labels.map((name) => ({ name })) },
+          encoded_jit_config: "one-use-encoded-config",
+        };
+      },
+      async listRunners() {
+        calls.push("list");
+        return [];
+      },
+      async deleteRunner() {},
+    },
+    yandex: {
+      async updateMetadata() {
+        calls.push("metadata");
+        await runnerControl.waitForOperation(
+          { id: "operation-timeout", done: false },
+          {
+            timeoutMs: 200,
+            pollIntervalMs: 100,
+            clock: {
+              now: () => now,
+              async sleep(milliseconds) {
+                now += milliseconds;
+              },
+            },
+            async getOperation() {
+              calls.push("operation");
+              return { id: "operation-timeout", done: false };
+            },
+          },
+        );
+      },
+      async getInstanceStatus() {
+        calls.push("status");
+        return "STOPPED";
+      },
+      async startInstance() {
+        calls.push("start");
+      },
+      async stopInstance() {},
+    },
+  };
+
+  await assert.rejects(
+    runnerControl.prepareAndStartRunner(dependencies),
+    /Yandex operation timed out/,
+  );
+  assert.deepEqual(calls, ["metadata", "operation", "operation"]);
+  assert.equal(calls.includes("start"), false);
 });
 
 function sshField(value) {

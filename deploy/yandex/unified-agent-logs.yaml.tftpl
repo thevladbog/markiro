@@ -22,6 +22,8 @@ routes:
       id: markiro_sanitized_journals
       config:
         path: /var/log/markiro/observability.log
+        out_directory: /var/log/markiro
+        state_directory: /var/lib/yandex/unified_agent/markiro
         min_bytes_read: 1b
         line_delimiter: "\n"
         read_only_newlines: true
@@ -31,6 +33,6 @@ routes:
         plugin: yc_logs
         id: markiro_application_logs
         config:
-          folder_id: ${folder_id}
+          log_group_id: ${application_log_group_id}
           iam:
             cloud_meta: {}
