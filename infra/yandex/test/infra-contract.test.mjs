@@ -151,6 +151,70 @@ test("repository scanner rejects literal credentials in an unlisted extension", 
   ]);
 });
 
+test("repository scanner rejects a force-staged credential under a generated path", async () => {
+  const credentialAssignment = `${["to", "ken"].join("")} = ${JSON.stringify(
+    ["test", "only", "placeholder"].join("-"),
+  )}`;
+
+  assert.deepEqual(
+    await scanFixture("infra/yandex/.terraform/credentials.txt", credentialAssignment),
+    [
+      {
+        relativePath: "infra/yandex/.terraform/credentials.txt",
+        reason: "literal credential material",
+      },
+    ],
+  );
+});
+
+test("repository scanner rejects an HCL credential followed by an inline comment", async () => {
+  const credentialAssignment = `${["access", "key"].join("_")} = ${JSON.stringify(
+    ["test", "only", "placeholder"].join("-"),
+  )} # test fixture`;
+
+  assert.deepEqual(await scanFixture("infra/yandex/backend.tf", credentialAssignment), [
+    {
+      relativePath: "infra/yandex/backend.tf",
+      reason: "literal credential material",
+    },
+  ]);
+});
+
+test("repository scanner rejects a YAML credential literal", async () => {
+  const credentialAssignment = `${["access", "key"].join("_")}: ${JSON.stringify(
+    ["test", "only", "placeholder"].join("-"),
+  )}`;
+
+  assert.deepEqual(await scanFixture("infra/yandex/backend.yaml", credentialAssignment), [
+    {
+      relativePath: "infra/yandex/backend.yaml",
+      reason: "literal credential material",
+    },
+  ]);
+});
+
+test("repository scanner rejects a JSON credential literal", async () => {
+  const credentialDocument = JSON.stringify({
+    [["access", "key"].join("_")]: ["test", "only", "placeholder"].join("-"),
+  });
+
+  assert.deepEqual(await scanFixture("infra/yandex/backend.json", credentialDocument), [
+    {
+      relativePath: "infra/yandex/backend.json",
+      reason: "literal credential material",
+    },
+  ]);
+});
+
+test("repository scanner permits runtime credential variable references without values", async () => {
+  const runtimeReferences = [
+    "AWS_ACCESS_KEY_ID",
+    `${["access", "key"].join("_")} = var.backend_access_key`,
+  ].join("\n");
+
+  assert.deepEqual(await scanFixture("infra/yandex/runtime-inputs.txt", runtimeReferences), []);
+});
+
 test("repository scanner rejects a nonblank secret variable default", async () => {
   const secretVariable = `variable ${JSON.stringify(
     ["to", "ken"].join(""),
