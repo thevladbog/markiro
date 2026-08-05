@@ -28,6 +28,17 @@ variable "app_service_account_id" {
   nullable    = false
 }
 
+variable "runtime_secret_id" {
+  description = "Identifier of the runtime Lockbox container, never its payload."
+  type        = string
+  nullable    = false
+
+  validation {
+    condition     = length(trimspace(var.runtime_secret_id)) > 0
+    error_message = "runtime_secret_id must not be empty."
+  }
+}
+
 variable "runner_service_account_id" {
   description = "Runtime service-account ID attached to the ephemeral runner instance."
   type        = string

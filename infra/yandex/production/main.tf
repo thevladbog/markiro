@@ -26,6 +26,7 @@ module "compute" {
   ubuntu_lts_image_family   = var.ubuntu_lts_image_family
   kms_key_id                = var.kms_key_id
   app_service_account_id    = var.app_service_account_id
+  runtime_secret_id         = var.runtime_secret_id
   runner_service_account_id = var.runner_service_account_id
   app_subnet_id             = module.network.app_subnet_id
   management_subnet_id      = module.network.management_subnet_id

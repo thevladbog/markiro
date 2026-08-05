@@ -1848,6 +1848,32 @@ test("production private-compute contract rejects public NAT, CIDR SSH, public a
   assert.throws(() => assertPrivateNetworkAndCompute(embeddedMetadataCredential));
 });
 
+test("runtime secret materialization is installed with only its Lockbox identifier and a hardened observer", async () => {
+  const [compute, cloudInit, runtimeUnit, observerUnit, observerTimer] = await Promise.all([
+    readRepositoryFile("infra/yandex/modules/compute/main.tf"),
+    readRepositoryFile("infra/yandex/modules/compute/cloud-init-app.yaml.tftpl"),
+    readRepositoryFile("deploy/yandex/systemd/markiro-runtime-env.service"),
+    readRepositoryFile("deploy/yandex/systemd/markiro-readiness-observer.service"),
+    readRepositoryFile("deploy/yandex/systemd/markiro-readiness-observer.timer"),
+  ]);
+
+  assert.match(compute, /runtime_secret_id\s*=\s*var\.runtime_secret_id/);
+  assert.match(cloudInit, /MARKIRO_RUNTIME_SECRET_ID=\$\{runtime_secret_id\}/);
+  assert.match(cloudInit, /owner:\s*root:root/g);
+  assert.match(cloudInit, /permissions:\s*"0600"/);
+  assert.doesNotMatch(cloudInit, /(?:DATABASE_URL|SMTP_PASSWORD|S3_SECRET_ACCESS_KEY)\s*=/);
+  assert.match(runtimeUnit, /Before=markiro-compose\.service markiro-deploy\.service/);
+  assert.match(runtimeUnit, /ReadWritePaths=\/etc\/markiro/);
+  assert.match(runtimeUnit, /NoNewPrivileges=true/);
+  assert.match(observerUnit, /User=markiro-monitor/);
+  assert.match(
+    observerUnit,
+    /ExecStart=\/usr\/bin\/node \/usr\/local\/lib\/markiro\/readiness-observer\.mjs/,
+  );
+  assert.match(observerTimer, /OnUnitActiveSec=1min/);
+  assert.match(observerTimer, /Persistent=true/);
+});
+
 test("bootstrap contract rejects a Terraform-managed static access key", async () => {
   const sources = await bootstrapContractSources();
   sources.iam += '\nresource "yandex_iam_service_account_static_access_key" "unsafe" {}\n';

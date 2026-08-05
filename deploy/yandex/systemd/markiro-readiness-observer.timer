@@ -1,0 +1,11 @@
+[Unit]
+Description=Observe Markiro readiness every minute
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+Persistent=true
+Unit=markiro-readiness-observer.service
+
+[Install]
+WantedBy=timers.target

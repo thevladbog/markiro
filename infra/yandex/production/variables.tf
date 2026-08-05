@@ -78,6 +78,20 @@ variable "app_service_account_id" {
   nullable    = false
 }
 
+variable "runtime_secret_id" {
+  description = "Bootstrap-created runtime Lockbox secret ID; payload remains out of Terraform."
+  type        = string
+  nullable    = false
+
+  validation {
+    condition = length(trimspace(var.runtime_secret_id)) > 0 && contains(
+      var.lockbox_secret_ids,
+      var.runtime_secret_id,
+    )
+    error_message = "runtime_secret_id must be a nonblank audited Lockbox secret ID."
+  }
+}
+
 variable "runner_service_account_id" {
   description = "Bootstrap-created runtime service account for the runner VM."
   type        = string

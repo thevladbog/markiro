@@ -45,7 +45,14 @@ resource "yandex_compute_instance" "app" {
   metadata = {
     enable-oslogin     = true
     serial-port-enable = false
-    user-data          = templatefile("${path.module}/cloud-init-app.yaml.tftpl", {})
+    user-data = templatefile("${path.module}/cloud-init-app.yaml.tftpl", {
+      runtime_secret_id             = var.runtime_secret_id
+      runtime_env_script_b64        = base64encode(file("${path.module}/../../../../deploy/yandex/runtime-env.mjs"))
+      readiness_observer_script_b64 = base64encode(file("${path.module}/../../../../deploy/yandex/readiness-observer.mjs"))
+      runtime_env_unit_b64          = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-runtime-env.service"))
+      readiness_observer_unit_b64   = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-readiness-observer.service"))
+      readiness_observer_timer_b64  = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-readiness-observer.timer"))
+    })
   }
 }
 
