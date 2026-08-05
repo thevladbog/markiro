@@ -1,0 +1,253 @@
+name: Deploy production
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_run_id:
+        description: Successful Publish production images workflow run ID
+        required: true
+        type: string
+      release_sha:
+        description: Exact 40-character release commit
+        required: true
+        type: string
+  workflow_run:
+    workflows: [Publish production images]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+
+concurrency:
+  group: markiro-production-deployment
+  cancel-in-progress: false
+
+jobs:
+  controller:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    outputs:
+      deployment-id: ${{ steps.runner.outputs.deployment-id }}
+      runner-id: ${{ steps.runner.outputs.runner-id }}
+      runner-label: ${{ steps.runner.outputs.runner-label }}
+      release-run-id: ${{ steps.release.outputs.release-run-id }}
+      release-sha: ${{ steps.release.outputs.release-sha }}
+    env:
+      YC_OIDC_AUDIENCE: ${{ vars.YC_OIDC_AUDIENCE }}
+      YC_RUNNER_SERVICE_ACCOUNT_ID: ${{ vars.YC_RUNNER_SERVICE_ACCOUNT_ID }}
+      YC_TERRAFORM_SERVICE_ACCOUNT_ID: ${{ vars.YC_TERRAFORM_SERVICE_ACCOUNT_ID }}
+      YC_RUNNER_REGISTRATION_SECRET_ID: ${{ vars.YC_RUNNER_REGISTRATION_SECRET_ID }}
+      YC_RUNNER_INSTANCE_ID: ${{ vars.YC_RUNNER_INSTANCE_ID }}
+      YC_APP_INSTANCE_ID: ${{ vars.YC_APP_INSTANCE_ID }}
+      YC_POSTGRES_CLUSTER_ID: ${{ vars.YC_POSTGRES_CLUSTER_ID }}
+      YC_LOAD_BALANCER_ID: ${{ vars.YC_LOAD_BALANCER_ID }}
+      YC_BACKEND_GROUP_ID: ${{ vars.YC_BACKEND_GROUP_ID }}
+      YC_TARGET_GROUP_ID: ${{ vars.YC_APP_TARGET_GROUP_ID }}
+    steps:
+      - name: Resolve exact trusted release identity
+        id: release
+        env:
+          DISPATCH_RUN_ID: ${{ inputs.release_run_id }}
+          DISPATCH_SHA: ${{ inputs.release_sha }}
+          EVENT_RUN_ID: ${{ github.event.workflow_run.id }}
+          EVENT_SHA: ${{ github.event.workflow_run.head_sha }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == workflow_run ]]; then
+            release_run_id="$EVENT_RUN_ID"
+            release_sha="$EVENT_SHA"
+          else
+            release_run_id="$DISPATCH_RUN_ID"
+            release_sha="$DISPATCH_SHA"
+          fi
+          [[ "$release_run_id" =~ ^[1-9][0-9]*$ ]]
+          [[ "$release_sha" =~ ^[0-9a-f]{40}$ ]]
+          run_path="$RUNNER_TEMP/release-run.json"
+          curl --fail --silent \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer $GITHUB_TOKEN" \
+            --header "X-GitHub-Api-Version: 2026-03-10" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$release_run_id" \
+            --output "$run_path"
+          jq -e --arg sha "$release_sha" '
+            .name == "Publish production images" and
+            .path == ".github/workflows/release-images.yml" and
+            .event == "push" and .head_branch == "main" and
+            .head_sha == $sha and .conclusion == "success"
+          ' "$run_path" > /dev/null
+          rm -f "$run_path"
+          printf 'release-run-id=%s\nrelease-sha=%s\n' "$release_run_id" "$release_sha" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ steps.release.outputs.release-sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Download the exact trusted release manifest
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: markiro-release-manifest-${{ steps.release.outputs.release-sha }}
+          path: ${{ runner.temp }}/release-manifest
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.release.outputs.release-run-id }}
+      - name: Validate manifest, infrastructure, backup, then start the one-use runner
+        id: runner
+        env:
+          EXPECTED_RELEASE_RUN_ID: ${{ steps.release.outputs.release-run-id }}
+          EXPECTED_RELEASE_SHA: ${{ steps.release.outputs.release-sha }}
+          RELEASE_MANIFEST_PATH: ${{ runner.temp }}/release-manifest/release-manifest.json
+        run: |
+          set -euo pipefail
+          node deploy/production/release-manifest.mjs validate "$RELEASE_MANIFEST_PATH" "$EXPECTED_RELEASE_RUN_ID" > /dev/null
+          [[ "$(git rev-parse HEAD)" == "$EXPECTED_RELEASE_SHA" ]]
+          github_oidc_response="$(curl --fail --silent --get \
+            --header "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            --data-urlencode "audience=$YC_OIDC_AUDIENCE" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL")"
+          github_oidc_token="$(jq -er '.value | select(type == "string" and length > 0)' <<<"$github_oidc_response")"
+          echo "::add-mask::$github_oidc_token"
+          iam_response="$(curl --fail --silent \
+            --request POST \
+            --header "Content-Type: application/x-www-form-urlencoded" \
+            --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' \
+            --data-urlencode 'requested_token_type=urn:ietf:params:oauth:token-type:access_token' \
+            --data-urlencode "audience=$YC_TERRAFORM_SERVICE_ACCOUNT_ID" \
+            --data-urlencode "subject_token=$github_oidc_token" \
+            --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:id_token' \
+            https://auth.yandex.cloud/oauth/token)"
+          iam_token="$(jq -er '.access_token | select(type == "string" and length > 0)' <<<"$iam_response")"
+          echo "::add-mask::$iam_token"
+          runner_iam_response="$(curl --fail --silent \
+            --request POST \
+            --header "Content-Type: application/x-www-form-urlencoded" \
+            --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' \
+            --data-urlencode 'requested_token_type=urn:ietf:params:oauth:token-type:access_token' \
+            --data-urlencode "audience=$YC_RUNNER_SERVICE_ACCOUNT_ID" \
+            --data-urlencode "subject_token=$github_oidc_token" \
+            --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:id_token' \
+            https://auth.yandex.cloud/oauth/token)"
+          runner_iam_token="$(jq -er '.access_token | select(type == "string" and length > 0)' <<<"$runner_iam_response")"
+          echo "::add-mask::$runner_iam_token"
+          lockbox_path="$RUNNER_TEMP/runner-lockbox.json"
+          curl --fail --silent \
+            --header "Authorization: Bearer $runner_iam_token" \
+            "https://payload.lockbox.api.cloud.yandex.net/lockbox/v1/secrets/$YC_RUNNER_REGISTRATION_SECRET_ID/payload" \
+            --output "$lockbox_path"
+          jq -e '
+            (.entries | type == "array" and length == 1) and
+            .entries[0].key == "GITHUB_RUNNER_ADMIN_TOKEN" and
+            (.entries[0].textValue | type == "string" and length > 0)
+          ' "$lockbox_path" > /dev/null
+          github_runner_admin_token="$(jq -er '.entries[0].textValue' "$lockbox_path")"
+          echo "::add-mask::$github_runner_admin_token"
+          rm -f "$lockbox_path"
+          export YC_GATE_IAM_TOKEN="$iam_token" YC_IAM_TOKEN="$runner_iam_token"
+          export GITHUB_RUNNER_ADMIN_TOKEN="$github_runner_admin_token"
+          export RUNNER_WAIT_DISCOVERY=1 RUNNER_OUTPUT_PATH="$GITHUB_OUTPUT"
+          node deploy/yandex/runner-control.mjs start
+          unset github_oidc_token github_runner_admin_token iam_token runner_iam_token
+          unset YC_GATE_IAM_TOKEN YC_IAM_TOKEN GITHUB_RUNNER_ADMIN_TOKEN
+
+  deploy:
+    needs: controller
+    if: needs.controller.result == 'success'
+    runs-on: [self-hosted, linux, "${{ needs.controller.outputs.runner-label }}"]
+    timeout-minutes: 40
+    environment: production
+    env:
+      EXPECTED_RELEASE_RUN_ID: ${{ needs.controller.outputs.release-run-id }}
+      EXPECTED_RELEASE_SHA: ${{ needs.controller.outputs.release-sha }}
+      YC_APP_INSTANCE_ID: ${{ vars.YC_APP_INSTANCE_ID }}
+      YC_OS_LOGIN: ${{ vars.YC_RUNNER_OS_LOGIN }}
+      YC_ORGANIZATION_ID: ${{ vars.YC_ORGANIZATION_ID }}
+      YC_LOAD_BALANCER_ID: ${{ vars.YC_LOAD_BALANCER_ID }}
+      YC_BACKEND_GROUP_ID: ${{ vars.YC_BACKEND_GROUP_ID }}
+      YC_TARGET_GROUP_ID: ${{ vars.YC_APP_TARGET_GROUP_ID }}
+      MARKIRO_DOMAIN: ${{ vars.MARKIRO_DOMAIN }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.controller.outputs.release-sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Download the exact trusted release manifest
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: markiro-release-manifest-${{ needs.controller.outputs.release-sha }}
+          path: ${{ runner.temp }}/release-manifest
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ needs.controller.outputs.release-run-id }}
+      - name: Deploy the immutable private bundle by digest
+        env:
+          RELEASE_MANIFEST_PATH: ${{ runner.temp }}/release-manifest/release-manifest.json
+        run: |
+          set -euo pipefail
+          node deploy/yandex/remote-deploy.mjs run
+      - name: Remove local deployment material
+        if: always()
+        run: |
+          set -euo pipefail
+          rm -rf -- "${RUNNER_TEMP:?}/release-manifest" "${RUNNER_TEMP:?}/markiro-os-login"
+
+  cleanup:
+    needs: [controller, deploy]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    env:
+      DEPLOYMENT_ID: ${{ needs.controller.outputs.deployment-id }}
+      RUNNER_ID: ${{ needs.controller.outputs.runner-id }}
+      YC_OIDC_AUDIENCE: ${{ vars.YC_OIDC_AUDIENCE }}
+      YC_RUNNER_SERVICE_ACCOUNT_ID: ${{ vars.YC_RUNNER_SERVICE_ACCOUNT_ID }}
+      YC_RUNNER_REGISTRATION_SECRET_ID: ${{ vars.YC_RUNNER_REGISTRATION_SECRET_ID }}
+      YC_RUNNER_INSTANCE_ID: ${{ vars.YC_RUNNER_INSTANCE_ID }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.controller.outputs.release-sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Deregister any stale runner and stop the VM independently
+        run: |
+          set -euo pipefail
+          github_oidc_response="$(curl --fail --silent --get \
+            --header "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            --data-urlencode "audience=$YC_OIDC_AUDIENCE" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL")"
+          github_oidc_token="$(jq -er '.value | select(type == "string" and length > 0)' <<<"$github_oidc_response")"
+          echo "::add-mask::$github_oidc_token"
+          iam_response="$(curl --fail --silent \
+            --request POST \
+            --header "Content-Type: application/x-www-form-urlencoded" \
+            --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' \
+            --data-urlencode 'requested_token_type=urn:ietf:params:oauth:token-type:access_token' \
+            --data-urlencode "audience=$YC_RUNNER_SERVICE_ACCOUNT_ID" \
+            --data-urlencode "subject_token=$github_oidc_token" \
+            --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:id_token' \
+            https://auth.yandex.cloud/oauth/token)"
+          iam_token="$(jq -er '.access_token | select(type == "string" and length > 0)' <<<"$iam_response")"
+          echo "::add-mask::$iam_token"
+          lockbox_path="$RUNNER_TEMP/runner-lockbox.json"
+          curl --fail --silent \
+            --header "Authorization: Bearer $iam_token" \
+            "https://payload.lockbox.api.cloud.yandex.net/lockbox/v1/secrets/$YC_RUNNER_REGISTRATION_SECRET_ID/payload" \
+            --output "$lockbox_path"
+          jq -e '
+            (.entries | type == "array" and length == 1) and
+            .entries[0].key == "GITHUB_RUNNER_ADMIN_TOKEN" and
+            (.entries[0].textValue | type == "string" and length > 0)
+          ' "$lockbox_path" > /dev/null
+          github_runner_admin_token="$(jq -er '.entries[0].textValue' "$lockbox_path")"
+          echo "::add-mask::$github_runner_admin_token"
+          rm -f "$lockbox_path"
+          export YC_IAM_TOKEN="$iam_token" GITHUB_RUNNER_ADMIN_TOKEN="$github_runner_admin_token"
+          node deploy/yandex/runner-control.mjs cleanup
+          unset github_oidc_token github_runner_admin_token iam_token YC_IAM_TOKEN GITHUB_RUNNER_ADMIN_TOKEN

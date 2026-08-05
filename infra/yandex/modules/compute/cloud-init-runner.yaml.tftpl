@@ -4,47 +4,127 @@ packages:
   - ca-certificates
   - curl
   - docker.io
+  - jq
+  - openssh-client
+  - tar
+users:
+  - name: markiro-runner
+    system: true
+    shell: /usr/sbin/nologin
+    groups: [docker]
 write_files:
   - path: /usr/local/lib/markiro/runner-jit
     permissions: "0755"
     content: |
-      #!/usr/bin/env sh
-      set -eu
+      #!/usr/bin/env bash
+      set -euo pipefail
+      umask 077
 
-      if [ "$#" -ne 1 ] || [ "$1" != "--bootstrap-only" ]; then
-        printf '%s\n' "markiro runner JIT implementation is pending Task 11" >&2
-        exit 64
-      fi
+      fail() {
+        printf '%s\n' "markiro runner bootstrap failed" >&2
+        exit 1
+      }
+      trap fail ERR
 
-      printf '%s\n' "markiro runner bootstrap completed without a registration job" >&2
+      tmp_dir=/run/markiro-runner
+      payload_path="$tmp_dir/lockbox-payload.json"
+      request_path="$tmp_dir/jit-request.json"
+      response_path="$tmp_dir/jit-response.json"
+      curl_config="$tmp_dir/github-curl.conf"
+      install -d -m 0700 "$tmp_dir"
+      trap 'unset iam_token github_token jit_config; rm -f "$payload_path" "$request_path" "$response_path" "$curl_config"' EXIT
 
-  - path: /etc/systemd/system/markiro-runner-jit.service
+      iam_token="$(curl --fail --silent \
+        --header 'Metadata-Flavor: Google' \
+        http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token | \
+        jq -er '.access_token | select(type == "string" and length > 0)')"
+      curl --fail --silent \
+        --header "Authorization: Bearer $iam_token" \
+        "https://payload.lockbox.api.cloud.yandex.net/lockbox/v1/secrets/${runner_registration_secret_id}/payload" \
+        --output "$payload_path"
+      unset iam_token
+      jq -e '
+        type == "object" and
+        (.entries | type == "array" and length == 1) and
+        (.entries[0] | (keys | sort) == ["key", "textValue"]) and
+        .entries[0].key == "GITHUB_RUNNER_ADMIN_TOKEN" and
+        (.entries[0].textValue | type == "string" and length > 0)
+      ' "$payload_path" > /dev/null
+      github_token="$(jq -er '.entries[0].textValue' "$payload_path")"
+      rm -f "$payload_path"
+
+      deployment_id="$(cat /proc/sys/kernel/random/uuid)"
+      runner_name="markiro-$deployment_id"
+      runner_label="markiro-deployment-$deployment_id"
+      jq -n \
+        --arg name "$runner_name" \
+        --argjson runner_group_id "$GITHUB_RUNNER_GROUP_ID" \
+        --arg label "$runner_label" \
+        '{name: $name, runner_group_id: $runner_group_id, labels: ["self-hosted", "linux", $label], work_folder: "_work"}' \
+        > "$request_path"
+      {
+        printf '%s\n' 'fail' 'silent' 'show-error = false'
+        printf 'header = "Accept: application/vnd.github+json"\n'
+        printf 'header = "Authorization: Bearer %s"\n' "$github_token"
+        printf 'header = "X-GitHub-Api-Version: 2026-03-10"\n'
+      } > "$curl_config"
+      chmod 0600 "$curl_config" "$request_path"
+      curl --config "$curl_config" \
+        --request POST \
+        --header 'Content-Type: application/json' \
+        --data-binary "@$request_path" \
+        "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runners/generate-jitconfig" \
+        --output "$response_path"
+      unset github_token
+      rm -f "$curl_config" "$request_path"
+      jit_config="$(jq -er '
+        type == "object" and
+        (.runner.name | type == "string") and
+        (.runner.labels | map(.name) | index("'"$runner_label"'")) != null and
+        (.encoded_jit_config | type == "string" and length > 0) |
+        .encoded_jit_config
+      ' "$response_path")"
+      rm -f "$response_path"
+      trap - ERR
+      exec /opt/actions-runner/run.sh --jitconfig "$jit_config"
+
+  - path: /etc/systemd/system/markiro-runner.service
     permissions: "0644"
-    content: |
-      [Unit]
-      Description=Markiro just-in-time deployment runner
-      Wants=network-online.target
-      After=network-online.target
-      Before=shutdown.target
-      ConditionPathExists=/usr/local/lib/markiro/runner-jit
-
-      [Service]
-      Type=oneshot
-      ExecStart=/usr/local/lib/markiro/runner-jit --bootstrap-only
-      RemainAfterExit=true
-
-      [Install]
-      WantedBy=multi-user.target
+    encoding: b64
+    content: ${runner_unit_b64}
 runcmd:
-  - install -d -m 0755 /usr/local/lib/markiro /var/lib/markiro
+  - install -d -m 0755 /usr/local/lib/markiro /opt/actions-runner /var/lib/markiro
+  - chown -R markiro-runner:markiro-runner /opt/actions-runner
+  - |
+      set -eu
+      RUNNER_VERSION=2.336.0
+      RUNNER_SHA256=04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d
+      archive=/tmp/actions-runner-linux-x64.tar.gz
+      test "$(uname -m)" = x86_64
+      curl --fail --silent --show-error --location \
+        "https://github.com/actions/runner/releases/download/v$RUNNER_VERSION/actions-runner-linux-x64-$RUNNER_VERSION.tar.gz" \
+        --output "$archive"
+      printf '%s  %s\n' "$RUNNER_SHA256" "$archive" | sha256sum --check --status
+      tar -xzf "$archive" -C /opt/actions-runner --no-same-owner
+      rm -f "$archive"
+      chown -R markiro-runner:markiro-runner /opt/actions-runner
+  - |
+      set -eu
+      archive=/tmp/yc_linux_amd64.tar.gz
+      unpack=/tmp/yandex-cloud-cli
+      curl --fail --silent --show-error --location \
+        https://storage.yandexcloud.net/yandexcloud-yc/release/yc_linux_amd64.tar.gz \
+        --output "$archive"
+      install -d -m 0700 "$unpack"
+      tar -xzf "$archive" -C "$unpack" --no-same-owner
+      install -m 0755 "$unpack/yc" /usr/local/bin/yc
+      rm -rf -- "$archive" "$unpack"
   - systemctl daemon-reload
-  - systemctl enable markiro-runner-jit.service
-  - systemctl start markiro-runner-jit.service
-  - systemctl is-active --quiet markiro-runner-jit.service
+  - systemctl enable markiro-runner.service
   - touch /var/lib/markiro/markiro-runner-bootstrap-complete
 power_state:
   delay: now
   mode: poweroff
-  message: Runner bootstrap completed; Task 11 controller starts the JIT implementation for a bounded job.
+  message: Runner bootstrap complete; controller may start the one-use JIT runner.
   timeout: 30
   condition: true

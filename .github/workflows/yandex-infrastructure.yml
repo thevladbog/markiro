@@ -124,6 +124,7 @@ jobs:
       TF_VAR_app_service_account_id: ${{ vars.YC_APP_SERVICE_ACCOUNT_ID }}
       TF_VAR_runtime_secret_id: ${{ vars.YC_RUNTIME_SECRET_ID }}
       TF_VAR_runner_service_account_id: ${{ vars.YC_RUNNER_SERVICE_ACCOUNT_ID }}
+      TF_VAR_runner_registration_secret_id: ${{ vars.YC_RUNNER_REGISTRATION_SECRET_ID }}
       TF_VAR_audit_service_account_id: ${{ vars.YC_AUDIT_SERVICE_ACCOUNT_ID }}
       TF_VAR_database_name: ${{ vars.YC_DATABASE_NAME }}
       TF_VAR_database_disk_size_gb: ${{ vars.YC_DATABASE_DISK_SIZE_GB }}
@@ -340,6 +341,7 @@ jobs:
       TF_VAR_app_service_account_id: ${{ vars.YC_APP_SERVICE_ACCOUNT_ID }}
       TF_VAR_runtime_secret_id: ${{ vars.YC_RUNTIME_SECRET_ID }}
       TF_VAR_runner_service_account_id: ${{ vars.YC_RUNNER_SERVICE_ACCOUNT_ID }}
+      TF_VAR_runner_registration_secret_id: ${{ vars.YC_RUNNER_REGISTRATION_SECRET_ID }}
       TF_VAR_audit_service_account_id: ${{ vars.YC_AUDIT_SERVICE_ACCOUNT_ID }}
       TF_VAR_database_name: ${{ vars.YC_DATABASE_NAME }}
       TF_VAR_database_disk_size_gb: ${{ vars.YC_DATABASE_DISK_SIZE_GB }}

@@ -313,8 +313,8 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, variables }) {
   );
   assert.equal(
     (iam.match(/resource\s+"yandex_iam_workload_identity_federated_credential"\s+/g) ?? []).length,
-    2,
-    "exact deployment and infrastructure repository/environment credentials are required",
+    3,
+    "exact production controller, production runner, and infrastructure credentials are required",
   );
 
   assert.doesNotMatch(
@@ -417,7 +417,7 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, variables }) {
   assert.match(federationUse, /role\s*=\s*"iam\.workloadIdentityFederations\.user"/);
   assert.match(
     federationUse,
-    /members\s*=\s*\["serviceAccount:\$\{yandex_iam_service_account\.terraform\.id\}"\]/,
+    /members\s*=\s*\[[\s\S]*?serviceAccount:\$\{yandex_iam_service_account\.terraform\.id\}[\s\S]*?serviceAccount:\$\{yandex_iam_service_account\.runner\.id\}[\s\S]*?\]/,
   );
 
   const stateAccess = terraformResourceBlock(
@@ -626,20 +626,11 @@ function assertPrivateNetworkAndCompute({
   );
   assert.match(
     runnerCloudInit,
-    /path:\s*\/usr\/local\/lib\/markiro\/runner-jit[\s\S]*?permissions:\s*"0755"[\s\S]*?--bootstrap-only/,
+    /path:\s*\/usr\/local\/lib\/markiro\/runner-jit[\s\S]*?permissions:\s*"0755"[\s\S]*?generate-jitconfig/,
   );
-  assert.match(runnerCloudInit, /markiro-runner-jit\.service/);
-  assert.match(runnerCloudInit, /After=network-online\.target/);
-  assert.match(runnerCloudInit, /Before=shutdown\.target/);
-  assert.match(runnerCloudInit, /ConditionPathExists=\/usr\/local\/lib\/markiro\/runner-jit/);
-  assert.match(
-    runnerCloudInit,
-    /ExecStart=\/usr\/local\/lib\/markiro\/runner-jit\s+--bootstrap-only/,
-  );
-  assert.match(runnerCloudInit, /RemainAfterExit=true/);
-  assert.match(runnerCloudInit, /systemctl\s+enable\s+markiro-runner-jit\.service/);
-  assert.match(runnerCloudInit, /systemctl\s+start\s+markiro-runner-jit\.service/);
-  assert.match(runnerCloudInit, /systemctl\s+is-active\s+--quiet\s+markiro-runner-jit\.service/);
+  assert.match(runnerCloudInit, /\/etc\/systemd\/system\/markiro-runner\.service/);
+  assert.match(runnerCloudInit, /systemctl\s+enable\s+markiro-runner\.service/);
+  assert.doesNotMatch(runnerCloudInit, /systemctl\s+start\s+markiro-runner\.service/);
   assert.match(runnerCloudInit, /markiro-runner-bootstrap-complete/);
   assert.doesNotMatch(runnerCloudInit, /markiro-runner-ready/);
   assert.match(runnerCloudInit, /power_state\s*:\s*[\s\S]*?mode\s*:\s*poweroff/);
@@ -1714,6 +1705,70 @@ test("production network and compute keep application and runner traffic private
   assertPrivateNetworkAndCompute(await privateNetworkAndComputeSources());
 });
 
+test("deployment runner uses exact production federation, VM-scoped operator, and one-use JIT boot", async () => {
+  const iam = await readRepositoryFile("infra/yandex/modules/iam/main.tf");
+  const compute = await readRepositoryFile("infra/yandex/modules/compute/main.tf");
+  const cloudInit = await readRepositoryFile(
+    "infra/yandex/modules/compute/cloud-init-runner.yaml.tftpl",
+  );
+  const unit = await readRepositoryFile("deploy/yandex/systemd/markiro-runner.service");
+
+  const credential = terraformResourceBlock(
+    iam,
+    "yandex_iam_workload_identity_federated_credential",
+    "github_production_runner",
+  );
+  assert.match(credential, /service_account_id\s*=\s*yandex_iam_service_account\.runner\.id/);
+  assert.match(credential, /external_subject_id\s*=\s*local\.github_subject/);
+  const federationUse = terraformResourceBlock(
+    iam,
+    "yandex_iam_workload_identity_oidc_federation_iam_binding",
+    "terraform_user",
+  );
+  assert.match(federationUse, /yandex_iam_service_account\.terraform\.id/);
+  assert.match(federationUse, /yandex_iam_service_account\.runner\.id/);
+
+  const operator = terraformResourceBlock(
+    compute,
+    "yandex_compute_instance_iam_binding",
+    "runner_operator",
+  );
+  assert.match(operator, /instance_id\s*=\s*yandex_compute_instance\.runner\.id/);
+  assert.match(operator, /role\s*=\s*"compute\.operator"/);
+  assert.match(operator, /serviceAccount:\$\{var\.runner_service_account_id\}/);
+  assert.doesNotMatch(
+    compute,
+    /yandex_resourcemanager_folder_iam_(?:member|binding)[\s\S]*role\s*=\s*"compute\.(?:operator|editor|admin)"/,
+  );
+  const appLogin = terraformResourceBlock(
+    compute,
+    "yandex_compute_instance_iam_binding",
+    "runner_app_os_login",
+  );
+  assert.match(appLogin, /instance_id\s*=\s*yandex_compute_instance\.app\.id/);
+  assert.match(appLogin, /role\s*=\s*"compute\.osAdminLogin"/);
+  const albViewer = terraformResourceBlock(
+    compute,
+    "yandex_resourcemanager_folder_iam_member",
+    "runner_alb_viewer",
+  );
+  assert.match(albViewer, /role\s*=\s*"alb\.viewer"/);
+
+  assert.match(cloudInit, /RUNNER_VERSION=2\.336\.0/);
+  assert.match(
+    cloudInit,
+    /RUNNER_SHA256=04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d/,
+  );
+  assert.match(cloudInit, /sha256sum --check --status/);
+  assert.match(cloudInit, /markiro-runner\.service/);
+  assert.doesNotMatch(cloudInit, /GITHUB_RUNNER_ADMIN_TOKEN\s*[:=]\s*[^$\s]/);
+
+  assert.match(unit, /RuntimeDirectory=markiro-runner/);
+  assert.match(unit, /ExecStart=\/usr\/local\/lib\/markiro\/runner-jit/);
+  assert.match(unit, /ExecStopPost=\+\/usr\/sbin\/poweroff/);
+  assert.match(unit, /TimeoutStartSec=45min/);
+});
+
 test("production managed PostgreSQL and object storage protect durable data", async () => {
   assertProtectedManagedData(await managedDataSources());
 });
@@ -2177,8 +2232,8 @@ test("production private-compute contract rejects public NAT, CIDR SSH, public a
 
   const embeddedWriteFileCredential = await privateNetworkAndComputeSources();
   embeddedWriteFileCredential.runnerCloudInit = embeddedWriteFileCredential.runnerCloudInit.replace(
-    "      #!/usr/bin/env sh",
-    "      RUNNER_TOKEN=unsafe-value\n      #!/usr/bin/env sh",
+    "      #!/usr/bin/env bash",
+    "      RUNNER_TOKEN=unsafe-value\n      #!/usr/bin/env bash",
   );
   assert.throws(() => assertPrivateNetworkAndCompute(embeddedWriteFileCredential));
 

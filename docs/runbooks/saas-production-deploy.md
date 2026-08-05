@@ -29,6 +29,65 @@ sanitized command failures rather than provider stderr.
   `0600`. Treat the records as protected operational data because they contain
   registry references and deployment history.
 
+## Protected workflow and private runner boundary
+
+Normal production delivery uses `.github/workflows/deploy-production.yml`. It
+accepts only an explicit dispatch naming the exact successful release run ID
+and commit, or a successful `Publish production images` `workflow_run` from
+`main`. The protected `production` environment must approve the controller,
+one-use deploy job, and independent cleanup job. A pull request, tag-shaped
+image selector, mutable runner label, or a different release workflow is not a
+deployment source.
+
+Populate the bootstrap-created runner-registration Lockbox container out of
+band with exactly one text entry named `GITHUB_RUNNER_ADMIN_TOKEN`. Prefer a
+GitHub App installation token (a GitHub App user token is also supported). For
+the MVP only, a fine-grained PAT is an accepted fallback when it is restricted
+to the `thevladbog/q` repository and grants only repository
+`Administration: write`, which GitHub requires for repository JIT configuration
+and forced stale-runner deletion. Rotate it out of band. Do not copy this token
+into a GitHub repository or environment secret, Terraform, cloud-init, VM
+metadata, or a ticket. The runner and GitHub-hosted cleanup fetch it directly,
+mask it, retain it only in bounded `/run` or runner-temporary files at mode
+`0600`, and delete those files before shutdown. Never enable provider or shell
+debugging around this flow.
+
+The existing exact `repo:thevladbog/q:environment:production` Terraform
+credential remains the production controller credential; the distinct
+`production-infrastructure` credential remains unchanged. A second credential
+with the same exact `production` subject targets only the runner service
+account so GitHub-hosted cleanup can read the runner-only Lockbox payload and
+stop the exact runner VM even when the private job never starts. That service
+account has `compute.operator` on the runner VM itself, not the folder, and
+`compute.osAdminLogin` on the app VM. Yandex provider 0.215.0 has no
+load-balancer-resource IAM-binding resource, so read-only `alb.viewer` at folder
+scope is the documented provider limitation used only for the post-switch
+target-state gate.
+
+The private VM installs GitHub Actions runner `2.336.0` for Linux x64 only after
+verifying the official SHA-256
+`04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d`.
+On each controller-started boot it generates a new deployment ID, requests one
+JIT configuration with the matching `markiro-deployment-<id>` label, executes
+at most one job, removes registration material, and powers off. The deploy job
+exports a one-hour OS Login certificate for the runner service-account profile,
+uses only the app VM internal address, and transfers no SSH static key. Configure
+`YC_RUNNER_OS_LOGIN` and `YC_ORGANIZATION_ID` for that exact OS Login profile;
+there must be no public address on either VM.
+
+Before starting the runner, the controller validates the exact release run,
+manifest SHA/digests, app/runner state, fresh managed PostgreSQL backup, and
+current ALB target health. The transferred archive contains only
+`compose.production.yml`, `deploy/production`, and the validated immutable
+`release-manifest.json`, rooted at `/opt/markiro/releases/<commit>`. Runtime
+Lockbox refresh and production preflight precede digest pulls; migration
+precedes either service switch. A migration failure switches nothing. An API,
+edge, ALB, or external-smoke failure redeploys the exact previous healthy API
+and edge digest pair; it never reverses the database migration. The
+GitHub-hosted `cleanup` job runs with `always()`, deregisters a stale runner when
+present, and stops the VM independently. Cleanup failures are alerted without
+replacing the primary deployment failure.
+
 ## Common setup and hard gates
 
 Set absolute paths and the approved release inputs. `MARKIRO_ROOT` must be the

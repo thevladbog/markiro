@@ -10,6 +10,7 @@ kms_key_id                = "replace-with-existing-kms-key-id"
 app_service_account_id    = "replace-with-bootstrap-app-service-account-id"
 runtime_secret_id         = "replace-with-bootstrap-runtime-lockbox-secret-id"
 runner_service_account_id = "replace-with-bootstrap-runner-service-account-id"
+runner_registration_secret_id = "replace-with-bootstrap-runner-registration-secret-id"
 audit_service_account_id  = "replace-with-bootstrap-audit-service-account-id"
 database_name             = "markiro"
 database_disk_size_gb     = 50

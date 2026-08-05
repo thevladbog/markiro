@@ -21,18 +21,19 @@ module "network" {
 module "compute" {
   source = "../modules/compute"
 
-  folder_id                 = var.folder_id
-  zone                      = var.zone
-  ubuntu_lts_image_family   = var.ubuntu_lts_image_family
-  kms_key_id                = var.kms_key_id
-  app_service_account_id    = var.app_service_account_id
-  runtime_secret_id         = var.runtime_secret_id
-  runner_service_account_id = var.runner_service_account_id
-  app_subnet_id             = module.network.app_subnet_id
-  management_subnet_id      = module.network.management_subnet_id
-  app_security_group_id     = module.network.security_group_ids.app
-  runner_security_group_id  = module.network.security_group_ids.runner
-  labels                    = local.labels
+  folder_id                     = var.folder_id
+  zone                          = var.zone
+  ubuntu_lts_image_family       = var.ubuntu_lts_image_family
+  kms_key_id                    = var.kms_key_id
+  app_service_account_id        = var.app_service_account_id
+  runtime_secret_id             = var.runtime_secret_id
+  runner_service_account_id     = var.runner_service_account_id
+  runner_registration_secret_id = var.runner_registration_secret_id
+  app_subnet_id                 = module.network.app_subnet_id
+  management_subnet_id          = module.network.management_subnet_id
+  app_security_group_id         = module.network.security_group_ids.app
+  runner_security_group_id      = module.network.security_group_ids.runner
+  labels                        = local.labels
 }
 
 module "postgres" {

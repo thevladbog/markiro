@@ -64,11 +64,20 @@ resource "yandex_iam_workload_identity_oidc_federation" "github" {
 resource "yandex_iam_workload_identity_oidc_federation_iam_binding" "terraform_user" {
   federation_id = yandex_iam_workload_identity_oidc_federation.github.id
   role          = "iam.workloadIdentityFederations.user"
-  members       = ["serviceAccount:${yandex_iam_service_account.terraform.id}"]
+  members = [
+    "serviceAccount:${yandex_iam_service_account.terraform.id}",
+    "serviceAccount:${yandex_iam_service_account.runner.id}",
+  ]
 }
 
 resource "yandex_iam_workload_identity_federated_credential" "github_production" {
   service_account_id  = yandex_iam_service_account.terraform.id
+  federation_id       = yandex_iam_workload_identity_oidc_federation.github.id
+  external_subject_id = local.github_subject
+}
+
+resource "yandex_iam_workload_identity_federated_credential" "github_production_runner" {
+  service_account_id  = yandex_iam_service_account.runner.id
   federation_id       = yandex_iam_workload_identity_oidc_federation.github.id
   external_subject_id = local.github_subject
 }

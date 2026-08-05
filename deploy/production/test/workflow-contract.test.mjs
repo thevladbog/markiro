@@ -561,6 +561,113 @@ test("main publication records a durable trusted release manifest after image pu
   );
 });
 
+function assertProductionDeploymentWorkflow(
+  deploymentSource,
+  remoteDeploySource,
+  runnerControlSource,
+) {
+  const workflow = parseWorkflow(deploymentSource, "production deployment workflow");
+
+  assert.deepEqual(Object.keys(workflow.on).sort(), ["workflow_dispatch", "workflow_run"]);
+  assert.deepEqual(workflow.on.workflow_run, {
+    workflows: ["Publish production images"],
+    types: ["completed"],
+    branches: ["main"],
+  });
+  assert.equal("pull_request" in workflow.on, false);
+  assert.deepEqual(workflow.permissions, {
+    actions: "read",
+    contents: "read",
+    "id-token": "write",
+  });
+  assert.doesNotMatch(deploymentSource, /packages:\s*write/);
+  assert.match(deploymentSource, /github\.event\.workflow_run\.conclusion == 'success'/);
+  assert.match(deploymentSource, /github\.event\.workflow_run\.id/);
+  assert.match(deploymentSource, /github\.event\.workflow_run\.head_sha/);
+  assert.equal(
+    (
+      deploymentSource.match(/name: markiro-release-manifest-\$\{\{[^}]*release-sha[^}]*\}\}/g) ??
+      []
+    ).length,
+    2,
+  );
+  assert.match(deploymentSource, /run-id:\s*\$\{\{[^}]*release-run-id[^}]*\}\}/);
+  assert.match(deploymentSource, /environment:\s*production/);
+  assert.match(
+    deploymentSource,
+    /runs-on:\s*\[self-hosted, linux, "\$\{\{ needs\.controller\.outputs\.runner-label \}\}"\]/,
+  );
+  assert.doesNotMatch(deploymentSource, /runs-on:\s*\[self-hosted, linux, markiro-production\]/);
+  assert.match(deploymentSource, /GITHUB_RUNNER_ADMIN_TOKEN/);
+  assert.match(deploymentSource, /YC_RUNNER_SERVICE_ACCOUNT_ID/);
+  assert.equal(workflow.jobs.cleanup?.if, "always()");
+  assert.match(deploymentSource, /node deploy\/yandex\/runner-control\.mjs cleanup/);
+  assert.match(
+    runnerControlSource,
+    /await verifyControllerGates\(requiredEnvironment\("YC_GATE_IAM_TOKEN"\)\)/,
+  );
+  assert.match(runnerControlSource, /production backup gate failed/);
+  assert.match(runnerControlSource, /production ALB gate failed/);
+  assert.doesNotMatch(deploymentSource, /ssh-key|identity-file|--public-address/i);
+  assert.match(remoteDeploySource, /--internal-address/);
+  assertPinnedComments(deploymentSource, CHECKOUT, "v4");
+  assertPinnedComments(deploymentSource, DOWNLOAD_ARTIFACT, "v8.0.1");
+}
+
+test("production deployment is protected, release-bound, dynamically labelled, and always cleaned", async () => {
+  assertProductionDeploymentWorkflow(
+    await source(".github/workflows/deploy-production.yml"),
+    await source("deploy/yandex/remote-deploy.mjs"),
+    await source("deploy/yandex/runner-control.mjs"),
+  );
+});
+
+test("production deployment contract rejects trigger, label, cleanup, and gate mutations", async () => {
+  const deployment = await source(".github/workflows/deploy-production.yml");
+  const remote = await source("deploy/yandex/remote-deploy.mjs");
+  const controller = await source("deploy/yandex/runner-control.mjs");
+
+  for (const mutation of [
+    {
+      name: "pull request deployment trigger",
+      search: "  workflow_run:\n",
+      replacement: "  pull_request:\n  workflow_run:\n",
+    },
+    {
+      name: "static deployment runner label",
+      search: 'runs-on: [self-hosted, linux, "${{ needs.controller.outputs.runner-label }}"]',
+      replacement: "runs-on: [self-hosted, linux, markiro-production]",
+    },
+    {
+      name: "cleanup only on success",
+      search: "  cleanup:\n    needs: [controller, deploy]\n    if: always()",
+      replacement: "  cleanup:\n    needs: [controller, deploy]\n    if: success()",
+    },
+    {
+      name: "tag-shaped manifest artifact",
+      search: "name: markiro-release-manifest-${{ steps.release.outputs.release-sha }}",
+      replacement: "name: markiro-release-manifest-main",
+    },
+  ]) {
+    const mutated = replaceExactlyOnce(
+      deployment,
+      mutation.search,
+      mutation.replacement,
+      mutation.name,
+    );
+    assert.throws(
+      () => assertProductionDeploymentWorkflow(mutated, remote, controller),
+      undefined,
+      mutation.name,
+    );
+  }
+
+  for (const search of ["production backup gate failed", "production ALB gate failed"]) {
+    const mutated = replaceExactlyOnce(controller, search, "gate omitted", `${search} removal`);
+    assert.throws(() => assertProductionDeploymentWorkflow(deployment, remote, mutated));
+  }
+});
+
 test("CI contract rejects each hidden-step, shell, log, and cleanup mutation for its own reason", async () => {
   const ci = await source(".github/workflows/ci.yml");
   const install =
