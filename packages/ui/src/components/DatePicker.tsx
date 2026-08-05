@@ -150,7 +150,13 @@ export function DatePicker({
     if (nextSelectedDate) setCalendarMonth(startOfMonth(nextSelectedDate));
   }, [value]);
 
+  useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
+
   const selectDate = (date: Date) => {
+    if (disabled) return;
+
     onValueChange?.(formatIsoDate(date));
     setOpen(false);
   };
@@ -169,7 +175,10 @@ export function DatePicker({
           {label}
         </label>
       )}
-      <RadixPopover.Root open={open} onOpenChange={setOpen}>
+      <RadixPopover.Root
+        open={open}
+        onOpenChange={(nextOpen) => setOpen(disabled ? false : nextOpen)}
+      >
         <RadixPopover.Trigger asChild>
           <button
             id={datePickerId}
@@ -251,7 +260,10 @@ export function DatePicker({
                 type="button"
                 aria-label="Предыдущий месяц"
                 className="mk-date-picker__navigation"
-                onClick={() => setCalendarMonth((month) => moveMonth(month, -1))}
+                disabled={disabled}
+                onClick={() => {
+                  if (!disabled) setCalendarMonth((month) => moveMonth(month, -1));
+                }}
               >
                 <svg
                   aria-hidden="true"
@@ -275,7 +287,10 @@ export function DatePicker({
                 type="button"
                 aria-label="Следующий месяц"
                 className="mk-date-picker__navigation"
-                onClick={() => setCalendarMonth((month) => moveMonth(month, 1))}
+                disabled={disabled}
+                onClick={() => {
+                  if (!disabled) setCalendarMonth((month) => moveMonth(month, 1));
+                }}
               >
                 <svg
                   aria-hidden="true"
@@ -328,6 +343,7 @@ export function DatePicker({
                         <span key={formatIsoDate(day)} role="gridcell">
                           <button
                             type="button"
+                            disabled={disabled}
                             aria-label={formatRussianDate(day)}
                             aria-pressed={isSelected}
                             className="mk-date-picker__day"
@@ -377,6 +393,11 @@ export function DatePicker({
         }
         .mk-date-picker__navigation:hover {
           background: var(--surface-panel);
+        }
+        .mk-date-picker__navigation:disabled,
+        .mk-date-picker__day:disabled {
+          cursor: not-allowed;
+          opacity: 0.45;
         }
         .mk-date-picker__day {
           display: inline-flex;

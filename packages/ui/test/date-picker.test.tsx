@@ -71,6 +71,31 @@ describe("DatePicker", () => {
     expect(onValueChange).not.toHaveBeenCalled();
   });
 
+  it("closes its calendar and blocks date selection when disabled while open", async () => {
+    const user = userEvent.setup();
+    const onValueChange = vi.fn();
+    const { rerender } = render(
+      <DatePicker label="Плановая дата" value="2026-08-05" onValueChange={onValueChange} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /плановая дата/i }));
+    expect(screen.getByRole("dialog")).toBeDefined();
+
+    rerender(
+      <DatePicker
+        label="Плановая дата"
+        value="2026-08-05"
+        disabled
+        onValueChange={onValueChange}
+      />,
+    );
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Следующий месяц" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "6 августа 2026" })).toBeNull();
+    expect(onValueChange).not.toHaveBeenCalled();
+  });
+
   it("treats an invalid ISO value as empty instead of displaying an invalid date", () => {
     render(<DatePicker label="Плановая дата" value="2026-02-31" />);
 
