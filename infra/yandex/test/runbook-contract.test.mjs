@@ -204,6 +204,18 @@ const markerProcedures = {
       "cleanup evidence separately",
     ],
   },
+  "docs/runbooks/yandex-first-go-live.md": {
+    "go-live-gate-09-deploy-smoke-rollback": [
+      "rollback_rehearsal=true",
+      "markiro-rollback-rehearsal-<release-sha>",
+      "production-cleanup",
+      "markiro-cleanup-<release-sha>",
+      "runner registration is absent",
+      "runner VM is stopped",
+      "rehearsal_run_id=<successful-rollback-rehearsal-run-id>",
+      "rollback_rehearsal=false",
+    ],
+  },
 };
 
 function assertRunbookContract({

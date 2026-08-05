@@ -9,6 +9,7 @@ const {
   parseSerialHostKeys,
   selectCleanupRunners,
   startRunner,
+  waitForRunnerCleanup,
   waitForRunner,
   withRunner,
 } = runnerControl;
@@ -520,6 +521,29 @@ test("waitForRunner has a bounded deadline", async () => {
   const { dependencies } = fixture({ instanceStates: ["STARTING"], runners: [[]] });
 
   await assert.rejects(waitForRunner(dependencies), /timed out/);
+});
+
+test("cleanup verification waits for both runner deregistration and the stopped VM", async () => {
+  const { dependencies, calls } = fixture({
+    instanceStates: ["STOPPING", "STOPPED"],
+    runners: [[jitRunner()], []],
+  });
+
+  await waitForRunnerCleanup(dependencies);
+
+  assert.deepEqual(calls, [
+    `status:${INSTANCE_ID}`,
+    "list",
+    "sleep:100",
+    `status:${INSTANCE_ID}`,
+    "list",
+  ]);
+});
+
+test("cleanup verification has a bounded deadline and never accepts STOPPING", async () => {
+  const { dependencies } = fixture({ instanceStates: ["STOPPING"], runners: [[]] });
+
+  await assert.rejects(waitForRunnerCleanup(dependencies), /cleanup verification timed out/);
 });
 
 test("withRunner deregisters and stops after exactly one successful callback", async () => {

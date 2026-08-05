@@ -296,6 +296,40 @@ export async function waitForRunner(dependencies) {
   throw new Error("runner startup timed out");
 }
 
+export async function waitForRunnerCleanup(dependencies) {
+  if (
+    !dependencies ||
+    typeof dependencies.instanceId !== "string" ||
+    dependencies.instanceId.length === 0 ||
+    typeof dependencies.yandex?.getInstanceStatus !== "function" ||
+    typeof dependencies.github?.listRunners !== "function"
+  )
+    throw new Error("invalid runner cleanup verification dependencies");
+  const timeoutMs = dependencies.timeoutMs ?? 300_000;
+  const pollIntervalMs = dependencies.pollIntervalMs ?? 2_000;
+  const now = dependencies.clock?.now ?? (() => performance.now());
+  const sleep =
+    dependencies.clock?.sleep ??
+    ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
+  if (
+    !Number.isFinite(timeoutMs) ||
+    timeoutMs <= 0 ||
+    !Number.isFinite(pollIntervalMs) ||
+    pollIntervalMs <= 0
+  )
+    throw new Error("invalid runner cleanup verification bounds");
+
+  const deadline = now() + timeoutMs;
+  while (now() < deadline) {
+    const status = await dependencies.yandex.getInstanceStatus(dependencies.instanceId);
+    const runners = await dependencies.github.listRunners();
+    if (!Array.isArray(runners)) throw new Error("invalid GitHub runner response");
+    if (status === "STOPPED" && deploymentRunners(runners).length === 0) return;
+    await sleep(Math.min(pollIntervalMs, Math.max(0, deadline - now())));
+  }
+  throw new Error("runner cleanup verification timed out");
+}
+
 async function reportCleanup(dependencies, error) {
   if (typeof dependencies.reportCleanupError !== "function") return;
   try {
@@ -461,7 +495,8 @@ async function cliClients() {
 }
 
 function deploymentPhase(value) {
-  if (value !== "first" && value !== "repeat") throw new Error("runner control configuration is incomplete");
+  if (value !== "first" && value !== "repeat")
+    throw new Error("runner control configuration is incomplete");
   return value;
 }
 
@@ -496,7 +531,8 @@ async function verifyControllerGates(yandexToken) {
     `https://alb.api.cloud.yandex.net/apploadbalancer/v1/loadBalancers/${loadBalancerId}/targetStates/${backendGroupId}/${targetGroupId}`,
     headers,
   );
-  if (!Array.isArray(targets.targetStates)) throw new Error("production ALB target inventory failed");
+  if (!Array.isArray(targets.targetStates))
+    throw new Error("production ALB target inventory failed");
   if (
     phase === "repeat" &&
     !targets.targetStates.some((target) =>
@@ -589,6 +625,7 @@ async function runCli(command) {
       errors.push(error);
     }
     if (errors.length) throw new AggregateError(errors, "runner cleanup failed");
+    await waitForRunnerCleanup(clients);
     return;
   }
   throw new Error("invalid runner control command");

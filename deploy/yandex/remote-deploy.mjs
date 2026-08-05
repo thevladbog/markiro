@@ -396,6 +396,7 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
           `MARKIRO_DOMAIN=${domain}`,
           "MARKIRO_EDGE_MODE=behind-alb",
           `MARKIRO_REQUIRE_PREVIOUS_HEALTHY=${phase === "repeat" ? "1" : "0"}`,
+          `MARKIRO_REQUIRE_NO_PREVIOUS_HEALTHY=${phase === "first" ? "1" : "0"}`,
           "MARKIRO_ENV_FILE=/etc/markiro/production.env",
           "MARKIRO_RELEASE_DIRECTORY=/var/lib/markiro/releases",
           "/usr/bin/bash",
@@ -448,7 +449,6 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
             ],
             [...sshBase, "sudo", "tar", "-xf", "-", "-C", "/opt/markiro", "--no-same-owner"],
           );
-          await activateRelease();
         },
         refreshRuntime: () =>
           system.run("ssh", [
@@ -523,7 +523,9 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
             expectedReleaseSha: manifest.commit,
           }),
         async finalize(candidate) {
-          return JSON.parse(await remoteStage("finalize", candidate));
+          const healthy = JSON.parse(await remoteStage("finalize", candidate));
+          await activateRelease();
+          return healthy;
         },
         async rollback(candidate) {
           return JSON.parse(await remoteStage("rollback", candidate));

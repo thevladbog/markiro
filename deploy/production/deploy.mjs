@@ -488,6 +488,8 @@ export async function prepareRelease(options, supplied = {}) {
       dependencies.timeouts.command,
     );
     const previous = await latestHealthyReleaseRecord(releaseDirectory);
+    if (options.requireNoPreviousHealthy && previous)
+      throw new Error("first deployment requires no previous healthy release");
     candidate = {
       tag: preflight.imageTag,
       previousTag: previous?.tag ?? null,
@@ -645,6 +647,7 @@ export async function rollbackPreparedRelease(options, supplied = {}) {
  * @property {number=} edgeReadinessIntervalMs
  * @property {number=} edgeReadinessTimeoutMs
  * @property {boolean=} requirePreviousHealthy
+ * @property {boolean=} requireNoPreviousHealthy
  */
 
 /**
@@ -821,6 +824,7 @@ if (isMainModule(import.meta.url)) {
           environment: process.env,
           releaseDirectory: cliReleaseDirectory(),
           requirePreviousHealthy: process.env.MARKIRO_REQUIRE_PREVIOUS_HEALTHY === "1",
+          requireNoPreviousHealthy: process.env.MARKIRO_REQUIRE_NO_PREVIOUS_HEALTHY === "1",
         },
         { log: () => undefined },
       );

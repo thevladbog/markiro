@@ -239,6 +239,34 @@ test("a repeat deployment rejects a missing previous healthy record before migra
   );
 });
 
+test("a first deployment rejects an existing healthy release before persistent or Docker mutation", async () => {
+  const { calls, dependencies, releaseDirectory } = await fixture();
+
+  await assert.rejects(
+    prepareRelease(
+      {
+        environment: ENVIRONMENT,
+        releaseDirectory,
+        readinessAttempts: 1,
+        requireNoPreviousHealthy: true,
+      },
+      dependencies,
+    ),
+    /first deployment requires no previous healthy release/,
+  );
+
+  assert.deepEqual(
+    (await records(releaseDirectory)).map(({ value }) => ({ state: value.state, tag: value.tag })),
+    [{ state: "healthy", tag: PREVIOUS_TAG }],
+  );
+  assert.equal(
+    calls.some(
+      ({ args }) => args.includes("migrate") || args.includes("up") || args.includes("stop"),
+    ),
+    false,
+  );
+});
+
 test("finalize validates the exact pending candidate and creates one immutable healthy record", async () => {
   const { dependencies, releaseDirectory } = await fixture();
   const candidate = await prepareRelease(

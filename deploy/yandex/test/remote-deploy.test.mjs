@@ -412,6 +412,7 @@ function cliFixture({ candidate = CANDIDATE, failAt } = {}) {
       if (args.includes("prepare")) {
         events.push("remote prepare");
         assert.ok(args.some((value) => value.includes("registry-auth.mjs run-stdin")));
+        if (failAt === "remote prepare") throw new Error("remote prepare failed");
         return `${JSON.stringify(candidate)}\n`;
       }
       if (args.includes("finalize")) {
@@ -419,6 +420,10 @@ function cliFixture({ candidate = CANDIDATE, failAt } = {}) {
         assert.deepEqual(JSON.parse(JSON.parse(options.input).commandInput), candidate);
         if (failAt === "remote finalize") throw new Error("remote finalize failed");
         return `${JSON.stringify({ ...candidate, state: "healthy" })}\n`;
+      }
+      if (args.includes("markiro-active-release")) {
+        events.push("activate release pointer");
+        return "";
       }
       if (args.includes("rollback")) {
         events.push("remote rollback");
@@ -455,6 +460,7 @@ test("real CLI adapter stages remote prepare, ALB, runner smoke, and remote fina
       "ALB healthy",
       "external smoke",
       "remote finalize",
+      "activate release pointer",
     ],
   );
   assert.ok(
@@ -473,6 +479,7 @@ test("real CLI adapter stages remote prepare, ALB, runner smoke, and remote fina
     "MARKIRO_DOMAIN=markiro.example",
     "MARKIRO_EDGE_MODE=behind-alb",
     "MARKIRO_REQUIRE_PREVIOUS_HEALTHY=1",
+    "MARKIRO_REQUIRE_NO_PREVIOUS_HEALTHY=0",
     "MARKIRO_ENV_FILE=/etc/markiro/production.env",
     "MARKIRO_RELEASE_DIRECTORY=/var/lib/markiro/releases",
   ];
@@ -489,6 +496,7 @@ test("real CLI adapter stages remote prepare, ALB, runner smoke, and remote fina
   assert.ok(activeRelease);
   assert.ok(activeRelease.args.includes("/opt/markiro/active-release"));
   assert.ok(activeRelease.args.some((value) => value.includes("mv -Tf")));
+  assert.ok(events.indexOf("activate release pointer") > events.indexOf("remote finalize"));
 });
 
 test("actual remote prepare argv satisfies the real app-side preflight environment boundary", async () => {
@@ -559,7 +567,35 @@ test("real CLI adapter keeps first deployment pre-DNS and probes loopback plus t
   assert.ok(albProbe.args.includes("markiro.example:443:203.0.113.42"));
   assert.ok(albProbe.args.includes("--dump-header"));
   assert.ok(prepare.args.includes("MARKIRO_REQUIRE_PREVIOUS_HEALTHY=0"));
+  assert.ok(prepare.args.includes("MARKIRO_REQUIRE_NO_PREVIOUS_HEALTHY=1"));
   assert.equal(events.includes("external smoke"), false);
+});
+
+test("first-deployment rollback rehearsal never activates the candidate release pointer", async () => {
+  const { environment, events, system } = cliFixture({ candidate: FIRST_CANDIDATE });
+  environment.MARKIRO_ROLLBACK_REHEARSAL = "1";
+
+  const result = await runRemoteDeployment(environment, system);
+
+  assert.deepEqual(result, { state: "rehearsed", tag: COMMIT });
+  assert.equal(events.includes("remote finalize"), false);
+  assert.equal(events.includes("activate release pointer"), false);
+  assert.ok(events.includes("remote rollback"));
+});
+
+test("app-side first-deployment precondition failure never mutates rollback or release pointer state", async () => {
+  const { commands, environment, events, system } = cliFixture({ failAt: "remote prepare" });
+  environment.MARKIRO_DEPLOYMENT_PHASE = "first";
+  environment.MARKIRO_ROLLBACK_REHEARSAL = "1";
+
+  await assert.rejects(runRemoteDeployment(environment, system), /remote prepare failed/);
+
+  const prepare = commands.find(
+    ({ command, args }) => command === "ssh" && args.includes("prepare"),
+  );
+  assert.ok(prepare.args.includes("MARKIRO_REQUIRE_NO_PREVIOUS_HEALTHY=1"));
+  assert.equal(events.includes("remote rollback"), false);
+  assert.equal(events.includes("activate release pointer"), false);
 });
 
 test("first deployment rejects a stale 200 release header before finalization", async () => {
@@ -578,6 +614,7 @@ test("first deployment rejects a stale 200 release header before finalization", 
 
   assert.equal(events.includes("remote finalize"), false);
   assert.equal(events.includes("remote rollback"), true);
+  assert.equal(events.includes("activate release pointer"), false);
 });
 
 test("real CLI adapter rejects a noncanonical authenticated host-key bundle before writing trust", async () => {
@@ -617,5 +654,6 @@ for (const failAt of ["ALB healthy", "remote finalize"]) {
     assert.ok(events.indexOf("remote rollback") > events.indexOf(failAt));
     assert.equal(events.filter((event) => event === "remote rollback").length, 1);
     assert.equal(events.includes("remote finalize"), failAt === "remote finalize");
+    assert.equal(events.includes("activate release pointer"), false);
   });
 }

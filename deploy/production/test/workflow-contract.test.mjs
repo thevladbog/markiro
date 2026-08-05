@@ -571,6 +571,7 @@ function assertProductionDeploymentWorkflow(
   assert.deepEqual(Object.keys(workflow.on).sort(), ["workflow_dispatch", "workflow_run"]);
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), [
     "deployment_phase",
+    "rehearsal_run_id",
     "release_run_id",
     "release_sha",
     "rollback_rehearsal",
@@ -581,6 +582,13 @@ function assertProductionDeploymentWorkflow(
     required: true,
     default: false,
     type: "boolean",
+  });
+  assert.deepEqual(workflow.on.workflow_dispatch.inputs.rehearsal_run_id, {
+    description:
+      "Exact prior rollback-rehearsal run ID; required only for a successful first deployment.",
+    required: true,
+    default: "none",
+    type: "string",
   });
   assert.deepEqual(workflow.on.workflow_run, {
     workflows: ["Publish production images"],
@@ -637,12 +645,82 @@ function assertProductionDeploymentWorkflow(
     deploymentSource,
     /MARKIRO_ROLLBACK_REHEARSAL:\s*\$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.rollback_rehearsal && '1' \|\| '0' \}\}/,
   );
+  const rollbackSelector =
+    "${{ github.event_name == 'workflow_dispatch' && inputs.rollback_rehearsal && '1' || '0' }}";
+  assert.equal(workflow.jobs.controller.env.MARKIRO_ROLLBACK_REHEARSAL, rollbackSelector);
+  assert.equal(workflow.jobs.deploy.env.MARKIRO_ROLLBACK_REHEARSAL, rollbackSelector);
   assert.match(remoteDeploySource, /rollback rehearsal requires a first deployment/);
+  assert.match(
+    remoteDeploySource,
+    /if \(dependencies\.rollbackRehearsal\) \{[\s\S]*?return \{ state: "rehearsed", tag: candidate\.tag \};[\s\S]*?\}\n\s+return await dependencies\.finalize\(candidate\);/,
+  );
   assert.match(
     deploymentSource,
     /markiro-rollback-rehearsal-\$\{\{ needs\.controller\.outputs\.release-sha \}\}/,
   );
   assert.match(deploymentSource, /Record authenticated bounded rollback rehearsal evidence/);
+  const successfulFirstCondition =
+    "github.event_name == 'workflow_dispatch' && inputs.deployment_phase == 'first' && inputs.rollback_rehearsal == false";
+  const controllerSteps = workflow.jobs.controller.steps;
+  const rehearsalDownload = controllerSteps.find(
+    ({ name }) => name === "Download prerequisite rollback rehearsal evidence",
+  );
+  const cleanupDownload = controllerSteps.find(
+    ({ name }) => name === "Download prerequisite cleanup receipt",
+  );
+  assert.equal(rehearsalDownload.if, successfulFirstCondition);
+  assert.equal(cleanupDownload.if, successfulFirstCondition);
+  assert.equal(
+    rehearsalDownload.with.name,
+    "markiro-rollback-rehearsal-${{ steps.release.outputs.release-sha }}",
+  );
+  assert.equal(
+    cleanupDownload.with.name,
+    "markiro-cleanup-${{ steps.release.outputs.release-sha }}",
+  );
+  assert.equal(rehearsalDownload.with["run-id"], "${{ inputs.rehearsal_run_id }}");
+  assert.equal(cleanupDownload.with["run-id"], "${{ inputs.rehearsal_run_id }}");
+  const releaseGate = controllerSteps.find(
+    ({ name }) => name === "Resolve exact trusted release identity",
+  );
+  assert.match(releaseGate.run, /\.inputs\.deployment_phase == "first"/);
+  assert.match(releaseGate.run, /\.inputs\.rollback_rehearsal == "true"/);
+  assert.match(releaseGate.run, /\.inputs\.rehearsal_run_id == "none"/);
+  assert.match(releaseGate.run, /\.head_sha == \$sha/);
+  assert.match(releaseGate.run, /\.conclusion == "success"/);
+  assert.match(releaseGate.run, /\[\[ "\$DISPATCH_PHASE" == repeat \]\]/);
+  assert.match(
+    releaseGate.run,
+    /if \[\[ "\$DISPATCH_REHEARSAL" == true \]\]; then\n\s+\[\[ "\$DISPATCH_PHASE" == first \]\]/,
+  );
+  assert.match(releaseGate.run, /\[\[ "\$REHEARSAL_RUN_ID" == none \]\]/);
+  const runnerGate = controllerSteps.find(
+    ({ name }) =>
+      name === "Validate manifest, infrastructure, backup, then start the one-use runner",
+  );
+  assert.match(runnerGate.run, /rollback-rehearsal-prerequisite/);
+  assert.match(runnerGate.run, /cleanup-prerequisite/);
+  assert.match(runnerGate.run, /\.runnerDeregistered == true/);
+  assert.match(runnerGate.run, /\.runnerVmStopped == true/);
+  assert.match(runnerGate.run, /\.deploymentRunId == \$deployment_run_id/);
+  assert.match(runnerGate.run, /\.releaseSha == \$release_sha/);
+  const deploySteps = workflow.jobs.deploy.steps;
+  const rehearsalEvidence = deploySteps.find(
+    ({ name }) => name === "Record authenticated bounded rollback rehearsal evidence",
+  );
+  const rehearsalUpload = deploySteps.find(
+    ({ name }) => name === "Upload rollback rehearsal evidence",
+  );
+  const finalizedEvidence = deploySteps.find(
+    ({ name }) => name === "Record the exact finalized release",
+  );
+  const finalizedUpload = deploySteps.find(
+    ({ name }) => name === "Upload finalized release evidence",
+  );
+  assert.equal(rehearsalEvidence.if, "env.MARKIRO_ROLLBACK_REHEARSAL == '1'");
+  assert.equal(rehearsalUpload.if, "env.MARKIRO_ROLLBACK_REHEARSAL == '1'");
+  assert.equal(finalizedEvidence.if, "env.MARKIRO_ROLLBACK_REHEARSAL != '1'");
+  assert.equal(finalizedUpload.if, "env.MARKIRO_ROLLBACK_REHEARSAL != '1'");
   assert.match(remoteDeploySource, /rollbackRehearsal/);
   assert.match(deploymentSource, /YC_DEPLOYMENT_CONTROLLER_SERVICE_ACCOUNT_ID/);
   assert.doesNotMatch(
@@ -660,7 +738,31 @@ function assertProductionDeploymentWorkflow(
     /APP_SSH_HOST_KEYS_B64:\s*\$\{\{ needs\.controller\.outputs\.app-host-keys-b64 \}\}/,
   );
   assert.equal(workflow.jobs.cleanup?.if, "always()");
-  assert.match(deploymentSource, /node deploy\/yandex\/runner-control\.mjs cleanup/);
+  const cleanupSteps = workflow.jobs.cleanup.steps;
+  const cleanupRunnerIndex = cleanupSteps.findIndex(
+    ({ name }) => name === "Deregister any stale runner and stop the VM independently",
+  );
+  const cleanupReceiptIndex = cleanupSteps.findIndex(
+    ({ name }) => name === "Record authenticated bounded cleanup receipt",
+  );
+  const cleanupUploadIndex = cleanupSteps.findIndex(
+    ({ name }) => name === "Upload cleanup receipt",
+  );
+  assert.ok(cleanupRunnerIndex >= 0);
+  assert.ok(cleanupReceiptIndex > cleanupRunnerIndex);
+  assert.ok(cleanupUploadIndex > cleanupReceiptIndex);
+  assert.match(
+    cleanupSteps[cleanupRunnerIndex].run,
+    /node deploy\/yandex\/runner-control\.mjs cleanup/,
+  );
+  assert.match(cleanupSteps[cleanupReceiptIndex].run, /runnerDeregistered: true/);
+  assert.match(cleanupSteps[cleanupReceiptIndex].run, /runnerVmStopped: true/);
+  assert.equal(cleanupSteps[cleanupUploadIndex].uses, UPLOAD_ARTIFACT);
+  assert.equal(
+    cleanupSteps[cleanupUploadIndex].with.name,
+    "markiro-cleanup-${{ needs.controller.outputs.release-sha }}",
+  );
+  assert.match(runnerControlSource, /await waitForRunnerCleanup\(clients\)/);
   assert.match(runnerControlSource, /const gateToken = requiredEnvironment\("YC_GATE_IAM_TOKEN"\)/);
   assert.match(runnerControlSource, /await verifyControllerGates\(gateToken\)/);
   assert.match(runnerControlSource, /await authenticatedAppHostKeys\(gateToken\)/);
@@ -670,6 +772,7 @@ function assertProductionDeploymentWorkflow(
   assert.match(remoteDeploySource, /--internal-address/);
   assertPinnedComments(deploymentSource, CHECKOUT, "v4");
   assertPinnedComments(deploymentSource, DOWNLOAD_ARTIFACT, "v8.0.1");
+  assertPinnedComments(deploymentSource, UPLOAD_ARTIFACT, "v7.0.1");
 }
 
 test("production deployment is protected, release-bound, dynamically labelled, and always cleaned", async () => {
@@ -716,6 +819,61 @@ test("production deployment contract rejects trigger, label, cleanup, and gate m
       search: "environment: production-cleanup",
       replacement: "environment: production-controller",
     },
+    {
+      name: "automatic delivery can select rehearsal",
+      search:
+        "MARKIRO_DEPLOYMENT_PHASE: ${{ github.event_name == 'workflow_dispatch' && inputs.deployment_phase || 'repeat' }}\n      MARKIRO_ROLLBACK_REHEARSAL: ${{ github.event_name == 'workflow_dispatch' && inputs.rollback_rehearsal && '1' || '0' }}",
+      replacement:
+        "MARKIRO_DEPLOYMENT_PHASE: ${{ github.event_name == 'workflow_dispatch' && inputs.deployment_phase || 'repeat' }}\n      MARKIRO_ROLLBACK_REHEARSAL: ${{ inputs.rollback_rehearsal && '1' || '0' }}",
+    },
+    {
+      name: "cleanup prerequisite is no longer run-bound",
+      search:
+        "name: markiro-cleanup-${{ steps.release.outputs.release-sha }}\n          path: ${{ runner.temp }}/cleanup-prerequisite\n          github-token: ${{ github.token }}\n          repository: ${{ github.repository }}\n          run-id: ${{ inputs.rehearsal_run_id }}",
+      replacement:
+        "name: markiro-cleanup-${{ steps.release.outputs.release-sha }}\n          path: ${{ runner.temp }}/cleanup-prerequisite\n          github-token: ${{ github.token }}\n          repository: ${{ github.repository }}\n          run-id: ${{ steps.release.outputs.release-run-id }}",
+    },
+    {
+      name: "cleanup prerequisite is missing",
+      search: "- name: Download prerequisite cleanup receipt",
+      replacement: "- name: Download optional cleanup receipt",
+    },
+    {
+      name: "rehearsal prerequisite is missing",
+      search: "- name: Download prerequisite rollback rehearsal evidence",
+      replacement: "- name: Download optional rollback rehearsal evidence",
+    },
+    {
+      name: "repeat deployment can select rehearsal",
+      search:
+        'if [[ "$DISPATCH_REHEARSAL" == true ]]; then\n              [[ "$DISPATCH_PHASE" == first ]]',
+      replacement:
+        'if [[ "$DISPATCH_REHEARSAL" == true ]]; then\n              [[ "$DISPATCH_PHASE" == repeat ]]',
+    },
+    {
+      name: "rehearsal evidence includes successful releases",
+      search:
+        "- name: Record authenticated bounded rollback rehearsal evidence\n        if: env.MARKIRO_ROLLBACK_REHEARSAL == '1'",
+      replacement:
+        "- name: Record authenticated bounded rollback rehearsal evidence\n        if: always()",
+    },
+    {
+      name: "finalized evidence includes rehearsals",
+      search:
+        "- name: Record the exact finalized release\n        if: env.MARKIRO_ROLLBACK_REHEARSAL != '1'",
+      replacement: "- name: Record the exact finalized release\n        if: always()",
+    },
+    {
+      name: "cleanup receipt precedes cleanup",
+      search: "      - name: Deregister any stale runner and stop the VM independently\n",
+      replacement:
+        "      - name: Deregister any stale runner and stop the VM independently later\n",
+    },
+    {
+      name: "cleanup evidence omits runner deregistration",
+      search: ".runnerDeregistered == true and .runnerVmStopped == true",
+      replacement: ".runnerVmStopped == true",
+    },
   ]) {
     const mutated = replaceExactlyOnce(
       deployment,
@@ -734,6 +892,22 @@ test("production deployment contract rejects trigger, label, cleanup, and gate m
     const mutated = replaceExactlyOnce(controller, search, "gate omitted", `${search} removal`);
     assert.throws(() => assertProductionDeploymentWorkflow(deployment, remote, mutated));
   }
+  const unverifiedCleanup = replaceExactlyOnce(
+    controller,
+    "await waitForRunnerCleanup(clients);",
+    "// cleanup verification omitted",
+    "cleanup receipt without provider verification",
+  );
+  assert.throws(() => assertProductionDeploymentWorkflow(deployment, remote, unverifiedCleanup));
+  const rehearsalFinalizes = replaceExactlyOnce(
+    remote,
+    "if (dependencies.rollbackRehearsal) {",
+    "if (false && dependencies.rollbackRehearsal) {",
+    "rehearsal reaches finalize",
+  );
+  assert.throws(() =>
+    assertProductionDeploymentWorkflow(deployment, rehearsalFinalizes, controller),
+  );
 });
 
 function assertPostDnsSmokeWorkflow(
