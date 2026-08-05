@@ -1,8 +1,3 @@
-output "network_id" {
-  description = "ID of the isolated production VPC."
-  value       = module.network.network_id
-}
-
 output "app_private_ip" {
   description = "Private IPv4 address of the application ALB target."
   value       = module.compute.app_private_ip

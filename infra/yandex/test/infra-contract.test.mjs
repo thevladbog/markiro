@@ -120,6 +120,28 @@ function terraformNestedBlocks(source, name) {
   return blocks;
 }
 
+function publicIngressPorts(securityGroup) {
+  return terraformNestedBlocks(securityGroup, "ingress")
+    .filter((ingress) => /v4_cidr_blocks\s*=\s*\["0\.0\.0\.0\/0"\]/.test(ingress))
+    .map((ingress) => {
+      const port = /from_port\s*=\s*(\d+)/.exec(ingress);
+      assert.ok(port?.[1], "public ingress must have an explicit from_port");
+      return Number(port[1]);
+    })
+    .sort((left, right) => left - right);
+}
+
+function hasCloudInitCredentialPayload(cloudInit) {
+  return (
+    /^\s*(?:github[_-]?(?:token|registration)|runtime[_-]?secret|secret|password|token)\s*:\s*[^$\s]/im.test(
+      cloudInit,
+    ) ||
+    /\b(?:[A-Z][A-Z0-9]*_)?(?:TOKEN|SECRET|PASSWORD|CREDENTIAL)\s*=\s*(?!"?\$\{?[A-Z_]+\}?)[^\s"']+/i.test(
+      cloudInit,
+    )
+  );
+}
+
 function replaceTerraformResource(source, type, name, mutate) {
   const block = terraformResourceBlock(source, type, name);
   return source.replace(block, mutate(block));
@@ -354,6 +376,7 @@ function assertPrivateNetworkAndCompute({
     albSecurityGroup,
     /from_port\s*=\s*443[\s\S]*?v4_cidr_blocks\s*=\s*\["0\.0\.0\.0\/0"\]/,
   );
+  assert.deepEqual(publicIngressPorts(albSecurityGroup), [80, 443]);
   for (const securityGroup of ["app", "data", "runner"]) {
     for (const ingress of terraformNestedBlocks(
       terraformResourceBlock(network, "yandex_vpc_security_group", securityGroup),
@@ -420,19 +443,34 @@ function assertPrivateNetworkAndCompute({
     /resource\s+"yandex_alb_target_group"\s+"app"\s*\{[\s\S]*?ip_address\s*=\s*yandex_compute_instance\.app\.network_interface\.0\.ip_address/,
   );
 
-  for (const [templateName, cloudInit] of [
-    ["app", appCloudInit],
-    ["runner", runnerCloudInit],
-  ]) {
-    assert.doesNotMatch(
-      cloudInit,
-      /^\s*(?:github[_-]?(?:token|registration)|runtime[_-]?secret|secret|password|token)\s*:\s*[^$\s]/im,
-      `${templateName} cloud-init must not embed a credential payload`,
-    );
-  }
+  assert.equal(
+    hasCloudInitCredentialPayload(appCloudInit),
+    false,
+    "app cloud-init must not embed a credential payload",
+  );
+  assert.equal(
+    hasCloudInitCredentialPayload(runnerCloudInit),
+    false,
+    "runner cloud-init must not embed a credential payload",
+  );
+  assert.match(
+    runnerCloudInit,
+    /path:\s*\/usr\/local\/lib\/markiro\/runner-jit[\s\S]*?permissions:\s*"0755"[\s\S]*?--bootstrap-only/,
+  );
   assert.match(runnerCloudInit, /markiro-runner-jit\.service/);
+  assert.match(runnerCloudInit, /After=network-online\.target/);
+  assert.match(runnerCloudInit, /Before=shutdown\.target/);
+  assert.match(runnerCloudInit, /ConditionPathExists=\/usr\/local\/lib\/markiro\/runner-jit/);
+  assert.match(
+    runnerCloudInit,
+    /ExecStart=\/usr\/local\/lib\/markiro\/runner-jit\s+--bootstrap-only/,
+  );
+  assert.match(runnerCloudInit, /RemainAfterExit=true/);
   assert.match(runnerCloudInit, /systemctl\s+enable\s+markiro-runner-jit\.service/);
-  assert.match(runnerCloudInit, /markiro-runner-ready/);
+  assert.match(runnerCloudInit, /systemctl\s+start\s+markiro-runner-jit\.service/);
+  assert.match(runnerCloudInit, /systemctl\s+is-active\s+--quiet\s+markiro-runner-jit\.service/);
+  assert.match(runnerCloudInit, /markiro-runner-bootstrap-complete/);
+  assert.doesNotMatch(runnerCloudInit, /markiro-runner-ready/);
   assert.match(runnerCloudInit, /power_state\s*:\s*[\s\S]*?mode\s*:\s*poweroff/);
 
   assert.match(computeOutputs, /output\s+"app_private_ip"\s*\{/);
@@ -622,9 +660,39 @@ test("production private-compute contract rejects public NAT, CIDR SSH, public a
   );
   assert.throws(() => assertPrivateNetworkAndCompute(publicAppPort));
 
+  for (const port of [22, 8080]) {
+    const extraAlbPublicIngress = await privateNetworkAndComputeSources();
+    extraAlbPublicIngress.network = replaceTerraformResource(
+      extraAlbPublicIngress.network,
+      "yandex_vpc_security_group",
+      "alb",
+      (block) =>
+        block.replace(
+          "\n  egress {",
+          '\n  ingress {\n    protocol       = "TCP"\n    from_port      = ' +
+            port +
+            "\n    to_port        = " +
+            port +
+            '\n    v4_cidr_blocks = ["0.0.0.0/0"]\n  }\n\n  egress {',
+        ),
+    );
+    assert.throws(() => assertPrivateNetworkAndCompute(extraAlbPublicIngress));
+  }
+
   const embeddedRunnerCredential = await privateNetworkAndComputeSources();
   embeddedRunnerCredential.runnerCloudInit += "\ngithub_token: unsafe-value\n";
   assert.throws(() => assertPrivateNetworkAndCompute(embeddedRunnerCredential));
+
+  const embeddedCommandCredential = await privateNetworkAndComputeSources();
+  embeddedCommandCredential.runnerCloudInit += '\nruncmd:\n  - sh -c "RUNNER_TOKEN=unsafe-value"\n';
+  assert.throws(() => assertPrivateNetworkAndCompute(embeddedCommandCredential));
+
+  const embeddedWriteFileCredential = await privateNetworkAndComputeSources();
+  embeddedWriteFileCredential.runnerCloudInit = embeddedWriteFileCredential.runnerCloudInit.replace(
+    "      #!/usr/bin/env sh",
+    "      RUNNER_TOKEN=unsafe-value\n      #!/usr/bin/env sh",
+  );
+  assert.throws(() => assertPrivateNetworkAndCompute(embeddedWriteFileCredential));
 
   const embeddedMetadataCredential = await privateNetworkAndComputeSources();
   embeddedMetadataCredential.compute = replaceTerraformResource(

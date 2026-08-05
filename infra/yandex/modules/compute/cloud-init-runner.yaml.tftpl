@@ -5,6 +5,19 @@ packages:
   - curl
   - docker.io
 write_files:
+  - path: /usr/local/lib/markiro/runner-jit
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env sh
+      set -eu
+
+      if [ "$#" -ne 1 ] || [ "$1" != "--bootstrap-only" ]; then
+        printf '%s\n' "markiro runner JIT implementation is pending Task 11" >&2
+        exit 64
+      fi
+
+      printf '%s\n' "markiro runner bootstrap completed without a registration job" >&2
+
   - path: /etc/systemd/system/markiro-runner-jit.service
     permissions: "0644"
     content: |
@@ -12,10 +25,13 @@ write_files:
       Description=Markiro just-in-time deployment runner
       Wants=network-online.target
       After=network-online.target
+      Before=shutdown.target
+      ConditionPathExists=/usr/local/lib/markiro/runner-jit
 
       [Service]
       Type=oneshot
-      ExecStart=/usr/local/lib/markiro/runner-jit
+      ExecStart=/usr/local/lib/markiro/runner-jit --bootstrap-only
+      RemainAfterExit=true
 
       [Install]
       WantedBy=multi-user.target
@@ -23,10 +39,12 @@ runcmd:
   - install -d -m 0755 /usr/local/lib/markiro /var/lib/markiro
   - systemctl daemon-reload
   - systemctl enable markiro-runner-jit.service
-  - touch /var/lib/markiro/markiro-runner-ready
+  - systemctl start markiro-runner-jit.service
+  - systemctl is-active --quiet markiro-runner-jit.service
+  - touch /var/lib/markiro/markiro-runner-bootstrap-complete
 power_state:
   delay: now
   mode: poweroff
-  message: Runner provisioning completed; controller starts it for a bounded job.
+  message: Runner bootstrap completed; Task 11 controller starts the JIT implementation for a bounded job.
   timeout: 30
   condition: true
