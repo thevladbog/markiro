@@ -5,6 +5,7 @@ import { afterEach, beforeAll, expect, it, vi } from "vitest";
 
 import {
   DatePicker,
+  ConfirmDialog,
   Select,
   SidePanel,
   type OverlayDismissReason,
@@ -169,4 +170,111 @@ it("keeps Radix child portals in the panel and lets each child consume Escape fi
   await user.keyboard("{Escape}");
   expect(screen.queryByRole("dialog", { name: "Calendar" })).toBeNull();
   expect(onClose).not.toHaveBeenCalled();
+});
+
+it("focuses Cancel and exposes one explicit destructive action", () => {
+  render(
+    <ConfirmDialog
+      open
+      title="Delete product?"
+      description="This cannot be undone."
+      entity="Milk 1 L"
+      cancelLabel="Cancel"
+      confirmLabel="Delete"
+      tone="destructive"
+      onCancel={() => {}}
+      onConfirm={() => {}}
+    />,
+  );
+
+  expect(screen.getByRole("alertdialog", { name: "Delete product?" })).toBeDefined();
+  expect(document.activeElement).toBe(screen.getByRole("button", { name: "Cancel" }));
+  expect(screen.getByRole("button", { name: "Delete" }).className).toContain("destructive");
+});
+
+it("maps Escape and backdrop to Cancel but blocks dismissal and submit while busy", async () => {
+  const user = userEvent.setup();
+  const onCancel = vi.fn();
+  const onConfirm = vi.fn();
+  const { rerender } = render(
+    <ConfirmDialog
+      open
+      title="Close shift?"
+      description="Consequence"
+      cancelLabel="Cancel"
+      confirmLabel="Close"
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />,
+  );
+
+  await user.keyboard("{Escape}");
+  expect(onCancel).toHaveBeenCalledTimes(1);
+
+  rerender(
+    <ConfirmDialog
+      open
+      busy
+      title="Close shift?"
+      description="Consequence"
+      cancelLabel="Cancel"
+      confirmLabel="Close"
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />,
+  );
+  await user.keyboard("{Escape}");
+  await user.click(document.querySelector(".mk-confirm-dialog__scrim") as HTMLElement);
+  expect((screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole("button", { name: "Close" }) as HTMLButtonElement).disabled).toBe(true);
+  expect(onCancel).toHaveBeenCalledTimes(1);
+  expect(onConfirm).not.toHaveBeenCalled();
+});
+
+it("keeps only the top confirmation layer interactive above a panel", async () => {
+  const user = userEvent.setup();
+  const onPanelClose = vi.fn();
+  const onDialogCancel = vi.fn();
+  const { rerender } = render(
+    <>
+      <SidePanel open title="Edit product" closeLabel="Close" onClose={onPanelClose}>
+        <Select label="Product" value="milk" options={[{ value: "milk", label: "Milk" }]} />
+      </SidePanel>
+      <ConfirmDialog
+        open
+        title="Discard changes?"
+        description="Unsaved changes will be lost."
+        cancelLabel="Keep editing"
+        confirmLabel="Discard"
+        onCancel={onDialogCancel}
+        onConfirm={() => {}}
+      />
+    </>,
+  );
+
+  expect(screen.getByRole("dialog", { name: "Edit product" })).toBeDefined();
+  expect(screen.getByRole("alertdialog", { name: "Discard changes?" })).toBeDefined();
+  expect((document.querySelector(".mk-overlay-layer--panel") as HTMLElement | null)?.inert).toBe(
+    true,
+  );
+  expect((document.querySelector(".mk-overlay-layer--dialog") as HTMLElement | null)?.inert).toBe(
+    false,
+  );
+
+  await user.keyboard("{Escape}");
+  expect(onDialogCancel).toHaveBeenCalledTimes(1);
+  expect(onPanelClose).not.toHaveBeenCalled();
+  expect(document.body.style.overflow).toBe("hidden");
+
+  rerender(
+    <SidePanel open title="Edit product" closeLabel="Close" onClose={onPanelClose}>
+      <Select label="Product" value="milk" options={[{ value: "milk", label: "Milk" }]} />
+    </SidePanel>,
+  );
+  expect((document.querySelector(".mk-overlay-layer--panel") as HTMLElement | null)?.inert).toBe(
+    false,
+  );
+  expect(screen.getByRole("dialog", { name: "Edit product" }).contains(document.activeElement)).toBe(
+    true,
+  );
 });

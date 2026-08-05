@@ -159,6 +159,7 @@ function unregister(id: symbol) {
 
   if (layers.length > 0) {
     applyInertness();
+    focusInitial(layers.at(-1)!);
   } else {
     inertSnapshot.forEach((wasInert, element) => {
       element.inert = wasInert;
@@ -171,7 +172,9 @@ function unregister(id: symbol) {
     removeListener();
   }
 
-  if (record?.previouslyFocused?.isConnected) record.previouslyFocused.focus();
+  if (layers.length === 0 && record?.previouslyFocused?.isConnected) {
+    record.previouslyFocused.focus();
+  }
 }
 
 /** Internal only: supplies the owning overlay layer to nested Radix portals. */
