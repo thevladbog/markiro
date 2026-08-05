@@ -179,8 +179,9 @@ jobs:
           dispatch_sha="$DISPATCH_SHA"
           cleanup() {
             unset github_oidc_response github_oidc_token iam_response lockbox_payload
-            unset iam_token aws_access_key_id aws_secret_access_key YC_TOKEN AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
+            unset iam_token aws_access_key_id aws_secret_access_key YC_TOKEN AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY TF_DATA_DIR
             rm -f "$backend_config"
+            rm -rf -- "${RUNNER_TEMP:?}/yandex-production-terraform-data"
           }
           trap cleanup EXIT
           [[ "$target_sha" =~ ^[0-9a-f]{40}$ ]]
@@ -303,6 +304,11 @@ jobs:
           path: ${{ runner.temp }}/yandex-infrastructure-plan
           if-no-files-found: error
           retention-days: 1
+      - name: Remove saved plan and temporary Terraform data
+        if: always()
+        run: |
+          set -euo pipefail
+          rm -rf -- "${RUNNER_TEMP:?}/yandex-infrastructure-plan"
 
   apply:
     needs: [plan]
@@ -393,8 +399,10 @@ jobs:
           dispatch_sha="$DISPATCH_SHA"
           cleanup() {
             unset github_oidc_response github_oidc_token iam_response lockbox_payload
-            unset iam_token aws_access_key_id aws_secret_access_key YC_TOKEN AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
+            unset iam_token aws_access_key_id aws_secret_access_key YC_TOKEN AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY TF_DATA_DIR
             rm -f "$backend_config"
+            rm -rf -- "${RUNNER_TEMP:?}/yandex-production-terraform-data"
+            rm -rf -- "${RUNNER_TEMP:?}/yandex-infrastructure-plan"
           }
           trap cleanup EXIT
           [[ "$target_sha" =~ ^[0-9a-f]{40}$ ]]

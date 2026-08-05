@@ -1344,6 +1344,12 @@ function workflowCommands(job) {
     .join("\n");
 }
 
+function mutateWorkflowSource(source, mutate) {
+  const workflow = yaml.load(source, { schema: yaml.JSON_SCHEMA });
+  mutate(workflow);
+  return yaml.dump(workflow, { noRefs: true, schema: yaml.JSON_SCHEMA });
+}
+
 function assertProtectedInfrastructureWorkflow(source) {
   const workflow = yaml.load(source, { schema: yaml.JSON_SCHEMA });
 
@@ -1395,6 +1401,25 @@ function assertProtectedInfrastructureWorkflow(source) {
   );
   assert.match(validateCommands, /pnpm test:yandex-infra:contract/);
 
+  const createPlanIndex = plan.steps.findIndex((step) => step.id === "create-plan");
+  const uploadPlanIndex = plan.steps.findIndex((step) => step.id === "plan-artifact");
+  const cleanupPlanIndex = plan.steps.findIndex(
+    (step) => step.name === "Remove saved plan and temporary Terraform data",
+  );
+  assert.ok(createPlanIndex >= 0);
+  assert.ok(uploadPlanIndex > createPlanIndex, "saved plan must be uploaded after creation");
+  assert.ok(cleanupPlanIndex > uploadPlanIndex, "saved plan cleanup must run after upload");
+  const createPlanStep = plan.steps[createPlanIndex];
+  const cleanupPlanStep = plan.steps[cleanupPlanIndex];
+  assert.equal(cleanupPlanStep.if, "always()");
+  assert.match(cleanupPlanStep.run, /rm -rf -- "\$\{RUNNER_TEMP:\?\}\/yandex-infrastructure-plan"/);
+  assert.doesNotMatch(createPlanStep.run, /rm -rf[^\n]*yandex-infrastructure-plan/);
+  assert.match(createPlanStep.run, /unset [^\n]*TF_DATA_DIR/);
+  assert.match(
+    createPlanStep.run,
+    /rm -rf -- "\$\{RUNNER_TEMP:\?\}\/yandex-production-terraform-data"/,
+  );
+
   const planCommands = workflowCommands(plan);
   assert.match(planCommands, /git rev-parse HEAD/);
   assert.match(planCommands, /refs\/heads\/main/);
@@ -1415,6 +1440,14 @@ function assertProtectedInfrastructureWorkflow(source) {
   assert.match(planCommands, /validate-plan-summary\.mjs/);
   assert.match(planCommands, /sha256sum/);
 
+  const applyStep = apply.steps.find(
+    (step) => step.name === "Verify evidence, authenticate, and apply only the saved plan",
+  );
+  assert.ok(applyStep);
+  assert.match(applyStep.run, /unset [^\n]*TF_DATA_DIR/);
+  assert.match(applyStep.run, /rm -rf -- "\$\{RUNNER_TEMP:\?\}\/yandex-production-terraform-data"/);
+  assert.match(applyStep.run, /rm -rf -- "\$\{RUNNER_TEMP:\?\}\/yandex-infrastructure-plan"/);
+
   const applyCommands = workflowCommands(apply);
   assert.match(applyCommands, /git rev-parse HEAD/);
   assert.match(applyCommands, /\[\[ "\$target_sha" == "\$dispatch_sha" \]\]/);
@@ -1433,6 +1466,21 @@ function assertProtectedInfrastructureWorkflow(source) {
   assert.doesNotMatch(allCommands, /-var=["']?public_dns_enabled=true/);
   assert.match(planCommands, /public_dns_enabled=\$public_dns_enabled/);
   assert.match(planCommands, /ENABLE_PUBLIC_DNS/);
+  assert.deepEqual(
+    [planCommands, applyCommands].flatMap((commands) =>
+      commands
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.startsWith("rm -rf")),
+    ),
+    [
+      'rm -rf -- "${RUNNER_TEMP:?}/yandex-production-terraform-data"',
+      'rm -rf -- "${RUNNER_TEMP:?}/yandex-infrastructure-plan"',
+      'rm -rf -- "${RUNNER_TEMP:?}/yandex-production-terraform-data"',
+      'rm -rf -- "${RUNNER_TEMP:?}/yandex-infrastructure-plan"',
+    ],
+    "recursive cleanup must stay confined to exact runner-temporary directories",
+  );
 
   for (const job of Object.values(workflow.jobs)) {
     for (const step of job.steps ?? []) {
@@ -1494,6 +1542,49 @@ test("infrastructure workflow contract rejects security-boundary mutations", asy
       ),
     ],
     ["missing cleanup", source.replace("trap cleanup EXIT\n", "", 1)],
+    [
+      "missing TF_DATA_DIR removal",
+      mutateWorkflowSource(source, (workflow) => {
+        const step = workflow.jobs.plan.steps.find((candidate) => candidate.id === "create-plan");
+        step.run = step.run.replace(
+          'rm -rf -- "${RUNNER_TEMP:?}/yandex-production-terraform-data"\n',
+          "",
+        );
+      }),
+    ],
+    [
+      "missing apply artifact removal",
+      mutateWorkflowSource(source, (workflow) => {
+        const step = workflow.jobs.apply.steps.find((candidate) =>
+          candidate.name?.startsWith("Verify evidence"),
+        );
+        step.run = step.run.replace(
+          'rm -rf -- "${RUNNER_TEMP:?}/yandex-infrastructure-plan"\n',
+          "",
+        );
+      }),
+    ],
+    [
+      "missing always plan-artifact cleanup",
+      mutateWorkflowSource(source, (workflow) => {
+        const step = workflow.jobs.plan.steps.find((candidate) =>
+          candidate.name?.startsWith("Remove saved plan"),
+        );
+        if (step) delete step.if;
+      }),
+    ],
+    [
+      "cleanup before upload",
+      mutateWorkflowSource(source, (workflow) => {
+        const steps = workflow.jobs.plan.steps;
+        const cleanupIndex = steps.findIndex((step) => step.name?.startsWith("Remove saved plan"));
+        if (cleanupIndex >= 0) {
+          const [cleanup] = steps.splice(cleanupIndex, 1);
+          const uploadIndex = steps.findIndex((step) => step.id === "plan-artifact");
+          steps.splice(uploadIndex, 0, cleanup);
+        }
+      }),
+    ],
   ]);
 
   for (const [name, mutation] of mutations) {
