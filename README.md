@@ -46,8 +46,8 @@ The platform is built for real production constraints: multiple terminals in one
 
 <table>
   <tr>
-    <td width="50%"><img alt="Markiro admin panel product design preview" src="./docs/assets/readme/admin.webp"></td>
-    <td width="50%"><img alt="Markiro pickup kiosk product design preview" src="./docs/assets/readme/kiosk.webp"></td>
+    <td width="50%"><a href="./docs/assets/readme/admin.webp"><img alt="Markiro admin panel product design preview" src="./docs/assets/readme/admin.webp"></a></td>
+    <td width="50%"><a href="./docs/assets/readme/kiosk.webp"><img alt="Markiro pickup kiosk product design preview" src="./docs/assets/readme/kiosk.webp"></a></td>
   </tr>
   <tr>
     <td><strong>Admin panel.</strong> Products, shifts, label templates, integrations, teams, pickup orders, and operational audit.</td>
@@ -96,6 +96,7 @@ Read [the architecture document](./docs/architecture.md) for tenant boundaries, 
 ```bash
 corepack enable
 pnpm install --frozen-lockfile
+pnpm --filter '@markiro/api^...' --filter '@markiro/admin^...' build
 if [ ! -e .env ]; then
   cp .env.example .env
 fi

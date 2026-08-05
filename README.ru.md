@@ -46,8 +46,8 @@
 
 <table>
   <tr>
-    <td width="50%"><img alt="Дизайн-концепт админ-панели «Маркиро»" src="./docs/assets/readme/admin.webp"></td>
-    <td width="50%"><img alt="Дизайн-концепт киоска выдачи «Маркиро»" src="./docs/assets/readme/kiosk.webp"></td>
+    <td width="50%"><a href="./docs/assets/readme/admin.webp"><img alt="Дизайн-концепт админ-панели «Маркиро»" src="./docs/assets/readme/admin.webp"></a></td>
+    <td width="50%"><a href="./docs/assets/readme/kiosk.webp"><img alt="Дизайн-концепт киоска выдачи «Маркиро»" src="./docs/assets/readme/kiosk.webp"></a></td>
   </tr>
   <tr>
     <td><strong>Админ-панель.</strong> Товары, смены, шаблоны этикеток, интеграции, команды, заказы на выдачу и операционный аудит.</td>
@@ -96,6 +96,7 @@ flowchart LR
 ```bash
 corepack enable
 pnpm install --frozen-lockfile
+pnpm --filter '@markiro/api^...' --filter '@markiro/admin^...' build
 if [ ! -e .env ]; then
   cp .env.example .env
 fi
