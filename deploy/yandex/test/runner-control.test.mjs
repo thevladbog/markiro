@@ -115,14 +115,127 @@ test("metadata operations poll to bounded success and reject provider failure or
   for (const malformed of [
     {},
     { id: "", done: false },
+    { id: " ", done: false },
+    { id: "x".repeat(257), done: false },
     { id: "operation-malformed" },
     { id: "operation-malformed", done: "true" },
     { id: "operation-malformed", done: true, error: "bad" },
+    { id: "operation-malformed", done: false, response: {} },
+    { id: "operation-malformed", done: false, error: { code: 7 } },
+    { id: "operation-malformed", done: true },
+    { id: "operation-malformed", done: true, response: {}, error: { code: 7 } },
   ])
     await assert.rejects(
       runnerControl.waitForOperation(malformed, { getOperation: async () => ({}) }),
       /invalid Yandex operation response/,
     );
+});
+
+function runnerDependenciesForOperation(initialOperation, getOperation) {
+  const calls = [];
+  let now = 0;
+  return {
+    calls,
+    dependencies: {
+      deploymentId: DEPLOYMENT_ID,
+      instanceId: INSTANCE_ID,
+      github: {
+        async generateJitConfig(request) {
+          return {
+            runner: { name: request.name, labels: request.labels.map((name) => ({ name })) },
+            encoded_jit_config: "one-use-encoded-config",
+          };
+        },
+        async listRunners() {
+          calls.push("list");
+          return [];
+        },
+        async deleteRunner() {},
+      },
+      yandex: {
+        async updateMetadata() {
+          calls.push("metadata");
+          await runnerControl.waitForOperation(initialOperation, {
+            timeoutMs: 10,
+            pollIntervalMs: 1,
+            clock: {
+              now: () => now,
+              async sleep(milliseconds) {
+                now += milliseconds;
+              },
+            },
+            getOperation,
+          });
+        },
+        async getInstanceStatus() {
+          calls.push("status");
+          return "STOPPED";
+        },
+        async startInstance() {
+          calls.push("start");
+        },
+        async stopInstance() {},
+      },
+    },
+  };
+}
+
+for (const [name, initialOperation, getOperation, expectedError] of [
+  [
+    "completed operation without a result",
+    { id: "operation-empty", done: true },
+    async () => assert.fail("completed operation must not poll"),
+    /invalid Yandex operation response/,
+  ],
+  [
+    "premature success response",
+    { id: "operation-premature", done: false, response: {} },
+    async () => assert.fail("invalid operation must not poll"),
+    /invalid Yandex operation response/,
+  ],
+  [
+    "provider error",
+    { id: "operation-error", done: true, error: { code: 7, message: "sensitive" } },
+    async () => assert.fail("completed operation must not poll"),
+    /Yandex operation failed/,
+  ],
+  [
+    "operation ID mismatch",
+    { id: "operation-original", done: false },
+    async () => ({ id: "operation-different", done: true, response: {} }),
+    /invalid Yandex operation response/,
+  ],
+])
+  test(`${name} prevents runner start`, async () => {
+    const { calls, dependencies } = runnerDependenciesForOperation(initialOperation, getOperation);
+
+    await assert.rejects(runnerControl.prepareAndStartRunner(dependencies), expectedError);
+    assert.equal(calls.includes("status"), false);
+    assert.equal(calls.includes("start"), false);
+  });
+
+test("runner start follows only a delayed operation success response", async () => {
+  let polls = 0;
+  const { calls, dependencies } = runnerDependenciesForOperation(
+    { id: "operation-delayed", done: false },
+    async (id) => {
+      calls.push(`operation:${id}`);
+      polls += 1;
+      return polls === 1
+        ? { id, done: false }
+        : { id, done: true, response: { typeUrl: "type.googleapis.com/Instance" } };
+    },
+  );
+
+  await runnerControl.prepareAndStartRunner(dependencies);
+  assert.deepEqual(calls, [
+    "metadata",
+    "operation:operation-delayed",
+    "operation:operation-delayed",
+    "status",
+    "list",
+    "start",
+  ]);
 });
 
 test("metadata operation timeout prevents runner start", async () => {

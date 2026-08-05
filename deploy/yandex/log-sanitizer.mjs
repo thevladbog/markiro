@@ -63,10 +63,21 @@ function redactJson(message) {
   }
 }
 
+function looksJsonLike(message) {
+  const trimmed = message.trim();
+  return (
+    trimmed.startsWith("{") ||
+    trimmed.startsWith("[") ||
+    /[\[{]\s*["']/.test(message) ||
+    /["'](?:\\.|[^"'\\]){1,128}["']\s*:/.test(message)
+  );
+}
+
 function redact(message) {
   const singleLine = message.replace(/[\r\n]+/g, " ");
   const structured = redactJson(singleLine);
   if (structured !== undefined) return structured;
+  if (looksJsonLike(singleLine)) return "[REDACTED]";
   return redactText(singleLine);
 }
 

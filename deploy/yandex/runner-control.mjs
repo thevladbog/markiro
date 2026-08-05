@@ -8,6 +8,7 @@ const DEPLOYMENT_ID = /^[a-z0-9][a-z0-9-]{7,63}$/;
 const DEPLOYMENT_LABEL_PREFIX = "markiro-deployment-";
 const HOST_KEY_MARKER = "MARKIRO_SSH_HOST_KEY_V1";
 const HOST_KEY_ALGORITHMS = ["ssh-ed25519", "ssh-rsa"];
+const MAX_OPERATION_ID_BYTES = 256;
 
 function requireDependencies(dependencies) {
   if (
@@ -92,18 +93,32 @@ export async function createJitRegistration(dependencies) {
 }
 
 function validateOperation(operation, expectedId) {
+  const hasError = operation && Object.hasOwn(operation, "error");
+  const hasResponse = operation && Object.hasOwn(operation, "response");
   if (
     !operation ||
     typeof operation !== "object" ||
+    Array.isArray(operation) ||
     typeof operation.id !== "string" ||
     operation.id.length === 0 ||
+    Buffer.byteLength(operation.id, "utf8") > MAX_OPERATION_ID_BYTES ||
+    operation.id.trim() !== operation.id ||
+    /\s/u.test(operation.id) ||
     (expectedId !== undefined && operation.id !== expectedId) ||
     typeof operation.done !== "boolean" ||
-    (operation.error !== undefined &&
-      (!operation.error || typeof operation.error !== "object" || Array.isArray(operation.error)))
+    (!operation.done && (hasError || hasResponse)) ||
+    (operation.done && hasError === hasResponse) ||
+    (hasError &&
+      (!operation.error ||
+        typeof operation.error !== "object" ||
+        Array.isArray(operation.error))) ||
+    (hasResponse &&
+      (!operation.response ||
+        typeof operation.response !== "object" ||
+        Array.isArray(operation.response)))
   )
     throw new Error("invalid Yandex operation response");
-  if (operation.error !== undefined) throw new Error("Yandex operation failed");
+  if (hasError) throw new Error("Yandex operation failed");
   return operation;
 }
 

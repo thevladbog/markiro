@@ -56,19 +56,45 @@ test("journal sanitizer allowlists units, redacts credential shapes, and enforce
   assert.ok(output.split("\n").every((line) => Buffer.byteLength(line) <= 256));
 });
 
-test("journal sanitizer redacts malformed structured credentials before UTF-8 truncation", () => {
+for (const [name, message, secret] of [
+  ["malformed JSON", '{"token":"malformed-secret" trailing', "malformed-secret"],
+  [
+    "prefixed and suffixed JSON",
+    'dependency failed: {"password":"prefixed-secret"} after retry',
+    "prefixed-secret",
+  ],
+  [
+    "quoted sensitive key and value",
+    'payload "client_secret" : "quoted-value-secret" trailing',
+    "quoted-value-secret",
+  ],
+])
+  test(`journal sanitizer fails closed for ${name} inside the retained byte budget`, () => {
+    const output = sanitizeJournal([{ unit: "markiro-deploy.service", message }], {
+      maxBytes: 256,
+      maxLineBytes: 192,
+    });
+
+    assert.ok(Buffer.byteLength(output) <= 256);
+    assert.doesNotMatch(output, new RegExp(secret));
+    assert.match(output, /\[REDACTED\]/);
+  });
+
+test("journal sanitizer redacts malformed structured credentials before a UTF-8 boundary truncation", () => {
+  const secret = "boundary-secret";
   const output = sanitizeJournal(
     [
       {
         unit: "markiro-deploy.service",
-        message: `${"я".repeat(20)} {"token":"malformed-secret`,
+        message: `${"я".repeat(4)} {"token":"${secret}","tail":"${"x".repeat(100)}`,
       },
     ],
     { maxBytes: 96, maxLineBytes: 72 },
   );
 
   assert.ok(Buffer.byteLength(output) <= 96);
-  assert.doesNotMatch(output, /malformed-secret|�/);
+  assert.doesNotMatch(output, new RegExp(`${secret}|�`));
+  assert.match(output, /\[REDACTED\]/);
 });
 
 test("durable spool stays size and age bounded across rename rotation and restart", async () => {
