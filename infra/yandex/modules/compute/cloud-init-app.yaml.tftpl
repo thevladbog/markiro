@@ -194,8 +194,6 @@ runcmd:
   - systemctl enable --now unified-agent.service
   - systemctl is-active --quiet unified-agent.service
   - systemctl enable markiro-runtime-env.service
-  - systemctl start markiro-runtime-env.service
-  - test -f /etc/markiro/production.env
   - systemctl enable --now markiro-readiness-observer.timer
   - systemctl enable --now markiro-monitoring-producer.timer
   - systemctl enable --now markiro-log-sanitizer.timer

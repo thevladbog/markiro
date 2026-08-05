@@ -117,21 +117,23 @@ variable "certificate_id" {
 variable "notification_channel_id" {
   description = "Existing Monitoring notification channel attached to every manual alert."
   type        = string
-  nullable    = false
+  default     = null
+  nullable    = true
 
   validation {
-    condition     = length(trimspace(var.notification_channel_id)) > 0
-    error_message = "notification_channel_id must not be empty."
+    condition     = var.observability_phase == "first" ? var.notification_channel_id == null : var.notification_channel_id != null && length(trimspace(var.notification_channel_id)) > 0
+    error_message = "notification_channel_id must be absent in first phase and nonblank in protected phase."
   }
 }
 
 variable "alert_ids" {
   description = "IDs of console-created Monitoring alerts that exactly implement alert_specs."
   type        = map(string)
-  nullable    = false
+  default     = null
+  nullable    = true
 
   validation {
-    condition = toset(keys(var.alert_ids)) == toset([
+    condition = var.observability_phase == "first" ? var.alert_ids == null : var.alert_ids != null && toset(keys(var.alert_ids)) == toset([
       "alb_healthy_backend",
       "alb_5xx",
       "alb_latency",
@@ -145,11 +147,22 @@ variable "alert_ids" {
       "postgres_connections",
       "postgres_backup_age",
       "certificate_risk",
-      "readiness_optional_dependency_degradation",
+      "readiness_required_unavailable",
       "deployment_failure",
       "runner_overrun",
-    ]) && alltrue([for alert_id in values(var.alert_ids) : length(trimspace(alert_id)) > 0]) && length(toset(values(var.alert_ids))) == length(var.alert_ids)
-    error_message = "alert_ids must contain exactly one unique, nonblank ID for every required alert category."
+    ]) && alltrue([for alert_id in values(var.alert_ids) : length(trimspace(alert_id)) > 0]) && length(toset(values(var.alert_ids))) == 16
+    error_message = "alert_ids must be absent in first phase and otherwise contain exactly 16 unique, nonblank IDs for every required alert category."
+  }
+}
+
+variable "observability_phase" {
+  description = "first emits alert specifications without console IDs; protected binds the reviewed alert IDs."
+  type        = string
+  nullable    = false
+
+  validation {
+    condition     = contains(["first", "protected"], var.observability_phase)
+    error_message = "observability_phase must be first or protected."
   }
 }
 

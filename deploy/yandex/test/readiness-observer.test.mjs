@@ -21,7 +21,10 @@ test("returns exactly the sanitized category for healthy, SMTP, storage, and req
     ],
   ];
   for (const [body, ok, category] of cases) {
-    const result = await observeReadiness({ fetch: async () => response(body, { ok }) });
+    const result = await observeReadiness({
+      domain: "markiro.example",
+      fetch: async () => response(body, { ok }),
+    });
     assert.deepEqual(result, { category, exitCode: category === "required_unavailable" ? 1 : 0 });
   }
 });
@@ -30,6 +33,7 @@ test("uses the fixed loopback readiness URL with a two-second abort signal", asy
   let call;
   const timeouts = [];
   const result = await observeReadiness({
+    domain: "markiro.example",
     fetch: async (url, options) => {
       call = { url, options };
       return response({ status: "ok", checks: {} });
@@ -42,8 +46,9 @@ test("uses the fixed loopback readiness URL with a two-second abort signal", asy
     },
   });
 
-  assert.equal(READY_URL, "http://127.0.0.1:3000/health/ready");
+  assert.equal(READY_URL, "http://127.0.0.1:8080/health/ready");
   assert.equal(call.url, READY_URL);
+  assert.deepEqual(call.options.headers, { Host: "markiro.example" });
   assert.ok(call.options.signal instanceof AbortSignal);
   assert.deepEqual(timeouts, [2_000]);
   assert.deepEqual(result, { category: "ok", exitCode: 0 });
@@ -63,11 +68,21 @@ test("treats timeout, malformed JSON, and raw failures as required-unavailable w
     }),
     async () => ({ ok: false, json: async () => ({ status: "ok", body }) }),
   ]) {
-    assert.deepEqual(await observeReadiness({ fetch }), {
+    assert.deepEqual(await observeReadiness({ domain: "markiro.example", fetch }), {
       category: "required_unavailable",
       exitCode: 1,
     });
   }
+});
+
+test("fails closed when the production Host authority is absent", async () => {
+  assert.deepEqual(
+    await observeReadiness({ fetch: async () => response({ status: "ok", checks: {} }) }),
+    {
+      category: "required_unavailable",
+      exitCode: 1,
+    },
+  );
 });
 
 test("CLI prints one sanitized line and exits nonzero for malformed JSON", () => {

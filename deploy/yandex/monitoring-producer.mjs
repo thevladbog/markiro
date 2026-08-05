@@ -46,6 +46,7 @@ export async function collectAppMetrics({
   const optionalDegraded = ["smtp_degraded", "storage_degraded"].includes(readiness?.category)
     ? 1
     : 0;
+  const requiredUnavailable = readiness?.category === "required_unavailable" ? 1 : 0;
   return [
     metric(
       "markiro.alb.healthy_backends",
@@ -65,6 +66,11 @@ export async function collectAppMetrics({
       "markiro.readiness.optional_dependency_degraded",
       { resource_id: appInstanceId },
       optionalDegraded,
+    ),
+    metric(
+      "markiro.readiness.required_unavailable",
+      { resource_id: appInstanceId },
+      requiredUnavailable,
     ),
   ];
 }

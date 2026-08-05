@@ -78,6 +78,17 @@ variable "app_service_account_id" {
   nullable    = false
 }
 
+variable "terraform_service_account_id" {
+  description = "Bootstrap-created workload-federated Terraform service account, supplied for provenance and separation checks."
+  type        = string
+  nullable    = false
+
+  validation {
+    condition     = length(trimspace(var.terraform_service_account_id)) > 0
+    error_message = "terraform_service_account_id must be a nonblank bootstrap identity ID."
+  }
+}
+
 variable "runtime_secret_id" {
   description = "Bootstrap-created runtime Lockbox secret ID; payload remains out of Terraform."
   type        = string
@@ -130,6 +141,17 @@ variable "audit_service_account_id" {
   description = "Bootstrap-created audit writer service-account ID."
   type        = string
   nullable    = false
+}
+
+variable "observability_phase" {
+  description = "first emits unbound alert specifications; protected requires the reviewed console alert attestation."
+  type        = string
+  nullable    = false
+
+  validation {
+    condition     = contains(["first", "protected"], var.observability_phase)
+    error_message = "observability_phase must be first or protected."
+  }
 }
 
 variable "audit_log_group_id" {
@@ -220,21 +242,23 @@ variable "public_dns_enabled" {
 variable "notification_channel_id" {
   description = "Existing Monitoring notification channel used by every production alert."
   type        = string
-  nullable    = false
+  default     = null
+  nullable    = true
 
   validation {
-    condition     = length(trimspace(var.notification_channel_id)) > 0
-    error_message = "notification_channel_id must not be empty."
+    condition     = var.observability_phase == "first" ? var.notification_channel_id == null : var.notification_channel_id != null && length(trimspace(var.notification_channel_id)) > 0
+    error_message = "notification_channel_id must be absent in first phase and nonblank in protected phase."
   }
 }
 
 variable "alert_ids" {
   description = "Complete IDs of Monitoring alerts created from module.observability.alert_specs."
   type        = map(string)
-  nullable    = false
+  default     = null
+  nullable    = true
 
   validation {
-    condition = toset(keys(var.alert_ids)) == toset([
+    condition = var.observability_phase == "first" ? var.alert_ids == null : var.alert_ids != null && toset(keys(var.alert_ids)) == toset([
       "alb_healthy_backend",
       "alb_5xx",
       "alb_latency",
@@ -248,11 +272,11 @@ variable "alert_ids" {
       "postgres_connections",
       "postgres_backup_age",
       "certificate_risk",
-      "readiness_optional_dependency_degradation",
+      "readiness_required_unavailable",
       "deployment_failure",
       "runner_overrun",
-    ]) && alltrue([for alert_id in values(var.alert_ids) : length(trimspace(alert_id)) > 0]) && length(toset(values(var.alert_ids))) == length(var.alert_ids)
-    error_message = "alert_ids must contain exactly one unique, nonblank ID for every required alert category."
+    ]) && alltrue([for alert_id in values(var.alert_ids) : length(trimspace(alert_id)) > 0]) && length(toset(values(var.alert_ids))) == 16
+    error_message = "alert_ids must be absent in first phase and otherwise contain exactly 16 unique, nonblank IDs for every required alert category."
   }
 }
 

@@ -48,35 +48,52 @@ async function integrationSources() {
 }
 
 function assertIntegratedGraph(sources) {
-  const { bootstrap, compute, iam, iamVariables, observability, production, workflow } =
-    sources;
+  const { bootstrap, compute, iam, iamVariables, observability, production, workflow } = sources;
 
-  assert.deepEqual(
-    allResources(iam, "yandex_iam_service_account").sort(),
-    ["app", "audit", "deployment_controller", "runner", "state", "terraform"],
-  );
+  assert.deepEqual(allResources(iam, "yandex_iam_service_account").sort(), [
+    "app",
+    "audit",
+    "deployment_controller",
+    "runner",
+    "state",
+    "terraform",
+  ]);
   assert.match(
     resourceBlock(compute, "yandex_compute_instance", "runner"),
     /service_account_id\s*=\s*var\.runner_service_account_id/,
   );
-  assert.doesNotMatch(compute, /runner_vm_service_account_id|service_account_id\s*=\s*var\.deployment_controller_service_account_id/);
-
-  assert.deepEqual(
-    allResources(iam, "yandex_iam_workload_identity_federated_credential").sort(),
-    ["github_infrastructure", "github_production_cleanup", "github_production_controller"],
+  assert.doesNotMatch(
+    compute,
+    /runner_vm_service_account_id|service_account_id\s*=\s*var\.deployment_controller_service_account_id/,
   );
+
+  assert.deepEqual(allResources(iam, "yandex_iam_workload_identity_federated_credential").sort(), [
+    "github_infrastructure",
+    "github_production_cleanup",
+    "github_production_controller",
+  ]);
   for (const [name, account, subject] of [
     ["github_production_controller", "deployment_controller", "github_controller_subject"],
     ["github_production_cleanup", "deployment_controller", "github_cleanup_subject"],
     ["github_infrastructure", "terraform", "github_infrastructure_subject"],
   ]) {
-    const credential = resourceBlock(iam, "yandex_iam_workload_identity_federated_credential", name);
-    assert.match(credential, new RegExp(`service_account_id\\s*=\\s*yandex_iam_service_account\\.${account}\\.id`));
+    const credential = resourceBlock(
+      iam,
+      "yandex_iam_workload_identity_federated_credential",
+      name,
+    );
+    assert.match(
+      credential,
+      new RegExp(`service_account_id\\s*=\\s*yandex_iam_service_account\\.${account}\\.id`),
+    );
     assert.match(credential, new RegExp(`external_subject_id\\s*=\\s*local\\.${subject}`));
   }
   assert.match(iamVariables, /var\.github_controller_environment\s*==\s*"production-controller"/);
   assert.match(iamVariables, /var\.github_cleanup_environment\s*==\s*"production-cleanup"/);
-  assert.match(iamVariables, /var\.github_infrastructure_environment\s*==\s*"production-infrastructure"/);
+  assert.match(
+    iamVariables,
+    /var\.github_infrastructure_environment\s*==\s*"production-infrastructure"/,
+  );
   assert.match(
     iam,
     /github_controller_subject\s*=\s*"repo:\$\{var\.github_repository\}:environment:\$\{var\.github_controller_environment\}"/,
@@ -85,7 +102,10 @@ function assertIntegratedGraph(sources) {
     iam,
     /github_cleanup_subject\s*=\s*"repo:\$\{var\.github_repository\}:environment:\$\{var\.github_cleanup_environment\}"/,
   );
-  assert.doesNotMatch(iam, /environment:production-deploy|github_deploy|runner.*federated_credential/);
+  assert.doesNotMatch(
+    iam,
+    /environment:production-deploy|github_deploy|runner.*federated_credential/,
+  );
   const federationUsers = resourceBlock(
     iam,
     "yandex_iam_workload_identity_oidc_federation_iam_binding",
@@ -93,9 +113,16 @@ function assertIntegratedGraph(sources) {
   );
   assert.match(federationUsers, /yandex_iam_service_account\.terraform\.id/);
   assert.match(federationUsers, /yandex_iam_service_account\.deployment_controller\.id/);
-  assert.doesNotMatch(federationUsers, /yandex_iam_service_account\.(?:app|runner|state|audit)\.id/);
+  assert.doesNotMatch(
+    federationUsers,
+    /yandex_iam_service_account\.(?:app|runner|state|audit)\.id/,
+  );
 
-  const runnerEditor = resourceBlock(compute, "yandex_compute_instance_iam_binding", "runner_editor");
+  const runnerEditor = resourceBlock(
+    compute,
+    "yandex_compute_instance_iam_binding",
+    "runner_editor",
+  );
   assert.match(runnerEditor, /instance_id\s*=\s*yandex_compute_instance\.runner\.id/);
   assert.match(runnerEditor, /role\s*=\s*"compute\.editor"/);
   assert.match(runnerEditor, /deployment_controller_service_account_id/);
@@ -105,7 +132,11 @@ function assertIntegratedGraph(sources) {
     /yandex_resourcemanager_folder_iam_(?:member|binding)[\s\S]{0,500}?role\s*=\s*"compute\.(?:editor|admin|operator)"/,
   );
   for (const [name, role, member] of [
-    ["deployment_controller_app_viewer", "compute.viewer", "deployment_controller_service_account_id"],
+    [
+      "deployment_controller_app_viewer",
+      "compute.viewer",
+      "deployment_controller_service_account_id",
+    ],
     ["runner_app_viewer", "compute.viewer", "runner_service_account_id"],
     ["runner_app_os_login", "compute.osAdminLogin", "runner_service_account_id"],
   ]) {
@@ -127,7 +158,11 @@ function assertIntegratedGraph(sources) {
   const expectedSecretReaders = [
     ["app_runtime", "runtime_secret_id", "app"],
     ["runner_registry", "registry_secret_id", "runner"],
-    ["deployment_controller_runner_registration", "runner_registration_secret_id", "deployment_controller"],
+    [
+      "deployment_controller_runner_registration",
+      "runner_registration_secret_id",
+      "deployment_controller",
+    ],
     ["terraform_state_backend", "state_backend_secret_id", "terraform"],
   ];
   assert.deepEqual(
@@ -154,6 +189,7 @@ function assertIntegratedGraph(sources) {
     ["app_postgres_viewer", "managed-postgresql.viewer", "app"],
     ["runner_monitoring_editor", "monitoring.editor", "runner"],
     ["runner_logging_writer", "logging.writer", "runner"],
+    ["runner_os_login_auditor", "resource-manager.auditor", "runner"],
     ["deployment_controller_alb_viewer", "alb.viewer", "deployment_controller"],
     ["deployment_controller_postgres_viewer", "managed-postgresql.viewer", "deployment_controller"],
   ]) {
@@ -161,7 +197,11 @@ function assertIntegratedGraph(sources) {
     assert.match(grant, new RegExp(`role\\s*=\\s*"${role.replaceAll(".", "\\.")}"`));
     assert.match(grant, new RegExp(`yandex_iam_service_account\\.${account}\\.id`));
   }
-  const runnerAlb = resourceBlock(iam, "yandex_resourcemanager_folder_iam_member", "runner_alb_viewer");
+  const runnerAlb = resourceBlock(
+    iam,
+    "yandex_resourcemanager_folder_iam_member",
+    "runner_alb_viewer",
+  );
   assert.match(runnerAlb, /role\s*=\s*"alb\.viewer"/);
   assert.match(runnerAlb, /yandex_iam_service_account\.runner\.id/);
   assert.doesNotMatch(
@@ -190,16 +230,97 @@ test("integrated Yandex graph preserves exact production identity, secret, role,
 test("combined graph contract rejects boundary regressions", async () => {
   const sources = await integrationSources();
   for (const [name, mutate] of [
-    ["shared OIDC subject", (graph) => ({ ...graph, iam: graph.iam.replace("environment:${var.github_cleanup_environment}", "environment:${var.github_controller_environment}") })],
-    ["deploy OIDC", (graph) => ({ ...graph, iam: graph.iam.replace("github_production_cleanup", "github_production_deploy") })],
-    ["Terraform exchange", (graph) => ({ ...graph, iam: graph.iam.replace("yandex_iam_service_account.terraform.id", "yandex_iam_service_account.runner.id") })],
-    ["identity reuse", (graph) => ({ ...graph, compute: graph.compute.replace("service_account_id        = var.runner_service_account_id", "service_account_id        = var.deployment_controller_service_account_id") })],
-    ["folder metadata editor", (graph) => ({ ...graph, compute: graph.compute.replace('resource "yandex_compute_instance_iam_binding" "runner_editor"', 'resource "yandex_resourcemanager_folder_iam_member" "runner_editor"') })],
-    ["runner role", (graph) => ({ ...graph, compute: graph.compute.replace('role = "compute.editor"', 'role = "compute.operator"') })],
-    ["secret crossover", (graph) => ({ ...graph, iam: graph.iam.replace("secret_id = var.registry_secret_id", "secret_id = var.runtime_secret_id") })],
-    ["KMS role", (graph) => ({ ...graph, bootstrap: graph.bootstrap.replace('role             = "kms.keys.user"', 'role             = "kms.keys.encrypterDecrypter"') })],
-    ["producer role", (graph) => ({ ...graph, iam: graph.iam.replace('role      = "monitoring.editor"', 'role      = "monitoring.viewer"') })],
-    ["log group", (graph) => ({ ...graph, compute: graph.compute.replace("var.application_log_group_id", "var.folder_id") })],
+    [
+      "shared OIDC subject",
+      (graph) => ({
+        ...graph,
+        iam: graph.iam.replace(
+          "environment:${var.github_cleanup_environment}",
+          "environment:${var.github_controller_environment}",
+        ),
+      }),
+    ],
+    [
+      "deploy OIDC",
+      (graph) => ({
+        ...graph,
+        iam: graph.iam.replace("github_production_cleanup", "github_production_deploy"),
+      }),
+    ],
+    [
+      "Terraform exchange",
+      (graph) => ({
+        ...graph,
+        iam: graph.iam.replace(
+          "yandex_iam_service_account.terraform.id",
+          "yandex_iam_service_account.runner.id",
+        ),
+      }),
+    ],
+    [
+      "identity reuse",
+      (graph) => ({
+        ...graph,
+        compute: graph.compute.replace(
+          "service_account_id        = var.runner_service_account_id",
+          "service_account_id        = var.deployment_controller_service_account_id",
+        ),
+      }),
+    ],
+    [
+      "folder metadata editor",
+      (graph) => ({
+        ...graph,
+        compute: graph.compute.replace(
+          'resource "yandex_compute_instance_iam_binding" "runner_editor"',
+          'resource "yandex_resourcemanager_folder_iam_member" "runner_editor"',
+        ),
+      }),
+    ],
+    [
+      "runner role",
+      (graph) => ({
+        ...graph,
+        compute: graph.compute.replace('role = "compute.editor"', 'role = "compute.operator"'),
+      }),
+    ],
+    [
+      "secret crossover",
+      (graph) => ({
+        ...graph,
+        iam: graph.iam.replace(
+          "secret_id = var.registry_secret_id",
+          "secret_id = var.runtime_secret_id",
+        ),
+      }),
+    ],
+    [
+      "KMS role",
+      (graph) => ({
+        ...graph,
+        bootstrap: graph.bootstrap.replace(
+          'role             = "kms.keys.user"',
+          'role             = "kms.keys.encrypterDecrypter"',
+        ),
+      }),
+    ],
+    [
+      "producer role",
+      (graph) => ({
+        ...graph,
+        iam: graph.iam.replace(
+          'role      = "monitoring.editor"',
+          'role      = "monitoring.viewer"',
+        ),
+      }),
+    ],
+    [
+      "log group",
+      (graph) => ({
+        ...graph,
+        compute: graph.compute.replace("var.application_log_group_id", "var.folder_id"),
+      }),
+    ],
   ]) {
     assert.throws(() => assertIntegratedGraph(mutate(structuredClone(sources))), undefined, name);
   }

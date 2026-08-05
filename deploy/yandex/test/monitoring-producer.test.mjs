@@ -19,6 +19,7 @@ test("app producer emits every app custom alert metric with exact Terraform sele
     "markiro.alb.healthy_backends": 1,
     "markiro.postgres.backup_age_seconds": 3720,
     "markiro.readiness.optional_dependency_degraded": 1,
+    "markiro.readiness.required_unavailable": 0,
   });
   assert.deepEqual(metrics[0].labels, {
     resource_id: "app-1",
@@ -26,6 +27,27 @@ test("app producer emits every app custom alert metric with exact Terraform sele
     backend_group_id: "backend-1",
   });
   assert.deepEqual(metrics[1].labels, { resource_id: "pg-1" });
+});
+
+test("app producer represents a required readiness failure independently", async () => {
+  const metrics = await collectAppMetrics({
+    appInstanceId: "app-1",
+    loadBalancerId: "alb-1",
+    backendGroupId: "backend-1",
+    postgresClusterId: "pg-1",
+    now: new Date("2026-08-05T10:02:00.000Z"),
+    getAlbTargets: async () => [{ status: { zoneStatuses: [{ status: "HEALTHY" }] } }],
+    getPostgresBackups: async () => [{ createdAt: "2026-08-05T09:00:00.000Z" }],
+    getReadiness: async () => ({ category: "required_unavailable", exitCode: 1 }),
+  });
+  assert.equal(
+    metrics.find(({ name }) => name === "markiro.readiness.required_unavailable")?.value,
+    1,
+  );
+  assert.equal(
+    metrics.find(({ name }) => name === "markiro.readiness.optional_dependency_degraded")?.value,
+    0,
+  );
 });
 
 test("producer fails without fabricating ALB or backup values when source data is missing", async () => {

@@ -710,10 +710,7 @@ function assertRunnerControllerProviderGrants({ bootstrap, compute, controller, 
   );
   assert.match(runnerEditor, /instance_id\s*=\s*yandex_compute_instance\.runner\.id/);
   assert.match(runnerEditor, /role\s*=\s*"compute\.editor"/);
-  assert.match(
-    runnerEditor,
-    /serviceAccount:\$\{var\.deployment_controller_service_account_id\}/,
-  );
+  assert.match(runnerEditor, /serviceAccount:\$\{var\.deployment_controller_service_account_id\}/);
 
   const appViewer = terraformResourceBlock(
     compute,
@@ -1317,7 +1314,7 @@ const requiredObservabilityAlerts = [
   "postgres_connections",
   "postgres_backup_age",
   "certificate_risk",
-  "readiness_optional_dependency_degradation",
+  "readiness_required_unavailable",
   "deployment_failure",
   "runner_overrun",
 ];
@@ -1444,7 +1441,7 @@ function assertProtectedObservability({
   for (const variables of [observabilityVariables, productionVariables]) {
     assert.match(
       variables,
-      /variable\s+"notification_channel_id"\s*\{[\s\S]*?condition\s*=\s*length\(trimspace\(var\.notification_channel_id\)\)\s*>\s*0/,
+      /variable\s+"notification_channel_id"\s*\{[\s\S]*?var\.observability_phase\s*==\s*"first"[\s\S]*?length\(trimspace\(var\.notification_channel_id\)\)\s*>\s*0/,
     );
     assert.match(variables, /variable\s+"alert_ids"\s*\{/);
     assert.match(variables, /toset\(keys\(var\.alert_ids\)\)\s*==\s*toset\(\[/);
@@ -1452,10 +1449,7 @@ function assertProtectedObservability({
       variables,
       /alltrue\(\[for alert_id in values\(var\.alert_ids\) : length\(trimspace\(alert_id\)\) > 0\]\)/,
     );
-    assert.match(
-      variables,
-      /length\(toset\(values\(var\.alert_ids\)\)\)\s*==\s*length\(var\.alert_ids\)/,
-    );
+    assert.match(variables, /length\(toset\(values\(var\.alert_ids\)\)\)\s*==\s*16/);
   }
 
   for (const category of requiredObservabilityAlerts) {
@@ -1508,7 +1502,7 @@ function assertProtectedObservability({
   assert.match(productionVariables, /variable\s+"alert_ids"\s*\{/);
   assert.match(
     readme,
-    /provider 0\.215\.0 does not expose a Monitoring alert resource[\s\S]*?must not proceed[\s\S]*?alert_ids/i,
+    /provider 0\.215\.0 does not expose a Monitoring alert resource[\s\S]*?observability_phase=first[\s\S]*?alert_ids/i,
   );
   assert.match(
     readme,
@@ -2268,7 +2262,7 @@ test("runtime foundation pins containers and telemetry and isolates deploy-only 
   for (const category of [
     "alb_healthy_backend",
     "postgres_backup_age",
-    "readiness_optional_dependency_degradation",
+    "readiness_required_unavailable",
   ]) {
     const spec = terraformObjectEntry(observability, category);
     assert.match(spec, /missing_data_behavior\s*=\s*"ALARM"/);
@@ -2287,6 +2281,8 @@ test("runtime foundation pins containers and telemetry and isolates deploy-only 
   assert.match(agentConfig, /plugin:\s*yc_metrics/);
   assert.match(agentConfig, /plugin:\s*yc_logs/);
   assert.match(agentConfig, /markiro\/observability\.log/);
+  assert.match(agentConfig, /read_only_new_lines:\s*true/);
+  assert.match(agentConfig, /namespace:\s*sys/);
 
   assert.match(remoteDeploy, /registry-auth\.mjs run-stdin/);
   assert.match(remoteDeploy, /YC_REGISTRY_SECRET_ID/);
@@ -2526,7 +2522,7 @@ test("observability contract rejects missing categories, unsafe retention, audit
   const duplicateAlertIdsAccepted = await observabilitySources();
   duplicateAlertIdsAccepted.observabilityVariables =
     duplicateAlertIdsAccepted.observabilityVariables.replace(
-      /\s*&&\s*length\(toset\(values\(var\.alert_ids\)\)\)\s*==\s*length\(var\.alert_ids\)/,
+      /\s*&&\s*length\(toset\(values\(var\.alert_ids\)\)\)\s*==\s*16/,
       "",
     );
   assert.throws(() => assertProtectedObservability(duplicateAlertIdsAccepted));
@@ -2534,7 +2530,7 @@ test("observability contract rejects missing categories, unsafe retention, audit
   const duplicateRootAlertIdsAccepted = await observabilitySources();
   duplicateRootAlertIdsAccepted.productionVariables =
     duplicateRootAlertIdsAccepted.productionVariables.replace(
-      /\s*&&\s*length\(toset\(values\(var\.alert_ids\)\)\)\s*==\s*length\(var\.alert_ids\)/,
+      /\s*&&\s*length\(toset\(values\(var\.alert_ids\)\)\)\s*==\s*16/,
       "",
     );
   assert.throws(() => assertProtectedObservability(duplicateRootAlertIdsAccepted));

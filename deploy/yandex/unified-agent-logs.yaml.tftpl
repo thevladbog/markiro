@@ -4,6 +4,7 @@ routes:
       id: markiro_linux_metrics
       config:
         poll_period: 15s
+        namespace: sys
         resources:
           cpu: basic
           memory: advanced
@@ -26,7 +27,7 @@ routes:
         state_directory: /var/lib/yandex/unified_agent/markiro
         min_bytes_read: 1b
         line_delimiter: "\n"
-        read_only_newlines: true
+        read_only_new_lines: true
         keep_open_file: true
     channel:
       output:

@@ -77,12 +77,15 @@ Trails destinations, and the dashboard, while `module.observability.alert_specs`
 is the authoritative contract for alerts created in the Yandex Monitoring
 console.
 
-Production apply and go-live must not proceed until an operator creates every alert in
-the console with the exact query, comparison, thresholds, evaluation window,
-and `notification_channel_id` emitted by `alert_specs`. Record the resulting IDs
-under the matching `alert_ids` keys. The production root rejects a missing,
-extra, or blank alert ID and a blank channel. Terraform does not claim ownership
-of those alert resources.
+Clean first provisioning uses `observability_phase=first`: it deliberately
+accepts no notification channel or alert IDs and emits reviewable
+`module.observability.alert_specs`. An operator then creates all 16 alerts in the
+console with the exact query, comparison, thresholds, and evaluation window, and
+performs the live metric inventory/query check. Only
+`observability_phase=protected` accepts the notification channel and the 16
+unique resulting IDs. The protected root rejects a missing, extra, duplicate, or
+blank alert ID and a blank channel. Terraform does not claim ownership of those
+alert resources.
 
 ## One-time bootstrap state migration
 

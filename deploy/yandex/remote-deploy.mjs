@@ -286,6 +286,12 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
         [
           ...sshBase,
           "sudo",
+          "/usr/bin/systemd-run",
+          "--quiet",
+          "--wait",
+          "--pipe",
+          "--collect",
+          "--unit=markiro-deploy",
           "env",
           `MARKIRO_IMAGE_TAG=${manifest.commit}`,
           `MARKIRO_API_IMAGE_DIGEST=${apiDigest}`,

@@ -16,6 +16,7 @@ const ALLOWED_UNITS = new Set([
   "markiro-runner-monitoring.service",
   "markiro-runtime-env.service",
 ]);
+const MARKIRO_DOCKER_TAG = /^markiro\./;
 
 const SENSITIVE_KEY =
   /(?:authorization|password|passwd|secret|token|cookie|api[-_]?key|credential|session)/i;
@@ -216,6 +217,7 @@ export function sanitizeJournal(entries, { maxBytes = 64 * 1024, maxLineBytes = 
   let bytes = 0;
   for (const entry of entries.slice(-200)) {
     if (!ALLOWED_UNITS.has(entry?.unit) || typeof entry.message !== "string") continue;
+    if (entry.unit === "docker.service" && !MARKIRO_DOCKER_TAG.test(entry.tag ?? "")) continue;
     const prefix = `${entry.unit} `;
     const available = Math.max(0, maxLineBytes - Buffer.byteLength(prefix) - 1);
     const sanitized =
@@ -366,7 +368,13 @@ async function runCli() {
     .flatMap((line) => {
       try {
         const parsed = JSON.parse(line);
-        return [{ unit: parsed._SYSTEMD_UNIT, message: parsed.MESSAGE }];
+        return [
+          {
+            unit: parsed._SYSTEMD_UNIT,
+            tag: parsed.CONTAINER_TAG,
+            message: parsed.MESSAGE,
+          },
+        ];
       } catch {
         return [];
       }

@@ -8,6 +8,7 @@ management_subnet_cidr    = "10.64.3.0/24"
 ubuntu_lts_image_family   = "ubuntu-2404-lts"
 kms_key_id                = "replace-with-existing-kms-key-id"
 app_service_account_id    = "replace-with-bootstrap-app-service-account-id"
+terraform_service_account_id = "replace-with-bootstrap-terraform-service-account-id"
 runtime_secret_id         = "replace-with-bootstrap-runtime-lockbox-secret-id"
 registry_secret_id        = "replace-with-bootstrap-registry-lockbox-secret-id"
 runner_service_account_id = "replace-with-bootstrap-runner-service-account-id"
@@ -23,6 +24,9 @@ audit_bucket_name         = "replace-with-private-audit-bucket-name"
 domain                    = "markiro.example.ru"
 dns_zone_id               = "replace-with-cloud-dns-zone-id"
 public_dns_enabled        = false
+# First provisioning deliberately omits notification_channel_id and alert_ids,
+# then protected phase records the exact reviewed console values below.
+observability_phase       = "protected"
 notification_channel_id   = "replace-with-monitoring-notification-channel-id"
 alert_ids = {
   alb_healthy_backend                       = "replace-with-alert-id"
@@ -38,7 +42,7 @@ alert_ids = {
   postgres_connections                      = "replace-with-alert-id"
   postgres_backup_age                       = "replace-with-alert-id"
   certificate_risk                          = "replace-with-alert-id"
-  readiness_optional_dependency_degradation = "replace-with-alert-id"
+  readiness_required_unavailable            = "replace-with-alert-id"
   deployment_failure                        = "replace-with-alert-id"
   runner_overrun                            = "replace-with-alert-id"
 }

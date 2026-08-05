@@ -174,11 +174,11 @@ locals {
       evaluation_window       = "1h"
       notification_channel_id = var.notification_channel_id
     }
-    readiness_optional_dependency_degradation = {
-      category                = "readiness_optional_dependency_degradation"
-      title                   = "Readiness optional dependency degradation"
-      metric                  = "markiro.readiness.optional_dependency_degraded"
-      query                   = "markiro.readiness.optional_dependency_degraded{service=\"custom\", resource_id=\"${var.app_instance_id}\"}"
+    readiness_required_unavailable = {
+      category                = "readiness_required_unavailable"
+      title                   = "Readiness required dependency unavailable"
+      metric                  = "markiro.readiness.required_unavailable"
+      query                   = "markiro.readiness.required_unavailable{service=\"custom\", resource_id=\"${var.app_instance_id}\"}"
       comparison              = "GREATER_THAN"
       warning_threshold       = 0
       alarm_threshold         = 0

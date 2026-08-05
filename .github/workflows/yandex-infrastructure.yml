@@ -16,6 +16,12 @@ name: Yandex infrastructure
         required: true
         default: false
         type: boolean
+      observability_phase:
+        description: First provisioning emits alert specs; protected binds reviewed console alert IDs
+        required: true
+        type: choice
+        default: protected
+        options: [first, protected]
       postgres_provisioning_phase:
         description: Create only the required first-provisioning PostgreSQL boundary
         required: true
@@ -143,6 +149,7 @@ jobs:
     env:
       ENABLE_PUBLIC_DNS: ${{ github.event_name == 'workflow_dispatch' && inputs.enable_public_dns || false }}
       POSTGRES_PROVISIONING_PHASE: ${{ github.event_name == 'workflow_dispatch' && inputs.postgres_provisioning_phase || 'none' }}
+      OBSERVABILITY_PHASE: ${{ github.event_name == 'workflow_dispatch' && inputs.observability_phase || 'protected' }}
       POSTGRES_OWNER_CHANGE_REFERENCE: ${{ github.event_name == 'workflow_dispatch' && inputs.postgres_owner_change_reference || 'none' }}
       POSTGRES_OWNER_APPROVAL_RESULT: ${{ needs.postgres_owner_approval.result }}
       POSTGRES_OWNER_APPROVAL_RUN_ID: ${{ needs.postgres_owner_approval.outputs.run-id || 'none' }}
@@ -164,6 +171,7 @@ jobs:
       TF_VAR_management_subnet_cidr: ${{ vars.YC_MANAGEMENT_SUBNET_CIDR }}
       TF_VAR_ubuntu_lts_image_family: ubuntu-2404-lts
       TF_VAR_kms_key_id: ${{ vars.YC_KMS_KEY_ID }}
+      TF_VAR_terraform_service_account_id: ${{ vars.YC_TERRAFORM_SERVICE_ACCOUNT_ID }}
       TF_VAR_app_service_account_id: ${{ vars.YC_APP_SERVICE_ACCOUNT_ID }}
       TF_VAR_runtime_secret_id: ${{ vars.YC_RUNTIME_SECRET_ID }}
       TF_VAR_registry_secret_id: ${{ vars.YC_REGISTRY_SECRET_ID }}
@@ -179,6 +187,7 @@ jobs:
       TF_VAR_audit_bucket_name: ${{ vars.YC_AUDIT_BUCKET_NAME }}
       TF_VAR_domain: ${{ vars.MARKIRO_DOMAIN }}
       TF_VAR_dns_zone_id: ${{ vars.YC_DNS_ZONE_ID }}
+      TF_VAR_observability_phase: ${{ github.event_name == 'workflow_dispatch' && inputs.observability_phase || 'protected' }}
       TF_VAR_notification_channel_id: ${{ vars.YC_NOTIFICATION_CHANNEL_ID }}
       TF_VAR_alert_ids: ${{ vars.YC_ALERT_IDS }}
     steps:
@@ -289,6 +298,18 @@ jobs:
               ;;
             *) exit 1 ;;
           esac
+          case "$OBSERVABILITY_PHASE" in
+            first)
+              [[ "$public_dns_enabled" == false ]]
+              unset TF_VAR_notification_channel_id TF_VAR_alert_ids
+              ;;
+            protected)
+              test -n "$TF_VAR_notification_channel_id"
+              test -n "$TF_VAR_alert_ids"
+              ;;
+            *) exit 1 ;;
+          esac
+          node infra/yandex/scripts/validate-workload-identities.mjs
           github_oidc_response="$(curl --fail --silent --show-error --get \
             --header "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
             --data-urlencode "audience=$YC_OIDC_AUDIENCE" \
@@ -362,8 +383,9 @@ jobs:
             --arg postgres_owner_approval_result "$POSTGRES_OWNER_APPROVAL_RESULT" \
             --arg postgres_owner_change_reference "$POSTGRES_OWNER_CHANGE_REFERENCE" \
             --arg postgres_provisioning_phase "$POSTGRES_PROVISIONING_PHASE" \
+            --arg observability_phase "$OBSERVABILITY_PHASE" \
             --argjson public_dns_enabled "$public_dns_enabled" \
-            '{commit_sha: $commit_sha, github_run_attempt: $github_run_attempt, github_run_id: $github_run_id, plan_sha256: $plan_sha256, postgres_owner_approval_result: $postgres_owner_approval_result, postgres_owner_change_reference: $postgres_owner_change_reference, postgres_provisioning_phase: $postgres_provisioning_phase, public_dns_enabled: $public_dns_enabled, summary_sha256: $summary_sha256}' \
+            '{commit_sha: $commit_sha, github_run_attempt: $github_run_attempt, github_run_id: $github_run_id, observability_phase: $observability_phase, plan_sha256: $plan_sha256, postgres_owner_approval_result: $postgres_owner_approval_result, postgres_owner_change_reference: $postgres_owner_change_reference, postgres_provisioning_phase: $postgres_provisioning_phase, public_dns_enabled: $public_dns_enabled, summary_sha256: $summary_sha256}' \
             > "$evidence_path"
           chmod 600 "$plan_path" "$summary_path" "$evidence_path"
           printf 'target_sha=%s\n' "$target_sha" >> "$GITHUB_OUTPUT"
@@ -371,6 +393,7 @@ jobs:
             printf '### Yandex production Terraform plan\n\n'
             printf -- '- Commit: `%s`\n' "$target_sha"
             printf -- '- Public DNS requested: `%s`\n' "$public_dns_enabled"
+            printf -- '- Observability phase: `%s`\n' "$OBSERVABILITY_PHASE"
             jq -r '
               "- Resource counts: add=\(.resource_counts.add), change=\(.resource_counts.change), remove=\(.resource_counts.remove)",
               "- Action classes: " + ((.action_classes | to_entries | map("\(.key)=\(.value)")) | if length == 0 then "none" else join(", ") end)
@@ -402,6 +425,7 @@ jobs:
     env:
       ENABLE_PUBLIC_DNS: ${{ inputs.enable_public_dns }}
       POSTGRES_PROVISIONING_PHASE: ${{ inputs.postgres_provisioning_phase }}
+      OBSERVABILITY_PHASE: ${{ inputs.observability_phase }}
       POSTGRES_OWNER_CHANGE_REFERENCE: ${{ inputs.postgres_owner_change_reference }}
       TARGET_SHA: ${{ inputs.target_sha }}
       YC_CLOUD_ID: ${{ vars.YC_CLOUD_ID }}
@@ -419,6 +443,7 @@ jobs:
       TF_VAR_management_subnet_cidr: ${{ vars.YC_MANAGEMENT_SUBNET_CIDR }}
       TF_VAR_ubuntu_lts_image_family: ubuntu-2404-lts
       TF_VAR_kms_key_id: ${{ vars.YC_KMS_KEY_ID }}
+      TF_VAR_terraform_service_account_id: ${{ vars.YC_TERRAFORM_SERVICE_ACCOUNT_ID }}
       TF_VAR_app_service_account_id: ${{ vars.YC_APP_SERVICE_ACCOUNT_ID }}
       TF_VAR_runtime_secret_id: ${{ vars.YC_RUNTIME_SECRET_ID }}
       TF_VAR_registry_secret_id: ${{ vars.YC_REGISTRY_SECRET_ID }}
@@ -434,6 +459,7 @@ jobs:
       TF_VAR_audit_bucket_name: ${{ vars.YC_AUDIT_BUCKET_NAME }}
       TF_VAR_domain: ${{ vars.MARKIRO_DOMAIN }}
       TF_VAR_dns_zone_id: ${{ vars.YC_DNS_ZONE_ID }}
+      TF_VAR_observability_phase: ${{ inputs.observability_phase }}
       TF_VAR_notification_channel_id: ${{ vars.YC_NOTIFICATION_CHANNEL_ID }}
       TF_VAR_alert_ids: ${{ vars.YC_ALERT_IDS }}
     steps:
@@ -509,10 +535,11 @@ jobs:
           test ! -L "$evidence_path"
           jq -e '
             type == "object" and
-            (keys | sort) == ["commit_sha", "github_run_attempt", "github_run_id", "plan_sha256", "postgres_owner_approval_result", "postgres_owner_change_reference", "postgres_provisioning_phase", "public_dns_enabled", "summary_sha256"] and
+            (keys | sort) == ["commit_sha", "github_run_attempt", "github_run_id", "observability_phase", "plan_sha256", "postgres_owner_approval_result", "postgres_owner_change_reference", "postgres_provisioning_phase", "public_dns_enabled", "summary_sha256"] and
             (.commit_sha | type == "string") and
             (.github_run_attempt | type == "string" and test("^[1-9][0-9]*$")) and
             (.github_run_id | type == "string" and test("^[1-9][0-9]*$")) and
+            (.observability_phase | type == "string" and (. == "first" or . == "protected")) and
             (.plan_sha256 | type == "string") and
             (.postgres_owner_approval_result | type == "string" and (. == "success" or . == "skipped")) and
             (.postgres_owner_change_reference | type == "string") and
@@ -528,6 +555,7 @@ jobs:
           evidence_postgres_owner_approval_result="$(jq -er '.postgres_owner_approval_result' "$evidence_path")"
           evidence_postgres_owner_change_reference="$(jq -er '.postgres_owner_change_reference' "$evidence_path")"
           evidence_postgres_provisioning_phase="$(jq -er '.postgres_provisioning_phase' "$evidence_path")"
+          evidence_observability_phase="$(jq -er '.observability_phase' "$evidence_path")"
           evidence_public_dns="$(jq -er '.public_dns_enabled' "$evidence_path")"
           [[ "$evidence_commit" == "$target_sha" ]]
           [[ "$artifact_sha256" =~ ^[0-9a-f]{64}$ ]]
@@ -538,6 +566,7 @@ jobs:
           [[ "$evidence_github_run_attempt" == "$GITHUB_RUN_ATTEMPT" ]]
           [[ "$evidence_postgres_owner_change_reference" == "$POSTGRES_OWNER_CHANGE_REFERENCE" ]]
           [[ "$evidence_postgres_provisioning_phase" == "$POSTGRES_PROVISIONING_PHASE" ]]
+          [[ "$evidence_observability_phase" == "$OBSERVABILITY_PHASE" ]]
           case "$POSTGRES_PROVISIONING_PHASE" in
             none|cluster)
               [[ "$POSTGRES_OWNER_CHANGE_REFERENCE" == none ]]
@@ -554,6 +583,17 @@ jobs:
             false) expected_public_dns=false ;;
             *) exit 1 ;;
           esac
+          case "$OBSERVABILITY_PHASE" in
+            first)
+              [[ "$expected_public_dns" == false ]]
+              ;;
+            protected)
+              test -n "$TF_VAR_notification_channel_id"
+              test -n "$TF_VAR_alert_ids"
+              ;;
+            *) exit 1 ;;
+          esac
+          node infra/yandex/scripts/validate-workload-identities.mjs
           [[ "$evidence_public_dns" == "$expected_public_dns" ]]
           for required_value in \
             "$YC_CLOUD_ID" \

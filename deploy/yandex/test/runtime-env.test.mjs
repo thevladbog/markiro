@@ -402,6 +402,7 @@ test("installed-layout helpers resolve their colocated inventory and preserve sy
   );
   assert.deepEqual(
     await installedObserver.observeReadiness({
+      domain: "markiro.example",
       fetch: async () => ({ ok: true, json: async () => ({ status: "ok", checks: {} }) }),
     }),
     { category: "ok", exitCode: 0 },

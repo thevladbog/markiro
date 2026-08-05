@@ -15,11 +15,14 @@ Local production apply is prohibited.
    11.10.0, runner `2.336.0`, and `yc` `1.23.0` pins are unchanged or have an
    approved provenance review. The `yc` SHA-256 is a measured repository pin,
    not vendor-attested provenance.
-3. Confirm access uses the exact protected environments: `production` for the
-   deployment controller, `production-infrastructure` for Terraform,
-   `production-public-dns` for public DNS approval, and
-   `production-postgres-owner` for the database-owner boundary. Do not treat a
-   boolean or a change-record reference as environment approval.
+3. Confirm access uses the exact protected environments:
+   `production-controller` for runner control, `production-deploy` for the
+   self-hosted deployment job, `production-cleanup` for runner cleanup,
+   `production-infrastructure` for Terraform, `production-public-dns` for
+   public DNS approval, and `production-postgres-owner` for the database-owner
+   boundary. Restrict each to `main`; these exact names are also OIDC subjects.
+   Do not treat a boolean or a change-record reference as environment approval,
+   and do not configure an obsolete shared `production` environment.
 4. Set `public_dns_enabled=false` unless this is the separately approved final
    DNS operation. Never use an automatic approval flag for public DNS.
 
@@ -35,6 +38,7 @@ target_sha=current_main_sha
 enable_public_dns=false
 postgres_provisioning_phase=none
 postgres_owner_change_reference=none
+observability_phase=protected
 ```
 
 2. Approve only the `production-infrastructure` environment after checking the
@@ -92,17 +96,32 @@ postgres_owner_change_reference=protected_change_record_id
    plan. The apply job rechecks the saved run identity, attempt, approval
    outcome, and change reference; it does not query or validate external record
    contents.
-7. Create Monitoring alerts manually from `alert_specs`; provider `0.215.0`
-   cannot mutate alerts. Enter the exact resulting IDs and notification channel
-   ID in protected infrastructure variables, then run a new reviewed plan.
-8. Record only change, plan-summary, approval, and sanitized post-apply
+7. For a clean environment, first dispatch a full-root plan with
+   `observability_phase=first`. The workflow deliberately unsets the notification
+   channel and alert IDs, so no fabricated placeholders enter Terraform. Apply
+   that saved plan and export only `module.observability.alert_specs` through the
+   protected review path. Create all 16 Monitoring alerts manually from those
+   specs; provider `0.215.0` cannot mutate alerts. Run the pre-go-live live metric
+   inventory and query check, including `sys.memory.used_percent`,
+   `sys.filesystem.used_percent`, and `markiro.readiness.required_unavailable`.
+   Then record the exact notification channel and one unique ID for every spec in
+   protected infrastructure variables and dispatch a new
+   `observability_phase=protected` saved plan/apply. The protected phase rejects a
+   missing, duplicate, blank, or extra ID.
+8. The app VM clean bootstrap installs and enables the runtime materializer but
+   does not read an empty Lockbox payload. Before any deployment, populate the
+   runtime Lockbox with every and only the `.env.production.example` inventory,
+   then use the protected deploy flow: it restarts the materializer and remains
+   blocked unless atomic exact materialization succeeds. Never treat VM creation
+   as proof that runtime secrets were materialized.
+9. Record only change, plan-summary, approval, and sanitized post-apply
    evidence IDs in the protected operational system.
-9. Before the first deployment, verify the bootstrap IAM boundary still grants
-   the audit service account `audit-trails.viewer` on this folder,
-   `logging.writer` on the bootstrap-created audit log group, and the exact KMS
-   encryption permission. Verify the deployment controller uses
-   `YC_DEPLOYMENT_CONTROLLER_SERVICE_ACCOUNT_ID`; it must never exchange a
-   GitHub OIDC token for `YC_TERRAFORM_SERVICE_ACCOUNT_ID`.
+10. Before the first deployment, verify the bootstrap IAM boundary still grants
+    the audit service account `audit-trails.viewer` on this folder,
+    `logging.writer` on the bootstrap-created audit log group, and the exact KMS
+    encryption permission. Verify the deployment controller uses
+    `YC_DEPLOYMENT_CONTROLLER_SERVICE_ACCOUNT_ID`; it must never exchange a
+    GitHub OIDC token for `YC_TERRAFORM_SERVICE_ACCOUNT_ID`.
 
 ## Investigate drift and stop unsafe changes
 

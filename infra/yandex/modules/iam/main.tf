@@ -223,6 +223,14 @@ resource "yandex_resourcemanager_folder_iam_member" "runner_logging_writer" {
   member    = "serviceAccount:${yandex_iam_service_account.runner.id}"
 }
 
+# Standard-client OS Login requires the instance role plus a folder-level
+# resource-manager.auditor grant for the VM's containing resource boundary.
+resource "yandex_resourcemanager_folder_iam_member" "runner_os_login_auditor" {
+  folder_id = var.folder_id
+  role      = "resource-manager.auditor"
+  member    = "serviceAccount:${yandex_iam_service_account.runner.id}"
+}
+
 # Application Load Balancer does not expose a load-balancer-level IAM binding in
 # yandex-cloud/yandex 0.215.0. Folder scope is therefore the narrowest
 # provider-supported scope for the runner's read-only target-state permission.

@@ -6,6 +6,27 @@ locals {
   }
 }
 
+check "workload_service_account_ids_are_distinct" {
+  assert {
+    condition = length(toset([
+      var.app_service_account_id,
+      var.runner_service_account_id,
+      var.deployment_controller_service_account_id,
+      var.audit_service_account_id,
+      var.terraform_service_account_id,
+    ])) == 5 && alltrue([
+      for identity in [
+        var.app_service_account_id,
+        var.runner_service_account_id,
+        var.deployment_controller_service_account_id,
+        var.audit_service_account_id,
+        var.terraform_service_account_id,
+      ] : length(trimspace(identity)) > 0
+    ])
+    error_message = "app, runner, deployment controller, audit, and Terraform service account IDs must be nonblank and pairwise distinct."
+  }
+}
+
 # Kept outside the observability module so both VM cloud-init templates can
 # target the retained group without introducing a compute/observability cycle.
 resource "yandex_logging_group" "application" {
@@ -115,6 +136,7 @@ module "observability" {
   runner_instance_id      = module.compute.runner_instance_id
   postgres_cluster_id     = module.postgres.cluster_id
   certificate_id          = module.ingress.certificate_id
+  observability_phase     = var.observability_phase
   notification_channel_id = var.notification_channel_id
   alert_ids               = var.alert_ids
   labels                  = local.labels
