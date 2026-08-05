@@ -10,12 +10,11 @@ import i18n from "../src/i18n/index.js";
 import { DashboardPage } from "../src/pages/dashboard/index.js";
 
 function jsonResponse(status: number, body: unknown): Response {
-  return {
-    ok: status >= 200 && status < 300,
+  return new Response(JSON.stringify(body), {
     status,
     statusText: status >= 200 && status < 300 ? "OK" : "Request failed",
-    json: async () => body,
-  } as Response;
+    headers: { "Content-Type": "application/json" },
+  });
 }
 
 function renderDashboard() {

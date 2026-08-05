@@ -179,7 +179,7 @@
 
   Run: `git diff --check`
 
-  Run: `rg -n "—|–" apps/admin/src/pages/dashboard apps/admin/src/i18n packages/ui/src/components/Sidebar.tsx`
+  Run: `git diff --unified=0 -- apps/admin/src/pages/dashboard apps/admin/src/i18n packages/ui/src/components/Sidebar.tsx | rg -n '^\+[^+].*(—|–)'`
 
   Expected: no visible dash characters introduced by this change.
 
