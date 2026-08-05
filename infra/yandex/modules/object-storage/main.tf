@@ -89,6 +89,13 @@ resource "yandex_storage_bucket_policy" "media_app" {
         Action    = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
         Resource  = ["arn:aws:s3:::${yandex_storage_bucket.media.bucket}/*"]
       },
+      {
+        Sid       = "AllowApplicationMediaBucketList"
+        Effect    = "Allow"
+        Principal = { CanonicalUser = var.app_service_account_id }
+        Action    = ["s3:ListBucket"]
+        Resource  = ["arn:aws:s3:::${yandex_storage_bucket.media.bucket}"]
+      },
     ]
   })
 }

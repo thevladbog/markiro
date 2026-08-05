@@ -167,6 +167,114 @@ function replaceTerraformResource(source, type, name, mutate) {
   return source.replace(block, mutate(block));
 }
 
+function terraformJsonencodePolicy(resource) {
+  const assignment = /\bpolicy\s*=\s*jsonencode\s*\(/.exec(resource);
+  assert.ok(assignment, "bucket policy must use jsonencode");
+
+  const openingParenthesis = resource.indexOf("(", assignment.index);
+  let depth = 0;
+  let escaped = false;
+  let inString = false;
+
+  for (let index = openingParenthesis; index < resource.length; index += 1) {
+    const character = resource[index];
+    if (inString) {
+      if (character === '"' && !escaped) inString = false;
+      escaped = character === "\\" && !escaped;
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+      continue;
+    }
+    if (character === "(") depth += 1;
+    if (character === ")") depth -= 1;
+    if (depth === 0) return parseTerraformLiteral(resource.slice(openingParenthesis + 1, index));
+  }
+
+  assert.fail("unterminated jsonencode policy");
+}
+
+function parseTerraformLiteral(source) {
+  const tokens = [];
+
+  for (let index = 0; index < source.length;) {
+    const character = source[index];
+    if (/\s/.test(character)) {
+      index += 1;
+      continue;
+    }
+    if ("{}[]=,".includes(character)) {
+      tokens.push({ type: character, value: character });
+      index += 1;
+      continue;
+    }
+    if (character === '"') {
+      let end = index + 1;
+      let escaped = false;
+      for (; end < source.length; end += 1) {
+        if (source[end] === '"' && !escaped) break;
+        escaped = source[end] === "\\" && !escaped;
+      }
+      assert.ok(end < source.length, "unterminated Terraform string");
+      tokens.push({ type: "value", value: JSON.parse(source.slice(index, end + 1)) });
+      index = end + 1;
+      continue;
+    }
+
+    const identifier = /^[A-Za-z0-9_.-]+/.exec(source.slice(index));
+    assert.ok(
+      identifier,
+      `unsupported Terraform policy token near ${source.slice(index, index + 16)}`,
+    );
+    tokens.push({ type: "value", value: identifier[0] });
+    index += identifier[0].length;
+  }
+
+  let cursor = 0;
+  const take = (type) => {
+    const token = tokens[cursor];
+    assert.equal(token?.type, type, `expected ${type} in Terraform jsonencode policy`);
+    cursor += 1;
+    return token;
+  };
+  const parseValue = () => {
+    const token = tokens[cursor];
+    assert.ok(token, "expected Terraform policy value");
+    if (token.type === "value") {
+      cursor += 1;
+      return token.value;
+    }
+    if (token.type === "{") {
+      cursor += 1;
+      const object = {};
+      while (tokens[cursor]?.type !== "}") {
+        const key = take("value").value;
+        take("=");
+        object[key] = parseValue();
+        if (tokens[cursor]?.type === ",") cursor += 1;
+      }
+      take("}");
+      return object;
+    }
+    if (token.type === "[") {
+      cursor += 1;
+      const values = [];
+      while (tokens[cursor]?.type !== "]") {
+        values.push(parseValue());
+        if (tokens[cursor]?.type === ",") cursor += 1;
+      }
+      take("]");
+      return values;
+    }
+    assert.fail(`unexpected ${token.type} in Terraform jsonencode policy`);
+  };
+
+  const parsed = parseValue();
+  assert.equal(cursor, tokens.length, "Terraform jsonencode policy has trailing content");
+  return parsed;
+}
+
 function assertProtectedBootstrap({ bootstrap, iam, outputs, variables }) {
   const allHcl = [bootstrap, iam, outputs, variables].join("\n");
   const serviceAccounts = [...iam.matchAll(/resource\s+"yandex_iam_service_account"\s+"([^"]+)"/g)]
@@ -627,19 +735,25 @@ function assertProtectedManagedData({
 
   const mediaPolicy = terraformResourceBlock(storage, "yandex_storage_bucket_policy", "media_app");
   assert.match(mediaPolicy, /bucket\s*=\s*yandex_storage_bucket\.media\.bucket/);
-  assert.match(mediaPolicy, /CanonicalUser\s*=\s*var\.app_service_account_id/);
-  assert.match(
-    mediaPolicy,
-    /Action\s*=\s*\[\s*"s3:GetObject",\s*"s3:PutObject",\s*"s3:DeleteObject",?\s*\]/,
-  );
-  assert.match(
-    mediaPolicy,
-    /Resource\s*=\s*\["arn:aws:s3:::\$\{yandex_storage_bucket\.media\.bucket\}\/\*"\]/,
-  );
-  assert.doesNotMatch(
-    mediaPolicy,
-    /s3:(?:\*|PutBucket|DeleteBucket|PutLifecycle|PutEncryption|PutBucketPolicy)/,
-  );
+  assert.deepEqual(terraformJsonencodePolicy(mediaPolicy), {
+    Version: "2012-10-17",
+    Statement: [
+      {
+        Sid: "AllowApplicationMediaObjects",
+        Effect: "Allow",
+        Principal: { CanonicalUser: "var.app_service_account_id" },
+        Action: ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+        Resource: ["arn:aws:s3:::${yandex_storage_bucket.media.bucket}/*"],
+      },
+      {
+        Sid: "AllowApplicationMediaBucketList",
+        Effect: "Allow",
+        Principal: { CanonicalUser: "var.app_service_account_id" },
+        Action: ["s3:ListBucket"],
+        Resource: ["arn:aws:s3:::${yandex_storage_bucket.media.bucket}"],
+      },
+    ],
+  });
 
   const auditPolicy = terraformResourceBlock(
     storage,
@@ -647,12 +761,18 @@ function assertProtectedManagedData({
     "audit_writer",
   );
   assert.match(auditPolicy, /bucket\s*=\s*yandex_storage_bucket\.audit\.bucket/);
-  assert.match(auditPolicy, /CanonicalUser\s*=\s*var\.audit_service_account_id/);
-  assert.match(auditPolicy, /Action\s*=\s*\["s3:PutObject"\]/);
-  assert.match(
-    auditPolicy,
-    /Resource\s*=\s*\["arn:aws:s3:::\$\{yandex_storage_bucket\.audit\.bucket\}\/\*"\]/,
-  );
+  assert.deepEqual(terraformJsonencodePolicy(auditPolicy), {
+    Version: "2012-10-17",
+    Statement: [
+      {
+        Sid: "AllowAuditArchiveWrites",
+        Effect: "Allow",
+        Principal: { CanonicalUser: "var.audit_service_account_id" },
+        Action: ["s3:PutObject"],
+        Resource: ["arn:aws:s3:::${yandex_storage_bucket.audit.bucket}/*"],
+      },
+    ],
+  });
 
   const mediaKms = terraformResourceBlock(
     storage,
@@ -963,6 +1083,38 @@ test("managed-data contract rejects unsafe PostgreSQL, buckets, access, and cred
     (block) => block.replace('"s3:DeleteObject"]', '"s3:DeleteObject", "s3:PutBucketLifecycle"]'),
   );
   assert.throws(() => assertProtectedManagedData(broadAppAccess));
+
+  const wildcardPrincipal = await managedDataSources();
+  wildcardPrincipal.storage = replaceTerraformResource(
+    wildcardPrincipal.storage,
+    "yandex_storage_bucket_policy",
+    "media_app",
+    (block) => block.replace("CanonicalUser = var.app_service_account_id", 'CanonicalUser = "*"'),
+  );
+  assert.throws(() => assertProtectedManagedData(wildcardPrincipal));
+
+  const extraPublicStatement = await managedDataSources();
+  extraPublicStatement.storage = replaceTerraformResource(
+    extraPublicStatement.storage,
+    "yandex_storage_bucket_policy",
+    "media_app",
+    (block) =>
+      block.replace(
+        "    ]\n  })",
+        '      {\n        Sid       = "PublicRead"\n        Effect    = "Allow"\n        Principal = "*"\n        Action    = ["s3:GetObject"]\n        Resource  = ["arn:aws:s3:::public/*"]\n      },\n    ]\n  })',
+      ),
+  );
+  assert.throws(() => assertProtectedManagedData(extraPublicStatement));
+
+  const broadenedAuditAction = await managedDataSources();
+  broadenedAuditAction.storage = replaceTerraformResource(
+    broadenedAuditAction.storage,
+    "yandex_storage_bucket_policy",
+    "audit_writer",
+    (block) =>
+      block.replace('Action    = ["s3:PutObject"]', 'Action = ["s3:PutObject", "s3:GetObject"]'),
+  );
+  assert.throws(() => assertProtectedManagedData(broadenedAuditAction));
 
   for (const resourceName of ["media_app", "audit_writer"]) {
     const missingKmsBinding = await managedDataSources();
