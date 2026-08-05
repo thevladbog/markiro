@@ -1,6 +1,6 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   Badge,
@@ -15,6 +15,15 @@ import {
 
 afterEach(() => {
   cleanup();
+});
+
+beforeAll(() => {
+  Object.defineProperties(HTMLElement.prototype, {
+    hasPointerCapture: { value: () => false },
+    setPointerCapture: { value: () => undefined },
+    releasePointerCapture: { value: () => undefined },
+    scrollIntoView: { value: () => undefined },
+  });
 });
 
 describe("Button", () => {
@@ -141,18 +150,66 @@ describe("Input", () => {
 });
 
 describe("Select", () => {
-  it("renders options and calls onChange with the selected value", async () => {
+  it("opens a custom option overlay and calls onValueChange when an option is clicked", async () => {
     const user = userEvent.setup();
-    const onChange = vi.fn();
-    render(<Select label="Группа" options={["Пиво", "Вода"]} value="Пиво" onChange={onChange} />);
+    const onValueChange = vi.fn();
+    render(
+      <Select
+        label="Группа"
+        options={["Пиво", "Вода"]}
+        value="Пиво"
+        onValueChange={onValueChange}
+      />,
+    );
 
-    const select = screen.getByLabelText("Группа");
-    await user.selectOptions(select, "Вода");
+    const trigger = screen.getByRole("combobox", { name: "Группа" });
+    expect(screen.queryByRole("listbox")).toBeNull();
 
-    expect(onChange).toHaveBeenCalledWith("Вода");
+    await user.click(trigger);
+    expect(screen.getByRole("listbox")).toBeDefined();
+    await user.click(screen.getByRole("option", { name: "Вода" }));
+
+    expect(onValueChange).toHaveBeenCalledWith("Вода");
   });
 
-  it("renders per-option disabled state and reflects it in the DOM", () => {
+  it("selects the next enabled option with ArrowDown and Enter", async () => {
+    const user = userEvent.setup();
+    const onValueChange = vi.fn();
+    render(
+      <Select
+        label="Группа"
+        options={["Пиво", "Вода"]}
+        value="Пиво"
+        onValueChange={onValueChange}
+      />,
+    );
+
+    await user.click(screen.getByRole("combobox", { name: "Группа" }));
+    await user.keyboard("{ArrowDown}");
+    const waterOption = screen.getByRole("option", { name: "Вода" });
+    await waitFor(() => expect(document.activeElement).toBe(waterOption));
+    await user.keyboard("{Enter}");
+
+    expect(onValueChange).toHaveBeenCalledWith("Вода");
+  });
+
+  it("closes on Escape and returns focus to its trigger", async () => {
+    const user = userEvent.setup();
+    render(<Select label="Группа" options={["Пиво", "Вода"]} value="Пиво" />);
+
+    const trigger = screen.getByRole("combobox", { name: "Группа" });
+    await user.click(trigger);
+    expect(screen.getByRole("listbox")).toBeDefined();
+
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("does not select a disabled option", async () => {
+    const user = userEvent.setup();
+    const onValueChange = vi.fn();
     render(
       <Select
         label="Продукты"
@@ -162,16 +219,17 @@ describe("Select", () => {
           { value: "p3", label: "Йогурт", disabled: false },
         ]}
         value="p1"
+        onValueChange={onValueChange}
       />,
     );
 
-    const milkOption = screen.getByRole("option", { name: "Молоко" }) as HTMLOptionElement;
-    const cheeseOption = screen.getByRole("option", { name: "Сыр" }) as HTMLOptionElement;
-    const yogurtOption = screen.getByRole("option", { name: "Йогурт" }) as HTMLOptionElement;
+    await user.click(screen.getByRole("combobox", { name: "Продукты" }));
+    const cheeseOption = screen.getByRole("option", { name: "Сыр" });
+    expect(cheeseOption.getAttribute("data-disabled")).toBe("");
 
-    expect(milkOption.disabled).toBe(false);
-    expect(cheeseOption.disabled).toBe(true);
-    expect(yogurtOption.disabled).toBe(false);
+    await user.click(cheeseOption);
+
+    expect(onValueChange).not.toHaveBeenCalled();
   });
 });
 
