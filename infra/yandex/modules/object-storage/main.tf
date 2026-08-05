@@ -131,17 +131,3 @@ resource "yandex_storage_bucket_policy" "audit_writer" {
     ]
   })
 }
-
-# SSE-KMS media reads and writes require both encryption and decryption.
-resource "yandex_kms_symmetric_key_iam_member" "media_app" {
-  symmetric_key_id = var.kms_key_id
-  role             = "kms.keys.encrypterDecrypter"
-  member           = "serviceAccount:${var.app_service_account_id}"
-}
-
-# Archive writers only encrypt new audit objects, so they receive no decrypt permission.
-resource "yandex_kms_symmetric_key_iam_member" "audit_writer" {
-  symmetric_key_id = var.kms_key_id
-  role             = "kms.keys.encrypter"
-  member           = "serviceAccount:${var.audit_service_account_id}"
-}

@@ -40,8 +40,7 @@ jobs:
       release-sha: ${{ steps.release.outputs.release-sha }}
     env:
       YC_OIDC_AUDIENCE: ${{ vars.YC_OIDC_AUDIENCE }}
-      YC_RUNNER_SERVICE_ACCOUNT_ID: ${{ vars.YC_RUNNER_SERVICE_ACCOUNT_ID }}
-      YC_TERRAFORM_SERVICE_ACCOUNT_ID: ${{ vars.YC_TERRAFORM_SERVICE_ACCOUNT_ID }}
+      YC_DEPLOYMENT_CONTROLLER_SERVICE_ACCOUNT_ID: ${{ vars.YC_DEPLOYMENT_CONTROLLER_SERVICE_ACCOUNT_ID }}
       YC_RUNNER_REGISTRATION_SECRET_ID: ${{ vars.YC_RUNNER_REGISTRATION_SECRET_ID }}
       YC_RUNNER_INSTANCE_ID: ${{ vars.YC_RUNNER_INSTANCE_ID }}
       YC_APP_INSTANCE_ID: ${{ vars.YC_APP_INSTANCE_ID }}
@@ -118,26 +117,15 @@ jobs:
             --header "Content-Type: application/x-www-form-urlencoded" \
             --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' \
             --data-urlencode 'requested_token_type=urn:ietf:params:oauth:token-type:access_token' \
-            --data-urlencode "audience=$YC_TERRAFORM_SERVICE_ACCOUNT_ID" \
+            --data-urlencode "audience=$YC_DEPLOYMENT_CONTROLLER_SERVICE_ACCOUNT_ID" \
             --data-urlencode "subject_token=$github_oidc_token" \
             --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:id_token' \
             https://auth.yandex.cloud/oauth/token)"
           iam_token="$(jq -er '.access_token | select(type == "string" and length > 0)' <<<"$iam_response")"
           echo "::add-mask::$iam_token"
-          runner_iam_response="$(curl --fail --silent \
-            --request POST \
-            --header "Content-Type: application/x-www-form-urlencoded" \
-            --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' \
-            --data-urlencode 'requested_token_type=urn:ietf:params:oauth:token-type:access_token' \
-            --data-urlencode "audience=$YC_RUNNER_SERVICE_ACCOUNT_ID" \
-            --data-urlencode "subject_token=$github_oidc_token" \
-            --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:id_token' \
-            https://auth.yandex.cloud/oauth/token)"
-          runner_iam_token="$(jq -er '.access_token | select(type == "string" and length > 0)' <<<"$runner_iam_response")"
-          echo "::add-mask::$runner_iam_token"
           lockbox_path="$RUNNER_TEMP/runner-lockbox.json"
           curl --fail --silent \
-            --header "Authorization: Bearer $runner_iam_token" \
+            --header "Authorization: Bearer $iam_token" \
             "https://payload.lockbox.api.cloud.yandex.net/lockbox/v1/secrets/$YC_RUNNER_REGISTRATION_SECRET_ID/payload" \
             --output "$lockbox_path"
           jq -e '
@@ -148,11 +136,11 @@ jobs:
           github_runner_admin_token="$(jq -er '.entries[0].textValue' "$lockbox_path")"
           echo "::add-mask::$github_runner_admin_token"
           rm -f "$lockbox_path"
-          export YC_GATE_IAM_TOKEN="$iam_token" YC_IAM_TOKEN="$runner_iam_token"
+          export YC_GATE_IAM_TOKEN="$iam_token" YC_IAM_TOKEN="$iam_token"
           export GITHUB_RUNNER_ADMIN_TOKEN="$github_runner_admin_token"
           export RUNNER_WAIT_DISCOVERY=1 RUNNER_OUTPUT_PATH="$GITHUB_OUTPUT"
           node deploy/yandex/runner-control.mjs start
-          unset github_oidc_token github_runner_admin_token iam_token runner_iam_token
+          unset github_oidc_token github_runner_admin_token iam_token
           unset YC_GATE_IAM_TOKEN YC_IAM_TOKEN GITHUB_RUNNER_ADMIN_TOKEN
 
   deploy:
@@ -208,7 +196,7 @@ jobs:
       DEPLOYMENT_ID: ${{ needs.controller.outputs.deployment-id }}
       RUNNER_ID: ${{ needs.controller.outputs.runner-id }}
       YC_OIDC_AUDIENCE: ${{ vars.YC_OIDC_AUDIENCE }}
-      YC_RUNNER_SERVICE_ACCOUNT_ID: ${{ vars.YC_RUNNER_SERVICE_ACCOUNT_ID }}
+      YC_DEPLOYMENT_CONTROLLER_SERVICE_ACCOUNT_ID: ${{ vars.YC_DEPLOYMENT_CONTROLLER_SERVICE_ACCOUNT_ID }}
       YC_RUNNER_REGISTRATION_SECRET_ID: ${{ vars.YC_RUNNER_REGISTRATION_SECRET_ID }}
       YC_RUNNER_INSTANCE_ID: ${{ vars.YC_RUNNER_INSTANCE_ID }}
     steps:
@@ -231,7 +219,7 @@ jobs:
             --header "Content-Type: application/x-www-form-urlencoded" \
             --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' \
             --data-urlencode 'requested_token_type=urn:ietf:params:oauth:token-type:access_token' \
-            --data-urlencode "audience=$YC_RUNNER_SERVICE_ACCOUNT_ID" \
+            --data-urlencode "audience=$YC_DEPLOYMENT_CONTROLLER_SERVICE_ACCOUNT_ID" \
             --data-urlencode "subject_token=$github_oidc_token" \
             --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:id_token' \
             https://auth.yandex.cloud/oauth/token)"

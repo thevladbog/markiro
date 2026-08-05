@@ -40,8 +40,10 @@ node infra/yandex/scripts/check-toolchain.mjs
 
 1. Load short-lived Yandex credentials and non-secret `TF_VAR_*` identifiers
    into the protected session. Do not save them in a `.tfvars` file.
-2. Create an ignored `infra/yandex/bootstrap/backend.hcl` only after the state
-   credential exists. Until then, use local state.
+2. Do not create `infra/yandex/bootstrap/backend.tf` yet. The bootstrap root
+   deliberately has no backend declaration, so this first plan and apply use
+   Terraform's real local backend. The ignored S3 backend declaration is added
+   only after the state bucket and HMAC credential exist.
 3. Run the following commands. Review the binary plan through the approved
    local review process; do not print it, export it, or attach it to the change
    record.
@@ -50,7 +52,7 @@ node infra/yandex/scripts/check-toolchain.mjs
 set -euo pipefail
 umask 077
 export TF_CLI_CONFIG_FILE=/protected/terraform/terraform.tfrc
-terraform -chdir=infra/yandex/bootstrap init -backend=false -lockfile=readonly
+terraform -chdir=infra/yandex/bootstrap init -input=false -lockfile=readonly
 terraform -chdir=infra/yandex/bootstrap fmt -check
 terraform -chdir=infra/yandex/bootstrap validate
 terraform -chdir=infra/yandex/bootstrap plan -out=bootstrap.tfplan
@@ -81,8 +83,11 @@ terraform -chdir=infra/yandex/bootstrap apply bootstrap.tfplan
 
 <!-- runbook-contract:bootstrap-state-migration -->
 
-1. Copy `infra/yandex/bootstrap/backend.hcl.example` to the ignored
-   `infra/yandex/bootstrap/backend.hcl`. Set only its bucket and key fields.
+1. Copy `infra/yandex/bootstrap/backend.tf.example` to the ignored
+   `infra/yandex/bootstrap/backend.tf`, then copy
+   `infra/yandex/bootstrap/backend.hcl.example` to the ignored
+   `infra/yandex/bootstrap/backend.hcl`. Set only the bucket and key fields in
+   `backend.hcl`; `backend.tf` contains only the S3 backend type.
 2. Have the approved broker inject the HMAC pair into the process environment.
    Check presence only; do not echo values.
 
@@ -91,6 +96,8 @@ set -euo pipefail
 umask 077
 test -n "${AWS_ACCESS_KEY_ID:-}"
 test -n "${AWS_SECRET_ACCESS_KEY:-}"
+cp infra/yandex/bootstrap/backend.tf.example infra/yandex/bootstrap/backend.tf
+cp infra/yandex/bootstrap/backend.hcl.example infra/yandex/bootstrap/backend.hcl
 terraform -chdir=infra/yandex/bootstrap init -migrate-state -backend-config=backend.hcl -lockfile=readonly
 unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
 ```
@@ -111,3 +118,15 @@ unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
    Clear injected credentials and close protected file descriptors.
 4. Confirm the bucket, Lockbox containers, and durable resources retain
    `prevent_destroy`. A normal destroy must not become a recovery procedure.
+
+## Privileged IAM boundary
+
+The bootstrap root is applied only by the protected operator. It creates the
+service accounts and grants the exact service-specific roles needed by the
+workload-federated Terraform identity, plus the Audit Trails collection,
+destination logging, and KMS permissions. Terraform receives no primitive
+`editor` or `admin` role. The separate deployment-controller identity is the
+only production GitHub OIDC subject and is limited to runner control and the
+read-only Compute, ALB, and PostgreSQL deployment gates. Record the resulting
+`deployment_controller` service-account ID and `audit_log_group_id` in the
+protected GitHub environment variables before any production plan.

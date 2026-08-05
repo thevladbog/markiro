@@ -74,3 +74,9 @@ variable "state_bucket_name" {
     error_message = "state_bucket_name must contain at least three characters."
   }
 }
+
+variable "kms_key_id" {
+  description = "Existing KMS key used by production disks and encrypted buckets."
+  type        = string
+  nullable    = false
+}

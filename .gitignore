@@ -22,5 +22,6 @@ deploy/production/.caddy-config/
 *.tfplan
 *.auto.tfvars
 backend.hcl
+backend.tf
 !.terraform.lock.hcl
 !*.example

@@ -33,3 +33,9 @@ output "runner_registration_secret_id" {
   value       = yandex_lockbox_secret.runner_registration.id
   sensitive   = true
 }
+
+output "audit_log_group_id" {
+  description = "Pre-created Cloud Logging destination for the audit trail writer."
+  value       = yandex_logging_group.audit.id
+  sensitive   = true
+}

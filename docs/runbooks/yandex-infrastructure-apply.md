@@ -97,6 +97,12 @@ postgres_owner_change_reference=protected_change_record_id
    ID in protected infrastructure variables, then run a new reviewed plan.
 8. Record only change, plan-summary, approval, and sanitized post-apply
    evidence IDs in the protected operational system.
+9. Before the first deployment, verify the bootstrap IAM boundary still grants
+   the audit service account `audit-trails.viewer` on this folder,
+   `logging.writer` on the bootstrap-created audit log group, and the exact KMS
+   encryption permission. Verify the deployment controller uses
+   `YC_DEPLOYMENT_CONTROLLER_SERVICE_ACCOUNT_ID`; it must never exchange a
+   GitHub OIDC token for `YC_TERRAFORM_SERVICE_ACCOUNT_ID`.
 
 ## Investigate drift and stop unsafe changes
 

@@ -42,6 +42,13 @@ resource "yandex_iam_service_account" "runner" {
   labels      = var.labels
 }
 
+resource "yandex_iam_service_account" "deployment_controller" {
+  name        = "markiro-production-deployment-controller"
+  description = "GitHub deployment-controller identity limited to deployment gates and runner control."
+  folder_id   = var.folder_id
+  labels      = var.labels
+}
+
 resource "yandex_iam_service_account" "audit" {
   name        = "markiro-production-audit"
   description = "Audit destination writer; destination-level access is defined with each destination."
@@ -66,18 +73,12 @@ resource "yandex_iam_workload_identity_oidc_federation_iam_binding" "terraform_u
   role          = "iam.workloadIdentityFederations.user"
   members = [
     "serviceAccount:${yandex_iam_service_account.terraform.id}",
-    "serviceAccount:${yandex_iam_service_account.runner.id}",
+    "serviceAccount:${yandex_iam_service_account.deployment_controller.id}",
   ]
 }
 
-resource "yandex_iam_workload_identity_federated_credential" "github_production" {
-  service_account_id  = yandex_iam_service_account.terraform.id
-  federation_id       = yandex_iam_workload_identity_oidc_federation.github.id
-  external_subject_id = local.github_subject
-}
-
-resource "yandex_iam_workload_identity_federated_credential" "github_production_runner" {
-  service_account_id  = yandex_iam_service_account.runner.id
+resource "yandex_iam_workload_identity_federated_credential" "github_production_controller" {
+  service_account_id  = yandex_iam_service_account.deployment_controller.id
   federation_id       = yandex_iam_workload_identity_oidc_federation.github.id
   external_subject_id = local.github_subject
 }
@@ -112,8 +113,59 @@ resource "yandex_lockbox_secret_iam_member" "runner_registration" {
   member    = "serviceAccount:${yandex_iam_service_account.runner.id}"
 }
 
-resource "yandex_resourcemanager_folder_iam_member" "terraform_management" {
+resource "yandex_lockbox_secret_iam_member" "deployment_controller_runner_registration" {
+  secret_id = var.runner_registration_secret_id
+  role      = "lockbox.payloadViewer"
+  member    = "serviceAccount:${yandex_iam_service_account.deployment_controller.id}"
+}
+
+# Bootstrap is applied by a protected operator. These service-specific roles are
+# the complete production Terraform capability set; it deliberately receives no
+# primitive editor/admin role and cannot change IAM bindings beyond services that
+# explicitly require their own administrative role.
+locals {
+  terraform_folder_roles = toset([
+    "alb.admin",
+    "audit-trails.editor",
+    "certificate-manager.editor",
+    "compute.admin",
+    "dns.editor",
+    "logging.editor",
+    "managed-postgresql.editor",
+    "smart-web-security.editor",
+    "storage.admin",
+    "vpc.admin",
+  ])
+}
+
+resource "yandex_resourcemanager_folder_iam_member" "terraform_service_role" {
+  for_each = local.terraform_folder_roles
+
   folder_id = var.folder_id
-  role      = "editor"
+  role      = each.value
   member    = "serviceAccount:${yandex_iam_service_account.terraform.id}"
+}
+
+resource "yandex_iam_service_account_iam_member" "terraform_service_account_user" {
+  for_each = toset([
+    yandex_iam_service_account.app.id,
+    yandex_iam_service_account.runner.id,
+    yandex_iam_service_account.audit.id,
+  ])
+
+  service_account_id = each.value
+  role               = "iam.serviceAccounts.user"
+  member             = "serviceAccount:${yandex_iam_service_account.terraform.id}"
+}
+
+resource "yandex_resourcemanager_folder_iam_member" "deployment_controller_alb_viewer" {
+  folder_id = var.folder_id
+  role      = "alb.viewer"
+  member    = "serviceAccount:${yandex_iam_service_account.deployment_controller.id}"
+}
+
+resource "yandex_resourcemanager_folder_iam_member" "deployment_controller_postgres_viewer" {
+  folder_id = var.folder_id
+  role      = "managed-postgresql.viewer"
+  member    = "serviceAccount:${yandex_iam_service_account.deployment_controller.id}"
 }

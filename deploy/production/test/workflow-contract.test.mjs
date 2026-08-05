@@ -599,7 +599,9 @@ function assertProductionDeploymentWorkflow(
   );
   assert.doesNotMatch(deploymentSource, /runs-on:\s*\[self-hosted, linux, markiro-production\]/);
   assert.match(deploymentSource, /GITHUB_RUNNER_ADMIN_TOKEN/);
-  assert.match(deploymentSource, /YC_RUNNER_SERVICE_ACCOUNT_ID/);
+  assert.match(deploymentSource, /YC_DEPLOYMENT_CONTROLLER_SERVICE_ACCOUNT_ID/);
+  assert.doesNotMatch(deploymentSource, /YC_TERRAFORM_SERVICE_ACCOUNT_ID/);
+  assert.doesNotMatch(deploymentSource, /YC_RUNNER_SERVICE_ACCOUNT_ID/);
   assert.match(
     deploymentSource,
     /app-host-keys-b64:\s*\$\{\{ steps\.runner\.outputs\.app-host-keys-b64 \}\}/,

@@ -1,8 +1,9 @@
 # Yandex Cloud Terraform foundations
 
 This directory contains two independent Terraform roots pinned to Terraform
-1.15.8 and `yandex-cloud/yandex` 0.215.0. Both use credential-free partial S3
-backends after the one-time bootstrap migration:
+1.15.8 and `yandex-cloud/yandex` 0.215.0. The production root uses a
+credential-free partial S3 backend. Bootstrap starts with Terraform's local
+backend and introduces its S3 declaration only for the one-time migration:
 
 - `bootstrap` creates prerequisites that must exist before remote state is used.
 - `production` manages the SaaS environment.
@@ -62,11 +63,11 @@ The application and audit identities receive direct, key-scoped KMS access:
 limited by explicit bucket policies, so neither runtime identity receives
 `storage.editor`, `storage.uploader`, or `storage.configurer`.
 
-The Terraform production identity is the only configuration boundary. Its
-existing folder-level management role applies bucket encryption, lifecycle, and
-policy settings during reviewed applies; no extra `storage.configurer` binding
-is granted to a runtime identity. No KMS key, database password, or static S3
-credential is created by Terraform.
+The Terraform production identity uses a bootstrap-created list of reviewed,
+service-specific roles. It has no primitive `editor` or `admin` role. Privileged
+IAM grants, including runtime KMS access and Audit Trails collection/destination
+rights, are created only in the protected bootstrap boundary. No KMS key,
+database password, or static S3 credential is created by Terraform.
 
 ## Monitoring alert provisioning boundary
 
@@ -95,7 +96,7 @@ arguments, or retain terminal/session logs containing secret material.
    ignored and must remain on the encrypted workstation.
 
    ```bash
-   terraform -chdir=infra/yandex/bootstrap init -backend=false
+   terraform -chdir=infra/yandex/bootstrap init -input=false
    terraform -chdir=infra/yandex/bootstrap plan -out=bootstrap.tfplan
    ```
 
@@ -118,14 +119,17 @@ arguments, or retain terminal/session logs containing secret material.
    Never pass either value as a CLI argument, Terraform variable, or file.
 
 5. **Backend migration with environment credentials.** Copy
-   `bootstrap/backend.hcl.example` to the ignored `bootstrap/backend.hcl`, set
-   only the non-secret bucket and key fields, and load the HMAC pair into the
-   standard AWS environment variables through the approved secret broker. Check
-   only that the variables exist, then migrate the authoritative state:
+   `bootstrap/backend.tf.example` to the ignored `bootstrap/backend.tf`, then
+   copy `bootstrap/backend.hcl.example` to the ignored `bootstrap/backend.hcl`.
+   Set only the non-secret bucket and key fields, and load the HMAC pair into
+   the standard AWS environment variables through the approved secret broker.
+   Check only that the variables exist, then migrate the authoritative state:
 
    ```bash
    test -n "${AWS_ACCESS_KEY_ID:-}"
    test -n "${AWS_SECRET_ACCESS_KEY:-}"
+   cp infra/yandex/bootstrap/backend.tf.example infra/yandex/bootstrap/backend.tf
+   cp infra/yandex/bootstrap/backend.hcl.example infra/yandex/bootstrap/backend.hcl
    terraform -chdir=infra/yandex/bootstrap init -migrate-state -backend-config=backend.hcl
    ```
 
@@ -148,10 +152,10 @@ credential-free. Pull requests run Terraform formatting, exact lock/toolchain
 checks, `init -backend=false`, validation, and infrastructure contracts without
 OIDC, environment variables, Lockbox, or a remote backend.
 
-The bootstrap root preserves two exact GitHub workload subjects on the same
-Terraform service account and federation:
+The bootstrap root preserves two exact GitHub workload subjects on one
+federation, with separate service accounts:
 
-- `production` is reserved for the deployment controller.
+- `production` is reserved for the least-privileged deployment controller.
 - `production-infrastructure` is reserved for Terraform plan and apply jobs.
 - `production-postgres-owner` is reserved for the database-only approval that
   attests the completed cluster apply, exact owner creation, and runtime
@@ -180,7 +184,7 @@ values mapped to the production root's `TF_VAR_*` inputs; collection variables
 such as `YC_LOCKBOX_SECRET_IDS` and `YC_ALERT_IDS` use valid Terraform
 expression syntax.
 
-On a trusted run, the job requests a GitHub OIDC token for the configured
+On a trusted infrastructure run, the job requests a GitHub OIDC token for the configured
 audience, exchanges it for a short-lived Yandex IAM token, and reads only the
 state-backend Lockbox container. That container must have exactly two text
 entries named `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`. Values are masked

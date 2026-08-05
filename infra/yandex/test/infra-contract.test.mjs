@@ -11,7 +11,7 @@ import * as yaml from "js-yaml";
 import { scanRepositoryLeaks } from "../scripts/scan-repository-leaks.mjs";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "../../..");
-const terraformRoots = ["bootstrap", "production"];
+const terraformRoots = ["production"];
 const reviewedNonUtf8Candidates = new Map([
   [
     "apps/api/test/fixtures/commerceml/import-cp1251.xml",
@@ -299,7 +299,14 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, variables }) {
     .map((match) => match[1])
     .sort();
 
-  assert.deepEqual(serviceAccounts, ["app", "audit", "runner", "state", "terraform"]);
+  assert.deepEqual(serviceAccounts, [
+    "app",
+    "audit",
+    "deployment_controller",
+    "runner",
+    "state",
+    "terraform",
+  ]);
   assert.equal(
     (iam.match(/resource\s+"yandex_iam_workload_identity_oidc_federation"\s+/g) ?? []).length,
     1,
@@ -313,8 +320,8 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, variables }) {
   );
   assert.equal(
     (iam.match(/resource\s+"yandex_iam_workload_identity_federated_credential"\s+/g) ?? []).length,
-    3,
-    "exact production controller, production runner, and infrastructure credentials are required",
+    2,
+    "exact production-controller and infrastructure credentials are required",
   );
 
   assert.doesNotMatch(
@@ -382,9 +389,9 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, variables }) {
   const credential = terraformResourceBlock(
     iam,
     "yandex_iam_workload_identity_federated_credential",
-    "github_production",
+    "github_production_controller",
   );
-  assert.match(credential, /service_account_id\s*=\s*yandex_iam_service_account\.terraform\.id/);
+  assert.match(credential, /service_account_id\s*=\s*yandex_iam_service_account\.deployment_controller\.id/);
   assert.match(
     credential,
     /federation_id\s*=\s*yandex_iam_workload_identity_oidc_federation\.github\.id/,
@@ -417,7 +424,7 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, variables }) {
   assert.match(federationUse, /role\s*=\s*"iam\.workloadIdentityFederations\.user"/);
   assert.match(
     federationUse,
-    /members\s*=\s*\[[\s\S]*?serviceAccount:\$\{yandex_iam_service_account\.terraform\.id\}[\s\S]*?serviceAccount:\$\{yandex_iam_service_account\.runner\.id\}[\s\S]*?\]/,
+    /members\s*=\s*\[[\s\S]*?serviceAccount:\$\{yandex_iam_service_account\.terraform\.id\}[\s\S]*?serviceAccount:\$\{yandex_iam_service_account\.deployment_controller\.id\}[\s\S]*?\]/,
   );
 
   const stateAccess = terraformResourceBlock(
@@ -448,15 +455,20 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, variables }) {
     );
   }
 
-  const productionManagement = terraformResourceBlock(
+  assert.doesNotMatch(
     iam,
-    "yandex_resourcemanager_folder_iam_member",
-    "terraform_management",
+    /role\s*=\s*"(?:admin|editor)"/,
+    "the production Terraform identity must not retain a primitive folder role",
   );
-  assert.match(productionManagement, /role\s*=\s*"editor"/);
+  assert.match(iam, /resource\s+"yandex_iam_service_account"\s+"deployment_controller"/);
   assert.match(
-    productionManagement,
-    /member\s*=\s*"serviceAccount:\$\{yandex_iam_service_account\.terraform\.id\}"/,
+    iam,
+    /resource\s+"yandex_iam_workload_identity_federated_credential"\s+"github_production_controller"[\s\S]*?service_account_id\s*=\s*yandex_iam_service_account\.deployment_controller\.id[\s\S]*?external_subject_id\s*=\s*local\.github_subject/,
+  );
+  assert.doesNotMatch(
+    terraformResourceBlock(iam, "yandex_iam_workload_identity_federated_credential", "github_infrastructure"),
+    /local\.github_subject/,
+    "Terraform federation must remain limited to the infrastructure environment",
   );
 
   const runtimeAccountReferences =
@@ -480,6 +492,7 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, variables }) {
     "runtime_secret_id",
     "state_backend_secret_id",
     "runner_registration_secret_id",
+    "audit_log_group_id",
   ]) {
     assert.match(
       terraformOutputBlock(outputs, name),
@@ -487,6 +500,28 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, variables }) {
       `${name} must be marked sensitive`,
     );
   }
+
+  const auditScope = terraformResourceBlock(
+    bootstrap,
+    "yandex_resourcemanager_folder_iam_member",
+    "audit_trails_viewer",
+  );
+  assert.match(auditScope, /role\s*=\s*"audit-trails\.viewer"/);
+  assert.match(auditScope, /serviceAccount:\$\{module\.iam\.service_account_ids\.audit\}/);
+  const auditDestination = terraformResourceBlock(
+    bootstrap,
+    "yandex_resourcemanager_folder_iam_member",
+    "audit_logging_writer",
+  );
+  assert.match(auditDestination, /folder_id\s*=\s*var\.folder_id/);
+  assert.match(auditDestination, /role\s*=\s*"logging\.writer"/);
+  const auditKms = terraformResourceBlock(
+    bootstrap,
+    "yandex_kms_symmetric_key_iam_member",
+    "audit_encrypter",
+  );
+  assert.match(auditKms, /symmetric_key_id\s*=\s*var\.kms_key_id/);
+  assert.match(auditKms, /role\s*=\s*"kms\.keys\.encrypter"/);
 }
 
 async function bootstrapContractSources() {
@@ -763,6 +798,12 @@ function assertProtectedIngress({
     securityProfile,
     /advanced_rate_limiter_profile_id\s*=\s*yandex_sws_advanced_rate_limiter_profile\.markiro\.id/,
   );
+  const wafProfile = terraformResourceBlock(ingress, "yandex_sws_waf_profile", "markiro");
+  assert.match(wafProfile, /rule_set\s*\{[\s\S]*?action\s*=\s*"DENY"[\s\S]*?is_enabled\s*=\s*true[\s\S]*?core_rule_set\s*\{[\s\S]*?inbound_anomaly_score\s*=\s*5/);
+  assert.match(wafProfile, /rule_set\s*\{[\s\S]*?name\s*=\s*"OWASP Core Ruleset"[\s\S]*?version\s*=\s*"4\.0\.0"/);
+  const rules = terraformNestedBlocks(securityProfile, "security_rule");
+  assert.ok(rules.some((rule) => /name\s*=\s*"baseline-smart-protection"[\s\S]*?smart_protection\s*\{[\s\S]*?mode\s*=\s*"API"/.test(rule)));
+  assert.ok(rules.some((rule) => /name\s*=\s*"waf-api"[\s\S]*?waf\s*\{[\s\S]*?mode\s*=\s*"API"[\s\S]*?waf_profile_id\s*=\s*yandex_sws_waf_profile\.markiro\.id/.test(rule)));
   assert.doesNotMatch(securityProfile, /analyze_request_body|size_limit/i);
 
   const publicDns = terraformResourceBlock(ingress, "yandex_dns_recordset", "application");
@@ -793,6 +834,7 @@ function assertProtectedIngress({
     "load_balancer_address",
     "backend_group_id",
     "security_profile_id",
+    "waf_profile_id",
     "approved_a_records",
   ]) {
     assert.match(ingressOutputs, new RegExp(`output\\s+"${output}"\\s*\\{`));
@@ -967,22 +1009,7 @@ function assertProtectedManagedData({
     ],
   });
 
-  const mediaKms = terraformResourceBlock(
-    storage,
-    "yandex_kms_symmetric_key_iam_member",
-    "media_app",
-  );
-  assert.match(mediaKms, /symmetric_key_id\s*=\s*var\.kms_key_id/);
-  assert.match(mediaKms, /role\s*=\s*"kms\.keys\.encrypterDecrypter"/);
-  assert.match(mediaKms, /member\s*=\s*"serviceAccount:\$\{var\.app_service_account_id\}"/);
-  const auditKms = terraformResourceBlock(
-    storage,
-    "yandex_kms_symmetric_key_iam_member",
-    "audit_writer",
-  );
-  assert.match(auditKms, /symmetric_key_id\s*=\s*var\.kms_key_id/);
-  assert.match(auditKms, /role\s*=\s*"kms\.keys\.encrypter"/);
-  assert.match(auditKms, /member\s*=\s*"serviceAccount:\$\{var\.audit_service_account_id\}"/);
+  assert.doesNotMatch(storage, /yandex_kms_symmetric_key_iam_member/);
 
   assert.match(production, /module\s+"postgres"\s*\{/);
   assert.match(production, /module\s+"object_storage"\s*\{/);
@@ -1077,14 +1104,14 @@ function assertProtectedObservability({
     /required_providers\s*\{[\s\S]*?source\s*=\s*"yandex-cloud\/yandex"[\s\S]*?version\s*=\s*"= 0\.215\.0"/,
   );
 
-  for (const groupName of ["application", "security", "audit"]) {
+  for (const groupName of ["application", "security"]) {
     const group = terraformResourceBlock(observability, "yandex_logging_group", groupName);
     assert.match(group, /retention_period\s*=\s*"336h"/);
   }
   assert.equal(
     [...observability.matchAll(/resource\s+"yandex_logging_group"\s+"([^"]+)"/g)].length,
-    3,
-    "application, security, and audit must use separate log groups",
+    2,
+    "application and security logging groups must remain production-root resources",
   );
 
   const auditBucket = terraformResourceBlock(storage, "yandex_storage_bucket", "audit");
@@ -1132,7 +1159,7 @@ function assertProtectedObservability({
     2,
     "one-destination provider schema requires exactly two trails",
   );
-  assert.match(trails[0], /logging_destination\s*\{[\s\S]*?yandex_logging_group\.audit\.id/);
+  assert.match(trails[0], /logging_destination\s*\{[\s\S]*?log_group_id\s*=\s*var\.audit_log_group_id/);
   assert.doesNotMatch(trails[0], /storage_destination\s*\{/);
   assert.match(
     trails[1],
@@ -1748,7 +1775,7 @@ test("provider configuration uses variables and leaves the IAM token to YC_TOKEN
   }
 });
 
-test("both roots use credential-free partial S3 backends", async () => {
+test("production uses a credential-free partial S3 backend", async () => {
   for (const root of terraformRoots) {
     const versions = await readRepositoryFile(`infra/yandex/${root}/versions.tf`);
     const backendExample = await readRepositoryFile(`infra/yandex/${root}/backend.hcl.example`);
@@ -1769,6 +1796,20 @@ test("both roots use credential-free partial S3 backends", async () => {
       `${root} backend example must not contain authentication settings`,
     );
   }
+});
+
+test("bootstrap starts with the local backend and introduces S3 only for migration", async () => {
+  const [versions, backendTemplate, runbook] = await Promise.all([
+    readRepositoryFile("infra/yandex/bootstrap/versions.tf"),
+    readRepositoryFile("infra/yandex/bootstrap/backend.tf.example"),
+    readRepositoryFile("docs/runbooks/yandex-bootstrap.md"),
+  ]);
+
+  assert.doesNotMatch(versions, /backend\s+"s3"/);
+  assert.match(backendTemplate, /backend\s+"s3"\s*\{\s*}/s);
+  assert.match(runbook, /cp infra\/yandex\/bootstrap\/backend\.tf\.example infra\/yandex\/bootstrap\/backend\.tf/);
+  assert.match(runbook, /terraform -chdir=infra\/yandex\/bootstrap init -input=false -lockfile=readonly/);
+  assert.match(runbook, /terraform -chdir=infra\/yandex\/bootstrap init -migrate-state -backend-config=backend\.hcl -lockfile=readonly/);
 });
 
 test("bootstrap protects state, exact workload identity, secrets, and least privilege", async () => {
@@ -1794,9 +1835,9 @@ test("deployment runner uses exact production federation, VM-scoped operator, an
   const credential = terraformResourceBlock(
     iam,
     "yandex_iam_workload_identity_federated_credential",
-    "github_production_runner",
+    "github_production_controller",
   );
-  assert.match(credential, /service_account_id\s*=\s*yandex_iam_service_account\.runner\.id/);
+  assert.match(credential, /service_account_id\s*=\s*yandex_iam_service_account\.deployment_controller\.id/);
   assert.match(credential, /external_subject_id\s*=\s*local\.github_subject/);
   const federationUse = terraformResourceBlock(
     iam,
@@ -1804,7 +1845,8 @@ test("deployment runner uses exact production federation, VM-scoped operator, an
     "terraform_user",
   );
   assert.match(federationUse, /yandex_iam_service_account\.terraform\.id/);
-  assert.match(federationUse, /yandex_iam_service_account\.runner\.id/);
+  assert.match(federationUse, /yandex_iam_service_account\.deployment_controller\.id/);
+  assert.doesNotMatch(federationUse, /yandex_iam_service_account\.runner\.id/);
 
   const operator = terraformResourceBlock(
     compute,
@@ -1813,7 +1855,7 @@ test("deployment runner uses exact production federation, VM-scoped operator, an
   );
   assert.match(operator, /instance_id\s*=\s*yandex_compute_instance\.runner\.id/);
   assert.match(operator, /role\s*=\s*"compute\.operator"/);
-  assert.match(operator, /serviceAccount:\$\{var\.runner_service_account_id\}/);
+  assert.match(operator, /serviceAccount:\$\{var\.deployment_controller_service_account_id\}/);
   assert.doesNotMatch(
     compute,
     /yandex_resourcemanager_folder_iam_(?:member|binding)[\s\S]*role\s*=\s*"compute\.(?:operator|editor|admin)"/,
@@ -1825,12 +1867,7 @@ test("deployment runner uses exact production federation, VM-scoped operator, an
   );
   assert.match(appLogin, /instance_id\s*=\s*yandex_compute_instance\.app\.id/);
   assert.match(appLogin, /role\s*=\s*"compute\.osAdminLogin"/);
-  const albViewer = terraformResourceBlock(
-    compute,
-    "yandex_resourcemanager_folder_iam_member",
-    "runner_alb_viewer",
-  );
-  assert.match(albViewer, /role\s*=\s*"alb\.viewer"/);
+  assert.doesNotMatch(compute, /yandex_resourcemanager_folder_iam_member\s+"runner_alb_viewer"/);
 
   assert.match(cloudInit, /RUNNER_VERSION=2\.336\.0/);
   assert.match(
@@ -2246,17 +2283,6 @@ test("managed-data contract rejects unsafe PostgreSQL, buckets, access, and cred
       block.replace('Action    = ["s3:PutObject"]', 'Action = ["s3:PutObject", "s3:GetObject"]'),
   );
   assert.throws(() => assertProtectedManagedData(broadenedAuditAction));
-
-  for (const resourceName of ["media_app", "audit_writer"]) {
-    const missingKmsBinding = await managedDataSources();
-    const binding = terraformResourceBlock(
-      missingKmsBinding.storage,
-      "yandex_kms_symmetric_key_iam_member",
-      resourceName,
-    );
-    missingKmsBinding.storage = missingKmsBinding.storage.replace(binding, "");
-    assert.throws(() => assertProtectedManagedData(missingKmsBinding));
-  }
 
   const passwordResource = await managedDataSources();
   passwordResource.postgres +=

@@ -10,7 +10,7 @@ output "security_log_group_id" {
 
 output "audit_log_group_id" {
   description = "Cloud Logging group ID for near-real-time Audit Trails events."
-  value       = yandex_logging_group.audit.id
+  value       = var.audit_log_group_id
 }
 
 output "audit_trail_ids" {

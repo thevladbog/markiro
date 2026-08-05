@@ -83,6 +83,11 @@ output "rate_limiter_profile_id" {
   value       = module.ingress.rate_limiter_profile_id
 }
 
+output "waf_profile_id" {
+  description = "Smart Web Security WAF profile protecting the public virtual host."
+  value       = module.ingress.waf_profile_id
+}
+
 output "approved_a_records" {
   description = "Exact application A-record set approved for gated publication."
   value       = module.ingress.approved_a_records

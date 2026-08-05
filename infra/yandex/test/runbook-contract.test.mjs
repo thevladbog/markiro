@@ -215,7 +215,7 @@ function assertRunbookContract({ documents, verifier, workflow }) {
   ordered(
     bootstrap,
     [
-      "terraform -chdir=infra/yandex/bootstrap init -backend=false -lockfile=readonly",
+      "terraform -chdir=infra/yandex/bootstrap init -input=false -lockfile=readonly",
       "terraform -chdir=infra/yandex/bootstrap plan -out=bootstrap.tfplan",
       "terraform -chdir=infra/yandex/bootstrap apply bootstrap.tfplan",
       "terraform -chdir=infra/yandex/bootstrap init -migrate-state -backend-config=backend.hcl -lockfile=readonly",

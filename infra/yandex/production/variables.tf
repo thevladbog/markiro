@@ -98,6 +98,12 @@ variable "runner_service_account_id" {
   nullable    = false
 }
 
+variable "deployment_controller_service_account_id" {
+  description = "Bootstrap-created GitHub deployment-controller service account ID."
+  type        = string
+  nullable    = false
+}
+
 variable "runner_registration_secret_id" {
   description = "Bootstrap-created runner-only Lockbox secret ID; payload remains out of Terraform."
   type        = string
@@ -114,6 +120,12 @@ variable "runner_registration_secret_id" {
 
 variable "audit_service_account_id" {
   description = "Bootstrap-created audit writer service-account ID."
+  type        = string
+  nullable    = false
+}
+
+variable "audit_log_group_id" {
+  description = "Bootstrap-created Cloud Logging group for near-real-time Audit Trails delivery."
   type        = string
   nullable    = false
 }

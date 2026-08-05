@@ -45,6 +45,12 @@ variable "runner_service_account_id" {
   nullable    = false
 }
 
+variable "deployment_controller_service_account_id" {
+  description = "Deployment-controller identity allowed to start and stop only the runner VM."
+  type        = string
+  nullable    = false
+}
+
 variable "runner_registration_secret_id" {
   description = "Runner-only Lockbox secret containing the out-of-band GitHub runner admin token."
   type        = string

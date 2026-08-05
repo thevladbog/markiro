@@ -10,6 +10,12 @@ variable "audit_service_account_id" {
   nullable    = false
 }
 
+variable "audit_log_group_id" {
+  description = "Bootstrap-created Cloud Logging destination with writer access for the audit service account."
+  type        = string
+  nullable    = false
+}
+
 variable "state_bucket_name" {
   description = "Protected bootstrap state bucket name, used only to reject audit/media destination reuse."
   type        = string

@@ -216,13 +216,6 @@ resource "yandex_logging_group" "security" {
   labels           = var.labels
 }
 
-resource "yandex_logging_group" "audit" {
-  name             = "markiro-production-audit"
-  folder_id        = var.folder_id
-  retention_period = "336h"
-  labels           = var.labels
-}
-
 resource "yandex_audit_trails_trail" "realtime" {
   name               = "markiro-production-audit-realtime"
   folder_id          = var.folder_id
@@ -230,7 +223,7 @@ resource "yandex_audit_trails_trail" "realtime" {
   labels             = var.labels
 
   logging_destination {
-    log_group_id = yandex_logging_group.audit.id
+    log_group_id = var.audit_log_group_id
   }
 
   filtering_policy {
