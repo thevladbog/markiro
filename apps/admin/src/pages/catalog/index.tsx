@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router";
+import { Link, Outlet, useNavigate } from "react-router";
 
 import {
   Alert,
   Button,
+  ConfirmDialog,
   EmptyState,
   Input,
-  Modal,
   PageHeader,
   Select,
   Spinner,
@@ -21,19 +21,11 @@ import { CABINET_CAPABILITY } from "@markiro/domain";
 import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
 import { toast } from "../../lib/toast.js";
-import { useCounterparties, type CounterpartyDto } from "../counterparties/api.js";
+import { useCounterparties } from "../counterparties/api.js";
 import { useCandidates } from "../integrations/api.js";
-import { useLabelTemplates, type LabelTemplateSummaryDto } from "../labels/api.js";
-import { ProductForm, type ProductFormValues } from "./ProductForm.js";
-import {
-  useCreateProduct,
-  useDeleteProduct,
-  useProducts,
-  useUpdateProduct,
-  type CreateProductInput,
-  type ProductDto,
-  type ProductStatus,
-} from "./api.js";
+import { useLabelTemplates } from "../labels/api.js";
+import { useDeleteProduct, useProducts, type ProductDto, type ProductStatus } from "./api.js";
+import type { CatalogPanelLocationState } from "./ProductPanelRoute.js";
 
 /**
  * The channel this plaque points into. Hardcoded rather than looped over
@@ -51,46 +43,21 @@ type StatusFilter = "all" | ProductStatus;
 /** Debounce delay (ms) between the last keystroke in the search box and the refetch. */
 const SEARCH_DEBOUNCE_MS = 300;
 
-interface CatalogFormOptions {
-  counterparties: CounterpartyDto[];
-  labelTemplates: LabelTemplateSummaryDto[];
-}
-
-function AuthorizedCreateProductAction({ counterparties, labelTemplates }: CatalogFormOptions) {
+function AuthorizedCreateProductAction() {
   const { t } = useTranslation();
-  const createMutation = useCreateProduct();
-  const [open, setOpen] = useState(false);
-
-  const handleSubmit = async (input: CreateProductInput) => {
-    try {
-      await createMutation.mutateAsync(input);
-      toast("ok", t("pages.catalog.toasts.createSuccess"));
-      setOpen(false);
-    } catch (error) {
-      toast(
-        "error",
-        error instanceof ApiRequestError ? error.message : t("pages.catalog.toasts.createError"),
-      );
-    }
-  };
+  const navigate = useNavigate();
 
   return (
-    <>
-      <Button type="button" onClick={() => setOpen(true)}>
-        {t("pages.catalog.addAction")}
-      </Button>
-      {open ? (
-        <ProductForm
-          open
-          mode="create"
-          counterparties={counterparties}
-          labelTemplates={labelTemplates}
-          submitting={createMutation.isPending}
-          onSubmit={handleSubmit}
-          onClose={() => setOpen(false)}
-        />
-      ) : null}
-    </>
+    <Button
+      type="button"
+      onClick={() =>
+        void navigate("new", {
+          state: { catalogBackground: true } satisfies CatalogPanelLocationState,
+        })
+      }
+    >
+      {t("pages.catalog.addAction")}
+    </Button>
   );
 }
 
@@ -125,59 +92,21 @@ function AuthorizedCandidatesPlaque() {
   );
 }
 
-function AuthorizedProductRowActions({
-  product,
-  counterparties,
-  labelTemplates,
-}: CatalogFormOptions & { product: ProductDto }) {
+function AuthorizedProductRowActions({ product }: { product: ProductDto }) {
   const { t } = useTranslation();
-  const updateMutation = useUpdateProduct();
+  const navigate = useNavigate();
   const deleteMutation = useDeleteProduct();
-  const [editingProduct, setEditingProduct] = useState<ProductDto | null>(null);
   const [deleting, setDeleting] = useState(false);
-
-  const initialValues: ProductFormValues | undefined = useMemo(
-    () =>
-      editingProduct
-        ? {
-            gtin: editingProduct.gtin14,
-            name: editingProduct.name,
-            productGroup: editingProduct.productGroup ?? "",
-            boxCapacity:
-              editingProduct.boxCapacity !== null ? String(editingProduct.boxCapacity) : "",
-            palletCapacity:
-              editingProduct.palletCapacity !== null ? String(editingProduct.palletCapacity) : "",
-            unitPrice: editingProduct.unitPrice ?? "",
-            egaisCode: editingProduct.egaisCode ?? "",
-            defaultCounterpartyId: editingProduct.defaultCounterpartyId ?? "",
-            defaultLabelTemplateId: editingProduct.defaultLabelTemplateId ?? "",
-          }
-        : undefined,
-    [editingProduct],
-  );
-
-  const handleUpdate = async (input: CreateProductInput) => {
-    if (!editingProduct) return;
-    try {
-      await updateMutation.mutateAsync({ id: editingProduct.id, input });
-      toast("ok", t("pages.catalog.toasts.updateSuccess"));
-      setEditingProduct(null);
-    } catch (error) {
-      toast(
-        "error",
-        error instanceof ApiRequestError ? error.message : t("pages.catalog.toasts.updateError"),
-      );
-    }
-  };
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const handleDelete = async () => {
     try {
+      setDeleteError(null);
       await deleteMutation.mutateAsync(product.id);
       toast("ok", t("pages.catalog.toasts.deleteSuccess"));
       setDeleting(false);
     } catch (error) {
-      toast(
-        "error",
+      setDeleteError(
         error instanceof ApiRequestError ? error.message : t("pages.catalog.toasts.deleteError"),
       );
     }
@@ -190,7 +119,11 @@ function AuthorizedProductRowActions({
           type="button"
           size="compact"
           variant="secondary"
-          onClick={() => setEditingProduct(product)}
+          onClick={() =>
+            void navigate(`${product.id}/edit`, {
+              state: { catalogBackground: true } satisfies CatalogPanelLocationState,
+            })
+          }
         >
           {t("pages.catalog.edit")}
         </Button>
@@ -198,51 +131,31 @@ function AuthorizedProductRowActions({
           type="button"
           size="compact"
           variant="destructive"
-          onClick={() => setDeleting(true)}
+          onClick={() => {
+            setDeleteError(null);
+            setDeleting(true);
+          }}
         >
           {t("pages.catalog.delete")}
         </Button>
       </div>
-      {editingProduct && initialValues ? (
-        <ProductForm
-          open
-          mode="edit"
-          initialValues={initialValues}
-          productStatus={editingProduct.status}
-          productId={editingProduct.id}
-          externalRef={editingProduct.externalRef}
-          counterparties={counterparties}
-          labelTemplates={labelTemplates}
-          submitting={updateMutation.isPending}
-          onSubmit={handleUpdate}
-          onClose={() => setEditingProduct(null)}
-        />
-      ) : null}
-      <Modal
+      <ConfirmDialog
         open={deleting}
-        onClose={() => setDeleting(false)}
-        closeLabel={t("common.close")}
         title={t("pages.catalog.deleteConfirmTitle")}
-        footer={
+        description={
           <>
-            <Button type="button" variant="secondary" onClick={() => setDeleting(false)}>
-              {t("pages.catalog.cancel")}
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              loading={deleteMutation.isPending}
-              onClick={() => void handleDelete()}
-            >
-              {t("pages.catalog.deleteConfirmAction")}
-            </Button>
+            <span>{t("pages.catalog.deleteConfirmBody", { name: product.name })}</span>
+            {deleteError ? <Alert tone="error">{deleteError}</Alert> : null}
           </>
         }
-      >
-        <p style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>
-          {t("pages.catalog.deleteConfirmBody", { name: product.name })}
-        </p>
-      </Modal>
+        entity={product.gtin14}
+        cancelLabel={t("pages.catalog.cancel")}
+        confirmLabel={t("pages.catalog.deleteConfirmAction")}
+        tone="destructive"
+        busy={deleteMutation.isPending}
+        onCancel={() => setDeleting(false)}
+        onConfirm={() => void handleDelete()}
+      />
     </>
   );
 }
@@ -263,12 +176,27 @@ export function CatalogPage() {
     return () => clearTimeout(handle);
   }, [searchInput]);
 
-  const { data, isPending, isError } = useProducts({
+  const {
+    data,
+    isPending,
+    isError,
+    refetch: refetchProducts,
+  } = useProducts({
     ...(debouncedSearch ? { search: debouncedSearch } : {}),
     ...(statusFilter !== "all" ? { status: statusFilter } : {}),
   });
-  const { data: counterpartiesData } = useCounterparties();
-  const { data: labelTemplatesData } = useLabelTemplates();
+  const {
+    data: counterpartiesData,
+    isPending: counterpartiesPending,
+    isError: counterpartiesError,
+    refetch: refetchCounterparties,
+  } = useCounterparties();
+  const {
+    data: labelTemplatesData,
+    isPending: labelTemplatesPending,
+    isError: labelTemplatesError,
+    refetch: refetchLabelTemplates,
+  } = useLabelTemplates();
   const items = data ?? [];
   const counterparties = useMemo(() => counterpartiesData ?? [], [counterpartiesData]);
   const labelTemplates = useMemo(() => labelTemplatesData ?? [], [labelTemplatesData]);
@@ -316,31 +244,21 @@ export function CatalogPage() {
         key: "actions",
         title: t("pages.catalog.table.actions"),
         align: "right",
-        render: (row) =>
-          canWrite ? (
-            <AuthorizedProductRowActions
-              product={row}
-              counterparties={counterparties}
-              labelTemplates={labelTemplates}
-            />
-          ) : null,
+        render: (row) => (canWrite ? <AuthorizedProductRowActions product={row} /> : null),
       },
     ],
-    [t, canWrite, counterparties, labelTemplates],
+    [t, canWrite],
   );
+
+  const retryPanelData = async () => {
+    await Promise.all([refetchProducts(), refetchCounterparties(), refetchLabelTemplates()]);
+  };
 
   return (
     <div style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: 20 }}>
       <PageHeader
         title={t("pages.catalog.title")}
-        actions={
-          canWrite ? (
-            <AuthorizedCreateProductAction
-              counterparties={counterparties}
-              labelTemplates={labelTemplates}
-            />
-          ) : null
-        }
+        actions={canWrite ? <AuthorizedCreateProductAction /> : null}
       />
 
       {canReadIntegrations ? <AuthorizedCandidatesPlaque /> : null}
@@ -374,18 +292,25 @@ export function CatalogPage() {
         <EmptyState
           title={t("pages.catalog.emptyTitle")}
           hint={t("pages.catalog.emptyHint")}
-          action={
-            canWrite ? (
-              <AuthorizedCreateProductAction
-                counterparties={counterparties}
-                labelTemplates={labelTemplates}
-              />
-            ) : null
-          }
+          action={canWrite ? <AuthorizedCreateProductAction /> : null}
         />
       ) : (
         <Table columns={columns} rows={items} />
       )}
+      <Outlet
+        context={{
+          products: items,
+          productsPending: isPending,
+          productsError: isError,
+          counterparties,
+          counterpartiesPending,
+          counterpartiesError,
+          labelTemplates,
+          labelTemplatesPending,
+          labelTemplatesError,
+          retryPanelData,
+        }}
+      />
     </div>
   );
 }

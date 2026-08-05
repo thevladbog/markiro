@@ -396,6 +396,11 @@
         "noLabelTemplate": "Не выбран",
         "submitCreate": "Создать",
         "submitUpdate": "Сохранить",
+        "sections": {
+          "basic": "Основное",
+          "aggregation": "Агрегация и цена",
+          "defaults": "Значения по умолчанию"
+        },
         "draftBanner": "Черновик — заполните группу и вместимости, чтобы запускать смены",
         "gtinOwnerHint": "Владелец ГТИН — {{name}}",
         "applyCounterparty": "Подставить контрагента",

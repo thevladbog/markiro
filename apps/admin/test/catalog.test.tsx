@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
@@ -10,6 +10,7 @@ import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider } from "../src/access/context.js";
 import type * as CatalogApiModule from "../src/pages/catalog/api.js";
 import { CatalogPage } from "../src/pages/catalog/index.js";
+import { ProductPanelRoute } from "../src/pages/catalog/ProductPanelRoute.js";
 import { candidatesQueryKey } from "../src/pages/integrations/api.js";
 
 const { unlinkHookMountSpy, writeHookMountSpy } = vi.hoisted(() => ({
@@ -100,8 +101,13 @@ function renderPage(
   return render(
     <QueryClientProvider client={queryClient}>
       <AccessProvider value={access}>
-        <MemoryRouter>
-          <CatalogPage />
+        <MemoryRouter initialEntries={["/catalog"]}>
+          <Routes>
+            <Route path="/catalog" element={<CatalogPage />}>
+              <Route path="new" element={<ProductPanelRoute mode="create" />} />
+              <Route path=":productId/edit" element={<ProductPanelRoute mode="edit" />} />
+            </Route>
+          </Routes>
         </MemoryRouter>
       </AccessProvider>
     </QueryClientProvider>,

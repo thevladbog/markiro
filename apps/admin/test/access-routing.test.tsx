@@ -159,6 +159,16 @@ it("allows a manager to open the catalog directly", async () => {
   expect(screen.queryByTestId("forbidden-page")).toBeNull();
 });
 
+it.each(["/catalog/new", "/catalog/p1/edit"])(
+  "forbids the direct write route %s for a read-only operator",
+  async (path) => {
+    renderAccessRoute(path, OPERATIONS_READ_ONLY);
+
+    expect(await screen.findByTestId("forbidden-page")).toBeDefined();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  },
+);
+
 it("keeps the label library readable but blocks editor routes", async () => {
   renderAccessRoute("/labels", OPERATIONS_READ_ONLY);
   expect(await screen.findByRole("heading", { name: "Шаблоны этикеток" })).toBeDefined();

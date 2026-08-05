@@ -396,6 +396,11 @@
         "noLabelTemplate": "None selected",
         "submitCreate": "Create",
         "submitUpdate": "Save",
+        "sections": {
+          "basic": "Basic",
+          "aggregation": "Aggregation and price",
+          "defaults": "Defaults"
+        },
         "draftBanner": "Draft — fill in the group and capacities to run shifts",
         "gtinOwnerHint": "GTIN owner — {{name}}",
         "applyCounterparty": "Apply counterparty",

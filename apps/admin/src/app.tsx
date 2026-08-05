@@ -12,6 +12,7 @@ import { ResetPasswordPage } from "./pages/auth/ResetPassword.js";
 import { SelectOrgPage } from "./pages/auth/SelectOrg.js";
 import { BoxesPage } from "./pages/boxes/index.js";
 import { CatalogPage } from "./pages/catalog/index.js";
+import { ProductPanelRoute } from "./pages/catalog/ProductPanelRoute.js";
 import { ConflictsPage } from "./pages/conflicts/index.js";
 import { CounterpartiesPage } from "./pages/counterparties/index.js";
 import { DashboardPage } from "./pages/dashboard/index.js";
@@ -69,7 +70,24 @@ export function AppRoutes() {
               <CatalogPage />
             </RequireCapability>
           }
-        />
+        >
+          <Route
+            path="new"
+            element={
+              <RequireCapability capability={C.OPERATIONS_WRITE}>
+                <ProductPanelRoute mode="create" />
+              </RequireCapability>
+            }
+          />
+          <Route
+            path=":productId/edit"
+            element={
+              <RequireCapability capability={C.OPERATIONS_WRITE}>
+                <ProductPanelRoute mode="edit" />
+              </RequireCapability>
+            }
+          />
+        </Route>
         <Route
           path="shifts"
           element={
