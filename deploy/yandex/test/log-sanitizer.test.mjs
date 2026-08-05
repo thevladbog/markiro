@@ -181,6 +181,10 @@ test("journal sanitizer preserves a safe prefixed JSON fragment with an escaped 
         unit: "markiro-deploy.service",
         message: String.raw`api-1 | {"status\uD83D\uDE80":"recovering"} after retry`,
       },
+      {
+        unit: "markiro-deploy.service",
+        message: String.raw`api-1 | {'st\u0061tus':'safe-single'} after retry`,
+      },
     ],
     { maxBytes: 512, maxLineBytes: 192 },
   );
@@ -189,7 +193,84 @@ test("journal sanitizer preserves a safe prefixed JSON fragment with an escaped 
   assert.match(output, /degraded/);
   assert.match(output, /status\\uD83D\\uDE80/);
   assert.match(output, /recovering/);
+  assert.match(output, /safe-single/);
   assert.doesNotMatch(output, /\[REDACTED\]/);
+});
+
+for (const [name, message, secret] of [
+  [
+    "standalone JSON key with an unpaired surrogate",
+    String.raw`{"to\uD800ken":"standalone-surrogate-secret"}`,
+    "standalone-surrogate-secret",
+  ],
+  [
+    "nested JSON key with an unpaired surrogate",
+    String.raw`{"safe":{"to\uDFFFken":"nested-surrogate-secret"}}`,
+    "nested-surrogate-secret",
+  ],
+  [
+    "nested JSON value with an unpaired surrogate",
+    String.raw`{"safe":{"message":"value\uD800scalar"},"status":"degraded"}`,
+    "value",
+  ],
+])
+  test(`journal sanitizer fails closed for ${name}`, () => {
+    const output = sanitizeJournal([{ unit: "markiro-deploy.service", message }]);
+
+    assert.doesNotMatch(output, new RegExp(secret));
+    assert.match(output, /\[REDACTED\]/);
+  });
+
+test("journal sanitizer preserves standalone JSON with valid paired-surrogate keys and values", () => {
+  const message = String.raw`{"status\uD83D\uDE80":"healthy\uD83D\uDE80"}`;
+  const output = sanitizeJournal([{ unit: "markiro-deploy.service", message }]);
+
+  assert.match(output, /status🚀/u);
+  assert.match(output, /healthy🚀/u);
+  assert.doesNotMatch(output, /\[REDACTED\]/);
+});
+
+test("journal sanitizer decodes escaped single-quoted sensitive keys", () => {
+  const message = String.raw`prefix {'to\u006ben':'single-quoted-secret'} suffix`;
+  const output = sanitizeJournal([{ unit: "markiro-deploy.service", message }]);
+
+  assert.doesNotMatch(output, /single-quoted-secret/);
+  assert.match(output, /\[REDACTED\]/);
+});
+
+for (const quote of ['"', "'"])
+  test(`journal sanitizer detects a sensitive ${quote}quoted key beyond the old atom bound`, () => {
+    const encodedKey = `${String.raw`\u0061`.repeat(124)}token`;
+    const message = `prefix {${quote}${encodedKey}${quote}:${quote}long-key-secret${quote}} suffix`;
+    const output = sanitizeJournal([{ unit: "markiro-deploy.service", message }]);
+
+    assert.doesNotMatch(output, /long-key-secret/);
+    assert.match(output, /\[REDACTED\]/);
+  });
+
+test("journal sanitizer preserves a long escaped benign quoted key", () => {
+  const encodedKey = String.raw`\u0061`.repeat(140);
+  const message = `prefix {"${encodedKey}":"long-safe-diagnostic"} suffix`;
+  const output = sanitizeJournal([{ unit: "markiro-deploy.service", message }]);
+
+  assert.match(output, /long-safe-diagnostic/);
+  assert.doesNotMatch(output, /\[REDACTED\]/);
+});
+
+test("journal sanitizer remains bounded for large adversarial quoted input", () => {
+  const withinBound = `${'"safe":'.repeat(8_000)}tail`;
+  const overBound = `prefix ${"\\".repeat(2 * 1024 * 1024)} suffix`;
+  const started = performance.now();
+  const output = sanitizeJournal([
+    { unit: "markiro-deploy.service", message: withinBound },
+    { unit: "markiro-deploy.service", message: overBound },
+  ]);
+  const elapsedMs = performance.now() - started;
+
+  assert.ok(elapsedMs < 2_000, `sanitization exceeded its bounded budget: ${elapsedMs}ms`);
+  assert.ok(Buffer.byteLength(output) <= 64 * 1024);
+  assert.match(output, /\[REDACTED\]/);
+  assert.doesNotMatch(output, /�/);
 });
 
 test("durable spool stays size and age bounded across rename rotation and restart", async () => {

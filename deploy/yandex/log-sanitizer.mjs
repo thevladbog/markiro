@@ -19,6 +19,8 @@ const ALLOWED_UNITS = new Set([
 
 const SENSITIVE_KEY =
   /(?:authorization|password|passwd|secret|token|cookie|api[-_]?key|credential|session)/i;
+const MAX_SANITIZER_INPUT_CODE_UNITS = 64 * 1024;
+const SIMPLE_ESCAPES = Object.freeze({ b: "\b", f: "\f", n: "\n", r: "\r", t: "\t" });
 
 function redactText(message) {
   return message
@@ -57,7 +59,9 @@ function redactJson(message) {
   const trimmed = message.trim();
   if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return undefined;
   try {
-    return JSON.stringify(redactStructured(JSON.parse(trimmed)));
+    const parsed = JSON.parse(trimmed);
+    if (hasInvalidUnicodeScalar(parsed)) return "[REDACTED]";
+    return JSON.stringify(redactStructured(parsed));
   } catch {
     return undefined;
   }
@@ -75,32 +79,129 @@ function hasUnpairedSurrogate(value) {
   return false;
 }
 
-function decodeJsonKey(encodedKey) {
-  try {
-    const decoded = JSON.parse(`"${encodedKey}"`);
-    return typeof decoded === "string" && !hasUnpairedSurrogate(decoded) ? decoded : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function hasSensitiveQuotedKey(message) {
-  for (const match of message.matchAll(
-    /"((?:\\.|[^"\\]){1,128})"\s*:|'((?:\\.|[^'\\]){1,128})'\s*:/g,
-  )) {
-    if (match[1] !== undefined) {
-      const decodedKey = decodeJsonKey(match[1]);
-      if (decodedKey === undefined || SENSITIVE_KEY.test(decodedKey)) return true;
-    } else if (match[2] !== undefined && SENSITIVE_KEY.test(match[2])) return true;
+function hasInvalidUnicodeScalar(value) {
+  const pending = [value];
+  while (pending.length > 0) {
+    const item = pending.pop();
+    if (typeof item === "string") {
+      if (hasUnpairedSurrogate(item)) return true;
+      continue;
+    }
+    if (!item || typeof item !== "object") continue;
+    for (const [key, child] of Object.entries(item)) {
+      if (hasUnpairedSurrogate(key)) return true;
+      pending.push(child);
+    }
   }
   return false;
+}
+
+function hexValue(code) {
+  if (code >= 0x30 && code <= 0x39) return code - 0x30;
+  if (code >= 0x41 && code <= 0x46) return code - 0x41 + 10;
+  if (code >= 0x61 && code <= 0x66) return code - 0x61 + 10;
+  return -1;
+}
+
+function decodeQuotedKey(message, start, end, quote) {
+  const decoded = [];
+  for (let index = start; index < end; index += 1) {
+    const code = message.charCodeAt(index);
+    if (code < 0x20) return undefined;
+    if (code !== 0x5c) {
+      decoded.push(message[index]);
+      continue;
+    }
+
+    index += 1;
+    if (index >= end) return undefined;
+    const escaped = message[index];
+    if (escaped === "u") {
+      if (index + 4 >= end) return undefined;
+      let codeUnit = 0;
+      for (let offset = 1; offset <= 4; offset += 1) {
+        const digit = hexValue(message.charCodeAt(index + offset));
+        if (digit < 0) return undefined;
+        codeUnit = codeUnit * 16 + digit;
+      }
+      decoded.push(String.fromCharCode(codeUnit));
+      index += 4;
+      continue;
+    }
+    if (escaped === quote || escaped === "\\" || escaped === "/") {
+      decoded.push(escaped);
+      continue;
+    }
+    if (quote === "'" && escaped === '"') {
+      decoded.push(escaped);
+      continue;
+    }
+    const simple = SIMPLE_ESCAPES[escaped];
+    if (simple === undefined) return undefined;
+    decoded.push(simple);
+  }
+  const value = decoded.join("");
+  return hasUnpairedSurrogate(value) ? undefined : value;
+}
+
+function isAsciiWord(code) {
+  return (
+    (code >= 0x30 && code <= 0x39) ||
+    (code >= 0x41 && code <= 0x5a) ||
+    code === 0x5f ||
+    (code >= 0x61 && code <= 0x7a)
+  );
+}
+
+function scanQuotedKeys(message, quote) {
+  let index = 0;
+  while (index < message.length) {
+    if (message[index] !== quote) {
+      index += 1;
+      continue;
+    }
+    if (
+      quote === "'" &&
+      isAsciiWord(message.charCodeAt(index - 1)) &&
+      isAsciiWord(message.charCodeAt(index + 1))
+    ) {
+      index += 1;
+      continue;
+    }
+
+    const start = index + 1;
+    let end = start;
+    while (end < message.length) {
+      if (message[end] === "\\") {
+        end += 2;
+        continue;
+      }
+      if (message[end] === quote) break;
+      end += 1;
+    }
+    if (end >= message.length) return false;
+
+    let colon = end + 1;
+    while (colon < message.length && (message[colon] === " " || message[colon] === "\t"))
+      colon += 1;
+    if (message[colon] === ":") {
+      const decodedKey = decodeQuotedKey(message, start, end, quote);
+      if (decodedKey === undefined || SENSITIVE_KEY.test(decodedKey)) return true;
+    }
+    index = end + 1;
+  }
+  return false;
+}
+
+function hasUnsafeQuotedKey(message) {
+  return scanQuotedKeys(message, '"') || scanQuotedKeys(message, "'");
 }
 
 function redact(message) {
   const singleLine = message.replace(/[\r\n]+/g, " ");
   const structured = redactJson(singleLine);
   if (structured !== undefined) return structured;
-  if (hasSensitiveQuotedKey(singleLine)) return "[REDACTED]";
+  if (hasUnsafeQuotedKey(singleLine)) return "[REDACTED]";
   return redactText(singleLine);
 }
 
@@ -123,7 +224,9 @@ export function sanitizeJournal(entries, { maxBytes = 64 * 1024, maxLineBytes = 
     if (!ALLOWED_UNITS.has(entry?.unit) || typeof entry.message !== "string") continue;
     const prefix = `${entry.unit} `;
     const available = Math.max(0, maxLineBytes - Buffer.byteLength(prefix) - 1);
-    const message = truncateUtf8(redact(entry.message), available);
+    const sanitized =
+      entry.message.length > MAX_SANITIZER_INPUT_CODE_UNITS ? "[REDACTED]" : redact(entry.message);
+    const message = truncateUtf8(sanitized, available);
     const line = `${prefix}${message}\n`;
     if (bytes + Buffer.byteLength(line) > maxBytes) break;
     lines.push(line);
