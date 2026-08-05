@@ -82,7 +82,7 @@ async function chooseOption(
   const trigger = screen.getByRole("combobox", { name: label });
   await user.click(trigger);
   await user.click(await screen.findByRole("option", { name: option }));
-  await waitFor(() => expect(trigger.textContent).toContain(option));
+  expect(trigger.textContent).toContain(option);
 }
 
 const PRODUCT_A = {
