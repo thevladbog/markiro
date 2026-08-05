@@ -126,7 +126,7 @@ export function Modal({
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        zIndex: 100,
+        zIndex: "var(--z-modal-legacy)",
         padding: 24,
       }}
     >

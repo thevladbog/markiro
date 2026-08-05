@@ -243,7 +243,11 @@ describe("Select", () => {
     expect(screen.queryByRole("listbox")).toBeNull();
 
     await user.click(trigger);
-    expect(screen.getByRole("listbox")).toBeDefined();
+    const listbox = screen.getByRole("listbox");
+    expect(listbox).toBeDefined();
+    expect((listbox.parentElement as HTMLElement).style.zIndex).toBe(
+      "var(--z-overlay-popover)",
+    );
     await user.click(screen.getByRole("option", { name: "Вода" }));
 
     expect(onValueChange).toHaveBeenCalledWith("Вода");

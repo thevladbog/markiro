@@ -2,6 +2,7 @@ import * as RadixSelect from "@radix-ui/react-select";
 import { useId, useState, type CSSProperties, type FocusEvent } from "react";
 
 import { cn } from "../cn.js";
+import { useOverlayPortalContainer } from "./OverlayLayer.js";
 
 const EMPTY_OPTION_VALUE = "__markiro_empty_option__";
 
@@ -49,6 +50,7 @@ export function Select<TValue extends string = string>({
   "aria-label": ariaLabel,
   "aria-labelledby": ariaLabelledBy,
 }: SelectProps<TValue>) {
+  const overlayPortalContainer = useOverlayPortalContainer();
   const [focus, setFocus] = useState(false);
   const autoId = useId();
   const selectId = id ?? `mk-select-${autoId}`;
@@ -138,10 +140,13 @@ export function Select<TValue extends string = string>({
             </svg>
           </RadixSelect.Icon>
         </RadixSelect.Trigger>
-        <RadixSelect.Portal>
+        <RadixSelect.Portal
+          {...(overlayPortalContainer === undefined ? {} : { container: overlayPortalContainer })}
+        >
           <RadixSelect.Content
+            data-mk-nested-overlay=""
             style={{
-              zIndex: 1000,
+              zIndex: "var(--z-overlay-popover)",
               overflow: "hidden",
               border: "1px solid var(--line-strong)",
               borderRadius: "var(--r-2)",

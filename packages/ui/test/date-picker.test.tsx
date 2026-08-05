@@ -25,6 +25,8 @@ describe("DatePicker", () => {
 
     await user.click(screen.getByRole("button", { name: /^плановая дата$/i }));
 
+    expect(screen.getByRole("dialog").style.zIndex).toBe("var(--z-overlay-popover)");
+
     const dayButtons = screen
       .getAllByRole("button")
       .filter((button) => button.classList.contains("mk-date-picker__day"));

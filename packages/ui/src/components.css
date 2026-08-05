@@ -106,3 +106,135 @@
   background: var(--surface-inverse);
   color: var(--fg-on-inverse);
 }
+
+.mk-overlay-root {
+  position: relative;
+}
+
+.mk-overlay-layer {
+  position: fixed;
+  inset: 0;
+}
+
+.mk-overlay-layer--panel {
+  z-index: var(--z-overlay-panel);
+}
+
+.mk-overlay-layer--dialog {
+  z-index: var(--z-overlay-dialog);
+}
+
+.mk-side-panel__scrim {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  justify-content: flex-end;
+  background: var(--surface-overlay);
+  animation: mk-panel-scrim-in 160ms ease-out;
+}
+
+.mk-side-panel {
+  width: min(100%, var(--mk-panel-width));
+  height: 100dvh;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  background: var(--surface-card);
+  border-left: 1px solid var(--line);
+  box-shadow: var(--shadow-3);
+  outline: none;
+  animation: mk-panel-in 200ms ease-out;
+}
+
+.mk-side-panel--compact {
+  --mk-panel-width: 480px;
+}
+
+.mk-side-panel--standard {
+  --mk-panel-width: min(640px, 64vw);
+}
+
+.mk-side-panel--complex {
+  --mk-panel-width: min(720px, 64vw);
+}
+
+.mk-side-panel__header,
+.mk-side-panel__footer {
+  display: flex;
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-6);
+  border-color: var(--line);
+}
+
+.mk-side-panel__header {
+  align-items: flex-start;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line);
+}
+
+.mk-side-panel__title {
+  margin: 0;
+  color: var(--fg-1);
+  font: var(--text-h2);
+}
+
+.mk-side-panel__description {
+  margin: var(--sp-1) 0 0;
+  color: var(--fg-3);
+  font: var(--text-body);
+}
+
+.mk-side-panel__body {
+  min-height: 0;
+  padding: var(--sp-6);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.mk-side-panel__footer {
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid var(--line);
+}
+
+.mk-side-panel__status {
+  min-width: 0;
+}
+
+.mk-side-panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  margin-left: auto;
+}
+
+@keyframes mk-panel-in {
+  from { transform: translateX(24px); }
+  to { transform: translateX(0); }
+}
+
+@keyframes mk-panel-scrim-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (max-width: 767px) {
+  .mk-side-panel {
+    --mk-panel-width: 100vw;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    border-left: 0;
+    border-radius: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mk-side-panel {
+    animation: none;
+  }
+
+  .mk-side-panel__scrim {
+    animation-duration: 1ms;
+    transition-duration: 1ms;
+  }
+}

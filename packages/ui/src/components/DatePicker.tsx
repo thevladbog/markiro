@@ -11,6 +11,7 @@ import {
 
 import { cn } from "../cn.js";
 import { IconButton } from "./IconButton.js";
+import { useOverlayPortalContainer } from "./OverlayLayer.js";
 
 const MONTHS_GENITIVE = [
   "января",
@@ -188,6 +189,7 @@ export function DatePicker({
   "aria-label": ariaLabel,
   "aria-labelledby": ariaLabelledBy,
 }: DatePickerProps) {
+  const overlayPortalContainer = useOverlayPortalContainer();
   const autoId = useId();
   const datePickerId = id ?? `mk-date-picker-${autoId}`;
   const labelId = label ? `${datePickerId}-label` : undefined;
@@ -382,8 +384,11 @@ export function DatePicker({
             value={selectedDate ? formatIsoDate(selectedDate) : ""}
           />
         )}
-        <RadixPopover.Portal>
+        <RadixPopover.Portal
+          {...(overlayPortalContainer === undefined ? {} : { container: overlayPortalContainer })}
+        >
           <RadixPopover.Content
+            data-mk-nested-overlay=""
             role="dialog"
             aria-label={calendarLabel}
             sideOffset={6}
@@ -394,7 +399,7 @@ export function DatePicker({
               shouldFocusActiveDayRef.current = false;
             }}
             style={{
-              zIndex: 1000,
+              zIndex: "var(--z-overlay-popover)",
               width: 304,
               padding: 12,
               border: "1px solid var(--line-strong)",
