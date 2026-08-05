@@ -212,6 +212,20 @@ test("first controller gate rejects absent, duplicate, draining, and malformed e
     ["absent", []],
     ["duplicate", [UNHEALTHY_TARGET, structuredClone(UNHEALTHY_TARGET)]],
     [
+      "duplicate mixed-status zone identity",
+      [
+        {
+          ...UNHEALTHY_TARGET,
+          status: {
+            zoneStatuses: [
+              { failedActiveHc: true, status: "UNHEALTHY", zoneId: "ru-central1-a" },
+              { failedActiveHc: false, status: "TIMEOUT", zoneId: "ru-central1-a" },
+            ],
+          },
+        },
+      ],
+    ],
+    [
       "legacy-only address",
       [{ ...UNHEALTHY_TARGET, target: { address: APP_ADDRESS, subnetId: "e2lsubnet123" } }],
     ],
@@ -283,6 +297,20 @@ test("repeat controller gate rejects stale, absent, unhealthy, duplicate, unexpe
     ["exact absent", [unrelatedHealthy]],
     ["exact unhealthy", [UNHEALTHY_TARGET]],
     ["duplicate exact", [HEALTHY_TARGET, structuredClone(HEALTHY_TARGET)]],
+    [
+      "duplicate healthy zone identity",
+      [
+        {
+          ...HEALTHY_TARGET,
+          status: {
+            zoneStatuses: [
+              { failedActiveHc: false, status: "HEALTHY", zoneId: "ru-central1-a" },
+              { failedActiveHc: false, status: "HEALTHY", zoneId: "ru-central1-a" },
+            ],
+          },
+        },
+      ],
+    ],
     ["unexpected extra", [HEALTHY_TARGET, unrelatedHealthy]],
     ["malformed address", [{ ...HEALTHY_TARGET, target: { ipAddress: "999.20.0.7" } }]],
     ["malformed status", [{ ...HEALTHY_TARGET, status: { zoneStatuses: [{}] } }]],

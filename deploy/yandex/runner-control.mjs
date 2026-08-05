@@ -552,6 +552,9 @@ function requireSingleAlbTarget(payload, expectedAddress) {
     )
   )
     throw new Error("production ALB target inventory failed");
+  const zoneIds = zones.map((zone) => zone.zoneId);
+  if (new Set(zoneIds).size !== zoneIds.length)
+    throw new Error("production ALB target inventory failed");
   return zones;
 }
 
