@@ -190,6 +190,33 @@ describe("Sidebar", () => {
     expect(within(dashboardLink).queryByText("0")).toBeNull();
   });
 
+  it("renders one non-interactive label for each consecutive navigation section", () => {
+    const groupedItems: SidebarItem[] = [
+      { to: "/dashboard", labelKey: "Обзор", section: "Производство" },
+      { to: "/shifts", labelKey: "Смены", section: "Производство" },
+      { to: "/catalog", labelKey: "Каталог", section: "Справочники" },
+    ];
+
+    render(
+      <Sidebar
+        items={groupedItems}
+        renderLink={(item, content) => (
+          <a className="mk-sidebar__link" href={item.to}>
+            {content}
+          </a>
+        )}
+      />,
+    );
+
+    const productionLabel = screen.getByText("Производство");
+    expect(productionLabel.getAttribute("aria-hidden")).toBeNull();
+    expect(screen.getAllByText("Справочники")).toHaveLength(1);
+    expect(screen.getAllByRole("link")).toHaveLength(3);
+    expect(getComputedStyle(screen.getByRole("link", { name: "Обзор" })).boxSizing).toBe(
+      "border-box",
+    );
+  });
+
   it("renders the footer slot", () => {
     render(
       <Sidebar

@@ -177,7 +177,7 @@ it("shows integrations and settings navigation to administrators", async () => {
 
   expect(await screen.findByRole("link", { name: "Интеграции" })).toBeDefined();
   expect(screen.getByRole("link", { name: "Настройки" })).toBeDefined();
-  expect(screen.getByRole("link", { name: "Команда" })).toBeDefined();
+  expect(screen.getByRole("link", { name: "Доступ в кабинет" })).toBeDefined();
   expect(screen.getByRole("link", { name: "Открыть профиль Елена Ким" })).toBeDefined();
 });
 
