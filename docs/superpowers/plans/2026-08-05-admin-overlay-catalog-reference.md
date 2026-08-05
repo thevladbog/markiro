@@ -114,7 +114,7 @@
 
 - `OverlayLayer` creates one `.mk-overlay-root` under `document.body`, creates one child layer per open overlay, provides that child layer as the nested Radix portal container, and removes the root after the final layer closes. A Select/DatePicker opened inside a panel therefore remains inside the panel's stacking and inert boundary. `SidePanel` emits the three pointer/keyboard reasons; route features feed `navigation` into the same feature-owned close state machine when their blocker activates.
 
-- [ ] **Step 1: Add failing portal, dismissal, and public-type tests**
+- [x] **Step 1: Add failing portal, dismissal, and public-type tests**
 
   Create `packages/ui/test/overlays.test.tsx` with a small trigger harness and these assertions:
 
@@ -187,13 +187,13 @@
 
   Import `SidePanel` and `type OverlayDismissReason` from `../src/components/index.js`. In `afterEach`, call `cleanup()`, assert `.mk-overlay-root` is absent, and restore `document.body.style.overflow = ""` so one failure cannot contaminate the next test.
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
   Run: `pnpm --filter @markiro/ui exec vitest run test/overlays.test.tsx`
 
   Expected: FAIL because `SidePanel` and `OverlayDismissReason` are not exported.
 
-- [ ] **Step 3: Implement the minimal private portal host and Escape stack**
+- [x] **Step 3: Implement the minimal private portal host and Escape stack**
 
   In `OverlayLayer.tsx`, keep module state private and deterministic:
 
@@ -215,7 +215,7 @@
 
   Install one bubble-phase document `keydown` listener while the stack is non-empty. For Escape, first return when `event.defaultPrevented` is already true or when the event target is inside `[data-mk-nested-overlay]`; `Select` and `DatePicker` add that private attribute to their Radix Content nodes, guaranteeing that Escape closes only the child listbox/calendar. Otherwise read the last record at event time; call only its `onEscape` when `busy === false`, prevent default, and stop propagation. Update the record's `busy` and callback without unregistering the layer.
 
-- [ ] **Step 4: Implement SidePanel markup and exports**
+- [x] **Step 4: Implement SidePanel markup and exports**
 
   `SidePanel` returns `null` when closed. When open, compose `OverlayLayer` and render:
 
@@ -270,7 +270,7 @@
 
   Expected: PASS for portal cleanup and the three close reasons; the advanced focus/inert tests do not exist yet.
 
-- [ ] **Step 5: Add failing focus, inert, scroll-lock, busy, and size tests**
+- [x] **Step 5: Add failing focus, inert, scroll-lock, busy, and size tests**
 
   Extend `overlays.test.tsx` with exact assertions, importing the current `Select` and `DatePicker` exports alongside `SidePanel`:
 
@@ -353,7 +353,7 @@
 
   Expected: FAIL on initial focus, inertness, body overflow, busy dismissal, and/or size classes until Step 6 is implemented.
 
-- [ ] **Step 6: Complete focus/inert and Radix-portal behavior, then add panel CSS, motion, responsive behavior, and z-index tokens**
+- [x] **Step 6: Complete focus/inert and Radix-portal behavior, then add panel CSS, motion, responsive behavior, and z-index tokens**
 
   On first layer registration, save `document.body.style.overflow`, set it to `hidden`, snapshot every other direct body child's `inert` value, and set those children inert. When a nested layer registers, set all earlier layer elements inert; when it unregisters, make only the new top layer interactive. When the final layer unregisters, restore the exact body overflow, restore and clear the inert snapshot, then remove the host.
 
@@ -461,7 +461,7 @@
 
   In the existing `components.test.tsx` Select suite and `date-picker.test.tsx`, open each control outside an overlay and assert its content has `style.zIndex === "var(--z-overlay-popover)"`. Their existing click, keyboard, disabled, error, value, and focus-restoration assertions must stay unchanged.
 
-- [ ] **Step 7: Run SidePanel tests and package type checks**
+- [x] **Step 7: Run SidePanel tests and package type checks**
 
   Run: `pnpm --filter @markiro/ui exec vitest run test/overlays.test.tsx test/feedback.test.tsx test/components.test.tsx test/date-picker.test.tsx`
 
@@ -469,7 +469,7 @@
 
   Expected: PASS; the existing `Modal`, Select, and DatePicker behavior remains green, child Escape never closes the panel, and the new overlay host is absent after every test.
 
-- [ ] **Step 8: Commit the SidePanel contract**
+- [x] **Step 8: Commit the SidePanel contract**
 
   ```bash
   git add packages/ui/src/components/OverlayLayer.tsx packages/ui/src/components/SidePanel.tsx packages/ui/src/components/Select.tsx packages/ui/src/components/DatePicker.tsx packages/ui/src/components.css packages/ui/src/tokens.css packages/ui/src/components/Modal.tsx packages/ui/src/components/Toast.tsx packages/ui/src/components/index.ts packages/ui/test/overlays.test.tsx packages/ui/test/components.test.tsx packages/ui/test/date-picker.test.tsx
@@ -511,7 +511,7 @@
 
 - `ConfirmDialog` has no general form slot and no close-X control. Escape and backdrop call `onCancel` only when idle.
 
-- [ ] **Step 1: Add failing confirmation semantics tests**
+- [x] **Step 1: Add failing confirmation semantics tests**
 
   Add to `overlays.test.tsx`:
 
@@ -578,19 +578,19 @@
   });
   ```
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
   Run: `pnpm --filter @markiro/ui exec vitest run test/overlays.test.tsx`
 
   Expected: FAIL because `ConfirmDialog` is not exported.
 
-- [ ] **Step 3: Implement ConfirmDialog through OverlayLayer**
+- [x] **Step 3: Implement ConfirmDialog through OverlayLayer**
 
   Render `role="alertdialog"`, `aria-modal="true"`, `aria-labelledby`, and `aria-describedby`. Pass `kind="dialog"`, `initialFocus="cancel"`, and the current `busy` value to `OverlayLayer`. The Cancel button carries `data-overlay-cancel`, the confirm button uses `variant={tone === "destructive" ? "destructive" : "primary"}`, and both buttons are disabled while busy; the confirm button also receives `loading={busy}`.
 
   Use `onMouseDown` on the scrim and only cancel when `event.target === event.currentTarget`. Keep the consequence and optional entity identity as separate elements so a screen reader announces the consequence through `aria-describedby` without duplicating the title.
 
-- [ ] **Step 4: Add failing nested-layer tests**
+- [x] **Step 4: Add failing nested-layer tests**
 
   Add a harness with an open `SidePanel` and an open `ConfirmDialog`, then assert:
 
@@ -620,7 +620,7 @@
 
   Expected: FAIL because `ConfirmDialog` is not implemented and the lower panel is not yet made inert by a nested dialog.
 
-- [ ] **Step 5: Complete dialog CSS and make nested tests GREEN**
+- [x] **Step 5: Complete dialog CSS and make nested tests GREEN**
 
   Add a centered quiet scrim, a `min(440px, calc(100vw - 32px))` dialog surface, bounded consequence width, entity identity treatment, and a right-aligned action row that stacks below 480 px. Use `--z-overlay-dialog`, existing border/shadow/radius tokens, and the same reduced-motion rule as SidePanel.
 
@@ -630,7 +630,7 @@
 
   Expected: PASS with the dialog alone and above an open panel.
 
-- [ ] **Step 6: Commit ConfirmDialog**
+- [x] **Step 6: Commit ConfirmDialog**
 
   ```bash
   git add packages/ui/src/components/ConfirmDialog.tsx packages/ui/src/components.css packages/ui/src/components/index.ts packages/ui/test/overlays.test.tsx
@@ -674,7 +674,7 @@
 
 - `ProductPanelRoute` may initially render a labelled placeholder in this task; Tasks 4 and 5 replace it with the complete panel. It must not call mutation hooks until Task 4.
 
-- [ ] **Step 1: Add failing nested-route and list-state tests**
+- [x] **Step 1: Add failing nested-route and list-state tests**
 
   In `catalog-routing.test.tsx`, reuse the existing `QueryClientProvider`, `AccessProvider`, and `MemoryRouter` pattern. Use a native response helper with no broad assertion:
 
@@ -725,13 +725,13 @@
   2. From a rendered product row click Edit, assert `/catalog/p1/edit`; use a probe button that calls `navigate(-1)`, then assert `/catalog`, the panel is gone, and Search still contains its prior value.
   3. Start directly at `/catalog/new`, click the placeholder Close button, and assert the location becomes `/catalog` via replacement rather than navigating to the previous `initialEntries` item.
 
-- [ ] **Step 2: Run the route test and verify RED**
+- [x] **Step 2: Run the route test and verify RED**
 
   Run: `pnpm --filter @markiro/admin exec vitest run test/catalog-routing.test.tsx`
 
   Expected: FAIL because Catalog has no child routes or outlet.
 
-- [ ] **Step 3: Add production child routes with the write guard outside the route component**
+- [x] **Step 3: Add production child routes with the write guard outside the route component**
 
   Replace the flat Catalog route in `app.tsx` with:
 
@@ -765,7 +765,7 @@
 
   The guard must wrap `ProductPanelRoute`, not render inside it, so rejected direct URLs cannot mount privileged hooks added in Task 4.
 
-- [ ] **Step 4: Lift editor data into outlet context and replace local edit/open state with navigation**
+- [x] **Step 4: Lift editor data into outlet context and replace local edit/open state with navigation**
 
   In `CatalogPage`, retain the existing query hooks and local search/status state. Build `retryPanelData` with `Promise.all` over the three existing `refetch()` functions and render `<Outlet context={panelContext} />` after the list.
 
@@ -799,7 +799,7 @@
 
   For edit mode, do not render an empty editor while products are pending, failed, or the requested ID is absent after a successful load.
 
-- [ ] **Step 5: Add direct-route authorization regression tests**
+- [x] **Step 5: Add direct-route authorization regression tests**
 
   Extend `access-routing.test.tsx` with:
 
@@ -816,13 +816,13 @@
 
   In `catalog-routing.test.tsx`, keep the existing hoisted spies for `useCreateProduct`, `useUpdateProduct`, `useDeleteProduct`, and `useUnlinkProduct`; render direct URLs with read-only access and assert every spy remains untouched. The fetch mock may observe the existing read-only list requests, but no write mutation hook may mount.
 
-- [ ] **Step 6: Run route and access tests and verify GREEN**
+- [x] **Step 6: Run route and access tests and verify GREEN**
 
   Run: `pnpm --filter @markiro/admin exec vitest run test/catalog-routing.test.tsx test/access-routing.test.tsx test/catalog.test.tsx`
 
   Expected: PASS; existing catalog tests may use the updated route harness but no payload assertion changes.
 
-- [ ] **Step 7: Commit nested routing**
+- [x] **Step 7: Commit nested routing**
 
   ```bash
   git add apps/admin/src/app.tsx apps/admin/src/pages/catalog/index.tsx apps/admin/src/pages/catalog/ProductPanelRoute.tsx apps/admin/test/catalog-routing.test.tsx apps/admin/test/access-routing.test.tsx apps/admin/test/catalog.test.tsx
@@ -868,7 +868,7 @@
 
 - `toCreateInput` remains byte-for-byte behaviorally equivalent: trimmed optional text maps to `null`, numeric capacities map to numbers or `null`, comma decimal maps to dot decimal, and `status` is never sent.
 
-- [ ] **Step 1: Add failing panel-section and form-preservation tests**
+- [x] **Step 1: Add failing panel-section and form-preservation tests**
 
   Adapt the Catalog test harness to render production-like nested routes. Keep all current tests for invalid/valid GTIN, owner hints, stale responses, template ID, unit price/EGAIS, draft banner, and unlink permissions.
 
@@ -884,13 +884,13 @@
 
   Add a mutation-failure test that fills valid values, makes POST return 500, clicks Create, and asserts the inline `Не удалось создать продукт` alert and entered Name remain visible inside the still-open panel.
 
-- [ ] **Step 2: Run the focused Catalog tests and verify RED**
+- [x] **Step 2: Run the focused Catalog tests and verify RED**
 
   Run: `pnpm --filter @markiro/admin exec vitest run test/catalog.test.tsx test/catalog-routing.test.tsx`
 
   Expected: FAIL because ProductForm still renders `Modal`, has no sections, and closes/errors are not route-owned.
 
-- [ ] **Step 3: Refactor ProductForm presentation without changing payload behavior**
+- [x] **Step 3: Refactor ProductForm presentation without changing payload behavior**
 
   Remove `open` from `ProductFormProps` and replace `Modal` with a `SidePanel open size="standard"`. Destructure `formState: { errors, isDirty }` and publish it:
 
@@ -924,7 +924,7 @@
 
   Keep both merged custom Select integrations unchanged: `defaultCounterpartyId` and `defaultLabelTemplateId` continue to use `onValueChange`, not the pre-PR `onChange` callback. Do not reintroduce `HTMLSelectElement`, `<option>`, `fireEvent.change` on a select, or native-select assertions; retain the current `userEvent` `combobox`/`option` helpers in `catalog.test.tsx`.
 
-- [ ] **Step 4: Implement route-owned create/update mutations and load states**
+- [x] **Step 4: Implement route-owned create/update mutations and load states**
 
   Split the route by mode so hooks remain explicit:
 
@@ -940,7 +940,7 @@
 
   Use a shape-matched panel loading body while required data is pending. On dependency error, render Retry and Close inside the open panel. If edit data finishes without the requested product, render `pages.catalog.form.notFound` and Close; never render blank editable fields.
 
-- [ ] **Step 5: Add and pass exact payload and stale-link regression assertions**
+- [x] **Step 5: Add and pass exact payload and stale-link regression assertions**
 
   Keep the existing create payload assertion exactly:
 
@@ -966,7 +966,7 @@
 
   Keep the current PATCH round-trip assertion for untouched `unitPrice`/`egaisCode` and the current `не восстанавливает плашку связи с 1С после успешного разрыва` test. Add one extra edit assertion: type an unsaved Name, resolve the unlink/refetch, and assert the typed Name is still present.
 
-- [ ] **Step 6: Add Catalog panel and section styles plus bilingual copy**
+- [x] **Step 6: Add Catalog panel and section styles plus bilingual copy**
 
   Import `catalog.css` from `index.tsx`. Define `.mk-catalog-panel-section`, section heading/supporting-copy styles, a two-column aggregation grid that collapses below 560 px, full-width alerts, and a skeleton whose rows match the three sections. Use only UI tokens.
 
@@ -985,7 +985,7 @@
 
   English values are `Basic`, `Aggregation and price`, `Defaults`, `Could not load product data.`, `Product was not found or is no longer available.`, and `Retry`.
 
-- [ ] **Step 7: Run focused tests and verify GREEN**
+- [x] **Step 7: Run focused tests and verify GREEN**
 
   Rebuild the UI package first because Admin imports its compiled export:
 
@@ -995,7 +995,7 @@
 
   Expected: PASS with unchanged request bodies, retained input on failures/refetch, and route close only after a successful mutation.
 
-- [ ] **Step 8: Commit ProductPanel behavior**
+- [x] **Step 8: Commit ProductPanel behavior**
 
   ```bash
   git add apps/admin/src/pages/catalog/ProductPanelRoute.tsx apps/admin/src/pages/catalog/ProductForm.tsx apps/admin/src/pages/catalog/catalog.css apps/admin/src/pages/catalog/index.tsx apps/admin/src/i18n/ru.json apps/admin/src/i18n/en.json apps/admin/test/catalog-routing.test.tsx apps/admin/test/catalog.test.tsx
@@ -1020,7 +1020,7 @@
 - Consumes: React Router 8 `useBlocker`, `ConfirmDialog`, `OverlayDismissReason`, and route-owned `dirty`/`submitting` state from Task 4.
 - Produces no new package API. Catalog owns two separate confirmations: unsaved-form discard above a panel and product deletion above the list.
 
-- [ ] **Step 1: Add failing dirty-dismissal tests for every close source**
+- [x] **Step 1: Add failing dirty-dismissal tests for every close source**
 
   In `catalog-routing.test.tsx`, parameterize close button, Escape, and backdrop. For each, open create from the list, type a valid change, invoke the close source, and assert:
 
@@ -1032,7 +1032,7 @@
 
   Click `Продолжить редактирование` and assert the confirm closes while the panel and field value remain. Repeat once with `Не сохранять` and assert the panel closes to `/catalog`.
 
-- [ ] **Step 2: Add failing Back-navigation and pending-mutation tests**
+- [x] **Step 2: Add failing Back-navigation and pending-mutation tests**
 
   From `/catalog`, open `/catalog/new`, dirty the form, and call `navigate(-1)` through the route probe. Assert `useBlocker` keeps `/catalog/new` active and opens the same `ConfirmDialog`. Cancel must call `blocker.reset()`; discard must call `blocker.proceed()` and return to the preserved list.
 
@@ -1042,7 +1042,7 @@
 
   Expected: FAIL because close intent still navigates immediately and no navigation blocker or discard confirmation exists.
 
-- [ ] **Step 3: Implement one feature-owned close state machine**
+- [x] **Step 3: Implement one feature-owned close state machine**
 
   In each create/edit panel controller, derive:
 
@@ -1071,7 +1071,7 @@
 
   Render `ConfirmDialog` after `ProductForm` so it becomes the top overlay. Use destructive tone, Cancel initial focus, and the new translated copy.
 
-- [ ] **Step 4: Add failing deletion confirmation tests**
+- [x] **Step 4: Add failing deletion confirmation tests**
 
   In `catalog.test.tsx`, click Delete and assert a standalone `alertdialog` with exact product identity, Cancel, and Delete. Assert Escape cancels without a DELETE request. Reopen, click Delete, keep the DELETE promise pending, and assert both buttons are disabled and duplicate click/Escape/backdrop produce exactly one request. Resolve successfully and assert the dialog closes and the existing success toast remains.
 
@@ -1081,7 +1081,7 @@
 
   Expected: FAIL because Catalog deletion still uses legacy `Modal`, permits pending dismissal, and has no persistent error content.
 
-- [ ] **Step 5: Replace Catalog delete Modal with ConfirmDialog**
+- [x] **Step 5: Replace Catalog delete Modal with ConfirmDialog**
 
   In `AuthorizedProductRowActions`, retain the capability-owned `useDeleteProduct` hook and local selected product. Replace `Modal` with:
 
@@ -1102,7 +1102,7 @@
 
   Store a local delete error, clear it before a new request, and render it inside the dialog's description content using an `Alert tone="error"` beneath the consequence. Because the public `description` accepts `ReactNode`, no general form slot is needed.
 
-- [ ] **Step 6: Add bilingual dirty/error copy and run focused tests**
+- [x] **Step 6: Add bilingual dirty/error copy and run focused tests**
 
   Add exact RU/EN pairs:
 
@@ -1115,7 +1115,7 @@
 
   Expected: PASS for all close sources, blocked Back, direct fallback, pending state, deletion success/failure, and exact write-hook denial.
 
-- [ ] **Step 7: Commit Catalog safety and deletion**
+- [x] **Step 7: Commit Catalog safety and deletion**
 
   ```bash
   git add apps/admin/src/pages/catalog/ProductPanelRoute.tsx apps/admin/src/pages/catalog/index.tsx apps/admin/src/i18n/ru.json apps/admin/src/i18n/en.json apps/admin/test/catalog-routing.test.tsx apps/admin/test/catalog.test.tsx
@@ -1140,7 +1140,7 @@
 - Consumes: completed overlay primitives and route-backed Catalog interactions.
 - Produces: one reference CRUD page aligned with the dashboard's bounded layout; no shared `AdminPage`, `FilterBar`, or `RowActions` abstraction until a second page proves reuse.
 
-- [ ] **Step 1: Add failing Catalog layout and bilingual behavior assertions**
+- [x] **Step 1: Add failing Catalog layout and bilingual behavior assertions**
 
   Add stable semantic/class assertions rather than pixel assertions:
 
@@ -1152,13 +1152,13 @@
 
   Switch i18n to English, render again, and assert `Catalog filters`, `2 products`, `Add product`, and the translated panel close label. Restore RU in `afterEach`.
 
-- [ ] **Step 2: Run the Catalog test and verify RED**
+- [x] **Step 2: Run the Catalog test and verify RED**
 
   Run: `pnpm --filter @markiro/admin exec vitest run test/catalog.test.tsx`
 
   Expected: FAIL because the current page has inline layout styles and no labelled filter group/result summary.
 
-- [ ] **Step 3: Apply the bounded page and filter/action layout locally**
+- [x] **Step 3: Apply the bounded page and filter/action layout locally**
 
   Replace the page wrapper's inline styles with `className="mk-catalog-page" data-testid="catalog-page"`. Match the dashboard content bound and responsive padding already established in `dashboard.css`; do not introduce a shared primitive from one consumer.
 
@@ -1178,7 +1178,7 @@
 
   Add the English `Catalog filters`, `{{count}} product`, and `{{count}} products` forms.
 
-- [ ] **Step 4: Run focused UI and Admin tests**
+- [x] **Step 4: Run focused UI and Admin tests**
 
   Run: `pnpm --filter @markiro/ui exec vitest run test/overlays.test.tsx test/feedback.test.tsx`
 
@@ -1188,7 +1188,7 @@
 
   Expected: PASS with no React act, duplicate-key, missing-translation, or focus warnings.
 
-- [ ] **Step 5: Run full package gates**
+- [x] **Step 5: Run full package gates**
 
   Run: `pnpm --filter @markiro/ui test`
 
@@ -1208,7 +1208,7 @@
 
   Expected: every command exits 0. Report any infrastructure skip separately; a build does not replace DOM or browser verification.
 
-- [ ] **Step 6: Run repository hygiene checks**
+- [x] **Step 6: Run repository hygiene checks**
 
   Run: `git diff --check origin/main...HEAD`
 
@@ -1220,6 +1220,9 @@
 
 - [ ] **Step 7: Perform browser and accessibility review if local infrastructure permits**
 
+  Not run on 2026-08-06: no application was available at `localhost:5173`, and an
+  authenticated API-backed Catalog session was not available for the state matrix below.
+
   Run the Admin app with its normal development services and verify both create and edit at 1440 px, 1024 px, 768 px, and one viewport narrower than 768 px in light and dark themes. Check:
 
   - panel width caps, full-screen mobile layout, safe-area spacing, body-only scrolling, sticky header/footer, and no horizontal overflow;
@@ -1230,7 +1233,7 @@
 
   Automated DOM tests do not count as this browser confirmation. Record any untested screen reader, mobile virtual keyboard, or browser behavior explicitly in the final report.
 
-- [ ] **Step 8: Review the final diff and commit page alignment**
+- [x] **Step 8: Review the final diff and commit page alignment**
 
   Inspect: `git diff --stat origin/main...HEAD` and `git diff origin/main...HEAD -- apps/admin packages/ui docs/superpowers`
 

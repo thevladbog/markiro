@@ -388,6 +388,13 @@
       "form": {
         "createTitle": "Новый продукт",
         "editTitle": "Изменить продукт",
+        "loadError": "Не удалось загрузить данные формы продукта.",
+        "notFound": "Продукт не найден.",
+        "retry": "Повторить",
+        "discardTitle": "Отменить изменения?",
+        "discardBody": "Несохранённые изменения будут потеряны.",
+        "continueEditing": "Продолжить редактирование",
+        "discardAction": "Не сохранять",
         "gtinLabel": "ГТИН",
         "nameLabel": "Название",
         "productGroupLabel": "Группа продукции",

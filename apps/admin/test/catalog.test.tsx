@@ -8,6 +8,7 @@ import { CABINET_CAPABILITY } from "@markiro/domain";
 
 import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider } from "../src/access/context.js";
+import i18n from "../src/i18n/index.js";
 import type * as CatalogApiModule from "../src/pages/catalog/api.js";
 import { CatalogPage } from "../src/pages/catalog/index.js";
 import { ProductPanelRoute } from "../src/pages/catalog/ProductPanelRoute.js";
@@ -41,11 +42,12 @@ vi.mock("../src/pages/catalog/api.js", async (importOriginal) => {
   };
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
   vi.unstubAllGlobals();
   unlinkHookMountSpy.mockClear();
   writeHookMountSpy.mockClear();
+  await i18n.changeLanguage("ru");
 });
 
 /** Minimal Response stand-in -- only what apps/admin/src/api/client.ts reads. */
@@ -234,6 +236,137 @@ describe("CatalogPage", () => {
     expect(screen.getByTestId("catalog-page").classList.contains("mk-catalog-page")).toBe(true);
     expect(screen.getByRole("group", { name: "Фильтры каталога" })).toBeDefined();
     expect(screen.getByText("2 продукта")).toBeDefined();
+  });
+
+  it("renders the aligned catalog and panel controls in English", async () => {
+    await i18n.changeLanguage("en");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) =>
+        String(url).includes("/candidates")
+          ? jsonResponse(200, { candidates: [] })
+          : jsonResponse(200, { items: [DRAFT_PRODUCT, ACTIVE_PRODUCT] }),
+      ),
+    );
+    const user = userEvent.setup();
+
+    renderPage();
+
+    expect(await screen.findByRole("group", { name: "Catalog filters" })).toBeDefined();
+    expect(await screen.findByText("2 products")).toBeDefined();
+    await user.click(screen.getAllByRole("button", { name: "Add product" })[0]!);
+    expect(await screen.findByRole("dialog", { name: "New product" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Close" })).toBeDefined();
+  });
+
+  it("groups the create form and preserves input after an API failure", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url) === "/api/products" && init?.method === "POST") {
+        return jsonResponse(500, { message: "Не удалось создать продукт" });
+      }
+      if (String(url) === "/api/products/gtin-check") {
+        return jsonResponse(200, { gtin14: "04006381333931", owner: "own" });
+      }
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    renderPage();
+    await screen.findByText("Каталог пуст");
+    await user.click(screen.getAllByRole("button", { name: "Добавить продукт" })[0]!);
+    const panel = await screen.findByRole("dialog", { name: "Новый продукт" });
+    expect(within(panel).getByRole("heading", { name: "Основное" })).toBeDefined();
+    expect(within(panel).getByRole("heading", { name: "Агрегация и цена" })).toBeDefined();
+    expect(within(panel).getByRole("heading", { name: "Значения по умолчанию" })).toBeDefined();
+    expect(panel.classList.contains("mk-side-panel--standard")).toBe(true);
+
+    await user.type(within(panel).getByLabelText("Название"), "Milk");
+    await user.type(within(panel).getByLabelText("ГТИН"), "4006381333931");
+    await user.click(within(panel).getByRole("button", { name: "Создать" }));
+
+    expect(await within(panel).findByText("Не удалось создать продукт")).toBeDefined();
+    expect((within(panel).getByLabelText("Название") as HTMLInputElement).value).toBe("Milk");
+    expect(screen.getByRole("dialog", { name: "Новый продукт" })).toBeDefined();
+  });
+
+  it("keeps deletion modal and request locked until one delete succeeds", async () => {
+    let resolveDelete: ((response: Response) => void) | undefined;
+    const deleteResponse = new Promise<Response>((resolve) => {
+      resolveDelete = resolve;
+    });
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url) === `/api/products/${DRAFT_PRODUCT.id}` && init?.method === "DELETE") {
+        return deleteResponse;
+      }
+      if (String(url) === "/api/products") {
+        return jsonResponse(200, { items: [DRAFT_PRODUCT] });
+      }
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    renderPage();
+    await screen.findByText(DRAFT_PRODUCT.name);
+    await user.click(screen.getByRole("button", { name: "Удалить" }));
+
+    let dialog = screen.getByRole("alertdialog", { name: "Удалить продукт?" });
+    expect(within(dialog).getByText(DRAFT_PRODUCT.gtin14)).toBeDefined();
+    expect(
+      within(dialog).getByText(
+        `Продукт «${DRAFT_PRODUCT.name}» будет удалён без возможности восстановления.`,
+      ),
+    ).toBeDefined();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(false);
+
+    await user.click(screen.getByRole("button", { name: "Удалить" }));
+    dialog = screen.getByRole("alertdialog", { name: "Удалить продукт?" });
+    await user.click(within(dialog).getByRole("button", { name: "Удалить" }));
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "DELETE")).toHaveLength(1),
+    );
+
+    const cancel = within(dialog).getByRole("button", { name: "Отмена" }) as HTMLButtonElement;
+    const confirm = within(dialog).getByRole("button", { name: "Удалить" }) as HTMLButtonElement;
+    expect(cancel.disabled).toBe(true);
+    expect(confirm.disabled).toBe(true);
+    await user.click(confirm);
+    await user.keyboard("{Escape}");
+    fireEvent.mouseDown(document.querySelector<HTMLElement>(".mk-confirm-dialog__scrim")!);
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "DELETE")).toHaveLength(1);
+
+    resolveDelete?.(jsonResponse(204, undefined));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    const toastMessage = await screen.findByText("Продукт удалён");
+    const toastStatus = toastMessage.closest<HTMLElement>("[role='status']");
+    expect(toastStatus).not.toBeNull();
+    await user.click(within(toastStatus!).getByRole("button", { name: "Закрыть" }));
+  });
+
+  it("keeps the deletion dialog open with the exact API error", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url) === `/api/products/${DRAFT_PRODUCT.id}` && init?.method === "DELETE") {
+        return jsonResponse(409, { message: "Продукт используется в смене" });
+      }
+      if (String(url) === "/api/products") {
+        return jsonResponse(200, { items: [DRAFT_PRODUCT] });
+      }
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    renderPage();
+    await screen.findByText(DRAFT_PRODUCT.name);
+    await user.click(screen.getByRole("button", { name: "Удалить" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Удалить продукт?" });
+    await user.click(within(dialog).getByRole("button", { name: "Удалить" }));
+
+    expect(await within(dialog).findByText("Продукт используется в смене")).toBeDefined();
+    expect(screen.getByRole("alertdialog", { name: "Удалить продукт?" })).toBeDefined();
   });
 
   it("shows a spinner (not EmptyState) while the list request is still pending", async () => {
@@ -706,6 +839,26 @@ describe("CatalogPage", () => {
     expect(patchBody.egaisCode).toBe("EG-123");
   });
 
+  it("keeps an unsaved edit when the dirty state re-renders the panel route", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(200, { items: [DRAFT_PRODUCT] })),
+    );
+    const user = userEvent.setup();
+
+    renderPage();
+    await screen.findByText(DRAFT_PRODUCT.name);
+    await user.click(screen.getByRole("button", { name: "Изменить" }));
+
+    const name = await screen.findByLabelText("Название");
+    await user.clear(name);
+    await user.type(name, "Молоко без лактозы");
+
+    expect((screen.getByLabelText("Название") as HTMLInputElement).value).toBe(
+      "Молоко без лактозы",
+    );
+  });
+
   // Fix 2 (review, Task 14 follow-up): `CatalogPage` used to rebuild
   // `initialValues` as a fresh object literal on every render. `ProductForm`'s
   // resync effect depends on that object referentially, so *any* unrelated
@@ -752,6 +905,9 @@ describe("CatalogPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
     await screen.findByText("Изменить продукт");
     expect(screen.getByText(/Связано с 1С: 1C-GUID-1/)).toBeDefined();
+    fireEvent.change(screen.getByLabelText("Название"), {
+      target: { value: "Молоко без лактозы" },
+    });
 
     const productsGetCountBeforeUnlink = productsGetCount;
     fireEvent.click(screen.getByRole("button", { name: "Разорвать связь" }));
@@ -766,6 +922,9 @@ describe("CatalogPage", () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     expect(screen.queryByText(/Связано с 1С:/)).toBeNull();
+    expect((screen.getByLabelText("Название") as HTMLInputElement).value).toBe(
+      "Молоко без лактозы",
+    );
   });
 
   it("shows a linked product to managers without exposing the integration unlink mutation", async () => {

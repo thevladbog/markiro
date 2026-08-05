@@ -1,5 +1,5 @@
 import { Alert, Button, ConfirmDialog, SidePanel, Spinner } from "@markiro/ui";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useBlocker, useLocation, useNavigate, useOutletContext, useParams } from "react-router";
 
@@ -58,29 +58,22 @@ function usePanelContext() {
   return { t, context, loading, failed, close };
 }
 
-function PanelState({ children }: { children: ReactNode }) {
+function PanelState({ mode, children }: { mode: "create" | "edit"; children: ReactNode }) {
   const { t, context, loading, failed, close } = usePanelContext();
+  const title = t(`pages.catalog.form.${mode === "create" ? "createTitle" : "editTitle"}`);
   if (loading)
     return (
-      <SidePanel
-        open
-        title={t("pages.catalog.form.createTitle")}
-        closeLabel={t("common.close")}
-        onClose={close}
-      >
+      <SidePanel open title={title} closeLabel={t("common.close")} onClose={close}>
         <Spinner label={t("common.loading")} />
       </SidePanel>
     );
   if (failed)
     return (
-      <SidePanel
-        open
-        title={t("pages.catalog.form.createTitle")}
-        closeLabel={t("common.close")}
-        onClose={close}
-      >
-        <Alert tone="error">{t("common.loadError")}</Alert>
-        <Button onClick={() => void context.retryPanelData()}>Повторить</Button>
+      <SidePanel open title={title} closeLabel={t("common.close")} onClose={close}>
+        <Alert tone="error">{t("pages.catalog.form.loadError")}</Alert>
+        <Button onClick={() => void context.retryPanelData()}>
+          {t("pages.catalog.form.retry")}
+        </Button>
       </SidePanel>
     );
   return children;
@@ -89,9 +82,12 @@ function PanelState({ children }: { children: ReactNode }) {
 function useDirtyGuard(close: () => void, busy: boolean) {
   const [dirty, setDirty] = useState(false);
   const [pendingDismiss, setPendingDismiss] = useState(false);
+  const allowNavigationRef = useRef(false);
   const blocker = useBlocker(
     ({ currentLocation, nextLocation }) =>
-      (dirty || busy) && currentLocation.pathname !== nextLocation.pathname,
+      !allowNavigationRef.current &&
+      (dirty || busy) &&
+      currentLocation.pathname !== nextLocation.pathname,
   );
   useEffect(() => {
     if (blocker.state !== "blocked") return;
@@ -108,12 +104,18 @@ function useDirtyGuard(close: () => void, busy: boolean) {
     if (blocker.state === "blocked") blocker.reset();
   };
   const discard = () => {
+    allowNavigationRef.current = true;
     setDirty(false);
     setPendingDismiss(false);
     if (blocker.state === "blocked") blocker.proceed();
     else close();
   };
-  return { setDirty, requestClose, confirmOpen: dirty && pendingDismiss, cancel, discard };
+  const finish = () => {
+    allowNavigationRef.current = true;
+    setDirty(false);
+    close();
+  };
+  return { setDirty, requestClose, confirmOpen: dirty && pendingDismiss, cancel, discard, finish };
 }
 
 function CreateProductPanel() {
@@ -123,7 +125,7 @@ function CreateProductPanel() {
   const guard = useDirtyGuard(close, mutation.isPending);
   if (loading || failed)
     return (
-      <PanelState>
+      <PanelState mode="create">
         <></>
       </PanelState>
     );
@@ -142,7 +144,7 @@ function CreateProductPanel() {
             setError(null);
             await mutation.mutateAsync(input);
             toast("ok", t("pages.catalog.toasts.createSuccess"));
-            close();
+            guard.finish();
           } catch (cause) {
             setError(
               cause instanceof ApiRequestError
@@ -155,10 +157,10 @@ function CreateProductPanel() {
       {guard.confirmOpen ? (
         <ConfirmDialog
           open
-          title="Отменить изменения?"
-          description="Несохранённые изменения будут потеряны."
-          cancelLabel="Продолжить редактирование"
-          confirmLabel="Не сохранять"
+          title={t("pages.catalog.form.discardTitle")}
+          description={t("pages.catalog.form.discardBody")}
+          cancelLabel={t("pages.catalog.form.continueEditing")}
+          confirmLabel={t("pages.catalog.form.discardAction")}
           tone="destructive"
           onCancel={guard.cancel}
           onConfirm={guard.discard}
@@ -175,13 +177,42 @@ function EditProductPanel() {
   const [error, setError] = useState<string | null>(null);
   const guard = useDirtyGuard(close, mutation.isPending);
   const product = context.products.find((item) => item.id === productId);
+  const initialValues = useMemo<ProductFormValues | undefined>(
+    () =>
+      product
+        ? {
+            gtin: product.gtin14,
+            name: product.name,
+            productGroup: product.productGroup ?? "",
+            boxCapacity: product.boxCapacity === null ? "" : String(product.boxCapacity),
+            palletCapacity: product.palletCapacity === null ? "" : String(product.palletCapacity),
+            unitPrice: product.unitPrice ?? "",
+            egaisCode: product.egaisCode ?? "",
+            defaultCounterpartyId: product.defaultCounterpartyId ?? "",
+            defaultLabelTemplateId: product.defaultLabelTemplateId ?? "",
+          }
+        : undefined,
+    // Exclude the product object itself: an external-link-only refetch must not reset dirty fields.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      product?.boxCapacity,
+      product?.defaultCounterpartyId,
+      product?.defaultLabelTemplateId,
+      product?.egaisCode,
+      product?.gtin14,
+      product?.name,
+      product?.palletCapacity,
+      product?.productGroup,
+      product?.unitPrice,
+    ],
+  );
   if (loading || failed)
     return (
-      <PanelState>
+      <PanelState mode="edit">
         <></>
       </PanelState>
     );
-  if (!product)
+  if (!product || !initialValues)
     return (
       <SidePanel
         open
@@ -189,20 +220,9 @@ function EditProductPanel() {
         closeLabel={t("common.close")}
         onClose={close}
       >
-        <p>Продукт не найден.</p>
+        <p>{t("pages.catalog.form.notFound")}</p>
       </SidePanel>
     );
-  const initialValues: ProductFormValues = {
-    gtin: product.gtin14,
-    name: product.name,
-    productGroup: product.productGroup ?? "",
-    boxCapacity: product.boxCapacity === null ? "" : String(product.boxCapacity),
-    palletCapacity: product.palletCapacity === null ? "" : String(product.palletCapacity),
-    unitPrice: product.unitPrice ?? "",
-    egaisCode: product.egaisCode ?? "",
-    defaultCounterpartyId: product.defaultCounterpartyId ?? "",
-    defaultLabelTemplateId: product.defaultLabelTemplateId ?? "",
-  };
   return (
     <>
       <ProductForm
@@ -222,7 +242,7 @@ function EditProductPanel() {
             setError(null);
             await mutation.mutateAsync({ id: product.id, input });
             toast("ok", t("pages.catalog.toasts.updateSuccess"));
-            close();
+            guard.finish();
           } catch (cause) {
             setError(
               cause instanceof ApiRequestError
@@ -235,10 +255,10 @@ function EditProductPanel() {
       {guard.confirmOpen ? (
         <ConfirmDialog
           open
-          title="Отменить изменения?"
-          description="Несохранённые изменения будут потеряны."
-          cancelLabel="Продолжить редактирование"
-          confirmLabel="Не сохранять"
+          title={t("pages.catalog.form.discardTitle")}
+          description={t("pages.catalog.form.discardBody")}
+          cancelLabel={t("pages.catalog.form.continueEditing")}
+          confirmLabel={t("pages.catalog.form.discardAction")}
           tone="destructive"
           onCancel={guard.cancel}
           onConfirm={guard.discard}
