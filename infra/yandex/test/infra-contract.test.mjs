@@ -1440,10 +1440,36 @@ function assertProtectedInfrastructureWorkflow(source) {
   assert.match(planCommands, /validate-plan-summary\.mjs/);
   assert.match(planCommands, /sha256sum/);
 
-  const applyStep = apply.steps.find(
+  const downloadPlanIndex = apply.steps.findIndex(
+    (step) => step.name === "Download the exact saved plan",
+  );
+  const applyStepIndex = apply.steps.findIndex(
     (step) => step.name === "Verify evidence, authenticate, and apply only the saved plan",
   );
+  const finalApplyCleanupIndex = apply.steps.findIndex(
+    (step) => step.name === "Remove downloaded plan and temporary Terraform data",
+  );
+  assert.ok(downloadPlanIndex >= 0);
+  assert.ok(applyStepIndex > downloadPlanIndex, "saved plan must be applied after download");
+  assert.ok(
+    finalApplyCleanupIndex > applyStepIndex,
+    "final apply cleanup must run after download and apply",
+  );
+  const applyStep = apply.steps[applyStepIndex];
+  const finalApplyCleanupStep = apply.steps[finalApplyCleanupIndex];
   assert.ok(applyStep);
+  assert.equal(finalApplyCleanupStep.if, "always()");
+  assert.deepEqual(
+    finalApplyCleanupStep.run
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith("rm -rf")),
+    [
+      'rm -rf -- "${RUNNER_TEMP:?}/yandex-infrastructure-plan"',
+      'rm -rf -- "${RUNNER_TEMP:?}/yandex-production-terraform-data"',
+    ],
+  );
+  assert.doesNotMatch(finalApplyCleanupStep.run, /\bunset\b/);
   assert.match(applyStep.run, /unset [^\n]*TF_DATA_DIR/);
   assert.match(applyStep.run, /rm -rf -- "\$\{RUNNER_TEMP:\?\}\/yandex-production-terraform-data"/);
   assert.match(applyStep.run, /rm -rf -- "\$\{RUNNER_TEMP:\?\}\/yandex-infrastructure-plan"/);
@@ -1478,6 +1504,8 @@ function assertProtectedInfrastructureWorkflow(source) {
       'rm -rf -- "${RUNNER_TEMP:?}/yandex-infrastructure-plan"',
       'rm -rf -- "${RUNNER_TEMP:?}/yandex-production-terraform-data"',
       'rm -rf -- "${RUNNER_TEMP:?}/yandex-infrastructure-plan"',
+      'rm -rf -- "${RUNNER_TEMP:?}/yandex-infrastructure-plan"',
+      'rm -rf -- "${RUNNER_TEMP:?}/yandex-production-terraform-data"',
     ],
     "recursive cleanup must stay confined to exact runner-temporary directories",
   );
@@ -1583,6 +1611,39 @@ test("infrastructure workflow contract rejects security-boundary mutations", asy
           const uploadIndex = steps.findIndex((step) => step.id === "plan-artifact");
           steps.splice(uploadIndex, 0, cleanup);
         }
+      }),
+    ],
+    [
+      "missing final apply cleanup",
+      mutateWorkflowSource(source, (workflow) => {
+        workflow.jobs.apply.steps = workflow.jobs.apply.steps.filter(
+          (step) => step.name !== "Remove downloaded plan and temporary Terraform data",
+        );
+      }),
+    ],
+    [
+      "final apply cleanup before download",
+      mutateWorkflowSource(source, (workflow) => {
+        const steps = workflow.jobs.apply.steps;
+        const cleanupIndex = steps.findIndex(
+          (step) => step.name === "Remove downloaded plan and temporary Terraform data",
+        );
+        if (cleanupIndex >= 0) {
+          const [cleanup] = steps.splice(cleanupIndex, 1);
+          const downloadIndex = steps.findIndex(
+            (step) => step.name === "Download the exact saved plan",
+          );
+          steps.splice(downloadIndex, 0, cleanup);
+        }
+      }),
+    ],
+    [
+      "final apply cleanup is not always",
+      mutateWorkflowSource(source, (workflow) => {
+        const step = workflow.jobs.apply.steps.find(
+          (candidate) => candidate.name === "Remove downloaded plan and temporary Terraform data",
+        );
+        if (step) step.if = "success()";
       }),
     ],
   ]);

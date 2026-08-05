@@ -503,3 +503,9 @@ jobs:
           chmod 600 "$backend_config"
           terraform -chdir=infra/yandex/production init -input=false -lockfile=readonly -backend-config="$backend_config"
           terraform -chdir=infra/yandex/production apply -input=false "$plan_path"
+      - name: Remove downloaded plan and temporary Terraform data
+        if: always()
+        run: |
+          set -euo pipefail
+          rm -rf -- "${RUNNER_TEMP:?}/yandex-infrastructure-plan"
+          rm -rf -- "${RUNNER_TEMP:?}/yandex-production-terraform-data"
