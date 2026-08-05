@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import process from "node:process";
 
 import { isMainModule } from "./cli-main.mjs";
+import { productionComposeArgs } from "./compose-files.mjs";
 
 const IMAGE_TAG_PATTERN = /^[0-9a-f]{40}$/;
 const IMAGE_DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/;
@@ -63,18 +64,7 @@ export async function composeQuiet(environment, supplied = {}) {
     try {
       child = dependencies.spawn(
         "docker",
-        [
-          "compose",
-          "--env-file",
-          environment.MARKIRO_ENV_FILE,
-          "-f",
-          "compose.production.yml",
-          ...(environment.MARKIRO_EDGE_MODE === "behind-alb"
-            ? ["-f", "deploy/production/compose.yandex.yml"]
-            : []),
-          "config",
-          "--quiet",
-        ],
+        [...productionComposeArgs(environment), "config", "--quiet"],
         { env: childEnvironment, stdio: ["ignore", "ignore", "pipe"] },
       );
     } catch {

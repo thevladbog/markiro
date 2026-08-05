@@ -25,17 +25,23 @@ function digest(image, prefix) {
   return image.slice(prefix.length);
 }
 
+function deploymentPhase(value) {
+  if (value !== "first" && value !== "repeat") throw new Error("invalid deployment phase");
+  return value;
+}
+
 export async function deployRelease(dependencies, manifestText) {
   for (const name of [
     "transferBundle",
     "refreshRuntime",
     "prepare",
     "verifyAlb",
-    "smoke",
     "finalize",
     "rollback",
   ])
     requireFunction(dependencies, name);
+  const phase = deploymentPhase(dependencies.deploymentPhase || "repeat");
+  requireFunction(dependencies, phase === "first" ? "preDnsSmoke" : "smoke");
 
   const manifest = parseReleaseManifest(manifestText, dependencies.expectedWorkflowRunId);
   if (manifest.commit !== dependencies.expectedCommit) throw new Error("invalid release manifest");
@@ -44,8 +50,13 @@ export async function deployRelease(dependencies, manifestText) {
   let candidate;
   try {
     candidate = await dependencies.prepare(manifest);
+    if (phase === "first" && candidate.previousTag !== null)
+      throw new Error("first deployment already has a previous healthy release");
+    if (phase === "repeat" && !candidate.previousTag)
+      throw new Error("previous healthy release is unavailable for repeat deployment");
     await dependencies.verifyAlb(candidate);
-    await dependencies.smoke(candidate);
+    if (phase === "first") await dependencies.preDnsSmoke(candidate);
+    else await dependencies.smoke(candidate);
     return await dependencies.finalize(candidate);
   } catch (error) {
     if (candidate)
@@ -65,6 +76,17 @@ export async function deployRelease(dependencies, manifestText) {
 function requiredEnvironment(name, environment = process.env) {
   const value = environment[name];
   if (!value) throw new Error("remote deployment configuration is incomplete");
+  return value;
+}
+
+function requiredIpv4(name, environment) {
+  const value = requiredEnvironment(name, environment);
+  const octets = value.split(".");
+  if (
+    octets.length !== 4 ||
+    octets.some((octet) => !/^(0|[1-9][0-9]{0,2})$/.test(octet) || Number(octet) > 255)
+  )
+    throw new Error("remote deployment configuration is incomplete");
   return value;
 }
 
@@ -175,6 +197,7 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
   const manifestPath = requiredEnvironment("RELEASE_MANIFEST_PATH", environment);
   const expectedRunId = requiredEnvironment("EXPECTED_RELEASE_RUN_ID", environment);
   const expectedCommit = requiredEnvironment("EXPECTED_RELEASE_SHA", environment);
+  const phase = deploymentPhase(requiredEnvironment("MARKIRO_DEPLOYMENT_PHASE", environment));
   const manifestText = await system.readFile(manifestPath, "utf8");
   const manifest = parseReleaseManifest(manifestText, expectedRunId);
   if (manifest.commit !== expectedCommit || process.cwd() === "/")
@@ -266,6 +289,7 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
           `MARKIRO_API_IMAGE_DIGEST=${apiDigest}`,
           `MARKIRO_EDGE_IMAGE_DIGEST=${edgeDigest}`,
           "MARKIRO_EDGE_MODE=behind-alb",
+          `MARKIRO_REQUIRE_PREVIOUS_HEALTHY=${phase === "repeat" ? "1" : "0"}`,
           "MARKIRO_ENV_FILE=/etc/markiro/production.env",
           "MARKIRO_RELEASE_DIRECTORY=/var/lib/markiro/releases",
           "/usr/bin/bash",
@@ -330,6 +354,33 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
             )
           )
             throw new Error("production ALB gate failed");
+        },
+        deploymentPhase: phase,
+        preDnsSmoke: async () => {
+          const domain = requiredEnvironment("MARKIRO_DOMAIN", environment);
+          const address = requiredIpv4("YC_LOAD_BALANCER_ADDRESS", environment);
+          await system.run("ssh", [
+            ...sshBase,
+            "curl",
+            "--fail",
+            "--silent",
+            "--show-error",
+            "--max-time",
+            "30",
+            "-H",
+            `Host: ${domain}`,
+            "http://127.0.0.1:8080/health/ready",
+          ]);
+          await system.run("curl", [
+            "--fail",
+            "--silent",
+            "--show-error",
+            "--max-time",
+            "30",
+            "--resolve",
+            `${domain}:443:${address}`,
+            `https://${domain}/health/ready`,
+          ]);
         },
         smoke: () =>
           system.smoke({

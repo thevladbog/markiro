@@ -264,6 +264,22 @@ function assertRunbookContract({ documents, verifier, workflow }) {
     const position = goLive.indexOf(marker);
     assert.ok(position >= 0 && position < publicDns, `gate ${gate} must precede public DNS`);
   }
+  ordered(
+    goLive,
+    [
+      "deployment_phase=first",
+      "http://127.0.0.1:8080/health/ready",
+      "curl --resolve <production-domain>:443:<reserved-alb-ip>",
+      "<!-- runbook-contract:go-live-public-dns-apply -->",
+      "authorized HTTPS smoke through the public hostname **only now**",
+    ],
+    "Yandex first-release ordering",
+  );
+  assert.doesNotMatch(
+    goLive.slice(0, publicDns),
+    /public smoke, `finalize`/i,
+    "pre-DNS Yandex procedure must not use public-hostname smoke",
+  );
   assert.match(goLive.slice(publicDns), /public_dns_enabled=true/);
   for (const input of verifierInputs) {
     assert.match(verifier, new RegExp(input));

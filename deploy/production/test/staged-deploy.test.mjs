@@ -102,6 +102,72 @@ test("prepare stops after local API and edge readiness with an exclusive pending
   );
 });
 
+test("behind-ALB local edge readiness uses the loopback listener with the production Host header", async () => {
+  const { dependencies, releaseDirectory } = await fixture({ withPrevious: false });
+  let probe;
+  dependencies.probeEdgeTls = async (options) => {
+    probe = options;
+    return { status: 200 };
+  };
+
+  await prepareRelease(
+    {
+      environment: { ...ENVIRONMENT, MARKIRO_EDGE_MODE: "behind-alb" },
+      releaseDirectory,
+      readinessAttempts: 1,
+    },
+    dependencies,
+  );
+
+  assert.deepEqual(probe, {
+    url: "http://127.0.0.1:8080/health/live",
+    headers: { host: "app.markiro.example" },
+    timeoutMs: 30_000,
+  });
+});
+
+test("behind-ALB prepare and first-release cleanup use the same Yandex Compose model for every Docker lifecycle command", async () => {
+  const { calls, dependencies, releaseDirectory } = await fixture({ withPrevious: false });
+  const yandexEnvironment = { ...ENVIRONMENT, MARKIRO_EDGE_MODE: "behind-alb" };
+  const candidate = await prepareRelease(
+    { environment: yandexEnvironment, releaseDirectory, readinessAttempts: 1 },
+    dependencies,
+  );
+  const prepareCalls = calls.filter(({ args }) => args[0] === "compose");
+  const failed = await rollbackPreparedRelease(
+    { candidate, environment: yandexEnvironment, releaseDirectory, readinessAttempts: 1 },
+    dependencies,
+  );
+  const allComposeCalls = calls.filter(({ args }) => args[0] === "compose");
+  const expectedFiles = ["-f", "compose.production.yml", "-f", "deploy/production/compose.yandex.yml"];
+
+  assert.equal(failed.state, "failed");
+  assert.ok(prepareCalls.some(({ args }) => args.includes("pull")));
+  assert.ok(allComposeCalls.some(({ args }) => args.includes("migrate")));
+  assert.ok(allComposeCalls.some(({ args }) => args.includes("stop")));
+  for (const { args } of allComposeCalls)
+    assert.deepEqual(args.slice(3, 7), expectedFiles, `missing Yandex overlay in ${args.join(" ")}`);
+});
+
+test("a repeat deployment rejects a missing previous healthy record before migration or service start", async () => {
+  const { calls, dependencies, releaseDirectory } = await fixture({ withPrevious: false });
+
+  await assert.rejects(
+    prepareRelease(
+      {
+        environment: ENVIRONMENT,
+        releaseDirectory,
+        readinessAttempts: 1,
+        requirePreviousHealthy: true,
+      },
+      dependencies,
+    ),
+    /previous healthy release is unavailable/,
+  );
+
+  assert.equal(calls.some(({ args }) => args.includes("migrate") || args.includes("up")), false);
+});
+
 test("finalize validates the exact pending candidate and creates one immutable healthy record", async () => {
   const { dependencies, releaseDirectory } = await fixture();
   const candidate = await prepareRelease(

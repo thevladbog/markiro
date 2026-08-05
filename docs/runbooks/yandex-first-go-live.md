@@ -28,11 +28,12 @@ system.
 
 <!-- runbook-contract:go-live-gate-04-alb-waf-arl -->
 
-4. **Ingress protection.** Verify Application Load Balancer (ALB) target
-   health and HTTPS listener, Smart Web Security (SWS) web application firewall
-   (WAF) profile, and Advanced Rate Limiter (ARL) profile use the reviewed
-   hostname, back-end health check, and conservative limits. Keep the app VM
-   private.
+4. **Ingress protection before the first application release.** Verify the
+   reserved ALB address, HTTPS listener, active Certificate Manager certificate,
+   Smart Web Security (SWS) web application firewall (WAF) profile, and Advanced
+   Rate Limiter (ARL) profile use the reviewed hostname and private back-end
+   configuration. Do **not** require a `HEALTHY` back end yet: the first app
+   release has not started the edge listener. Keep the app VM private.
 
 <!-- runbook-contract:go-live-gate-05-alert-specs -->
 
@@ -61,10 +62,20 @@ system.
 
 <!-- runbook-contract:go-live-gate-09-deploy-smoke-rollback -->
 
-9. **Deploy, smoke, and rollback.** Rehearse staged `prepare`, ALB check,
-   public smoke, `finalize`, and rollback with the protected runner. Confirm a
-   first deployment fails closed by stopping both candidate services when no
-   previous healthy release exists.
+9. **First deployment rehearsal, still without public DNS.** Dispatch the
+   protected **Deploy production** workflow manually with
+   `deployment_phase=first`. Its authoritative order is: materialize runtime
+   secrets; start the private edge; probe
+   `http://127.0.0.1:8080/health/ready` on the app VM with the production
+   `Host` header; wait for ALB back-end `HEALTHY`; then probe the reserved ALB
+   address via `curl --resolve <production-domain>:443:<reserved-alb-ip>`.
+   This preserves TLS SNI and the production hostname without creating public
+   DNS. The workflow finalizes only after those probes. Rehearse the failure
+   path too: the first deployment must stop both candidate services and record
+   the candidate failed because it has no previous healthy release. A
+   `deployment_phase=repeat` run instead requires the previous ALB back end to
+   be healthy and performs public-hostname smoke only after DNS has been
+   approved and applied.
 
 <!-- runbook-contract:go-live-gate-10-tenant-rbac -->
 
@@ -117,7 +128,9 @@ unset MARKIRO_DOMAIN MARKIRO_AUTHORITATIVE_DNS_SERVER MARKIRO_PUBLIC_DNS_RESOLVE
 unset MARKIRO_APPROVED_DNS_A MARKIRO_APPROVED_DNS_AAAA
 ```
 
-2. Run the authorized HTTPS smoke through the public hostname. Confirm the
-   certificate, SWS/ARL behavior, backend readiness, and alert delivery.
+2. Run the authorized HTTPS smoke through the public hostname **only now**,
+   after DNS convergence. Confirm the certificate, SWS/ARL behavior, backend
+   readiness, and alert delivery. This is the post-cutover public smoke; it is
+   not part of the pre-DNS first-deployment workflow.
 3. Record convergence and smoke evidence IDs in the protected system. If any
    verifier fails, stop traffic expansion and follow the rollback procedure.

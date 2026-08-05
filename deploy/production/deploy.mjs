@@ -16,21 +16,12 @@ import process from "node:process";
 import { randomUUID } from "node:crypto";
 
 import { isMainModule } from "./cli-main.mjs";
+import { productionComposeArgs } from "./compose-files.mjs";
 import { runPreflight } from "./preflight.mjs";
 import { productionBaseUrl, runSmoke } from "./smoke.mjs";
 
 const apiRepository = "ghcr.io/thevladbog/markiro-api";
 const edgeRepository = "ghcr.io/thevladbog/markiro-edge";
-
-function composeArgs(environment) {
-  return [
-    "compose",
-    "--env-file",
-    environment.MARKIRO_ENV_FILE || ".env.production",
-    "-f",
-    "compose.production.yml",
-  ];
-}
 
 const COMMAND_TIMEOUT_MS = 30_000;
 const PULL_TIMEOUT_MS = 600_000;
@@ -101,16 +92,25 @@ function processRunner() {
   };
 }
 
-async function probeEdgeTls({ url, timeoutMs }) {
+async function probeEdgeTls({ url, headers, timeoutMs }) {
   const response = await fetch(url, {
     method: "GET",
-    headers: { accept: "application/json" },
+    headers: { accept: "application/json", ...headers },
     redirect: "manual",
     signal: AbortSignal.timeout(timeoutMs),
   });
   const status = response.status;
   await response.body?.cancel();
   return { status };
+}
+
+function edgeReadinessProbe(environment) {
+  if (environment.MARKIRO_EDGE_MODE === "behind-alb")
+    return {
+      url: "http://127.0.0.1:8080/health/live",
+      headers: { host: environment.MARKIRO_DOMAIN },
+    };
+  return { url: new URL("/health/live", productionBaseUrl(environment)).href, headers: undefined };
 }
 
 async function latestHealthyRelease(directory) {
@@ -350,7 +350,7 @@ function positiveInteger(value, fallback) {
   return Number.isSafeInteger(value) && value > 0 ? value : fallback;
 }
 
-async function waitForEdgeTls(dependencies, options, baseUrl) {
+async function waitForEdgeTls(dependencies, options) {
   const timeoutMs = positiveInteger(options.edgeReadinessTimeoutMs, EDGE_READINESS_TIMEOUT_MS);
   const intervalMs = positiveInteger(options.edgeReadinessIntervalMs, EDGE_READINESS_INTERVAL_MS);
   const maximumAttempts = positiveInteger(
@@ -358,7 +358,7 @@ async function waitForEdgeTls(dependencies, options, baseUrl) {
     Math.ceil(timeoutMs / intervalMs) + 1,
   );
   const startedAt = dependencies.monotonicNow();
-  const endpoint = new URL("/health/live", baseUrl).href;
+  const probe = edgeReadinessProbe(options.environment);
   let lastCause = "no successful response";
 
   for (let attempt = 0; attempt < maximumAttempts; attempt += 1) {
@@ -370,7 +370,11 @@ async function waitForEdgeTls(dependencies, options, baseUrl) {
         Math.floor(Math.min(dependencies.timeouts.command, remaining)),
       );
       const result = await withDeadline(
-        dependencies.probeEdgeTls({ url: endpoint, timeoutMs: probeTimeoutMs }),
+        dependencies.probeEdgeTls({
+          url: probe.url,
+          headers: probe.headers,
+          timeoutMs: probeTimeoutMs,
+        }),
         "edge/TLS probe",
         probeTimeoutMs,
       );
@@ -455,7 +459,7 @@ export async function prepareRelease(options, supplied = {}) {
     MARKIRO_ENV_FILE: preflight.envFile,
   };
   const releaseDirectory = options.releaseDirectory || ".markiro-releases";
-  const compose = composeArgs(environment);
+  const compose = productionComposeArgs(environment);
   const approvedApiImage = `${apiRepository}@${preflight.apiImageDigest}`;
   const approvedEdgeImage = `${edgeRepository}@${preflight.edgeImageDigest}`;
   let candidate;
@@ -492,6 +496,8 @@ export async function prepareRelease(options, supplied = {}) {
       state: "pending",
       createdAt: dependencies.now().toISOString(),
     };
+    if (options.requirePreviousHealthy && !candidate.previousTag)
+      throw new Error("previous healthy release is unavailable");
     await writeStagedRelease(releaseDirectory, candidate, "pending");
     dependencies.log("release pending");
 
@@ -518,7 +524,7 @@ export async function prepareRelease(options, supplied = {}) {
       environment,
       dependencies.timeouts.service,
     );
-    await waitForEdgeTls(dependencies, options, productionBaseUrl(environment));
+    await waitForEdgeTls(dependencies, options);
     dependencies.log("release prepared");
     return candidate;
   } catch (error) {
@@ -556,7 +562,7 @@ export async function rollbackPreparedRelease(options, supplied = {}) {
   const candidate = await requirePendingRelease(options.releaseDirectory, options.candidate);
   if (!candidate.previousTag) {
     const environment = { ...process.env, ...options.environment };
-    const compose = composeArgs(environment);
+    const compose = productionComposeArgs(environment);
     const recoveryErrors = [];
     let failed;
     try {
@@ -588,7 +594,7 @@ export async function rollbackPreparedRelease(options, supplied = {}) {
     MARKIRO_API_IMAGE_DIGEST: previous.apiDigest.slice(`${apiRepository}@`.length),
     MARKIRO_EDGE_IMAGE_DIGEST: previous.edgeDigest.slice(`${edgeRepository}@`.length),
   };
-  const compose = composeArgs(environment);
+  const compose = productionComposeArgs(environment);
   await mustRun(
     dependencies,
     "docker",
@@ -611,7 +617,7 @@ export async function rollbackPreparedRelease(options, supplied = {}) {
     environment,
     dependencies.timeouts.service,
   );
-  await waitForEdgeTls(dependencies, options, productionBaseUrl(environment));
+  await waitForEdgeTls(dependencies, options);
   dependencies.log("release rolled back");
   return markPreparedReleaseFailed(options.releaseDirectory, candidate);
 }
@@ -638,12 +644,13 @@ export async function rollbackPreparedRelease(options, supplied = {}) {
  * @property {number=} edgeReadinessAttempts
  * @property {number=} edgeReadinessIntervalMs
  * @property {number=} edgeReadinessTimeoutMs
+ * @property {boolean=} requirePreviousHealthy
  */
 
 /**
  * Pull, migrate, and switch a release. This intentionally never rolls back.
  * @param {DeployOptions} options
- * @param {{runPreflight?: typeof runPreflight, runner?: ReturnType<typeof processRunner>, runSmoke?: typeof runSmoke, writeRelease?: typeof writeRelease, isReady?: () => Promise<boolean>, probeEdgeTls?: (options: {url: string, timeoutMs: number}) => Promise<{status: number}>, sleep?: (milliseconds: number) => Promise<void>, monotonicNow?: () => number, now?: () => Date, log?: (message: string) => void}=} supplied
+ * @param {{runPreflight?: typeof runPreflight, runner?: ReturnType<typeof processRunner>, runSmoke?: typeof runSmoke, writeRelease?: typeof writeRelease, isReady?: () => Promise<boolean>, probeEdgeTls?: (options: {url: string, headers?: Record<string, string>, timeoutMs: number}) => Promise<{status: number}>, sleep?: (milliseconds: number) => Promise<void>, monotonicNow?: () => number, now?: () => Date, log?: (message: string) => void}=} supplied
  * @returns {Promise<ReleaseRecord>}
  */
 export async function deployRelease(options, supplied = {}) {
@@ -673,7 +680,7 @@ export async function deployRelease(options, supplied = {}) {
     MARKIRO_ENV_FILE: preflight.envFile,
   };
   const releaseDirectory = options.releaseDirectory || ".markiro-releases";
-  const compose = composeArgs(environment);
+  const compose = productionComposeArgs(environment);
   const tag = preflight.imageTag;
   const approvedApiImage = `${apiRepository}@${preflight.apiImageDigest}`;
   const approvedEdgeImage = `${edgeRepository}@${preflight.edgeImageDigest}`;
@@ -761,7 +768,7 @@ export async function deployRelease(options, supplied = {}) {
       dependencies.timeouts.service,
     );
     const baseUrl = productionBaseUrl(environment);
-    await waitForEdgeTls(dependencies, options, baseUrl);
+    await waitForEdgeTls(dependencies, options);
     try {
       await dependencies.runSmoke({ environment, baseUrl });
     } catch {
@@ -813,6 +820,7 @@ if (isMainModule(import.meta.url)) {
         {
           environment: process.env,
           releaseDirectory: cliReleaseDirectory(),
+          requirePreviousHealthy: process.env.MARKIRO_REQUIRE_PREVIOUS_HEALTHY === "1",
         },
         { log: () => undefined },
       );

@@ -11,6 +11,12 @@ on:
         description: Exact 40-character release commit
         required: true
         type: string
+      deployment_phase:
+        description: First deployment only skips the pre-existing ALB-health gate and performs pre-DNS probes.
+        required: true
+        default: repeat
+        type: choice
+        options: [first, repeat]
   workflow_run:
     workflows: [Publish production images]
     types: [completed]
@@ -49,6 +55,7 @@ jobs:
       YC_LOAD_BALANCER_ID: ${{ vars.YC_LOAD_BALANCER_ID }}
       YC_BACKEND_GROUP_ID: ${{ vars.YC_BACKEND_GROUP_ID }}
       YC_TARGET_GROUP_ID: ${{ vars.YC_APP_TARGET_GROUP_ID }}
+      MARKIRO_DEPLOYMENT_PHASE: ${{ github.event_name == 'workflow_dispatch' && inputs.deployment_phase || 'repeat' }}
     steps:
       - name: Resolve exact trusted release identity
         id: release
@@ -166,6 +173,8 @@ jobs:
       YC_BACKEND_GROUP_ID: ${{ vars.YC_BACKEND_GROUP_ID }}
       YC_TARGET_GROUP_ID: ${{ vars.YC_APP_TARGET_GROUP_ID }}
       MARKIRO_DOMAIN: ${{ vars.MARKIRO_DOMAIN }}
+      MARKIRO_DEPLOYMENT_PHASE: ${{ github.event_name == 'workflow_dispatch' && inputs.deployment_phase || 'repeat' }}
+      YC_LOAD_BALANCER_ADDRESS: ${{ vars.YC_LOAD_BALANCER_ADDRESS }}
       APP_SSH_HOST_KEYS_B64: ${{ needs.controller.outputs.app-host-keys-b64 }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

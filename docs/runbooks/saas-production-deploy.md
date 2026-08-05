@@ -263,6 +263,13 @@ rollback would not be authorized.
 
 ## First deploy
 
+> **Direct/on-prem procedure only.** This runbook describes a deployment where
+> the edge owns the public TLS/ACME boundary. Do not use its DNS, Caddy, or ACME
+> ordering for Yandex Cloud ALB. The authoritative Yandex first-release sequence
+> is [the Yandex first go-live runbook](yandex-first-go-live.md): private local
+> and reserved-ALB probes first, separately approved DNS apply second, then the
+> public-hostname smoke.
+
 For a new environment, complete the common gates, authenticate Docker to GHCR
 through the approved credential helper, and confirm no unrecorded Markiro
 containers are being adopted. There is no previous application tag on the

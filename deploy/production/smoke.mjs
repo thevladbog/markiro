@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import process from "node:process";
 
 import { isMainModule } from "./cli-main.mjs";
+import { productionComposeArgs } from "./compose-files.mjs";
 import { RUNTIME_DEPENDENCY_PROBE_SOURCE } from "./runtime-dependency-probe.mjs";
 
 const CSP =
@@ -142,19 +143,6 @@ function dockerRunner(environment, timeoutMs) {
 
 function requestClient() {
   return { request: (url, init) => fetch(url, init) };
-}
-
-function composeArgs(environment) {
-  const args = [
-    "compose",
-    "--env-file",
-    environment.MARKIRO_ENV_FILE || ".env.production",
-    "-f",
-    "compose.production.yml",
-  ];
-  if (environment.MARKIRO_SMOKE_CI_OVERLAY === "1")
-    args.push("-f", "deploy/production/compose.ci.yml");
-  return args;
 }
 
 function assertHeaders(response, requiresHsts) {
@@ -447,7 +435,7 @@ async function waitForRestoredReadiness(client, baseUrl, attempts, intervalMs, s
 }
 
 async function runtimeSmoke(environment, docker, client, baseUrl, options) {
-  const compose = composeArgs(environment);
+  const compose = productionComposeArgs(environment, { includeCiOverlay: true });
   const apiId = await runDocker(docker, [...compose, "ps", "-q", "api"], options.commandTimeoutMs);
   const containerId = apiId.stdout.trim();
   if (apiId.code !== 0 || !containerId) throw new Error("API container ID is unavailable");

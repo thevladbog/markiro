@@ -89,6 +89,37 @@ test("deployRelease uses the staged boundary in exact ALB, external smoke, final
   assert.equal(record.state, "healthy");
 });
 
+test("first deployment runs the ALB pre-DNS probe and never uses public DNS smoke", async () => {
+  const { dependencies, events } = orchestrationFixture({ candidate: FIRST_CANDIDATE });
+  dependencies.deploymentPhase = "first";
+  delete dependencies.smoke;
+  dependencies.preDnsSmoke = () => {
+    events.push("pre-DNS ALB smoke");
+  };
+
+  const record = await deployRelease(dependencies, MANIFEST);
+
+  assert.equal(record.state, "healthy");
+  assert.deepEqual(events, [
+    "transfer immutable bundle",
+    "runtime refresh",
+    "remote prepare",
+    "ALB healthy",
+    "pre-DNS ALB smoke",
+    "remote finalize",
+  ]);
+});
+
+test("repeat deployment rejects a missing previous healthy release before public smoke", async () => {
+  const { dependencies, events } = orchestrationFixture({ candidate: FIRST_CANDIDATE });
+  dependencies.deploymentPhase = "repeat";
+
+  await assert.rejects(deployRelease(dependencies, MANIFEST), /previous healthy release/);
+
+  assert.equal(events.includes("external smoke"), false);
+  assert.equal(events.includes("remote finalize"), false);
+});
+
 test("prepare failure relies on remote local recovery and never invokes a second rollback", async () => {
   const { dependencies, events } = orchestrationFixture({ failAt: "remote prepare" });
 
@@ -114,6 +145,8 @@ test("rollback cleanup failure is surfaced alongside the primary deployment fail
     candidate: FIRST_CANDIDATE,
     failAt: "ALB healthy",
   });
+  dependencies.deploymentPhase = "first";
+  dependencies.preDnsSmoke = () => undefined;
   dependencies.rollback = async () => {
     throw new Error("first deployment recovery failed");
   };
@@ -188,6 +221,8 @@ function cliFixture({ candidate = CANDIDATE, failAt } = {}) {
     YC_BACKEND_GROUP_ID: "ds7backend",
     YC_TARGET_GROUP_ID: "ds7target",
     MARKIRO_DOMAIN: "markiro.example",
+    MARKIRO_DEPLOYMENT_PHASE: candidate.previousTag === null ? "first" : "repeat",
+    YC_LOAD_BALANCER_ADDRESS: "203.0.113.42",
     APP_SSH_HOST_KEYS_B64: Buffer.from(`${ED25519_KEY}\n${RSA_KEY}`).toString("base64"),
   };
   const system = {
@@ -274,7 +309,7 @@ function cliFixture({ candidate = CANDIDATE, failAt } = {}) {
 }
 
 test("real CLI adapter stages remote prepare, ALB, runner smoke, and remote finalize", async () => {
-  const { environment, events, system } = cliFixture();
+  const { commands, environment, events, system } = cliFixture();
 
   await runRemoteDeployment(environment, system);
 
@@ -292,6 +327,36 @@ test("real CLI adapter stages remote prepare, ALB, runner smoke, and remote fina
       "remote finalize",
     ],
   );
+  assert.ok(
+    commands.some(
+      ({ command, args }) =>
+        command === "ssh" &&
+        args.includes("prepare") &&
+        args.includes("MARKIRO_REQUIRE_PREVIOUS_HEALTHY=1"),
+    ),
+  );
+});
+
+test("real CLI adapter keeps first deployment pre-DNS and probes loopback plus the reserved ALB address", async () => {
+  const { commands, environment, events, system } = cliFixture({ candidate: FIRST_CANDIDATE });
+
+  await runRemoteDeployment(environment, system);
+
+  const localProbe = commands.find(
+    ({ command, args }) => command === "ssh" && args.includes("http://127.0.0.1:8080/health/ready"),
+  );
+  const albProbe = commands.find(
+    ({ command, args }) => command === "curl" && args.includes("https://markiro.example/health/ready"),
+  );
+  const prepare = commands.find(
+    ({ command, args }) => command === "ssh" && args.includes("prepare"),
+  );
+  assert.ok(localProbe);
+  assert.ok(localProbe.args.includes("Host: markiro.example"));
+  assert.ok(albProbe);
+  assert.ok(albProbe.args.includes("markiro.example:443:203.0.113.42"));
+  assert.ok(prepare.args.includes("MARKIRO_REQUIRE_PREVIOUS_HEALTHY=0"));
+  assert.equal(events.includes("external smoke"), false);
 });
 
 test("real CLI adapter rejects a noncanonical authenticated host-key bundle before writing trust", async () => {
@@ -315,7 +380,7 @@ test("real CLI adapter rolls back remotely when runner external smoke fails", as
   assert.equal(events.includes("remote finalize"), false);
 });
 
-for (const failAt of ["ALB healthy", "external smoke", "remote finalize"]) {
+for (const failAt of ["ALB healthy", "remote finalize"]) {
   test(`real CLI adapter terminalizes a first deployment after ${failAt} failure`, async () => {
     const { environment, events, system } = cliFixture({
       candidate: FIRST_CANDIDATE,

@@ -460,7 +460,13 @@ async function cliClients() {
   };
 }
 
+function deploymentPhase(value) {
+  if (value !== "first" && value !== "repeat") throw new Error("runner control configuration is incomplete");
+  return value;
+}
+
 async function verifyControllerGates(yandexToken) {
+  const phase = deploymentPhase(requiredEnvironment("MARKIRO_DEPLOYMENT_PHASE"));
   const appInstanceId = requiredEnvironment("YC_APP_INSTANCE_ID");
   const postgresClusterId = requiredEnvironment("YC_POSTGRES_CLUSTER_ID");
   const loadBalancerId = requiredEnvironment("YC_LOAD_BALANCER_ID");
@@ -490,8 +496,9 @@ async function verifyControllerGates(yandexToken) {
     `https://alb.api.cloud.yandex.net/apploadbalancer/v1/loadBalancers/${loadBalancerId}/targetStates/${backendGroupId}/${targetGroupId}`,
     headers,
   );
+  if (!Array.isArray(targets.targetStates)) throw new Error("production ALB target inventory failed");
   if (
-    !Array.isArray(targets.targetStates) ||
+    phase === "repeat" &&
     !targets.targetStates.some((target) =>
       target.status?.zoneStatuses?.some((zone) => zone.status === "HEALTHY"),
     )
