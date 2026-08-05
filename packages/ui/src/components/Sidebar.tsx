@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from "react";
+import { Fragment, type CSSProperties, type ReactNode } from "react";
 
 import { cn } from "../cn.js";
 import { Badge } from "./Badge.js";
@@ -34,6 +34,8 @@ import { Badge } from "./Badge.js";
 export interface SidebarItem {
   to: string;
   labelKey: string;
+  /** Optional visible group label. Consecutive items with the same value share one label. */
+  section?: string;
   /** Счётчик справа */
   badge?: number | string;
 }
@@ -52,6 +54,7 @@ export interface SidebarProps {
 
 const SIDEBAR_LINK_CSS = `
 .mk-sidebar__link {
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   width: 100%;
@@ -65,11 +68,27 @@ const SIDEBAR_LINK_CSS = `
   box-shadow: none;
   color: var(--fg-2);
   font: 500 14px/20px var(--font-ui);
+  outline: none;
+}
+.mk-sidebar__link:hover {
+  background: color-mix(in srgb, var(--surface-card) 55%, transparent);
+}
+.mk-sidebar__link:focus-visible {
+  outline: var(--focus-ring-w) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 .mk-sidebar__link--active {
   background: var(--surface-card);
   box-shadow: inset 0 0 0 1px var(--line);
   color: var(--fg-1);
+}
+.mk-sidebar__section {
+  padding: 14px 10px 4px;
+  color: var(--fg-3);
+  font: var(--text-caption);
+}
+.mk-sidebar__section:first-child {
+  padding-top: 4px;
 }
 `;
 
@@ -123,33 +142,42 @@ export function Sidebar({
           display: "flex",
           flexDirection: "column",
           gap: 2,
+          flex: 1,
+          minHeight: 0,
+          overflowY: "auto",
         }}
       >
-        {items.map((item) => (
-          <li key={item.to}>
-            {renderLink(
-              item,
-              <span
-                className="mk-sidebar__content"
-                style={{ display: "flex", alignItems: "center", gap: 10, width: "100%" }}
-              >
-                <span
-                  style={{
-                    flex: 1,
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                  }}
-                >
-                  {item.labelKey}
-                </span>
-                {item.badge != null && <Badge>{item.badge}</Badge>}
-              </span>,
-            )}
-          </li>
-        ))}
+        {items.map((item, index) => {
+          const showSection = item.section && item.section !== items[index - 1]?.section;
+
+          return (
+            <Fragment key={item.to}>
+              {showSection ? <li className="mk-sidebar__section">{item.section}</li> : null}
+              <li>
+                {renderLink(
+                  item,
+                  <span
+                    className="mk-sidebar__content"
+                    style={{ display: "flex", alignItems: "center", gap: 10, width: "100%" }}
+                  >
+                    <span
+                      style={{
+                        flex: 1,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {item.labelKey}
+                    </span>
+                    {item.badge != null && <Badge>{item.badge}</Badge>}
+                  </span>,
+                )}
+              </li>
+            </Fragment>
+          );
+        })}
       </ul>
-      <div style={{ flex: 1 }} />
       {footer}
       <style>{SIDEBAR_LINK_CSS}</style>
     </nav>

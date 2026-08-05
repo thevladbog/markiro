@@ -60,6 +60,14 @@ beforeEach(() => {
         });
       }
       if (url.includes("/api/pickup-orders")) return jsonResponse(200, { items: [] });
+      if (
+        url.endsWith("/api/products") ||
+        url.endsWith("/api/shifts") ||
+        url.endsWith("/api/lines") ||
+        url.endsWith("/api/conflicts?reviewed=false")
+      ) {
+        return jsonResponse(200, { items: [] });
+      }
       throw new Error(`Unexpected request: ${url}`);
     }),
   );
@@ -137,6 +145,7 @@ describe("app shell layout", () => {
       ["Каталог", "/catalog"],
       ["Смены", "/shifts"],
       ["Контрагенты", "/counterparties"],
+      ["Операторы и сотрудники", "/employees"],
       ["Этикетки", "/labels"],
       ["Для себя", "/pickup"],
     ];
@@ -144,13 +153,20 @@ describe("app shell layout", () => {
       const link = await screen.findByRole("link", { name: label });
       expect(link.getAttribute("href")).toBe(href);
     }
+    expect(screen.getByText("Производство")).toBeDefined();
+    expect(screen.getByText("Справочники")).toBeDefined();
+    expect(screen.getByText("Оборудование и обмен")).toBeDefined();
+    expect(screen.queryByText("Организация")).toBeNull();
     expect(screen.queryByRole("link", { name: "Интеграции" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Настройки" })).toBeNull();
   });
 
-  it("dashboard stub shows an EmptyState", async () => {
+  it("dashboard guides a new organization to its first product", async () => {
     renderApp(createFakeAuthClient());
-    expect(await screen.findByText("Пока нет данных")).toBeDefined();
+    expect(await screen.findByRole("heading", { name: "Подготовьте первую смену" })).toBeDefined();
+    expect(screen.getByRole("link", { name: "Добавить продукт" }).getAttribute("href")).toBe(
+      "/catalog",
+    );
   });
 
   it("waits for sign-out to settle before redirecting to /login", async () => {

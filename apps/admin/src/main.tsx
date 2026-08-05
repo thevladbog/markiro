@@ -1,4 +1,5 @@
 import "@markiro/ui/styles.css";
+import "./global.css";
 import "./i18n/index.js";
 
 import { StrictMode } from "react";
