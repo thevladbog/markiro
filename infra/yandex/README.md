@@ -1,10 +1,11 @@
 # Yandex Cloud Terraform foundations
 
 This directory contains two independent Terraform roots pinned to Terraform
-1.15.8 and `yandex-cloud/yandex` 0.215.0:
+1.15.8 and `yandex-cloud/yandex` 0.215.0. Both use credential-free partial S3
+backends after the one-time bootstrap migration:
 
 - `bootstrap` creates prerequisites that must exist before remote state is used.
-- `production` manages the SaaS environment and uses a partial S3 backend.
+- `production` manages the SaaS environment.
 
 ## Runtime inputs
 
@@ -21,14 +22,71 @@ Supply S3-compatible backend authentication only through the standard AWS
 environment variables in the deployment process. Never write those values to a
 backend file, Terraform variables, shell history, or logs.
 
-Copy `production/backend.hcl.example` to the ignored `production/backend.hcl`
-and replace only the example bucket name and state key. Then initialize the
-roots explicitly:
+Copy the applicable `backend.hcl.example` to the ignored `backend.hcl` in the
+same root and replace only the example bucket name and state key. Initialize a
+new production checkout explicitly:
 
 ```bash
-terraform -chdir=infra/yandex/bootstrap init -backend=false
 terraform -chdir=infra/yandex/production init -backend-config=backend.hcl
 ```
+
+## One-time bootstrap state migration
+
+The bootstrap operator uses an approved, encrypted administrative workstation.
+Do not print Terraform state, echo credentials, place secret values in command
+arguments, or retain terminal/session logs containing secret material.
+
+1. **Local bootstrap plan.** Load the required `TF_VAR_*` identifiers and a
+   short-lived operator IAM token into the process environment. Initialize the
+   bootstrap root locally and save the reviewed binary plan. The plan file is
+   ignored and must remain on the encrypted workstation.
+
+   ```bash
+   terraform -chdir=infra/yandex/bootstrap init -backend=false
+   terraform -chdir=infra/yandex/bootstrap plan -out=bootstrap.tfplan
+   ```
+
+2. **Approved bootstrap apply.** After independent plan approval, apply the
+   exact saved plan locally. Do not apply an unreviewed, newly calculated plan.
+
+   ```bash
+   terraform -chdir=infra/yandex/bootstrap apply bootstrap.tfplan
+   ```
+
+3. **Out-of-band state HMAC creation.** Using the protected Yandex Cloud
+   operator surface, create one HMAC credential for the dedicated
+   `markiro-production-state` service account. Terraform must not create or
+   import this credential. Capture it once through the approved secret-transfer
+   channel without terminal or workflow logging.
+
+4. **Direct Lockbox upload.** Transfer the HMAC identifier and secret directly
+   into the empty `markiro-production-state-backend` Lockbox container using the
+   protected Yandex Cloud console or an approved secret-broker integration.
+   Never pass either value as a CLI argument, Terraform variable, or file.
+
+5. **Backend migration with environment credentials.** Copy
+   `bootstrap/backend.hcl.example` to the ignored `bootstrap/backend.hcl`, set
+   only the non-secret bucket and key fields, and load the HMAC pair into the
+   standard AWS environment variables through the approved secret broker. Check
+   only that the variables exist, then migrate the authoritative state:
+
+   ```bash
+   test -n "${AWS_ACCESS_KEY_ID:-}"
+   test -n "${AWS_SECRET_ACCESS_KEY:-}"
+   terraform -chdir=infra/yandex/bootstrap init -migrate-state -backend-config=backend.hcl
+   ```
+
+6. **Remote object and version verification.** In the Yandex Cloud console or
+   through a metadata-only approved API call, verify that the configured object
+   key exists in the protected bucket and has a current version ID. Do not
+   download, display, or log the state object.
+
+7. **Secure deletion of local authoritative state.** Only after remote object
+   and version verification succeeds, securely erase the explicit local
+   bootstrap state and backup files according to the workstation media policy.
+   Do not use a broad recursive target. Clear the backend environment variables
+   and delete the local binary plan as well. The remote versioned object is now
+   the sole authoritative bootstrap state.
 
 ## Toolchain contract
 

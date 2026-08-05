@@ -65,6 +65,226 @@ async function readRepositoryFile(relativePath) {
   return readFile(path.join(repositoryRoot, relativePath), "utf8");
 }
 
+function terraformResourceBlock(source, type, name) {
+  const declaration = new RegExp(`resource\\s+"${type}"\\s+"${name}"\\s*\\{`).exec(source);
+
+  assert.ok(declaration, `missing resource ${type}.${name}`);
+
+  const openingBrace = source.indexOf("{", declaration.index);
+  let depth = 0;
+
+  for (let index = openingBrace; index < source.length; index += 1) {
+    if (source[index] === "{") depth += 1;
+    if (source[index] === "}") depth -= 1;
+    if (depth === 0) return source.slice(declaration.index, index + 1);
+  }
+
+  assert.fail(`unterminated resource ${type}.${name}`);
+}
+
+function terraformOutputBlock(source, name) {
+  const declaration = new RegExp(`output\\s+"${name}"\\s*\\{`).exec(source);
+
+  assert.ok(declaration, `missing output ${name}`);
+
+  const openingBrace = source.indexOf("{", declaration.index);
+  let depth = 0;
+
+  for (let index = openingBrace; index < source.length; index += 1) {
+    if (source[index] === "{") depth += 1;
+    if (source[index] === "}") depth -= 1;
+    if (depth === 0) return source.slice(declaration.index, index + 1);
+  }
+
+  assert.fail(`unterminated output ${name}`);
+}
+
+function replaceTerraformResource(source, type, name, mutate) {
+  const block = terraformResourceBlock(source, type, name);
+  return source.replace(block, mutate(block));
+}
+
+function assertProtectedBootstrap({ bootstrap, iam, outputs, variables }) {
+  const allHcl = [bootstrap, iam, outputs, variables].join("\n");
+  const serviceAccounts = [...iam.matchAll(/resource\s+"yandex_iam_service_account"\s+"([^"]+)"/g)]
+    .map((match) => match[1])
+    .sort();
+
+  assert.deepEqual(serviceAccounts, ["app", "audit", "runner", "state", "terraform"]);
+  assert.equal(
+    (iam.match(/resource\s+"yandex_iam_workload_identity_oidc_federation"\s+/g) ?? []).length,
+    1,
+    "exactly one provider-supported OIDC workload identity federation is required",
+  );
+  assert.equal(
+    (iam.match(/resource\s+"yandex_iam_workload_identity_oidc_federation_iam_binding"\s+/g) ?? [])
+      .length,
+    1,
+    "the OIDC federation requires one exact user binding",
+  );
+  assert.equal(
+    (iam.match(/resource\s+"yandex_iam_workload_identity_federated_credential"\s+/g) ?? []).length,
+    1,
+    "exactly one repository-and-environment credential is required",
+  );
+
+  assert.doesNotMatch(
+    allHcl,
+    /yandex_iam_service_account_(?:static_)?access_key/,
+    "Terraform must not create long-lived service-account access keys",
+  );
+  assert.doesNotMatch(
+    allHcl,
+    /yandex_lockbox_secret_version/,
+    "Terraform must create secret containers without payload versions",
+  );
+
+  const stateBucket = terraformResourceBlock(bootstrap, "yandex_storage_bucket", "state");
+  assert.match(stateBucket, /versioning\s*\{[\s\S]*?enabled\s*=\s*true/);
+  assert.match(stateBucket, /lifecycle\s*\{[\s\S]*?prevent_destroy\s*=\s*true/);
+
+  const secretNames = ["runtime", "state_backend", "runner_registration"];
+  const lockboxSecrets = [...bootstrap.matchAll(/resource\s+"yandex_lockbox_secret"\s+"([^"]+)"/g)]
+    .map((match) => match[1])
+    .sort();
+  assert.deepEqual(lockboxSecrets, [...secretNames].sort());
+  for (const name of secretNames) {
+    assert.match(
+      terraformResourceBlock(bootstrap, "yandex_lockbox_secret", name),
+      /lifecycle\s*\{[\s\S]*?prevent_destroy\s*=\s*true/,
+      `${name} secret container must be protected from destroy`,
+    );
+  }
+
+  assert.match(
+    variables,
+    /variable\s+"github_repository"\s*\{[\s\S]*?condition\s*=\s*var\.github_repository\s*==\s*"thevladbog\/q"/,
+  );
+  assert.match(
+    variables,
+    /variable\s+"github_environment"\s*\{[\s\S]*?condition\s*=\s*var\.github_environment\s*==\s*"production"/,
+  );
+  assert.match(
+    iam,
+    /github_subject\s*=\s*"repo:\$\{var\.github_repository\}:environment:\$\{var\.github_environment\}"/,
+  );
+
+  const federation = terraformResourceBlock(
+    iam,
+    "yandex_iam_workload_identity_oidc_federation",
+    "github",
+  );
+  assert.match(federation, /issuer\s*=\s*"https:\/\/token\.actions\.githubusercontent\.com"/);
+  assert.match(
+    federation,
+    /jwks_url\s*=\s*"https:\/\/token\.actions\.githubusercontent\.com\/\.well-known\/jwks"/,
+  );
+  assert.match(federation, /disabled\s*=\s*false/);
+  assert.match(federation, /audiences\s*=\s*\[local\.github_audience\]/);
+
+  const credential = terraformResourceBlock(
+    iam,
+    "yandex_iam_workload_identity_federated_credential",
+    "github_production",
+  );
+  assert.match(credential, /service_account_id\s*=\s*yandex_iam_service_account\.terraform\.id/);
+  assert.match(
+    credential,
+    /federation_id\s*=\s*yandex_iam_workload_identity_oidc_federation\.github\.id/,
+  );
+  assert.match(credential, /external_subject_id\s*=\s*local\.github_subject/);
+
+  const federationUse = terraformResourceBlock(
+    iam,
+    "yandex_iam_workload_identity_oidc_federation_iam_binding",
+    "terraform_user",
+  );
+  assert.match(federationUse, /role\s*=\s*"iam\.workloadIdentityFederations\.user"/);
+  assert.match(
+    federationUse,
+    /members\s*=\s*\["serviceAccount:\$\{yandex_iam_service_account\.terraform\.id\}"\]/,
+  );
+
+  const stateAccess = terraformResourceBlock(
+    iam,
+    "yandex_storage_bucket_iam_binding",
+    "state_backend",
+  );
+  assert.match(stateAccess, /role\s*=\s*"storage\.editor"/);
+  assert.match(
+    stateAccess,
+    /members\s*=\s*\["serviceAccount:\$\{yandex_iam_service_account\.state\.id\}"\]/,
+  );
+
+  const secretReaders = [
+    ["app_runtime", "runtime_secret_id", "app"],
+    ["terraform_state_backend", "state_backend_secret_id", "terraform"],
+    ["runner_registration", "runner_registration_secret_id", "runner"],
+  ];
+  for (const [resourceName, secretId, serviceAccount] of secretReaders) {
+    const binding = terraformResourceBlock(iam, "yandex_lockbox_secret_iam_member", resourceName);
+    assert.match(binding, new RegExp(`secret_id\\s*=\\s*var\\.${secretId}`));
+    assert.match(binding, /role\s*=\s*"lockbox\.payloadViewer"/);
+    assert.match(
+      binding,
+      new RegExp(
+        `member\\s*=\\s*"serviceAccount:\\$\\{yandex_iam_service_account\\.${serviceAccount}\\.id\\}"`,
+      ),
+    );
+  }
+
+  const productionManagement = terraformResourceBlock(
+    iam,
+    "yandex_resourcemanager_folder_iam_member",
+    "terraform_management",
+  );
+  assert.match(productionManagement, /role\s*=\s*"editor"/);
+  assert.match(
+    productionManagement,
+    /member\s*=\s*"serviceAccount:\$\{yandex_iam_service_account\.terraform\.id\}"/,
+  );
+
+  const runtimeAccountReferences =
+    /serviceAccount:\$\{yandex_iam_service_account\.(?:app|runner|audit)\.id\}/;
+  for (const match of iam.matchAll(/resource\s+"[^"]+"\s+"[^"]+"\s*\{/g)) {
+    const opening = match[0].match(/resource\s+"([^"]+)"\s+"([^"]+)"/);
+    const block = terraformResourceBlock(iam, opening[1], opening[2]);
+    if (runtimeAccountReferences.test(block)) {
+      assert.doesNotMatch(
+        block,
+        /role\s*=\s*"(?:admin|editor)"/,
+        "runtime accounts must not receive primitive admin or editor",
+      );
+    }
+  }
+
+  for (const name of [
+    "service_account_ids",
+    "workload_identity_federation_id",
+    "state_bucket_name",
+    "runtime_secret_id",
+    "state_backend_secret_id",
+    "runner_registration_secret_id",
+  ]) {
+    assert.match(
+      terraformOutputBlock(outputs, name),
+      /sensitive\s*=\s*true/,
+      `${name} must be marked sensitive`,
+    );
+  }
+}
+
+async function bootstrapContractSources() {
+  const [bootstrap, iam, outputs, variables] = await Promise.all([
+    readRepositoryFile("infra/yandex/bootstrap/main.tf"),
+    readRepositoryFile("infra/yandex/modules/iam/main.tf"),
+    readRepositoryFile("infra/yandex/bootstrap/outputs.tf"),
+    readRepositoryFile("infra/yandex/bootstrap/variables.tf"),
+  ]);
+
+  return { bootstrap, iam, outputs, variables };
+}
+
 function candidateRepositoryFiles(root = repositoryRoot) {
   return execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], {
     cwd: root,
@@ -139,24 +359,110 @@ test("provider configuration uses variables and leaves the IAM token to YC_TOKEN
   }
 });
 
-test("production uses a credential-free partial S3 backend", async () => {
-  const productionVersions = await readRepositoryFile("infra/yandex/production/versions.tf");
-  const backendExample = await readRepositoryFile("infra/yandex/production/backend.hcl.example");
+test("both roots use credential-free partial S3 backends", async () => {
+  for (const root of terraformRoots) {
+    const versions = await readRepositoryFile(`infra/yandex/${root}/versions.tf`);
+    const backendExample = await readRepositoryFile(`infra/yandex/${root}/backend.hcl.example`);
 
-  assert.match(productionVersions, /backend\s+"s3"\s*{\s*}/s);
-  assert.equal(
-    /access_key|secret_key|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY/i.test(productionVersions),
-    false,
-    "the partial backend must not contain authentication settings",
+    assert.match(versions, /backend\s+"s3"\s*{\s*}/s);
+    assert.equal(
+      /access_key|secret_key|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY/i.test(versions),
+      false,
+      `${root} partial backend must not contain authentication settings`,
+    );
+    assert.match(backendExample, /bucket\s*=/);
+    assert.match(backendExample, /key\s*=/);
+    assert.match(backendExample, /region\s*=/);
+    assert.match(backendExample, /storage\.yandexcloud\.net/);
+    assert.equal(
+      /access_key|secret_key|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY/i.test(backendExample),
+      false,
+      `${root} backend example must not contain authentication settings`,
+    );
+  }
+});
+
+test("bootstrap protects state, exact workload identity, secrets, and least privilege", async () => {
+  assertProtectedBootstrap(await bootstrapContractSources());
+});
+
+test("bootstrap contract rejects a Terraform-managed static access key", async () => {
+  const sources = await bootstrapContractSources();
+  sources.iam += '\nresource "yandex_iam_service_account_static_access_key" "unsafe" {}\n';
+
+  assert.throws(() => assertProtectedBootstrap(sources), /long-lived service-account access keys/);
+});
+
+test("bootstrap contract rejects a Terraform-managed Lockbox payload version", async () => {
+  const sources = await bootstrapContractSources();
+  sources.bootstrap += '\nresource "yandex_lockbox_secret_version" "unsafe" {}\n';
+
+  assert.throws(() => assertProtectedBootstrap(sources), /without payload versions/);
+});
+
+test("bootstrap contract rejects primitive editor for the app runtime", async () => {
+  const sources = await bootstrapContractSources();
+  sources.iam = replaceTerraformResource(
+    sources.iam,
+    "yandex_lockbox_secret_iam_member",
+    "app_runtime",
+    (block) => block.replace('role      = "lockbox.payloadViewer"', 'role      = "editor"'),
   );
-  assert.match(backendExample, /bucket\s*=/);
-  assert.match(backendExample, /key\s*=/);
-  assert.match(backendExample, /region\s*=/);
-  assert.match(backendExample, /storage\.yandexcloud\.net/);
-  assert.equal(
-    /access_key|secret_key|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY/i.test(backendExample),
-    false,
-    "the backend example must not contain authentication settings",
+
+  assert.throws(() => assertProtectedBootstrap(sources), /lockbox\\.payloadViewer|primitive/);
+});
+
+test("bootstrap contract rejects disabled state versioning", async () => {
+  const sources = await bootstrapContractSources();
+  sources.bootstrap = replaceTerraformResource(
+    sources.bootstrap,
+    "yandex_storage_bucket",
+    "state",
+    (block) => block.replace("enabled = true", "enabled = false"),
+  );
+
+  assert.throws(() => assertProtectedBootstrap(sources), /enabled\\s\*=\\s\*true/);
+});
+
+test("bootstrap contract rejects removal of state prevent_destroy", async () => {
+  const sources = await bootstrapContractSources();
+  sources.bootstrap = replaceTerraformResource(
+    sources.bootstrap,
+    "yandex_storage_bucket",
+    "state",
+    (block) => block.replace("prevent_destroy = true", "prevent_destroy = false"),
+  );
+
+  assert.throws(() => assertProtectedBootstrap(sources), /prevent_destroy\\s\*=\\s\*true/);
+});
+
+test("bootstrap state migration is ordered, credential-safe, and never prints state", async () => {
+  const readme = await readRepositoryFile("infra/yandex/README.md");
+  const orderedBoundaries = [
+    "Local bootstrap plan",
+    "Approved bootstrap apply",
+    "Out-of-band state HMAC creation",
+    "Direct Lockbox upload",
+    "Backend migration with environment credentials",
+    "Remote object and version verification",
+    "Secure deletion of local authoritative state",
+  ];
+  let previousIndex = -1;
+
+  for (const boundary of orderedBoundaries) {
+    const currentIndex = readme.indexOf(boundary);
+    assert.ok(currentIndex > previousIndex, `${boundary} must appear in the safe migration order`);
+    previousIndex = currentIndex;
+  }
+
+  assert.match(
+    readme,
+    /terraform -chdir=infra\/yandex\/bootstrap init -migrate-state -backend-config=backend\.hcl/,
+  );
+  assert.doesNotMatch(readme, /terraform\s+(?:show|state\s+pull)/);
+  assert.doesNotMatch(
+    readme,
+    /(?:access_key|secret_key|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY)=\S+/i,
   );
 });
 
