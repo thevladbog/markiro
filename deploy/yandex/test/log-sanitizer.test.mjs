@@ -116,6 +116,82 @@ test("journal sanitizer preserves benign structured-looking diagnostics", () => 
   assert.doesNotMatch(output, /\[REDACTED\]/);
 });
 
+for (const [name, message, secret] of [
+  [
+    "lowercase JSON Unicode escape",
+    String.raw`prefix {"to\u006ben":"lowercase-escape-secret"} suffix`,
+    "lowercase-escape-secret",
+  ],
+  [
+    "uppercase JSON Unicode escape",
+    String.raw`prefix {"to\u006Ben":"uppercase-escape-secret"} suffix`,
+    "uppercase-escape-secret",
+  ],
+  [
+    "multiple JSON Unicode escapes",
+    String.raw`prefix {"cl\u0069ent_\u0073ecret":"multiple-escape-secret"} suffix`,
+    "multiple-escape-secret",
+  ],
+  [
+    "invalid JSON escape",
+    String.raw`prefix {"to\u00G0ken":"invalid-escape-secret"} suffix`,
+    "invalid-escape-secret",
+  ],
+  [
+    "unpaired JSON surrogate escape",
+    String.raw`prefix {"to\uD800ken":"surrogate-escape-secret"} suffix`,
+    "surrogate-escape-secret",
+  ],
+])
+  test(`journal sanitizer fails closed for ${name} in a quoted key`, () => {
+    const output = sanitizeJournal([{ unit: "markiro-deploy.service", message }], {
+      maxBytes: 256,
+      maxLineBytes: 192,
+    });
+
+    assert.doesNotMatch(output, new RegExp(secret));
+    assert.match(output, /\[REDACTED\]/);
+  });
+
+test("journal sanitizer decodes escaped sensitive keys before a retained-byte truncation boundary", () => {
+  const secret = "escaped-boundary-secret";
+  const output = sanitizeJournal(
+    [
+      {
+        unit: "markiro-deploy.service",
+        message: String.raw`${"я".repeat(4)} {"to\u006ben":"${secret}","tail":"${"x".repeat(100)}`,
+      },
+    ],
+    { maxBytes: 96, maxLineBytes: 80 },
+  );
+
+  assert.ok(Buffer.byteLength(output) <= 96);
+  assert.doesNotMatch(output, new RegExp(`${secret}|�`));
+  assert.match(output, /\[REDACTED\]/);
+});
+
+test("journal sanitizer preserves a safe prefixed JSON fragment with an escaped benign key", () => {
+  const output = sanitizeJournal(
+    [
+      {
+        unit: "markiro-deploy.service",
+        message: String.raw`api-1 | {"st\u0061tus":"degraded"} after retry`,
+      },
+      {
+        unit: "markiro-deploy.service",
+        message: String.raw`api-1 | {"status\uD83D\uDE80":"recovering"} after retry`,
+      },
+    ],
+    { maxBytes: 512, maxLineBytes: 192 },
+  );
+
+  assert.match(output, /st\\u0061tus/);
+  assert.match(output, /degraded/);
+  assert.match(output, /status\\uD83D\\uDE80/);
+  assert.match(output, /recovering/);
+  assert.doesNotMatch(output, /\[REDACTED\]/);
+});
+
 test("durable spool stays size and age bounded across rename rotation and restart", async () => {
   assert.equal(typeof logSanitizer.writeBoundedSpool, "function");
   const root = await mkdtemp(path.join(tmpdir(), "markiro-log-spool-"));

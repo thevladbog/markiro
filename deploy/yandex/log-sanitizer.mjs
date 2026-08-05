@@ -63,12 +63,35 @@ function redactJson(message) {
   }
 }
 
+function hasUnpairedSurrogate(value) {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const following = value.charCodeAt(index + 1);
+      if (following < 0xdc00 || following > 0xdfff) return true;
+      index += 1;
+    } else if (code >= 0xdc00 && code <= 0xdfff) return true;
+  }
+  return false;
+}
+
+function decodeJsonKey(encodedKey) {
+  try {
+    const decoded = JSON.parse(`"${encodedKey}"`);
+    return typeof decoded === "string" && !hasUnpairedSurrogate(decoded) ? decoded : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function hasSensitiveQuotedKey(message) {
   for (const match of message.matchAll(
     /"((?:\\.|[^"\\]){1,128})"\s*:|'((?:\\.|[^'\\]){1,128})'\s*:/g,
   )) {
-    const key = match[1] ?? match[2];
-    if (key !== undefined && SENSITIVE_KEY.test(key)) return true;
+    if (match[1] !== undefined) {
+      const decodedKey = decodeJsonKey(match[1]);
+      if (decodedKey === undefined || SENSITIVE_KEY.test(decodedKey)) return true;
+    } else if (match[2] !== undefined && SENSITIVE_KEY.test(match[2])) return true;
   }
   return false;
 }
