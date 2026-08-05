@@ -117,42 +117,52 @@ async function latestHealthyRelease(directory) {
   return (await latestHealthyReleaseRecord(directory))?.tag ?? null;
 }
 
-async function latestHealthyReleaseRecord(directory) {
+function isFailedRelease(release, filename, metadata) {
+  return (
+    isStagedRelease(release, "failed") &&
+    filename === stagedReleaseFileName(release, "failed") &&
+    metadata.isFile() &&
+    (metadata.mode & 0o777) === 0o600
+  );
+}
+
+async function effectiveHealthyReleaseRecords(directory) {
   try {
     const files = (await readdir(directory)).filter((file) => file.endsWith(".json"));
-    const candidates = [];
+    const healthy = [];
+    const failed = [];
     for (const file of files) {
       try {
         const path = join(directory, file);
         const release = JSON.parse(await readFile(path, "utf8"));
         const metadata = await stat(path);
-        if (isHealthyRelease(release, file, metadata)) candidates.push(release);
+        if (isHealthyRelease(release, file, metadata)) healthy.push(release);
+        if (isFailedRelease(release, file, metadata)) failed.push(release);
       } catch {
         // A malformed local record cannot be used to select a rollback target.
       }
     }
-    candidates.sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
-    return candidates[0] ?? null;
+    return healthy.filter(
+      (candidate) =>
+        !failed.some((terminal) => sameRelease({ ...terminal, state: "healthy" }, candidate)),
+    );
   } catch (error) {
     if (error?.code !== "ENOENT") throw error;
   }
-  return null;
+  return [];
+}
+
+async function latestHealthyReleaseRecord(directory) {
+  const candidates = await effectiveHealthyReleaseRecords(directory);
+  candidates.sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
+  return candidates[0] ?? null;
 }
 
 async function healthyReleaseByTag(directory, tag) {
   try {
-    const matches = [];
-    for (const file of await readdir(directory)) {
-      try {
-        const path = join(directory, file);
-        const release = JSON.parse(await readFile(path, "utf8"));
-        const metadata = await stat(path);
-        if (release?.tag === tag && isHealthyRelease(release, file, metadata))
-          matches.push(release);
-      } catch {
-        // Invalid records are never rollback evidence.
-      }
-    }
+    const matches = (await effectiveHealthyReleaseRecords(directory)).filter(
+      (release) => release.tag === tag,
+    );
     if (matches.length !== 1) throw new Error("previous healthy release is unavailable");
     return matches[0];
   } catch (error) {
@@ -288,7 +298,7 @@ async function writeStagedRelease(directory, release, state) {
   return release;
 }
 
-async function requirePendingRelease(directory, candidate) {
+async function requirePendingRelease(directory, candidate, { allowHealthy = false } = {}) {
   if (!isStagedRelease(candidate, "pending")) throw new Error("release state transition rejected");
   try {
     const path = join(directory, stagedReleaseFileName(candidate, "pending"));
@@ -302,7 +312,18 @@ async function requirePendingRelease(directory, candidate) {
       throw new Error("release state transition rejected");
     for (const terminal of ["healthy", "failed"])
       try {
-        await stat(join(directory, stagedReleaseFileName(candidate, terminal)));
+        const terminalPath = join(directory, stagedReleaseFileName(candidate, terminal));
+        const terminalMetadata = await stat(terminalPath);
+        if (terminal === "healthy" && allowHealthy) {
+          const terminalRelease = JSON.parse(await readFile(terminalPath, "utf8"));
+          if (
+            !terminalMetadata.isFile() ||
+            (terminalMetadata.mode & 0o777) !== 0o600 ||
+            !sameRelease({ ...candidate, state: "healthy" }, terminalRelease)
+          )
+            throw new Error("release state transition rejected");
+          continue;
+        }
         throw new Error("release state transition rejected");
       } catch (error) {
         if (error?.code !== "ENOENT") throw error;
@@ -561,7 +582,9 @@ export async function finalizePreparedRelease({ candidate, releaseDirectory }) {
 /** Restore the exact previous healthy digest pair without running migrations. */
 export async function rollbackPreparedRelease(options, supplied = {}) {
   const dependencies = deploymentDependencies(options, supplied);
-  const candidate = await requirePendingRelease(options.releaseDirectory, options.candidate);
+  const candidate = await requirePendingRelease(options.releaseDirectory, options.candidate, {
+    allowHealthy: true,
+  });
   if (!candidate.previousTag) {
     const environment = { ...process.env, ...options.environment };
     const compose = productionComposeArgs(environment);

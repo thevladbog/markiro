@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { load } from "js-yaml";
 
@@ -571,6 +574,7 @@ function assertProductionDeploymentWorkflow(
   assert.deepEqual(Object.keys(workflow.on).sort(), ["workflow_dispatch", "workflow_run"]);
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), [
     "deployment_phase",
+    "rehearsal_run_attempt",
     "rehearsal_run_id",
     "release_run_id",
     "release_sha",
@@ -586,6 +590,13 @@ function assertProductionDeploymentWorkflow(
   assert.deepEqual(workflow.on.workflow_dispatch.inputs.rehearsal_run_id, {
     description:
       "Exact prior rollback-rehearsal run ID; required only for a successful first deployment.",
+    required: true,
+    default: "none",
+    type: "string",
+  });
+  assert.deepEqual(workflow.on.workflow_dispatch.inputs.rehearsal_run_attempt, {
+    description:
+      "Exact prior rollback-rehearsal run attempt; required only for a successful first deployment.",
     required: true,
     default: "none",
     type: "string",
@@ -672,20 +683,21 @@ function assertProductionDeploymentWorkflow(
   assert.equal(cleanupDownload.if, successfulFirstCondition);
   assert.equal(
     rehearsalDownload.with.name,
-    "markiro-rollback-rehearsal-${{ steps.release.outputs.release-sha }}",
+    "markiro-rollback-rehearsal-${{ steps.release.outputs.release-sha }}-attempt-${{ inputs.rehearsal_run_attempt }}",
   );
   assert.equal(
     cleanupDownload.with.name,
-    "markiro-cleanup-${{ steps.release.outputs.release-sha }}",
+    "markiro-cleanup-${{ steps.release.outputs.release-sha }}-attempt-${{ inputs.rehearsal_run_attempt }}",
   );
   assert.equal(rehearsalDownload.with["run-id"], "${{ inputs.rehearsal_run_id }}");
   assert.equal(cleanupDownload.with["run-id"], "${{ inputs.rehearsal_run_id }}");
   const releaseGate = controllerSteps.find(
     ({ name }) => name === "Resolve exact trusted release identity",
   );
-  assert.match(releaseGate.run, /\.inputs\.deployment_phase == "first"/);
-  assert.match(releaseGate.run, /\.inputs\.rollback_rehearsal == "true"/);
-  assert.match(releaseGate.run, /\.inputs\.rehearsal_run_id == "none"/);
+  assert.doesNotMatch(releaseGate.run, /\.inputs(?:\.|\[)/);
+  assert.match(releaseGate.run, /rtrimstr\("@refs\/heads\/main"\)/);
+  assert.match(releaseGate.run, /rtrimstr\("@main"\)/);
+  assert.match(releaseGate.run, /\.run_attempt == \(\$rehearsal_run_attempt \| tonumber\)/);
   assert.match(releaseGate.run, /\.head_sha == \$sha/);
   assert.match(releaseGate.run, /\.conclusion == "success"/);
   assert.match(releaseGate.run, /\[\[ "\$DISPATCH_PHASE" == repeat \]\]/);
@@ -702,6 +714,12 @@ function assertProductionDeploymentWorkflow(
   assert.match(runnerGate.run, /cleanup-prerequisite/);
   assert.match(runnerGate.run, /\.runnerDeregistered == true/);
   assert.match(runnerGate.run, /\.runnerVmStopped == true/);
+  assert.match(runnerGate.run, /\.deploymentRunAttempt == \$deployment_run_attempt/);
+  assert.match(runnerGate.run, /\.releaseRunId == \$release_run_id/);
+  assert.match(runnerGate.run, /\.deploymentPhase == "first"/);
+  assert.match(runnerGate.run, /\.rollbackRehearsal == true/);
+  assert.match(runnerGate.run, /\.sourceEvent == "workflow_dispatch"/);
+  assert.match(runnerGate.run, /\.sourceRef == "refs\/heads\/main"/);
   assert.match(runnerGate.run, /\.deploymentRunId == \$deployment_run_id/);
   assert.match(runnerGate.run, /\.releaseSha == \$release_sha/);
   const deploySteps = workflow.jobs.deploy.steps;
@@ -760,7 +778,7 @@ function assertProductionDeploymentWorkflow(
   assert.equal(cleanupSteps[cleanupUploadIndex].uses, UPLOAD_ARTIFACT);
   assert.equal(
     cleanupSteps[cleanupUploadIndex].with.name,
-    "markiro-cleanup-${{ needs.controller.outputs.release-sha }}",
+    "markiro-cleanup-${{ needs.controller.outputs.release-sha }}-attempt-${{ github.run_attempt }}",
   );
   assert.match(runnerControlSource, /await waitForRunnerCleanup\(clients\)/);
   assert.match(runnerControlSource, /const gateToken = requiredEnvironment\("YC_GATE_IAM_TOKEN"\)/);
@@ -781,6 +799,112 @@ test("production deployment is protected, release-bound, dynamically labelled, a
     await source("deploy/yandex/remote-deploy.mjs"),
     await source("deploy/yandex/runner-control.mjs"),
   );
+});
+
+async function executeReleaseIdentityGate({ releaseRun = {}, rehearsalRun = {} } = {}) {
+  const workflow = parseWorkflow(
+    await source(".github/workflows/deploy-production.yml"),
+    "production deployment workflow",
+  );
+  const step = workflow.jobs.controller.steps.find(
+    ({ name }) => name === "Resolve exact trusted release identity",
+  );
+  const directory = await mkdtemp(join(tmpdir(), "markiro-release-identity-gate-"));
+  const fakeBin = join(directory, "bin");
+  const outputPath = join(directory, "github-output");
+  const releasePath = join(directory, "provider-release-run.json");
+  const rehearsalPath = join(directory, "provider-rehearsal-run.json");
+  await mkdir(fakeBin);
+  await writeFile(
+    join(fakeBin, "curl"),
+    `#!/usr/bin/env bash
+set -euo pipefail
+output=""
+url=""
+while (( $# )); do
+  case "$1" in
+    --output) output="$2"; shift 2 ;;
+    https://*) url="$1"; shift ;;
+    *) shift ;;
+  esac
+done
+if [[ "$url" == */actions/runs/111 ]]; then
+  cp "$FIXTURE_RELEASE_RUN" "$output"
+elif [[ "$url" == */actions/runs/222 ]]; then
+  cp "$FIXTURE_REHEARSAL_RUN" "$output"
+else
+  exit 64
+fi
+`,
+    { mode: 0o700 },
+  );
+  await chmod(join(fakeBin, "curl"), 0o700);
+  await writeFile(
+    releasePath,
+    JSON.stringify({
+      id: 111,
+      name: "Publish production images",
+      path: ".github/workflows/release-images.yml@refs/heads/main",
+      event: "push",
+      head_branch: "main",
+      head_sha: "a".repeat(40),
+      conclusion: "success",
+      run_attempt: 2,
+      ...releaseRun,
+    }),
+  );
+  await writeFile(
+    rehearsalPath,
+    JSON.stringify({
+      id: 222,
+      name: "Deploy production",
+      path: ".github/workflows/deploy-production.yml@main",
+      event: "workflow_dispatch",
+      head_branch: "main",
+      head_sha: "a".repeat(40),
+      conclusion: "success",
+      run_attempt: 3,
+      ...rehearsalRun,
+    }),
+  );
+  return spawnSync("bash", ["-c", step.run], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${fakeBin}:${process.env.PATH}`,
+      DISPATCH_RUN_ID: "111",
+      DISPATCH_SHA: "a".repeat(40),
+      DISPATCH_PHASE: "first",
+      DISPATCH_REHEARSAL: "false",
+      REHEARSAL_RUN_ID: "222",
+      REHEARSAL_RUN_ATTEMPT: "3",
+      EVENT_RUN_ID: "",
+      EVENT_SHA: "",
+      FIXTURE_RELEASE_RUN: releasePath,
+      FIXTURE_REHEARSAL_RUN: rehearsalPath,
+      GITHUB_EVENT_NAME: "workflow_dispatch",
+      GITHUB_OUTPUT: outputPath,
+      GITHUB_REPOSITORY: "thevladbog/q",
+      GITHUB_TOKEN: "masked-test-token",
+      MARKIRO_DEPLOYMENT_PHASE: "first",
+      MARKIRO_ROLLBACK_REHEARSAL: "0",
+      RUNNER_TEMP: directory,
+    },
+  });
+}
+
+test("embedded release gate accepts documented provider fields without inputs and normalizes main-qualified paths", async () => {
+  const accepted = await executeReleaseIdentityGate();
+  assert.equal(accepted.status, 0, accepted.stderr);
+
+  for (const [name, rehearsalRun] of [
+    ["missing attempt", { run_attempt: null }],
+    ["wrong attempt", { run_attempt: 4 }],
+    ["wrong ref-qualified path", { path: ".github/workflows/deploy-production.yml@release" }],
+  ]) {
+    const rejected = await executeReleaseIdentityGate({ rehearsalRun });
+    assert.notEqual(rejected.status, 0, name);
+  }
 });
 
 test("production deployment contract rejects trigger, label, cleanup, and gate mutations", async () => {
@@ -829,9 +953,9 @@ test("production deployment contract rejects trigger, label, cleanup, and gate m
     {
       name: "cleanup prerequisite is no longer run-bound",
       search:
-        "name: markiro-cleanup-${{ steps.release.outputs.release-sha }}\n          path: ${{ runner.temp }}/cleanup-prerequisite\n          github-token: ${{ github.token }}\n          repository: ${{ github.repository }}\n          run-id: ${{ inputs.rehearsal_run_id }}",
+        "name: markiro-cleanup-${{ steps.release.outputs.release-sha }}-attempt-${{ inputs.rehearsal_run_attempt }}\n          path: ${{ runner.temp }}/cleanup-prerequisite\n          github-token: ${{ github.token }}\n          repository: ${{ github.repository }}\n          run-id: ${{ inputs.rehearsal_run_id }}",
       replacement:
-        "name: markiro-cleanup-${{ steps.release.outputs.release-sha }}\n          path: ${{ runner.temp }}/cleanup-prerequisite\n          github-token: ${{ github.token }}\n          repository: ${{ github.repository }}\n          run-id: ${{ steps.release.outputs.release-run-id }}",
+        "name: markiro-cleanup-${{ steps.release.outputs.release-sha }}-attempt-${{ inputs.rehearsal_run_attempt }}\n          path: ${{ runner.temp }}/cleanup-prerequisite\n          github-token: ${{ github.token }}\n          repository: ${{ github.repository }}\n          run-id: ${{ steps.release.outputs.release-run-id }}",
     },
     {
       name: "cleanup prerequisite is missing",
@@ -899,6 +1023,14 @@ test("production deployment contract rejects trigger, label, cleanup, and gate m
     "cleanup receipt without provider verification",
   );
   assert.throws(() => assertProductionDeploymentWorkflow(deployment, remote, unverifiedCleanup));
+  const receiptsWithoutAttempt = deployment.replaceAll(
+    ".deploymentRunAttempt == $deployment_run_attempt and",
+    "true and",
+  );
+  assert.notEqual(receiptsWithoutAttempt, deployment);
+  assert.throws(() =>
+    assertProductionDeploymentWorkflow(receiptsWithoutAttempt, remote, controller),
+  );
   const rehearsalFinalizes = replaceExactlyOnce(
     remote,
     "if (dependencies.rollbackRehearsal) {",

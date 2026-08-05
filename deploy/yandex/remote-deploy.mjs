@@ -414,17 +414,25 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
         },
       );
 
-    const activateRelease = () =>
+    const replaceActiveRelease = (target, operation) =>
       system.run("ssh", [
         ...sshBase,
         "sudo",
         "/usr/bin/bash",
         "-c",
         'set -euo pipefail; temporary="$2.$$.new"; rm -f -- "$temporary"; ln -s -- "$1" "$temporary"; mv -Tf -- "$temporary" "$2"',
-        "markiro-active-release",
-        releaseDirectory,
+        operation,
+        target,
         "/opt/markiro/active-release",
       ]);
+    const activateRelease = () => replaceActiveRelease(releaseDirectory, "markiro-active-release");
+    const restoreActiveRelease = (candidate) =>
+      candidate.previousTag
+        ? replaceActiveRelease(
+            `/opt/markiro/releases/${candidate.previousTag}`,
+            "markiro-restore-active-release",
+          )
+        : system.run("ssh", [...sshBase, "sudo", "rm", "-f", "--", "/opt/markiro/active-release"]);
 
     return await deployRelease(
       {
@@ -528,7 +536,9 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
           return healthy;
         },
         async rollback(candidate) {
-          return JSON.parse(await remoteStage("rollback", candidate));
+          const failed = JSON.parse(await remoteStage("rollback", candidate));
+          await restoreActiveRelease(candidate);
+          return failed;
         },
       },
       manifestText,

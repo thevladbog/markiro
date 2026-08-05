@@ -27,6 +27,11 @@ on:
         required: true
         default: none
         type: string
+      rehearsal_run_attempt:
+        description: Exact prior rollback-rehearsal run attempt; required only for a successful first deployment.
+        required: true
+        default: none
+        type: string
   workflow_run:
     workflows: [Publish production images]
     types: [completed]
@@ -76,6 +81,7 @@ jobs:
           DISPATCH_PHASE: ${{ inputs.deployment_phase }}
           DISPATCH_REHEARSAL: ${{ inputs.rollback_rehearsal }}
           REHEARSAL_RUN_ID: ${{ inputs.rehearsal_run_id || 'none' }}
+          REHEARSAL_RUN_ATTEMPT: ${{ inputs.rehearsal_run_attempt || 'none' }}
           EVENT_RUN_ID: ${{ github.event.workflow_run.id }}
           EVENT_SHA: ${{ github.event.workflow_run.head_sha }}
           GITHUB_TOKEN: ${{ github.token }}
@@ -85,17 +91,21 @@ jobs:
             [[ "$MARKIRO_DEPLOYMENT_PHASE" == repeat ]]
             [[ "$MARKIRO_ROLLBACK_REHEARSAL" == 0 ]]
             [[ "$REHEARSAL_RUN_ID" == none ]]
+            [[ "$REHEARSAL_RUN_ATTEMPT" == none ]]
             release_run_id="$EVENT_RUN_ID"
             release_sha="$EVENT_SHA"
           else
             if [[ "$DISPATCH_REHEARSAL" == true ]]; then
               [[ "$DISPATCH_PHASE" == first ]]
               [[ "$REHEARSAL_RUN_ID" == none ]]
+              [[ "$REHEARSAL_RUN_ATTEMPT" == none ]]
             elif [[ "$DISPATCH_PHASE" == first ]]; then
               [[ "$REHEARSAL_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+              [[ "$REHEARSAL_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
             else
               [[ "$DISPATCH_PHASE" == repeat ]]
               [[ "$REHEARSAL_RUN_ID" == none ]]
+              [[ "$REHEARSAL_RUN_ATTEMPT" == none ]]
             fi
             release_run_id="$DISPATCH_RUN_ID"
             release_sha="$DISPATCH_SHA"
@@ -109,11 +119,17 @@ jobs:
             --header "X-GitHub-Api-Version: 2026-03-10" \
             "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$release_run_id" \
             --output "$run_path"
-          jq -e --arg sha "$release_sha" '
+          jq -e --arg release_run_id "$release_run_id" --arg sha "$release_sha" '
+            def normalized_main_workflow_path:
+              if endswith("@refs/heads/main") then rtrimstr("@refs/heads/main")
+              elif endswith("@main") then rtrimstr("@main")
+              else . end;
+            .id == ($release_run_id | tonumber) and
             .name == "Publish production images" and
-            .path == ".github/workflows/release-images.yml" and
+            (.path | normalized_main_workflow_path) == ".github/workflows/release-images.yml" and
             .event == "push" and .head_branch == "main" and
-            .head_sha == $sha and .conclusion == "success"
+            .head_sha == $sha and .conclusion == "success" and
+            (.run_attempt | type == "number" and . >= 1 and floor == .)
           ' "$run_path" > /dev/null
           rm -f "$run_path"
           if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && "$DISPATCH_PHASE" == first && "$DISPATCH_REHEARSAL" == false ]]; then
@@ -125,19 +141,19 @@ jobs:
               "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$REHEARSAL_RUN_ID" \
               --output "$rehearsal_run_path"
             jq -e \
-              --arg release_run_id "$release_run_id" \
               --arg rehearsal_run_id "$REHEARSAL_RUN_ID" \
+              --arg rehearsal_run_attempt "$REHEARSAL_RUN_ATTEMPT" \
               --arg sha "$release_sha" '
+                def normalized_main_workflow_path:
+                  if endswith("@refs/heads/main") then rtrimstr("@refs/heads/main")
+                  elif endswith("@main") then rtrimstr("@main")
+                  else . end;
                 .id == ($rehearsal_run_id | tonumber) and
                 .name == "Deploy production" and
-                .path == ".github/workflows/deploy-production.yml" and
+                (.path | normalized_main_workflow_path) == ".github/workflows/deploy-production.yml" and
                 .event == "workflow_dispatch" and .head_branch == "main" and
                 .head_sha == $sha and .conclusion == "success" and
-                .inputs.release_run_id == $release_run_id and
-                .inputs.release_sha == $sha and
-                .inputs.deployment_phase == "first" and
-                .inputs.rollback_rehearsal == "true" and
-                .inputs.rehearsal_run_id == "none"
+                .run_attempt == ($rehearsal_run_attempt | tonumber)
               ' "$rehearsal_run_path" > /dev/null
             rm -f "$rehearsal_run_path"
           fi
@@ -159,7 +175,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && inputs.deployment_phase == 'first' && inputs.rollback_rehearsal == false
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: markiro-rollback-rehearsal-${{ steps.release.outputs.release-sha }}
+          name: markiro-rollback-rehearsal-${{ steps.release.outputs.release-sha }}-attempt-${{ inputs.rehearsal_run_attempt }}
           path: ${{ runner.temp }}/rollback-rehearsal-prerequisite
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
@@ -168,7 +184,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && inputs.deployment_phase == 'first' && inputs.rollback_rehearsal == false
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: markiro-cleanup-${{ steps.release.outputs.release-sha }}
+          name: markiro-cleanup-${{ steps.release.outputs.release-sha }}-attempt-${{ inputs.rehearsal_run_attempt }}
           path: ${{ runner.temp }}/cleanup-prerequisite
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
@@ -179,6 +195,7 @@ jobs:
           EXPECTED_RELEASE_RUN_ID: ${{ steps.release.outputs.release-run-id }}
           EXPECTED_RELEASE_SHA: ${{ steps.release.outputs.release-sha }}
           REHEARSAL_RUN_ID: ${{ inputs.rehearsal_run_id || 'none' }}
+          REHEARSAL_RUN_ATTEMPT: ${{ inputs.rehearsal_run_attempt || 'none' }}
           RELEASE_MANIFEST_PATH: ${{ runner.temp }}/release-manifest/release-manifest.json
         run: |
           set -euo pipefail
@@ -187,16 +204,29 @@ jobs:
           if [[ "$MARKIRO_DEPLOYMENT_PHASE" == first && "$MARKIRO_ROLLBACK_REHEARSAL" == 0 ]]; then
             rehearsal_path="$RUNNER_TEMP/rollback-rehearsal-prerequisite/rollback-rehearsal.json"
             cleanup_path="$RUNNER_TEMP/cleanup-prerequisite/cleanup-receipt.json"
-            jq -e --arg deployment_run_id "$REHEARSAL_RUN_ID" --arg release_sha "$EXPECTED_RELEASE_SHA" '
+            jq -e \
+              --argjson deployment_run_attempt "$REHEARSAL_RUN_ATTEMPT" \
+              --arg deployment_run_id "$REHEARSAL_RUN_ID" \
+              --arg release_run_id "$EXPECTED_RELEASE_RUN_ID" \
+              --arg release_sha "$EXPECTED_RELEASE_SHA" '
               type == "object" and
-              (keys | sort) == ["deploymentRunId", "rehearsedAt", "releaseSha", "state"] and
-              .deploymentRunId == $deployment_run_id and .releaseSha == $release_sha and
+              (keys | sort) == ["deploymentPhase", "deploymentRunAttempt", "deploymentRunId", "rehearsedAt", "releaseRunId", "releaseSha", "rollbackRehearsal", "sourceEvent", "sourceRef", "sourceWorkflow", "state"] and
+              .deploymentRunAttempt == $deployment_run_attempt and
+              .deploymentRunId == $deployment_run_id and
+              .releaseRunId == $release_run_id and .releaseSha == $release_sha and
+              .deploymentPhase == "first" and .rollbackRehearsal == true and
+              .sourceEvent == "workflow_dispatch" and .sourceRef == "refs/heads/main" and
+              .sourceWorkflow == ".github/workflows/deploy-production.yml" and
               .state == "rehearsed" and
               (.rehearsedAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.000Z$"))
             ' "$rehearsal_path" > /dev/null
-            jq -e --arg deployment_run_id "$REHEARSAL_RUN_ID" --arg release_sha "$EXPECTED_RELEASE_SHA" '
+            jq -e \
+              --argjson deployment_run_attempt "$REHEARSAL_RUN_ATTEMPT" \
+              --arg deployment_run_id "$REHEARSAL_RUN_ID" \
+              --arg release_sha "$EXPECTED_RELEASE_SHA" '
               type == "object" and
-              (keys | sort) == ["cleanupAt", "deploymentRunId", "releaseSha", "runnerDeregistered", "runnerVmStopped", "state"] and
+              (keys | sort) == ["cleanupAt", "deploymentRunAttempt", "deploymentRunId", "releaseSha", "runnerDeregistered", "runnerVmStopped", "state"] and
+              .deploymentRunAttempt == $deployment_run_attempt and
               .deploymentRunId == $deployment_run_id and .releaseSha == $release_sha and
               .runnerDeregistered == true and .runnerVmStopped == true and .state == "clean" and
               (.cleanupAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.000Z$"))
@@ -322,6 +352,7 @@ jobs:
       - name: Record authenticated bounded rollback rehearsal evidence
         if: env.MARKIRO_ROLLBACK_REHEARSAL == '1'
         env:
+          RELEASE_RUN_ID: ${{ needs.controller.outputs.release-run-id }}
           RELEASE_SHA: ${{ needs.controller.outputs.release-sha }}
         run: |
           set -euo pipefail
@@ -333,12 +364,25 @@ jobs:
             type == "object" and (keys | sort) == ["state", "tag"] and
             .state == "rehearsed" and .tag == $release_sha
           ' "$result_path" > /dev/null
+          [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]
+          [[ "$GITHUB_REF" == refs/heads/main ]]
+          [[ "$GITHUB_WORKFLOW_REF" == "$GITHUB_REPOSITORY/.github/workflows/deploy-production.yml@refs/heads/main" ]]
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          [[ "$RELEASE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$MARKIRO_DEPLOYMENT_PHASE" == first ]]
+          [[ "$MARKIRO_ROLLBACK_REHEARSAL" == 1 ]]
           umask 077
           jq -n \
+            --arg deployment_phase "$MARKIRO_DEPLOYMENT_PHASE" \
+            --argjson deployment_run_attempt "$GITHUB_RUN_ATTEMPT" \
             --arg deployment_run_id "$GITHUB_RUN_ID" \
+            --arg release_run_id "$RELEASE_RUN_ID" \
             --arg release_sha "$RELEASE_SHA" \
             --arg rehearsed_at "$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')" \
-            '{deploymentRunId: $deployment_run_id, releaseSha: $release_sha, rehearsedAt: $rehearsed_at, state: "rehearsed"}' \
+            --arg source_event "$GITHUB_EVENT_NAME" \
+            --arg source_ref "$GITHUB_REF" \
+            '{deploymentPhase: $deployment_phase, deploymentRunAttempt: $deployment_run_attempt, deploymentRunId: $deployment_run_id, rehearsedAt: $rehearsed_at, releaseRunId: $release_run_id, releaseSha: $release_sha, rollbackRehearsal: true, sourceEvent: $source_event, sourceRef: $source_ref, sourceWorkflow: ".github/workflows/deploy-production.yml", state: "rehearsed"}' \
             > "$evidence_path"
           chmod 600 "$evidence_path"
       - name: Upload finalized release evidence
@@ -353,7 +397,7 @@ jobs:
         if: env.MARKIRO_ROLLBACK_REHEARSAL == '1'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: markiro-rollback-rehearsal-${{ needs.controller.outputs.release-sha }}
+          name: markiro-rollback-rehearsal-${{ needs.controller.outputs.release-sha }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/rollback-rehearsal.json
           retention-days: 90
           if-no-files-found: error
@@ -429,19 +473,21 @@ jobs:
           cleanup_path="$RUNNER_TEMP/cleanup-receipt.json"
           test ! -e "$cleanup_path"
           [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
           [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
           umask 077
           jq -n \
             --arg cleanup_at "$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')" \
+            --argjson deployment_run_attempt "$GITHUB_RUN_ATTEMPT" \
             --arg deployment_run_id "$GITHUB_RUN_ID" \
             --arg release_sha "$RELEASE_SHA" \
-            '{cleanupAt: $cleanup_at, deploymentRunId: $deployment_run_id, releaseSha: $release_sha, runnerDeregistered: true, runnerVmStopped: true, state: "clean"}' \
+            '{cleanupAt: $cleanup_at, deploymentRunAttempt: $deployment_run_attempt, deploymentRunId: $deployment_run_id, releaseSha: $release_sha, runnerDeregistered: true, runnerVmStopped: true, state: "clean"}' \
             > "$cleanup_path"
           chmod 600 "$cleanup_path"
       - name: Upload cleanup receipt
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: markiro-cleanup-${{ needs.controller.outputs.release-sha }}
+          name: markiro-cleanup-${{ needs.controller.outputs.release-sha }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/cleanup-receipt.json
           retention-days: 90
           if-no-files-found: error

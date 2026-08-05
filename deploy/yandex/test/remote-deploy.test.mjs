@@ -324,6 +324,7 @@ function response(body, ok = true) {
 function cliFixture({ candidate = CANDIDATE, failAt } = {}) {
   const events = [];
   const commands = [];
+  let activeRelease = candidate.previousTag;
   let monotonicTime = 0;
   const environment = {
     RELEASE_MANIFEST_PATH: "/runner/release-manifest.json",
@@ -423,6 +424,19 @@ function cliFixture({ candidate = CANDIDATE, failAt } = {}) {
       }
       if (args.includes("markiro-active-release")) {
         events.push("activate release pointer");
+        if (failAt === "activate release pointer")
+          throw new Error("activate release pointer failed");
+        activeRelease = COMMIT;
+        return "";
+      }
+      if (args.includes("markiro-restore-active-release")) {
+        events.push("restore release pointer");
+        activeRelease = candidate.previousTag;
+        return "";
+      }
+      if (args.includes("/opt/markiro/active-release") && args.includes("rm")) {
+        events.push("restore release pointer");
+        activeRelease = null;
         return "";
       }
       if (args.includes("rollback")) {
@@ -440,7 +454,7 @@ function cliFixture({ candidate = CANDIDATE, failAt } = {}) {
       if (failAt === "external smoke") throw new Error("external smoke failed");
     },
   };
-  return { commands, environment, events, system };
+  return { activeRelease: () => activeRelease, commands, environment, events, system };
 }
 
 test("real CLI adapter stages remote prepare, ALB, runner smoke, and remote finalize", async () => {
@@ -572,7 +586,9 @@ test("real CLI adapter keeps first deployment pre-DNS and probes loopback plus t
 });
 
 test("first-deployment rollback rehearsal never activates the candidate release pointer", async () => {
-  const { environment, events, system } = cliFixture({ candidate: FIRST_CANDIDATE });
+  const { activeRelease, environment, events, system } = cliFixture({
+    candidate: FIRST_CANDIDATE,
+  });
   environment.MARKIRO_ROLLBACK_REHEARSAL = "1";
 
   const result = await runRemoteDeployment(environment, system);
@@ -581,6 +597,8 @@ test("first-deployment rollback rehearsal never activates the candidate release 
   assert.equal(events.includes("remote finalize"), false);
   assert.equal(events.includes("activate release pointer"), false);
   assert.ok(events.includes("remote rollback"));
+  assert.ok(events.includes("restore release pointer"));
+  assert.equal(activeRelease(), null);
 });
 
 test("app-side first-deployment precondition failure never mutates rollback or release pointer state", async () => {
@@ -596,6 +614,27 @@ test("app-side first-deployment precondition failure never mutates rollback or r
   assert.ok(prepare.args.includes("MARKIRO_REQUIRE_NO_PREVIOUS_HEALTHY=1"));
   assert.equal(events.includes("remote rollback"), false);
   assert.equal(events.includes("activate release pointer"), false);
+});
+
+test("activation failure rolls containers back and preserves the previous live pointer", async () => {
+  const { activeRelease, environment, events, system } = cliFixture({
+    failAt: "activate release pointer",
+  });
+
+  await assert.rejects(runRemoteDeployment(environment, system), /activate release pointer failed/);
+
+  assert.deepEqual(
+    events.filter((event) =>
+      [
+        "remote finalize",
+        "activate release pointer",
+        "remote rollback",
+        "restore release pointer",
+      ].includes(event),
+    ),
+    ["remote finalize", "activate release pointer", "remote rollback", "restore release pointer"],
+  );
+  assert.equal(activeRelease(), CANDIDATE.previousTag);
 });
 
 test("first deployment rejects a stale 200 release header before finalization", async () => {

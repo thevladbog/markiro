@@ -65,7 +65,7 @@ system.
 9. **First deployment rehearsal, still without public DNS.** First dispatch the
    protected **Deploy production** workflow manually with
    `deployment_phase=first`, `rollback_rehearsal=true`, and
-   `rehearsal_run_id=none`; automatic
+   `rehearsal_run_id=none`, `rehearsal_run_attempt=none`; automatic
    `workflow_run` delivery always fixes this input to false. Its authoritative order is: materialize runtime
    secrets; start the private edge; probe
    `http://127.0.0.1:8080/health/ready` on the app VM with the production
@@ -75,15 +75,21 @@ system.
    DNS. The rehearsal deterministically stops after the candidate is running and
    before finalize; it must stop both candidate services and record the candidate
    failed because it has no previous healthy release. Retain the bounded
-   `markiro-rollback-rehearsal-<release-sha>` artifact. The live
+   `markiro-rollback-rehearsal-<release-sha>-attempt-<rehearsal-run-attempt>`
+   artifact. The live
    `/opt/markiro/active-release` pointer remains absent (or unchanged if this
    check is being repeated); it never points at the failed rehearsal candidate.
    Wait for the independent `production-cleanup` job to succeed and retain its
-   bounded `markiro-cleanup-<release-sha>` artifact from the same workflow run.
+   bounded `markiro-cleanup-<release-sha>-attempt-<rehearsal-run-attempt>`
+   artifact from the same workflow run attempt.
    Confirm that the deployment runner registration is absent and the runner VM is stopped.
-   Record that run ID as `<successful-rollback-rehearsal-run-id>`. Only then
+   Record that run ID as `<successful-rollback-rehearsal-run-id>` and its current
+   successful attempt as `<successful-rollback-rehearsal-run-attempt>`. A rerun
+   keeps the run ID but changes the attempt; never reuse evidence from an older
+   attempt. Only then
    dispatch the same approved release again with `deployment_phase=first`,
    `rehearsal_run_id=<successful-rollback-rehearsal-run-id>`, and
+   `rehearsal_run_attempt=<successful-rollback-rehearsal-run-attempt>`, and
    `rollback_rehearsal=false` for the successful first deployment. The
    controller authenticates that exact successful rehearsal run, SHA, workflow,
    ref, inputs, rehearsal artifact, and cleanup receipt before starting a new

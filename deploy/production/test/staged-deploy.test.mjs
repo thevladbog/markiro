@@ -217,6 +217,117 @@ test("two SHA release directories replace one stable Compose project and rollbac
   });
 });
 
+test("a later failed terminal event supersedes an earlier healthy event for the same first candidate", async () => {
+  const { dependencies, releaseDirectory } = await fixture({ withPrevious: false });
+  const first = await prepareRelease(
+    { environment: ENVIRONMENT, releaseDirectory, readinessAttempts: 1 },
+    dependencies,
+  );
+  await finalizePreparedRelease({ candidate: first, releaseDirectory });
+  await rollbackPreparedRelease(
+    { candidate: first, environment: ENVIRONMENT, releaseDirectory, readinessAttempts: 1 },
+    dependencies,
+  );
+  dependencies.now = () => new Date("2026-08-05T10:20:31.000Z");
+
+  const retry = await prepareRelease(
+    {
+      environment: ENVIRONMENT,
+      releaseDirectory,
+      readinessAttempts: 1,
+      requireNoPreviousHealthy: true,
+    },
+    dependencies,
+  );
+
+  assert.equal(retry.previousTag, null);
+});
+
+test("a healthy retry of the same immutable SHA is the sole effective rollback target", async () => {
+  const { dependencies, releaseDirectory, running } = await fixture({ withPrevious: false });
+  const first = await prepareRelease(
+    { environment: ENVIRONMENT, releaseDirectory, readinessAttempts: 1 },
+    dependencies,
+  );
+  await finalizePreparedRelease({ candidate: first, releaseDirectory });
+  await rollbackPreparedRelease(
+    { candidate: first, environment: ENVIRONMENT, releaseDirectory, readinessAttempts: 1 },
+    dependencies,
+  );
+
+  dependencies.now = () => new Date("2026-08-05T10:20:31.000Z");
+  const retry = await prepareRelease(
+    {
+      environment: ENVIRONMENT,
+      releaseDirectory,
+      readinessAttempts: 1,
+      requireNoPreviousHealthy: true,
+    },
+    dependencies,
+  );
+  await finalizePreparedRelease({ candidate: retry, releaseDirectory });
+
+  dependencies.now = () => new Date("2026-08-05T10:20:32.000Z");
+  const nextEnvironment = {
+    ...ENVIRONMENT,
+    MARKIRO_IMAGE_TAG: "1".repeat(40),
+    MARKIRO_API_IMAGE_DIGEST: `sha256:${"e".repeat(64)}`,
+    MARKIRO_EDGE_IMAGE_DIGEST: `sha256:${"f".repeat(64)}`,
+  };
+  const next = await prepareRelease(
+    {
+      environment: nextEnvironment,
+      releaseDirectory,
+      readinessAttempts: 1,
+      requirePreviousHealthy: true,
+    },
+    dependencies,
+  );
+
+  assert.equal(next.previousTag, TAG);
+  await rollbackPreparedRelease(
+    { candidate: next, environment: nextEnvironment, releaseDirectory, readinessAttempts: 1 },
+    dependencies,
+  );
+  assert.deepEqual(running, {
+    apiDigest: API_DIGEST,
+    edgeDigest: EDGE_DIGEST,
+    project: "markiro-production",
+  });
+});
+
+test("a finalized candidate rolled back after activation failure is not the next repeat baseline", async () => {
+  const { dependencies, releaseDirectory } = await fixture();
+  const candidate = await prepareRelease(
+    { environment: ENVIRONMENT, releaseDirectory, readinessAttempts: 1 },
+    dependencies,
+  );
+  await finalizePreparedRelease({ candidate, releaseDirectory });
+  await rollbackPreparedRelease(
+    { candidate, environment: ENVIRONMENT, releaseDirectory, readinessAttempts: 1 },
+    dependencies,
+  );
+  dependencies.now = () => new Date("2026-08-05T10:20:31.000Z");
+  const nextEnvironment = {
+    ...ENVIRONMENT,
+    MARKIRO_IMAGE_TAG: "1".repeat(40),
+    MARKIRO_API_IMAGE_DIGEST: `sha256:${"e".repeat(64)}`,
+    MARKIRO_EDGE_IMAGE_DIGEST: `sha256:${"f".repeat(64)}`,
+  };
+
+  const next = await prepareRelease(
+    {
+      environment: nextEnvironment,
+      releaseDirectory,
+      readinessAttempts: 1,
+      requirePreviousHealthy: true,
+    },
+    dependencies,
+  );
+
+  assert.equal(next.previousTag, PREVIOUS_TAG);
+});
+
 test("a repeat deployment rejects a missing previous healthy record before migration or service start", async () => {
   const { calls, dependencies, releaseDirectory } = await fixture({ withPrevious: false });
 

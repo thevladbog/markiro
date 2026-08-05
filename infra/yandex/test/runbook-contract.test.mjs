@@ -207,12 +207,14 @@ const markerProcedures = {
   "docs/runbooks/yandex-first-go-live.md": {
     "go-live-gate-09-deploy-smoke-rollback": [
       "rollback_rehearsal=true",
-      "markiro-rollback-rehearsal-<release-sha>",
+      "rehearsal_run_attempt=none",
+      "markiro-rollback-rehearsal-<release-sha>-attempt-<rehearsal-run-attempt>",
       "production-cleanup",
-      "markiro-cleanup-<release-sha>",
+      "markiro-cleanup-<release-sha>-attempt-<rehearsal-run-attempt>",
       "runner registration is absent",
       "runner VM is stopped",
       "rehearsal_run_id=<successful-rollback-rehearsal-run-id>",
+      "rehearsal_run_attempt=<successful-rollback-rehearsal-run-attempt>",
       "rollback_rehearsal=false",
     ],
   },
