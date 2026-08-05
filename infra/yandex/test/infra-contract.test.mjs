@@ -120,15 +120,35 @@ function terraformNestedBlocks(source, name) {
   return blocks;
 }
 
-function publicIngressPorts(securityGroup) {
+function hasPublicCidr(ingress) {
+  for (const list of ingress.matchAll(
+    /\b(?:v4_cidr_blocks|v6_cidr_blocks)\s*=\s*\[([\s\S]*?)\]/g,
+  )) {
+    for (const cidr of list[1].matchAll(/"([^"]+)"/g)) {
+      if (cidr[1] === "0.0.0.0/0" || cidr[1] === "::/0") return true;
+    }
+  }
+
+  return false;
+}
+
+function ingressRules(securityGroup) {
   return terraformNestedBlocks(securityGroup, "ingress")
-    .filter((ingress) => /v4_cidr_blocks\s*=\s*\["0\.0\.0\.0\/0"\]/.test(ingress))
     .map((ingress) => {
-      const port = /from_port\s*=\s*(\d+)/.exec(ingress);
-      assert.ok(port?.[1], "public ingress must have an explicit from_port");
-      return Number(port[1]);
+      const protocol = /\bprotocol\s*=\s*"([^"]+)"/.exec(ingress);
+      const fromPort = /\bfrom_port\s*=\s*(\d+)/.exec(ingress);
+      const toPort = /\bto_port\s*=\s*(\d+)/.exec(ingress);
+
+      assert.ok(protocol?.[1], "ingress must declare a protocol");
+      assert.ok(fromPort?.[1], "ingress must have an explicit from_port");
+      assert.ok(toPort?.[1], "ingress must have an explicit to_port");
+      return {
+        fromPort: Number(fromPort[1]),
+        protocol: protocol[1],
+        toPort: Number(toPort[1]),
+      };
     })
-    .sort((left, right) => left - right);
+    .sort((left, right) => left.fromPort - right.fromPort || left.toPort - right.toPort);
 }
 
 function hasCloudInitCredentialPayload(cloudInit) {
@@ -376,17 +396,16 @@ function assertPrivateNetworkAndCompute({
     albSecurityGroup,
     /from_port\s*=\s*443[\s\S]*?v4_cidr_blocks\s*=\s*\["0\.0\.0\.0\/0"\]/,
   );
-  assert.deepEqual(publicIngressPorts(albSecurityGroup), [80, 443]);
+  assert.deepEqual(ingressRules(albSecurityGroup), [
+    { fromPort: 80, protocol: "TCP", toPort: 80 },
+    { fromPort: 443, protocol: "TCP", toPort: 443 },
+  ]);
   for (const securityGroup of ["app", "data", "runner"]) {
     for (const ingress of terraformNestedBlocks(
       terraformResourceBlock(network, "yandex_vpc_security_group", securityGroup),
       "ingress",
     )) {
-      assert.doesNotMatch(
-        ingress,
-        /v4_cidr_blocks\s*=\s*\["0\.0\.0\.0\/0"\]/,
-        `${securityGroup} must not have public ingress`,
-      );
+      assert.equal(hasPublicCidr(ingress), false, `${securityGroup} must not have public ingress`);
     }
   }
 
@@ -678,6 +697,32 @@ test("production private-compute contract rejects public NAT, CIDR SSH, public a
     );
     assert.throws(() => assertPrivateNetworkAndCompute(extraAlbPublicIngress));
   }
+
+  const rangedAlbPublicIngress = await privateNetworkAndComputeSources();
+  rangedAlbPublicIngress.network = replaceTerraformResource(
+    rangedAlbPublicIngress.network,
+    "yandex_vpc_security_group",
+    "alb",
+    (block) =>
+      block.replace(
+        "from_port      = 80\n    to_port        = 80",
+        "from_port      = 80\n    to_port        = 8080",
+      ),
+  );
+  assert.throws(() => assertPrivateNetworkAndCompute(rangedAlbPublicIngress));
+
+  const multiCidrPublicIngress = await privateNetworkAndComputeSources();
+  multiCidrPublicIngress.network = replaceTerraformResource(
+    multiCidrPublicIngress.network,
+    "yandex_vpc_security_group",
+    "app",
+    (block) =>
+      block.replace(
+        "\n  egress {",
+        '\n  ingress {\n    protocol       = "TCP"\n    from_port      = 22\n    to_port        = 22\n    v4_cidr_blocks = ["10.0.0.0/8", "0.0.0.0/0"]\n  }\n\n  egress {',
+      ),
+  );
+  assert.throws(() => assertPrivateNetworkAndCompute(multiCidrPublicIngress));
 
   const embeddedRunnerCredential = await privateNetworkAndComputeSources();
   embeddedRunnerCredential.runnerCloudInit += "\ngithub_token: unsafe-value\n";
