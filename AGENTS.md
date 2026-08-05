@@ -59,8 +59,10 @@ Docker is required for the development Postgres, Mailpit, and MinIO services.
 ```bash
 corepack enable
 pnpm install --frozen-lockfile
+if [ ! -e .env ]; then
+  cp .env.example .env
+fi
 docker compose -f docker-compose.dev.yml up -d
-cp .env.example .env
 ```
 
 Do not overwrite an existing `.env`. It may contain local credentials. Treat

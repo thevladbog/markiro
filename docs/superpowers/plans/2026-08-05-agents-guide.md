@@ -46,7 +46,7 @@ Create `AGENTS.md` with these concrete sections and requirements:
 1. `# AGENTS.md` and `## Purpose and scope`: identify Markiro as a Russian manufacturing platform for SSCC labels, scan traceability, admin workflows, kiosk pickup, and offline line stations; state that these instructions cover the whole repository.
 2. `## Sources of truth`: order direct user instructions first, then the nearest `AGENTS.md`, code/tests/manifests, `README.md`, `docs/architecture.md`, and scoped design/spec/plan documents; require agents to inspect the relevant implementation and recent history before changing behavior.
 3. `## Repository map`: describe `apps/api`, `apps/admin`, `apps/kiosk`, `apps/station`, `packages/domain`, `packages/db`, `packages/email`, `packages/ui`, `deploy/production`, `tools/production-browser`, and the documentation directories without inventorying every feature.
-4. `## Toolchain and setup`: state Node 24+, pnpm 11.10.0 via Corepack, Docker Compose for Postgres/Mailpit/MinIO, `pnpm install --frozen-lockfile`, development compose startup, migration command, and API/admin development commands. Warn that tests using Postgres need `DATABASE_URL` and API startup needs exported `.env` values.
+4. `## Toolchain and setup`: state Node 24+, pnpm 11.10.0 via Corepack, Docker Compose for Postgres/Mailpit/MinIO, `pnpm install --frozen-lockfile`, development compose startup, migration command, and API/admin development commands. Warn that tests using Postgres need `DATABASE_URL` and API startup requires `.env` values to be exported.
 5. `## Working method`: inspect `git status`, preserve unrelated changes, retrieve the issue/spec and comparable fixes, make the smallest coherent change, use TDD for behavior changes, run scoped checks during iteration, and report unverified surfaces honestly.
 6. `## Architectural invariants`: cover tenant scoping, separate cabinet and station identities, offline-first station/kiosk operation, append-only/idempotent sync, raw device-local ID resolution before UUID writes, label rendering in clients, shared domain logic, bundled station assets, and explicit degraded-state behavior.
 7. `## Database and migrations`: distinguish Postgres and SQLite schemas/migrations; forbid editing old applied migrations; require generated or reviewed migrations plus schema tests; explain that consumers load `@markiro/db/dist`, so rebuild `@markiro/db` before API tests after DB source changes; require checking actual shared Postgres state when e2e failures suggest drift.
@@ -62,7 +62,7 @@ Create `AGENTS.md` with these concrete sections and requirements:
 Run:
 
 ```bash
-for candidate_path in README.md docs/architecture.md package.json pnpm-workspace.yaml turbo.json apps/api apps/admin apps/kiosk apps/station packages/domain packages/db packages/email packages/ui deploy/production tools/production-browser .env.example .env.production.example; do
+for candidate_path in AGENTS.md README.md docs/architecture.md docs/design-briefs docs/superpowers/plans docs/superpowers/specs package.json pnpm-workspace.yaml pnpm-lock.yaml .npmrc turbo.json docker-compose.dev.yml apps/api apps/admin apps/kiosk apps/station apps/station/src-tauri apps/station/src-tauri/Cargo.toml packages/domain packages/db packages/db/drizzle.config.ts packages/db/migrations packages/db/src/schema packages/db/src/sqlite packages/email packages/ui deploy/production tools/production-browser .env.example .env.production.example patches/minimatch@3.1.5.patch; do
   test -e "$candidate_path" || { echo "missing: $candidate_path"; exit 1; }
 done
 ```
@@ -82,7 +82,10 @@ const required = {
   'apps/admin/package.json': ['dev', 'build', 'test', 'typecheck', 'lint'],
   'apps/kiosk/package.json': ['dev', 'build', 'test', 'typecheck', 'lint'],
   'apps/station/package.json': ['dev', 'build', 'test', 'typecheck', 'lint'],
+  'packages/domain/package.json': ['build', 'test', 'typecheck', 'lint'],
   'packages/db/package.json': ['build', 'test', 'typecheck', 'lint', 'db:generate', 'db:migrate', 'db:generate:sqlite'],
+  'packages/email/package.json': ['build', 'test', 'typecheck', 'lint'],
+  'packages/ui/package.json': ['build', 'test', 'typecheck', 'lint'],
 };
 for (const [file, scripts] of Object.entries(required)) {
   const manifest = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -122,5 +125,7 @@ Expected: `AGENTS.md` is the only implementation file added by this task; pre-ex
 
 ```bash
 git add AGENTS.md
+git diff --cached --check
+git diff --cached -- AGENTS.md
 git commit -m "docs: add repository agent guide"
 ```
