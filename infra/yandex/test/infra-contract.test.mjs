@@ -605,28 +605,71 @@ function assertProtectedManagedData({
   }
 
   const media = terraformResourceBlock(storage, "yandex_storage_bucket", "media");
-  assert.match(media, /noncurrent_version_expiration\s*\{[\s\S]*?days\s*=\s*30/);
-  assert.match(media, /abort_incomplete_multipart_upload_days\s*=\s*7/);
-
-  const mediaAccess = terraformResourceBlock(
-    storage,
-    "yandex_storage_bucket_iam_binding",
-    "media_app",
+  const mediaLifecycleRules = terraformNestedBlocks(media, "lifecycle_rule");
+  assert.equal(mediaLifecycleRules.length, 1, "media must have exactly one lifecycle rule");
+  const noncurrentExpirations = terraformNestedBlocks(
+    mediaLifecycleRules[0],
+    "noncurrent_version_expiration",
   );
-  assert.match(mediaAccess, /bucket\s*=\s*yandex_storage_bucket\.media\.bucket/);
-  assert.match(mediaAccess, /role\s*=\s*"storage\.editor"/);
-  assert.match(mediaAccess, /members\s*=\s*\["serviceAccount:\$\{var\.app_service_account_id\}"\]/);
-  const auditAccess = terraformResourceBlock(
+  assert.equal(noncurrentExpirations.length, 1, "media must expire one noncurrent version set");
+  assert.match(noncurrentExpirations[0], /days\s*=\s*30/);
+  assert.match(mediaLifecycleRules[0], /abort_incomplete_multipart_upload_days\s*=\s*7/);
+  assert.doesNotMatch(mediaLifecycleRules[0], /\bexpiration\s*\{/);
+  assert.doesNotMatch(mediaLifecycleRules[0], /\b(?:noncurrent_version_)?transition\s*\{/);
+
+  const bucketPolicies = [
+    ...storage.matchAll(/resource\s+"yandex_storage_bucket_policy"\s+"([^"]+)"/g),
+  ]
+    .map((match) => match[1])
+    .sort();
+  assert.deepEqual(bucketPolicies, ["audit_writer", "media_app"]);
+  assert.doesNotMatch(storage, /yandex_storage_bucket_iam_binding/);
+
+  const mediaPolicy = terraformResourceBlock(storage, "yandex_storage_bucket_policy", "media_app");
+  assert.match(mediaPolicy, /bucket\s*=\s*yandex_storage_bucket\.media\.bucket/);
+  assert.match(mediaPolicy, /CanonicalUser\s*=\s*var\.app_service_account_id/);
+  assert.match(
+    mediaPolicy,
+    /Action\s*=\s*\[\s*"s3:GetObject",\s*"s3:PutObject",\s*"s3:DeleteObject",?\s*\]/,
+  );
+  assert.match(
+    mediaPolicy,
+    /Resource\s*=\s*\["arn:aws:s3:::\$\{yandex_storage_bucket\.media\.bucket\}\/\*"\]/,
+  );
+  assert.doesNotMatch(
+    mediaPolicy,
+    /s3:(?:\*|PutBucket|DeleteBucket|PutLifecycle|PutEncryption|PutBucketPolicy)/,
+  );
+
+  const auditPolicy = terraformResourceBlock(
     storage,
-    "yandex_storage_bucket_iam_binding",
+    "yandex_storage_bucket_policy",
     "audit_writer",
   );
-  assert.match(auditAccess, /bucket\s*=\s*yandex_storage_bucket\.audit\.bucket/);
-  assert.match(auditAccess, /role\s*=\s*"storage\.uploader"/);
+  assert.match(auditPolicy, /bucket\s*=\s*yandex_storage_bucket\.audit\.bucket/);
+  assert.match(auditPolicy, /CanonicalUser\s*=\s*var\.audit_service_account_id/);
+  assert.match(auditPolicy, /Action\s*=\s*\["s3:PutObject"\]/);
   assert.match(
-    auditAccess,
-    /members\s*=\s*\["serviceAccount:\$\{var\.audit_service_account_id\}"\]/,
+    auditPolicy,
+    /Resource\s*=\s*\["arn:aws:s3:::\$\{yandex_storage_bucket\.audit\.bucket\}\/\*"\]/,
   );
+
+  const mediaKms = terraformResourceBlock(
+    storage,
+    "yandex_kms_symmetric_key_iam_member",
+    "media_app",
+  );
+  assert.match(mediaKms, /symmetric_key_id\s*=\s*var\.kms_key_id/);
+  assert.match(mediaKms, /role\s*=\s*"kms\.keys\.encrypterDecrypter"/);
+  assert.match(mediaKms, /member\s*=\s*"serviceAccount:\$\{var\.app_service_account_id\}"/);
+  const auditKms = terraformResourceBlock(
+    storage,
+    "yandex_kms_symmetric_key_iam_member",
+    "audit_writer",
+  );
+  assert.match(auditKms, /symmetric_key_id\s*=\s*var\.kms_key_id/);
+  assert.match(auditKms, /role\s*=\s*"kms\.keys\.encrypter"/);
+  assert.match(auditKms, /member\s*=\s*"serviceAccount:\$\{var\.audit_service_account_id\}"/);
 
   assert.match(production, /module\s+"postgres"\s*\{/);
   assert.match(production, /module\s+"object_storage"\s*\{/);
@@ -640,10 +683,13 @@ function assertProtectedManagedData({
     assert.match(productionOutputs, new RegExp(`output\\s+"${output}"\\s*\\{`));
   }
   assert.doesNotMatch(productionOutputs, /password|access_key|secret/i);
+  assert.doesNotMatch(postgresVariables, /variable\s+"(?:database_)?owner"/);
   assert.doesNotMatch(allHcl, /resource\s+"yandex_mdb_postgresql_user"/);
   assert.doesNotMatch(allHcl, /resource\s+"yandex_iam_service_account_(?:static_)?access_key"/);
   assert.doesNotMatch(allHcl, /resource\s+"yandex_lockbox_secret_version"/);
+  assert.doesNotMatch(allHcl, /resource\s+"yandex_resourcemanager_folder_iam_/);
   assert.doesNotMatch(allHcl, /\bpassword\s*=/i);
+  assert.doesNotMatch(allHcl, /\b(?:access_key|secret_key)\s*=/i);
 }
 
 async function managedDataSources() {
@@ -810,6 +856,46 @@ test("managed-data contract rejects unsafe PostgreSQL, buckets, access, and cred
   );
   assert.throws(() => assertProtectedManagedData(shortRetention));
 
+  const wrongPostgresKms = await managedDataSources();
+  wrongPostgresKms.postgres = replaceTerraformResource(
+    wrongPostgresKms.postgres,
+    "yandex_mdb_postgresql_cluster",
+    "production",
+    (block) =>
+      block.replace(
+        /disk_encryption_key_id\s*=\s*var\.kms_key_id/,
+        "disk_encryption_key_id = var.other_kms_key_id",
+      ),
+  );
+  assert.throws(() => assertProtectedManagedData(wrongPostgresKms));
+
+  const wrongDatabaseOwner = await managedDataSources();
+  wrongDatabaseOwner.postgres = replaceTerraformResource(
+    wrongDatabaseOwner.postgres,
+    "yandex_mdb_postgresql_database",
+    "application",
+    (block) => block.replace(/owner\s*=\s*var\.database_name/, "owner = var.other_database_owner"),
+  );
+  assert.throws(() => assertProtectedManagedData(wrongDatabaseOwner));
+
+  const missingDatabaseOwner = await managedDataSources();
+  missingDatabaseOwner.postgres = replaceTerraformResource(
+    missingDatabaseOwner.postgres,
+    "yandex_mdb_postgresql_database",
+    "application",
+    (block) => block.replace(/\n\s*owner\s*=\s*var\.database_name/, ""),
+  );
+  assert.throws(() => assertProtectedManagedData(missingDatabaseOwner));
+
+  const missingPostgresKms = await managedDataSources();
+  missingPostgresKms.postgres = replaceTerraformResource(
+    missingPostgresKms.postgres,
+    "yandex_mdb_postgresql_cluster",
+    "production",
+    (block) => block.replace(/\n\s*disk_encryption_key_id\s*=\s*var\.kms_key_id/, ""),
+  );
+  assert.throws(() => assertProtectedManagedData(missingPostgresKms));
+
   const publicBucket = await managedDataSources();
   publicBucket.storage = replaceTerraformResource(
     publicBucket.storage,
@@ -832,14 +918,62 @@ test("managed-data contract rejects unsafe PostgreSQL, buckets, access, and cred
   );
   assert.throws(() => assertProtectedManagedData(unversionedBucket));
 
+  for (const bucketName of ["media", "audit"]) {
+    const wrongBucketKms = await managedDataSources();
+    wrongBucketKms.storage = replaceTerraformResource(
+      wrongBucketKms.storage,
+      "yandex_storage_bucket",
+      bucketName,
+      (block) =>
+        block.replace(
+          /kms_master_key_id\s*=\s*var\.kms_key_id/,
+          "kms_master_key_id = var.other_kms_key_id",
+        ),
+    );
+    assert.throws(() => assertProtectedManagedData(wrongBucketKms));
+
+    const missingBucketKms = await managedDataSources();
+    missingBucketKms.storage = replaceTerraformResource(
+      missingBucketKms.storage,
+      "yandex_storage_bucket",
+      bucketName,
+      (block) => block.replace(/\n\s*kms_master_key_id\s*=\s*var\.kms_key_id/, ""),
+    );
+    assert.throws(() => assertProtectedManagedData(missingBucketKms));
+  }
+
+  const currentMediaExpiration = await managedDataSources();
+  currentMediaExpiration.storage = replaceTerraformResource(
+    currentMediaExpiration.storage,
+    "yandex_storage_bucket",
+    "media",
+    (block) =>
+      block.replace(
+        "noncurrent_version_expiration {",
+        "expiration {\n      days = 365\n    }\n\n    noncurrent_version_expiration {",
+      ),
+  );
+  assert.throws(() => assertProtectedManagedData(currentMediaExpiration));
+
   const broadAppAccess = await managedDataSources();
   broadAppAccess.storage = replaceTerraformResource(
     broadAppAccess.storage,
-    "yandex_storage_bucket_iam_binding",
+    "yandex_storage_bucket_policy",
     "media_app",
-    (block) => block.replace(/role\s*=\s*"storage\.editor"/, 'role = "editor"'),
+    (block) => block.replace('"s3:DeleteObject"]', '"s3:DeleteObject", "s3:PutBucketLifecycle"]'),
   );
   assert.throws(() => assertProtectedManagedData(broadAppAccess));
+
+  for (const resourceName of ["media_app", "audit_writer"]) {
+    const missingKmsBinding = await managedDataSources();
+    const binding = terraformResourceBlock(
+      missingKmsBinding.storage,
+      "yandex_kms_symmetric_key_iam_member",
+      resourceName,
+    );
+    missingKmsBinding.storage = missingKmsBinding.storage.replace(binding, "");
+    assert.throws(() => assertProtectedManagedData(missingKmsBinding));
+  }
 
   const passwordResource = await managedDataSources();
   passwordResource.postgres +=

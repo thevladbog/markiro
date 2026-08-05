@@ -49,6 +49,20 @@ This sequencing is only for first provisioning. It keeps the database owner
 credential out of Terraform configuration and state while satisfying the
 provider-required database `owner` binding.
 
+## Object storage encryption and runtime access
+
+The application and audit identities receive direct, key-scoped KMS access:
+`kms.keys.encrypterDecrypter` for media reads/writes and
+`kms.keys.encrypter` for write-only audit archives. Object access is instead
+limited by explicit bucket policies, so neither runtime identity receives
+`storage.editor`, `storage.uploader`, or `storage.configurer`.
+
+The Terraform production identity is the only configuration boundary. Its
+existing folder-level management role applies bucket encryption, lifecycle, and
+policy settings during reviewed applies; no extra `storage.configurer` binding
+is granted to a runtime identity. No KMS key, database password, or static S3
+credential is created by Terraform.
+
 ## One-time bootstrap state migration
 
 The bootstrap operator uses an approved, encrypted administrative workstation.

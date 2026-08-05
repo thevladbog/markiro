@@ -75,17 +75,52 @@ resource "yandex_storage_bucket" "audit" {
   }
 }
 
-# This binding is bucket-scoped: the application can operate on media objects,
-# without receiving a folder-wide role or access to audit archives.
-resource "yandex_storage_bucket_iam_binding" "media_app" {
-  bucket  = yandex_storage_bucket.media.bucket
-  role    = "storage.editor"
-  members = ["serviceAccount:${var.app_service_account_id}"]
+# A bucket policy, rather than storage.editor, constrains the application to
+# media object operations and gives it no bucket configuration authority.
+resource "yandex_storage_bucket_policy" "media_app" {
+  bucket = yandex_storage_bucket.media.bucket
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "AllowApplicationMediaObjects"
+        Effect    = "Allow"
+        Principal = { CanonicalUser = var.app_service_account_id }
+        Action    = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+        Resource  = ["arn:aws:s3:::${yandex_storage_bucket.media.bucket}/*"]
+      },
+    ]
+  })
 }
 
-# The archive identity can append audit objects but cannot list, read, or alter them.
-resource "yandex_storage_bucket_iam_binding" "audit_writer" {
-  bucket  = yandex_storage_bucket.audit.bucket
-  role    = "storage.uploader"
-  members = ["serviceAccount:${var.audit_service_account_id}"]
+# The audit identity can write archive objects only; it cannot list, read, or
+# delete them, nor configure the bucket.
+resource "yandex_storage_bucket_policy" "audit_writer" {
+  bucket = yandex_storage_bucket.audit.bucket
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "AllowAuditArchiveWrites"
+        Effect    = "Allow"
+        Principal = { CanonicalUser = var.audit_service_account_id }
+        Action    = ["s3:PutObject"]
+        Resource  = ["arn:aws:s3:::${yandex_storage_bucket.audit.bucket}/*"]
+      },
+    ]
+  })
+}
+
+# SSE-KMS media reads and writes require both encryption and decryption.
+resource "yandex_kms_symmetric_key_iam_member" "media_app" {
+  symmetric_key_id = var.kms_key_id
+  role             = "kms.keys.encrypterDecrypter"
+  member           = "serviceAccount:${var.app_service_account_id}"
+}
+
+# Archive writers only encrypt new audit objects, so they receive no decrypt permission.
+resource "yandex_kms_symmetric_key_iam_member" "audit_writer" {
+  symmetric_key_id = var.kms_key_id
+  role             = "kms.keys.encrypter"
+  member           = "serviceAccount:${var.audit_service_account_id}"
 }
