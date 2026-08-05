@@ -1841,6 +1841,10 @@ function assertProtectedInfrastructureWorkflow(source) {
   );
   assert.match(
     applyCommands,
+    /if \[\[ "\$OBSERVABILITY_PHASE" == first && "\$POSTGRES_PROVISIONING_PHASE" == none \]\]; then/,
+  );
+  assert.match(
+    applyCommands,
     /node infra\/yandex\/scripts\/verify-service-account-provenance\.mjs validate < "\$identity_path" > \/dev\/null/,
   );
   assert.match(
@@ -1867,7 +1871,10 @@ function assertProtectedInfrastructureWorkflow(source) {
     (step) => step.name === "Upload exact first-phase alert specifications",
   );
   assert.ok(alertUploadStep);
-  assert.equal(alertUploadStep.if, "inputs.observability_phase == 'first'");
+  assert.equal(
+    alertUploadStep.if,
+    "inputs.observability_phase == 'first' && inputs.postgres_provisioning_phase == 'none'",
+  );
   assert.equal(alertUploadStep.with.path, "${{ runner.temp }}/yandex-alert-specs/alert-specs.json");
   assert.equal(alertUploadStep.with["if-no-files-found"], "error");
 
@@ -1995,6 +2002,20 @@ test("infrastructure workflow contract rejects security-boundary mutations", asy
       source.replace(
         'terraform -chdir=infra/yandex/production apply -json -input=false "$plan_path" > /dev/null',
         'terraform -chdir=infra/yandex/production apply -input=false "$plan_path"',
+      ),
+    ],
+    [
+      "targeted first apply requires alert extraction",
+      source.replace(
+        'if [[ "$OBSERVABILITY_PHASE" == first && "$POSTGRES_PROVISIONING_PHASE" == none ]]; then',
+        'if [[ "$OBSERVABILITY_PHASE" == first ]]; then',
+      ),
+    ],
+    [
+      "targeted first apply uploads a missing alert artifact",
+      source.replace(
+        "if: inputs.observability_phase == 'first' && inputs.postgres_provisioning_phase == 'none'",
+        "if: inputs.observability_phase == 'first'",
       ),
     ],
     [

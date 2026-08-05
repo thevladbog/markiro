@@ -71,7 +71,9 @@ postgres_owner_change_reference=none
 observability_phase=first
 ```
 
-4. Approve and apply that exact cluster plan. Create the owner named exactly as
+4. Approve and apply that exact cluster plan. The cluster-targeted apply
+   suppresses raw Terraform stdout/stderr. It does not run the alert extractor
+   or upload an alert artifact. Create the owner named exactly as
    `database_name` through the approved database administration surface. Write
    its credential directly to runtime Lockbox. Record the cluster apply, exact
    owner creation, and runtime Lockbox write under one protected, non-secret
@@ -97,33 +99,49 @@ observability_phase=first
    write in the protected record. Then approve and apply that exact database
    plan. The apply job rechecks the saved run identity, attempt, approval
    outcome, and change reference; it does not query or validate external record
-   contents.
-7. For a clean environment, first dispatch a full-root plan with
-   `observability_phase=first`. The workflow deliberately unsets the notification
-   channel and alert IDs, so no fabricated placeholders enter Terraform. Apply that saved plan.
-   On successful apply, download the protected
-   `yandex-alert-specs-<commit>-<run>-<attempt>` artifact and inspect its single
-   `alert-specs.json` file. Its schema contains only `alert_specs` and binding
-   metadata: `commit_sha`, `evidence_sha256`, `github_run_id`,
-   `github_run_attempt`, `observability_phase=first`, and `plan_sha256`. Match all
-   binding values to the reviewed apply evidence before using the specifications;
-   the workflow rejects extra fields and never uploads raw Terraform event output
-   or any other root output. Create all 16 Monitoring alerts manually from those
-   specs; provider `0.215.0` cannot mutate alerts. Run the pre-go-live live metric
-   inventory and query check, including `sys.memory.used_percent`,
-   `sys.filesystem.used_percent`, and `markiro.readiness.required_unavailable`.
-   Then record the exact notification channel and one unique ID for every spec in
-   protected infrastructure variables and dispatch a new
-   `observability_phase=protected` saved plan/apply. The protected phase rejects a
-   missing, duplicate, blank, or extra ID.
+   contents. The database-targeted apply suppresses raw Terraform stdout/stderr.
+   This database-targeted apply does not run the alert extractor or upload an
+   alert artifact.
+7. For a clean environment, first dispatch a full-root plan with these exact
+   inputs:
+
+```text
+target_sha=current_main_sha
+enable_public_dns=false
+postgres_provisioning_phase=none
+postgres_owner_change_reference=none
+observability_phase=first
+```
+
+Only this full-root first-phase combination runs the alert extractor and
+uploads its artifact. The workflow deliberately unsets the notification
+channel and alert IDs, so no fabricated placeholders enter Terraform.
+Apply that saved plan. On successful apply, download the protected
+`yandex-alert-specs-<commit>-<run>-<attempt>` artifact and inspect its single
+`alert-specs.json` file. Its schema contains only `alert_specs` and binding
+metadata: `commit_sha`, `evidence_sha256`, `github_run_id`,
+`github_run_attempt`, `observability_phase=first`, and `plan_sha256`. Match all
+binding values to the reviewed apply evidence before using the specifications;
+the workflow rejects extra fields and never uploads raw Terraform event output
+or any other root output. Create all 16 Monitoring alerts manually from those
+specs; provider `0.215.0` cannot mutate alerts. Run the pre-go-live live metric
+inventory and query check, including `sys.memory.used_percent`,
+`sys.filesystem.used_percent`, and `markiro.readiness.required_unavailable`.
+Then record the exact notification channel and one unique ID for every spec in
+protected infrastructure variables and dispatch a new
+`observability_phase=protected` saved plan/apply. The protected phase rejects a
+missing, duplicate, blank, or extra ID.
+
 8. The app VM clean bootstrap installs and enables the runtime materializer but
    does not read an empty Lockbox payload. Before any deployment, populate the
    runtime Lockbox with every and only the `.env.production.example` inventory,
    then use the protected deploy flow: it restarts the materializer and remains
    blocked unless atomic exact materialization succeeds. Never treat VM creation
    as proof that runtime secrets were materialized.
-9. Record only change, plan-summary, approval, and sanitized post-apply
-   evidence IDs in the protected operational system.
+
+9. Record only change, plan-summary, approval, and sanitized post-apply evidence
+   IDs in the protected operational system.
+
 10. Before the first deployment, verify the bootstrap IAM boundary still grants
     the audit service account `audit-trails.viewer` on this folder,
     `logging.writer` on the bootstrap-created audit log group, and the exact KMS

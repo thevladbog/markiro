@@ -674,7 +674,7 @@ jobs:
             'use_path_style = true' > "$backend_config"
           chmod 600 "$backend_config"
           terraform -chdir=infra/yandex/production init -input=false -lockfile=readonly -backend-config="$backend_config"
-          if [[ "$OBSERVABILITY_PHASE" == first ]]; then
+          if [[ "$OBSERVABILITY_PHASE" == first && "$POSTGRES_PROVISIONING_PHASE" == none ]]; then
             test ! -e "$alert_dir"
             install -d -m 700 "$alert_dir"
             export ALERT_SPECS_COMMIT_SHA="$evidence_commit"
@@ -694,7 +694,7 @@ jobs:
             terraform -chdir=infra/yandex/production apply -json -input=false "$plan_path" > /dev/null 2>&1
           fi
       - name: Upload exact first-phase alert specifications
-        if: inputs.observability_phase == 'first'
+        if: inputs.observability_phase == 'first' && inputs.postgres_provisioning_phase == 'none'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: yandex-alert-specs-${{ inputs.target_sha }}-${{ github.run_id }}-${{ github.run_attempt }}

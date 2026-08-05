@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import {
@@ -195,5 +199,80 @@ test("rejects malformed or oversized apply streams without echoing their content
         return true;
       },
     );
+  }
+});
+
+test("Terraform 1.15.8 targeted apply needs no alert artifact while full-root apply emits the exact artifact", async (t) => {
+  const terraform = process.env.MARKIRO_TERRAFORM_BIN ?? "terraform";
+  const version = spawnSync(terraform, ["version", "-json"], { encoding: "utf8" });
+  if (version.error?.code === "ENOENT") {
+    t.skip("Terraform 1.15.8 is unavailable");
+    return;
+  }
+  assert.equal(version.status, 0, version.stderr);
+  if (JSON.parse(version.stdout).terraform_version !== "1.15.8") {
+    t.skip("Terraform 1.15.8 is unavailable");
+    return;
+  }
+
+  const fixture = await mkdtemp(path.join(tmpdir(), "markiro-alert-artifact-"));
+  const artifactPath = path.join(fixture, "alert-specs.json");
+  const run = (args, options = {}) =>
+    spawnSync(terraform, [`-chdir=${fixture}`, ...args], {
+      encoding: "utf8",
+      ...options,
+    });
+
+  try {
+    await writeFile(
+      path.join(fixture, "main.tf.json"),
+      `${JSON.stringify(
+        {
+          terraform: { required_version: "= 1.15.8" },
+          resource: {
+            terraform_data: {
+              targeted: { input: "targeted" },
+              untargeted: { input: alertSpecs() },
+            },
+          },
+          output: {
+            alert_specs: { value: "${terraform_data.untargeted.output}" },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      { mode: 0o600 },
+    );
+
+    const init = run(["init", "-backend=false", "-input=false"]);
+    assert.equal(init.status, 0, init.stderr);
+
+    const targetedPlan = run([
+      "plan",
+      "-input=false",
+      "-out=targeted.tfplan",
+      "-target=terraform_data.targeted",
+    ]);
+    assert.equal(targetedPlan.status, 0, targetedPlan.stderr);
+    const targetedApply = run(["apply", "-json", "-input=false", "targeted.tfplan"], {
+      stdio: "ignore",
+    });
+    assert.equal(targetedApply.status, 0);
+    await assert.rejects(readFile(artifactPath), { code: "ENOENT" });
+
+    const fullPlan = run(["plan", "-input=false", "-out=full.tfplan"]);
+    assert.equal(fullPlan.status, 0, fullPlan.stderr);
+    const fullApply = run(["apply", "-json", "-input=false", "full.tfplan"]);
+    assert.equal(fullApply.status, 0, fullApply.stderr);
+
+    const artifact = extractAlertSpecsArtifact(fullApply.stdout, binding);
+    await writeFile(artifactPath, `${JSON.stringify(artifact)}\n`, { mode: 0o600 });
+    assert.deepEqual(JSON.parse(await readFile(artifactPath, "utf8")), {
+      alert_specs: alertSpecs(),
+      ...binding,
+    });
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
   }
 });

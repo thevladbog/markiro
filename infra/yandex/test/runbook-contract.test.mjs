@@ -122,8 +122,14 @@ const markerProcedures = {
   "docs/runbooks/yandex-infrastructure-apply.md": {
     "infrastructure-approved-apply": [
       "postgres_provisioning_phase=cluster\npostgres_owner_change_reference=none\nobservability_phase=first",
+      "The cluster-targeted apply",
+      "suppresses raw Terraform stdout/stderr",
+      "It does not run the alert extractor",
       "Create the owner",
       "postgres_provisioning_phase=database\npostgres_owner_change_reference=protected_change_record_id\nobservability_phase=first",
+      "The database-targeted apply suppresses raw Terraform stdout/stderr",
+      "This database-targeted apply does not run the alert extractor",
+      "postgres_provisioning_phase=none\npostgres_owner_change_reference=none\nobservability_phase=first",
       "yandex-alert-specs-",
       "observability_phase=protected",
     ],
@@ -252,16 +258,20 @@ function assertRunbookContract({ documents, verifier, workflow, dnsWorkflow, pos
     [
       "postgres_provisioning_phase=cluster\npostgres_owner_change_reference=none",
       "observability_phase=first",
+      "The cluster-targeted apply",
+      "suppresses raw Terraform stdout/stderr",
       "Create the owner",
       "runtime Lockbox",
       "postgres_provisioning_phase=database\npostgres_owner_change_reference=protected_change_record_id\nobservability_phase=first",
+      "The database-targeted apply suppresses raw Terraform stdout/stderr",
+      "postgres_provisioning_phase=none\npostgres_owner_change_reference=none\nobservability_phase=first",
     ],
     "two-phase PostgreSQL procedure",
   );
   ordered(
     markerProcedure(infrastructure, "infrastructure-approved-apply"),
     [
-      "observability_phase=first",
+      "postgres_provisioning_phase=none\npostgres_owner_change_reference=none\nobservability_phase=first",
       "Apply that saved plan",
       "yandex-alert-specs-",
       "alert-specs.json",
