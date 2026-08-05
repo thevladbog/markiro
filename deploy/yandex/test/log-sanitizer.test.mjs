@@ -337,6 +337,98 @@ test("journal sanitizer remains bounded while recovering through many false quot
   assert.equal(output.includes(message), false);
 });
 
+const ECMASCRIPT_WHITESPACE_AND_LINE_TERMINATORS = [
+  ["TAB U+0009", "\u0009"],
+  ["LF U+000A", "\u000a"],
+  ["VT U+000B", "\u000b"],
+  ["FF U+000C", "\u000c"],
+  ["CR U+000D", "\u000d"],
+  ["SPACE U+0020", "\u0020"],
+  ["NBSP U+00A0", "\u00a0"],
+  ["OGHAM SPACE MARK U+1680", "\u1680"],
+  ["EN QUAD U+2000", "\u2000"],
+  ["EM QUAD U+2001", "\u2001"],
+  ["EN SPACE U+2002", "\u2002"],
+  ["EM SPACE U+2003", "\u2003"],
+  ["THREE-PER-EM SPACE U+2004", "\u2004"],
+  ["FOUR-PER-EM SPACE U+2005", "\u2005"],
+  ["SIX-PER-EM SPACE U+2006", "\u2006"],
+  ["FIGURE SPACE U+2007", "\u2007"],
+  ["PUNCTUATION SPACE U+2008", "\u2008"],
+  ["THIN SPACE U+2009", "\u2009"],
+  ["HAIR SPACE U+200A", "\u200a"],
+  ["LINE SEPARATOR U+2028", "\u2028"],
+  ["PARAGRAPH SEPARATOR U+2029", "\u2029"],
+  ["NARROW NBSP U+202F", "\u202f"],
+  ["MEDIUM MATHEMATICAL SPACE U+205F", "\u205f"],
+  ["IDEOGRAPHIC SPACE U+3000", "\u3000"],
+  ["BOM U+FEFF", "\ufeff"],
+];
+
+const SENSITIVE_QUOTED_KEY_FORMS = [
+  ["double-quoted key", '"token"', '"whitespace-separator-secret"'],
+  ["single-quoted key", "'token'", "'whitespace-separator-secret'"],
+  ["escaped double-quoted key", String.raw`"to\u006ben"`, '"whitespace-separator-secret"'],
+  ["escaped single-quoted key", String.raw`'to\u006ben'`, "'whitespace-separator-secret'"],
+];
+
+for (const [whitespaceName, whitespace] of ECMASCRIPT_WHITESPACE_AND_LINE_TERMINATORS)
+  for (const [keyFormName, key, value] of SENSITIVE_QUOTED_KEY_FORMS)
+    test(`journal sanitizer classifies ${keyFormName} before ${whitespaceName}`, () => {
+      const message = `prefix {${key}${whitespace}:${value}} suffix`;
+      const originalLine = `markiro-deploy.service ${message}\n`;
+      assert.ok(Buffer.byteLength(originalLine) <= 192);
+
+      const output = sanitizeJournal([{ unit: "markiro-deploy.service", message }], {
+        maxBytes: 256,
+        maxLineBytes: 192,
+      });
+
+      assert.equal(output, "markiro-deploy.service [REDACTED]\n");
+      assert.doesNotMatch(output, /whitespace-separator-secret/);
+      assert.equal(output.includes(message), false);
+    });
+
+test("journal sanitizer skips a mixed run containing every ECMAScript whitespace", () => {
+  const whitespaceRun = ECMASCRIPT_WHITESPACE_AND_LINE_TERMINATORS.map(([, value]) => value).join(
+    "",
+  );
+  const message = String.raw`prefix {"to\u006ben"${whitespaceRun}:"mixed-whitespace-secret"} suffix`;
+  assert.ok(Buffer.byteLength(`markiro-deploy.service ${message}\n`) <= 192);
+
+  const output = sanitizeJournal([{ unit: "markiro-deploy.service", message }], {
+    maxBytes: 256,
+    maxLineBytes: 192,
+  });
+
+  assert.equal(output, "markiro-deploy.service [REDACTED]\n");
+  assert.doesNotMatch(output, /mixed-whitespace-secret/);
+});
+
+for (const [whitespaceName, whitespace] of ECMASCRIPT_WHITESPACE_AND_LINE_TERMINATORS)
+  test(`journal sanitizer preserves a benign key before ${whitespaceName}`, () => {
+    const message = `prefix {"status"${whitespace}:"safe-whitespace-diagnostic"} suffix`;
+    const output = sanitizeJournal([{ unit: "markiro-deploy.service", message }], {
+      maxBytes: 256,
+      maxLineBytes: 192,
+    });
+
+    assert.match(output, /safe-whitespace-diagnostic/);
+    assert.doesNotMatch(output, /\[REDACTED\]/);
+  });
+
+for (const [separatorName, separator] of [
+  ["ASCII letter between NBSPs", "\u00a0x\u00a0"],
+  ["ZERO WIDTH SPACE U+200B between line separators", "\u2028\u200b\u2029"],
+])
+  test(`journal sanitizer does not skip through non-whitespace ${separatorName}`, () => {
+    const message = `prefix {"token"${separator}:"safe-non-whitespace-diagnostic"} suffix`;
+    const output = sanitizeJournal([{ unit: "markiro-deploy.service", message }]);
+
+    assert.match(output, /safe-non-whitespace-diagnostic/);
+    assert.doesNotMatch(output, /\[REDACTED\]/);
+  });
+
 test("journal sanitizer remains bounded for large adversarial quoted input", () => {
   const withinBound = `${'"safe":'.repeat(8_000)}tail`;
   const overBound = `prefix ${"\\".repeat(2 * 1024 * 1024)} suffix`;

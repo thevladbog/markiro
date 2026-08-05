@@ -144,6 +144,23 @@ function decodeQuotedKey(message, start, end, quote) {
   return hasUnpairedSurrogate(value) ? undefined : value;
 }
 
+function isQuotedKeyWhitespace(codeUnit) {
+  // ECMAScript WhiteSpace and LineTerminator code points are all in the BMP.
+  return (
+    (codeUnit >= 0x0009 && codeUnit <= 0x000d) ||
+    codeUnit === 0x0020 ||
+    codeUnit === 0x00a0 ||
+    codeUnit === 0x1680 ||
+    (codeUnit >= 0x2000 && codeUnit <= 0x200a) ||
+    codeUnit === 0x2028 ||
+    codeUnit === 0x2029 ||
+    codeUnit === 0x202f ||
+    codeUnit === 0x205f ||
+    codeUnit === 0x3000 ||
+    codeUnit === 0xfeff
+  );
+}
+
 function scanQuotedKeys(message, quote) {
   let previousQuote;
   let backslashRun = 0;
@@ -159,8 +176,7 @@ function scanQuotedKeys(message, quote) {
     if (!isUnescapedQuote) continue;
 
     let colon = index + 1;
-    while (colon < message.length && (message[colon] === " " || message[colon] === "\t"))
-      colon += 1;
+    while (colon < message.length && isQuotedKeyWhitespace(message.charCodeAt(colon))) colon += 1;
     if (message[colon] === ":") {
       if (previousQuote === undefined) return true;
       const decodedKey = decodeQuotedKey(message, previousQuote + 1, index, quote);
