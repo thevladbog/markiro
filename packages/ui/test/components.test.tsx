@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -6,8 +6,11 @@ import {
   Badge,
   Button,
   Card,
+  Checkbox,
   Field,
+  IconButton,
   Input,
+  RadioGroup,
   Select,
   StatusChip,
   Table,
@@ -230,6 +233,98 @@ describe("Select", () => {
     await user.click(cheeseOption);
 
     expect(onValueChange).not.toHaveBeenCalled();
+  });
+});
+
+describe("Checkbox", () => {
+  it("calls onCheckedChange with true when its labelled control is checked", async () => {
+    const user = userEvent.setup();
+    const onCheckedChange = vi.fn();
+    render(<Checkbox label="Паллеты" checked={false} onCheckedChange={onCheckedChange} />);
+
+    await user.click(screen.getByRole("checkbox", { name: "Паллеты" }));
+
+    expect(onCheckedChange).toHaveBeenCalledWith(true);
+  });
+
+  it("does not change while disabled", async () => {
+    const user = userEvent.setup();
+    const onCheckedChange = vi.fn();
+    render(<Checkbox label="Паллеты" checked={false} disabled onCheckedChange={onCheckedChange} />);
+
+    await user.click(screen.getByRole("checkbox", { name: "Паллеты" }));
+
+    expect(onCheckedChange).not.toHaveBeenCalled();
+  });
+});
+
+describe("RadioGroup", () => {
+  it("moves the selected choice with ArrowDown", async () => {
+    const user = userEvent.setup();
+    const onValueChange = vi.fn();
+    const { rerender } = render(
+      <RadioGroup
+        label="Режим смены"
+        options={[
+          { value: "production", label: "Производство" },
+          { value: "rework", label: "Переработка" },
+        ]}
+        value="production"
+        onValueChange={onValueChange}
+      />,
+    );
+
+    await user.tab();
+    const production = screen.getByRole("radio", { name: "Производство" });
+    expect(document.activeElement).toBe(production);
+    fireEvent.keyDown(production, { key: "ArrowDown" });
+
+    await waitFor(() => expect(onValueChange).toHaveBeenCalledWith("rework"));
+    fireEvent.keyUp(document, { key: "ArrowDown" });
+    rerender(
+      <RadioGroup
+        label="Режим смены"
+        options={[
+          { value: "production", label: "Производство" },
+          { value: "rework", label: "Переработка" },
+        ]}
+        value="rework"
+        onValueChange={onValueChange}
+      />,
+    );
+    expect(screen.getByRole("radio", { name: "Переработка" }).getAttribute("data-state")).toBe(
+      "checked",
+    );
+  });
+
+  it("does not select a disabled choice", async () => {
+    const user = userEvent.setup();
+    const onValueChange = vi.fn();
+    render(
+      <RadioGroup
+        label="Режим смены"
+        options={[
+          { value: "production", label: "Производство" },
+          { value: "rework", label: "Переработка", disabled: true },
+        ]}
+        value="production"
+        onValueChange={onValueChange}
+      />,
+    );
+
+    await user.click(screen.getByRole("radio", { name: "Переработка" }));
+
+    expect(onValueChange).not.toHaveBeenCalled();
+  });
+});
+
+describe("IconButton", () => {
+  it("exposes its required accessible name while rendering only the icon", () => {
+    render(<IconButton aria-label="Открыть уведомления" icon={<svg aria-hidden="true" />} />);
+
+    const button = screen.getByRole("button", { name: "Открыть уведомления" });
+    expect(button.textContent).toBe("");
+    expect(button.querySelector("svg")).not.toBeNull();
   });
 });
 
