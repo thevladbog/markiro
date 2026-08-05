@@ -5,8 +5,8 @@ import { Link } from "react-router";
 import {
   Alert,
   Button,
+  DatePicker,
   EmptyState,
-  Input,
   PageHeader,
   Select,
   Spinner,
@@ -170,7 +170,7 @@ export function RejectionsPage() {
             label={t("pages.pickup.rejections.filters.kioskLabel")}
             options={kioskOptions}
             value={kioskId}
-            onChange={(value) => setKioskId(value)}
+            onValueChange={setKioskId}
           />
         </div>
         <div style={{ width: 200 }}>
@@ -178,23 +178,21 @@ export function RejectionsPage() {
             label={t("pages.pickup.rejections.filters.stateLabel")}
             options={stateOptions}
             value={stateFilter}
-            onChange={(value) => setStateFilter(value as RejectionState)}
+            onValueChange={(value) => setStateFilter(value as RejectionState)}
           />
         </div>
         <div style={{ width: 180 }}>
-          <Input
+          <DatePicker
             label={t("pages.pickup.rejections.filters.fromLabel")}
-            type="date"
-            value={fromDate}
-            onChange={(event) => setFromDate(event.target.value)}
+            {...(fromDate ? { value: fromDate } : {})}
+            onValueChange={(value) => setFromDate(value ?? "")}
           />
         </div>
         <div style={{ width: 180 }}>
-          <Input
+          <DatePicker
             label={t("pages.pickup.rejections.filters.toLabel")}
-            type="date"
-            value={toDate}
-            onChange={(event) => setToDate(event.target.value)}
+            {...(toDate ? { value: toDate } : {})}
+            onValueChange={(value) => setToDate(value ?? "")}
           />
         </div>
       </div>

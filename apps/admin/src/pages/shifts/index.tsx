@@ -5,6 +5,7 @@ import {
   Alert,
   Badge,
   Button,
+  DatePicker,
   EmptyState,
   Input,
   Modal,
@@ -404,23 +405,21 @@ export function ShiftsPage() {
             label={t("pages.shifts.filters.statusLabel")}
             options={statusFilterOptions}
             value={statusFilter}
-            onChange={(value) => setStatusFilter(value as StatusFilter)}
+            onValueChange={(value) => setStatusFilter(value as StatusFilter)}
           />
         </div>
         <div style={{ width: 180 }}>
-          <Input
+          <DatePicker
             label={t("pages.shifts.filters.fromLabel")}
-            type="date"
-            value={fromDate}
-            onChange={(event) => setFromDate(event.target.value)}
+            {...(fromDate ? { value: fromDate } : {})}
+            onValueChange={(value) => setFromDate(value ?? "")}
           />
         </div>
         <div style={{ width: 180 }}>
-          <Input
+          <DatePicker
             label={t("pages.shifts.filters.toLabel")}
-            type="date"
-            value={toDate}
-            onChange={(event) => setToDate(event.target.value)}
+            {...(toDate ? { value: toDate } : {})}
+            onValueChange={(value) => setToDate(value ?? "")}
           />
         </div>
       </div>

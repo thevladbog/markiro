@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { useRef } from "react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -88,6 +89,15 @@ function renderWith(ui: React.ReactElement, access: AccessDocument = OPERATIONS_
       </MemoryRouter>
     </QueryClientProvider>,
   );
+}
+
+async function chooseOption(
+  user: ReturnType<typeof userEvent.setup>,
+  label: string,
+  option: string,
+) {
+  await user.click(screen.getByRole("combobox", { name: label }));
+  await user.click(await screen.findByRole("option", { name: option }));
 }
 
 describe("rejections banner on the свод", () => {
@@ -297,6 +307,7 @@ describe("rejections page", () => {
   });
 
   it("filters by kiosk", async () => {
+    const user = userEvent.setup();
     const KIOSKS = [
       { id: "k-1", name: "Киоск-1" },
       { id: "k-2", name: "Киоск-2" },
@@ -312,12 +323,7 @@ describe("rejections page", () => {
     renderWith(<RejectionsPage />);
 
     await waitFor(() => expect(screen.getByText("Иван Иванов")).toBeDefined());
-    // Wait for the kiosk options to actually be in the DOM before selecting
-    // one -- otherwise fireEvent.change on a <select> with no matching
-    // <option> yet leaves its value empty instead of "k-2".
-    await waitFor(() => expect(screen.getByText("Киоск-2")).toBeDefined());
-
-    fireEvent.change(screen.getByLabelText("Киоск"), { target: { value: "k-2" } });
+    await chooseOption(user, "Киоск", "Киоск-2");
 
     await waitFor(() =>
       expect(

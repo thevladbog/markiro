@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { useRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -64,6 +65,15 @@ function renderPage(access: AccessDocument = OPERATIONS_WRITE_ACCESS) {
       </AccessProvider>
     </QueryClientProvider>,
   );
+}
+
+async function chooseOption(
+  user: ReturnType<typeof userEvent.setup>,
+  label: string,
+  option: string,
+) {
+  await user.click(screen.getByRole("combobox", { name: label }));
+  await user.click(await screen.findByRole("option", { name: option }));
 }
 
 // losingShiftId and winningShiftId are deliberately DISTINCT ("s1" vs "s2"):
@@ -397,13 +407,14 @@ describe("ConflictsPage", () => {
   });
 
   it("lists the shift filter options newest first, though GET /shifts returns oldest first", async () => {
+    const user = userEvent.setup();
     stubFetch({ conflicts: [UNREVIEWED], shifts: [SHIFT_S1, SHIFT_S2] });
 
     renderPage();
     await screen.findByRole("table");
 
-    const select = screen.getByLabelText("Смена") as HTMLSelectElement;
-    const optionLabels = Array.from(select.options).map((option) => option.textContent);
+    await user.click(screen.getByRole("combobox", { name: "Смена" }));
+    const optionLabels = screen.getAllByRole("option").map((option) => option.textContent);
     // The mocked /api/shifts response lists SHIFT_S1 (older) before SHIFT_S2
     // (newer), matching the server's real oldest-first order -- the manager
     // currently closing the newest shift should not have to scroll to find
@@ -412,13 +423,14 @@ describe("ConflictsPage", () => {
   });
 
   it("refetches the list scoped to the selected shift when the shift filter changes", async () => {
+    const user = userEvent.setup();
     const fetchMock = stubFetch({ conflicts: [UNREVIEWED], shifts: [SHIFT_S1, SHIFT_S2] });
 
     renderPage();
     await screen.findByRole("table");
     expect(fetchMock).toHaveBeenCalledWith("/api/conflicts?reviewed=false", expect.any(Object));
 
-    fireEvent.change(screen.getByLabelText("Смена"), { target: { value: "s2" } });
+    await chooseOption(user, "Смена", "2026-07-29 — Sprite");
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -433,18 +445,19 @@ describe("ConflictsPage", () => {
   // all -- "mark reviewed" changed a badge and nothing else. Defaulting to
   // unreviewed-only is what actually shrinks the list.
   it("defaults to the unreviewed filter, and the status toggle changes it", async () => {
+    const user = userEvent.setup();
     const fetchMock = stubFetch({ conflicts: [UNREVIEWED] });
 
     renderPage();
     await screen.findByRole("table");
     expect(fetchMock).toHaveBeenCalledWith("/api/conflicts?reviewed=false", expect.any(Object));
 
-    fireEvent.change(screen.getByLabelText("Статус"), { target: { value: "reviewed" } });
+    await chooseOption(user, "Статус", "Рассмотренные");
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith("/api/conflicts?reviewed=true", expect.any(Object));
     });
 
-    fireEvent.change(screen.getByLabelText("Статус"), { target: { value: "all" } });
+    await chooseOption(user, "Статус", "Все");
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith("/api/conflicts", expect.any(Object));
     });

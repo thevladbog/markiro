@@ -1,11 +1,11 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import type { TFunction } from "i18next";
 import { useEffect, useRef } from "react";
-import { useForm } from "react-hook-form";
+import { Controller, useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
 
-import { Button, Input, Modal, Select } from "@markiro/ui";
+import { Button, Checkbox, DatePicker, Input, Modal, RadioGroup, Select } from "@markiro/ui";
 import type { SelectOption } from "@markiro/ui";
 
 import { errorProp } from "../../lib/form-error.js";
@@ -23,8 +23,8 @@ const SHIFT_MODES = ["validation", "aggregation"] as const;
  * `updateShiftSchema` has no `productId` field at all), mode is one of the
  * two enum values, plannedQty/boxCapacity/palletCapacity are optional
  * positive integers entered as text (kept as strings in form state, parsed
- * to number|null on submit by `toPayload`), plannedDate is a native
- * `<input type="date">` value (already `YYYY-MM-DD`, matching the server's
+ * to number|null on submit by `toPayload`), plannedDate keeps its ISO
+ * `YYYY-MM-DD` value (matching the server's
  * regex, so no extra format validation is needed client-side). Error
  * messages are i18n keys (resolved through `t()` at render time) -- same
  * convention as `../catalog/ProductForm.tsx`.
@@ -125,6 +125,7 @@ export function ShiftForm({
   const boxLabelTemplateTouchedRef = useRef(false);
 
   const {
+    control,
     register,
     handleSubmit,
     reset,
@@ -165,30 +166,54 @@ export function ShiftForm({
 
   // Product-change prefill (create mode only -- the product can't change once
   // a shift exists, and the product select is disabled while editing): seeds
-  // the counterparty select, the label template select, and the capacity
-  // inputs' *displayed* values from the newly-picked product.
+  // the capacity inputs' *displayed* values from the newly-picked product.
   //
-  // This is a plain `setValue` call, not a user interaction, so it does NOT
-  // set `counterpartyTouchedRef`/`labelTemplateTouchedRef` -- those fields
-  // stay "untouched" for payload purposes even though they now visibly
-  // display the product's defaults (see `toPayload`'s comment for the full
-  // contract). boxCapacity/palletCapacity don't need that distinction (their
-  // payload rule doesn't look at touched-ness at all -- see below), but
-  // they're seeded the same way for consistency.
+  // boxCapacity/palletCapacity don't need a touched distinction (their payload
+  // rule doesn't look at touched-ness at all -- see below), so they can be
+  // seeded as soon as the product is selected.
   useEffect(() => {
     if (!open || formMode !== "create") return;
     if (!productId || lastPrefilledProductRef.current === productId) return;
     lastPrefilledProductRef.current = productId;
     const product = products.find((p) => p.id === productId);
     if (!product) return;
-    setValue("counterpartyId", product.defaultCounterpartyId ?? "");
-    setValue("labelTemplateId", product.defaultLabelTemplateId ?? "");
     setValue("boxCapacity", product.boxCapacity !== null ? String(product.boxCapacity) : "");
     setValue(
       "palletCapacity",
       product.palletCapacity !== null ? String(product.palletCapacity) : "",
     );
   }, [open, formMode, productId, products, setValue]);
+
+  // The two product defaults need their option lists first. A native select
+  // silently renders an unknown value as its empty option; Radix correctly
+  // exposes that mismatch, so applying the default before its query resolves
+  // would turn an untouched field into a false user clear. Reconcile once
+  // each list is available, unless the operator has deliberately changed it.
+  useEffect(() => {
+    if (!open || formMode !== "create" || !productId) return;
+    const product = products.find((item) => item.id === productId);
+    if (!product) return;
+
+    if (!counterpartyTouchedRef.current) {
+      const defaultCounterpartyId = product.defaultCounterpartyId;
+      setValue(
+        "counterpartyId",
+        defaultCounterpartyId && counterparties.some((item) => item.id === defaultCounterpartyId)
+          ? defaultCounterpartyId
+          : "",
+      );
+    }
+
+    if (!labelTemplateTouchedRef.current) {
+      const defaultLabelTemplateId = product.defaultLabelTemplateId;
+      setValue(
+        "labelTemplateId",
+        defaultLabelTemplateId && labelTemplates.some((item) => item.id === defaultLabelTemplateId)
+          ? defaultLabelTemplateId
+          : "",
+      );
+    }
+  }, [open, formMode, productId, products, counterparties, labelTemplates, setValue]);
 
   const submit = handleSubmit(async (values) => {
     await onSubmit(
@@ -283,37 +308,26 @@ export function ShiftForm({
           value={productId}
           disabled={formMode === "edit"}
           {...errorProp(translateFieldError(t, errors.productId?.message))}
-          onChange={(value) =>
+          onValueChange={(value) =>
             setValue("productId", value, { shouldDirty: true, shouldValidate: true })
           }
         />
 
-        <fieldset
-          style={{
-            border: "none",
-            padding: 0,
-            margin: 0,
-            display: "flex",
-            flexDirection: "column",
-            gap: 6,
-          }}
-        >
-          <legend style={{ font: "var(--text-caption)", color: "var(--fg-2)", padding: 0 }}>
-            {t("pages.shifts.form.modeLabel")}
-          </legend>
-          <label
-            style={{ display: "flex", alignItems: "center", gap: 8, font: "var(--text-body)" }}
-          >
-            <input type="radio" value="validation" {...register("mode")} />
-            {t("pages.shifts.form.modeValidation")}
-          </label>
-          <label
-            style={{ display: "flex", alignItems: "center", gap: 8, font: "var(--text-body)" }}
-          >
-            <input type="radio" value="aggregation" {...register("mode")} />
-            {t("pages.shifts.form.modeAggregation")}
-          </label>
-        </fieldset>
+        <Controller
+          control={control}
+          name="mode"
+          render={({ field }) => (
+            <RadioGroup
+              label={t("pages.shifts.form.modeLabel")}
+              options={[
+                { value: "validation", label: t("pages.shifts.form.modeValidation") },
+                { value: "aggregation", label: t("pages.shifts.form.modeAggregation") },
+              ]}
+              value={field.value}
+              onValueChange={field.onChange}
+            />
+          )}
+        />
 
         <Input
           label={t("pages.shifts.form.plannedQtyLabel")}
@@ -323,10 +337,16 @@ export function ShiftForm({
           {...register("plannedQty")}
         />
 
-        <Input
-          label={t("pages.shifts.form.plannedDateLabel")}
-          type="date"
-          {...register("plannedDate")}
+        <Controller
+          control={control}
+          name="plannedDate"
+          render={({ field }) => (
+            <DatePicker
+              label={t("pages.shifts.form.plannedDateLabel")}
+              {...(field.value ? { value: field.value } : {})}
+              onValueChange={(value) => field.onChange(value ?? "")}
+            />
+          )}
         />
 
         <Select
@@ -334,14 +354,14 @@ export function ShiftForm({
           options={lineOptions}
           value={lineId ?? ""}
           {...(lines.length === 0 ? { hint: t("pages.shifts.form.noLinesHint") } : {})}
-          onChange={(value) => setValue("lineId", value, { shouldDirty: true })}
+          onValueChange={(value) => setValue("lineId", value, { shouldDirty: true })}
         />
 
         <Select
           label={t("pages.shifts.form.counterpartyLabel")}
           options={counterpartyOptions}
           value={counterpartyId ?? ""}
-          onChange={(value) => {
+          onValueChange={(value) => {
             counterpartyTouchedRef.current = true;
             setValue("counterpartyId", value, { shouldDirty: true, shouldValidate: true });
           }}
@@ -352,7 +372,7 @@ export function ShiftForm({
           options={ssccIssuerOptions}
           value={ssccIssuerCounterpartyId ?? ""}
           hint={t("pages.shifts.form.ssccIssuerHint")}
-          onChange={(value) => {
+          onValueChange={(value) => {
             ssccIssuerTouchedRef.current = true;
             setValue("ssccIssuerCounterpartyId", value, {
               shouldDirty: true,
@@ -365,7 +385,7 @@ export function ShiftForm({
           label={t("pages.shifts.form.labelTemplateLabel")}
           options={labelTemplateOptions}
           value={labelTemplateId ?? ""}
-          onChange={(value) => {
+          onValueChange={(value) => {
             labelTemplateTouchedRef.current = true;
             setValue("labelTemplateId", value, { shouldDirty: true, shouldValidate: true });
           }}
@@ -375,7 +395,7 @@ export function ShiftForm({
           label={t("pages.shifts.form.boxLabelTemplateLabel")}
           options={boxLabelTemplateOptions}
           value={boxLabelTemplateId ?? ""}
-          onChange={(value) => {
+          onValueChange={(value) => {
             boxLabelTemplateTouchedRef.current = true;
             setValue("boxLabelTemplateId", value, { shouldDirty: true, shouldValidate: true });
           }}
@@ -390,12 +410,17 @@ export function ShiftForm({
               {...errorProp(translateFieldError(t, errors.boxCapacity?.message))}
               {...register("boxCapacity")}
             />
-            <label
-              style={{ display: "flex", alignItems: "center", gap: 8, font: "var(--text-body)" }}
-            >
-              <input type="checkbox" {...register("palletsEnabled")} />
-              {t("pages.shifts.form.palletsEnabledLabel")}
-            </label>
+            <Controller
+              control={control}
+              name="palletsEnabled"
+              render={({ field }) => (
+                <Checkbox
+                  label={t("pages.shifts.form.palletsEnabledLabel")}
+                  checked={field.value}
+                  onCheckedChange={field.onChange}
+                />
+              )}
+            />
             {palletsEnabled && (
               <Input
                 label={t("pages.shifts.form.palletCapacityLabel")}

@@ -6,8 +6,9 @@ import {
   Alert,
   Badge,
   Button,
+  Checkbox,
+  DatePicker,
   EmptyState,
-  Input,
   PageHeader,
   Select,
   Spinner,
@@ -39,6 +40,18 @@ const STATUS_TO_CHIP: Record<PickupOrderStatus, StatusChipStatus> = {
   writtenoff: "neutral",
   cancelled: "error",
 };
+
+const VISUALLY_HIDDEN_STYLE = {
+  position: "absolute",
+  width: 1,
+  height: 1,
+  padding: 0,
+  margin: -1,
+  overflow: "hidden",
+  clip: "rect(0, 0, 0, 0)",
+  whiteSpace: "nowrap",
+  border: 0,
+} as const;
 
 interface PickupPageContentProps {
   statusFilter: StatusFilter;
@@ -214,11 +227,15 @@ function PickupPageContent({
             title: "",
             width: 32,
             render: (row) => (
-              <input
-                type="checkbox"
+              <Checkbox
+                label={
+                  <span style={VISUALLY_HIDDEN_STYLE}>
+                    {t("pages.pickup.bulkExport.selectRow", { orderNo: row.orderNo })}
+                  </span>
+                }
                 aria-label={t("pages.pickup.bulkExport.selectRow", { orderNo: row.orderNo })}
                 checked={write.selectedIds.has(row.id)}
-                onChange={() => write.onToggleSelected(row.id)}
+                onCheckedChange={() => write.onToggleSelected(row.id)}
               />
             ),
           },
@@ -268,7 +285,7 @@ function PickupPageContent({
             label={t("pages.pickup.filters.statusLabel")}
             options={statusOptions}
             value={statusFilter}
-            onChange={(value) => onStatusFilterChange(value as StatusFilter)}
+            onValueChange={(value) => onStatusFilterChange(value as StatusFilter)}
           />
         </div>
         <div style={{ width: 200 }}>
@@ -276,23 +293,21 @@ function PickupPageContent({
             label={t("pages.pickup.filters.reasonLabel")}
             options={reasonOptions}
             value={reasonFilter}
-            onChange={(value) => onReasonFilterChange(value as ReasonFilter)}
+            onValueChange={(value) => onReasonFilterChange(value as ReasonFilter)}
           />
         </div>
         <div style={{ width: 180 }}>
-          <Input
+          <DatePicker
             label={t("pages.pickup.filters.fromLabel")}
-            type="date"
-            value={fromDate}
-            onChange={(event) => onFromDateChange(event.target.value)}
+            {...(fromDate ? { value: fromDate } : {})}
+            onValueChange={(value) => onFromDateChange(value ?? "")}
           />
         </div>
         <div style={{ width: 180 }}>
-          <Input
+          <DatePicker
             label={t("pages.pickup.filters.toLabel")}
-            type="date"
-            value={toDate}
-            onChange={(event) => onToDateChange(event.target.value)}
+            {...(toDate ? { value: toDate } : {})}
+            onValueChange={(value) => onToDateChange(value ?? "")}
           />
         </div>
       </div>

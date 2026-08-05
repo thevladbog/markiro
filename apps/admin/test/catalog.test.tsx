@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -81,6 +82,15 @@ function newQueryClient() {
   return new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+}
+
+async function chooseOption(
+  user: ReturnType<typeof userEvent.setup>,
+  label: string,
+  option: string,
+) {
+  await user.click(screen.getByRole("combobox", { name: label }));
+  await user.click(await screen.findByRole("option", { name: option }));
 }
 
 function renderPage(
@@ -511,6 +521,7 @@ describe("CatalogPage", () => {
   };
 
   it("renders label templates as options in the default label template select", async () => {
+    const user = userEvent.setup();
     const fetchMock = vi.fn(async (url: string) => {
       const path = String(url);
       if (path === "/api/label-templates") return jsonResponse(200, { items: [LABEL_TEMPLATE] });
@@ -524,13 +535,12 @@ describe("CatalogPage", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Добавить продукт" })[0]!);
     await screen.findByText("Новый продукт");
 
-    const select = (await screen.findByLabelText(
-      "Шаблон этикетки по умолчанию",
-    )) as HTMLSelectElement;
-    expect(within(select).getByRole("option", { name: LABEL_TEMPLATE.name })).toBeDefined();
+    await user.click(await screen.findByRole("combobox", { name: "Шаблон этикетки по умолчанию" }));
+    expect(screen.getByRole("option", { name: LABEL_TEMPLATE.name })).toBeDefined();
   });
 
   it("sends the chosen defaultLabelTemplateId in the create payload", async () => {
+    const user = userEvent.setup();
     const created = { ...DRAFT_PRODUCT, id: "p4", defaultLabelTemplateId: LABEL_TEMPLATE.id };
     let didCreate = false;
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
@@ -553,9 +563,7 @@ describe("CatalogPage", () => {
 
     fireEvent.change(screen.getByLabelText("Название"), { target: { value: "Йогурт" } });
     fireEvent.change(screen.getByLabelText("ГТИН"), { target: { value: "4006381333931" } });
-    fireEvent.change(screen.getByLabelText("Шаблон этикетки по умолчанию"), {
-      target: { value: LABEL_TEMPLATE.id },
-    });
+    await chooseOption(user, "Шаблон этикетки по умолчанию", LABEL_TEMPLATE.name);
     fireEvent.click(screen.getByRole("button", { name: "Создать" }));
 
     await waitFor(() => {

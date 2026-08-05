@@ -17,7 +17,7 @@ import type { ChangeEvent } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { LabelElement, LabelField } from "@markiro/domain";
-import { Button, Input, Select } from "@markiro/ui";
+import { Button, Checkbox, Input, Select } from "@markiro/ui";
 
 const LABEL_FIELDS: LabelField[] = [
   "product.name",
@@ -114,7 +114,7 @@ export function PropertiesPanel({ element, onChange, onDelete }: PropertiesPanel
                 label: t(`pages.labels.editor.fields.${field}`),
               }))}
               value={element.field}
-              onChange={(value) => patch({ field: value as LabelField })}
+              onValueChange={(value) => patch({ field: value as LabelField })}
             />
           )}
           <div style={ROW_STYLE}>
@@ -132,19 +132,14 @@ export function PropertiesPanel({ element, onChange, onDelete }: PropertiesPanel
                 label: t(`pages.labels.editor.properties.${option.labelKey}`),
               }))}
               value={element.align ?? "left"}
-              onChange={(value) => patch({ align: value as "left" | "center" | "right" })}
+              onValueChange={(value) => patch({ align: value as "left" | "center" | "right" })}
             />
           </div>
-          <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <input
-              type="checkbox"
-              checked={element.bold ?? false}
-              onChange={(event) => patch({ bold: event.target.checked })}
-            />
-            <span style={{ font: "var(--text-body-sm)", color: "var(--fg-2)" }}>
-              {t("pages.labels.editor.properties.bold")}
-            </span>
-          </label>
+          <Checkbox
+            label={t("pages.labels.editor.properties.bold")}
+            checked={element.bold ?? false}
+            onCheckedChange={(bold) => patch({ bold })}
+          />
           <Input
             label={t("pages.labels.editor.properties.maxWidth")}
             type="number"
@@ -174,7 +169,7 @@ export function PropertiesPanel({ element, onChange, onDelete }: PropertiesPanel
               { value: "literal", label: t("pages.labels.editor.properties.sourceLiteral") },
             ]}
             value={typeof element.data === "string" ? "field" : "literal"}
-            onChange={(value) =>
+            onValueChange={(value) =>
               patch({
                 data: value === "field" ? "product.gtin" : { literal: "" },
               })
@@ -188,7 +183,7 @@ export function PropertiesPanel({ element, onChange, onDelete }: PropertiesPanel
                 label: t(`pages.labels.editor.fields.${field}`),
               }))}
               value={element.data}
-              onChange={(value) => patch({ data: value as LabelField })}
+              onValueChange={(value) => patch({ data: value as LabelField })}
             />
           ) : (
             <Input

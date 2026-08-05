@@ -11,6 +11,7 @@
 import { useTranslation } from "react-i18next";
 
 import type { LabelElement } from "@markiro/domain";
+import { IconButton } from "@markiro/ui";
 
 export interface PaletteProps {
   /** The label's own size -- new elements are centered within it. */
@@ -22,12 +23,14 @@ export interface PaletteProps {
 interface PaletteButtonDef {
   /** i18n key under `pages.labels.editor.palette`. */
   labelKey: string;
+  icon: string;
   build: (centerXMm: number, centerYMm: number, defaultText: string) => LabelElement;
 }
 
 const PALETTE_BUTTONS: PaletteButtonDef[] = [
   {
     labelKey: "text",
+    icon: "T",
     build: (xMm, yMm, defaultText) => ({
       kind: "text",
       id: crypto.randomUUID(),
@@ -39,6 +42,7 @@ const PALETTE_BUTTONS: PaletteButtonDef[] = [
   },
   {
     labelKey: "field",
+    icon: "ƒ",
     build: (xMm, yMm) => ({
       kind: "field",
       id: crypto.randomUUID(),
@@ -50,6 +54,7 @@ const PALETTE_BUTTONS: PaletteButtonDef[] = [
   },
   {
     labelKey: "datamatrix",
+    icon: "▦",
     build: (xMm, yMm) => ({
       kind: "barcode",
       id: crypto.randomUUID(),
@@ -62,6 +67,7 @@ const PALETTE_BUTTONS: PaletteButtonDef[] = [
   },
   {
     labelKey: "code128",
+    icon: "▤",
     build: (xMm, yMm) => ({
       kind: "barcode",
       id: crypto.randomUUID(),
@@ -74,6 +80,7 @@ const PALETTE_BUTTONS: PaletteButtonDef[] = [
   },
   {
     labelKey: "ean13",
+    icon: "▥",
     build: (xMm, yMm) => ({
       kind: "barcode",
       id: crypto.randomUUID(),
@@ -86,6 +93,7 @@ const PALETTE_BUTTONS: PaletteButtonDef[] = [
   },
   {
     labelKey: "qr",
+    icon: "▧",
     build: (xMm, yMm) => ({
       kind: "barcode",
       id: crypto.randomUUID(),
@@ -98,6 +106,7 @@ const PALETTE_BUTTONS: PaletteButtonDef[] = [
   },
   {
     labelKey: "line",
+    icon: "╱",
     build: (xMm, yMm) => ({
       kind: "line",
       id: crypto.randomUUID(),
@@ -110,6 +119,7 @@ const PALETTE_BUTTONS: PaletteButtonDef[] = [
   },
   {
     labelKey: "box",
+    icon: "□",
     build: (xMm, yMm) => ({
       kind: "box",
       id: crypto.randomUUID(),
@@ -121,21 +131,6 @@ const PALETTE_BUTTONS: PaletteButtonDef[] = [
     }),
   },
 ];
-
-const BUTTON_STYLE = {
-  display: "flex",
-  alignItems: "center",
-  gap: 10,
-  padding: "8px 10px",
-  border: "1px solid var(--line)",
-  borderRadius: "var(--r-2)",
-  background: "var(--surface-panel)",
-  font: "500 13px/18px var(--font-ui)",
-  color: "var(--fg-1)",
-  cursor: "pointer",
-  textAlign: "left" as const,
-  width: "100%",
-};
 
 export function Palette({ labelWidthMm, labelHeightMm, onAdd }: PaletteProps) {
   const { t } = useTranslation();
@@ -156,16 +151,15 @@ export function Palette({ labelWidthMm, labelHeightMm, onAdd }: PaletteProps) {
         {t("pages.labels.editor.palette.title")}
       </span>
       {PALETTE_BUTTONS.map((button) => (
-        <button
+        <IconButton
           key={button.labelKey}
-          type="button"
-          style={BUTTON_STYLE}
+          aria-label={t(`pages.labels.editor.palette.${button.labelKey}`)}
+          icon={<span aria-hidden="true">{button.icon}</span>}
+          title={t(`pages.labels.editor.palette.${button.labelKey}`)}
           onClick={() =>
             onAdd(button.build(centerXMm, centerYMm, t("pages.labels.editor.defaultText")))
           }
-        >
-          {t(`pages.labels.editor.palette.${button.labelKey}`)}
-        </button>
+        />
       ))}
     </div>
   );

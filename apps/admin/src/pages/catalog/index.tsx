@@ -359,7 +359,7 @@ export function CatalogPage() {
             label={t("pages.catalog.statusFilterLabel")}
             options={statusFilterOptions}
             value={statusFilter}
-            onChange={(value) => setStatusFilter(value as StatusFilter)}
+            onValueChange={(value) => setStatusFilter(value as StatusFilter)}
           />
         </div>
       </div>

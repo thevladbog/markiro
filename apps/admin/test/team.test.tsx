@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThemeProvider } from "@markiro/ui";
@@ -139,6 +140,15 @@ function renderTeam(fetchImplementation: typeof fetch) {
   );
 }
 
+async function chooseOption(
+  user: ReturnType<typeof userEvent.setup>,
+  label: string,
+  option: string,
+) {
+  await user.click(screen.getByRole("combobox", { name: label }));
+  await user.click(await screen.findByRole("option", { name: option }));
+}
+
 afterEach(async () => {
   cleanup();
   vi.useRealTimers();
@@ -166,6 +176,7 @@ describe("TeamPage", () => {
   });
 
   it("offers only unclaimed active employees and creates an invitation", async () => {
+    const user = userEvent.setup();
     const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
     renderTeam(async (input, init) => {
       const url = String(input);
@@ -179,17 +190,16 @@ describe("TeamPage", () => {
     });
 
     fireEvent.click(await screen.findByRole("button", { name: "Пригласить" }));
-    expect(await screen.findByRole("option", { name: "Олег Серов — Оператор" })).toBeDefined();
+    await user.click(screen.getByRole("combobox", { name: "Сотрудник" }));
+    const olegOption = await screen.findByRole("option", { name: "Олег Серов — Оператор" });
     expect(screen.queryByRole("option", { name: /Елена Ким/ })).toBeNull();
+    await user.click(olegOption);
 
     fireEvent.change(screen.getByLabelText("Электронная почта"), {
       target: { value: "new.manager@example.com" },
     });
     fireEvent.change(screen.getByLabelText("Должность"), {
       target: { value: "Начальник цеха" },
-    });
-    fireEvent.change(screen.getByLabelText("Сотрудник"), {
-      target: { value: "22222222-2222-4222-8222-222222222222" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Отправить приглашение" }));
 
@@ -250,6 +260,7 @@ describe("TeamPage", () => {
   });
 
   it("resets canceled member edits and performs update, employee link, and confirmed removal", async () => {
+    const user = userEvent.setup();
     const mutations: Array<{ url: string; init: RequestInit | undefined }> = [];
     renderTeam(async (input, init) => {
       const url = String(input);
@@ -270,20 +281,19 @@ describe("TeamPage", () => {
 
     const edit = await screen.findByRole("button", { name: "Изменить Анна Соколова" });
     fireEvent.click(edit);
-    fireEvent.change(await screen.findByLabelText("Роль"), { target: { value: "admin" } });
+    await chooseOption(user, "Роль", "Администратор");
     fireEvent.change(screen.getByLabelText("Должность"), { target: { value: "Черновик" } });
     fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
 
     fireEvent.click(edit);
-    expect((screen.getByLabelText("Роль") as HTMLSelectElement).value).toBe("manager");
+    await screen.findByRole("dialog", { name: "Доступ участника" });
+    expect(screen.getByRole("combobox", { name: "Роль" }).textContent).toContain("Менеджер");
     expect((screen.getByLabelText("Должность") as HTMLInputElement).value).toBe("Мастер смены");
-    fireEvent.change(screen.getByLabelText("Роль"), { target: { value: "admin" } });
+    await chooseOption(user, "Роль", "Администратор");
     fireEvent.change(screen.getByLabelText("Должность"), {
       target: { value: "Начальник смены" },
     });
-    fireEvent.change(screen.getByLabelText("Сотрудник"), {
-      target: { value: "22222222-2222-4222-8222-222222222222" },
-    });
+    await chooseOption(user, "Сотрудник", "Олег Серов");
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
 
     await waitFor(() => {

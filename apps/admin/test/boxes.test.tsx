@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { formatCreatedAt } from "../src/lib/datetime.js";
@@ -229,6 +230,7 @@ describe("BoxesPage", () => {
   });
 
   it("refetches scoped to the selected shift when the shift filter changes", async () => {
+    const user = userEvent.setup();
     const fetchMock = stubFetch({ shifts: [SHIFT_S1, SHIFT_S2], boxes: [] });
 
     renderPage();
@@ -236,7 +238,8 @@ describe("BoxesPage", () => {
       expect(fetchMock).toHaveBeenCalledWith("/api/boxes?shiftId=s2", expect.any(Object));
     });
 
-    fireEvent.change(screen.getByLabelText("Смена"), { target: { value: "s1" } });
+    await user.click(screen.getByRole("combobox", { name: "Смена" }));
+    await user.click(await screen.findByRole("option", { name: "2026-07-28 — Cola" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith("/api/boxes?shiftId=s1", expect.any(Object));

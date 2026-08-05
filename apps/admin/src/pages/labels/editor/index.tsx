@@ -307,7 +307,7 @@ function LabelEditorContent({
             { value: "custom", label: t("pages.labels.editor.customSizeOption") },
           ]}
           value={customSize ? "custom" : (matchPresetKey(spec.widthMm, spec.heightMm) ?? "custom")}
-          onChange={handleSizePresetChange}
+          onValueChange={handleSizePresetChange}
           style={{ width: 140 }}
         />
         {customSize && (
@@ -338,14 +338,16 @@ function LabelEditorContent({
           aria-label={t("pages.labels.editor.dpiLabel")}
           options={DPI_OPTIONS}
           value={String(spec.dpi)}
-          onChange={(value) => handleReplaceSpec({ ...spec, dpi: value === "300" ? 300 : 203 })}
+          onValueChange={(value) =>
+            handleReplaceSpec({ ...spec, dpi: value === "300" ? 300 : 203 })
+          }
           style={{ width: 100 }}
         />
         <Select
           aria-label={t("pages.labels.editor.languageLabel")}
           options={LANGUAGE_OPTIONS}
           value={spec.language}
-          onChange={(value) =>
+          onValueChange={(value) =>
             handleReplaceSpec({ ...spec, language: value as LabelTemplateSpec["language"] })
           }
           style={{ width: 100 }}
