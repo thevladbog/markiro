@@ -16,6 +16,12 @@ name: Yandex infrastructure
         required: true
         default: false
         type: boolean
+      postgres_provisioning_phase:
+        description: Create only the required first-provisioning PostgreSQL boundary
+        required: true
+        type: choice
+        default: none
+        options: [none, cluster, database]
 
 permissions:
   contents: read
@@ -105,6 +111,7 @@ jobs:
       target-sha: ${{ steps.create-plan.outputs.target_sha }}
     env:
       ENABLE_PUBLIC_DNS: ${{ github.event_name == 'workflow_dispatch' && inputs.enable_public_dns || false }}
+      POSTGRES_PROVISIONING_PHASE: ${{ github.event_name == 'workflow_dispatch' && inputs.postgres_provisioning_phase || 'none' }}
       TARGET_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.target_sha || github.sha }}
       YC_CLOUD_ID: ${{ vars.YC_CLOUD_ID }}
       YC_FOLDER_ID: ${{ vars.YC_FOLDER_ID }}
@@ -215,6 +222,18 @@ jobs:
             [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]
             [[ "${{ needs.dns_approval.result }}" == "success" ]]
           fi
+          case "$POSTGRES_PROVISIONING_PHASE" in
+            none) terraform_targets=() ;;
+            cluster)
+              [[ "$public_dns_enabled" == false ]]
+              terraform_targets=(-target=module.postgres.yandex_mdb_postgresql_cluster.production)
+              ;;
+            database)
+              [[ "$public_dns_enabled" == false ]]
+              terraform_targets=(-target=module.postgres.yandex_mdb_postgresql_database.application)
+              ;;
+            *) exit 1 ;;
+          esac
           github_oidc_response="$(curl --fail --silent --show-error --get \
             --header "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
             --data-urlencode "audience=$YC_OIDC_AUDIENCE" \
@@ -264,7 +283,7 @@ jobs:
             'use_path_style = true' > "$backend_config"
           chmod 600 "$backend_config"
           terraform -chdir=infra/yandex/production init -input=false -lockfile=readonly -backend-config="$backend_config"
-          terraform -chdir=infra/yandex/production plan -json -out="$plan_path" -var="public_dns_enabled=$public_dns_enabled" |
+          terraform -chdir=infra/yandex/production plan -json -out="$plan_path" -var="public_dns_enabled=$public_dns_enabled" "${terraform_targets[@]}" |
             jq -c '
               if .type == "planned_change" then
                 {type: "planned_change", action: .change.action}
@@ -283,8 +302,9 @@ jobs:
             --arg commit_sha "$target_sha" \
             --arg plan_sha256 "$plan_sha256" \
             --arg summary_sha256 "$summary_sha256" \
+            --arg postgres_provisioning_phase "$POSTGRES_PROVISIONING_PHASE" \
             --argjson public_dns_enabled "$public_dns_enabled" \
-            '{commit_sha: $commit_sha, plan_sha256: $plan_sha256, public_dns_enabled: $public_dns_enabled, summary_sha256: $summary_sha256}' \
+            '{commit_sha: $commit_sha, plan_sha256: $plan_sha256, postgres_provisioning_phase: $postgres_provisioning_phase, public_dns_enabled: $public_dns_enabled, summary_sha256: $summary_sha256}' \
             > "$evidence_path"
           chmod 600 "$plan_path" "$summary_path" "$evidence_path"
           printf 'target_sha=%s\n' "$target_sha" >> "$GITHUB_OUTPUT"
@@ -322,6 +342,7 @@ jobs:
       id-token: write
     env:
       ENABLE_PUBLIC_DNS: ${{ inputs.enable_public_dns }}
+      POSTGRES_PROVISIONING_PHASE: ${{ inputs.postgres_provisioning_phase }}
       TARGET_SHA: ${{ inputs.target_sha }}
       YC_CLOUD_ID: ${{ vars.YC_CLOUD_ID }}
       YC_FOLDER_ID: ${{ vars.YC_FOLDER_ID }}
@@ -426,21 +447,24 @@ jobs:
           test ! -L "$evidence_path"
           jq -e '
             type == "object" and
-            (keys | sort) == ["commit_sha", "plan_sha256", "public_dns_enabled", "summary_sha256"] and
+            (keys | sort) == ["commit_sha", "plan_sha256", "postgres_provisioning_phase", "public_dns_enabled", "summary_sha256"] and
             (.commit_sha | type == "string") and
             (.plan_sha256 | type == "string") and
+            (.postgres_provisioning_phase | type == "string") and
             (.public_dns_enabled | type == "boolean") and
             (.summary_sha256 | type == "string")
           ' "$evidence_path" > /dev/null
           evidence_commit="$(jq -er '.commit_sha' "$evidence_path")"
           artifact_sha256="$(jq -er '.plan_sha256' "$evidence_path")"
           summary_sha256="$(jq -er '.summary_sha256' "$evidence_path")"
+          evidence_postgres_provisioning_phase="$(jq -er '.postgres_provisioning_phase' "$evidence_path")"
           evidence_public_dns="$(jq -er '.public_dns_enabled' "$evidence_path")"
           [[ "$evidence_commit" == "$target_sha" ]]
           [[ "$artifact_sha256" =~ ^[0-9a-f]{64}$ ]]
           [[ "$summary_sha256" =~ ^[0-9a-f]{64}$ ]]
           [[ "$(sha256sum "$plan_path" | cut -d' ' -f1)" == "$artifact_sha256" ]]
           [[ "$(sha256sum "$summary_path" | cut -d' ' -f1)" == "$summary_sha256" ]]
+          [[ "$evidence_postgres_provisioning_phase" == "$POSTGRES_PROVISIONING_PHASE" ]]
           case "$ENABLE_PUBLIC_DNS" in
             true) expected_public_dns=true ;;
             false) expected_public_dns=false ;;

@@ -1360,6 +1360,13 @@ function assertProtectedInfrastructureWorkflow(source) {
   assert.equal(dispatchInputs.enable_public_dns.type, "boolean");
   assert.equal(dispatchInputs.enable_public_dns.default, false);
   assert.equal(dispatchInputs.enable_public_dns.required, true);
+  assert.deepEqual(dispatchInputs.postgres_provisioning_phase, {
+    description: "Create only the required first-provisioning PostgreSQL boundary",
+    required: true,
+    type: "choice",
+    default: "none",
+    options: ["none", "cluster", "database"],
+  });
 
   const { apply, dns_approval: dnsApproval, plan, validate } = workflow.jobs;
   assert.deepEqual(validate.permissions, { contents: "read" });
@@ -1428,6 +1435,10 @@ function assertProtectedInfrastructureWorkflow(source) {
   assert.match(planCommands, /unset [^\n]*YC_TOKEN AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY/);
   assert.match(planCommands, /terraform -chdir=infra\/yandex\/production init/);
   assert.match(planCommands, /terraform -chdir=infra\/yandex\/production plan -json/);
+  assert.match(planCommands, /POSTGRES_PROVISIONING_PHASE/);
+  assert.match(planCommands, /module\.postgres\.yandex_mdb_postgresql_cluster\.production/);
+  assert.match(planCommands, /module\.postgres\.yandex_mdb_postgresql_database\.application/);
+  assert.match(planCommands, /postgres_provisioning_phase/);
   assert.match(planCommands, /validate-plan-summary\.mjs/);
   assert.match(planCommands, /sha256sum/);
 
@@ -1474,6 +1485,8 @@ function assertProtectedInfrastructureWorkflow(source) {
   assert.match(applyCommands, /unset [^\n]*YC_TOKEN AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY/);
   assert.match(applyCommands, /terraform -chdir=infra\/yandex\/production apply/);
   assert.match(applyCommands, /saved\.tfplan/);
+  assert.match(applyCommands, /POSTGRES_PROVISIONING_PHASE/);
+  assert.match(applyCommands, /evidence_postgres_provisioning_phase/);
 
   const allCommands = [validateCommands, planCommands, applyCommands].join("\n");
   assert.doesNotMatch(allCommands, /pull_request_target/);
@@ -1549,6 +1562,10 @@ test("infrastructure workflow contract rejects security-boundary mutations", asy
     ["stale commit", source.replace('[[ "$target_sha" == "$dispatch_sha" ]]\n', "")],
     ["unmasked HMAC", source.replace('echo "::add-mask::$aws_secret_access_key"\n', "")],
     ["DNS default true", source.replace("default: false", "default: true")],
+    [
+      "unbounded PostgreSQL target",
+      source.replace("module.postgres.yandex_mdb_postgresql_cluster.production", "module.postgres"),
+    ],
     [
       "broad permissions",
       source.replace("permissions:\n  contents: read", "permissions:\n  contents: write"),

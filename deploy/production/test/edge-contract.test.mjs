@@ -272,7 +272,10 @@ test("edge runtime selects a fixed direct or ALB Caddyfile without dynamic evalu
 
   assert.match(dockerfile, /COPY deploy\/production\/Caddyfile \/etc\/caddy\/Caddyfile\.direct/);
   assert.match(dockerfile, /COPY deploy\/production\/Caddyfile\.alb \/etc\/caddy\/Caddyfile\.alb/);
-  assert.match(dockerfile, /COPY deploy\/production\/edge-entrypoint\.sh \/usr\/bin\/edge-entrypoint/);
+  assert.match(
+    dockerfile,
+    /COPY deploy\/production\/edge-entrypoint\.sh \/usr\/bin\/edge-entrypoint/,
+  );
   assert.match(dockerfile, /ENTRYPOINT \["\/usr\/bin\/edge-entrypoint"\]/);
   assert.match(entrypoint, /direct\)/);
   assert.match(entrypoint, /behind-alb\)/);

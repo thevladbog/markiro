@@ -5,6 +5,12 @@ production bundle. Run it from a protected deployment checkout at the approved
 revision. It does not create cloud resources or authorize public exposure by
 itself.
 
+Complete [bootstrap](yandex-bootstrap.md), [secrets](yandex-secrets.md),
+[infrastructure apply](yandex-infrastructure-apply.md), and
+[first go-live](yandex-first-go-live.md) before the first production release.
+Use [recovery](yandex-recovery.md) for restore drills or service loss. This
+runbook does not authorize Terraform apply or DNS mutation.
+
 Use a dedicated operator account and a protected change record. Run every code
 block with Bash, stop on the first non-zero exit, and do not improvise around a
 failed gate. The deployment scripts deliberately emit lifecycle states and
