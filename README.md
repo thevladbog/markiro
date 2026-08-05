@@ -169,6 +169,7 @@ Database-backed tests require the exported `DATABASE_URL`. Report intentional sk
 - [Architecture](./docs/architecture.md)
 - [Design briefs](./docs/design-briefs/)
 - [Implementation plans](./docs/superpowers/plans/)
+- [MVP roadmap](./docs/superpowers/plans/2026-07-21-markiro-mvp-roadmap.md)
 - [OpenAPI explorer](http://localhost:3000/docs) when the API is running
 
 ## License

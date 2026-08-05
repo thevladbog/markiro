@@ -169,6 +169,7 @@ pnpm format:check
 - [Архитектура](./docs/architecture.md)
 - [Дизайн-брифы](./docs/design-briefs/)
 - [Планы реализации](./docs/superpowers/plans/)
+- [Дорожная карта MVP](./docs/superpowers/plans/2026-07-21-markiro-mvp-roadmap.md)
 - [Обозреватель OpenAPI](http://localhost:3000/docs), когда API запущен
 
 ## Лицензия
