@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { runPreflight } from "../../production/preflight.mjs";
 import {
   deployRelease,
   runRemoteDeployment,
@@ -335,6 +336,69 @@ test("real CLI adapter stages remote prepare, ALB, runner smoke, and remote fina
         args.includes("MARKIRO_REQUIRE_PREVIOUS_HEALTHY=1"),
     ),
   );
+  const expectedRemoteEnvironment = [
+    `MARKIRO_IMAGE_TAG=${COMMIT}`,
+    `MARKIRO_API_IMAGE_DIGEST=sha256:${"a".repeat(64)}`,
+    `MARKIRO_EDGE_IMAGE_DIGEST=sha256:${"b".repeat(64)}`,
+    "MARKIRO_DOMAIN=markiro.example",
+    "MARKIRO_EDGE_MODE=behind-alb",
+    "MARKIRO_REQUIRE_PREVIOUS_HEALTHY=1",
+    "MARKIRO_ENV_FILE=/etc/markiro/production.env",
+    "MARKIRO_RELEASE_DIRECTORY=/var/lib/markiro/releases",
+  ];
+  const successfulStages = commands.filter(
+    ({ command, args }) =>
+      command === "ssh" && (args.includes("prepare") || args.includes("finalize")),
+  );
+  assert.equal(successfulStages.length, 2);
+  for (const { args } of successfulStages)
+    for (const variable of expectedRemoteEnvironment) assert.ok(args.includes(variable));
+});
+
+test("actual remote prepare argv satisfies the real app-side preflight environment boundary", async () => {
+  const { commands, environment, system } = cliFixture();
+
+  await runRemoteDeployment(environment, system);
+
+  const prepare = commands.find(
+    ({ command, args }) => command === "ssh" && args.includes("prepare"),
+  );
+  const envStart = prepare.args.indexOf("env") + 1;
+  const envEnd = prepare.args.indexOf("/usr/bin/bash");
+  const remoteEnvironment = Object.fromEntries(
+    prepare.args.slice(envStart, envEnd).map((entry) => {
+      const separator = entry.indexOf("=");
+      return [entry.slice(0, separator), entry.slice(separator + 1)];
+    }),
+  );
+  let composeEnvironment;
+
+  const preflight = await runPreflight(remoteEnvironment, {
+    mode: async () => 0o600,
+    composeQuiet: async (value) => {
+      composeEnvironment = value;
+    },
+  });
+
+  assert.deepEqual(preflight, {
+    imageTag: COMMIT,
+    apiImageDigest: `sha256:${"a".repeat(64)}`,
+    edgeImageDigest: `sha256:${"b".repeat(64)}`,
+    domain: "markiro.example",
+    acmeEmail: undefined,
+    envFile: "/etc/markiro/production.env",
+    edgeMode: "behind-alb",
+  });
+  assert.equal(composeEnvironment.MARKIRO_DOMAIN, "markiro.example");
+});
+
+test("runner rejects a malformed production domain before transferring the release", async () => {
+  const { environment, events, system } = cliFixture();
+  environment.MARKIRO_DOMAIN = "https://markiro.example/path";
+
+  await assert.rejects(runRemoteDeployment(environment, system), /MARKIRO_DOMAIN is invalid/);
+
+  assert.equal(events.includes("transfer immutable bundle"), false);
 });
 
 test("real CLI adapter keeps first deployment pre-DNS and probes loopback plus the reserved ALB address", async () => {
@@ -346,7 +410,8 @@ test("real CLI adapter keeps first deployment pre-DNS and probes loopback plus t
     ({ command, args }) => command === "ssh" && args.includes("http://127.0.0.1:8080/health/ready"),
   );
   const albProbe = commands.find(
-    ({ command, args }) => command === "curl" && args.includes("https://markiro.example/health/ready"),
+    ({ command, args }) =>
+      command === "curl" && args.includes("https://markiro.example/health/ready"),
   );
   const prepare = commands.find(
     ({ command, args }) => command === "ssh" && args.includes("prepare"),
@@ -372,12 +437,16 @@ test("real CLI adapter rejects a noncanonical authenticated host-key bundle befo
 });
 
 test("real CLI adapter rolls back remotely when runner external smoke fails", async () => {
-  const { environment, events, system } = cliFixture({ failAt: "external smoke" });
+  const { commands, environment, events, system } = cliFixture({ failAt: "external smoke" });
 
   await assert.rejects(runRemoteDeployment(environment, system), /external smoke failed/);
 
   assert.ok(events.indexOf("remote rollback") > events.indexOf("external smoke"));
   assert.equal(events.includes("remote finalize"), false);
+  const rollback = commands.find(
+    ({ command, args }) => command === "ssh" && args.includes("rollback"),
+  );
+  assert.ok(rollback.args.includes("MARKIRO_DOMAIN=markiro.example"));
 });
 
 for (const failAt of ["ALB healthy", "remote finalize"]) {

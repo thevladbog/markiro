@@ -712,6 +712,93 @@ test("production deployment contract rejects trigger, label, cleanup, and gate m
   }
 });
 
+function assertPostDnsSmokeWorkflow(
+  postDnsSource,
+  deploymentSource,
+  infrastructureSource,
+  scriptSource,
+) {
+  const workflow = parseWorkflow(postDnsSource, "post-DNS smoke workflow");
+  assert.deepEqual(Object.keys(workflow.on), ["workflow_dispatch"]);
+  assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), [
+    "deployment_run_id",
+    "dns_apply_run_id",
+    "dns_convergence_evidence_id",
+    "release_run_id",
+    "release_sha",
+  ]);
+  assert.deepEqual(workflow.permissions, { actions: "read", contents: "read" });
+  assert.equal(workflow.concurrency.group, "markiro-production-post-dns-smoke");
+  assert.equal(workflow.concurrency["cancel-in-progress"], false);
+  const job = workflow.jobs?.smoke;
+  assert.equal(job.environment, "production-public-smoke");
+  assert.equal(job["runs-on"], "ubuntu-latest");
+  assert.deepEqual(job.steps.map((step) => step.name).filter(Boolean), [
+    "Validate current main, finalized release, approved DNS apply, and convergence evidence reference",
+    "Download exact finalized release evidence",
+    "Download exact approved public DNS apply evidence",
+    "Run the full non-mutating public route smoke",
+    "Upload post-DNS smoke evidence",
+    "Remove local evidence material",
+  ]);
+  const commands = job.steps
+    .map((step) => step.run)
+    .filter(Boolean)
+    .join("\n");
+  assert.match(commands, /git\/ref\/heads\/main/);
+  assert.match(commands, /\.github\/workflows\/deploy-production\.yml/);
+  assert.match(commands, /\.github\/workflows\/yandex-infrastructure\.yml/);
+  assert.match(commands, /DNS_CONVERGENCE_EVIDENCE_ID/);
+  assert.match(commands, /node deploy\/yandex\/post-dns-smoke\.mjs run/);
+  assert.match(postDnsSource, /name: markiro-finalized-release-\$\{\{ inputs\.release_sha \}\}/);
+  assert.match(postDnsSource, /run-id: \$\{\{ inputs\.deployment_run_id \}\}/);
+  assert.match(postDnsSource, /name: yandex-public-dns-apply-\$\{\{ inputs\.release_sha \}\}/);
+  assert.match(postDnsSource, /run-id: \$\{\{ inputs\.dns_apply_run_id \}\}/);
+  assert.doesNotMatch(
+    postDnsSource,
+    /remote-deploy|runner-control|deploy[.]mjs|docker|migrate|systemctl|terraform|\byc\b|\bssh\b|curl\s+(?:--request\s+POST|-X\s+POST)/i,
+  );
+  assert.doesNotMatch(scriptSource, /child_process|deploy[.]mjs|remote-deploy|docker|migrate/i);
+  assert.match(scriptSource, /import \{ runPublicSmoke \} from "\.\.\/production\/smoke\.mjs"/);
+  assert.match(deploymentSource, /name: markiro-finalized-release-\$\{\{[^}]*release-sha[^}]*\}\}/);
+  assert.match(deploymentSource, /deploymentPhase: \$phase/);
+  assert.match(deploymentSource, /deploymentRunId: \$deployment_run_id/);
+  assert.match(infrastructureSource, /if: inputs\.enable_public_dns == true/);
+  assert.match(infrastructureSource, /publicDnsEnabled: true/);
+  assert.match(
+    infrastructureSource,
+    /name: yandex-public-dns-apply-\$\{\{ inputs\.target_sha \}\}/,
+  );
+  assertPinnedComments(postDnsSource, CHECKOUT, "v4");
+  assertPinnedComments(postDnsSource, DOWNLOAD_ARTIFACT, "v8.0.1");
+  assertPinnedComments(postDnsSource, UPLOAD_ARTIFACT, "v4.6.2");
+}
+
+test("post-DNS public smoke is a protected release-bound non-mutating workflow", async () => {
+  assertPostDnsSmokeWorkflow(
+    await source(".github/workflows/yandex-post-dns-smoke.yml"),
+    await source(".github/workflows/deploy-production.yml"),
+    await source(".github/workflows/yandex-infrastructure.yml"),
+    await source("deploy/yandex/post-dns-smoke.mjs"),
+  );
+});
+
+test("post-DNS workflow contract rejects lost approval and redeployment mutations", async () => {
+  const postDns = await source(".github/workflows/yandex-post-dns-smoke.yml");
+  const deployment = await source(".github/workflows/deploy-production.yml");
+  const infrastructure = await source(".github/workflows/yandex-infrastructure.yml");
+  const script = await source("deploy/yandex/post-dns-smoke.mjs");
+
+  for (const [search, replacement] of [
+    ["environment: production-public-smoke", "environment: production"],
+    ["node deploy/yandex/post-dns-smoke.mjs run", "node deploy/yandex/remote-deploy.mjs run"],
+    ["run-id: ${{ inputs.dns_apply_run_id }}", "run-id: ${{ inputs.deployment_run_id }}"],
+  ]) {
+    const mutated = replaceExactlyOnce(postDns, search, replacement, "post-DNS mutation");
+    assert.throws(() => assertPostDnsSmokeWorkflow(mutated, deployment, infrastructure, script));
+  }
+});
+
 test("CI contract rejects each hidden-step, shell, log, and cleanup mutation for its own reason", async () => {
   const ci = await source(".github/workflows/ci.yml");
   const install =

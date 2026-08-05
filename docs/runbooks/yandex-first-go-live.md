@@ -128,9 +128,31 @@ unset MARKIRO_DOMAIN MARKIRO_AUTHORITATIVE_DNS_SERVER MARKIRO_PUBLIC_DNS_RESOLVE
 unset MARKIRO_APPROVED_DNS_A MARKIRO_APPROVED_DNS_AAAA
 ```
 
-2. Run the authorized HTTPS smoke through the public hostname **only now**,
-   after DNS convergence. Confirm the certificate, SWS/ARL behavior, backend
-   readiness, and alert delivery. This is the post-cutover public smoke; it is
-   not part of the pre-DNS first-deployment workflow.
-3. Record convergence and smoke evidence IDs in the protected system. If any
+2. Obtain approval for the dedicated `production-public-smoke` environment.
+   This boundary authorizes only public read/route probes from the GitHub-hosted
+   runner; it does not authorize infrastructure or application mutation.
+   Prepare these exact dispatch inputs from the protected records:
+
+```text
+release_sha=<current-main-40-character-sha>
+release_run_id=<publish-production-images-run-id>
+deployment_run_id=<successful-first-deployment-run-id>
+dns_apply_run_id=<successful-approved-dns-apply-run-id>
+dns_convergence_evidence_id=<protected-non-secret-evidence-id>
+```
+
+3. Dispatch **Post-DNS production smoke** with those inputs. The workflow
+   verifies that the release is still current `main`, downloads the exact
+   finalized first-release evidence from the deployment run, verifies the
+   successful separately approved DNS apply, binds the protected convergence
+   evidence reference, and only then runs the full public route smoke through
+   `https://MARKIRO_DOMAIN`. It
+   never prepares, migrates, starts, finalizes, rolls back, or redeploys the
+   application. Do not dispatch `deployment_phase=repeat` merely to obtain this
+   smoke.
+4. Confirm the certificate, SWS/ARL behavior, backend readiness, documentation,
+   proxy routes, and alert delivery from the uploaded post-DNS smoke receipt.
+   This is the post-cutover public smoke and is not part of the pre-DNS
+   first-deployment workflow.
+5. Record convergence and smoke evidence IDs in the protected system. If any
    verifier fails, stop traffic expansion and follow the rollback procedure.

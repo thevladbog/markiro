@@ -379,7 +379,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload exact saved plan and evidence
         id: plan-artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.2
         with:
           name: yandex-infrastructure-plan-${{ steps.create-plan.outputs.target_sha }}
           path: ${{ runner.temp }}/yandex-infrastructure-plan
@@ -615,9 +615,33 @@ jobs:
           chmod 600 "$backend_config"
           terraform -chdir=infra/yandex/production init -input=false -lockfile=readonly -backend-config="$backend_config"
           terraform -chdir=infra/yandex/production apply -input=false "$plan_path"
+      - name: Record exact public DNS apply evidence
+        if: inputs.enable_public_dns == true
+        run: |
+          set -euo pipefail
+          receipt_path="$RUNNER_TEMP/public-dns-apply.json"
+          test ! -e "$receipt_path"
+          umask 077
+          applied_at="$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')"
+          jq -n \
+            --arg applied_at "$applied_at" \
+            --arg dns_apply_run_id "$GITHUB_RUN_ID" \
+            --arg release_sha "$TARGET_SHA" \
+            '{appliedAt: $applied_at, dnsApplyRunId: $dns_apply_run_id, publicDnsEnabled: true, releaseSha: $release_sha}' \
+            > "$receipt_path"
+          chmod 600 "$receipt_path"
+      - name: Upload exact public DNS apply evidence
+        if: inputs.enable_public_dns == true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: yandex-public-dns-apply-${{ inputs.target_sha }}
+          path: ${{ runner.temp }}/public-dns-apply.json
+          if-no-files-found: error
+          retention-days: 90
       - name: Remove downloaded plan and temporary Terraform data
         if: always()
         run: |
           set -euo pipefail
           rm -rf -- "${RUNNER_TEMP:?}/yandex-infrastructure-plan"
           rm -rf -- "${RUNNER_TEMP:?}/yandex-production-terraform-data"
+          rm -f -- "${RUNNER_TEMP:?}/public-dns-apply.json"

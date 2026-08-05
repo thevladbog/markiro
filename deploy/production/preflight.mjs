@@ -4,11 +4,10 @@ import process from "node:process";
 
 import { isMainModule } from "./cli-main.mjs";
 import { productionComposeArgs } from "./compose-files.mjs";
+import { validateProductionDomain } from "./production-domain.mjs";
 
 const IMAGE_TAG_PATTERN = /^[0-9a-f]{40}$/;
 const IMAGE_DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/;
-const DOMAIN_PATTERN =
-  /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const COMPOSE_TIMEOUT_MS = 30_000;
 const TERMINATION_GRACE_MS = 1_000;
 const STDERR_LIMIT_BYTES = 8 * 1024;
@@ -182,7 +181,7 @@ export async function runPreflight(
     throw invalid("MARKIRO_API_IMAGE_DIGEST");
   if (!edgeImageDigest || !IMAGE_DIGEST_PATTERN.test(edgeImageDigest))
     throw invalid("MARKIRO_EDGE_IMAGE_DIGEST");
-  if (!domain || !DOMAIN_PATTERN.test(domain)) throw invalid("MARKIRO_DOMAIN");
+  validateProductionDomain(domain);
   if (edgeMode !== "direct" && edgeMode !== "behind-alb") throw invalid("MARKIRO_EDGE_MODE");
   if (edgeMode === "direct" && (!acmeEmail || !isEmail(acmeEmail))) throw invalid("ACME_EMAIL");
 

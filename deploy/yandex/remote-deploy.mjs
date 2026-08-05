@@ -1,4 +1,5 @@
 import { parseReleaseManifest } from "../production/release-manifest.mjs";
+import { validateProductionDomain } from "../production/production-domain.mjs";
 import { productionBaseUrl, runPublicSmoke } from "../production/smoke.mjs";
 import { spawn } from "node:child_process";
 import { copyFile, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
@@ -198,6 +199,7 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
   const expectedRunId = requiredEnvironment("EXPECTED_RELEASE_RUN_ID", environment);
   const expectedCommit = requiredEnvironment("EXPECTED_RELEASE_SHA", environment);
   const phase = deploymentPhase(requiredEnvironment("MARKIRO_DEPLOYMENT_PHASE", environment));
+  const domain = validateProductionDomain(environment.MARKIRO_DOMAIN);
   const manifestText = await system.readFile(manifestPath, "utf8");
   const manifest = parseReleaseManifest(manifestText, expectedRunId);
   if (manifest.commit !== expectedCommit || process.cwd() === "/")
@@ -288,6 +290,7 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
           `MARKIRO_IMAGE_TAG=${manifest.commit}`,
           `MARKIRO_API_IMAGE_DIGEST=${apiDigest}`,
           `MARKIRO_EDGE_IMAGE_DIGEST=${edgeDigest}`,
+          `MARKIRO_DOMAIN=${domain}`,
           "MARKIRO_EDGE_MODE=behind-alb",
           `MARKIRO_REQUIRE_PREVIOUS_HEALTHY=${phase === "repeat" ? "1" : "0"}`,
           "MARKIRO_ENV_FILE=/etc/markiro/production.env",
@@ -357,7 +360,6 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
         },
         deploymentPhase: phase,
         preDnsSmoke: async () => {
-          const domain = requiredEnvironment("MARKIRO_DOMAIN", environment);
           const address = requiredIpv4("YC_LOAD_BALANCER_ADDRESS", environment);
           await system.run("ssh", [
             ...sshBase,
@@ -385,7 +387,7 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
         smoke: () =>
           system.smoke({
             baseUrl: productionBaseUrl({
-              MARKIRO_DOMAIN: requiredEnvironment("MARKIRO_DOMAIN", environment),
+              MARKIRO_DOMAIN: domain,
               MARKIRO_HTTPS_PORT: environment.MARKIRO_HTTPS_PORT,
             }),
           }),

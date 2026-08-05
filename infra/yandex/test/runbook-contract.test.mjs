@@ -84,6 +84,7 @@ async function sources() {
     documents: Object.fromEntries(documents),
     verifier: await contents("deploy/production/verify-dns.mjs"),
     workflow: await contents(".github/workflows/yandex-infrastructure.yml"),
+    postDnsWorkflow: await contents(".github/workflows/yandex-post-dns-smoke.yml"),
   };
 }
 
@@ -188,7 +189,7 @@ const markerProcedures = {
   },
 };
 
-function assertRunbookContract({ documents, verifier, workflow }) {
+function assertRunbookContract({ documents, verifier, workflow, postDnsWorkflow }) {
   for (const [runbook, markers] of Object.entries(runbooks)) {
     const source = documents[runbook];
     markersAppearInOrder(source, markers);
@@ -271,7 +272,7 @@ function assertRunbookContract({ documents, verifier, workflow }) {
       "http://127.0.0.1:8080/health/ready",
       "curl --resolve <production-domain>:443:<reserved-alb-ip>",
       "<!-- runbook-contract:go-live-public-dns-apply -->",
-      "authorized HTTPS smoke through the public hostname **only now**",
+      "production-public-smoke",
     ],
     "Yandex first-release ordering",
   );
@@ -281,6 +282,23 @@ function assertRunbookContract({ documents, verifier, workflow }) {
     "pre-DNS Yandex procedure must not use public-hostname smoke",
   );
   assert.match(goLive.slice(publicDns), /public_dns_enabled=true/);
+  ordered(
+    goLive.slice(publicDns),
+    [
+      "node deploy/production/verify-dns.mjs",
+      "production-public-smoke",
+      "release_sha=<current-main-40-character-sha>",
+      "release_run_id=<publish-production-images-run-id>",
+      "deployment_run_id=<successful-first-deployment-run-id>",
+      "dns_apply_run_id=<successful-approved-dns-apply-run-id>",
+      "dns_convergence_evidence_id=<protected-non-secret-evidence-id>",
+      "Post-DNS production smoke",
+    ],
+    "post-DNS public smoke dispatch",
+  );
+  assert.match(postDnsWorkflow, /environment:\s*production-public-smoke/);
+  assert.match(postDnsWorkflow, /node deploy\/yandex\/post-dns-smoke\.mjs run/);
+  assert.doesNotMatch(postDnsWorkflow, /remote-deploy|deploy[.]mjs|\bmigrate\b|\bdocker\b/i);
   for (const input of verifierInputs) {
     assert.match(verifier, new RegExp(input));
     assert.match(goLive, new RegExp(`export [^\\n]*\\b${input}\\b`));

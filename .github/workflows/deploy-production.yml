@@ -196,11 +196,41 @@ jobs:
         run: |
           set -euo pipefail
           node deploy/yandex/remote-deploy.mjs run
+      - name: Record the exact finalized release
+        env:
+          RELEASE_RUN_ID: ${{ needs.controller.outputs.release-run-id }}
+          RELEASE_SHA: ${{ needs.controller.outputs.release-sha }}
+          DEPLOYMENT_PHASE: ${{ github.event_name == 'workflow_dispatch' && inputs.deployment_phase || 'repeat' }}
+        run: |
+          set -euo pipefail
+          finalized_path="$RUNNER_TEMP/finalized-release.json"
+          test ! -e "$finalized_path"
+          umask 077
+          phase="$DEPLOYMENT_PHASE"
+          deployment_run_id="$GITHUB_RUN_ID"
+          finalized_at="$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')"
+          jq -n \
+            --arg phase "$phase" \
+            --arg deployment_run_id "$deployment_run_id" \
+            --arg finalized_at "$finalized_at" \
+            --arg release_run_id "$RELEASE_RUN_ID" \
+            --arg release_sha "$RELEASE_SHA" \
+            '{deploymentPhase: $phase, deploymentRunId: $deployment_run_id, finalizedAt: $finalized_at, releaseRunId: $release_run_id, releaseSha: $release_sha}' \
+            > "$finalized_path"
+          chmod 600 "$finalized_path"
+      - name: Upload finalized release evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.2
+        with:
+          name: markiro-finalized-release-${{ needs.controller.outputs.release-sha }}
+          path: ${{ runner.temp }}/finalized-release.json
+          retention-days: 90
+          if-no-files-found: error
       - name: Remove local deployment material
         if: always()
         run: |
           set -euo pipefail
           rm -rf -- "${RUNNER_TEMP:?}/release-manifest" "${RUNNER_TEMP:?}/markiro-os-login"
+          rm -f -- "${RUNNER_TEMP:?}/finalized-release.json"
 
   cleanup:
     needs: [controller, deploy]

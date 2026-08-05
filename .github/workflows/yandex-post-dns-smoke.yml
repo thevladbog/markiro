@@ -1,0 +1,141 @@
+name: Post-DNS production smoke
+
+"on":
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Exact finalized release SHA, which must still be current main
+        required: true
+        type: string
+      release_run_id:
+        description: Successful Publish production images workflow run ID
+        required: true
+        type: string
+      deployment_run_id:
+        description: Successful first-phase Deploy production workflow run ID
+        required: true
+        type: string
+      dns_apply_run_id:
+        description: Successful approved Yandex infrastructure DNS apply workflow run ID
+        required: true
+        type: string
+      dns_convergence_evidence_id:
+        description: Protected non-secret evidence reference from the DNS convergence verifier
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: markiro-production-post-dns-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production-public-smoke
+    env:
+      MARKIRO_DOMAIN: ${{ vars.MARKIRO_DOMAIN }}
+      RELEASE_SHA: ${{ inputs.release_sha }}
+      RELEASE_RUN_ID: ${{ inputs.release_run_id }}
+      DEPLOYMENT_RUN_ID: ${{ inputs.deployment_run_id }}
+      DNS_APPLY_RUN_ID: ${{ inputs.dns_apply_run_id }}
+      DNS_CONVERGENCE_EVIDENCE_ID: ${{ inputs.dns_convergence_evidence_id }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.release_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Validate current main, finalized release, approved DNS apply, and convergence evidence reference
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RELEASE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$DEPLOYMENT_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$DNS_APPLY_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$DNS_CONVERGENCE_EVIDENCE_ID" =~ ^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$ ]]
+          [[ "$(git rev-parse HEAD)" == "$RELEASE_SHA" ]]
+          main_ref_path="$RUNNER_TEMP/main-ref.json"
+          deployment_run_path="$RUNNER_TEMP/deployment-run.json"
+          dns_run_path="$RUNNER_TEMP/dns-run.json"
+          curl --fail --silent \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer $GITHUB_TOKEN" \
+            --header "X-GitHub-Api-Version: 2026-03-10" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/git/ref/heads/main" \
+            --output "$main_ref_path"
+          jq -e --arg release_sha "$RELEASE_SHA" '.object.sha == $release_sha' "$main_ref_path" > /dev/null
+          curl --fail --silent \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer $GITHUB_TOKEN" \
+            --header "X-GitHub-Api-Version: 2026-03-10" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$DEPLOYMENT_RUN_ID" \
+            --output "$deployment_run_path"
+          jq -e \
+            --arg release_sha "$RELEASE_SHA" '
+              .name == "Deploy production" and
+              .path == ".github/workflows/deploy-production.yml" and
+              .event == "workflow_dispatch" and
+              .head_branch == "main" and
+              .head_sha == $release_sha and
+              .conclusion == "success"
+            ' "$deployment_run_path" > /dev/null
+          curl --fail --silent \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer $GITHUB_TOKEN" \
+            --header "X-GitHub-Api-Version: 2026-03-10" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$DNS_APPLY_RUN_ID" \
+            --output "$dns_run_path"
+          jq -e \
+            --arg release_sha "$RELEASE_SHA" '
+              .name == "Yandex infrastructure" and
+              .path == ".github/workflows/yandex-infrastructure.yml" and
+              .event == "workflow_dispatch" and
+              .head_branch == "main" and
+              .head_sha == $release_sha and
+              .conclusion == "success"
+            ' "$dns_run_path" > /dev/null
+          rm -f "$main_ref_path" "$deployment_run_path" "$dns_run_path"
+      - name: Download exact finalized release evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: markiro-finalized-release-${{ inputs.release_sha }}
+          path: ${{ runner.temp }}/finalized-release
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.deployment_run_id }}
+      - name: Download exact approved public DNS apply evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: yandex-public-dns-apply-${{ inputs.release_sha }}
+          path: ${{ runner.temp }}/dns-apply
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.dns_apply_run_id }}
+      - name: Run the full non-mutating public route smoke
+        env:
+          FINALIZED_RELEASE_PATH: ${{ runner.temp }}/finalized-release/finalized-release.json
+          DNS_APPLY_RECEIPT_PATH: ${{ runner.temp }}/dns-apply/public-dns-apply.json
+          SMOKE_RECEIPT_PATH: ${{ runner.temp }}/post-dns-smoke.json
+        run: node deploy/yandex/post-dns-smoke.mjs run
+      - name: Upload post-DNS smoke evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.2
+        with:
+          name: markiro-post-dns-smoke-${{ inputs.release_sha }}
+          path: ${{ runner.temp }}/post-dns-smoke.json
+          retention-days: 90
+          if-no-files-found: error
+      - name: Remove local evidence material
+        if: always()
+        run: |
+          set -euo pipefail
+          rm -rf -- "${RUNNER_TEMP:?}/finalized-release"
+          rm -rf -- "${RUNNER_TEMP:?}/dns-apply"
+          rm -f -- "${RUNNER_TEMP:?}/main-ref.json" "${RUNNER_TEMP:?}/deployment-run.json"
+          rm -f -- "${RUNNER_TEMP:?}/dns-run.json" "${RUNNER_TEMP:?}/post-dns-smoke.json"
