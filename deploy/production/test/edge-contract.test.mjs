@@ -246,3 +246,38 @@ test("production edge preserves its image and routing contract", async () => {
   assert.match(caddy, /Cache-Control "public, max-age=31536000, immutable"/);
   assert.match(caddy, /Cache-Control "no-cache"/);
 });
+
+test("ALB mode keeps route parity but owns no certificate", async () => {
+  const direct = await readFile("deploy/production/Caddyfile", "utf8");
+  const alb = await readFile("deploy/production/Caddyfile.alb", "utf8");
+  for (const marker of [
+    "@apiAuth path /api/auth/*",
+    "handle_path /api/*",
+    "@commerceMl path /1c_exchange",
+    "@device path /station/* /kiosk/* /health /health/* /openapi.json /docs /docs/*",
+    "@assets path /assets/*",
+    "@spa method GET HEAD",
+  ]) {
+    assert.ok(direct.includes(marker));
+    assert.ok(alb.includes(marker));
+  }
+  assert.match(alb, /http:\/\/\{\$MARKIRO_DOMAIN\}:8080/);
+  assert.doesNotMatch(alb, /https:\/\/|ACME_EMAIL|redir https/);
+  assert.match(alb, /header_up X-Forwarded-Proto https/);
+});
+
+test("edge runtime selects a fixed direct or ALB Caddyfile without dynamic evaluation", async () => {
+  const dockerfile = await readFile("deploy/production/edge.Dockerfile", "utf8");
+  const entrypoint = await readFile("deploy/production/edge-entrypoint.sh", "utf8");
+
+  assert.match(dockerfile, /COPY deploy\/production\/Caddyfile \/etc\/caddy\/Caddyfile\.direct/);
+  assert.match(dockerfile, /COPY deploy\/production\/Caddyfile\.alb \/etc\/caddy\/Caddyfile\.alb/);
+  assert.match(dockerfile, /COPY deploy\/production\/edge-entrypoint\.sh \/usr\/bin\/edge-entrypoint/);
+  assert.match(dockerfile, /ENTRYPOINT \["\/usr\/bin\/edge-entrypoint"\]/);
+  assert.match(entrypoint, /direct\)/);
+  assert.match(entrypoint, /behind-alb\)/);
+  assert.match(entrypoint, /config=\/etc\/caddy\/Caddyfile\.direct/);
+  assert.match(entrypoint, /config=\/etc\/caddy\/Caddyfile\.alb/);
+  assert.match(entrypoint, /exec caddy run --config "\$config" --adapter caddyfile/);
+  assert.doesNotMatch(entrypoint, /\beval\b|\$\(|`/);
+});

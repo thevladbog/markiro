@@ -28,6 +28,13 @@ test("uses the configured HTTPS port for production-bundle smoke", () => {
   assert.equal(productionBaseUrl({ MARKIRO_DOMAIN: "markiro.example" }), "https://markiro.example");
 });
 
+test("keeps the public route table HTTPS-facing when ALB terminates TLS", () => {
+  assert.equal(
+    productionBaseUrl({ MARKIRO_DOMAIN: "markiro.example", MARKIRO_EDGE_MODE: "behind-alb" }),
+    "https://markiro.example",
+  );
+});
+
 function response({ status = 200, body = "{}", headers = {} } = {}) {
   return {
     status,

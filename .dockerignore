@@ -24,6 +24,8 @@
 !deploy/
 !deploy/production/
 !deploy/production/Caddyfile
+!deploy/production/Caddyfile.alb
+!deploy/production/edge-entrypoint.sh
 !deploy/production/healthcheck.mjs
 
 .git

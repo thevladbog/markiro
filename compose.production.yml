@@ -51,7 +51,8 @@ services:
     restart: unless-stopped
     environment:
       MARKIRO_DOMAIN: ${MARKIRO_DOMAIN:?MARKIRO_DOMAIN is required}
-      ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL is required}
+      MARKIRO_EDGE_MODE: direct
+      ACME_EMAIL: ${ACME_EMAIL:-}
     depends_on:
       api:
         condition: service_healthy
