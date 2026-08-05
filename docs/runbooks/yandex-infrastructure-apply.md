@@ -68,6 +68,7 @@ target_sha=current_main_sha
 enable_public_dns=false
 postgres_provisioning_phase=cluster
 postgres_owner_change_reference=none
+observability_phase=first
 ```
 
 4. Approve and apply that exact cluster plan. Create the owner named exactly as
@@ -88,6 +89,7 @@ target_sha=current_main_sha
 enable_public_dns=false
 postgres_provisioning_phase=database
 postgres_owner_change_reference=protected_change_record_id
+observability_phase=first
 ```
 
 6. Approve the `production-postgres-owner` job only after independently
@@ -98,9 +100,15 @@ postgres_owner_change_reference=protected_change_record_id
    contents.
 7. For a clean environment, first dispatch a full-root plan with
    `observability_phase=first`. The workflow deliberately unsets the notification
-   channel and alert IDs, so no fabricated placeholders enter Terraform. Apply
-   that saved plan and export only `module.observability.alert_specs` through the
-   protected review path. Create all 16 Monitoring alerts manually from those
+   channel and alert IDs, so no fabricated placeholders enter Terraform. Apply that saved plan.
+   On successful apply, download the protected
+   `yandex-alert-specs-<commit>-<run>-<attempt>` artifact and inspect its single
+   `alert-specs.json` file. Its schema contains only `alert_specs` and binding
+   metadata: `commit_sha`, `evidence_sha256`, `github_run_id`,
+   `github_run_attempt`, `observability_phase=first`, and `plan_sha256`. Match all
+   binding values to the reviewed apply evidence before using the specifications;
+   the workflow rejects extra fields and never uploads raw Terraform event output
+   or any other root output. Create all 16 Monitoring alerts manually from those
    specs; provider `0.215.0` cannot mutate alerts. Run the pre-go-live live metric
    inventory and query check, including `sys.memory.used_percent`,
    `sys.filesystem.used_percent`, and `markiro.readiness.required_unavailable`.

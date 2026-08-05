@@ -128,8 +128,15 @@ The bootstrap root is applied only by the protected operator. It creates the
 service accounts and grants the exact service-specific roles needed by the
 workload-federated Terraform identity, plus the Audit Trails collection,
 destination logging, and KMS permissions. Terraform receives no primitive
-`editor` or `admin` role. The separate deployment-controller identity is the
-only production GitHub OIDC subject and is limited to runner control and the
-read-only Compute, ALB, and PostgreSQL deployment gates. Record the resulting
+`editor` or `admin` role. The `production-controller` and `production-cleanup`
+GitHub OIDC subjects map only to the separate deployment-controller identity,
+which is limited to runner control and the read-only Compute, ALB, and PostgreSQL
+deployment gates. The `production-infrastructure` OIDC subject maps to the
+Terraform service account. Existing resource-scoped
+`iam.serviceAccounts.user` bindings authorize it to read the app, runner, and
+audit accounts; exact resource-scoped `viewer` bindings authorize only the
+controller and Terraform accounts. Together they allow the workflow to verify
+the five IDs, bootstrap names, folder, and `ACTIVE` status before production
+plans and applies without folder-wide IAM visibility. Record the resulting
 `deployment_controller` service-account ID and `audit_log_group_id` in the
 protected GitHub environment variables before any production plan.

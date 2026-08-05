@@ -414,6 +414,22 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, productionResources
     iam,
     /terraform_folder_roles\s*=\s*toset\(values\(local\.terraform_production_action_roles\)\)/,
   );
+  const terraformServiceAccountViewer = terraformResourceBlock(
+    iam,
+    "yandex_iam_service_account_iam_member",
+    "terraform_service_account_viewer",
+  );
+  assert.match(
+    terraformServiceAccountViewer,
+    /for_each\s*=\s*toset\(\[\s*yandex_iam_service_account\.deployment_controller\.id,\s*yandex_iam_service_account\.terraform\.id,?\s*\]\)/,
+  );
+  assert.match(terraformServiceAccountViewer, /service_account_id\s*=\s*each\.value/);
+  assert.match(terraformServiceAccountViewer, /role\s*=\s*"viewer"/);
+  assert.match(
+    terraformServiceAccountViewer,
+    /member\s*=\s*"serviceAccount:\$\{yandex_iam_service_account\.terraform\.id\}"/,
+  );
+  assert.doesNotMatch(iam, /folder_iam_member"\s+"terraform_iam_viewer"/);
   assert.doesNotMatch(iam, /"(?:alb|vpc)\.admin"/);
 
   const encryptedResources = productionResources
@@ -1629,6 +1645,13 @@ function assertProtectedInfrastructureWorkflow(source) {
   assert.equal(dispatchInputs.enable_public_dns.type, "boolean");
   assert.equal(dispatchInputs.enable_public_dns.default, false);
   assert.equal(dispatchInputs.enable_public_dns.required, true);
+  assert.deepEqual(dispatchInputs.observability_phase, {
+    description: "First provisioning emits alert specs; protected binds reviewed console alert IDs",
+    required: true,
+    type: "choice",
+    default: "protected",
+    options: ["first", "protected"],
+  });
   assert.deepEqual(dispatchInputs.postgres_provisioning_phase, {
     description: "Create only the required first-provisioning PostgreSQL boundary",
     required: true,
@@ -1726,6 +1749,13 @@ function assertProtectedInfrastructureWorkflow(source) {
   assert.match(planCommands, /https:\/\/auth\.yandex\.cloud\/oauth\/token/);
   assert.match(
     planCommands,
+    /node infra\/yandex\/scripts\/verify-service-account-provenance\.mjs fetch > "\$identity_path"/,
+  );
+  assert.match(planCommands, /service_account_provenance_sha256/);
+  assert.match(planCommands, /sha256sum "\$identity_path"/);
+  assert.match(planCommands, /chmod 600 "\$identity_path"/);
+  assert.match(
+    planCommands,
     /https:\/\/payload\.lockbox\.api\.cloud\.yandex\.net\/lockbox\/v1\/secrets/,
   );
   assert.match(planCommands, /entries \| type == "array" and length == 2/);
@@ -1780,6 +1810,7 @@ function assertProtectedInfrastructureWorkflow(source) {
     [
       'rm -rf -- "${RUNNER_TEMP:?}/yandex-infrastructure-plan"',
       'rm -rf -- "${RUNNER_TEMP:?}/yandex-production-terraform-data"',
+      'rm -rf -- "${RUNNER_TEMP:?}/yandex-alert-specs"',
     ],
   );
   assert.doesNotMatch(finalApplyCleanupStep.run, /\bunset\b/);
@@ -1803,6 +1834,42 @@ function assertProtectedInfrastructureWorkflow(source) {
   assert.match(applyCommands, /evidence_github_run_id/);
   assert.match(applyCommands, /evidence_github_run_attempt/);
   assert.match(applyCommands, /evidence_postgres_owner_approval_result/);
+  assert.match(applyCommands, /evidence_service_account_provenance_sha256/);
+  assert.match(
+    applyCommands,
+    /\[\[ "\$\(sha256sum "\$identity_path" \| cut -d' ' -f1\)" == "\$evidence_service_account_provenance_sha256" \]\]/,
+  );
+  assert.match(
+    applyCommands,
+    /node infra\/yandex\/scripts\/verify-service-account-provenance\.mjs validate < "\$identity_path" > \/dev\/null/,
+  );
+  assert.match(
+    applyCommands,
+    /node infra\/yandex\/scripts\/verify-service-account-provenance\.mjs fetch > "\$fresh_identity_path"/,
+  );
+  assert.match(applyCommands, /cmp --silent "\$identity_path" "\$fresh_identity_path"/);
+  assert.ok(
+    applyCommands.indexOf("verify-service-account-provenance.mjs fetch") <
+      applyCommands.indexOf("terraform -chdir=infra/yandex/production apply"),
+    "fresh IAM provenance must be checked before saved-plan apply",
+  );
+  assert.match(
+    applyCommands,
+    /terraform -chdir=infra\/yandex\/production apply -json -input=false "\$plan_path" 2>\/dev\/null \|\s+node infra\/yandex\/scripts\/extract-alert-specs\.mjs extract > "\$alert_artifact"/,
+  );
+  assert.match(
+    applyCommands,
+    /terraform -chdir=infra\/yandex\/production apply -json -input=false "\$plan_path" > \/dev\/null/,
+  );
+  assert.doesNotMatch(applyCommands, /terraform[^\n]*apply[^\n]*\$plan_path"\s*$/m);
+
+  const alertUploadStep = apply.steps.find(
+    (step) => step.name === "Upload exact first-phase alert specifications",
+  );
+  assert.ok(alertUploadStep);
+  assert.equal(alertUploadStep.if, "inputs.observability_phase == 'first'");
+  assert.equal(alertUploadStep.with.path, "${{ runner.temp }}/yandex-alert-specs/alert-specs.json");
+  assert.equal(alertUploadStep.with["if-no-files-found"], "error");
 
   const allCommands = [validateCommands, planCommands, applyCommands].join("\n");
   assert.doesNotMatch(allCommands, /pull_request_target/);
@@ -1826,6 +1893,7 @@ function assertProtectedInfrastructureWorkflow(source) {
       'rm -rf -- "${RUNNER_TEMP:?}/yandex-infrastructure-plan"',
       'rm -rf -- "${RUNNER_TEMP:?}/yandex-infrastructure-plan"',
       'rm -rf -- "${RUNNER_TEMP:?}/yandex-production-terraform-data"',
+      'rm -rf -- "${RUNNER_TEMP:?}/yandex-alert-specs"',
     ],
     "recursive cleanup must stay confined to exact runner-temporary directories",
   );
@@ -1904,6 +1972,38 @@ test("infrastructure workflow contract rejects security-boundary mutations", asy
       ),
     ],
     ["missing cleanup", source.replace("trap cleanup EXIT\n", "", 1)],
+    [
+      "missing plan IAM provenance",
+      source.replace(
+        'node infra/yandex/scripts/verify-service-account-provenance.mjs fetch > "$identity_path"\n',
+        "",
+      ),
+    ],
+    [
+      "missing fresh apply IAM provenance comparison",
+      source.replace('cmp --silent "$identity_path" "$fresh_identity_path"\n', ""),
+    ],
+    [
+      "tampered plan IAM provenance evidence",
+      source.replace(
+        '[[ "$(sha256sum "$identity_path" | cut -d\' \' -f1)" == "$evidence_service_account_provenance_sha256" ]]\n',
+        "",
+      ),
+    ],
+    [
+      "raw Terraform apply output",
+      source.replace(
+        'terraform -chdir=infra/yandex/production apply -json -input=false "$plan_path" > /dev/null',
+        'terraform -chdir=infra/yandex/production apply -input=false "$plan_path"',
+      ),
+    ],
+    [
+      "broad alert artifact upload",
+      source.replace(
+        "${{ runner.temp }}/yandex-alert-specs/alert-specs.json",
+        "${{ runner.temp }}/yandex-alert-specs",
+      ),
+    ],
     [
       "missing TF_DATA_DIR removal",
       mutateWorkflowSource(source, (workflow) => {

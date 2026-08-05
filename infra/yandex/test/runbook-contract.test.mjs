@@ -119,6 +119,15 @@ function markerProcedure(source, marker) {
 }
 
 const markerProcedures = {
+  "docs/runbooks/yandex-infrastructure-apply.md": {
+    "infrastructure-approved-apply": [
+      "postgres_provisioning_phase=cluster\npostgres_owner_change_reference=none\nobservability_phase=first",
+      "Create the owner",
+      "postgres_provisioning_phase=database\npostgres_owner_change_reference=protected_change_record_id\nobservability_phase=first",
+      "yandex-alert-specs-",
+      "observability_phase=protected",
+    ],
+  },
   "docs/runbooks/yandex-secrets.md": {
     "secrets-inventory": [
       "protected change record",
@@ -232,21 +241,38 @@ function assertRunbookContract({ documents, verifier, workflow, dnsWorkflow, pos
     "enable_public_dns=false",
     "postgres_provisioning_phase=cluster",
     "postgres_owner_change_reference=none",
+    "observability_phase=first",
     "postgres_provisioning_phase=database",
     "postgres_owner_change_reference=protected_change_record_id",
   ]) {
     assert.match(infrastructure, new RegExp(input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
   ordered(
-    infrastructure,
+    markerProcedure(infrastructure, "infrastructure-approved-apply"),
     [
       "postgres_provisioning_phase=cluster\npostgres_owner_change_reference=none",
+      "observability_phase=first",
       "Create the owner",
       "runtime Lockbox",
-      "postgres_owner_change_reference=protected_change_record_id",
+      "postgres_provisioning_phase=database\npostgres_owner_change_reference=protected_change_record_id\nobservability_phase=first",
     ],
     "two-phase PostgreSQL procedure",
   );
+  ordered(
+    markerProcedure(infrastructure, "infrastructure-approved-apply"),
+    [
+      "observability_phase=first",
+      "Apply that saved plan",
+      "yandex-alert-specs-",
+      "alert-specs.json",
+      "commit_sha",
+      "evidence_sha256",
+      "plan_sha256",
+      "observability_phase=protected",
+    ],
+    "first-phase alert specification evidence handoff",
+  );
+  assert.match(infrastructure, /contains only `alert_specs` and\s+binding\s+metadata/i);
   for (const workflowInterface of [
     "postgres_provisioning_phase:",
     "postgres_owner_change_reference:",

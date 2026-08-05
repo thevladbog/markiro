@@ -14,7 +14,7 @@ check "workload_service_account_ids_are_distinct" {
       var.deployment_controller_service_account_id,
       var.audit_service_account_id,
       var.terraform_service_account_id,
-    ])) == 5 && alltrue([
+      ])) == 5 && alltrue([
       for identity in [
         var.app_service_account_id,
         var.runner_service_account_id,

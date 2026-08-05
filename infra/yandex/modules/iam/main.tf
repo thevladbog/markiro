@@ -175,6 +175,20 @@ resource "yandex_iam_service_account_iam_member" "terraform_service_account_user
   member             = "serviceAccount:${yandex_iam_service_account.terraform.id}"
 }
 
+# iam.serviceAccounts.user already authorizes ServiceAccount.Get for app,
+# runner, and audit. These resource-scoped viewer bindings complete the exact
+# five-identity provenance check without exposing every account in the folder.
+resource "yandex_iam_service_account_iam_member" "terraform_service_account_viewer" {
+  for_each = toset([
+    yandex_iam_service_account.deployment_controller.id,
+    yandex_iam_service_account.terraform.id,
+  ])
+
+  service_account_id = each.value
+  role               = "viewer"
+  member             = "serviceAccount:${yandex_iam_service_account.terraform.id}"
+}
+
 resource "yandex_resourcemanager_folder_iam_member" "deployment_controller_alb_viewer" {
   folder_id = var.folder_id
   role      = "alb.viewer"
