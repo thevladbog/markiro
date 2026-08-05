@@ -13,7 +13,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test:production-bundle:contract": "node --test deploy/production/test/*.test.mjs",
-    "test:production-docs:browser": "pnpm --dir tools/production-browser --ignore-workspace test"
+    "test:production-docs:browser": "pnpm --dir tools/production-browser --ignore-workspace test",
+    "test:yandex-infra:contract": "node --test infra/yandex/test/*.test.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

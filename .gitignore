@@ -12,3 +12,12 @@ deploy/production/.caddy-config/
 
 # Sibling agent worktrees (also in .prettierignore)
 .worktrees/
+
+# Local Terraform artifacts; examples and dependency locks remain committed.
+.terraform/
+*.tfstate*
+*.tfplan
+*.auto.tfvars
+backend.hcl
+!.terraform.lock.hcl
+!*.example
