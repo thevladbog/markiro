@@ -19,8 +19,8 @@ name: Post-DNS production smoke
         description: Successful approved Yandex infrastructure DNS apply workflow run ID
         required: true
         type: string
-      dns_convergence_evidence_id:
-        description: Protected non-secret evidence reference from the DNS convergence verifier
+      dns_verifier_run_id:
+        description: Successful protected DNS convergence verification workflow run ID
         required: true
         type: string
 
@@ -29,7 +29,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: markiro-production-post-dns-smoke
+  group: markiro-production-deployment
   cancel-in-progress: false
 
 jobs:
@@ -43,14 +43,15 @@ jobs:
       RELEASE_RUN_ID: ${{ inputs.release_run_id }}
       DEPLOYMENT_RUN_ID: ${{ inputs.deployment_run_id }}
       DNS_APPLY_RUN_ID: ${{ inputs.dns_apply_run_id }}
-      DNS_CONVERGENCE_EVIDENCE_ID: ${{ inputs.dns_convergence_evidence_id }}
+      DNS_VERIFIER_RUN_ID: ${{ inputs.dns_verifier_run_id }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ inputs.release_sha }}
           fetch-depth: 1
           persist-credentials: false
-      - name: Validate current main, finalized release, approved DNS apply, and convergence evidence reference
+      - name: Validate current main, finalized release, DNS apply, and convergence provenance
+        id: provenance
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -59,11 +60,16 @@ jobs:
           [[ "$RELEASE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           [[ "$DEPLOYMENT_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           [[ "$DNS_APPLY_RUN_ID" =~ ^[1-9][0-9]*$ ]]
-          [[ "$DNS_CONVERGENCE_EVIDENCE_ID" =~ ^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$ ]]
+          [[ "$DNS_VERIFIER_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$GITHUB_REF" == "refs/heads/main" ]]
+          [[ "$GITHUB_SHA" == "$RELEASE_SHA" ]]
           [[ "$(git rev-parse HEAD)" == "$RELEASE_SHA" ]]
           main_ref_path="$RUNNER_TEMP/main-ref.json"
           deployment_run_path="$RUNNER_TEMP/deployment-run.json"
           dns_run_path="$RUNNER_TEMP/dns-run.json"
+          verifier_run_path="$RUNNER_TEMP/verifier-run.json"
+          dns_artifact_path="$RUNNER_TEMP/dns-artifact.json"
+          convergence_artifact_path="$RUNNER_TEMP/convergence-artifact.json"
           curl --fail --silent \
             --header "Accept: application/vnd.github+json" \
             --header "Authorization: Bearer $GITHUB_TOKEN" \
@@ -77,31 +83,72 @@ jobs:
             --header "X-GitHub-Api-Version: 2026-03-10" \
             "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$DEPLOYMENT_RUN_ID" \
             --output "$deployment_run_path"
-          jq -e \
-            --arg release_sha "$RELEASE_SHA" '
-              .name == "Deploy production" and
-              .path == ".github/workflows/deploy-production.yml" and
-              .event == "workflow_dispatch" and
-              .head_branch == "main" and
-              .head_sha == $release_sha and
-              .conclusion == "success"
-            ' "$deployment_run_path" > /dev/null
+          jq -e --arg release_sha "$RELEASE_SHA" '
+            .name == "Deploy production" and
+            .path == ".github/workflows/deploy-production.yml" and
+            .event == "workflow_dispatch" and
+            .head_branch == "main" and
+            .head_sha == $release_sha and
+            .conclusion == "success"
+          ' "$deployment_run_path" > /dev/null
           curl --fail --silent \
             --header "Accept: application/vnd.github+json" \
             --header "Authorization: Bearer $GITHUB_TOKEN" \
             --header "X-GitHub-Api-Version: 2026-03-10" \
             "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$DNS_APPLY_RUN_ID" \
             --output "$dns_run_path"
-          jq -e \
-            --arg release_sha "$RELEASE_SHA" '
-              .name == "Yandex infrastructure" and
-              .path == ".github/workflows/yandex-infrastructure.yml" and
-              .event == "workflow_dispatch" and
-              .head_branch == "main" and
-              .head_sha == $release_sha and
-              .conclusion == "success"
-            ' "$dns_run_path" > /dev/null
-          rm -f "$main_ref_path" "$deployment_run_path" "$dns_run_path"
+          jq -e --arg release_sha "$RELEASE_SHA" '
+            .name == "Yandex infrastructure" and
+            .path == ".github/workflows/yandex-infrastructure.yml" and
+            .event == "workflow_dispatch" and
+            .head_branch == "main" and
+            .head_sha == $release_sha and
+            .conclusion == "success"
+          ' "$dns_run_path" > /dev/null
+          curl --fail --silent \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer $GITHUB_TOKEN" \
+            --header "X-GitHub-Api-Version: 2026-03-10" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$DNS_VERIFIER_RUN_ID" \
+            --output "$verifier_run_path"
+          jq -e --arg release_sha "$RELEASE_SHA" '
+            .name == "DNS convergence verification" and
+            .path == ".github/workflows/yandex-dns-convergence.yml" and
+            .event == "workflow_dispatch" and
+            .head_branch == "main" and
+            .head_sha == $release_sha and
+            .conclusion == "success"
+          ' "$verifier_run_path" > /dev/null
+          dns_artifact_name="yandex-public-dns-apply-$RELEASE_SHA"
+          curl --fail --silent \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer $GITHUB_TOKEN" \
+            --header "X-GitHub-Api-Version: 2026-03-10" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$DNS_APPLY_RUN_ID/artifacts?name=$dns_artifact_name" \
+            --output "$dns_artifact_path"
+          convergence_artifact_name="markiro-dns-convergence-$RELEASE_SHA"
+          curl --fail --silent \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer $GITHUB_TOKEN" \
+            --header "X-GitHub-Api-Version: 2026-03-10" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$DNS_VERIFIER_RUN_ID/artifacts?name=$convergence_artifact_name" \
+            --output "$convergence_artifact_path"
+          for artifact_spec in \
+            "$dns_artifact_path:$dns_artifact_name:dns-apply-artifact-digest" \
+            "$convergence_artifact_path:$convergence_artifact_name:dns-convergence-artifact-digest"; do
+            IFS=: read -r artifact_path artifact_name output_name <<< "$artifact_spec"
+            jq -e --arg name "$artifact_name" '
+              .total_count == 1 and
+              (.artifacts | length) == 1 and
+              .artifacts[0].name == $name and
+              .artifacts[0].expired == false
+            ' "$artifact_path" > /dev/null
+            artifact_digest="$(jq -er '.artifacts[0].digest' "$artifact_path")"
+            [[ "$artifact_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            printf '%s=%s\n' "$output_name" "$artifact_digest" >> "$GITHUB_OUTPUT"
+          done
+          rm -f "$main_ref_path" "$deployment_run_path" "$dns_run_path" "$verifier_run_path"
+          rm -f "$dns_artifact_path" "$convergence_artifact_path"
       - name: Download exact finalized release evidence
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -118,14 +165,26 @@ jobs:
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
           run-id: ${{ inputs.dns_apply_run_id }}
+      - name: Download exact authenticated DNS convergence evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: markiro-dns-convergence-${{ inputs.release_sha }}
+          path: ${{ runner.temp }}/dns-convergence
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.dns_verifier_run_id }}
       - name: Run the full non-mutating public route smoke
         env:
+          GITHUB_TOKEN: ${{ github.token }}
+          DNS_APPLY_ARTIFACT_DIGEST: ${{ steps.provenance.outputs.dns-apply-artifact-digest }}
+          DNS_CONVERGENCE_ARTIFACT_DIGEST: ${{ steps.provenance.outputs.dns-convergence-artifact-digest }}
           FINALIZED_RELEASE_PATH: ${{ runner.temp }}/finalized-release/finalized-release.json
           DNS_APPLY_RECEIPT_PATH: ${{ runner.temp }}/dns-apply/public-dns-apply.json
+          DNS_CONVERGENCE_RECEIPT_PATH: ${{ runner.temp }}/dns-convergence/dns-convergence.json
           SMOKE_RECEIPT_PATH: ${{ runner.temp }}/post-dns-smoke.json
         run: node deploy/yandex/post-dns-smoke.mjs run
       - name: Upload post-DNS smoke evidence
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: markiro-post-dns-smoke-${{ inputs.release_sha }}
           path: ${{ runner.temp }}/post-dns-smoke.json
@@ -136,6 +195,8 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf -- "${RUNNER_TEMP:?}/finalized-release"
-          rm -rf -- "${RUNNER_TEMP:?}/dns-apply"
+          rm -rf -- "${RUNNER_TEMP:?}/dns-apply" "${RUNNER_TEMP:?}/dns-convergence"
           rm -f -- "${RUNNER_TEMP:?}/main-ref.json" "${RUNNER_TEMP:?}/deployment-run.json"
-          rm -f -- "${RUNNER_TEMP:?}/dns-run.json" "${RUNNER_TEMP:?}/post-dns-smoke.json"
+          rm -f -- "${RUNNER_TEMP:?}/dns-run.json" "${RUNNER_TEMP:?}/verifier-run.json"
+          rm -f -- "${RUNNER_TEMP:?}/dns-artifact.json" "${RUNNER_TEMP:?}/convergence-artifact.json"
+          rm -f -- "${RUNNER_TEMP:?}/post-dns-smoke.json"

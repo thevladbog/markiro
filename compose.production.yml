@@ -51,6 +51,7 @@ services:
     restart: unless-stopped
     environment:
       MARKIRO_DOMAIN: ${MARKIRO_DOMAIN:?MARKIRO_DOMAIN is required}
+      MARKIRO_RELEASE_SHA: ${MARKIRO_IMAGE_TAG:?MARKIRO_IMAGE_TAG is required}
       MARKIRO_EDGE_MODE: direct
       ACME_EMAIL: ${ACME_EMAIL:-}
     depends_on:

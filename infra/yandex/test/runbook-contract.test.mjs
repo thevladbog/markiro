@@ -84,6 +84,7 @@ async function sources() {
     documents: Object.fromEntries(documents),
     verifier: await contents("deploy/production/verify-dns.mjs"),
     workflow: await contents(".github/workflows/yandex-infrastructure.yml"),
+    dnsWorkflow: await contents(".github/workflows/yandex-dns-convergence.yml"),
     postDnsWorkflow: await contents(".github/workflows/yandex-post-dns-smoke.yml"),
   };
 }
@@ -189,7 +190,7 @@ const markerProcedures = {
   },
 };
 
-function assertRunbookContract({ documents, verifier, workflow, postDnsWorkflow }) {
+function assertRunbookContract({ documents, verifier, workflow, dnsWorkflow, postDnsWorkflow }) {
   for (const [runbook, markers] of Object.entries(runbooks)) {
     const source = documents[runbook];
     markersAppearInOrder(source, markers);
@@ -285,24 +286,48 @@ function assertRunbookContract({ documents, verifier, workflow, postDnsWorkflow 
   ordered(
     goLive.slice(publicDns),
     [
-      "node deploy/production/verify-dns.mjs",
-      "production-public-smoke",
+      "production-dns-convergence",
+      "DNS convergence verification",
       "release_sha=<current-main-40-character-sha>",
+      "dns_apply_run_id=<successful-approved-dns-apply-run-id>",
+      "production-public-smoke",
       "release_run_id=<publish-production-images-run-id>",
       "deployment_run_id=<successful-first-deployment-run-id>",
-      "dns_apply_run_id=<successful-approved-dns-apply-run-id>",
-      "dns_convergence_evidence_id=<protected-non-secret-evidence-id>",
+      "dns_verifier_run_id=<successful-dns-convergence-run-id>",
       "Post-DNS production smoke",
     ],
     "post-DNS public smoke dispatch",
   );
+  assert.equal(
+    goLive.match(/release_sha=<current-main-40-character-sha>/g)?.length,
+    2,
+    "both protected dispatches must bind the exact release SHA",
+  );
+  assert.equal(
+    goLive.match(/dns_apply_run_id=<successful-approved-dns-apply-run-id>/g)?.length,
+    2,
+    "both protected dispatches must bind the exact DNS-apply run",
+  );
+  assert.match(dnsWorkflow, /environment:\s*production-dns-convergence/);
+  assert.match(dnsWorkflow, /node deploy\/yandex\/dns-convergence\.mjs run/);
   assert.match(postDnsWorkflow, /environment:\s*production-public-smoke/);
   assert.match(postDnsWorkflow, /node deploy\/yandex\/post-dns-smoke\.mjs run/);
   assert.doesNotMatch(postDnsWorkflow, /remote-deploy|deploy[.]mjs|\bmigrate\b|\bdocker\b/i);
+  assert.match(
+    goLive,
+    /receipt proves only TLS, routes, security headers, readiness,\s+documentation, proxy behavior/i,
+  );
+  assert.match(
+    goLive,
+    /SWS[/]ARL and alert-delivery[\s\S]{0,120}separate\s+protected gate records/i,
+  );
+  assert.doesNotMatch(
+    goLive,
+    /confirm the certificate, SWS[/]ARL behavior,[\s\S]{0,160}from the uploaded post-DNS smoke receipt/i,
+  );
   for (const input of verifierInputs) {
     assert.match(verifier, new RegExp(input));
-    assert.match(goLive, new RegExp(`export [^\\n]*\\b${input}\\b`));
-    assert.match(goLive, new RegExp(`unset [^\\n]*\\b${input}\\b`));
+    assert.match(dnsWorkflow, new RegExp(input));
   }
 }
 
@@ -324,9 +349,7 @@ test("runbook contract rejects every unsafe command and missing DNS verifier inp
 
   for (const input of verifierInputs) {
     const mutated = structuredClone(current);
-    mutated.documents["docs/runbooks/yandex-first-go-live.md"] = mutated.documents[
-      "docs/runbooks/yandex-first-go-live.md"
-    ].replaceAll(input, `REMOVED_${input}`);
+    mutated.dnsWorkflow = mutated.dnsWorkflow.replaceAll(input, "REMOVED_INPUT");
     assert.throws(() => assertRunbookContract(mutated), input);
   }
 

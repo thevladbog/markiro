@@ -716,6 +716,7 @@ function assertPostDnsSmokeWorkflow(
   postDnsSource,
   deploymentSource,
   infrastructureSource,
+  convergenceSource,
   scriptSource,
 ) {
   const workflow = parseWorkflow(postDnsSource, "post-DNS smoke workflow");
@@ -723,20 +724,21 @@ function assertPostDnsSmokeWorkflow(
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), [
     "deployment_run_id",
     "dns_apply_run_id",
-    "dns_convergence_evidence_id",
+    "dns_verifier_run_id",
     "release_run_id",
     "release_sha",
   ]);
   assert.deepEqual(workflow.permissions, { actions: "read", contents: "read" });
-  assert.equal(workflow.concurrency.group, "markiro-production-post-dns-smoke");
+  assert.equal(workflow.concurrency.group, "markiro-production-deployment");
   assert.equal(workflow.concurrency["cancel-in-progress"], false);
   const job = workflow.jobs?.smoke;
   assert.equal(job.environment, "production-public-smoke");
   assert.equal(job["runs-on"], "ubuntu-latest");
   assert.deepEqual(job.steps.map((step) => step.name).filter(Boolean), [
-    "Validate current main, finalized release, approved DNS apply, and convergence evidence reference",
+    "Validate current main, finalized release, DNS apply, and convergence provenance",
     "Download exact finalized release evidence",
     "Download exact approved public DNS apply evidence",
+    "Download exact authenticated DNS convergence evidence",
     "Run the full non-mutating public route smoke",
     "Upload post-DNS smoke evidence",
     "Remove local evidence material",
@@ -746,14 +748,19 @@ function assertPostDnsSmokeWorkflow(
     .filter(Boolean)
     .join("\n");
   assert.match(commands, /git\/ref\/heads\/main/);
+  assert.match(commands, /GITHUB_REF.*refs\/heads\/main/);
+  assert.match(commands, /GITHUB_SHA.*RELEASE_SHA/);
   assert.match(commands, /\.github\/workflows\/deploy-production\.yml/);
   assert.match(commands, /\.github\/workflows\/yandex-infrastructure\.yml/);
-  assert.match(commands, /DNS_CONVERGENCE_EVIDENCE_ID/);
+  assert.match(commands, /\.github\/workflows\/yandex-dns-convergence\.yml/);
+  assert.match(commands, /artifact-digest/);
   assert.match(commands, /node deploy\/yandex\/post-dns-smoke\.mjs run/);
   assert.match(postDnsSource, /name: markiro-finalized-release-\$\{\{ inputs\.release_sha \}\}/);
   assert.match(postDnsSource, /run-id: \$\{\{ inputs\.deployment_run_id \}\}/);
   assert.match(postDnsSource, /name: yandex-public-dns-apply-\$\{\{ inputs\.release_sha \}\}/);
   assert.match(postDnsSource, /run-id: \$\{\{ inputs\.dns_apply_run_id \}\}/);
+  assert.match(postDnsSource, /name: markiro-dns-convergence-\$\{\{ inputs\.release_sha \}\}/);
+  assert.match(postDnsSource, /run-id: \$\{\{ inputs\.dns_verifier_run_id \}\}/);
   assert.doesNotMatch(
     postDnsSource,
     /remote-deploy|runner-control|deploy[.]mjs|docker|migrate|systemctl|terraform|\byc\b|\bssh\b|curl\s+(?:--request\s+POST|-X\s+POST)/i,
@@ -769,16 +776,84 @@ function assertPostDnsSmokeWorkflow(
     infrastructureSource,
     /name: yandex-public-dns-apply-\$\{\{ inputs\.target_sha \}\}/,
   );
+  assert.match(convergenceSource, /name: markiro-dns-convergence-\$\{\{ inputs\.release_sha \}\}/);
+  assert.match(convergenceSource, /node deploy\/yandex\/dns-convergence\.mjs run/);
   assertPinnedComments(postDnsSource, CHECKOUT, "v4");
   assertPinnedComments(postDnsSource, DOWNLOAD_ARTIFACT, "v8.0.1");
-  assertPinnedComments(postDnsSource, UPLOAD_ARTIFACT, "v4.6.2");
+  assertPinnedComments(postDnsSource, UPLOAD_ARTIFACT, "v7.0.1");
+  assertPinnedComments(deploymentSource, UPLOAD_ARTIFACT, "v7.0.1");
+  assertPinnedComments(infrastructureSource, UPLOAD_ARTIFACT, "v7.0.1");
 }
+
+function assertDnsConvergenceWorkflow(sourceText, infrastructureSource, scriptSource) {
+  const workflow = parseWorkflow(sourceText, "DNS convergence workflow");
+  assert.deepEqual(Object.keys(workflow.on), ["workflow_dispatch"]);
+  assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), [
+    "dns_apply_run_id",
+    "release_sha",
+  ]);
+  assert.deepEqual(workflow.permissions, { actions: "read", contents: "read" });
+  assert.equal(workflow.concurrency.group, "markiro-production-dns-convergence");
+  assert.equal(workflow.concurrency["cancel-in-progress"], false);
+  const job = workflow.jobs?.verify;
+  assert.equal(job.environment, "production-dns-convergence");
+  assert.equal(job["runs-on"], "ubuntu-latest");
+  assert.deepEqual(job.steps.map((step) => step.name).filter(Boolean), [
+    "Authenticate exact DNS apply and current main",
+    "Download exact approved public DNS apply evidence",
+    "Run authoritative and public DNS convergence verifier",
+    "Upload immutable DNS convergence evidence",
+    "Remove local DNS evidence",
+  ]);
+  const commands = job.steps
+    .map((step) => step.run)
+    .filter(Boolean)
+    .join("\n");
+  assert.match(commands, /GITHUB_REF.*refs\/heads\/main/);
+  assert.match(commands, /GITHUB_SHA.*RELEASE_SHA/);
+  assert.match(commands, /git\/ref\/heads\/main/);
+  assert.match(commands, /\.github\/workflows\/yandex-infrastructure\.yml/);
+  assert.match(commands, /artifacts\?name=/);
+  assert.match(commands, /sha256:\[0-9a-f\]\{64\}/);
+  assert.match(commands, /node deploy\/yandex\/dns-convergence\.mjs run/);
+  for (const variable of [
+    "MARKIRO_AUTHORITATIVE_DNS_SERVER",
+    "MARKIRO_PUBLIC_DNS_RESOLVERS",
+    "MARKIRO_APPROVED_DNS_A",
+    "MARKIRO_APPROVED_DNS_AAAA",
+  ])
+    assert.match(sourceText, new RegExp(variable));
+  assert.match(sourceText, /name: yandex-public-dns-apply-\$\{\{ inputs\.release_sha \}\}/);
+  assert.match(sourceText, /run-id: \$\{\{ inputs\.dns_apply_run_id \}\}/);
+  assert.match(sourceText, /name: markiro-dns-convergence-\$\{\{ inputs\.release_sha \}\}/);
+  assert.match(
+    infrastructureSource,
+    /name: yandex-public-dns-apply-\$\{\{ inputs\.target_sha \}\}/,
+  );
+  assert.match(scriptSource, /verifyDnsConvergence/);
+  assert.doesNotMatch(
+    sourceText,
+    /remote-deploy|runner-control|deploy[.]mjs|docker|migrate|systemctl|terraform|\byc\b|\bssh\b|curl\s+(?:--request\s+POST|-X\s+POST)/i,
+  );
+  assertPinnedComments(sourceText, CHECKOUT, "v4");
+  assertPinnedComments(sourceText, DOWNLOAD_ARTIFACT, "v8.0.1");
+  assertPinnedComments(sourceText, UPLOAD_ARTIFACT, "v7.0.1");
+}
+
+test("DNS convergence is a separately protected authenticated verifier workflow", async () => {
+  assertDnsConvergenceWorkflow(
+    await source(".github/workflows/yandex-dns-convergence.yml"),
+    await source(".github/workflows/yandex-infrastructure.yml"),
+    await source("deploy/yandex/dns-convergence.mjs"),
+  );
+});
 
 test("post-DNS public smoke is a protected release-bound non-mutating workflow", async () => {
   assertPostDnsSmokeWorkflow(
     await source(".github/workflows/yandex-post-dns-smoke.yml"),
     await source(".github/workflows/deploy-production.yml"),
     await source(".github/workflows/yandex-infrastructure.yml"),
+    await source(".github/workflows/yandex-dns-convergence.yml"),
     await source("deploy/yandex/post-dns-smoke.mjs"),
   );
 });
@@ -787,15 +862,19 @@ test("post-DNS workflow contract rejects lost approval and redeployment mutation
   const postDns = await source(".github/workflows/yandex-post-dns-smoke.yml");
   const deployment = await source(".github/workflows/deploy-production.yml");
   const infrastructure = await source(".github/workflows/yandex-infrastructure.yml");
+  const convergence = await source(".github/workflows/yandex-dns-convergence.yml");
   const script = await source("deploy/yandex/post-dns-smoke.mjs");
 
   for (const [search, replacement] of [
     ["environment: production-public-smoke", "environment: production"],
+    ["group: markiro-production-deployment", "group: markiro-production-post-dns-smoke"],
     ["node deploy/yandex/post-dns-smoke.mjs run", "node deploy/yandex/remote-deploy.mjs run"],
-    ["run-id: ${{ inputs.dns_apply_run_id }}", "run-id: ${{ inputs.deployment_run_id }}"],
+    ["run-id: ${{ inputs.dns_verifier_run_id }}", "run-id: ${{ inputs.deployment_run_id }}"],
   ]) {
     const mutated = replaceExactlyOnce(postDns, search, replacement, "post-DNS mutation");
-    assert.throws(() => assertPostDnsSmokeWorkflow(mutated, deployment, infrastructure, script));
+    assert.throws(() =>
+      assertPostDnsSmokeWorkflow(mutated, deployment, infrastructure, convergence, script),
+    );
   }
 });
 

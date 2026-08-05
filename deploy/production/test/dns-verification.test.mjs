@@ -676,7 +676,7 @@ test("retries the complete verification within a bounded convergence budget", as
   ];
   const sleeps = [];
 
-  await verifyDnsConvergence(
+  const result = await verifyDnsConvergence(
     {
       domain,
       authoritativeServer: "ns1.example.test",
@@ -693,6 +693,7 @@ test("retries the complete verification within a bounded convergence budget", as
   );
 
   assert.deepEqual(sleeps, [7]);
+  assert.deepEqual(result, { attempt: 2 });
 });
 
 test("parses explicit A, AAAA, authoritative, and public-resolver operator inputs", () => {

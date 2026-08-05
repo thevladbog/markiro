@@ -264,6 +264,9 @@ test("ALB mode keeps route parity but owns no certificate", async () => {
   assert.match(alb, /http:\/\/\{\$MARKIRO_DOMAIN\}:8080/);
   assert.doesNotMatch(alb, /https:\/\/|ACME_EMAIL|redir https/);
   assert.match(alb, /header_up X-Forwarded-Proto https/);
+  for (const caddy of [direct, alb]) {
+    assert.match(caddy, /X-Markiro-Release-Sha "\{\$MARKIRO_RELEASE_SHA\}"/);
+  }
 });
 
 test("edge runtime selects a fixed direct or ALB Caddyfile without dynamic evaluation", async () => {

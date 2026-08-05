@@ -25,6 +25,7 @@ http://{$MARKIRO_DOMAIN}:8080 {
 
 	header {
 		-Server
+		X-Markiro-Release-Sha "{$MARKIRO_RELEASE_SHA}"
 		Strict-Transport-Security "max-age=63072000; includeSubDomains"
 		X-Content-Type-Options nosniff
 		X-Frame-Options SAMEORIGIN

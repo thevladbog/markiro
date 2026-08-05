@@ -54,6 +54,15 @@ test("production application services use exact restart policies", async () => {
   assert.equal(model.services.edge.restart, "unless-stopped");
 });
 
+test("production edge receives the immutable release SHA used by its public identity header", async () => {
+  const model = loadYaml(await readFile(productionCompose, "utf8"));
+
+  assert.equal(
+    model.services.edge.environment.MARKIRO_RELEASE_SHA,
+    "${MARKIRO_IMAGE_TAG:?MARKIRO_IMAGE_TAG is required}",
+  );
+});
+
 test("merged CI Compose config preserves production restart policies", () => {
   const configured = execFileSync(
     "docker",

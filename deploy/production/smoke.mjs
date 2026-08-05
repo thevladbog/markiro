@@ -561,6 +561,11 @@ async function runtimeSmoke(environment, docker, client, baseUrl, options) {
 export async function runPublicSmoke(options, client = requestClient()) {
   const baseUrl = options.baseUrl.replace(/\/$/, "");
   const root = await publicRequest(client, new URL("/", baseUrl), { method: "GET" });
+  if (
+    options.expectedReleaseSha &&
+    root.headers.get("x-markiro-release-sha") !== options.expectedReleaseSha
+  )
+    throw new Error("live release identity does not match the expected release");
   const rootHtml = await getText(root);
   assertHeaders(root, new URL(baseUrl).protocol === "https:");
   const signature = shellSignature(rootHtml);

@@ -50,7 +50,7 @@ function response({ status = 200, body = "{}", headers = {} } = {}) {
   };
 }
 
-function smokeClient() {
+function smokeClient(releaseSha) {
   const requests = [];
   return {
     requests,
@@ -60,7 +60,11 @@ function smokeClient() {
       if (path === "/" || path === "/team/deep-link")
         return response({
           body: shell,
-          headers: { "cache-control": "no-cache", "content-type": "text/html" },
+          headers: {
+            "cache-control": "no-cache",
+            "content-type": "text/html",
+            ...(releaseSha ? { "x-markiro-release-sha": releaseSha } : {}),
+          },
         });
       if (path === "/assets/main.js")
         return response({
@@ -106,6 +110,32 @@ test("runner public smoke exercises the external route contract without local Do
   await runPublicSmoke({ baseUrl: "https://markiro.example" }, client);
 
   assert.ok(client.requests.some(({ url }) => new URL(url).pathname === "/health/ready"));
+});
+
+test("public smoke rejects a different live release identity before exercising routes", async () => {
+  const client = smokeClient("b".repeat(40));
+
+  await assert.rejects(
+    runPublicSmoke(
+      { baseUrl: "https://markiro.example", expectedReleaseSha: "a".repeat(40) },
+      client,
+    ),
+    /live release identity does not match/,
+  );
+
+  assert.equal(client.requests.length, 1);
+});
+
+test("public smoke accepts the exact live release identity", async () => {
+  const releaseSha = "a".repeat(40);
+  const client = smokeClient(releaseSha);
+
+  await runPublicSmoke(
+    { baseUrl: "https://markiro.example", expectedReleaseSha: releaseSha },
+    client,
+  );
+
+  assert.ok(client.requests.length > 1);
 });
 
 const cleanStoppedState = Object.freeze({

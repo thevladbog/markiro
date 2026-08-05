@@ -7,60 +7,133 @@ import { isMainModule } from "./cli-main.mjs";
 
 const SHA_PATTERN = /^[0-9a-f]{40}$/;
 const RUN_ID_PATTERN = /^[1-9][0-9]*$/;
-const EVIDENCE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/;
+const DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/;
 
-function required(name, environment) {
+function invalid() {
+  return new Error("post-DNS smoke evidence is invalid");
+}
+
+function required(name, environment, pattern = /.+/) {
   const value = environment[name];
-  if (typeof value !== "string" || value.length === 0)
-    throw new Error("post-DNS smoke configuration is incomplete");
+  if (typeof value !== "string" || !pattern.test(value)) throw invalid();
   return value;
 }
 
-function runId(name, environment) {
-  const value = required(name, environment);
-  if (!RUN_ID_PATTERN.test(value)) throw new Error("post-DNS smoke evidence is invalid");
-  return value;
+function timestamp(value) {
+  if (typeof value !== "string") throw invalid();
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.valueOf()) || parsed.toISOString() !== value) throw invalid();
+  return parsed;
+}
+
+function parseExact(text, keys, validate) {
+  try {
+    const value = JSON.parse(text);
+    if (!value || Object.keys(value).sort().join(",") !== [...keys].sort().join(","))
+      throw invalid();
+    validate(value);
+    return value;
+  } catch {
+    throw invalid();
+  }
 }
 
 function parseFinalizedRelease(text) {
-  try {
-    const value = JSON.parse(text);
-    if (
-      !value ||
-      Object.keys(value).sort().join(",") !==
-        "deploymentPhase,deploymentRunId,finalizedAt,releaseRunId,releaseSha" ||
-      value.deploymentPhase !== "first" ||
-      !RUN_ID_PATTERN.test(value.deploymentRunId) ||
-      !RUN_ID_PATTERN.test(value.releaseRunId) ||
-      !SHA_PATTERN.test(value.releaseSha) ||
-      typeof value.finalizedAt !== "string" ||
-      new Date(value.finalizedAt).toISOString() !== value.finalizedAt
-    )
-      throw new Error();
-    return value;
-  } catch {
-    throw new Error("post-DNS smoke evidence is invalid");
-  }
+  return parseExact(
+    text,
+    ["deploymentPhase", "deploymentRunId", "finalizedAt", "releaseRunId", "releaseSha"],
+    (value) => {
+      if (
+        value.deploymentPhase !== "first" ||
+        !RUN_ID_PATTERN.test(value.deploymentRunId) ||
+        !RUN_ID_PATTERN.test(value.releaseRunId) ||
+        !SHA_PATTERN.test(value.releaseSha)
+      )
+        throw invalid();
+      timestamp(value.finalizedAt);
+    },
+  );
 }
 
 function parseDnsApply(text) {
-  try {
-    const value = JSON.parse(text);
-    if (
-      !value ||
-      Object.keys(value).sort().join(",") !==
-        "appliedAt,dnsApplyRunId,publicDnsEnabled,releaseSha" ||
-      value.publicDnsEnabled !== true ||
-      !RUN_ID_PATTERN.test(value.dnsApplyRunId) ||
-      !SHA_PATTERN.test(value.releaseSha) ||
-      typeof value.appliedAt !== "string" ||
-      new Date(value.appliedAt).toISOString() !== value.appliedAt
-    )
-      throw new Error();
-    return value;
-  } catch {
-    throw new Error("post-DNS smoke evidence is invalid");
-  }
+  return parseExact(
+    text,
+    ["appliedAt", "dnsApplyRunId", "publicDnsEnabled", "releaseSha"],
+    (value) => {
+      if (
+        value.publicDnsEnabled !== true ||
+        !RUN_ID_PATTERN.test(value.dnsApplyRunId) ||
+        !SHA_PATTERN.test(value.releaseSha)
+      )
+        throw invalid();
+      timestamp(value.appliedAt);
+    },
+  );
+}
+
+function isStringArray(value) {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function parseConvergence(text) {
+  return parseExact(
+    text,
+    [
+      "appliedAt",
+      "approvedA",
+      "approvedAaaa",
+      "authoritativeServer",
+      "dnsApplyArtifactDigest",
+      "dnsApplyRunId",
+      "domain",
+      "publicResolvers",
+      "releaseSha",
+      "verificationAttempt",
+      "verifiedAt",
+      "verifierRunAttempt",
+      "verifierRunId",
+    ],
+    (value) => {
+      validateProductionDomain(value.domain);
+      if (
+        !isStringArray(value.approvedA) ||
+        !isStringArray(value.approvedAaaa) ||
+        !isStringArray(value.publicResolvers) ||
+        value.publicResolvers.length === 0 ||
+        typeof value.authoritativeServer !== "string" ||
+        !DIGEST_PATTERN.test(value.dnsApplyArtifactDigest) ||
+        !RUN_ID_PATTERN.test(value.dnsApplyRunId) ||
+        !SHA_PATTERN.test(value.releaseSha) ||
+        !Number.isSafeInteger(value.verificationAttempt) ||
+        value.verificationAttempt < 1 ||
+        !RUN_ID_PATTERN.test(value.verifierRunAttempt) ||
+        !RUN_ID_PATTERN.test(value.verifierRunId)
+      )
+        throw invalid();
+      timestamp(value.appliedAt);
+      timestamp(value.verifiedAt);
+    },
+  );
+}
+
+async function fetchCurrentMainSha(environment) {
+  const repository = required(
+    "GITHUB_REPOSITORY",
+    environment,
+    /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/,
+  );
+  const token = required("GITHUB_TOKEN", environment);
+  const response = await fetch(`https://api.github.com/repos/${repository}/git/ref/heads/main`, {
+    headers: {
+      Accept: "application/vnd.github+json",
+      Authorization: `Bearer ${token}`,
+      "X-GitHub-Api-Version": "2026-03-10",
+    },
+  });
+  if (!response.ok) throw invalid();
+  const sha = (await response.json())?.object?.sha;
+  if (!SHA_PATTERN.test(sha)) throw invalid();
+  return sha;
 }
 
 export async function runPostDnsSmoke(environment = process.env, supplied = {}) {
@@ -68,41 +141,75 @@ export async function runPostDnsSmoke(environment = process.env, supplied = {}) 
     readFile,
     writeFile,
     smoke: runPublicSmoke,
+    currentMainSha: () => fetchCurrentMainSha(environment),
     now: () => new Date(),
     ...supplied,
   };
   const domain = validateProductionDomain(environment.MARKIRO_DOMAIN);
-  const releaseSha = required("RELEASE_SHA", environment);
-  const releaseRunId = runId("RELEASE_RUN_ID", environment);
-  const deploymentRunId = runId("DEPLOYMENT_RUN_ID", environment);
-  const dnsApplyRunId = runId("DNS_APPLY_RUN_ID", environment);
-  const smokeRunId = runId("GITHUB_RUN_ID", environment);
-  const evidenceId = required("DNS_CONVERGENCE_EVIDENCE_ID", environment);
-  if (!SHA_PATTERN.test(releaseSha) || !EVIDENCE_PATTERN.test(evidenceId))
-    throw new Error("post-DNS smoke evidence is invalid");
+  const releaseSha = required("RELEASE_SHA", environment, SHA_PATTERN);
+  const releaseRunId = required("RELEASE_RUN_ID", environment, RUN_ID_PATTERN);
+  const deploymentRunId = required("DEPLOYMENT_RUN_ID", environment, RUN_ID_PATTERN);
+  const dnsApplyRunId = required("DNS_APPLY_RUN_ID", environment, RUN_ID_PATTERN);
+  const dnsVerifierRunId = required("DNS_VERIFIER_RUN_ID", environment, RUN_ID_PATTERN);
+  const dnsConvergenceArtifactDigest = required(
+    "DNS_CONVERGENCE_ARTIFACT_DIGEST",
+    environment,
+    DIGEST_PATTERN,
+  );
+  const smokeRunId = required("GITHUB_RUN_ID", environment, RUN_ID_PATTERN);
+  if (environment.GITHUB_REF !== "refs/heads/main" || environment.GITHUB_SHA !== releaseSha)
+    throw invalid();
+
   const finalized = parseFinalizedRelease(
     await dependencies.readFile(required("FINALIZED_RELEASE_PATH", environment), "utf8"),
   );
   const dnsApply = parseDnsApply(
     await dependencies.readFile(required("DNS_APPLY_RECEIPT_PATH", environment), "utf8"),
   );
+  const convergence = parseConvergence(
+    await dependencies.readFile(required("DNS_CONVERGENCE_RECEIPT_PATH", environment), "utf8"),
+  );
   if (
     finalized.releaseSha !== releaseSha ||
     finalized.releaseRunId !== releaseRunId ||
     finalized.deploymentRunId !== deploymentRunId ||
     dnsApply.releaseSha !== releaseSha ||
-    dnsApply.dnsApplyRunId !== dnsApplyRunId
+    dnsApply.dnsApplyRunId !== dnsApplyRunId ||
+    convergence.releaseSha !== releaseSha ||
+    convergence.dnsApplyRunId !== dnsApplyRunId ||
+    convergence.verifierRunId !== dnsVerifierRunId ||
+    convergence.dnsApplyArtifactDigest !==
+      required("DNS_APPLY_ARTIFACT_DIGEST", environment, DIGEST_PATTERN) ||
+    convergence.domain !== domain ||
+    convergence.appliedAt !== dnsApply.appliedAt
   )
-    throw new Error("post-DNS smoke evidence is invalid");
+    throw invalid();
 
-  await dependencies.smoke({ baseUrl: `https://${domain}` });
+  const finalizedAt = timestamp(finalized.finalizedAt);
+  const appliedAt = timestamp(dnsApply.appliedAt);
+  const verifiedAt = timestamp(convergence.verifiedAt);
+  const smokeStartedAt = dependencies.now();
+  if (!(finalizedAt < appliedAt && appliedAt < verifiedAt && verifiedAt < smokeStartedAt))
+    throw invalid();
+  if ((await dependencies.currentMainSha()) !== releaseSha) throw invalid();
+  await dependencies.smoke({ baseUrl: `https://${domain}`, expectedReleaseSha: releaseSha });
+  if ((await dependencies.currentMainSha()) !== releaseSha) throw invalid();
+  const smokeAt = dependencies.now();
+  if (!(verifiedAt < smokeAt)) throw invalid();
+
   const receipt = {
+    appliedAt: dnsApply.appliedAt,
     deploymentRunId,
+    dnsApplyArtifactDigest: convergence.dnsApplyArtifactDigest,
     dnsApplyRunId,
-    dnsConvergenceEvidenceId: evidenceId,
+    dnsConvergenceArtifactDigest,
+    dnsVerifierRunId,
+    finalizedAt: finalized.finalizedAt,
+    releaseRunId,
     releaseSha,
+    smokeAt: smokeAt.toISOString(),
     smokeRunId,
-    verifiedAt: dependencies.now().toISOString(),
+    verifiedAt: convergence.verifiedAt,
   };
   await dependencies.writeFile(
     required("SMOKE_RECEIPT_PATH", environment),

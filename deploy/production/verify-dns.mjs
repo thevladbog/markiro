@@ -267,7 +267,7 @@ export async function verifyDnsConvergence(options, supplied = {}) {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
       await verifyDnsOnce(options, dependencies);
-      return;
+      return { attempt: attempt + 1 };
     } catch (error) {
       lastError = error;
     }
