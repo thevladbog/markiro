@@ -54,7 +54,7 @@ Create `AGENTS.md` with these concrete sections and requirements:
 9. `## Code conventions`: strict TypeScript, type-only imports, Zod/DTO validation at boundaries, focused modules, existing naming/i18n patterns, React hooks rules, reuse `@markiro/ui` tokens/components, and no CDN/runtime network dependency for the station.
 10. `## Tests and commands`: document workspace-filtered build/lint/typecheck/test commands, direct Vitest invocation for one file, the full Turbo gate, `format:check`, production bundle contracts, and browser docs tests. Include the fresh-worktree prerequisite to build `@markiro/domain` and `@markiro/ui` before diagnosing kiosk import failures.
 11. `## Change-specific checks`: provide a compact table mapping domain/DB, API, admin, kiosk, station, UI/email, and deployment changes to their minimum relevant checks and environment caveats.
-12. `## Dependencies and generated artifacts`: require exact dependency versions, use `pnpm-workspace.yaml` for pnpm policy, do not hand-edit lockfiles or generated artifacts, do not bypass release-age policy globally, and inspect security overrides/patches before changing them.
+12. `## Dependencies and generated artifacts`: require exact dependency versions, identify `.npmrc` and `pnpm-workspace.yaml` as the current configuration surfaces, require `pnpm config list` plus a bounded behavioral probe before claiming a policy is enforced, do not hand-edit lockfiles or generated artifacts, do not bypass release-age policy globally, and inspect security overrides/patches before changing them. Note that moving policy keys between configuration files is a separate change, not part of unrelated dependency work.
 13. `## Git and completion`: forbid destructive cleanup and unrelated commits, require `git diff --check`, scoped/full checks proportionate to risk, documentation updates when contracts change, and a final report listing changed files, automated checks, and manual/external gaps.
 
 - [ ] **Step 2: Verify referenced paths**
@@ -62,8 +62,8 @@ Create `AGENTS.md` with these concrete sections and requirements:
 Run:
 
 ```bash
-for path in README.md docs/architecture.md package.json pnpm-workspace.yaml turbo.json apps/api apps/admin apps/kiosk apps/station packages/domain packages/db packages/email packages/ui deploy/production tools/production-browser .env.example .env.production.example; do
-  test -e "$path" || { echo "missing: $path"; exit 1; }
+for candidate_path in README.md docs/architecture.md package.json pnpm-workspace.yaml turbo.json apps/api apps/admin apps/kiosk apps/station packages/domain packages/db packages/email packages/ui deploy/production tools/production-browser .env.example .env.production.example; do
+  test -e "$candidate_path" || { echo "missing: $candidate_path"; exit 1; }
 done
 ```
 
