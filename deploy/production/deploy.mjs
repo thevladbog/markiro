@@ -487,6 +487,13 @@ export async function prepareRelease(options, supplied = {}) {
   let switched = false;
 
   try {
+    const previous = await latestHealthyReleaseRecord(releaseDirectory);
+    if (previous?.tag === preflight.imageTag)
+      throw new Error("requested release is already healthy");
+    if (options.requireNoPreviousHealthy && previous)
+      throw new Error("first deployment requires no previous healthy release");
+    if (options.requirePreviousHealthy && !previous)
+      throw new Error("previous healthy release is unavailable");
     await mustRun(
       dependencies,
       "docker",
@@ -508,9 +515,6 @@ export async function prepareRelease(options, supplied = {}) {
       environment,
       dependencies.timeouts.command,
     );
-    const previous = await latestHealthyReleaseRecord(releaseDirectory);
-    if (options.requireNoPreviousHealthy && previous)
-      throw new Error("first deployment requires no previous healthy release");
     candidate = {
       tag: preflight.imageTag,
       previousTag: previous?.tag ?? null,
@@ -519,8 +523,6 @@ export async function prepareRelease(options, supplied = {}) {
       state: "pending",
       createdAt: dependencies.now().toISOString(),
     };
-    if (options.requirePreviousHealthy && !candidate.previousTag)
-      throw new Error("previous healthy release is unavailable");
     await writeStagedRelease(releaseDirectory, candidate, "pending");
     dependencies.log("release pending");
 

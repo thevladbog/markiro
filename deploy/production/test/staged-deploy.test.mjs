@@ -296,6 +296,90 @@ test("a healthy retry of the same immutable SHA is the sole effective rollback t
   });
 });
 
+test("an already healthy immutable SHA repeat fails before mutation and leaves the next rollback unambiguous", async () => {
+  const nextEnvironment = {
+    ...ENVIRONMENT,
+    MARKIRO_IMAGE_TAG: "1".repeat(40),
+    MARKIRO_API_IMAGE_DIGEST: `sha256:${"e".repeat(64)}`,
+    MARKIRO_EDGE_IMAGE_DIGEST: `sha256:${"f".repeat(64)}`,
+  };
+  let failNextCandidateEdge = false;
+  const { calls, dependencies, releaseDirectory, running } = await fixture({
+    withPrevious: false,
+    failure: ({ args, environment }) =>
+      failNextCandidateEdge &&
+      args.includes("up") &&
+      args.at(-1) === "edge" &&
+      environment.MARKIRO_IMAGE_TAG === nextEnvironment.MARKIRO_IMAGE_TAG,
+  });
+  const logs = [];
+  dependencies.log = (event) => logs.push(event);
+  const first = await prepareRelease(
+    { environment: ENVIRONMENT, releaseDirectory, readinessAttempts: 1 },
+    dependencies,
+  );
+  await finalizePreparedRelease({ candidate: first, releaseDirectory });
+  const recordsBeforeRepeat = (await records(releaseDirectory)).sort((left, right) =>
+    left.name.localeCompare(right.name),
+  );
+  const repeatCallStart = calls.length;
+  const repeatLogStart = logs.length;
+
+  await assert.rejects(
+    prepareRelease(
+      {
+        environment: ENVIRONMENT,
+        releaseDirectory,
+        readinessAttempts: 1,
+        requirePreviousHealthy: true,
+      },
+      dependencies,
+    ),
+    /requested release is already healthy/,
+  );
+
+  assert.deepEqual(logs.slice(repeatLogStart), ["preflight"]);
+  assert.deepEqual(calls.slice(repeatCallStart), []);
+  assert.deepEqual(
+    (await records(releaseDirectory)).sort((left, right) => left.name.localeCompare(right.name)),
+    recordsBeforeRepeat,
+  );
+
+  dependencies.now = () => new Date("2026-08-05T10:20:31.000Z");
+  failNextCandidateEdge = true;
+  await assert.rejects(
+    prepareRelease(
+      {
+        environment: nextEnvironment,
+        releaseDirectory,
+        readinessAttempts: 1,
+        requirePreviousHealthy: true,
+      },
+      dependencies,
+    ),
+    /docker failed/,
+  );
+
+  assert.deepEqual(running, {
+    apiDigest: API_DIGEST,
+    edgeDigest: EDGE_DIGEST,
+    project: "markiro-production",
+  });
+  const persisted = await records(releaseDirectory);
+  assert.equal(
+    persisted.filter(({ name, value }) => name.endsWith(".healthy.json") && value.tag === TAG)
+      .length,
+    1,
+  );
+  assert.equal(
+    persisted.filter(
+      ({ name, value }) =>
+        name.endsWith(".failed.json") && value.tag === nextEnvironment.MARKIRO_IMAGE_TAG,
+    ).length,
+    1,
+  );
+});
+
 test("a finalized candidate rolled back after activation failure is not the next repeat baseline", async () => {
   const { dependencies, releaseDirectory } = await fixture();
   const candidate = await prepareRelease(
