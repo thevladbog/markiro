@@ -353,6 +353,12 @@ const expectedProductionActionRoles = {
   "vpc.security-groups.manage": "vpc.securityGroups.admin",
 };
 
+const expectedEncryptedResourceKeyDependencies = {
+  "yandex_compute_instance.app": "kms.keys.user",
+  "yandex_compute_instance.runner": "kms.keys.user",
+  "yandex_mdb_postgresql_cluster.production": "kms.keys.user",
+};
+
 function assertProtectedBootstrap({ bootstrap, iam, outputs, productionResources, variables }) {
   const allHcl = [bootstrap, iam, outputs, variables].join("\n");
   const serviceAccounts = [...iam.matchAll(/resource\s+"yandex_iam_service_account"\s+"([^"]+)"/g)]
@@ -409,6 +415,36 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, productionResources
     /terraform_folder_roles\s*=\s*toset\(values\(local\.terraform_production_action_roles\)\)/,
   );
   assert.doesNotMatch(iam, /"(?:alb|vpc)\.admin"/);
+
+  const encryptedResources = productionResources
+    .flatMap((source) =>
+      [...source.matchAll(/^resource\s+"([^"]+)"\s+"([^"]+)"\s*\{/gm)].map((match) => ({
+        address: `${match[1]}.${match[2]}`,
+        block: terraformResourceBlock(source, match[1], match[2]),
+      })),
+    )
+    .filter(({ block }) =>
+      /\b(?:kms_key_id|disk_encryption_key_id)\s*=\s*var\.kms_key_id/.test(block),
+    )
+    .map(({ address }) => address)
+    .sort();
+  assert.deepEqual(
+    encryptedResources,
+    Object.keys(expectedEncryptedResourceKeyDependencies).sort(),
+  );
+
+  for (const [name, serviceAccount] of [
+    ["terraform_key_user", "terraform"],
+    ["deployment_controller_runner_key_user", "deployment_controller"],
+  ]) {
+    const grant = terraformResourceBlock(bootstrap, "yandex_kms_symmetric_key_iam_member", name);
+    assert.match(grant, /symmetric_key_id\s*=\s*var\.kms_key_id/);
+    assert.match(grant, /role\s*=\s*"kms\.keys\.user"/);
+    assert.match(
+      grant,
+      new RegExp(`serviceAccount:\\$\\{module\\.iam\\.service_account_ids\\.${serviceAccount}\\}`),
+    );
+  }
   assert.doesNotMatch(
     allHcl,
     /yandex_lockbox_secret_version/,
@@ -625,7 +661,7 @@ async function bootstrapContractSources() {
   return { bootstrap, iam, outputs, productionResources, variables };
 }
 
-function assertRunnerControllerProviderGrants({ compute, controller, iam }) {
+function assertRunnerControllerProviderGrants({ bootstrap, compute, controller, iam }) {
   const providerCalls = [
     ...controller.matchAll(/`(https:\/\/(?:compute|mdb|alb)\.api\.cloud\.yandex\.net\/[^`]+)`/g),
   ]
@@ -661,6 +697,20 @@ function assertRunnerControllerProviderGrants({ compute, controller, iam }) {
   assert.match(appViewer, /instance_id\s*=\s*yandex_compute_instance\.app\.id/);
   assert.match(appViewer, /role\s*=\s*"compute\.viewer"/);
   assert.match(appViewer, /serviceAccount:\$\{var\.deployment_controller_service_account_id\}/);
+
+  const runner = terraformResourceBlock(compute, "yandex_compute_instance", "runner");
+  assert.match(runner, /kms_key_id\s*=\s*var\.kms_key_id/);
+  const runnerKeyUser = terraformResourceBlock(
+    bootstrap,
+    "yandex_kms_symmetric_key_iam_member",
+    "deployment_controller_runner_key_user",
+  );
+  assert.match(runnerKeyUser, /symmetric_key_id\s*=\s*var\.kms_key_id/);
+  assert.match(runnerKeyUser, /role\s*=\s*"kms\.keys\.user"/);
+  assert.match(
+    runnerKeyUser,
+    /serviceAccount:\$\{module\.iam\.service_account_ids\.deployment_controller\}/,
+  );
 
   for (const [name, role] of [
     ["deployment_controller_alb_viewer", "alb.viewer"],
@@ -1993,9 +2043,10 @@ test("deployment runner uses exact production federation, VM-scoped operator, an
   );
   const remoteDeploy = await readRepositoryFile("deploy/yandex/remote-deploy.mjs");
   const controller = await readRepositoryFile("deploy/yandex/runner-control.mjs");
+  const bootstrap = await readRepositoryFile("infra/yandex/bootstrap/main.tf");
   const unit = await readRepositoryFile("deploy/yandex/systemd/markiro-runner.service");
 
-  assertRunnerControllerProviderGrants({ compute, controller, iam });
+  assertRunnerControllerProviderGrants({ bootstrap, compute, controller, iam });
 
   const credential = terraformResourceBlock(
     iam,
@@ -2715,7 +2766,8 @@ test("bootstrap contract rejects an incomplete or broadened production action-ro
 });
 
 test("runner-controller provider-call contract rejects a missing app grant or unknown provider call", async () => {
-  const [compute, controller, iam] = await Promise.all([
+  const [bootstrap, compute, controller, iam] = await Promise.all([
+    readRepositoryFile("infra/yandex/bootstrap/main.tf"),
     readRepositoryFile("infra/yandex/modules/compute/main.tf"),
     readRepositoryFile("deploy/yandex/runner-control.mjs"),
     readRepositoryFile("infra/yandex/modules/iam/main.tf"),
@@ -2725,12 +2777,28 @@ test("runner-controller provider-call contract rejects a missing app grant or un
     "",
   );
   assert.throws(() =>
-    assertRunnerControllerProviderGrants({ compute: missingViewer, controller, iam }),
+    assertRunnerControllerProviderGrants({ bootstrap, compute: missingViewer, controller, iam }),
   );
   const unknownCall = `${controller}\nconst unsafe = \`https://compute.api.cloud.yandex.net/compute/v1/disks/\${diskId}\`;\n`;
   assert.throws(() =>
-    assertRunnerControllerProviderGrants({ compute, controller: unknownCall, iam }),
+    assertRunnerControllerProviderGrants({ bootstrap, compute, controller: unknownCall, iam }),
   );
+});
+
+test("encrypted production resources and runner start reject missing or folder-scoped key use", async () => {
+  const missingTerraformGrant = await bootstrapContractSources();
+  missingTerraformGrant.bootstrap = missingTerraformGrant.bootstrap.replace(
+    /resource\s+"yandex_kms_symmetric_key_iam_member"\s+"terraform_key_user"\s*\{[\s\S]*?\n\}/,
+    "",
+  );
+  assert.throws(() => assertProtectedBootstrap(missingTerraformGrant));
+
+  const folderScoped = await bootstrapContractSources();
+  folderScoped.bootstrap = folderScoped.bootstrap.replace(
+    'resource "yandex_kms_symmetric_key_iam_member" "deployment_controller_runner_key_user"',
+    'resource "yandex_resourcemanager_folder_iam_member" "deployment_controller_runner_key_user"',
+  );
+  assert.throws(() => assertProtectedBootstrap(folderScoped));
 });
 
 test("bootstrap contract rejects disabled state versioning", async () => {

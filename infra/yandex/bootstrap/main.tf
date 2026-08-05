@@ -101,6 +101,18 @@ resource "yandex_kms_symmetric_key_iam_member" "terraform_encrypter_decrypter" {
   member           = "serviceAccount:${module.iam.service_account_ids.terraform}"
 }
 
+resource "yandex_kms_symmetric_key_iam_member" "terraform_key_user" {
+  symmetric_key_id = var.kms_key_id
+  role             = "kms.keys.user"
+  member           = "serviceAccount:${module.iam.service_account_ids.terraform}"
+}
+
+resource "yandex_kms_symmetric_key_iam_member" "deployment_controller_runner_key_user" {
+  symmetric_key_id = var.kms_key_id
+  role             = "kms.keys.user"
+  member           = "serviceAccount:${module.iam.service_account_ids.deployment_controller}"
+}
+
 resource "yandex_kms_symmetric_key_iam_member" "app_encrypter_decrypter" {
   symmetric_key_id = var.kms_key_id
   role             = "kms.keys.encrypterDecrypter"
