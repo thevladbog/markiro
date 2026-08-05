@@ -5,6 +5,10 @@ export default defineConfig({
   plugins: [react()],
   test: {
     environment: "jsdom",
+    // The admin suites share a browser-like JSDOM process and many Radix
+    // portals. Serialising files prevents CI CPU contention from turning
+    // legitimate 200–500ms interaction tests into 5s timeouts.
+    fileParallelism: false,
     // Plan 04 Task 5 adds the first plain-`.ts` (no-JSX) admin test file
     // (`labels-raster.test.ts`, covering `labels/rasterizer.ts` and
     // `labels/fontCoverage.ts`) alongside the existing `.test.tsx` component
