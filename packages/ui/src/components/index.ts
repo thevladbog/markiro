@@ -7,6 +7,20 @@ export type { InputProps } from "./Input.js";
 export { Select } from "./Select.js";
 export type { SelectOption, SelectProps } from "./Select.js";
 
+export { Checkbox } from "./Checkbox.js";
+export type { CheckboxProps } from "./Checkbox.js";
+
+export { RadioGroup } from "./RadioGroup.js";
+export type { RadioGroupOption, RadioGroupProps } from "./RadioGroup.js";
+
+export { IconButton } from "./IconButton.js";
+export type { IconButtonProps } from "./IconButton.js";
+
+export { DatePicker } from "./DatePicker.js";
+export type { DatePickerProps } from "./DatePicker.js";
+export { VisuallyHidden } from "./VisuallyHidden.js";
+export type { VisuallyHiddenProps } from "./VisuallyHidden.js";
+
 export { Field } from "./Field.js";
 export type { FieldProps } from "./Field.js";
 

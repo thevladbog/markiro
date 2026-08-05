@@ -5,6 +5,7 @@ import {
   Alert,
   Badge,
   Button,
+  DatePicker,
   EmptyState,
   Input,
   Modal,
@@ -270,7 +271,7 @@ function AuthorizedCloseShiftAction({ shift }: { shift: ShiftDto }) {
 
 /** Admin shift-planning screen -- Plan 03 Task 13 (list/create/edit/delete/close). */
 export function ShiftsPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -293,7 +294,7 @@ export function ShiftsPage() {
   const counterparties = useMemo(() => counterpartiesData ?? [], [counterpartiesData]);
   const labelTemplates = useMemo(() => labelTemplatesData ?? [], [labelTemplatesData]);
 
-  const statusFilterOptions: SelectOption[] = [
+  const statusFilterOptions: SelectOption<StatusFilter>[] = [
     { value: "all", label: t("pages.shifts.filters.status.all") },
     { value: "planned", label: t("pages.shifts.filters.status.planned") },
     { value: "active", label: t("pages.shifts.filters.status.active") },
@@ -404,23 +405,33 @@ export function ShiftsPage() {
             label={t("pages.shifts.filters.statusLabel")}
             options={statusFilterOptions}
             value={statusFilter}
-            onChange={(value) => setStatusFilter(value as StatusFilter)}
+            onValueChange={setStatusFilter}
           />
         </div>
         <div style={{ width: 180 }}>
-          <Input
+          <DatePicker
             label={t("pages.shifts.filters.fromLabel")}
-            type="date"
-            value={fromDate}
-            onChange={(event) => setFromDate(event.target.value)}
+            placeholder={t("common.datePicker.placeholder")}
+            clearLabel={t("common.datePicker.clear")}
+            calendarLabel={t("common.datePicker.calendar")}
+            previousMonthLabel={t("common.datePicker.previousMonth")}
+            nextMonthLabel={t("common.datePicker.nextMonth")}
+            locale={i18n.language}
+            {...(fromDate ? { value: fromDate } : {})}
+            onValueChange={(value) => setFromDate(value ?? "")}
           />
         </div>
         <div style={{ width: 180 }}>
-          <Input
+          <DatePicker
             label={t("pages.shifts.filters.toLabel")}
-            type="date"
-            value={toDate}
-            onChange={(event) => setToDate(event.target.value)}
+            placeholder={t("common.datePicker.placeholder")}
+            clearLabel={t("common.datePicker.clear")}
+            calendarLabel={t("common.datePicker.calendar")}
+            previousMonthLabel={t("common.datePicker.previousMonth")}
+            nextMonthLabel={t("common.datePicker.nextMonth")}
+            locale={i18n.language}
+            {...(toDate ? { value: toDate } : {})}
+            onValueChange={(value) => setToDate(value ?? "")}
           />
         </div>
       </div>

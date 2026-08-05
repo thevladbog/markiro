@@ -200,7 +200,7 @@ function AuthorizedResolveOrderActions({
             label={t("pages.pickup.detail.writeoffModal.reasonLabel")}
             options={reasonOptions}
             value={writeoffReasonId}
-            onChange={setWriteoffReasonId}
+            onValueChange={setWriteoffReasonId}
           />
         </div>
       </Modal>

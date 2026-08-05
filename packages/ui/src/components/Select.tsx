@@ -1,49 +1,72 @@
-import { useId, useState, type FocusEvent, type SelectHTMLAttributes } from "react";
+import * as RadixSelect from "@radix-ui/react-select";
+import { useId, useState, type CSSProperties, type FocusEvent } from "react";
 
 import { cn } from "../cn.js";
 
-/** Порт `design-system/components/forms/Select.jsx` (нативный select) — только офисный режим. */
-export type SelectOption = string | { value: string; label: string; disabled?: boolean };
+const EMPTY_OPTION_VALUE = "__markiro_empty_option__";
 
-export interface SelectProps extends Omit<SelectHTMLAttributes<HTMLSelectElement>, "onChange"> {
+export type SelectOption<TValue extends string = string> =
+  TValue | { value: TValue; label: string; disabled?: boolean };
+
+export interface SelectProps<TValue extends string = string> {
   label?: string;
-  /** Строки или {value, label} */
-  options: SelectOption[];
-  onChange?: (value: string) => void;
+  /** Строки или { value, label, disabled } */
+  options: SelectOption<TValue>[];
+  value?: TValue;
+  onValueChange?: (value: TValue) => void;
   hint?: string;
   error?: string;
+  disabled?: boolean;
+  name?: string;
+  required?: boolean;
+  /** Text shown when no value is selected. An empty option label takes precedence. */
+  placeholder?: string;
+  id?: string;
+  className?: string;
+  style?: CSSProperties;
+  "aria-label"?: string;
+  "aria-labelledby"?: string;
 }
 
-export function Select({
+function normalizeOption<TValue extends string>(option: SelectOption<TValue>) {
+  return typeof option === "string" ? { value: option, label: option, disabled: false } : option;
+}
+
+export function Select<TValue extends string = string>({
   label,
   options,
   value,
-  onChange,
+  onValueChange,
   disabled,
+  name,
+  required,
+  placeholder,
   hint,
   error,
   className,
   style,
   id,
-  onFocus,
-  onBlur,
-  ...rest
-}: SelectProps) {
+  "aria-label": ariaLabel,
+  "aria-labelledby": ariaLabelledBy,
+}: SelectProps<TValue>) {
   const [focus, setFocus] = useState(false);
   const autoId = useId();
   const selectId = id ?? `mk-select-${autoId}`;
   const hintId = hint ? `${selectId}-hint` : undefined;
   const errorId = error ? `${selectId}-error` : undefined;
   const describedBy = errorId ?? hintId;
+  const normalizedOptions = options.map(normalizeOption);
+  const emptyOptionLabel = normalizedOptions.find((option) => option.value === "")?.label;
+  const itemOptions = normalizedOptions.map((option) =>
+    option.value === "" ? { ...option, value: EMPTY_OPTION_VALUE } : option,
+  );
 
-  const handleFocus = (event: FocusEvent<HTMLSelectElement>) => {
+  const handleFocus = (_event: FocusEvent<HTMLButtonElement>) => {
     setFocus(true);
-    onFocus?.(event);
   };
 
-  const handleBlur = (event: FocusEvent<HTMLSelectElement>) => {
+  const handleBlur = (_event: FocusEvent<HTMLButtonElement>) => {
     setFocus(false);
-    onBlur?.(event);
   };
 
   return (
@@ -56,14 +79,24 @@ export function Select({
           {label}
         </label>
       )}
-      <span style={{ position: "relative", display: "flex" }}>
-        <select
+      <RadixSelect.Root
+        {...(value === undefined ? {} : { value })}
+        {...(onValueChange === undefined
+          ? {}
+          : {
+              onValueChange: (nextValue: string) =>
+                onValueChange((nextValue === EMPTY_OPTION_VALUE ? "" : nextValue) as TValue),
+            })}
+        {...(disabled === undefined ? {} : { disabled })}
+        {...(name === undefined ? {} : { name })}
+        {...(required === undefined ? {} : { required })}
+      >
+        <RadixSelect.Trigger
           id={selectId}
-          value={value}
-          disabled={disabled}
+          aria-label={ariaLabel}
+          aria-labelledby={ariaLabelledBy}
           aria-invalid={error ? true : undefined}
           aria-describedby={describedBy}
-          onChange={(event) => onChange?.(event.target.value)}
           onFocus={handleFocus}
           onBlur={handleBlur}
           className="mk-select__control"
@@ -72,7 +105,11 @@ export function Select({
             WebkitAppearance: "none",
             width: "100%",
             height: "var(--control-md)",
-            padding: "0 36px 0 12px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 8,
+            padding: "0 12px",
             borderRadius: "var(--r-2)",
             background: "var(--surface-card)",
             color: "var(--fg-1)",
@@ -86,38 +123,81 @@ export function Select({
             cursor: disabled ? "not-allowed" : "pointer",
             opacity: disabled ? 0.45 : 1,
           }}
-          {...rest}
         >
-          {options.map((option) => {
-            const optionValue = typeof option === "string" ? option : option.value;
-            const optionLabel = typeof option === "string" ? option : option.label;
-            const optionDisabled = typeof option === "string" ? false : Boolean(option.disabled);
-            return (
-              <option key={optionValue} value={optionValue} disabled={optionDisabled}>
-                {optionLabel}
-              </option>
-            );
-          })}
-        </select>
-        <svg
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="var(--fg-3)"
-          strokeWidth={2}
-          aria-hidden="true"
-          style={{
-            position: "absolute",
-            right: 12,
-            top: "50%",
-            transform: "translateY(-50%)",
-            pointerEvents: "none",
-          }}
-        >
-          <path d="M6 9l6 6 6-6" />
-        </svg>
-      </span>
+          <RadixSelect.Value placeholder={emptyOptionLabel ?? placeholder} />
+          <RadixSelect.Icon aria-hidden="true">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path d="M6 9l6 6 6-6" />
+            </svg>
+          </RadixSelect.Icon>
+        </RadixSelect.Trigger>
+        <RadixSelect.Portal>
+          <RadixSelect.Content
+            style={{
+              zIndex: 1000,
+              overflow: "hidden",
+              border: "1px solid var(--line-strong)",
+              borderRadius: "var(--r-2)",
+              background: "var(--surface-card)",
+              color: "var(--fg-1)",
+              boxShadow: "0 12px 32px color-mix(in srgb, var(--fg-1) 18%, transparent)",
+            }}
+          >
+            <RadixSelect.Viewport style={{ padding: 4 }}>
+              {itemOptions.map((option) => (
+                <RadixSelect.Item
+                  key={option.value}
+                  value={option.value}
+                  {...(option.disabled ? { disabled: true } : {})}
+                  className="mk-select__item"
+                  style={{
+                    position: "relative",
+                    display: "flex",
+                    alignItems: "center",
+                    minHeight: "var(--control-md)",
+                    padding: "0 32px 0 12px",
+                    borderRadius: "calc(var(--r-2) - 2px)",
+                    background: "transparent",
+                    outline: "none",
+                    font: "var(--text-body)",
+                    cursor: option.disabled ? "not-allowed" : "pointer",
+                    opacity: option.disabled ? 0.45 : 1,
+                  }}
+                >
+                  <RadixSelect.ItemText>{option.label}</RadixSelect.ItemText>
+                  <RadixSelect.ItemIndicator
+                    aria-hidden="true"
+                    style={{
+                      position: "absolute",
+                      right: 10,
+                      display: "flex",
+                      color: "var(--accent-fg)",
+                    }}
+                  >
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                    >
+                      <path d="m5 12 4 4L19 6" />
+                    </svg>
+                  </RadixSelect.ItemIndicator>
+                </RadixSelect.Item>
+              ))}
+            </RadixSelect.Viewport>
+          </RadixSelect.Content>
+        </RadixSelect.Portal>
+      </RadixSelect.Root>
       {(error || hint) && (
         <span
           id={error ? errorId : hintId}

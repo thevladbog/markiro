@@ -522,7 +522,8 @@ describe("ChannelPage", () => {
 
     await userEvent.click(screen.getByRole("button", { name: /добавить строку/i }));
     await userEvent.type(screen.getByPlaceholderText(/внешнее значение/i), "ЗаказВыполнен");
-    await userEvent.selectOptions(screen.getByRole("combobox"), "writtenoff");
+    await userEvent.click(screen.getByRole("combobox", { name: /внутренний статус.*1/i }));
+    await userEvent.click(screen.getByRole("option", { name: /списан/i }));
 
     await userEvent.click(screen.getByRole("button", { name: /сохранить/i }));
 

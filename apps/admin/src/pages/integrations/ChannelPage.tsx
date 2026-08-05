@@ -4,7 +4,17 @@ import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
-import { Alert, Button, Card, Input, PageHeader, Select, Spinner, StatusChip } from "@markiro/ui";
+import {
+  Alert,
+  Button,
+  Card,
+  Checkbox,
+  Input,
+  PageHeader,
+  Select,
+  Spinner,
+  StatusChip,
+} from "@markiro/ui";
 
 import { useCan } from "../../access/context.js";
 import type { StatusChipStatus } from "@markiro/ui";
@@ -203,10 +213,17 @@ function CommercemlSettingsForm({
         hint={t("pages.integrations.channel.settings.priceTypeHint")}
         {...register("priceType")}
       />
-      <label style={{ display: "flex", alignItems: "center", gap: 8, font: "var(--text-body)" }}>
-        <input type="checkbox" {...register("splitWriteoffDocument")} />
-        {t("pages.integrations.channel.settings.splitWriteoffDocumentLabel")}
-      </label>
+      <Controller
+        control={control}
+        name="splitWriteoffDocument"
+        render={({ field }) => (
+          <Checkbox
+            label={t("pages.integrations.channel.settings.splitWriteoffDocumentLabel")}
+            checked={field.value}
+            onCheckedChange={field.onChange}
+          />
+        )}
+      />
       <Input
         label={t("pages.integrations.channel.settings.writeoffDocumentTypeLabel")}
         hint={t("pages.integrations.channel.settings.writeoffDocumentTypeHint")}
@@ -248,7 +265,7 @@ function CommercemlSettingsForm({
                     label: t(option.labelKey),
                   }))}
                   value={controllerField.value}
-                  onChange={controllerField.onChange}
+                  onValueChange={controllerField.onChange}
                 />
               )}
             />

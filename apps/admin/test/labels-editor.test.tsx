@@ -24,6 +24,7 @@
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useParams } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -137,6 +138,15 @@ function renderEditFlow(id: string, options: RenderOptions = {}) {
   );
 }
 
+async function chooseOption(
+  user: ReturnType<typeof userEvent.setup>,
+  label: string,
+  option: string,
+) {
+  await user.click(screen.getByRole("combobox", { name: label }));
+  await user.click(await screen.findByRole("option", { name: option }));
+}
+
 describe("Palette", () => {
   it("clicking a palette button adds an element centered on the label and selects it", async () => {
     renderCreateFlow();
@@ -185,6 +195,7 @@ describe("PropertiesPanel + Save (round-trip into the POSTed spec)", () => {
   });
 
   it("a dpi/language change (label-level) round-trips into the POSTed spec", async () => {
+    const user = userEvent.setup();
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url === "/api/label-templates" && init?.method === "POST") {
         const body = JSON.parse(init.body as string) as { name: string; spec: unknown };
@@ -202,8 +213,8 @@ describe("PropertiesPanel + Save (round-trip into the POSTed spec)", () => {
 
     renderCreateFlow();
 
-    fireEvent.change(screen.getByLabelText("DPI"), { target: { value: "300" } });
-    fireEvent.change(screen.getByLabelText("Язык"), { target: { value: "tspl" } });
+    await chooseOption(user, "DPI", "300");
+    await chooseOption(user, "Язык", "TSPL");
 
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
 
@@ -359,6 +370,7 @@ describe("Download (ZPL/TSPL byte safety)", () => {
   });
 
   it("Скачать TSPL preserves an injected raster byte > 0x7F intact in the downloaded Blob", async () => {
+    const user = userEvent.setup();
     let capturedBlob: Blob | undefined;
     vi.spyOn(URL, "createObjectURL").mockImplementation((blob: Blob | MediaSource) => {
       capturedBlob = blob as Blob;
@@ -368,7 +380,7 @@ describe("Download (ZPL/TSPL byte safety)", () => {
 
     renderCreateFlow();
     fireEvent.click(screen.getByRole("button", { name: "Поле" }));
-    fireEvent.change(screen.getByLabelText("Язык"), { target: { value: "tspl" } });
+    await chooseOption(user, "Язык", "TSPL");
 
     fireEvent.click(screen.getByRole("button", { name: "Скачать TSPL" }));
 

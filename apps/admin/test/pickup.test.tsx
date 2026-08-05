@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -155,13 +156,15 @@ describe("PickupPage", () => {
   });
 
   it("refetches with ?status=pending when the status filter changes to Ожидают", async () => {
+    const user = userEvent.setup();
     const fetchMock = vi.fn(async () => jsonResponse(200, { items: [ORDER_A, ORDER_B] }));
     vi.stubGlobal("fetch", fetchMock);
 
     renderPage();
     await screen.findByText("Смирнов Алексей");
 
-    fireEvent.change(screen.getByLabelText("Статус"), { target: { value: "pending" } });
+    await user.click(screen.getByRole("combobox", { name: "Статус" }));
+    await user.click(await screen.findByRole("option", { name: "Ожидают" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(

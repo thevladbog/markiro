@@ -388,7 +388,7 @@ export function ProductForm({
           label={t("pages.catalog.form.defaultCounterpartyLabel")}
           options={counterpartyOptions}
           value={defaultCounterpartyId ?? ""}
-          onChange={(value) =>
+          onValueChange={(value) =>
             setValue("defaultCounterpartyId", value, { shouldDirty: true, shouldValidate: true })
           }
         />
@@ -396,7 +396,7 @@ export function ProductForm({
           label={t("pages.catalog.form.defaultLabelTemplateLabel")}
           options={labelTemplateOptions}
           value={defaultLabelTemplateId ?? ""}
-          onChange={(value) =>
+          onValueChange={(value) =>
             setValue("defaultLabelTemplateId", value, { shouldDirty: true, shouldValidate: true })
           }
         />
