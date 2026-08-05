@@ -16,6 +16,8 @@ export interface SelectProps {
   disabled?: boolean;
   name?: string;
   required?: boolean;
+  /** Text shown when no value is selected. An empty option label takes precedence. */
+  placeholder?: string;
   id?: string;
   className?: string;
   style?: CSSProperties;
@@ -35,6 +37,7 @@ export function Select({
   disabled,
   name,
   required,
+  placeholder,
   hint,
   error,
   className,
@@ -50,6 +53,8 @@ export function Select({
   const hintId = hint ? `${selectId}-hint` : undefined;
   const errorId = error ? `${selectId}-error` : undefined;
   const describedBy = errorId ?? hintId;
+  const normalizedOptions = options.map(normalizeOption);
+  const emptyOptionLabel = normalizedOptions.find((option) => option.value === "")?.label;
 
   const handleFocus = (_event: FocusEvent<HTMLButtonElement>) => {
     setFocus(true);
@@ -109,7 +114,7 @@ export function Select({
             opacity: disabled ? 0.45 : 1,
           }}
         >
-          <RadixSelect.Value />
+          <RadixSelect.Value placeholder={emptyOptionLabel ?? placeholder} />
           <RadixSelect.Icon aria-hidden="true">
             <svg
               width="16"
@@ -136,7 +141,7 @@ export function Select({
             }}
           >
             <RadixSelect.Viewport style={{ padding: 4 }}>
-              {options.map(normalizeOption).map((option) => (
+              {normalizedOptions.map((option) => (
                 <RadixSelect.Item
                   key={option.value}
                   value={option.value}

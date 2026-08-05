@@ -1,5 +1,5 @@
 import * as RadixPopover from "@radix-ui/react-popover";
-import { useEffect, useId, useState, type CSSProperties } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 
 import { cn } from "../cn.js";
 import { IconButton } from "./IconButton.js";
@@ -116,8 +116,27 @@ function startOfMonth(date: Date) {
   return createLocalDate(date.getFullYear(), date.getMonth(), 1);
 }
 
-function moveMonth(month: Date, amount: number) {
-  return createLocalDate(month.getFullYear(), month.getMonth() + amount, 1);
+function moveDateByDays(date: Date, amount: number) {
+  return createLocalDate(date.getFullYear(), date.getMonth(), date.getDate() + amount);
+}
+
+function moveDateByMonths(date: Date, amount: number) {
+  const targetMonth = createLocalDate(date.getFullYear(), date.getMonth() + amount, 1);
+  const lastTargetDay = createLocalDate(
+    targetMonth.getFullYear(),
+    targetMonth.getMonth() + 1,
+    0,
+  ).getDate();
+
+  return createLocalDate(
+    targetMonth.getFullYear(),
+    targetMonth.getMonth(),
+    Math.min(date.getDate(), lastTargetDay),
+  );
+}
+
+function isSameDate(left: Date, right: Date) {
+  return formatIsoDate(left) === formatIsoDate(right);
 }
 
 export function getEffectivePopoverOpen(open: boolean, disabled: boolean) {
@@ -150,15 +169,76 @@ export function DatePicker({
   const [calendarMonth, setCalendarMonth] = useState(() =>
     startOfMonth(selectedDate ?? new Date()),
   );
+  const [activeDate, setActiveDate] = useState(() => selectedDate ?? new Date());
+  const activeDayRef = useRef<HTMLButtonElement>(null);
+  const shouldFocusActiveDayRef = useRef(false);
 
   useEffect(() => {
     const nextSelectedDate = parseIsoDate(value);
-    if (nextSelectedDate) setCalendarMonth(startOfMonth(nextSelectedDate));
+    if (nextSelectedDate) {
+      setCalendarMonth(startOfMonth(nextSelectedDate));
+      setActiveDate(nextSelectedDate);
+    }
   }, [value]);
 
   useEffect(() => {
     if (disabled) setOpen(false);
   }, [disabled]);
+
+  useEffect(() => {
+    if (!open || !shouldFocusActiveDayRef.current || !activeDayRef.current) return;
+
+    activeDayRef.current.focus();
+    shouldFocusActiveDayRef.current = false;
+  }, [activeDate, calendarMonth, open]);
+
+  const moveActiveDate = (nextDate: Date) => {
+    shouldFocusActiveDayRef.current = true;
+    setActiveDate(nextDate);
+    setCalendarMonth(startOfMonth(nextDate));
+  };
+
+  const changeCalendarMonth = (amount: number) => {
+    const nextActiveDate = moveDateByMonths(activeDate, amount);
+    setActiveDate(nextActiveDate);
+    setCalendarMonth(startOfMonth(nextActiveDate));
+  };
+
+  const handleDayKeyDown = (event: KeyboardEvent<HTMLButtonElement>, day: Date) => {
+    let nextDate: Date | undefined;
+
+    switch (event.key) {
+      case "ArrowLeft":
+        nextDate = moveDateByDays(day, -1);
+        break;
+      case "ArrowRight":
+        nextDate = moveDateByDays(day, 1);
+        break;
+      case "ArrowUp":
+        nextDate = moveDateByDays(day, -7);
+        break;
+      case "ArrowDown":
+        nextDate = moveDateByDays(day, 7);
+        break;
+      case "Home":
+        nextDate = moveDateByDays(day, -((day.getDay() + 6) % 7));
+        break;
+      case "End":
+        nextDate = moveDateByDays(day, 6 - ((day.getDay() + 6) % 7));
+        break;
+      case "PageUp":
+        nextDate = moveDateByMonths(day, -1);
+        break;
+      case "PageDown":
+        nextDate = moveDateByMonths(day, 1);
+        break;
+      default:
+        return;
+    }
+
+    event.preventDefault();
+    moveActiveDate(nextDate);
+  };
 
   const selectDate = (date: Date) => {
     if (disabled) return;
@@ -190,7 +270,20 @@ export function DatePicker({
       )}
       <RadixPopover.Root
         open={getEffectivePopoverOpen(open, disabled)}
-        onOpenChange={(nextOpen) => setOpen(disabled ? false : nextOpen)}
+        onOpenChange={(nextOpen) => {
+          if (disabled) {
+            setOpen(false);
+            return;
+          }
+
+          if (nextOpen) {
+            const nextActiveDate = selectedDate ?? new Date();
+            shouldFocusActiveDayRef.current = true;
+            setActiveDate(nextActiveDate);
+            setCalendarMonth(startOfMonth(nextActiveDate));
+          }
+          setOpen(nextOpen);
+        }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <RadixPopover.Trigger asChild>
@@ -263,6 +356,11 @@ export function DatePicker({
             aria-label="Календарь"
             sideOffset={6}
             className="mk-date-picker__popover"
+            onOpenAutoFocus={(event) => {
+              event.preventDefault();
+              activeDayRef.current?.focus();
+              shouldFocusActiveDayRef.current = false;
+            }}
             style={{
               zIndex: 1000,
               width: 304,
@@ -289,7 +387,7 @@ export function DatePicker({
                 className="mk-date-picker__navigation"
                 disabled={disabled}
                 onClick={() => {
-                  if (!disabled) setCalendarMonth((month) => moveMonth(month, -1));
+                  if (!disabled) changeCalendarMonth(-1);
                 }}
               >
                 <svg
@@ -316,7 +414,7 @@ export function DatePicker({
                 className="mk-date-picker__navigation"
                 disabled={disabled}
                 onClick={() => {
-                  if (!disabled) setCalendarMonth((month) => moveMonth(month, 1));
+                  if (!disabled) changeCalendarMonth(1);
                 }}
               >
                 <svg
@@ -365,17 +463,22 @@ export function DatePicker({
                       const isSelected = selectedDate
                         ? formatIsoDate(day) === formatIsoDate(selectedDate)
                         : false;
+                      const isActive = isSameDate(day, activeDate);
 
                       return (
-                        <span key={formatIsoDate(day)} role="gridcell">
+                        <span key={formatIsoDate(day)} role="gridcell" aria-selected={isSelected}>
                           <button
                             type="button"
                             disabled={disabled}
                             aria-label={formatRussianDate(day)}
                             aria-pressed={isSelected}
+                            tabIndex={isActive ? 0 : -1}
+                            ref={isActive ? activeDayRef : undefined}
                             className="mk-date-picker__day"
                             data-outside-month={outsideMonth ? "true" : undefined}
                             data-selected={isSelected ? "true" : undefined}
+                            onFocus={() => setActiveDate(day)}
+                            onKeyDown={(event) => handleDayKeyDown(event, day)}
                             onClick={() => selectDate(day)}
                           >
                             {day.getDate()}
@@ -397,61 +500,6 @@ export function DatePicker({
           {error || hint}
         </span>
       )}
-      <style>{`
-        .mk-date-picker__trigger:focus-visible,
-        .mk-date-picker__navigation:focus-visible,
-        .mk-date-picker__day:focus-visible {
-          outline: 2px solid var(--focus-ring);
-          outline-offset: 2px;
-          box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus-ring) 25%, transparent);
-        }
-        .mk-date-picker__navigation {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          width: var(--control-sm);
-          height: var(--control-sm);
-          padding: 0;
-          border: 1px solid var(--line-strong);
-          border-radius: var(--r-1);
-          background: var(--surface-card);
-          color: var(--fg-1);
-          cursor: pointer;
-        }
-        .mk-date-picker__navigation:hover {
-          background: var(--surface-panel);
-        }
-        .mk-date-picker__navigation:disabled,
-        .mk-date-picker__day:disabled {
-          cursor: not-allowed;
-          opacity: 0.45;
-        }
-        .mk-date-picker__day {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          width: 100%;
-          aspect-ratio: 1;
-          min-height: var(--control-sm);
-          padding: 0;
-          border: 1px solid transparent;
-          border-radius: var(--r-1);
-          background: transparent;
-          color: var(--fg-1);
-          font: var(--text-body-sm);
-          cursor: pointer;
-        }
-        .mk-date-picker__day:hover {
-          background: var(--surface-panel);
-        }
-        .mk-date-picker__day[data-outside-month="true"] {
-          color: var(--fg-disabled);
-        }
-        .mk-date-picker__day[data-selected="true"] {
-          background: var(--surface-inverse);
-          color: var(--fg-on-inverse);
-        }
-      `}</style>
     </div>
   );
 }

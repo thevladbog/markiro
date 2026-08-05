@@ -1,5 +1,5 @@
 import * as RadixCheckbox from "@radix-ui/react-checkbox";
-import { useId, useState, type CSSProperties, type ReactNode } from "react";
+import { useId, type CSSProperties, type ReactNode } from "react";
 
 import { cn } from "../cn.js";
 
@@ -30,7 +30,6 @@ export function Checkbox({
   style,
   "aria-label": ariaLabel,
 }: CheckboxProps) {
-  const [focused, setFocused] = useState(false);
   const autoId = useId();
   const checkboxId = id ?? `mk-checkbox-${autoId}`;
   const labelId = `${checkboxId}-label`;
@@ -53,8 +52,6 @@ export function Checkbox({
           {...(ariaLabel === undefined ? { "aria-labelledby": labelId } : {})}
           {...(error ? { "aria-invalid": true } : {})}
           {...(errorId || hintId ? { "aria-describedby": errorId ?? hintId } : {})}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
           className="mk-checkbox__control"
           style={{
             flex: "0 0 auto",
@@ -69,9 +66,6 @@ export function Checkbox({
             borderRadius: "var(--r-1)",
             color: "var(--fg-on-inverse)",
             outline: "none",
-            boxShadow: focused
-              ? "0 0 0 2px color-mix(in srgb, var(--focus-ring) 25%, transparent)"
-              : "none",
             cursor: disabled ? "not-allowed" : "pointer",
             opacity: disabled ? 0.45 : 1,
           }}
@@ -89,9 +83,17 @@ export function Checkbox({
             </svg>
           </RadixCheckbox.Indicator>
         </RadixCheckbox.Root>
-        <span id={labelId} style={{ font: "var(--text-body)", color: "var(--fg-1)" }}>
+        <label
+          id={labelId}
+          htmlFor={checkboxId}
+          style={{
+            font: "var(--text-body)",
+            color: "var(--fg-1)",
+            cursor: disabled ? "not-allowed" : "pointer",
+          }}
+        >
           {label}
-        </span>
+        </label>
       </div>
       {(error || hint) && (
         <span
@@ -101,13 +103,6 @@ export function Checkbox({
           {error || hint}
         </span>
       )}
-      <style>{`
-        .mk-checkbox__control[data-state="checked"],
-        .mk-checkbox__control[data-state="indeterminate"] {
-          background: var(--surface-inverse);
-          border-color: var(--surface-inverse);
-        }
-      `}</style>
     </div>
   );
 }

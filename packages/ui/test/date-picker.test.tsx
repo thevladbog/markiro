@@ -19,6 +19,87 @@ beforeAll(() => {
 });
 
 describe("DatePicker", () => {
+  it("opens with exactly one active day in the tab order", async () => {
+    const user = userEvent.setup();
+    render(<DatePicker label="Плановая дата" value="2026-08-05" />);
+
+    await user.click(screen.getByRole("button", { name: /^плановая дата$/i }));
+
+    const dayButtons = screen
+      .getAllByRole("button")
+      .filter((button) => button.classList.contains("mk-date-picker__day"));
+    expect(dayButtons.filter((button) => button.tabIndex === 0)).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "5 августа 2026" }).tabIndex).toBe(0);
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "5 августа 2026" }));
+  });
+
+  it("exposes the selected calendar day through the gridcell state", async () => {
+    const user = userEvent.setup();
+    render(<DatePicker label="Плановая дата" value="2026-08-05" />);
+
+    await user.click(screen.getByRole("button", { name: /^плановая дата$/i }));
+
+    expect(
+      screen
+        .getByRole("button", { name: "5 августа 2026" })
+        .closest('[role="gridcell"]')
+        ?.getAttribute("aria-selected"),
+    ).toBe("true");
+  });
+
+  it("selects a date using only keyboard interaction", async () => {
+    const user = userEvent.setup();
+    const onValueChange = vi.fn();
+    render(<DatePicker label="Плановая дата" value="2026-08-05" onValueChange={onValueChange} />);
+
+    await user.tab();
+    await user.keyboard("{Enter}");
+    await user.keyboard("{ArrowRight}{Enter}");
+
+    expect(onValueChange).toHaveBeenCalledWith("2026-08-06");
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("moves to the start and end of the week with Home and End", async () => {
+    const user = userEvent.setup();
+    render(<DatePicker label="Плановая дата" value="2026-08-05" />);
+
+    await user.click(screen.getByRole("button", { name: /^плановая дата$/i }));
+    await user.keyboard("{Home}");
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "3 августа 2026" }));
+
+    await user.keyboard("{End}");
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "9 августа 2026" }));
+  });
+
+  it("moves across month boundaries and changes months with PageUp and PageDown", async () => {
+    const user = userEvent.setup();
+    render(<DatePicker label="Плановая дата" value="2026-08-31" />);
+
+    await user.click(screen.getByRole("button", { name: /^плановая дата$/i }));
+    await user.keyboard("{ArrowRight}");
+    expect(screen.getByRole("heading", { name: "Сентябрь 2026" })).toBeDefined();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "1 сентября 2026" }));
+
+    await user.keyboard("{PageDown}");
+    expect(screen.getByRole("heading", { name: "Октябрь 2026" })).toBeDefined();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "1 октября 2026" }));
+
+    await user.keyboard("{PageUp}");
+    expect(screen.getByRole("heading", { name: "Сентябрь 2026" })).toBeDefined();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "1 сентября 2026" }));
+  });
+
+  it("wires an error to its trigger and exposes the invalid state", () => {
+    render(<DatePicker label="Плановая дата" error="Дата обязательна" />);
+
+    const trigger = screen.getByRole("button", { name: /^плановая дата$/i });
+    expect(trigger.getAttribute("aria-invalid")).toBe("true");
+    expect(document.getElementById(trigger.getAttribute("aria-describedby")!)?.textContent).toBe(
+      "Дата обязательна",
+    );
+  });
+
   it("derives a closed effective popover state whenever disabled", () => {
     expect(getEffectivePopoverOpen(true, true)).toBe(false);
     expect(getEffectivePopoverOpen(false, true)).toBe(false);

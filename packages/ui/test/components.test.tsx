@@ -1,6 +1,9 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
+import { useState } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+
+import componentStyles from "virtual:ui-component-styles";
 
 import {
   Badge,
@@ -28,6 +31,10 @@ afterEach(() => {
 });
 
 beforeAll(() => {
+  const style = document.createElement("style");
+  style.textContent = componentStyles;
+  document.head.append(style);
+
   Object.defineProperties(HTMLElement.prototype, {
     hasPointerCapture: { value: () => false },
     setPointerCapture: { value: () => undefined },
@@ -160,6 +167,66 @@ describe("Input", () => {
 });
 
 describe("Select", () => {
+  it("shows the empty option label for an initial empty value", () => {
+    render(
+      <Select
+        label="Линия"
+        options={[
+          { value: "", label: "Без линии" },
+          { value: "line-1", label: "Линия 1" },
+        ]}
+        value=""
+      />,
+    );
+
+    expect(screen.getByRole("combobox", { name: "Линия" }).textContent).toContain("Без линии");
+  });
+
+  it("shows the empty option label after clearing a selected value", async () => {
+    const user = userEvent.setup();
+
+    function SelectHarness() {
+      const [value, setValue] = useState("line-1");
+
+      return (
+        <Select
+          label="Линия"
+          options={[
+            { value: "", label: "Без линии" },
+            { value: "line-1", label: "Линия 1" },
+          ]}
+          value={value}
+          onValueChange={setValue}
+        />
+      );
+    }
+
+    render(<SelectHarness />);
+
+    await user.click(screen.getByRole("combobox", { name: "Линия" }));
+    await user.click(screen.getByRole("option", { name: "Без линии" }));
+
+    expect(screen.getByRole("combobox", { name: "Линия" }).textContent).toContain("Без линии");
+  });
+
+  it("uses its public placeholder when no value is selected", () => {
+    render(<Select label="Продукт" options={["Молоко"]} placeholder="Выберите продукт" />);
+
+    expect(screen.getByRole("combobox", { name: "Продукт" }).textContent).toContain(
+      "Выберите продукт",
+    );
+  });
+
+  it("wires an error to the trigger and exposes the invalid state", () => {
+    render(<Select label="Продукт" options={["Молоко"]} error="Выберите продукт" />);
+
+    const trigger = screen.getByRole("combobox", { name: "Продукт" });
+    expect(trigger.getAttribute("aria-invalid")).toBe("true");
+    expect(document.getElementById(trigger.getAttribute("aria-describedby")!)?.textContent).toBe(
+      "Выберите продукт",
+    );
+  });
+
   it("opens a custom option overlay and calls onValueChange when an option is clicked", async () => {
     const user = userEvent.setup();
     const onValueChange = vi.fn();
@@ -244,6 +311,47 @@ describe("Select", () => {
 });
 
 describe("Checkbox", () => {
+  it("toggles when its visible label is clicked", async () => {
+    const user = userEvent.setup();
+    const onCheckedChange = vi.fn();
+    render(<Checkbox label="Паллеты" checked={false} onCheckedChange={onCheckedChange} />);
+
+    await user.click(screen.getByText("Паллеты"));
+
+    expect(onCheckedChange).toHaveBeenCalledWith(true);
+  });
+
+  it("toggles from the keyboard", async () => {
+    const user = userEvent.setup();
+    const onCheckedChange = vi.fn();
+    render(<Checkbox label="Паллеты" checked={false} onCheckedChange={onCheckedChange} />);
+
+    await user.tab();
+    await user.keyboard(" ");
+
+    expect(onCheckedChange).toHaveBeenCalledWith(true);
+  });
+
+  it("wires an error to the checkbox and exposes the invalid state", () => {
+    render(<Checkbox label="Паллеты" error="Выберите значение" />);
+
+    const checkbox = screen.getByRole("checkbox", { name: "Паллеты" });
+    expect(checkbox.getAttribute("aria-invalid")).toBe("true");
+    expect(document.getElementById(checkbox.getAttribute("aria-describedby")!)?.textContent).toBe(
+      "Выберите значение",
+    );
+  });
+
+  it("uses the shared solid tokenised focus-visible rule", () => {
+    render(<Checkbox label="Паллеты" />);
+
+    const focusRule = Array.from(document.styleSheets)
+      .flatMap((sheet) => Array.from(sheet.cssRules))
+      .find((rule) => rule.cssText.includes(".mk-checkbox__control:focus-visible"));
+    expect(focusRule).toBeDefined();
+    expect(focusRule!.cssText).toContain("outline: 2px solid var(--focus-ring);");
+  });
+
   it("calls onCheckedChange with true when its labelled control is checked", async () => {
     const user = userEvent.setup();
     const onCheckedChange = vi.fn();
@@ -266,6 +374,54 @@ describe("Checkbox", () => {
 });
 
 describe("RadioGroup", () => {
+  it("selects an option when its visible label is clicked", async () => {
+    const user = userEvent.setup();
+    const onValueChange = vi.fn();
+    render(
+      <RadioGroup
+        label="Режим смены"
+        options={[
+          { value: "production", label: "Производство" },
+          { value: "rework", label: "Переработка" },
+        ]}
+        value="production"
+        onValueChange={onValueChange}
+      />,
+    );
+
+    await user.click(screen.getByText("Переработка"));
+
+    expect(onValueChange).toHaveBeenCalledWith("rework");
+  });
+
+  it("wires an error to the group and exposes the invalid state", () => {
+    render(
+      <RadioGroup
+        label="Режим смены"
+        error="Выберите режим"
+        options={[{ value: "production", label: "Производство" }]}
+      />,
+    );
+
+    const group = screen.getByRole("radiogroup", { name: "Режим смены" });
+    expect(group.getAttribute("aria-invalid")).toBe("true");
+    expect(document.getElementById(group.getAttribute("aria-describedby")!)?.textContent).toBe(
+      "Выберите режим",
+    );
+  });
+
+  it("uses the shared solid tokenised focus-visible rule", () => {
+    render(
+      <RadioGroup label="Режим смены" options={[{ value: "production", label: "Производство" }]} />,
+    );
+
+    const focusRule = Array.from(document.styleSheets)
+      .flatMap((sheet) => Array.from(sheet.cssRules))
+      .find((rule) => rule.cssText.includes(".mk-radio-group__control:focus-visible"));
+    expect(focusRule).toBeDefined();
+    expect(focusRule!.cssText).toContain("outline: 2px solid var(--focus-ring);");
+  });
+
   it("uses aria-label when no visible group label is supplied", () => {
     render(
       <RadioGroup
@@ -356,9 +512,24 @@ describe("IconButton", () => {
 
     const focusRule = Array.from(document.styleSheets)
       .flatMap((sheet) => Array.from(sheet.cssRules))
-      .find((rule) => rule.cssText.startsWith(".mk-icon-button:focus-visible"));
+      .find((rule) => rule.cssText.includes(".mk-icon-button:focus-visible"));
     expect(focusRule).toBeDefined();
     expect(focusRule!.cssText).toContain("outline: 2px solid var(--focus-ring);");
+  });
+});
+
+describe("shared control styles", () => {
+  it("does not emit a global style tag for every control instance", () => {
+    const { container } = render(
+      <>
+        <Checkbox label="Первый" />
+        <Checkbox label="Второй" />
+        <RadioGroup label="Режим" options={[{ value: "one", label: "Один" }]} />
+        <IconButton aria-label="Добавить" icon={<span aria-hidden="true">+</span>} />
+      </>,
+    );
+
+    expect(container.querySelector("style")).toBeNull();
   });
 });
 

@@ -1,5 +1,5 @@
 import * as RadixRadioGroup from "@radix-ui/react-radio-group";
-import { useId, useState, type CSSProperties, type ReactNode } from "react";
+import { useId, type CSSProperties, type ReactNode } from "react";
 
 import { cn } from "../cn.js";
 
@@ -41,7 +41,6 @@ export function RadioGroup({
   style,
   "aria-label": ariaLabel,
 }: RadioGroupProps) {
-  const [focusedValue, setFocusedValue] = useState<string>();
   const autoId = useId();
   const groupId = id ?? `mk-radio-group-${autoId}`;
   const labelId = label ? `${groupId}-label` : undefined;
@@ -81,10 +80,6 @@ export function RadioGroup({
                 value={option.value}
                 disabled={optionDisabled}
                 aria-labelledby={`${optionId}-label`}
-                onFocus={() => setFocusedValue(option.value)}
-                onBlur={() =>
-                  setFocusedValue((current) => (current === option.value ? undefined : current))
-                }
                 className="mk-radio-group__control"
                 style={{
                   flex: "0 0 auto",
@@ -99,10 +94,6 @@ export function RadioGroup({
                   borderRadius: "50%",
                   background: "var(--surface-card)",
                   outline: "none",
-                  boxShadow:
-                    focusedValue === option.value
-                      ? "0 0 0 2px color-mix(in srgb, var(--focus-ring) 25%, transparent)"
-                      : "none",
                   cursor: optionDisabled ? "not-allowed" : "pointer",
                   opacity: optionDisabled ? 0.45 : 1,
                 }}
@@ -112,12 +103,17 @@ export function RadioGroup({
                   className="mk-radio-group__indicator"
                 />
               </RadixRadioGroup.Item>
-              <span
+              <label
                 id={`${optionId}-label`}
-                style={{ font: "var(--text-body)", color: "var(--fg-1)" }}
+                htmlFor={optionId}
+                style={{
+                  font: "var(--text-body)",
+                  color: "var(--fg-1)",
+                  cursor: optionDisabled ? "not-allowed" : "pointer",
+                }}
               >
                 {option.label}
-              </span>
+              </label>
             </div>
           );
         })}
@@ -130,17 +126,6 @@ export function RadioGroup({
           {error || hint}
         </span>
       )}
-      <style>{`
-        .mk-radio-group__control[data-state="checked"] {
-          border-color: var(--surface-inverse);
-        }
-        .mk-radio-group__indicator {
-          width: 8px;
-          height: 8px;
-          border-radius: 50%;
-          background: var(--surface-inverse);
-        }
-      `}</style>
     </div>
   );
 }
