@@ -16,6 +16,7 @@ const runbooks = {
     "secrets-inventory",
     "secrets-runtime-payload",
     "secrets-mode-verification",
+    "secrets-post-activation-verification",
     "secrets-rotation",
   ],
   "docs/runbooks/yandex-infrastructure-apply.md": [
@@ -87,6 +88,8 @@ async function sources() {
     dnsWorkflow: await contents(".github/workflows/yandex-dns-convergence.yml"),
     postDnsWorkflow: await contents(".github/workflows/yandex-post-dns-smoke.yml"),
     remoteDeploy: await contents("deploy/yandex/remote-deploy.mjs"),
+    runtimeUnit: await contents("deploy/yandex/systemd/markiro-runtime-env.service"),
+    appCloudInit: await contents("infra/yandex/modules/compute/cloud-init-app.yaml.tftpl"),
   };
 }
 
@@ -154,10 +157,20 @@ const markerProcedures = {
     ],
     "secrets-mode-verification": [
       "expected key names",
-      "/etc/markiro/production.env` at mode `0600`",
-      "node deploy/production/preflight.mjs",
-      "config --quiet",
+      "/etc/markiro/production.env",
+      "root-owned file at mode `0600`",
+      "/usr/local/lib/markiro/.env.production.example",
+      "systemctl is-enabled --quiet markiro-runtime-env.service",
+      "systemctl restart markiro-runtime-env.service",
+      "exact generated environment inventory",
       "sanitized readiness state",
+      "candidate-bound production preflight",
+    ],
+    "secrets-post-activation-verification": [
+      "successful finalized first deployment",
+      'expected_release="/opt/markiro/releases/$SUCCESSFUL_FIRST_RELEASE_SHA"',
+      "readlink -e",
+      'test "$active_release" = "$expected_release"',
     ],
     "secrets-rotation": [
       "approved rotation record",
@@ -227,6 +240,8 @@ function assertRunbookContract({
   dnsWorkflow,
   postDnsWorkflow,
   remoteDeploy,
+  runtimeUnit,
+  appCloudInit,
 }) {
   for (const [runbook, markers] of Object.entries(runbooks)) {
     const source = documents[runbook];
@@ -331,10 +346,43 @@ function assertRunbookContract({
   assert.match(goLive, /rollback_rehearsal=false/);
   assert.match(goLive, /automatic\s+`workflow_run` delivery always fixes this input to false/i);
   const secrets = documents["docs/runbooks/yandex-secrets.md"];
-  assert.match(secrets, /\/opt\/markiro\/active-release/);
-  assert.match(secrets, /--project-name markiro-production/);
+  const preFirstSecrets = markerProcedure(secrets, "secrets-mode-verification");
+  assert.doesNotMatch(preFirstSecrets, /\/opt\/markiro\/active-release/);
+  assert.doesNotMatch(preFirstSecrets, /deploy\/production\/preflight\.mjs/);
+  assert.doesNotMatch(preFirstSecrets, /docker compose/);
+  assert.match(
+    markerProcedure(secrets, "secrets-post-activation-verification"),
+    /\/opt\/markiro\/active-release/,
+  );
+  assert.match(
+    runtimeUnit,
+    /ExecStart=\/usr\/bin\/node \/usr\/local\/lib\/markiro\/runtime-env\.mjs/,
+  );
+  assert.match(
+    appCloudInit,
+    /path: \/usr\/local\/lib\/markiro\/runtime-env\.mjs[\s\S]*?owner: root:root[\s\S]*?permissions: "0700"/,
+  );
+  assert.match(
+    appCloudInit,
+    /path: \/usr\/local\/lib\/markiro\/\.env\.production\.example[\s\S]*?owner: root:root[\s\S]*?permissions: "0644"/,
+  );
+  assert.match(
+    appCloudInit,
+    /path: \/etc\/systemd\/system\/markiro-runtime-env\.service[\s\S]*?owner: root:root[\s\S]*?permissions: "0644"/,
+  );
+  assert.match(appCloudInit, /install -d -m 0700 \/etc\/markiro/);
+  assert.match(appCloudInit, /chmod 0600 \/etc\/markiro\/runtime-secret-id/);
   assert.match(remoteDeploy, /\/opt\/markiro\/active-release/);
   assert.match(remoteDeploy, /mv -Tf/);
+  ordered(
+    remoteDeploy,
+    [
+      "await dependencies.transferBundle(manifest)",
+      "await dependencies.refreshRuntime(manifest)",
+      "candidate = await dependencies.prepare(manifest)",
+    ],
+    "candidate-bound production preflight",
+  );
   const publicDns = goLive.indexOf("<!-- runbook-contract:go-live-public-dns-apply -->");
   assert.ok(publicDns >= 0, "missing public DNS apply marker");
   for (let gate = 1; gate <= 11; gate += 1) {
@@ -352,6 +400,20 @@ function assertRunbookContract({
       "production-public-smoke",
     ],
     "Yandex first-release ordering",
+  );
+  ordered(
+    goLive,
+    [
+      "<!-- runbook-contract:go-live-gate-07-smtp-s3 -->",
+      "pre-first activation materialization checks",
+      "rollback_rehearsal=true",
+      "/opt/markiro/active-release` pointer remains absent",
+      "production-cleanup",
+      "rollback_rehearsal=false",
+      "successful finalized first deployment creates",
+      "post-activation active-path",
+    ],
+    "pre-first materialization through first activation",
   );
   assert.doesNotMatch(
     goLive.slice(0, publicDns),

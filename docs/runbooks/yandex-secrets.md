@@ -64,27 +64,108 @@ rendered Compose output.
 
 <!-- runbook-contract:secrets-mode-verification -->
 
-1. Verify Lockbox contains the expected key names once, with no unknown,
-   duplicate, blank, or multiline entry. Do not display values.
-2. Verify the app can materialize `/etc/markiro/production.env` at mode `0600`
-   and its parent directory at mode `0700`. Verify no registry `DOCKER_CONFIG`
-   remains after deployment and that the app identity cannot read the registry
-   container. Verify the runner receives only the bounded encoded JIT
-   configuration and deletes its metadata key before the runner process starts;
-   it must not be able to read the registration container.
-3. Run the supported production preflight, which validates Compose quietly and
-   does not render secret-expanded configuration.
+1. Before the first deployment, verify Lockbox contains the expected key names
+   once, with no unknown, duplicate, blank, or multiline entry. Do not display
+   values.
+2. Verify the installed root-owned materializer assets and unit, restart the
+   enabled oneshot unit, and compare only generated environment key names with
+   the installed inventory. The generated `/etc/markiro/production.env` must be
+   a regular root-owned file at mode `0600`; its parent directory must be a
+   root-owned directory at mode `0700`.
 
 ```bash
 set -euo pipefail
 umask 077
-cd /opt/markiro/active-release
-node deploy/production/preflight.mjs
-docker compose --project-name markiro-production --env-file /etc/markiro/production.env -f compose.production.yml -f deploy/production/compose.yandex.yml config --quiet
+
+test "$(stat -c '%U:%G:%a' /usr/local/lib/markiro/runtime-env.mjs)" = root:root:700
+test "$(stat -c '%U:%G:%a' /usr/local/lib/markiro/.env.production.example)" = root:root:644
+test "$(stat -c '%U:%G:%a' /etc/systemd/system/markiro-runtime-env.service)" = root:root:644
+test "$(stat -c '%U:%G:%a' /etc/markiro)" = root:root:700
+test "$(stat -c '%U:%G:%a' /etc/markiro/runtime-secret-id)" = root:root:600
+
+systemctl is-enabled --quiet markiro-runtime-env.service
+systemctl restart markiro-runtime-env.service
+test "$(systemctl show --property=Result --value markiro-runtime-env.service)" = success
+test -f /etc/markiro/production.env
+test ! -L /etc/markiro/production.env
+test "$(stat -c '%U:%G:%a' /etc/markiro/production.env)" = root:root:600
+
+node - /usr/local/lib/markiro/.env.production.example /etc/markiro/production.env <<'NODE'
+const { readFileSync } = require("node:fs");
+
+function keys(path, inventory) {
+  const names = [];
+  for (const line of readFileSync(path, "utf8").split("\n")) {
+    if (line === "" || line.startsWith("#")) continue;
+    const match = line.match(/^([A-Z][A-Z0-9_]*)=(.*)$/);
+    if (!match || (inventory && match[2] !== "")) {
+      throw new Error("runtime environment inventory is invalid");
+    }
+    names.push(match[1]);
+  }
+  if (new Set(names).size !== names.length) {
+    throw new Error("runtime environment inventory is invalid");
+  }
+  return names.sort();
+}
+
+const expected = keys(process.argv[2], true);
+const actual = keys(process.argv[3], false);
+if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+  throw new Error("runtime environment inventory is invalid");
+}
+console.log("exact generated environment inventory verified");
+NODE
+
+readiness_result="$(mktemp)"
+trap 'rm -f "$readiness_result"' EXIT
+if /usr/bin/node /usr/local/lib/markiro/readiness-observer.mjs > "$readiness_result"; then
+  readiness_status=0
+else
+  readiness_status=$?
+fi
+test "$readiness_status" = 1
+test "$(cat "$readiness_result")" = required_unavailable
 ```
 
-4. Check the sanitized readiness state. Treat a missing mandatory dependency as
-   a stop. Record the health evidence ID only in the protected system.
+3. The `required_unavailable` sanitized readiness state is expected before the
+   first candidate exists; it proves that the observer fails closed without
+   disclosing a response body. Do not treat it as candidate health evidence.
+   The deployment workflow's candidate-bound production preflight after bundle
+   transfer is the authority for the first release's exact Compose model and
+   non-secret release inputs. Do not run a release preflight from this pre-first
+   procedure.
+4. Verify no registry `DOCKER_CONFIG` remains after deployment and that the app
+   identity cannot read the registry container. Verify the runner receives only
+   the bounded encoded JIT configuration and deletes its metadata key before the
+   runner process starts; it must not be able to read the registration
+   container. Record only sanitized evidence IDs in the protected system.
+
+## Verify the active path only after first activation
+
+<!-- runbook-contract:secrets-post-activation-verification -->
+
+1. Run this check only after the protected workflow has produced authenticated
+   evidence for a successful finalized first deployment. Obtain the exact
+   successful first-release SHA from that evidence; do not infer it from a
+   mutable tag.
+2. Verify the live symlink resolves to that immutable transferred directory.
+   This is an identity check, not a second manual preflight.
+
+```bash
+set -euo pipefail
+read -r -p 'Successful finalized first-release 40-character SHA: ' SUCCESSFUL_FIRST_RELEASE_SHA
+[[ "$SUCCESSFUL_FIRST_RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+expected_release="/opt/markiro/releases/$SUCCESSFUL_FIRST_RELEASE_SHA"
+active_release="$(readlink -e /opt/markiro/active-release)"
+test "$active_release" = "$expected_release"
+test -f "$active_release/compose.production.yml"
+test -f "$active_release/deploy/production/preflight.mjs"
+```
+
+3. Use `/opt/markiro/active-release` only for post-activation operator checks.
+   Candidate-bound preflight remains the workflow authority after every
+   immutable bundle transfer.
 
 ## Rotate a secret without logging it
 

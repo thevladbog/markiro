@@ -79,6 +79,154 @@ test("controller rejects mismatched JIT responses and never writes metadata", as
   assert.equal(writes, 0);
 });
 
+const CONTROLLER_GATE_ENVIRONMENT = {
+  MARKIRO_DEPLOYMENT_PHASE: "repeat",
+  YC_APP_INSTANCE_ID: "fv4app123",
+  YC_POSTGRES_CLUSTER_ID: "c9qpostgres123",
+  YC_LOAD_BALANCER_ID: "ds7loadbalancer123",
+  YC_BACKEND_GROUP_ID: "ds7backend123",
+  YC_TARGET_GROUP_ID: "ds7target123",
+};
+const APP_ADDRESS = "10.20.0.7";
+const HEALTHY_TARGET = {
+  target: { address: APP_ADDRESS, subnetId: "e2lsubnet123" },
+  status: { zoneStatuses: [{ status: "HEALTHY", zoneId: "ru-central1-a" }] },
+};
+
+function controllerGateProvider({ app = {}, targetStates = [HEALTHY_TARGET] } = {}) {
+  const requests = [];
+  const request = async (url, options = {}) => {
+    requests.push(url);
+    assert.equal(options.headers.Authorization, "Bearer test-gate-token");
+    if (url.includes("/compute/v1/instances/"))
+      return {
+        id: "fv4app123",
+        folderId: "b1gfolder123",
+        status: "RUNNING",
+        networkInterfaces: [
+          {
+            index: "0",
+            macAddress: "d0:0d:00:00:00:01",
+            subnetId: "e2lsubnet123",
+            primaryV4Address: { address: APP_ADDRESS },
+          },
+        ],
+        ...app,
+      };
+    if (url.endsWith("/backups"))
+      return {
+        backups: [
+          {
+            createdAt: "2026-08-05T09:00:00.000Z",
+            id: "mdbbackup123",
+            sourceClusterId: "c9qpostgres123",
+          },
+        ],
+      };
+    if (url.includes("/targetStates/")) return { targetStates };
+    assert.fail(`unexpected provider request: ${url}`);
+  };
+  return { request, requests };
+}
+
+test("repeat controller gate accepts exactly one healthy target for the validated private app address", async () => {
+  assert.equal(typeof runnerControl.verifyControllerGates, "function");
+  const provider = controllerGateProvider();
+
+  await runnerControl.verifyControllerGates("test-gate-token", {
+    environment: CONTROLLER_GATE_ENVIRONMENT,
+    now: () => Date.parse("2026-08-05T10:00:00.000Z"),
+    request: provider.request,
+  });
+
+  assert.equal(provider.requests.length, 3);
+});
+
+test("repeat controller gate rejects stale, absent, unhealthy, duplicate, unexpected, and malformed target inventories", async () => {
+  const unrelatedHealthy = {
+    target: { address: "10.20.0.8", subnetId: "e2lsubnet123" },
+    status: { zoneStatuses: [{ status: "HEALTHY", zoneId: "ru-central1-a" }] },
+  };
+  const exactUnhealthy = {
+    ...HEALTHY_TARGET,
+    status: { zoneStatuses: [{ status: "UNHEALTHY", zoneId: "ru-central1-a" }] },
+  };
+  for (const [name, targetStates] of [
+    ["unrelated healthy and exact unhealthy", [unrelatedHealthy, exactUnhealthy]],
+    ["exact absent", [unrelatedHealthy]],
+    ["exact unhealthy", [exactUnhealthy]],
+    ["duplicate exact", [HEALTHY_TARGET, structuredClone(HEALTHY_TARGET)]],
+    ["unexpected extra", [HEALTHY_TARGET, unrelatedHealthy]],
+    ["malformed address", [{ ...HEALTHY_TARGET, target: { address: "999.20.0.7" } }]],
+    ["malformed status", [{ ...HEALTHY_TARGET, status: { zoneStatuses: [{}] } }]],
+    ["malformed root", null],
+  ]) {
+    const provider = controllerGateProvider({ targetStates });
+    await assert.rejects(
+      runnerControl.verifyControllerGates("test-gate-token", {
+        environment: CONTROLLER_GATE_ENVIRONMENT,
+        now: () => Date.parse("2026-08-05T10:00:00.000Z"),
+        request: provider.request,
+      }),
+      /production ALB target inventory failed|production ALB gate failed/,
+      name,
+    );
+  }
+});
+
+test("repeat controller gate rejects ambiguous, public, or malformed app network identity", async () => {
+  for (const [name, app] of [
+    ["missing interface", { networkInterfaces: [] }],
+    [
+      "duplicate interfaces",
+      {
+        networkInterfaces: [
+          { index: "0", primaryV4Address: { address: APP_ADDRESS } },
+          { index: "1", primaryV4Address: { address: "10.20.0.8" } },
+        ],
+      },
+    ],
+    [
+      "public NAT",
+      {
+        networkInterfaces: [
+          {
+            index: "0",
+            primaryV4Address: {
+              address: APP_ADDRESS,
+              oneToOneNat: { address: "203.0.113.10", ipVersion: "IPV4" },
+            },
+          },
+        ],
+      },
+    ],
+    [
+      "public-only address",
+      { networkInterfaces: [{ index: "0", primaryV4Address: { address: "203.0.113.10" } }] },
+    ],
+    [
+      "malformed address",
+      { networkInterfaces: [{ index: "0", primaryV4Address: { address: "10.20.0.999" } }] },
+    ],
+  ]) {
+    const provider = controllerGateProvider({ app });
+    await assert.rejects(
+      runnerControl.verifyControllerGates("test-gate-token", {
+        environment: CONTROLLER_GATE_ENVIRONMENT,
+        now: () => Date.parse("2026-08-05T10:00:00.000Z"),
+        request: provider.request,
+      }),
+      /production infrastructure gate failed/,
+      name,
+    );
+    assert.equal(
+      provider.requests.some((url) => url.includes("/targetStates/")),
+      false,
+      name,
+    );
+  }
+});
+
 test("metadata operations poll to bounded success and reject provider failure or malformed state", async () => {
   assert.equal(typeof runnerControl.waitForOperation, "function");
   let now = 0;

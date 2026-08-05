@@ -784,6 +784,18 @@ function assertProductionDeploymentWorkflow(
   assert.match(runnerControlSource, /const gateToken = requiredEnvironment\("YC_GATE_IAM_TOKEN"\)/);
   assert.match(runnerControlSource, /await verifyControllerGates\(gateToken\)/);
   assert.match(runnerControlSource, /await authenticatedAppHostKeys\(gateToken\)/);
+  assert.match(runnerControlSource, /const appAddress = privateAppIpv4\(app\)/);
+  assert.match(runnerControlSource, /requireSingleHealthyAlbTarget\(targets, appAddress\)/);
+  assert.ok(
+    runnerControlSource.indexOf("await verifyControllerGates(gateToken)") <
+      runnerControlSource.indexOf("await authenticatedAppHostKeys(gateToken)"),
+    "provider gates must precede host-key and JIT work",
+  );
+  assert.ok(
+    runnerControlSource.indexOf("await verifyControllerGates(gateToken)") <
+      runnerControlSource.indexOf("await prepareAndStartRunner"),
+    "provider gates must precede JIT metadata and runner mutation",
+  );
   assert.match(runnerControlSource, /production backup gate failed/);
   assert.match(runnerControlSource, /production ALB gate failed/);
   assert.doesNotMatch(deploymentSource, /ssh-key|identity-file|--public-address/i);
@@ -1015,6 +1027,21 @@ test("production deployment contract rejects trigger, label, cleanup, and gate m
   for (const search of ["production backup gate failed", "production ALB gate failed"]) {
     const mutated = replaceExactlyOnce(controller, search, "gate omitted", `${search} removal`);
     assert.throws(() => assertProductionDeploymentWorkflow(deployment, remote, mutated));
+  }
+  for (const [search, replacement, label] of [
+    [
+      "const appAddress = privateAppIpv4(app);",
+      'const appAddress = "10.20.0.8";',
+      "controller ignores the authenticated app address",
+    ],
+    [
+      "requireSingleHealthyAlbTarget(targets, appAddress);",
+      "// exact target inventory gate omitted",
+      "controller accepts any healthy target",
+    ],
+  ]) {
+    const mutated = replaceExactlyOnce(controller, search, replacement, label);
+    assert.throws(() => assertProductionDeploymentWorkflow(deployment, remote, mutated), label);
   }
   const unverifiedCleanup = replaceExactlyOnce(
     controller,

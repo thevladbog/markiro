@@ -487,8 +487,11 @@ export async function prepareRelease(options, supplied = {}) {
   let switched = false;
 
   try {
-    const previous = await latestHealthyReleaseRecord(releaseDirectory);
-    if (previous?.tag === preflight.imageTag)
+    const effectiveHealthy = await effectiveHealthyReleaseRecords(releaseDirectory);
+    const previous = effectiveHealthy.toSorted(
+      (left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt),
+    )[0];
+    if (effectiveHealthy.some((release) => release.tag === preflight.imageTag))
       throw new Error("requested release is already healthy");
     if (options.requireNoPreviousHealthy && previous)
       throw new Error("first deployment requires no previous healthy release");

@@ -50,9 +50,15 @@ system.
 
 <!-- runbook-contract:go-live-gate-07-smtp-s3 -->
 
-7. **SMTP and S3.** Load runtime payloads through the secrets runbook. Verify a
-   controlled SMTP delivery and private S3 media access without exposing object
-   URLs or credentials.
+7. **SMTP and S3.** Load runtime payloads through the secrets runbook and
+   complete its pre-first activation materialization checks. At this point no
+   candidate or active bundle exists, so `required_unavailable` is the expected
+   sanitized observer result rather than candidate health evidence. The later
+   workflow rehearsal performs the authoritative candidate-bound preflight and
+   readiness sequence. Do not claim real SMTP delivery or S3 access from this
+   pre-first materialization check. Verify those operations only after the
+   candidate-bound path is available, without exposing object URLs or
+   credentials.
 
 <!-- runbook-contract:go-live-gate-08-release-manifest -->
 
@@ -66,8 +72,9 @@ system.
    protected **Deploy production** workflow manually with
    `deployment_phase=first`, `rollback_rehearsal=true`, and
    `rehearsal_run_id=none`, `rehearsal_run_attempt=none`; automatic
-   `workflow_run` delivery always fixes this input to false. Its authoritative order is: materialize runtime
-   secrets; start the private edge; probe
+   `workflow_run` delivery always fixes this input to false. Its authoritative
+   order is: transfer the immutable candidate bundle; materialize runtime
+   secrets; run candidate-bound preflight; start the private edge; probe
    `http://127.0.0.1:8080/health/ready` on the app VM with the production
    `Host` header; wait for ALB back-end `HEALTHY`; then probe the reserved ALB
    address via `curl --resolve <production-domain>:443:<reserved-alb-ip>`.
@@ -93,10 +100,12 @@ system.
    `rollback_rehearsal=false` for the successful first deployment. The
    controller authenticates that exact successful rehearsal run, SHA, workflow,
    ref, inputs, rehearsal artifact, and cleanup receipt before starting a new
-   runner. A
-   `deployment_phase=repeat` run instead requires the previous ALB back end to
-   be healthy and performs public-hostname smoke only after DNS has been
-   approved and applied.
+   runner. A successful finalized first deployment creates
+   `/opt/markiro/active-release`; only after its authenticated finalized-release
+   evidence exists, complete the secrets runbook's post-activation active-path
+   verification against the exact successful SHA. A `deployment_phase=repeat`
+   run instead requires the previous ALB back end to be healthy and performs
+   public-hostname smoke only after DNS has been approved and applied.
 
 <!-- runbook-contract:go-live-gate-10-tenant-rbac -->
 

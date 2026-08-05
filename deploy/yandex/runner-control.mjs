@@ -1,5 +1,6 @@
 import { appendFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import { isIPv4 } from "node:net";
 import process from "node:process";
 
 import { isMainModule } from "./cli-main.mjs";
@@ -386,8 +387,8 @@ export async function withRunner(dependencies, job) {
   return result;
 }
 
-function requiredEnvironment(name) {
-  const value = process.env[name];
+function requiredEnvironment(name, environment = process.env) {
+  const value = environment[name];
   if (!value) throw new Error("runner control configuration is incomplete");
   return value;
 }
@@ -500,24 +501,58 @@ function deploymentPhase(value) {
   return value;
 }
 
-async function verifyControllerGates(yandexToken) {
-  const phase = deploymentPhase(requiredEnvironment("MARKIRO_DEPLOYMENT_PHASE"));
-  const appInstanceId = requiredEnvironment("YC_APP_INSTANCE_ID");
-  const postgresClusterId = requiredEnvironment("YC_POSTGRES_CLUSTER_ID");
-  const loadBalancerId = requiredEnvironment("YC_LOAD_BALANCER_ID");
-  const backendGroupId = requiredEnvironment("YC_BACKEND_GROUP_ID");
-  const targetGroupId = requiredEnvironment("YC_TARGET_GROUP_ID");
+function privateAppIpv4(app) {
+  const interfaces = app?.networkInterfaces;
+  if (app?.status !== "RUNNING" || !Array.isArray(interfaces) || interfaces.length !== 1)
+    throw new Error("production infrastructure gate failed");
+  const primary = interfaces[0]?.primaryV4Address;
+  const address = primary?.address;
+  const octets =
+    typeof address === "string" && isIPv4(address) ? address.split(".").map(Number) : [];
+  const isPrivate =
+    octets[0] === 10 ||
+    (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
+    (octets[0] === 192 && octets[1] === 168);
+  if (!isPrivate || primary.oneToOneNat !== undefined)
+    throw new Error("production infrastructure gate failed");
+  return address;
+}
+
+function requireSingleHealthyAlbTarget(payload, expectedAddress) {
+  if (!payload || !Array.isArray(payload.targetStates) || payload.targetStates.length !== 1)
+    throw new Error("production ALB target inventory failed");
+  const target = payload.targetStates[0];
+  if (target?.target?.address !== expectedAddress)
+    throw new Error("production ALB target inventory failed");
+  const zones = target.status?.zoneStatuses;
+  if (
+    !Array.isArray(zones) ||
+    zones.length === 0 ||
+    !zones.every(
+      (zone) =>
+        zone && typeof zone === "object" && !Array.isArray(zone) && zone.status === "HEALTHY",
+    )
+  )
+    throw new Error("production ALB gate failed");
+}
+
+export async function verifyControllerGates(
+  yandexToken,
+  { environment = process.env, now = () => Date.now(), request = requestJson } = {},
+) {
+  const phase = deploymentPhase(requiredEnvironment("MARKIRO_DEPLOYMENT_PHASE", environment));
+  const appInstanceId = requiredEnvironment("YC_APP_INSTANCE_ID", environment);
+  const postgresClusterId = requiredEnvironment("YC_POSTGRES_CLUSTER_ID", environment);
+  const loadBalancerId = requiredEnvironment("YC_LOAD_BALANCER_ID", environment);
+  const backendGroupId = requiredEnvironment("YC_BACKEND_GROUP_ID", environment);
+  const targetGroupId = requiredEnvironment("YC_TARGET_GROUP_ID", environment);
   const headers = { headers: bearer(yandexToken) };
-  const app = await requestJson(
+  const app = await request(
     `https://compute.api.cloud.yandex.net/compute/v1/instances/${appInstanceId}`,
     headers,
   );
-  if (
-    app.status !== "RUNNING" ||
-    app.networkInterfaces?.some((item) => item.primaryV4Address?.oneToOneNat)
-  )
-    throw new Error("production infrastructure gate failed");
-  const backups = await requestJson(
+  const appAddress = privateAppIpv4(app);
+  const backups = await request(
     `https://mdb.api.cloud.yandex.net/managed-postgresql/v1/clusters/${postgresClusterId}/backups`,
     headers,
   );
@@ -525,21 +560,16 @@ async function verifyControllerGates(yandexToken) {
     .map((backup) => Date.parse(backup.createdAt))
     .filter(Number.isFinite)
     .sort((left, right) => right - left)[0];
-  if (!newest || newest > Date.now() || Date.now() - newest > 86_400_000)
+  const checkedAt = now();
+  if (!newest || newest > checkedAt || checkedAt - newest > 86_400_000)
     throw new Error("production backup gate failed");
-  const targets = await requestJson(
+  const targets = await request(
     `https://alb.api.cloud.yandex.net/apploadbalancer/v1/loadBalancers/${loadBalancerId}/targetStates/${backendGroupId}/${targetGroupId}`,
     headers,
   );
   if (!Array.isArray(targets.targetStates))
     throw new Error("production ALB target inventory failed");
-  if (
-    phase === "repeat" &&
-    !targets.targetStates.some((target) =>
-      target.status?.zoneStatuses?.some((zone) => zone.status === "HEALTHY"),
-    )
-  )
-    throw new Error("production ALB gate failed");
+  if (phase === "repeat") requireSingleHealthyAlbTarget(targets, appAddress);
 }
 
 async function authenticatedAppHostKeys(yandexToken) {
