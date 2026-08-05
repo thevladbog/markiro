@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { createMemoryRouter, createRoutesFromElements, Route, RouterProvider } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
@@ -101,14 +101,17 @@ function renderPage(
   return render(
     <QueryClientProvider client={queryClient}>
       <AccessProvider value={access}>
-        <MemoryRouter initialEntries={["/catalog"]}>
-          <Routes>
-            <Route path="/catalog" element={<CatalogPage />}>
-              <Route path="new" element={<ProductPanelRoute mode="create" />} />
-              <Route path=":productId/edit" element={<ProductPanelRoute mode="edit" />} />
-            </Route>
-          </Routes>
-        </MemoryRouter>
+        <RouterProvider
+          router={createMemoryRouter(
+            createRoutesFromElements(
+              <Route path="/catalog" element={<CatalogPage />}>
+                <Route path="new" element={<ProductPanelRoute mode="create" />} />
+                <Route path=":productId/edit" element={<ProductPanelRoute mode="edit" />} />
+              </Route>,
+            ),
+            { initialEntries: ["/catalog"] },
+          )}
+        />
       </AccessProvider>
     </QueryClientProvider>,
   );

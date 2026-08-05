@@ -1,7 +1,7 @@
 import { Alert, Button, ConfirmDialog, SidePanel, Spinner } from "@markiro/ui";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { useLocation, useNavigate, useOutletContext, useParams } from "react-router";
+import { useBlocker, useLocation, useNavigate, useOutletContext, useParams } from "react-router";
 
 import { ApiRequestError } from "../../api/client.js";
 import { toast } from "../../lib/toast.js";
@@ -89,6 +89,15 @@ function PanelState({ children }: { children: ReactNode }) {
 function useDirtyGuard(close: () => void, busy: boolean) {
   const [dirty, setDirty] = useState(false);
   const [pendingDismiss, setPendingDismiss] = useState(false);
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      (dirty || busy) && currentLocation.pathname !== nextLocation.pathname,
+  );
+  useEffect(() => {
+    if (blocker.state !== "blocked") return;
+    if (busy) blocker.reset();
+    else setPendingDismiss(true);
+  }, [blocker, busy]);
   const requestClose = () => {
     if (busy) return;
     if (dirty) setPendingDismiss(true);
@@ -96,11 +105,13 @@ function useDirtyGuard(close: () => void, busy: boolean) {
   };
   const cancel = () => {
     setPendingDismiss(false);
+    if (blocker.state === "blocked") blocker.reset();
   };
   const discard = () => {
     setDirty(false);
     setPendingDismiss(false);
-    close();
+    if (blocker.state === "blocked") blocker.proceed();
+    else close();
   };
   return { setDirty, requestClose, confirmOpen: dirty && pendingDismiss, cancel, discard };
 }
