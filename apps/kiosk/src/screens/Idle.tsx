@@ -245,18 +245,7 @@ export function Idle({
   useEffect(() => endHold, [endHold]);
 
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        display: "grid",
-        alignContent: "center",
-        justifyItems: "center",
-        gap: 28,
-        padding: 40,
-        boxSizing: "border-box",
-        textAlign: "center",
-      }}
-    >
+    <main className="kiosk-screen kiosk-screen--centered kiosk-idle">
       {/* Decoration: the wordless "this kiosk reads codes" cue the prototype
           opens with. Hidden from assistive tech — everything it signals is
           said in words below. */}

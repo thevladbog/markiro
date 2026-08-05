@@ -329,7 +329,15 @@ describe("ScannerSetup — access before pairing", () => {
     render(<ScannerSetup paired={false} bootstrap={null} subscribe={noFanOut} onClose={vi.fn()} />);
 
     expect(transportGroup()).toBeTruthy();
-    expect(screen.getByText(TEST_SCAN)).toBeTruthy();
+    expect(screen.getByRole("region", { name: TEST_SCAN })).toBeDefined();
+    const done = screen.getByRole("button", { name: "Done" });
+    expect(done.closest("footer")).not.toBeNull();
+    expect(
+      screen
+        .getByRole("radio", { name: KEYBOARD })
+        .closest("label")
+        ?.classList.contains("kiosk-radio-option"),
+    ).toBe(true);
     expect(screen.queryByRole("button", { name: "Sign in" })).toBeNull();
   });
 });
@@ -349,6 +357,8 @@ describe("ScannerSetup — access after pairing", () => {
     expect(container.textContent).not.toContain(KEYBOARD);
     expect(container.textContent).not.toContain(TEST_SCAN);
     expect(screen.getByRole("heading", { name: "Sign in to the settings" })).toBeTruthy();
+    const entry = screen.getByRole("region", { name: "Personnel number" });
+    expect(entry.contains(screen.getByRole("button", { name: "Next" }))).toBe(true);
   });
 
   it("keeps it closed on a wrong PIN and says only that sign-in failed", async () => {

@@ -12,3 +12,17 @@ html {
 html[data-theme="dark"] {
   color-scheme: dark;
 }
+
+body {
+  margin: 0;
+  background: var(--surface-page);
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}

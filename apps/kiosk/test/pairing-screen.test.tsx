@@ -179,6 +179,27 @@ function stubFetch(impl: (...args: Parameters<typeof fetch>) => Promise<Response
 }
 
 describe("Pairing", () => {
+  it("separates commissioning details from the keypad without changing the form", () => {
+    render(
+      <Pairing
+        defaultServerUrl={SERVER}
+        subscribe={fakeFanOut().subscribe}
+        onPaired={vi.fn()}
+        onConfigureScanner={vi.fn()}
+      />,
+    );
+
+    const details = screen.getByRole("region", { name: "Connect this kiosk" });
+    const keypad = screen.getByRole("region", {
+      name: "Enter the eight-digit pairing code from the admin panel",
+    });
+
+    expect(details.contains(scanButton())).toBe(true);
+    expect(details.contains(scannerSetupButton())).toBe(true);
+    expect(keypad.contains(submitButton())).toBe(true);
+    expect(submitButton().classList.contains("kiosk-control")).toBe(true);
+  });
+
   it("enables the submit only once all eight digits are entered", () => {
     render(
       <Pairing

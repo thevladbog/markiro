@@ -1,0 +1,312 @@
+html,
+body,
+#root {
+  width: 100%;
+  height: 100dvh;
+  min-height: 0;
+}
+
+body,
+#root {
+  overflow: hidden;
+}
+
+.kiosk-shell {
+  width: 100%;
+  height: 100dvh;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--surface-page);
+  color: var(--fg-1);
+}
+
+.kiosk-screen-slot {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.kiosk-screen {
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+  background: var(--surface-page);
+  color: var(--fg-1);
+}
+
+.kiosk-screen--centered {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(12px, 2.5dvh, 28px);
+  padding: clamp(20px, 4dvh, 40px);
+  text-align: center;
+}
+
+.kiosk-control {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    transform 70ms ease,
+    color 120ms ease,
+    background-color 120ms ease,
+    border-color 120ms ease !important;
+}
+
+.kiosk-control:focus-visible {
+  outline: var(--focus-ring-w) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.kiosk-control:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.kiosk-control:disabled {
+  transform: none;
+}
+
+.kiosk-idle,
+.kiosk-blocked,
+.kiosk-done {
+  gap: clamp(14px, 2.5dvh, 28px);
+}
+
+.kiosk-done__conflicts {
+  max-height: min(30dvh, 240px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.kiosk-cart {
+  display: flex;
+  flex-direction: column;
+}
+
+.kiosk-cart__list,
+.kiosk-cart__reason-scroll {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.kiosk-cart__reason-scroll {
+  max-height: min(22dvh, 176px);
+}
+
+.kiosk-product-monogram {
+  width: 56px;
+  height: 56px;
+  flex: 0 0 56px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  display: grid;
+  place-items: center;
+  background: var(--surface-panel);
+  color: var(--fg-2);
+  font: 600 22px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.kiosk-pairing {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(340px, 0.9fr);
+  gap: clamp(20px, 3vw, 48px);
+  padding: clamp(20px, 3.5dvh, 36px) clamp(24px, 4vw, 56px);
+}
+
+.kiosk-pairing__details {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  gap: clamp(12px, 2dvh, 20px);
+}
+
+.kiosk-pairing__details > header {
+  display: grid;
+  gap: 10px;
+}
+
+.kiosk-pairing__details h1,
+.kiosk-pairing__details p {
+  margin: 0;
+}
+
+.kiosk-pairing__keypad {
+  min-width: 0;
+  min-height: 0;
+  border-left: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding-left: clamp(20px, 3vw, 40px);
+}
+
+.kiosk-pin-pad {
+  display: flex;
+  justify-content: center;
+}
+
+.kiosk-pairing__actions {
+  width: min(100%, 312px);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.kiosk-pairing__service {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.kiosk-credential-gate {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 0.8fr);
+  min-height: 0;
+}
+
+.kiosk-credential-gate__details,
+.kiosk-credential-gate__entry {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 16px;
+  padding: clamp(24px, 4dvh, 48px) clamp(28px, 5vw, 64px);
+}
+
+.kiosk-credential-gate__details {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.kiosk-credential-gate__details h1,
+.kiosk-credential-gate__details p,
+.kiosk-credential-gate__entry p {
+  margin: 0;
+}
+
+.kiosk-credential-gate__entry {
+  align-items: center;
+  border-left: 1px solid var(--line);
+}
+
+.kiosk-credential-gate__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+}
+
+.kiosk-setup {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 20px;
+  padding: clamp(20px, 3.5dvh, 36px) clamp(24px, 4vw, 48px);
+}
+
+.kiosk-setup__header h1,
+.kiosk-setup__panel h2 {
+  margin: 0;
+}
+
+.kiosk-setup__workspace {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  overflow: hidden;
+  background: var(--surface-card);
+}
+
+.kiosk-setup__panel {
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 16px;
+  margin: 0;
+  padding: clamp(22px, 3vw, 40px);
+  border: 0;
+}
+
+.kiosk-setup__panel + .kiosk-setup__panel {
+  border-left: 1px solid var(--line);
+}
+
+.kiosk-radio-option {
+  min-height: 44px;
+  touch-action: manipulation;
+  cursor: pointer;
+}
+
+.kiosk-setup__footer {
+  display: flex;
+  justify-content: flex-end;
+}
+
+@media (orientation: portrait), (max-width: 899px) {
+  .kiosk-pairing {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+    gap: 0;
+    padding: 0;
+  }
+
+  .kiosk-pairing__details {
+    justify-content: flex-start;
+    padding: 24px 28px 16px;
+  }
+
+  .kiosk-pairing__keypad {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+    padding: 16px 28px 24px;
+  }
+
+  .kiosk-credential-gate {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  .kiosk-credential-gate__details,
+  .kiosk-credential-gate__entry {
+    padding: 20px 28px;
+  }
+
+  .kiosk-credential-gate__entry {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .kiosk-setup__workspace {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .kiosk-setup__panel + .kiosk-setup__panel {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+}
