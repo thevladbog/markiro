@@ -119,7 +119,11 @@
   Create `packages/ui/test/overlays.test.tsx` with a small trigger harness and these assertions:
 
   ```tsx
-  function PanelHarness({ onClose = vi.fn() }: { onClose?: (reason: OverlayDismissReason) => void }) {
+  function PanelHarness({
+    onClose = vi.fn(),
+  }: {
+    onClose?: (reason: OverlayDismissReason) => void;
+  }) {
     const [open, setOpen] = useState(false);
     return (
       <>
@@ -161,9 +165,16 @@
   });
 
   it.each([
-    ["close-button", async (user: UserEvent) => user.click(screen.getByRole("button", { name: "Close panel" }))],
+    [
+      "close-button",
+      async (user: UserEvent) => user.click(screen.getByRole("button", { name: "Close panel" })),
+    ],
     ["escape", async (user: UserEvent) => user.keyboard("{Escape}")],
-    ["backdrop", async (user: UserEvent) => user.click(document.querySelector(".mk-side-panel__scrim") as HTMLElement)],
+    [
+      "backdrop",
+      async (user: UserEvent) =>
+        user.click(document.querySelector(".mk-side-panel__scrim") as HTMLElement),
+    ],
   ] as const)("reports %s dismissal", async (reason, dismiss) => {
     const user = userEvent.setup();
     const onClose = vi.fn();
@@ -294,8 +305,14 @@
   it("blocks every dismissal path while busy", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
-    render(<SidePanel open busy title="Saving" closeLabel="Close" onClose={onClose}>Body</SidePanel>);
-    expect((screen.getByRole("button", { name: "Close" }) as HTMLButtonElement).disabled).toBe(true);
+    render(
+      <SidePanel open busy title="Saving" closeLabel="Close" onClose={onClose}>
+        Body
+      </SidePanel>,
+    );
+    expect((screen.getByRole("button", { name: "Close" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
     await user.keyboard("{Escape}");
     await user.click(document.querySelector(".mk-side-panel__scrim") as HTMLElement);
     expect(onClose).not.toHaveBeenCalled();
@@ -372,18 +389,70 @@
   Add CSS with these exact layout constraints:
 
   ```css
-  .mk-overlay-root { position: relative; }
-  .mk-overlay-layer { position: fixed; inset: 0; }
-  .mk-overlay-layer--panel { z-index: var(--z-overlay-panel); }
-  .mk-overlay-layer--dialog { z-index: var(--z-overlay-dialog); }
-  .mk-side-panel__scrim { position: fixed; inset: 0; display: flex; justify-content: flex-end; background: var(--surface-overlay); }
-  .mk-side-panel { width: min(100%, var(--mk-panel-width)); height: 100dvh; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; background: var(--surface-card); border-left: 1px solid var(--line); box-shadow: var(--shadow-3); outline: none; animation: mk-panel-in 200ms ease-out; }
-  .mk-side-panel--compact { --mk-panel-width: 480px; }
-  .mk-side-panel--standard { --mk-panel-width: min(640px, 64vw); }
-  .mk-side-panel--complex { --mk-panel-width: min(720px, 64vw); }
-  .mk-side-panel__body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: var(--sp-6); }
-  @media (max-width: 767px) { .mk-side-panel { --mk-panel-width: 100vw; border-left: 0; border-radius: 0; padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); } }
-  @media (prefers-reduced-motion: reduce) { .mk-side-panel { animation: none; } .mk-side-panel__scrim { animation-duration: 1ms; transition-duration: 1ms; } }
+  .mk-overlay-root {
+    position: relative;
+  }
+  .mk-overlay-layer {
+    position: fixed;
+    inset: 0;
+  }
+  .mk-overlay-layer--panel {
+    z-index: var(--z-overlay-panel);
+  }
+  .mk-overlay-layer--dialog {
+    z-index: var(--z-overlay-dialog);
+  }
+  .mk-side-panel__scrim {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    justify-content: flex-end;
+    background: var(--surface-overlay);
+  }
+  .mk-side-panel {
+    width: min(100%, var(--mk-panel-width));
+    height: 100dvh;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    background: var(--surface-card);
+    border-left: 1px solid var(--line);
+    box-shadow: var(--shadow-3);
+    outline: none;
+    animation: mk-panel-in 200ms ease-out;
+  }
+  .mk-side-panel--compact {
+    --mk-panel-width: 480px;
+  }
+  .mk-side-panel--standard {
+    --mk-panel-width: min(640px, 64vw);
+  }
+  .mk-side-panel--complex {
+    --mk-panel-width: min(720px, 64vw);
+  }
+  .mk-side-panel__body {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: var(--sp-6);
+  }
+  @media (max-width: 767px) {
+    .mk-side-panel {
+      --mk-panel-width: 100vw;
+      border-left: 0;
+      border-radius: 0;
+      padding-top: env(safe-area-inset-top);
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .mk-side-panel {
+      animation: none;
+    }
+    .mk-side-panel__scrim {
+      animation-duration: 1ms;
+      transition-duration: 1ms;
+    }
+  }
   ```
 
   The root must not create a stacking context: each fixed layer owns its global z-index, so a dialog layer at 440 remains above a panel-owned popover while a standalone popover at 420 remains above a legacy modal at 100. Complete the header/footer spacing, focus-visible close control, scrim fade keyframes, and X-only transform keyframes using existing tokens. Do not animate width, height, inset, or other layout properties.
@@ -471,16 +540,39 @@
     const onCancel = vi.fn();
     const onConfirm = vi.fn();
     const { rerender } = render(
-      <ConfirmDialog open title="Close shift?" description="Consequence" cancelLabel="Cancel" confirmLabel="Close" onCancel={onCancel} onConfirm={onConfirm} />,
+      <ConfirmDialog
+        open
+        title="Close shift?"
+        description="Consequence"
+        cancelLabel="Cancel"
+        confirmLabel="Close"
+        onCancel={onCancel}
+        onConfirm={onConfirm}
+      />,
     );
     await user.keyboard("{Escape}");
     expect(onCancel).toHaveBeenCalledTimes(1);
 
-    rerender(<ConfirmDialog open busy title="Close shift?" description="Consequence" cancelLabel="Cancel" confirmLabel="Close" onCancel={onCancel} onConfirm={onConfirm} />);
+    rerender(
+      <ConfirmDialog
+        open
+        busy
+        title="Close shift?"
+        description="Consequence"
+        cancelLabel="Cancel"
+        confirmLabel="Close"
+        onCancel={onCancel}
+        onConfirm={onConfirm}
+      />,
+    );
     await user.keyboard("{Escape}");
     await user.click(document.querySelector(".mk-confirm-dialog__scrim") as HTMLElement);
-    expect((screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole("button", { name: "Close" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect((screen.getByRole("button", { name: "Close" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
     expect(onCancel).toHaveBeenCalledTimes(1);
     expect(onConfirm).not.toHaveBeenCalled();
   });
@@ -515,7 +607,9 @@
 
   rerender(<Harness confirmOpen={false} />);
   expect(document.querySelector(".mk-overlay-layer--panel")?.inert).toBe(false);
-  expect(screen.getByRole("dialog", { name: "Edit product" }).contains(document.activeElement)).toBe(true);
+  expect(
+    screen.getByRole("dialog", { name: "Edit product" }).contains(document.activeElement),
+  ).toBe(true);
   ```
 
   Add a second nested case whose panel contains a controlled `Select`. Open its listbox, rerender the harness with `confirmOpen={true}` without closing the Select, and assert the listbox remains inside `.mk-overlay-layer--panel`, that entire layer is inert, and `.mk-overlay-layer--dialog` is the only interactive layer. This proves the merged Radix portal cannot escape the lower overlay boundary or paint above the confirmation.
@@ -602,8 +696,22 @@
         <LocationProbe />
         <Routes>
           <Route path="/catalog" element={<CatalogPage />}>
-            <Route path="new" element={<RequireCapability capability={C.OPERATIONS_WRITE}><ProductPanelRoute mode="create" /></RequireCapability>} />
-            <Route path=":productId/edit" element={<RequireCapability capability={C.OPERATIONS_WRITE}><ProductPanelRoute mode="edit" /></RequireCapability>} />
+            <Route
+              path="new"
+              element={
+                <RequireCapability capability={C.OPERATIONS_WRITE}>
+                  <ProductPanelRoute mode="create" />
+                </RequireCapability>
+              }
+            />
+            <Route
+              path=":productId/edit"
+              element={
+                <RequireCapability capability={C.OPERATIONS_WRITE}>
+                  <ProductPanelRoute mode="edit" />
+                </RequireCapability>
+              }
+            />
           </Route>
         </Routes>
       </MemoryRouter>
@@ -941,8 +1049,7 @@
   ```ts
   const blocker = useBlocker(
     ({ currentLocation, nextLocation }) =>
-      (dirty || mutation.isPending) &&
-      currentLocation.pathname !== nextLocation.pathname,
+      (dirty || mutation.isPending) && currentLocation.pathname !== nextLocation.pathname,
   );
   const [pendingDismiss, setPendingDismiss] = useState<OverlayDismissReason | null>(null);
   const confirmOpen = dirty && (pendingDismiss !== null || blocker.state === "blocked");

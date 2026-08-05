@@ -40,7 +40,13 @@ export function SidePanel({
   if (!open) return null;
 
   return (
-    <OverlayLayer open kind="panel" busy={busy} initialFocus="first-editable" onEscape={() => onClose("escape")}>
+    <OverlayLayer
+      open
+      kind="panel"
+      busy={busy}
+      initialFocus="first-editable"
+      onEscape={() => onClose("escape")}
+    >
       {(surfaceRef) => (
         <div
           className="mk-side-panel__scrim"

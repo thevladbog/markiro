@@ -43,7 +43,9 @@ it("keeps list search state while the create panel uses a nested route", async (
   );
   const user = userEvent.setup();
   render(
-    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
       <AccessProvider value={ACCESS}>
         <MemoryRouter initialEntries={["/catalog"]}>
           <LocationProbe />

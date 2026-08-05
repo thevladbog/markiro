@@ -11,11 +11,7 @@ import {
   type OverlayDismissReason,
 } from "../src/components/index.js";
 
-function PanelHarness({
-  onClose = vi.fn(),
-}: {
-  onClose?: (reason: OverlayDismissReason) => void;
-}) {
+function PanelHarness({ onClose = vi.fn() }: { onClose?: (reason: OverlayDismissReason) => void }) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -166,7 +162,9 @@ it("keeps Radix child portals in the panel and lets each child consume Escape fi
   expect(onClose).not.toHaveBeenCalled();
 
   await user.click(screen.getByRole("button", { name: "Planned date" }));
-  expect(screen.getByRole("dialog", { name: "Calendar" }).closest(".mk-overlay-layer--panel")).not.toBeNull();
+  expect(
+    screen.getByRole("dialog", { name: "Calendar" }).closest(".mk-overlay-layer--panel"),
+  ).not.toBeNull();
   await user.keyboard("{Escape}");
   expect(screen.queryByRole("dialog", { name: "Calendar" })).toBeNull();
   expect(onClose).not.toHaveBeenCalled();
@@ -274,7 +272,7 @@ it("keeps only the top confirmation layer interactive above a panel", async () =
   expect((document.querySelector(".mk-overlay-layer--panel") as HTMLElement | null)?.inert).toBe(
     false,
   );
-  expect(screen.getByRole("dialog", { name: "Edit product" }).contains(document.activeElement)).toBe(
-    true,
-  );
+  expect(
+    screen.getByRole("dialog", { name: "Edit product" }).contains(document.activeElement),
+  ).toBe(true);
 });

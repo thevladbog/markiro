@@ -75,7 +75,7 @@ function focusInitial(record: LayerRecord) {
   );
   const cancel = container.querySelector<HTMLElement>("[data-overlay-cancel]");
   const target =
-    (record.initialFocus === "cancel" ? cancel : invalid ?? editable) ??
+    (record.initialFocus === "cancel" ? cancel : (invalid ?? editable)) ??
     getFocusable(container)[0] ??
     record.surfaceRef.current;
   target?.focus();
@@ -182,7 +182,14 @@ export function useOverlayPortalContainer() {
   return useContext(OverlayPortalContext);
 }
 
-export function OverlayLayer({ open, kind, busy, initialFocus, onEscape, children }: OverlayLayerProps) {
+export function OverlayLayer({
+  open,
+  kind,
+  busy,
+  initialFocus,
+  onEscape,
+  children,
+}: OverlayLayerProps) {
   const idRef = useRef(Symbol("mk-overlay-layer"));
   const surfaceRef = useRef<HTMLDivElement>(null);
   const onEscapeRef = useRef(onEscape);
@@ -210,7 +217,8 @@ export function OverlayLayer({ open, kind, busy, initialFocus, onEscape, childre
       busy: busyRef.current,
       initialFocus: initialFocusRef.current,
       surfaceRef,
-      previouslyFocused: document.activeElement instanceof HTMLElement ? document.activeElement : null,
+      previouslyFocused:
+        document.activeElement instanceof HTMLElement ? document.activeElement : null,
     };
     register(record);
 
@@ -234,7 +242,9 @@ export function OverlayLayer({ open, kind, busy, initialFocus, onEscape, childre
   if (!open || !layer) return null;
 
   return createPortal(
-    <OverlayPortalContext.Provider value={layer}>{children(surfaceRef)}</OverlayPortalContext.Provider>,
+    <OverlayPortalContext.Provider value={layer}>
+      {children(surfaceRef)}
+    </OverlayPortalContext.Provider>,
     layer,
   );
 }
