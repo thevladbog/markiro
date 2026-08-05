@@ -16,6 +16,9 @@ export type { RadioGroupOption, RadioGroupProps } from "./RadioGroup.js";
 export { IconButton } from "./IconButton.js";
 export type { IconButtonProps } from "./IconButton.js";
 
+export { DatePicker } from "./DatePicker.js";
+export type { DatePickerProps } from "./DatePicker.js";
+
 export { Field } from "./Field.js";
 export type { FieldProps } from "./Field.js";
 
