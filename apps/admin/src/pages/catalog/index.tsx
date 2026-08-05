@@ -273,7 +273,7 @@ export function CatalogPage() {
   const counterparties = useMemo(() => counterpartiesData ?? [], [counterpartiesData]);
   const labelTemplates = useMemo(() => labelTemplatesData ?? [], [labelTemplatesData]);
 
-  const statusFilterOptions: SelectOption[] = [
+  const statusFilterOptions: SelectOption<StatusFilter>[] = [
     { value: "all", label: t("pages.catalog.statusFilter.all") },
     { value: "draft", label: t("pages.catalog.statusFilter.draft") },
     { value: "active", label: t("pages.catalog.statusFilter.active") },
@@ -359,7 +359,7 @@ export function CatalogPage() {
             label={t("pages.catalog.statusFilterLabel")}
             options={statusFilterOptions}
             value={statusFilter}
-            onValueChange={(value) => setStatusFilter(value as StatusFilter)}
+            onValueChange={setStatusFilter}
           />
         </div>
       </div>

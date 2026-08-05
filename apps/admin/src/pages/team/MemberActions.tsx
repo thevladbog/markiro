@@ -132,7 +132,7 @@ export function MemberActions({ member, team }: { member: TeamMember; team: Team
           <Select
             label={t("pages.team.invite.role")}
             value={role}
-            onValueChange={(value) => setRole(value as TeamRole)}
+            onValueChange={setRole}
             options={[
               { value: "manager", label: t("pages.team.roles.manager") },
               { value: "admin", label: t("pages.team.roles.admin") },

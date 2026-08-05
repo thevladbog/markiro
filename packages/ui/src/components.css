@@ -10,6 +10,22 @@
   white-space: nowrap;
 }
 
+.mk-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.mk-select__item[data-highlighted] {
+  background: var(--surface-panel);
+}
+
 .mk-checkbox__control:focus-visible,
 .mk-radio-group__control:focus-visible,
 .mk-icon-button:focus-visible,

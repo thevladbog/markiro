@@ -1,23 +1,16 @@
 import * as RadixPopover from "@radix-ui/react-popover";
-import { useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+} from "react";
 
 import { cn } from "../cn.js";
 import { IconButton } from "./IconButton.js";
-
-const MONTHS_NOMINATIVE = [
-  "Январь",
-  "Февраль",
-  "Март",
-  "Апрель",
-  "Май",
-  "Июнь",
-  "Июль",
-  "Август",
-  "Сентябрь",
-  "Октябрь",
-  "Ноябрь",
-  "Декабрь",
-] as const;
 
 const MONTHS_GENITIVE = [
   "января",
@@ -34,8 +27,6 @@ const MONTHS_GENITIVE = [
   "декабря",
 ] as const;
 
-const WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"] as const;
-
 interface DatePickerBaseProps {
   value?: string;
   onValueChange?: (value: string | undefined) => void;
@@ -45,6 +36,11 @@ interface DatePickerBaseProps {
   name?: string;
   id?: string;
   placeholder?: string;
+  locale?: string;
+  clearLabel?: string;
+  calendarLabel?: string;
+  previousMonthLabel?: string;
+  nextMonthLabel?: string;
   className?: string;
   style?: CSSProperties;
   "aria-labelledby"?: string;
@@ -108,8 +104,37 @@ export function formatRussianDate(date: Date) {
   return `${date.getDate()} ${MONTHS_GENITIVE[date.getMonth()]} ${date.getFullYear()}`;
 }
 
-function formatRussianMonth(date: Date) {
-  return `${MONTHS_NOMINATIVE[date.getMonth()]} ${date.getFullYear()}`;
+function capitalize(value: string) {
+  return value ? `${value[0]!.toLocaleUpperCase()}${value.slice(1)}` : value;
+}
+
+function formatLocalizedDate(date: Date, locale: string) {
+  return new Intl.DateTimeFormat(locale, {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  })
+    .format(date)
+    .replace(/\sг\.$/u, "");
+}
+
+function formatLocalizedMonth(date: Date, locale: string) {
+  return capitalize(
+    new Intl.DateTimeFormat(locale, { month: "long", year: "numeric" })
+      .format(date)
+      .replace(/\sг\.$/u, ""),
+  );
+}
+
+function getLocalizedWeekdays(locale: string) {
+  const monday = createLocalDate(2024, 0, 1);
+  return Array.from({ length: 7 }, (_, index) =>
+    capitalize(
+      new Intl.DateTimeFormat(locale, { weekday: "short" })
+        .format(moveDateByDays(monday, index))
+        .replace(/\.$/u, ""),
+    ),
+  );
 }
 
 function startOfMonth(date: Date) {
@@ -153,6 +178,11 @@ export function DatePicker({
   name,
   id,
   placeholder = "Выберите дату",
+  locale = "ru-RU",
+  clearLabel = "Очистить дату",
+  calendarLabel = "Календарь",
+  previousMonthLabel = "Предыдущий месяц",
+  nextMonthLabel = "Следующий месяц",
   className,
   style,
   "aria-label": ariaLabel,
@@ -164,7 +194,7 @@ export function DatePicker({
   const hintId = hint ? `${datePickerId}-hint` : undefined;
   const errorId = error ? `${datePickerId}-error` : undefined;
   const selectedDate = parseIsoDate(value);
-  const clearActionLabel = `Очистить дату${label ? `: ${label}` : ariaLabel ? `: ${ariaLabel}` : ""}`;
+  const clearActionLabel = `${clearLabel}${label ? `: ${label}` : ariaLabel ? `: ${ariaLabel}` : ""}`;
   const [open, setOpen] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(() =>
     startOfMonth(selectedDate ?? new Date()),
@@ -172,6 +202,8 @@ export function DatePicker({
   const [activeDate, setActiveDate] = useState(() => selectedDate ?? new Date());
   const activeDayRef = useRef<HTMLButtonElement>(null);
   const shouldFocusActiveDayRef = useRef(false);
+  const calendarDays = useMemo(() => getCalendarDays(calendarMonth), [calendarMonth]);
+  const weekdays = useMemo(() => getLocalizedWeekdays(locale), [locale]);
 
   useEffect(() => {
     const nextSelectedDate = parseIsoDate(value);
@@ -316,7 +348,7 @@ export function DatePicker({
                 opacity: disabled ? 0.45 : 1,
               }}
             >
-              <span>{selectedDate ? formatRussianDate(selectedDate) : placeholder}</span>
+              <span>{selectedDate ? formatLocalizedDate(selectedDate, locale) : placeholder}</span>
               <svg
                 aria-hidden="true"
                 width="16"
@@ -353,7 +385,7 @@ export function DatePicker({
         <RadixPopover.Portal>
           <RadixPopover.Content
             role="dialog"
-            aria-label="Календарь"
+            aria-label={calendarLabel}
             sideOffset={6}
             className="mk-date-picker__popover"
             onOpenAutoFocus={(event) => {
@@ -383,7 +415,7 @@ export function DatePicker({
             >
               <button
                 type="button"
-                aria-label="Предыдущий месяц"
+                aria-label={previousMonthLabel}
                 className="mk-date-picker__navigation"
                 disabled={disabled}
                 onClick={() => {
@@ -406,11 +438,11 @@ export function DatePicker({
                 id={`${datePickerId}-month`}
                 style={{ margin: 0, font: "var(--text-h3)", color: "var(--fg-1)" }}
               >
-                {formatRussianMonth(calendarMonth)}
+                {formatLocalizedMonth(calendarMonth, locale)}
               </h2>
               <button
                 type="button"
-                aria-label="Следующий месяц"
+                aria-label={nextMonthLabel}
                 className="mk-date-picker__navigation"
                 disabled={disabled}
                 onClick={() => {
@@ -435,7 +467,7 @@ export function DatePicker({
                 role="row"
                 style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", marginBottom: 4 }}
               >
-                {WEEKDAYS.map((weekday) => (
+                {weekdays.map((weekday) => (
                   <span
                     key={weekday}
                     role="columnheader"
@@ -456,36 +488,34 @@ export function DatePicker({
                   role="row"
                   style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2 }}
                 >
-                  {getCalendarDays(calendarMonth)
-                    .slice(weekIndex * 7, weekIndex * 7 + 7)
-                    .map((day) => {
-                      const outsideMonth = day.getMonth() !== calendarMonth.getMonth();
-                      const isSelected = selectedDate
-                        ? formatIsoDate(day) === formatIsoDate(selectedDate)
-                        : false;
-                      const isActive = isSameDate(day, activeDate);
+                  {calendarDays.slice(weekIndex * 7, weekIndex * 7 + 7).map((day) => {
+                    const outsideMonth = day.getMonth() !== calendarMonth.getMonth();
+                    const isSelected = selectedDate
+                      ? formatIsoDate(day) === formatIsoDate(selectedDate)
+                      : false;
+                    const isActive = isSameDate(day, activeDate);
 
-                      return (
-                        <span key={formatIsoDate(day)} role="gridcell" aria-selected={isSelected}>
-                          <button
-                            type="button"
-                            disabled={disabled}
-                            aria-label={formatRussianDate(day)}
-                            aria-pressed={isSelected}
-                            tabIndex={isActive ? 0 : -1}
-                            ref={isActive ? activeDayRef : undefined}
-                            className="mk-date-picker__day"
-                            data-outside-month={outsideMonth ? "true" : undefined}
-                            data-selected={isSelected ? "true" : undefined}
-                            onFocus={() => setActiveDate(day)}
-                            onKeyDown={(event) => handleDayKeyDown(event, day)}
-                            onClick={() => selectDate(day)}
-                          >
-                            {day.getDate()}
-                          </button>
-                        </span>
-                      );
-                    })}
+                    return (
+                      <span key={formatIsoDate(day)} role="gridcell" aria-selected={isSelected}>
+                        <button
+                          type="button"
+                          disabled={disabled}
+                          aria-label={formatLocalizedDate(day, locale)}
+                          aria-pressed={isSelected}
+                          tabIndex={isActive ? 0 : -1}
+                          ref={isActive ? activeDayRef : undefined}
+                          className="mk-date-picker__day"
+                          data-outside-month={outsideMonth ? "true" : undefined}
+                          data-selected={isSelected ? "true" : undefined}
+                          onFocus={() => setActiveDate(day)}
+                          onKeyDown={(event) => handleDayKeyDown(event, day)}
+                          onClick={() => selectDate(day)}
+                        >
+                          {day.getDate()}
+                        </button>
+                      </span>
+                    );
+                  })}
                 </div>
               ))}
             </div>

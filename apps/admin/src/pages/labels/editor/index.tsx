@@ -347,9 +347,7 @@ function LabelEditorContent({
           aria-label={t("pages.labels.editor.languageLabel")}
           options={LANGUAGE_OPTIONS}
           value={spec.language}
-          onValueChange={(value) =>
-            handleReplaceSpec({ ...spec, language: value as LabelTemplateSpec["language"] })
-          }
+          onValueChange={(value) => handleReplaceSpec({ ...spec, language: value })}
           style={{ width: 100 }}
         />
         <span style={{ flex: 1 }} />

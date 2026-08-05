@@ -114,7 +114,7 @@ export function PropertiesPanel({ element, onChange, onDelete }: PropertiesPanel
                 label: t(`pages.labels.editor.fields.${field}`),
               }))}
               value={element.field}
-              onValueChange={(value) => patch({ field: value as LabelField })}
+              onValueChange={(value) => patch({ field: value })}
             />
           )}
           <div style={ROW_STYLE}>
@@ -132,7 +132,7 @@ export function PropertiesPanel({ element, onChange, onDelete }: PropertiesPanel
                 label: t(`pages.labels.editor.properties.${option.labelKey}`),
               }))}
               value={element.align ?? "left"}
-              onValueChange={(value) => patch({ align: value as "left" | "center" | "right" })}
+              onValueChange={(value) => patch({ align: value })}
             />
           </div>
           <Checkbox
@@ -183,7 +183,7 @@ export function PropertiesPanel({ element, onChange, onDelete }: PropertiesPanel
                 label: t(`pages.labels.editor.fields.${field}`),
               }))}
               value={element.data}
-              onValueChange={(value) => patch({ data: value as LabelField })}
+              onValueChange={(value) => patch({ data: value })}
             />
           ) : (
             <Input

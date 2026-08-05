@@ -64,7 +64,7 @@ export function ConflictsPage() {
     [t, shifts],
   );
 
-  const reviewedFilterOptions: SelectOption[] = useMemo(
+  const reviewedFilterOptions: SelectOption<ReviewedFilter>[] = useMemo(
     () => [
       { value: "unreviewed", label: t("pages.conflicts.filters.reviewed.unreviewed") },
       { value: "reviewed", label: t("pages.conflicts.filters.reviewed.reviewed") },
@@ -143,7 +143,7 @@ export function ConflictsPage() {
             label={t("pages.conflicts.filters.reviewedLabel")}
             options={reviewedFilterOptions}
             value={reviewedFilter}
-            onValueChange={(value) => setReviewedFilter(value as ReviewedFilter)}
+            onValueChange={setReviewedFilter}
           />
         </div>
       </div>

@@ -142,6 +142,30 @@ describe("DatePicker", () => {
     expect(screen.getByRole("heading", { name: "Август 2026" })).toBeDefined();
   });
 
+  it("localizes calendar content and accessible actions", async () => {
+    const user = userEvent.setup();
+    render(
+      <DatePicker
+        label="Planned date"
+        value="2026-08-05"
+        locale="en-US"
+        placeholder="Select a date"
+        clearLabel="Clear date"
+        calendarLabel="Calendar"
+        previousMonthLabel="Previous month"
+        nextMonthLabel="Next month"
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Planned date" }));
+
+    expect(screen.getByRole("heading", { name: "August 2026" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "August 5, 2026" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Previous month" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Next month" })).toBeDefined();
+    expect(screen.getByRole("dialog", { name: "Calendar" })).toBeDefined();
+  });
+
   it("closes on Escape and restores focus to the trigger", async () => {
     const user = userEvent.setup();
     render(<DatePicker label="Плановая дата" value="2026-08-05" />);

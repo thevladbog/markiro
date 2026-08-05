@@ -106,7 +106,7 @@ export function ShiftForm({
   onSubmit,
   onClose,
 }: ShiftFormProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const lastPrefilledProductRef = useRef<string | null>(null);
   // Tracks whether the user has ever directly changed the counterparty select
   // during this modal session -- deliberately NOT react-hook-form's own
@@ -346,6 +346,12 @@ export function ShiftForm({
           render={({ field }) => (
             <DatePicker
               label={t("pages.shifts.form.plannedDateLabel")}
+              placeholder={t("common.datePicker.placeholder")}
+              clearLabel={t("common.datePicker.clear")}
+              calendarLabel={t("common.datePicker.calendar")}
+              previousMonthLabel={t("common.datePicker.previousMonth")}
+              nextMonthLabel={t("common.datePicker.nextMonth")}
+              locale={i18n.language}
               {...(field.value ? { value: field.value } : {})}
               onValueChange={(value) => field.onChange(value ?? "")}
             />

@@ -18,6 +18,8 @@ export type { IconButtonProps } from "./IconButton.js";
 
 export { DatePicker } from "./DatePicker.js";
 export type { DatePickerProps } from "./DatePicker.js";
+export { VisuallyHidden } from "./VisuallyHidden.js";
+export type { VisuallyHiddenProps } from "./VisuallyHidden.js";
 
 export { Field } from "./Field.js";
 export type { FieldProps } from "./Field.js";

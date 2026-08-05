@@ -85,11 +85,15 @@ export function Header() {
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
         <IconButton
           aria-label={t("shell.header.toggleTheme")}
+          variant="secondary"
+          size="compact"
           icon={<span aria-hidden="true">{theme === "dark" ? "🌙" : "☀️"}</span>}
           onClick={handleToggleTheme}
         />
         <IconButton
           aria-label={t("shell.header.toggleLanguage")}
+          variant="secondary"
+          size="compact"
           icon={<span aria-hidden="true">{nextLanguage.toUpperCase()}</span>}
           onClick={handleToggleLanguage}
         />

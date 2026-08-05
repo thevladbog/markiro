@@ -3,14 +3,17 @@ import { useId, useState, type CSSProperties, type FocusEvent } from "react";
 
 import { cn } from "../cn.js";
 
-export type SelectOption = string | { value: string; label: string; disabled?: boolean };
+const EMPTY_OPTION_VALUE = "__markiro_empty_option__";
 
-export interface SelectProps {
+export type SelectOption<TValue extends string = string> =
+  TValue | { value: TValue; label: string; disabled?: boolean };
+
+export interface SelectProps<TValue extends string = string> {
   label?: string;
   /** Строки или { value, label, disabled } */
-  options: SelectOption[];
-  value?: string;
-  onValueChange?: (value: string) => void;
+  options: SelectOption<TValue>[];
+  value?: TValue;
+  onValueChange?: (value: TValue) => void;
   hint?: string;
   error?: string;
   disabled?: boolean;
@@ -25,11 +28,11 @@ export interface SelectProps {
   "aria-labelledby"?: string;
 }
 
-function normalizeOption(option: SelectOption) {
+function normalizeOption<TValue extends string>(option: SelectOption<TValue>) {
   return typeof option === "string" ? { value: option, label: option, disabled: false } : option;
 }
 
-export function Select({
+export function Select<TValue extends string = string>({
   label,
   options,
   value,
@@ -45,9 +48,8 @@ export function Select({
   id,
   "aria-label": ariaLabel,
   "aria-labelledby": ariaLabelledBy,
-}: SelectProps) {
+}: SelectProps<TValue>) {
   const [focus, setFocus] = useState(false);
-  const [highlightedValue, setHighlightedValue] = useState<string>();
   const autoId = useId();
   const selectId = id ?? `mk-select-${autoId}`;
   const hintId = hint ? `${selectId}-hint` : undefined;
@@ -55,6 +57,9 @@ export function Select({
   const describedBy = errorId ?? hintId;
   const normalizedOptions = options.map(normalizeOption);
   const emptyOptionLabel = normalizedOptions.find((option) => option.value === "")?.label;
+  const itemOptions = normalizedOptions.map((option) =>
+    option.value === "" ? { ...option, value: EMPTY_OPTION_VALUE } : option,
+  );
 
   const handleFocus = (_event: FocusEvent<HTMLButtonElement>) => {
     setFocus(true);
@@ -76,7 +81,12 @@ export function Select({
       )}
       <RadixSelect.Root
         {...(value === undefined ? {} : { value })}
-        {...(onValueChange === undefined ? {} : { onValueChange })}
+        {...(onValueChange === undefined
+          ? {}
+          : {
+              onValueChange: (nextValue: string) =>
+                onValueChange((nextValue === EMPTY_OPTION_VALUE ? "" : nextValue) as TValue),
+            })}
         {...(disabled === undefined ? {} : { disabled })}
         {...(name === undefined ? {} : { name })}
         {...(required === undefined ? {} : { required })}
@@ -141,17 +151,12 @@ export function Select({
             }}
           >
             <RadixSelect.Viewport style={{ padding: 4 }}>
-              {normalizedOptions.map((option) => (
+              {itemOptions.map((option) => (
                 <RadixSelect.Item
                   key={option.value}
                   value={option.value}
                   {...(option.disabled ? { disabled: true } : {})}
-                  onFocus={() => setHighlightedValue(option.value)}
-                  onBlur={() =>
-                    setHighlightedValue((current) =>
-                      current === option.value ? undefined : current,
-                    )
-                  }
+                  className="mk-select__item"
                   style={{
                     position: "relative",
                     display: "flex",
@@ -159,8 +164,7 @@ export function Select({
                     minHeight: "var(--control-md)",
                     padding: "0 32px 0 12px",
                     borderRadius: "calc(var(--r-2) - 2px)",
-                    background:
-                      highlightedValue === option.value ? "var(--surface-panel)" : "transparent",
+                    background: "transparent",
                     outline: "none",
                     font: "var(--text-body)",
                     cursor: option.disabled ? "not-allowed" : "pointer",

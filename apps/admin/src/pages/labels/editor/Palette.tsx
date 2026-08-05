@@ -154,6 +154,8 @@ export function Palette({ labelWidthMm, labelHeightMm, onAdd }: PaletteProps) {
         <IconButton
           key={button.labelKey}
           aria-label={t(`pages.labels.editor.palette.${button.labelKey}`)}
+          variant="secondary"
+          size="compact"
           icon={<span aria-hidden="true">{button.icon}</span>}
           title={t(`pages.labels.editor.palette.${button.labelKey}`)}
           onClick={() =>

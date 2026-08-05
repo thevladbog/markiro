@@ -14,6 +14,7 @@ import {
   Spinner,
   StatusChip,
   Table,
+  VisuallyHidden,
 } from "@markiro/ui";
 import type { SelectOption, StatusChipStatus, TableColumn } from "@markiro/ui";
 
@@ -40,18 +41,6 @@ const STATUS_TO_CHIP: Record<PickupOrderStatus, StatusChipStatus> = {
   writtenoff: "neutral",
   cancelled: "error",
 };
-
-const VISUALLY_HIDDEN_STYLE = {
-  position: "absolute",
-  width: 1,
-  height: 1,
-  padding: 0,
-  margin: -1,
-  overflow: "hidden",
-  clip: "rect(0, 0, 0, 0)",
-  whiteSpace: "nowrap",
-  border: 0,
-} as const;
 
 interface PickupPageContentProps {
   statusFilter: StatusFilter;
@@ -144,7 +133,7 @@ function PickupPageContent({
   const shownKiosks = rejections.kioskNames.slice(0, 3);
   const hiddenKioskCount = rejections.kioskNames.length - shownKiosks.length;
 
-  const statusOptions: SelectOption[] = [
+  const statusOptions: SelectOption<StatusFilter>[] = [
     { value: "all", label: t("pages.pickup.filters.status.all") },
     { value: "pending", label: t("pages.pickup.filters.status.pending") },
     { value: "punched", label: t("pages.pickup.filters.status.punched") },
@@ -152,7 +141,7 @@ function PickupPageContent({
     { value: "cancelled", label: t("pages.pickup.filters.status.cancelled") },
   ];
 
-  const reasonOptions: SelectOption[] = [
+  const reasonOptions: SelectOption<ReasonFilter>[] = [
     { value: "all", label: t("pages.pickup.filters.reason.all") },
     { value: "buy", label: t("pages.pickup.filters.reason.buy") },
     { value: "writeoff", label: t("pages.pickup.filters.reason.writeoff") },
@@ -229,9 +218,9 @@ function PickupPageContent({
             render: (row) => (
               <Checkbox
                 label={
-                  <span style={VISUALLY_HIDDEN_STYLE}>
+                  <VisuallyHidden>
                     {t("pages.pickup.bulkExport.selectRow", { orderNo: row.orderNo })}
-                  </span>
+                  </VisuallyHidden>
                 }
                 aria-label={t("pages.pickup.bulkExport.selectRow", { orderNo: row.orderNo })}
                 checked={write.selectedIds.has(row.id)}
@@ -285,7 +274,7 @@ function PickupPageContent({
             label={t("pages.pickup.filters.statusLabel")}
             options={statusOptions}
             value={statusFilter}
-            onValueChange={(value) => onStatusFilterChange(value as StatusFilter)}
+            onValueChange={onStatusFilterChange}
           />
         </div>
         <div style={{ width: 200 }}>
@@ -293,12 +282,18 @@ function PickupPageContent({
             label={t("pages.pickup.filters.reasonLabel")}
             options={reasonOptions}
             value={reasonFilter}
-            onValueChange={(value) => onReasonFilterChange(value as ReasonFilter)}
+            onValueChange={onReasonFilterChange}
           />
         </div>
         <div style={{ width: 180 }}>
           <DatePicker
             label={t("pages.pickup.filters.fromLabel")}
+            placeholder={t("common.datePicker.placeholder")}
+            clearLabel={t("common.datePicker.clear")}
+            calendarLabel={t("common.datePicker.calendar")}
+            previousMonthLabel={t("common.datePicker.previousMonth")}
+            nextMonthLabel={t("common.datePicker.nextMonth")}
+            locale={i18n.language}
             {...(fromDate ? { value: fromDate } : {})}
             onValueChange={(value) => onFromDateChange(value ?? "")}
           />
@@ -306,6 +301,12 @@ function PickupPageContent({
         <div style={{ width: 180 }}>
           <DatePicker
             label={t("pages.pickup.filters.toLabel")}
+            placeholder={t("common.datePicker.placeholder")}
+            clearLabel={t("common.datePicker.clear")}
+            calendarLabel={t("common.datePicker.calendar")}
+            previousMonthLabel={t("common.datePicker.previousMonth")}
+            nextMonthLabel={t("common.datePicker.nextMonth")}
+            locale={i18n.language}
             {...(toDate ? { value: toDate } : {})}
             onValueChange={(value) => onToDateChange(value ?? "")}
           />
