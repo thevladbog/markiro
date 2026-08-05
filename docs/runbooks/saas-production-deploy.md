@@ -67,6 +67,23 @@ target-state gate.
 The private VM installs GitHub Actions runner `2.336.0` for Linux x64 only after
 verifying the official SHA-256
 `04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d`.
+It installs Yandex Cloud CLI `1.23.0` from the exact official versioned object
+`https://storage.yandexcloud.net/yandexcloud-yc/release/1.23.0/linux/amd64/yc`
+only after verifying SHA-256
+`3e287905b63685847aa77f17f92bf7156037cc63b9a42c6cd901db69a61604c9`,
+then requires `yc version --semantic` to equal `1.23.0`. Yandex's official
+installer currently selects a mutable stable version and performs a version
+check, but Yandex publishes no digest or signature beside this object. The
+recorded checksum was measured locally from the exact HTTPS object; it is a
+repository-controlled integrity pin, not a vendor-attested checksum.
+
+To upgrade `yc`, two reviewers must independently download the exact versioned
+official Linux AMD64 object, independently calculate and compare SHA-256, and
+review the reported semantic version. Update the version, object path, checksum,
+mutation contract, runbook, and task evidence in one protected change. Never
+substitute `release/stable`, `latest`, an unversioned archive, or an installer
+whose selected version is resolved at boot.
+
 On each controller-started boot it generates a new deployment ID, requests one
 JIT configuration with the matching `markiro-deployment-<id>` label, executes
 at most one job, removes registration material, and powers off. The deploy job
@@ -75,15 +92,31 @@ uses only the app VM internal address, and transfers no SSH static key. Configur
 `YC_RUNNER_OS_LOGIN` and `YC_ORGANIZATION_ID` for that exact OS Login profile;
 there must be no public address on either VM.
 
+The app VM emits only its OpenSSH public host keys as bounded
+`MARKIRO_SSH_HOST_KEY` records on the serial console during cloud-init. Before
+starting delivery, the controller reads that output through the authenticated
+Yandex Compute `serialPortOutput` API using the already-gated short-lived IAM
+token. It passes the validated public keys to the private runner, which writes an
+exact private `known_hosts` file for the app's internal IP and requires
+`StrictHostKeyChecking=yes`. `accept-new`, empty trust stores, and Terraform- or
+workflow-managed SSH private keys are prohibited.
+
 Before starting the runner, the controller validates the exact release run,
 manifest SHA/digests, app/runner state, fresh managed PostgreSQL backup, and
 current ALB target health. The transferred archive contains only
 `compose.production.yml`, `deploy/production`, and the validated immutable
 `release-manifest.json`, rooted at `/opt/markiro/releases/<commit>`. Runtime
 Lockbox refresh and production preflight precede digest pulls; migration
-precedes either service switch. A migration failure switches nothing. An API,
-edge, ALB, or external-smoke failure redeploys the exact previous healthy API
-and edge digest pair; it never reverses the database migration. The
+precedes either service switch. Remote `prepare` leaves an append-only pending
+candidate only after the candidate API and edge both pass local readiness. The
+runner then checks ALB target health and performs the public smoke contract;
+only remote `finalize` may mark that exact pending tag and digest pair healthy.
+A migration failure switches nothing. Any post-switch local-readiness, ALB,
+external-smoke, or finalize failure invokes remote `rollback`, which validates
+the exact pending record, redeploys the exact previous healthy API and edge
+digest pair without another migration, and verifies both restored services
+locally before recording the candidate failed. Pending, healthy, and failed
+records are private, exclusive, and never overwritten. The
 GitHub-hosted `cleanup` job runs with `always()`, deregisters a stale runner when
 present, and stops the VM independently. Cleanup failures are alerted without
 replacing the primary deployment failure.

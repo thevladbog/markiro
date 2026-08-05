@@ -1711,6 +1711,10 @@ test("deployment runner uses exact production federation, VM-scoped operator, an
   const cloudInit = await readRepositoryFile(
     "infra/yandex/modules/compute/cloud-init-runner.yaml.tftpl",
   );
+  const appCloudInit = await readRepositoryFile(
+    "infra/yandex/modules/compute/cloud-init-app.yaml.tftpl",
+  );
+  const remoteDeploy = await readRepositoryFile("deploy/yandex/remote-deploy.mjs");
   const unit = await readRepositoryFile("deploy/yandex/systemd/markiro-runner.service");
 
   const credential = terraformResourceBlock(
@@ -1762,11 +1766,55 @@ test("deployment runner uses exact production federation, VM-scoped operator, an
   assert.match(cloudInit, /sha256sum --check --status/);
   assert.match(cloudInit, /markiro-runner\.service/);
   assert.doesNotMatch(cloudInit, /GITHUB_RUNNER_ADMIN_TOKEN\s*[:=]\s*[^$\s]/);
+  assert.match(appCloudInit, /MARKIRO_SSH_HOST_KEY.*\/dev\/ttyS0/);
+  assert.match(appCloudInit, /ssh_host_(?:ed25519|rsa)_key\.pub/);
+  assert.doesNotMatch(appCloudInit, /ssh_host_(?:ed25519|rsa)_key(?!\.pub)/);
+  assert.match(cloudInit, /YC_VERSION=1\.23\.0/);
+  assert.match(
+    cloudInit,
+    /YC_SHA256=3e287905b63685847aa77f17f92bf7156037cc63b9a42c6cd901db69a61604c9/,
+  );
+  assert.match(cloudInit, /release\/\$YC_VERSION\/linux\/amd64\/yc/);
+  assert.match(cloudInit, /yc version --semantic/);
+  assert.doesNotMatch(cloudInit, /release\/yc_linux_amd64\.tar\.gz/);
+  assert.match(remoteDeploy, /StrictHostKeyChecking=yes/);
+  assert.doesNotMatch(remoteDeploy, /StrictHostKeyChecking=accept-new/);
 
   assert.match(unit, /RuntimeDirectory=markiro-runner/);
   assert.match(unit, /ExecStart=\/usr\/local\/lib\/markiro\/runner-jit/);
   assert.match(unit, /ExecStopPost=\+\/usr\/sbin\/poweroff/);
   assert.match(unit, /TimeoutStartSec=45min/);
+});
+
+test("runner delivery bootstrap rejects mutable yc and unauthenticated SSH host-key mutations", async () => {
+  const runner = await readRepositoryFile(
+    "infra/yandex/modules/compute/cloud-init-runner.yaml.tftpl",
+  );
+  const app = await readRepositoryFile("infra/yandex/modules/compute/cloud-init-app.yaml.tftpl");
+  const remote = await readRepositoryFile("deploy/yandex/remote-deploy.mjs");
+  const assertContract = ({ runnerSource, appSource, remoteSource }) => {
+    assert.match(runnerSource, /YC_VERSION=1\.23\.0/);
+    assert.match(runnerSource, /YC_SHA256=[0-9a-f]{64}/);
+    assert.match(runnerSource, /sha256sum --check --status/);
+    assert.match(runnerSource, /yc version --semantic/);
+    assert.match(appSource, /MARKIRO_SSH_HOST_KEY.*\/dev\/ttyS0/);
+    assert.match(remoteSource, /StrictHostKeyChecking=yes/);
+    assert.doesNotMatch(remoteSource, /accept-new/);
+  };
+
+  assertContract({ runnerSource: runner, appSource: app, remoteSource: remote });
+  for (const [name, runnerSource, appSource, remoteSource] of [
+    ["yc version", runner.replace("YC_VERSION=1.23.0", "YC_VERSION=latest"), app, remote],
+    ["yc checksum", runner.replace(/YC_SHA256=[0-9a-f]{64}/, "YC_SHA256="), app, remote],
+    ["host-key serial evidence", runner, app.replace("MARKIRO_SSH_HOST_KEY", "HOST_KEY"), remote],
+    [
+      "strict host checking",
+      runner,
+      app,
+      remote.replace("StrictHostKeyChecking=yes", "StrictHostKeyChecking=accept-new"),
+    ],
+  ])
+    assert.throws(() => assertContract({ runnerSource, appSource, remoteSource }), undefined, name);
 });
 
 test("production managed PostgreSQL and object storage protect durable data", async () => {

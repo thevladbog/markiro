@@ -1,15 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { deployRelease } from "../remote-deploy.mjs";
+import { deployRelease, runRemoteDeployment } from "../remote-deploy.mjs";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const RUN_ID = "987654321";
 const API = `ghcr.io/thevladbog/markiro-api@sha256:${"a".repeat(64)}`;
 const EDGE = `ghcr.io/thevladbog/markiro-edge@sha256:${"b".repeat(64)}`;
-const PREVIOUS_API = `ghcr.io/thevladbog/markiro-api@sha256:${"c".repeat(64)}`;
-const PREVIOUS_EDGE = `ghcr.io/thevladbog/markiro-edge@sha256:${"d".repeat(64)}`;
-
 const MANIFEST = JSON.stringify({
   api: API,
   commit: COMMIT,
@@ -17,117 +14,200 @@ const MANIFEST = JSON.stringify({
   edge: EDGE,
   workflowRunId: RUN_ID,
 });
+const CANDIDATE = {
+  tag: COMMIT,
+  previousTag: "f".repeat(40),
+  apiDigest: API,
+  edgeDigest: EDGE,
+  state: "pending",
+  createdAt: "2026-08-05T10:20:30.000Z",
+};
 
-function fixture({ failAt } = {}) {
+function orchestrationFixture({ failAt } = {}) {
   const events = [];
-  const calls = [];
-  const phase = async (name, payload) => {
+  const phase = async (name, result) => {
     events.push(name);
-    calls.push({ name, payload });
     if (failAt === name) throw new Error(`${name} failed`);
+    return result;
   };
-  const dependencies = {
-    expectedWorkflowRunId: RUN_ID,
-    expectedCommit: COMMIT,
-    onPhase: (name) => events.push(name),
-    verifyInfrastructure: (payload) => phase("verify infrastructure", payload),
-    verifyBackup: (payload) => phase("verify backup", payload),
-    async withRunner(callback) {
-      events.push("start runner");
-      try {
-        return await callback({ id: 71 });
-      } finally {
-        events.push("cleanup runner");
-      }
+  return {
+    events,
+    dependencies: {
+      expectedWorkflowRunId: RUN_ID,
+      expectedCommit: COMMIT,
+      transferBundle: () => phase("transfer immutable bundle"),
+      refreshRuntime: () => phase("runtime refresh"),
+      prepare: () => phase("remote prepare", CANDIDATE),
+      verifyAlb: () => phase("ALB healthy"),
+      smoke: () => phase("external smoke"),
+      finalize: () => phase("remote finalize", { ...CANDIDATE, state: "healthy" }),
+      rollback: () => phase("remote rollback", { ...CANDIDATE, state: "failed" }),
     },
-    readPreviousRelease: async () => ({ api: PREVIOUS_API, edge: PREVIOUS_EDGE }),
-    transferBundle: (payload) => phase("transfer immutable bundle", payload),
-    refreshRuntime: (payload) => phase("runtime refresh", payload),
-    preflight: (payload) => phase("preflight", payload),
-    pullDigests: (payload) => phase("pull digests", payload),
-    migrate: (payload) => phase("migrate", payload),
-    startApi: (payload) => phase("API ready", payload),
-    startEdge: (payload) => phase("edge ready", payload),
-    verifyAlb: (payload) => phase("ALB healthy", payload),
-    smoke: (payload) => phase("external smoke", payload),
-    rollback: (payload) => phase("rollback", payload),
-    writeRelease: (payload) => phase(`${payload.state} record`, payload),
   };
-  return { dependencies, events, calls };
 }
 
-test("deployRelease validates trusted identity before gates and performs the exact private order", async () => {
-  const { dependencies, events, calls } = fixture();
+test("deployRelease uses the staged boundary in exact ALB, external smoke, finalize order", async () => {
+  const { dependencies, events } = orchestrationFixture();
 
   const record = await deployRelease(dependencies, MANIFEST);
 
   assert.deepEqual(events, [
-    "validate manifest",
-    "verify infrastructure",
-    "verify backup",
-    "start runner",
     "transfer immutable bundle",
     "runtime refresh",
-    "preflight",
-    "pull digests",
-    "migrate",
-    "API ready",
-    "edge ready",
+    "remote prepare",
     "ALB healthy",
     "external smoke",
-    "healthy record",
-    "cleanup runner",
+    "remote finalize",
   ]);
-  assert.deepEqual(record, {
-    api: API,
-    commit: COMMIT,
-    edge: EDGE,
-    releaseWorkflowRunId: RUN_ID,
-    state: "healthy",
-  });
-  const transfer = calls.find((call) => call.name === "transfer immutable bundle").payload;
-  assert.deepEqual(transfer, {
-    destination: `/opt/markiro/releases/${COMMIT}`,
-    sources: ["compose.production.yml", "deploy/production", "release-manifest.json"],
-    transport: { internalAddress: true, kind: "yandex-os-login", staticKey: false },
-  });
-  const preflight = calls.find((call) => call.name === "preflight").payload;
-  assert.deepEqual(preflight.images, { api: API, edge: EDGE });
+  assert.equal(record.state, "healthy");
 });
 
-test("deployRelease rejects a tag-shaped or mismatched release manifest before cloud checks", async () => {
-  const { dependencies, events } = fixture();
-  const tagManifest = MANIFEST.replace(API, "ghcr.io/thevladbog/markiro-api:main");
+test("prepare failure relies on remote local recovery and never invokes a second rollback", async () => {
+  const { dependencies, events } = orchestrationFixture({ failAt: "remote prepare" });
 
-  await assert.rejects(deployRelease(dependencies, tagManifest), /invalid release manifest/);
-  await assert.rejects(
-    deployRelease({ ...dependencies, expectedWorkflowRunId: "123" }, MANIFEST),
-    /invalid release manifest/,
-  );
+  await assert.rejects(deployRelease(dependencies, MANIFEST), /remote prepare failed/);
 
-  assert.deepEqual(events, ["validate manifest", "validate manifest"]);
+  assert.equal(events.includes("remote rollback"), false);
+  assert.equal(events.includes("ALB healthy"), false);
 });
 
-test("migration failure switches neither service and performs no image rollback", async () => {
-  const { dependencies, events } = fixture({ failAt: "migrate" });
-
-  await assert.rejects(deployRelease(dependencies, MANIFEST), /migrate failed/);
-
-  assert.equal(events.includes("API ready"), false);
-  assert.equal(events.includes("edge ready"), false);
-  assert.equal(events.includes("rollback"), false);
-  assert.equal(events.at(-1), "cleanup runner");
-});
-
-for (const failAt of ["API ready", "edge ready", "ALB healthy", "external smoke"]) {
-  test(`post-switch ${failAt} failure restores the exact previous digest pair`, async () => {
-    const { dependencies, calls, events } = fixture({ failAt });
+for (const failAt of ["ALB healthy", "external smoke", "remote finalize"]) {
+  test(`${failAt} failure rolls back the exact prepared candidate`, async () => {
+    const { dependencies, events } = orchestrationFixture({ failAt });
 
     await assert.rejects(deployRelease(dependencies, MANIFEST), new RegExp(`${failAt} failed`));
 
-    const rollback = calls.find((call) => call.name === "rollback");
-    assert.deepEqual(rollback.payload, { api: PREVIOUS_API, edge: PREVIOUS_EDGE });
-    assert.ok(events.indexOf("rollback") > events.indexOf(failAt));
-    assert.equal(events.at(-1), "cleanup runner");
+    assert.ok(events.indexOf("remote rollback") > events.indexOf(failAt));
+    assert.equal(events.filter((event) => event === "remote rollback").length, 1);
   });
 }
+
+function response(body, ok = true) {
+  return {
+    ok,
+    async json() {
+      return body;
+    },
+  };
+}
+
+function cliFixture({ smokeFails = false } = {}) {
+  const events = [];
+  const commands = [];
+  const environment = {
+    RELEASE_MANIFEST_PATH: "/runner/release-manifest.json",
+    EXPECTED_RELEASE_RUN_ID: RUN_ID,
+    EXPECTED_RELEASE_SHA: COMMIT,
+    YC_APP_INSTANCE_ID: "fv4app123",
+    YC_OS_LOGIN: "deployer",
+    YC_ORGANIZATION_ID: "bpforganization",
+    YC_LOAD_BALANCER_ID: "ds7loadbalancer",
+    YC_BACKEND_GROUP_ID: "ds7backend",
+    YC_TARGET_GROUP_ID: "ds7target",
+    MARKIRO_DOMAIN: "markiro.example",
+    APP_SSH_HOST_KEYS_B64: Buffer.from(
+      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixedAuthenticatedKey",
+    ).toString("base64"),
+  };
+  const system = {
+    async readFile() {
+      return MANIFEST;
+    },
+    async metadataIamToken() {
+      return "runner-iam-token";
+    },
+    async fetch(url) {
+      if (String(url).includes("/targetStates/")) {
+        events.push("ALB healthy");
+        return response({ targetStates: [{ status: { zoneStatuses: [{ status: "HEALTHY" }] } }] });
+      }
+      return response({
+        status: "RUNNING",
+        networkInterfaces: [{ primaryV4Address: { address: "10.20.0.7" } }],
+      });
+    },
+    async mkdtemp(prefix) {
+      return prefix.includes("os-login") ? "/tmp/os-login" : "/tmp/manifest";
+    },
+    async readdir() {
+      return ["id_ed25519", "id_ed25519-cert.pub"];
+    },
+    async copyFile() {
+      events.push("copy manifest");
+    },
+    async writeFile(path, value, options) {
+      events.push("write known hosts");
+      assert.equal(options.mode, 0o600);
+      assert.equal(value, "10.20.0.7 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixedAuthenticatedKey\n");
+    },
+    async rm() {
+      events.push("cleanup local material");
+    },
+    async streamArchive(_tar, ssh) {
+      events.push("transfer immutable bundle");
+      assert.ok(ssh.includes("StrictHostKeyChecking=yes"));
+      assert.equal(
+        ssh.some((value) => value.includes("accept-new")),
+        false,
+      );
+    },
+    async run(command, args, options = {}) {
+      commands.push({ command, args, options });
+      if (command === "yc") return "";
+      if (args.includes("markiro-runtime-env.service")) {
+        events.push("runtime refresh");
+        return "";
+      }
+      if (args.includes("prepare")) {
+        events.push("remote prepare");
+        return `${JSON.stringify(CANDIDATE)}\n`;
+      }
+      if (args.includes("finalize")) {
+        events.push("remote finalize");
+        assert.deepEqual(JSON.parse(options.input), CANDIDATE);
+        return `${JSON.stringify({ ...CANDIDATE, state: "healthy" })}\n`;
+      }
+      if (args.includes("rollback")) {
+        events.push("remote rollback");
+        assert.deepEqual(JSON.parse(options.input), CANDIDATE);
+        return `${JSON.stringify({ ...CANDIDATE, state: "failed" })}\n`;
+      }
+      return "";
+    },
+    async smoke() {
+      events.push("external smoke");
+      if (smokeFails) throw new Error("external smoke failed");
+    },
+  };
+  return { commands, environment, events, system };
+}
+
+test("real CLI adapter stages remote prepare, ALB, runner smoke, and remote finalize", async () => {
+  const { environment, events, system } = cliFixture();
+
+  await runRemoteDeployment(environment, system);
+
+  assert.deepEqual(
+    events.filter(
+      (event) =>
+        !event.startsWith("cleanup") && event !== "copy manifest" && event !== "write known hosts",
+    ),
+    [
+      "transfer immutable bundle",
+      "runtime refresh",
+      "remote prepare",
+      "ALB healthy",
+      "external smoke",
+      "remote finalize",
+    ],
+  );
+});
+
+test("real CLI adapter rolls back remotely when runner external smoke fails", async () => {
+  const { environment, events, system } = cliFixture({ smokeFails: true });
+
+  await assert.rejects(runRemoteDeployment(environment, system), /external smoke failed/);
+
+  assert.ok(events.indexOf("remote rollback") > events.indexOf("external smoke"));
+  assert.equal(events.includes("remote finalize"), false);
+});

@@ -33,6 +33,7 @@ jobs:
     environment: production
     outputs:
       deployment-id: ${{ steps.runner.outputs.deployment-id }}
+      app-host-keys-b64: ${{ steps.runner.outputs.app-host-keys-b64 }}
       runner-id: ${{ steps.runner.outputs.runner-id }}
       runner-label: ${{ steps.runner.outputs.runner-label }}
       release-run-id: ${{ steps.release.outputs.release-run-id }}
@@ -170,6 +171,7 @@ jobs:
       YC_BACKEND_GROUP_ID: ${{ vars.YC_BACKEND_GROUP_ID }}
       YC_TARGET_GROUP_ID: ${{ vars.YC_APP_TARGET_GROUP_ID }}
       MARKIRO_DOMAIN: ${{ vars.MARKIRO_DOMAIN }}
+      APP_SSH_HOST_KEYS_B64: ${{ needs.controller.outputs.app-host-keys-b64 }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:

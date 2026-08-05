@@ -83,6 +83,13 @@ runcmd:
       mv "$${node_workdir}/node-v$${NODE_VERSION}-linux-$${NODE_ARCH}" "$${node_root}"
       ln -sfn "$${node_root}/bin/node" /usr/bin/node
       test "$(/usr/bin/node --version)" = "v$${NODE_VERSION}"
+  - |
+      set -eu
+      for host_key in /etc/ssh/ssh_host_ed25519_key.pub /etc/ssh/ssh_host_rsa_key.pub; do
+        test -s "$${host_key}"
+        read -r key_type key_value _ < "$${host_key}"
+        printf 'MARKIRO_SSH_HOST_KEY %s %s\n' "$${key_type}" "$${key_value}" > /dev/ttyS0
+      done
   - systemctl enable docker.service
   - systemctl daemon-reload
   - systemctl enable markiro-runtime-env.service

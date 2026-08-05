@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { productionBaseUrl, ROUTE_CHECKS, runSmoke } from "../smoke.mjs";
+import { productionBaseUrl, ROUTE_CHECKS, runPublicSmoke, runSmoke } from "../smoke.mjs";
 
 const csp =
   "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'";
@@ -99,6 +99,14 @@ function smokeClient() {
     },
   };
 }
+
+test("runner public smoke exercises the external route contract without local Docker access", async () => {
+  const client = smokeClient();
+
+  await runPublicSmoke({ baseUrl: "https://markiro.example" }, client);
+
+  assert.ok(client.requests.some(({ url }) => new URL(url).pathname === "/health/ready"));
+});
 
 const cleanStoppedState = Object.freeze({
   Status: "exited",

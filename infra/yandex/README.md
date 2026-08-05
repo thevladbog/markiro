@@ -201,3 +201,23 @@ corepack pnpm test:yandex-infra:contract
 Both `.terraform.lock.hcl` files are committed. Local state, plans, generated
 backend configuration, and automatic variable files are ignored and must never
 be committed.
+
+## Deployment-runner binary and SSH trust pins
+
+The deployment runner installs Yandex Cloud CLI `1.23.0` from the exact
+versioned official Linux AMD64 object and verifies the repository-controlled
+SHA-256
+`3e287905b63685847aa77f17f92bf7156037cc63b9a42c6cd901db69a61604c9`
+before installation. It then requires `yc version --semantic` to return exactly
+`1.23.0`. Yandex currently publishes no checksum or signature for that object;
+the pin was independently measured from the exact HTTPS payload. Upgrade it only
+through the two-reviewer procedure in
+`docs/runbooks/saas-production-deploy.md`; mutable stable/latest paths are not
+allowed in cloud-init.
+
+Application cloud-init emits only public OpenSSH host keys to its serial output.
+The protected controller retrieves those records through the authenticated
+Compute serial-output API, and the private runner uses an exact private
+`known_hosts` file with strict host checking for the app's internal IP. Do not
+place SSH private host keys in Terraform, metadata, workflow outputs, or
+deployment artifacts.

@@ -1,6 +1,7 @@
 import { parseReleaseManifest } from "../production/release-manifest.mjs";
+import { productionBaseUrl, runPublicSmoke } from "../production/smoke.mjs";
 import { spawn } from "node:child_process";
-import { copyFile, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { copyFile, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import process from "node:process";
@@ -21,103 +22,41 @@ function digest(image, prefix) {
   return image.slice(prefix.length);
 }
 
-async function recordFailure(dependencies, manifest, error) {
-  try {
-    await dependencies.writeRelease({
-      api: manifest.api,
-      commit: manifest.commit,
-      edge: manifest.edge,
-      error: error instanceof Error ? error.message : "deployment failed",
-      releaseWorkflowRunId: manifest.workflowRunId,
-      state: "failed",
-    });
-  } catch {
-    // The primary deployment failure remains authoritative.
-  }
-}
-
 export async function deployRelease(dependencies, manifestText) {
   for (const name of [
-    "verifyInfrastructure",
-    "verifyBackup",
-    "withRunner",
-    "readPreviousRelease",
     "transferBundle",
     "refreshRuntime",
-    "preflight",
-    "pullDigests",
-    "migrate",
-    "startApi",
-    "startEdge",
+    "prepare",
     "verifyAlb",
     "smoke",
+    "finalize",
     "rollback",
-    "writeRelease",
   ])
     requireFunction(dependencies, name);
 
-  dependencies.onPhase?.("validate manifest");
   const manifest = parseReleaseManifest(manifestText, dependencies.expectedWorkflowRunId);
   if (manifest.commit !== dependencies.expectedCommit) throw new Error("invalid release manifest");
-  const images = { api: manifest.api, edge: manifest.edge };
-  const digests = {
-    api: digest(manifest.api, API_PREFIX),
-    edge: digest(manifest.edge, EDGE_PREFIX),
-  };
-
-  await dependencies.verifyInfrastructure({ commit: manifest.commit });
-  await dependencies.verifyBackup({ commit: manifest.commit });
-
-  return dependencies.withRunner(async (runner) => {
-    const previous = await dependencies.readPreviousRelease();
-    let switched = false;
-    try {
-      await dependencies.transferBundle({
-        destination: `/opt/markiro/releases/${manifest.commit}`,
-        sources: ["compose.production.yml", "deploy/production", "release-manifest.json"],
-        transport: { internalAddress: true, kind: "yandex-os-login", staticKey: false },
-      });
-      const deployment = {
-        commit: manifest.commit,
-        digests,
-        images,
-        releaseWorkflowRunId: manifest.workflowRunId,
-        runnerId: runner.id,
-      };
-      await dependencies.refreshRuntime(deployment);
-      await dependencies.preflight(deployment);
-      await dependencies.pullDigests(deployment);
-      await dependencies.migrate(deployment);
-      switched = true;
-      await dependencies.startApi(deployment);
-      await dependencies.startEdge(deployment);
-      await dependencies.verifyAlb(deployment);
-      await dependencies.smoke(deployment);
-      const record = {
-        api: manifest.api,
-        commit: manifest.commit,
-        edge: manifest.edge,
-        releaseWorkflowRunId: manifest.workflowRunId,
-        state: "healthy",
-      };
-      await dependencies.writeRelease(record);
-      return record;
-    } catch (error) {
-      if (switched) {
-        try {
-          await dependencies.rollback({ api: previous.api, edge: previous.edge });
-        } catch {
-          // Rollback failure is recorded by the injected operational boundary.
-        }
+  await dependencies.transferBundle(manifest);
+  await dependencies.refreshRuntime(manifest);
+  let candidate;
+  try {
+    candidate = await dependencies.prepare(manifest);
+    await dependencies.verifyAlb(candidate);
+    await dependencies.smoke(candidate);
+    return await dependencies.finalize(candidate);
+  } catch (error) {
+    if (candidate)
+      try {
+        await dependencies.rollback(candidate);
+      } catch {
+        // The original deployment failure remains authoritative.
       }
-      await recordFailure(dependencies, manifest, error);
-      throw error;
-    }
-  });
+    throw error;
+  }
 }
 
-function requiredEnvironment(name) {
-  const value = process.env[name];
+function requiredEnvironment(name, environment = process.env) {
+  const value = environment[name];
   if (!value) throw new Error("remote deployment configuration is incomplete");
   return value;
 }
@@ -177,8 +116,8 @@ async function streamArchive(tarArguments, sshArguments) {
   });
 }
 
-async function metadataIamToken() {
-  const response = await fetch(
+async function metadataIamToken(fetchImpl = fetch) {
+  const response = await fetchImpl(
     "http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token",
     { headers: { "Metadata-Flavor": "Google" } },
   );
@@ -189,20 +128,67 @@ async function metadataIamToken() {
   return payload.access_token;
 }
 
-async function runRemoteDeployment() {
-  const manifestPath = requiredEnvironment("RELEASE_MANIFEST_PATH");
-  const expectedRunId = requiredEnvironment("EXPECTED_RELEASE_RUN_ID");
-  const expectedCommit = requiredEnvironment("EXPECTED_RELEASE_SHA");
-  const manifestText = await readFile(manifestPath, "utf8");
+function authenticatedKnownHosts(encodedKeys, address) {
+  const keys = Buffer.from(encodedKeys, "base64")
+    .toString("utf8")
+    .trim()
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (
+    keys.length === 0 ||
+    new Set(keys).size !== keys.length ||
+    keys.some((key) => !/^ssh-(?:ed25519|rsa) [A-Za-z0-9+/]+={0,2}$/.test(key))
+  )
+    throw new Error("authenticated SSH host keys are invalid");
+  return `${keys.map((key) => `${address} ${key}`).join("\n")}\n`;
+}
+
+function parseCandidate(output) {
+  try {
+    const candidate = JSON.parse(output);
+    if (
+      !candidate ||
+      candidate.state !== "pending" ||
+      !/^[0-9a-f]{40}$/.test(candidate.tag) ||
+      !/^ghcr\.io\/thevladbog\/markiro-api@sha256:[0-9a-f]{64}$/.test(candidate.apiDigest) ||
+      !/^ghcr\.io\/thevladbog\/markiro-edge@sha256:[0-9a-f]{64}$/.test(candidate.edgeDigest)
+    )
+      throw new Error();
+    return candidate;
+  } catch {
+    throw new Error("remote deployment candidate is invalid");
+  }
+}
+
+export async function runRemoteDeployment(environment = process.env, supplied = {}) {
+  const system = {
+    readFile,
+    metadataIamToken,
+    fetch,
+    mkdtemp,
+    readdir,
+    copyFile,
+    writeFile,
+    rm,
+    streamArchive,
+    run,
+    smoke: ({ baseUrl }) => runPublicSmoke({ baseUrl }),
+    ...supplied,
+  };
+  const manifestPath = requiredEnvironment("RELEASE_MANIFEST_PATH", environment);
+  const expectedRunId = requiredEnvironment("EXPECTED_RELEASE_RUN_ID", environment);
+  const expectedCommit = requiredEnvironment("EXPECTED_RELEASE_SHA", environment);
+  const manifestText = await system.readFile(manifestPath, "utf8");
   const manifest = parseReleaseManifest(manifestText, expectedRunId);
   if (manifest.commit !== expectedCommit || process.cwd() === "/")
     throw new Error("invalid release manifest");
 
-  const token = await metadataIamToken();
-  const appInstanceId = requiredEnvironment("YC_APP_INSTANCE_ID");
-  const login = requiredEnvironment("YC_OS_LOGIN");
-  const organizationId = requiredEnvironment("YC_ORGANIZATION_ID");
-  const instanceResponse = await fetch(
+  const token = await system.metadataIamToken(system.fetch);
+  const appInstanceId = requiredEnvironment("YC_APP_INSTANCE_ID", environment);
+  const login = requiredEnvironment("YC_OS_LOGIN", environment);
+  const organizationId = requiredEnvironment("YC_ORGANIZATION_ID", environment);
+  const instanceResponse = await system.fetch(
     `https://compute.api.cloud.yandex.net/compute/v1/instances/${appInstanceId}`,
     { headers: { Authorization: `Bearer ${token}` } },
   );
@@ -212,11 +198,10 @@ async function runRemoteDeployment() {
   if (typeof address !== "string" || instance.networkInterfaces?.[0]?.primaryV4Address?.oneToOneNat)
     throw new Error("application instance is not private");
 
-  const credentialDirectory = await mkdtemp(join(tmpdir(), "markiro-os-login-"));
-  const manifestDirectory = await mkdtemp(join(tmpdir(), "markiro-release-manifest-"));
+  const credentialDirectory = await system.mkdtemp(join(tmpdir(), "markiro-os-login-"));
+  const manifestDirectory = await system.mkdtemp(join(tmpdir(), "markiro-release-manifest-"));
   try {
-    const ycEnvironment = { ...process.env, YC_TOKEN: token };
-    await run(
+    await system.run(
       "yc",
       [
         "compute",
@@ -234,81 +219,125 @@ async function runRemoteDeployment() {
         credentialDirectory,
         "--no-user-output",
       ],
-      { env: ycEnvironment },
+      { env: { ...process.env, YC_TOKEN: token } },
     );
-    const credentialFiles = await readdir(credentialDirectory);
+    const credentialFiles = await system.readdir(credentialDirectory);
     const identityName = credentialFiles.find(
       (name) => !name.endsWith("-cert.pub") && !name.endsWith(".pub"),
     );
-    if (!identityName) throw new Error("OS Login certificate export failed");
-    const identity = join(credentialDirectory, identityName);
-    const certificate = `${identity}-cert.pub`;
-    if (!credentialFiles.includes(`${identityName}-cert.pub`))
+    if (!identityName || !credentialFiles.includes(`${identityName}-cert.pub`))
       throw new Error("OS Login certificate export failed");
+    const identity = join(credentialDirectory, identityName);
     const knownHosts = join(credentialDirectory, "known_hosts");
-    const target = `${login}@${address}`;
+    await system.writeFile(
+      knownHosts,
+      authenticatedKnownHosts(requiredEnvironment("APP_SSH_HOST_KEYS_B64", environment), address),
+      { encoding: "utf8", mode: 0o600 },
+    );
     const sshBase = [
       "-i",
       identity,
       "-o",
-      `CertificateFile=${certificate}`,
+      `CertificateFile=${identity}-cert.pub`,
       "-o",
       `UserKnownHostsFile=${knownHosts}`,
       "-o",
-      "StrictHostKeyChecking=accept-new",
-      target,
+      "StrictHostKeyChecking=yes",
+      `${login}@${address}`,
     ];
-    const copiedManifest = join(manifestDirectory, "release-manifest.json");
-    await copyFile(manifestPath, copiedManifest);
-    const prefix = `releases/${manifest.commit}/`;
-    await streamArchive(
-      [
-        "-cf",
-        "-",
-        `--transform=s,^,${prefix},`,
-        "-C",
-        process.cwd(),
-        "compose.production.yml",
-        "deploy/production",
-        "-C",
-        manifestDirectory,
-        "release-manifest.json",
-      ],
-      [...sshBase, "sudo", "tar", "-xf", "-", "-C", "/opt/markiro", "--no-same-owner"],
-    );
-    await run("ssh", [...sshBase, "sudo", "systemctl", "restart", "markiro-runtime-env.service"]);
     const apiDigest = digest(manifest.api, API_PREFIX);
     const edgeDigest = digest(manifest.edge, EDGE_PREFIX);
     const releaseDirectory = `/opt/markiro/releases/${manifest.commit}`;
-    await run("ssh", [
-      ...sshBase,
-      "sudo",
-      "env",
-      `MARKIRO_IMAGE_TAG=${manifest.commit}`,
-      `MARKIRO_API_IMAGE_DIGEST=${apiDigest}`,
-      `MARKIRO_EDGE_IMAGE_DIGEST=${edgeDigest}`,
-      "MARKIRO_EDGE_MODE=behind-alb",
-      "MARKIRO_ENV_FILE=/etc/markiro/production.env",
-      "/usr/bin/bash",
-      "-c",
-      'cd "$1" && exec node deploy/production/deploy.mjs',
-      "markiro-deploy",
-      releaseDirectory,
-    ]);
-    const targets = await fetch(
-      `https://alb.api.cloud.yandex.net/apploadbalancer/v1/loadBalancers/${requiredEnvironment("YC_LOAD_BALANCER_ID")}/targetStates/${requiredEnvironment("YC_BACKEND_GROUP_ID")}/${requiredEnvironment("YC_TARGET_GROUP_ID")}`,
-      { headers: { Authorization: `Bearer ${token}` } },
+    const remoteStage = (stage, candidate) =>
+      system.run(
+        "ssh",
+        [
+          ...sshBase,
+          "sudo",
+          "env",
+          `MARKIRO_IMAGE_TAG=${manifest.commit}`,
+          `MARKIRO_API_IMAGE_DIGEST=${apiDigest}`,
+          `MARKIRO_EDGE_IMAGE_DIGEST=${edgeDigest}`,
+          "MARKIRO_EDGE_MODE=behind-alb",
+          "MARKIRO_ENV_FILE=/etc/markiro/production.env",
+          "MARKIRO_RELEASE_DIRECTORY=/var/lib/markiro/releases",
+          "/usr/bin/bash",
+          "-c",
+          'cd "$1" && exec node deploy/production/deploy.mjs "$2"',
+          "markiro-deploy",
+          releaseDirectory,
+          stage,
+        ],
+        candidate ? { input: `${JSON.stringify(candidate)}\n` } : undefined,
+      );
+
+    return await deployRelease(
+      {
+        expectedWorkflowRunId: expectedRunId,
+        expectedCommit,
+        async transferBundle() {
+          const copiedManifest = join(manifestDirectory, "release-manifest.json");
+          await system.copyFile(manifestPath, copiedManifest);
+          const prefix = `releases/${manifest.commit}/`;
+          await system.streamArchive(
+            [
+              "-cf",
+              "-",
+              `--transform=s,^,${prefix},`,
+              "-C",
+              process.cwd(),
+              "compose.production.yml",
+              "deploy/production",
+              "-C",
+              manifestDirectory,
+              "release-manifest.json",
+            ],
+            [...sshBase, "sudo", "tar", "-xf", "-", "-C", "/opt/markiro", "--no-same-owner"],
+          );
+        },
+        refreshRuntime: () =>
+          system.run("ssh", [
+            ...sshBase,
+            "sudo",
+            "systemctl",
+            "restart",
+            "markiro-runtime-env.service",
+          ]),
+        async prepare() {
+          return parseCandidate(await remoteStage("prepare"));
+        },
+        async verifyAlb() {
+          const targets = await system.fetch(
+            `https://alb.api.cloud.yandex.net/apploadbalancer/v1/loadBalancers/${requiredEnvironment("YC_LOAD_BALANCER_ID", environment)}/targetStates/${requiredEnvironment("YC_BACKEND_GROUP_ID", environment)}/${requiredEnvironment("YC_TARGET_GROUP_ID", environment)}`,
+            { headers: { Authorization: `Bearer ${token}` } },
+          );
+          const state = targets.ok ? await targets.json() : {};
+          if (
+            !state.targetStates?.some((targetState) =>
+              targetState.status?.zoneStatuses?.some((zone) => zone.status === "HEALTHY"),
+            )
+          )
+            throw new Error("production ALB gate failed");
+        },
+        smoke: () =>
+          system.smoke({
+            baseUrl: productionBaseUrl({
+              MARKIRO_DOMAIN: requiredEnvironment("MARKIRO_DOMAIN", environment),
+              MARKIRO_HTTPS_PORT: environment.MARKIRO_HTTPS_PORT,
+            }),
+          }),
+        async finalize(candidate) {
+          return JSON.parse(await remoteStage("finalize", candidate));
+        },
+        async rollback(candidate) {
+          return JSON.parse(await remoteStage("rollback", candidate));
+        },
+      },
+      manifestText,
     );
-    const state = targets.ok ? await targets.json() : {};
-    if (
-      !state.targetStates?.some((targetState) =>
-        targetState.status?.zoneStatuses?.some((zone) => zone.status === "HEALTHY"),
-      )
-    )
-      throw new Error("production ALB gate failed");
   } finally {
-    await rm(credentialDirectory, { recursive: true, force: true });
-    await rm(manifestDirectory, { recursive: true, force: true });
+    await system.rm(credentialDirectory, { recursive: true, force: true });
+    await system.rm(manifestDirectory, { recursive: true, force: true });
   }
 }
 

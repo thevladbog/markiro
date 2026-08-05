@@ -13,6 +13,9 @@ deploy/production/.caddy-config/
 # Sibling agent worktrees (also in .prettierignore)
 .worktrees/
 
+# Local Superpowers execution artifacts; reviewed specs and plans live under docs/.
+/.superpowers/
+
 # Local Terraform artifacts; examples and dependency locks remain committed.
 .terraform/
 *.tfstate*

@@ -570,22 +570,7 @@ async function runtimeSmoke(environment, docker, client, baseUrl, options) {
   if (restoreError) throw restoreError;
 }
 
-/**
- * @param {{baseUrl: string, assetName?: string, environment?: Record<string, string | undefined>, commandTimeoutMs?: number, readinessAttempts?: number, readinessIntervalMs?: number, sleep?: (milliseconds: number) => Promise<void>}} options
- * @param {{request(url: string | URL, init: RequestInit): Promise<{status: number, headers: Headers, text(): Promise<string>}>}=} client
- * @param {{run(command: string, args: string[]): Promise<{code: number, stdout: string, stderr: string, durationMs?: number}>}=} docker
- */
-export async function runSmoke(options, client = requestClient(), docker) {
-  const environment = options.environment || process.env;
-  const runtimeOptions = {
-    commandTimeoutMs: options.commandTimeoutMs ?? COMMAND_TIMEOUT_MS,
-    readinessAttempts: options.readinessAttempts ?? 30,
-    readinessIntervalMs: options.readinessIntervalMs ?? 2_000,
-    sleep:
-      options.sleep ||
-      ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))),
-  };
-  const dockerClient = docker || dockerRunner(environment, runtimeOptions.commandTimeoutMs);
+export async function runPublicSmoke(options, client = requestClient()) {
   const baseUrl = options.baseUrl.replace(/\/$/, "");
   const root = await publicRequest(client, new URL("/", baseUrl), { method: "GET" });
   const rootHtml = await getText(root);
@@ -615,6 +600,26 @@ export async function runSmoke(options, client = requestClient(), docker) {
     assertRoute(check, response, body, signature);
     if (check.kind === "docs") await assertDocumentation(client, body, baseUrl);
   }
+}
+
+/**
+ * @param {{baseUrl: string, assetName?: string, environment?: Record<string, string | undefined>, commandTimeoutMs?: number, readinessAttempts?: number, readinessIntervalMs?: number, sleep?: (milliseconds: number) => Promise<void>}} options
+ * @param {{request(url: string | URL, init: RequestInit): Promise<{status: number, headers: Headers, text(): Promise<string>}>}=} client
+ * @param {{run(command: string, args: string[]): Promise<{code: number, stdout: string, stderr: string, durationMs?: number}>}=} docker
+ */
+export async function runSmoke(options, client = requestClient(), docker) {
+  const environment = options.environment || process.env;
+  const runtimeOptions = {
+    commandTimeoutMs: options.commandTimeoutMs ?? COMMAND_TIMEOUT_MS,
+    readinessAttempts: options.readinessAttempts ?? 30,
+    readinessIntervalMs: options.readinessIntervalMs ?? 2_000,
+    sleep:
+      options.sleep ||
+      ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))),
+  };
+  const dockerClient = docker || dockerRunner(environment, runtimeOptions.commandTimeoutMs);
+  await runPublicSmoke(options, client);
+  const baseUrl = options.baseUrl.replace(/\/$/, "");
   await runtimeSmoke(environment, dockerClient, client, baseUrl, runtimeOptions);
 }
 

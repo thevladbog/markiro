@@ -1,5 +1,16 @@
 import { spawn } from "node:child_process";
-import { chmod, mkdir, readdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  link,
+  mkdir,
+  open,
+  readdir,
+  readFile,
+  rename,
+  stat,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 import process from "node:process";
 import { randomUUID } from "node:crypto";
@@ -103,6 +114,10 @@ async function probeEdgeTls({ url, timeoutMs }) {
 }
 
 async function latestHealthyRelease(directory) {
+  return (await latestHealthyReleaseRecord(directory))?.tag ?? null;
+}
+
+async function latestHealthyReleaseRecord(directory) {
   try {
     const files = (await readdir(directory)).filter((file) => file.endsWith(".json"));
     const candidates = [];
@@ -117,15 +132,41 @@ async function latestHealthyRelease(directory) {
       }
     }
     candidates.sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
-    return candidates[0]?.tag ?? null;
+    return candidates[0] ?? null;
   } catch (error) {
     if (error?.code !== "ENOENT") throw error;
   }
   return null;
 }
 
+async function healthyReleaseByTag(directory, tag) {
+  try {
+    const matches = [];
+    for (const file of await readdir(directory)) {
+      try {
+        const path = join(directory, file);
+        const release = JSON.parse(await readFile(path, "utf8"));
+        const metadata = await stat(path);
+        if (release?.tag === tag && isHealthyRelease(release, file, metadata))
+          matches.push(release);
+      } catch {
+        // Invalid records are never rollback evidence.
+      }
+    }
+    if (matches.length !== 1) throw new Error("previous healthy release is unavailable");
+    return matches[0];
+  } catch (error) {
+    if (error?.message === "previous healthy release is unavailable") throw error;
+    throw new Error("previous healthy release is unavailable");
+  }
+}
+
 function releaseFileName(createdAt, tag) {
   return `${createdAt.replace(/[:.]/g, "-")}-${tag}.json`;
+}
+
+function stagedReleaseFileName(release, state) {
+  return `${release.createdAt.replace(/[:.]/g, "-")}-${release.tag}.${state}.json`;
 }
 
 export async function writeRelease(directory, release) {
@@ -184,10 +225,93 @@ function isHealthyRelease(release, filename, metadata) {
     isDigestFor(apiRepository, release.apiDigest) &&
     isDigestFor(edgeRepository, release.edgeDigest) &&
     isValidIsoDate(release.createdAt) &&
-    filename === releaseFileName(release.createdAt, release.tag) &&
+    (filename === releaseFileName(release.createdAt, release.tag) ||
+      filename === stagedReleaseFileName(release, "healthy")) &&
     metadata.isFile() &&
     (metadata.mode & 0o777) === 0o600
   );
+}
+
+function sameRelease(left, right) {
+  return (
+    left?.tag === right?.tag &&
+    left?.previousTag === right?.previousTag &&
+    left?.apiDigest === right?.apiDigest &&
+    left?.edgeDigest === right?.edgeDigest &&
+    left?.state === right?.state &&
+    left?.createdAt === right?.createdAt
+  );
+}
+
+function isStagedRelease(release, state) {
+  return (
+    release &&
+    release.state === state &&
+    typeof release.tag === "string" &&
+    /^[0-9a-f]{40}$/.test(release.tag) &&
+    (release.previousTag === null || /^[0-9a-f]{40}$/.test(release.previousTag)) &&
+    isDigestFor(apiRepository, release.apiDigest) &&
+    isDigestFor(edgeRepository, release.edgeDigest) &&
+    isValidIsoDate(release.createdAt) &&
+    Object.keys(release).sort().join(",") === "apiDigest,createdAt,edgeDigest,previousTag,state,tag"
+  );
+}
+
+async function writeStagedRelease(directory, release, state) {
+  if (!isStagedRelease(release, state)) throw new Error("release state transition rejected");
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  const path = join(directory, stagedReleaseFileName(release, state));
+  const temporaryPath = join(
+    directory,
+    `.${stagedReleaseFileName(release, state)}.${randomUUID()}`,
+  );
+  let file;
+  let directoryHandle;
+  try {
+    file = await open(temporaryPath, "wx", 0o600);
+    await file.writeFile(`${JSON.stringify(release)}\n`, "utf8");
+    await file.sync();
+    await file.close();
+    file = undefined;
+    await link(temporaryPath, path);
+    directoryHandle = await open(directory, "r");
+    await directoryHandle.sync();
+  } catch {
+    throw new Error("release state transition rejected");
+  } finally {
+    await file?.close();
+    await directoryHandle?.close();
+    await unlink(temporaryPath).catch((error) => {
+      if (error?.code !== "ENOENT") throw error;
+    });
+  }
+  return release;
+}
+
+async function requirePendingRelease(directory, candidate) {
+  if (!isStagedRelease(candidate, "pending")) throw new Error("release state transition rejected");
+  try {
+    const path = join(directory, stagedReleaseFileName(candidate, "pending"));
+    const metadata = await stat(path);
+    const persisted = JSON.parse(await readFile(path, "utf8"));
+    if (
+      !metadata.isFile() ||
+      (metadata.mode & 0o777) !== 0o600 ||
+      !sameRelease(candidate, persisted)
+    )
+      throw new Error("release state transition rejected");
+    for (const terminal of ["healthy", "failed"])
+      try {
+        await stat(join(directory, stagedReleaseFileName(candidate, terminal)));
+        throw new Error("release state transition rejected");
+      } catch (error) {
+        if (error?.code !== "ENOENT") throw error;
+      }
+    return persisted;
+  } catch (error) {
+    if (error?.message === "release state transition rejected") throw error;
+    throw new Error("release state transition rejected");
+  }
 }
 
 function commandError(command, result) {
@@ -265,6 +389,200 @@ async function waitForEdgeTls(dependencies, options, baseUrl) {
   }
 
   throw new Error(`Edge/TLS readiness failed after ${timeoutMs}ms (last cause: ${lastCause})`);
+}
+
+async function waitForApi(dependencies, options, compose, environment) {
+  const attempts = options.readinessAttempts ?? 30;
+  const interval = options.readinessIntervalMs ?? 2_000;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    let ready = false;
+    try {
+      if (dependencies.isReady) ready = await dependencies.isReady();
+      else {
+        const check = await runCommand(
+          dependencies,
+          "docker",
+          [...compose, "exec", "-T", "api", "node", "/opt/markiro/healthcheck.mjs"],
+          environment,
+          dependencies.timeouts.command,
+        );
+        dependencies.log("docker");
+        ready = check.code === 0;
+      }
+    } catch {
+      ready = false;
+    }
+    if (ready) return;
+    if (attempt + 1 < attempts) await dependencies.sleep(interval);
+  }
+  throw new Error("API readiness failed");
+}
+
+function deploymentDependencies(options, supplied = {}) {
+  return {
+    runPreflight,
+    runner: processRunner(),
+    writeRelease,
+    isReady: undefined,
+    probeEdgeTls,
+    sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+    monotonicNow: () => performance.now(),
+    now: () => new Date(),
+    log: (event) => console.log(event),
+    timeouts: {
+      command: options.commandTimeoutMs ?? COMMAND_TIMEOUT_MS,
+      pull: options.pullTimeoutMs ?? PULL_TIMEOUT_MS,
+      service: options.serviceTimeoutMs ?? SERVICE_TIMEOUT_MS,
+    },
+    ...supplied,
+  };
+}
+
+async function markPreparedReleaseFailed(releaseDirectory, candidate) {
+  return writeStagedRelease(releaseDirectory, { ...candidate, state: "failed" }, "failed");
+}
+
+/**
+ * Pull, migrate, and switch a digest-backed candidate, stopping after local API and edge readiness.
+ */
+export async function prepareRelease(options, supplied = {}) {
+  const dependencies = deploymentDependencies(options, supplied);
+  dependencies.log("preflight");
+  const preflight = await dependencies.runPreflight(options.environment);
+  const environment = {
+    ...process.env,
+    ...options.environment,
+    MARKIRO_ENV_FILE: preflight.envFile,
+  };
+  const releaseDirectory = options.releaseDirectory || ".markiro-releases";
+  const compose = composeArgs(environment);
+  const approvedApiImage = `${apiRepository}@${preflight.apiImageDigest}`;
+  const approvedEdgeImage = `${edgeRepository}@${preflight.edgeImageDigest}`;
+  let candidate;
+  let switched = false;
+
+  try {
+    await mustRun(
+      dependencies,
+      "docker",
+      [...compose, "pull", "api", "edge"],
+      environment,
+      dependencies.timeouts.pull,
+    );
+    const api = await mustRun(
+      dependencies,
+      "docker",
+      ["image", "inspect", "--format", "{{json .RepoDigests}}", approvedApiImage],
+      environment,
+      dependencies.timeouts.command,
+    );
+    const edge = await mustRun(
+      dependencies,
+      "docker",
+      ["image", "inspect", "--format", "{{json .RepoDigests}}", approvedEdgeImage],
+      environment,
+      dependencies.timeouts.command,
+    );
+    const previous = await latestHealthyReleaseRecord(releaseDirectory);
+    candidate = {
+      tag: preflight.imageTag,
+      previousTag: previous?.tag ?? null,
+      apiDigest: requireApprovedDigest(approvedApiImage, api.stdout.trim()),
+      edgeDigest: requireApprovedDigest(approvedEdgeImage, edge.stdout.trim()),
+      state: "pending",
+      createdAt: dependencies.now().toISOString(),
+    };
+    await writeStagedRelease(releaseDirectory, candidate, "pending");
+    dependencies.log("release pending");
+
+    await mustRun(
+      dependencies,
+      "docker",
+      [...compose, "run", "--rm", "migrate"],
+      environment,
+      null,
+    );
+    switched = true;
+    await mustRun(
+      dependencies,
+      "docker",
+      [...compose, "up", "-d", "--no-deps", "api"],
+      environment,
+      dependencies.timeouts.service,
+    );
+    await waitForApi(dependencies, options, compose, environment);
+    await mustRun(
+      dependencies,
+      "docker",
+      [...compose, "up", "-d", "--no-deps", "edge"],
+      environment,
+      dependencies.timeouts.service,
+    );
+    await waitForEdgeTls(dependencies, options, productionBaseUrl(environment));
+    dependencies.log("release prepared");
+    return candidate;
+  } catch (error) {
+    if (candidate) {
+      try {
+        if (switched && candidate.previousTag)
+          await rollbackPreparedRelease(
+            { ...options, candidate, environment, releaseDirectory },
+            dependencies,
+          );
+        else await markPreparedReleaseFailed(releaseDirectory, candidate);
+      } catch {
+        bestEffortLog(dependencies, "prepared release recovery failed");
+      }
+    }
+    throw error;
+  }
+}
+
+/** Mark the exact persisted pending candidate healthy without replacing any record. */
+export async function finalizePreparedRelease({ candidate, releaseDirectory }) {
+  await requirePendingRelease(releaseDirectory, candidate);
+  return writeStagedRelease(releaseDirectory, { ...candidate, state: "healthy" }, "healthy");
+}
+
+/** Restore the exact previous healthy digest pair without running migrations. */
+export async function rollbackPreparedRelease(options, supplied = {}) {
+  const dependencies = deploymentDependencies(options, supplied);
+  const candidate = await requirePendingRelease(options.releaseDirectory, options.candidate);
+  if (!candidate.previousTag) throw new Error("previous healthy release is unavailable");
+  const previous = await healthyReleaseByTag(options.releaseDirectory, candidate.previousTag);
+  const environment = {
+    ...process.env,
+    ...options.environment,
+    MARKIRO_IMAGE_TAG: previous.tag,
+    MARKIRO_API_IMAGE_DIGEST: previous.apiDigest.slice(`${apiRepository}@`.length),
+    MARKIRO_EDGE_IMAGE_DIGEST: previous.edgeDigest.slice(`${edgeRepository}@`.length),
+  };
+  const compose = composeArgs(environment);
+  await mustRun(
+    dependencies,
+    "docker",
+    [...compose, "pull", "api", "edge"],
+    environment,
+    dependencies.timeouts.pull,
+  );
+  await mustRun(
+    dependencies,
+    "docker",
+    [...compose, "up", "-d", "--no-deps", "api"],
+    environment,
+    dependencies.timeouts.service,
+  );
+  await waitForApi(dependencies, options, compose, environment);
+  await mustRun(
+    dependencies,
+    "docker",
+    [...compose, "up", "-d", "--no-deps", "edge"],
+    environment,
+    dependencies.timeouts.service,
+  );
+  await waitForEdgeTls(dependencies, options, productionBaseUrl(environment));
+  dependencies.log("release rolled back");
+  return markPreparedReleaseFailed(options.releaseDirectory, candidate);
 }
 
 /**
@@ -436,9 +754,55 @@ export async function deployRelease(options, supplied = {}) {
   }
 }
 
+async function candidateFromStdin() {
+  let input = "";
+  for await (const chunk of process.stdin) {
+    input += chunk;
+    if (input.length > 16 * 1024) throw new Error("release state transition rejected");
+  }
+  try {
+    return JSON.parse(input);
+  } catch {
+    throw new Error("release state transition rejected");
+  }
+}
+
+function cliReleaseDirectory() {
+  const directory = process.env.MARKIRO_RELEASE_DIRECTORY;
+  if (!directory?.startsWith("/") || directory.includes("\0"))
+    throw new Error("release state transition rejected");
+  return directory;
+}
+
 if (isMainModule(import.meta.url)) {
   try {
-    await deployRelease({ environment: process.env });
+    const mode = process.argv[2];
+    if (mode === "prepare") {
+      const candidate = await prepareRelease(
+        {
+          environment: process.env,
+          releaseDirectory: cliReleaseDirectory(),
+        },
+        { log: () => undefined },
+      );
+      process.stdout.write(`${JSON.stringify(candidate)}\n`);
+    } else if (mode === "finalize") {
+      const release = await finalizePreparedRelease({
+        candidate: await candidateFromStdin(),
+        releaseDirectory: cliReleaseDirectory(),
+      });
+      process.stdout.write(`${JSON.stringify(release)}\n`);
+    } else if (mode === "rollback") {
+      const release = await rollbackPreparedRelease(
+        {
+          candidate: await candidateFromStdin(),
+          environment: process.env,
+          releaseDirectory: cliReleaseDirectory(),
+        },
+        { log: () => undefined },
+      );
+      process.stdout.write(`${JSON.stringify(release)}\n`);
+    } else await deployRelease({ environment: process.env });
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;

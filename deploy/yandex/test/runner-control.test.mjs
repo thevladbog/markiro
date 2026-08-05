@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   deploymentRunnerLabel,
+  parseSerialHostKeys,
   selectCleanupRunners,
   startRunner,
   waitForRunner,
@@ -11,6 +12,31 @@ import {
 
 const DEPLOYMENT_ID = "deploy-123456789";
 const INSTANCE_ID = "fv4runner123";
+
+test("serial host-key parser accepts only unique cloud-init markers from authenticated output", () => {
+  const output = [
+    "ordinary boot output",
+    "MARKIRO_SSH_HOST_KEY ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixedKey",
+    "MARKIRO_SSH_HOST_KEY ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABFixedKey",
+  ].join("\n");
+
+  assert.equal(
+    Buffer.from(parseSerialHostKeys(output), "base64").toString("utf8"),
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixedKey\nssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABFixedKey",
+  );
+  assert.throws(() => parseSerialHostKeys("boot complete"), /authenticated SSH host keys/);
+  assert.throws(
+    () =>
+      parseSerialHostKeys(
+        `${output}\nMARKIRO_SSH_HOST_KEY ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixedKey`,
+      ),
+    /authenticated SSH host keys/,
+  );
+  assert.throws(
+    () => parseSerialHostKeys("MARKIRO_SSH_HOST_KEY ssh-ed25519 invalid key"),
+    /authenticated SSH host keys/,
+  );
+});
 
 function fixture({ instanceStates = ["STOPPED", "RUNNING"], runners = [] } = {}) {
   const calls = [];

@@ -57,6 +57,16 @@ export function deploymentRunnerLabel(deploymentId) {
   return `${DEPLOYMENT_LABEL_PREFIX}${deploymentId}`;
 }
 
+export function parseSerialHostKeys(serialOutput) {
+  if (typeof serialOutput !== "string") throw new Error("authenticated SSH host keys are invalid");
+  const keys = [
+    ...serialOutput.matchAll(/^MARKIRO_SSH_HOST_KEY (ssh-(?:ed25519|rsa) [A-Za-z0-9+/]+={0,2})$/gm),
+  ].map((match) => match[1]);
+  if (keys.length === 0 || new Set(keys).size !== keys.length)
+    throw new Error("authenticated SSH host keys are invalid");
+  return Buffer.from(keys.join("\n"), "utf8").toString("base64");
+}
+
 export async function startRunner(dependencies) {
   requireDependencies(dependencies);
   const status = await dependencies.yandex.getInstanceStatus(dependencies.instanceId);
@@ -266,6 +276,15 @@ async function verifyControllerGates(yandexToken) {
     throw new Error("production ALB gate failed");
 }
 
+async function authenticatedAppHostKeys(yandexToken) {
+  const appInstanceId = requiredEnvironment("YC_APP_INSTANCE_ID");
+  const serial = await requestJson(
+    `https://compute.api.cloud.yandex.net/compute/v1/instances/${appInstanceId}:serialPortOutput?port=1`,
+    { headers: bearer(yandexToken) },
+  );
+  return parseSerialHostKeys(serial.contents);
+}
+
 async function discoverRunner(clients) {
   const deadline = performance.now() + 300_000;
   while (performance.now() < deadline) {
@@ -284,7 +303,9 @@ async function discoverRunner(clients) {
 async function runCli(command) {
   const clients = await cliClients();
   if (command === "start") {
-    await verifyControllerGates(requiredEnvironment("YC_GATE_IAM_TOKEN"));
+    const gateToken = requiredEnvironment("YC_GATE_IAM_TOKEN");
+    await verifyControllerGates(gateToken);
+    const appHostKeys = await authenticatedAppHostKeys(gateToken);
     const status = await clients.yandex.getInstanceStatus(clients.instanceId);
     if (status !== "STOPPED") throw new Error("runner VM must be STOPPED");
     if (deploymentRunners(await clients.github.listRunners()).length !== 0)
@@ -295,7 +316,7 @@ async function runCli(command) {
     const deploymentId = label.slice(DEPLOYMENT_LABEL_PREFIX.length);
     await appendFile(
       output,
-      `deployment-id=${deploymentId}\nrunner-id=${runner.id}\nrunner-label=${label}\n`,
+      `deployment-id=${deploymentId}\nrunner-id=${runner.id}\nrunner-label=${label}\napp-host-keys-b64=${appHostKeys}\n`,
       { encoding: "utf8", mode: 0o600 },
     );
     return;

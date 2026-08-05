@@ -600,12 +600,19 @@ function assertProductionDeploymentWorkflow(
   assert.doesNotMatch(deploymentSource, /runs-on:\s*\[self-hosted, linux, markiro-production\]/);
   assert.match(deploymentSource, /GITHUB_RUNNER_ADMIN_TOKEN/);
   assert.match(deploymentSource, /YC_RUNNER_SERVICE_ACCOUNT_ID/);
+  assert.match(
+    deploymentSource,
+    /app-host-keys-b64:\s*\$\{\{ steps\.runner\.outputs\.app-host-keys-b64 \}\}/,
+  );
+  assert.match(
+    deploymentSource,
+    /APP_SSH_HOST_KEYS_B64:\s*\$\{\{ needs\.controller\.outputs\.app-host-keys-b64 \}\}/,
+  );
   assert.equal(workflow.jobs.cleanup?.if, "always()");
   assert.match(deploymentSource, /node deploy\/yandex\/runner-control\.mjs cleanup/);
-  assert.match(
-    runnerControlSource,
-    /await verifyControllerGates\(requiredEnvironment\("YC_GATE_IAM_TOKEN"\)\)/,
-  );
+  assert.match(runnerControlSource, /const gateToken = requiredEnvironment\("YC_GATE_IAM_TOKEN"\)/);
+  assert.match(runnerControlSource, /await verifyControllerGates\(gateToken\)/);
+  assert.match(runnerControlSource, /await authenticatedAppHostKeys\(gateToken\)/);
   assert.match(runnerControlSource, /production backup gate failed/);
   assert.match(runnerControlSource, /production ALB gate failed/);
   assert.doesNotMatch(deploymentSource, /ssh-key|identity-file|--public-address/i);

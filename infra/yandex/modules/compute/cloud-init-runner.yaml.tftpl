@@ -110,15 +110,16 @@ runcmd:
       chown -R markiro-runner:markiro-runner /opt/actions-runner
   - |
       set -eu
-      archive=/tmp/yc_linux_amd64.tar.gz
-      unpack=/tmp/yandex-cloud-cli
-      curl --fail --silent --show-error --location \
-        https://storage.yandexcloud.net/yandexcloud-yc/release/yc_linux_amd64.tar.gz \
-        --output "$archive"
-      install -d -m 0700 "$unpack"
-      tar -xzf "$archive" -C "$unpack" --no-same-owner
-      install -m 0755 "$unpack/yc" /usr/local/bin/yc
-      rm -rf -- "$archive" "$unpack"
+      YC_VERSION=1.23.0
+      YC_SHA256=3e287905b63685847aa77f17f92bf7156037cc63b9a42c6cd901db69a61604c9
+      binary=/tmp/yc
+      curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+        "https://storage.yandexcloud.net/yandexcloud-yc/release/$YC_VERSION/linux/amd64/yc" \
+        --output "$binary"
+      printf '%s  %s\n' "$YC_SHA256" "$binary" | sha256sum --check --status
+      install -m 0755 "$binary" /usr/local/bin/yc
+      rm -f "$binary"
+      test "$(/usr/local/bin/yc version --semantic)" = "$YC_VERSION"
   - systemctl daemon-reload
   - systemctl enable markiro-runner.service
   - touch /var/lib/markiro/markiro-runner-bootstrap-complete
