@@ -19,11 +19,19 @@ independent approval is absent. Do not perform a live apply from CI.
 4. Confirm the exact IDs, domain ownership, KMS key, subnet ranges, bucket
    names, notification destination, and protected GitHub environments:
    `production`, `production-infrastructure`, and `production-public-dns`.
-5. Install only Terraform `1.15.8` at
-   `/private/tmp/markiro-terraform-1.15.8.HkkrjU`. Configure the reviewed
-   Yandex provider mirror in a protected Terraform CLI configuration file.
-   Keep the file mode `0600` and verify the provider lock for Linux amd64 and
-   Darwin arm64 before proceeding.
+5. Install only the vendor-verified Terraform `1.15.8` release through the
+   approved workstation package process. Verify the vendor signature and
+   checksum before installation, then expose the executable as stable
+   `terraform` on the protected workstation `PATH`; do not use a temporary
+   review directory. Configure the reviewed Yandex provider mirror in a
+   protected Terraform CLI configuration file. Keep the file mode `0600` and
+   verify the provider lock for Linux amd64 and Darwin arm64 before proceeding.
+
+```bash
+set -euo pipefail
+terraform version -json | jq -e '.terraform_version == "1.15.8"' >/dev/null
+node infra/yandex/scripts/check-toolchain.mjs
+```
 
 ## Apply the local bootstrap plan
 
@@ -41,11 +49,11 @@ independent approval is absent. Do not perform a live apply from CI.
 set -euo pipefail
 umask 077
 export TF_CLI_CONFIG_FILE=/protected/terraform/terraform.tfrc
-/private/tmp/markiro-terraform-1.15.8.HkkrjU -chdir=infra/yandex/bootstrap init -backend=false -lockfile=readonly
-/private/tmp/markiro-terraform-1.15.8.HkkrjU -chdir=infra/yandex/bootstrap fmt -check
-/private/tmp/markiro-terraform-1.15.8.HkkrjU -chdir=infra/yandex/bootstrap validate
-/private/tmp/markiro-terraform-1.15.8.HkkrjU -chdir=infra/yandex/bootstrap plan -out=bootstrap.tfplan
-/private/tmp/markiro-terraform-1.15.8.HkkrjU -chdir=infra/yandex/bootstrap apply bootstrap.tfplan
+terraform -chdir=infra/yandex/bootstrap init -backend=false -lockfile=readonly
+terraform -chdir=infra/yandex/bootstrap fmt -check
+terraform -chdir=infra/yandex/bootstrap validate
+terraform -chdir=infra/yandex/bootstrap plan -out=bootstrap.tfplan
+terraform -chdir=infra/yandex/bootstrap apply bootstrap.tfplan
 ```
 
 4. Record only the approved change ID and the protected review evidence ID.
@@ -82,7 +90,7 @@ set -euo pipefail
 umask 077
 test -n "${AWS_ACCESS_KEY_ID:-}"
 test -n "${AWS_SECRET_ACCESS_KEY:-}"
-/private/tmp/markiro-terraform-1.15.8.HkkrjU -chdir=infra/yandex/bootstrap init -migrate-state -backend-config=backend.hcl -lockfile=readonly
+terraform -chdir=infra/yandex/bootstrap init -migrate-state -backend-config=backend.hcl -lockfile=readonly
 unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
 ```
 

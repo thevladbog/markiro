@@ -28,10 +28,11 @@ system.
 
 <!-- runbook-contract:go-live-gate-04-alb-waf-arl -->
 
-4. **ALB, WAF, and rate limiting.** Verify ALB target health, the HTTPS
-   listener, Smart Web Security profile, and Advanced Rate Limiter profile use
-   the reviewed hostname, back-end health check, and conservative limits. Keep
-   the app VM private.
+4. **Ingress protection.** Verify Application Load Balancer (ALB) target
+   health and HTTPS listener, Smart Web Security (SWS) web application firewall
+   (WAF) profile, and Advanced Rate Limiter (ARL) profile use the reviewed
+   hostname, back-end health check, and conservative limits. Keep the app VM
+   private.
 
 <!-- runbook-contract:go-live-gate-05-alert-specs -->
 
@@ -98,16 +99,22 @@ system.
 
 <!-- runbook-contract:go-live-dns-convergence -->
 
-1. Run the existing convergence verifier from the approved checkout with the
-   exact domain, DNS zone, and expected ALB address. It must check both the
-   authoritative zone and public recursive resolution before normal SWS traffic
-   is opened.
+1. Run the existing convergence verifier from the approved checkout. It checks
+   both the authoritative zone and public recursive resolution before normal
+   Smart Web Security (SWS) traffic is opened. Enter only non-secret DNS values.
 
 ```bash
 set -euo pipefail
-export MARKIRO_APPROVED_DNS_A="$MARKIRO_ALB_ADDRESS"
-export MARKIRO_APPROVED_DNS_AAAA=none
+read -r -p 'Production domain: ' MARKIRO_DOMAIN
+read -r -p 'Authoritative DNS server: ' MARKIRO_AUTHORITATIVE_DNS_SERVER
+read -r -p 'Approved public DNS resolvers (comma-separated): ' MARKIRO_PUBLIC_DNS_RESOLVERS
+read -r -p 'Approved ALB IPv4 address: ' MARKIRO_APPROVED_DNS_A
+read -r -p 'Approved ALB IPv6 addresses, or none: ' MARKIRO_APPROVED_DNS_AAAA
+export MARKIRO_DOMAIN MARKIRO_AUTHORITATIVE_DNS_SERVER MARKIRO_PUBLIC_DNS_RESOLVERS
+export MARKIRO_APPROVED_DNS_A MARKIRO_APPROVED_DNS_AAAA
 node deploy/production/verify-dns.mjs
+unset MARKIRO_DOMAIN MARKIRO_AUTHORITATIVE_DNS_SERVER MARKIRO_PUBLIC_DNS_RESOLVERS
+unset MARKIRO_APPROVED_DNS_A MARKIRO_APPROVED_DNS_AAAA
 ```
 
 2. Run the authorized HTTPS smoke through the public hostname. Confirm the

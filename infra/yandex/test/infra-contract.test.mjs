@@ -1367,6 +1367,12 @@ function assertProtectedInfrastructureWorkflow(source) {
     default: "none",
     options: ["none", "cluster", "database"],
   });
+  assert.deepEqual(dispatchInputs.postgres_owner_boundary, {
+    description: "Protected evidence ID proving the cluster, owner, and Lockbox boundary",
+    required: true,
+    type: "string",
+    default: "none",
+  });
 
   const { apply, dns_approval: dnsApproval, plan, validate } = workflow.jobs;
   assert.deepEqual(validate.permissions, { contents: "read" });
@@ -1436,6 +1442,8 @@ function assertProtectedInfrastructureWorkflow(source) {
   assert.match(planCommands, /terraform -chdir=infra\/yandex\/production init/);
   assert.match(planCommands, /terraform -chdir=infra\/yandex\/production plan -json/);
   assert.match(planCommands, /POSTGRES_PROVISIONING_PHASE/);
+  assert.match(planCommands, /POSTGRES_OWNER_BOUNDARY/);
+  assert.match(planCommands, /\^change-\[A-Za-z0-9\]/);
   assert.match(planCommands, /module\.postgres\.yandex_mdb_postgresql_cluster\.production/);
   assert.match(planCommands, /module\.postgres\.yandex_mdb_postgresql_database\.application/);
   assert.match(planCommands, /postgres_provisioning_phase/);
@@ -1486,7 +1494,9 @@ function assertProtectedInfrastructureWorkflow(source) {
   assert.match(applyCommands, /terraform -chdir=infra\/yandex\/production apply/);
   assert.match(applyCommands, /saved\.tfplan/);
   assert.match(applyCommands, /POSTGRES_PROVISIONING_PHASE/);
+  assert.match(applyCommands, /POSTGRES_OWNER_BOUNDARY/);
   assert.match(applyCommands, /evidence_postgres_provisioning_phase/);
+  assert.match(applyCommands, /evidence_postgres_owner_boundary/);
 
   const allCommands = [validateCommands, planCommands, applyCommands].join("\n");
   assert.doesNotMatch(allCommands, /pull_request_target/);
@@ -1562,6 +1572,7 @@ test("infrastructure workflow contract rejects security-boundary mutations", asy
     ["stale commit", source.replace('[[ "$target_sha" == "$dispatch_sha" ]]\n', "")],
     ["unmasked HMAC", source.replace('echo "::add-mask::$aws_secret_access_key"\n', "")],
     ["DNS default true", source.replace("default: false", "default: true")],
+    ["database phase without recorded owner boundary", source.replace("^change-", "^unsafe-")],
     [
       "unbounded PostgreSQL target",
       source.replace("module.postgres.yandex_mdb_postgresql_cluster.production", "module.postgres"),

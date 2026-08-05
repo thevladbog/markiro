@@ -26,8 +26,16 @@ Local production apply is prohibited.
 
 <!-- runbook-contract:infrastructure-reviewed-plan -->
 
-1. Dispatch **Yandex infrastructure** from the current `main` commit with the
-   exact target SHA and `enable_public_dns=false`.
+1. For an ordinary full-root plan, dispatch **Yandex infrastructure** from the
+   current `main` commit with these exact inputs.
+
+```text
+target_sha=<CURRENT_MAIN_SHA>
+enable_public_dns=false
+postgres_provisioning_phase=none
+postgres_owner_boundary=none
+```
+
 2. Approve only the `production-infrastructure` environment after checking the
    sanitized plan summary, resource addresses, durable-resource protections,
    private ingress, and expected change scope.
@@ -47,16 +55,39 @@ Local production apply is prohibited.
 2. Approve the workflow's `production-infrastructure` apply job. It rechecks
    the checked-out SHA, current main ref, artifact hash, and backend credentials
    before applying the saved plan.
-3. For first PostgreSQL provisioning, apply only
-   `module.postgres.yandex_mdb_postgresql_cluster.production`. Create the owner
-   named exactly as `database_name` through the approved database administration
-   surface, write its credential directly to runtime Lockbox, then apply
-   `module.postgres.yandex_mdb_postgresql_database.application`. Terraform must
-   never receive the owner password.
-4. Create Monitoring alerts manually from `alert_specs`; provider `0.215.0`
+3. For first PostgreSQL provisioning, dispatch the protected workflow with the
+   following inputs. This creates only the cluster saved plan.
+
+```text
+target_sha=<CURRENT_MAIN_SHA>
+enable_public_dns=false
+postgres_provisioning_phase=cluster
+postgres_owner_boundary=none
+```
+
+4. Approve and apply that exact cluster plan. Create the owner named exactly as
+   `database_name` through the approved database administration surface. Write
+   its credential directly to runtime Lockbox. Record the cluster apply, owner
+   creation, and Lockbox write under one protected, non-secret change evidence
+   ID beginning `change-`. Terraform must never receive the owner password.
+5. Dispatch a new protected workflow for the same current main SHA with these
+   exact inputs. Replace the placeholder with the recorded protected change
+   evidence ID; the workflow rejects a missing or malformed boundary and binds
+   it to the saved-plan evidence.
+
+```text
+target_sha=<CURRENT_MAIN_SHA>
+enable_public_dns=false
+postgres_provisioning_phase=database
+postgres_owner_boundary=<PROTECTED_CHANGE_EVIDENCE_ID>
+```
+
+6. Approve and apply that exact database plan only after the protected record
+   confirms the cluster, owner, and Lockbox boundary.
+7. Create Monitoring alerts manually from `alert_specs`; provider `0.215.0`
    cannot mutate alerts. Enter the exact resulting IDs and notification channel
    ID in protected infrastructure variables, then run a new reviewed plan.
-5. Record only change, plan-summary, approval, and sanitized post-apply
+8. Record only change, plan-summary, approval, and sanitized post-apply
    evidence IDs in the protected operational system.
 
 ## Investigate drift and stop unsafe changes
