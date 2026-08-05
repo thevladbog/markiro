@@ -4,15 +4,16 @@
 
 **Goal:** Add accessible side-panel and confirmation primitives to `@markiro/ui`, then migrate Catalog create, edit, and delete interactions as the first route-backed reference implementation.
 
-**Architecture:** A private overlay layer in `@markiro/ui` owns the shared portal host, stack order, background inertness, document scroll locking, focus containment, and focus restoration. Catalog remains the mounted parent route while `/catalog/new` or `/catalog/:productId/edit` renders a guarded `ProductPanelRoute` through `<Outlet>`; the feature owns dirty-form confirmation and mutation state, while the form keeps its existing validation and payload mapper.
+**Architecture:** A private overlay layer in `@markiro/ui` owns the shared portal host, stack order, background inertness, document scroll locking, focus containment, focus restoration, and the DOM container used by nested Radix portals. Catalog remains the mounted parent route while `/catalog/new` or `/catalog/:productId/edit` renders a guarded `ProductPanelRoute` through `<Outlet>`; the feature owns dirty-form confirmation and mutation state, while the form keeps its existing validation and payload mapper.
 
-**Tech Stack:** React 19, React Router 8 declarative routing, TanStack Query 5, React Hook Form 7, Zod 4, react-i18next, Vitest 4, Testing Library, `@markiro/ui` CSS variables.
+**Tech Stack:** React 19, React Router 8 declarative routing, TanStack Query 5, React Hook Form 7, Zod 4, Radix Select/Popover, react-i18next, Vitest 4, Testing Library, `@markiro/ui` CSS variables.
 
 ## Global Constraints
 
 - Implement only shared overlay primitives and the Catalog reference migration from the approved specification; later page waves require separate plans.
 - Do not change backend endpoints, DTOs, audit behavior, tenant scoping, or query-cache identity boundaries.
 - Do not add dependencies or migrate the router, form library, query library, fonts, or icon library.
+- Preserve the merged custom-control contracts from PR #51: `Select` remains generic and controlled through `onValueChange`, `DatePicker` keeps its ISO-date contract, and both keep their current Radix keyboard/focus behavior.
 - Preserve the exact Catalog create/update payload null and omission semantics, GTIN validation, stale-response protection, integration unlink permissions, query invalidation, and success toasts.
 - `/catalog/new` and `/catalog/:productId/edit` require `operations.write`; an unauthorized direct URL renders the established forbidden page and must not mount create, update, delete, or unlink mutation hooks.
 - Keep the current `Modal` export for unmigrated consumers; do not add panel or confirmation modes to it.
@@ -20,20 +21,23 @@
 - At widths below 768 px, panels occupy the viewport with `100dvh`, no outer corner rounding, and safe-area padding; at 1024 px a panel must not exceed `64vw`.
 - Preserve RU/EN, light/dark, semantic status colors, keyboard operation, visible focus, and `prefers-reduced-motion` behavior.
 - A pending mutation blocks Escape, backdrop, close-button, Cancel, and navigation dismissal; failed mutations retain form input and render a persistent inline error.
+- An Escape consumed by an open Radix Select or DatePicker closes only that child overlay; it must not also close the containing SidePanel.
 - Write each focused failing test before its production change, run the narrowest test during iteration, and commit only the files listed in that task.
 
 ---
 
 ## File map and boundaries
 
-- Create `packages/ui/src/components/OverlayLayer.tsx`: private portal/stack/focus infrastructure. It exports only to sibling overlay components, never from the package barrel.
+- Create `packages/ui/src/components/OverlayLayer.tsx`: private portal/stack/focus infrastructure plus an internal Radix portal-container context. It exports only to sibling UI components, never from the package barrel.
 - Create `packages/ui/src/components/SidePanel.tsx`: public data-work surface and its close-reason contract.
 - Create `packages/ui/src/components/ConfirmDialog.tsx`: public concise decision surface; it composes the same private overlay layer.
 - Create `packages/ui/test/overlays.test.tsx`: behavioral contract for both public overlays, including nested layers.
 - Modify `packages/ui/src/components.css`: overlay, panel, dialog, responsive, safe-area, and reduced-motion classes.
-- Modify `packages/ui/src/tokens.css`: named legacy-modal, overlay, panel, dialog, and toast z-index tokens.
+- Modify `packages/ui/src/tokens.css`: named legacy-modal, panel, popover, dialog, and toast z-index tokens.
 - Modify `packages/ui/src/components/Modal.tsx` and `packages/ui/src/components/Toast.tsx`: replace hard-coded z-index numbers only; legacy behavior remains unchanged.
+- Modify `packages/ui/src/components/Select.tsx` and `packages/ui/src/components/DatePicker.tsx`: mount Radix portals into the active overlay layer when present and replace hard-coded `zIndex: 1000` with the shared popover token.
 - Modify `packages/ui/src/components/index.ts`: export the two public primitives and their public types.
+- Modify `packages/ui/test/components.test.tsx` and `packages/ui/test/date-picker.test.tsx`: retain the merged custom-control contract while asserting tokenized fallback portal levels.
 - Modify `apps/admin/src/app.tsx`: make Catalog a parent route with write-guarded `new` and `:productId/edit` children.
 - Create `apps/admin/src/pages/catalog/ProductPanelRoute.tsx`: resolve route data, own create/update mutations, close fallback, dirty guard, and load/error states.
 - Modify `apps/admin/src/pages/catalog/ProductForm.tsx`: render form content inside `SidePanel`, publish dirty state, group fields, and show persistent submission errors without changing `toCreateInput`.
@@ -57,7 +61,11 @@
 - Modify: `packages/ui/src/tokens.css`
 - Modify: `packages/ui/src/components/Modal.tsx`
 - Modify: `packages/ui/src/components/Toast.tsx`
+- Modify: `packages/ui/src/components/Select.tsx`
+- Modify: `packages/ui/src/components/DatePicker.tsx`
 - Modify: `packages/ui/src/components/index.ts`
+- Modify: `packages/ui/test/components.test.tsx`
+- Modify: `packages/ui/test/date-picker.test.tsx`
 
 **Interfaces:**
 
@@ -96,7 +104,15 @@
   }
   ```
 
-- `OverlayLayer` creates one `.mk-overlay-root` under `document.body`, creates one child layer per open overlay, and removes the root after the final layer closes. `SidePanel` emits the three pointer/keyboard reasons; route features feed `navigation` into the same feature-owned close state machine when their blocker activates.
+- Private sibling contract, exported from `OverlayLayer.tsx` but not from `components/index.ts`:
+
+  ```ts
+  export function useOverlayPortalContainer(): HTMLElement | undefined;
+  ```
+
+  `Select` passes the returned element to `RadixSelect.Portal container`; `DatePicker` passes it to `RadixPopover.Portal container`. Outside SidePanel/ConfirmDialog the hook returns `undefined`, preserving Radix's current `document.body` fallback.
+
+- `OverlayLayer` creates one `.mk-overlay-root` under `document.body`, creates one child layer per open overlay, provides that child layer as the nested Radix portal container, and removes the root after the final layer closes. A Select/DatePicker opened inside a panel therefore remains inside the panel's stacking and inert boundary. `SidePanel` emits the three pointer/keyboard reasons; route features feed `navigation` into the same feature-owned close state machine when their blocker activates.
 
 - [ ] **Step 1: Add failing portal, dismissal, and public-type tests**
 
@@ -186,7 +202,7 @@
 
   `ensureHost()` appends `.mk-overlay-root` to `document.body`. Register one child `.mk-overlay-layer` per open overlay and remove both the child and host when their counts reach zero. At this RED/GREEN boundary, implement only portal lifecycle and topmost Escape dispatch; Step 6 adds inertness, scroll locking, focus containment, and restoration under their own failing tests.
 
-  Install one document `keydown` listener while the stack is non-empty. For Escape, read the last record at event time; call only its `onEscape` when `busy === false`, prevent default, and stop propagation. Update the record's `busy` and callback without unregistering the layer.
+  Install one bubble-phase document `keydown` listener while the stack is non-empty. For Escape, first return when `event.defaultPrevented` is already true or when the event target is inside `[data-mk-nested-overlay]`; `Select` and `DatePicker` add that private attribute to their Radix Content nodes, guaranteeing that Escape closes only the child listbox/calendar. Otherwise read the last record at event time; call only its `onEscape` when `busy === false`, prevent default, and stop propagation. Update the record's `busy` and callback without unregistering the layer.
 
 - [ ] **Step 4: Implement SidePanel markup and exports**
 
@@ -214,14 +230,15 @@
           <h2 id={titleId}>{title}</h2>
           {description ? <p id={descriptionId}>{description}</p> : null}
         </div>
-        <button
+        <IconButton
           type="button"
+          size="compact"
+          variant="secondary"
           aria-label={closeLabel}
+          icon={<span aria-hidden="true">✕</span>}
           disabled={busy}
           onClick={() => onClose("close-button")}
-        >
-          <span aria-hidden="true">✕</span>
-        </button>
+        />
       </header>
       <div className="mk-side-panel__body">{children}</div>
       {footer || status ? (
@@ -234,7 +251,7 @@
   </div>
   ```
 
-  The close control is a real button, uses `closeLabel`, reports `close-button`, and is disabled while busy. The body is the only region with `overflow-y: auto`; header and footer remain fixed within the panel grid.
+  The close control reuses the merged `IconButton`, uses `closeLabel`, reports `close-button`, and is disabled while busy. The body is the only region with `overflow-y: auto`; header and footer remain fixed within the panel grid.
 
   Export `SidePanel`, `SidePanelProps`, `SidePanelSize`, and `OverlayDismissReason` from `components/index.ts`. Do not export `OverlayLayer`.
 
@@ -244,7 +261,7 @@
 
 - [ ] **Step 5: Add failing focus, inert, scroll-lock, busy, and size tests**
 
-  Extend `overlays.test.tsx` with exact assertions:
+  Extend `overlays.test.tsx` with exact assertions, importing the current `Select` and `DatePicker` exports alongside `SidePanel`:
 
   ```tsx
   it("focuses the first editable field, traps focus, and restores the exact trigger", async () => {
@@ -288,19 +305,46 @@
     render(<SidePanel open size={size} title="Panel" closeLabel="Close" onClose={() => {}} />);
     expect(screen.getByRole("dialog").classList.contains(`mk-side-panel--${size}`)).toBe(true);
   });
+
+  it("keeps Radix child portals in the panel and lets each child consume Escape first", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    render(
+      <SidePanel open title="Panel" closeLabel="Close" onClose={onClose}>
+        <Select label="Product" value="milk" options={[{ value: "milk", label: "Milk" }]} />
+        <DatePicker label="Planned date" value="2026-08-06" calendarLabel="Calendar" />
+      </SidePanel>,
+    );
+
+    await user.click(screen.getByRole("combobox", { name: "Product" }));
+    expect(screen.getByRole("listbox").closest(".mk-overlay-layer--panel")).not.toBeNull();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Planned date" }));
+    expect(
+      screen.getByRole("dialog", { name: "Calendar" }).closest(".mk-overlay-layer--panel"),
+    ).not.toBeNull();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Calendar" })).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+  });
   ```
 
   Run: `pnpm --filter @markiro/ui exec vitest run test/overlays.test.tsx`
 
   Expected: FAIL on initial focus, inertness, body overflow, busy dismissal, and/or size classes until Step 6 is implemented.
 
-- [ ] **Step 6: Complete focus/inert behavior and add panel CSS, motion, responsive behavior, and z-index tokens**
+- [ ] **Step 6: Complete focus/inert and Radix-portal behavior, then add panel CSS, motion, responsive behavior, and z-index tokens**
 
   On first layer registration, save `document.body.style.overflow`, set it to `hidden`, snapshot every other direct body child's `inert` value, and set those children inert. When a nested layer registers, set all earlier layer elements inert; when it unregisters, make only the new top layer interactive. When the final layer unregisters, restore the exact body overflow, restore and clear the inert snapshot, then remove the host.
 
   Capture `document.activeElement` immediately before registration. After unregistering and removing the layer, restore focus only when the captured element is an attached `HTMLElement`; this restores the originating row/action but does not focus detached direct-link content.
 
-  Within the top surface, trap Tab and Shift+Tab using this selector:
+  Create an internal React context whose value is the registered layer element. Wrap the layer's portaled children in its provider and implement `useOverlayPortalContainer()` as the sibling-only consumer. Update `Select` and `DatePicker` to pass that container to their Radix `Portal`; omit the `container` prop when the hook returns `undefined` so existing standalone and legacy-Modal behavior is unchanged. Add `data-mk-nested-overlay=""` to `RadixSelect.Content` and `RadixPopover.Content`; this is an internal Escape-routing marker, not a public selector contract.
+
+  Within the top layer, trap Tab and Shift+Tab using this selector. Query the registered layer element, not only the panel surface, so an owned Radix listbox/calendar is inside the same focus boundary:
 
   ```ts
   const FOCUSABLE_SELECTOR = [
@@ -320,14 +364,15 @@
   ```css
   --z-modal-legacy: 100;
   --z-overlay-panel: 400;
-  --z-overlay-dialog: 410;
+  --z-overlay-popover: 420;
+  --z-overlay-dialog: 440;
   --z-toast: 500;
   ```
 
   Add CSS with these exact layout constraints:
 
   ```css
-  .mk-overlay-root { position: relative; z-index: var(--z-overlay-panel); }
+  .mk-overlay-root { position: relative; }
   .mk-overlay-layer { position: fixed; inset: 0; }
   .mk-overlay-layer--panel { z-index: var(--z-overlay-panel); }
   .mk-overlay-layer--dialog { z-index: var(--z-overlay-dialog); }
@@ -341,22 +386,24 @@
   @media (prefers-reduced-motion: reduce) { .mk-side-panel { animation: none; } .mk-side-panel__scrim { animation-duration: 1ms; transition-duration: 1ms; } }
   ```
 
-  Complete the header/footer spacing, focus-visible close control, scrim fade keyframes, and X-only transform keyframes using existing tokens. Do not animate width, height, inset, or other layout properties.
+  The root must not create a stacking context: each fixed layer owns its global z-index, so a dialog layer at 440 remains above a panel-owned popover while a standalone popover at 420 remains above a legacy modal at 100. Complete the header/footer spacing, focus-visible close control, scrim fade keyframes, and X-only transform keyframes using existing tokens. Do not animate width, height, inset, or other layout properties.
 
-  Replace `Modal.tsx`'s `zIndex: 100` with `zIndex: "var(--z-modal-legacy)"` and `Toast.tsx`'s `zIndex: 200` with `zIndex: "var(--z-toast)"`; make no other legacy changes.
+  Replace `Modal.tsx`'s `zIndex: 100` with `zIndex: "var(--z-modal-legacy)"`, `Select.tsx` and `DatePicker.tsx`'s `zIndex: 1000` with `zIndex: "var(--z-overlay-popover)"`, and `Toast.tsx`'s `zIndex: 200` with `zIndex: "var(--z-toast)"`. Make no other legacy/custom-control behavior changes.
+
+  In the existing `components.test.tsx` Select suite and `date-picker.test.tsx`, open each control outside an overlay and assert its content has `style.zIndex === "var(--z-overlay-popover)"`. Their existing click, keyboard, disabled, error, value, and focus-restoration assertions must stay unchanged.
 
 - [ ] **Step 7: Run SidePanel tests and package type checks**
 
-  Run: `pnpm --filter @markiro/ui exec vitest run test/overlays.test.tsx test/feedback.test.tsx`
+  Run: `pnpm --filter @markiro/ui exec vitest run test/overlays.test.tsx test/feedback.test.tsx test/components.test.tsx test/date-picker.test.tsx`
 
   Run: `pnpm --filter @markiro/ui typecheck`
 
-  Expected: PASS; the existing `Modal` tests remain green and the new overlay host is absent after every test.
+  Expected: PASS; the existing `Modal`, Select, and DatePicker behavior remains green, child Escape never closes the panel, and the new overlay host is absent after every test.
 
 - [ ] **Step 8: Commit the SidePanel contract**
 
   ```bash
-  git add packages/ui/src/components/OverlayLayer.tsx packages/ui/src/components/SidePanel.tsx packages/ui/src/components.css packages/ui/src/tokens.css packages/ui/src/components/Modal.tsx packages/ui/src/components/Toast.tsx packages/ui/src/components/index.ts packages/ui/test/overlays.test.tsx
+  git add packages/ui/src/components/OverlayLayer.tsx packages/ui/src/components/SidePanel.tsx packages/ui/src/components/Select.tsx packages/ui/src/components/DatePicker.tsx packages/ui/src/components.css packages/ui/src/tokens.css packages/ui/src/components/Modal.tsx packages/ui/src/components/Toast.tsx packages/ui/src/components/index.ts packages/ui/test/overlays.test.tsx packages/ui/test/components.test.tsx packages/ui/test/date-picker.test.tsx
   git commit -m "feat(ui): add accessible side panel"
   ```
 
@@ -470,6 +517,8 @@
   expect(document.querySelector(".mk-overlay-layer--panel")?.inert).toBe(false);
   expect(screen.getByRole("dialog", { name: "Edit product" }).contains(document.activeElement)).toBe(true);
   ```
+
+  Add a second nested case whose panel contains a controlled `Select`. Open its listbox, rerender the harness with `confirmOpen={true}` without closing the Select, and assert the listbox remains inside `.mk-overlay-layer--panel`, that entire layer is inert, and `.mk-overlay-layer--dialog` is the only interactive layer. This proves the merged Radix portal cannot escape the lower overlay boundary or paint above the confirmation.
 
   Close the panel last and assert that body inertness, overflow, and trigger focus restore only after the stack is empty.
 
@@ -764,6 +813,8 @@
   - `defaults`: Counterparty and Label template.
 
   Use `<section aria-labelledby>` and `<h3>` for each translated heading. Keep the existing `product-form` ID, submit button labels, and field labels so current assistive queries and payload tests remain stable.
+
+  Keep both merged custom Select integrations unchanged: `defaultCounterpartyId` and `defaultLabelTemplateId` continue to use `onValueChange`, not the pre-PR `onChange` callback. Do not reintroduce `HTMLSelectElement`, `<option>`, `fireEvent.change` on a select, or native-select assertions; retain the current `userEvent` `combobox`/`option` helpers in `catalog.test.tsx`.
 
 - [ ] **Step 4: Implement route-owned create/update mutations and load states**
 
@@ -1089,8 +1140,8 @@
 
 The implementation handoff must list separately:
 
-1. Behavior changed: SidePanel/ConfirmDialog semantics, Catalog nested routes, dirty guard, deletion, and page alignment.
-2. Files or areas changed: `packages/ui` overlays and Catalog-only Admin files.
+1. Behavior changed: SidePanel/ConfirmDialog semantics, Radix child-overlay containment, Catalog nested routes, dirty guard, deletion, and page alignment.
+2. Files or areas changed: `packages/ui` overlays plus Select/DatePicker portal integration, and Catalog-only Admin files.
 3. Automated checks: every focused and package command with pass/fail/skip counts.
 4. Manual checks: exact themes, viewport sizes, keyboard paths, and direct URLs actually exercised.
 5. Checks not run: browser, assistive technology, mobile keyboard, or infrastructure limitations with reasons.
