@@ -97,6 +97,25 @@ test("journal sanitizer redacts malformed structured credentials before a UTF-8 
   assert.match(output, /\[REDACTED\]/);
 });
 
+test("journal sanitizer preserves benign structured-looking diagnostics", () => {
+  const output = sanitizeJournal(
+    [
+      { unit: "markiro-deploy.service", message: "[INFO] deployment failed" },
+      { unit: "markiro-deploy.service", message: 'retrying "database": unavailable' },
+      {
+        unit: "markiro-deploy.service",
+        message: 'api-1 | {"status":"degraded"} after retry',
+      },
+    ],
+    { maxBytes: 512, maxLineBytes: 160 },
+  );
+
+  assert.match(output, /\[INFO\] deployment failed/);
+  assert.match(output, /retrying "database": unavailable/);
+  assert.match(output, /api-1 \| \{"status":"degraded"\} after retry/);
+  assert.doesNotMatch(output, /\[REDACTED\]/);
+});
+
 test("durable spool stays size and age bounded across rename rotation and restart", async () => {
   assert.equal(typeof logSanitizer.writeBoundedSpool, "function");
   const root = await mkdtemp(path.join(tmpdir(), "markiro-log-spool-"));

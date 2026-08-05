@@ -63,21 +63,21 @@ function redactJson(message) {
   }
 }
 
-function looksJsonLike(message) {
-  const trimmed = message.trim();
-  return (
-    trimmed.startsWith("{") ||
-    trimmed.startsWith("[") ||
-    /[\[{]\s*["']/.test(message) ||
-    /["'](?:\\.|[^"'\\]){1,128}["']\s*:/.test(message)
-  );
+function hasSensitiveQuotedKey(message) {
+  for (const match of message.matchAll(
+    /"((?:\\.|[^"\\]){1,128})"\s*:|'((?:\\.|[^'\\]){1,128})'\s*:/g,
+  )) {
+    const key = match[1] ?? match[2];
+    if (key !== undefined && SENSITIVE_KEY.test(key)) return true;
+  }
+  return false;
 }
 
 function redact(message) {
   const singleLine = message.replace(/[\r\n]+/g, " ");
   const structured = redactJson(singleLine);
   if (structured !== undefined) return structured;
-  if (looksJsonLike(singleLine)) return "[REDACTED]";
+  if (hasSensitiveQuotedKey(singleLine)) return "[REDACTED]";
   return redactText(singleLine);
 }
 

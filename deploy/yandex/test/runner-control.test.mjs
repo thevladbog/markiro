@@ -131,9 +131,69 @@ test("metadata operations poll to bounded success and reject provider failure or
     );
 });
 
-function runnerDependenciesForOperation(initialOperation, getOperation) {
+function runnerDependenciesForHttpAdapter({
+  initialOperation,
+  polledOperations = [],
+  operationOptions = {},
+}) {
   const calls = [];
   let now = 0;
+  let pollIndex = 0;
+  const updateUrl = `https://compute.api.cloud.yandex.net/compute/v1/instances/${INSTANCE_ID}/updateMetadata`;
+  const instanceUrl = `https://compute.api.cloud.yandex.net/compute/v1/instances/${INSTANCE_ID}`;
+  const startUrl = `${instanceUrl}:start`;
+  const request = async (url, options = {}) => {
+    const method = options.method ?? "GET";
+    if (url === updateUrl) {
+      calls.push("metadata:POST");
+      assert.equal(method, "POST");
+      assert.equal(options.headers.Authorization, "Bearer test-yandex-token");
+      assert.equal(options.headers["Content-Type"], "application/json");
+      assert.deepEqual(JSON.parse(options.body), {
+        upsert: { "markiro-runner-jit": "one-use-encoded-config" },
+      });
+      return initialOperation;
+    }
+    if (url.startsWith("https://operation.api.cloud.yandex.net/operations/")) {
+      const operationId = decodeURIComponent(url.split("/").at(-1));
+      calls.push(`operation:GET:${operationId}`);
+      const response =
+        typeof polledOperations === "function"
+          ? polledOperations(operationId, pollIndex)
+          : polledOperations[pollIndex];
+      pollIndex += 1;
+      assert.notEqual(response, undefined, "unexpected operation poll");
+      return response;
+    }
+    if (url === instanceUrl) {
+      calls.push("status:GET");
+      assert.equal(method, "GET");
+      return { status: "STOPPED" };
+    }
+    if (url === startUrl) {
+      calls.push("start:POST");
+      assert.equal(method, "POST");
+      return {};
+    }
+    assert.fail(`unexpected Yandex request: ${method} ${url}`);
+  };
+
+  const yandex = runnerControl.createYandexClient({
+    token: "test-yandex-token",
+    request,
+    operation: {
+      timeoutMs: 10,
+      pollIntervalMs: 1,
+      clock: {
+        now: () => now,
+        async sleep(milliseconds) {
+          now += milliseconds;
+        },
+      },
+      ...operationOptions,
+    },
+  });
+
   return {
     calls,
     dependencies: {
@@ -152,151 +212,130 @@ function runnerDependenciesForOperation(initialOperation, getOperation) {
         },
         async deleteRunner() {},
       },
-      yandex: {
-        async updateMetadata() {
-          calls.push("metadata");
-          await runnerControl.waitForOperation(initialOperation, {
-            timeoutMs: 10,
-            pollIntervalMs: 1,
-            clock: {
-              now: () => now,
-              async sleep(milliseconds) {
-                now += milliseconds;
-              },
-            },
-            getOperation,
-          });
-        },
-        async getInstanceStatus() {
-          calls.push("status");
-          return "STOPPED";
-        },
-        async startInstance() {
-          calls.push("start");
-        },
-        async stopInstance() {},
-      },
+      yandex,
     },
   };
 }
 
-for (const [name, initialOperation, getOperation, expectedError] of [
+test("real Yandex HTTP adapter orders metadata POST, operation polls, status, inventory, and start", async () => {
+  assert.equal(typeof runnerControl.createYandexClient, "function");
+  const operationId = "operation-delayed";
+  const { calls, dependencies } = runnerDependenciesForHttpAdapter({
+    initialOperation: { id: operationId, done: false },
+    polledOperations: [
+      { id: operationId, done: false },
+      { id: operationId, done: true, response: { typeUrl: "type.googleapis.com/Instance" } },
+    ],
+  });
+
+  await runnerControl.prepareAndStartRunner(dependencies);
+  assert.deepEqual(calls, [
+    "metadata:POST",
+    `operation:GET:${operationId}`,
+    `operation:GET:${operationId}`,
+    "status:GET",
+    "list",
+    "start:POST",
+  ]);
+});
+
+test("real Yandex HTTP adapter keeps runner start blocked while operation polling is pending", async () => {
+  let releaseSleep;
+  let enteredSleep;
+  const sleepEntered = new Promise((resolve) => {
+    enteredSleep = resolve;
+  });
+  const operationId = "operation-barrier";
+  const { calls, dependencies } = runnerDependenciesForHttpAdapter({
+    initialOperation: { id: operationId, done: false },
+    polledOperations: [
+      { id: operationId, done: true, response: { typeUrl: "type.googleapis.com/Instance" } },
+    ],
+    operationOptions: {
+      clock: {
+        now: () => 0,
+        sleep() {
+          enteredSleep();
+          return new Promise((resolve) => {
+            releaseSleep = resolve;
+          });
+        },
+      },
+    },
+  });
+
+  const start = runnerControl.prepareAndStartRunner(dependencies);
+  await sleepEntered;
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(calls, ["metadata:POST"]);
+  assert.equal(calls.includes("start:POST"), false);
+
+  releaseSleep();
+  await start;
+  assert.deepEqual(calls, [
+    "metadata:POST",
+    `operation:GET:${operationId}`,
+    "status:GET",
+    "list",
+    "start:POST",
+  ]);
+});
+
+for (const [name, initialOperation, polledOperations, expectedError] of [
   [
     "completed operation without a result",
     { id: "operation-empty", done: true },
-    async () => assert.fail("completed operation must not poll"),
+    [],
     /invalid Yandex operation response/,
   ],
   [
     "premature success response",
     { id: "operation-premature", done: false, response: {} },
-    async () => assert.fail("invalid operation must not poll"),
+    [],
+    /invalid Yandex operation response/,
+  ],
+  [
+    "operation with both result fields",
+    { id: "operation-both", done: true, response: {}, error: { code: 7 } },
+    [],
+    /invalid Yandex operation response/,
+  ],
+  [
+    "malformed success response",
+    { id: "operation-malformed", done: true, response: null },
+    [],
     /invalid Yandex operation response/,
   ],
   [
     "provider error",
     { id: "operation-error", done: true, error: { code: 7, message: "sensitive" } },
-    async () => assert.fail("completed operation must not poll"),
+    [],
     /Yandex operation failed/,
   ],
   [
     "operation ID mismatch",
     { id: "operation-original", done: false },
-    async () => ({ id: "operation-different", done: true, response: {} }),
+    [{ id: "operation-different", done: true, response: {} }],
     /invalid Yandex operation response/,
+  ],
+  [
+    "operation timeout",
+    { id: "operation-timeout", done: false },
+    (id) => ({ id, done: false }),
+    /Yandex operation timed out/,
   ],
 ])
   test(`${name} prevents runner start`, async () => {
-    const { calls, dependencies } = runnerDependenciesForOperation(initialOperation, getOperation);
+    const { calls, dependencies } = runnerDependenciesForHttpAdapter({
+      initialOperation,
+      polledOperations,
+    });
 
     await assert.rejects(runnerControl.prepareAndStartRunner(dependencies), expectedError);
-    assert.equal(calls.includes("status"), false);
-    assert.equal(calls.includes("start"), false);
+    assert.equal(calls.includes("status:GET"), false);
+    assert.equal(calls.includes("list"), false);
+    assert.equal(calls.includes("start:POST"), false);
   });
-
-test("runner start follows only a delayed operation success response", async () => {
-  let polls = 0;
-  const { calls, dependencies } = runnerDependenciesForOperation(
-    { id: "operation-delayed", done: false },
-    async (id) => {
-      calls.push(`operation:${id}`);
-      polls += 1;
-      return polls === 1
-        ? { id, done: false }
-        : { id, done: true, response: { typeUrl: "type.googleapis.com/Instance" } };
-    },
-  );
-
-  await runnerControl.prepareAndStartRunner(dependencies);
-  assert.deepEqual(calls, [
-    "metadata",
-    "operation:operation-delayed",
-    "operation:operation-delayed",
-    "status",
-    "list",
-    "start",
-  ]);
-});
-
-test("metadata operation timeout prevents runner start", async () => {
-  assert.equal(typeof runnerControl.prepareAndStartRunner, "function");
-  let now = 0;
-  const calls = [];
-  const dependencies = {
-    deploymentId: DEPLOYMENT_ID,
-    instanceId: INSTANCE_ID,
-    github: {
-      async generateJitConfig(request) {
-        return {
-          runner: { name: request.name, labels: request.labels.map((name) => ({ name })) },
-          encoded_jit_config: "one-use-encoded-config",
-        };
-      },
-      async listRunners() {
-        calls.push("list");
-        return [];
-      },
-      async deleteRunner() {},
-    },
-    yandex: {
-      async updateMetadata() {
-        calls.push("metadata");
-        await runnerControl.waitForOperation(
-          { id: "operation-timeout", done: false },
-          {
-            timeoutMs: 200,
-            pollIntervalMs: 100,
-            clock: {
-              now: () => now,
-              async sleep(milliseconds) {
-                now += milliseconds;
-              },
-            },
-            async getOperation() {
-              calls.push("operation");
-              return { id: "operation-timeout", done: false };
-            },
-          },
-        );
-      },
-      async getInstanceStatus() {
-        calls.push("status");
-        return "STOPPED";
-      },
-      async startInstance() {
-        calls.push("start");
-      },
-      async stopInstance() {},
-    },
-  };
-
-  await assert.rejects(
-    runnerControl.prepareAndStartRunner(dependencies),
-    /Yandex operation timed out/,
-  );
-  assert.deepEqual(calls, ["metadata", "operation", "operation"]);
-  assert.equal(calls.includes("start"), false);
-});
 
 function sshField(value) {
   const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value, "utf8");

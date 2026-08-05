@@ -368,6 +368,62 @@ function bearer(token, additions = {}) {
   return { Authorization: `Bearer ${token}`, ...additions };
 }
 
+export function createYandexClient({ token, request = requestJson, operation = {} } = {}) {
+  if (
+    typeof token !== "string" ||
+    token.length === 0 ||
+    typeof request !== "function" ||
+    !operation ||
+    typeof operation !== "object" ||
+    Array.isArray(operation)
+  )
+    throw new Error("invalid Yandex client configuration");
+
+  const client = {
+    async getInstanceStatus(id) {
+      const instance = await request(
+        `https://compute.api.cloud.yandex.net/compute/v1/instances/${id}`,
+        { headers: bearer(token) },
+      );
+      return instance.status;
+    },
+    async startInstance(id) {
+      await request(`https://compute.api.cloud.yandex.net/compute/v1/instances/${id}:start`, {
+        method: "POST",
+        headers: bearer(token),
+      });
+    },
+    async stopInstance(id) {
+      const status = await client.getInstanceStatus(id);
+      if (status === "STOPPED" || status === "STOPPING") return;
+      await request(`https://compute.api.cloud.yandex.net/compute/v1/instances/${id}:stop`, {
+        method: "POST",
+        headers: bearer(token),
+      });
+    },
+    async updateMetadata(id, update) {
+      const pendingOperation = await request(
+        `https://compute.api.cloud.yandex.net/compute/v1/instances/${id}/updateMetadata`,
+        {
+          method: "POST",
+          headers: bearer(token, { "Content-Type": "application/json" }),
+          body: JSON.stringify(update),
+        },
+      );
+      await waitForOperation(pendingOperation, {
+        ...operation,
+        async getOperation(operationId) {
+          return request(
+            `https://operation.api.cloud.yandex.net/operations/${encodeURIComponent(operationId)}`,
+            { headers: bearer(token) },
+          );
+        },
+      });
+    },
+  };
+  return client;
+}
+
 async function cliClients() {
   const yandexToken = requiredEnvironment("YC_IAM_TOKEN");
   const githubToken = requiredEnvironment("GITHUB_RUNNER_ADMIN_TOKEN");
@@ -380,47 +436,7 @@ async function cliClients() {
   });
   return {
     instanceId,
-    yandex: {
-      async getInstanceStatus(id) {
-        const instance = await requestJson(
-          `https://compute.api.cloud.yandex.net/compute/v1/instances/${id}`,
-          { headers: bearer(yandexToken) },
-        );
-        return instance.status;
-      },
-      async startInstance(id) {
-        await requestJson(`https://compute.api.cloud.yandex.net/compute/v1/instances/${id}:start`, {
-          method: "POST",
-          headers: bearer(yandexToken),
-        });
-      },
-      async stopInstance(id) {
-        const status = await this.getInstanceStatus(id);
-        if (status === "STOPPED" || status === "STOPPING") return;
-        await requestJson(`https://compute.api.cloud.yandex.net/compute/v1/instances/${id}:stop`, {
-          method: "POST",
-          headers: bearer(yandexToken),
-        });
-      },
-      async updateMetadata(id, update) {
-        const operation = await requestJson(
-          `https://compute.api.cloud.yandex.net/compute/v1/instances/${id}/updateMetadata`,
-          {
-            method: "POST",
-            headers: bearer(yandexToken, { "Content-Type": "application/json" }),
-            body: JSON.stringify(update),
-          },
-        );
-        await waitForOperation(operation, {
-          async getOperation(operationId) {
-            return requestJson(
-              `https://operation.api.cloud.yandex.net/operations/${encodeURIComponent(operationId)}`,
-              { headers: bearer(yandexToken) },
-            );
-          },
-        });
-      },
-    },
+    yandex: createYandexClient({ token: yandexToken }),
     github: {
       async listRunners() {
         const result = await requestJson(`${githubBase}?per_page=100`, {
