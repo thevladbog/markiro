@@ -9,11 +9,10 @@ export interface RadioGroupOption {
   disabled?: boolean;
 }
 
-export interface RadioGroupProps {
+interface RadioGroupBaseProps {
   options: RadioGroupOption[];
   value?: string;
   onValueChange?: (value: string) => void;
-  label?: string;
   hint?: string;
   error?: string;
   disabled?: boolean;
@@ -21,8 +20,12 @@ export interface RadioGroupProps {
   id?: string;
   className?: string;
   style?: CSSProperties;
-  "aria-label"?: string;
 }
+
+type RadioGroupAccessibleName =
+  { label: string; "aria-label"?: string } | { label?: undefined; "aria-label": string };
+
+export type RadioGroupProps = RadioGroupBaseProps & RadioGroupAccessibleName;
 
 export function RadioGroup({
   options,

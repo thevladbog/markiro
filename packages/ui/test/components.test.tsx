@@ -16,6 +16,13 @@ import {
   Table,
 } from "../src/components/index.js";
 
+void (
+  (
+    // @ts-expect-error RadioGroup requires a visible label or an aria-label.
+    <RadioGroup options={[{ value: "production", label: "Производство" }]} />
+  )
+);
+
 afterEach(() => {
   cleanup();
 });
@@ -259,6 +266,17 @@ describe("Checkbox", () => {
 });
 
 describe("RadioGroup", () => {
+  it("uses aria-label when no visible group label is supplied", () => {
+    render(
+      <RadioGroup
+        aria-label="Режим смены"
+        options={[{ value: "production", label: "Производство" }]}
+      />,
+    );
+
+    expect(screen.getByRole("radiogroup", { name: "Режим смены" })).toBeDefined();
+  });
+
   it("moves the selected choice with ArrowDown", async () => {
     const user = userEvent.setup();
     const onValueChange = vi.fn();
@@ -325,6 +343,18 @@ describe("IconButton", () => {
     const button = screen.getByRole("button", { name: "Открыть уведомления" });
     expect(button.textContent).toBe("");
     expect(button.querySelector("svg")).not.toBeNull();
+  });
+
+  it("shows a tokenised focus-visible state after keyboard focus", async () => {
+    const user = userEvent.setup();
+    render(<IconButton aria-label="Открыть уведомления" icon={<svg aria-hidden="true" />} />);
+
+    await user.tab();
+
+    const button = screen.getByRole("button", { name: "Открыть уведомления" });
+    expect(document.activeElement).toBe(button);
+    expect(button.getAttribute("data-focus-visible")).toBe("true");
+    expect(button.style.outline).toBe("2px solid var(--focus-ring)");
   });
 });
 
