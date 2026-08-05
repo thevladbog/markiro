@@ -1,0 +1,16 @@
+[Unit]
+Description=Markiro sanitized custom metric producer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+EnvironmentFile=/etc/markiro/monitoring.conf
+ExecStart=/usr/bin/node /usr/local/lib/markiro/monitoring-producer.mjs app
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict

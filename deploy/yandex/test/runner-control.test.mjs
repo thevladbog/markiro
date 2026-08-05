@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  createJitRegistration,
   deploymentRunnerLabel,
   parseSerialHostKeys,
   selectCleanupRunners,
@@ -12,6 +13,68 @@ import {
 
 const DEPLOYMENT_ID = "deploy-123456789";
 const INSTANCE_ID = "fv4runner123";
+
+test("controller generates one-use JIT config and delivers only it through instance metadata", async () => {
+  const calls = [];
+  const result = await createJitRegistration({
+    deploymentId: DEPLOYMENT_ID,
+    instanceId: INSTANCE_ID,
+    github: {
+      async generateJitConfig(request) {
+        calls.push(["github", request]);
+        return {
+          runner: { name: request.name, labels: request.labels.map((name) => ({ name })) },
+          encoded_jit_config: "one-use-encoded-config",
+        };
+      },
+    },
+    yandex: {
+      async updateMetadata(id, update) {
+        calls.push(["metadata", id, update]);
+      },
+    },
+  });
+
+  assert.deepEqual(result, {
+    deploymentId: DEPLOYMENT_ID,
+    label: deploymentRunnerLabel(DEPLOYMENT_ID),
+  });
+  assert.deepEqual(calls, [
+    [
+      "github",
+      {
+        name: `markiro-${DEPLOYMENT_ID}`,
+        runner_group_id: 1,
+        labels: ["self-hosted", "linux", deploymentRunnerLabel(DEPLOYMENT_ID)],
+        work_folder: "_work",
+      },
+    ],
+    ["metadata", INSTANCE_ID, { upsert: { "markiro-runner-jit": "one-use-encoded-config" } }],
+  ]);
+  assert.doesNotMatch(JSON.stringify(calls), /admin.token|GITHUB_RUNNER_ADMIN_TOKEN/i);
+});
+
+test("controller rejects mismatched JIT responses and never writes metadata", async () => {
+  let writes = 0;
+  await assert.rejects(
+    createJitRegistration({
+      deploymentId: DEPLOYMENT_ID,
+      instanceId: INSTANCE_ID,
+      github: {
+        async generateJitConfig() {
+          return { runner: { name: "wrong", labels: [] }, encoded_jit_config: "config" };
+        },
+      },
+      yandex: {
+        async updateMetadata() {
+          writes += 1;
+        },
+      },
+    }),
+    /invalid JIT registration response/,
+  );
+  assert.equal(writes, 0);
+});
 
 function sshField(value) {
   const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value, "utf8");

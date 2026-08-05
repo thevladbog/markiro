@@ -455,7 +455,7 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, productionResources
   assert.match(stateBucket, /versioning\s*\{[\s\S]*?enabled\s*=\s*true/);
   assert.match(stateBucket, /lifecycle\s*\{[\s\S]*?prevent_destroy\s*=\s*true/);
 
-  const secretNames = ["runtime", "state_backend", "runner_registration"];
+  const secretNames = ["runtime", "registry", "state_backend", "runner_registration"];
   const lockboxSecrets = [...bootstrap.matchAll(/resource\s+"yandex_lockbox_secret"\s+"([^"]+)"/g)]
     .map((match) => match[1])
     .sort();
@@ -613,6 +613,7 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, productionResources
     "workload_identity_federation_id",
     "state_bucket_name",
     "runtime_secret_id",
+    "registry_secret_id",
     "state_backend_secret_id",
     "runner_registration_secret_id",
     "audit_log_group_id",
@@ -851,7 +852,16 @@ function assertPrivateNetworkAndCompute({
   );
   assert.match(
     runnerCloudInit,
-    /path:\s*\/usr\/local\/lib\/markiro\/runner-jit[\s\S]*?permissions:\s*"0755"[\s\S]*?generate-jitconfig/,
+    /path:\s*\/usr\/local\/lib\/markiro\/runner-jit[\s\S]*?permissions:\s*"0755"[\s\S]*?markiro-runner-jit[\s\S]*?updateMetadata/,
+  );
+  assert.doesNotMatch(
+    runnerCloudInit,
+    /generate-jitconfig|runner_registration_secret_id|GITHUB_RUNNER_ADMIN_TOKEN|payload\.lockbox/,
+  );
+  assert.match(compute, /service_account_id\s*=\s*var\.runner_vm_service_account_id/);
+  assert.match(
+    compute,
+    /members\s*=\s*\[[\s\S]*?var\.runner_service_account_id[\s\S]*?var\.runner_vm_service_account_id/,
   );
   assert.match(runnerCloudInit, /\/etc\/systemd\/system\/markiro-runner\.service/);
   assert.match(runnerCloudInit, /systemctl\s+enable\s+markiro-runner\.service/);
@@ -2075,6 +2085,11 @@ test("deployment runner uses exact production federation, VM-scoped operator, an
   assert.match(operator, /instance_id\s*=\s*yandex_compute_instance\.runner\.id/);
   assert.match(operator, /role\s*=\s*"compute\.operator"/);
   assert.match(operator, /serviceAccount:\$\{var\.deployment_controller_service_account_id\}/);
+  assert.match(operator, /serviceAccount:\$\{var\.runner_service_account_id\}/);
+  assert.match(
+    terraformResourceBlock(compute, "yandex_compute_instance", "runner"),
+    /service_account_id\s*=\s*var\.runner_service_account_id/,
+  );
   assert.doesNotMatch(
     compute,
     /yandex_resourcemanager_folder_iam_(?:member|binding)[\s\S]*role\s*=\s*"compute\.(?:operator|editor|admin)"/,
@@ -2086,7 +2101,14 @@ test("deployment runner uses exact production federation, VM-scoped operator, an
   );
   assert.match(appLogin, /instance_id\s*=\s*yandex_compute_instance\.app\.id/);
   assert.match(appLogin, /role\s*=\s*"compute\.osAdminLogin"/);
-  assert.doesNotMatch(compute, /yandex_resourcemanager_folder_iam_member\s+"runner_alb_viewer"/);
+  assert.match(appLogin, /serviceAccount:\$\{var\.runner_service_account_id\}/);
+  const albViewer = terraformResourceBlock(
+    compute,
+    "yandex_resourcemanager_folder_iam_member",
+    "runner_alb_viewer",
+  );
+  assert.match(albViewer, /role\s*=\s*"alb\.viewer"/);
+  assert.match(albViewer, /serviceAccount:\$\{var\.runner_service_account_id\}/);
 
   assert.match(cloudInit, /RUNNER_VERSION=2\.336\.0/);
   assert.match(
@@ -2096,6 +2118,15 @@ test("deployment runner uses exact production federation, VM-scoped operator, an
   assert.match(cloudInit, /sha256sum --check --status/);
   assert.match(cloudInit, /markiro-runner\.service/);
   assert.doesNotMatch(cloudInit, /GITHUB_RUNNER_ADMIN_TOKEN\s*[:=]\s*[^$\s]/);
+  assert.doesNotMatch(
+    cloudInit,
+    /generate-jitconfig|payload\.lockbox|runner_registration_secret_id/,
+  );
+  assert.match(cloudInit, /attributes\/markiro-runner-jit/);
+  assert.match(cloudInit, /updateMetadata/);
+  assert.match(runnerControl, /generate-jitconfig/);
+  assert.match(runnerControl, /"markiro-runner-jit"/);
+  assert.match(runnerControl, /delete:\s*\["markiro-runner-jit"\]/);
   assert.match(appCloudInit, /MARKIRO_SSH_HOST_KEY_V1.*\/dev\/ttyS0/);
   assert.match(appCloudInit, /ssh_host_(?:ed25519|rsa)_key\.pub/);
   assert.doesNotMatch(appCloudInit, /ssh_host_(?:ed25519|rsa)_key(?!\.pub)/);
@@ -2151,6 +2182,85 @@ test("runner delivery bootstrap rejects mutable yc and unauthenticated SSH host-
     ],
   ])
     assert.throws(() => assertContract({ runnerSource, appSource, remoteSource }), undefined, name);
+});
+
+test("runtime foundation pins containers and telemetry and isolates deploy-only registry credentials", async () => {
+  const [
+    installer,
+    appCloudInit,
+    runnerCloudInit,
+    compute,
+    observability,
+    remoteDeploy,
+    registryAuth,
+    agentConfig,
+  ] = await Promise.all([
+    readRepositoryFile("deploy/yandex/install-container-runtime.sh"),
+    readRepositoryFile("infra/yandex/modules/compute/cloud-init-app.yaml.tftpl"),
+    readRepositoryFile("infra/yandex/modules/compute/cloud-init-runner.yaml.tftpl"),
+    readRepositoryFile("infra/yandex/modules/compute/main.tf"),
+    readRepositoryFile("infra/yandex/modules/observability/main.tf"),
+    readRepositoryFile("deploy/yandex/remote-deploy.mjs"),
+    readRepositoryFile("deploy/yandex/registry-auth.mjs"),
+    readRepositoryFile("deploy/yandex/unified-agent-logs.yaml.tftpl"),
+  ]);
+
+  assert.match(installer, /DOCKER_VERSION=28\.5\.2/);
+  assert.match(
+    installer,
+    /DOCKER_SHA256=ea90cfd12e1eeb12aa1c971741adb8bd4ed88e2a574eaac13f5029a1dbc6300d/,
+  );
+  assert.match(installer, /COMPOSE_VERSION=2\.40\.3/);
+  assert.match(
+    installer,
+    /COMPOSE_SHA256=dba9d98e1ba5bfe11d88c99b9bd32fc4a0624a30fafe68eea34d61a3e42fd372/,
+  );
+  assert.match(installer, /sha256sum --check --status/g);
+  for (const cloudInit of [appCloudInit, runnerCloudInit]) {
+    assert.doesNotMatch(cloudInit, /docker\.io/);
+    assert.match(cloudInit, /install-container-runtime/);
+    assert.match(cloudInit, /UA_VERSION=26\.07\.11/);
+    assert.match(
+      cloudInit,
+      /UA_SHA256=30e216b61b44eecb443942b986e44c0d83c0548a1bc6dbebb134067d678e2dc7/,
+    );
+    assert.match(cloudInit, /unified-agent\.service/);
+  }
+  assert.match(appCloudInit, /container-runtime\.mjs/);
+  assert.match(appCloudInit, /markiro-app-bootstrap-complete/);
+  assert.match(compute, /production_compose_b64\s*=\s*base64encode\(file/);
+
+  for (const category of [
+    "alb_healthy_backend",
+    "postgres_backup_age",
+    "readiness_optional_dependency_degradation",
+  ]) {
+    const spec = terraformObjectEntry(observability, category);
+    assert.match(spec, /missing_data_behavior\s*=\s*"ALARM"/);
+    assert.match(spec, /producer\s*=\s*"[^"]+"/);
+  }
+  assert.match(
+    terraformObjectEntry(observability, "deployment_failure"),
+    /missing_data_behavior\s*=\s*"OK"[\s\S]*?producer\s*=\s*"runner:remote-deploy\.mjs"/,
+  );
+  assert.match(
+    terraformObjectEntry(observability, "runner_overrun"),
+    /missing_data_behavior\s*=\s*"OK"/,
+  );
+  assert.match(agentConfig, /plugin:\s*file_input/);
+  assert.match(agentConfig, /plugin:\s*linux_metrics/);
+  assert.match(agentConfig, /plugin:\s*yc_metrics/);
+  assert.match(agentConfig, /plugin:\s*yc_logs/);
+  assert.match(agentConfig, /markiro\/observability\.log/);
+
+  assert.match(remoteDeploy, /registry-auth\.mjs run-stdin/);
+  assert.match(remoteDeploy, /YC_REGISTRY_SECRET_ID/);
+  assert.match(remoteDeploy, /payload\.lockbox\.api\.cloud\.yandex\.net/);
+  assert.match(registryAuth, /--password-stdin/);
+  assert.match(registryAuth, /DOCKER_CONFIG/);
+  assert.match(registryAuth, /docker", \["logout", "ghcr\.io"\]/);
+  assert.doesNotMatch(appCloudInit, /GHCR_(?:USERNAME|TOKEN)\s*=/);
+  assert.doesNotMatch(appCloudInit, /registry-secret-id|YC_REGISTRY_SECRET_ID/);
 });
 
 test("production managed PostgreSQL and object storage protect durable data", async () => {
@@ -2639,17 +2749,20 @@ test("production private-compute contract rejects public NAT, CIDR SSH, public a
 });
 
 function assertRuntimeNodeProvisioning(cloudInit) {
-  assert.match(cloudInit, /NODE_VERSION=24\.11\.1/);
+  const nodeBlock = cloudInit.match(
+    /NODE_VERSION=24\.11\.1[\s\S]*?(?=\n  - \|\n      set -eu\n      UA_VERSION)/,
+  )?.[0];
+  assert.ok(nodeBlock, "Node provisioning block is required");
   assert.match(
-    cloudInit,
+    nodeBlock,
     /NODE_SHA256=60e3b0a8500819514aca603487c254298cd776de0698d3cd08f11dba5b8289a8/,
   );
-  assert.match(cloudInit, /NODE_ARCH=x64/);
-  assert.match(cloudInit, /test "\$\(uname -m\)" = "x86_64"/);
-  assert.match(cloudInit, /test "\$\(dpkg --print-architecture\)" = "amd64"/);
-  assert.match(cloudInit, /sha256sum --check --status/);
-  assert.match(cloudInit, /test "\$\(\/usr\/bin\/node --version\)" = "v\$\$\{NODE_VERSION\}"/);
-  assert.doesNotMatch(cloudInit, /curl[^\n]*\|/);
+  assert.match(nodeBlock, /NODE_ARCH=x64/);
+  assert.match(nodeBlock, /test "\$\(uname -m\)" = "x86_64"/);
+  assert.match(nodeBlock, /test "\$\(dpkg --print-architecture\)" = "amd64"/);
+  assert.match(nodeBlock, /sha256sum --check --status/);
+  assert.match(nodeBlock, /test "\$\(\/usr\/bin\/node --version\)" = "v\$\$\{NODE_VERSION\}"/);
+  assert.doesNotMatch(nodeBlock, /curl[^\n]*\|/);
 }
 
 test("runtime secret materialization installs coherent assets, verified Node, and reactivating service dependencies", async () => {

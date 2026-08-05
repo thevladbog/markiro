@@ -36,6 +36,16 @@ resource "yandex_lockbox_secret" "runtime" {
   }
 }
 
+resource "yandex_lockbox_secret" "registry" {
+  name      = "markiro-production-registry"
+  folder_id = var.folder_id
+  labels    = local.labels
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
 resource "yandex_lockbox_secret" "state_backend" {
   name      = "markiro-production-state-backend"
   folder_id = var.folder_id

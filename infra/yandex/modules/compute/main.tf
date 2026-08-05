@@ -46,16 +46,30 @@ resource "yandex_compute_instance" "app" {
     enable-oslogin     = true
     serial-port-enable = false
     user-data = templatefile("${path.module}/cloud-init-app.yaml.tftpl", {
-      runtime_secret_id             = var.runtime_secret_id
-      runtime_env_script_b64        = base64encode(file("${path.module}/../../../../deploy/yandex/runtime-env.mjs"))
-      readiness_observer_script_b64 = base64encode(file("${path.module}/../../../../deploy/yandex/readiness-observer.mjs"))
-      cli_main_script_b64           = base64encode(file("${path.module}/../../../../deploy/yandex/cli-main.mjs"))
-      environment_inventory_b64     = base64encode(file("${path.module}/../../../../.env.production.example"))
-      runtime_env_unit_b64          = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-runtime-env.service"))
-      readiness_observer_unit_b64   = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-readiness-observer.service"))
-      readiness_observer_timer_b64  = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-readiness-observer.timer"))
-      compose_runtime_dropin_b64    = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-compose.service.d/runtime-env.conf"))
-      deploy_runtime_dropin_b64     = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-deploy.service.d/runtime-env.conf"))
+      folder_id                      = var.folder_id
+      runtime_secret_id              = var.runtime_secret_id
+      runtime_env_script_b64         = base64encode(file("${path.module}/../../../../deploy/yandex/runtime-env.mjs"))
+      readiness_observer_script_b64  = base64encode(file("${path.module}/../../../../deploy/yandex/readiness-observer.mjs"))
+      monitoring_producer_script_b64 = base64encode(file("${path.module}/../../../../deploy/yandex/monitoring-producer.mjs"))
+      log_sanitizer_script_b64       = base64encode(file("${path.module}/../../../../deploy/yandex/log-sanitizer.mjs"))
+      registry_auth_script_b64       = base64encode(file("${path.module}/../../../../deploy/yandex/registry-auth.mjs"))
+      container_runtime_script_b64   = base64encode(file("${path.module}/../../../../deploy/yandex/container-runtime.mjs"))
+      container_installer_b64        = base64encode(file("${path.module}/../../../../deploy/yandex/install-container-runtime.sh"))
+      cli_main_script_b64            = base64encode(file("${path.module}/../../../../deploy/yandex/cli-main.mjs"))
+      environment_inventory_b64      = base64encode(file("${path.module}/../../../../.env.production.example"))
+      compose_contract_env_b64       = base64encode(file("${path.module}/../../../../deploy/yandex/compose-contract.env"))
+      production_compose_b64         = base64encode(file("${path.module}/../../../../compose.production.yml"))
+      docker_unit_b64                = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/docker.service"))
+      monitoring_unit_b64            = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-monitoring-producer.service"))
+      monitoring_timer_b64           = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-monitoring-producer.timer"))
+      log_sanitizer_unit_b64         = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-log-sanitizer.service"))
+      log_sanitizer_timer_b64        = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-log-sanitizer.timer"))
+      unified_agent_logs_b64         = base64encode(templatefile("${path.module}/../../../../deploy/yandex/unified-agent-logs.yaml.tftpl", { folder_id = var.folder_id }))
+      runtime_env_unit_b64           = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-runtime-env.service"))
+      readiness_observer_unit_b64    = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-readiness-observer.service"))
+      readiness_observer_timer_b64   = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-readiness-observer.timer"))
+      compose_runtime_dropin_b64     = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-compose.service.d/runtime-env.conf"))
+      deploy_runtime_dropin_b64      = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-deploy.service.d/runtime-env.conf"))
     })
   }
 }
@@ -95,8 +109,18 @@ resource "yandex_compute_instance" "runner" {
     enable-oslogin     = true
     serial-port-enable = false
     user-data = templatefile("${path.module}/cloud-init-runner.yaml.tftpl", {
-      runner_registration_secret_id = var.runner_registration_secret_id
-      runner_unit_b64               = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-runner.service"))
+      runner_unit_b64             = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-runner.service"))
+      monitoring_producer_b64     = base64encode(file("${path.module}/../../../../deploy/yandex/monitoring-producer.mjs"))
+      log_sanitizer_script_b64    = base64encode(file("${path.module}/../../../../deploy/yandex/log-sanitizer.mjs"))
+      runner_monitoring_unit_b64  = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-runner-monitoring.service"))
+      runner_monitoring_timer_b64 = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-runner-monitoring.timer"))
+      log_sanitizer_unit_b64      = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-log-sanitizer.service"))
+      log_sanitizer_timer_b64     = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/markiro-log-sanitizer.timer"))
+      unified_agent_logs_b64      = base64encode(templatefile("${path.module}/../../../../deploy/yandex/unified-agent-logs.yaml.tftpl", { folder_id = var.folder_id }))
+      cli_main_script_b64         = base64encode(file("${path.module}/../../../../deploy/yandex/cli-main.mjs"))
+      container_installer_b64     = base64encode(file("${path.module}/../../../../deploy/yandex/install-container-runtime.sh"))
+      docker_unit_b64             = base64encode(file("${path.module}/../../../../deploy/yandex/systemd/docker.service"))
+      folder_id                   = var.folder_id
     })
   }
 }
@@ -104,7 +128,10 @@ resource "yandex_compute_instance" "runner" {
 resource "yandex_compute_instance_iam_binding" "runner_operator" {
   instance_id = yandex_compute_instance.runner.id
   role        = "compute.operator"
-  members     = ["serviceAccount:${var.deployment_controller_service_account_id}"]
+  members = [
+    "serviceAccount:${var.deployment_controller_service_account_id}",
+    "serviceAccount:${var.runner_service_account_id}",
+  ]
 }
 
 resource "yandex_compute_instance_iam_binding" "deployment_controller_app_viewer" {
@@ -117,6 +144,15 @@ resource "yandex_compute_instance_iam_binding" "runner_app_os_login" {
   instance_id = yandex_compute_instance.app.id
   role        = "compute.osAdminLogin"
   members     = ["serviceAccount:${var.runner_service_account_id}"]
+}
+
+# Application Load Balancer does not expose a load-balancer-level IAM binding in
+# yandex-cloud/yandex 0.215.0. Folder scope is therefore the narrowest
+# provider-supported scope for the read-only target-state permission.
+resource "yandex_resourcemanager_folder_iam_member" "runner_alb_viewer" {
+  folder_id = var.folder_id
+  role      = "alb.viewer"
+  member    = "serviceAccount:${var.runner_service_account_id}"
 }
 
 resource "yandex_alb_target_group" "app" {

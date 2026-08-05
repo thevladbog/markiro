@@ -92,6 +92,20 @@ variable "runtime_secret_id" {
   }
 }
 
+variable "registry_secret_id" {
+  description = "Bootstrap-created deploy-only GHCR Lockbox secret ID; payload remains out of Terraform."
+  type        = string
+  nullable    = false
+
+  validation {
+    condition = length(trimspace(var.registry_secret_id)) > 0 && var.registry_secret_id != var.runtime_secret_id && contains(
+      var.lockbox_secret_ids,
+      var.registry_secret_id,
+    )
+    error_message = "registry_secret_id must be a distinct nonblank audited Lockbox secret ID."
+  }
+}
+
 variable "runner_service_account_id" {
   description = "Bootstrap-created runtime service account for the runner VM."
   type        = string

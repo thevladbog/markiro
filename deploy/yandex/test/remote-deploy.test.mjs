@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { deployRelease, runRemoteDeployment } from "../remote-deploy.mjs";
+import {
+  deployRelease,
+  runRemoteDeployment,
+  runRemoteDeploymentWithReporting,
+} from "../remote-deploy.mjs";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const RUN_ID = "987654321";
@@ -130,6 +134,36 @@ test("rollback cleanup failure is surfaced alongside the primary deployment fail
   assert.equal(error.cause.message, "ALB healthy failed");
 });
 
+test("deployment wrapper emits the exact success or failure metric without masking the primary error", async () => {
+  for (const failure of [undefined, new Error("deploy failed")]) {
+    const writes = [];
+    const environment = { MARKIRO_FOLDER_ID: "folder-1", YC_APP_INSTANCE_ID: "app-1" };
+    const reporting = {
+      runDeployment: async () => {
+        if (failure) throw failure;
+        return "healthy";
+      },
+      metadataIamToken: async () => "iam-token",
+      writeMetrics: async (request) => writes.push(request),
+    };
+    if (failure)
+      await assert.rejects(
+        runRemoteDeploymentWithReporting(environment, {}, reporting),
+        /deploy failed/,
+      );
+    else
+      assert.equal(await runRemoteDeploymentWithReporting(environment, {}, reporting), "healthy");
+    assert.deepEqual(writes[0].metrics, [
+      {
+        name: "markiro.deployment.failure",
+        labels: { resource_id: "app-1" },
+        type: "DGAUGE",
+        value: failure ? 1 : 0,
+      },
+    ]);
+  }
+});
+
 function response(body, ok = true) {
   return {
     ok,
@@ -147,6 +181,7 @@ function cliFixture({ candidate = CANDIDATE, failAt } = {}) {
     EXPECTED_RELEASE_RUN_ID: RUN_ID,
     EXPECTED_RELEASE_SHA: COMMIT,
     YC_APP_INSTANCE_ID: "fv4app123",
+    YC_REGISTRY_SECRET_ID: "e6qregistry123",
     YC_OS_LOGIN: "deployer",
     YC_ORGANIZATION_ID: "bpforganization",
     YC_LOAD_BALANCER_ID: "ds7loadbalancer",
@@ -163,6 +198,13 @@ function cliFixture({ candidate = CANDIDATE, failAt } = {}) {
       return "runner-iam-token";
     },
     async fetch(url) {
+      if (String(url).includes("payload.lockbox"))
+        return response({
+          entries: [
+            { key: "GHCR_USERNAME", textValue: "deployer" },
+            { key: "GHCR_TOKEN", textValue: "registry-token" },
+          ],
+        });
       if (String(url).includes("/targetStates/")) {
         events.push("ALB healthy");
         if (failAt === "ALB healthy") return response({ targetStates: [] });
@@ -207,17 +249,18 @@ function cliFixture({ candidate = CANDIDATE, failAt } = {}) {
       }
       if (args.includes("prepare")) {
         events.push("remote prepare");
+        assert.ok(args.some((value) => value.includes("registry-auth.mjs run-stdin")));
         return `${JSON.stringify(candidate)}\n`;
       }
       if (args.includes("finalize")) {
         events.push("remote finalize");
-        assert.deepEqual(JSON.parse(options.input), candidate);
+        assert.deepEqual(JSON.parse(JSON.parse(options.input).commandInput), candidate);
         if (failAt === "remote finalize") throw new Error("remote finalize failed");
         return `${JSON.stringify({ ...candidate, state: "healthy" })}\n`;
       }
       if (args.includes("rollback")) {
         events.push("remote rollback");
-        assert.deepEqual(JSON.parse(options.input), candidate);
+        assert.deepEqual(JSON.parse(JSON.parse(options.input).commandInput), candidate);
         return `${JSON.stringify({ ...candidate, state: "failed" })}\n`;
       }
       return "";

@@ -32,6 +32,8 @@ locals {
       warning_threshold       = 1
       alarm_threshold         = 1
       evaluation_window       = "2m"
+      missing_data_behavior   = "ALARM"
+      producer                = "app:markiro-monitoring-producer.timer"
       notification_channel_id = var.notification_channel_id
     }
     alb_5xx = {
@@ -98,6 +100,8 @@ locals {
       warning_threshold       = 80
       alarm_threshold         = 90
       evaluation_window       = "10m"
+      missing_data_behavior   = "ALARM"
+      producer                = "app+runner:unified-agent.service"
       notification_channel_id = var.notification_channel_id
     }
     vm_disk = {
@@ -109,6 +113,8 @@ locals {
       warning_threshold       = 80
       alarm_threshold         = 90
       evaluation_window       = "10m"
+      missing_data_behavior   = "ALARM"
+      producer                = "app+runner:unified-agent.service"
       notification_channel_id = var.notification_channel_id
     }
     postgres_availability = {
@@ -153,6 +159,8 @@ locals {
       warning_threshold       = 90000
       alarm_threshold         = 172800
       evaluation_window       = "15m"
+      missing_data_behavior   = "ALARM"
+      producer                = "app:markiro-monitoring-producer.timer"
       notification_channel_id = var.notification_channel_id
     }
     certificate_risk = {
@@ -175,6 +183,8 @@ locals {
       warning_threshold       = 0
       alarm_threshold         = 0
       evaluation_window       = "5m"
+      missing_data_behavior   = "ALARM"
+      producer                = "app:markiro-monitoring-producer.timer"
       notification_channel_id = var.notification_channel_id
     }
     deployment_failure = {
@@ -186,6 +196,8 @@ locals {
       warning_threshold       = 0
       alarm_threshold         = 0
       evaluation_window       = "5m"
+      missing_data_behavior   = "OK"
+      producer                = "runner:remote-deploy.mjs"
       notification_channel_id = var.notification_channel_id
     }
     runner_overrun = {
@@ -197,6 +209,8 @@ locals {
       warning_threshold       = 3300
       alarm_threshold         = 3600
       evaluation_window       = "5m"
+      missing_data_behavior   = "OK"
+      producer                = "runner:markiro-runner-monitoring.timer"
       notification_channel_id = var.notification_channel_id
     }
   }

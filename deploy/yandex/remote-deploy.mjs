@@ -8,6 +8,8 @@ import process from "node:process";
 
 import { isMainModule } from "./cli-main.mjs";
 import { parseAuthenticatedHostKeys } from "./runner-control.mjs";
+import { writeMetrics } from "./monitoring-producer.mjs";
+import { registryCredentials } from "./registry-auth.mjs";
 
 const API_PREFIX = "ghcr.io/thevladbog/markiro-api@";
 const EDGE_PREFIX = "ghcr.io/thevladbog/markiro-edge@";
@@ -179,6 +181,17 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
     throw new Error("invalid release manifest");
 
   const token = await system.metadataIamToken(system.fetch);
+  const registrySecretId = requiredEnvironment("YC_REGISTRY_SECRET_ID", environment);
+  const registryResponse = await system.fetch(
+    `https://payload.lockbox.api.cloud.yandex.net/lockbox/v1/secrets/${registrySecretId}/payload`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(5_000),
+    },
+  );
+  if (!registryResponse.ok) throw new Error("registry credential request failed");
+  const registryPayload = await registryResponse.json();
+  registryCredentials(registryPayload);
   const appInstanceId = requiredEnvironment("YC_APP_INSTANCE_ID", environment);
   const login = requiredEnvironment("YC_OS_LOGIN", environment);
   const organizationId = requiredEnvironment("YC_ORGANIZATION_ID", environment);
@@ -257,12 +270,17 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
           "MARKIRO_RELEASE_DIRECTORY=/var/lib/markiro/releases",
           "/usr/bin/bash",
           "-c",
-          'cd "$1" && exec node deploy/production/deploy.mjs "$2"',
+          'cd "$1" && exec /usr/bin/node /usr/local/lib/markiro/registry-auth.mjs run-stdin /usr/bin/node deploy/production/deploy.mjs "$2"',
           "markiro-deploy",
           releaseDirectory,
           stage,
         ],
-        candidate ? { input: `${JSON.stringify(candidate)}\n` } : undefined,
+        {
+          input: `${JSON.stringify({
+            entries: registryPayload.entries,
+            ...(candidate ? { commandInput: `${JSON.stringify(candidate)}\n` } : {}),
+          })}\n`,
+        },
       );
 
     return await deployRelease(
@@ -335,12 +353,50 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
   }
 }
 
+export async function runRemoteDeploymentWithReporting(
+  environment = process.env,
+  supplied = {},
+  reporting = {},
+) {
+  const runDeployment = reporting.runDeployment ?? runRemoteDeployment;
+  const getToken = reporting.metadataIamToken ?? metadataIamToken;
+  const emit = reporting.writeMetrics ?? writeMetrics;
+  const folderId = requiredEnvironment("MARKIRO_FOLDER_ID", environment);
+  const appInstanceId = requiredEnvironment("YC_APP_INSTANCE_ID", environment);
+  let result;
+  let primaryError;
+  try {
+    result = await runDeployment(environment, supplied);
+  } catch (error) {
+    primaryError = error;
+  }
+  try {
+    const token = await getToken();
+    await emit({
+      folderId,
+      iamToken: token,
+      metrics: [
+        {
+          name: "markiro.deployment.failure",
+          labels: { resource_id: appInstanceId },
+          type: "DGAUGE",
+          value: primaryError ? 1 : 0,
+        },
+      ],
+    });
+  } catch (reportingError) {
+    if (!primaryError) throw reportingError;
+  }
+  if (primaryError) throw primaryError;
+  return result;
+}
+
 if (isMainModule(import.meta.url)) {
   if (process.argv[2] !== "run") {
     process.stderr.write("remote deployment failed\n");
     process.exitCode = 1;
   } else
-    runRemoteDeployment().catch(() => {
+    runRemoteDeploymentWithReporting().catch(() => {
       process.stderr.write("remote deployment failed\n");
       process.exitCode = 1;
     });

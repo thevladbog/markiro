@@ -1,4 +1,5 @@
 import { appendFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import process from "node:process";
 
 import { isMainModule } from "./cli-main.mjs";
@@ -57,6 +58,37 @@ export function deploymentRunnerLabel(deploymentId) {
   if (typeof deploymentId !== "string" || !DEPLOYMENT_ID.test(deploymentId))
     throw new Error("invalid deployment ID");
   return `${DEPLOYMENT_LABEL_PREFIX}${deploymentId}`;
+}
+
+export async function createJitRegistration(dependencies) {
+  if (
+    !dependencies ||
+    typeof dependencies.instanceId !== "string" ||
+    typeof dependencies.github?.generateJitConfig !== "function" ||
+    typeof dependencies.yandex?.updateMetadata !== "function"
+  )
+    throw new Error("invalid JIT registration dependencies");
+  const label = deploymentRunnerLabel(dependencies.deploymentId);
+  const request = {
+    name: `markiro-${dependencies.deploymentId}`,
+    runner_group_id: 1,
+    labels: ["self-hosted", "linux", label],
+    work_folder: "_work",
+  };
+  const response = await dependencies.github.generateJitConfig(request);
+  const responseLabels = labelsOf(response?.runner);
+  if (
+    response?.runner?.name !== request.name ||
+    !request.labels.every((expected) => responseLabels.includes(expected)) ||
+    typeof response?.encoded_jit_config !== "string" ||
+    response.encoded_jit_config.length === 0 ||
+    response.encoded_jit_config.length > 256 * 1024
+  )
+    throw new Error("invalid JIT registration response");
+  await dependencies.yandex.updateMetadata(dependencies.instanceId, {
+    upsert: { "markiro-runner-jit": response.encoded_jit_config },
+  });
+  return { deploymentId: dependencies.deploymentId, label };
 }
 
 function decodeBase64(value) {
@@ -305,6 +337,16 @@ async function cliClients() {
           headers: bearer(yandexToken),
         });
       },
+      async updateMetadata(id, update) {
+        await requestJson(
+          `https://compute.api.cloud.yandex.net/compute/v1/instances/${id}/updateMetadata`,
+          {
+            method: "POST",
+            headers: bearer(yandexToken, { "Content-Type": "application/json" }),
+            body: JSON.stringify(update),
+          },
+        );
+      },
     },
     github: {
       async listRunners() {
@@ -317,6 +359,13 @@ async function cliClients() {
       },
       async deleteRunner(id) {
         await requestJson(`${githubBase}/${id}`, { method: "DELETE", headers: githubHeaders });
+      },
+      async generateJitConfig(request) {
+        return requestJson(`${githubBase}/generate-jitconfig`, {
+          method: "POST",
+          headers: { ...githubHeaders, "Content-Type": "application/json" },
+          body: JSON.stringify(request),
+        });
       },
     },
   };
@@ -395,10 +444,22 @@ async function runCli(command) {
     if (status !== "STOPPED") throw new Error("runner VM must be STOPPED");
     if (deploymentRunners(await clients.github.listRunners()).length !== 0)
       throw new Error("registered deployment runner already exists");
-    await clients.yandex.startInstance(clients.instanceId);
-    const { runner, label } = await discoverRunner(clients);
+    const deploymentId = randomUUID();
+    const { label } = await createJitRegistration({ ...clients, deploymentId });
+    let runner;
+    try {
+      await clients.yandex.startInstance(clients.instanceId);
+      ({ runner } = await discoverRunner(clients));
+    } catch (error) {
+      await clients.yandex
+        .updateMetadata(clients.instanceId, { delete: ["markiro-runner-jit"] })
+        .catch(() => undefined);
+      throw error;
+    }
+    await clients.yandex.updateMetadata(clients.instanceId, {
+      delete: ["markiro-runner-jit"],
+    });
     const output = requiredEnvironment("RUNNER_OUTPUT_PATH");
-    const deploymentId = label.slice(DEPLOYMENT_LABEL_PREFIX.length);
     await appendFile(
       output,
       `deployment-id=${deploymentId}\nrunner-id=${runner.id}\nrunner-label=${label}\napp-host-keys-b64=${appHostKeys}\n`,
@@ -423,6 +484,13 @@ async function runCli(command) {
       } catch (error) {
         errors.push(error);
       }
+    try {
+      await clients.yandex.updateMetadata(clients.instanceId, {
+        delete: ["markiro-runner-jit"],
+      });
+    } catch (error) {
+      errors.push(error);
+    }
     try {
       await clients.yandex.stopInstance(clients.instanceId);
     } catch (error) {

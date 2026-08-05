@@ -12,8 +12,6 @@ SupplementaryGroups=docker
 UMask=0077
 RuntimeDirectory=markiro-runner
 RuntimeDirectoryMode=0700
-Environment=GITHUB_REPOSITORY=thevladbog/q
-Environment=GITHUB_RUNNER_GROUP_ID=1
 ExecStart=/usr/local/lib/markiro/runner-jit
 ExecStopPost=+/usr/sbin/poweroff
 Restart=no

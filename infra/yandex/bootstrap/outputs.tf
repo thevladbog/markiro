@@ -22,6 +22,12 @@ output "runtime_secret_id" {
   sensitive   = true
 }
 
+output "registry_secret_id" {
+  description = "Empty deploy-only GHCR Lockbox container populated and rotated out of band."
+  value       = yandex_lockbox_secret.registry.id
+  sensitive   = true
+}
+
 output "state_backend_secret_id" {
   description = "Empty state-backend Lockbox container populated out of band."
   value       = yandex_lockbox_secret.state_backend.id

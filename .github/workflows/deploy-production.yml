@@ -153,6 +153,8 @@ jobs:
       EXPECTED_RELEASE_RUN_ID: ${{ needs.controller.outputs.release-run-id }}
       EXPECTED_RELEASE_SHA: ${{ needs.controller.outputs.release-sha }}
       YC_APP_INSTANCE_ID: ${{ vars.YC_APP_INSTANCE_ID }}
+      MARKIRO_FOLDER_ID: ${{ vars.YC_FOLDER_ID }}
+      YC_REGISTRY_SECRET_ID: ${{ vars.YC_REGISTRY_SECRET_ID }}
       YC_OS_LOGIN: ${{ vars.YC_RUNNER_OS_LOGIN }}
       YC_ORGANIZATION_ID: ${{ vars.YC_ORGANIZATION_ID }}
       YC_LOAD_BALANCER_ID: ${{ vars.YC_LOAD_BALANCER_ID }}

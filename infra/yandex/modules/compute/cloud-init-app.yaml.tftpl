@@ -3,13 +3,40 @@ package_update: true
 packages:
   - ca-certificates
   - curl
-  - docker.io
+  - iptables
   - xz-utils
+groups:
+  - docker
 users:
   - name: markiro-monitor
     system: true
     shell: /usr/sbin/nologin
 write_files:
+  - path: /usr/local/lib/markiro/install-container-runtime
+    owner: root:root
+    permissions: "0700"
+    encoding: b64
+    content: ${container_installer_b64}
+  - path: /usr/local/lib/markiro/container-runtime.mjs
+    owner: root:root
+    permissions: "0700"
+    encoding: b64
+    content: ${container_runtime_script_b64}
+  - path: /usr/local/lib/markiro/monitoring-producer.mjs
+    owner: root:root
+    permissions: "0700"
+    encoding: b64
+    content: ${monitoring_producer_script_b64}
+  - path: /usr/local/lib/markiro/log-sanitizer.mjs
+    owner: root:root
+    permissions: "0700"
+    encoding: b64
+    content: ${log_sanitizer_script_b64}
+  - path: /usr/local/lib/markiro/registry-auth.mjs
+    owner: root:root
+    permissions: "0700"
+    encoding: b64
+    content: ${registry_auth_script_b64}
   - path: /usr/local/lib/markiro/runtime-env.mjs
     owner: root:root
     permissions: "0700"
@@ -30,6 +57,46 @@ write_files:
     permissions: "0644"
     encoding: b64
     content: ${environment_inventory_b64}
+  - path: /etc/markiro/compose-contract.env
+    owner: root:root
+    permissions: "0600"
+    encoding: b64
+    content: ${compose_contract_env_b64}
+  - path: /opt/markiro/compose.production.yml
+    owner: root:root
+    permissions: "0644"
+    encoding: b64
+    content: ${production_compose_b64}
+  - path: /etc/systemd/system/docker.service
+    owner: root:root
+    permissions: "0644"
+    encoding: b64
+    content: ${docker_unit_b64}
+  - path: /etc/systemd/system/markiro-monitoring-producer.service
+    owner: root:root
+    permissions: "0644"
+    encoding: b64
+    content: ${monitoring_unit_b64}
+  - path: /etc/systemd/system/markiro-monitoring-producer.timer
+    owner: root:root
+    permissions: "0644"
+    encoding: b64
+    content: ${monitoring_timer_b64}
+  - path: /etc/systemd/system/markiro-log-sanitizer.service
+    owner: root:root
+    permissions: "0644"
+    encoding: b64
+    content: ${log_sanitizer_unit_b64}
+  - path: /etc/systemd/system/markiro-log-sanitizer.timer
+    owner: root:root
+    permissions: "0644"
+    encoding: b64
+    content: ${log_sanitizer_timer_b64}
+  - path: /etc/yandex/unified_agent/conf.d/markiro-logs.yml
+    owner: root:root
+    permissions: "0640"
+    encoding: b64
+    content: ${unified_agent_logs_b64}
   - path: /etc/systemd/system/markiro-runtime-env.service
     owner: root:root
     permissions: "0644"
@@ -60,12 +127,23 @@ write_files:
     permissions: "0600"
     content: |
       MARKIRO_RUNTIME_SECRET_ID=${runtime_secret_id}
+  - path: /etc/markiro/monitoring.conf
+    owner: root:root
+    permissions: "0600"
+    content: |
+      MARKIRO_FOLDER_ID=${folder_id}
 runcmd:
   - install -d -m 0755 /opt/markiro /usr/local/lib/markiro
   - install -d -m 0700 /etc/markiro
-  - chown root:root /etc/markiro /etc/markiro/runtime-secret-id
+  - install -d -m 0750 -o root -g adm /var/log/markiro
+  - install -d -m 0700 /var/lib/markiro/monitoring /run/markiro-registry-auth
+  - touch /var/log/markiro/observability.log
+  - chown root:adm /var/log/markiro/observability.log
+  - chmod 0640 /var/log/markiro/observability.log
+  - chown root:root /etc/markiro /etc/markiro/runtime-secret-id /etc/markiro/monitoring.conf
   - chmod 0700 /etc/markiro
-  - chmod 0600 /etc/markiro/runtime-secret-id
+  - chmod 0600 /etc/markiro/runtime-secret-id /etc/markiro/monitoring.conf /etc/markiro/compose-contract.env
+  - /usr/local/lib/markiro/install-container-runtime
   - |
       set -eu
       NODE_VERSION=24.11.1
@@ -85,15 +163,32 @@ runcmd:
       test "$(/usr/bin/node --version)" = "v$${NODE_VERSION}"
   - |
       set -eu
+      UA_VERSION=26.07.11
+      UA_SHA256=30e216b61b44eecb443942b986e44c0d83c0548a1bc6dbebb134067d678e2dc7
+      package=/tmp/yandex-unified-agent.deb
+      curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+        "https://storage.yandexcloud.net/yc-unified-agent/releases/$${UA_VERSION}/deb/ubuntu-24.04-noble/yandex-unified-agent_$${UA_VERSION}_amd64.deb" \
+        --output "$${package}"
+      printf '%s  %s\n' "$${UA_SHA256}" "$${package}" | sha256sum --check --status
+      dpkg -i "$${package}"
+      rm -f "$${package}"
+      test "$(dpkg-query -W -f='$${Version}' yandex-unified-agent)" = "$${UA_VERSION}"
+      /usr/bin/unified_agent --config /etc/yandex/unified_agent/config.yml check-config > /dev/null
+  - |
+      set -eu
       for host_key in /etc/ssh/ssh_host_ed25519_key.pub /etc/ssh/ssh_host_rsa_key.pub; do
         test -s "$${host_key}"
         read -r key_type key_value _ < "$${host_key}"
         printf 'MARKIRO_SSH_HOST_KEY_V1 %s %s\n' "$${key_type}" "$${key_value}" > /dev/ttyS0
       done
-  - systemctl enable docker.service
   - systemctl daemon-reload
+  - systemctl enable --now docker.service
+  - /usr/bin/node /usr/local/lib/markiro/container-runtime.mjs
+  - systemctl enable --now unified-agent.service
   - systemctl enable markiro-runtime-env.service
   - systemctl start markiro-runtime-env.service
   - test -f /etc/markiro/production.env
   - systemctl enable --now markiro-readiness-observer.timer
-  - systemctl start docker.service
+  - systemctl enable --now markiro-monitoring-producer.timer
+  - systemctl enable --now markiro-log-sanitizer.timer
+  - touch /var/lib/markiro/markiro-app-bootstrap-complete

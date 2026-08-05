@@ -15,15 +15,21 @@ rendered Compose output.
 2. Inventory the runtime Lockbox payload against `.env.production.example`.
    Include PostgreSQL connection data, Better Auth secret and origins,
    pairing-code pepper, SMTP endpoint/credentials/sender/reply-to, mail-payload
-   encryption key, private S3 access values, and GHCR pull credentials if they
-   are required by the chosen package visibility.
+   encryption key, and private S3 access values. Registry credentials are not
+   runtime application configuration.
 3. Keep the state-backend payload separate. It contains exactly
    `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` for the state identity.
-4. Keep the runner payload separate. It contains exactly
+4. Keep the deploy-only registry payload separate. It contains exactly
+   `GHCR_USERNAME` and `GHCR_TOKEN` for a read-only package principal. Only the
+   deployment-runner VM identity may read this container; the app VM identity
+   must not. The runner passes only that validated two-entry envelope through
+   the authenticated deployment SSH channel to the root helper.
+5. Keep the runner-registration payload separate. It contains exactly
    `GITHUB_RUNNER_ADMIN_TOKEN`. Prefer a GitHub App installation token; use a
    repository-scoped fine-grained PAT only as the documented fallback. Never
-   put it in a GitHub repository or environment secret.
-5. Record entry names, Lockbox container IDs, access binding review IDs, and
+   put it in a GitHub repository or environment secret. Only the protected
+   controller identity may read it; the runner VM identity must not.
+6. Record entry names, Lockbox container IDs, access binding review IDs, and
    rotation due dates in the protected operational system. Record no values.
 
 ## Load runtime payloads through a protected input channel
@@ -44,9 +50,15 @@ rendered Compose output.
    future product images.
 5. Populate SMTP credentials directly in the runtime payload. Send no test
    mail until the first go-live gate authorizes it.
-6. Populate GHCR credentials directly for the app runtime only when package
-   visibility requires them. Retain digest-addressed images under the GHCR
-   retention policy; do not substitute a mutable tag.
+6. Populate the separate deploy-only registry container with exactly these
+   GHCR credentials:
+   `GHCR_USERNAME` and `GHCR_TOKEN`. The deployment runner retrieves the latest
+   version at each deployment and sends only the validated two-entry envelope
+   over the strict-host-key-checked SSH standard input. The app's root helper
+   authenticates with `--password-stdin` under a root-owned transient
+   `DOCKER_CONFIG`, then logs out and removes the directory on both success and
+   failure. Never add these keys to `.env.production.example` or
+   `/etc/markiro/production.env`.
 
 ## Verify names, modes, and runtime health without reading values
 
@@ -55,8 +67,11 @@ rendered Compose output.
 1. Verify Lockbox contains the expected key names once, with no unknown,
    duplicate, blank, or multiline entry. Do not display values.
 2. Verify the app can materialize `/etc/markiro/production.env` at mode `0600`
-   and its parent directory at mode `0700`. Verify the runner uses a bounded
-   `/run` or temporary file at mode `0600` and removes it before shutdown.
+   and its parent directory at mode `0700`. Verify no registry `DOCKER_CONFIG`
+   remains after deployment and that the app identity cannot read the registry
+   container. Verify the runner receives only the bounded encoded JIT
+   configuration and deletes its metadata key before the runner process starts;
+   it must not be able to read the registration container.
 3. Run the supported production preflight, which validates Compose quietly and
    does not render secret-expanded configuration.
 
@@ -85,8 +100,12 @@ docker compose --env-file /etc/markiro/production.env -f compose.production.yml 
    PostgreSQL access before retiring the prior database role; rotate state HMAC
    only through a separately reviewed backend migration procedure.
 5. For `GITHUB_RUNNER_ADMIN_TOKEN`, rotate the GitHub App token or fallback PAT
-   in Lockbox, verify one JIT runner lifecycle, then revoke the previous token.
-   The runner is normally stopped outside that window.
-6. Record rotation and verification evidence IDs only in the protected
+   in Lockbox, verify the controller generates one JIT configuration and the VM
+   deletes it before startup, then revoke the previous token. The runner is
+   normally stopped outside that window.
+6. For `GHCR_TOKEN`, upload the new read-only token as a new registry Lockbox
+   version, run one digest deployment, verify logout and transient-directory
+   cleanup, then revoke the prior token.
+7. Record rotation and verification evidence IDs only in the protected
    operational system. Remove temporary protected files, unset process values,
    and close descriptors before closing the change.

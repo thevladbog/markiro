@@ -3,16 +3,34 @@ package_update: true
 packages:
   - ca-certificates
   - curl
-  - docker.io
+  - iptables
   - jq
   - openssh-client
   - tar
+groups:
+  - docker
 users:
   - name: markiro-runner
     system: true
     shell: /usr/sbin/nologin
     groups: [docker]
 write_files:
+  - path: /usr/local/lib/markiro/install-container-runtime
+    permissions: "0700"
+    encoding: b64
+    content: ${container_installer_b64}
+  - path: /usr/local/lib/markiro/monitoring-producer.mjs
+    permissions: "0700"
+    encoding: b64
+    content: ${monitoring_producer_b64}
+  - path: /usr/local/lib/markiro/log-sanitizer.mjs
+    permissions: "0700"
+    encoding: b64
+    content: ${log_sanitizer_script_b64}
+  - path: /usr/local/lib/markiro/cli-main.mjs
+    permissions: "0644"
+    encoding: b64
+    content: ${cli_main_script_b64}
   - path: /usr/local/lib/markiro/runner-jit
     permissions: "0755"
     content: |
@@ -27,64 +45,52 @@ write_files:
       trap fail ERR
 
       tmp_dir=/run/markiro-runner
-      payload_path="$tmp_dir/lockbox-payload.json"
-      request_path="$tmp_dir/jit-request.json"
-      response_path="$tmp_dir/jit-response.json"
-      curl_config="$tmp_dir/github-curl.conf"
       install -d -m 0700 "$tmp_dir"
-      trap 'unset iam_token github_token jit_config; rm -f "$payload_path" "$request_path" "$response_path" "$curl_config"' EXIT
+      jit_path="$tmp_dir/jitconfig"
+      trap 'unset iam_token jit_config; rm -f "$jit_path"' EXIT
+      for _ in $(seq 1 120); do
+        if curl --fail --silent --show-error \
+          --header 'Metadata-Flavor: Google' \
+          http://169.254.169.254/computeMetadata/v1/instance/attributes/markiro-runner-jit \
+          --output "$jit_path"; then
+          break
+        fi
+        sleep 1
+      done
+      test -s "$jit_path"
+      test "$(wc -c < "$jit_path")" -le 262144
+      jit_config="$(cat "$jit_path")"
+      rm -f "$jit_path"
 
-      iam_token="$(curl --fail --silent \
+      instance_id="$(curl --fail --silent --show-error \
+        --header 'Metadata-Flavor: Google' \
+        http://169.254.169.254/computeMetadata/v1/instance/id)"
+      iam_token="$(curl --fail --silent --show-error \
         --header 'Metadata-Flavor: Google' \
         http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token | \
         jq -er '.access_token | select(type == "string" and length > 0)')"
-      curl --fail --silent \
-        --header "Authorization: Bearer $iam_token" \
-        "https://payload.lockbox.api.cloud.yandex.net/lockbox/v1/secrets/${runner_registration_secret_id}/payload" \
-        --output "$payload_path"
-      unset iam_token
-      jq -e '
-        type == "object" and
-        (.entries | type == "array" and length == 1) and
-        (.entries[0] | (keys | sort) == ["key", "textValue"]) and
-        .entries[0].key == "GITHUB_RUNNER_ADMIN_TOKEN" and
-        (.entries[0].textValue | type == "string" and length > 0)
-      ' "$payload_path" > /dev/null
-      github_token="$(jq -er '.entries[0].textValue' "$payload_path")"
-      rm -f "$payload_path"
-
-      deployment_id="$(cat /proc/sys/kernel/random/uuid)"
-      runner_name="markiro-$deployment_id"
-      runner_label="markiro-deployment-$deployment_id"
-      jq -n \
-        --arg name "$runner_name" \
-        --argjson runner_group_id "$GITHUB_RUNNER_GROUP_ID" \
-        --arg label "$runner_label" \
-        '{name: $name, runner_group_id: $runner_group_id, labels: ["self-hosted", "linux", $label], work_folder: "_work"}' \
-        > "$request_path"
-      {
-        printf '%s\n' 'fail' 'silent' 'show-error = false'
-        printf 'header = "Accept: application/vnd.github+json"\n'
-        printf 'header = "Authorization: Bearer %s"\n' "$github_token"
-        printf 'header = "X-GitHub-Api-Version: 2026-03-10"\n'
-      } > "$curl_config"
-      chmod 0600 "$curl_config" "$request_path"
-      curl --config "$curl_config" \
+      operation_id="$(curl --fail --silent --show-error \
         --request POST \
+        --header "Authorization: Bearer $iam_token" \
         --header 'Content-Type: application/json' \
-        --data-binary "@$request_path" \
-        "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runners/generate-jitconfig" \
-        --output "$response_path"
-      unset github_token
-      rm -f "$curl_config" "$request_path"
-      jit_config="$(jq -er '
-        type == "object" and
-        (.runner.name | type == "string") and
-        (.runner.labels | map(.name) | index("'"$runner_label"'")) != null and
-        (.encoded_jit_config | type == "string" and length > 0) |
-        .encoded_jit_config
-      ' "$response_path")"
-      rm -f "$response_path"
+        --data '{"delete":["markiro-runner-jit"]}' \
+        "https://compute.api.cloud.yandex.net/compute/v1/instances/$instance_id/updateMetadata" | \
+        jq -er '.id | select(type == "string" and length > 0)')"
+      for _ in $(seq 1 30); do
+        done_state="$(curl --fail --silent --show-error \
+          --header "Authorization: Bearer $iam_token" \
+          "https://operation.api.cloud.yandex.net/operations/$operation_id" | jq -er '.done')"
+        test "$done_state" = false || break
+        sleep 1
+      done
+      test "$done_state" = true
+      unset iam_token
+      if curl --fail --silent \
+        --header 'Metadata-Flavor: Google' \
+        http://169.254.169.254/computeMetadata/v1/instance/attributes/markiro-runner-jit \
+        --output /dev/null; then
+        fail
+      fi
       trap - ERR
       exec /opt/actions-runner/run.sh --jitconfig "$jit_config"
 
@@ -92,9 +98,67 @@ write_files:
     permissions: "0644"
     encoding: b64
     content: ${runner_unit_b64}
+  - path: /etc/systemd/system/docker.service
+    permissions: "0644"
+    encoding: b64
+    content: ${docker_unit_b64}
+  - path: /etc/systemd/system/markiro-runner-monitoring.service
+    permissions: "0644"
+    encoding: b64
+    content: ${runner_monitoring_unit_b64}
+  - path: /etc/systemd/system/markiro-runner-monitoring.timer
+    permissions: "0644"
+    encoding: b64
+    content: ${runner_monitoring_timer_b64}
+  - path: /etc/systemd/system/markiro-log-sanitizer.service
+    permissions: "0644"
+    encoding: b64
+    content: ${log_sanitizer_unit_b64}
+  - path: /etc/systemd/system/markiro-log-sanitizer.timer
+    permissions: "0644"
+    encoding: b64
+    content: ${log_sanitizer_timer_b64}
+  - path: /etc/yandex/unified_agent/conf.d/markiro-logs.yml
+    permissions: "0640"
+    encoding: b64
+    content: ${unified_agent_logs_b64}
+  - path: /etc/markiro/monitoring.conf
+    permissions: "0600"
+    content: |
+      MARKIRO_FOLDER_ID=${folder_id}
 runcmd:
   - install -d -m 0755 /usr/local/lib/markiro /opt/actions-runner /var/lib/markiro
+  - install -d -m 0750 -o root -g adm /var/log/markiro
+  - touch /var/log/markiro/observability.log
+  - chown root:adm /var/log/markiro/observability.log
+  - chmod 0640 /var/log/markiro/observability.log
   - chown -R markiro-runner:markiro-runner /opt/actions-runner
+  - /usr/local/lib/markiro/install-container-runtime
+  - |
+      set -eu
+      NODE_VERSION=24.11.1
+      NODE_SHA256=60e3b0a8500819514aca603487c254298cd776de0698d3cd08f11dba5b8289a8
+      archive=/tmp/node.tar.xz
+      curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+        "https://nodejs.org/dist/v$${NODE_VERSION}/node-v$${NODE_VERSION}-linux-x64.tar.xz" \
+        --output "$${archive}"
+      printf '%s  %s\n' "$${NODE_SHA256}" "$${archive}" | sha256sum --check --status
+      tar -xJf "$${archive}" -C /opt/markiro
+      rm -f "$${archive}"
+      ln -sfn "/opt/markiro/node-v$${NODE_VERSION}-linux-x64/bin/node" /usr/bin/node
+      test "$(node --version)" = "v$${NODE_VERSION}"
+  - |
+      set -eu
+      UA_VERSION=26.07.11
+      UA_SHA256=30e216b61b44eecb443942b986e44c0d83c0548a1bc6dbebb134067d678e2dc7
+      package=/tmp/yandex-unified-agent.deb
+      curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+        "https://storage.yandexcloud.net/yc-unified-agent/releases/$${UA_VERSION}/deb/ubuntu-24.04-noble/yandex-unified-agent_$${UA_VERSION}_amd64.deb" \
+        --output "$${package}"
+      printf '%s  %s\n' "$${UA_SHA256}" "$${package}" | sha256sum --check --status
+      dpkg -i "$${package}"
+      rm -f "$${package}"
+      test "$(dpkg-query -W -f='$${Version}' yandex-unified-agent)" = "$${UA_VERSION}"
   - |
       set -eu
       RUNNER_VERSION=2.336.0
@@ -121,6 +185,10 @@ runcmd:
       rm -f "$binary"
       test "$(/usr/local/bin/yc version --semantic)" = "$YC_VERSION"
   - systemctl daemon-reload
+  - systemctl enable docker.service unified-agent.service markiro-runner-monitoring.timer markiro-log-sanitizer.timer
+  - systemctl start docker.service
+  - test "$(docker version --format '{{.Server.Version}}')" = "28.5.2"
+  - test "$(docker compose version --short)" = "2.40.3"
   - systemctl enable markiro-runner.service
   - touch /var/lib/markiro/markiro-runner-bootstrap-complete
 power_state:

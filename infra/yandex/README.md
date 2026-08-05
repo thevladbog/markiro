@@ -217,6 +217,38 @@ be committed.
 
 ## Deployment-runner binary and SSH trust pins
 
+Both VM bootstraps install Docker Engine `28.5.2` and Docker Compose v2
+`2.40.3` from exact official HTTPS artifacts with repository-controlled
+SHA-256 pins. The app bootstrap does not become complete until the server and
+plugin versions match and `docker compose ... config --quiet` renders the
+production model from the bundled Compose contract. Ubuntu `docker.io` and
+mutable install scripts are not part of the image contract.
+
+Both VMs also install Unified Agent `26.07.11` from the exact Ubuntu 24.04
+package and repository-controlled SHA-256. It collects Linux memory/disk
+metrics and ships only the bounded, allowlisted, redacted journal export.
+`markiro-monitoring-producer` writes the ALB-backend, PostgreSQL-backup-age,
+readiness-degradation, and runner-runtime metrics used by `alert_specs`;
+`remote-deploy.mjs` writes the deployment result metric. Every custom alert
+spec names its producer and its missing-data behavior.
+
+Private GHCR authentication uses the separate deploy-only registry Lockbox
+container. The deployment-runner VM identity reads exactly `GHCR_USERNAME` and
+`GHCR_TOKEN`, validates that closed shape, and sends it through the
+strict-host-key-checked SSH standard input. The app VM identity has no registry
+Lockbox access. Its root helper uses `docker login --password-stdin` under a
+transient `DOCKER_CONFIG`, then always logs out and removes that directory.
+Those entries never enter cloud-init or the runtime environment file. Rotation
+is a new Lockbox version followed by one verified digest deployment and
+revocation of the prior read-only token.
+
+The protected controller, not the VM, calls GitHub `generate-jitconfig` and
+upserts only the encoded one-use configuration into the runner's metadata while
+it is stopped. The runner deletes that key and waits for the provider operation
+to complete before executing Actions Runner. The VM must use a distinct
+least-privilege identity with no access to the runner-registration Lockbox;
+only the controller workload identity may read the GitHub admin token.
+
 The deployment runner installs Yandex Cloud CLI `1.23.0` from the exact
 versioned official Linux AMD64 object and verifies the repository-controlled
 SHA-256

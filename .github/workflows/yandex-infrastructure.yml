@@ -166,6 +166,7 @@ jobs:
       TF_VAR_kms_key_id: ${{ vars.YC_KMS_KEY_ID }}
       TF_VAR_app_service_account_id: ${{ vars.YC_APP_SERVICE_ACCOUNT_ID }}
       TF_VAR_runtime_secret_id: ${{ vars.YC_RUNTIME_SECRET_ID }}
+      TF_VAR_registry_secret_id: ${{ vars.YC_REGISTRY_SECRET_ID }}
       TF_VAR_runner_service_account_id: ${{ vars.YC_RUNNER_SERVICE_ACCOUNT_ID }}
       TF_VAR_deployment_controller_service_account_id: ${{ vars.YC_DEPLOYMENT_CONTROLLER_SERVICE_ACCOUNT_ID }}
       TF_VAR_runner_registration_secret_id: ${{ vars.YC_RUNNER_REGISTRATION_SECRET_ID }}
@@ -421,6 +422,7 @@ jobs:
       TF_VAR_kms_key_id: ${{ vars.YC_KMS_KEY_ID }}
       TF_VAR_app_service_account_id: ${{ vars.YC_APP_SERVICE_ACCOUNT_ID }}
       TF_VAR_runtime_secret_id: ${{ vars.YC_RUNTIME_SECRET_ID }}
+      TF_VAR_registry_secret_id: ${{ vars.YC_REGISTRY_SECRET_ID }}
       TF_VAR_runner_service_account_id: ${{ vars.YC_RUNNER_SERVICE_ACCOUNT_ID }}
       TF_VAR_deployment_controller_service_account_id: ${{ vars.YC_DEPLOYMENT_CONTROLLER_SERVICE_ACCOUNT_ID }}
       TF_VAR_runner_registration_secret_id: ${{ vars.YC_RUNNER_REGISTRATION_SECRET_ID }}

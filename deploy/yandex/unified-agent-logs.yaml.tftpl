@@ -1,0 +1,36 @@
+routes:
+  - input:
+      plugin: linux_metrics
+      id: markiro_linux_metrics
+      config:
+        poll_period: 15s
+        resources:
+          cpu: basic
+          memory: advanced
+          storage: advanced
+          io: basic
+    channel:
+      output:
+        plugin: yc_metrics
+        id: markiro_system_metrics
+        config:
+          folder_id: ${folder_id}
+          iam:
+            cloud_meta: {}
+  - input:
+      plugin: file_input
+      id: markiro_sanitized_journals
+      config:
+        path: /var/log/markiro/observability.log
+        min_bytes_read: 1b
+        line_delimiter: "\n"
+        read_only_newlines: true
+        keep_open_file: true
+    channel:
+      output:
+        plugin: yc_logs
+        id: markiro_application_logs
+        config:
+          folder_id: ${folder_id}
+          iam:
+            cloud_meta: {}
