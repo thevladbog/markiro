@@ -58,13 +58,14 @@ mask it, retain it only in bounded `/run` or runner-temporary files at mode
 `0600`, and delete those files before shutdown. Never enable provider or shell
 debugging around this flow.
 
-The existing exact `repo:thevladbog/q:environment:production` Terraform
-credential remains the production controller credential; the distinct
-`production-infrastructure` credential remains unchanged. A second credential
-with the same exact `production` subject targets only the runner service
-account so GitHub-hosted cleanup can read the runner-only Lockbox payload and
-stop the exact runner VM even when the private job never starts. That service
-account has `compute.operator` on the runner VM itself, not the folder, and
+The exact `production-controller` and `production-cleanup` subjects both
+exchange only as the deployment-controller service account; the distinct
+`production-infrastructure` subject exchanges only as Terraform. The
+deployment controller alone reads the runner-registration Lockbox payload and
+can stop the exact runner VM even when the private job never starts. The
+deployment controller and runner VM service accounts have `compute.editor` on
+the runner VM itself, not the folder, so controller metadata updates and runner
+self-deletion stay instance-scoped. The runner also has `compute.viewer` and
 `compute.osAdminLogin` on the app VM. Yandex provider 0.215.0 has no
 load-balancer-resource IAM-binding resource, so read-only `alb.viewer` at folder
 scope is the documented provider limitation used only for the post-switch

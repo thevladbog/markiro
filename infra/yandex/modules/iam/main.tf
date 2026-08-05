@@ -10,7 +10,8 @@ terraform {
 locals {
   github_owner                  = split("/", var.github_repository)[0]
   github_audience               = "https://github.com/${local.github_owner}"
-  github_subject                = "repo:${var.github_repository}:environment:${var.github_environment}"
+  github_controller_subject     = "repo:${var.github_repository}:environment:${var.github_controller_environment}"
+  github_cleanup_subject        = "repo:${var.github_repository}:environment:${var.github_cleanup_environment}"
   github_infrastructure_subject = "repo:${var.github_repository}:environment:${var.github_infrastructure_environment}"
 }
 
@@ -80,7 +81,13 @@ resource "yandex_iam_workload_identity_oidc_federation_iam_binding" "terraform_u
 resource "yandex_iam_workload_identity_federated_credential" "github_production_controller" {
   service_account_id  = yandex_iam_service_account.deployment_controller.id
   federation_id       = yandex_iam_workload_identity_oidc_federation.github.id
-  external_subject_id = local.github_subject
+  external_subject_id = local.github_controller_subject
+}
+
+resource "yandex_iam_workload_identity_federated_credential" "github_production_cleanup" {
+  service_account_id  = yandex_iam_service_account.deployment_controller.id
+  federation_id       = yandex_iam_workload_identity_oidc_federation.github.id
+  external_subject_id = local.github_cleanup_subject
 }
 
 resource "yandex_iam_workload_identity_federated_credential" "github_infrastructure" {
@@ -107,8 +114,8 @@ resource "yandex_lockbox_secret_iam_member" "terraform_state_backend" {
   member    = "serviceAccount:${yandex_iam_service_account.terraform.id}"
 }
 
-resource "yandex_lockbox_secret_iam_member" "runner_registration" {
-  secret_id = var.runner_registration_secret_id
+resource "yandex_lockbox_secret_iam_member" "runner_registry" {
+  secret_id = var.registry_secret_id
   role      = "lockbox.payloadViewer"
   member    = "serviceAccount:${yandex_iam_service_account.runner.id}"
 }
@@ -178,4 +185,49 @@ resource "yandex_resourcemanager_folder_iam_member" "deployment_controller_postg
   folder_id = var.folder_id
   role      = "managed-postgresql.viewer"
   member    = "serviceAccount:${yandex_iam_service_account.deployment_controller.id}"
+}
+
+resource "yandex_resourcemanager_folder_iam_member" "app_monitoring_editor" {
+  folder_id = var.folder_id
+  role      = "monitoring.editor"
+  member    = "serviceAccount:${yandex_iam_service_account.app.id}"
+}
+
+resource "yandex_resourcemanager_folder_iam_member" "app_logging_writer" {
+  folder_id = var.folder_id
+  role      = "logging.writer"
+  member    = "serviceAccount:${yandex_iam_service_account.app.id}"
+}
+
+resource "yandex_resourcemanager_folder_iam_member" "app_alb_viewer" {
+  folder_id = var.folder_id
+  role      = "alb.viewer"
+  member    = "serviceAccount:${yandex_iam_service_account.app.id}"
+}
+
+resource "yandex_resourcemanager_folder_iam_member" "app_postgres_viewer" {
+  folder_id = var.folder_id
+  role      = "managed-postgresql.viewer"
+  member    = "serviceAccount:${yandex_iam_service_account.app.id}"
+}
+
+resource "yandex_resourcemanager_folder_iam_member" "runner_monitoring_editor" {
+  folder_id = var.folder_id
+  role      = "monitoring.editor"
+  member    = "serviceAccount:${yandex_iam_service_account.runner.id}"
+}
+
+resource "yandex_resourcemanager_folder_iam_member" "runner_logging_writer" {
+  folder_id = var.folder_id
+  role      = "logging.writer"
+  member    = "serviceAccount:${yandex_iam_service_account.runner.id}"
+}
+
+# Application Load Balancer does not expose a load-balancer-level IAM binding in
+# yandex-cloud/yandex 0.215.0. Folder scope is therefore the narrowest
+# provider-supported scope for the runner's read-only target-state permission.
+resource "yandex_resourcemanager_folder_iam_member" "runner_alb_viewer" {
+  folder_id = var.folder_id
+  role      = "alb.viewer"
+  member    = "serviceAccount:${yandex_iam_service_account.runner.id}"
 }

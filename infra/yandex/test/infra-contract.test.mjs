@@ -386,8 +386,8 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, productionResources
   );
   assert.equal(
     (iam.match(/resource\s+"yandex_iam_workload_identity_federated_credential"\s+/g) ?? []).length,
-    2,
-    "exact production-controller and infrastructure credentials are required",
+    3,
+    "exact production-controller, production-cleanup, and infrastructure credentials are required",
   );
 
   assert.doesNotMatch(
@@ -474,7 +474,11 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, productionResources
   );
   assert.match(
     variables,
-    /variable\s+"github_environment"\s*\{[\s\S]*?condition\s*=\s*var\.github_environment\s*==\s*"production"/,
+    /variable\s+"github_controller_environment"\s*\{[\s\S]*?condition\s*=\s*var\.github_controller_environment\s*==\s*"production-controller"/,
+  );
+  assert.match(
+    variables,
+    /variable\s+"github_cleanup_environment"\s*\{[\s\S]*?condition\s*=\s*var\.github_cleanup_environment\s*==\s*"production-cleanup"/,
   );
   assert.match(
     variables,
@@ -482,7 +486,11 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, productionResources
   );
   assert.match(
     iam,
-    /github_subject\s*=\s*"repo:\$\{var\.github_repository\}:environment:\$\{var\.github_environment\}"/,
+    /github_controller_subject\s*=\s*"repo:\$\{var\.github_repository\}:environment:\$\{var\.github_controller_environment\}"/,
+  );
+  assert.match(
+    iam,
+    /github_cleanup_subject\s*=\s*"repo:\$\{var\.github_repository\}:environment:\$\{var\.github_cleanup_environment\}"/,
   );
   assert.match(
     iam,
@@ -515,7 +523,18 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, productionResources
     credential,
     /federation_id\s*=\s*yandex_iam_workload_identity_oidc_federation\.github\.id/,
   );
-  assert.match(credential, /external_subject_id\s*=\s*local\.github_subject/);
+  assert.match(credential, /external_subject_id\s*=\s*local\.github_controller_subject/);
+
+  const cleanupCredential = terraformResourceBlock(
+    iam,
+    "yandex_iam_workload_identity_federated_credential",
+    "github_production_cleanup",
+  );
+  assert.match(
+    cleanupCredential,
+    /service_account_id\s*=\s*yandex_iam_service_account\.deployment_controller\.id/,
+  );
+  assert.match(cleanupCredential, /external_subject_id\s*=\s*local\.github_cleanup_subject/);
 
   const infrastructureCredential = terraformResourceBlock(
     iam,
@@ -559,8 +578,13 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, productionResources
 
   const secretReaders = [
     ["app_runtime", "runtime_secret_id", "app"],
+    ["runner_registry", "registry_secret_id", "runner"],
     ["terraform_state_backend", "state_backend_secret_id", "terraform"],
-    ["runner_registration", "runner_registration_secret_id", "runner"],
+    [
+      "deployment_controller_runner_registration",
+      "runner_registration_secret_id",
+      "deployment_controller",
+    ],
   ];
   for (const [resourceName, secretId, serviceAccount] of secretReaders) {
     const binding = terraformResourceBlock(iam, "yandex_lockbox_secret_iam_member", resourceName);
@@ -582,7 +606,7 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, productionResources
   assert.match(iam, /resource\s+"yandex_iam_service_account"\s+"deployment_controller"/);
   assert.match(
     iam,
-    /resource\s+"yandex_iam_workload_identity_federated_credential"\s+"github_production_controller"[\s\S]*?service_account_id\s*=\s*yandex_iam_service_account\.deployment_controller\.id[\s\S]*?external_subject_id\s*=\s*local\.github_subject/,
+    /resource\s+"yandex_iam_workload_identity_federated_credential"\s+"github_production_controller"[\s\S]*?service_account_id\s*=\s*yandex_iam_service_account\.deployment_controller\.id[\s\S]*?external_subject_id\s*=\s*local\.github_controller_subject/,
   );
   assert.doesNotMatch(
     terraformResourceBlock(
@@ -590,7 +614,7 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, productionResources
       "yandex_iam_workload_identity_federated_credential",
       "github_infrastructure",
     ),
-    /local\.github_subject/,
+    /local\.github_(?:controller|cleanup)_subject/,
     "Terraform federation must remain limited to the infrastructure environment",
   );
 
@@ -673,20 +697,21 @@ function assertRunnerControllerProviderGrants({ bootstrap, compute, controller, 
     "https://compute.api.cloud.yandex.net/compute/v1/instances/${appInstanceId}",
     "https://compute.api.cloud.yandex.net/compute/v1/instances/${appInstanceId}:serialPortOutput?port=1",
     "https://compute.api.cloud.yandex.net/compute/v1/instances/${id}",
+    "https://compute.api.cloud.yandex.net/compute/v1/instances/${id}/updateMetadata",
     "https://compute.api.cloud.yandex.net/compute/v1/instances/${id}:start",
     "https://compute.api.cloud.yandex.net/compute/v1/instances/${id}:stop",
     "https://mdb.api.cloud.yandex.net/managed-postgresql/v1/clusters/${postgresClusterId}/backups",
   ]);
 
-  const runnerOperator = terraformResourceBlock(
+  const runnerEditor = terraformResourceBlock(
     compute,
     "yandex_compute_instance_iam_binding",
-    "runner_operator",
+    "runner_editor",
   );
-  assert.match(runnerOperator, /instance_id\s*=\s*yandex_compute_instance\.runner\.id/);
-  assert.match(runnerOperator, /role\s*=\s*"compute\.operator"/);
+  assert.match(runnerEditor, /instance_id\s*=\s*yandex_compute_instance\.runner\.id/);
+  assert.match(runnerEditor, /role\s*=\s*"compute\.editor"/);
   assert.match(
-    runnerOperator,
+    runnerEditor,
     /serviceAccount:\$\{var\.deployment_controller_service_account_id\}/,
   );
 
@@ -858,10 +883,10 @@ function assertPrivateNetworkAndCompute({
     runnerCloudInit,
     /generate-jitconfig|runner_registration_secret_id|GITHUB_RUNNER_ADMIN_TOKEN|payload\.lockbox/,
   );
-  assert.match(compute, /service_account_id\s*=\s*var\.runner_vm_service_account_id/);
+  assert.match(compute, /service_account_id\s*=\s*var\.runner_service_account_id/);
   assert.match(
     compute,
-    /members\s*=\s*\[[\s\S]*?var\.runner_service_account_id[\s\S]*?var\.runner_vm_service_account_id/,
+    /members\s*=\s*\[[\s\S]*?var\.deployment_controller_service_account_id[\s\S]*?var\.runner_service_account_id/,
   );
   assert.match(runnerCloudInit, /\/etc\/systemd\/system\/markiro-runner\.service/);
   assert.match(runnerCloudInit, /systemctl\s+enable\s+markiro-runner\.service/);
@@ -2052,7 +2077,7 @@ test("production network and compute keep application and runner traffic private
   assertPrivateNetworkAndCompute(await privateNetworkAndComputeSources());
 });
 
-test("deployment runner uses exact production federation, VM-scoped operator, and one-use JIT boot", async () => {
+test("deployment runner uses exact production federation, VM-scoped editor, and one-use JIT boot", async () => {
   const iam = await readRepositoryFile("infra/yandex/modules/iam/main.tf");
   const compute = await readRepositoryFile("infra/yandex/modules/compute/main.tf");
   const cloudInit = await readRepositoryFile(
@@ -2077,7 +2102,7 @@ test("deployment runner uses exact production federation, VM-scoped operator, an
     credential,
     /service_account_id\s*=\s*yandex_iam_service_account\.deployment_controller\.id/,
   );
-  assert.match(credential, /external_subject_id\s*=\s*local\.github_subject/);
+  assert.match(credential, /external_subject_id\s*=\s*local\.github_controller_subject/);
   const federationUse = terraformResourceBlock(
     iam,
     "yandex_iam_workload_identity_oidc_federation_iam_binding",
@@ -2090,10 +2115,10 @@ test("deployment runner uses exact production federation, VM-scoped operator, an
   const operator = terraformResourceBlock(
     compute,
     "yandex_compute_instance_iam_binding",
-    "runner_operator",
+    "runner_editor",
   );
   assert.match(operator, /instance_id\s*=\s*yandex_compute_instance\.runner\.id/);
-  assert.match(operator, /role\s*=\s*"compute\.operator"/);
+  assert.match(operator, /role\s*=\s*"compute\.editor"/);
   assert.match(operator, /serviceAccount:\$\{var\.deployment_controller_service_account_id\}/);
   assert.match(operator, /serviceAccount:\$\{var\.runner_service_account_id\}/);
   assert.match(
@@ -2113,12 +2138,12 @@ test("deployment runner uses exact production federation, VM-scoped operator, an
   assert.match(appLogin, /role\s*=\s*"compute\.osAdminLogin"/);
   assert.match(appLogin, /serviceAccount:\$\{var\.runner_service_account_id\}/);
   const albViewer = terraformResourceBlock(
-    compute,
+    iam,
     "yandex_resourcemanager_folder_iam_member",
     "runner_alb_viewer",
   );
   assert.match(albViewer, /role\s*=\s*"alb\.viewer"/);
-  assert.match(albViewer, /serviceAccount:\$\{var\.runner_service_account_id\}/);
+  assert.match(albViewer, /serviceAccount:\$\{yandex_iam_service_account\.runner\.id\}/);
 
   assert.match(cloudInit, /RUNNER_VERSION=2\.336\.0/);
   assert.match(
@@ -2134,9 +2159,9 @@ test("deployment runner uses exact production federation, VM-scoped operator, an
   );
   assert.match(cloudInit, /attributes\/markiro-runner-jit/);
   assert.match(cloudInit, /updateMetadata/);
-  assert.match(runnerControl, /generate-jitconfig/);
-  assert.match(runnerControl, /"markiro-runner-jit"/);
-  assert.match(runnerControl, /delete:\s*\["markiro-runner-jit"\]/);
+  assert.match(controller, /generate-jitconfig/);
+  assert.match(controller, /"markiro-runner-jit"/);
+  assert.match(controller, /delete:\s*\["markiro-runner-jit"\]/);
   assert.match(appCloudInit, /MARKIRO_SSH_HOST_KEY_V1.*\/dev\/ttyS0/);
   assert.match(appCloudInit, /ssh_host_(?:ed25519|rsa)_key\.pub/);
   assert.doesNotMatch(appCloudInit, /ssh_host_(?:ed25519|rsa)_key(?!\.pub)/);

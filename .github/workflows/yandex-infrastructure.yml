@@ -179,7 +179,6 @@ jobs:
       TF_VAR_audit_bucket_name: ${{ vars.YC_AUDIT_BUCKET_NAME }}
       TF_VAR_domain: ${{ vars.MARKIRO_DOMAIN }}
       TF_VAR_dns_zone_id: ${{ vars.YC_DNS_ZONE_ID }}
-      TF_VAR_lockbox_secret_ids: ${{ vars.YC_LOCKBOX_SECRET_IDS }}
       TF_VAR_notification_channel_id: ${{ vars.YC_NOTIFICATION_CHANNEL_ID }}
       TF_VAR_alert_ids: ${{ vars.YC_ALERT_IDS }}
     steps:
@@ -435,7 +434,6 @@ jobs:
       TF_VAR_audit_bucket_name: ${{ vars.YC_AUDIT_BUCKET_NAME }}
       TF_VAR_domain: ${{ vars.MARKIRO_DOMAIN }}
       TF_VAR_dns_zone_id: ${{ vars.YC_DNS_ZONE_ID }}
-      TF_VAR_lockbox_secret_ids: ${{ vars.YC_LOCKBOX_SECRET_IDS }}
       TF_VAR_notification_channel_id: ${{ vars.YC_NOTIFICATION_CHANNEL_ID }}
       TF_VAR_alert_ids: ${{ vars.YC_ALERT_IDS }}
     steps:

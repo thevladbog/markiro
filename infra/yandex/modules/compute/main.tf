@@ -131,9 +131,11 @@ resource "yandex_compute_instance" "runner" {
   }
 }
 
-resource "yandex_compute_instance_iam_binding" "runner_operator" {
+resource "yandex_compute_instance_iam_binding" "runner_editor" {
   instance_id = yandex_compute_instance.runner.id
-  role        = "compute.operator"
+  # Runner metadata updates and self-deletion require compute.editor in the
+  # provider API. Instance scope prevents either identity managing other VMs.
+  role = "compute.editor"
   members = [
     "serviceAccount:${var.deployment_controller_service_account_id}",
     "serviceAccount:${var.runner_service_account_id}",
@@ -152,13 +154,10 @@ resource "yandex_compute_instance_iam_binding" "runner_app_os_login" {
   members     = ["serviceAccount:${var.runner_service_account_id}"]
 }
 
-# Application Load Balancer does not expose a load-balancer-level IAM binding in
-# yandex-cloud/yandex 0.215.0. Folder scope is therefore the narrowest
-# provider-supported scope for the read-only target-state permission.
-resource "yandex_resourcemanager_folder_iam_member" "runner_alb_viewer" {
-  folder_id = var.folder_id
-  role      = "alb.viewer"
-  member    = "serviceAccount:${var.runner_service_account_id}"
+resource "yandex_compute_instance_iam_binding" "runner_app_viewer" {
+  instance_id = yandex_compute_instance.app.id
+  role        = "compute.viewer"
+  members     = ["serviceAccount:${var.runner_service_account_id}"]
 }
 
 resource "yandex_alb_target_group" "app" {

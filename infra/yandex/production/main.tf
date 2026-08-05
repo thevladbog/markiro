@@ -39,7 +39,6 @@ module "compute" {
   runtime_secret_id                        = var.runtime_secret_id
   runner_service_account_id                = var.runner_service_account_id
   deployment_controller_service_account_id = var.deployment_controller_service_account_id
-  runner_registration_secret_id            = var.runner_registration_secret_id
   app_subnet_id                            = module.network.app_subnet_id
   management_subnet_id                     = module.network.management_subnet_id
   app_security_group_id                    = module.network.security_group_ids.app
@@ -103,16 +102,20 @@ module "observability" {
   state_bucket_name        = var.state_bucket_name
   media_bucket_name        = module.object_storage.media_bucket_name
   audit_bucket_name        = module.object_storage.audit_bucket_name
-  lockbox_secret_ids       = var.lockbox_secret_ids
-  load_balancer_id         = module.ingress.load_balancer_id
-  backend_group_id         = module.ingress.backend_group_id
-  security_profile_id      = module.ingress.security_profile_id
-  rate_limiter_profile_id  = module.ingress.rate_limiter_profile_id
-  app_instance_id          = module.compute.app_instance_id
-  runner_instance_id       = module.compute.runner_instance_id
-  postgres_cluster_id      = module.postgres.cluster_id
-  certificate_id           = module.ingress.certificate_id
-  notification_channel_id  = var.notification_channel_id
-  alert_ids                = var.alert_ids
-  labels                   = local.labels
+  lockbox_secret_ids = toset([
+    var.runtime_secret_id,
+    var.registry_secret_id,
+    var.runner_registration_secret_id,
+  ])
+  load_balancer_id        = module.ingress.load_balancer_id
+  backend_group_id        = module.ingress.backend_group_id
+  security_profile_id     = module.ingress.security_profile_id
+  rate_limiter_profile_id = module.ingress.rate_limiter_profile_id
+  app_instance_id         = module.compute.app_instance_id
+  runner_instance_id      = module.compute.runner_instance_id
+  postgres_cluster_id     = module.postgres.cluster_id
+  certificate_id          = module.ingress.certificate_id
+  notification_channel_id = var.notification_channel_id
+  alert_ids               = var.alert_ids
+  labels                  = local.labels
 }

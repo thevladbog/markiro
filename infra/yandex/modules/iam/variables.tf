@@ -21,14 +21,25 @@ variable "github_repository" {
   }
 }
 
-variable "github_environment" {
-  description = "Exact protected GitHub environment allowed by the workload credential."
+variable "github_controller_environment" {
+  description = "Exact protected GitHub environment allowed to control the deployment runner."
   type        = string
   nullable    = false
 
   validation {
-    condition     = var.github_environment == "production"
-    error_message = "github_environment must be exactly production."
+    condition     = var.github_controller_environment == "production-controller"
+    error_message = "github_controller_environment must be exactly production-controller."
+  }
+}
+
+variable "github_cleanup_environment" {
+  description = "Exact protected GitHub environment allowed to clean up the deployment runner."
+  type        = string
+  nullable    = false
+
+  validation {
+    condition     = var.github_cleanup_environment == "production-cleanup"
+    error_message = "github_cleanup_environment must be exactly production-cleanup."
   }
 }
 
@@ -55,6 +66,12 @@ variable "runtime_secret_id" {
   nullable    = false
 }
 
+variable "registry_secret_id" {
+  description = "Lockbox registry container readable only by the runner service account."
+  type        = string
+  nullable    = false
+}
+
 variable "state_backend_secret_id" {
   description = "Lockbox state-backend container readable only by Terraform automation."
   type        = string
@@ -62,7 +79,7 @@ variable "state_backend_secret_id" {
 }
 
 variable "runner_registration_secret_id" {
-  description = "Lockbox runner-registration container readable only by the runner."
+  description = "Lockbox runner-registration container readable only by the deployment controller."
   type        = string
   nullable    = false
 }

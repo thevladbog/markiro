@@ -168,8 +168,10 @@ subjects on the shared federation:
   attests the completed cluster apply, exact owner creation, and runtime
   Lockbox write before the database plan is created.
 
-Configure `github_infrastructure_environment = "production-infrastructure"`
-when bootstrapping. In GitHub, protect the `production-infrastructure`
+Configure `github_controller_environment = "production-controller"`,
+`github_cleanup_environment = "production-cleanup"`, and
+`github_infrastructure_environment = "production-infrastructure"` when
+bootstrapping. In GitHub, protect the `production-infrastructure`
 environment with required reviewers and main-branch deployment restrictions.
 Configure a second protected `production-public-dns` environment with the
 separate reviewers authorized to approve public DNS cutover. The boolean
@@ -197,9 +199,10 @@ long-lived secrets. Required identity and state variables are
 `YC_CLOUD_ID`, `YC_FOLDER_ID`, `YC_OIDC_AUDIENCE`,
 `YC_TERRAFORM_SERVICE_ACCOUNT_ID`, `YC_STATE_BACKEND_SECRET_ID`, and
 `YC_STATE_BUCKET_NAME`. It also supplies the non-secret `YC_*`/`MARKIRO_DOMAIN`
-values mapped to the production root's `TF_VAR_*` inputs; collection variables
-such as `YC_LOCKBOX_SECRET_IDS` and `YC_ALERT_IDS` use valid Terraform
-expression syntax.
+values mapped to the production root's `TF_VAR_*` inputs; the `YC_ALERT_IDS`
+collection uses valid Terraform expression syntax. Audit Trails derives its
+exact Lockbox scope from the three distinct runtime, registry, and runner
+registration secret inputs rather than accepting a separate list.
 
 On a trusted infrastructure run, the job requests a GitHub OIDC token for the configured
 audience, exchanges it for a short-lived Yandex IAM token, and reads only the

@@ -62,17 +62,6 @@ variable "deployment_controller_service_account_id" {
   nullable    = false
 }
 
-variable "runner_registration_secret_id" {
-  description = "Runner-only Lockbox secret containing the out-of-band GitHub runner admin token."
-  type        = string
-  nullable    = false
-
-  validation {
-    condition     = length(trimspace(var.runner_registration_secret_id)) > 0
-    error_message = "runner_registration_secret_id must not be empty."
-  }
-}
-
 variable "app_subnet_id" {
   description = "Private application subnet ID."
   type        = string

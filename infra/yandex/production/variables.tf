@@ -84,11 +84,8 @@ variable "runtime_secret_id" {
   nullable    = false
 
   validation {
-    condition = length(trimspace(var.runtime_secret_id)) > 0 && contains(
-      var.lockbox_secret_ids,
-      var.runtime_secret_id,
-    )
-    error_message = "runtime_secret_id must be a nonblank audited Lockbox secret ID."
+    condition     = length(trimspace(var.runtime_secret_id)) > 0
+    error_message = "runtime_secret_id must be a nonblank Lockbox secret ID."
   }
 }
 
@@ -98,11 +95,8 @@ variable "registry_secret_id" {
   nullable    = false
 
   validation {
-    condition = length(trimspace(var.registry_secret_id)) > 0 && var.registry_secret_id != var.runtime_secret_id && contains(
-      var.lockbox_secret_ids,
-      var.registry_secret_id,
-    )
-    error_message = "registry_secret_id must be a distinct nonblank audited Lockbox secret ID."
+    condition     = length(trimspace(var.registry_secret_id)) > 0 && var.registry_secret_id != var.runtime_secret_id
+    error_message = "registry_secret_id must be a distinct nonblank Lockbox secret ID."
   }
 }
 
@@ -124,11 +118,11 @@ variable "runner_registration_secret_id" {
   nullable    = false
 
   validation {
-    condition = length(trimspace(var.runner_registration_secret_id)) > 0 && contains(
-      var.lockbox_secret_ids,
+    condition = length(trimspace(var.runner_registration_secret_id)) > 0 && !contains(
+      [var.runtime_secret_id, var.registry_secret_id],
       var.runner_registration_secret_id,
     )
-    error_message = "runner_registration_secret_id must be a nonblank audited Lockbox secret ID."
+    error_message = "runner_registration_secret_id must be distinct from the runtime and registry Lockbox secret IDs."
   }
 }
 
@@ -221,17 +215,6 @@ variable "public_dns_enabled" {
   type        = bool
   default     = false
   nullable    = false
-}
-
-variable "lockbox_secret_ids" {
-  description = "Exact production Lockbox secret IDs whose payload access is audited."
-  type        = set(string)
-  nullable    = false
-
-  validation {
-    condition     = length(var.lockbox_secret_ids) > 0 && alltrue([for secret_id in var.lockbox_secret_ids : length(trimspace(secret_id)) > 0])
-    error_message = "lockbox_secret_ids must contain at least one nonblank secret ID."
-  }
 }
 
 variable "notification_channel_id" {
