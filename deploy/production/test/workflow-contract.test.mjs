@@ -10,6 +10,7 @@ const LOGIN = "docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1";
 const UPLOAD_ARTIFACT = "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a";
 const DOWNLOAD_ARTIFACT = "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c";
 const RELEASE_ARTIFACT_NAME = "markiro-production-images-${{ github.sha }}";
+const RELEASE_MANIFEST_ARTIFACT_NAME = "markiro-release-manifest-${{ github.sha }}";
 const RELEASE_ARTIFACT_OUTPUTS = {
   "verified-images-artifact-id": "${{ steps.verified-images-artifact.outputs.artifact-id }}",
 };
@@ -254,6 +255,35 @@ const PUSH_VERIFIED_IMAGES =
   'printf \'api_digest=%s\\n\' "$api_digest" >> "$GITHUB_OUTPUT"\n' +
   'printf \'edge_digest=%s\\n\' "$edge_digest" >> "$GITHUB_OUTPUT"\n';
 
+const RELEASE_TIME_STEP = {
+  name: "Record release timestamp",
+  id: "release-time",
+  run: `printf 'created_at=%s\\n' "$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')" >> "$GITHUB_OUTPUT"`,
+};
+
+const CREATE_RELEASE_MANIFEST_STEP = {
+  name: "Create trusted release manifest",
+  env: {
+    RELEASE_SHA: "${{ github.sha }}",
+    API_DIGEST: "${{ steps.published-images.outputs.api_digest }}",
+    EDGE_DIGEST: "${{ steps.published-images.outputs.edge_digest }}",
+    GITHUB_RUN_ID: "${{ github.run_id }}",
+    CREATED_AT: "${{ steps.release-time.outputs.created_at }}",
+  },
+  run: 'node deploy/production/release-manifest.mjs create "$RUNNER_TEMP/release-manifest.json"',
+};
+
+const UPLOAD_RELEASE_MANIFEST_STEP = {
+  name: "Upload trusted release manifest",
+  uses: UPLOAD_ARTIFACT,
+  with: {
+    name: RELEASE_MANIFEST_ARTIFACT_NAME,
+    path: "${{ runner.temp }}/release-manifest.json",
+    "retention-days": 90,
+    "if-no-files-found": "error",
+  },
+};
+
 const RELEASE_STEPS = [
   {
     name: "Download the verified production images",
@@ -282,6 +312,9 @@ const RELEASE_STEPS = [
     env: { RELEASE_SHA: "${{ github.sha }}" },
     run: PUSH_VERIFIED_IMAGES,
   },
+  RELEASE_TIME_STEP,
+  CREATE_RELEASE_MANIFEST_STEP,
+  UPLOAD_RELEASE_MANIFEST_STEP,
   {
     name: "Record trusted image digest evidence",
     env: {
@@ -521,7 +554,7 @@ test("CI structurally verifies the production bundle and secret-safe cleanup", a
   assertCiWorkflow(await source(".github/workflows/ci.yml"));
 });
 
-test("main publication structurally pushes SHA tags and records trusted digest evidence", async () => {
+test("main publication records a durable trusted release manifest after image publication", async () => {
   assertReleaseWorkflow(
     await source(".github/workflows/release-images.yml"),
     await source(".github/workflows/ci.yml"),
@@ -686,6 +719,15 @@ test("release contract rejects verification, artifact identity, publication, and
   const release = await source(".github/workflows/release-images.yml");
   const ci = await source(".github/workflows/ci.yml");
   const publishStep = "      - name: Publish the exact verified production images";
+  const createManifestStep =
+    "      - name: Create trusted release manifest\n" +
+    "        env:\n" +
+    "          RELEASE_SHA: ${{ github.sha }}\n" +
+    "          API_DIGEST: ${{ steps.published-images.outputs.api_digest }}\n" +
+    "          EDGE_DIGEST: ${{ steps.published-images.outputs.edge_digest }}\n" +
+    "          GITHUB_RUN_ID: ${{ github.run_id }}\n" +
+    "          CREATED_AT: ${{ steps.release-time.outputs.created_at }}\n" +
+    '        run: node deploy/production/release-manifest.mjs create "$RUNNER_TEMP/release-manifest.json"\n';
   const cleanupIf =
     "      - name: Remove production-bundle containers and volumes\n" + "        if: always()";
 
@@ -749,8 +791,14 @@ test("release contract rejects verification, artifact identity, publication, and
     },
     {
       name: "incorrect upload-artifact revision comment",
-      search: `${UPLOAD_ARTIFACT} # v7.0.1`,
-      replacement: `${UPLOAD_ARTIFACT} # v4.6.X`,
+      search:
+        `        uses: ${UPLOAD_ARTIFACT} # v7.0.1\n` +
+        "        with:\n" +
+        `          name: ${RELEASE_MANIFEST_ARTIFACT_NAME}`,
+      replacement:
+        `        uses: ${UPLOAD_ARTIFACT} # v4.6.X\n` +
+        "        with:\n" +
+        `          name: ${RELEASE_MANIFEST_ARTIFACT_NAME}`,
       expected: /missing v7\.0\.1 revision comment/,
     },
     {
@@ -785,9 +833,17 @@ test("release contract rejects verification, artifact identity, publication, and
     },
     {
       name: "artifact upload tolerates missing files",
-      search: "          if-no-files-found: error",
-      replacement: "          if-no-files-found: ignore",
-      expected: /unexpected Upload the verified production images step/,
+      search:
+        `          name: ${RELEASE_MANIFEST_ARTIFACT_NAME}\n` +
+        "          path: ${{ runner.temp }}/release-manifest.json\n" +
+        "          retention-days: 90\n" +
+        "          if-no-files-found: error",
+      replacement:
+        `          name: ${RELEASE_MANIFEST_ARTIFACT_NAME}\n` +
+        "          path: ${{ runner.temp }}/release-manifest.json\n" +
+        "          retention-days: 90\n" +
+        "          if-no-files-found: ignore",
+      expected: /unexpected Upload trusted release manifest step/,
     },
     {
       name: "download falls back to ambiguous name lookup",
@@ -860,6 +916,33 @@ test("release contract rejects verification, artifact identity, publication, and
       replacement: "      - name: Omit trusted image digest evidence\n",
       expected: /unexpected release publish steps/,
     },
+    {
+      name: "manifest uses a tag instead of the API repository digest",
+      search: createManifestStep,
+      replacement: createManifestStep.replace(
+        "          API_DIGEST: ${{ steps.published-images.outputs.api_digest }}\n",
+        "          API_DIGEST: ${{ github.sha }}\n",
+      ),
+      expected: /unexpected Create trusted release manifest step/,
+    },
   ])
     expectRejected((mutated) => assertReleaseWorkflow(mutated, ci), release, mutation);
+
+  const withoutManifest = replaceExactlyOnce(
+    release,
+    createManifestStep,
+    "",
+    "manifest move source removal",
+  );
+  const movedManifest = replaceExactlyOnce(
+    withoutManifest,
+    publishStep,
+    `${createManifestStep}${publishStep}`,
+    "manifest moved before image pushes",
+  );
+  assert.throws(
+    () => assertReleaseWorkflow(movedManifest, ci),
+    /unexpected release publish steps/,
+    "manifest creation must remain after both image pushes",
+  );
 });
