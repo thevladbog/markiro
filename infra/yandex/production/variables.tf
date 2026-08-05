@@ -83,3 +83,43 @@ variable "runner_service_account_id" {
   type        = string
   nullable    = false
 }
+
+variable "audit_service_account_id" {
+  description = "Bootstrap-created audit writer service-account ID."
+  type        = string
+  nullable    = false
+}
+
+variable "database_name" {
+  description = "PostgreSQL database and out-of-band owner identity name."
+  type        = string
+  nullable    = false
+
+  validation {
+    condition     = can(regex("^[a-z_][a-z0-9_]{0,62}$", var.database_name))
+    error_message = "database_name must be a lowercase PostgreSQL identifier no longer than 63 characters."
+  }
+}
+
+variable "database_disk_size_gb" {
+  description = "Allocated PostgreSQL SSD size in GiB."
+  type        = number
+  nullable    = false
+
+  validation {
+    condition     = var.database_disk_size_gb >= 50
+    error_message = "database_disk_size_gb must be at least 50 GiB."
+  }
+}
+
+variable "media_bucket_name" {
+  description = "Globally unique private bucket name for application media."
+  type        = string
+  nullable    = false
+}
+
+variable "audit_bucket_name" {
+  description = "Globally unique private bucket name for durable audit archives."
+  type        = string
+  nullable    = false
+}

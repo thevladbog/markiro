@@ -33,3 +33,28 @@ module "compute" {
   runner_security_group_id  = module.network.security_group_ids.runner
   labels                    = local.labels
 }
+
+module "postgres" {
+  source = "../modules/postgres"
+
+  folder_id              = var.folder_id
+  zone                   = var.zone
+  network_id             = module.network.network_id
+  data_subnet_id         = module.network.data_subnet_id
+  data_security_group_id = module.network.security_group_ids.data
+  kms_key_id             = var.kms_key_id
+  database_name          = var.database_name
+  database_disk_size_gb  = var.database_disk_size_gb
+  labels                 = local.labels
+}
+
+module "object_storage" {
+  source = "../modules/object-storage"
+
+  folder_id                = var.folder_id
+  kms_key_id               = var.kms_key_id
+  media_bucket_name        = var.media_bucket_name
+  audit_bucket_name        = var.audit_bucket_name
+  app_service_account_id   = var.app_service_account_id
+  audit_service_account_id = var.audit_service_account_id
+}

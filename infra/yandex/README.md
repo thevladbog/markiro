@@ -30,6 +30,25 @@ new production checkout explicitly:
 terraform -chdir=infra/yandex/production init -backend-config=backend.hcl
 ```
 
+## First PostgreSQL provisioning boundary
+
+Terraform creates the protected cluster and the database definition, but it
+never creates a PostgreSQL owner, password, static access key, or Lockbox
+secret payload. On the first deployment, use this controlled sequence after a
+reviewed plan:
+
+1. Apply only `module.postgres.yandex_mdb_postgresql_cluster.production`.
+2. Through the approved database administration surface, create the PostgreSQL
+   identity named exactly as `database_name`. Transfer its credential directly
+   to the pre-created runtime Lockbox container through the protected console
+   or approved secret broker; do not provide the credential to Terraform.
+3. Apply `module.postgres.yandex_mdb_postgresql_database.application`, then
+   return to normal reviewed production plans.
+
+This sequencing is only for first provisioning. It keeps the database owner
+credential out of Terraform configuration and state while satisfying the
+provider-required database `owner` binding.
+
 ## One-time bootstrap state migration
 
 The bootstrap operator uses an approved, encrypted administrative workstation.

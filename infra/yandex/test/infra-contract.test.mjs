@@ -538,6 +538,150 @@ async function privateNetworkAndComputeSources() {
   };
 }
 
+function assertProtectedManagedData({
+  postgres,
+  postgresOutputs,
+  postgresVariables,
+  storage,
+  storageOutputs,
+  storageVariables,
+  production,
+  productionOutputs,
+  productionVariables,
+}) {
+  const allHcl = [
+    postgres,
+    postgresOutputs,
+    postgresVariables,
+    storage,
+    storageOutputs,
+    storageVariables,
+    production,
+    productionOutputs,
+    productionVariables,
+  ].join("\n");
+
+  for (const moduleSource of [postgres, storage]) {
+    assert.match(
+      moduleSource,
+      /terraform\s*\{[\s\S]*?required_providers\s*\{[\s\S]*?yandex\s*=\s*\{[\s\S]*?source\s*=\s*"yandex-cloud\/yandex"[\s\S]*?version\s*=\s*"= 0\.215\.0"/,
+    );
+  }
+
+  const cluster = terraformResourceBlock(postgres, "yandex_mdb_postgresql_cluster", "production");
+  const database = terraformResourceBlock(
+    postgres,
+    "yandex_mdb_postgresql_database",
+    "application",
+  );
+  assert.match(cluster, /version\s*=\s*"17"/);
+  assert.match(cluster, /backup_retain_period_days\s*=\s*14/);
+  assert.match(cluster, /backup_window_start\s*\{/);
+  assert.match(cluster, /maintenance_window\s*\{/);
+  assert.equal(terraformNestedBlocks(cluster, "host").length, 1, "PostgreSQL must have one host");
+  assert.match(cluster, /host\s*\{[\s\S]*?subnet_id\s*=\s*var\.data_subnet_id/);
+  assert.match(cluster, /host\s*\{[\s\S]*?assign_public_ip\s*=\s*false/);
+  assert.doesNotMatch(cluster, /assign_public_ip\s*=\s*true/);
+  assert.match(cluster, /disk_encryption_key_id\s*=\s*var\.kms_key_id/);
+  assert.match(cluster, /lifecycle\s*\{[\s\S]*?prevent_destroy\s*=\s*true/);
+  assert.match(database, /owner\s*=\s*var\.database_name/);
+  assert.match(
+    postgresVariables,
+    /variable\s+"database_disk_size_gb"\s*\{[\s\S]*?condition\s*=\s*var\.database_disk_size_gb\s*>=\s*50/,
+  );
+
+  for (const bucketName of ["media", "audit"]) {
+    const bucket = terraformResourceBlock(storage, "yandex_storage_bucket", bucketName);
+    assert.match(bucket, /force_destroy\s*=\s*false/);
+    assert.match(bucket, /anonymous_access_flags\s*\{[\s\S]*?\bread\s*=\s*false/);
+    assert.match(bucket, /anonymous_access_flags\s*\{[\s\S]*?\blist\s*=\s*false/);
+    assert.match(bucket, /anonymous_access_flags\s*\{[\s\S]*?\bconfig_read\s*=\s*false/);
+    const versioning = terraformNestedBlocks(bucket, "versioning");
+    assert.equal(versioning.length, 1, `${bucketName} bucket must define versioning`);
+    assert.match(versioning[0], /enabled\s*=\s*true/);
+    assert.match(bucket, /lifecycle\s*\{[\s\S]*?prevent_destroy\s*=\s*true/);
+    assert.match(bucket, /kms_master_key_id\s*=\s*var\.kms_key_id/);
+    assert.match(bucket, /sse_algorithm\s*=\s*"aws:kms"/);
+  }
+
+  const media = terraformResourceBlock(storage, "yandex_storage_bucket", "media");
+  assert.match(media, /noncurrent_version_expiration\s*\{[\s\S]*?days\s*=\s*30/);
+  assert.match(media, /abort_incomplete_multipart_upload_days\s*=\s*7/);
+
+  const mediaAccess = terraformResourceBlock(
+    storage,
+    "yandex_storage_bucket_iam_binding",
+    "media_app",
+  );
+  assert.match(mediaAccess, /bucket\s*=\s*yandex_storage_bucket\.media\.bucket/);
+  assert.match(mediaAccess, /role\s*=\s*"storage\.editor"/);
+  assert.match(mediaAccess, /members\s*=\s*\["serviceAccount:\$\{var\.app_service_account_id\}"\]/);
+  const auditAccess = terraformResourceBlock(
+    storage,
+    "yandex_storage_bucket_iam_binding",
+    "audit_writer",
+  );
+  assert.match(auditAccess, /bucket\s*=\s*yandex_storage_bucket\.audit\.bucket/);
+  assert.match(auditAccess, /role\s*=\s*"storage\.uploader"/);
+  assert.match(
+    auditAccess,
+    /members\s*=\s*\["serviceAccount:\$\{var\.audit_service_account_id\}"\]/,
+  );
+
+  assert.match(production, /module\s+"postgres"\s*\{/);
+  assert.match(production, /module\s+"object_storage"\s*\{/);
+  for (const output of [
+    "postgres_cluster_id",
+    "postgres_database_id",
+    "postgres_fqdn",
+    "media_bucket_name",
+    "audit_bucket_name",
+  ]) {
+    assert.match(productionOutputs, new RegExp(`output\\s+"${output}"\\s*\\{`));
+  }
+  assert.doesNotMatch(productionOutputs, /password|access_key|secret/i);
+  assert.doesNotMatch(allHcl, /resource\s+"yandex_mdb_postgresql_user"/);
+  assert.doesNotMatch(allHcl, /resource\s+"yandex_iam_service_account_(?:static_)?access_key"/);
+  assert.doesNotMatch(allHcl, /resource\s+"yandex_lockbox_secret_version"/);
+  assert.doesNotMatch(allHcl, /\bpassword\s*=/i);
+}
+
+async function managedDataSources() {
+  const [
+    postgres,
+    postgresOutputs,
+    postgresVariables,
+    storage,
+    storageOutputs,
+    storageVariables,
+    production,
+    productionOutputs,
+    productionVariables,
+  ] = await Promise.all([
+    readRepositoryFile("infra/yandex/modules/postgres/main.tf"),
+    readRepositoryFile("infra/yandex/modules/postgres/outputs.tf"),
+    readRepositoryFile("infra/yandex/modules/postgres/variables.tf"),
+    readRepositoryFile("infra/yandex/modules/object-storage/main.tf"),
+    readRepositoryFile("infra/yandex/modules/object-storage/outputs.tf"),
+    readRepositoryFile("infra/yandex/modules/object-storage/variables.tf"),
+    readRepositoryFile("infra/yandex/production/main.tf"),
+    readRepositoryFile("infra/yandex/production/outputs.tf"),
+    readRepositoryFile("infra/yandex/production/variables.tf"),
+  ]);
+
+  return {
+    postgres,
+    postgresOutputs,
+    postgresVariables,
+    storage,
+    storageOutputs,
+    storageVariables,
+    production,
+    productionOutputs,
+    productionVariables,
+  };
+}
+
 function candidateRepositoryFiles(root = repositoryRoot) {
   return execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], {
     cwd: root,
@@ -641,6 +785,71 @@ test("bootstrap protects state, exact workload identity, secrets, and least priv
 
 test("production network and compute keep application and runner traffic private", async () => {
   assertPrivateNetworkAndCompute(await privateNetworkAndComputeSources());
+});
+
+test("production managed PostgreSQL and object storage protect durable data", async () => {
+  assertProtectedManagedData(await managedDataSources());
+});
+
+test("managed-data contract rejects unsafe PostgreSQL, buckets, access, and credentials", async () => {
+  const publicPostgres = await managedDataSources();
+  publicPostgres.postgres = replaceTerraformResource(
+    publicPostgres.postgres,
+    "yandex_mdb_postgresql_cluster",
+    "production",
+    (block) => block.replace(/assign_public_ip\s*=\s*false/, "assign_public_ip = true"),
+  );
+  assert.throws(() => assertProtectedManagedData(publicPostgres));
+
+  const shortRetention = await managedDataSources();
+  shortRetention.postgres = replaceTerraformResource(
+    shortRetention.postgres,
+    "yandex_mdb_postgresql_cluster",
+    "production",
+    (block) => block.replace(/backup_retain_period_days\s*=\s*14/, "backup_retain_period_days = 7"),
+  );
+  assert.throws(() => assertProtectedManagedData(shortRetention));
+
+  const publicBucket = await managedDataSources();
+  publicBucket.storage = replaceTerraformResource(
+    publicBucket.storage,
+    "yandex_storage_bucket",
+    "media",
+    (block) => block.replace(/read\s*=\s*false/, "read = true"),
+  );
+  assert.throws(() => assertProtectedManagedData(publicBucket));
+
+  const unversionedBucket = await managedDataSources();
+  unversionedBucket.storage = replaceTerraformResource(
+    unversionedBucket.storage,
+    "yandex_storage_bucket",
+    "media",
+    (block) =>
+      block.replace(
+        /versioning\s*\{\s*enabled\s*=\s*true\s*\}/,
+        "versioning {\n    enabled = false\n  }",
+      ),
+  );
+  assert.throws(() => assertProtectedManagedData(unversionedBucket));
+
+  const broadAppAccess = await managedDataSources();
+  broadAppAccess.storage = replaceTerraformResource(
+    broadAppAccess.storage,
+    "yandex_storage_bucket_iam_binding",
+    "media_app",
+    (block) => block.replace(/role\s*=\s*"storage\.editor"/, 'role = "editor"'),
+  );
+  assert.throws(() => assertProtectedManagedData(broadAppAccess));
+
+  const passwordResource = await managedDataSources();
+  passwordResource.postgres +=
+    '\nresource "yandex_mdb_postgresql_user" "unsafe" { password = "unsafe" }\n';
+  assert.throws(() => assertProtectedManagedData(passwordResource));
+
+  const staticKeyResource = await managedDataSources();
+  staticKeyResource.storage +=
+    '\nresource "yandex_iam_service_account_static_access_key" "unsafe" {}\n';
+  assert.throws(() => assertProtectedManagedData(staticKeyResource));
 });
 
 test("production private-compute contract rejects public NAT, CIDR SSH, public app traffic, and embedded credentials", async () => {
