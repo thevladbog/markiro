@@ -34,12 +34,18 @@ test("ALB target gate waits for the exact application target through transitiona
   const responses = [
     {
       targetStates: [
-        { target: { address: "10.20.0.7" }, status: { zoneStatuses: [{ status: "UNHEALTHY" }] } },
+        {
+          target: { ipAddress: "10.20.0.7" },
+          status: { zoneStatuses: [{ status: "UNHEALTHY" }] },
+        },
       ],
     },
     {
       targetStates: [
-        { target: { address: "10.20.0.7" }, status: { zoneStatuses: [{ status: "HEALTHY" }] } },
+        {
+          target: { ipAddress: "10.20.0.7" },
+          status: { zoneStatuses: [{ status: "HEALTHY" }] },
+        },
       ],
     },
   ];
@@ -69,7 +75,10 @@ test("ALB target gate rejects a stale healthy target and reports only a bounded 
       expectedAddress: "10.20.0.7",
       fetchTargetStates: async () => ({
         targetStates: [
-          { target: { address: "10.20.0.8" }, status: { zoneStatuses: [{ status: "HEALTHY" }] } },
+          {
+            target: { ipAddress: "10.20.0.8" },
+            status: { zoneStatuses: [{ status: "HEALTHY" }] },
+          },
         ],
       }),
       sleep: async (milliseconds) => {
@@ -84,6 +93,31 @@ test("ALB target gate rejects a stale healthy target and reports only a bounded 
   );
 });
 
+test("ALB target gate rejects the legacy-only address field", async () => {
+  let now = 0;
+  await assert.rejects(
+    waitForAlbTarget({
+      expectedAddress: "10.20.0.7",
+      fetchTargetStates: async () => ({
+        targetStates: [
+          {
+            target: { address: "10.20.0.7" },
+            status: { zoneStatuses: [{ status: "HEALTHY" }] },
+          },
+        ],
+      }),
+      sleep: async (milliseconds) => {
+        now += milliseconds;
+      },
+      monotonicNow: () => now,
+      timeoutMs: 100,
+      initialBackoffMs: 100,
+      maxBackoffMs: 100,
+    }),
+    /production ALB gate failed after 100ms \(last cause: expected target unavailable\)/,
+  );
+});
+
 test("ALB target gate abort-bounds malformed provider responses without exposing them", async () => {
   let now = 0;
   let signal;
@@ -92,7 +126,7 @@ test("ALB target gate abort-bounds malformed provider responses without exposing
       expectedAddress: "10.20.0.7",
       fetchTargetStates: async (options) => {
         signal = options.signal;
-        return { targetStates: [{ target: { address: "10.20.0.7" }, status: {} }] };
+        return { targetStates: [{ target: { ipAddress: "10.20.0.7" }, status: {} }] };
       },
       sleep: async (milliseconds) => {
         now += milliseconds;
@@ -367,7 +401,7 @@ function cliFixture({ candidate = CANDIDATE, failAt } = {}) {
         return response({
           targetStates: [
             {
-              target: { address: "10.20.0.7" },
+              target: { ipAddress: "10.20.0.7" },
               status: { zoneStatuses: [{ status: "HEALTHY" }] },
             },
           ],

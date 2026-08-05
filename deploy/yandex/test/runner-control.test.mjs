@@ -87,10 +87,22 @@ const CONTROLLER_GATE_ENVIRONMENT = {
   YC_BACKEND_GROUP_ID: "ds7backend123",
   YC_TARGET_GROUP_ID: "ds7target123",
 };
+const FIRST_CONTROLLER_GATE_ENVIRONMENT = {
+  ...CONTROLLER_GATE_ENVIRONMENT,
+  MARKIRO_DEPLOYMENT_PHASE: "first",
+};
 const APP_ADDRESS = "10.20.0.7";
 const HEALTHY_TARGET = {
-  target: { address: APP_ADDRESS, subnetId: "e2lsubnet123" },
-  status: { zoneStatuses: [{ status: "HEALTHY", zoneId: "ru-central1-a" }] },
+  target: { ipAddress: APP_ADDRESS, subnetId: "e2lsubnet123" },
+  status: {
+    zoneStatuses: [{ failedActiveHc: false, status: "HEALTHY", zoneId: "ru-central1-a" }],
+  },
+};
+const UNHEALTHY_TARGET = {
+  target: { ipAddress: APP_ADDRESS, subnetId: "e2lsubnet123" },
+  status: {
+    zoneStatuses: [{ failedActiveHc: true, status: "UNHEALTHY", zoneId: "ru-central1-a" }],
+  },
 };
 
 function controllerGateProvider({ app = {}, targetStates = [HEALTHY_TARGET] } = {}) {
@@ -142,22 +154,137 @@ test("repeat controller gate accepts exactly one healthy target for the validate
   assert.equal(provider.requests.length, 3);
 });
 
+test("first controller gate rejects a foreign target before host-key or JIT mutation can start", async () => {
+  const provider = controllerGateProvider({
+    targetStates: [
+      {
+        target: { ipAddress: "10.20.0.8", subnetId: "e2lsubnet123" },
+        status: {
+          zoneStatuses: [{ failedActiveHc: false, status: "HEALTHY", zoneId: "ru-central1-a" }],
+        },
+      },
+    ],
+  });
+
+  await assert.rejects(
+    runnerControl.verifyControllerGates("test-gate-token", {
+      environment: FIRST_CONTROLLER_GATE_ENVIRONMENT,
+      now: () => Date.parse("2026-08-05T10:00:00.000Z"),
+      request: provider.request,
+    }),
+    /production ALB target inventory failed/,
+  );
+  assert.equal(provider.requests.length, 3);
+});
+
+test("first controller gate accepts the exact target while it is UNHEALTHY before service start", async () => {
+  const provider = controllerGateProvider({ targetStates: [UNHEALTHY_TARGET] });
+
+  await runnerControl.verifyControllerGates("test-gate-token", {
+    environment: FIRST_CONTROLLER_GATE_ENVIRONMENT,
+    now: () => Date.parse("2026-08-05T10:00:00.000Z"),
+    request: provider.request,
+  });
+
+  assert.equal(provider.requests.length, 3);
+});
+
+test("first controller gate accepts the exact target while health checks are in TIMEOUT", async () => {
+  const timeoutTarget = {
+    ...UNHEALTHY_TARGET,
+    status: {
+      zoneStatuses: [{ failedActiveHc: false, status: "TIMEOUT", zoneId: "ru-central1-a" }],
+    },
+  };
+  const provider = controllerGateProvider({ targetStates: [timeoutTarget] });
+
+  await runnerControl.verifyControllerGates("test-gate-token", {
+    environment: FIRST_CONTROLLER_GATE_ENVIRONMENT,
+    now: () => Date.parse("2026-08-05T10:00:00.000Z"),
+    request: provider.request,
+  });
+
+  assert.equal(provider.requests.length, 3);
+});
+
+test("first controller gate rejects absent, duplicate, draining, and malformed exact-target states", async () => {
+  for (const [name, targetStates] of [
+    ["absent", []],
+    ["duplicate", [UNHEALTHY_TARGET, structuredClone(UNHEALTHY_TARGET)]],
+    [
+      "legacy-only address",
+      [{ ...UNHEALTHY_TARGET, target: { address: APP_ADDRESS, subnetId: "e2lsubnet123" } }],
+    ],
+    [
+      "draining",
+      [
+        {
+          ...UNHEALTHY_TARGET,
+          status: {
+            zoneStatuses: [{ failedActiveHc: false, status: "DRAINING", zoneId: "ru-central1-a" }],
+          },
+        },
+      ],
+    ],
+    ["missing zones", [{ ...UNHEALTHY_TARGET, status: {} }]],
+    ["empty zones", [{ ...UNHEALTHY_TARGET, status: { zoneStatuses: [] } }]],
+    [
+      "unknown status",
+      [
+        {
+          ...UNHEALTHY_TARGET,
+          status: { zoneStatuses: [{ status: "STARTING", zoneId: "ru-central1-a" }] },
+        },
+      ],
+    ],
+    [
+      "missing zone identity",
+      [
+        {
+          ...UNHEALTHY_TARGET,
+          status: { zoneStatuses: [{ status: "TIMEOUT" }] },
+        },
+      ],
+    ],
+    [
+      "malformed health-check flag",
+      [
+        {
+          ...UNHEALTHY_TARGET,
+          status: {
+            zoneStatuses: [{ failedActiveHc: "false", status: "TIMEOUT", zoneId: "ru-central1-a" }],
+          },
+        },
+      ],
+    ],
+  ]) {
+    const provider = controllerGateProvider({ targetStates });
+    await assert.rejects(
+      runnerControl.verifyControllerGates("test-gate-token", {
+        environment: FIRST_CONTROLLER_GATE_ENVIRONMENT,
+        now: () => Date.parse("2026-08-05T10:00:00.000Z"),
+        request: provider.request,
+      }),
+      /production ALB target inventory failed|production first ALB gate failed/,
+      name,
+    );
+  }
+});
+
 test("repeat controller gate rejects stale, absent, unhealthy, duplicate, unexpected, and malformed target inventories", async () => {
   const unrelatedHealthy = {
-    target: { address: "10.20.0.8", subnetId: "e2lsubnet123" },
-    status: { zoneStatuses: [{ status: "HEALTHY", zoneId: "ru-central1-a" }] },
-  };
-  const exactUnhealthy = {
-    ...HEALTHY_TARGET,
-    status: { zoneStatuses: [{ status: "UNHEALTHY", zoneId: "ru-central1-a" }] },
+    target: { ipAddress: "10.20.0.8", subnetId: "e2lsubnet123" },
+    status: {
+      zoneStatuses: [{ failedActiveHc: false, status: "HEALTHY", zoneId: "ru-central1-a" }],
+    },
   };
   for (const [name, targetStates] of [
-    ["unrelated healthy and exact unhealthy", [unrelatedHealthy, exactUnhealthy]],
+    ["unrelated healthy and exact unhealthy", [unrelatedHealthy, UNHEALTHY_TARGET]],
     ["exact absent", [unrelatedHealthy]],
-    ["exact unhealthy", [exactUnhealthy]],
+    ["exact unhealthy", [UNHEALTHY_TARGET]],
     ["duplicate exact", [HEALTHY_TARGET, structuredClone(HEALTHY_TARGET)]],
     ["unexpected extra", [HEALTHY_TARGET, unrelatedHealthy]],
-    ["malformed address", [{ ...HEALTHY_TARGET, target: { address: "999.20.0.7" } }]],
+    ["malformed address", [{ ...HEALTHY_TARGET, target: { ipAddress: "999.20.0.7" } }]],
     ["malformed status", [{ ...HEALTHY_TARGET, status: { zoneStatuses: [{}] } }]],
     ["malformed root", null],
   ]) {

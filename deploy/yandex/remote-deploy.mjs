@@ -39,7 +39,7 @@ function positiveMilliseconds(value, fallback) {
 }
 
 function targetAddress(targetState) {
-  const address = targetState?.target?.address;
+  const address = targetState?.target?.ipAddress;
   return typeof address === "string" && /^(?:\d{1,3}\.){3}\d{1,3}$/.test(address) ? address : null;
 }
 

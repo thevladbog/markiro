@@ -785,7 +785,24 @@ function assertProductionDeploymentWorkflow(
   assert.match(runnerControlSource, /await verifyControllerGates\(gateToken\)/);
   assert.match(runnerControlSource, /await authenticatedAppHostKeys\(gateToken\)/);
   assert.match(runnerControlSource, /const appAddress = privateAppIpv4\(app\)/);
-  assert.match(runnerControlSource, /requireSingleHealthyAlbTarget\(targets, appAddress\)/);
+  assert.match(runnerControlSource, /target\?\.target\?\.ipAddress/);
+  assert.match(remoteDeploySource, /targetState\?\.target\?\.ipAddress/);
+  assert.match(
+    runnerControlSource,
+    /const targetZones = requireSingleAlbTarget\(targets, appAddress\);\s+if \(phase === "repeat"\) requireHealthyAlbTarget\(targetZones\);/,
+  );
+  const controllerGate = runnerControlSource.slice(
+    runnerControlSource.indexOf("export async function verifyControllerGates"),
+    runnerControlSource.indexOf("async function authenticatedAppHostKeys"),
+  );
+  assert.ok(controllerGate.length > 0, "controller gate function must be inspectable");
+  assert.equal(
+    controllerGate
+      .slice(0, controllerGate.indexOf("const targetZones = requireSingleAlbTarget"))
+      .lastIndexOf('if (phase === "repeat")'),
+    -1,
+    "exact target inventory must be unconditional",
+  );
   assert.ok(
     runnerControlSource.indexOf("await verifyControllerGates(gateToken)") <
       runnerControlSource.indexOf("await authenticatedAppHostKeys(gateToken)"),
@@ -1035,14 +1052,30 @@ test("production deployment contract rejects trigger, label, cleanup, and gate m
       "controller ignores the authenticated app address",
     ],
     [
-      "requireSingleHealthyAlbTarget(targets, appAddress);",
+      "const targetZones = requireSingleAlbTarget(targets, appAddress);",
       "// exact target inventory gate omitted",
-      "controller accepts any healthy target",
+      "controller conditionally omits exact target inventory",
+    ],
+    [
+      'if (phase === "repeat") requireHealthyAlbTarget(targetZones);',
+      "requireHealthyAlbTarget(targetZones);",
+      "controller incorrectly requires first target health",
     ],
   ]) {
     const mutated = replaceExactlyOnce(controller, search, replacement, label);
     assert.throws(() => assertProductionDeploymentWorkflow(deployment, remote, mutated), label);
   }
+  const conditionallyCheckedInventory = replaceExactlyOnce(
+    controller,
+    '  const targetZones = requireSingleAlbTarget(targets, appAddress);\n  if (phase === "repeat") requireHealthyAlbTarget(targetZones);',
+    '  if (phase === "repeat") {\n    const targetZones = requireSingleAlbTarget(targets, appAddress);\n    if (phase === "repeat") requireHealthyAlbTarget(targetZones);\n  }',
+    "controller limits exact target inventory to repeats",
+  );
+  assert.throws(
+    () => assertProductionDeploymentWorkflow(deployment, remote, conditionallyCheckedInventory),
+    undefined,
+    "controller limits exact target inventory to repeats",
+  );
   const unverifiedCleanup = replaceExactlyOnce(
     controller,
     "await waitForRunnerCleanup(clients);",

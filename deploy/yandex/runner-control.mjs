@@ -518,22 +518,51 @@ function privateAppIpv4(app) {
   return address;
 }
 
-function requireSingleHealthyAlbTarget(payload, expectedAddress) {
+const ALB_ZONE_STATUSES = new Set([
+  "HEALTHY",
+  "PARTIALLY_HEALTHY",
+  "UNHEALTHY",
+  "DRAINING",
+  "TIMEOUT",
+]);
+const FIRST_ALB_ZONE_STATUSES = new Set(["HEALTHY", "PARTIALLY_HEALTHY", "UNHEALTHY", "TIMEOUT"]);
+
+function requireSingleAlbTarget(payload, expectedAddress) {
   if (!payload || !Array.isArray(payload.targetStates) || payload.targetStates.length !== 1)
     throw new Error("production ALB target inventory failed");
   const target = payload.targetStates[0];
-  if (target?.target?.address !== expectedAddress)
+  if (target?.target?.ipAddress !== expectedAddress)
     throw new Error("production ALB target inventory failed");
   const zones = target.status?.zoneStatuses;
   if (
     !Array.isArray(zones) ||
     zones.length === 0 ||
+    zones.length > 16 ||
     !zones.every(
       (zone) =>
-        zone && typeof zone === "object" && !Array.isArray(zone) && zone.status === "HEALTHY",
+        zone &&
+        typeof zone === "object" &&
+        !Array.isArray(zone) &&
+        typeof zone.zoneId === "string" &&
+        zone.zoneId.length > 0 &&
+        zone.zoneId.length <= 64 &&
+        zone.zoneId.trim() === zone.zoneId &&
+        ALB_ZONE_STATUSES.has(zone.status) &&
+        (zone.failedActiveHc === undefined || typeof zone.failedActiveHc === "boolean"),
     )
   )
+    throw new Error("production ALB target inventory failed");
+  return zones;
+}
+
+function requireHealthyAlbTarget(zones) {
+  if (!zones.every((zone) => zone.status === "HEALTHY"))
     throw new Error("production ALB gate failed");
+}
+
+function requireFirstAlbTargetStatus(zones) {
+  if (!zones.every((zone) => FIRST_ALB_ZONE_STATUSES.has(zone.status)))
+    throw new Error("production first ALB gate failed");
 }
 
 export async function verifyControllerGates(
@@ -567,9 +596,9 @@ export async function verifyControllerGates(
     `https://alb.api.cloud.yandex.net/apploadbalancer/v1/loadBalancers/${loadBalancerId}/targetStates/${backendGroupId}/${targetGroupId}`,
     headers,
   );
-  if (!Array.isArray(targets.targetStates))
-    throw new Error("production ALB target inventory failed");
-  if (phase === "repeat") requireSingleHealthyAlbTarget(targets, appAddress);
+  const targetZones = requireSingleAlbTarget(targets, appAddress);
+  if (phase === "repeat") requireHealthyAlbTarget(targetZones);
+  if (phase === "first") requireFirstAlbTargetStatus(targetZones);
 }
 
 async function authenticatedAppHostKeys(yandexToken) {
