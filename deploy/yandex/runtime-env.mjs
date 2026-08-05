@@ -171,6 +171,17 @@ function asMaterializationFailure() {
   return new Error("runtime environment materialization failed");
 }
 
+const CLI_FAILURE = "runtime environment materialization failed";
+const CLI_DURABILITY_WARNING = "runtime environment durability is indeterminate";
+
+function writeSanitizedLine(stderr, line) {
+  try {
+    stderr.write(`${line}\n`);
+  } catch {
+    // Logging failure cannot change the committed replacement outcome.
+  }
+}
+
 export async function materializeRuntimeEnv({
   destination = "/etc/markiro/production.env",
   clock = { timeout: AbortSignal.timeout },
@@ -203,11 +214,25 @@ export async function materializeRuntimeEnv({
   }
 }
 
-if (isMainModule(import.meta.url)) {
+export async function runCli({
+  environment = process.env,
+  materialize = materializeRuntimeEnv,
+  stderr = process.stderr,
+  ...dependencies
+} = {}) {
   try {
-    await materializeRuntimeEnv({ secretId: process.env.MARKIRO_RUNTIME_SECRET_ID });
+    await materialize({
+      ...dependencies,
+      onWarning: () => writeSanitizedLine(stderr, CLI_DURABILITY_WARNING),
+      secretId: environment.MARKIRO_RUNTIME_SECRET_ID,
+    });
+    return 0;
   } catch {
-    process.stderr.write("runtime environment materialization failed\n");
-    process.exitCode = 1;
+    writeSanitizedLine(stderr, CLI_FAILURE);
+    return 1;
   }
+}
+
+if (isMainModule(import.meta.url)) {
+  process.exitCode = await runCli();
 }

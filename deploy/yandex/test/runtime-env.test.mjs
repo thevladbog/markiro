@@ -9,6 +9,7 @@ import {
   environmentKeysFromExample,
   materializeRuntimeEnv,
   renderRuntimeEnvironment,
+  runCli,
 } from "../runtime-env.mjs";
 
 const INVENTORY = `# runtime inventory\nDATABASE_URL=\nSMTP_PASSWORD=\nS3_ENDPOINT=\n`;
@@ -290,6 +291,75 @@ test("directory fsync after rename keeps the new environment and reports only a 
   assert.deepEqual(warnings, ["runtime environment durability is indeterminate"]);
   assert.doesNotMatch(warnings[0], /\/etc\/markiro/);
   assert.equal(fs.files.has("/etc/markiro/.production.env.runtime.tmp"), false);
+});
+
+test("CLI emits one fixed durability warning after a committed rename and keeps success status", async () => {
+  const fs = fakeFilesystem();
+  fs.openDirectory = async () => ({
+    async sync() {
+      throw new Error("directory /etc/markiro could not sync");
+    },
+    async close() {},
+  });
+  const stderr = [];
+
+  const exitCode = await runCli({
+    environment: { MARKIRO_RUNTIME_SECRET_ID: "runtime-secret-id" },
+    fs,
+    inventoryText: INVENTORY,
+    fetchIamToken: async () => "iam-token",
+    fetchSecretPayload: async () =>
+      Object.entries(VALUES).map(([key, textValue]) => ({ key, textValue })),
+    stderr: { write: (line) => stderr.push(line) },
+    temporaryName: () => ".production.env.runtime.tmp",
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(stderr, ["runtime environment durability is indeterminate\n"]);
+  assert.deepEqual(fs.files.get("/etc/markiro/production.env"), {
+    mode: 0o600,
+    text:
+      "DATABASE_URL=postgres://markiro:password@db.example.test/markiro\n" +
+      "S3_ENDPOINT=https://storage.example.test\n" +
+      "SMTP_PASSWORD=mail-password\n",
+  });
+});
+
+test("CLI reports a fixed nonzero failure before rename without disclosing secret material", async () => {
+  const secretValue = "runtime-secret-value";
+  const fs = fakeFilesystem(
+    new Map([["/etc/markiro/production.env", { text: "DATABASE_URL=old\n", mode: 0o600 }]]),
+  );
+  const openFile = fs.open;
+  fs.open = async (...arguments_) => {
+    const file = await openFile(...arguments_);
+    return {
+      ...file,
+      async writeFile() {
+        throw new Error(`write failed: ${secretValue}`);
+      },
+    };
+  };
+  const stderr = [];
+
+  const exitCode = await runCli({
+    environment: { MARKIRO_RUNTIME_SECRET_ID: secretValue },
+    fs,
+    inventoryText: INVENTORY,
+    fetchIamToken: async () => "iam-token",
+    fetchSecretPayload: async () =>
+      Object.entries(VALUES).map(([key, textValue]) => ({ key, textValue })),
+    stderr: { write: (line) => stderr.push(line) },
+    temporaryName: () => ".production.env.runtime.tmp",
+  });
+
+  assert.equal(exitCode, 1);
+  assert.deepEqual(stderr, ["runtime environment materialization failed\n"]);
+  assert.doesNotMatch(stderr.join(""), new RegExp(secretValue));
+  assert.deepEqual(fs.files.get("/etc/markiro/production.env"), {
+    mode: 0o600,
+    text: "DATABASE_URL=old\n",
+  });
 });
 
 test("installed-layout helpers resolve their colocated inventory and preserve symlink-safe CLI detection", async (t) => {
