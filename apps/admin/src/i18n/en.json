@@ -137,14 +137,20 @@
     "counterparties": "Counterparties",
     "labels": "Labels",
     "pickup": "Self-pickup",
-    "employees": "Employees",
+    "employees": "Operators and employees",
     "kiosks": "Kiosks",
     "integrations": "Integrations",
-    "team": "Team",
+    "team": "Cabinet access",
     "settings": "Settings"
   },
   "shell": {
     "navLabel": "Main navigation",
+    "sections": {
+      "production": "Production",
+      "reference": "Reference data",
+      "equipment": "Equipment and exchange",
+      "organization": "Organization"
+    },
     "header": {
       "noOrgName": "No organization selected",
       "toggleTheme": "Toggle theme",
@@ -273,8 +279,67 @@
     },
     "dashboard": {
       "title": "Overview",
+      "loading": "Loading overview",
       "emptyTitle": "No data yet",
-      "emptyHint": "A summary of shifts and production will appear here once the first shift runs."
+      "emptyHint": "A summary of shifts and production will appear here once the first shift runs.",
+      "setup": {
+        "title": "Prepare the first shift",
+        "hint": "Three actions take a new cabinet to its first production run.",
+        "product": "Add a product and complete its required settings.",
+        "shift": "Plan a shift with its product, mode, and quantity.",
+        "launch": "Open the shift on a line station.",
+        "addProduct": "Add product",
+        "openCatalog": "Open catalog",
+        "planShift": "Plan shift",
+        "openShifts": "Open shifts"
+      },
+      "error": {
+        "title": "Could not load the overview",
+        "hint": "Some data is unavailable. Retry before making decisions from an incomplete summary.",
+        "retry": "Retry"
+      },
+      "summary": {
+        "label": "Summary",
+        "active": "Active shifts",
+        "planned": "Planned",
+        "products": "Ready products",
+        "conflicts": "Unreviewed conflicts"
+      },
+      "attention": {
+        "title": "Needs attention",
+        "conflicts_one": "{{count}} unreviewed conflict",
+        "conflicts_few": "{{count}} unreviewed conflicts",
+        "conflicts_many": "{{count}} unreviewed conflicts",
+        "conflicts_other": "{{count}} unreviewed conflicts",
+        "conflictsHint": "Review which scan must remain in the registry.",
+        "drafts_one": "{{count}} draft product",
+        "drafts_few": "{{count}} draft products",
+        "drafts_many": "{{count}} draft products",
+        "drafts_other": "{{count}} draft products",
+        "draftsHint": "Incomplete products cannot be used to start a shift."
+      },
+      "active": {
+        "title": "Shifts running now",
+        "product": "Product",
+        "line": "Line",
+        "mode": "Mode",
+        "plan": "Plan",
+        "started": "Opened",
+        "empty": "No shifts are active now.",
+        "openShifts": "Open shifts"
+      },
+      "planned": {
+        "title": "Upcoming shifts",
+        "empty": "No shifts are planned yet.",
+        "plan": "Plan shift",
+        "noDate": "Date not set"
+      },
+      "mode": {
+        "validation": "Validation only",
+        "aggregation": "Validation and aggregation"
+      },
+      "viewAll": "All shifts",
+      "notSpecified": "Not specified"
     },
     "catalog": {
       "title": "Product catalog",
