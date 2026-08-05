@@ -524,14 +524,20 @@ export async function prepareRelease(options, supplied = {}) {
   } catch (error) {
     if (candidate) {
       try {
-        if (switched && candidate.previousTag)
+        if (switched)
           await rollbackPreparedRelease(
             { ...options, candidate, environment, releaseDirectory },
             dependencies,
           );
         else await markPreparedReleaseFailed(releaseDirectory, candidate);
-      } catch {
+      } catch (recoveryError) {
         bestEffortLog(dependencies, "prepared release recovery failed");
+        if (switched)
+          throw new AggregateError(
+            [error, recoveryError],
+            error instanceof Error ? error.message : "deployment failed",
+            { cause: error },
+          );
       }
     }
     throw error;
@@ -548,7 +554,32 @@ export async function finalizePreparedRelease({ candidate, releaseDirectory }) {
 export async function rollbackPreparedRelease(options, supplied = {}) {
   const dependencies = deploymentDependencies(options, supplied);
   const candidate = await requirePendingRelease(options.releaseDirectory, options.candidate);
-  if (!candidate.previousTag) throw new Error("previous healthy release is unavailable");
+  if (!candidate.previousTag) {
+    const environment = { ...process.env, ...options.environment };
+    const compose = composeArgs(environment);
+    const recoveryErrors = [];
+    let failed;
+    try {
+      await mustRun(
+        dependencies,
+        "docker",
+        [...compose, "stop", "api", "edge"],
+        environment,
+        dependencies.timeouts.service,
+      );
+    } catch (error) {
+      recoveryErrors.push(error);
+    }
+    try {
+      failed = await markPreparedReleaseFailed(options.releaseDirectory, candidate);
+    } catch (error) {
+      recoveryErrors.push(error);
+    }
+    if (recoveryErrors.length)
+      throw new AggregateError(recoveryErrors, "first deployment recovery failed");
+    dependencies.log("first deployment stopped");
+    return failed;
+  }
   const previous = await healthyReleaseByTag(options.releaseDirectory, candidate.previousTag);
   const environment = {
     ...process.env,

@@ -88,7 +88,7 @@ runcmd:
       for host_key in /etc/ssh/ssh_host_ed25519_key.pub /etc/ssh/ssh_host_rsa_key.pub; do
         test -s "$${host_key}"
         read -r key_type key_value _ < "$${host_key}"
-        printf 'MARKIRO_SSH_HOST_KEY %s %s\n' "$${key_type}" "$${key_value}" > /dev/ttyS0
+        printf 'MARKIRO_SSH_HOST_KEY_V1 %s %s\n' "$${key_type}" "$${key_value}" > /dev/ttyS0
       done
   - systemctl enable docker.service
   - systemctl daemon-reload

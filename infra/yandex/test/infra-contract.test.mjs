@@ -1766,7 +1766,7 @@ test("deployment runner uses exact production federation, VM-scoped operator, an
   assert.match(cloudInit, /sha256sum --check --status/);
   assert.match(cloudInit, /markiro-runner\.service/);
   assert.doesNotMatch(cloudInit, /GITHUB_RUNNER_ADMIN_TOKEN\s*[:=]\s*[^$\s]/);
-  assert.match(appCloudInit, /MARKIRO_SSH_HOST_KEY.*\/dev\/ttyS0/);
+  assert.match(appCloudInit, /MARKIRO_SSH_HOST_KEY_V1.*\/dev\/ttyS0/);
   assert.match(appCloudInit, /ssh_host_(?:ed25519|rsa)_key\.pub/);
   assert.doesNotMatch(appCloudInit, /ssh_host_(?:ed25519|rsa)_key(?!\.pub)/);
   assert.match(cloudInit, /YC_VERSION=1\.23\.0/);
@@ -1797,7 +1797,7 @@ test("runner delivery bootstrap rejects mutable yc and unauthenticated SSH host-
     assert.match(runnerSource, /YC_SHA256=[0-9a-f]{64}/);
     assert.match(runnerSource, /sha256sum --check --status/);
     assert.match(runnerSource, /yc version --semantic/);
-    assert.match(appSource, /MARKIRO_SSH_HOST_KEY.*\/dev\/ttyS0/);
+    assert.match(appSource, /MARKIRO_SSH_HOST_KEY_V1.*\/dev\/ttyS0/);
     assert.match(remoteSource, /StrictHostKeyChecking=yes/);
     assert.doesNotMatch(remoteSource, /accept-new/);
   };
@@ -1807,6 +1807,12 @@ test("runner delivery bootstrap rejects mutable yc and unauthenticated SSH host-
     ["yc version", runner.replace("YC_VERSION=1.23.0", "YC_VERSION=latest"), app, remote],
     ["yc checksum", runner.replace(/YC_SHA256=[0-9a-f]{64}/, "YC_SHA256="), app, remote],
     ["host-key serial evidence", runner, app.replace("MARKIRO_SSH_HOST_KEY", "HOST_KEY"), remote],
+    [
+      "host-key marker version",
+      runner,
+      app.replace("MARKIRO_SSH_HOST_KEY_V1", "MARKIRO_SSH_HOST_KEY_V2"),
+      remote,
+    ],
     [
       "strict host checking",
       runner,

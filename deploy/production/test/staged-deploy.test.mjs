@@ -24,7 +24,7 @@ function legacyFileName(record) {
   return `${record.createdAt.replace(/[:.]/g, "-")}-${record.tag}.json`;
 }
 
-async function fixture({ failure } = {}) {
+async function fixture({ failure, withPrevious = true } = {}) {
   const releaseDirectory = await mkdtemp(join(tmpdir(), "markiro-staged-deploy-"));
   const previous = {
     tag: PREVIOUS_TAG,
@@ -34,9 +34,11 @@ async function fixture({ failure } = {}) {
     state: "healthy",
     createdAt: "2026-08-03T09:00:00.000Z",
   };
-  const previousPath = join(releaseDirectory, legacyFileName(previous));
-  await writeFile(previousPath, `${JSON.stringify(previous)}\n`, { mode: 0o600 });
-  await chmod(previousPath, 0o600);
+  if (withPrevious) {
+    const previousPath = join(releaseDirectory, legacyFileName(previous));
+    await writeFile(previousPath, `${JSON.stringify(previous)}\n`, { mode: 0o600 });
+    await chmod(previousPath, 0o600);
+  }
 
   const calls = [];
   const runner = {
@@ -160,6 +162,83 @@ test("rollback restores the exact previous digest pair without migrations and ve
     );
   }
   assert.equal(failed.state, "failed");
+  assert.equal(
+    (await records(releaseDirectory)).filter(({ name }) => name.endsWith(".failed.json")).length,
+    1,
+  );
+});
+
+test("first-deploy rollback stops both candidate services and terminalizes the candidate failed", async () => {
+  const { calls, dependencies, releaseDirectory } = await fixture({ withPrevious: false });
+  const candidate = await prepareRelease(
+    { environment: ENVIRONMENT, releaseDirectory, readinessAttempts: 1 },
+    dependencies,
+  );
+  const rollbackStart = calls.length;
+
+  const failed = await rollbackPreparedRelease(
+    { candidate, environment: ENVIRONMENT, releaseDirectory, readinessAttempts: 1 },
+    dependencies,
+  );
+
+  assert.equal(candidate.previousTag, null);
+  assert.deepEqual(
+    calls.slice(rollbackStart).map(({ args }) => args.slice(-3)),
+    [["stop", "api", "edge"]],
+  );
+  assert.equal(failed.state, "failed");
+  assert.equal(
+    (await records(releaseDirectory)).filter(({ name }) => name.endsWith(".failed.json")).length,
+    1,
+  );
+});
+
+test("first-deploy rollback records failed even when stopping the candidate fails", async () => {
+  const { calls, dependencies, releaseDirectory } = await fixture({
+    withPrevious: false,
+    failure: ({ args }) => args.includes("stop"),
+  });
+  const candidate = await prepareRelease(
+    { environment: ENVIRONMENT, releaseDirectory, readinessAttempts: 1 },
+    dependencies,
+  );
+
+  await assert.rejects(
+    rollbackPreparedRelease(
+      { candidate, environment: ENVIRONMENT, releaseDirectory, readinessAttempts: 1 },
+      dependencies,
+    ),
+    /first deployment recovery failed/,
+  );
+
+  assert.equal(calls.filter(({ args }) => args.includes("stop")).length, 1);
+  assert.equal(
+    (await records(releaseDirectory)).filter(({ name }) => name.endsWith(".failed.json")).length,
+    1,
+  );
+});
+
+test("first-deploy local switch failure surfaces stop cleanup while preserving the primary", async () => {
+  const { calls, dependencies, releaseDirectory } = await fixture({
+    withPrevious: false,
+    failure: ({ args }) => args.includes("stop") || (args.includes("up") && args.at(-1) === "edge"),
+  });
+
+  let error;
+  try {
+    await prepareRelease(
+      { environment: ENVIRONMENT, releaseDirectory, readinessAttempts: 1 },
+      dependencies,
+    );
+    assert.fail("deployment unexpectedly succeeded");
+  } catch (caught) {
+    error = caught;
+  }
+
+  assert.ok(error instanceof AggregateError);
+  assert.equal(error.errors.length, 2);
+  assert.equal(error.cause.message, "docker failed with exit 1");
+  assert.equal(calls.filter(({ args }) => args.includes("stop")).length, 1);
   assert.equal(
     (await records(releaseDirectory)).filter(({ name }) => name.endsWith(".failed.json")).length,
     1,

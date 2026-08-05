@@ -215,9 +215,11 @@ through the two-reviewer procedure in
 `docs/runbooks/saas-production-deploy.md`; mutable stable/latest paths are not
 allowed in cloud-init.
 
-Application cloud-init emits only public OpenSSH host keys to its serial output.
-The protected controller retrieves those records through the authenticated
-Compute serial-output API, and the private runner uses an exact private
-`known_hosts` file with strict host checking for the app's internal IP. Do not
-place SSH private host keys in Terraform, metadata, workflow outputs, or
+Application cloud-init emits only the versioned `MARKIRO_SSH_HOST_KEY_V1`
+OpenSSH public-key records to its serial output. The protected controller
+requires exactly one valid `ssh-ed25519` and one valid `ssh-rsa` payload,
+canonicalizes that pair, and retrieves it through the authenticated Compute
+serial-output API. The private runner revalidates the exact pair and uses a
+private `known_hosts` file with strict host checking for the app's internal IP.
+Do not place SSH private host keys in Terraform, metadata, workflow outputs, or
 deployment artifacts.

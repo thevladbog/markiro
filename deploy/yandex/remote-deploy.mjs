@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import process from "node:process";
 
 import { isMainModule } from "./cli-main.mjs";
+import { parseAuthenticatedHostKeys } from "./runner-control.mjs";
 
 const API_PREFIX = "ghcr.io/thevladbog/markiro-api@";
 const EDGE_PREFIX = "ghcr.io/thevladbog/markiro-edge@";
@@ -48,8 +49,12 @@ export async function deployRelease(dependencies, manifestText) {
     if (candidate)
       try {
         await dependencies.rollback(candidate);
-      } catch {
-        // The original deployment failure remains authoritative.
+      } catch (recoveryError) {
+        throw new AggregateError(
+          [error, recoveryError],
+          error instanceof Error ? error.message : "deployment failed",
+          { cause: error },
+        );
       }
     throw error;
   }
@@ -129,18 +134,7 @@ async function metadataIamToken(fetchImpl = fetch) {
 }
 
 function authenticatedKnownHosts(encodedKeys, address) {
-  const keys = Buffer.from(encodedKeys, "base64")
-    .toString("utf8")
-    .trim()
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-  if (
-    keys.length === 0 ||
-    new Set(keys).size !== keys.length ||
-    keys.some((key) => !/^ssh-(?:ed25519|rsa) [A-Za-z0-9+/]+={0,2}$/.test(key))
-  )
-    throw new Error("authenticated SSH host keys are invalid");
+  const keys = parseAuthenticatedHostKeys(encodedKeys);
   return `${keys.map((key) => `${address} ${key}`).join("\n")}\n`;
 }
 

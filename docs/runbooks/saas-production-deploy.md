@@ -93,11 +93,15 @@ uses only the app VM internal address, and transfers no SSH static key. Configur
 there must be no public address on either VM.
 
 The app VM emits only its OpenSSH public host keys as bounded
-`MARKIRO_SSH_HOST_KEY` records on the serial console during cloud-init. Before
-starting delivery, the controller reads that output through the authenticated
-Yandex Compute `serialPortOutput` API using the already-gated short-lived IAM
-token. It passes the validated public keys to the private runner, which writes an
-exact private `known_hosts` file for the app's internal IP and requires
+`MARKIRO_SSH_HOST_KEY_V1` records on the serial console during cloud-init. The
+contract requires exactly one structurally valid `ssh-ed25519` record and one
+structurally valid `ssh-rsa` record; unknown, duplicated, additional,
+unversioned, malformed, and marker-like lines fail closed. The controller
+canonicalizes the pair in that algorithm order. Before starting delivery, it
+reads the output through the authenticated Yandex Compute `serialPortOutput` API
+using the already-gated short-lived IAM token. It passes only the canonical pair
+to the private runner, which revalidates it, writes an exact private
+`known_hosts` file for the app's internal IP, and requires
 `StrictHostKeyChecking=yes`. `accept-new`, empty trust stores, and Terraform- or
 workflow-managed SSH private keys are prohibited.
 
@@ -116,7 +120,11 @@ external-smoke, or finalize failure invokes remote `rollback`, which validates
 the exact pending record, redeploys the exact previous healthy API and edge
 digest pair without another migration, and verifies both restored services
 locally before recording the candidate failed. Pending, healthy, and failed
-records are private, exclusive, and never overwritten. The
+records are private, exclusive, and never overwritten. On the first deployment,
+where no previous healthy pair exists, rollback explicitly stops both candidate
+services before terminalizing the exact candidate failed. A stop failure does
+not prevent the failed record attempt and is surfaced alongside the primary
+deployment failure. The
 GitHub-hosted `cleanup` job runs with `always()`, deregisters a stale runner when
 present, and stops the VM independently. Cleanup failures are alerted without
 replacing the primary deployment failure.

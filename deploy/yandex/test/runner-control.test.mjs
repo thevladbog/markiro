@@ -13,30 +13,60 @@ import {
 const DEPLOYMENT_ID = "deploy-123456789";
 const INSTANCE_ID = "fv4runner123";
 
-test("serial host-key parser accepts only unique cloud-init markers from authenticated output", () => {
-  const output = [
-    "ordinary boot output",
-    "MARKIRO_SSH_HOST_KEY ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixedKey",
-    "MARKIRO_SSH_HOST_KEY ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABFixedKey",
-  ].join("\n");
+function sshField(value) {
+  const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value, "utf8");
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(bytes.length);
+  return Buffer.concat([length, bytes]);
+}
+
+function publicKey(algorithm, seed = 1) {
+  const blob =
+    algorithm === "ssh-ed25519"
+      ? Buffer.concat([sshField(algorithm), sshField(Buffer.alloc(32, seed))])
+      : Buffer.concat([
+          sshField(algorithm),
+          sshField(Buffer.from([1, 0, 1])),
+          sshField(Buffer.alloc(64, seed)),
+        ]);
+  return `${algorithm} ${blob.toString("base64")}`;
+}
+
+const ED25519_KEY = publicKey("ssh-ed25519");
+const RSA_KEY = publicKey("ssh-rsa");
+
+function marker(key) {
+  return `MARKIRO_SSH_HOST_KEY_V1 ${key}`;
+}
+
+test("serial host-key parser requires the exact V1 pair and canonicalizes algorithm order", () => {
+  const output = ["ordinary boot output", marker(RSA_KEY), marker(ED25519_KEY)].join("\n");
 
   assert.equal(
     Buffer.from(parseSerialHostKeys(output), "base64").toString("utf8"),
-    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixedKey\nssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABFixedKey",
-  );
-  assert.throws(() => parseSerialHostKeys("boot complete"), /authenticated SSH host keys/);
-  assert.throws(
-    () =>
-      parseSerialHostKeys(
-        `${output}\nMARKIRO_SSH_HOST_KEY ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixedKey`,
-      ),
-    /authenticated SSH host keys/,
-  );
-  assert.throws(
-    () => parseSerialHostKeys("MARKIRO_SSH_HOST_KEY ssh-ed25519 invalid key"),
-    /authenticated SSH host keys/,
+    `${ED25519_KEY}\n${RSA_KEY}`,
   );
 });
+
+for (const [name, output] of [
+  ["missing markers", "boot complete"],
+  [
+    "extra third marker",
+    `${marker(ED25519_KEY)}\n${marker(RSA_KEY)}\n${marker(publicKey("ssh-ed25519", 2))}`,
+  ],
+  [
+    "distinct duplicate algorithm",
+    `${marker(publicKey("ssh-ed25519", 2))}\n${marker(ED25519_KEY)}`,
+  ],
+  ["unknown algorithm", `${marker(ED25519_KEY)}\nMARKIRO_SSH_HOST_KEY_V1 ssh-dss AAAA`],
+  ["malformed base64", `${marker(ED25519_KEY)}\nMARKIRO_SSH_HOST_KEY_V1 ssh-rsa !!!!`],
+  ["malformed SSH payload", `${marker(ED25519_KEY)}\nMARKIRO_SSH_HOST_KEY_V1 ssh-rsa AA==`],
+  ["old unversioned marker", `${marker(ED25519_KEY)}\nMARKIRO_SSH_HOST_KEY ${RSA_KEY}`],
+  ["marker-like prefix noise", `${marker(ED25519_KEY)}\nprefix ${marker(RSA_KEY)}`],
+])
+  test(`serial host-key parser rejects ${name}`, () => {
+    assert.throws(() => parseSerialHostKeys(output), /authenticated SSH host keys/);
+  });
 
 function fixture({ instanceStates = ["STOPPED", "RUNNING"], runners = [] } = {}) {
   const calls = [];
