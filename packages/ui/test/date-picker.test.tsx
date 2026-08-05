@@ -3,6 +3,7 @@ import { userEvent } from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { DatePicker } from "../src/components/index.js";
+import { getEffectivePopoverOpen } from "../src/components/DatePicker.js";
 
 afterEach(() => {
   cleanup();
@@ -18,6 +19,12 @@ beforeAll(() => {
 });
 
 describe("DatePicker", () => {
+  it("derives a closed effective popover state whenever disabled", () => {
+    expect(getEffectivePopoverOpen(true, true)).toBe(false);
+    expect(getEffectivePopoverOpen(false, true)).toBe(false);
+    expect(getEffectivePopoverOpen(true, false)).toBe(true);
+  });
+
   it("selects a Russian calendar day and emits an ISO date", async () => {
     const user = userEvent.setup();
     const onValueChange = vi.fn();

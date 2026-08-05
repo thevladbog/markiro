@@ -119,6 +119,10 @@ function moveMonth(month: Date, amount: number) {
   return createLocalDate(month.getFullYear(), month.getMonth() + amount, 1);
 }
 
+export function getEffectivePopoverOpen(open: boolean, disabled: boolean) {
+  return disabled ? false : open;
+}
+
 export function DatePicker({
   value,
   onValueChange,
@@ -176,7 +180,7 @@ export function DatePicker({
         </label>
       )}
       <RadixPopover.Root
-        open={open}
+        open={getEffectivePopoverOpen(open, disabled)}
         onOpenChange={(nextOpen) => setOpen(disabled ? false : nextOpen)}
       >
         <RadixPopover.Trigger asChild>
