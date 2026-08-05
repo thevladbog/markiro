@@ -1,0 +1,99 @@
+terraform {
+  required_providers {
+    yandex = {
+      source  = "yandex-cloud/yandex"
+      version = "= 0.215.0"
+    }
+  }
+}
+
+data "yandex_compute_image" "ubuntu_lts" {
+  family = var.ubuntu_lts_image_family
+}
+
+resource "yandex_compute_instance" "app" {
+  name                      = "markiro-production-app"
+  hostname                  = "markiro-app"
+  folder_id                 = var.folder_id
+  zone                      = var.zone
+  platform_id               = "standard-v3"
+  service_account_id        = var.app_service_account_id
+  allow_stopping_for_update = true
+  labels                    = var.labels
+
+  resources {
+    cores         = 4
+    memory        = 8
+    core_fraction = 100
+  }
+
+  boot_disk {
+    initialize_params {
+      image_id   = data.yandex_compute_image.ubuntu_lts.id
+      type       = "network-ssd"
+      size       = 50
+      kms_key_id = var.kms_key_id
+    }
+  }
+
+  network_interface {
+    subnet_id          = var.app_subnet_id
+    security_group_ids = [var.app_security_group_id]
+    nat                = false
+  }
+
+  metadata = {
+    enable-oslogin     = true
+    serial-port-enable = false
+    user-data          = templatefile("${path.module}/cloud-init-app.yaml.tftpl", {})
+  }
+}
+
+resource "yandex_compute_instance" "runner" {
+  name                      = "markiro-production-runner"
+  hostname                  = "markiro-runner"
+  folder_id                 = var.folder_id
+  zone                      = var.zone
+  platform_id               = "standard-v3"
+  service_account_id        = var.runner_service_account_id
+  allow_stopping_for_update = true
+  labels                    = var.labels
+
+  resources {
+    cores         = 2
+    memory        = 4
+    core_fraction = 100
+  }
+
+  boot_disk {
+    initialize_params {
+      image_id   = data.yandex_compute_image.ubuntu_lts.id
+      type       = "network-ssd"
+      size       = 30
+      kms_key_id = var.kms_key_id
+    }
+  }
+
+  network_interface {
+    subnet_id          = var.management_subnet_id
+    security_group_ids = [var.runner_security_group_id]
+    nat                = false
+  }
+
+  metadata = {
+    enable-oslogin     = true
+    serial-port-enable = false
+    user-data          = templatefile("${path.module}/cloud-init-runner.yaml.tftpl", {})
+  }
+}
+
+resource "yandex_alb_target_group" "app" {
+  name      = "markiro-production-app"
+  folder_id = var.folder_id
+  labels    = var.labels
+
+  target {
+    subnet_id  = var.app_subnet_id
+    ip_address = yandex_compute_instance.app.network_interface.0.ip_address
+  }
+}

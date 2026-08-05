@@ -1,0 +1,32 @@
+#cloud-config
+package_update: true
+packages:
+  - ca-certificates
+  - curl
+  - docker.io
+write_files:
+  - path: /etc/systemd/system/markiro-runner-jit.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Markiro just-in-time deployment runner
+      Wants=network-online.target
+      After=network-online.target
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/lib/markiro/runner-jit
+
+      [Install]
+      WantedBy=multi-user.target
+runcmd:
+  - install -d -m 0755 /usr/local/lib/markiro /var/lib/markiro
+  - systemctl daemon-reload
+  - systemctl enable markiro-runner-jit.service
+  - touch /var/lib/markiro/markiro-runner-ready
+power_state:
+  delay: now
+  mode: poweroff
+  message: Runner provisioning completed; controller starts it for a bounded job.
+  timeout: 30
+  condition: true

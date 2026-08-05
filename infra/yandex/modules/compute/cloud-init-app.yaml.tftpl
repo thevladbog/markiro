@@ -1,0 +1,10 @@
+#cloud-config
+package_update: true
+packages:
+  - ca-certificates
+  - curl
+  - docker.io
+runcmd:
+  - install -d -m 0755 /opt/markiro
+  - systemctl enable docker.service
+  - systemctl start docker.service

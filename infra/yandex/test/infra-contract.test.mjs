@@ -99,6 +99,27 @@ function terraformOutputBlock(source, name) {
   assert.fail(`unterminated output ${name}`);
 }
 
+function terraformNestedBlocks(source, name) {
+  const blocks = [];
+  const declaration = new RegExp(`\\b${name}\\s*\\{`, "g");
+
+  for (const match of source.matchAll(declaration)) {
+    const openingBrace = source.indexOf("{", match.index);
+    let depth = 0;
+
+    for (let index = openingBrace; index < source.length; index += 1) {
+      if (source[index] === "{") depth += 1;
+      if (source[index] === "}") depth -= 1;
+      if (depth === 0) {
+        blocks.push(source.slice(match.index, index + 1));
+        break;
+      }
+    }
+  }
+
+  return blocks;
+}
+
 function replaceTerraformResource(source, type, name, mutate) {
   const block = terraformResourceBlock(source, type, name);
   return source.replace(block, mutate(block));
@@ -285,6 +306,181 @@ async function bootstrapContractSources() {
   return { bootstrap, iam, outputs, variables };
 }
 
+function assertPrivateNetworkAndCompute({
+  network,
+  networkOutputs,
+  compute,
+  computeOutputs,
+  appCloudInit,
+  runnerCloudInit,
+  production,
+  productionOutputs,
+}) {
+  const securityGroups = ["alb", "app", "data", "runner"];
+
+  for (const moduleSource of [network, compute]) {
+    assert.match(
+      moduleSource,
+      /terraform\s*\{[\s\S]*?required_providers\s*\{[\s\S]*?yandex\s*=\s*\{[\s\S]*?source\s*=\s*"yandex-cloud\/yandex"[\s\S]*?version\s*=\s*"= 0\.215\.0"/,
+    );
+  }
+
+  assert.match(network, /resource\s+"yandex_vpc_network"\s+"production"\s*\{/);
+  for (const subnet of ["alb", "app", "data", "management"]) {
+    assert.match(network, new RegExp(`resource\\s+"yandex_vpc_subnet"\\s+"${subnet}"\\s*\\{`));
+  }
+  for (const securityGroup of securityGroups) {
+    assert.match(
+      network,
+      new RegExp(`resource\\s+"yandex_vpc_security_group"\\s+"${securityGroup}"\\s*\\{`),
+    );
+  }
+
+  assert.match(
+    network,
+    /resource\s+"yandex_vpc_gateway"\s+"nat"\s*\{[\s\S]*?shared_egress_gateway\s*\{/,
+  );
+  assert.match(
+    network,
+    /resource\s+"yandex_vpc_route_table"\s+"private_egress"\s*\{[\s\S]*?destination_prefix\s*=\s*"0\.0\.0\.0\/0"[\s\S]*?gateway_id\s*=\s*yandex_vpc_gateway\.nat\.id/,
+  );
+
+  const albSecurityGroup = terraformResourceBlock(network, "yandex_vpc_security_group", "alb");
+  assert.match(
+    albSecurityGroup,
+    /from_port\s*=\s*80[\s\S]*?v4_cidr_blocks\s*=\s*\["0\.0\.0\.0\/0"\]/,
+  );
+  assert.match(
+    albSecurityGroup,
+    /from_port\s*=\s*443[\s\S]*?v4_cidr_blocks\s*=\s*\["0\.0\.0\.0\/0"\]/,
+  );
+  for (const securityGroup of ["app", "data", "runner"]) {
+    for (const ingress of terraformNestedBlocks(
+      terraformResourceBlock(network, "yandex_vpc_security_group", securityGroup),
+      "ingress",
+    )) {
+      assert.doesNotMatch(
+        ingress,
+        /v4_cidr_blocks\s*=\s*\["0\.0\.0\.0\/0"\]/,
+        `${securityGroup} must not have public ingress`,
+      );
+    }
+  }
+
+  const appSecurityGroup = terraformResourceBlock(network, "yandex_vpc_security_group", "app");
+  assert.match(
+    appSecurityGroup,
+    /from_port\s*=\s*8080[\s\S]*?security_group_id\s*=\s*yandex_vpc_security_group\.alb\.id/,
+  );
+  assert.match(
+    appSecurityGroup,
+    /from_port\s*=\s*22[\s\S]*?security_group_id\s*=\s*yandex_vpc_security_group\.runner\.id/,
+  );
+  const dataSecurityGroup = terraformResourceBlock(network, "yandex_vpc_security_group", "data");
+  assert.match(
+    dataSecurityGroup,
+    /from_port\s*=\s*6432[\s\S]*?security_group_id\s*=\s*yandex_vpc_security_group\.app\.id/,
+  );
+  const appIngress = terraformNestedBlocks(appSecurityGroup, "ingress");
+  const sshIngress = appIngress.find((ingress) => /from_port\s*=\s*22/.test(ingress));
+  const appPortIngress = appIngress.find((ingress) => /from_port\s*=\s*8080/.test(ingress));
+  const dataIngress = terraformNestedBlocks(dataSecurityGroup, "ingress").find((ingress) =>
+    /from_port\s*=\s*6432/.test(ingress),
+  );
+  assert.ok(sshIngress, "app security group must define an SSH ingress rule");
+  assert.ok(appPortIngress, "app security group must define an application ingress rule");
+  assert.ok(dataIngress, "data security group must define a PostgreSQL ingress rule");
+  assert.doesNotMatch(sshIngress, /v4_cidr_blocks\s*=/);
+  assert.doesNotMatch(appPortIngress, /v4_cidr_blocks\s*=/);
+  assert.doesNotMatch(dataIngress, /v4_cidr_blocks\s*=/);
+
+  assert.match(
+    compute,
+    /data\s+"yandex_compute_image"\s+"ubuntu_lts"\s*\{[\s\S]*?family\s*=\s*var\.ubuntu_lts_image_family/,
+  );
+  for (const instance of ["app", "runner"]) {
+    const resource = terraformResourceBlock(compute, "yandex_compute_instance", instance);
+    assert.match(resource, /nat\s*=\s*false/);
+    assert.match(resource, /enable-oslogin\s*=\s*true/);
+    assert.match(resource, /serial-port-enable\s*=\s*false/);
+    assert.match(
+      resource,
+      /boot_disk\s*\{[\s\S]*?initialize_params\s*\{[\s\S]*?image_id\s*=\s*data\.yandex_compute_image\.ubuntu_lts\.id/,
+    );
+    assert.match(resource, /kms_key_id\s*=\s*var\.kms_key_id/);
+    assert.doesNotMatch(
+      resource,
+      /metadata\s*=\s*\{[\s\S]*?\b(?:github[_-]?(?:token|registration)|runtime[_-]?secret|secret|password|token)\s*=/i,
+      "instance metadata must not contain a runtime credential payload",
+    );
+  }
+  assert.doesNotMatch(compute, /nat\s*=\s*true/);
+  assert.match(
+    compute,
+    /resource\s+"yandex_alb_target_group"\s+"app"\s*\{[\s\S]*?ip_address\s*=\s*yandex_compute_instance\.app\.network_interface\.0\.ip_address/,
+  );
+
+  for (const [templateName, cloudInit] of [
+    ["app", appCloudInit],
+    ["runner", runnerCloudInit],
+  ]) {
+    assert.doesNotMatch(
+      cloudInit,
+      /^\s*(?:github[_-]?(?:token|registration)|runtime[_-]?secret|secret|password|token)\s*:\s*[^$\s]/im,
+      `${templateName} cloud-init must not embed a credential payload`,
+    );
+  }
+  assert.match(runnerCloudInit, /markiro-runner-jit\.service/);
+  assert.match(runnerCloudInit, /systemctl\s+enable\s+markiro-runner-jit\.service/);
+  assert.match(runnerCloudInit, /markiro-runner-ready/);
+  assert.match(runnerCloudInit, /power_state\s*:\s*[\s\S]*?mode\s*:\s*poweroff/);
+
+  assert.match(computeOutputs, /output\s+"app_private_ip"\s*\{/);
+  assert.match(computeOutputs, /output\s+"app_target_group_id"\s*\{/);
+  assert.match(computeOutputs, /output\s+"runner_instance_id"\s*\{/);
+  assert.doesNotMatch(computeOutputs, /nat_ip_address|public.*ip/i);
+  assert.match(networkOutputs, /output\s+"app_subnet_id"\s*\{/);
+  assert.match(production, /module\s+"network"\s*\{/);
+  assert.match(production, /module\s+"compute"\s*\{/);
+  assert.match(productionOutputs, /output\s+"app_private_ip"\s*\{/);
+  assert.match(productionOutputs, /output\s+"app_target_group_id"\s*\{/);
+  assert.match(productionOutputs, /output\s+"runner_instance_id"\s*\{/);
+  assert.doesNotMatch(productionOutputs, /nat_ip_address|public.*ip/i);
+}
+
+async function privateNetworkAndComputeSources() {
+  const [
+    network,
+    networkOutputs,
+    compute,
+    computeOutputs,
+    appCloudInit,
+    runnerCloudInit,
+    production,
+    productionOutputs,
+  ] = await Promise.all([
+    readRepositoryFile("infra/yandex/modules/network/main.tf"),
+    readRepositoryFile("infra/yandex/modules/network/outputs.tf"),
+    readRepositoryFile("infra/yandex/modules/compute/main.tf"),
+    readRepositoryFile("infra/yandex/modules/compute/outputs.tf"),
+    readRepositoryFile("infra/yandex/modules/compute/cloud-init-app.yaml.tftpl"),
+    readRepositoryFile("infra/yandex/modules/compute/cloud-init-runner.yaml.tftpl"),
+    readRepositoryFile("infra/yandex/production/main.tf"),
+    readRepositoryFile("infra/yandex/production/outputs.tf"),
+  ]);
+
+  return {
+    network,
+    networkOutputs,
+    compute,
+    computeOutputs,
+    appCloudInit,
+    runnerCloudInit,
+    production,
+    productionOutputs,
+  };
+}
+
 function candidateRepositoryFiles(root = repositoryRoot) {
   return execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], {
     cwd: root,
@@ -384,6 +580,61 @@ test("both roots use credential-free partial S3 backends", async () => {
 
 test("bootstrap protects state, exact workload identity, secrets, and least privilege", async () => {
   assertProtectedBootstrap(await bootstrapContractSources());
+});
+
+test("production network and compute keep application and runner traffic private", async () => {
+  assertPrivateNetworkAndCompute(await privateNetworkAndComputeSources());
+});
+
+test("production private-compute contract rejects public NAT, CIDR SSH, public app traffic, and embedded credentials", async () => {
+  const natEnabled = await privateNetworkAndComputeSources();
+  natEnabled.compute = replaceTerraformResource(
+    natEnabled.compute,
+    "yandex_compute_instance",
+    "app",
+    (block) => block.replace(/nat\s*=\s*false/, "nat = true"),
+  );
+  assert.throws(() => assertPrivateNetworkAndCompute(natEnabled));
+
+  const cidrSsh = await privateNetworkAndComputeSources();
+  cidrSsh.network = replaceTerraformResource(
+    cidrSsh.network,
+    "yandex_vpc_security_group",
+    "app",
+    (block) =>
+      block.replace(
+        "security_group_id = yandex_vpc_security_group.runner.id",
+        'v4_cidr_blocks  = ["10.0.0.0/8"]',
+      ),
+  );
+  assert.throws(() => assertPrivateNetworkAndCompute(cidrSsh));
+
+  const publicAppPort = await privateNetworkAndComputeSources();
+  publicAppPort.network = replaceTerraformResource(
+    publicAppPort.network,
+    "yandex_vpc_security_group",
+    "app",
+    (block) =>
+      block.replace(
+        "security_group_id = yandex_vpc_security_group.alb.id",
+        'v4_cidr_blocks  = ["0.0.0.0/0"]',
+      ),
+  );
+  assert.throws(() => assertPrivateNetworkAndCompute(publicAppPort));
+
+  const embeddedRunnerCredential = await privateNetworkAndComputeSources();
+  embeddedRunnerCredential.runnerCloudInit += "\ngithub_token: unsafe-value\n";
+  assert.throws(() => assertPrivateNetworkAndCompute(embeddedRunnerCredential));
+
+  const embeddedMetadataCredential = await privateNetworkAndComputeSources();
+  embeddedMetadataCredential.compute = replaceTerraformResource(
+    embeddedMetadataCredential.compute,
+    "yandex_compute_instance",
+    "app",
+    (block) =>
+      block.replace(/metadata\s*=\s*\{/, 'metadata = {\n    runtime_secret = "unsafe-value"'),
+  );
+  assert.throws(() => assertPrivateNetworkAndCompute(embeddedMetadataCredential));
 });
 
 test("bootstrap contract rejects a Terraform-managed static access key", async () => {
