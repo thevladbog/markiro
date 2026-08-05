@@ -75,13 +75,21 @@ function renderPage(access: AccessDocument = OPERATIONS_WRITE_ACCESS) {
 }
 
 async function chooseOption(
-  user: ReturnType<typeof userEvent.setup>,
+  _user: ReturnType<typeof userEvent.setup>,
   label: string,
   option: string,
 ) {
   const trigger = screen.getByRole("combobox", { name: label });
-  await user.click(trigger);
-  await user.click(await screen.findByRole("option", { name: option }));
+  fireEvent.pointerDown(trigger, {
+    button: 0,
+    ctrlKey: false,
+    pageX: 0,
+    pageY: 0,
+    pointerId: 1,
+    pointerType: "mouse",
+  });
+  const optionElement = screen.getByRole("option", { name: option });
+  fireEvent.click(optionElement);
   expect(trigger.textContent).toContain(option);
 }
 
