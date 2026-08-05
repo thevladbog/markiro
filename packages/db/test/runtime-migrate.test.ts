@@ -56,18 +56,15 @@ const migrationsFolderOnDisk = fileURLToPath(new URL("../migrations", import.met
 const runtimeMigrateModule = fileURLToPath(new URL("../src/runtime-migrate.ts", import.meta.url));
 
 const legacyStationMigrationFixture = String.raw`
-import { execFile as execFileCallback } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { promisify } from "node:util";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
 
-const execFile = promisify(execFileCallback);
 const databaseUrl = process.env.MARKIRO_LEGACY_FIXTURE_DATABASE_URL;
 const migrationsFolder = process.env.MARKIRO_LEGACY_FIXTURE_MIGRATIONS_FOLDER;
 const runtimeModule = process.env.MARKIRO_LEGACY_FIXTURE_RUNTIME_MODULE;
@@ -82,10 +79,22 @@ scratchUrl.pathname = "/" + databaseName;
 scratchUrl.search = "";
 const temporaryRoot = await mkdtemp(join(tmpdir(), "markiro-runtime-migrate-"));
 const legacyMigrationsFolder = join(temporaryRoot, "migrations");
+const maintenancePool = new pg.Pool({ connectionString: databaseUrl });
 let pool;
+let databaseCreated = false;
+let primaryError;
+let cleanupError;
+
+function quoteDatabaseIdentifier(identifier) {
+  if (!/^[a-z_][a-z0-9_]*$/.test(identifier)) {
+    throw new Error("Unsafe temporary database identifier");
+  }
+  return '"' + identifier + '"';
+}
 
 try {
-  await execFile("createdb", ["--maintenance-db=" + databaseUrl, databaseName]);
+  await maintenancePool.query("CREATE DATABASE " + quoteDatabaseIdentifier(databaseName));
+  databaseCreated = true;
   await cp(migrationsFolder, legacyMigrationsFolder, { recursive: true });
   await rm(join(legacyMigrationsFolder, "0029_loving_triathlon.sql"));
   await rm(join(legacyMigrationsFolder, "meta", "0029_snapshot.json"));
@@ -122,11 +131,41 @@ try {
     "SELECT d.id, d.api_key_id, d.enrolled_at, b.device_id FROM station_devices d JOIN sscc_blocks b ON b.tenant_id = d.tenant_id AND b.device_id = d.id WHERE d.id = $1",
     ["00000000-0000-0000-0000-000000000001"],
   );
-  process.stdout.write(JSON.stringify(result.rows[0]));
+  process.stdout.write(
+    JSON.stringify({
+      record: result.rows[0],
+      databaseUrlArguments: process.argv.filter((argument) => argument.includes(databaseUrl)),
+    }),
+  );
+} catch (error) {
+  primaryError = error;
+  throw error;
 } finally {
-  await pool?.end();
-  await rm(temporaryRoot, { recursive: true, force: true });
-  await execFile("dropdb", ["--maintenance-db=" + databaseUrl, databaseName]);
+  try {
+    await pool?.end();
+  } catch (error) {
+    cleanupError ??= error;
+  }
+  try {
+    await rm(temporaryRoot, { recursive: true, force: true });
+  } catch (error) {
+    cleanupError ??= error;
+  }
+  if (databaseCreated) {
+    try {
+      await maintenancePool.query("DROP DATABASE " + quoteDatabaseIdentifier(databaseName));
+    } catch (error) {
+      cleanupError ??= error;
+    }
+  }
+  try {
+    await maintenancePool.end();
+  } catch (error) {
+    cleanupError ??= error;
+  }
+  if (primaryError === undefined && cleanupError !== undefined) {
+    throw cleanupError;
+  }
 }
 `;
 
@@ -207,10 +246,13 @@ describe("runRuntimeMigrations", () => {
       );
 
       expect(JSON.parse(stdout)).toEqual({
-        id: "00000000-0000-0000-0000-000000000001",
-        api_key_id: "legacy-api-key",
-        enrolled_at: "2026-08-06T00:00:00.000Z",
-        device_id: "00000000-0000-0000-0000-000000000001",
+        record: {
+          id: "00000000-0000-0000-0000-000000000001",
+          api_key_id: "legacy-api-key",
+          enrolled_at: "2026-08-06T00:00:00.000Z",
+          device_id: "00000000-0000-0000-0000-000000000001",
+        },
+        databaseUrlArguments: [],
       });
     },
   );
