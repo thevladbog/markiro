@@ -101,7 +101,13 @@ test("journal sanitizer preserves benign structured-looking diagnostics", () => 
   const output = sanitizeJournal(
     [
       { unit: "markiro-deploy.service", message: "[INFO] deployment failed" },
+      { unit: "markiro-deploy.service", message: "[INFO] can't deploy" },
+      {
+        unit: "markiro-deploy.service",
+        message: "runner's retrying 'database': unavailable",
+      },
       { unit: "markiro-deploy.service", message: 'retrying "database": unavailable' },
+      { unit: "markiro-deploy.service", message: 'prefix "unmatched diagnostic' },
       {
         unit: "markiro-deploy.service",
         message: 'api-1 | {"status":"degraded"} after retry',
@@ -111,7 +117,10 @@ test("journal sanitizer preserves benign structured-looking diagnostics", () => 
   );
 
   assert.match(output, /\[INFO\] deployment failed/);
+  assert.match(output, /\[INFO\] can't deploy/);
+  assert.match(output, /runner's retrying 'database': unavailable/);
   assert.match(output, /retrying "database": unavailable/);
+  assert.match(output, /prefix "unmatched diagnostic/);
   assert.match(output, /api-1 \| \{"status":"degraded"\} after retry/);
   assert.doesNotMatch(output, /\[REDACTED\]/);
 });
@@ -255,6 +264,77 @@ test("journal sanitizer preserves a long escaped benign quoted key", () => {
 
   assert.match(output, /long-safe-diagnostic/);
   assert.doesNotMatch(output, /\[REDACTED\]/);
+});
+
+test("journal sanitizer recovers a sensitive key after an unmatched quote in an exact 777-byte line", () => {
+  const secret = "retained-malformed-secret";
+  const message = `prefix "broken ${"x".repeat(700)} {"token":"${secret}"}`;
+  const originalLine = `markiro-deploy.service ${message}\n`;
+
+  assert.equal(Buffer.byteLength(originalLine), 777);
+
+  const output = sanitizeJournal([{ unit: "markiro-deploy.service", message }]);
+
+  assert.equal(output, "markiro-deploy.service [REDACTED]\n");
+  assert.doesNotMatch(output, new RegExp(secret));
+  assert.equal(output.includes(message), false);
+});
+
+for (const [name, message, secret] of [
+  [
+    "short single quote prefix",
+    "prefix 'broken {'token':'single-malformed-secret'}",
+    "single-malformed-secret",
+  ],
+  ["attached single-quoted key", "prefix'token':'attached-secret'", "attached-secret"],
+  [
+    "multiple false quote starts",
+    String.raw`prefix "first "second "third {"to\u006ben":"multiple-false-start-secret"}`,
+    "multiple-false-start-secret",
+  ],
+  ["orphan closing quote", 'prefix token": "orphan-quote-secret"', "orphan-quote-secret"],
+])
+  test(`journal sanitizer recovers from ${name}`, () => {
+    const output = sanitizeJournal([{ unit: "markiro-deploy.service", message }]);
+
+    assert.equal(output, "markiro-deploy.service [REDACTED]\n");
+    assert.doesNotMatch(output, new RegExp(secret));
+    assert.equal(output.includes(message), false);
+  });
+
+test("journal sanitizer recovers an escaped sensitive key before UTF-8 truncation", () => {
+  const secret = "escaped-recovery-secret";
+  const message = String.raw`${"я".repeat(4)} prefix \"ignored "broken {"to\u006ben":"${secret}","tail":"${"x".repeat(100)}`;
+  const maxLineBytes = 96;
+  const retainedMessageBytes =
+    maxLineBytes - Buffer.byteLength("markiro-deploy.service ") - Buffer.byteLength("\n");
+  const secretEnd = message.indexOf(secret) + secret.length;
+  assert.equal(Buffer.byteLength(message.slice(0, secretEnd)), retainedMessageBytes);
+
+  const output = sanitizeJournal([{ unit: "markiro-deploy.service", message }], {
+    maxBytes: 128,
+    maxLineBytes,
+  });
+
+  assert.ok(Buffer.byteLength(output) <= maxLineBytes);
+  assert.equal(output, "markiro-deploy.service [REDACTED]\n");
+  assert.doesNotMatch(output, new RegExp(`${secret}|�`));
+  assert.equal(output.includes(message), false);
+});
+
+test("journal sanitizer remains bounded while recovering through many false quote starts", () => {
+  const secret = "false-start-performance-secret";
+  const message = `${'"broken '.repeat(7_999)}{"token":"${secret}"}`;
+  assert.ok(message.length < 64 * 1024);
+
+  const started = performance.now();
+  const output = sanitizeJournal([{ unit: "markiro-deploy.service", message }]);
+  const elapsedMs = performance.now() - started;
+
+  assert.ok(elapsedMs < 2_000, `sanitization exceeded its bounded budget: ${elapsedMs}ms`);
+  assert.equal(output, "markiro-deploy.service [REDACTED]\n");
+  assert.doesNotMatch(output, new RegExp(secret));
+  assert.equal(output.includes(message), false);
 });
 
 test("journal sanitizer remains bounded for large adversarial quoted input", () => {

@@ -144,51 +144,29 @@ function decodeQuotedKey(message, start, end, quote) {
   return hasUnpairedSurrogate(value) ? undefined : value;
 }
 
-function isAsciiWord(code) {
-  return (
-    (code >= 0x30 && code <= 0x39) ||
-    (code >= 0x41 && code <= 0x5a) ||
-    code === 0x5f ||
-    (code >= 0x61 && code <= 0x7a)
-  );
-}
-
 function scanQuotedKeys(message, quote) {
-  let index = 0;
-  while (index < message.length) {
-    if (message[index] !== quote) {
-      index += 1;
+  let previousQuote;
+  let backslashRun = 0;
+  // Retain every unescaped quote as the next possible opener. Each interval
+  // between adjacent quotes is decoded at most once, so recovery stays linear.
+  for (let index = 0; index < message.length; index += 1) {
+    if (message[index] === "\\") {
+      backslashRun += 1;
       continue;
     }
-    if (
-      quote === "'" &&
-      isAsciiWord(message.charCodeAt(index - 1)) &&
-      isAsciiWord(message.charCodeAt(index + 1))
-    ) {
-      index += 1;
-      continue;
-    }
+    const isUnescapedQuote = message[index] === quote && backslashRun % 2 === 0;
+    backslashRun = 0;
+    if (!isUnescapedQuote) continue;
 
-    const start = index + 1;
-    let end = start;
-    while (end < message.length) {
-      if (message[end] === "\\") {
-        end += 2;
-        continue;
-      }
-      if (message[end] === quote) break;
-      end += 1;
-    }
-    if (end >= message.length) return false;
-
-    let colon = end + 1;
+    let colon = index + 1;
     while (colon < message.length && (message[colon] === " " || message[colon] === "\t"))
       colon += 1;
     if (message[colon] === ":") {
-      const decodedKey = decodeQuotedKey(message, start, end, quote);
+      if (previousQuote === undefined) return true;
+      const decodedKey = decodeQuotedKey(message, previousQuote + 1, index, quote);
       if (decodedKey === undefined || SENSITIVE_KEY.test(decodedKey)) return true;
     }
-    index = end + 1;
+    previousQuote = index;
   }
   return false;
 }
