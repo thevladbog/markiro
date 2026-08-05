@@ -15,6 +15,8 @@ import {
   shifts,
   ssccBlocks,
   ssccCounters,
+  stationDevices,
+  stationPairingCodes,
 } from "../src/schema/platform.js";
 import { codes } from "../src/schema/codes.js";
 
@@ -85,6 +87,32 @@ describe("platform schema", () => {
     expect(getTableName(ref.foreignTable)).toBe("station_devices");
     expect(ref.columns.map((c) => c.name)).toEqual(["tenant_id", "device_id"]);
     expect(ref.foreignColumns.map((c) => c.name)).toEqual(["tenant_id", "id"]);
+  });
+
+  it("declares durable station pairing fields and tenant-scoped pairing constraints", () => {
+    expect(stationDevices.apiKeyId.notNull).toBe(false);
+    expect(stationDevices.lineId).toBeDefined();
+    expect(stationDevices.pairedAt).toBeDefined();
+    expect(stationDevices.revokedAt).toBeDefined();
+    expect(stationPairingCodes).toBeDefined();
+
+    const { foreignKeys } = getTableConfig(stationDevices);
+    const lineFk = foreignKeys.find((f) => f.getName() === "station_devices_tenant_line_fk");
+    expect(lineFk).toBeDefined();
+    const lineRef = lineFk!.reference();
+    expect(getTableName(lineRef.foreignTable)).toBe("lines");
+    expect(lineRef.columns.map((c) => c.name)).toEqual(["tenant_id", "line_id"]);
+    expect(lineRef.foreignColumns.map((c) => c.name)).toEqual(["tenant_id", "id"]);
+
+    const pairingConfig = getTableConfig(stationPairingCodes);
+    const deviceFk = pairingConfig.foreignKeys.find(
+      (f) => f.getName() === "station_pairing_codes_tenant_station_device_fk",
+    );
+    expect(deviceFk).toBeDefined();
+    const deviceRef = deviceFk!.reference();
+    expect(getTableName(deviceRef.foreignTable)).toBe("station_devices");
+    expect(deviceRef.columns.map((c) => c.name)).toEqual(["tenant_id", "station_device_id"]);
+    expect(deviceRef.foreignColumns.map((c) => c.name)).toEqual(["tenant_id", "id"]);
   });
 
   it("declares canonical raw storage and lowercase SHA-256 checks", () => {

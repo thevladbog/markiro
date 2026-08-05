@@ -325,11 +325,56 @@ export const stationDevices = pgTable(
     name: text("name").notNull(),
     // References better-auth's apikey.id (text). Not a composite tenant FK:
     // apikey is a Better Auth-managed table without a (tenant_id, id) unique.
-    apiKeyId: text("api_key_id").notNull(),
+    apiKeyId: text("api_key_id"),
+    lineId: uuid("line_id"),
     enrolledAt: timestamp("enrolled_at", { withTimezone: true }).notNull().defaultNow(),
+    pairedAt: timestamp("paired_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
   },
-  (t) => [unique("station_devices_tenant_id_uq").on(t.tenantId, t.id)],
+  (t) => [
+    unique("station_devices_tenant_id_uq").on(t.tenantId, t.id),
+    foreignKey({
+      name: "station_devices_tenant_line_fk",
+      columns: [t.tenantId, t.lineId],
+      foreignColumns: [lines.tenantId, lines.id],
+    }),
+  ],
+);
+
+/**
+ * Single-use station device pairing codes. Only the hash is stored; the
+ * plaintext is revealed once in the cabinet. `attempts` drives the per-code
+ * lockout.
+ */
+export const stationPairingCodes = pgTable(
+  "station_pairing_codes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    stationDeviceId: uuid("station_device_id").notNull(),
+    codeHash: text("code_hash").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    attempts: integer("attempts").notNull().default(0),
+    issuedByUserId: text("issued_by_user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("station_pairing_codes_tenant_id_uq").on(t.tenantId, t.id),
+    index("station_pairing_codes_hash_idx").on(t.codeHash),
+    foreignKey({
+      name: "station_pairing_codes_tenant_station_device_fk",
+      columns: [t.tenantId, t.stationDeviceId],
+      foreignColumns: [stationDevices.tenantId, stationDevices.id],
+    }),
+    uniqueIndex("station_pairing_codes_one_live_uq")
+      .on(t.tenantId, t.stationDeviceId)
+      .where(sql`used_at is null`),
+    uniqueIndex("station_pairing_codes_code_hash_live_uq")
+      .on(t.codeHash)
+      .where(sql`used_at is null`),
+  ],
 );
 
 /**

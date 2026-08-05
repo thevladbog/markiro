@@ -62,7 +62,9 @@ function resetHarness() {
   harness.pool.end.mockClear();
   harness.readFile.mockReset();
   harness.readFile.mockResolvedValue(
-    JSON.stringify({ entries: [{ tag: "0028_avatar-owner-integrity" }] }),
+    JSON.stringify({
+      entries: [{ tag: "0028_avatar-owner-integrity" }, { tag: "0029_loving_triathlon" }],
+    }),
   );
   harness.migration.mockImplementation(
     async (_db: unknown, config: { migrationsFolder: string }) => {
@@ -101,9 +103,16 @@ describe("runRuntimeMigrations", () => {
       connectionTimeoutMillis: 30_000,
     });
     expect(result).toEqual({
-      packaged: ["0028_avatar-owner-integrity"],
+      packaged: ["0028_avatar-owner-integrity", "0029_loving_triathlon"],
       completedAt: "2026-08-04T12:00:00.000Z",
     });
+  });
+
+  test("packages the additive station lifecycle migration for existing device records", async () => {
+    const result = await runRuntimeMigrations({ databaseUrl, migrationsFolder, log: vi.fn() });
+
+    expect(result.packaged).toContain("0029_loving_triathlon");
+    expect(harness.migration).toHaveBeenCalledWith(harness.db, { migrationsFolder });
   });
 
   test("releases the lock, client, and pool when migration fails", async () => {
@@ -177,6 +186,7 @@ describe("runRuntimeMigrations", () => {
     expect(logs).toEqual([
       "runtime migration started",
       "migration packaged: 0028_avatar-owner-integrity",
+      "migration packaged: 0029_loving_triathlon",
       "runtime migration failed",
     ]);
     expect(logs.join("\n")).not.toContain(databaseUrl);

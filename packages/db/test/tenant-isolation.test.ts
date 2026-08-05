@@ -3,7 +3,14 @@ import { inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb } from "../src/client.js";
 import { organization } from "../src/schema/auth.js";
-import { counterparties, products, shifts } from "../src/schema/platform.js";
+import {
+  counterparties,
+  lines,
+  products,
+  shifts,
+  stationDevices,
+  stationPairingCodes,
+} from "../src/schema/platform.js";
 
 // Postgres error codes: https://www.postgresql.org/docs/current/errcodes-appendix.html
 const FOREIGN_KEY_VIOLATION = "23503";
@@ -30,14 +37,23 @@ describe.skipIf(!url)("tenant isolation (composite FKs + tenant-scoped uniquenes
   const productIds: string[] = [];
   const shiftIds: string[] = [];
   const counterpartyIds: string[] = [];
+  const lineIds: string[] = [];
+  const stationDeviceIds: string[] = [];
 
   beforeAll(async () => {
     await db.insert(organization).values([orgA, orgB]);
   });
 
   afterAll(async () => {
-    // Clean up in FK order: shifts -> products/counterparties -> organization.
+    // Clean up in FK order: pairing codes -> devices -> lines/shifts -> products/counterparties -> organization.
+    if (stationDeviceIds.length) {
+      await db
+        .delete(stationPairingCodes)
+        .where(inArray(stationPairingCodes.stationDeviceId, stationDeviceIds));
+      await db.delete(stationDevices).where(inArray(stationDevices.id, stationDeviceIds));
+    }
     if (shiftIds.length) await db.delete(shifts).where(inArray(shifts.id, shiftIds));
+    if (lineIds.length) await db.delete(lines).where(inArray(lines.id, lineIds));
     if (productIds.length) await db.delete(products).where(inArray(products.id, productIds));
     if (counterpartyIds.length) {
       await db.delete(counterparties).where(inArray(counterparties.id, counterpartyIds));
@@ -125,5 +141,105 @@ describe.skipIf(!url)("tenant isolation (composite FKs + tenant-scoped uniquenes
 
     expect(productA!.gtin14).toBe(productB!.gtin14);
     expect(productA!.tenantId).not.toBe(productB!.tenantId);
+  });
+
+  it("allows a station without an API key to reference a line in its own tenant", async () => {
+    const [line] = await db
+      .insert(lines)
+      .values({ tenantId: orgA.id, name: "Line A" })
+      .returning();
+    lineIds.push(line!.id);
+
+    const [station] = await db
+      .insert(stationDevices)
+      .values({ tenantId: orgA.id, name: "Station A", lineId: line!.id })
+      .returning();
+    stationDeviceIds.push(station!.id);
+
+    expect(station).toMatchObject({
+      tenantId: orgA.id,
+      lineId: line!.id,
+      apiKeyId: null,
+    });
+  });
+
+  it("rejects a station line that belongs to another tenant", async () => {
+    const [foreignLine] = await db
+      .insert(lines)
+      .values({ tenantId: orgA.id, name: "Foreign line" })
+      .returning();
+    lineIds.push(foreignLine!.id);
+
+    await expect(
+      db.insert(stationDevices).values({
+        tenantId: orgB.id,
+        name: "Station B",
+        lineId: foreignLine!.id,
+      }),
+    ).rejects.toMatchObject({ cause: { code: FOREIGN_KEY_VIOLATION } });
+  });
+
+  it("rejects a station pairing code for a device of another tenant", async () => {
+    const [foreignStation] = await db
+      .insert(stationDevices)
+      .values({ tenantId: orgB.id, name: "Station B" })
+      .returning();
+    stationDeviceIds.push(foreignStation!.id);
+
+    await expect(
+      db.insert(stationPairingCodes).values({
+        tenantId: orgA.id,
+        stationDeviceId: foreignStation!.id,
+        codeHash: `hash-${randomUUID()}`,
+        expiresAt: new Date(Date.now() + 60_000),
+        issuedByUserId: "user-a",
+      }),
+    ).rejects.toMatchObject({ cause: { code: FOREIGN_KEY_VIOLATION } });
+  });
+
+  it("enforces one live station pairing code per device and code hash", async () => {
+    const [stationA] = await db
+      .insert(stationDevices)
+      .values({ tenantId: orgA.id, name: "Station pairing A" })
+      .returning();
+    const [stationB] = await db
+      .insert(stationDevices)
+      .values({ tenantId: orgB.id, name: "Station pairing B" })
+      .returning();
+    stationDeviceIds.push(stationA!.id, stationB!.id);
+
+    const expiresAt = new Date(Date.now() + 60_000);
+    const codeHash = `hash-${randomUUID()}`;
+    await db.insert(stationPairingCodes).values({
+      tenantId: orgA.id,
+      stationDeviceId: stationA!.id,
+      codeHash,
+      expiresAt,
+      issuedByUserId: "user-a",
+    });
+
+    await expect(
+      db.insert(stationPairingCodes).values({
+        tenantId: orgA.id,
+        stationDeviceId: stationA!.id,
+        codeHash: `hash-${randomUUID()}`,
+        expiresAt,
+        issuedByUserId: "user-a",
+      }),
+    ).rejects.toMatchObject({
+      cause: { code: UNIQUE_VIOLATION, constraint: "station_pairing_codes_one_live_uq" },
+    });
+
+    await expect(
+      db.insert(stationPairingCodes).values({
+        tenantId: orgB.id,
+        stationDeviceId: stationB!.id,
+        codeHash,
+        expiresAt,
+        issuedByUserId: "user-b",
+      }),
+    ).rejects.toMatchObject({
+      cause: { code: UNIQUE_VIOLATION, constraint: "station_pairing_codes_code_hash_live_uq" },
+    });
   });
 });
