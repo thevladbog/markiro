@@ -1,5 +1,5 @@
 import { Alert, Button, ConfirmDialog, SidePanel, Spinner } from "@markiro/ui";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useBlocker, useLocation, useNavigate, useOutletContext, useParams } from "react-router";
 
@@ -58,7 +58,7 @@ function usePanelContext() {
   return { t, context, loading, failed, close };
 }
 
-function PanelState({ mode, children }: { mode: "create" | "edit"; children: ReactNode }) {
+function PanelState({ mode }: { mode: "create" | "edit" }) {
   const { t, context, loading, failed, close } = usePanelContext();
   const title = t(`pages.catalog.form.${mode === "create" ? "createTitle" : "editTitle"}`);
   if (loading)
@@ -76,7 +76,7 @@ function PanelState({ mode, children }: { mode: "create" | "edit"; children: Rea
         </Button>
       </SidePanel>
     );
-  return children;
+  return null;
 }
 
 function useDirtyGuard(close: () => void, busy: boolean) {
@@ -91,9 +91,9 @@ function useDirtyGuard(close: () => void, busy: boolean) {
   );
   useEffect(() => {
     if (blocker.state !== "blocked") return;
-    if (busy) blocker.reset();
+    if (busy || !dirty) blocker.reset();
     else setPendingDismiss(true);
-  }, [blocker, busy]);
+  }, [blocker, busy, dirty]);
   const requestClose = () => {
     if (busy) return;
     if (dirty) setPendingDismiss(true);
@@ -123,12 +123,7 @@ function CreateProductPanel() {
   const mutation = useCreateProduct();
   const [error, setError] = useState<string | null>(null);
   const guard = useDirtyGuard(close, mutation.isPending);
-  if (loading || failed)
-    return (
-      <PanelState mode="create">
-        <></>
-      </PanelState>
-    );
+  if (loading || failed) return <PanelState mode="create" />;
   return (
     <>
       <ProductForm
@@ -206,12 +201,7 @@ function EditProductPanel() {
       product?.unitPrice,
     ],
   );
-  if (loading || failed)
-    return (
-      <PanelState mode="edit">
-        <></>
-      </PanelState>
-    );
+  if (loading || failed) return <PanelState mode="edit" />;
   if (!product || !initialValues)
     return (
       <SidePanel

@@ -244,8 +244,9 @@ describe("Select", () => {
 
     await user.click(trigger);
     const listbox = screen.getByRole("listbox");
-    expect(listbox).toBeDefined();
-    expect((listbox.parentElement as HTMLElement).style.zIndex).toBe("var(--z-overlay-popover)");
+    const content = listbox.closest<HTMLElement>("[data-mk-nested-overlay]");
+    expect(content).not.toBeNull();
+    expect(content?.style.zIndex).toBe("var(--z-overlay-popover)");
     await user.click(screen.getByRole("option", { name: "Вода" }));
 
     expect(onValueChange).toHaveBeenCalledWith("Вода");

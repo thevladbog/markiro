@@ -75,8 +75,6 @@ const productFormSchema = z.object({
 export type ProductFormValues = z.infer<typeof productFormSchema>;
 
 export interface ProductFormProps {
-  /** Compatibility for direct consumers; route-backed panels always render open. */
-  open?: boolean;
   mode: "create" | "edit";
   initialValues?: ProductFormValues;
   /** Only meaningful in edit mode -- drives the draft banner. */
@@ -163,7 +161,6 @@ function AuthorizedUnlinkProductAction({
 }
 
 export function ProductForm({
-  open = true,
   mode,
   initialValues,
   productStatus,
@@ -182,6 +179,7 @@ export function ProductForm({
   const gtinCheckMutation = useGtinCheck();
   const [ownerHint, setOwnerHint] = useState<GtinCheckResult | null>(null);
   const lastCheckedGtinRef = useRef<string | null>(null);
+  const isDirtyRef = useRef(false);
   // Local mirror of `externalRef`, not read from it directly: a successful
   // unlink clears this immediately so the section disappears from the
   // still-open modal, without waiting for `editingProduct` (a snapshot
@@ -206,12 +204,11 @@ export function ProductForm({
   const defaultCounterpartyId = watch("defaultCounterpartyId");
   const defaultLabelTemplateId = watch("defaultLabelTemplateId");
 
-  // Re-seed the form (and the owner-hint state) whenever the modal opens --
-  // covers both the create -> create and edit A -> edit B cases, since
-  // defaultValues is only read once by react-hook-form on mount. The
-  // already-known GTIN (if any) is marked as "checked" so opening an edit
-  // modal doesn't immediately re-fire the hint lookup for an unchanged value.
+  // Re-seed clean forms when their server values change. A background refetch
+  // must never overwrite unsaved operator input, so dirty forms retain their
+  // current values until they are saved or discarded.
   useEffect(() => {
+    if (isDirtyRef.current) return;
     const seeded = initialValues ?? EMPTY_VALUES;
     reset(seeded);
     setOwnerHint(null);
@@ -223,6 +220,7 @@ export function ProductForm({
   }, [externalRef]);
 
   useEffect(() => {
+    isDirtyRef.current = isDirty;
     onDirtyChange(isDirty);
   }, [isDirty, onDirtyChange]);
 
@@ -252,8 +250,8 @@ export function ProductForm({
       },
     });
     // gtinCheckMutation is a fresh object every render (per TanStack Query) --
-    // deliberately left out of the deps array so only gtinValue/open
-    // re-trigger this effect (mutate is called via the latest closure).
+    // deliberately left out of the deps array so only gtinValue re-triggers
+    // this effect (mutate is called via the latest closure).
     // eslint-disable-next-line react-hooks/exhaustive-deps -- see above; `getValues` is a stable react-hook-form reference, and depending on the mutation object would re-fire the lookup every render.
   }, [gtinValue]);
 
@@ -282,7 +280,7 @@ export function ProductForm({
 
   return (
     <SidePanel
-      open={open}
+      open
       size="standard"
       busy={submitting}
       onClose={onClose}

@@ -10,6 +10,7 @@ import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider } from "../src/access/context.js";
 import i18n from "../src/i18n/index.js";
 import type * as CatalogApiModule from "../src/pages/catalog/api.js";
+import { PRODUCTS_QUERY_KEY } from "../src/pages/catalog/api.js";
 import { CatalogPage } from "../src/pages/catalog/index.js";
 import { ProductPanelRoute } from "../src/pages/catalog/ProductPanelRoute.js";
 import { candidatesQueryKey } from "../src/pages/integrations/api.js";
@@ -262,7 +263,7 @@ describe("CatalogPage", () => {
   it("groups the create form and preserves input after an API failure", async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (String(url) === "/api/products" && init?.method === "POST") {
-        return jsonResponse(500, { message: "Не удалось создать продукт" });
+        return jsonResponse(500, { message: "Сервис каталога временно недоступен" });
       }
       if (String(url) === "/api/products/gtin-check") {
         return jsonResponse(200, { gtin14: "04006381333931", owner: "own" });
@@ -285,7 +286,7 @@ describe("CatalogPage", () => {
     await user.type(within(panel).getByLabelText("ГТИН"), "4006381333931");
     await user.click(within(panel).getByRole("button", { name: "Создать" }));
 
-    expect(await within(panel).findByText("Не удалось создать продукт")).toBeDefined();
+    expect(await within(panel).findByText("Сервис каталога временно недоступен")).toBeDefined();
     expect((within(panel).getByLabelText("Название") as HTMLInputElement).value).toBe("Milk");
     expect(screen.getByRole("dialog", { name: "Новый продукт" })).toBeDefined();
   });
@@ -378,6 +379,8 @@ describe("CatalogPage", () => {
 
     renderPage();
 
+    const resultCount = screen.getByText("", { selector: ".mk-catalog-result-count" });
+    expect(resultCount.getAttribute("aria-live")).toBe("polite");
     expect(await screen.findByRole("status")).toBeDefined();
     expect(screen.queryByText("Каталог пуст")).toBeNull();
   });
@@ -840,19 +843,38 @@ describe("CatalogPage", () => {
   });
 
   it("keeps an unsaved edit when the dirty state re-renders the panel route", async () => {
+    let serverProduct: Omit<typeof DRAFT_PRODUCT, "productGroup"> & {
+      productGroup: string | null;
+    } = DRAFT_PRODUCT;
+    let productsGetCount = 0;
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => jsonResponse(200, { items: [DRAFT_PRODUCT] })),
+      vi.fn(async (url: string) => {
+        if (String(url) === "/api/products") {
+          productsGetCount += 1;
+          return jsonResponse(200, { items: [serverProduct] });
+        }
+        return jsonResponse(200, { items: [] });
+      }),
     );
     const user = userEvent.setup();
+    const queryClient = newQueryClient();
 
-    renderPage();
+    renderPage(ADMIN_ACCESS, queryClient);
     await screen.findByText(DRAFT_PRODUCT.name);
     await user.click(screen.getByRole("button", { name: "Изменить" }));
 
     const name = await screen.findByLabelText("Название");
     await user.clear(name);
     await user.type(name, "Молоко без лактозы");
+
+    const callsBeforeRefetch = productsGetCount;
+    serverProduct = { ...DRAFT_PRODUCT, productGroup: "Обновлённая группа" };
+    await queryClient.invalidateQueries({ queryKey: PRODUCTS_QUERY_KEY });
+    await waitFor(() => expect(productsGetCount).toBeGreaterThan(callsBeforeRefetch));
+    await waitFor(() =>
+      expect(screen.getAllByText("Обновлённая группа").length).toBeGreaterThan(0),
+    );
 
     expect((screen.getByLabelText("Название") as HTMLInputElement).value).toBe(
       "Молоко без лактозы",

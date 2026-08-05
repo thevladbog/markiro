@@ -1214,14 +1214,14 @@
 
   Run: `pnpm format:check`
 
-  Run: `git diff --unified=0 origin/main...HEAD -- packages/ui apps/admin docs/superpowers | rg -n '^\+[^+].*(—|–)'`
+  Run: `git diff --unified=0 origin/main...HEAD -- packages/ui apps/admin docs/superpowers | rg -n '^\+[^+]' | rg -n $'\u2014|\u2013'`
 
   Expected: no whitespace errors, formatting passes, and the final command has no match for newly added dash characters. Existing repository text outside added diff lines cannot fail the audit.
 
 - [ ] **Step 7: Perform browser and accessibility review if local infrastructure permits**
 
-  Not run on 2026-08-06: no application was available at `localhost:5173`, and an
-  authenticated API-backed Catalog session was not available for the state matrix below.
+  Pending: no application was available at `localhost:5173`, and an authenticated
+  API-backed Catalog session was not available for the state matrix below.
 
   Run the Admin app with its normal development services and verify both create and edit at 1440 px, 1024 px, 768 px, and one viewport narrower than 768 px in light and dark themes. Check:
 

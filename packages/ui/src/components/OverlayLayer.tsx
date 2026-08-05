@@ -69,14 +69,13 @@ function applyInertness() {
 
 function focusInitial(record: LayerRecord) {
   const container = record.element;
-  const invalid = container.querySelector<HTMLElement>("[aria-invalid='true']");
-  const editable = container.querySelector<HTMLElement>(
-    "input:not([disabled]), textarea:not([disabled]), select:not([disabled])",
-  );
-  const cancel = container.querySelector<HTMLElement>("[data-overlay-cancel]");
+  const focusable = getFocusable(container);
+  const invalid = focusable.find((element) => element.matches("[aria-invalid='true']"));
+  const editable = focusable.find((element) => element.matches("input, textarea, select"));
+  const cancel = focusable.find((element) => element.matches("[data-overlay-cancel]"));
   const target =
     (record.initialFocus === "cancel" ? cancel : (invalid ?? editable)) ??
-    getFocusable(container)[0] ??
+    focusable[0] ??
     record.surfaceRef.current;
   target?.focus();
 }
@@ -139,9 +138,9 @@ function register(record: LayerRecord) {
     restoreBodyOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     Array.from(document.body.children).forEach((child) => {
-      if (child === host) return;
-      inertSnapshot.set(child as HTMLElement, Boolean((child as HTMLElement).inert));
-      (child as HTMLElement).inert = true;
+      if (child === host || !(child instanceof HTMLElement)) return;
+      inertSnapshot.set(child, Boolean(child.inert));
+      child.inert = true;
     });
     installListener();
   }
@@ -159,7 +158,12 @@ function unregister(id: symbol) {
 
   if (layers.length > 0) {
     applyInertness();
-    focusInitial(layers.at(-1)!);
+    const top = layers.at(-1);
+    if (record?.previouslyFocused?.isConnected && top?.element.contains(record.previouslyFocused)) {
+      record.previouslyFocused.focus();
+    } else if (top) {
+      focusInitial(top);
+    }
   } else {
     inertSnapshot.forEach((wasInert, element) => {
       element.inert = wasInert;

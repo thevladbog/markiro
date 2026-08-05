@@ -25,7 +25,7 @@ import { useCounterparties } from "../counterparties/api.js";
 import { useCandidates } from "../integrations/api.js";
 import { useLabelTemplates } from "../labels/api.js";
 import { useDeleteProduct, useProducts, type ProductDto, type ProductStatus } from "./api.js";
-import type { CatalogPanelLocationState } from "./ProductPanelRoute.js";
+import type { CatalogPanelContext, CatalogPanelLocationState } from "./ProductPanelRoute.js";
 import "./catalog.css";
 
 /**
@@ -283,11 +283,9 @@ export function CatalogPage() {
         </div>
       </div>
 
-      {!isPending && !isError ? (
-        <p className="mk-catalog-result-count" aria-live="polite">
-          {t("pages.catalog.resultCount", { count: items.length })}
-        </p>
-      ) : null}
+      <p className="mk-catalog-result-count" aria-live="polite">
+        {!isPending && !isError ? t("pages.catalog.resultCount", { count: items.length }) : ""}
+      </p>
 
       {isPending ? (
         <div style={{ display: "flex", justifyContent: "center", padding: 48 }}>
@@ -305,18 +303,20 @@ export function CatalogPage() {
         <Table columns={columns} rows={items} />
       )}
       <Outlet
-        context={{
-          products: items,
-          productsPending: isPending,
-          productsError: isError,
-          counterparties,
-          counterpartiesPending,
-          counterpartiesError,
-          labelTemplates,
-          labelTemplatesPending,
-          labelTemplatesError,
-          retryPanelData,
-        }}
+        context={
+          {
+            products: items,
+            productsPending: isPending,
+            productsError: isError,
+            counterparties,
+            counterpartiesPending,
+            counterpartiesError,
+            labelTemplates,
+            labelTemplatesPending,
+            labelTemplatesError,
+            retryPanelData,
+          } satisfies CatalogPanelContext
+        }
       />
     </div>
   );

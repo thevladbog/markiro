@@ -169,6 +169,16 @@ it.each(["/catalog/new", "/catalog/p1/edit"])(
   },
 );
 
+it.each([
+  ["/catalog/new", "Новый продукт"],
+  ["/catalog/p1/edit", "Изменить продукт"],
+])("opens the direct write route %s for a write-capable operator", async (path, title) => {
+  renderAccessRoute(path, MANAGER_ACCESS);
+
+  expect(await screen.findByRole("dialog", { name: title })).toBeDefined();
+  expect(screen.queryByTestId("forbidden-page")).toBeNull();
+});
+
 it("keeps the label library readable but blocks editor routes", async () => {
   renderAccessRoute("/labels", OPERATIONS_READ_ONLY);
   expect(await screen.findByRole("heading", { name: "Шаблоны этикеток" })).toBeDefined();

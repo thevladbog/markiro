@@ -11,6 +11,13 @@ import {
   type OverlayDismissReason,
 } from "../src/components/index.js";
 
+function requiredElement(selector: string): HTMLElement {
+  const element = document.querySelector<HTMLElement>(selector);
+  expect(element).not.toBeNull();
+  if (!element) throw new Error(`Missing test element: ${selector}`);
+  return element;
+}
+
 function PanelHarness({ onClose = vi.fn() }: { onClose?: (reason: OverlayDismissReason) => void }) {
   const [open, setOpen] = useState(false);
 
@@ -82,7 +89,7 @@ it.each([
   [
     "backdrop",
     async (user: ReturnType<typeof userEvent.setup>) =>
-      user.click(document.querySelector(".mk-side-panel__scrim") as HTMLElement),
+      user.click(requiredElement(".mk-side-panel__scrim")),
   ],
 ] as const)("reports %s dismissal", async (reason, dismiss) => {
   const user = userEvent.setup();
@@ -136,7 +143,7 @@ it("blocks every dismissal path while busy", async () => {
 
   expect((screen.getByRole("button", { name: "Close" }) as HTMLButtonElement).disabled).toBe(true);
   await user.keyboard("{Escape}");
-  await user.click(document.querySelector(".mk-side-panel__scrim") as HTMLElement);
+  await user.click(requiredElement(".mk-side-panel__scrim"));
   expect(onClose).not.toHaveBeenCalled();
 });
 
@@ -188,6 +195,7 @@ it("focuses Cancel and exposes one explicit destructive action", () => {
   expect(screen.getByRole("alertdialog", { name: "Delete product?" })).toBeDefined();
   expect(document.activeElement).toBe(screen.getByRole("button", { name: "Cancel" }));
   expect(screen.getByRole("button", { name: "Delete" }).className).toContain("destructive");
+  expect(screen.getByText("This cannot be undone.").tagName).toBe("DIV");
 });
 
 it("maps Escape and backdrop to Cancel but blocks dismissal and submit while busy", async () => {
@@ -222,7 +230,7 @@ it("maps Escape and backdrop to Cancel but blocks dismissal and submit while bus
     />,
   );
   await user.keyboard("{Escape}");
-  await user.click(document.querySelector(".mk-confirm-dialog__scrim") as HTMLElement);
+  await user.click(requiredElement(".mk-confirm-dialog__scrim"));
   expect((screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(true);
   expect((screen.getByRole("button", { name: "Close" }) as HTMLButtonElement).disabled).toBe(true);
   expect(onCancel).toHaveBeenCalledTimes(1);
@@ -234,8 +242,18 @@ it("keeps only the top confirmation layer interactive above a panel", async () =
   const onPanelClose = vi.fn();
   const onDialogCancel = vi.fn();
   const { rerender } = render(
+    <SidePanel open title="Edit product" closeLabel="Close" onClose={onPanelClose}>
+      <button type="button">Resume editing</button>
+      <Select label="Product" value="milk" options={[{ value: "milk", label: "Milk" }]} />
+    </SidePanel>,
+  );
+  const resumeEditing = screen.getByRole("button", { name: "Resume editing" });
+  resumeEditing.focus();
+
+  rerender(
     <>
       <SidePanel open title="Edit product" closeLabel="Close" onClose={onPanelClose}>
+        <button type="button">Resume editing</button>
         <Select label="Product" value="milk" options={[{ value: "milk", label: "Milk" }]} />
       </SidePanel>
       <ConfirmDialog
@@ -252,12 +270,8 @@ it("keeps only the top confirmation layer interactive above a panel", async () =
 
   expect(screen.getByRole("dialog", { name: "Edit product" })).toBeDefined();
   expect(screen.getByRole("alertdialog", { name: "Discard changes?" })).toBeDefined();
-  expect((document.querySelector(".mk-overlay-layer--panel") as HTMLElement | null)?.inert).toBe(
-    true,
-  );
-  expect((document.querySelector(".mk-overlay-layer--dialog") as HTMLElement | null)?.inert).toBe(
-    false,
-  );
+  expect(requiredElement(".mk-overlay-layer--panel").inert).toBe(true);
+  expect(requiredElement(".mk-overlay-layer--dialog").inert).toBe(false);
 
   await user.keyboard("{Escape}");
   expect(onDialogCancel).toHaveBeenCalledTimes(1);
@@ -266,13 +280,10 @@ it("keeps only the top confirmation layer interactive above a panel", async () =
 
   rerender(
     <SidePanel open title="Edit product" closeLabel="Close" onClose={onPanelClose}>
+      <button type="button">Resume editing</button>
       <Select label="Product" value="milk" options={[{ value: "milk", label: "Milk" }]} />
     </SidePanel>,
   );
-  expect((document.querySelector(".mk-overlay-layer--panel") as HTMLElement | null)?.inert).toBe(
-    false,
-  );
-  expect(
-    screen.getByRole("dialog", { name: "Edit product" }).contains(document.activeElement),
-  ).toBe(true);
+  expect(requiredElement(".mk-overlay-layer--panel").inert).toBe(false);
+  expect(document.activeElement).toBe(screen.getByRole("button", { name: "Resume editing" }));
 });

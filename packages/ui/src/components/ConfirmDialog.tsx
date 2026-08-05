@@ -57,9 +57,9 @@ export function ConfirmDialog({
             <h2 id={titleId} className="mk-confirm-dialog__title">
               {title}
             </h2>
-            <p id={descriptionId} className="mk-confirm-dialog__description">
+            <div id={descriptionId} className="mk-confirm-dialog__description">
               {description}
-            </p>
+            </div>
             {entity ? <div className="mk-confirm-dialog__entity">{entity}</div> : null}
             <footer className="mk-confirm-dialog__actions">
               <Button data-overlay-cancel variant="secondary" disabled={busy} onClick={onCancel}>

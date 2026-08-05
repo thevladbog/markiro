@@ -64,24 +64,7 @@ it("keeps list search state while the create panel uses a nested route", async (
       return jsonResponse(200, { items: [] });
     }),
   );
-  const user = userEvent.setup();
-  const router = createMemoryRouter(
-    createRoutesFromElements(
-      <Route path="/catalog" element={<CatalogPage />}>
-        <Route path="new" element={<ProductPanelRoute mode="create" />} />
-      </Route>,
-    ),
-    { initialEntries: ["/catalog"] },
-  );
-  render(
-    <QueryClientProvider
-      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-    >
-      <AccessProvider value={ACCESS}>
-        <RouterProvider router={router} />
-      </AccessProvider>
-    </QueryClientProvider>,
-  );
+  const { router, user } = renderCreatePanel(["/catalog"]);
   await user.type(screen.getByLabelText("Поиск"), "milk");
   await user.click(screen.getAllByRole("button", { name: "Добавить продукт" })[0]!);
 
@@ -95,24 +78,7 @@ it("blocks Back until a dirty product form is explicitly discarded", async () =>
     "fetch",
     vi.fn(async () => jsonResponse(200, { items: [] })),
   );
-  const router = createMemoryRouter(
-    createRoutesFromElements(
-      <Route path="/catalog" element={<CatalogPage />}>
-        <Route path="new" element={<ProductPanelRoute mode="create" />} />
-      </Route>,
-    ),
-    { initialEntries: ["/catalog", "/catalog/new"], initialIndex: 1 },
-  );
-  const user = userEvent.setup();
-  render(
-    <QueryClientProvider
-      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-    >
-      <AccessProvider value={ACCESS}>
-        <RouterProvider router={router} />
-      </AccessProvider>
-    </QueryClientProvider>,
-  );
+  const { router, user } = renderCreatePanel();
 
   await user.type(await screen.findByLabelText("Название"), "Milk");
   await router.navigate(-1);
@@ -131,24 +97,7 @@ it("localizes the panel close control and dirty confirmation in English", async 
     "fetch",
     vi.fn(async () => jsonResponse(200, { items: [] })),
   );
-  const router = createMemoryRouter(
-    createRoutesFromElements(
-      <Route path="/catalog" element={<CatalogPage />}>
-        <Route path="new" element={<ProductPanelRoute mode="create" />} />
-      </Route>,
-    ),
-    { initialEntries: ["/catalog/new"] },
-  );
-  const user = userEvent.setup();
-  render(
-    <QueryClientProvider
-      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-    >
-      <AccessProvider value={ACCESS}>
-        <RouterProvider router={router} />
-      </AccessProvider>
-    </QueryClientProvider>,
-  );
+  const { user } = renderCreatePanel(["/catalog/new"]);
 
   await user.type(await screen.findByLabelText("Name"), "Milk");
   await user.click(screen.getByRole("button", { name: "Close" }));
@@ -290,11 +239,20 @@ it("keeps a failed create panel open and retries all required data", async () =>
   await screen.findByRole("dialog", { name: "Новый продукт" });
   expect(await screen.findByText("Не удалось загрузить данные формы продукта.")).toBeDefined();
   const callsBeforeRetry = fetchMock.mock.calls.length;
+  const requiredPaths = ["/api/products", "/api/counterparties", "/api/label-templates"];
+  const requiredCallsBeforeRetry = requiredPaths.map(
+    (path) => fetchMock.mock.calls.filter(([url]) => String(url) === path).length,
+  );
   failing = false;
   await user.click(screen.getByRole("button", { name: "Повторить" }));
 
   expect(await screen.findByLabelText("Название")).toBeDefined();
   expect(fetchMock.mock.calls.length).toBeGreaterThan(callsBeforeRetry);
+  requiredPaths.forEach((path, index) => {
+    expect(fetchMock.mock.calls.filter(([url]) => String(url) === path).length).toBe(
+      requiredCallsBeforeRetry[index]! + 1,
+    );
+  });
   expect(screen.getByRole("dialog", { name: "Новый продукт" })).toBeDefined();
 });
 
@@ -329,4 +287,63 @@ it("renders a translated not-found state instead of an empty edit form", async (
   expect(await screen.findByText("Продукт не найден.")).toBeDefined();
   const panel = screen.getByRole("dialog", { name: "Изменить продукт" });
   expect(within(panel).queryByLabelText("Название")).toBeNull();
+});
+
+it("releases a busy-only Back block after an unchanged edit request fails", async () => {
+  const product = {
+    id: "p1",
+    gtin14: "04006381333931",
+    name: "Milk",
+    productGroup: null,
+    boxCapacity: null,
+    palletCapacity: null,
+    unitPrice: null,
+    egaisCode: null,
+    externalRef: null,
+    status: "draft",
+    defaultCounterpartyId: null,
+    defaultLabelTemplateId: null,
+    createdAt: "2026-08-05T00:00:00.000Z",
+  };
+  let resolveUpdate: ((response: Response) => void) | undefined;
+  const updateResponse = new Promise<Response>((resolve) => {
+    resolveUpdate = resolve;
+  });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url) === "/api/products/p1" && init?.method === "PATCH") {
+        return updateResponse;
+      }
+      if (String(url) === "/api/products") return jsonResponse(200, { items: [product] });
+      return jsonResponse(200, { items: [] });
+    }),
+  );
+  const router = createMemoryRouter(
+    createRoutesFromElements(
+      <Route path="/catalog" element={<CatalogPage />}>
+        <Route path=":productId/edit" element={<ProductPanelRoute mode="edit" />} />
+      </Route>,
+    ),
+    { initialEntries: ["/catalog", "/catalog/p1/edit"], initialIndex: 1 },
+  );
+  const user = userEvent.setup();
+  render(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <AccessProvider value={ACCESS}>
+        <RouterProvider router={router} />
+      </AccessProvider>
+    </QueryClientProvider>,
+  );
+
+  await user.click(await screen.findByRole("button", { name: "Сохранить" }));
+  await router.navigate(-1);
+  expect(router.state.location.pathname).toBe("/catalog/p1/edit");
+  resolveUpdate?.(jsonResponse(500, { message: "Update failed" }));
+  expect(await screen.findByText("Update failed")).toBeDefined();
+
+  await router.navigate(-1);
+  await waitFor(() => expect(router.state.location.pathname).toBe("/catalog"));
 });

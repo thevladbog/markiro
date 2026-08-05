@@ -275,6 +275,7 @@
 @media (max-width: 767px) {
   .mk-side-panel {
     --mk-panel-width: 100vw;
+
     padding-top: env(safe-area-inset-top);
     padding-bottom: env(safe-area-inset-bottom);
     border-left: 0;
@@ -297,7 +298,8 @@
     animation: none;
   }
 
-  .mk-side-panel__scrim {
+  .mk-side-panel__scrim,
+  .mk-confirm-dialog__scrim {
     animation-duration: 1ms;
     transition-duration: 1ms;
   }
