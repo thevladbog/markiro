@@ -2,6 +2,7 @@ import * as RadixPopover from "@radix-ui/react-popover";
 import { useEffect, useId, useState, type CSSProperties } from "react";
 
 import { cn } from "../cn.js";
+import { IconButton } from "./IconButton.js";
 
 const MONTHS_NOMINATIVE = [
   "Январь",
@@ -144,6 +145,7 @@ export function DatePicker({
   const hintId = hint ? `${datePickerId}-hint` : undefined;
   const errorId = error ? `${datePickerId}-error` : undefined;
   const selectedDate = parseIsoDate(value);
+  const clearActionLabel = `Очистить дату${label ? `: ${label}` : ariaLabel ? `: ${ariaLabel}` : ""}`;
   const [open, setOpen] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(() =>
     startOfMonth(selectedDate ?? new Date()),
@@ -165,6 +167,13 @@ export function DatePicker({
     setOpen(false);
   };
 
+  const clearDate = () => {
+    if (disabled || !selectedDate) return;
+
+    onValueChange?.(undefined);
+    setOpen(false);
+  };
+
   return (
     <div
       className={cn("mk-field", "mk-date-picker", className)}
@@ -183,50 +192,64 @@ export function DatePicker({
         open={getEffectivePopoverOpen(open, disabled)}
         onOpenChange={(nextOpen) => setOpen(disabled ? false : nextOpen)}
       >
-        <RadixPopover.Trigger asChild>
-          <button
-            id={datePickerId}
-            type="button"
-            disabled={disabled}
-            aria-label={ariaLabel}
-            aria-labelledby={ariaLabelledBy ?? (ariaLabel ? undefined : labelId)}
-            aria-invalid={error ? true : undefined}
-            aria-describedby={errorId ?? hintId}
-            className="mk-date-picker__trigger"
-            style={{
-              appearance: "none",
-              width: "100%",
-              height: "var(--control-md)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 8,
-              padding: "0 12px",
-              borderRadius: "var(--r-2)",
-              background: "var(--surface-card)",
-              color: selectedDate ? "var(--fg-1)" : "var(--fg-3)",
-              border: `1px solid ${error ? "var(--err-solid)" : "var(--line-strong)"}`,
-              font: "var(--text-body)",
-              textAlign: "left",
-              cursor: disabled ? "not-allowed" : "pointer",
-              opacity: disabled ? 0.45 : 1,
-            }}
-          >
-            <span>{selectedDate ? formatRussianDate(selectedDate) : placeholder}</span>
-            <svg
-              aria-hidden="true"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <RadixPopover.Trigger asChild>
+            <button
+              id={datePickerId}
+              type="button"
+              disabled={disabled}
+              aria-label={ariaLabel}
+              aria-labelledby={ariaLabelledBy ?? (ariaLabel ? undefined : labelId)}
+              aria-invalid={error ? true : undefined}
+              aria-describedby={errorId ?? hintId}
+              className="mk-date-picker__trigger"
+              style={{
+                appearance: "none",
+                flex: 1,
+                minWidth: 0,
+                height: "var(--control-md)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 8,
+                padding: "0 12px",
+                borderRadius: "var(--r-2)",
+                background: "var(--surface-card)",
+                color: selectedDate ? "var(--fg-1)" : "var(--fg-3)",
+                border: `1px solid ${error ? "var(--err-solid)" : "var(--line-strong)"}`,
+                font: "var(--text-body)",
+                textAlign: "left",
+                cursor: disabled ? "not-allowed" : "pointer",
+                opacity: disabled ? 0.45 : 1,
+              }}
             >
-              <rect x="3" y="5" width="18" height="16" rx="2" />
-              <path d="M16 3v4M8 3v4M3 10h18" />
-            </svg>
-          </button>
-        </RadixPopover.Trigger>
+              <span>{selectedDate ? formatRussianDate(selectedDate) : placeholder}</span>
+              <svg
+                aria-hidden="true"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <rect x="3" y="5" width="18" height="16" rx="2" />
+                <path d="M16 3v4M8 3v4M3 10h18" />
+              </svg>
+            </button>
+          </RadixPopover.Trigger>
+          {selectedDate && (
+            <IconButton
+              type="button"
+              variant="secondary"
+              size="compact"
+              aria-label={clearActionLabel}
+              icon={<span aria-hidden="true">×</span>}
+              disabled={disabled}
+              onClick={clearDate}
+            />
+          )}
+        </div>
         {name && (
           <input
             type="hidden"

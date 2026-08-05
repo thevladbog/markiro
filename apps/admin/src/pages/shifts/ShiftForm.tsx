@@ -165,18 +165,20 @@ export function ShiftForm({
   }, [open, initialValues, reset, formMode]);
 
   // Product-change prefill (create mode only -- the product can't change once
-  // a shift exists, and the product select is disabled while editing): seeds
-  // the capacity inputs' *displayed* values from the newly-picked product.
+  // a shift exists, and the product select is disabled while editing): applies
+  // every default and capacity from the newly-picked product.
   //
-  // boxCapacity/palletCapacity don't need a touched distinction (their payload
-  // rule doesn't look at touched-ness at all -- see below), so they can be
-  // seeded as soon as the product is selected.
+  // This remains a programmatic prefill: touched refs preserve whether the
+  // operator had previously changed these fields for payload purposes, while
+  // the actual values always follow the latest product selection.
   useEffect(() => {
     if (!open || formMode !== "create") return;
     if (!productId || lastPrefilledProductRef.current === productId) return;
     lastPrefilledProductRef.current = productId;
     const product = products.find((p) => p.id === productId);
     if (!product) return;
+    setValue("counterpartyId", product.defaultCounterpartyId ?? "");
+    setValue("labelTemplateId", product.defaultLabelTemplateId ?? "");
     setValue("boxCapacity", product.boxCapacity !== null ? String(product.boxCapacity) : "");
     setValue(
       "palletCapacity",
@@ -184,11 +186,12 @@ export function ShiftForm({
     );
   }, [open, formMode, productId, products, setValue]);
 
-  // The two product defaults need their option lists first. A native select
-  // silently renders an unknown value as its empty option; Radix correctly
-  // exposes that mismatch, so applying the default before its query resolves
-  // would turn an untouched field into a false user clear. Reconcile once
-  // each list is available, unless the operator has deliberately changed it.
+  // A Radix select needs its matching item before it can safely represent a
+  // product default. Reconcile defaults while a field is still untouched so a
+  // late option-list response cannot turn an unknown value into a false user
+  // clear. Product changes above always write the new defaults first; once an
+  // operator has touched a field, this effect deliberately leaves that latest
+  // product value intact.
   useEffect(() => {
     if (!open || formMode !== "create" || !productId) return;
     const product = products.find((item) => item.id === productId);

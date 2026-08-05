@@ -37,6 +37,7 @@ vi.mock("../src/pages/shifts/api.js", async (importOriginal) => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   writeHookMountSpy.mockClear();
 });
@@ -105,6 +106,12 @@ const PRODUCT_B = {
   status: "active",
   defaultCounterpartyId: null,
   createdAt: "2026-01-02T00:00:00.000Z",
+};
+
+const PRODUCT_B_WITH_DEFAULTS = {
+  ...PRODUCT_B,
+  defaultCounterpartyId: "cp2",
+  defaultLabelTemplateId: "lt1",
 };
 
 const DRAFT_PRODUCT = {
@@ -554,6 +561,66 @@ describe("ShiftsPage", () => {
     });
   });
 
+  it("applies product B defaults after counterparty and template were touched for product A", async () => {
+    const user = userEvent.setup();
+    const created = { ...PLANNED_SHIFT, id: "new-defaults", productId: PRODUCT_B_WITH_DEFAULTS.id };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/shifts" && init?.method === "POST") return jsonResponse(201, created);
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
+      if (path === "/api/products") {
+        return jsonResponse(200, { items: [PRODUCT_A, PRODUCT_B_WITH_DEFAULTS] });
+      }
+      if (path === "/api/counterparties") {
+        return jsonResponse(200, { items: [COUNTERPARTY, BUYER, BRAND_OWNER] });
+      }
+      if (path === "/api/label-templates") {
+        return jsonResponse(200, { items: [LABEL_TEMPLATE, BOX_LABEL_TEMPLATE] });
+      }
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Смены не запланированы");
+    fireEvent.click(screen.getAllByRole("button", { name: "Запланировать смену" })[0]!);
+    await screen.findByText("Новая смена");
+
+    await chooseOption(user, "Продукт", PRODUCT_A.name);
+    await chooseOption(user, "Для контрагента (толлинг)", BUYER.name);
+    await chooseOption(user, "Шаблон этикетки", BOX_LABEL_TEMPLATE.name);
+    await chooseOption(user, "Продукт", PRODUCT_B_WITH_DEFAULTS.name);
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("combobox", { name: "Для контрагента (толлинг)" }).textContent,
+      ).toContain(BRAND_OWNER.name);
+      expect(screen.getByRole("combobox", { name: "Шаблон этикетки" }).textContent).toContain(
+        LABEL_TEMPLATE.name,
+      );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Запланировать" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/shifts",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            mode: "validation",
+            lineId: null,
+            plannedQty: null,
+            plannedDate: null,
+            counterpartyId: BRAND_OWNER.id,
+            labelTemplateId: LABEL_TEMPLATE.id,
+            productId: PRODUCT_B_WITH_DEFAULTS.id,
+          }),
+        }),
+      );
+    });
+  });
+
   it("sends labelTemplateId: null when the user clears the prefilled label template before submitting", async () => {
     const user = userEvent.setup();
     const created = { ...PLANNED_SHIFT, id: "new5", productId: PRODUCT_A.id };
@@ -669,7 +736,9 @@ describe("ShiftsPage", () => {
   });
 
   it("applies the status and date-range filters to the GET /shifts query", async () => {
-    const user = userEvent.setup();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-08-05T12:00:00"));
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     const fetchMock = vi.fn(async () => jsonResponse(200, { items: [] }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -699,6 +768,47 @@ describe("ShiftsPage", () => {
         "/api/shifts?status=active&from=2026-07-01&to=2026-07-31",
         expect.any(Object),
       );
+    });
+
+    await user.click(screen.getByRole("button", { name: "Очистить дату: С даты" }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/shifts?status=active&to=2026-07-31",
+        expect.any(Object),
+      );
+    });
+
+    await user.click(screen.getByRole("button", { name: "Очистить дату: По дату" }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/shifts?status=active", expect.any(Object));
+    });
+  });
+
+  it("clears a planned date to null in the update payload", async () => {
+    const user = userEvent.setup();
+    const updated = { ...PLANNED_SHIFT, plannedDate: null };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/shifts/s1" && init?.method === "PATCH") return jsonResponse(200, updated);
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [PLANNED_SHIFT] });
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Молоко 1л");
+    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+    await screen.findByText("Изменить смену");
+
+    await user.click(screen.getByRole("button", { name: "Очистить дату: Дата смены" }));
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    await waitFor(() => {
+      const patchCall = fetchMock.mock.calls.find(
+        (call) => call[0] === "/api/shifts/s1" && call[1]?.method === "PATCH",
+      );
+      const body = JSON.parse(patchCall?.[1]?.body as string);
+      expect(body.plannedDate).toBeNull();
     });
   });
 

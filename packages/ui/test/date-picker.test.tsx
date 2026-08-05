@@ -30,7 +30,7 @@ describe("DatePicker", () => {
     const onValueChange = vi.fn();
     render(<DatePicker label="Плановая дата" value="2026-08-05" onValueChange={onValueChange} />);
 
-    await user.click(screen.getByRole("button", { name: /плановая дата/i }));
+    await user.click(screen.getByRole("button", { name: /^плановая дата$/i }));
 
     expect(screen.getByRole("heading", { name: "Август 2026" })).toBeDefined();
     await user.click(screen.getByRole("button", { name: "6 августа 2026" }));
@@ -39,11 +39,21 @@ describe("DatePicker", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("clears a selected date through an accessible custom action", async () => {
+    const user = userEvent.setup();
+    const onValueChange = vi.fn();
+    render(<DatePicker label="Плановая дата" value="2026-08-05" onValueChange={onValueChange} />);
+
+    await user.click(screen.getByRole("button", { name: "Очистить дату: Плановая дата" }));
+
+    expect(onValueChange).toHaveBeenCalledWith(undefined);
+  });
+
   it("navigates months with Russian headings", async () => {
     const user = userEvent.setup();
     render(<DatePicker label="Плановая дата" value="2026-08-05" />);
 
-    await user.click(screen.getByRole("button", { name: /плановая дата/i }));
+    await user.click(screen.getByRole("button", { name: /^плановая дата$/i }));
     await user.click(screen.getByRole("button", { name: "Следующий месяц" }));
     expect(screen.getByRole("heading", { name: "Сентябрь 2026" })).toBeDefined();
 
@@ -55,7 +65,7 @@ describe("DatePicker", () => {
     const user = userEvent.setup();
     render(<DatePicker label="Плановая дата" value="2026-08-05" />);
 
-    const trigger = screen.getByRole("button", { name: /плановая дата/i });
+    const trigger = screen.getByRole("button", { name: /^плановая дата$/i });
     await user.click(trigger);
     expect(screen.getByRole("dialog")).toBeDefined();
 
@@ -70,7 +80,7 @@ describe("DatePicker", () => {
     const onValueChange = vi.fn();
     render(<DatePicker label="Плановая дата" disabled onValueChange={onValueChange} />);
 
-    const trigger = screen.getByRole("button", { name: /плановая дата/i });
+    const trigger = screen.getByRole("button", { name: /^плановая дата$/i });
     expect(trigger.getAttribute("disabled")).toBe("");
     await user.click(trigger);
 
@@ -85,7 +95,7 @@ describe("DatePicker", () => {
       <DatePicker label="Плановая дата" value="2026-08-05" onValueChange={onValueChange} />,
     );
 
-    await user.click(screen.getByRole("button", { name: /плановая дата/i }));
+    await user.click(screen.getByRole("button", { name: /^плановая дата$/i }));
     expect(screen.getByRole("dialog")).toBeDefined();
 
     rerender(
@@ -106,7 +116,7 @@ describe("DatePicker", () => {
   it("treats an invalid ISO value as empty instead of displaying an invalid date", () => {
     render(<DatePicker label="Плановая дата" value="2026-02-31" />);
 
-    const trigger = screen.getByRole("button", { name: /плановая дата/i });
+    const trigger = screen.getByRole("button", { name: /^плановая дата$/i });
     expect(trigger.textContent).toContain("Выберите дату");
     expect(trigger.textContent).not.toContain("31 февраля");
   });
