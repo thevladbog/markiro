@@ -358,6 +358,9 @@
       "cancel": "Cancel",
       "searchLabel": "Search",
       "searchPlaceholder": "Name or GTIN",
+      "filtersLabel": "Catalog filters",
+      "resultCount_one": "{{count}} product",
+      "resultCount_other": "{{count}} products",
       "statusFilterLabel": "Status",
       "statusFilter": {
         "all": "All statuses",

@@ -315,7 +315,7 @@ export function ProductForm({
         style={{ display: "flex", flexDirection: "column", gap: 16 }}
       >
         {submissionError ? <Alert tone="error">{submissionError}</Alert> : null}
-        <section aria-labelledby="product-form-basic">
+        <section className="mk-catalog-panel-section" aria-labelledby="product-form-basic">
           <h3 id="product-form-basic">{t("pages.catalog.form.sections.basic")}</h3>
           {mode === "edit" && productStatus === "draft" && (
             <Alert tone="warn">{t("pages.catalog.form.draftBanner")}</Alert>
@@ -378,7 +378,7 @@ export function ProductForm({
             {...register("productGroup")}
           />
         </section>
-        <section aria-labelledby="product-form-aggregation">
+        <section className="mk-catalog-panel-section" aria-labelledby="product-form-aggregation">
           <h3 id="product-form-aggregation">{t("pages.catalog.form.sections.aggregation")}</h3>
           <Input
             label={t("pages.catalog.form.boxCapacityLabel")}
@@ -407,7 +407,7 @@ export function ProductForm({
             {...register("egaisCode")}
           />
         </section>
-        <section aria-labelledby="product-form-defaults">
+        <section className="mk-catalog-panel-section" aria-labelledby="product-form-defaults">
           <h3 id="product-form-defaults">{t("pages.catalog.form.sections.defaults")}</h3>
           <Select
             label={t("pages.catalog.form.defaultCounterpartyLabel")}

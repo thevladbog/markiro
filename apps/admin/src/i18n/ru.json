@@ -358,6 +358,11 @@
       "cancel": "Отмена",
       "searchLabel": "Поиск",
       "searchPlaceholder": "Название или ГТИН",
+      "filtersLabel": "Фильтры каталога",
+      "resultCount_one": "{{count}} продукт",
+      "resultCount_few": "{{count}} продукта",
+      "resultCount_many": "{{count}} продуктов",
+      "resultCount_other": "{{count}} продукта",
       "statusFilterLabel": "Статус",
       "statusFilter": {
         "all": "Все статусы",

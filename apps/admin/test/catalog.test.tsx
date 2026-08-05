@@ -228,6 +228,9 @@ describe("CatalogPage", () => {
     expect(table.getByText("Черновик")).toBeDefined();
     expect(table.getByText("Активен")).toBeDefined();
     expect(fetchMock).toHaveBeenCalledWith("/api/products", expect.any(Object));
+    expect(screen.getByTestId("catalog-page").classList.contains("mk-catalog-page")).toBe(true);
+    expect(screen.getByRole("group", { name: "Фильтры каталога" })).toBeDefined();
+    expect(screen.getByText("2 продукта")).toBeDefined();
   });
 
   it("shows a spinner (not EmptyState) while the list request is still pending", async () => {

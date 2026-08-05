@@ -26,6 +26,7 @@ import { useCandidates } from "../integrations/api.js";
 import { useLabelTemplates } from "../labels/api.js";
 import { useDeleteProduct, useProducts, type ProductDto, type ProductStatus } from "./api.js";
 import type { CatalogPanelLocationState } from "./ProductPanelRoute.js";
+import "./catalog.css";
 
 /**
  * The channel this plaque points into. Hardcoded rather than looped over
@@ -114,7 +115,7 @@ function AuthorizedProductRowActions({ product }: { product: ProductDto }) {
 
   return (
     <>
-      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+      <div className="mk-catalog-row-actions">
         <Button
           type="button"
           size="compact"
@@ -255,7 +256,7 @@ export function CatalogPage() {
   };
 
   return (
-    <div style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: 20 }}>
+    <div className="mk-catalog-page" data-testid="catalog-page">
       <PageHeader
         title={t("pages.catalog.title")}
         actions={canWrite ? <AuthorizedCreateProductAction /> : null}
@@ -263,8 +264,8 @@ export function CatalogPage() {
 
       {canReadIntegrations ? <AuthorizedCandidatesPlaque /> : null}
 
-      <div style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
-        <div style={{ flex: 1, maxWidth: 320 }}>
+      <div className="mk-catalog-filters" role="group" aria-label={t("pages.catalog.filtersLabel")}>
+        <div className="mk-catalog-filters__search">
           <Input
             label={t("pages.catalog.searchLabel")}
             placeholder={t("pages.catalog.searchPlaceholder")}
@@ -272,7 +273,7 @@ export function CatalogPage() {
             onChange={(event) => setSearchInput(event.target.value)}
           />
         </div>
-        <div style={{ width: 200 }}>
+        <div className="mk-catalog-filters__status">
           <Select
             label={t("pages.catalog.statusFilterLabel")}
             options={statusFilterOptions}
@@ -281,6 +282,12 @@ export function CatalogPage() {
           />
         </div>
       </div>
+
+      {!isPending && !isError ? (
+        <p className="mk-catalog-result-count" aria-live="polite">
+          {t("pages.catalog.resultCount", { count: items.length })}
+        </p>
+      ) : null}
 
       {isPending ? (
         <div style={{ display: "flex", justifyContent: "center", padding: 48 }}>
