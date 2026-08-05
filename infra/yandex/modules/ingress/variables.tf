@@ -71,7 +71,7 @@ variable "global_rate_limit" {
   nullable    = false
 
   validation {
-    condition     = var.global_rate_limit >= 1 && var.global_rate_limit <= 9999999999999
+    condition     = var.global_rate_limit == floor(var.global_rate_limit) && var.global_rate_limit >= 1 && var.global_rate_limit <= 9999999999999
     error_message = "global_rate_limit must be an integer between 1 and 9999999999999."
   }
 }
@@ -83,7 +83,7 @@ variable "per_ip_rate_limit" {
   nullable    = false
 
   validation {
-    condition     = var.per_ip_rate_limit >= 1 && var.per_ip_rate_limit <= 9999999999999
+    condition     = var.per_ip_rate_limit == floor(var.per_ip_rate_limit) && var.per_ip_rate_limit >= 1 && var.per_ip_rate_limit <= 9999999999999
     error_message = "per_ip_rate_limit must be an integer between 1 and 9999999999999."
   }
 }
@@ -95,7 +95,7 @@ variable "rate_limit_period_seconds" {
   nullable    = false
 
   validation {
-    condition     = var.rate_limit_period_seconds >= 1
+    condition     = var.rate_limit_period_seconds == floor(var.rate_limit_period_seconds) && var.rate_limit_period_seconds >= 1
     error_message = "rate_limit_period_seconds must be at least one second."
   }
 }

@@ -662,8 +662,22 @@ function assertProtectedIngress({
 
   const certificate = terraformResourceBlock(ingress, "yandex_cm_certificate", "markiro");
   assert.match(certificate, /domains\s*=\s*\[var\.domain\]/);
-  assert.match(certificate, /managed\s*\{[\s\S]*?challenge_type\s*=\s*"DNS_CNAME"/);
-  assert.match(ingress, /resource\s+"yandex_dns_recordset"\s+"certificate_validation"\s*\{/);
+  assert.match(
+    certificate,
+    /managed\s*\{[\s\S]*?challenge_type\s*=\s*"DNS_CNAME"[\s\S]*?challenge_count\s*=\s*1/,
+  );
+  const certificateValidation = terraformResourceBlock(
+    ingress,
+    "yandex_dns_recordset",
+    "certificate_validation",
+  );
+  assert.match(certificateValidation, /count\s*=\s*1/);
+  assert.match(certificateValidation, /challenges\[count\.index\]/);
+  assert.doesNotMatch(certificateValidation, /for_each/);
+  assert.match(
+    ingress,
+    /data\s+"yandex_cm_certificate"\s+"issued"\s*\{[\s\S]*?certificate_id\s*=\s*yandex_cm_certificate\.markiro\.id[\s\S]*?wait_validation\s*=\s*true[\s\S]*?depends_on\s*=\s*\[yandex_dns_recordset\.certificate_validation\]/,
+  );
 
   const backendGroup = terraformResourceBlock(ingress, "yandex_alb_backend_group", "app");
   assert.match(backendGroup, /target_group_ids\s*=\s*\[var\.app_target_group_id\]/);
@@ -688,7 +702,7 @@ function assertProtectedIngress({
   assert.match(loadBalancer, /ports\s*=\s*\[80\][\s\S]*?http_to_https\s*=\s*true/);
   assert.match(
     loadBalancer,
-    /ports\s*=\s*\[443\][\s\S]*?certificate_ids\s*=\s*\[yandex_cm_certificate\.markiro\.id\][\s\S]*?http_router_id\s*=\s*yandex_alb_http_router\.markiro\.id/,
+    /ports\s*=\s*\[443\][\s\S]*?certificate_ids\s*=\s*\[data\.yandex_cm_certificate\.issued\.id\][\s\S]*?http_router_id\s*=\s*yandex_alb_http_router\.markiro\.id/,
   );
   assert.match(
     loadBalancer,
@@ -725,7 +739,13 @@ function assertProtectedIngress({
     assert.match(
       ingressVariables,
       new RegExp(
-        `variable\\s+"${variable}"\\s*\\{[\\s\\S]*?type\\s*=\\s*number[\\s\\S]*?validation\\s*\\{`,
+        `variable\\s+"${variable}"\\s*\\{[\\s\\S]*?type\\s*=\\s*number[\\s\\S]*?condition\\s*=[\\s\\S]*?var\\.${variable}\\s*==\\s*floor\\(var\\.${variable}\\)`,
+      ),
+    );
+    assert.match(
+      productionVariables,
+      new RegExp(
+        `variable\\s+"${variable}"\\s*\\{[\\s\\S]*?type\\s*=\\s*number[\\s\\S]*?condition\\s*=[\\s\\S]*?var\\.${variable}\\s*==\\s*floor\\(var\\.${variable}\\)`,
       ),
     );
   }
@@ -1099,7 +1119,7 @@ test("production ingress provides HTTPS-only protected routing through the priva
   assertProtectedIngress(await protectedIngressSources());
 });
 
-test("production ingress contract rejects bypasses and unsafe defaults", async () => {
+test("production ingress contract rejects bypasses, computed certificate keys, fractional rates, and unsafe defaults", async () => {
   const missingSws = await protectedIngressSources();
   missingSws.ingress = replaceTerraformResource(
     missingSws.ingress,
@@ -1155,6 +1175,33 @@ test("production ingress contract rejects bypasses and unsafe defaults", async (
       ),
   );
   assert.throws(() => assertProtectedIngress(ipv6));
+
+  const computedForEach = await protectedIngressSources();
+  computedForEach.ingress = replaceTerraformResource(
+    computedForEach.ingress,
+    "yandex_dns_recordset",
+    "certificate_validation",
+    (block) =>
+      block.replace(
+        "count = 1",
+        "for_each = { for challenge in yandex_cm_certificate.markiro.challenges : challenge.domain => challenge }",
+      ),
+  );
+  assert.throws(() => assertProtectedIngress(computedForEach));
+
+  const fractionalGlobalRate = await protectedIngressSources();
+  fractionalGlobalRate.ingressVariables = fractionalGlobalRate.ingressVariables.replace(
+    "var.global_rate_limit == floor(var.global_rate_limit) && ",
+    "",
+  );
+  assert.throws(() => assertProtectedIngress(fractionalGlobalRate));
+
+  const fractionalPerIpRate = await protectedIngressSources();
+  fractionalPerIpRate.productionVariables = fractionalPerIpRate.productionVariables.replace(
+    "var.per_ip_rate_limit == floor(var.per_ip_rate_limit) && ",
+    "",
+  );
+  assert.throws(() => assertProtectedIngress(fractionalPerIpRate));
 });
 
 test("managed-data contract rejects unsafe PostgreSQL, buckets, access, and credentials", async () => {

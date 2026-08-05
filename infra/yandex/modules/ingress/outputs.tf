@@ -5,12 +5,12 @@ output "reserved_ipv4_address" {
 
 output "certificate_id" {
   description = "Certificate Manager ID presented by the HTTPS listener."
-  value       = yandex_cm_certificate.markiro.id
+  value       = data.yandex_cm_certificate.issued.id
 }
 
 output "certificate_status" {
   description = "Current Certificate Manager issuance status."
-  value       = yandex_cm_certificate.markiro.status
+  value       = data.yandex_cm_certificate.issued.status
 }
 
 output "load_balancer_id" {

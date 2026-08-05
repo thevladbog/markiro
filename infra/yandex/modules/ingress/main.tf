@@ -25,20 +25,26 @@ resource "yandex_cm_certificate" "markiro" {
   labels    = var.labels
 
   managed {
-    challenge_type = "DNS_CNAME"
+    challenge_type  = "DNS_CNAME"
+    challenge_count = 1
   }
 }
 
 resource "yandex_dns_recordset" "certificate_validation" {
-  for_each = {
-    for challenge in yandex_cm_certificate.markiro.challenges : challenge.domain => challenge
-  }
+  count = 1
 
   zone_id = var.dns_zone_id
-  name    = each.value.dns_name
-  type    = each.value.dns_type
+  name    = yandex_cm_certificate.markiro.challenges[count.index].dns_name
+  type    = yandex_cm_certificate.markiro.challenges[count.index].dns_type
   ttl     = 300
-  data    = [each.value.dns_value]
+  data    = [yandex_cm_certificate.markiro.challenges[count.index].dns_value]
+}
+
+data "yandex_cm_certificate" "issued" {
+  certificate_id  = yandex_cm_certificate.markiro.id
+  wait_validation = true
+
+  depends_on = [yandex_dns_recordset.certificate_validation]
 }
 
 resource "yandex_alb_backend_group" "app" {
@@ -185,7 +191,7 @@ resource "yandex_alb_load_balancer" "markiro" {
 
     tls {
       default_handler {
-        certificate_ids = [yandex_cm_certificate.markiro.id]
+        certificate_ids = [data.yandex_cm_certificate.issued.id]
 
         http_handler {
           http_router_id = yandex_alb_http_router.markiro.id
