@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -9,6 +10,56 @@ import { scanRepositoryLeaks } from "../scripts/scan-repository-leaks.mjs";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "../../..");
 const terraformRoots = ["bootstrap", "production"];
+const reviewedNonUtf8Candidates = new Map([
+  [
+    "apps/api/test/fixtures/commerceml/import-cp1251.xml",
+    "12ab20d74e2de16275d2b25104db83d7a9989dd975df3460fdaa19d6f2b47eec",
+  ],
+  [
+    "apps/kiosk/public/icon-192.png",
+    "2df023b2b2bf5ef4937ee5326b7648d5078446e0c4c9fc64fd17852c6e64d155",
+  ],
+  [
+    "apps/kiosk/public/icon-512.png",
+    "27b6f4caf19eb5e53b5100122351151b4d526894ccf90932620c043da1a245ec",
+  ],
+  [
+    "apps/kiosk/public/icon-maskable-512.png",
+    "cae36541e97a1c22d28c55b02715d9adf40113b54db63910acbff36a5836d4b2",
+  ],
+  [
+    "apps/station/src-tauri/icons/128x128.png",
+    "05055aee4d39fd8a1e36c662ec81570e5642de71e7c56a4adc21cc656a79ea93",
+  ],
+  [
+    "apps/station/src-tauri/icons/128x128@2x.png",
+    "2eea5e93ae86e9f66f0572b772a2a5838a1660e7907701eea378268cd2f412b8",
+  ],
+  [
+    "apps/station/src-tauri/icons/32x32.png",
+    "33f22f1b9173cd9d502f3915d58dc55523b63c13e11dc396a698b45932c0ea6f",
+  ],
+  [
+    "apps/station/src-tauri/icons/64x64.png",
+    "7973b75a7160bbd662a2a258111ff07086e15aa2086e1236e3bcd436d8b0eee5",
+  ],
+  [
+    "apps/station/src-tauri/icons/icon.icns",
+    "970b55a217645966e990bb715b286325735f38f685e32f4707ae6d893a372340",
+  ],
+  [
+    "apps/station/src-tauri/icons/icon.ico",
+    "ac677017964ca93519a2206fc27e13a3962a9bf082e3824a324d2ed38466936a",
+  ],
+  [
+    "apps/station/src-tauri/icons/icon.png",
+    "24386a483f0c6ca48467cd16e4fc3e49d5712d72d549802ee8a91053a7bdb6de",
+  ],
+  [
+    "docs/superpowers/plans/2026-07-23-pickup-kiosk-a-backend-admin.md",
+    "b9a52ee02b06e261de44439b99a09e085b99cae68ac501b0567d519aef38e6bd",
+  ],
+]);
 
 async function readRepositoryFile(relativePath) {
   return readFile(path.join(repositoryRoot, relativePath), "utf8");
@@ -30,7 +81,7 @@ async function scanFixture(relativePath, contents = "fixture") {
   try {
     execFileSync("git", ["init", "--quiet"], { cwd: fixtureRoot, stdio: "pipe" });
     await mkdir(path.dirname(fixturePath), { recursive: true });
-    await writeFile(fixturePath, contents, "utf8");
+    await writeFile(fixturePath, contents);
     execFileSync("git", ["add", "--force", "--", relativePath], {
       cwd: fixtureRoot,
       stdio: "pipe",
@@ -39,6 +90,24 @@ async function scanFixture(relativePath, contents = "fixture") {
   } finally {
     await rm(fixtureRoot, { recursive: true, force: true });
   }
+}
+
+async function reviewedNonUtf8Violations() {
+  const violations = [];
+
+  for (const [relativePath, expectedDigest] of reviewedNonUtf8Candidates) {
+    const contents = await readFile(path.join(repositoryRoot, relativePath));
+    const actualDigest = createHash("sha256").update(contents).digest("hex");
+
+    assert.equal(
+      actualDigest === expectedDigest,
+      true,
+      `${relativePath} reviewed non-UTF-8 content changed`,
+    );
+    violations.push({ relativePath, reason: "binary or invalid UTF-8 candidate" });
+  }
+
+  return violations.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
 }
 
 test("both Terraform roots pin the exact supported toolchain", async () => {
@@ -107,8 +176,12 @@ test("Yandex infrastructure ignores local Terraform artifacts but keeps contract
 test("repository candidates contain no state, plans, or credential material", async () => {
   const files = candidateRepositoryFiles();
   const violations = await scanRepositoryLeaks(repositoryRoot, files);
+  const expectedViolations = await reviewedNonUtf8Violations();
 
-  assert.deepEqual(violations, []);
+  assert.deepEqual(
+    violations.sort((left, right) => left.relativePath.localeCompare(right.relativePath)),
+    expectedViolations,
+  );
 });
 
 test("repository scanner rejects a committed Terraform state", async () => {
@@ -213,6 +286,30 @@ test("repository scanner permits runtime credential variable references without 
   ].join("\n");
 
   assert.deepEqual(await scanFixture("infra/yandex/runtime-inputs.txt", runtimeReferences), []);
+});
+
+test("repository scanner rejects a staged binary candidate without exposing bytes", async () => {
+  assert.deepEqual(
+    await scanFixture("infra/yandex/binary-candidate.bin", Buffer.from([0x00, 0x01, 0x02, 0x03])),
+    [
+      {
+        relativePath: "infra/yandex/binary-candidate.bin",
+        reason: "binary or invalid UTF-8 candidate",
+      },
+    ],
+  );
+});
+
+test("repository scanner rejects a staged invalid UTF-8 candidate", async () => {
+  assert.deepEqual(
+    await scanFixture("infra/yandex/invalid-utf8.bin", Buffer.from([0xff, 0xfe, 0xfd])),
+    [
+      {
+        relativePath: "infra/yandex/invalid-utf8.bin",
+        reason: "binary or invalid UTF-8 candidate",
+      },
+    ],
+  );
 });
 
 test("repository scanner rejects a nonblank secret variable default", async () => {
