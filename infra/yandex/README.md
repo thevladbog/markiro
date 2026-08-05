@@ -18,6 +18,11 @@ export TF_VAR_cloud_id="$YC_CLOUD_ID"
 export TF_VAR_folder_id="$YC_FOLDER_ID"
 ```
 
+Set required `state_bucket_name` from the protected bootstrap output (or the
+same approved operator configuration used for `backend.hcl`). Production uses
+the name only to reject collisions with media and audit buckets; it does not
+create or read the state bucket.
+
 Supply S3-compatible backend authentication only through the standard AWS
 environment variables in the deployment process. Never write those values to a
 backend file, Terraform variables, shell history, or logs.

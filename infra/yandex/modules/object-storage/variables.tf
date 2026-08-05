@@ -10,6 +10,17 @@ variable "kms_key_id" {
   nullable    = false
 }
 
+variable "state_bucket_name" {
+  description = "Protected bootstrap state bucket name, used only to reject durable-bucket collisions."
+  type        = string
+  nullable    = false
+
+  validation {
+    condition     = length(trimspace(var.state_bucket_name)) > 0 && can(regex("^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$", var.state_bucket_name)) && var.state_bucket_name != var.media_bucket_name && var.state_bucket_name != var.audit_bucket_name
+    error_message = "state_bucket_name must be a valid nonblank S3 bucket name distinct from media and audit buckets."
+  }
+}
+
 variable "media_bucket_name" {
   description = "Globally unique private bucket name for application media."
   type        = string

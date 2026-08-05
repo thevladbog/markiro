@@ -10,6 +10,17 @@ variable "audit_service_account_id" {
   nullable    = false
 }
 
+variable "state_bucket_name" {
+  description = "Protected bootstrap state bucket name, used only to reject audit/media destination reuse."
+  type        = string
+  nullable    = false
+
+  validation {
+    condition     = length(trimspace(var.state_bucket_name)) > 0 && var.state_bucket_name != var.media_bucket_name && var.state_bucket_name != var.audit_bucket_name
+    error_message = "state_bucket_name must be nonblank and distinct from media and audit buckets."
+  }
+}
+
 variable "media_bucket_name" {
   description = "Media bucket selected as an Object Storage data-event source."
   type        = string
@@ -23,7 +34,7 @@ variable "audit_bucket_name" {
 
   validation {
     condition     = var.audit_bucket_name != var.media_bucket_name
-    error_message = "audit_bucket_name must be distinct from the media data-event source."
+    error_message = "audit_bucket_name must be distinct from the media bucket."
   }
 }
 
@@ -120,8 +131,8 @@ variable "alert_ids" {
       "readiness_optional_dependency_degradation",
       "deployment_failure",
       "runner_overrun",
-    ]) && alltrue([for alert_id in values(var.alert_ids) : length(trimspace(alert_id)) > 0])
-    error_message = "alert_ids must contain exactly one nonblank ID for every required alert category."
+    ]) && alltrue([for alert_id in values(var.alert_ids) : length(trimspace(alert_id)) > 0]) && length(toset(values(var.alert_ids))) == length(var.alert_ids)
+    error_message = "alert_ids must contain exactly one unique, nonblank ID for every required alert category."
   }
 }
 

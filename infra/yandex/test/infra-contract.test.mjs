@@ -1047,6 +1047,7 @@ function assertProtectedObservability({
   observabilityVariables,
   ingress,
   storage,
+  storageVariables,
   production,
   productionOutputs,
   productionVariables,
@@ -1074,6 +1075,34 @@ function assertProtectedObservability({
   assert.match(auditLifecycleRules[0], /noncurrent_version_expiration\s*\{[\s\S]*?days\s*=\s*90/);
   assert.match(auditBucket, /versioning\s*\{[\s\S]*?enabled\s*=\s*true/);
   assert.match(auditBucket, /lifecycle\s*\{[\s\S]*?prevent_destroy\s*=\s*true/);
+
+  for (const [boundary, variables] of [
+    ["object storage", storageVariables],
+    ["observability", observabilityVariables],
+    ["production", productionVariables],
+  ]) {
+    assert.match(variables, /variable\s+"state_bucket_name"\s*\{/);
+    assert.match(
+      variables,
+      /length\(trimspace\(var\.state_bucket_name\)\)\s*>\s*0/,
+      `${boundary} must reject a blank state bucket name`,
+    );
+    assert.match(
+      variables,
+      /var\.state_bucket_name\s*!=\s*var\.media_bucket_name/,
+      `${boundary} must keep state and media buckets distinct`,
+    );
+    assert.match(
+      variables,
+      /var\.state_bucket_name\s*!=\s*var\.audit_bucket_name/,
+      `${boundary} must keep state and audit buckets distinct`,
+    );
+    assert.match(
+      variables,
+      /var\.audit_bucket_name\s*!=\s*var\.media_bucket_name/,
+      `${boundary} must keep audit and media buckets distinct`,
+    );
+  }
 
   const trails = [
     terraformResourceBlock(observability, "yandex_audit_trails_trail", "realtime"),
@@ -1132,6 +1161,10 @@ function assertProtectedObservability({
       variables,
       /alltrue\(\[for alert_id in values\(var\.alert_ids\) : length\(trimspace\(alert_id\)\) > 0\]\)/,
     );
+    assert.match(
+      variables,
+      /length\(toset\(values\(var\.alert_ids\)\)\)\s*==\s*length\(var\.alert_ids\)/,
+    );
   }
 
   for (const category of requiredObservabilityAlerts) {
@@ -1174,11 +1207,21 @@ function assertProtectedObservability({
   assert.match(production, /alert_ids\s*=\s*var\.alert_ids/);
   assert.match(production, /audit_bucket_name\s*=\s*module\.object_storage\.audit_bucket_name/);
   assert.match(production, /media_bucket_name\s*=\s*module\.object_storage\.media_bucket_name/);
+  assert.equal(
+    [...production.matchAll(/state_bucket_name\s*=\s*var\.state_bucket_name/g)].length,
+    2,
+    "production must pass the protected state bucket name to both validation boundaries",
+  );
+  assert.doesNotMatch(production, /(?:resource|data)\s+"yandex_storage_bucket"\s+"state"/);
   assert.match(productionVariables, /variable\s+"notification_channel_id"\s*\{/);
   assert.match(productionVariables, /variable\s+"alert_ids"\s*\{/);
   assert.match(
     readme,
     /provider 0\.215\.0 does not expose a Monitoring alert resource[\s\S]*?must not proceed[\s\S]*?alert_ids/i,
+  );
+  assert.match(
+    readme,
+    /state_bucket_name[\s\S]*?bootstrap output[\s\S]*?does\s+not\s+create\s+or\s+read/i,
   );
 }
 
@@ -1189,6 +1232,7 @@ async function observabilitySources() {
     observabilityVariables,
     ingress,
     storage,
+    storageVariables,
     production,
     productionOutputs,
     productionVariables,
@@ -1199,6 +1243,7 @@ async function observabilitySources() {
     readRepositoryFile("infra/yandex/modules/observability/variables.tf"),
     readRepositoryFile("infra/yandex/modules/ingress/main.tf"),
     readRepositoryFile("infra/yandex/modules/object-storage/main.tf"),
+    readRepositoryFile("infra/yandex/modules/object-storage/variables.tf"),
     readRepositoryFile("infra/yandex/production/main.tf"),
     readRepositoryFile("infra/yandex/production/outputs.tf"),
     readRepositoryFile("infra/yandex/production/variables.tf"),
@@ -1211,6 +1256,7 @@ async function observabilitySources() {
     observabilityVariables,
     ingress,
     storage,
+    storageVariables,
     production,
     productionOutputs,
     productionVariables,
@@ -1357,6 +1403,13 @@ test("observability contract rejects missing categories, unsafe retention, audit
   );
   assert.throws(() => assertProtectedObservability(reusedMediaDestination));
 
+  const reusedStateDestination = await observabilitySources();
+  reusedStateDestination.observability = reusedStateDestination.observability.replace(
+    "bucket_name   = var.audit_bucket_name",
+    "bucket_name   = var.state_bucket_name",
+  );
+  assert.throws(() => assertProtectedObservability(reusedStateDestination));
+
   const recursiveAuditSource = await observabilitySources();
   recursiveAuditSource.observability = recursiveAuditSource.observability.replace(
     /resource_id\s*=\s*var\.media_bucket_name/g,
@@ -1382,6 +1435,22 @@ test("observability contract rejects missing categories, unsafe retention, audit
     "",
   );
   assert.throws(() => assertProtectedObservability(blankAlertIdAccepted));
+
+  const duplicateAlertIdsAccepted = await observabilitySources();
+  duplicateAlertIdsAccepted.observabilityVariables =
+    duplicateAlertIdsAccepted.observabilityVariables.replace(
+      /\s*&&\s*length\(toset\(values\(var\.alert_ids\)\)\)\s*==\s*length\(var\.alert_ids\)/,
+      "",
+    );
+  assert.throws(() => assertProtectedObservability(duplicateAlertIdsAccepted));
+
+  const duplicateRootAlertIdsAccepted = await observabilitySources();
+  duplicateRootAlertIdsAccepted.productionVariables =
+    duplicateRootAlertIdsAccepted.productionVariables.replace(
+      /\s*&&\s*length\(toset\(values\(var\.alert_ids\)\)\)\s*==\s*length\(var\.alert_ids\)/,
+      "",
+    );
+  assert.throws(() => assertProtectedObservability(duplicateRootAlertIdsAccepted));
 
   const blankChannelAccepted = await observabilitySources();
   blankChannelAccepted.observabilityVariables = blankChannelAccepted.observabilityVariables.replace(

@@ -53,6 +53,7 @@ module "object_storage" {
 
   folder_id                = var.folder_id
   kms_key_id               = var.kms_key_id
+  state_bucket_name        = var.state_bucket_name
   media_bucket_name        = var.media_bucket_name
   audit_bucket_name        = var.audit_bucket_name
   app_service_account_id   = var.app_service_account_id
@@ -84,6 +85,7 @@ module "observability" {
 
   folder_id                = var.folder_id
   audit_service_account_id = var.audit_service_account_id
+  state_bucket_name        = var.state_bucket_name
   media_bucket_name        = module.object_storage.media_bucket_name
   audit_bucket_name        = module.object_storage.audit_bucket_name
   lockbox_secret_ids       = var.lockbox_secret_ids

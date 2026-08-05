@@ -112,16 +112,37 @@ variable "database_disk_size_gb" {
   }
 }
 
+variable "state_bucket_name" {
+  description = "Protected bootstrap state bucket name, supplied only for collision validation."
+  type        = string
+  nullable    = false
+
+  validation {
+    condition     = length(trimspace(var.state_bucket_name)) > 0 && can(regex("^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$", var.state_bucket_name)) && var.state_bucket_name != var.media_bucket_name && var.state_bucket_name != var.audit_bucket_name
+    error_message = "state_bucket_name must be a valid nonblank S3 bucket name distinct from media and audit buckets."
+  }
+}
+
 variable "media_bucket_name" {
   description = "Globally unique private bucket name for application media."
   type        = string
   nullable    = false
+
+  validation {
+    condition     = can(regex("^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$", var.media_bucket_name))
+    error_message = "media_bucket_name must be a 3-63 character lowercase S3 bucket name."
+  }
 }
 
 variable "audit_bucket_name" {
   description = "Globally unique private bucket name for durable audit archives."
   type        = string
   nullable    = false
+
+  validation {
+    condition     = can(regex("^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$", var.audit_bucket_name)) && var.audit_bucket_name != var.media_bucket_name
+    error_message = "audit_bucket_name must be a distinct 3-63 character lowercase S3 bucket name."
+  }
 }
 
 variable "domain" {
@@ -193,8 +214,8 @@ variable "alert_ids" {
       "readiness_optional_dependency_degradation",
       "deployment_failure",
       "runner_overrun",
-    ]) && alltrue([for alert_id in values(var.alert_ids) : length(trimspace(alert_id)) > 0])
-    error_message = "alert_ids must contain exactly one nonblank ID for every required alert category."
+    ]) && alltrue([for alert_id in values(var.alert_ids) : length(trimspace(alert_id)) > 0]) && length(toset(values(var.alert_ids))) == length(var.alert_ids)
+    error_message = "alert_ids must contain exactly one unique, nonblank ID for every required alert category."
   }
 }
 

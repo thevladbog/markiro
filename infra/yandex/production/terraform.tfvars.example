@@ -12,6 +12,7 @@ runner_service_account_id = "replace-with-bootstrap-runner-service-account-id"
 audit_service_account_id  = "replace-with-bootstrap-audit-service-account-id"
 database_name             = "markiro"
 database_disk_size_gb     = 50
+state_bucket_name         = "replace-with-bootstrap-state-bucket-name"
 media_bucket_name         = "replace-with-private-media-bucket-name"
 audit_bucket_name         = "replace-with-private-audit-bucket-name"
 domain                    = "markiro.example.ru"
