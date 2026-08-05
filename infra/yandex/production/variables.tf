@@ -148,10 +148,54 @@ variable "public_dns_enabled" {
   nullable    = false
 }
 
-variable "log_group_id" {
-  description = "Existing Cloud Logging group ID for ALB and Smart Web Security events."
+variable "lockbox_secret_ids" {
+  description = "Exact production Lockbox secret IDs whose payload access is audited."
+  type        = set(string)
+  nullable    = false
+
+  validation {
+    condition     = length(var.lockbox_secret_ids) > 0 && alltrue([for secret_id in var.lockbox_secret_ids : length(trimspace(secret_id)) > 0])
+    error_message = "lockbox_secret_ids must contain at least one nonblank secret ID."
+  }
+}
+
+variable "notification_channel_id" {
+  description = "Existing Monitoring notification channel used by every production alert."
   type        = string
   nullable    = false
+
+  validation {
+    condition     = length(trimspace(var.notification_channel_id)) > 0
+    error_message = "notification_channel_id must not be empty."
+  }
+}
+
+variable "alert_ids" {
+  description = "Complete IDs of Monitoring alerts created from module.observability.alert_specs."
+  type        = map(string)
+  nullable    = false
+
+  validation {
+    condition = toset(keys(var.alert_ids)) == toset([
+      "alb_healthy_backend",
+      "alb_5xx",
+      "alb_latency",
+      "sws_deny",
+      "sws_arl",
+      "vm_cpu",
+      "vm_memory",
+      "vm_disk",
+      "postgres_availability",
+      "postgres_storage",
+      "postgres_connections",
+      "postgres_backup_age",
+      "certificate_risk",
+      "readiness_optional_dependency_degradation",
+      "deployment_failure",
+      "runner_overrun",
+    ]) && alltrue([for alert_id in values(var.alert_ids) : length(trimspace(alert_id)) > 0])
+    error_message = "alert_ids must contain exactly one nonblank ID for every required alert category."
+  }
 }
 
 variable "global_rate_limit" {

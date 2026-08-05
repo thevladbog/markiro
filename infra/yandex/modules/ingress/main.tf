@@ -112,7 +112,7 @@ resource "yandex_sws_security_profile" "markiro" {
 
   log_options {
     enable       = true
-    log_group_id = var.log_group_id
+    log_group_id = var.security_log_group_id
   }
 }
 
@@ -201,7 +201,7 @@ resource "yandex_alb_load_balancer" "markiro" {
   }
 
   log_options {
-    log_group_id = var.log_group_id
+    log_group_id = var.application_log_group_id
   }
 }
 

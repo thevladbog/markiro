@@ -3,6 +3,11 @@ output "app_private_ip" {
   value       = module.compute.app_private_ip
 }
 
+output "app_instance_id" {
+  description = "ID of the private application VM."
+  value       = module.compute.app_instance_id
+}
+
 output "app_target_group_id" {
   description = "ALB target group ID containing the private application target."
   value       = module.compute.app_target_group_id
@@ -73,7 +78,47 @@ output "security_profile_id" {
   value       = module.ingress.security_profile_id
 }
 
+output "rate_limiter_profile_id" {
+  description = "Advanced Rate Limiter profile ID attached to Smart Web Security."
+  value       = module.ingress.rate_limiter_profile_id
+}
+
 output "approved_a_records" {
   description = "Exact application A-record set approved for gated publication."
   value       = module.ingress.approved_a_records
+}
+
+output "application_log_group_id" {
+  description = "Cloud Logging group ID for ALB application traffic."
+  value       = module.observability.application_log_group_id
+}
+
+output "security_log_group_id" {
+  description = "Cloud Logging group ID for Smart Web Security events."
+  value       = module.observability.security_log_group_id
+}
+
+output "audit_log_group_id" {
+  description = "Cloud Logging group ID for near-real-time audit events."
+  value       = module.observability.audit_log_group_id
+}
+
+output "audit_trail_ids" {
+  description = "Near-real-time and archive Audit Trails IDs."
+  value       = module.observability.audit_trail_ids
+}
+
+output "dashboard_id" {
+  description = "Production Monitoring dashboard ID."
+  value       = module.observability.dashboard_id
+}
+
+output "alert_ids" {
+  description = "Validated IDs of required console-created Monitoring alerts."
+  value       = module.observability.alert_ids
+}
+
+output "alert_specs" {
+  description = "Exact specifications for required console-created Monitoring alerts."
+  value       = module.observability.alert_specs
 }

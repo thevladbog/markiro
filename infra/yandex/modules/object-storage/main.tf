@@ -61,6 +61,20 @@ resource "yandex_storage_bucket" "audit" {
     enabled = true
   }
 
+  lifecycle_rule {
+    id                                     = "expire-audit-archives"
+    enabled                                = true
+    abort_incomplete_multipart_upload_days = 7
+
+    expiration {
+      days = 90
+    }
+
+    noncurrent_version_expiration {
+      days = 90
+    }
+  }
+
   server_side_encryption_configuration {
     rule {
       apply_server_side_encryption_by_default {

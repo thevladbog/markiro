@@ -120,6 +120,22 @@ function terraformNestedBlocks(source, name) {
   return blocks;
 }
 
+function terraformObjectEntry(source, name) {
+  const declaration = new RegExp(`^\\s*${name}\\s*=\\s*\\{`, "m").exec(source);
+  assert.ok(declaration, `missing object entry ${name}`);
+
+  const openingBrace = source.indexOf("{", declaration.index);
+  let depth = 0;
+
+  for (let index = openingBrace; index < source.length; index += 1) {
+    if (source[index] === "{") depth += 1;
+    if (source[index] === "}") depth -= 1;
+    if (depth === 0) return source.slice(declaration.index, index + 1);
+  }
+
+  assert.fail(`unterminated object entry ${name}`);
+}
+
 function hasPublicCidr(ingress) {
   for (const list of ingress.matchAll(
     /\b(?:v4_cidr_blocks|v6_cidr_blocks)\s*=\s*\[([\s\S]*?)\]/g,
@@ -1006,6 +1022,202 @@ async function managedDataSources() {
   };
 }
 
+const requiredObservabilityAlerts = [
+  "alb_healthy_backend",
+  "alb_5xx",
+  "alb_latency",
+  "sws_deny",
+  "sws_arl",
+  "vm_cpu",
+  "vm_memory",
+  "vm_disk",
+  "postgres_availability",
+  "postgres_storage",
+  "postgres_connections",
+  "postgres_backup_age",
+  "certificate_risk",
+  "readiness_optional_dependency_degradation",
+  "deployment_failure",
+  "runner_overrun",
+];
+
+function assertProtectedObservability({
+  observability,
+  observabilityOutputs,
+  observabilityVariables,
+  ingress,
+  storage,
+  production,
+  productionOutputs,
+  productionVariables,
+  readme,
+}) {
+  assert.match(
+    observability,
+    /required_providers\s*\{[\s\S]*?source\s*=\s*"yandex-cloud\/yandex"[\s\S]*?version\s*=\s*"= 0\.215\.0"/,
+  );
+
+  for (const groupName of ["application", "security", "audit"]) {
+    const group = terraformResourceBlock(observability, "yandex_logging_group", groupName);
+    assert.match(group, /retention_period\s*=\s*"336h"/);
+  }
+  assert.equal(
+    [...observability.matchAll(/resource\s+"yandex_logging_group"\s+"([^"]+)"/g)].length,
+    3,
+    "application, security, and audit must use separate log groups",
+  );
+
+  const auditBucket = terraformResourceBlock(storage, "yandex_storage_bucket", "audit");
+  const auditLifecycleRules = terraformNestedBlocks(auditBucket, "lifecycle_rule");
+  assert.equal(auditLifecycleRules.length, 1, "audit archive must have exactly one lifecycle rule");
+  assert.match(auditLifecycleRules[0], /expiration\s*\{[\s\S]*?days\s*=\s*90/);
+  assert.match(auditLifecycleRules[0], /noncurrent_version_expiration\s*\{[\s\S]*?days\s*=\s*90/);
+  assert.match(auditBucket, /versioning\s*\{[\s\S]*?enabled\s*=\s*true/);
+  assert.match(auditBucket, /lifecycle\s*\{[\s\S]*?prevent_destroy\s*=\s*true/);
+
+  const trails = [
+    terraformResourceBlock(observability, "yandex_audit_trails_trail", "realtime"),
+    terraformResourceBlock(observability, "yandex_audit_trails_trail", "archive"),
+  ];
+  assert.equal(
+    [...observability.matchAll(/resource\s+"yandex_audit_trails_trail"\s+"([^"]+)"/g)].length,
+    2,
+    "one-destination provider schema requires exactly two trails",
+  );
+  assert.match(trails[0], /logging_destination\s*\{[\s\S]*?yandex_logging_group\.audit\.id/);
+  assert.doesNotMatch(trails[0], /storage_destination\s*\{/);
+  assert.match(
+    trails[1],
+    /storage_destination\s*\{[\s\S]*?bucket_name\s*=\s*var\.audit_bucket_name/,
+  );
+  assert.doesNotMatch(trails[1], /logging_destination\s*\{/);
+
+  for (const trail of trails) {
+    assert.match(
+      trail,
+      /management_events_filter\s*\{[\s\S]*?resource_id\s*=\s*var\.folder_id[\s\S]*?resource_type\s*=\s*"resource-manager\.folder"/,
+    );
+    assert.match(
+      trail,
+      /data_events_filter\s*\{[\s\S]*?service\s*=\s*"lockbox"[\s\S]*?included_events\s*=\s*local\.lockbox_data_events[\s\S]*?for_each\s*=\s*var\.lockbox_secret_ids[\s\S]*?resource_type\s*=\s*"lockbox\.secret"/,
+    );
+    assert.match(
+      trail,
+      /data_events_filter\s*\{[\s\S]*?service\s*=\s*"storage"[\s\S]*?included_events\s*=\s*local\.media_data_events[\s\S]*?resource_id\s*=\s*var\.media_bucket_name[\s\S]*?resource_type\s*=\s*"storage\.bucket"/,
+    );
+    assert.doesNotMatch(
+      trail,
+      /data_events_filter\s*\{[\s\S]*?service\s*=\s*"storage"[\s\S]*?resource_id\s*=\s*var\.audit_bucket_name/,
+    );
+  }
+  assert.match(observability, /yandex\.cloud\.audit\.lockbox\.GetPayload/);
+  assert.match(observability, /yandex\.cloud\.audit\.lockbox\.GetPayloadEx/);
+  for (const event of ["ObjectCreate", "ObjectUpdate", "ObjectDelete", "ObjectGet"]) {
+    assert.match(observability, new RegExp(`yandex\\.cloud\\.audit\\.storage\\.${event}`));
+  }
+
+  const loadBalancer = terraformResourceBlock(ingress, "yandex_alb_load_balancer", "markiro");
+  const securityProfile = terraformResourceBlock(ingress, "yandex_sws_security_profile", "markiro");
+  assert.match(loadBalancer, /log_group_id\s*=\s*var\.application_log_group_id/);
+  assert.match(securityProfile, /log_group_id\s*=\s*var\.security_log_group_id/);
+
+  for (const variables of [observabilityVariables, productionVariables]) {
+    assert.match(
+      variables,
+      /variable\s+"notification_channel_id"\s*\{[\s\S]*?condition\s*=\s*length\(trimspace\(var\.notification_channel_id\)\)\s*>\s*0/,
+    );
+    assert.match(variables, /variable\s+"alert_ids"\s*\{/);
+    assert.match(variables, /toset\(keys\(var\.alert_ids\)\)\s*==\s*toset\(\[/);
+    assert.match(
+      variables,
+      /alltrue\(\[for alert_id in values\(var\.alert_ids\) : length\(trimspace\(alert_id\)\) > 0\]\)/,
+    );
+  }
+
+  for (const category of requiredObservabilityAlerts) {
+    const spec = terraformObjectEntry(observability, category);
+    assert.match(spec, new RegExp(`category\\s*=\\s*"${category}"`));
+    assert.match(spec, /metric\s*=\s*"[^\n]+"/);
+    assert.match(spec, /query\s*=\s*"[^\n]+"/);
+    assert.match(spec, /comparison\s*=\s*"(?:GREATER_THAN|LESS_THAN)"/);
+    assert.match(spec, /warning_threshold\s*=\s*[0-9.]+/);
+    assert.match(spec, /alarm_threshold\s*=\s*[0-9.]+/);
+    assert.match(spec, /evaluation_window\s*=\s*"[^"]+"/);
+    assert.match(spec, /notification_channel_id\s*=\s*var\.notification_channel_id/);
+    assert.match(observabilityVariables, new RegExp(`"${category}"`));
+    assert.match(productionVariables, new RegExp(`"${category}"`));
+  }
+
+  const dashboard = terraformResourceBlock(
+    observability,
+    "yandex_monitoring_dashboard",
+    "production",
+  );
+  assert.match(dashboard, /for_each\s*=\s*local\.alert_specs/);
+  assert.match(dashboard, /query\s*=\s*widgets\.value\.query/);
+
+  for (const output of [
+    "application_log_group_id",
+    "security_log_group_id",
+    "audit_log_group_id",
+    "audit_trail_ids",
+    "dashboard_id",
+    "alert_ids",
+    "alert_specs",
+  ]) {
+    assert.match(observabilityOutputs, new RegExp(`output\\s+"${output}"\\s*\\{`));
+    assert.match(productionOutputs, new RegExp(`output\\s+"${output}"\\s*\\{`));
+  }
+
+  assert.match(production, /module\s+"observability"\s*\{/);
+  assert.match(production, /notification_channel_id\s*=\s*var\.notification_channel_id/);
+  assert.match(production, /alert_ids\s*=\s*var\.alert_ids/);
+  assert.match(production, /audit_bucket_name\s*=\s*module\.object_storage\.audit_bucket_name/);
+  assert.match(production, /media_bucket_name\s*=\s*module\.object_storage\.media_bucket_name/);
+  assert.match(productionVariables, /variable\s+"notification_channel_id"\s*\{/);
+  assert.match(productionVariables, /variable\s+"alert_ids"\s*\{/);
+  assert.match(
+    readme,
+    /provider 0\.215\.0 does not expose a Monitoring alert resource[\s\S]*?must not proceed[\s\S]*?alert_ids/i,
+  );
+}
+
+async function observabilitySources() {
+  const [
+    observability,
+    observabilityOutputs,
+    observabilityVariables,
+    ingress,
+    storage,
+    production,
+    productionOutputs,
+    productionVariables,
+    readme,
+  ] = await Promise.all([
+    readRepositoryFile("infra/yandex/modules/observability/main.tf"),
+    readRepositoryFile("infra/yandex/modules/observability/outputs.tf"),
+    readRepositoryFile("infra/yandex/modules/observability/variables.tf"),
+    readRepositoryFile("infra/yandex/modules/ingress/main.tf"),
+    readRepositoryFile("infra/yandex/modules/object-storage/main.tf"),
+    readRepositoryFile("infra/yandex/production/main.tf"),
+    readRepositoryFile("infra/yandex/production/outputs.tf"),
+    readRepositoryFile("infra/yandex/production/variables.tf"),
+    readRepositoryFile("infra/yandex/README.md"),
+  ]);
+
+  return {
+    observability,
+    observabilityOutputs,
+    observabilityVariables,
+    ingress,
+    storage,
+    production,
+    productionOutputs,
+    productionVariables,
+    readme,
+  };
+}
+
 function candidateRepositoryFiles(root = repositoryRoot) {
   return execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], {
     cwd: root,
@@ -1117,6 +1329,81 @@ test("production managed PostgreSQL and object storage protect durable data", as
 
 test("production ingress provides HTTPS-only protected routing through the private app target", async () => {
   assertProtectedIngress(await protectedIngressSources());
+});
+
+test("production observability separates logs and audit destinations and defines every alert contract", async () => {
+  assertProtectedObservability(await observabilitySources());
+});
+
+test("observability contract rejects missing categories, unsafe retention, audit recursion, and incomplete alert wiring", async () => {
+  const missingGroup = await observabilitySources();
+  missingGroup.observability = missingGroup.observability.replace(
+    terraformResourceBlock(missingGroup.observability, "yandex_logging_group", "application"),
+    "",
+  );
+  assert.throws(() => assertProtectedObservability(missingGroup));
+
+  const unlimitedRetention = await observabilitySources();
+  unlimitedRetention.observability = unlimitedRetention.observability.replace(
+    /retention_period\s*=\s*"336h"/,
+    "",
+  );
+  assert.throws(() => assertProtectedObservability(unlimitedRetention));
+
+  const reusedMediaDestination = await observabilitySources();
+  reusedMediaDestination.observability = reusedMediaDestination.observability.replace(
+    "bucket_name   = var.audit_bucket_name",
+    "bucket_name   = var.media_bucket_name",
+  );
+  assert.throws(() => assertProtectedObservability(reusedMediaDestination));
+
+  const recursiveAuditSource = await observabilitySources();
+  recursiveAuditSource.observability = recursiveAuditSource.observability.replace(
+    /resource_id\s*=\s*var\.media_bucket_name/g,
+    "resource_id   = var.audit_bucket_name",
+  );
+  assert.throws(() => assertProtectedObservability(recursiveAuditSource));
+
+  const missingAlert = await observabilitySources();
+  missingAlert.observability = missingAlert.observability.replace(
+    /\n\s*runner_overrun\s*=\s*\{[\s\S]*?\n\s*\}/,
+    "",
+  );
+  assert.throws(() => assertProtectedObservability(missingAlert));
+
+  const missingAlertIdCategory = await observabilitySources();
+  missingAlertIdCategory.observabilityVariables =
+    missingAlertIdCategory.observabilityVariables.replace('      "runner_overrun",\n', "");
+  assert.throws(() => assertProtectedObservability(missingAlertIdCategory));
+
+  const blankAlertIdAccepted = await observabilitySources();
+  blankAlertIdAccepted.observabilityVariables = blankAlertIdAccepted.observabilityVariables.replace(
+    /\s*&&\s*alltrue\(\[for alert_id in values\(var\.alert_ids\) : length\(trimspace\(alert_id\)\) > 0\]\)/,
+    "",
+  );
+  assert.throws(() => assertProtectedObservability(blankAlertIdAccepted));
+
+  const blankChannelAccepted = await observabilitySources();
+  blankChannelAccepted.observabilityVariables = blankChannelAccepted.observabilityVariables.replace(
+    /length\(trimspace\(var\.notification_channel_id\)\)\s*>\s*0/,
+    "true",
+  );
+  assert.throws(() => assertProtectedObservability(blankChannelAccepted));
+
+  const blankRootChannelAccepted = await observabilitySources();
+  blankRootChannelAccepted.productionVariables =
+    blankRootChannelAccepted.productionVariables.replace(
+      /length\(trimspace\(var\.notification_channel_id\)\)\s*>\s*0/,
+      "true",
+    );
+  assert.throws(() => assertProtectedObservability(blankRootChannelAccepted));
+
+  const wrongChannel = await observabilitySources();
+  wrongChannel.observability = wrongChannel.observability.replace(
+    /notification_channel_id\s*=\s*var\.notification_channel_id/,
+    'notification_channel_id = "other-channel"',
+  );
+  assert.throws(() => assertProtectedObservability(wrongChannel));
 });
 
 test("production ingress contract rejects bypasses, computed certificate keys, fractional rates, and unsafe defaults", async () => {

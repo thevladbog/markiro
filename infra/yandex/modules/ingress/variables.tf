@@ -58,8 +58,14 @@ variable "public_dns_enabled" {
   nullable    = false
 }
 
-variable "log_group_id" {
-  description = "Cloud Logging group ID for ALB and Smart Web Security events."
+variable "application_log_group_id" {
+  description = "Cloud Logging group ID for ALB application traffic."
+  type        = string
+  nullable    = false
+}
+
+variable "security_log_group_id" {
+  description = "Cloud Logging group ID for Smart Web Security events."
   type        = string
   nullable    = false
 }

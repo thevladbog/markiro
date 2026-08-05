@@ -63,6 +63,21 @@ policy settings during reviewed applies; no extra `storage.configurer` binding
 is granted to a runtime identity. No KMS key, database password, or static S3
 credential is created by Terraform.
 
+## Monitoring alert provisioning boundary
+
+The pinned Yandex provider 0.215.0 does not expose a Monitoring alert resource
+or alert data source. Terraform therefore creates the log groups, both Audit
+Trails destinations, and the dashboard, while `module.observability.alert_specs`
+is the authoritative contract for alerts created in the Yandex Monitoring
+console.
+
+Production apply and go-live must not proceed until an operator creates every alert in
+the console with the exact query, comparison, thresholds, evaluation window,
+and `notification_channel_id` emitted by `alert_specs`. Record the resulting IDs
+under the matching `alert_ids` keys. The production root rejects a missing,
+extra, or blank alert ID and a blank channel. Terraform does not claim ownership
+of those alert resources.
+
 ## One-time bootstrap state migration
 
 The bootstrap operator uses an approved, encrypted administrative workstation.

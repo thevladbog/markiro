@@ -71,9 +71,31 @@ module "ingress" {
   domain                    = var.domain
   dns_zone_id               = var.dns_zone_id
   public_dns_enabled        = var.public_dns_enabled
-  log_group_id              = var.log_group_id
+  application_log_group_id  = module.observability.application_log_group_id
+  security_log_group_id     = module.observability.security_log_group_id
   global_rate_limit         = var.global_rate_limit
   per_ip_rate_limit         = var.per_ip_rate_limit
   rate_limit_period_seconds = var.rate_limit_period_seconds
   labels                    = local.labels
+}
+
+module "observability" {
+  source = "../modules/observability"
+
+  folder_id                = var.folder_id
+  audit_service_account_id = var.audit_service_account_id
+  media_bucket_name        = module.object_storage.media_bucket_name
+  audit_bucket_name        = module.object_storage.audit_bucket_name
+  lockbox_secret_ids       = var.lockbox_secret_ids
+  load_balancer_id         = module.ingress.load_balancer_id
+  backend_group_id         = module.ingress.backend_group_id
+  security_profile_id      = module.ingress.security_profile_id
+  rate_limiter_profile_id  = module.ingress.rate_limiter_profile_id
+  app_instance_id          = module.compute.app_instance_id
+  runner_instance_id       = module.compute.runner_instance_id
+  postgres_cluster_id      = module.postgres.cluster_id
+  certificate_id           = module.ingress.certificate_id
+  notification_channel_id  = var.notification_channel_id
+  alert_ids                = var.alert_ids
+  labels                   = local.labels
 }
