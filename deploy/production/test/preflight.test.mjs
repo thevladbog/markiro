@@ -123,6 +123,8 @@ test("uses the Yandex overlay only for the behind-alb edge mode", async () => {
 
   assert.deepEqual(args, [
     "compose",
+    "--project-name",
+    "markiro-production",
     "--env-file",
     "/private/production.env",
     "-f",

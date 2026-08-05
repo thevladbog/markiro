@@ -78,9 +78,9 @@ rendered Compose output.
 ```bash
 set -euo pipefail
 umask 077
-cd /opt/markiro/production-bundle
+cd /opt/markiro/active-release
 node deploy/production/preflight.mjs
-docker compose --env-file /etc/markiro/production.env -f compose.production.yml -f deploy/production/compose.yandex.yml config --quiet
+docker compose --project-name markiro-production --env-file /etc/markiro/production.env -f compose.production.yml -f deploy/production/compose.yandex.yml config --quiet
 ```
 
 4. Check the sanitized readiness state. Treat a missing mandatory dependency as

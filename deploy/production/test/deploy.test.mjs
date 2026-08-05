@@ -95,6 +95,8 @@ async function fixture({ failures, readiness, smokeError, priorTag = previousTag
 
 const compose = [
   "compose",
+  "--project-name",
+  "markiro-production",
   "--env-file",
   environment.MARKIRO_ENV_FILE,
   "-f",

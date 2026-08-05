@@ -569,6 +569,19 @@ function assertProductionDeploymentWorkflow(
   const workflow = parseWorkflow(deploymentSource, "production deployment workflow");
 
   assert.deepEqual(Object.keys(workflow.on).sort(), ["workflow_dispatch", "workflow_run"]);
+  assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), [
+    "deployment_phase",
+    "release_run_id",
+    "release_sha",
+    "rollback_rehearsal",
+  ]);
+  assert.deepEqual(workflow.on.workflow_dispatch.inputs.rollback_rehearsal, {
+    description:
+      "Separately approved first-release rollback rehearsal; never enabled by automatic delivery.",
+    required: true,
+    default: false,
+    type: "boolean",
+  });
   assert.deepEqual(workflow.on.workflow_run, {
     workflows: ["Publish production images"],
     types: ["completed"],
@@ -620,6 +633,17 @@ function assertProductionDeploymentWorkflow(
   );
   assert.doesNotMatch(deploymentSource, /runs-on:\s*\[self-hosted, linux, markiro-production\]/);
   assert.match(deploymentSource, /GITHUB_RUNNER_ADMIN_TOKEN/);
+  assert.match(
+    deploymentSource,
+    /MARKIRO_ROLLBACK_REHEARSAL:\s*\$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.rollback_rehearsal && '1' \|\| '0' \}\}/,
+  );
+  assert.match(remoteDeploySource, /rollback rehearsal requires a first deployment/);
+  assert.match(
+    deploymentSource,
+    /markiro-rollback-rehearsal-\$\{\{ needs\.controller\.outputs\.release-sha \}\}/,
+  );
+  assert.match(deploymentSource, /Record authenticated bounded rollback rehearsal evidence/);
+  assert.match(remoteDeploySource, /rollbackRehearsal/);
   assert.match(deploymentSource, /YC_DEPLOYMENT_CONTROLLER_SERVICE_ACCOUNT_ID/);
   assert.doesNotMatch(
     deploymentSource,

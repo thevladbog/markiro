@@ -41,22 +41,35 @@ async function fixture({ failure, withPrevious = true } = {}) {
   }
 
   const calls = [];
+  const running = { apiDigest: null, edgeDigest: null, project: null };
   const runner = {
     async run(command, args, environment, timeoutMs) {
       const call = { command, args, environment, timeoutMs };
       calls.push(call);
       if (failure?.(call)) return { code: 1, stdout: "", stderr: "private" };
+      if (args.includes("up") && args.at(-1) === "api") {
+        running.apiDigest = environment.MARKIRO_API_IMAGE_DIGEST;
+        running.project = args[2];
+      }
+      if (args.includes("up") && args.at(-1) === "edge") {
+        running.edgeDigest = environment.MARKIRO_EDGE_IMAGE_DIGEST;
+        running.project = args[2];
+      }
+      if (args.includes("stop")) {
+        running.apiDigest = null;
+        running.edgeDigest = null;
+      }
       if (args.includes("inspect"))
         return { code: 0, stdout: JSON.stringify([args.at(-1)]), stderr: "" };
       return { code: 0, stdout: "", stderr: "" };
     },
   };
   const dependencies = {
-    runPreflight: async () => ({
-      imageTag: TAG,
-      apiImageDigest: API_DIGEST,
-      edgeImageDigest: EDGE_DIGEST,
-      envFile: ENVIRONMENT.MARKIRO_ENV_FILE,
+    runPreflight: async (environment) => ({
+      imageTag: environment.MARKIRO_IMAGE_TAG,
+      apiImageDigest: environment.MARKIRO_API_IMAGE_DIGEST,
+      edgeImageDigest: environment.MARKIRO_EDGE_IMAGE_DIGEST,
+      envFile: environment.MARKIRO_ENV_FILE,
     }),
     runner,
     isReady: async () => true,
@@ -66,7 +79,7 @@ async function fixture({ failure, withPrevious = true } = {}) {
     now: () => new Date("2026-08-05T10:20:30.000Z"),
     log: () => undefined,
   };
-  return { calls, dependencies, previous, releaseDirectory };
+  return { calls, dependencies, previous, releaseDirectory, running };
 }
 
 async function records(directory) {
@@ -139,14 +152,69 @@ test("behind-ALB prepare and first-release cleanup use the same Yandex Compose m
     dependencies,
   );
   const allComposeCalls = calls.filter(({ args }) => args[0] === "compose");
-  const expectedFiles = ["-f", "compose.production.yml", "-f", "deploy/production/compose.yandex.yml"];
+  const expectedCompose = [
+    "compose",
+    "--project-name",
+    "markiro-production",
+    "--env-file",
+    ENVIRONMENT.MARKIRO_ENV_FILE,
+    "-f",
+    "compose.production.yml",
+    "-f",
+    "deploy/production/compose.yandex.yml",
+  ];
 
   assert.equal(failed.state, "failed");
   assert.ok(prepareCalls.some(({ args }) => args.includes("pull")));
   assert.ok(allComposeCalls.some(({ args }) => args.includes("migrate")));
   assert.ok(allComposeCalls.some(({ args }) => args.includes("stop")));
   for (const { args } of allComposeCalls)
-    assert.deepEqual(args.slice(3, 7), expectedFiles, `missing Yandex overlay in ${args.join(" ")}`);
+    assert.deepEqual(
+      args.slice(0, expectedCompose.length),
+      expectedCompose,
+      `stable project or Yandex overlay missing in ${args.join(" ")}`,
+    );
+});
+
+test("two SHA release directories replace one stable Compose project and rollback restores the prior digest pair", async () => {
+  const { dependencies, releaseDirectory, running } = await fixture({ withPrevious: false });
+  const first = await prepareRelease(
+    { environment: ENVIRONMENT, releaseDirectory, readinessAttempts: 1 },
+    dependencies,
+  );
+  await finalizePreparedRelease({ candidate: first, releaseDirectory });
+  const secondEnvironment = {
+    ...ENVIRONMENT,
+    MARKIRO_IMAGE_TAG: "1".repeat(40),
+    MARKIRO_API_IMAGE_DIGEST: `sha256:${"e".repeat(64)}`,
+    MARKIRO_EDGE_IMAGE_DIGEST: `sha256:${"f".repeat(64)}`,
+  };
+  const second = await prepareRelease(
+    {
+      environment: secondEnvironment,
+      releaseDirectory,
+      readinessAttempts: 1,
+      requirePreviousHealthy: true,
+    },
+    dependencies,
+  );
+
+  assert.deepEqual(running, {
+    apiDigest: secondEnvironment.MARKIRO_API_IMAGE_DIGEST,
+    edgeDigest: secondEnvironment.MARKIRO_EDGE_IMAGE_DIGEST,
+    project: "markiro-production",
+  });
+
+  await rollbackPreparedRelease(
+    { candidate: second, environment: secondEnvironment, releaseDirectory, readinessAttempts: 1 },
+    dependencies,
+  );
+
+  assert.deepEqual(running, {
+    apiDigest: API_DIGEST,
+    edgeDigest: EDGE_DIGEST,
+    project: "markiro-production",
+  });
 });
 
 test("a repeat deployment rejects a missing previous healthy record before migration or service start", async () => {
@@ -165,7 +233,10 @@ test("a repeat deployment rejects a missing previous healthy record before migra
     /previous healthy release is unavailable/,
   );
 
-  assert.equal(calls.some(({ args }) => args.includes("migrate") || args.includes("up")), false);
+  assert.equal(
+    calls.some(({ args }) => args.includes("migrate") || args.includes("up")),
+    false,
+  );
 });
 
 test("finalize validates the exact pending candidate and creates one immutable healthy record", async () => {

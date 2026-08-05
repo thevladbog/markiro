@@ -40,8 +40,9 @@ sanitized command failures rather than provider stderr.
 Normal production delivery uses `.github/workflows/deploy-production.yml`. It
 accepts only an explicit dispatch naming the exact successful release run ID
 and commit, or a successful `Publish production images` `workflow_run` from
-`main`. The protected `production` environment must approve the controller,
-one-use deploy job, and independent cleanup job. A pull request, tag-shaped
+`main`. The independently protected `production-controller`, `production-deploy`,
+and `production-cleanup` environments approve the controller, one-use deploy
+job, and independent cleanup job. A pull request, tag-shaped
 image selector, mutable runner label, or a different release workflow is not a
 deployment source.
 
@@ -53,10 +54,11 @@ to the `thevladbog/q` repository and grants only repository
 `Administration: write`, which GitHub requires for repository JIT configuration
 and forced stale-runner deletion. Rotate it out of band. Do not copy this token
 into a GitHub repository or environment secret, Terraform, cloud-init, VM
-metadata, or a ticket. The runner and GitHub-hosted cleanup fetch it directly,
-mask it, retain it only in bounded `/run` or runner-temporary files at mode
-`0600`, and delete those files before shutdown. Never enable provider or shell
-debugging around this flow.
+metadata, or a ticket. Only the GitHub-hosted deployment controller and cleanup
+job fetch it directly, mask it, retain it only in bounded `/run` or
+runner-temporary files at mode `0600`, and delete those files before shutdown.
+The self-hosted deploy job has `id-token: none` and can never fetch the
+runner-registration payload. Never enable provider or shell debugging around this flow.
 
 The exact `production-controller` and `production-cleanup` subjects both
 exchange only as the deployment-controller service account; the distinct
@@ -146,8 +148,9 @@ scripts at the same approved revision.
 set -euo pipefail
 umask 077
 
-export MARKIRO_ROOT=/opt/markiro/production-bundle
+export MARKIRO_ROOT=/opt/markiro/active-release
 export MARKIRO_ENV_FILE=/etc/markiro/production.env
+export MARKIRO_COMPOSE_PROJECT=markiro-production
 export MARKIRO_DOMAIN=app.example.ru
 export ACME_EMAIL=ops@example.ru
 
@@ -158,6 +161,7 @@ export MARKIRO_IMAGE_TAG MARKIRO_API_IMAGE_DIGEST MARKIRO_EDGE_IMAGE_DIGEST
 
 [[ "$MARKIRO_ROOT" = /* ]]
 [[ "$MARKIRO_ENV_FILE" = /* ]]
+test "$MARKIRO_COMPOSE_PROJECT" = markiro-production
 [[ "$MARKIRO_IMAGE_TAG" =~ ^[0-9a-f]{40}$ ]] || {
   echo 'STOP: the approved release must be a full lowercase 40-character SHA' >&2
   exit 1
@@ -446,7 +450,7 @@ install -d -m 0700 "$PROTECTED_ROLLOUT_DIR"
 OWNER_RESULT_FILE="$(mktemp "$PROTECTED_ROLLOUT_DIR/first-owner.XXXXXX")"
 chmod 600 "$OWNER_RESULT_FILE"
 
-docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml run --rm --no-deps api \
+docker compose --project-name markiro-production --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml run --rm --no-deps api \
   node dist/cli/provision-tenant-owner.js \
   --email "$OWNER_EMAIL" \
   --tenant-name "$TENANT_NAME" \
@@ -528,14 +532,14 @@ provider endpoints, cookies, personal data, and payloads before placing a
 minimal excerpt in the protected incident record; never paste raw logs into
 tickets or chat.
 
-| Failure phase      | What remains running                                                                                                                                               | Safe local evidence                                                                                                                                                                           | Rollback                                                                                                                                            | Exact next command                                                                                                                                                                                 |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Pull               | The previous API and edge are unchanged; no candidate release record exists if digest resolution never completed.                                                  | `docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml ps` and the sanitized deploy error.                                                                                  | Not needed; production images were not switched.                                                                                                    | After registry/network access is fixed and the same SHA remains approved: `node deploy/production/preflight.mjs`, then `node deploy/production/deploy.mjs`.                                        |
-| Migration          | Previous API and edge remain running. A candidate record is `failed`; some forward migrations may already be committed.                                            | `docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml logs --no-color --tail 200 migrate`; migration logs contain lifecycle/tag output, but still review before recording. | Do not reverse SQL. An image rollback is relevant only if another phase changed an image, and is allowed only with backward-compatibility evidence. | `docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml logs --no-color --tail 200 migrate`; investigate database state and ship a reviewed forward fix—do not restart in a loop. |
-| API readiness      | The candidate API container was recreated but is not ready; the existing edge image was not deliberately switched and may proxy the unavailable candidate service. | `docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml ps` and `docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml logs --no-color --tail 200 api`.    | Allowed only after the compatibility gate below.                                                                                                    | `docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml logs --no-color --tail 200 api`; then enter **Rollback** if authorized.                                                   |
-| Edge start         | The candidate API is ready; edge may be failed/stopped or partly replaced and public service is not accepted.                                                      | `docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml ps` and `docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml logs --no-color --tail 200 edge`.   | Allowed only after the compatibility gate below.                                                                                                    | `docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml logs --no-color --tail 200 edge`; then enter **Rollback** if authorized.                                                  |
-| Edge/TLS readiness | Candidate API and edge were started, but the public HTTPS liveness endpoint did not become ready inside its bounded stage timeout.                                 | The sanitized deploy error's last cause (`HTTP nnn` or connection/TLS) and reviewed `edge` log tails; do not copy certificate account data.                                                   | Allowed only after the compatibility gate below.                                                                                                    | Keep maintenance/deny active; inspect `docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml logs --no-color --tail 200 edge`, then enter **Rollback** if authorized.            |
-| Post-switch smoke  | Candidate API and edge are HTTPS-ready, but the single deploy-owned full smoke failed; the release record is `failed` and the release is rejected.                 | Retain the sanitized failed-smoke gate and collect reviewed `api`/`edge` log tails locally. Do not run another full smoke against the rejected release.                                       | Allowed only after the compatibility gate below.                                                                                                    | Keep maintenance/deny active and enter **Rollback** if authorized.                                                                                                                                 |
+| Failure phase      | What remains running                                                                                                                                               | Safe local evidence                                                                                                                                                                                                                                             | Rollback                                                                                                                                            | Exact next command                                                                                                                                                                                                                   |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Pull               | The previous API and edge are unchanged; no candidate release record exists if digest resolution never completed.                                                  | `docker compose --project-name markiro-production --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml ps` and the sanitized deploy error.                                                                                                                  | Not needed; production images were not switched.                                                                                                    | After registry/network access is fixed and the same SHA remains approved: `node deploy/production/preflight.mjs`, then `node deploy/production/deploy.mjs`.                                                                          |
+| Migration          | Previous API and edge remain running. A candidate record is `failed`; some forward migrations may already be committed.                                            | `docker compose --project-name markiro-production --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml logs --no-color --tail 200 migrate`; migration logs contain lifecycle/tag output, but still review before recording.                                 | Do not reverse SQL. An image rollback is relevant only if another phase changed an image, and is allowed only with backward-compatibility evidence. | `docker compose --project-name markiro-production --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml logs --no-color --tail 200 migrate`; investigate database state and ship a reviewed forward fix—do not restart in a loop. |
+| API readiness      | The candidate API container was recreated but is not ready; the existing edge image was not deliberately switched and may proxy the unavailable candidate service. | `docker compose --project-name markiro-production --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml ps` and `docker compose --project-name markiro-production --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml logs --no-color --tail 200 api`.  | Allowed only after the compatibility gate below.                                                                                                    | `docker compose --project-name markiro-production --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml logs --no-color --tail 200 api`; then enter **Rollback** if authorized.                                                   |
+| Edge start         | The candidate API is ready; edge may be failed/stopped or partly replaced and public service is not accepted.                                                      | `docker compose --project-name markiro-production --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml ps` and `docker compose --project-name markiro-production --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml logs --no-color --tail 200 edge`. | Allowed only after the compatibility gate below.                                                                                                    | `docker compose --project-name markiro-production --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml logs --no-color --tail 200 edge`; then enter **Rollback** if authorized.                                                  |
+| Edge/TLS readiness | Candidate API and edge were started, but the public HTTPS liveness endpoint did not become ready inside its bounded stage timeout.                                 | The sanitized deploy error's last cause (`HTTP nnn` or connection/TLS) and reviewed `edge` log tails; do not copy certificate account data.                                                                                                                     | Allowed only after the compatibility gate below.                                                                                                    | Keep maintenance/deny active; inspect `docker compose --project-name markiro-production --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml logs --no-color --tail 200 edge`, then enter **Rollback** if authorized.            |
+| Post-switch smoke  | Candidate API and edge are HTTPS-ready, but the single deploy-owned full smoke failed; the release record is `failed` and the release is rejected.                 | Retain the sanitized failed-smoke gate and collect reviewed `api`/`edge` log tails locally. Do not run another full smoke against the rejected release.                                                                                                         | Allowed only after the compatibility gate below.                                                                                                    | Keep maintenance/deny active and enter **Rollback** if authorized.                                                                                                                                                                   |
 
 For every phase, a non-zero migration, readiness, or smoke result means reject,
 not “accept with warning.” If migration compatibility cannot be proved, keep
@@ -636,7 +640,7 @@ protected record using the same `docker image inspect` interface as
 order—forward migrator, API, bounded readiness, edge, smoke:
 
 ```bash
-docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml pull api edge
+docker compose --project-name markiro-production --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml pull api edge
 
 ACTUAL_API_DIGESTS="$(docker image inspect --format '{{json .RepoDigests}}' "ghcr.io/thevladbog/markiro-api@${MARKIRO_API_IMAGE_DIGEST}")"
 ACTUAL_EDGE_DIGESTS="$(docker image inspect --format '{{json .RepoDigests}}' "ghcr.io/thevladbog/markiro-edge@${MARKIRO_EDGE_IMAGE_DIGEST}")"
@@ -676,12 +680,12 @@ if (
 console.log("rollback image digests verified");
 NODE
 
-docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml run --rm migrate
-docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml up -d --no-deps api
+docker compose --project-name markiro-production --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml run --rm migrate
+docker compose --project-name markiro-production --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml up -d --no-deps api
 
 READY=0
 for attempt in $(seq 1 30); do
-  if docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml exec -T api \
+  if docker compose --project-name markiro-production --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml exec -T api \
     node /opt/markiro/healthcheck.mjs; then
     READY=1
     break
@@ -693,7 +697,7 @@ test "$READY" = 1 || {
   exit 1
 }
 
-docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml up -d --no-deps edge
+docker compose --project-name markiro-production --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml up -d --no-deps edge
 node deploy/production/smoke.mjs
 ```
 

@@ -49,6 +49,7 @@ export async function composeQuiet(environment, supplied = {}) {
     MARKIRO_DOMAIN: environment.MARKIRO_DOMAIN,
     MARKIRO_EDGE_MODE: environment.MARKIRO_EDGE_MODE,
     MARKIRO_ENV_FILE: environment.MARKIRO_ENV_FILE,
+    MARKIRO_COMPOSE_PROJECT: environment.MARKIRO_COMPOSE_PROJECT,
   };
   if (environment.MARKIRO_IMAGE_TAG !== undefined)
     childEnvironment.MARKIRO_IMAGE_TAG = environment.MARKIRO_IMAGE_TAG;
@@ -203,6 +204,7 @@ export async function runPreflight(
       MARKIRO_EDGE_MODE: edgeMode,
       ACME_EMAIL: acmeEmail,
       MARKIRO_ENV_FILE: envFile,
+      MARKIRO_COMPOSE_PROJECT: environment.MARKIRO_COMPOSE_PROJECT,
     };
     if (environment.MARKIRO_HTTP_PORT !== undefined)
       composeEnvironment.MARKIRO_HTTP_PORT = environment.MARKIRO_HTTP_PORT;

@@ -62,17 +62,22 @@ system.
 
 <!-- runbook-contract:go-live-gate-09-deploy-smoke-rollback -->
 
-9. **First deployment rehearsal, still without public DNS.** Dispatch the
+9. **First deployment rehearsal, still without public DNS.** First dispatch the
    protected **Deploy production** workflow manually with
-   `deployment_phase=first`. Its authoritative order is: materialize runtime
+   `deployment_phase=first` and `rollback_rehearsal=true`; automatic
+   `workflow_run` delivery always fixes this input to false. Its authoritative order is: materialize runtime
    secrets; start the private edge; probe
    `http://127.0.0.1:8080/health/ready` on the app VM with the production
    `Host` header; wait for ALB back-end `HEALTHY`; then probe the reserved ALB
    address via `curl --resolve <production-domain>:443:<reserved-alb-ip>`.
    This preserves TLS SNI and the production hostname without creating public
-   DNS. The workflow finalizes only after those probes. Rehearse the failure
-   path too: the first deployment must stop both candidate services and record
-   the candidate failed because it has no previous healthy release. A
+   DNS. The rehearsal deterministically stops after the candidate is running and
+   before finalize; it must stop both candidate services and record the candidate
+   failed because it has no previous healthy release. Retain the bounded
+   `markiro-rollback-rehearsal-<release-sha>` artifact, then confirm the stopped
+   services and failed record through `/opt/markiro/active-release`. Only then
+   dispatch the same approved release again with `deployment_phase=first` and
+   `rollback_rehearsal=false` for the successful first deployment. A
    `deployment_phase=repeat` run instead requires the previous ALB back end to
    be healthy and performs public-hostname smoke only after DNS has been
    approved and applied.

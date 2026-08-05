@@ -86,6 +86,7 @@ async function sources() {
     workflow: await contents(".github/workflows/yandex-infrastructure.yml"),
     dnsWorkflow: await contents(".github/workflows/yandex-dns-convergence.yml"),
     postDnsWorkflow: await contents(".github/workflows/yandex-post-dns-smoke.yml"),
+    remoteDeploy: await contents("deploy/yandex/remote-deploy.mjs"),
   };
 }
 
@@ -205,7 +206,14 @@ const markerProcedures = {
   },
 };
 
-function assertRunbookContract({ documents, verifier, workflow, dnsWorkflow, postDnsWorkflow }) {
+function assertRunbookContract({
+  documents,
+  verifier,
+  workflow,
+  dnsWorkflow,
+  postDnsWorkflow,
+  remoteDeploy,
+}) {
   for (const [runbook, markers] of Object.entries(runbooks)) {
     const source = documents[runbook];
     markersAppearInOrder(source, markers);
@@ -224,6 +232,13 @@ function assertRunbookContract({ documents, verifier, workflow, dnsWorkflow, pos
   }
 
   const bootstrap = documents["docs/runbooks/yandex-bootstrap.md"];
+  assert.match(
+    bootstrap,
+    /production-controller/,
+    "bootstrap must name the controller environment",
+  );
+  assert.match(bootstrap, /production-deploy/, "bootstrap must name the deploy environment");
+  assert.match(bootstrap, /production-cleanup/, "bootstrap must name the cleanup environment");
   assert.match(bootstrap, /production-postgres-owner/);
   assert.match(bootstrap, /install .*Terraform `1\.15\.8`/i);
   assert.match(bootstrap, /terraform version -json/);
@@ -241,6 +256,9 @@ function assertRunbookContract({ documents, verifier, workflow, dnsWorkflow, pos
   );
 
   const infrastructure = documents["docs/runbooks/yandex-infrastructure-apply.md"];
+  assert.match(infrastructure, /production-controller/);
+  assert.match(infrastructure, /production-deploy/);
+  assert.match(infrastructure, /production-cleanup/);
   assert.match(infrastructure, /production-postgres-owner/);
   for (const input of [
     "target_sha",
@@ -295,6 +313,14 @@ function assertRunbookContract({ documents, verifier, workflow, dnsWorkflow, pos
   }
 
   const goLive = documents["docs/runbooks/yandex-first-go-live.md"];
+  assert.match(goLive, /rollback_rehearsal=true/);
+  assert.match(goLive, /rollback_rehearsal=false/);
+  assert.match(goLive, /automatic\s+`workflow_run` delivery always fixes this input to false/i);
+  const secrets = documents["docs/runbooks/yandex-secrets.md"];
+  assert.match(secrets, /\/opt\/markiro\/active-release/);
+  assert.match(secrets, /--project-name markiro-production/);
+  assert.match(remoteDeploy, /\/opt\/markiro\/active-release/);
+  assert.match(remoteDeploy, /mv -Tf/);
   const publicDns = goLive.indexOf("<!-- runbook-contract:go-live-public-dns-apply -->");
   assert.ok(publicDns >= 0, "missing public DNS apply marker");
   for (let gate = 1; gate <= 11; gate += 1) {

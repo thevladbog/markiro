@@ -724,6 +724,8 @@ test("restores the API through the fixed CI image override when requested", asyn
   const restored = calls.find((args) => args.includes("up") && args.at(-1) === "api");
   assert.deepEqual(restored, [
     "compose",
+    "--project-name",
+    "markiro-production",
     "--env-file",
     "/private/ci.env",
     "-f",

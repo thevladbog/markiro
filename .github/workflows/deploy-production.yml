@@ -17,6 +17,11 @@ on:
         default: repeat
         type: choice
         options: [first, repeat]
+      rollback_rehearsal:
+        description: Separately approved first-release rollback rehearsal; never enabled by automatic delivery.
+        required: true
+        default: false
+        type: boolean
   workflow_run:
     workflows: [Publish production images]
     types: [completed]
@@ -56,6 +61,7 @@ jobs:
       YC_BACKEND_GROUP_ID: ${{ vars.YC_BACKEND_GROUP_ID }}
       YC_TARGET_GROUP_ID: ${{ vars.YC_APP_TARGET_GROUP_ID }}
       MARKIRO_DEPLOYMENT_PHASE: ${{ github.event_name == 'workflow_dispatch' && inputs.deployment_phase || 'repeat' }}
+      MARKIRO_ROLLBACK_REHEARSAL: ${{ github.event_name == 'workflow_dispatch' && inputs.rollback_rehearsal && '1' || '0' }}
     steps:
       - name: Resolve exact trusted release identity
         id: release
@@ -175,6 +181,7 @@ jobs:
       MARKIRO_DOMAIN: ${{ vars.MARKIRO_DOMAIN }}
       MARKIRO_DEPLOYMENT_PHASE: ${{ github.event_name == 'workflow_dispatch' && inputs.deployment_phase || 'repeat' }}
       YC_LOAD_BALANCER_ADDRESS: ${{ vars.YC_LOAD_BALANCER_ADDRESS }}
+      MARKIRO_ROLLBACK_REHEARSAL: ${{ github.event_name == 'workflow_dispatch' && inputs.rollback_rehearsal && '1' || '0' }}
       APP_SSH_HOST_KEYS_B64: ${{ needs.controller.outputs.app-host-keys-b64 }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -195,8 +202,17 @@ jobs:
           RELEASE_MANIFEST_PATH: ${{ runner.temp }}/release-manifest/release-manifest.json
         run: |
           set -euo pipefail
-          node deploy/yandex/remote-deploy.mjs run
+          if [[ "$MARKIRO_ROLLBACK_REHEARSAL" == 1 ]]; then
+            node deploy/yandex/remote-deploy.mjs run > "$RUNNER_TEMP/rollback-rehearsal-result.json"
+            jq -e --arg release_sha "$EXPECTED_RELEASE_SHA" '
+              type == "object" and (keys | sort) == ["state", "tag"] and
+              .state == "rehearsed" and .tag == $release_sha
+            ' "$RUNNER_TEMP/rollback-rehearsal-result.json" > /dev/null
+          else
+            node deploy/yandex/remote-deploy.mjs run
+          fi
       - name: Record the exact finalized release
+        if: env.MARKIRO_ROLLBACK_REHEARSAL != '1'
         env:
           RELEASE_RUN_ID: ${{ needs.controller.outputs.release-run-id }}
           RELEASE_SHA: ${{ needs.controller.outputs.release-sha }}
@@ -218,11 +234,42 @@ jobs:
             '{deploymentPhase: $phase, deploymentRunId: $deployment_run_id, finalizedAt: $finalized_at, releaseRunId: $release_run_id, releaseSha: $release_sha}' \
             > "$finalized_path"
           chmod 600 "$finalized_path"
+      - name: Record authenticated bounded rollback rehearsal evidence
+        if: env.MARKIRO_ROLLBACK_REHEARSAL == '1'
+        env:
+          RELEASE_SHA: ${{ needs.controller.outputs.release-sha }}
+        run: |
+          set -euo pipefail
+          result_path="$RUNNER_TEMP/rollback-rehearsal-result.json"
+          evidence_path="$RUNNER_TEMP/rollback-rehearsal.json"
+          test -s "$result_path"
+          test ! -e "$evidence_path"
+          jq -e --arg release_sha "$RELEASE_SHA" '
+            type == "object" and (keys | sort) == ["state", "tag"] and
+            .state == "rehearsed" and .tag == $release_sha
+          ' "$result_path" > /dev/null
+          umask 077
+          jq -n \
+            --arg deployment_run_id "$GITHUB_RUN_ID" \
+            --arg release_sha "$RELEASE_SHA" \
+            --arg rehearsed_at "$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')" \
+            '{deploymentRunId: $deployment_run_id, releaseSha: $release_sha, rehearsedAt: $rehearsed_at, state: "rehearsed"}' \
+            > "$evidence_path"
+          chmod 600 "$evidence_path"
       - name: Upload finalized release evidence
+        if: env.MARKIRO_ROLLBACK_REHEARSAL != '1'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: markiro-finalized-release-${{ needs.controller.outputs.release-sha }}
           path: ${{ runner.temp }}/finalized-release.json
+          retention-days: 90
+          if-no-files-found: error
+      - name: Upload rollback rehearsal evidence
+        if: env.MARKIRO_ROLLBACK_REHEARSAL == '1'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: markiro-rollback-rehearsal-${{ needs.controller.outputs.release-sha }}
+          path: ${{ runner.temp }}/rollback-rehearsal.json
           retention-days: 90
           if-no-files-found: error
       - name: Remove local deployment material
@@ -230,7 +277,7 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf -- "${RUNNER_TEMP:?}/release-manifest" "${RUNNER_TEMP:?}/markiro-os-login"
-          rm -f -- "${RUNNER_TEMP:?}/finalized-release.json"
+          rm -f -- "${RUNNER_TEMP:?}/finalized-release.json" "${RUNNER_TEMP:?}/rollback-rehearsal-result.json" "${RUNNER_TEMP:?}/rollback-rehearsal.json"
 
   cleanup:
     needs: [controller, deploy]

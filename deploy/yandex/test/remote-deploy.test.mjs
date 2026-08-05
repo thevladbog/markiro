@@ -6,6 +6,7 @@ import {
   deployRelease,
   runRemoteDeployment,
   runRemoteDeploymentWithReporting,
+  waitForAlbTarget,
 } from "../remote-deploy.mjs";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
@@ -28,6 +29,83 @@ const CANDIDATE = {
   createdAt: "2026-08-05T10:20:30.000Z",
 };
 const FIRST_CANDIDATE = { ...CANDIDATE, previousTag: null };
+
+test("ALB target gate waits for the exact application target through transitional states", async () => {
+  const responses = [
+    {
+      targetStates: [
+        { target: { address: "10.20.0.7" }, status: { zoneStatuses: [{ status: "UNHEALTHY" }] } },
+      ],
+    },
+    {
+      targetStates: [
+        { target: { address: "10.20.0.7" }, status: { zoneStatuses: [{ status: "HEALTHY" }] } },
+      ],
+    },
+  ];
+  const sleeps = [];
+  let now = 0;
+
+  await waitForAlbTarget({
+    expectedAddress: "10.20.0.7",
+    fetchTargetStates: async () => responses.shift(),
+    sleep: async (milliseconds) => {
+      sleeps.push(milliseconds);
+      now += milliseconds;
+    },
+    monotonicNow: () => now,
+    timeoutMs: 1_000,
+    initialBackoffMs: 100,
+    maxBackoffMs: 200,
+  });
+
+  assert.deepEqual(sleeps, [100]);
+});
+
+test("ALB target gate rejects a stale healthy target and reports only a bounded sanitized cause", async () => {
+  let now = 0;
+  await assert.rejects(
+    waitForAlbTarget({
+      expectedAddress: "10.20.0.7",
+      fetchTargetStates: async () => ({
+        targetStates: [
+          { target: { address: "10.20.0.8" }, status: { zoneStatuses: [{ status: "HEALTHY" }] } },
+        ],
+      }),
+      sleep: async (milliseconds) => {
+        now += milliseconds;
+      },
+      monotonicNow: () => now,
+      timeoutMs: 250,
+      initialBackoffMs: 100,
+      maxBackoffMs: 100,
+    }),
+    /production ALB gate failed after 250ms \(last cause: expected target unavailable\)/,
+  );
+});
+
+test("ALB target gate abort-bounds malformed provider responses without exposing them", async () => {
+  let now = 0;
+  let signal;
+  await assert.rejects(
+    waitForAlbTarget({
+      expectedAddress: "10.20.0.7",
+      fetchTargetStates: async (options) => {
+        signal = options.signal;
+        return { targetStates: [{ target: { address: "10.20.0.7" }, status: {} }] };
+      },
+      sleep: async (milliseconds) => {
+        now += milliseconds;
+      },
+      monotonicNow: () => now,
+      timeoutMs: 100,
+      initialBackoffMs: 100,
+      maxBackoffMs: 100,
+    }),
+    /production ALB gate failed after 100ms \(last cause: malformed target response\)/,
+  );
+  assert.ok(signal instanceof AbortSignal);
+});
 
 function sshField(value) {
   const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value, "utf8");
@@ -109,6 +187,42 @@ test("first deployment runs the ALB pre-DNS probe and never uses public DNS smok
     "pre-DNS ALB smoke",
     "remote finalize",
   ]);
+});
+
+test("separately selected first-release rehearsal stops the running candidate before finalize", async () => {
+  const { dependencies, events } = orchestrationFixture({ candidate: FIRST_CANDIDATE });
+  dependencies.deploymentPhase = "first";
+  dependencies.rollbackRehearsal = true;
+  delete dependencies.smoke;
+  dependencies.preDnsSmoke = () => events.push("pre-DNS ALB smoke");
+
+  const record = await deployRelease(dependencies, MANIFEST);
+
+  assert.deepEqual(record, { state: "rehearsed", tag: COMMIT });
+  assert.deepEqual(events, [
+    "transfer immutable bundle",
+    "runtime refresh",
+    "remote prepare",
+    "ALB healthy",
+    "pre-DNS ALB smoke",
+    "remote rollback",
+  ]);
+});
+
+test("rollback rehearsal never retries a failed first-release stop", async () => {
+  const { dependencies, events } = orchestrationFixture({ candidate: FIRST_CANDIDATE });
+  dependencies.deploymentPhase = "first";
+  dependencies.rollbackRehearsal = true;
+  delete dependencies.smoke;
+  dependencies.preDnsSmoke = () => events.push("pre-DNS ALB smoke");
+  dependencies.rollback = async () => {
+    events.push("remote rollback");
+    throw new Error("first deployment recovery failed");
+  };
+
+  await assert.rejects(deployRelease(dependencies, MANIFEST), /first deployment recovery failed/);
+
+  assert.equal(events.filter((event) => event === "remote rollback").length, 1);
 });
 
 test("repeat deployment rejects a missing previous healthy release before public smoke", async () => {
@@ -210,6 +324,7 @@ function response(body, ok = true) {
 function cliFixture({ candidate = CANDIDATE, failAt } = {}) {
   const events = [];
   const commands = [];
+  let monotonicTime = 0;
   const environment = {
     RELEASE_MANIFEST_PATH: "/runner/release-manifest.json",
     EXPECTED_RELEASE_RUN_ID: RUN_ID,
@@ -227,6 +342,10 @@ function cliFixture({ candidate = CANDIDATE, failAt } = {}) {
     APP_SSH_HOST_KEYS_B64: Buffer.from(`${ED25519_KEY}\n${RSA_KEY}`).toString("base64"),
   };
   const system = {
+    monotonicNow: () => monotonicTime,
+    sleep: async (milliseconds) => {
+      monotonicTime += milliseconds;
+    },
     async readFile() {
       return MANIFEST;
     },
@@ -244,7 +363,14 @@ function cliFixture({ candidate = CANDIDATE, failAt } = {}) {
       if (String(url).includes("/targetStates/")) {
         events.push("ALB healthy");
         if (failAt === "ALB healthy") return response({ targetStates: [] });
-        return response({ targetStates: [{ status: { zoneStatuses: [{ status: "HEALTHY" }] } }] });
+        return response({
+          targetStates: [
+            {
+              target: { address: "10.20.0.7" },
+              status: { zoneStatuses: [{ status: "HEALTHY" }] },
+            },
+          ],
+        });
       }
       return response({
         status: "RUNNING",
@@ -299,10 +425,13 @@ function cliFixture({ candidate = CANDIDATE, failAt } = {}) {
         assert.deepEqual(JSON.parse(JSON.parse(options.input).commandInput), candidate);
         return `${JSON.stringify({ ...candidate, state: "failed" })}\n`;
       }
+      if (args.includes("--dump-header"))
+        return `HTTP/1.1 200 OK\r\nx-markiro-release-sha: ${COMMIT}\r\n\r\n`;
       return "";
     },
-    async smoke() {
+    async smoke({ expectedReleaseSha }) {
       events.push("external smoke");
+      assert.equal(expectedReleaseSha, COMMIT);
       if (failAt === "external smoke") throw new Error("external smoke failed");
     },
   };
@@ -340,6 +469,7 @@ test("real CLI adapter stages remote prepare, ALB, runner smoke, and remote fina
     `MARKIRO_IMAGE_TAG=${COMMIT}`,
     `MARKIRO_API_IMAGE_DIGEST=sha256:${"a".repeat(64)}`,
     `MARKIRO_EDGE_IMAGE_DIGEST=sha256:${"b".repeat(64)}`,
+    "MARKIRO_COMPOSE_PROJECT=markiro-production",
     "MARKIRO_DOMAIN=markiro.example",
     "MARKIRO_EDGE_MODE=behind-alb",
     "MARKIRO_REQUIRE_PREVIOUS_HEALTHY=1",
@@ -353,6 +483,12 @@ test("real CLI adapter stages remote prepare, ALB, runner smoke, and remote fina
   assert.equal(successfulStages.length, 2);
   for (const { args } of successfulStages)
     for (const variable of expectedRemoteEnvironment) assert.ok(args.includes(variable));
+  const activeRelease = commands.find(
+    ({ command, args }) => command === "ssh" && args.includes("markiro-active-release"),
+  );
+  assert.ok(activeRelease);
+  assert.ok(activeRelease.args.includes("/opt/markiro/active-release"));
+  assert.ok(activeRelease.args.some((value) => value.includes("mv -Tf")));
 });
 
 test("actual remote prepare argv satisfies the real app-side preflight environment boundary", async () => {
@@ -418,10 +554,30 @@ test("real CLI adapter keeps first deployment pre-DNS and probes loopback plus t
   );
   assert.ok(localProbe);
   assert.ok(localProbe.args.includes("Host: markiro.example"));
+  assert.ok(localProbe.args.includes("--dump-header"));
   assert.ok(albProbe);
   assert.ok(albProbe.args.includes("markiro.example:443:203.0.113.42"));
+  assert.ok(albProbe.args.includes("--dump-header"));
   assert.ok(prepare.args.includes("MARKIRO_REQUIRE_PREVIOUS_HEALTHY=0"));
   assert.equal(events.includes("external smoke"), false);
+});
+
+test("first deployment rejects a stale 200 release header before finalization", async () => {
+  const { environment, events, system } = cliFixture({ candidate: FIRST_CANDIDATE });
+  const run = system.run;
+  system.run = async (command, args, options) => {
+    if (args.includes("--dump-header"))
+      return `HTTP/1.1 200 OK\r\nx-markiro-release-sha: ${"f".repeat(40)}\r\n\r\n`;
+    return run(command, args, options);
+  };
+
+  await assert.rejects(
+    runRemoteDeployment(environment, system),
+    /live release identity does not match the expected release/,
+  );
+
+  assert.equal(events.includes("remote finalize"), false);
+  assert.equal(events.includes("remote rollback"), true);
 });
 
 test("real CLI adapter rejects a noncanonical authenticated host-key bundle before writing trust", async () => {

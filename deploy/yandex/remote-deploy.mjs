@@ -14,6 +14,9 @@ import { registryCredentials } from "./registry-auth.mjs";
 
 const API_PREFIX = "ghcr.io/thevladbog/markiro-api@";
 const EDGE_PREFIX = "ghcr.io/thevladbog/markiro-edge@";
+const ALB_TARGET_TIMEOUT_MS = 180_000;
+const ALB_TARGET_INITIAL_BACKOFF_MS = 1_000;
+const ALB_TARGET_MAX_BACKOFF_MS = 10_000;
 
 function requireFunction(dependencies, name) {
   if (typeof dependencies[name] !== "function")
@@ -31,6 +34,74 @@ function deploymentPhase(value) {
   return value;
 }
 
+function positiveMilliseconds(value, fallback) {
+  return Number.isSafeInteger(value) && value > 0 ? value : fallback;
+}
+
+function targetAddress(targetState) {
+  const address = targetState?.target?.address;
+  return typeof address === "string" && /^(?:\d{1,3}\.){3}\d{1,3}$/.test(address) ? address : null;
+}
+
+function albTargetCause(payload, expectedAddress) {
+  if (!payload || !Array.isArray(payload.targetStates)) return "malformed target response";
+  const target = payload.targetStates.find(
+    (targetState) => targetAddress(targetState) === expectedAddress,
+  );
+  if (!target) return "expected target unavailable";
+  const zones = target.status?.zoneStatuses;
+  if (!Array.isArray(zones)) return "malformed target response";
+  if (zones.some((zone) => zone?.status === "HEALTHY")) return null;
+  return "expected target is not healthy";
+}
+
+/**
+ * Wait only for the app VM's exact private target identity. The provider can
+ * report healthy stale targets while the newly prepared candidate is absent.
+ */
+export async function waitForAlbTarget({
+  expectedAddress,
+  fetchTargetStates,
+  sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+  monotonicNow = () => performance.now(),
+  timeoutMs = ALB_TARGET_TIMEOUT_MS,
+  initialBackoffMs = ALB_TARGET_INITIAL_BACKOFF_MS,
+  maxBackoffMs = ALB_TARGET_MAX_BACKOFF_MS,
+}) {
+  if (!/^(?:\d{1,3}\.){3}\d{1,3}$/.test(expectedAddress))
+    throw new Error("production ALB gate failed");
+  const deadline = positiveMilliseconds(timeoutMs, ALB_TARGET_TIMEOUT_MS);
+  const initialBackoff = positiveMilliseconds(initialBackoffMs, ALB_TARGET_INITIAL_BACKOFF_MS);
+  const maxBackoff = Math.max(
+    initialBackoff,
+    positiveMilliseconds(maxBackoffMs, ALB_TARGET_MAX_BACKOFF_MS),
+  );
+  const startedAt = monotonicNow();
+  let delay = initialBackoff;
+  let lastCause = "no target response";
+
+  while (true) {
+    const remaining = deadline - (monotonicNow() - startedAt);
+    if (remaining <= 0) break;
+    try {
+      const payload = await fetchTargetStates({
+        signal: AbortSignal.timeout(Math.max(1, Math.floor(remaining))),
+      });
+      const cause = albTargetCause(payload, expectedAddress);
+      if (cause === null) return;
+      lastCause = cause;
+    } catch {
+      lastCause = "target-state request failed";
+    }
+    const remainingAfterRequest = deadline - (monotonicNow() - startedAt);
+    if (remainingAfterRequest <= 0) break;
+    const pause = Math.min(delay, remainingAfterRequest);
+    await sleep(pause);
+    delay = Math.min(maxBackoff, delay * 2);
+  }
+  throw new Error(`production ALB gate failed after ${deadline}ms (last cause: ${lastCause})`);
+}
+
 export async function deployRelease(dependencies, manifestText) {
   for (const name of [
     "transferBundle",
@@ -43,12 +114,15 @@ export async function deployRelease(dependencies, manifestText) {
     requireFunction(dependencies, name);
   const phase = deploymentPhase(dependencies.deploymentPhase || "repeat");
   requireFunction(dependencies, phase === "first" ? "preDnsSmoke" : "smoke");
+  if (dependencies.rollbackRehearsal && phase !== "first")
+    throw new Error("rollback rehearsal requires a first deployment");
 
   const manifest = parseReleaseManifest(manifestText, dependencies.expectedWorkflowRunId);
   if (manifest.commit !== dependencies.expectedCommit) throw new Error("invalid release manifest");
   await dependencies.transferBundle(manifest);
   await dependencies.refreshRuntime(manifest);
   let candidate;
+  let rollbackAttempted = false;
   try {
     candidate = await dependencies.prepare(manifest);
     if (phase === "first" && candidate.previousTag !== null)
@@ -58,9 +132,16 @@ export async function deployRelease(dependencies, manifestText) {
     await dependencies.verifyAlb(candidate);
     if (phase === "first") await dependencies.preDnsSmoke(candidate);
     else await dependencies.smoke(candidate);
+    if (dependencies.rollbackRehearsal) {
+      rollbackAttempted = true;
+      const failed = await dependencies.rollback(candidate);
+      if (failed?.state !== "failed" || candidate.previousTag !== null)
+        throw new Error("rollback rehearsal recovery failed");
+      return { state: "rehearsed", tag: candidate.tag };
+    }
     return await dependencies.finalize(candidate);
   } catch (error) {
-    if (candidate)
+    if (candidate && !rollbackAttempted)
       try {
         await dependencies.rollback(candidate);
       } catch (recoveryError) {
@@ -163,6 +244,16 @@ function authenticatedKnownHosts(encodedKeys, address) {
   return `${keys.map((key) => `${address} ${key}`).join("\n")}\n`;
 }
 
+function assertExpectedReleaseHeader(headers, expectedReleaseSha) {
+  const matches = String(headers).match(/^x-markiro-release-sha:\s*([^\r\n]+)$/gim);
+  const value = matches
+    ?.at(-1)
+    ?.replace(/^x-markiro-release-sha:\s*/i, "")
+    .trim();
+  if (value !== expectedReleaseSha)
+    throw new Error("live release identity does not match the expected release");
+}
+
 function parseCandidate(output) {
   try {
     const candidate = JSON.parse(output);
@@ -192,13 +283,18 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
     rm,
     streamArchive,
     run,
-    smoke: ({ baseUrl }) => runPublicSmoke({ baseUrl }),
+    sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+    monotonicNow: () => performance.now(),
+    smoke: ({ baseUrl, expectedReleaseSha }) => runPublicSmoke({ baseUrl, expectedReleaseSha }),
     ...supplied,
   };
   const manifestPath = requiredEnvironment("RELEASE_MANIFEST_PATH", environment);
   const expectedRunId = requiredEnvironment("EXPECTED_RELEASE_RUN_ID", environment);
   const expectedCommit = requiredEnvironment("EXPECTED_RELEASE_SHA", environment);
   const phase = deploymentPhase(requiredEnvironment("MARKIRO_DEPLOYMENT_PHASE", environment));
+  const rollbackRehearsal = environment.MARKIRO_ROLLBACK_REHEARSAL === "1";
+  if (rollbackRehearsal && phase !== "first")
+    throw new Error("rollback rehearsal requires a first deployment");
   const domain = validateProductionDomain(environment.MARKIRO_DOMAIN);
   const manifestText = await system.readFile(manifestPath, "utf8");
   const manifest = parseReleaseManifest(manifestText, expectedRunId);
@@ -296,6 +392,7 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
           `MARKIRO_IMAGE_TAG=${manifest.commit}`,
           `MARKIRO_API_IMAGE_DIGEST=${apiDigest}`,
           `MARKIRO_EDGE_IMAGE_DIGEST=${edgeDigest}`,
+          "MARKIRO_COMPOSE_PROJECT=markiro-production",
           `MARKIRO_DOMAIN=${domain}`,
           "MARKIRO_EDGE_MODE=behind-alb",
           `MARKIRO_REQUIRE_PREVIOUS_HEALTHY=${phase === "repeat" ? "1" : "0"}`,
@@ -315,6 +412,18 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
           })}\n`,
         },
       );
+
+    const activateRelease = () =>
+      system.run("ssh", [
+        ...sshBase,
+        "sudo",
+        "/usr/bin/bash",
+        "-c",
+        'set -euo pipefail; temporary="$2.$$.new"; rm -f -- "$temporary"; ln -s -- "$1" "$temporary"; mv -Tf -- "$temporary" "$2"',
+        "markiro-active-release",
+        releaseDirectory,
+        "/opt/markiro/active-release",
+      ]);
 
     return await deployRelease(
       {
@@ -339,6 +448,7 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
             ],
             [...sshBase, "sudo", "tar", "-xf", "-", "-C", "/opt/markiro", "--no-same-owner"],
           );
+          await activateRelease();
         },
         refreshRuntime: () =>
           system.run("ssh", [
@@ -352,22 +462,26 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
           return parseCandidate(await remoteStage("prepare"));
         },
         async verifyAlb() {
-          const targets = await system.fetch(
-            `https://alb.api.cloud.yandex.net/apploadbalancer/v1/loadBalancers/${requiredEnvironment("YC_LOAD_BALANCER_ID", environment)}/targetStates/${requiredEnvironment("YC_BACKEND_GROUP_ID", environment)}/${requiredEnvironment("YC_TARGET_GROUP_ID", environment)}`,
-            { headers: { Authorization: `Bearer ${token}` } },
-          );
-          const state = targets.ok ? await targets.json() : {};
-          if (
-            !state.targetStates?.some((targetState) =>
-              targetState.status?.zoneStatuses?.some((zone) => zone.status === "HEALTHY"),
-            )
-          )
-            throw new Error("production ALB gate failed");
+          const targetStateUrl = `https://alb.api.cloud.yandex.net/apploadbalancer/v1/loadBalancers/${requiredEnvironment("YC_LOAD_BALANCER_ID", environment)}/targetStates/${requiredEnvironment("YC_BACKEND_GROUP_ID", environment)}/${requiredEnvironment("YC_TARGET_GROUP_ID", environment)}`;
+          await waitForAlbTarget({
+            expectedAddress: address,
+            fetchTargetStates: async ({ signal }) => {
+              const targets = await system.fetch(targetStateUrl, {
+                headers: { Authorization: `Bearer ${token}` },
+                signal,
+              });
+              if (!targets.ok) throw new Error("ALB target-state request failed");
+              return targets.json();
+            },
+            sleep: system.sleep,
+            monotonicNow: system.monotonicNow,
+          });
         },
         deploymentPhase: phase,
+        rollbackRehearsal,
         preDnsSmoke: async () => {
           const address = requiredIpv4("YC_LOAD_BALANCER_ADDRESS", environment);
-          await system.run("ssh", [
+          const localHeaders = await system.run("ssh", [
             ...sshBase,
             "curl",
             "--fail",
@@ -375,20 +489,30 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
             "--show-error",
             "--max-time",
             "30",
+            "--dump-header",
+            "-",
+            "--output",
+            "/dev/null",
             "-H",
             `Host: ${domain}`,
             "http://127.0.0.1:8080/health/ready",
           ]);
-          await system.run("curl", [
+          assertExpectedReleaseHeader(localHeaders, manifest.commit);
+          const albHeaders = await system.run("curl", [
             "--fail",
             "--silent",
             "--show-error",
             "--max-time",
             "30",
+            "--dump-header",
+            "-",
+            "--output",
+            "/dev/null",
             "--resolve",
             `${domain}:443:${address}`,
             `https://${domain}/health/ready`,
           ]);
+          assertExpectedReleaseHeader(albHeaders, manifest.commit);
         },
         smoke: () =>
           system.smoke({
@@ -396,6 +520,7 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
               MARKIRO_DOMAIN: domain,
               MARKIRO_HTTPS_PORT: environment.MARKIRO_HTTPS_PORT,
             }),
+            expectedReleaseSha: manifest.commit,
           }),
         async finalize(candidate) {
           return JSON.parse(await remoteStage("finalize", candidate));
@@ -455,8 +580,12 @@ if (isMainModule(import.meta.url)) {
     process.stderr.write("remote deployment failed\n");
     process.exitCode = 1;
   } else
-    runRemoteDeploymentWithReporting().catch(() => {
-      process.stderr.write("remote deployment failed\n");
-      process.exitCode = 1;
-    });
+    runRemoteDeploymentWithReporting()
+      .then((result) => {
+        if (result?.state === "rehearsed") process.stdout.write(`${JSON.stringify(result)}\n`);
+      })
+      .catch(() => {
+        process.stderr.write("remote deployment failed\n");
+        process.exitCode = 1;
+      });
 }
