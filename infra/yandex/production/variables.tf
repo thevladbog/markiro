@@ -123,3 +123,69 @@ variable "audit_bucket_name" {
   type        = string
   nullable    = false
 }
+
+variable "domain" {
+  description = "Exact public authority served by the protected production ingress."
+  type        = string
+  nullable    = false
+
+  validation {
+    condition     = can(regex("^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$", var.domain))
+    error_message = "domain must be a lowercase fully-qualified domain name."
+  }
+}
+
+variable "dns_zone_id" {
+  description = "Existing Cloud DNS zone ID for certificate validation and application publication."
+  type        = string
+  nullable    = false
+}
+
+variable "public_dns_enabled" {
+  description = "Whether to publish the application A record after explicit go-live approval."
+  type        = bool
+  default     = false
+  nullable    = false
+}
+
+variable "log_group_id" {
+  description = "Existing Cloud Logging group ID for ALB and Smart Web Security events."
+  type        = string
+  nullable    = false
+}
+
+variable "global_rate_limit" {
+  description = "Maximum aggregate requests per ARL period; sized above normal CommerceML uploads."
+  type        = number
+  default     = 10000
+  nullable    = false
+
+  validation {
+    condition     = var.global_rate_limit >= 1 && var.global_rate_limit <= 9999999999999
+    error_message = "global_rate_limit must be an integer between 1 and 9999999999999."
+  }
+}
+
+variable "per_ip_rate_limit" {
+  description = "Maximum requests per client IP and ARL period; sized above normal CommerceML uploads."
+  type        = number
+  default     = 1000
+  nullable    = false
+
+  validation {
+    condition     = var.per_ip_rate_limit >= 1 && var.per_ip_rate_limit <= 9999999999999
+    error_message = "per_ip_rate_limit must be an integer between 1 and 9999999999999."
+  }
+}
+
+variable "rate_limit_period_seconds" {
+  description = "Shared ARL quota period in seconds."
+  type        = number
+  default     = 60
+  nullable    = false
+
+  validation {
+    condition     = var.rate_limit_period_seconds >= 1
+    error_message = "rate_limit_period_seconds must be at least one second."
+  }
+}

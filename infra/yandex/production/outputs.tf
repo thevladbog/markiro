@@ -37,3 +37,43 @@ output "audit_bucket_name" {
   description = "Private versioned bucket used for audit archives."
   value       = module.object_storage.audit_bucket_name
 }
+
+output "reserved_ipv4_address" {
+  description = "Reserved public IPv4 address used by the protected ingress."
+  value       = module.ingress.reserved_ipv4_address
+}
+
+output "certificate_id" {
+  description = "Certificate Manager ID for the public HTTPS listener."
+  value       = module.ingress.certificate_id
+}
+
+output "certificate_status" {
+  description = "Current Certificate Manager issuance status."
+  value       = module.ingress.certificate_status
+}
+
+output "load_balancer_id" {
+  description = "Protected public application load balancer ID."
+  value       = module.ingress.load_balancer_id
+}
+
+output "load_balancer_address" {
+  description = "Reserved public IPv4 address served by the load balancer."
+  value       = module.ingress.load_balancer_address
+}
+
+output "backend_group_id" {
+  description = "ALB backend group that reaches the private app target."
+  value       = module.ingress.backend_group_id
+}
+
+output "security_profile_id" {
+  description = "Smart Web Security profile attached to the virtual host."
+  value       = module.ingress.security_profile_id
+}
+
+output "approved_a_records" {
+  description = "Exact application A-record set approved for gated publication."
+  value       = module.ingress.approved_a_records
+}

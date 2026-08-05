@@ -610,7 +610,7 @@ function assertPrivateNetworkAndCompute({
   assert.match(productionOutputs, /output\s+"app_private_ip"\s*\{/);
   assert.match(productionOutputs, /output\s+"app_target_group_id"\s*\{/);
   assert.match(productionOutputs, /output\s+"runner_instance_id"\s*\{/);
-  assert.doesNotMatch(productionOutputs, /nat_ip_address|public.*ip/i);
+  assert.doesNotMatch(productionOutputs, /nat_ip_address/i);
 }
 
 async function privateNetworkAndComputeSources() {
@@ -643,6 +643,144 @@ async function privateNetworkAndComputeSources() {
     runnerCloudInit,
     production,
     productionOutputs,
+  };
+}
+
+function assertProtectedIngress({
+  ingress,
+  ingressOutputs,
+  ingressVariables,
+  production,
+  productionOutputs,
+  productionVariables,
+}) {
+  const allIngress = [ingress, ingressOutputs, ingressVariables].join("\n");
+
+  const publicAddress = terraformResourceBlock(ingress, "yandex_vpc_address", "markiro");
+  assert.match(publicAddress, /external_ipv4_address\s*\{/);
+  assert.doesNotMatch(publicAddress, /internal_ipv4_address|ipv6/i);
+
+  const certificate = terraformResourceBlock(ingress, "yandex_cm_certificate", "markiro");
+  assert.match(certificate, /domains\s*=\s*\[var\.domain\]/);
+  assert.match(certificate, /managed\s*\{[\s\S]*?challenge_type\s*=\s*"DNS_CNAME"/);
+  assert.match(ingress, /resource\s+"yandex_dns_recordset"\s+"certificate_validation"\s*\{/);
+
+  const backendGroup = terraformResourceBlock(ingress, "yandex_alb_backend_group", "app");
+  assert.match(backendGroup, /target_group_ids\s*=\s*\[var\.app_target_group_id\]/);
+  assert.match(backendGroup, /port\s*=\s*8080/);
+  assert.match(backendGroup, /path\s*=\s*"\/health\/ready"/);
+  assert.match(backendGroup, /host\s*=\s*var\.domain/);
+  assert.doesNotMatch(backendGroup, /path\s*=\s*"\/health"|\/api(?:\W|$)|port\s*=\s*443/);
+
+  const router = terraformResourceBlock(ingress, "yandex_alb_http_router", "markiro");
+  assert.match(router, /name\s*=\s*"markiro-production"/);
+
+  const virtualHost = terraformResourceBlock(ingress, "yandex_alb_virtual_host", "markiro");
+  assert.match(virtualHost, /authority\s*=\s*\[var\.domain\]/);
+  assert.match(virtualHost, /backend_group_id\s*=\s*yandex_alb_backend_group\.app\.id/);
+  assert.match(
+    virtualHost,
+    /route_options\s*\{[\s\S]*?security_profile_id\s*=\s*yandex_sws_security_profile\.markiro\.id/,
+  );
+  assert.doesNotMatch(virtualHost, /disable_security_profile\s*=\s*true/);
+
+  const loadBalancer = terraformResourceBlock(ingress, "yandex_alb_load_balancer", "markiro");
+  assert.match(loadBalancer, /ports\s*=\s*\[80\][\s\S]*?http_to_https\s*=\s*true/);
+  assert.match(
+    loadBalancer,
+    /ports\s*=\s*\[443\][\s\S]*?certificate_ids\s*=\s*\[yandex_cm_certificate\.markiro\.id\][\s\S]*?http_router_id\s*=\s*yandex_alb_http_router\.markiro\.id/,
+  );
+  assert.match(
+    loadBalancer,
+    /external_ipv4_address\s*\{[\s\S]*?address\s*=\s*yandex_vpc_address\.markiro\.external_ipv4_address\.0\.address/,
+  );
+  assert.doesNotMatch(loadBalancer, /external_ipv6_address/);
+
+  const rateLimiter = terraformResourceBlock(
+    ingress,
+    "yandex_sws_advanced_rate_limiter_profile",
+    "markiro",
+  );
+  for (const ruleName of ["global-request-rate", "per-ip-request-rate"]) {
+    assert.match(rateLimiter, new RegExp(`name\\s*=\\s*"${ruleName}"`));
+  }
+  assert.match(rateLimiter, /limit\s*=\s*var\.global_rate_limit/);
+  assert.match(rateLimiter, /limit\s*=\s*var\.per_ip_rate_limit/);
+  assert.match(rateLimiter, /simple_characteristic\s*\{[\s\S]*?type\s*=\s*"IP"/);
+
+  const securityProfile = terraformResourceBlock(ingress, "yandex_sws_security_profile", "markiro");
+  assert.match(securityProfile, /default_action\s*=\s*"ALLOW"/);
+  assert.match(
+    securityProfile,
+    /advanced_rate_limiter_profile_id\s*=\s*yandex_sws_advanced_rate_limiter_profile\.markiro\.id/,
+  );
+  assert.doesNotMatch(securityProfile, /analyze_request_body|size_limit/i);
+
+  const publicDns = terraformResourceBlock(ingress, "yandex_dns_recordset", "application");
+  assert.match(publicDns, /count\s*=\s*var\.public_dns_enabled\s*\?\s*1\s*:\s*0/);
+  assert.match(publicDns, /type\s*=\s*"A"/);
+  assert.doesNotMatch(publicDns, /AAAA/);
+  assert.match(ingressVariables, /variable\s+"public_dns_enabled"\s*\{[\s\S]*?default\s*=\s*false/);
+  for (const variable of ["global_rate_limit", "per_ip_rate_limit"]) {
+    assert.match(
+      ingressVariables,
+      new RegExp(
+        `variable\\s+"${variable}"\\s*\\{[\\s\\S]*?type\\s*=\\s*number[\\s\\S]*?validation\\s*\\{`,
+      ),
+    );
+  }
+
+  for (const output of [
+    "reserved_ipv4_address",
+    "certificate_id",
+    "certificate_status",
+    "load_balancer_id",
+    "load_balancer_address",
+    "backend_group_id",
+    "security_profile_id",
+    "approved_a_records",
+  ]) {
+    assert.match(ingressOutputs, new RegExp(`output\\s+"${output}"\\s*\\{`));
+    assert.match(productionOutputs, new RegExp(`output\\s+"${output}"\\s*\\{`));
+  }
+
+  assert.match(production, /module\s+"ingress"\s*\{/);
+  for (const variable of [
+    "domain",
+    "dns_zone_id",
+    "public_dns_enabled",
+    "global_rate_limit",
+    "per_ip_rate_limit",
+  ]) {
+    assert.match(productionVariables, new RegExp(`variable\\s+"${variable}"\\s*\\{`));
+  }
+  assert.doesNotMatch(allIngress, /(?:api|backend)[_-]?(?:url|address).*443/i);
+}
+
+async function protectedIngressSources() {
+  const [
+    ingress,
+    ingressOutputs,
+    ingressVariables,
+    production,
+    productionOutputs,
+    productionVariables,
+  ] = await Promise.all([
+    readRepositoryFile("infra/yandex/modules/ingress/main.tf"),
+    readRepositoryFile("infra/yandex/modules/ingress/outputs.tf"),
+    readRepositoryFile("infra/yandex/modules/ingress/variables.tf"),
+    readRepositoryFile("infra/yandex/production/main.tf"),
+    readRepositoryFile("infra/yandex/production/outputs.tf"),
+    readRepositoryFile("infra/yandex/production/variables.tf"),
+  ]);
+
+  return {
+    ingress,
+    ingressOutputs,
+    ingressVariables,
+    production,
+    productionOutputs,
+    productionVariables,
   };
 }
 
@@ -955,6 +1093,68 @@ test("production network and compute keep application and runner traffic private
 
 test("production managed PostgreSQL and object storage protect durable data", async () => {
   assertProtectedManagedData(await managedDataSources());
+});
+
+test("production ingress provides HTTPS-only protected routing through the private app target", async () => {
+  assertProtectedIngress(await protectedIngressSources());
+});
+
+test("production ingress contract rejects bypasses and unsafe defaults", async () => {
+  const missingSws = await protectedIngressSources();
+  missingSws.ingress = replaceTerraformResource(
+    missingSws.ingress,
+    "yandex_alb_virtual_host",
+    "markiro",
+    (block) => block.replace(/\n\s*route_options\s*\{[\s\S]*?\n\s*\}/, ""),
+  );
+  assert.throws(() => assertProtectedIngress(missingSws));
+
+  const apiBypass = await protectedIngressSources();
+  apiBypass.ingress = replaceTerraformResource(
+    apiBypass.ingress,
+    "yandex_alb_virtual_host",
+    "markiro",
+    (block) => block.replace("yandex_alb_backend_group.app.id", "var.api_backend_group_id"),
+  );
+  assert.throws(() => assertProtectedIngress(apiBypass));
+
+  const tlsBackend = await protectedIngressSources();
+  tlsBackend.ingress = replaceTerraformResource(
+    tlsBackend.ingress,
+    "yandex_alb_backend_group",
+    "app",
+    (block) => block.replace(/port\s*=\s*8080/, "port = 443"),
+  );
+  assert.throws(() => assertProtectedIngress(tlsBackend));
+
+  const livenessProbe = await protectedIngressSources();
+  livenessProbe.ingress = replaceTerraformResource(
+    livenessProbe.ingress,
+    "yandex_alb_backend_group",
+    "app",
+    (block) => block.replace("/health/ready", "/health"),
+  );
+  assert.throws(() => assertProtectedIngress(livenessProbe));
+
+  const publicByDefault = await protectedIngressSources();
+  publicByDefault.ingressVariables = publicByDefault.ingressVariables.replace(
+    "default     = false",
+    "default     = true",
+  );
+  assert.throws(() => assertProtectedIngress(publicByDefault));
+
+  const ipv6 = await protectedIngressSources();
+  ipv6.ingress = replaceTerraformResource(
+    ipv6.ingress,
+    "yandex_alb_load_balancer",
+    "markiro",
+    (block) =>
+      block.replace(
+        "external_ipv4_address {",
+        "external_ipv6_address {}\n\n        external_ipv4_address {",
+      ),
+  );
+  assert.throws(() => assertProtectedIngress(ipv6));
 });
 
 test("managed-data contract rejects unsafe PostgreSQL, buckets, access, and credentials", async () => {

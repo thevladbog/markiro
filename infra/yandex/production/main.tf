@@ -58,3 +58,22 @@ module "object_storage" {
   app_service_account_id   = var.app_service_account_id
   audit_service_account_id = var.audit_service_account_id
 }
+
+module "ingress" {
+  source = "../modules/ingress"
+
+  folder_id                 = var.folder_id
+  zone                      = var.zone
+  network_id                = module.network.network_id
+  alb_subnet_id             = module.network.alb_subnet_id
+  alb_security_group_id     = module.network.security_group_ids.alb
+  app_target_group_id       = module.compute.app_target_group_id
+  domain                    = var.domain
+  dns_zone_id               = var.dns_zone_id
+  public_dns_enabled        = var.public_dns_enabled
+  log_group_id              = var.log_group_id
+  global_rate_limit         = var.global_rate_limit
+  per_ip_rate_limit         = var.per_ip_rate_limit
+  rate_limit_period_seconds = var.rate_limit_period_seconds
+  labels                    = local.labels
+}
