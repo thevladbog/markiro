@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Alert, Button, Drawer, Input, Select } from "@markiro/ui";
@@ -19,10 +19,17 @@ export interface DeviceDrawerProps {
   open: boolean;
   allowStation: boolean;
   allowKiosk: boolean;
+  canIssueKiosk: boolean;
   onClose: () => void;
 }
 
-export function DeviceDrawer({ open, allowStation, allowKiosk, onClose }: DeviceDrawerProps) {
+export function DeviceDrawer({
+  open,
+  allowStation,
+  allowKiosk,
+  canIssueKiosk,
+  onClose,
+}: DeviceDrawerProps) {
   const { t } = useTranslation();
   const initialType = allowStation ? "station" : "kiosk";
   const [type, setType] = useState<DeviceType>(initialType);
@@ -44,7 +51,7 @@ export function DeviceDrawer({ open, allowStation, allowKiosk, onClose }: Device
     [allowKiosk, allowStation, t],
   );
 
-  const reset = () => {
+  const reset = useCallback(() => {
     setType(initialType);
     setName("");
     setPlace("");
@@ -52,29 +59,24 @@ export function DeviceDrawer({ open, allowStation, allowKiosk, onClose }: Device
     setError(null);
     issueStation.reset();
     issueKiosk.reset();
-  };
+  }, [initialType, issueKiosk, issueStation]);
 
-  useEffect(() => {
-    if (!open) reset();
-    return () => {
-      issueStation.reset();
-      issueKiosk.reset();
-    };
-  }, [open]);
-
-  const issue = async (deviceId: string, deviceType: DeviceType) => {
-    setError(null);
-    try {
-      const code =
-        deviceType === "station"
-          ? await issueStation.mutateAsync(deviceId)
-          : await issueKiosk.mutateAsync(deviceId);
-      setPairing({ deviceId, type: deviceType, code });
-    } catch {
-      setPairing({ deviceId, type: deviceType, code: { code: "", expiresAt: "" } });
-      setError(t("pages.devices.drawer.issueError"));
-    }
-  };
+  const issue = useCallback(
+    async (deviceId: string, deviceType: DeviceType) => {
+      setError(null);
+      try {
+        const code =
+          deviceType === "station"
+            ? await issueStation.mutateAsync(deviceId)
+            : await issueKiosk.mutateAsync(deviceId);
+        setPairing({ deviceId, type: deviceType, code });
+      } catch {
+        setPairing({ deviceId, type: deviceType, code: { code: "", expiresAt: "" } });
+        setError(t("pages.devices.drawer.issueError"));
+      }
+    },
+    [issueKiosk, issueStation, t],
+  );
 
   const submit = async () => {
     setError(null);
@@ -88,7 +90,8 @@ export function DeviceDrawer({ open, allowStation, allowKiosk, onClose }: Device
               dayLimitPerEmployee: 5,
               showPrices: true,
             });
-      await issue(created.id, type);
+      if (type === "station" || canIssueKiosk) await issue(created.id, type);
+      else setPairing({ deviceId: created.id, type, code: { code: "", expiresAt: "" } });
     } catch {
       setError(t("pages.devices.drawer.createError"));
     }
@@ -115,7 +118,7 @@ export function DeviceDrawer({ open, allowStation, allowKiosk, onClose }: Device
       footer={
         pairing ? (
           <>
-            {!hasCode && (
+            {!hasCode && (pairing.type === "station" || canIssueKiosk) && (
               <Button
                 type="button"
                 loading={isPending}
@@ -154,7 +157,9 @@ export function DeviceDrawer({ open, allowStation, allowKiosk, onClose }: Device
               {pairing.code.expiresAt}
             </p>
           </div>
-        ) : null
+        ) : (
+          <p>{t("pages.devices.drawer.createdWithoutCode")}</p>
+        )
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <Select

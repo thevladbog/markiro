@@ -951,7 +951,8 @@
         "codePending": "The device was created. The pairing code will be added in the next step.",
         "createError": "Could not create the device",
         "issueError": "The device was created, but its pairing code was not issued.",
-        "retryIssue": "Retry issuing code"
+        "retryIssue": "Retry issuing code",
+        "createdWithoutCode": "The device was created and awaits pairing. A credentials manager can issue its code later."
       }
     },
     "kiosks": {

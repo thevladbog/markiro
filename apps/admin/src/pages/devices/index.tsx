@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router";
 
@@ -50,7 +50,7 @@ export function DevicesPage() {
   const canWriteOperations = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
   const canManageCredentials = useCan(CABINET_CAPABILITY.CREDENTIALS_MANAGE);
   const allowStation = canManageCredentials;
-  const allowKiosk = canWriteOperations && canManageCredentials;
+  const allowKiosk = canWriteOperations;
   const result = useDevices({
     ...(type ? { type } : {}),
     ...(status ? { status } : {}),
@@ -58,25 +58,24 @@ export function DevicesPage() {
     pageSize: PAGE_SIZE,
   });
 
-  const setFilters = (next: {
-    type?: DeviceType | undefined;
-    status?: DeviceStatus | undefined;
-    page?: number;
-  }) => {
-    const params = new URLSearchParams();
-    const nextType = next.type === undefined ? type : next.type;
-    const nextStatus = next.status === undefined ? status : next.status;
-    if (nextType) params.set("type", nextType);
-    if (nextStatus) params.set("status", nextStatus);
-    if ((next.page ?? page) > 1) params.set("page", String(next.page ?? page));
-    setSearchParams(params);
-  };
+  const setFilters = useCallback(
+    (next: { type?: DeviceType | null; status?: DeviceStatus | null; page?: number }) => {
+      const params = new URLSearchParams();
+      const nextType = next.type === undefined ? type : (next.type ?? undefined);
+      const nextStatus = next.status === undefined ? status : (next.status ?? undefined);
+      if (nextType) params.set("type", nextType);
+      if (nextStatus) params.set("status", nextStatus);
+      if ((next.page ?? page) > 1) params.set("page", String(next.page ?? page));
+      setSearchParams(params);
+    },
+    [page, setSearchParams, status, type],
+  );
 
   useEffect(() => {
     if (!result.data) return;
     const lastPage = Math.max(1, Math.ceil(result.data.total / result.data.pageSize));
     if (page > lastPage) setFilters({ page: lastPage });
-  }, [page, result.data]);
+  }, [page, result.data, setFilters]);
 
   const columns = useMemo<TableColumn<DeviceDto>[]>(
     () => [
@@ -137,7 +136,7 @@ export function DevicesPage() {
         <Select
           label={t("pages.devices.typeLabel")}
           value={type ?? ""}
-          onChange={(value) => setFilters({ type: parseType(value), page: 1 })}
+          onChange={(value) => setFilters({ type: parseType(value) ?? null, page: 1 })}
           options={[
             { value: "", label: t("pages.devices.allTypes") },
             ...deviceTypes.map((item) => ({ value: item, label: t(`pages.devices.type.${item}`) })),
@@ -146,7 +145,7 @@ export function DevicesPage() {
         <Select
           label={t("pages.devices.statusLabel")}
           value={status ?? ""}
-          onChange={(value) => setFilters({ status: parseStatus(value), page: 1 })}
+          onChange={(value) => setFilters({ status: parseStatus(value) ?? null, page: 1 })}
           options={[
             { value: "", label: t("pages.devices.allStatuses") },
             ...deviceStatuses.map((item) => ({
@@ -185,6 +184,7 @@ export function DevicesPage() {
           open
           allowStation={allowStation}
           allowKiosk={allowKiosk}
+          canIssueKiosk={canManageCredentials}
           onClose={() => setOpen(false)}
         />
       ) : null}
