@@ -396,40 +396,59 @@ describe.skipIf(!ready)("station pairing e2e", () => {
       .expect(201);
 
     const pool = app!.get<AuthSetup["pool"]>(DB_POOL);
-    await pool.query("CREATE TABLE station_pairing_test_blocked_key (id text PRIMARY KEY)");
-    await pool.query("INSERT INTO station_pairing_test_blocked_key (id) VALUES ($1)", [
-      before!.apiKeyId,
-    ]);
-    await pool.query(`
-      CREATE FUNCTION station_pairing_reject_old_key_delete()
-      RETURNS trigger
-      LANGUAGE plpgsql
-      AS $$
-      BEGIN
-        IF OLD.id = (SELECT id FROM station_pairing_test_blocked_key LIMIT 1) THEN
-          RAISE EXCEPTION 'forced persisted old-key delete failure';
-        END IF;
-        RETURN OLD;
-      END;
-      $$
-    `);
-    await pool.query(`
-      CREATE TRIGGER station_pairing_reject_old_key_delete_trigger
-      BEFORE DELETE ON apikey
-      FOR EACH ROW EXECUTE FUNCTION station_pairing_reject_old_key_delete()
-    `);
+    const objectScope = deviceId.replaceAll("-", "");
+    const blockedKeyTable = `sp_blocked_key_${objectScope}`;
+    const rejectDeleteFunction = `sp_reject_key_delete_${objectScope}`;
+    const rejectDeleteTrigger = `sp_reject_key_delete_trigger_${objectScope}`;
+    const identifier = (value: string) => `"${value}"`;
+    let primaryError: unknown;
+    let hasPrimaryError = false;
     try {
+      await pool.query(`CREATE TABLE ${identifier(blockedKeyTable)} (id text PRIMARY KEY)`);
+      await pool.query(`INSERT INTO ${identifier(blockedKeyTable)} (id) VALUES ($1)`, [
+        before!.apiKeyId,
+      ]);
+      await pool.query(`
+        CREATE FUNCTION ${identifier(rejectDeleteFunction)}()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+          IF OLD.id = (SELECT id FROM ${identifier(blockedKeyTable)} LIMIT 1) THEN
+            RAISE EXCEPTION 'forced persisted old-key delete failure';
+          END IF;
+          RETURN OLD;
+        END;
+        $$
+      `);
+      await pool.query(`
+        CREATE TRIGGER ${identifier(rejectDeleteTrigger)}
+        BEFORE DELETE ON apikey
+        FOR EACH ROW EXECUTE FUNCTION ${identifier(rejectDeleteFunction)}()
+      `);
       await request(app!.getHttpServer())
         .post("/station/pair")
         .send({ code: replacementCode.body.code })
         .expect(500);
-    } finally {
-      await pool.query(
-        "DROP TRIGGER IF EXISTS station_pairing_reject_old_key_delete_trigger ON apikey",
-      );
-      await pool.query("DROP FUNCTION IF EXISTS station_pairing_reject_old_key_delete()");
-      await pool.query("DROP TABLE IF EXISTS station_pairing_test_blocked_key");
+    } catch (error) {
+      primaryError = error;
+      hasPrimaryError = true;
     }
+
+    let cleanupError: unknown;
+    for (const cleanup of [
+      () => pool.query(`DROP TRIGGER IF EXISTS ${identifier(rejectDeleteTrigger)} ON apikey`),
+      () => pool.query(`DROP FUNCTION IF EXISTS ${identifier(rejectDeleteFunction)}() CASCADE`),
+      () => pool.query(`DROP TABLE IF EXISTS ${identifier(blockedKeyTable)}`),
+    ]) {
+      try {
+        await cleanup();
+      } catch (error) {
+        cleanupError ??= error;
+      }
+    }
+    if (hasPrimaryError) throw primaryError;
+    if (cleanupError !== undefined) throw cleanupError;
 
     await request(app!.getHttpServer())
       .get("/station/operators")
