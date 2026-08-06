@@ -358,6 +358,11 @@
       "cancel": "Cancel",
       "searchLabel": "Search",
       "searchPlaceholder": "Name or GTIN",
+      "filtersLabel": "Catalog filters",
+      "resultCount_one": "{{count}} product",
+      "resultCount_few": "{{count}} products",
+      "resultCount_many": "{{count}} products",
+      "resultCount_other": "{{count}} products",
       "statusFilterLabel": "Status",
       "statusFilter": {
         "all": "All statuses",
@@ -383,6 +388,13 @@
       "form": {
         "createTitle": "New product",
         "editTitle": "Edit product",
+        "loadError": "Could not load the product form data.",
+        "notFound": "Product not found.",
+        "retry": "Retry",
+        "discardTitle": "Discard changes?",
+        "discardBody": "Your unsaved changes will be lost.",
+        "continueEditing": "Continue editing",
+        "discardAction": "Discard",
         "gtinLabel": "GTIN",
         "nameLabel": "Name",
         "productGroupLabel": "Product group",
@@ -396,6 +408,11 @@
         "noLabelTemplate": "None selected",
         "submitCreate": "Create",
         "submitUpdate": "Save",
+        "sections": {
+          "basic": "Basic",
+          "aggregation": "Aggregation and price",
+          "defaults": "Defaults"
+        },
         "draftBanner": "Draft — fill in the group and capacities to run shifts",
         "gtinOwnerHint": "GTIN owner — {{name}}",
         "applyCounterparty": "Apply counterparty",

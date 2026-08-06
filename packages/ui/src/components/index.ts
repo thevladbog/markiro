@@ -42,6 +42,12 @@ export type { AlertProps, AlertTone } from "./Alert.js";
 export { Modal } from "./Modal.js";
 export type { ModalProps } from "./Modal.js";
 
+export { SidePanel } from "./SidePanel.js";
+export type { OverlayDismissReason, SidePanelProps, SidePanelSize } from "./SidePanel.js";
+
+export { ConfirmDialog } from "./ConfirmDialog.js";
+export type { ConfirmDialogProps, ConfirmDialogTone } from "./ConfirmDialog.js";
+
 export { EmptyState } from "./EmptyState.js";
 export type { EmptyStateProps } from "./EmptyState.js";
 

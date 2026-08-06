@@ -210,7 +210,6 @@ function renderProductCard({
     <QueryClientProvider client={newQueryClient()}>
       <AccessProvider value={ADMIN_ACCESS}>
         <ProductForm
-          open
           mode="edit"
           productId="p-1"
           externalRef={externalRef}

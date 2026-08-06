@@ -6,8 +6,8 @@ import { useTranslation } from "react-i18next";
 import { z } from "zod";
 
 import { CABINET_CAPABILITY, isValidGtin } from "@markiro/domain";
-import { Alert, Button, Input, Modal, Select } from "@markiro/ui";
-import type { SelectOption } from "@markiro/ui";
+import { Alert, Button, Input, Select, SidePanel } from "@markiro/ui";
+import type { OverlayDismissReason, SelectOption } from "@markiro/ui";
 
 import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
@@ -75,7 +75,6 @@ const productFormSchema = z.object({
 export type ProductFormValues = z.infer<typeof productFormSchema>;
 
 export interface ProductFormProps {
-  open: boolean;
   mode: "create" | "edit";
   initialValues?: ProductFormValues;
   /** Only meaningful in edit mode -- drives the draft banner. */
@@ -98,8 +97,10 @@ export interface ProductFormProps {
   counterparties: CounterpartyDto[];
   labelTemplates: LabelTemplateSummaryDto[];
   submitting?: boolean;
+  submissionError?: string | null;
+  onDirtyChange?: (dirty: boolean) => void;
   onSubmit: (input: CreateProductInput) => void | Promise<void>;
-  onClose: () => void;
+  onClose: (reason: OverlayDismissReason) => void;
 }
 
 const EMPTY_VALUES: ProductFormValues = {
@@ -160,7 +161,6 @@ function AuthorizedUnlinkProductAction({
 }
 
 export function ProductForm({
-  open,
   mode,
   initialValues,
   productStatus,
@@ -169,6 +169,8 @@ export function ProductForm({
   counterparties,
   labelTemplates,
   submitting = false,
+  submissionError,
+  onDirtyChange = () => {},
   onSubmit,
   onClose,
 }: ProductFormProps) {
@@ -177,6 +179,7 @@ export function ProductForm({
   const gtinCheckMutation = useGtinCheck();
   const [ownerHint, setOwnerHint] = useState<GtinCheckResult | null>(null);
   const lastCheckedGtinRef = useRef<string | null>(null);
+  const isDirtyRef = useRef(false);
   // Local mirror of `externalRef`, not read from it directly: a successful
   // unlink clears this immediately so the section disappears from the
   // still-open modal, without waiting for `editingProduct` (a snapshot
@@ -191,7 +194,7 @@ export function ProductForm({
     watch,
     setValue,
     getValues,
-    formState: { errors },
+    formState: { errors, isDirty },
   } = useForm<ProductFormValues>({
     resolver: zodResolver(productFormSchema),
     defaultValues: initialValues ?? EMPTY_VALUES,
@@ -201,26 +204,30 @@ export function ProductForm({
   const defaultCounterpartyId = watch("defaultCounterpartyId");
   const defaultLabelTemplateId = watch("defaultLabelTemplateId");
 
-  // Re-seed the form (and the owner-hint state) whenever the modal opens --
-  // covers both the create -> create and edit A -> edit B cases, since
-  // defaultValues is only read once by react-hook-form on mount. The
-  // already-known GTIN (if any) is marked as "checked" so opening an edit
-  // modal doesn't immediately re-fire the hint lookup for an unchanged value.
+  // Re-seed clean forms when their server values change. A background refetch
+  // must never overwrite unsaved operator input, so dirty forms retain their
+  // current values until they are saved or discarded.
   useEffect(() => {
-    if (open) {
-      const seeded = initialValues ?? EMPTY_VALUES;
-      reset(seeded);
-      setOwnerHint(null);
-      lastCheckedGtinRef.current = seeded.gtin.trim() || null;
-      setLinkedExternalRef(externalRef ?? null);
-    }
-  }, [open, initialValues, externalRef, reset]);
+    if (isDirtyRef.current) return;
+    const seeded = initialValues ?? EMPTY_VALUES;
+    reset(seeded);
+    setOwnerHint(null);
+    lastCheckedGtinRef.current = seeded.gtin.trim() || null;
+  }, [initialValues, reset]);
+
+  useEffect(() => {
+    setLinkedExternalRef(externalRef ?? null);
+  }, [externalRef]);
+
+  useEffect(() => {
+    isDirtyRef.current = isDirty;
+    onDirtyChange(isDirty);
+  }, [isDirty, onDirtyChange]);
 
   // GTIN owner hint (design brief 03): only ever calls the check for a
   // checksum-valid GTIN (`isValidGtin`, client-side, before any network
   // call) so an in-progress/garbage value never triggers a noisy request.
   useEffect(() => {
-    if (!open) return;
     const trimmed = (gtinValue ?? "").trim();
     if (!trimmed || !isValidGtin(trimmed)) {
       setOwnerHint(null);
@@ -243,10 +250,10 @@ export function ProductForm({
       },
     });
     // gtinCheckMutation is a fresh object every render (per TanStack Query) --
-    // deliberately left out of the deps array so only gtinValue/open
-    // re-trigger this effect (mutate is called via the latest closure).
+    // deliberately left out of the deps array so only gtinValue re-triggers
+    // this effect (mutate is called via the latest closure).
     // eslint-disable-next-line react-hooks/exhaustive-deps -- see above; `getValues` is a stable react-hook-form reference, and depending on the mutation object would re-fire the lookup every render.
-  }, [gtinValue, open]);
+  }, [gtinValue]);
 
   const submit = handleSubmit(async (values) => {
     await onSubmit(toCreateInput(values));
@@ -272,8 +279,10 @@ export function ProductForm({
   };
 
   return (
-    <Modal
-      open={open}
+    <SidePanel
+      open
+      size="standard"
+      busy={submitting}
       onClose={onClose}
       closeLabel={t("common.close")}
       title={
@@ -281,7 +290,12 @@ export function ProductForm({
       }
       footer={
         <>
-          <Button type="button" variant="secondary" onClick={onClose}>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={submitting}
+            onClick={() => onClose("close-button")}
+          >
             {t("pages.catalog.cancel")}
           </Button>
           <Button type="submit" form={FORM_ID} loading={submitting}>
@@ -298,110 +312,120 @@ export function ProductForm({
         noValidate
         style={{ display: "flex", flexDirection: "column", gap: 16 }}
       >
-        {mode === "edit" && productStatus === "draft" && (
-          <Alert tone="warn">{t("pages.catalog.form.draftBanner")}</Alert>
-        )}
+        {submissionError ? <Alert tone="error">{submissionError}</Alert> : null}
+        <section className="mk-catalog-panel-section" aria-labelledby="product-form-basic">
+          <h3 id="product-form-basic">{t("pages.catalog.form.sections.basic")}</h3>
+          {mode === "edit" && productStatus === "draft" && (
+            <Alert tone="warn">{t("pages.catalog.form.draftBanner")}</Alert>
+          )}
 
-        {mode === "edit" && linkedExternalRef && (
-          <Alert
-            tone="info"
-            {...(canUnlinkIntegrations && productId
-              ? {
-                  action: (
-                    <AuthorizedUnlinkProductAction
-                      productId={productId}
-                      onUnlinked={() => setLinkedExternalRef(null)}
-                    />
-                  ),
-                }
-              : {})}
-          >
-            {t("pages.catalog.form.externalLink.linkedText", { ref: linkedExternalRef })}
-          </Alert>
-        )}
+          {mode === "edit" && linkedExternalRef && (
+            <Alert
+              tone="info"
+              {...(canUnlinkIntegrations && productId
+                ? {
+                    action: (
+                      <AuthorizedUnlinkProductAction
+                        productId={productId}
+                        onUnlinked={() => setLinkedExternalRef(null)}
+                      />
+                    ),
+                  }
+                : {})}
+            >
+              {t("pages.catalog.form.externalLink.linkedText", { ref: linkedExternalRef })}
+            </Alert>
+          )}
 
-        <Input
-          label={t("pages.catalog.form.gtinLabel")}
-          mono
-          {...errorProp(translateFieldError(t, errors.gtin?.message))}
-          {...register("gtin")}
-        />
+          <Input
+            label={t("pages.catalog.form.gtinLabel")}
+            mono
+            {...errorProp(translateFieldError(t, errors.gtin?.message))}
+            {...register("gtin")}
+          />
 
-        {ownerHint?.owner === "counterparty" && (
-          <Alert
-            tone="info"
-            action={
-              <Button
-                type="button"
-                size="compact"
-                variant="secondary"
-                onClick={applyCounterpartyHint}
-              >
-                {t("pages.catalog.form.applyCounterparty")}
-              </Button>
+          {ownerHint?.owner === "counterparty" && (
+            <Alert
+              tone="info"
+              action={
+                <Button
+                  type="button"
+                  size="compact"
+                  variant="secondary"
+                  onClick={applyCounterpartyHint}
+                >
+                  {t("pages.catalog.form.applyCounterparty")}
+                </Button>
+              }
+            >
+              {t("pages.catalog.form.gtinOwnerHint", { name: ownerHint.counterpartyName })}
+            </Alert>
+          )}
+          {ownerHint?.owner === "unknown" && (
+            <Alert tone="warn">{t("pages.catalog.form.gtinOwnerUnknown")}</Alert>
+          )}
+
+          <Input
+            label={t("pages.catalog.form.nameLabel")}
+            {...errorProp(translateFieldError(t, errors.name?.message))}
+            {...register("name")}
+          />
+          <Input
+            label={t("pages.catalog.form.productGroupLabel")}
+            {...errorProp(translateFieldError(t, errors.productGroup?.message))}
+            {...register("productGroup")}
+          />
+        </section>
+        <section className="mk-catalog-panel-section" aria-labelledby="product-form-aggregation">
+          <h3 id="product-form-aggregation">{t("pages.catalog.form.sections.aggregation")}</h3>
+          <Input
+            label={t("pages.catalog.form.boxCapacityLabel")}
+            mono
+            inputMode="numeric"
+            {...errorProp(translateFieldError(t, errors.boxCapacity?.message))}
+            {...register("boxCapacity")}
+          />
+          <Input
+            label={t("pages.catalog.form.palletCapacityLabel")}
+            mono
+            inputMode="numeric"
+            {...errorProp(translateFieldError(t, errors.palletCapacity?.message))}
+            {...register("palletCapacity")}
+          />
+          <Input
+            label={t("pages.catalog.form.unitPriceLabel")}
+            mono
+            inputMode="decimal"
+            {...errorProp(translateFieldError(t, errors.unitPrice?.message))}
+            {...register("unitPrice")}
+          />
+          <Input
+            label={t("pages.catalog.form.egaisCodeLabel")}
+            {...errorProp(translateFieldError(t, errors.egaisCode?.message))}
+            {...register("egaisCode")}
+          />
+        </section>
+        <section className="mk-catalog-panel-section" aria-labelledby="product-form-defaults">
+          <h3 id="product-form-defaults">{t("pages.catalog.form.sections.defaults")}</h3>
+          <Select
+            label={t("pages.catalog.form.defaultCounterpartyLabel")}
+            options={counterpartyOptions}
+            value={defaultCounterpartyId ?? ""}
+            onValueChange={(value) =>
+              setValue("defaultCounterpartyId", value, { shouldDirty: true, shouldValidate: true })
             }
-          >
-            {t("pages.catalog.form.gtinOwnerHint", { name: ownerHint.counterpartyName })}
-          </Alert>
-        )}
-        {ownerHint?.owner === "unknown" && (
-          <Alert tone="warn">{t("pages.catalog.form.gtinOwnerUnknown")}</Alert>
-        )}
-
-        <Input
-          label={t("pages.catalog.form.nameLabel")}
-          {...errorProp(translateFieldError(t, errors.name?.message))}
-          {...register("name")}
-        />
-        <Input
-          label={t("pages.catalog.form.productGroupLabel")}
-          {...errorProp(translateFieldError(t, errors.productGroup?.message))}
-          {...register("productGroup")}
-        />
-        <Input
-          label={t("pages.catalog.form.boxCapacityLabel")}
-          mono
-          inputMode="numeric"
-          {...errorProp(translateFieldError(t, errors.boxCapacity?.message))}
-          {...register("boxCapacity")}
-        />
-        <Input
-          label={t("pages.catalog.form.palletCapacityLabel")}
-          mono
-          inputMode="numeric"
-          {...errorProp(translateFieldError(t, errors.palletCapacity?.message))}
-          {...register("palletCapacity")}
-        />
-        <Input
-          label={t("pages.catalog.form.unitPriceLabel")}
-          mono
-          inputMode="decimal"
-          {...errorProp(translateFieldError(t, errors.unitPrice?.message))}
-          {...register("unitPrice")}
-        />
-        <Input
-          label={t("pages.catalog.form.egaisCodeLabel")}
-          {...errorProp(translateFieldError(t, errors.egaisCode?.message))}
-          {...register("egaisCode")}
-        />
-        <Select
-          label={t("pages.catalog.form.defaultCounterpartyLabel")}
-          options={counterpartyOptions}
-          value={defaultCounterpartyId ?? ""}
-          onValueChange={(value) =>
-            setValue("defaultCounterpartyId", value, { shouldDirty: true, shouldValidate: true })
-          }
-        />
-        <Select
-          label={t("pages.catalog.form.defaultLabelTemplateLabel")}
-          options={labelTemplateOptions}
-          value={defaultLabelTemplateId ?? ""}
-          onValueChange={(value) =>
-            setValue("defaultLabelTemplateId", value, { shouldDirty: true, shouldValidate: true })
-          }
-        />
+          />
+          <Select
+            label={t("pages.catalog.form.defaultLabelTemplateLabel")}
+            options={labelTemplateOptions}
+            value={defaultLabelTemplateId ?? ""}
+            onValueChange={(value) =>
+              setValue("defaultLabelTemplateId", value, { shouldDirty: true, shouldValidate: true })
+            }
+          />
+        </section>
       </form>
-    </Modal>
+    </SidePanel>
   );
 }
 

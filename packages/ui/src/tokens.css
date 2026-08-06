@@ -148,6 +148,12 @@
   --shadow-2: 0 2px 8px rgba(23, 22, 26, 0.1);
   --shadow-3: 0 8px 24px rgba(23, 22, 26, 0.16);
 
+  --z-modal-legacy: 100;
+  --z-overlay-panel: 400;
+  --z-overlay-popover: 420;
+  --z-overlay-dialog: 440;
+  --z-toast: 500;
+
   /* controls */
   --control-sm: 32px; /* компактные таблицы, офис */
   --control-md: 40px; /* минимальная цель, офис */

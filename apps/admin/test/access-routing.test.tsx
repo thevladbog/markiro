@@ -1,13 +1,13 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
+import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import { ThemeProvider } from "@markiro/ui";
 
 import type { AccessDocument } from "../src/access/api.js";
-import { AppRoutes } from "../src/app.js";
+import { appRoutes } from "../src/app.js";
 import {
   AuthClientProvider,
   type AuthClientLike,
@@ -115,11 +115,11 @@ function renderAccessRoute(
   const view = render(
     <QueryClientProvider client={queryClient}>
       <ThemeProvider defaultTheme="light">
-        <MemoryRouter initialEntries={[initialPath]}>
-          <AuthClientProvider client={createFakeAuthClient()}>
-            <AppRoutes />
-          </AuthClientProvider>
-        </MemoryRouter>
+        <AuthClientProvider client={createFakeAuthClient()}>
+          <RouterProvider
+            router={createMemoryRouter(appRoutes, { initialEntries: [initialPath] })}
+          />
+        </AuthClientProvider>
       </ThemeProvider>
     </QueryClientProvider>,
   );
@@ -156,6 +156,26 @@ it("allows a manager to open the catalog directly", async () => {
   renderAccessRoute("/catalog", MANAGER_ACCESS);
 
   expect(await screen.findByRole("heading", { name: "Каталог продукции" })).toBeDefined();
+  expect(screen.queryByTestId("forbidden-page")).toBeNull();
+});
+
+it.each(["/catalog/new", "/catalog/p1/edit"])(
+  "forbids the direct write route %s for a read-only operator",
+  async (path) => {
+    renderAccessRoute(path, OPERATIONS_READ_ONLY);
+
+    expect(await screen.findByTestId("forbidden-page")).toBeDefined();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  },
+);
+
+it.each([
+  ["/catalog/new", "Новый продукт"],
+  ["/catalog/p1/edit", "Изменить продукт"],
+])("opens the direct write route %s for a write-capable operator", async (path, title) => {
+  renderAccessRoute(path, MANAGER_ACCESS);
+
+  expect(await screen.findByRole("dialog", { name: title })).toBeDefined();
   expect(screen.queryByTestId("forbidden-page")).toBeNull();
 });
 
