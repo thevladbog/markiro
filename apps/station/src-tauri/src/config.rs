@@ -67,18 +67,21 @@ pub fn read_config(dir: &Path) -> Result<StationConfig, String> {
 /// provisioning bundle instead of truncating it. On Unix the sibling is
 /// created at mode 0600; Windows uses the per-user app-config directory.
 pub fn write_config(dir: &Path, cfg: &StationConfig) -> Result<(), String> {
-    write_config_with_parent_sync(dir, cfg, sync_parent_directory)
+    write_config_with_parent_syncs(dir, cfg, sync_parent_directory, sync_parent_directory)
 }
 
-/// The sync operation is injected only so the post-replacement failure path
-/// can be proven in a unit test. Production always uses `sync_parent_directory`.
-fn write_config_with_parent_sync<F>(
+/// The two directory sync operations are injected only so both post-replace
+/// paths can be proven in unit tests. Production always uses
+/// `sync_parent_directory` for both boundaries.
+fn write_config_with_parent_syncs<F, G>(
     dir: &Path,
     cfg: &StationConfig,
-    parent_sync: F,
+    commit_sync: F,
+    rollback_sync: G,
 ) -> Result<(), String>
 where
     F: Fn(&Path) -> Result<(), String>,
+    G: Fn(&Path) -> Result<(), String>,
 {
     fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let path = config_path(dir);
@@ -110,29 +113,29 @@ where
         let _ = fs::remove_file(&backup);
         e.to_string()
     })?;
-    match parent_sync(dir) {
+    match commit_sync(dir) {
         Ok(()) => {
             let _ = fs::remove_file(&backup);
             Ok(())
         }
         Err(sync_error) => {
             let restored = if had_previous {
-                replace_config_file(&backup, &path).map_err(|error| error.to_string())
+                restore_config_from_backup(dir, &backup, &path)
             } else {
                 fs::remove_file(&path).map_err(|error| error.to_string())
             };
             match restored {
-                Ok(()) => {
-                    // Restore uses the real fsync primitive: the injected
-                    // failure models only the failed commit, not a second
-                    // failed rollback. The old config is readable even if a
-                    // later physical flush remains uncertain.
-                    let _ = sync_parent_directory(dir);
-                    let _ = fs::remove_file(&backup);
-                    Err(format!(
-                        "Configuration write was rolled back after directory sync failed: {sync_error}"
-                    ))
-                }
+                Ok(()) => match rollback_sync(dir) {
+                    Ok(()) => {
+                        let _ = fs::remove_file(&backup);
+                        Err(format!(
+                            "Configuration write was rolled back after directory sync failed: {sync_error}"
+                        ))
+                    }
+                    Err(rollback_sync_error) => Err(format!(
+                        "Configuration durability is uncertain after replacement; rollback directory sync failed: {rollback_sync_error}; original sync error: {sync_error}"
+                    )),
+                },
                 Err(restore_error) => Err(format!(
                     "Configuration durability is uncertain after replacement; automatic restoration failed: {restore_error}; original sync error: {sync_error}"
                 )),
@@ -152,6 +155,22 @@ fn backup_existing_config(destination: &Path, backup: &Path) -> Result<bool, Str
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(error.to_string()),
     }
+}
+
+/// Restores a backup through a fresh private sibling, retaining the backup
+/// itself until the final directory sync confirms the restored destination.
+/// This path works with Unix rename and the Windows replacement primitive.
+fn restore_config_from_backup(dir: &Path, backup: &Path, destination: &Path) -> Result<(), String> {
+    let restoration = dir.join(format!(".station-{}.tmp", Uuid::new_v4()));
+    let backup_bytes = fs::read(backup).map_err(|error| error.to_string())?;
+    if let Err(error) = write_owner_only(&restoration, &backup_bytes) {
+        let _ = fs::remove_file(&restoration);
+        return Err(error);
+    }
+    replace_config_file(&restoration, destination).map_err(|error| {
+        let _ = fs::remove_file(&restoration);
+        error.to_string()
+    })
 }
 
 /// Replaces the destination without truncating it in place. Windows cannot
@@ -345,9 +364,12 @@ mod tests {
         replacement.api_key = Some("credential-after".into());
         replacement.server_url = Some("https://api.after.example".into());
 
-        let result = write_config_with_parent_sync(&dir, &replacement, |_| {
-            Err("injected directory sync failure".to_string())
-        });
+        let result = write_config_with_parent_syncs(
+            &dir,
+            &replacement,
+            |_| Err("injected directory sync failure".to_string()),
+            sync_parent_directory,
+        );
 
         assert!(result.is_err());
         assert_eq!(read_config(&dir).unwrap(), original);
@@ -363,9 +385,12 @@ mod tests {
         let dir = temp_dir();
         let cfg = StationConfig::new_with_machine_id();
 
-        let result = write_config_with_parent_sync(&dir, &cfg, |_| {
-            Err("injected directory sync failure".to_string())
-        });
+        let result = write_config_with_parent_syncs(
+            &dir,
+            &cfg,
+            |_| Err("injected directory sync failure".to_string()),
+            sync_parent_directory,
+        );
 
         assert!(result.is_err());
         assert!(!config_path(&dir).exists());
@@ -374,6 +399,70 @@ mod tests {
             let name = name.to_string_lossy();
             !name.ends_with(".tmp") && !name.ends_with(".bak")
         }));
+    }
+
+    #[test]
+    fn failed_final_restore_sync_preserves_the_prior_backup_as_durability_recovery() {
+        let dir = temp_dir();
+        let mut original = read_config(&dir).unwrap();
+        original.device_id = Some("device_before".into());
+        original.api_key = Some("credential-before".into());
+        original.server_url = Some("https://api.before.example".into());
+        write_config(&dir, &original).unwrap();
+
+        let mut replacement = original.clone();
+        replacement.api_key = Some("credential-after".into());
+
+        let result = write_config_with_parent_syncs(
+            &dir,
+            &replacement,
+            |_| Err("injected commit directory sync failure".to_string()),
+            |_| Err("injected restore directory sync failure".to_string()),
+        );
+
+        expect_durability_uncertainty(&result);
+        assert_eq!(read_config(&dir).unwrap(), original);
+        assert!(fs::read_dir(&dir).unwrap().any(|entry| {
+            entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".bak")
+        }));
+        assert!(fs::read_dir(&dir).unwrap().all(|entry| {
+            !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".tmp")
+        }));
+    }
+
+    #[test]
+    fn failed_final_first_write_removal_sync_is_durability_uncertainty_not_rollback() {
+        let dir = temp_dir();
+        let cfg = StationConfig::new_with_machine_id();
+
+        let result = write_config_with_parent_syncs(
+            &dir,
+            &cfg,
+            |_| Err("injected commit directory sync failure".to_string()),
+            |_| Err("injected deletion directory sync failure".to_string()),
+        );
+
+        expect_durability_uncertainty(&result);
+        assert!(!config_path(&dir).exists());
+        assert!(fs::read_dir(&dir).unwrap().all(|entry| {
+            let name = entry.unwrap().file_name();
+            let name = name.to_string_lossy();
+            !name.ends_with(".tmp") && !name.ends_with(".bak")
+        }));
+    }
+
+    fn expect_durability_uncertainty(result: &Result<(), String>) {
+        assert!(result
+            .as_ref()
+            .is_err_and(|error| error.contains("durability is uncertain")));
     }
 
     #[test]
