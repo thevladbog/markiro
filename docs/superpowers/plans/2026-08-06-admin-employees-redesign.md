@@ -1013,6 +1013,11 @@ navigation, focus restoration, long RU/EN labels, reduced motion, and no horizon
 Record screen reader, mobile virtual keyboard, browser, or infrastructure behavior not exercised.
 Automated DOM tests must not be reported as manual confirmation.
 
+Evidence (2026-08-06): the availability probe to `http://127.0.0.1:5173/` was refused. No
+authenticated Admin/API infrastructure was available, started, or altered. Therefore all listed
+browser, theme, viewport, keyboard, screen-reader, and mobile virtual-keyboard checks remain
+unverified. Automated DOM tests are not manual or browser confirmation.
+
 - [x] **Step 6: Review final diff and commit verification evidence**
 
 Review `git diff --stat origin/main...HEAD` and the complete diff. Update only completed checkboxes
