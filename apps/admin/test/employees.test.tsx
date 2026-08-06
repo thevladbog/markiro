@@ -522,7 +522,9 @@ describe("EmployeesPage station access (rendered in English)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     await screen.findByText("Edit employee");
 
-    fireEvent.change(screen.getByLabelText("Personnel number"), { target: { value: "123456" } });
+    fireEvent.change(await screen.findByLabelText("Personnel number"), {
+      target: { value: "123456" },
+    });
     fireEvent.change(screen.getByLabelText("PIN"), { target: { value: "4321" } });
     fireEvent.click(screen.getByRole("button", { name: "Grant access" }));
 
@@ -573,7 +575,7 @@ describe("EmployeesPage station access (rendered in English)", () => {
     // to retype (and thus nothing to accidentally rename).
     expect(screen.queryByLabelText("Personnel number")).toBeNull();
 
-    fireEvent.change(screen.getByLabelText("PIN"), { target: { value: "9999" } });
+    fireEvent.change(await screen.findByLabelText("PIN"), { target: { value: "9999" } });
     fireEvent.click(screen.getByRole("button", { name: "Change PIN" }));
 
     await waitFor(() => {
@@ -602,11 +604,8 @@ describe("EmployeesPage station access (rendered in English)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     await screen.findByText("Edit employee");
 
-    expect(
-      await screen.findByText(
-        "Could not load station access status. Refresh the page before granting access.",
-      ),
-    ).toBeDefined();
+    expect(await screen.findByText("Could not load station access status.")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeDefined();
     expect(screen.queryByText("No line-station access granted")).toBeNull();
     // A failed lookup must not leave the grant control enabled -- that would
     // invite a duplicate grant which then 409s (C4 review finding).

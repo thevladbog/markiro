@@ -76,6 +76,75 @@
   flex: 1;
 }
 
+.mk-employee-station-access-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  border-top: 1px solid var(--line);
+  padding-top: var(--sp-4);
+}
+
+.mk-employee-station-access-section__title {
+  margin: 0;
+  color: var(--fg-1);
+  font: 600 13px/1 var(--font-ui);
+}
+
+.mk-employee-station-access-section__identity,
+.mk-employee-station-access-section__actions,
+.mk-employee-station-access-section__form-row,
+.mk-employee-station-access-section__error-state {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.mk-employee-station-access-section__identity {
+  justify-content: space-between;
+}
+
+.mk-employee-station-access-section__current {
+  color: var(--fg-1);
+  font: var(--text-body);
+}
+
+.mk-employee-station-access-section__form-row {
+  align-items: flex-end;
+}
+
+.mk-employee-station-access-section__form-row > :not(button) {
+  flex: 1;
+}
+
+.mk-employee-station-access-section__empty,
+.mk-employee-station-access-section__loading-label {
+  margin: 0;
+  color: var(--fg-3);
+  font: var(--text-caption);
+}
+
+.mk-employee-station-access-section__error-state {
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.mk-employee-station-access-section__error-state > :first-child {
+  flex: 1;
+}
+
+.mk-employee-station-access-section__skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.mk-employee-station-access-section__skeleton-line {
+  width: min(320px, 70%);
+  height: 32px;
+  border-radius: var(--r-1);
+  background: var(--surface-panel);
+}
+
 @media (max-width: 639px) {
   .mk-employees-filter--status {
     width: 100%;
@@ -88,6 +157,18 @@
   }
 
   .mk-employee-badges-section__actions {
+    justify-content: flex-end;
+  }
+
+  .mk-employee-station-access-section__identity,
+  .mk-employee-station-access-section__form-row,
+  .mk-employee-station-access-section__error-state {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .mk-employee-station-access-section__actions {
+    flex-wrap: wrap;
     justify-content: flex-end;
   }
 }
