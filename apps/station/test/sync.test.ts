@@ -459,7 +459,11 @@ describe("sync engine", () => {
     await Promise.all(engines.map((engine) => engine.idle()));
 
     expect(onCredentialRejected).toHaveBeenCalledTimes(1);
-    expect(rejectedGeneration).toEqual({ sealed: true, rejectionPublished: true });
+    expect(rejectedGeneration).toEqual({
+      phase: "sealed",
+      sealed: true,
+      rejectionPublished: true,
+    });
     expect(await outboxDepth(exec)).toBe(1);
     engines.forEach((engine) => engine.stop());
 
@@ -477,7 +481,11 @@ describe("sync engine", () => {
     await fresh.idle();
 
     expect(acceptedPost).toHaveBeenCalledTimes(1);
-    expect(freshGeneration).toEqual({ sealed: false, rejectionPublished: false });
+    expect(freshGeneration).toEqual({
+      phase: "active",
+      sealed: false,
+      rejectionPublished: false,
+    });
     expect(await outboxDepth(exec)).toBe(0);
     expect(onCredentialRejected).toHaveBeenCalledTimes(1);
     fresh.stop();
@@ -639,6 +647,113 @@ describe("sync engine", () => {
       vi.useRealTimers();
     }
   });
+
+  it.each([
+    ["successful", false],
+    ["failing", true],
+  ])(
+    "waits for a %s sibling response commit lease before publishing recovery",
+    async (_label, failDelete) => {
+      const base = await migratedExec();
+      await seed(base, 1);
+      let releaseDelete!: () => void;
+      let announceDelete!: () => void;
+      const deleteGate = new Promise<void>((resolve) => {
+        releaseDelete = resolve;
+      });
+      const deleteReached = new Promise<void>((resolve) => {
+        announceDelete = resolve;
+      });
+      let recoveryPublished = false;
+      let writesAfterRecovery = 0;
+      const exec: SqlExecutor = {
+        all: base.all,
+        async run(sql, params = []) {
+          if (recoveryPublished) writesAfterRecovery += 1;
+          if (sql.includes("DELETE FROM outbox")) {
+            announceDelete();
+            await deleteGate;
+            if (failDelete) throw new Error("ack write failed");
+          }
+          await base.run(sql, params);
+        },
+      };
+      let rejectA!: (reason: unknown) => void;
+      let resolveB!: (value: unknown) => void;
+      const postA = vi.fn(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectA = reject;
+          }),
+      );
+      const postB = vi.fn(
+        () =>
+          new Promise((resolve) => {
+            resolveB = resolve;
+          }),
+      );
+      const generation = createCredentialGeneration();
+      let snapshotAtRecovery: Promise<string> | null = null;
+      const snapshot = async () =>
+        JSON.stringify({
+          outbox: await base.all("SELECT * FROM outbox ORDER BY id"),
+          meta: await base.all(
+            "SELECT * FROM station_meta WHERE key LIKE 'sync_pending_%' ORDER BY key",
+          ),
+        });
+      const onCredentialRejected = vi.fn(() => {
+        recoveryPublished = true;
+        snapshotAtRecovery = snapshot();
+      });
+      const a = createSyncEngine({
+        exec,
+        client: { post: <T>() => postA() as Promise<T> },
+        machineId: "machine-1",
+        credentialGeneration: generation,
+        onState: () => {},
+        onCredentialRejected,
+      });
+      const b = createSyncEngine({
+        exec,
+        client: { post: <T>() => postB() as Promise<T> },
+        machineId: "machine-1",
+        credentialGeneration: generation,
+        onState: () => {},
+        onCredentialRejected,
+      });
+      a.nudge();
+      b.nudge();
+      await vi.waitFor(() => {
+        expect(postA).toHaveBeenCalledTimes(1);
+        expect(postB).toHaveBeenCalledTimes(1);
+      });
+
+      resolveB({ applied: 1, alreadyApplied: false, conflicts: [] });
+      await deleteReached;
+      rejectA(new StationApiError(401, "rejected"));
+      const sealingIdle = a.idle();
+      let sealingSettled = false;
+      void sealingIdle.then(() => {
+        sealingSettled = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const callbacksBeforeLeaseSettled = onCredentialRejected.mock.calls.length;
+      expect(sealingSettled).toBe(false);
+      expect(generation.phase).toBe("sealing");
+      releaseDelete();
+      await Promise.all([sealingIdle, b.idle()]);
+      await vi.waitFor(() => expect(onCredentialRejected).toHaveBeenCalledTimes(1));
+
+      const finalSnapshot = await snapshot();
+      expect(callbacksBeforeLeaseSettled).toBe(0);
+      expect(await snapshotAtRecovery).toBe(finalSnapshot);
+      expect(writesAfterRecovery).toBe(0);
+      expect(generation.phase).toBe("sealed");
+      expect(await outboxDepth(base)).toBe(failDelete ? 1 : 0);
+      a.stop();
+      b.stop();
+    },
+  );
 
   it.each([
     ["network", new Error("offline")],

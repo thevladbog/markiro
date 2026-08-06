@@ -26,9 +26,10 @@ export interface ScanQueue {
   open(): void;
   /** Stops accepting new work and resolves after every already accepted entry finishes. */
   close(): Promise<void>;
-  enqueue(raw: string): void;
+  /** Returns false after close, when intake is no longer accepted. */
+  enqueue(raw: string): boolean;
   /** Runs a side-channel write in strict order with scans. */
-  enqueueJob(job: () => Promise<void>): void;
+  enqueueJob(job: () => Promise<void>): boolean;
   /** Resolves once the queue has drained (tests await this instead of sleeping). */
   idle(): Promise<void>;
   pending(): number;
@@ -109,14 +110,16 @@ export function createScanQueue(deps: ScanQueueDeps): ScanQueue {
       return new Promise<void>((resolve) => idleResolvers.push(resolve));
     },
     enqueue(raw: string) {
-      if (!accepting) return;
+      if (!accepting) return false;
       buffer.push({ type: "scan", raw });
       void drain();
+      return true;
     },
     enqueueJob(job: () => Promise<void>) {
-      if (!accepting) return;
+      if (!accepting) return false;
       buffer.push({ type: "job", run: job });
       void drain();
+      return true;
     },
     idle() {
       if (!draining && buffer.length === 0) return Promise.resolve();

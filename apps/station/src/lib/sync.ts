@@ -2,6 +2,7 @@ import { MAX_BOX_CLOSURES_PER_SYNC_BATCH } from "@markiro/domain";
 import { StationApiError, type StationClient } from "./api-client.js";
 import { conflictCount, recordConflicts } from "./conflicts.js";
 import {
+  acquireCredentialCommitLease,
   createCredentialGeneration,
   sealCredentialGeneration,
   type CredentialGeneration,
@@ -613,7 +614,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
     for (const resolve of resolvers) resolve();
   }
 
-  function rejectCredential(): void {
+  async function rejectCredential(): Promise<void> {
     if (credentialRejected) return;
     // Terminal before the first await: no nudge, retry timer, or continuation
     // can start another request with the rejected client once the 401 is known.
@@ -624,7 +625,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
       clearTimeout(retryTimer);
       retryTimer = null;
     }
-    if (sealCredentialGeneration(credentialGeneration)) {
+    if (await sealCredentialGeneration(credentialGeneration)) {
       deps.onCredentialRejected?.({ machineId: deps.machineId, generation: credentialGeneration });
     }
   }
@@ -760,17 +761,21 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
             // satisfied. `continue`, not `break`: any rows queued above the
             // (now cleared) ceiling must drain in this same pass, not wait
             // for the next nudge or the 15-second heartbeat.
-            pendingCeiling = null;
-            pendingBoxCeiling = null;
-            pendingExceptionCeiling = null;
-            pendingBatchId = null;
-            await clearPersistedCeiling(deps.exec, CEILING_META_KEY);
+            const staleLease = acquireCredentialCommitLease(credentialGeneration);
+            if (!staleLease) break;
+            try {
+              pendingCeiling = null;
+              pendingBoxCeiling = null;
+              pendingExceptionCeiling = null;
+              pendingBatchId = null;
+              await clearPersistedCeiling(deps.exec, CEILING_META_KEY);
+              await clearPersistedCeiling(deps.exec, BOX_CEILING_META_KEY);
+              await clearPersistedCeiling(deps.exec, EXCEPTION_CEILING_META_KEY);
+              await clearPersistedCeiling(deps.exec, BATCH_ID_META_KEY);
+            } finally {
+              staleLease.release();
+            }
             if (credentialGeneration.sealed) break;
-            await clearPersistedCeiling(deps.exec, BOX_CEILING_META_KEY);
-            if (credentialGeneration.sealed) break;
-            await clearPersistedCeiling(deps.exec, EXCEPTION_CEILING_META_KEY);
-            if (credentialGeneration.sealed) break;
-            await clearPersistedCeiling(deps.exec, BATCH_ID_META_KEY);
             continue;
           }
           break;
@@ -791,53 +796,57 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
         // brand-new engine's first drain after a restart — re-requests
         // exactly this id range (and exactly these box/exception sets), never
         // a fresh read that could have grown past it.
-        pendingCeiling = maxId ?? 0;
-        pendingBoxCeiling = newBoxCeiling ?? 0;
-        pendingExceptionCeiling = newExceptionCeiling ?? 0;
         try {
-          if (credentialGeneration.sealed) break;
-          await savePersistedCeiling(deps.exec, CEILING_META_KEY, pendingCeiling);
-          if (credentialGeneration.sealed) break;
-          await savePersistedCeiling(deps.exec, BOX_CEILING_META_KEY, pendingBoxCeiling);
-          if (credentialGeneration.sealed) break;
-          await savePersistedCeiling(
-            deps.exec,
-            EXCEPTION_CEILING_META_KEY,
-            pendingExceptionCeiling,
-          );
-          if (credentialGeneration.sealed) break;
-          const instId = await ensureInstallId();
-          // A batch's box set (when non-empty) is folded into `batchId`
-          // (Finding 1) via `boxSetSignature`, on top of `maxId` when items
-          // are ALSO present: pinning `pendingCeiling` alone is not enough
-          // to protect a box that closes while an ITEM batch is in flight,
-          // because `maxId` does not change just because the box set grew,
-          // and the server claims batch ids in `sync_batches` and
-          // short-circuits an already-claimed one with `alreadyApplied`
-          // BEFORE its own box-closures loop (`station-scans.service.ts`) --
-          // so a retry that silently balloons its box set under an unchanged
-          // key would never have that new closure actually applied
-          // server-side, while this device's `ackBoxes` marks it
-          // acknowledged anyway. `pendingBoxCeiling` above already stops the
-          // SET from growing mid-retry; folding its signature into `batchId`
-          // is what also lets the NEXT batch (once this one clears) claim a
-          // key of its own, and what already gave the boxes-only branch
-          // (`maxId === null`) a distinct key across a print-verification
-          // outcome resolving (Task 13 review, second wave) -- see
-          // `boxSetSignature`'s own doc comment.
-          const boxSuffix = boxes.length > 0 ? `:box:${boxSetSignature(boxes)}` : "";
-          const exceptionSuffix =
-            newExceptionCeiling !== null ? `:exception:${newExceptionCeiling}` : "";
-          const generatedBatchId =
-            maxId !== null
-              ? `${deps.machineId}:${instId}:${maxId}${boxSuffix}${exceptionSuffix}`
-              : `${deps.machineId}:${instId}${boxSuffix}${exceptionSuffix}`;
-          const batchId = (await ensurePendingBatchId()) ?? generatedBatchId;
-          if (pendingBatchId === null) {
-            pendingBatchId = batchId;
-            await savePersistedValue(deps.exec, BATCH_ID_META_KEY, batchId);
+          const preparationLease = acquireCredentialCommitLease(credentialGeneration);
+          if (!preparationLease) break;
+          let batchId: string;
+          let serialsLeft: number;
+          try {
+            pendingCeiling = maxId ?? 0;
+            pendingBoxCeiling = newBoxCeiling ?? 0;
+            pendingExceptionCeiling = newExceptionCeiling ?? 0;
+            await savePersistedCeiling(deps.exec, CEILING_META_KEY, pendingCeiling);
+            await savePersistedCeiling(deps.exec, BOX_CEILING_META_KEY, pendingBoxCeiling);
+            await savePersistedCeiling(
+              deps.exec,
+              EXCEPTION_CEILING_META_KEY,
+              pendingExceptionCeiling,
+            );
+            const instId = await ensureInstallId();
+            // A batch's box set (when non-empty) is folded into `batchId`
+            // (Finding 1) via `boxSetSignature`, on top of `maxId` when items
+            // are ALSO present: pinning `pendingCeiling` alone is not enough
+            // to protect a box that closes while an ITEM batch is in flight,
+            // because `maxId` does not change just because the box set grew,
+            // and the server claims batch ids in `sync_batches` and
+            // short-circuits an already-claimed one with `alreadyApplied`
+            // BEFORE its own box-closures loop (`station-scans.service.ts`) --
+            // so a retry that silently balloons its box set under an unchanged
+            // key would never have that new closure actually applied
+            // server-side, while this device's `ackBoxes` marks it
+            // acknowledged anyway. `pendingBoxCeiling` above already stops the
+            // SET from growing mid-retry; folding its signature into `batchId`
+            // is what also lets the NEXT batch (once this one clears) claim a
+            // key of its own, and what already gave the boxes-only branch
+            // (`maxId === null`) a distinct key across a print-verification
+            // outcome resolving (Task 13 review, second wave) -- see
+            // `boxSetSignature`'s own doc comment.
+            const boxSuffix = boxes.length > 0 ? `:box:${boxSetSignature(boxes)}` : "";
+            const exceptionSuffix =
+              newExceptionCeiling !== null ? `:exception:${newExceptionCeiling}` : "";
+            const generatedBatchId =
+              maxId !== null
+                ? `${deps.machineId}:${instId}:${maxId}${boxSuffix}${exceptionSuffix}`
+                : `${deps.machineId}:${instId}${boxSuffix}${exceptionSuffix}`;
+            batchId = (await ensurePendingBatchId()) ?? generatedBatchId;
+            if (pendingBatchId === null) {
+              pendingBatchId = batchId;
+              await savePersistedValue(deps.exec, BATCH_ID_META_KEY, batchId);
+            }
+            serialsLeft = await computeSerialsLeft(deps.exec);
+          } finally {
+            preparationLease.release();
           }
-          const serialsLeft = await computeSerialsLeft(deps.exec);
           if (credentialGeneration.sealed) break;
           const res = await deps.client.post<BatchResponse>("/station/scans", {
             batchId,
@@ -856,132 +865,126 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
             // same failure path as a network error: do not ack.
             throw new Error("station: unexpected /station/scans response shape");
           }
-          // Filtered element-by-element, not all-or-nothing: dropping only
-          // the malformed entry (Finding 2) keeps the rest of this batch's
-          // conflicts intact. That matters more here than it would somewhere
-          // safety-critical — this is a courtesy count, not delivery — and
-          // discarding the whole array over one bad element would
-          // under-report further than a single malformed field warrants;
-          // nothing about one malformed entry says anything about the
-          // others in the same response.
-          const reported = Array.isArray(res.conflicts)
-            ? res.conflicts.filter(isBatchConflict)
-            : [];
-          if (reported.length > 0) {
-            if (credentialGeneration.sealed) break;
-            // Recorded BEFORE the ack, on purpose: `recordConflicts` and
-            // `ackThrough` are two separate device-side writes (this pool
-            // has no multi-call transaction — see the module doc comment),
-            // so a crash between them is possible either way. Persisting
-            // conflicts first means a crash there simply resends the batch;
-            // the server already applied it and answers `alreadyApplied`
-            // with an empty `conflicts` list, and the ones already stored
-            // locally are untouched (recordConflicts is an idempotent
-            // upsert). The other order would lose them: acking first and
-            // then crashing before this write deletes the outbox rows that
-            // were the only local record a conflict existed for that batch,
-            // and the resend that would have carried them again never
-            // happens because the server no-ops an already-applied batch.
-            //
-            // Isolated in its own try/catch, separate from the network/shape
-            // catch below (Finding 1): a failure here has nothing to do with
-            // whether the server received the batch — it already did,
-            // durably, before this response ever arrived — so retrying
-            // protects nothing and would instead wedge every subsequent scan
-            // on this terminal behind a batch that can never ack. The floor
-            // rule (design brief 04) is that nothing competes with scan
-            // delivery, and a courtesy count is exactly the kind of thing
-            // that must not. The accepted trade: a failed recording loses
-            // those conflicts on this device permanently — a resend of an
-            // already-applied batch reports `conflicts: []` (the server
-            // decides conflicts at ingest and never recomputes them for a
-            // retry), so there is no second chance on this device. A
-            // silently under-reported courtesy count beats a terminal that
-            // cannot deliver scans, and the cabinet remains the
-            // authoritative record either way.
-            try {
-              await recordConflicts(deps.exec, reported, new Date(now()).toISOString());
-              if (credentialGeneration.sealed) break;
-              // A still-open box corrects itself: the operator simply scans
-              // one more item. A CLOSED box is taped and labelled, so it
-              // stays as printed and ends one position short — the cabinet
-              // is where that surfaces. This is the same trade the server
-              // makes when it marks a box item displaced rather than
-              // deleting it. Same try/catch as `recordConflicts` above, for
-              // the same reason: this is bookkeeping, not delivery.
-              for (const c of reported) {
-                if (credentialGeneration.sealed) break;
-                await deps.exec.run(
-                  `UPDATE codes_mirror SET box_id = NULL
+          const commitLease = acquireCredentialCommitLease(credentialGeneration);
+          if (!commitLease) break;
+          try {
+            // Filtered element-by-element, not all-or-nothing: dropping only
+            // the malformed entry (Finding 2) keeps the rest of this batch's
+            // conflicts intact. That matters more here than it would somewhere
+            // safety-critical — this is a courtesy count, not delivery — and
+            // discarding the whole array over one bad element would
+            // under-report further than a single malformed field warrants;
+            // nothing about one malformed entry says anything about the
+            // others in the same response.
+            const reported = Array.isArray(res.conflicts)
+              ? res.conflicts.filter(isBatchConflict)
+              : [];
+            if (reported.length > 0) {
+              // Recorded BEFORE the ack, on purpose: `recordConflicts` and
+              // `ackThrough` are two separate device-side writes (this pool
+              // has no multi-call transaction — see the module doc comment),
+              // so a crash between them is possible either way. Persisting
+              // conflicts first means a crash there simply resends the batch;
+              // the server already applied it and answers `alreadyApplied`
+              // with an empty `conflicts` list, and the ones already stored
+              // locally are untouched (recordConflicts is an idempotent
+              // upsert). The other order would lose them: acking first and
+              // then crashing before this write deletes the outbox rows that
+              // were the only local record a conflict existed for that batch,
+              // and the resend that would have carried them again never
+              // happens because the server no-ops an already-applied batch.
+              //
+              // Isolated in its own try/catch, separate from the network/shape
+              // catch below (Finding 1): a failure here has nothing to do with
+              // whether the server received the batch — it already did,
+              // durably, before this response ever arrived — so retrying
+              // protects nothing and would instead wedge every subsequent scan
+              // on this terminal behind a batch that can never ack. The floor
+              // rule (design brief 04) is that nothing competes with scan
+              // delivery, and a courtesy count is exactly the kind of thing
+              // that must not. The accepted trade: a failed recording loses
+              // those conflicts on this device permanently — a resend of an
+              // already-applied batch reports `conflicts: []` (the server
+              // decides conflicts at ingest and never recomputes them for a
+              // retry), so there is no second chance on this device. A
+              // silently under-reported courtesy count beats a terminal that
+              // cannot deliver scans, and the cabinet remains the
+              // authoritative record either way.
+              try {
+                await recordConflicts(deps.exec, reported, new Date(now()).toISOString());
+                // A still-open box corrects itself: the operator simply scans
+                // one more item. A CLOSED box is taped and labelled, so it
+                // stays as printed and ends one position short — the cabinet
+                // is where that surfaces. This is the same trade the server
+                // makes when it marks a box item displaced rather than
+                // deleting it. Same try/catch as `recordConflicts` above, for
+                // the same reason: this is bookkeeping, not delivery.
+                for (const c of reported) {
+                  await deps.exec.run(
+                    `UPDATE codes_mirror SET box_id = NULL
                          WHERE code_hash = ?
                            AND box_id IN (SELECT box_id FROM boxes_mirror WHERE closed_at IS NULL)`,
-                  [c.codeHash],
-                );
+                    [c.codeHash],
+                  );
+                }
+              } catch (err) {
+                console.error("station: recording conflicts failed", err);
               }
-            } catch (err) {
-              console.error("station: recording conflicts failed", err);
             }
-          }
-          // Applied AFTER the validated response and BEFORE the ack, in its
-          // own try/catch: a pool top-up that fails must not block delivery,
-          // for the same reason a failed conflict recording does not (see
-          // above). The device simply runs on what it has; the next
-          // response carries another block. Losing one block costs at most
-          // some burnt numbers, and SSCCs need not be contiguous.
-          if (res.ssccBlock && isBatchSsccBlock(res.ssccBlock)) {
-            if (credentialGeneration.sealed) break;
-            try {
-              await addRange(deps.exec, res.ssccBlock);
-            } catch (err) {
-              console.error("station: applying serial block failed", err);
+            // Applied AFTER the validated response and BEFORE the ack, in its
+            // own try/catch: a pool top-up that fails must not block delivery,
+            // for the same reason a failed conflict recording does not (see
+            // above). The device simply runs on what it has; the next
+            // response carries another block. Losing one block costs at most
+            // some burnt numbers, and SSCCs need not be contiguous.
+            if (res.ssccBlock && isBatchSsccBlock(res.ssccBlock)) {
+              try {
+                await addRange(deps.exec, res.ssccBlock);
+              } catch (err) {
+                console.error("station: applying serial block failed", err);
+              }
             }
+            // `alreadyApplied` is a success: this exact batch is on the
+            // server already, so holding on to it would wedge the queue
+            // forever.
+            if (maxId !== null) {
+              await ackThrough(deps.exec, maxId);
+            }
+            if (boxes.length > 0) {
+              // `boxes` itself -- not just the ids -- so the ack can gate each
+              // row on the outcome fields actually read into THIS payload
+              // (Finding 6): see `ackBoxes`'s own doc comment.
+              await ackBoxes(deps.exec, boxes, new Date(now()).toISOString());
+            }
+            if (newExceptionCeiling !== null) {
+              await ackExceptionsThrough(deps.exec, newExceptionCeiling);
+            }
+            // Clear the identity first, then its ceilings. A crash in between
+            // leaves stale ceilings that exclude newer rows and are safely
+            // discarded by the empty-prefix branch above. The reverse order
+            // could expose newer rows under an already-applied batch id.
+            await clearPersistedCeiling(deps.exec, BATCH_ID_META_KEY);
+            pendingBatchId = null;
+            if (pendingCeiling !== null) {
+              await clearPersistedCeiling(deps.exec, CEILING_META_KEY);
+            }
+            if (pendingBoxCeiling !== null) {
+              await clearPersistedCeiling(deps.exec, BOX_CEILING_META_KEY);
+            }
+            if (pendingExceptionCeiling !== null) {
+              await clearPersistedCeiling(deps.exec, EXCEPTION_CEILING_META_KEY);
+            }
+            pendingCeiling = null;
+            pendingBoxCeiling = null;
+            pendingExceptionCeiling = null;
+            lastSuccessAt = now();
+            backoffMs = BACKOFF_START_MS;
+          } finally {
+            commitLease.release();
           }
-          // `alreadyApplied` is a success: this exact batch is on the
-          // server already, so holding on to it would wedge the queue
-          // forever.
-          if (maxId !== null) {
-            if (credentialGeneration.sealed) break;
-            await ackThrough(deps.exec, maxId);
-          }
-          if (boxes.length > 0) {
-            if (credentialGeneration.sealed) break;
-            // `boxes` itself -- not just the ids -- so the ack can gate each
-            // row on the outcome fields actually read into THIS payload
-            // (Finding 6): see `ackBoxes`'s own doc comment.
-            await ackBoxes(deps.exec, boxes, new Date(now()).toISOString());
-          }
-          if (newExceptionCeiling !== null) {
-            if (credentialGeneration.sealed) break;
-            await ackExceptionsThrough(deps.exec, newExceptionCeiling);
-          }
-          if (credentialGeneration.sealed) break;
-          // Clear the identity first, then its ceilings. A crash in between
-          // leaves stale ceilings that exclude newer rows and are safely
-          // discarded by the empty-prefix branch above. The reverse order
-          // could expose newer rows under an already-applied batch id.
-          await clearPersistedCeiling(deps.exec, BATCH_ID_META_KEY);
-          if (credentialGeneration.sealed) break;
-          pendingBatchId = null;
-          if (pendingCeiling !== null) {
-            await clearPersistedCeiling(deps.exec, CEILING_META_KEY);
-            if (credentialGeneration.sealed) break;
-          }
-          if (pendingBoxCeiling !== null) {
-            await clearPersistedCeiling(deps.exec, BOX_CEILING_META_KEY);
-            if (credentialGeneration.sealed) break;
-          }
-          if (pendingExceptionCeiling !== null) {
-            await clearPersistedCeiling(deps.exec, EXCEPTION_CEILING_META_KEY);
-            if (credentialGeneration.sealed) break;
-          }
-          pendingCeiling = null;
-          pendingBoxCeiling = null;
-          pendingExceptionCeiling = null;
-          lastSuccessAt = now();
-          backoffMs = BACKOFF_START_MS;
         } catch (err) {
           if (err instanceof StationApiError && err.status === 401) {
-            rejectCredential();
+            await rejectCredential();
             break;
           }
           if (credentialGeneration.sealed) break;

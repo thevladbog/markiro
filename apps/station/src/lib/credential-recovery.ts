@@ -14,24 +14,99 @@ export interface CredentialRejectedEvent {
 }
 
 export interface CredentialGeneration {
-  sealed: boolean;
-  rejectionPublished: boolean;
+  readonly phase: "active" | "sealing" | "sealed";
+  /** True from sealing intent onward, so requests/retries stop immediately. */
+  readonly sealed: boolean;
+  readonly rejectionPublished: boolean;
 }
 
+interface CredentialGenerationLifecycle {
+  phase: CredentialGeneration["phase"];
+  activeCommits: number;
+  rejectionPublished: boolean;
+  settle: Promise<void> | null;
+  resolveSettle: (() => void) | null;
+}
+
+const credentialGenerationLifecycles = new WeakMap<
+  CredentialGeneration,
+  CredentialGenerationLifecycle
+>();
+
 export function createCredentialGeneration(): CredentialGeneration {
-  return { sealed: false, rejectionPublished: false };
+  const lifecycle: CredentialGenerationLifecycle = {
+    phase: "active",
+    activeCommits: 0,
+    rejectionPublished: false,
+    settle: null,
+    resolveSettle: null,
+  };
+  const generation = {} as CredentialGeneration;
+  Object.defineProperties(generation, {
+    phase: { enumerable: true, get: () => lifecycle.phase },
+    sealed: { enumerable: true, get: () => lifecycle.phase !== "active" },
+    rejectionPublished: { enumerable: true, get: () => lifecycle.rejectionPublished },
+  });
+  credentialGenerationLifecycles.set(generation, lifecycle);
+  return generation;
 }
 
 export function credentialGenerationIsCurrent(generation: CredentialGeneration): boolean {
   return !generation.sealed;
 }
 
-/** Seals every engine sharing this key generation; only the first caller publishes recovery. */
-export function sealCredentialGeneration(generation: CredentialGeneration): boolean {
-  generation.sealed = true;
-  if (generation.rejectionPublished) return false;
-  generation.rejectionPublished = true;
-  return true;
+function credentialLifecycle(generation: CredentialGeneration): CredentialGenerationLifecycle {
+  const lifecycle = credentialGenerationLifecycles.get(generation);
+  if (!lifecycle) throw new Error("unknown credential generation");
+  return lifecycle;
+}
+
+export interface CredentialCommitLease {
+  release(): void;
+}
+
+/** Atomically refuses a new local commit as soon as sealing intent exists. */
+export function acquireCredentialCommitLease(
+  generation: CredentialGeneration,
+): CredentialCommitLease | null {
+  const lifecycle = credentialLifecycle(generation);
+  if (lifecycle.phase !== "active") return null;
+  lifecycle.activeCommits += 1;
+  let released = false;
+  return {
+    release() {
+      if (released) return;
+      released = true;
+      lifecycle.activeCommits -= 1;
+      if (lifecycle.activeCommits === 0 && lifecycle.phase === "sealing") {
+        lifecycle.phase = "sealed";
+        lifecycle.resolveSettle?.();
+        lifecycle.resolveSettle = null;
+      }
+    },
+  };
+}
+
+/**
+ * Enters sealing synchronously, waits every already-issued local commit
+ * lease, then lets exactly one caller publish recovery from stable storage.
+ */
+export async function sealCredentialGeneration(generation: CredentialGeneration): Promise<boolean> {
+  const lifecycle = credentialLifecycle(generation);
+  const first = lifecycle.phase === "active";
+  if (first) {
+    lifecycle.phase = "sealing";
+    lifecycle.rejectionPublished = true;
+    if (lifecycle.activeCommits === 0) {
+      lifecycle.phase = "sealed";
+    } else {
+      lifecycle.settle = new Promise<void>((resolve) => {
+        lifecycle.resolveSettle = resolve;
+      });
+    }
+  }
+  if (lifecycle.settle) await lifecycle.settle;
+  return first;
 }
 
 export interface FloorWorkBarrier {

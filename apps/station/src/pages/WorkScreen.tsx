@@ -474,11 +474,19 @@ export function WorkScreen({
    * both calls would burn a serial and print a label each, and the box's
    * stored SSCC would end up as whichever write lands second.
    */
-  async function closeTheBox(): Promise<void> {
-    if (issuerPrefix === null) return;
-    if (closingRef.current) return;
+  function reserveClose(): string | null {
+    if (issuerPrefix === null || closingRef.current) return null;
     closingRef.current = true;
     setClosing(true);
+    return issuerPrefix;
+  }
+
+  function releaseClose(): void {
+    closingRef.current = false;
+    setClosing(false);
+  }
+
+  async function performReservedClose(reservedIssuerPrefix: string): Promise<void> {
     try {
       // `boxRef.current`, not the `box` state variable: this file's own
       // comments on `boxRef` document that `box` can lag a `process()`-driven
@@ -492,7 +500,7 @@ export function WorkScreen({
       const impl =
         closeCurrentBoxProp ??
         ((sid: string, operatorId: string | null) =>
-          closeCurrentBoxLib({ exec, issuerPrefix }, sid, operatorId));
+          closeCurrentBoxLib({ exec, issuerPrefix: reservedIssuerPrefix }, sid, operatorId));
 
       let result: CloseBoxResult;
       try {
@@ -527,9 +535,22 @@ export function WorkScreen({
 
       void printAndMaybeVerify(result, closingBoxId);
     } finally {
-      closingRef.current = false;
-      setClosing(false);
+      releaseClose();
     }
+  }
+
+  /** Auto-close already runs inside the ordered scan queue. */
+  async function closeTheBox(): Promise<void> {
+    const reservedIssuerPrefix = reserveClose();
+    if (reservedIssuerPrefix === null) return;
+    await performReservedClose(reservedIssuerPrefix);
+  }
+
+  /** Manual admission reserves synchronously so a double-tap cannot queue two closes. */
+  function enqueueManualClose(): void {
+    const reservedIssuerPrefix = reserveClose();
+    if (reservedIssuerPrefix === null) return;
+    if (!queue.enqueueJob(() => performReservedClose(reservedIssuerPrefix))) releaseClose();
   }
 
   /**
@@ -864,19 +885,19 @@ export function WorkScreen({
     // empty outright (Finding 9) -- see `verificationQueue`'s own doc
     // comment.
     dequeueVerification();
-    // `.catch`, not a bare `void` (Task 13 review, "also fix, cheap"): a
-    // locked-DB write here would otherwise become an unhandled rejection,
-    // and unlike a rendering/printing failure (which the operator can see
-    // and retry), a failed verification record is silently dropped with
-    // nothing but a console trace to find it by -- the same discipline
-    // `hardware.ts`'s scan/status subscriptions already apply to their own
-    // fallible calls.
+    // The outcome is an ordered queue job, so credential recovery waits it
+    // alongside accepted scans and box/correction work. Keep the existing
+    // console reporting: a locked DB must not become an unhandled rejection.
     if (boxId) {
-      markPrintVerified(exec, boxId, new Date().toISOString()).catch((err: unknown) => {
-        console.error("station: recording print verification failed", err);
+      queue.enqueueJob(async () => {
+        try {
+          await markPrintVerified(exec, boxId, new Date().toISOString());
+        } catch (err) {
+          console.error("station: recording print verification failed", err);
+        }
       });
     }
-  }, [exec]);
+  }, [exec, queue]);
 
   return (
     <main
@@ -977,7 +998,7 @@ export function WorkScreen({
                 style={{ minHeight: 64 }}
                 disabled={closing}
                 onClick={(event) => {
-                  void closeTheBox();
+                  enqueueManualClose();
                   event.currentTarget.blur();
                 }}
               >
@@ -1068,11 +1089,14 @@ export function WorkScreen({
             // Reveals the next queued prompt (if any) -- see
             // `verificationQueue`'s own doc comment (Finding 9).
             dequeueVerification();
-            // `.catch`, not a bare `void` -- see `handleVerified` above for
-            // why.
+            // Same ordered recovery barrier and error behavior as verified.
             if (boxId) {
-              markPrintSkipped(exec, boxId, new Date().toISOString()).catch((err: unknown) => {
-                console.error("station: recording print skip failed", err);
+              queue.enqueueJob(async () => {
+                try {
+                  await markPrintSkipped(exec, boxId, new Date().toISOString());
+                } catch (err) {
+                  console.error("station: recording print skip failed", err);
+                }
               });
             }
           }}

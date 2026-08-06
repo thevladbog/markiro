@@ -135,7 +135,7 @@ describe("mirrorShiftBundle", () => {
       generation,
     );
 
-    sealCredentialGeneration(generation);
+    await sealCredentialGeneration(generation);
     resolveBundle(bundle);
     await mirroring;
 

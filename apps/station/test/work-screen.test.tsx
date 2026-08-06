@@ -5,6 +5,7 @@ import { STATION_MIGRATIONS } from "@markiro/db";
 import { buildSscc, kmHash, parseKm, type LabelTemplateSpec } from "@markiro/domain";
 import i18n from "../src/i18n/index.js";
 import type { CloseBoxResult } from "../src/lib/close-box.js";
+import { createFloorWorkRegistry, readSealedWorkSummary } from "../src/lib/credential-recovery.js";
 import type { PrinterLanguage } from "../src/lib/hardware-config.js";
 import type { PrintTarget } from "../src/lib/hardware.js";
 import type { SqlExecutor } from "../src/lib/mirror.js";
@@ -259,6 +260,7 @@ function renderWork(overrides: RenderWorkOverrides = {}) {
     source = manualSource(),
     sound = { muted: true, volume: 1 },
     onScanRecorded,
+    onScanQueueRegister,
     onExit = () => {},
     pendingSync = 0,
     issuerPrefix = TEST_ISSUER_PREFIX,
@@ -309,6 +311,7 @@ function renderWork(overrides: RenderWorkOverrides = {}) {
       source={source}
       sound={sound}
       {...(onScanRecorded ? { onScanRecorded } : {})}
+      {...(onScanQueueRegister ? { onScanQueueRegister } : {})}
       onExit={onExit}
       pendingSync={pendingSync}
       issuerPrefix={issuerPrefix}
@@ -750,6 +753,49 @@ describe("WorkScreen box progress, closing and printing", () => {
     await waitFor(() => expect(close).toHaveBeenCalledOnce());
   });
 
+  it("keeps a delayed manual close inside the recovery work barrier", async () => {
+    const base = makeExec();
+    await addRange(base, {
+      issuerPrefix: TEST_ISSUER_PREFIX,
+      extensionDigit: 0,
+      fromSerial: 1,
+      toSerial: 5,
+    });
+    let releaseClose!: () => void;
+    let announceClose!: () => void;
+    const closeGate = new Promise<void>((resolve) => {
+      releaseClose = resolve;
+    });
+    const closeReached = new Promise<void>((resolve) => {
+      announceClose = resolve;
+    });
+    const exec: SqlExecutor = {
+      all: base.all,
+      async run(sql, params = []) {
+        if (sql.includes("SET sscc = ?, closed_at = ?")) {
+          announceClose();
+          await closeGate;
+        }
+        await base.run(sql, params);
+      },
+    };
+    const registry = createFloorWorkRegistry();
+    const view = renderWorkTracked({
+      exec,
+      boxCapacity: 10,
+      boxItemCount: 3,
+      onScanQueueRegister: (queue) => registry.register(queue),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Закрыть короб" }));
+    await closeReached;
+    view.unmount();
+    const summary = readSealedWorkSummary(exec, registry.current(), 1_000);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    releaseClose();
+
+    await expect(summary).resolves.toMatchObject({ boxes: 1, total: 1 });
+  });
+
   // Task 13 review, Finding 2: a double-tap (or a tap racing an auto-close
   // triggered by the same accepted scan) used to run `closeCurrentBox`
   // twice before either finished -- both burn a serial and print, and the
@@ -1101,6 +1147,77 @@ describe("WorkScreen box progress, closing and printing", () => {
       expect(rows[0]?.print_verified_at).not.toBeNull();
     });
   });
+
+  it.each(["skip", "verify"] as const)(
+    "keeps a delayed print-%s outcome inside the recovery work barrier",
+    async (outcome) => {
+      const base = makeExec();
+      await seedLabelSpec(base, "s1");
+      await addRange(base, {
+        issuerPrefix: TEST_ISSUER_PREFIX,
+        extensionDigit: 0,
+        fromSerial: 1,
+        toSerial: 5,
+      });
+      let releaseOutcome!: () => void;
+      let announceOutcome!: () => void;
+      const outcomeGate = new Promise<void>((resolve) => {
+        releaseOutcome = resolve;
+      });
+      const outcomeReached = new Promise<void>((resolve) => {
+        announceOutcome = resolve;
+      });
+      const marker = outcome === "skip" ? "print_skipped_at" : "print_verified_at";
+      const exec: SqlExecutor = {
+        all: base.all,
+        async run(sql, params = []) {
+          if (sql.includes(`SET ${marker} = ?`)) {
+            announceOutcome();
+            await outcomeGate;
+          }
+          await base.run(sql, params);
+        },
+      };
+      const registry = createFloorWorkRegistry();
+      const view = renderWorkTracked({
+        exec,
+        boxCapacity: 10,
+        boxItemCount: 9,
+        verifyPrintedLabel: true,
+        printing: { target: PRINT_TARGET, language: "zpl", print: vi.fn(async () => {}) },
+        onScanQueueRegister: (queue) => registry.register(queue),
+      });
+      act(() => scan(KM));
+      await screen.findByText("Отсканируйте распечатанную этикетку");
+      await base.run("UPDATE boxes_mirror SET acked_at = ? WHERE box_id = ?", [
+        "2026-08-06T08:00:00Z",
+        SEEDED_BOX_ID,
+      ]);
+
+      if (outcome === "skip") {
+        fireEvent.click(screen.getByRole("button", { name: "Пропустить" }));
+      } else {
+        const rows = await base.all<{ sscc: string }>(
+          "SELECT sscc FROM boxes_mirror WHERE box_id = ?",
+          [SEEDED_BOX_ID],
+        );
+        act(() => scan(`]C100${rows[0]!.sscc}`));
+      }
+      await outcomeReached;
+      view.unmount();
+      const summary = readSealedWorkSummary(exec, registry.current(), 1_000);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      releaseOutcome();
+
+      await expect(summary).resolves.toMatchObject({ boxes: 1, total: 2 });
+      const rows = await base.all<Record<string, string | null>>(
+        `SELECT ${marker}, acked_at FROM boxes_mirror WHERE box_id = ?`,
+        [SEEDED_BOX_ID],
+      );
+      expect(rows[0]?.[marker]).not.toBeNull();
+      expect(rows[0]?.acked_at).toBeNull();
+    },
+  );
 
   // Task 13 review, Finding 4: `closeTheBox` used to capture the box id for
   // the verification/skip record from the `box` REACT STATE variable, which

@@ -83,7 +83,7 @@ describe("syncOperatorRoster", () => {
     const generation = createCredentialGeneration();
     const late = syncOperatorRoster({ get: vi.fn().mockReturnValue(response) }, exec, generation);
 
-    sealCredentialGeneration(generation);
+    await sealCredentialGeneration(generation);
     await clearRejectedCredentialState({ exec, clearCredential: async () => {} });
     resolveGet({ items: [OPERATOR] });
     await late;
@@ -104,7 +104,7 @@ describe("syncOperatorRoster", () => {
       exec,
       oldGeneration,
     );
-    sealCredentialGeneration(oldGeneration);
+    await sealCredentialGeneration(oldGeneration);
     await clearRejectedCredentialState({ exec, clearCredential: async () => {} });
 
     const fresh = { ...OPERATOR, operatorId: "op-fresh", login: "900" };
