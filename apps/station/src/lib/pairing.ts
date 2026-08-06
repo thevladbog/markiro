@@ -43,11 +43,17 @@ const pairingErrors: Record<string, PairingError> = {
 export async function redeemStationPairing(
   serverUrl: string,
   code: string,
+  signal?: AbortSignal,
 ): Promise<PairingResult> {
   if (!/^\d{8}$/.test(code)) return { ok: false, error: "invalid" };
 
   try {
-    const response = await postUnauthenticatedStationRequest(serverUrl, "/station/pair", { code });
+    const response = await postUnauthenticatedStationRequest(
+      serverUrl,
+      "/station/pair",
+      { code },
+      signal,
+    );
     const body = await readJson(response);
     if (!response.ok) return { ok: false, error: pairingErrorFrom(body) };
 

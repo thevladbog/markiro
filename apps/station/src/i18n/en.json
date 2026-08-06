@@ -5,6 +5,7 @@
     "resolving": "Updating station identity. Cached offline work remains available.",
     "degraded": "Station identity update is waiting for a connection. Cached offline work remains available.",
     "retry": "Retry identity update",
+    "missingServer": "Station identity cannot be updated because no trusted API address is available. Local work and the device key are preserved; contact service support.",
     "rejected": "This legacy station key could not prove its device identity. Local work is preserved; contact service support before pairing again."
   },
   "enroll": {

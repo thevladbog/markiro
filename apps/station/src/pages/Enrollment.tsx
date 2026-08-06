@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, Card, Input } from "@markiro/ui";
 import { createStationClient } from "../lib/api-client.js";
@@ -27,6 +27,13 @@ export interface EnrollmentProps {
 
 type EnrollmentState = "waiting" | "redeeming" | "success" | "service";
 
+interface EnrollmentOperation {
+  readonly id: number;
+  readonly controller: AbortController;
+}
+
+const directConfigTransition = (transition: () => Promise<void>): Promise<void> => transition();
+
 /**
  * First-run pairing is deliberately code-first. The legacy URL/key path is a
  * service recovery action, not an ordinary operator workflow, and still
@@ -40,7 +47,7 @@ export function Enrollment({
   pairingServerUrl,
   onSetup,
   scanSource,
-  runConfigTransition = (transition) => transition(),
+  runConfigTransition = directConfigTransition,
 }: EnrollmentProps) {
   const { t } = useTranslation();
   const [code, setCode] = useState("");
@@ -50,8 +57,37 @@ export function Enrollment({
   );
   const [serverUrl, setServerUrl] = useState(() => pairingServerUrl ?? "");
   const [apiKey, setApiKey] = useState("");
+  const operationSequence = useRef(0);
+  const activeOperation = useRef<EnrollmentOperation | null>(null);
 
   const busy = state === "redeeming";
+
+  function beginOperation(): EnrollmentOperation {
+    activeOperation.current?.controller.abort();
+    const operation = {
+      id: ++operationSequence.current,
+      controller: new AbortController(),
+    };
+    activeOperation.current = operation;
+    return operation;
+  }
+
+  function operationIsCurrent(operation: EnrollmentOperation): boolean {
+    return activeOperation.current === operation && !operation.controller.signal.aborted;
+  }
+
+  function finishOperation(operation: EnrollmentOperation): void {
+    if (activeOperation.current === operation) activeOperation.current = null;
+  }
+
+  useEffect(
+    () => () => {
+      operationSequence.current += 1;
+      activeOperation.current?.controller.abort();
+      activeOperation.current = null;
+    },
+    [machineId, expectedDeviceId, pairingServerUrl, runConfigTransition],
+  );
 
   // A configured serial scanner has no focused DOM input to type into. The
   // same source is therefore consumed here and in the floor, but only an
@@ -69,16 +105,21 @@ export function Enrollment({
       setError("setup_required");
       return;
     }
+    const operation = beginOperation();
     setState("redeeming");
     setError(null);
-    const result = await redeemStationPairing(pairingServerUrl, code);
-    if (!result.ok) {
-      setError(result.error);
-      setState("waiting");
-      return;
-    }
-
     try {
+      const result = await redeemStationPairing(
+        pairingServerUrl,
+        code,
+        operation.controller.signal,
+      );
+      if (!operationIsCurrent(operation)) return;
+      if (!result.ok) {
+        setError(result.error);
+        setState("waiting");
+        return;
+      }
       await runConfigTransition(() =>
         persistStationProvisioning(result.provisioning, {
           machineId,
@@ -87,29 +128,39 @@ export function Enrollment({
           writeConfig,
         }),
       );
+      if (!operationIsCurrent(operation)) return;
       setState("success");
       onEnrolled();
     } catch {
+      if (!operationIsCurrent(operation)) return;
       // A roster/config failure is deliberately indistinguishable from a
       // recoverable availability problem; never surface provisioning data.
       setError("unavailable");
       setState("waiting");
+    } finally {
+      finishOperation(operation);
     }
   }
 
   async function serviceConnect() {
     if (busy || !serverUrl || !apiKey) return;
+    const operation = beginOperation();
     setState("redeeming");
     setError(null);
     try {
       const client = createStationClient({ machineId, apiKey, serverUrl });
-      await client.whoami();
+      await client.whoami(operation.controller.signal);
+      if (!operationIsCurrent(operation)) return;
       await runConfigTransition(() => writeConfig({ machineId, apiKey, serverUrl }));
+      if (!operationIsCurrent(operation)) return;
       setState("success");
       onEnrolled();
     } catch {
+      if (!operationIsCurrent(operation)) return;
       setError("service");
       setState("service");
+    } finally {
+      finishOperation(operation);
     }
   }
 

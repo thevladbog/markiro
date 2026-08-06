@@ -19,6 +19,7 @@ beforeAll(async () => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   invokeMock.mockReset();
   pairingMock.redeemStationPairing.mockReset();
   pairingMock.persistStationProvisioning.mockReset();
@@ -60,6 +61,7 @@ describe("Enrollment", () => {
     expect(pairingMock.redeemStationPairing).toHaveBeenCalledWith(
       "https://api.factory.example",
       "12345678",
+      expect.any(AbortSignal),
     );
     expect(pairingMock.persistStationProvisioning.mock.invocationCallOrder[0]).toBeLessThan(
       onEnrolled.mock.invocationCallOrder[0]!,
@@ -95,6 +97,7 @@ describe("Enrollment", () => {
       expect(pairingMock.redeemStationPairing).toHaveBeenCalledWith(
         "https://retained.factory.example",
         "12345678",
+        expect.any(AbortSignal),
       ),
     );
     expect(pairingMock.persistStationProvisioning).toHaveBeenCalledWith(
@@ -168,5 +171,116 @@ describe("Enrollment", () => {
     fireEvent.click(screen.getByRole("button", { name: "Pair station" }));
 
     expect(pairingMock.redeemStationPairing).not.toHaveBeenCalled();
+  });
+
+  it("does not persist or publish a code response that resolves after unmount", async () => {
+    let resolveRedeem!: (value: {
+      ok: true;
+      provisioning: {
+        deviceId: string;
+        deviceName: string;
+        tenantId: string;
+        organizationName: string;
+        apiKey: string;
+        serverUrl: string;
+        operators: never[];
+      };
+    }) => void;
+    pairingMock.redeemStationPairing.mockReturnValue(
+      new Promise((resolve) => {
+        resolveRedeem = resolve;
+      }),
+    );
+    const oldEnrolled = vi.fn();
+
+    const oldView = render(
+      <Enrollment
+        machineId="old-machine"
+        onEnrolled={oldEnrolled}
+        pairingServerUrl="https://old.factory.example"
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Pairing code"), { target: { value: "12345678" } });
+    fireEvent.click(screen.getByRole("button", { name: "Pair station" }));
+    await waitFor(() => expect(pairingMock.redeemStationPairing).toHaveBeenCalledTimes(1));
+    oldView.unmount();
+
+    const newView = render(
+      <Enrollment
+        machineId="new-machine"
+        expectedDeviceId="new-device"
+        onEnrolled={() => {}}
+        pairingServerUrl="https://new.factory.example"
+      />,
+    );
+    resolveRedeem({
+      ok: true,
+      provisioning: {
+        deviceId: "old-device",
+        deviceName: "Old station",
+        tenantId: "old-tenant",
+        organizationName: "Old factory",
+        apiKey: "old-key",
+        serverUrl: "https://old.factory.example",
+        operators: [],
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(pairingMock.persistStationProvisioning).not.toHaveBeenCalled();
+    expect(oldEnrolled).not.toHaveBeenCalled();
+    expect(screen.queryByText("Station connected")).toBeNull();
+    newView.unmount();
+  });
+
+  it("does not write or publish a service response that resolves after unmount", async () => {
+    let resolveWhoami!: (response: Response) => void;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveWhoami = resolve;
+          }),
+      ),
+    );
+    const oldEnrolled = vi.fn();
+
+    const oldView = render(
+      <Enrollment
+        machineId="old-machine"
+        onEnrolled={oldEnrolled}
+        pairingServerUrl="https://old.factory.example"
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Service setup" }));
+    fireEvent.change(screen.getByLabelText("Server URL"), {
+      target: { value: "https://old.factory.example" },
+    });
+    fireEvent.change(screen.getByLabelText("Device key"), { target: { value: "old-key" } });
+    fireEvent.click(screen.getByRole("button", { name: "Connect service credentials" }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+    oldView.unmount();
+
+    const newView = render(
+      <Enrollment
+        machineId="new-machine"
+        expectedDeviceId="new-device"
+        onEnrolled={() => {}}
+        pairingServerUrl="https://new.factory.example"
+      />,
+    );
+    resolveWhoami(
+      new Response(JSON.stringify({ items: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(invokeMock).not.toHaveBeenCalledWith("write_config", expect.anything());
+    expect(oldEnrolled).not.toHaveBeenCalled();
+    expect(screen.queryByText("Station connected")).toBeNull();
+    newView.unmount();
   });
 });

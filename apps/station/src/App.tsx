@@ -113,6 +113,19 @@ export function pairingServerUrl(
   return canonicalStationApiUrl(config.deviceId ? config.serverUrl : buildApiUrl);
 }
 
+/**
+ * A legacy key may prove only its own station identity. Prefer a valid base
+ * already persisted on the device, then the deployment-supplied origin. An
+ * invalid persisted value is never used as a request prefix.
+ */
+export function legacyIdentityServerUrl(
+  config: StationConfig,
+  buildApiUrl: string | undefined,
+): string | null {
+  if (!config.apiKey || config.deviceId) return null;
+  return canonicalStationApiUrl(config.serverUrl) ?? canonicalStationApiUrl(buildApiUrl);
+}
+
 function configuredStationApiUrl(): string | undefined {
   // `import.meta.env` is untyped in this Tauri build, so narrow its untrusted
   // build-time value before it reaches the URL parser.
@@ -375,27 +388,45 @@ export function App() {
     };
   }, []);
 
-  // Memoized (keyed on apiKey+serverUrl, not the whole `config` object, which
+  const legacyKeyedConfig = Boolean(config?.apiKey && !config.deviceId);
+  const legacyApiUrl = config ? legacyIdentityServerUrl(config, configuredStationApiUrl()) : null;
+
+  // Memoized (keyed on identity-bearing fields and canonical legacy base, not
+  // the whole `config` object, which
   // is a fresh reference on every `readConfig()`/`refreshConfig()` call) so
   // ShiftSelection's fetch-on-mount effect (keyed on `client`) does not
   // refetch on every render — e.g. every online/offline flap re-renders App.
   // Must run unconditionally (before the `!config` early return below) to
   // respect the Rules of Hooks; it degrades to `null` until enrolled.
   const client = useMemo(
-    () => (config?.apiKey && config.serverUrl ? createStationClient(config) : null),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- see above; `createStationClient` reads only apiKey/serverUrl, so these deps cover everything the client is built from.
-    [config?.apiKey, config?.serverUrl],
+    () => {
+      if (!config?.apiKey) return null;
+      if (!config.deviceId) {
+        return legacyApiUrl ? createStationClient({ ...config, serverUrl: legacyApiUrl }) : null;
+      }
+      return config.serverUrl ? createStationClient(config) : null;
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- see above; the client reads only these credential/base fields.
+    [config?.apiKey, config?.deviceId, config?.serverUrl, legacyApiUrl],
   );
 
   const verifiedClient = config?.deviceId ? client : null;
 
   const attemptLegacyIdentity = useCallback(() => {
-    if (!config || !client || config.deviceId || legacyIdentityState === "rejected") return;
+    if (
+      !config ||
+      !client ||
+      !legacyApiUrl ||
+      config.deviceId ||
+      legacyIdentityState === "rejected"
+    ) {
+      return;
+    }
     if (legacyIdentityAttempt.current) return;
     const origin = config;
     const generation = configTransitions.current.begin();
     setLegacyIdentityState("resolving");
-    const attempt = resolveLegacyStationIdentity(client, origin)
+    const attempt = resolveLegacyStationIdentity(client, { ...origin, serverUrl: legacyApiUrl })
       .then((backfilled) => {
         return configTransitions.current.commit({
           generation,
@@ -422,7 +453,7 @@ export function App() {
         if (legacyIdentityAttempt.current === attempt) legacyIdentityAttempt.current = null;
       });
     legacyIdentityAttempt.current = attempt;
-  }, [client, config, legacyIdentityState, publishConfig]);
+  }, [client, config, legacyApiUrl, legacyIdentityState, publishConfig]);
 
   useEffect(() => {
     if (
@@ -625,6 +656,17 @@ export function App() {
     );
   }
 
+  if (legacyKeyedConfig && !legacyApiUrl) {
+    return (
+      <main style={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>
+        <Card style={{ width: "min(720px, calc(100vw - 64px))", padding: 32 }}>
+          <h1 style={{ fontSize: "2rem", marginBottom: 24 }}>{t("legacyIdentity.title")}</h1>
+          <p role="alert">{t("legacyIdentity.missingServer")}</p>
+        </Card>
+      </main>
+    );
+  }
+
   if (credentialRecovery) {
     if (credentialRecovery.phase === "ready") {
       return (
@@ -707,7 +749,11 @@ export function App() {
   ) : null;
 
   // `config` is narrowed to non-null for the rest of this render.
-  const stage = nextStationView(config, operator);
+  const stage = legacyKeyedConfig
+    ? operator
+      ? "floor"
+      : "login"
+    : nextStationView(config, operator);
   const legacyCredentialResetBlocked = Boolean(config.apiKey && !config.deviceId);
 
   if (stage === "pairing") {

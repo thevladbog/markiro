@@ -103,6 +103,7 @@ beforeAll(async () => {
 afterEach(() => {
   invokeMock.mockClear();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   hardwareMock.listScannerPorts.mockReset().mockResolvedValue([]);
   hardwareMock.openScanner.mockReset().mockResolvedValue(undefined);
   hardwareMock.closeScanner.mockReset().mockResolvedValue(undefined);
@@ -655,6 +656,113 @@ describe("App", () => {
     });
     expect(outbox).toHaveLength(1);
     expect(screen.queryByText("legacy-key-not-to-render")).toBeNull();
+  });
+
+  it.each([
+    ["missing", {}],
+    ["empty", { server_url: "" }],
+    ["invalid", { server_url: "not a valid station API URL" }],
+  ])(
+    "keeps a legacy keyed config with a %s server URL out of every enrollment path",
+    async (_case, serverFields) => {
+      vi.stubEnv("VITE_STATION_API_URL", "");
+      const pinHash = await hashSecret(OPERATOR_PIN);
+      const persistedConfig: Record<string, unknown> = {
+        machine_id: "legacy-machine",
+        api_key: "legacy-key",
+        ...serverFields,
+      };
+      const outbox = mockInvokeForFloor(
+        pinHash,
+        { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+        [outboxRow(1)],
+        persistedConfig,
+      );
+      const originalQueue = JSON.stringify(outbox);
+      const fetchMock = vi.fn(async () => new Response(null, { status: 500 }));
+      vi.stubGlobal("fetch", fetchMock);
+
+      render(<App />);
+
+      expect(
+        await screen.findByText(
+          "Station identity cannot be updated because no trusted API address is available. Local work and the device key are preserved; contact service support.",
+        ),
+      ).toBeDefined();
+      expect(screen.queryByLabelText("Pairing code")).toBeNull();
+      expect(screen.queryByLabelText("Server URL")).toBeNull();
+      expect(screen.queryByLabelText("Device key")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Service setup" })).toBeNull();
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(invokeMock).not.toHaveBeenCalledWith("clear_credential");
+      expect(invokeMock).not.toHaveBeenCalledWith("write_config", expect.anything());
+      expect(persistedConfig).toEqual({
+        machine_id: "legacy-machine",
+        api_key: "legacy-key",
+        ...serverFields,
+      });
+      expect(JSON.stringify(outbox)).toBe(originalQueue);
+    },
+  );
+
+  it("uses and persists the canonical trusted build-time base for a partial legacy config", async () => {
+    vi.stubEnv("VITE_STATION_API_URL", "https://api.factory.example/deployment/path");
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const persistedConfig: Record<string, unknown> = {
+      machine_id: "legacy-machine",
+      api_key: "legacy-key",
+      server_url: "not a valid station API URL",
+    };
+    const outbox = mockInvokeForFloor(
+      pinHash,
+      { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+      [outboxRow(1)],
+      persistedConfig,
+    );
+    const originalQueue = JSON.stringify(outbox);
+    let resolveIdentity!: (response: Response) => void;
+    const fetchMock = vi.fn((url: string) => {
+      if (new URL(url).pathname === "/station/identity") {
+        return new Promise<Response>((resolve) => {
+          resolveIdentity = resolve;
+        });
+      }
+      return new Promise<Response>(() => {});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const view = render(<App />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.factory.example/station/identity");
+    expect(screen.queryByLabelText("Pairing code")).toBeNull();
+    expect(screen.queryByLabelText("Server URL")).toBeNull();
+    expect(screen.queryByLabelText("Device key")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Service setup" })).toBeNull();
+
+    resolveIdentity(
+      new Response(
+        JSON.stringify({
+          device: {
+            id: "legacy-device",
+            name: "Legacy station",
+            tenantId: "legacy-tenant",
+            organizationName: "Factory",
+            line: null,
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    await waitFor(() =>
+      expect(persistedConfig).toMatchObject({
+        machine_id: "legacy-machine",
+        device_id: "legacy-device",
+        api_key: "legacy-key",
+        server_url: "https://api.factory.example",
+      }),
+    );
+    expect(JSON.stringify(outbox)).toBe(originalQueue);
+    view.unmount();
   });
 
   it("keeps cached floor login available while legacy identity is offline and coalesces reconnect retries", async () => {

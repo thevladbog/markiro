@@ -12,7 +12,7 @@ export class StationApiError extends Error {
 export interface StationClient {
   get<T>(path: string): Promise<T>;
   post<T>(path: string, body?: unknown): Promise<T>;
-  whoami(): Promise<{ ok: true }>;
+  whoami(signal?: AbortSignal): Promise<{ ok: true }>;
 }
 
 /**
@@ -55,8 +55,12 @@ export async function postUnauthenticatedStationRequest(
   serverUrl: string,
   path: string,
   body: unknown,
+  signal?: AbortSignal,
 ): Promise<Response> {
   const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (signal?.aborted) controller.abort();
+  else signal?.addEventListener("abort", abort, { once: true });
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     return await fetch(`${serverUrl.replace(/\/+$/, "")}${path}`, {
@@ -68,6 +72,7 @@ export async function postUnauthenticatedStationRequest(
     });
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener("abort", abort);
   }
 }
 
@@ -83,7 +88,12 @@ export function createStationClient(
 ): StationClient {
   const base = (cfg.serverUrl ?? "").replace(/\/+$/, "");
 
-  async function request<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
+  async function request<T>(
+    method: "GET" | "POST",
+    path: string,
+    body?: unknown,
+    signal?: AbortSignal,
+  ): Promise<T> {
     // One `AbortController` per attempt, cleared in `finally` so the timer
     // never leaks on the success path (nor on an ordinary HTTP-error path —
     // both go through the same `finally`). `controller.abort()` makes the
@@ -91,6 +101,9 @@ export function createStationClient(
     // rejection the caller (the sync drain, or any other station request)
     // already has to handle like any other network failure.
     const controller = new AbortController();
+    const abort = () => controller.abort();
+    if (signal?.aborted) controller.abort();
+    else signal?.addEventListener("abort", abort, { once: true });
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
       const res = await fetch(`${base}${path}`, {
@@ -107,6 +120,7 @@ export function createStationClient(
       return (await res.json()) as T;
     } finally {
       clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
     }
   }
 
@@ -115,8 +129,8 @@ export function createStationClient(
     post: (path, body) => request("POST", path, body),
     // A cheap reachability + auth probe used by enrollment; GET /shifts is
     // TenantGuard-protected, so a 200 proves the key resolves a tenant.
-    whoami: async () => {
-      await request("GET", "/shifts");
+    whoami: async (signal) => {
+      await request("GET", "/shifts", undefined, signal);
       return { ok: true };
     },
   };
