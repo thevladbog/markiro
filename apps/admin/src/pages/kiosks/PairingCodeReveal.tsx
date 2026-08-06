@@ -24,9 +24,21 @@ function useRemainingMs(expiresAt: string): number {
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
-    setNowMs(Date.now());
-    const timer = window.setInterval(() => setNowMs(Date.now()), 1_000);
-    return () => window.clearInterval(timer);
+    let timer: number | undefined;
+    const update = () => {
+      const current = Date.now();
+      setNowMs(current);
+      if (current >= expiresAtMs && timer !== undefined) {
+        window.clearInterval(timer);
+        timer = undefined;
+      }
+    };
+
+    update();
+    if (Date.now() < expiresAtMs) timer = window.setInterval(update, 1_000);
+    return () => {
+      if (timer !== undefined) window.clearInterval(timer);
+    };
   }, [expiresAtMs]);
 
   return Math.max(0, expiresAtMs - nowMs);
@@ -51,6 +63,10 @@ export function PairingCodeReveal({
   const remainingMs = useRemainingMs(expiresAt);
   const expiryReported = useRef(false);
   const [copyError, setCopyError] = useState(false);
+
+  useEffect(() => {
+    expiryReported.current = false;
+  }, [expiresAt]);
 
   useEffect(() => {
     if (remainingMs > 0 || expiryReported.current) return;

@@ -119,7 +119,9 @@ export function KioskProductsSection({
     try {
       setMutationError(null);
       await setProductsMutation.mutateAsync({ id: kiosk.id, productIds });
-      setSavedIds(new Set(productIds));
+      const persistedIds = new Set(productIds);
+      setSelectedIds(persistedIds);
+      setSavedIds(new Set(persistedIds));
       toast("ok", t("pages.kiosks.toasts.setProductsSuccess"));
     } catch (error) {
       setMutationError(saveError(error, t("pages.kiosks.products.saveError")));

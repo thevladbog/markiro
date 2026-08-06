@@ -32,7 +32,7 @@ export interface KioskProfileFormProps {
   initialValues?: KioskFormValues;
   submitting: boolean;
   submissionError: string | null;
-  onSubmit: (input: CreateKioskInput) => void | Promise<void>;
+  onSubmit: (input: CreateKioskInput) => Promise<boolean>;
   onDirtyChange: (dirty: boolean) => void;
   onValidationErrorChange?: (hasError: boolean) => void;
 }
@@ -99,7 +99,7 @@ export function KioskProfileForm({
   }, [initialValues, reset]);
 
   const submit = handleSubmit(async (values) => {
-    await onSubmit(toKioskInput(values));
+    if (await onSubmit(toKioskInput(values))) reset(values);
   });
 
   return (

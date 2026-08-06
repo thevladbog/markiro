@@ -83,11 +83,11 @@ function createFakeAuthClient(): AuthClientLike {
 }
 
 function deferred<T>() {
-  let resolve: (value: T) => void;
+  let resolve: (value: T) => void = () => undefined;
   const promise = new Promise<T>((resolvePromise) => {
     resolve = resolvePromise;
   });
-  return { promise, resolve: resolve! };
+  return { promise, resolve };
 }
 
 function futureExpiry(ms = 15 * 60_000): string {
@@ -177,6 +177,7 @@ function renderKiosksRouter(
 
 afterEach(async () => {
   cleanup();
+  Reflect.deleteProperty(navigator, "clipboard");
   toastMock.mockClear();
   vi.unstubAllGlobals();
   vi.useRealTimers();

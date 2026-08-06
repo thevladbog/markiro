@@ -479,10 +479,7 @@ it("keeps the panel, draft values, and persistent API error after a failed kiosk
 
 it("denies a direct read-only URL before the privileged create hook mounts", async () => {
   stubFetch(() => undefined);
-  renderKiosksRouter(["/kiosks/new"], {
-    roles: [],
-    capabilities: [CABINET_CAPABILITY.OPERATIONS_READ],
-  });
+  renderKiosksRouter(["/kiosks/new"], READ_ONLY_ACCESS);
 
   expect(await screen.findByTestId("forbidden-page")).toBeDefined();
   expect(screen.queryByRole("dialog")).toBeNull();
@@ -907,19 +904,21 @@ it("does not start or finish a profile save while a product save is pending", as
   await waitFor(() => expect(panel.hasAttribute("aria-busy")).toBe(false));
 });
 
-it("does not start a product save while a profile save is pending", async () => {
+it("does not start a product save while a profile save is pending or discard its draft", async () => {
   let resolveProfileSave: ((response: Response) => void) | undefined;
+  let currentKiosk: KiosksApiModule.KioskDto = { ...KIOSK, status: "active" };
   const profileSaveResponse = new Promise<Response>((resolve) => {
     resolveProfileSave = resolve;
   });
   const fetchMock = stubFetch((path, init) => {
-    if (path === "/api/kiosks") return jsonResponse(200, { items: [KIOSK] });
+    if (path === "/api/kiosks") return jsonResponse(200, { items: [currentKiosk] });
     if (path === "/api/products?status=active") return jsonResponse(200, { items: [PRODUCT] });
     if (path === `/api/kiosks/${KIOSK.id}` && init?.method === "PATCH") {
       return profileSaveResponse;
     }
     if (path === `/api/kiosks/${KIOSK.id}/products` && init?.method === "PUT") {
-      return jsonResponse(200, { ...KIOSK, productIds: [PRODUCT.id] });
+      currentKiosk = { ...currentKiosk, productIds: [PRODUCT.id] };
+      return jsonResponse(200, currentKiosk);
     }
     return undefined;
   });
@@ -946,8 +945,17 @@ it("does not start a product save while a profile save is pending", async () => 
   ).toHaveLength(0);
   expect(router.state.location.pathname).toBe(`/kiosks/${KIOSK.id}/edit`);
 
-  resolveProfileSave?.(jsonResponse(200, { ...KIOSK, name: `${KIOSK.name} draft` }));
+  currentKiosk = { ...currentKiosk, name: `${KIOSK.name} draft` };
+  resolveProfileSave?.(jsonResponse(200, currentKiosk));
+  await waitFor(() => expect(panel.hasAttribute("aria-busy")).toBe(false));
+  expect(router.state.location.pathname).toBe(`/kiosks/${KIOSK.id}/edit`);
+  expect(checkbox.getAttribute("aria-checked")).toBe("true");
+
+  await user.click(productSave);
+  await waitFor(() => expect(panel.hasAttribute("aria-busy")).toBe(false));
+  await user.click(within(panel).getByRole("button", { name: "Закрыть" }));
   await waitFor(() => expect(router.state.location.pathname).toBe("/kiosks"));
+  expect(screen.queryByRole("alertdialog", { name: "Отменить изменения?" })).toBeNull();
 });
 
 it("denies a direct read-only edit URL before the privileged update hook mounts", async () => {

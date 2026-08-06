@@ -219,12 +219,14 @@ export function KioskCreatePanelRoute(): ReactElement {
                 } else {
                   guard.finish();
                 }
+                return true;
               } catch (cause) {
                 setError(
                   cause instanceof ApiRequestError
                     ? cause.message
                     : t("pages.kiosks.form.createError"),
                 );
+                return false;
               }
             }}
           />
@@ -418,17 +420,19 @@ function KioskEditPanelContent({ kioskId }: { kioskId: string | undefined }): Re
   const updateProfile = async (
     input: Parameters<typeof updateMutation.mutateAsync>[0]["input"],
   ) => {
-    if (updateMutation.isPending || productsBusyRef.current) return;
+    if (updateMutation.isPending || productsBusyRef.current) return false;
 
     try {
       setProfileError(null);
       await updateMutation.mutateAsync({ id: kiosk.id, input });
       toast("ok", t("pages.kiosks.toasts.updateSuccess"));
-      if (!productsBusyRef.current) guard.finish();
+      if (!productsBusyRef.current && !dirty.products) guard.finish();
+      return true;
     } catch (cause) {
       setProfileError(
         cause instanceof ApiRequestError ? cause.message : t("pages.kiosks.form.updateError"),
       );
+      return false;
     }
   };
 

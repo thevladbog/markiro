@@ -230,6 +230,15 @@ it("keeps direct read-only reasons access readable", async () => {
   expect(screen.queryByRole("button", { name: "Изменить" })).toBeNull();
 });
 
+it("uses the full empty state for an authorized empty reasons table", async () => {
+  stubFetch({ reasons: [] });
+  renderKiosksRouter("/kiosks/reasons");
+
+  expect(await screen.findByText("Причины списания не добавлены")).toBeDefined();
+  expect(screen.getByText("Причины не добавлены")).toBeDefined();
+  expect(screen.getByRole("button", { name: "Добавить причину" })).toBeDefined();
+});
+
 it("associates create and edit validation with the exact invalid reason field", async () => {
   const fetchMock = stubFetch({ reasons: [REASON_A] });
   renderKiosksRouter("/kiosks/reasons");
@@ -405,6 +414,47 @@ it("confirms before replacing a dirty row edit with another row", async () => {
   expect(await screen.findByRole("alertdialog", { name: "Отменить изменения?" })).toBeDefined();
   await user.click(screen.getByRole("button", { name: "Не сохранять" }));
   expect(((await screen.findByLabelText("Название")) as HTMLInputElement).value).toBe(reasonB.name);
+});
+
+it("confirms before replacing a dirty row edit with the create row", async () => {
+  stubFetch({ reasons: [REASON_A] });
+  renderKiosksRouter("/kiosks/reasons");
+  const user = userEvent.setup();
+
+  await user.click(await screen.findByRole("button", { name: "Изменить" }));
+  await user.clear(screen.getByLabelText("Название"));
+  await user.type(screen.getByLabelText("Название"), "Локальная правка");
+  await user.click(screen.getByRole("button", { name: "Добавить причину" }));
+
+  const confirmation = await screen.findByRole("alertdialog", { name: "Отменить изменения?" });
+  expect(screen.getAllByLabelText("Название")).toHaveLength(1);
+  await user.click(within(confirmation).getByRole("button", { name: "Не сохранять" }));
+
+  expect(screen.getAllByLabelText("Название")).toHaveLength(1);
+  expect((screen.getByLabelText("Название") as HTMLInputElement).value).toBe("");
+});
+
+it("marks local navigation unavailable while a reason mutation is pending", async () => {
+  const createResponse = new Promise<Response>(() => undefined);
+  stubFetch({
+    reasons: [],
+    onRequest: (path, init) =>
+      path.endsWith("/api/pickup-reasons") && init?.method === "POST" ? createResponse : undefined,
+  });
+  const { router } = renderKiosksRouter("/kiosks/reasons");
+  const user = userEvent.setup();
+
+  await user.click(await screen.findByRole("button", { name: "Добавить причину" }));
+  await user.type(screen.getByLabelText("Название"), "Брак упаковки");
+  await user.click(screen.getByRole("button", { name: "Создать" }));
+
+  const kiosksLink = within(screen.getByRole("navigation", { name: "Разделы киосков" })).getByRole(
+    "link",
+    { name: "Киоски" },
+  );
+  await waitFor(() => expect(kiosksLink.getAttribute("aria-disabled")).toBe("true"));
+  await user.click(kiosksLink);
+  expect(router.state.location.pathname).toBe("/kiosks/reasons");
 });
 
 it("does not replace a dirty edit when a query refetches", async () => {

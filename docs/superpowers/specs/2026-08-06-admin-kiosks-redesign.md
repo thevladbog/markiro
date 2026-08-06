@@ -360,10 +360,9 @@ Name and numeric Order controls plus Cancel and Save. Preserve the current updat
 }
 ```
 
-The order value must be finite. A blank order must not become zero through `Number("")`; either
-show a local validation error or retain the current server value, with the chosen behavior covered
-by a focused test. The implementation-plan stage should prefer explicit validation because it gives
-the operator a clear correction path.
+The order value must be a finite integer. A blank, non-finite, or non-integer value shows a local
+validation error and must not send `PATCH /pickup-reasons/:id`; in particular, a blank value must
+not become zero through `Number("")`. Cover this explicit correction path with a focused test.
 
 Starting another edit while the current row is dirty asks for confirmation before discarding the
 draft. Query refetches must not overwrite an active dirty row. A failed update preserves both

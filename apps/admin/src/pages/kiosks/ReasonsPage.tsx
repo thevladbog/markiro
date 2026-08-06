@@ -22,7 +22,9 @@ import { KiosksLayout } from "./KiosksLayout.js";
 type ReasonDraft = { name: string; sortOrder: string };
 type ReasonFieldErrors = Partial<Record<keyof ReasonDraft, string>>;
 type LocalAction =
-  { kind: "edit"; reasonId: string } | { kind: "navigate"; to: "/kiosks" | "/kiosks/reasons" };
+  | { kind: "edit"; reasonId: string }
+  | { kind: "create" }
+  | { kind: "navigate"; to: "/kiosks" | "/kiosks/reasons" };
 
 function draftFrom(reason: ReasonDto): ReasonDraft {
   return { name: reason.name, sortOrder: String(reason.sortOrder) };
@@ -251,14 +253,27 @@ function AuthorizedReasonsEditor({
     setEditError(null);
   };
 
+  const startCreating = () => {
+    setEditId(null);
+    setEditDraft(null);
+    setEditFieldErrors({});
+    setEditError(null);
+    setCreateOpen(true);
+  };
+
+  const performAction = (action: LocalAction) => {
+    if (action.kind === "edit") startEditing(action.reasonId);
+    else if (action.kind === "create") startCreating();
+    else onNavigate(action.to);
+  };
+
   const requestAction = (action: LocalAction) => {
     if (busy) return;
     if (hasDirtyDraft) {
       setPendingAction(action);
       return;
     }
-    if (action.kind === "edit") startEditing(action.reasonId);
-    else onNavigate(action.to);
+    performAction(action);
   };
 
   const confirmDiscard = () => {
@@ -266,8 +281,7 @@ function AuthorizedReasonsEditor({
     clearDrafts();
     setPendingAction(null);
     if (!action) return;
-    if (action.kind === "edit") startEditing(action.reasonId);
-    else onNavigate(action.to);
+    performAction(action);
   };
 
   const handleCreate = async () => {
@@ -340,17 +354,21 @@ function AuthorizedReasonsEditor({
   return (
     <KiosksLayout
       actions={
-        <Button type="button" disabled={busy} onClick={() => setCreateOpen(true)}>
+        <Button type="button" disabled={busy} onClick={() => requestAction({ kind: "create" })}>
           {t("pages.kiosks.reasons.addAction")}
         </Button>
       }
+      navigationBusy={busy}
       onViewNavigate={(to) => requestAction({ kind: "navigate", to })}
     >
       {showRefetchWarning ? <ReasonsRefetchWarning retry={onRetry} /> : null}
       <Card title={t("pages.kiosks.reasons.title")}>
         <div className="mk-kiosks-reasons">
           {items.length === 0 && !createOpen ? (
-            <p className="mk-kiosks-reasons__empty">{t("pages.kiosks.reasons.emptyHint")}</p>
+            <EmptyState
+              title={t("pages.kiosks.reasons.emptyTitle")}
+              hint={t("pages.kiosks.reasons.emptyHint")}
+            />
           ) : (
             <div className="mk-kiosks-reasons__table-scroll">
               <table className="mk-kiosks-reasons__table">

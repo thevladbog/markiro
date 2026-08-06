@@ -1,4 +1,5 @@
 import type { KioskDto } from "./api.js";
+import { resolveDateTimeLocale } from "../../lib/datetime.js";
 
 export type KioskOperationalState = "archived" | "awaiting-pairing" | "online" | "offline";
 export type KioskStateFilter = "all" | KioskOperationalState;
@@ -17,7 +18,7 @@ export function getKioskOperationalState(
 
 export function formatRelativeLastSeen(iso: string, nowMs: number, language: string): string {
   const seconds = Math.round((new Date(iso).getTime() - nowMs) / 1000);
-  const locale = language.startsWith("ru") ? "ru-RU" : "en-US";
+  const locale = resolveDateTimeLocale(language);
   const formatter = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
   if (Math.abs(seconds) < 60) return formatter.format(seconds, "second");
   const minutes = Math.round(seconds / 60);

@@ -7,6 +7,7 @@ import { AdminPage, PageHeader } from "@markiro/ui";
 export interface KiosksLayoutProps {
   actions?: ReactNode;
   children: ReactNode;
+  navigationBusy?: boolean;
   onViewNavigate?: (to: "/kiosks" | "/kiosks/reasons") => void;
 }
 
@@ -14,6 +15,7 @@ export interface KiosksLayoutProps {
 export function KiosksLayout({
   actions,
   children,
+  navigationBusy = false,
   onViewNavigate,
 }: KiosksLayoutProps): ReactElement {
   const { t } = useTranslation();
@@ -24,6 +26,7 @@ export function KiosksLayout({
         return;
       }
       event.preventDefault();
+      if (navigationBusy) return;
       onViewNavigate(to);
     };
 
@@ -31,10 +34,19 @@ export function KiosksLayout({
     <AdminPage className="mk-kiosks-page">
       <PageHeader title={t("pages.kiosks.title")} actions={actions} />
       <nav className="mk-kiosks-view-nav" aria-label={t("pages.kiosks.views.label")}>
-        <NavLink end to="/kiosks" onClick={handleClick("/kiosks")}>
+        <NavLink
+          end
+          to="/kiosks"
+          aria-disabled={navigationBusy || undefined}
+          onClick={handleClick("/kiosks")}
+        >
           {t("pages.kiosks.views.kiosks")}
         </NavLink>
-        <NavLink to="/kiosks/reasons" onClick={handleClick("/kiosks/reasons")}>
+        <NavLink
+          to="/kiosks/reasons"
+          aria-disabled={navigationBusy || undefined}
+          onClick={handleClick("/kiosks/reasons")}
+        >
           {t("pages.kiosks.views.reasons")}
         </NavLink>
       </nav>

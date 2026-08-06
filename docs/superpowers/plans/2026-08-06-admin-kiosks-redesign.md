@@ -659,6 +659,10 @@ export interface KioskProductsSectionProps {
   onDirtyChange: (dirty: boolean) => void;
   onBusyChange: (busy: boolean) => void;
   onErrorChange: (hasError: boolean) => void;
+  onStatusChange?: (status: {
+    phase: "loading" | "error" | "ready";
+    selectedCount: number;
+  }) => void;
 }
 ```
 
@@ -734,14 +738,16 @@ Replace the old checkbox block in `KioskForm` with:
 ```tsx
 <KioskProductsSection
   kiosk={kiosk}
-  onDirtyChange={() => undefined}
-  onBusyChange={() => undefined}
-  onErrorChange={() => undefined}
+  onDirtyChange={onProductsDirtyChange}
+  onBusyChange={onProductsBusyChange}
+  onErrorChange={onProductsErrorChange}
 />
 ```
 
 Remove `useProducts` and product props from `KiosksPage`, create action, and row actions. Product
-data now loads only when the edit surface mounts.
+data now loads only when the edit surface mounts. The temporary edit consumer must aggregate these
+callbacks into its existing dismissal guard and busy/error state; Task 4 is not integration-ready
+with no-op callbacks. Task 5 moves the same reporting contract into the route panel.
 
 - [ ] **Step 6: Add copy/styles and run GREEN checks**
 

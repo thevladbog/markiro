@@ -53,11 +53,11 @@ const PRODUCT_C = {
 };
 
 function deferred<T>() {
-  let resolve: (value: T) => void;
+  let resolve: (value: T) => void = () => undefined;
   const promise = new Promise<T>((resolvePromise) => {
     resolve = resolvePromise;
   });
-  return { promise, resolve: resolve! };
+  return { promise, resolve };
 }
 
 function renderProductsSection(
@@ -242,6 +242,46 @@ describe("KioskProductsSection", () => {
     expect(screen.getByRole("region", { name: "Разрешённые товары" })).toBeDefined();
     expect(await screen.findByText("Список товаров обновлён")).toBeDefined();
     expect(reporters.onBusyChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it("converges the local selection when saving removes an id omitted by the active catalog", async () => {
+    const archivedProductId = "archived-product";
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      if (url === "/api/products?status=active") {
+        return Promise.resolve(jsonResponse(200, { items: [PRODUCT_A] }));
+      }
+      if (url === "/api/kiosks/k1/products" && init?.method === "PUT") {
+        return Promise.resolve(jsonResponse(200, { ...ONLINE_KIOSK, productIds: [PRODUCT_A.id] }));
+      }
+      return Promise.resolve(jsonResponse(200, { items: [] }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const reporters = {
+      onDirtyChange: vi.fn(),
+      onBusyChange: vi.fn(),
+      onErrorChange: vi.fn(),
+      onStatusChange: vi.fn(),
+    };
+    renderProductsSection({ ...ONLINE_KIOSK, productIds: [archivedProductId] }, reporters);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("checkbox", { name: PRODUCT_A.name }));
+    await user.click(screen.getByRole("button", { name: "Сохранить список" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/kiosks/k1/products",
+        expect.objectContaining({
+          method: "PUT",
+          body: JSON.stringify({ productIds: [PRODUCT_A.id] }),
+        }),
+      ),
+    );
+    await waitFor(() => expect(reporters.onDirtyChange).toHaveBeenLastCalledWith(false));
+    expect(reporters.onStatusChange).toHaveBeenLastCalledWith({
+      phase: "ready",
+      selectedCount: 1,
+    });
   });
 
   it("reports a changed selection and retains it with the server error after a failed save", async () => {

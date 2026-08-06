@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PairingCodeReveal } from "../src/pages/kiosks/PairingCodeReveal.js";
@@ -22,7 +22,10 @@ vi.mock("../src/pages/kiosks/PairingBarcode.js", () => ({
   },
 }));
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 const PAIRING_TTL_MS = 15 * 60_000;
 
@@ -60,5 +63,36 @@ describe("pairing code barcode placeholder", () => {
     // a slow chunk must not hold back the parts the operator can already act on.
     expect(screen.getByText("1234 5678")).toBeDefined();
     expect(screen.getByRole("button", { name: "Скопировать" })).toBeDefined();
+  });
+
+  it("reports expiry again when the reveal receives a new expiration", async () => {
+    vi.useFakeTimers();
+    const onExpired = vi.fn();
+    const firstExpiry = new Date(Date.now() + 1_000).toISOString();
+    const view = render(
+      <PairingCodeReveal
+        code="12345678"
+        expiresAt={firstExpiry}
+        regenerating={false}
+        onRegenerate={() => {}}
+        onExpired={onExpired}
+      />,
+    );
+
+    await act(async () => vi.advanceTimersByTimeAsync(1_000));
+    expect(onExpired).toHaveBeenCalledTimes(1);
+
+    view.rerender(
+      <PairingCodeReveal
+        code="87654321"
+        expiresAt={new Date(Date.now() + 1_000).toISOString()}
+        regenerating={false}
+        onRegenerate={() => {}}
+        onExpired={onExpired}
+      />,
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(1_000));
+
+    expect(onExpired).toHaveBeenCalledTimes(2);
   });
 });

@@ -64,11 +64,11 @@ function jsonResponse(status: number, body: unknown): Response {
 }
 
 function deferred<T>() {
-  let resolve: (value: T) => void;
+  let resolve: (value: T) => void = () => undefined;
   const promise = new Promise<T>((resolvePromise) => {
     resolve = resolvePromise;
   });
-  return { promise, resolve: resolve! };
+  return { promise, resolve };
 }
 
 const ADMIN_ACCESS: AccessDocument = {

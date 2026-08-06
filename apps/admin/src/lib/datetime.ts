@@ -9,8 +9,12 @@
  * detail view (`pages/pickup/OrderDetail.tsx`), which previously each carried
  * an identical copy.
  */
+export function resolveDateTimeLocale(language: string): string {
+  return language.startsWith("ru") ? "ru-RU" : "en-US";
+}
+
 export function formatCreatedAt(iso: string, language: string): string {
-  const locale = language.startsWith("ru") ? "ru-RU" : "en-US";
+  const locale = resolveDateTimeLocale(language);
   return new Intl.DateTimeFormat(locale, { dateStyle: "short", timeStyle: "short" }).format(
     new Date(iso),
   );
@@ -29,7 +33,7 @@ export function formatCreatedAt(iso: string, language: string): string {
  * thing a manager is there to compare.
  */
 export function formatScanTime(iso: string, language: string): string {
-  const locale = language.startsWith("ru") ? "ru-RU" : "en-US";
+  const locale = resolveDateTimeLocale(language);
   return new Intl.DateTimeFormat(locale, { dateStyle: "short", timeStyle: "medium" }).format(
     new Date(iso),
   );

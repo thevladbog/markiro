@@ -129,7 +129,11 @@ export function useUpdateKiosk(): UseMutationResult<
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, input }) => patchKiosk(id, input),
-    onSuccess: () => {
+    onSuccess: (updated) => {
+      queryClient.setQueryData<KioskDto[]>(KIOSKS_QUERY_KEY, (current) => {
+        if (!current) return [updated];
+        return current.map((kiosk) => (kiosk.id === updated.id ? updated : kiosk));
+      });
       void queryClient.invalidateQueries({ queryKey: KIOSKS_QUERY_KEY });
     },
   });
