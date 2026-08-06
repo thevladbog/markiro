@@ -40,6 +40,7 @@ import { canonicalStationApiUrl } from "./lib/station-api-url.js";
 import { loadSoundSettings, type SoundSettings } from "./lib/signal-sound.js";
 import { tauriExecutor } from "./lib/sqlite.js";
 import { resolveLegacyStationIdentity } from "./lib/legacy-identity.js";
+import { createLockdownLifecycle } from "./lib/lockdown.js";
 import { ConfigTransitionCoordinator } from "./lib/config-transition.js";
 import {
   resetCredentialForPairing as resetCredentialConfig,
@@ -188,6 +189,7 @@ export function App() {
   const legacyIdentityAttempt = useRef<Promise<unknown> | null>(null);
   const recoveryCleanupStarted = useRef<CredentialRejectedEvent | null>(null);
   const floorWorkRegistry = useMemo(() => createFloorWorkRegistry(), []);
+  const lockdown = useMemo(() => createLockdownLifecycle({ dev: import.meta.env.DEV }), []);
   const registerFloorWorkBarrier = useCallback(
     (barrier: FloorWorkBarrier) => floorWorkRegistry.register(barrier),
     [floorWorkRegistry],
@@ -228,6 +230,16 @@ export function App() {
   // the station would be left with whatever session Setup's own buttons put
   // it in.
   const [sessionEpoch, setSessionEpoch] = useState(0);
+
+  useEffect(() => lockdown.start(), [lockdown]);
+
+  useEffect(() => {
+    if (!showSetup) return;
+    void lockdown.exit();
+    return () => {
+      void lockdown.enter();
+    };
+  }, [lockdown, showSetup]);
 
   useEffect(() => {
     void loadSoundSettings(tauriExecutor).then(setSound);

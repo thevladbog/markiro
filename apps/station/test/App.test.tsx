@@ -73,6 +73,18 @@ const hardwareMock = vi.hoisted(() => ({
   print: vi.fn<(target: unknown, bytes: Uint8Array) => Promise<void>>(async () => {}),
 }));
 
+const lockdownMock = vi.hoisted(() => ({
+  start: vi.fn<() => () => void>(() => () => {}),
+  enter: vi.fn<() => Promise<void>>(async () => {}),
+  exit: vi.fn<() => Promise<void>>(async () => {}),
+  whenSettled: vi.fn<() => Promise<void>>(async () => {}),
+}));
+
+vi.mock("../src/lib/lockdown.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof LockdownModule>();
+  return { ...actual, createLockdownLifecycle: () => lockdownMock };
+});
+
 vi.mock("../src/lib/hardware.js", async (importOriginal) => {
   const actual = await importOriginal<typeof HardwareModule>();
   return { ...actual, tauriHardware: hardwareMock };
@@ -91,6 +103,7 @@ import { hashSecret } from "../src/lib/crypto.js";
 import type { HardwareConfig } from "../src/lib/hardware-config.js";
 import type * as HardwareModule from "../src/lib/hardware.js";
 import type { ScannerStatus } from "../src/lib/hardware.js";
+import type * as LockdownModule from "../src/lib/lockdown.js";
 import { readShiftContext } from "../src/lib/mirror.js";
 import { tauriExecutor } from "../src/lib/sqlite.js";
 import { BACKOFF_START_MS } from "../src/lib/sync.js";
@@ -110,6 +123,10 @@ afterEach(() => {
   hardwareMock.onScan.mockReset().mockResolvedValue(() => {});
   hardwareMock.onScannerStatus.mockReset().mockResolvedValue(() => {});
   hardwareMock.print.mockReset().mockResolvedValue(undefined);
+  lockdownMock.start.mockReset().mockReturnValue(() => {});
+  lockdownMock.enter.mockReset().mockResolvedValue(undefined);
+  lockdownMock.exit.mockReset().mockResolvedValue(undefined);
+  lockdownMock.whenSettled.mockReset().mockResolvedValue(undefined);
 });
 
 // No `tenantId` here on purpose: `Enrollment` never persists one (the
@@ -484,6 +501,31 @@ describe("pairingServerUrl", () => {
 });
 
 describe("App", () => {
+  it("leaves lockdown only for workstation service setup and re-enters on return", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    mockInvokeForFloor(pinHash, {
+      scanner: null,
+      printer: null,
+      printerLanguage: "zpl",
+      verifyPrintedLabel: false,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ items: [] }), { status: 200 })),
+    );
+
+    render(<App />);
+    await signInAsOperator();
+
+    expect(lockdownMock.start).toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /exit.*lockdown/i })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
+    await waitFor(() => expect(lockdownMock.exit).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Done" }));
+    await waitFor(() => expect(lockdownMock.enter).toHaveBeenCalledTimes(1));
+  });
+
   it("renders Enrollment when readConfig resolves an un-enrolled config", async () => {
     invokeMock.mockImplementation((cmd: string): Promise<unknown> => {
       if (cmd === "read_config") return Promise.resolve({ machine_id: "m1" });

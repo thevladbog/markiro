@@ -135,4 +135,10 @@ mod tests {
         assert!(validate_endpoint_url("ftp://releases.markiro.app/x").is_err());
         assert!(validate_endpoint_url("https://user:pass@evil.example.com/x").is_err());
     }
+
+    #[test]
+    fn lockdown_state_starts_unlocked() {
+        let state = LockdownState::default();
+        assert!(!*state.0.lock().expect("lockdown mutex should be available"));
+    }
 }
