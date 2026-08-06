@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -107,6 +107,29 @@ describe("development screen gallery", () => {
         name: "Extended offline operation on the production line",
       }),
     ).not.toBeNull();
+  });
+
+  it("renders the five-result name-search worst case with floor-sized targets", () => {
+    const view = render(
+      <StationScreenGallery request={{ state: "login-name-search", locale: "ru" }} />,
+    );
+    const ruResults = within(screen.getByTestId("gallery-name-search-results")).getAllByRole(
+      "button",
+    );
+
+    expect(ruResults).toHaveLength(5);
+    expect(view.container.textContent).toContain("Александрова-Романовская Екатерина Владимировна");
+    for (const result of ruResults) {
+      expect(result.classList.contains("mk-btn--floor")).toBe(true);
+      expect(result.style.height).toBe("var(--control-floor)");
+    }
+
+    view.rerender(<StationScreenGallery request={{ state: "login-name-search", locale: "en" }} />);
+    const enResults = within(screen.getByTestId("gallery-name-search-results")).getAllByRole(
+      "button",
+    );
+    expect(enResults).toHaveLength(5);
+    expect(view.container.textContent).toContain("Alexandria Montgomery-Wellington the Third");
   });
 
   it.each([

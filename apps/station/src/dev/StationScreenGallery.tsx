@@ -244,6 +244,21 @@ function PairingFixture({ variant, locale }: { variant: string; locale: GalleryL
 function LoginFixture({ variant, locale }: { variant: string; locale: GalleryLocale }) {
   const ru = locale === "ru";
   const isSearch = variant === "name-search";
+  const searchNames = ru
+    ? [
+        "Александрова-Романовская Екатерина Владимировна",
+        "Иванов Алексей Сергеевич",
+        "Петрова Мария Андреевна",
+        "Смирнов Александр Олегович",
+        "Фёдорова Елена Викторовна",
+      ]
+    : [
+        "Alexandria Montgomery-Wellington the Third",
+        "Alex Johnson",
+        "Alice Peterson",
+        "Alicia Smith",
+        "Alison Foster",
+      ];
   const title = ru ? "Вход оператора" : "Operator sign-in";
   const prompt =
     variant === "badge"
@@ -264,11 +279,11 @@ function LoginFixture({ variant, locale }: { variant: string; locale: GalleryLoc
   return (
     <StationScreen title={title} header={<p className="gallery-subtitle">{prompt}</p>}>
       {isSearch ? (
-        <div className="gallery-search-grid">
-          <div className="gallery-search-field">{ru ? "Тесто" : "Sample"}</div>
-          {["Оператор Тестов", "Sample Operator", "Демо Пользователь"].map((name) => (
-            <Button key={name} size="floor" variant="secondary">
-              {name}
+        <div className="gallery-search-grid" data-testid="gallery-name-search-results">
+          <div className="gallery-search-field">{ru ? "Але" : "Ale"}</div>
+          {searchNames.map((name) => (
+            <Button key={name} size="floor" variant="secondary" fullWidth>
+              <span className="operator-name-search__result-label">{name}</span>
             </Button>
           ))}
         </div>
