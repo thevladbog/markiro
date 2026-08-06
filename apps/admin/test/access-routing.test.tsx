@@ -102,6 +102,9 @@ function renderAccessRoute(
       if (path.endsWith("/api/products")) return jsonResponse(200, { items: [] });
       if (path.endsWith("/api/counterparties")) return jsonResponse(200, { items: [] });
       if (path.endsWith("/api/label-templates")) return jsonResponse(200, { items: [] });
+      if (path.includes("/api/devices"))
+        return jsonResponse(200, { items: [], page: 1, pageSize: 8, total: 0 });
+      if (path.endsWith("/api/lines")) return jsonResponse(200, { items: [] });
       if (path.includes("/api/integrations/commerceml/candidates")) {
         return jsonResponse(200, { candidates: [] });
       }
@@ -157,6 +160,13 @@ it("allows a manager to open the catalog directly", async () => {
 
   expect(await screen.findByRole("heading", { name: "Каталог продукции" })).toBeDefined();
   expect(screen.queryByTestId("forbidden-page")).toBeNull();
+});
+
+it("redirects the legacy kiosks index to the kiosk-filtered devices page", async () => {
+  const { requests } = renderAccessRoute("/kiosks", MANAGER_ACCESS);
+
+  expect(await screen.findByRole("heading", { name: "Устройства" })).toBeDefined();
+  await expect.poll(() => requests).toContain("/api/devices?page=1&pageSize=8&type=kiosk");
 });
 
 it("keeps the label library readable but blocks editor routes", async () => {

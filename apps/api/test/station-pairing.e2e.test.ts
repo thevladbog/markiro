@@ -100,6 +100,7 @@ describe.skipIf(!ready)("station pairing e2e", () => {
     const issued = await agent
       .post(`/station-devices/${deviceId}/pairing-code`)
       .send({})
+      .expect("Cache-Control", "no-store")
       .expect(201);
 
     expect(issued.body.code).toMatch(/^\d{8}$/);
@@ -123,6 +124,7 @@ describe.skipIf(!ready)("station pairing e2e", () => {
     const paired = await request(app!.getHttpServer())
       .post("/station/pair")
       .send({ code: issued.body.code })
+      .expect("Cache-Control", "no-store")
       .expect(201);
 
     expect(paired.body).toMatchObject({

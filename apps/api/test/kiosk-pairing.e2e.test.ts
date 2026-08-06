@@ -270,7 +270,11 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
   });
 
   it("issues an 8-digit code that expires in 15 minutes", async () => {
-    const res = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    const res = await agent
+      .post(`/kiosks/${kioskId}/pairing-code`)
+      .send({})
+      .expect("Cache-Control", "no-store")
+      .expect(201);
     expect(res.body.code).toMatch(/^\d{8}$/);
     const ttlMs = new Date(res.body.expiresAt).getTime() - Date.now();
     expect(ttlMs).toBeGreaterThan(13 * 60_000);
@@ -342,6 +346,7 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
     const paired = await request(app!.getHttpServer())
       .post("/kiosk/pair")
       .send({ code: issued.body.code })
+      .expect("Cache-Control", "no-store")
       .expect(201);
 
     expect(paired.body).toStrictEqual({

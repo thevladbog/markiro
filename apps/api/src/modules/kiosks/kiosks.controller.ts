@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Header,
   HttpCode,
   Param,
   Patch,
@@ -111,6 +112,7 @@ export class KiosksController {
 
   @Post(":id/enroll")
   @HttpCode(200)
+  @Header("Cache-Control", "no-store")
   @RequirePermissions(CABINET_CAPABILITY.CREDENTIALS_MANAGE)
   async enroll(
     @Req() req: RequestWithTenant,
@@ -129,6 +131,7 @@ export class KiosksController {
 
   /** Credential-only: a stolen device must not be able to mint pairing codes. */
   @Post(":id/pairing-code")
+  @Header("Cache-Control", "no-store")
   @RequirePermissions(CABINET_CAPABILITY.CREDENTIALS_MANAGE)
   async issuePairingCode(
     @Req() req: RequestWithTenant,

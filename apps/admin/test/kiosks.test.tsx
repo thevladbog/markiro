@@ -682,6 +682,153 @@ describe("KiosksPage", () => {
   });
 
   describe("pairing lifecycle response safety", () => {
+    it("ignores a late regeneration success after close while the page stays mounted", async () => {
+      let resolveRegeneration: ((response: Response) => void) | undefined;
+      let issued = 0;
+      const clipboard = { writeText: vi.fn() };
+      const print = vi.fn();
+      vi.stubGlobal("navigator", { clipboard });
+      vi.stubGlobal("print", print);
+      stubFetch({
+        kiosks: [ONLINE_KIOSK],
+        onPost: (path, init) => {
+          if (path !== "/api/kiosks/k1/pairing-code" || init?.method !== "POST") return undefined;
+          issued += 1;
+          if (issued === 1)
+            return jsonResponse(201, {
+              code: "12345678",
+              expiresAt: new Date(Date.now() + PAIRING_TTL_MS).toISOString(),
+            });
+          return new Promise<Response>((resolve) => {
+            resolveRegeneration = resolve;
+          });
+        },
+      });
+      const { queryClient } = renderPage();
+
+      await screen.findByText("Касса у входа");
+      fireEvent.click(screen.getByRole("button", { name: "Код привязки" }));
+      await screen.findByText("1234 5678");
+      fireEvent.click(screen.getByRole("button", { name: "Сформировать новый" }));
+      await waitFor(() => expect(resolveRegeneration).toBeDefined());
+      fireEvent.click(screen.getByRole("button", { name: "Готово" }));
+      const successCount = screen.queryAllByText("Код привязки сформирован").length;
+
+      await act(async () => {
+        resolveRegeneration?.(
+          jsonResponse(201, {
+            code: "87654321",
+            expiresAt: new Date(Date.now() + PAIRING_TTL_MS).toISOString(),
+          }),
+        );
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(screen.queryByText("8765 4321")).toBeNull();
+      expect(screen.queryAllByText("Код привязки сформирован")).toHaveLength(successCount);
+      expect(clipboard.writeText).not.toHaveBeenCalled();
+      expect(print).not.toHaveBeenCalled();
+      expect(
+        queryClient
+          .getMutationCache()
+          .getAll()
+          .every((mutation) => !JSON.stringify(mutation.state.data).includes("87654321")),
+      ).toBe(true);
+    });
+
+    it("ignores a late regeneration error after close without showing a toast", async () => {
+      let rejectRegeneration: ((error: Error) => void) | undefined;
+      let issued = 0;
+      stubFetch({
+        kiosks: [ONLINE_KIOSK],
+        onPost: (path, init) => {
+          if (path !== "/api/kiosks/k1/pairing-code" || init?.method !== "POST") return undefined;
+          issued += 1;
+          if (issued === 1)
+            return jsonResponse(201, {
+              code: "12345678",
+              expiresAt: new Date(Date.now() + PAIRING_TTL_MS).toISOString(),
+            });
+          return new Promise<Response>((_resolve, reject) => {
+            rejectRegeneration = reject;
+          });
+        },
+      });
+      renderPage();
+
+      await screen.findByText("Касса у входа");
+      fireEvent.click(screen.getByRole("button", { name: "Код привязки" }));
+      await screen.findByText("1234 5678");
+      fireEvent.click(screen.getByRole("button", { name: "Сформировать новый" }));
+      await waitFor(() => expect(rejectRegeneration).toBeDefined());
+      fireEvent.click(screen.getByRole("button", { name: "Готово" }));
+      const errorCount = screen.queryAllByText("Не удалось сформировать код привязки").length;
+
+      await act(async () => {
+        rejectRegeneration?.(new Error("late network failure"));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(screen.queryAllByText("Не удалось сформировать код привязки")).toHaveLength(
+        errorCount,
+      );
+      expect(screen.queryByRole("dialog", { name: "Код привязки киоска" })).toBeNull();
+    });
+
+    it("keeps only the newest response when pairing requests overlap", async () => {
+      const pending: Array<(response: Response) => void> = [];
+      stubFetch({
+        kiosks: [ONLINE_KIOSK],
+        onPost: (path, init) => {
+          if (path !== "/api/kiosks/k1/pairing-code" || init?.method !== "POST") return undefined;
+          return new Promise<Response>((resolve) => pending.push(resolve));
+        },
+      });
+      const { queryClient } = renderPage();
+
+      await screen.findByText("Касса у входа");
+      const action = screen.getByRole("button", { name: "Код привязки" });
+      fireEvent.click(action);
+      fireEvent.click(action);
+      await waitFor(() => expect(pending).toHaveLength(2));
+      const successCount = screen.queryAllByText("Код привязки сформирован").length;
+
+      await act(async () => {
+        pending[1]?.(
+          jsonResponse(201, {
+            code: "22222222",
+            expiresAt: new Date(Date.now() + PAIRING_TTL_MS).toISOString(),
+          }),
+        );
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(await screen.findByText("2222 2222")).toBeDefined();
+
+      await act(async () => {
+        pending[0]?.(
+          jsonResponse(201, {
+            code: "11111111",
+            expiresAt: new Date(Date.now() + PAIRING_TTL_MS).toISOString(),
+          }),
+        );
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(screen.getByText("2222 2222")).toBeDefined();
+      expect(screen.queryByText("1111 1111")).toBeNull();
+      expect(screen.queryAllByText("Код привязки сформирован")).toHaveLength(successCount + 1);
+      expect(
+        queryClient
+          .getMutationCache()
+          .getAll()
+          .every((mutation) => !JSON.stringify(mutation.state.data).includes("11111111")),
+      ).toBe(true);
+    });
+
     it("ignores a late regeneration response after Done and route teardown", async () => {
       let resolveRegeneration: ((response: Response) => void) | undefined;
       let regenerationSettled = false;

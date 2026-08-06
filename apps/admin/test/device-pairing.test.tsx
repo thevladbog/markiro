@@ -88,6 +88,119 @@ it("keeps the one-time pairing secret only in the active drawer and clears its m
   ).toBe(true);
 });
 
+it("keeps a failed station code issue retryable in the same drawer", async () => {
+  let attempts = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/lines") return response({ items: [] });
+      if (url === "/api/station-devices/station-retry/pairing-code") {
+        attempts += 1;
+        if (attempts === 1)
+          return {
+            ok: false,
+            status: 503,
+            statusText: "Unavailable",
+            json: async () => ({ message: "offline" }),
+          } as Response;
+        return response({ code: "12345678", expiresAt: "2026-08-06T12:00:00.000Z" });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }),
+  );
+  render(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { mutations: { retry: false } } })}
+    >
+      <ThemeProvider defaultTheme="light">
+        <DeviceDrawer
+          open
+          allowStation
+          allowKiosk={false}
+          canIssueKiosk={false}
+          mode="pair"
+          device={{
+            id: "station-retry",
+            type: "station",
+            name: "Packing",
+            place: { id: null, name: null },
+            status: "offline",
+            lastSeenAt: null,
+            paired: false,
+          }}
+          onClose={vi.fn()}
+        />
+      </ThemeProvider>
+    </QueryClientProvider>,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "Выдать код привязки" }));
+  expect(await screen.findByText("Устройство создано, но код привязки не получен.")).toBeDefined();
+  expect(screen.getByRole("dialog", { name: "Привязка устройства" })).toBeDefined();
+  fireEvent.click(screen.getByRole("button", { name: "Выдать код привязки" }));
+  expect(await screen.findAllByText("1234 5678")).toHaveLength(2);
+  expect(attempts).toBe(2);
+});
+
+it("drops a pending station pairing response from mutation memory after drawer teardown", async () => {
+  let resolveIssue: ((response: Response) => void) | undefined;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/lines") return response({ items: [] });
+      if (url === "/api/station-devices/station-teardown/pairing-code")
+        return new Promise<Response>((resolve) => {
+          resolveIssue = resolve;
+        });
+      throw new Error(`Unexpected request: ${url}`);
+    }),
+  );
+  const queryClient = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+  const view = render(
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider defaultTheme="light">
+        <DeviceDrawer
+          open
+          allowStation
+          allowKiosk={false}
+          canIssueKiosk={false}
+          mode="pair"
+          device={{
+            id: "station-teardown",
+            type: "station",
+            name: "Packing",
+            place: { id: null, name: null },
+            status: "offline",
+            lastSeenAt: null,
+            paired: false,
+          }}
+          onClose={vi.fn()}
+        />
+      </ThemeProvider>
+    </QueryClientProvider>,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "Выдать код привязки" }));
+  await waitFor(() => expect(resolveIssue).toBeDefined());
+  view.unmount();
+  await act(async () => {
+    resolveIssue?.(response({ code: "87654321", expiresAt: "2026-08-06T12:00:00.000Z" }));
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  expect(screen.queryByText("8765 4321")).toBeNull();
+  expect(
+    queryClient
+      .getMutationCache()
+      .getAll()
+      .every((mutation) => !JSON.stringify(mutation.state.data).includes("87654321")),
+  ).toBe(true);
+  queryClient.clear();
+});
+
 it("uses the server expiry and replaces the reveal with an expired state", () => {
   render(
     <ThemeProvider defaultTheme="light">

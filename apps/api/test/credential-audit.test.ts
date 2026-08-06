@@ -202,6 +202,22 @@ describe("credential mutation audit", () => {
     expect(JSON.stringify(audit.credentialMutation.mock.calls)).not.toContain("12345678");
   });
 
+  it("audits rejected station pairing-code issuance with the durable device id", async () => {
+    const pairing = { issueCode: vi.fn().mockRejectedValue(new Error("issuance failed")) };
+    const audit = auditDouble();
+    const controller = new StationDevicesController({} as never, pairing as never, audit as never);
+
+    await expect(controller.issuePairingCode(req, "station_5")).rejects.toThrow("issuance failed");
+    expect(audit.credentialMutation).toHaveBeenCalledWith({
+      tenantId: "org_1",
+      userId: "user_1",
+      action: "station_pairing_code.issue",
+      resourceId: "station_5",
+      outcome: "failed",
+    });
+    expect(JSON.stringify(audit.credentialMutation.mock.calls)).not.toContain("issuance failed");
+  });
+
   it("audits kiosk enrollment without the plaintext token", async () => {
     const kiosks = { enroll: vi.fn().mockResolvedValue({ token: "plain-token" }) };
     const pairing = {};

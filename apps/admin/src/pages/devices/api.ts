@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
+import type { QueryClient, UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import { apiFetch } from "../../api/client.js";
 
 export type DeviceType = "station" | "kiosk";
@@ -56,6 +56,10 @@ export interface CreatedDevice {
 }
 export const DEVICES_QUERY_KEY = ["devices"] as const;
 export const KIOSKS_QUERY_KEY = ["kiosks"] as const;
+const DEVICE_PAIRING_CODE_MUTATION_KEY = ["device-pairing-code"] as const;
+function pairingMutationKey(type: DeviceType) {
+  return [...DEVICE_PAIRING_CODE_MUTATION_KEY, type] as const;
+}
 function key(params: DevicesParams) {
   return [...DEVICES_QUERY_KEY, params] as const;
 }
@@ -102,6 +106,7 @@ export function useRevokeStation() {
 export function useIssueStationCode() {
   const qc = useQueryClient();
   return useMutation({
+    mutationKey: pairingMutationKey("station"),
     mutationFn: (id: string) =>
       apiFetch<PairingCode>(`/station-devices/${id}/pairing-code`, { method: "POST" }),
     gcTime: 0,
@@ -134,6 +139,7 @@ export function useUnbindKiosk() {
 export function useIssueKioskCode() {
   const qc = useQueryClient();
   return useMutation({
+    mutationKey: pairingMutationKey("kiosk"),
     mutationFn: (id: string) =>
       apiFetch<PairingCode>(`/kiosks/${id}/pairing-code`, { method: "POST" }),
     gcTime: 0,
@@ -142,4 +148,23 @@ export function useIssueKioskCode() {
       void qc.invalidateQueries({ queryKey: KIOSKS_QUERY_KEY });
     },
   });
+}
+
+/** Removes only the one-time response for one concrete drawer/device request. */
+export function clearDevicePairingCodeMutations(
+  queryClient: QueryClient,
+  type: DeviceType,
+  deviceId: string,
+  expectedResult?: PairingCode,
+): void {
+  for (const mutation of queryClient
+    .getMutationCache()
+    .findAll({ mutationKey: pairingMutationKey(type) })) {
+    if (
+      mutation.state.variables === deviceId &&
+      (expectedResult === undefined || mutation.state.data === expectedResult)
+    ) {
+      queryClient.getMutationCache().remove(mutation);
+    }
+  }
 }

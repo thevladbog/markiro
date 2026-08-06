@@ -192,6 +192,70 @@ it("hides Add device when the grant cannot create either type", async () => {
   expect(screen.queryByRole("button", { name: "Добавить устройство" })).toBeNull();
 });
 
+it("lets a credentials-only operator create and pair a station without operations.write", async () => {
+  const requests: Array<{ url: string; method?: string }> = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      requests.push({ url, ...(init?.method ? { method: init.method } : {}) });
+      if (url.startsWith("/api/devices"))
+        return response({ items: [], page: 1, pageSize: 8, total: 0 });
+      if (url === "/api/lines") return response({ items: [] });
+      if (url === "/api/station-devices" && init?.method === "POST")
+        return response({ id: "station-credentials", name: "Packing station" });
+      if (
+        url === "/api/station-devices/station-credentials/pairing-code" &&
+        init?.method === "POST"
+      )
+        return response({ code: "12345678", expiresAt: "2026-08-06T12:00:00.000Z" });
+      throw new Error(`Unexpected request: ${url}`);
+    }),
+  );
+  render(
+    <QueryClientProvider
+      client={
+        new QueryClient({
+          defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+        })
+      }
+    >
+      <ThemeProvider defaultTheme="light">
+        <MemoryRouter>
+          <AccessProvider
+            value={{
+              roles: [],
+              capabilities: [
+                CABINET_CAPABILITY.OPERATIONS_READ,
+                CABINET_CAPABILITY.CREDENTIALS_MANAGE,
+              ],
+            }}
+          >
+            <DevicesPage />
+          </AccessProvider>
+        </MemoryRouter>
+      </ThemeProvider>
+    </QueryClientProvider>,
+  );
+
+  await screen.findByText("Устройства не добавлены");
+  fireEvent.click(screen.getByRole("button", { name: "Добавить устройство" }));
+  const drawer = await screen.findByRole("dialog", { name: "Новое устройство" });
+  expect((within(drawer).getByLabelText("Тип") as HTMLSelectElement).value).toBe("station");
+  expect(within(drawer).queryByRole("option", { name: "Киоск" })).toBeNull();
+  fireEvent.change(within(drawer).getByLabelText("Название"), {
+    target: { value: "Packing station" },
+  });
+  fireEvent.click(within(drawer).getByRole("button", { name: "Создать" }));
+  expect(await screen.findAllByText("1234 5678")).toHaveLength(2);
+  expect(requests).toContainEqual({ url: "/api/station-devices", method: "POST" });
+  expect(requests).toContainEqual({
+    url: "/api/station-devices/station-credentials/pairing-code",
+    method: "POST",
+  });
+  expect(requests.some((request) => request.url === "/api/kiosks")).toBe(false);
+});
+
 it("lets an operations-only user create a kiosk without issuing a pairing code", async () => {
   const requests: Array<{ url: string; method?: string }> = [];
   vi.stubGlobal(

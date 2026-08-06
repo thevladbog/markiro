@@ -1,4 +1,4 @@
-import { Body, Controller, Ip, Post } from "@nestjs/common";
+import { Body, Controller, Header, Ip, Post } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "../../zod.pipe";
 import { pairStationSchema, type PairStationDto, type PairStationResultDto } from "./dto";
@@ -15,6 +15,7 @@ export class StationPairController {
   constructor(private readonly pairing: StationPairingService) {}
 
   @Post("pair")
+  @Header("Cache-Control", "no-store")
   async pair(
     @Body(new ZodValidationPipe(pairStationSchema)) body: PairStationDto,
     @Ip() ip: string,

@@ -16,9 +16,14 @@ const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
 );
 
-async function waitForKioskLockWait(pool: AuthSetup["pool"]): Promise<void> {
+async function waitForKioskLockWait(
+  pool: AuthSetup["pool"],
+  blockingPid: number,
+  kioskId: string,
+): Promise<void> {
   for (let attempt = 0; attempt < 100; attempt++) {
-    const result = await pool.query(`
+    const result = await pool.query(
+      `
       SELECT EXISTS (
         SELECT 1
         FROM pg_stat_activity
@@ -26,12 +31,15 @@ async function waitForKioskLockWait(pool: AuthSetup["pool"]): Promise<void> {
           AND wait_event_type = 'Lock'
           AND query ILIKE '%kiosks%'
           AND query ILIKE '%for update%'
+          AND $1 = ANY(pg_blocking_pids(pid))
       )
-    `);
+    `,
+      [blockingPid],
+    );
     if (result.rows[0]?.exists === true) return;
     await new Promise<void>((resolve) => setTimeout(resolve, 10));
   }
-  throw new Error("Timed out waiting for enrollment to block on the kiosk row lock");
+  throw new Error(`Timed out waiting for enrollment to block on kiosk ${kioskId}`);
 }
 
 describe.skipIf(!ready)("kiosks e2e", () => {
@@ -115,7 +123,11 @@ describe.skipIf(!ready)("kiosks e2e", () => {
       .expect(200);
     expect(withList.body.productIds).toEqual([productId]);
 
-    const enroll = await agent.post(`/kiosks/${id}/enroll`).send({}).expect(200);
+    const enroll = await agent
+      .post(`/kiosks/${id}/enroll`)
+      .send({})
+      .expect("Cache-Control", "no-store")
+      .expect(200);
     expect(typeof enroll.body.token).toBe("string");
     expect(enroll.body.token.length).toBeGreaterThan(0);
 
@@ -324,8 +336,11 @@ describe.skipIf(!ready)("kiosks e2e", () => {
     const archiveStarted = new Promise<void>((resolve) => {
       archiveLocked = resolve;
     });
+    let archivePid: number | undefined;
 
     const archive = db.transaction(async (tx) => {
+      const pidResult = await tx.execute<{ pid: number }>("select pg_backend_pid() as pid");
+      archivePid = pidResult.rows[0]?.pid;
       await tx
         .select({ id: schema.kiosks.id })
         .from(schema.kiosks)
@@ -345,7 +360,8 @@ describe.skipIf(!ready)("kiosks e2e", () => {
         .post(`/kiosks/${id}/enroll`)
         .send({})
         .then((response) => response);
-      await waitForKioskLockWait(setup.pool);
+      if (archivePid === undefined) throw new Error("Archive transaction PID was not captured");
+      await waitForKioskLockWait(setup.pool, archivePid, id);
       releaseArchive?.();
       await archive;
 

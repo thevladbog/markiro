@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { Alert, Button, Drawer, Input, Select } from "@markiro/ui";
 
@@ -12,6 +13,7 @@ import {
   useIssueStationCode,
   useUpdateKiosk,
   useUpdateStation,
+  clearDevicePairingCodeMutations,
   type DeviceDto,
   type DeviceType,
   type PairingCode,
@@ -50,6 +52,7 @@ export function DeviceDrawer({
   onClose,
 }: DeviceDrawerProps) {
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
   const initialType = device?.type ?? (allowStation ? "station" : "kiosk");
   const [type, setType] = useState<DeviceType>(initialType);
   const [name, setName] = useState(device?.name ?? "");
@@ -64,6 +67,8 @@ export function DeviceDrawer({
   const issueStation = useIssueStationCode();
   const issueKiosk = useIssueKioskCode();
   const resetMutationCache = useRef<() => void>(() => {});
+  const requestGeneration = useRef(0);
+  const mounted = useRef(false);
   resetMutationCache.current = () => {
     issueStation.reset();
     issueKiosk.reset();
@@ -78,9 +83,13 @@ export function DeviceDrawer({
   );
 
   const clearSecret = useCallback(() => {
+    requestGeneration.current += 1;
+    if (pairing) {
+      clearDevicePairingCodeMutations(queryClient, pairing.type, pairing.deviceId);
+    }
     setPairing(null);
     resetMutationCache.current();
-  }, []);
+  }, [pairing, queryClient]);
 
   const reset = useCallback(() => {
     setType(initialType);
@@ -91,24 +100,37 @@ export function DeviceDrawer({
   }, [clearSecret, device?.name, device?.place.id, device?.place.name, initialType]);
 
   // Route changes and conditional drawer teardown must clear mutation data too.
-  useEffect(() => () => resetMutationCache.current(), []);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      requestGeneration.current += 1;
+      resetMutationCache.current();
+    };
+  }, []);
 
   const issue = useCallback(
     async (target: { id: string; type: DeviceType; name: string; placeName: string | null }) => {
+      const generation = ++requestGeneration.current;
       setError(null);
       try {
         const code =
           target.type === "station"
             ? await issueStation.mutateAsync(target.id)
             : await issueKiosk.mutateAsync(target.id);
+        if (!mounted.current || generation !== requestGeneration.current) {
+          clearDevicePairingCodeMutations(queryClient, target.type, target.id, code);
+          return;
+        }
         if (!/^\d{8}$/.test(code.code)) throw new Error("Invalid pairing code response");
         setPairing({ deviceId: target.id, ...target, code, issuedAt: new Date().toISOString() });
       } catch {
+        if (!mounted.current || generation !== requestGeneration.current) return;
         // Retain a previously visible code after a failed regeneration.
         setError(t("pages.devices.drawer.issueError"));
       }
     },
-    [issueKiosk, issueStation, t],
+    [issueKiosk, issueStation, queryClient, t],
   );
 
   const submit = async () => {

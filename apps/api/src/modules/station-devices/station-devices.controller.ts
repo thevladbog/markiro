@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Header,
   HttpCode,
   Param,
   Patch,
@@ -89,6 +90,7 @@ export class StationDevicesController {
   }
 
   @Post(":id/pairing-code")
+  @Header("Cache-Control", "no-store")
   async issuePairingCode(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,

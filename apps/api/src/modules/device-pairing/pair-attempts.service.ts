@@ -86,6 +86,7 @@ export class PairAttemptsService {
         set: { failures: sql`${schema.kioskPairAttempts.failures} + 1` },
       })
       .returning({ failures: schema.kioskPairAttempts.failures });
-    return row!.failures;
+    if (!row) throw new Error("Device pairing attempt counter did not return its updated row");
+    return row.failures;
   }
 }
