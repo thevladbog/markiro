@@ -215,9 +215,9 @@ and the [cabinet RBAC rollout runbook](runbooks/cabinet-rbac-rollout.md).
   `req.ip` resolves to Caddy's own address for every request. IP-keyed rate
   limiting belongs in Caddy itself as the primary layer (it sees the real
   client address unconditionally and can shed load before it reaches the
-  app); the API's own DB-backed limiter (currently just kiosk pairing) is a
-  backstop for when that layer is missing or misconfigured, not a
-  replacement for it.
+  app); the API's own DB-backed limiter for station and kiosk pairing is a
+  backstop for when that layer is missing or misconfigured, not a replacement
+  for it.
 - **Deployment checklist item:** the API container must run with both
   `NODE_ENV=production` **and** `TRUST_PROXY_HOPS` set to the number of
   reverse proxies that append to `X-Forwarded-For` (`1` behind the single
