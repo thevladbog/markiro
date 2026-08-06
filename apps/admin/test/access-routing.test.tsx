@@ -60,6 +60,19 @@ const JANE = {
   createdAt: "2026-01-01T00:00:00.000Z",
 };
 
+const KIOSK = {
+  id: "k1",
+  name: "Касса у входа",
+  location: "Зал 1",
+  dayLimitPerEmployee: 5,
+  showPrices: true,
+  status: "active",
+  lastSeenAt: null,
+  enrolled: false,
+  productIds: [],
+  createdAt: "2026-08-06T00:00:00.000Z",
+};
+
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(body === undefined ? null : JSON.stringify(body), {
     status,
@@ -111,6 +124,7 @@ function renderAccessRoute(
       if (path.endsWith("/api/pickup-reasons")) return jsonResponse(200, { items: [] });
       if (path.endsWith("/api/counterparties")) return jsonResponse(200, { items: [] });
       if (path.endsWith("/api/employees")) return jsonResponse(200, { items: [JANE] });
+      if (path.endsWith("/api/kiosks")) return jsonResponse(200, { items: [KIOSK] });
       if (path.endsWith("/api/operators")) return jsonResponse(200, { items: [] });
       if (path.endsWith("/api/label-templates")) return jsonResponse(200, { items: [] });
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
@@ -221,12 +235,15 @@ it.each(["/employees/new", "/employees/1/edit"])(
   },
 );
 
-it("forbids the direct kiosk create route for a read-only operator", async () => {
-  renderAccessRoute("/kiosks/new", OPERATIONS_READ_ONLY);
+it.each(["/kiosks/new", "/kiosks/k1/edit"])(
+  "forbids the direct kiosk write route %s for a read-only operator",
+  async (path) => {
+    renderAccessRoute(path, OPERATIONS_READ_ONLY);
 
-  expect(await screen.findByTestId("forbidden-page")).toBeDefined();
-  expect(screen.queryByRole("dialog")).toBeNull();
-});
+    expect(await screen.findByTestId("forbidden-page")).toBeDefined();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  },
+);
 
 it.each([
   ["/catalog/new", "Новый продукт"],
@@ -234,6 +251,7 @@ it.each([
   ["/employees/new", "Новый сотрудник"],
   ["/employees/1/edit", "Изменить сотрудника"],
   ["/kiosks/new", "Новый киоск"],
+  ["/kiosks/k1/edit", "Изменить киоск"],
 ])("opens the direct write route %s for a write-capable operator", async (path, title) => {
   renderAccessRoute(path, MANAGER_ACCESS);
 

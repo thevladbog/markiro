@@ -10,11 +10,14 @@ import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider, RequireCapability } from "../src/access/context.js";
 import i18n from "../src/i18n/index.js";
 import type * as KiosksApiModule from "../src/pages/kiosks/api.js";
-import { KioskCreatePanelRoute } from "../src/pages/kiosks/KioskPanelRoute.js";
+import { KioskCreatePanelRoute, KioskEditPanelRoute } from "../src/pages/kiosks/KioskPanelRoute.js";
 import { KiosksPage } from "../src/pages/kiosks/index.js";
 import { jsonResponse } from "./helpers/http.js";
 
-const { createHookMountSpy } = vi.hoisted(() => ({ createHookMountSpy: vi.fn() }));
+const { createHookMountSpy, updateHookMountSpy } = vi.hoisted(() => ({
+  createHookMountSpy: vi.fn(),
+  updateHookMountSpy: vi.fn(),
+}));
 
 vi.mock("../src/pages/kiosks/api.js", async (importOriginal) => {
   const actual = await importOriginal<typeof KiosksApiModule>();
@@ -24,12 +27,21 @@ vi.mock("../src/pages/kiosks/api.js", async (importOriginal) => {
       createHookMountSpy();
       return actual.useCreateKiosk();
     },
+    useUpdateKiosk: () => {
+      updateHookMountSpy();
+      return actual.useUpdateKiosk();
+    },
   };
 });
 
 const WRITE_ACCESS: AccessDocument = {
   roles: ["manager"],
   capabilities: [CABINET_CAPABILITY.OPERATIONS_READ, CABINET_CAPABILITY.OPERATIONS_WRITE],
+};
+
+const READ_ONLY_ACCESS: AccessDocument = {
+  roles: [],
+  capabilities: [CABINET_CAPABILITY.OPERATIONS_READ],
 };
 
 const KIOSK = {
@@ -43,6 +55,30 @@ const KIOSK = {
   enrolled: false,
   productIds: [],
   createdAt: "2026-08-06T00:00:00.000Z",
+};
+
+const ARCHIVED_KIOSK = {
+  ...KIOSK,
+  id: "k9",
+  name: "Архивный киоск",
+  status: "archived",
+  enrolled: true,
+};
+
+const PRODUCT = {
+  id: "p1",
+  gtin14: "04006381333931",
+  name: "Молоко 1л",
+  productGroup: "Молочные продукты",
+  boxCapacity: 12,
+  palletCapacity: 48,
+  unitPrice: null,
+  egaisCode: null,
+  externalRef: null,
+  status: "active",
+  defaultCounterpartyId: null,
+  defaultLabelTemplateId: null,
+  createdAt: "2026-01-01T00:00:00.000Z",
 };
 
 function requiredElement<T extends Element>(selector: string): T {
@@ -92,6 +128,14 @@ function renderKiosksRouter(
             </RequireCapability>
           }
         />
+        <Route
+          path=":kioskId/edit"
+          element={
+            <RequireCapability capability={CABINET_CAPABILITY.OPERATIONS_WRITE}>
+              <KioskEditPanelRoute />
+            </RequireCapability>
+          }
+        />
       </Route>,
     ),
     { initialEntries, initialIndex: initialEntries.length - 1 },
@@ -110,6 +154,7 @@ afterEach(async () => {
   cleanup();
   vi.unstubAllGlobals();
   createHookMountSpy.mockClear();
+  updateHookMountSpy.mockClear();
   await i18n.changeLanguage("ru");
 });
 
@@ -318,4 +363,260 @@ it("denies a direct read-only URL before the privileged create hook mounts", asy
   expect(await screen.findByTestId("forbidden-page")).toBeDefined();
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(createHookMountSpy).not.toHaveBeenCalled();
+});
+
+it("opens kiosk editing at the nested complex-panel route", async () => {
+  stubFetch((path) => (path === "/api/kiosks" ? jsonResponse(200, { items: [KIOSK] }) : undefined));
+  const { router } = renderKiosksRouter();
+  const user = userEvent.setup();
+
+  await user.click(await screen.findByRole("button", { name: "Изменить" }));
+
+  expect(router.state.location.pathname).toBe(`/kiosks/${KIOSK.id}/edit`);
+  const panel = screen.getByRole("dialog", { name: "Изменить киоск" });
+  expect(panel.textContent).toContain(KIOSK.name);
+  expect(panel.textContent).toContain("Ожидает привязки");
+  expect(panel.classList.contains("mk-side-panel--complex")).toBe(true);
+});
+
+it("falls back to the kiosk list when a directly entered edit panel closes", async () => {
+  stubFetch((path) => (path === "/api/kiosks" ? jsonResponse(200, { items: [KIOSK] }) : undefined));
+  const { router } = renderKiosksRouter([`/kiosks/${KIOSK.id}/edit`]);
+  const user = userEvent.setup();
+
+  await screen.findByLabelText("Название");
+  const panel = screen.getByRole("dialog", { name: "Изменить киоск" });
+  await user.click(within(panel).getByRole("button", { name: "Закрыть" }));
+
+  await waitFor(() => expect(router.state.location.pathname).toBe("/kiosks"));
+});
+
+it("shows an edit-panel load error, retries, and then mounts both resources", async () => {
+  let attempts = 0;
+  stubFetch((path) => {
+    if (path === "/api/kiosks") {
+      attempts += 1;
+      return attempts === 1
+        ? jsonResponse(503, { message: "Unavailable" })
+        : jsonResponse(200, { items: [KIOSK] });
+    }
+    return undefined;
+  });
+  renderKiosksRouter([`/kiosks/${KIOSK.id}/edit`]);
+
+  let panel = await screen.findByRole("dialog", { name: "Изменить киоск" });
+  expect((await within(panel).findByRole("alert")).textContent).toContain(
+    "Не удалось загрузить данные киоска.",
+  );
+  fireEvent.click(within(panel).getByRole("button", { name: "Повторить" }));
+
+  await screen.findByLabelText("Название");
+  panel = screen.getByRole("dialog", { name: "Изменить киоск" });
+  expect(await within(panel).findByRole("region", { name: "Профиль" })).toBeDefined();
+  expect(within(panel).getByRole("region", { name: "Разрешённые товары" })).toBeDefined();
+  expect(attempts).toBe(2);
+});
+
+it("shows a translated not-found edit panel without mounting product work", async () => {
+  const fetchMock = stubFetch((path) =>
+    path === "/api/kiosks" ? jsonResponse(200, { items: [] }) : undefined,
+  );
+  const { router } = renderKiosksRouter(["/kiosks/missing/edit"]);
+  const user = userEvent.setup();
+
+  expect((await screen.findByRole("alert")).textContent).toContain("Киоск не найден.");
+  const panel = screen.getByRole("dialog", { name: "Изменить киоск" });
+  expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/products"))).toBe(false);
+  await user.click(within(panel).getByRole("button", { name: "Закрыть" }));
+  await waitFor(() => expect(router.state.location.pathname).toBe("/kiosks"));
+});
+
+it("keeps archived kiosks inspectable without lifecycle actions in the edit panel", async () => {
+  stubFetch((path) => {
+    if (path === "/api/kiosks") return jsonResponse(200, { items: [ARCHIVED_KIOSK] });
+    if (path === "/api/products?status=active") return jsonResponse(200, { items: [PRODUCT] });
+    return undefined;
+  });
+  renderKiosksRouter([`/kiosks/${ARCHIVED_KIOSK.id}/edit`]);
+
+  await screen.findByLabelText("Название");
+  const panel = screen.getByRole("dialog", { name: "Изменить киоск" });
+  expect(panel.textContent).toContain("Архивный киоск");
+  expect(panel.textContent).toContain("В архиве");
+  expect(await within(panel).findByLabelText("Название")).toBeDefined();
+  expect(within(panel).getByRole("region", { name: "Разрешённые товары" })).toBeDefined();
+  expect(within(panel).queryByRole("button", { name: "Код привязки" })).toBeNull();
+  expect(within(panel).queryByRole("button", { name: "В архив" })).toBeNull();
+});
+
+it("submits only the exact normalized profile PATCH and closes after success", async () => {
+  const updated = {
+    ...KIOSK,
+    name: "Новый склад",
+    location: null,
+    dayLimitPerEmployee: 8,
+    showPrices: false,
+  };
+  let didPatch = false;
+  const fetchMock = stubFetch((path, init) => {
+    if (path === `/api/kiosks/${KIOSK.id}` && init?.method === "PATCH") {
+      didPatch = true;
+      return jsonResponse(200, updated);
+    }
+    if (path === "/api/kiosks") {
+      return jsonResponse(200, { items: [didPatch ? updated : KIOSK] });
+    }
+    return undefined;
+  });
+  const { router } = renderKiosksRouter([
+    "/kiosks",
+    { pathname: `/kiosks/${KIOSK.id}/edit`, state: { kiosksBackground: true } },
+  ]);
+  const user = userEvent.setup();
+
+  await screen.findByLabelText("Название");
+  const panel = screen.getByRole("dialog", { name: "Изменить киоск" });
+  await user.clear(within(panel).getByLabelText("Название"));
+  await user.type(within(panel).getByLabelText("Название"), "  Новый склад  ");
+  await user.clear(within(panel).getByLabelText("Расположение"));
+  await user.clear(within(panel).getByLabelText("Лимит позиций на сотрудника в день"));
+  await user.type(within(panel).getByLabelText("Лимит позиций на сотрудника в день"), "8");
+  await user.click(within(panel).getByLabelText("Показывать цены"));
+  await user.click(within(panel).getByRole("button", { name: "Сохранить" }));
+
+  await waitFor(() =>
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/kiosks/${KIOSK.id}`,
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({
+          name: "Новый склад",
+          location: null,
+          dayLimitPerEmployee: 8,
+          showPrices: false,
+        }),
+      }),
+    ),
+  );
+  await waitFor(() => expect(router.state.location.pathname).toBe("/kiosks"));
+});
+
+it("keeps product work independent when profile update fails", async () => {
+  stubFetch((path, init) => {
+    if (path === "/api/kiosks") return jsonResponse(200, { items: [KIOSK] });
+    if (path === `/api/kiosks/${KIOSK.id}` && init?.method === "PATCH") {
+      return jsonResponse(409, { message: "Name already exists" });
+    }
+    if (path === "/api/products?status=active") return jsonResponse(200, { items: [PRODUCT] });
+    return undefined;
+  });
+  const { router } = renderKiosksRouter([`/kiosks/${KIOSK.id}/edit`]);
+  const user = userEvent.setup();
+
+  await screen.findByLabelText("Название");
+  const panel = screen.getByRole("dialog", { name: "Изменить киоск" });
+  await user.clear(within(panel).getByLabelText("Название"));
+  await user.type(within(panel).getByLabelText("Название"), "Новый склад");
+  await user.click(within(panel).getByRole("button", { name: "Сохранить" }));
+
+  expect((await within(panel).findByRole("alert")).textContent).toContain("Name already exists");
+  expect((within(panel).getByLabelText("Название") as HTMLInputElement).value).toBe("Новый склад");
+  expect(within(panel).getByRole("region", { name: "Разрешённые товары" })).toBeDefined();
+  expect(router.state.location.pathname).toBe(`/kiosks/${KIOSK.id}/edit`);
+});
+
+it("keeps both sections mounted and activates a section by scrolling and focusing its heading", async () => {
+  stubFetch((path) => {
+    if (path === "/api/kiosks")
+      return jsonResponse(200, { items: [{ ...KIOSK, productIds: [PRODUCT.id] }] });
+    if (path === "/api/products?status=active") return jsonResponse(200, { items: [PRODUCT] });
+    return undefined;
+  });
+  renderKiosksRouter([`/kiosks/${KIOSK.id}/edit`]);
+  const user = userEvent.setup();
+
+  await screen.findByRole("region", { name: "Профиль" });
+  const panel = screen.getByRole("dialog", { name: "Изменить киоск" });
+  const profile = within(panel).getByRole("region", { name: "Профиль" });
+  const products = within(panel).getByRole("region", { name: "Разрешённые товары" });
+  expect(profile).toBeDefined();
+  const navigation = within(panel).getByRole("navigation", { name: "Разделы киоска" });
+  const profileAction = within(navigation).getByRole("button", { name: /Профиль/ });
+  const productsAction = within(navigation).getByRole("button", {
+    name: /Разрешённые товары.*Выбрано: 1/,
+  });
+  expect(profileAction.getAttribute("aria-current")).toBe("location");
+  const heading = within(products).getByRole("heading", { name: "Разрешённые товары" });
+  const scrollIntoView = vi.fn();
+  Object.defineProperty(products, "scrollIntoView", { configurable: true, value: scrollIntoView });
+
+  await user.click(productsAction);
+
+  expect(scrollIntoView).toHaveBeenCalledWith({ block: "start" });
+  expect(productsAction.getAttribute("aria-current")).toBe("location");
+  expect(document.activeElement).toBe(heading);
+  expect(within(panel).getByRole("region", { name: "Профиль" })).toBe(profile);
+});
+
+it("blocks dirty Back navigation until the kiosk edit is discarded", async () => {
+  stubFetch((path) => (path === "/api/kiosks" ? jsonResponse(200, { items: [KIOSK] }) : undefined));
+  const { router } = renderKiosksRouter([
+    "/kiosks",
+    { pathname: `/kiosks/${KIOSK.id}/edit`, state: { kiosksBackground: true } },
+  ]);
+  const user = userEvent.setup();
+
+  await user.type(await screen.findByLabelText("Название"), " draft");
+  await router.navigate(-1);
+
+  expect(router.state.location.pathname).toBe(`/kiosks/${KIOSK.id}/edit`);
+  const confirmation = await screen.findByRole("alertdialog", { name: "Отменить изменения?" });
+  await user.click(within(confirmation).getByRole("button", { name: "Не сохранять" }));
+  await waitFor(() => expect(router.state.location.pathname).toBe("/kiosks"));
+});
+
+it("blocks every dismissal while a product save is busy and keeps the panel open after success", async () => {
+  let resolveSave: ((response: Response) => void) | undefined;
+  const saveResponse = new Promise<Response>((resolve) => {
+    resolveSave = resolve;
+  });
+  stubFetch((path, init) => {
+    if (path === "/api/kiosks") return jsonResponse(200, { items: [KIOSK] });
+    if (path === "/api/products?status=active") return jsonResponse(200, { items: [PRODUCT] });
+    if (path === `/api/kiosks/${KIOSK.id}/products` && init?.method === "PUT") return saveResponse;
+    return undefined;
+  });
+  const { router } = renderKiosksRouter([
+    "/kiosks",
+    { pathname: `/kiosks/${KIOSK.id}/edit`, state: { kiosksBackground: true } },
+  ]);
+  const user = userEvent.setup();
+
+  await screen.findByRole("checkbox", { name: PRODUCT.name });
+  const panel = screen.getByRole("dialog", { name: "Изменить киоск" });
+  await user.click(within(panel).getByRole("checkbox", { name: PRODUCT.name }));
+  await user.click(within(panel).getByRole("button", { name: "Сохранить список" }));
+  await waitFor(() => expect(panel.getAttribute("aria-busy")).toBe("true"));
+
+  expect(
+    (within(panel).getByRole("button", { name: "Закрыть" }) as HTMLButtonElement).disabled,
+  ).toBe(true);
+  expect(
+    (within(panel).getByRole("button", { name: "Отмена" }) as HTMLButtonElement).disabled,
+  ).toBe(true);
+  await router.navigate(-1);
+  expect(router.state.location.pathname).toBe(`/kiosks/${KIOSK.id}/edit`);
+
+  resolveSave?.(jsonResponse(200, { ...KIOSK, productIds: [PRODUCT.id] }));
+  await waitFor(() => expect(panel.hasAttribute("aria-busy")).toBe(false));
+  expect(router.state.location.pathname).toBe(`/kiosks/${KIOSK.id}/edit`);
+});
+
+it("denies a direct read-only edit URL before the privileged update hook mounts", async () => {
+  stubFetch(() => undefined);
+  renderKiosksRouter([`/kiosks/${KIOSK.id}/edit`], READ_ONLY_ACCESS);
+
+  expect(await screen.findByTestId("forbidden-page")).toBeDefined();
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(updateHookMountSpy).not.toHaveBeenCalled();
 });

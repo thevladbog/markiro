@@ -21,19 +21,10 @@ import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
 import { formatCreatedAt } from "../../lib/datetime.js";
 import { toast } from "../../lib/toast.js";
-import { KioskForm, type KioskFormValues } from "./KioskForm.js";
 import type { KiosksPanelContext, KiosksPanelLocationState } from "./KioskPanelRoute.js";
 import { PairingCodeModal } from "./PairingCodeModal.js";
 import { KiosksLayout } from "./KiosksLayout.js";
-import {
-  useArchiveKiosk,
-  useIssueKioskPairingCode,
-  useKiosks,
-  useUpdateKiosk,
-  type CreateKioskInput,
-  type KioskDto,
-  type UpdateKioskInput,
-} from "./api.js";
+import { useArchiveKiosk, useIssueKioskPairingCode, useKiosks, type KioskDto } from "./api.js";
 import {
   formatRelativeLastSeen,
   getKioskOperationalState,
@@ -117,31 +108,10 @@ function AuthorizedCreateKioskAction() {
 
 function AuthorizedKioskRowActions({ kiosk }: { kiosk: KioskDto }) {
   const { t } = useTranslation();
-  const updateMutation = useUpdateKiosk();
+  const navigate = useNavigate();
   const archiveMutation = useArchiveKiosk();
-  const [editing, setEditing] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const [archiveError, setArchiveError] = useState<string | null>(null);
-
-  const initialValues: KioskFormValues = {
-    name: kiosk.name,
-    location: kiosk.location ?? "",
-    dayLimitPerEmployee: String(kiosk.dayLimitPerEmployee),
-    showPrices: kiosk.showPrices,
-  };
-
-  const handleUpdate = async (input: CreateKioskInput | UpdateKioskInput) => {
-    try {
-      await updateMutation.mutateAsync({ id: kiosk.id, input });
-      toast("ok", t("pages.kiosks.toasts.updateSuccess"));
-      setEditing(false);
-    } catch (error) {
-      toast(
-        "error",
-        error instanceof ApiRequestError ? error.message : t("pages.kiosks.toasts.updateError"),
-      );
-    }
-  };
 
   const handleArchive = async () => {
     try {
@@ -159,7 +129,16 @@ function AuthorizedKioskRowActions({ kiosk }: { kiosk: KioskDto }) {
   return (
     <>
       <RowActions>
-        <Button type="button" size="compact" variant="secondary" onClick={() => setEditing(true)}>
+        <Button
+          type="button"
+          size="compact"
+          variant="secondary"
+          onClick={() =>
+            void navigate(`${kiosk.id}/edit`, {
+              state: { kiosksBackground: true } satisfies KiosksPanelLocationState,
+            })
+          }
+        >
           {t("pages.kiosks.edit")}
         </Button>
         {kiosk.status === "active" ? (
@@ -176,17 +155,6 @@ function AuthorizedKioskRowActions({ kiosk }: { kiosk: KioskDto }) {
           </Button>
         ) : null}
       </RowActions>
-      {editing ? (
-        <KioskForm
-          open
-          mode="edit"
-          kiosk={kiosk}
-          initialValues={initialValues}
-          submitting={updateMutation.isPending}
-          onSubmit={handleUpdate}
-          onClose={() => setEditing(false)}
-        />
-      ) : null}
       <ConfirmDialog
         open={archiving}
         title={t("pages.kiosks.archiveConfirmTitle")}

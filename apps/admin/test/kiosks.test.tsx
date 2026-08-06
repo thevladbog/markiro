@@ -674,45 +674,6 @@ describe("KiosksPage", () => {
     expect(screen.getByRole("button", { name: "Изменить" })).toBeDefined();
   });
 
-  it("edits a kiosk and toggles the product allowlist, saving via PUT /api/kiosks/:id/products", async () => {
-    const user = userEvent.setup();
-    const updated = { ...ONLINE_KIOSK, productIds: ["p1", "p2"] };
-    const fetchMock = stubFetch({
-      kiosks: [ONLINE_KIOSK],
-      products: [PRODUCT_A, PRODUCT_B],
-      onPost: (path, init) => {
-        if (path === "/api/kiosks/k1/products" && init?.method === "PUT") {
-          return jsonResponse(200, updated);
-        }
-        return undefined;
-      },
-    });
-
-    renderPage();
-    await screen.findByText("Касса у входа");
-
-    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
-    await screen.findByText("Изменить киоск");
-
-    const productBCheckbox = await screen.findByRole("checkbox", { name: PRODUCT_B.name });
-    expect(productBCheckbox.getAttribute("aria-checked")).toBe("false");
-    const productACheckbox = screen.getByRole("checkbox", { name: PRODUCT_A.name });
-    expect(productACheckbox.getAttribute("aria-checked")).toBe("true");
-
-    await user.click(productBCheckbox);
-    fireEvent.click(screen.getByRole("button", { name: "Сохранить список" }));
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/kiosks/k1/products",
-        expect.objectContaining({
-          method: "PUT",
-          body: JSON.stringify({ productIds: ["p1", "p2"] }),
-        }),
-      );
-    });
-  });
-
   it("archives a kiosk via the row action + confirm modal", async () => {
     let didArchive = false;
     const fetchMock = stubFetch({

@@ -41,18 +41,32 @@
 }
 
 .mk-kiosk-panel-skeleton__shape {
-  display: flex;
+  display: grid;
   width: 100%;
-  flex-direction: column;
   gap: var(--sp-4);
   opacity: 0.65;
 }
 
-.mk-kiosk-panel-skeleton__shape > span {
+.mk-kiosk-panel-skeleton--edit .mk-kiosk-panel-skeleton__shape {
+  grid-template-columns: minmax(148px, 180px) minmax(0, 1fr);
+}
+
+.mk-kiosk-panel-skeleton__rail,
+.mk-kiosk-panel-skeleton__content > span {
   display: block;
   height: 72px;
   border-radius: var(--r-1);
   background: var(--surface-panel);
+}
+
+.mk-kiosk-panel-skeleton__rail {
+  min-height: 220px;
+}
+
+.mk-kiosk-panel-skeleton__content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
 }
 
 .mk-kiosk-panel-skeleton > .mk-spinner {
@@ -68,6 +82,135 @@
 
 .mk-kiosk-profile-form > [role="alert"] {
   grid-column: 1 / -1;
+}
+
+.mk-kiosk-edit-panel__layout {
+  display: grid;
+  grid-template-columns: minmax(148px, 180px) minmax(0, 1fr);
+  gap: var(--sp-6);
+  align-items: start;
+}
+
+.mk-kiosk-section-nav {
+  position: sticky;
+  top: 0;
+  min-width: 0;
+}
+
+.mk-kiosk-section-nav__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mk-kiosk-section-nav__item {
+  min-width: 0;
+}
+
+.mk-kiosk-section-nav__button {
+  width: 100%;
+  min-height: var(--control-sm);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid transparent;
+  border-radius: var(--r-1);
+  background: transparent;
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.mk-kiosk-section-nav__button:hover {
+  background: var(--surface-panel);
+  color: var(--fg-1);
+}
+
+.mk-kiosk-section-nav__button[aria-current="location"] {
+  border-color: var(--line);
+  background: var(--surface-panel);
+  color: var(--fg-1);
+  font-weight: 600;
+}
+
+.mk-kiosk-section-nav__button:focus-visible,
+.mk-kiosk-profile-section__title:focus-visible,
+.mk-kiosk-products-section__title:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.mk-kiosk-section-nav__label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.mk-kiosk-section-nav__markers {
+  min-width: 0;
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.mk-kiosk-section-nav__meta,
+.mk-kiosk-section-nav__error {
+  padding: 2px 6px;
+  border-radius: var(--r-1);
+  font: var(--text-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.mk-kiosk-section-nav__meta {
+  background: var(--line);
+  color: var(--fg-2);
+}
+
+.mk-kiosk-section-nav__error {
+  border: 1px solid var(--err-border);
+  background: var(--err-bg);
+  color: var(--err-fg);
+}
+
+.mk-kiosk-edit-panel__sections {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-7);
+}
+
+.mk-kiosk-edit-panel__section-host {
+  min-width: 0;
+}
+
+.mk-kiosk-profile-section,
+.mk-kiosk-products-section {
+  scroll-margin-top: 32px;
+}
+
+.mk-kiosk-profile-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.mk-kiosk-profile-section__title,
+.mk-kiosk-edit-panel .mk-kiosk-products-section__title {
+  margin: 0;
+  color: var(--fg-1);
+  font: var(--text-h3);
+}
+
+.mk-kiosk-edit-panel .mk-kiosk-products-section {
+  margin-top: 0;
+  padding-top: var(--sp-6);
+  border-top: 1px solid var(--line);
 }
 
 .mk-kiosk-products-section {
@@ -301,6 +444,37 @@
 }
 
 @media (max-width: 720px) {
+  .mk-kiosk-panel-skeleton--edit .mk-kiosk-panel-skeleton__shape,
+  .mk-kiosk-edit-panel__layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mk-kiosk-panel-skeleton__rail {
+    min-height: 44px;
+  }
+
+  .mk-kiosk-section-nav {
+    z-index: 1;
+    overflow-x: auto;
+    padding: var(--sp-2) 0;
+    background: var(--surface-card);
+  }
+
+  .mk-kiosk-section-nav__list {
+    width: max-content;
+    min-width: 100%;
+    flex-direction: row;
+  }
+
+  .mk-kiosk-section-nav__button {
+    width: auto;
+    white-space: nowrap;
+  }
+
+  .mk-kiosk-edit-panel__sections {
+    gap: var(--sp-6);
+  }
+
   .mk-kiosk-profile-form {
     grid-template-columns: minmax(0, 1fr);
   }

@@ -1157,6 +1157,9 @@
         "loadError": "Could not load kiosk data.",
         "retry": "Retry",
         "createError": "Could not create kiosk.",
+        "updateError": "Could not update the kiosk.",
+        "notFound": "Kiosk not found.",
+        "editIdentity": "{{name}} · {{state}}",
         "discardTitle": "Discard changes?",
         "discardBody": "Unsaved changes will be lost.",
         "continueEditing": "Continue editing",
@@ -1166,6 +1169,12 @@
           "nameTooLong": "200 characters or fewer",
           "dayLimitInvalid": "Enter a positive whole number"
         }
+      },
+      "sections": {
+        "navigationLabel": "Kiosk sections",
+        "profile": "Profile",
+        "loading": "Loading",
+        "error": "Error"
       },
       "products": {
         "title": "Allowed products",
