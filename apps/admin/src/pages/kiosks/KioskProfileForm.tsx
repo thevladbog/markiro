@@ -79,19 +79,23 @@ export function KioskProfileForm({
     defaultValues: initialValues ?? EMPTY_VALUES,
   });
   const isDirtyRef = useRef(false);
+  const latestInitialValuesRef = useRef(initialValues ?? EMPTY_VALUES);
 
   useEffect(() => {
+    const wasDirty = isDirtyRef.current;
     isDirtyRef.current = isDirty;
     onDirtyChange(isDirty);
-  }, [isDirty, onDirtyChange]);
+    if (wasDirty && !isDirty) reset(latestInitialValuesRef.current);
+  }, [isDirty, onDirtyChange, reset]);
 
   useEffect(() => {
     onValidationErrorChange?.(Object.keys(errors).length > 0);
   }, [errors, onValidationErrorChange]);
 
   useEffect(() => {
+    latestInitialValuesRef.current = initialValues ?? EMPTY_VALUES;
     if (isDirtyRef.current) return;
-    reset(initialValues ?? EMPTY_VALUES);
+    reset(latestInitialValuesRef.current);
   }, [initialValues, reset]);
 
   const submit = handleSubmit(async (values) => {

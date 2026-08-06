@@ -229,20 +229,27 @@ export function KiosksPage() {
       {
         key: "lastSeenAt",
         title: t("pages.kiosks.table.lastActivity"),
-        render: (row) =>
-          row.lastSeenAt ? (
+        render: (row) => {
+          if (!row.lastSeenAt) {
+            return (
+              <span className="mk-kiosk-activity__label">{t("pages.kiosks.neverActivity")}</span>
+            );
+          }
+          const relative = formatRelativeLastSeen(row.lastSeenAt, nowMs, i18n.language);
+          const absolute = formatCreatedAt(row.lastSeenAt, i18n.language);
+          return (
             <div className="mk-kiosk-activity">
               <time
                 dateTime={row.lastSeenAt}
-                title={formatCreatedAt(row.lastSeenAt, i18n.language)}
+                title={absolute}
+                aria-label={t("pages.kiosks.lastActivityAccessible", { relative, absolute })}
               >
-                {formatRelativeLastSeen(row.lastSeenAt, nowMs, i18n.language)}
+                {relative}
               </time>
               <span className="mk-kiosk-activity__label">{t("pages.kiosks.lastActivity")}</span>
             </div>
-          ) : (
-            <span className="mk-kiosk-activity__label">{t("pages.kiosks.neverActivity")}</span>
-          ),
+          );
+        },
       },
       {
         key: "dayLimitPerEmployee",

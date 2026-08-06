@@ -20,6 +20,9 @@ export function KiosksLayout({
   const handleClick =
     (to: "/kiosks" | "/kiosks/reasons") => (event: ReactMouseEvent<HTMLAnchorElement>) => {
       if (!onViewNavigate) return;
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+        return;
+      }
       event.preventDefault();
       onViewNavigate(to);
     };

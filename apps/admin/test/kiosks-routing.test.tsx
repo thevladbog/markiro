@@ -173,7 +173,7 @@ function renderKiosksRouter(
       </AccessProvider>
     </QueryClientProvider>,
   );
-  return { router };
+  return { queryClient, router };
 }
 
 afterEach(async () => {
@@ -307,6 +307,40 @@ it("continues from create to safe pairing without automatically issuing a code",
   expect(router.state.location.state).toEqual({ kiosksBackground: true });
   expect(await screen.findByRole("button", { name: "Сформировать код" })).toBeDefined();
   expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/pairing-code"))).toBe(false);
+});
+
+it("continues from create to safe pairing when the kiosk refetch fails", async () => {
+  const created = { ...KIOSK, id: "k2", name: "Киоск склада" };
+  let kioskListRequests = 0;
+  const fetchMock = stubFetch((path, init) => {
+    if (path === "/api/kiosks" && init?.method === "POST") {
+      return jsonResponse(201, created);
+    }
+    if (path === "/api/kiosks") {
+      kioskListRequests += 1;
+      return kioskListRequests === 1
+        ? jsonResponse(200, { items: [KIOSK] })
+        : jsonResponse(503, { message: "Refetch failed" });
+    }
+    return undefined;
+  });
+  const { router } = renderKiosksRouter(["/kiosks/new"], WRITE_AND_CREDENTIALS_ACCESS);
+  const user = userEvent.setup();
+
+  await user.type(await screen.findByLabelText("Название"), created.name);
+  await user.click(screen.getByRole("button", { name: "Создать" }));
+  await screen.findByText("Киоск создан");
+  await waitFor(() => expect(kioskListRequests).toBe(2));
+  await user.click(screen.getByRole("button", { name: "Настроить привязку" }));
+
+  await waitFor(() => expect(router.state.location.pathname).toBe(`/kiosks/${created.id}/pair`));
+  expect(await screen.findByRole("button", { name: "Сформировать код" })).toBeDefined();
+  expect(
+    fetchMock.mock.calls.some(
+      ([url, init]) =>
+        String(url) === `/api/kiosks/${created.id}/pairing-code` && init?.method === "POST",
+    ),
+  ).toBe(false);
 });
 
 it("falls back to the kiosk list when a directly entered panel closes", async () => {
@@ -613,6 +647,59 @@ it("keeps product work independent when profile update fails", async () => {
   expect((within(panel).getByLabelText("Название") as HTMLInputElement).value).toBe("Новый склад");
   expect(within(panel).getByRole("region", { name: "Разрешённые товары" })).toBeDefined();
   expect(router.state.location.pathname).toBe(`/kiosks/${KIOSK.id}/edit`);
+});
+
+it("retains a dirty kiosk editor when a background refetch omits the kiosk", async () => {
+  let kiosks = [KIOSK];
+  stubFetch((path) => (path === "/api/kiosks" ? jsonResponse(200, { items: kiosks }) : undefined));
+  const { queryClient, router } = renderKiosksRouter([`/kiosks/${KIOSK.id}/edit`]);
+  const user = userEvent.setup();
+
+  const name = await screen.findByLabelText("Название");
+  await user.type(name, " draft");
+  kiosks = [];
+  await queryClient.invalidateQueries({ queryKey: ["kiosks"] });
+
+  const panel = screen.getByRole("dialog", { name: "Изменить киоск" });
+  expect(
+    await within(panel).findByText(
+      "Киоск не найден в обновлённом списке. Несохранённые изменения сохранены в редакторе.",
+    ),
+  ).toBeDefined();
+  expect((within(panel).getByLabelText("Название") as HTMLInputElement).value).toBe(
+    `${KIOSK.name} draft`,
+  );
+  expect(router.state.location.pathname).toBe(`/kiosks/${KIOSK.id}/edit`);
+
+  await user.click(within(panel).getByRole("button", { name: "Закрыть" }));
+  const confirmation = await screen.findByRole("alertdialog", { name: "Отменить изменения?" });
+  await user.click(within(confirmation).getByRole("button", { name: "Продолжить редактирование" }));
+
+  const retainedName = within(panel).getByLabelText("Название");
+  await user.clear(retainedName);
+  await user.type(retainedName, KIOSK.name);
+  expect((await within(screen.getByRole("dialog")).findByRole("alert")).textContent).toContain(
+    "Киоск не найден.",
+  );
+});
+
+it("applies deferred server profile values after a dirty form returns to clean", async () => {
+  let kiosk = KIOSK;
+  stubFetch((path) => (path === "/api/kiosks" ? jsonResponse(200, { items: [kiosk] }) : undefined));
+  const { queryClient } = renderKiosksRouter([`/kiosks/${KIOSK.id}/edit`]);
+  const user = userEvent.setup();
+
+  const name = await screen.findByLabelText("Название");
+  await user.clear(name);
+  await user.type(name, "Локальная правка");
+  kiosk = { ...KIOSK, name: "Серверная правка" };
+  await queryClient.invalidateQueries({ queryKey: ["kiosks"] });
+
+  expect((name as HTMLInputElement).value).toBe("Локальная правка");
+  await user.clear(name);
+  await user.type(name, KIOSK.name);
+
+  await waitFor(() => expect((name as HTMLInputElement).value).toBe("Серверная правка"));
 });
 
 it("keeps both sections mounted and activates a section by scrolling and focusing its heading", async () => {

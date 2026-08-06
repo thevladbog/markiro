@@ -324,6 +324,24 @@ describe("KiosksPage", () => {
     expect(await screen.findByText("Никогда")).toBeDefined();
   });
 
+  it("includes the absolute last activity in the time element's accessible label", async () => {
+    const now = Date.parse("2026-08-06T10:00:00.000Z");
+    vi.setSystemTime(now);
+    const lastSeenAt = new Date(now - 60_000).toISOString();
+    stubFetch({ kiosks: [{ ...ONLINE_KIOSK, lastSeenAt }], products: [], reasons: [] });
+    renderPage();
+
+    await screen.findByText(ONLINE_KIOSK.name);
+    const time = document.querySelector<HTMLTimeElement>(`time[datetime="${lastSeenAt}"]`);
+    expect(time).not.toBeNull();
+    const relative = time?.textContent ?? "";
+    const absolute = time?.getAttribute("title") ?? "";
+    expect(relative).not.toBe("");
+    expect(absolute).not.toBe("");
+    expect(time?.getAttribute("aria-label")).toContain(relative);
+    expect(time?.getAttribute("aria-label")).toContain(absolute);
+  });
+
   it("filters the fetched rows without adding query parameters", async () => {
     const now = Date.parse("2026-08-06T10:00:00.000Z");
     vi.setSystemTime(now);

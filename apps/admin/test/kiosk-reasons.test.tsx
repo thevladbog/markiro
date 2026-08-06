@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, expect, it, vi } from "vitest";
@@ -81,11 +81,11 @@ function stubFetch({
   access?: AccessDocument;
   kiosks?: unknown[];
   reasons?: unknown[];
-  onRequest?: (path: string, init?: RequestInit) => Response | undefined;
+  onRequest?: (path: string, init?: RequestInit) => Response | Promise<Response> | undefined;
 }) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
-    const override = onRequest?.(path, init);
+    const override = await onRequest?.(path, init);
     if (override) return override;
     if (path.endsWith("/api/profile")) {
       return jsonResponse(200, {
@@ -177,6 +177,34 @@ it("keeps a failed reason edit in its row with the exact payload", async () => {
   );
 });
 
+it("renders a semantic reasons table for an authorized user", async () => {
+  stubFetch({ reasons: [REASON_A] });
+  renderKiosksRouter("/kiosks/reasons");
+
+  await screen.findByText(REASON_A.name);
+  const table = screen.getByRole("table", { name: "Причины списания" });
+  expect(
+    within(table)
+      .getAllByRole("columnheader")
+      .map((header) => header.textContent),
+  ).toEqual(["Название", "Порядок", "Действия"]);
+  const row = within(table).getByRole("row", { name: /Испорчен товар.*1/ });
+  expect(within(row).getByRole("button", { name: "Изменить" })).toBeDefined();
+  expect(within(row).getByRole("button", { name: "Удалить" })).toBeDefined();
+});
+
+it("uses a table-shaped loading state for reasons", async () => {
+  const pendingReasons = new Promise<Response>(() => undefined);
+  stubFetch({
+    onRequest: (path) => (path.endsWith("/api/pickup-reasons") ? pendingReasons : undefined),
+  });
+  renderKiosksRouter("/kiosks/reasons");
+
+  await screen.findByRole("heading", { name: "Киоски" });
+  const loading = screen.getByRole("status");
+  expect(loading.querySelector("table")).not.toBeNull();
+});
+
 it("does not fetch write-off reasons from the kiosk view", async () => {
   const fetchMock = stubFetch({ kiosks: [ONLINE_KIOSK] });
   renderKiosksRouter("/kiosks");
@@ -192,24 +220,49 @@ it("keeps direct read-only reasons access readable", async () => {
   renderKiosksRouter("/kiosks/reasons");
 
   expect(await screen.findByText(REASON_A.name)).toBeDefined();
+  const table = screen.getByRole("table", { name: "Причины списания" });
+  expect(
+    within(table)
+      .getAllByRole("columnheader")
+      .map((header) => header.textContent),
+  ).toEqual(["Название", "Порядок", "Действия"]);
   expect(screen.queryByRole("button", { name: "Добавить причину" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Изменить" })).toBeNull();
 });
 
-it("validates blank names and blank or non-integer order without sending a reason mutation", async () => {
+it("associates create and edit validation with the exact invalid reason field", async () => {
   const fetchMock = stubFetch({ reasons: [REASON_A] });
   renderKiosksRouter("/kiosks/reasons");
   const user = userEvent.setup();
 
   await user.click(await screen.findByRole("button", { name: "Добавить причину" }));
-  await user.type(screen.getByLabelText("Название"), "   ");
+  const createName = screen.getByLabelText("Название");
+  await user.type(createName, "   ");
   await user.click(screen.getByRole("button", { name: "Создать" }));
-  expect((await screen.findByRole("alert")).textContent).toContain("Укажите название");
+  expect(createName.getAttribute("aria-invalid")).toBe("true");
+  expect(
+    document.getElementById(createName.getAttribute("aria-describedby") ?? "")?.textContent,
+  ).toBe("Укажите название");
 
   await user.click(screen.getByRole("button", { name: "Изменить" }));
-  await user.clear(screen.getByLabelText("Порядок"));
+  const editName = screen.getByLabelText("Название");
+  const editOrder = screen.getByLabelText("Порядок");
+  await user.clear(editName);
   await user.click(screen.getByRole("button", { name: "Сохранить" }));
-  expect((await screen.findByRole("alert")).textContent).toContain("Введите целое число");
+  expect(editName.getAttribute("aria-invalid")).toBe("true");
+  expect(editOrder.hasAttribute("aria-invalid")).toBe(false);
+  expect(
+    document.getElementById(editName.getAttribute("aria-describedby") ?? "")?.textContent,
+  ).toBe("Укажите название");
+
+  await user.type(editName, "Исправленная причина");
+  await user.clear(editOrder);
+  await user.click(screen.getByRole("button", { name: "Сохранить" }));
+  expect(editName.hasAttribute("aria-invalid")).toBe(false);
+  expect(editOrder.getAttribute("aria-invalid")).toBe("true");
+  expect(
+    document.getElementById(editOrder.getAttribute("aria-describedby") ?? "")?.textContent,
+  ).toBe("Введите целое число для порядка");
   expect(
     fetchMock.mock.calls.some(
       ([path, init]) => String(path).includes("/api/pickup-reasons") && init?.method !== undefined,
@@ -218,7 +271,7 @@ it("validates blank names and blank or non-integer order without sending a reaso
 
   await user.type(screen.getByLabelText("Порядок"), "1.5");
   await user.click(screen.getByRole("button", { name: "Сохранить" }));
-  expect((await screen.findByRole("alert")).textContent).toContain("Введите целое число");
+  expect(editOrder.getAttribute("aria-invalid")).toBe("true");
   expect(
     fetchMock.mock.calls.some(
       ([path, init]) => String(path).includes("/api/pickup-reasons") && init?.method !== undefined,
@@ -321,6 +374,23 @@ it("protects a non-empty create draft before local navigation", async () => {
   await waitFor(() => expect(router.state.location.pathname).toBe("/kiosks"));
 });
 
+it("leaves modified local-navigation clicks to the browser", async () => {
+  stubFetch({ reasons: [REASON_A] });
+  const { router } = renderKiosksRouter("/kiosks/reasons");
+  const user = userEvent.setup();
+
+  await user.click(await screen.findByRole("button", { name: "Добавить причину" }));
+  await user.type(screen.getByLabelText("Название"), "Брак упаковки");
+  const kiosksLink = within(screen.getByRole("navigation", { name: "Разделы киосков" })).getByRole(
+    "link",
+    { name: "Киоски" },
+  );
+
+  expect(fireEvent.click(kiosksLink, { button: 0, ctrlKey: true })).toBe(true);
+  expect(screen.queryByRole("alertdialog", { name: "Отменить изменения?" })).toBeNull();
+  expect(router.state.location.pathname).toBe("/kiosks/reasons");
+});
+
 it("confirms before replacing a dirty row edit with another row", async () => {
   const reasonB = { id: "r2", name: "Истёк срок годности", sortOrder: 2 };
   stubFetch({ reasons: [REASON_A, reasonB] });
@@ -354,5 +424,37 @@ it("does not replace a dirty edit when a query refetches", async () => {
   currentReason = { ...REASON_A, name: "Серверная правка" };
   await queryClient.invalidateQueries({ queryKey: ["pickup-reasons"] });
 
+  expect((screen.getByLabelText("Название") as HTMLInputElement).value).toBe("Локальная правка");
+});
+
+it("preserves a dirty reason draft when a background refetch fails", async () => {
+  let attempts = 0;
+  stubFetch({
+    onRequest: (path) => {
+      if (!path.endsWith("/api/pickup-reasons")) return undefined;
+      attempts += 1;
+      if (attempts === 2) return jsonResponse(503, { message: "Refetch failed" });
+      return jsonResponse(200, { items: [REASON_A] });
+    },
+  });
+  const { queryClient } = renderKiosksRouter("/kiosks/reasons");
+  const user = userEvent.setup();
+
+  await user.click(await screen.findByRole("button", { name: "Изменить" }));
+  const name = screen.getByLabelText("Название");
+  await user.clear(name);
+  await user.type(name, "Локальная правка");
+  await queryClient.invalidateQueries({ queryKey: ["pickup-reasons"] });
+
+  expect(
+    await screen.findByText("Не удалось обновить причины. Показаны последние загруженные данные."),
+  ).toBeDefined();
+  expect((screen.getByLabelText("Название") as HTMLInputElement).value).toBe("Локальная правка");
+
+  await user.click(screen.getByRole("button", { name: "Повторить" }));
+  await waitFor(() => expect(attempts).toBe(3));
+  expect(
+    screen.queryByText("Не удалось обновить причины. Показаны последние загруженные данные."),
+  ).toBeNull();
   expect((screen.getByLabelText("Название") as HTMLInputElement).value).toBe("Локальная правка");
 });

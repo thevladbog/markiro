@@ -261,7 +261,13 @@ function KioskEditPanelContent({ kioskId }: { kioskId: string | undefined }): Re
   const profileSectionRef = useRef<HTMLElement>(null);
   const productsHostRef = useRef<HTMLDivElement>(null);
   const productsBusyRef = useRef(false);
-  const kiosk = context.kiosks.find((item) => item.id === kioskId);
+  const panelDirty = dirty.profile || dirty.products;
+  const panelBusy = updateMutation.isPending || busy.products;
+  const resolvedKiosk = context.kiosks.find((item) => item.id === kioskId);
+  const [retainedKiosk, setRetainedKiosk] = useState<KioskDto | null>(resolvedKiosk ?? null);
+  const kioskMissingWhileDirty =
+    resolvedKiosk === undefined && panelDirty && retainedKiosk?.id === kioskId;
+  const kiosk = resolvedKiosk ?? (kioskMissingWhileDirty ? retainedKiosk : undefined);
   const initialValues = useMemo<KioskFormValues | undefined>(
     () =>
       kiosk
@@ -274,8 +280,6 @@ function KioskEditPanelContent({ kioskId }: { kioskId: string | undefined }): Re
         : undefined,
     [kiosk],
   );
-  const panelDirty = dirty.profile || dirty.products;
-  const panelBusy = updateMutation.isPending || busy.products;
   const guard = useRoutePanelGuard(close, panelBusy);
   const setGuardDirty = guard.setDirty;
 
@@ -308,6 +312,11 @@ function KioskEditPanelContent({ kioskId }: { kioskId: string | undefined }): Re
   useEffect(() => {
     setGuardDirty(panelDirty);
   }, [panelDirty, setGuardDirty]);
+
+  useEffect(() => {
+    if (resolvedKiosk) setRetainedKiosk(resolvedKiosk);
+    else if (!panelDirty) setRetainedKiosk(null);
+  }, [panelDirty, resolvedKiosk]);
 
   const getSectionElement = useCallback((id: KioskSectionId): HTMLElement | null => {
     if (id === "profile") return profileSectionRef.current;
@@ -455,6 +464,11 @@ function KioskEditPanelContent({ kioskId }: { kioskId: string | undefined }): Re
           </>
         }
       >
+        {kioskMissingWhileDirty ? (
+          <div className="mk-kiosk-edit-panel__warning">
+            <Alert tone="warn">{t("pages.kiosks.form.missingWhileDirtyWarning")}</Alert>
+          </div>
+        ) : null}
         <div className="mk-kiosk-edit-panel__layout">
           <KioskSectionNav items={navItems} activeId={activeSection} onActivate={activateSection} />
           <div className="mk-kiosk-edit-panel__sections">

@@ -108,7 +108,13 @@ export function useCreateKiosk(): UseMutationResult<KioskDto, Error, CreateKiosk
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: postKiosk,
-    onSuccess: () => {
+    onSuccess: (created) => {
+      queryClient.setQueryData<KioskDto[]>(KIOSKS_QUERY_KEY, (current) => {
+        if (!current) return [created];
+        const existingIndex = current.findIndex((kiosk) => kiosk.id === created.id);
+        if (existingIndex === -1) return [...current, created];
+        return current.map((kiosk, index) => (index === existingIndex ? created : kiosk));
+      });
       void queryClient.invalidateQueries({ queryKey: KIOSKS_QUERY_KEY });
     },
   });
@@ -155,10 +161,7 @@ export function useSetKioskProducts(): UseMutationResult<
   });
 }
 
-// --- Pickup reasons mini-api ------------------------------------------------
-// Write-off reasons feed the kiosks settings screen (Task 18); listed here
-// rather than a separate page directory since there's no standalone
-// "reasons" page -- they're managed alongside kiosks.
+// --- Pickup reasons API for the route-backed write-off reasons view ---------
 
 /** Mirrors `apps/api/src/modules/pickup-reasons/dto.ts`'s `ReasonDto`. */
 export interface ReasonDto {

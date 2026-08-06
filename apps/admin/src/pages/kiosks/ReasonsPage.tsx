@@ -1,13 +1,14 @@
-import { useMemo, useState, type ReactElement } from "react";
+import { Fragment, useMemo, useState, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
 
-import { Alert, Button, Card, ConfirmDialog, EmptyState, Input, Spinner } from "@markiro/ui";
+import { Alert, Button, Card, ConfirmDialog, EmptyState, Input } from "@markiro/ui";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
 
 import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
+import { errorProp } from "../../lib/form-error.js";
 import { toast } from "../../lib/toast.js";
 import {
   useArchiveReason,
@@ -19,6 +20,7 @@ import {
 import { KiosksLayout } from "./KiosksLayout.js";
 
 type ReasonDraft = { name: string; sortOrder: string };
+type ReasonFieldErrors = Partial<Record<keyof ReasonDraft, string>>;
 type LocalAction =
   { kind: "edit"; reasonId: string } | { kind: "navigate"; to: "/kiosks" | "/kiosks/reasons" };
 
@@ -30,27 +32,96 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof ApiRequestError ? error.message : fallback;
 }
 
+function clearFieldError(errors: ReasonFieldErrors, field: keyof ReasonDraft): ReasonFieldErrors {
+  const next = { ...errors };
+  delete next[field];
+  return next;
+}
+
+function ReasonsTableHead(): ReactElement {
+  const { t } = useTranslation();
+
+  return (
+    <>
+      <caption className="mk-visually-hidden">{t("pages.kiosks.reasons.title")}</caption>
+      <thead>
+        <tr>
+          <th scope="col">{t("pages.kiosks.reasons.nameLabel")}</th>
+          <th scope="col">{t("pages.kiosks.reasons.sortOrderLabel")}</th>
+          <th scope="col">{t("pages.kiosks.table.actions")}</th>
+        </tr>
+      </thead>
+    </>
+  );
+}
+
+function ReasonsTableSkeleton(): ReactElement {
+  const { t } = useTranslation();
+
+  return (
+    <Card title={t("pages.kiosks.reasons.title")}>
+      <div
+        className="mk-kiosks-reasons__table-scroll mk-kiosks-reasons__loading"
+        role="status"
+        aria-label={t("common.loading")}
+        aria-busy="true"
+      >
+        <table className="mk-kiosks-reasons__table">
+          <ReasonsTableHead />
+          <tbody aria-hidden="true">
+            {["first", "second", "third"].map((row) => (
+              <tr key={row}>
+                <td>
+                  <span />
+                </td>
+                <td>
+                  <span />
+                </td>
+                <td>
+                  <span />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+function ReasonsRefetchWarning({ retry }: { retry: () => void }): ReactElement {
+  const { t } = useTranslation();
+
+  return (
+    <div className="mk-kiosks-reasons__refetch-warning">
+      <Alert tone="warn">{t("pages.kiosks.reasons.refetchError")}</Alert>
+      <div>
+        <Button type="button" size="compact" variant="secondary" onClick={retry}>
+          {t("pages.kiosks.retry")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 /** Route-backed write-off reasons view. It never mounts on the kiosk list route. */
 export function ReasonsPage(): ReactElement {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
-  const { data, isPending, isError, refetch } = usePickupReasons();
+  const { data, isPending, isError, isRefetchError, refetch } = usePickupReasons();
+  const hasUsableData = data !== undefined;
   const items = data ?? [];
 
-  if (isPending) {
+  if (isPending && !hasUsableData) {
     return (
       <KiosksLayout>
-        <Card title={t("pages.kiosks.reasons.title")}>
-          <div className="mk-kiosks-reasons__loading">
-            <Spinner label={t("common.loading")} />
-          </div>
-        </Card>
+        <ReasonsTableSkeleton />
       </KiosksLayout>
     );
   }
 
-  if (isError) {
+  if (isError && !hasUsableData) {
     return (
       <KiosksLayout>
         <div className="mk-kiosks-section-state">
@@ -65,12 +136,23 @@ export function ReasonsPage(): ReactElement {
     );
   }
 
+  const showRefetchWarning = isRefetchError || (isError && hasUsableData);
+  const retry = () => void refetch();
+
   if (canWrite) {
-    return <AuthorizedReasonsEditor items={items} onNavigate={(to) => void navigate(to)} />;
+    return (
+      <AuthorizedReasonsEditor
+        items={items}
+        showRefetchWarning={showRefetchWarning}
+        onRetry={retry}
+        onNavigate={(to) => void navigate(to)}
+      />
+    );
   }
 
   return (
     <KiosksLayout>
+      {showRefetchWarning ? <ReasonsRefetchWarning retry={retry} /> : null}
       <ReadOnlyReasons items={items} />
     </KiosksLayout>
   );
@@ -85,14 +167,22 @@ function ReadOnlyReasons({ items }: { items: ReasonDto[] }): ReactElement {
     />
   ) : (
     <Card title={t("pages.kiosks.reasons.title")}>
-      <ul className="mk-kiosks-reasons__list">
-        {items.map((reason) => (
-          <li key={reason.id} className="mk-kiosks-reason-row">
-            <span>{reason.name}</span>
-            <span className="mk-kiosks-reason-row__order">{reason.sortOrder}</span>
-          </li>
-        ))}
-      </ul>
+      <div className="mk-kiosks-reasons__table-scroll">
+        <table className="mk-kiosks-reasons__table">
+          <ReasonsTableHead />
+          <tbody>
+            {items.map((reason) => (
+              <tr key={reason.id} className="mk-kiosks-reason-row">
+                <td>{reason.name}</td>
+                <td className="mk-kiosks-reason-row__order">{reason.sortOrder}</td>
+                <td className="mk-kiosks-reason-row__actions">
+                  <span aria-hidden="true">—</span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </Card>
   );
 }
@@ -100,9 +190,13 @@ function ReadOnlyReasons({ items }: { items: ReasonDto[] }): ReactElement {
 /** Owns reason mutations so read-only users do not mount mutation hooks. */
 function AuthorizedReasonsEditor({
   items,
+  showRefetchWarning,
+  onRetry,
   onNavigate,
 }: {
   items: ReasonDto[];
+  showRefetchWarning: boolean;
+  onRetry: () => void;
   onNavigate: (to: "/kiosks" | "/kiosks/reasons") => void;
 }): ReactElement {
   const { t } = useTranslation();
@@ -113,6 +207,8 @@ function AuthorizedReasonsEditor({
   const [newName, setNewName] = useState("");
   const [editId, setEditId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<ReasonDraft | null>(null);
+  const [createNameError, setCreateNameError] = useState<string | null>(null);
+  const [editFieldErrors, setEditFieldErrors] = useState<ReasonFieldErrors>({});
   const [createError, setCreateError] = useState<string | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ReasonDto | null>(null);
@@ -134,9 +230,11 @@ function AuthorizedReasonsEditor({
   const clearDrafts = () => {
     setCreateOpen(false);
     setNewName("");
+    setCreateNameError(null);
     setCreateError(null);
     setEditId(null);
     setEditDraft(null);
+    setEditFieldErrors({});
     setEditError(null);
   };
 
@@ -145,9 +243,11 @@ function AuthorizedReasonsEditor({
     if (!reason) return;
     setCreateOpen(false);
     setNewName("");
+    setCreateNameError(null);
     setCreateError(null);
     setEditId(reason.id);
     setEditDraft(draftFrom(reason));
+    setEditFieldErrors({});
     setEditError(null);
   };
 
@@ -173,9 +273,11 @@ function AuthorizedReasonsEditor({
   const handleCreate = async () => {
     const name = newName.trim();
     if (!name) {
-      setCreateError(t("pages.kiosks.reasons.errors.nameRequired"));
+      setCreateNameError(t("pages.kiosks.reasons.errors.nameRequired"));
+      setCreateError(null);
       return;
     }
+    setCreateNameError(null);
     setCreateError(null);
     try {
       await createMutation.mutateAsync({ name });
@@ -192,16 +294,20 @@ function AuthorizedReasonsEditor({
     const name = editDraft.name.trim();
     const sortOrderText = editDraft.sortOrder.trim();
     const parsedSortOrder = Number(sortOrderText);
+    const fieldErrors: ReasonFieldErrors = {};
     if (!name) {
-      setEditError(t("pages.kiosks.reasons.errors.nameRequired"));
-      return;
+      fieldErrors.name = t("pages.kiosks.reasons.errors.nameRequired");
     }
     if (
       sortOrderText === "" ||
       !Number.isFinite(parsedSortOrder) ||
       !Number.isInteger(parsedSortOrder)
     ) {
-      setEditError(t("pages.kiosks.reasons.errors.sortOrderInvalid"));
+      fieldErrors.sortOrder = t("pages.kiosks.reasons.errors.sortOrderInvalid");
+    }
+    setEditFieldErrors(fieldErrors);
+    if (Object.keys(fieldErrors).length > 0) {
+      setEditError(null);
       return;
     }
     setEditError(null);
@@ -212,6 +318,7 @@ function AuthorizedReasonsEditor({
       });
       setEditId(null);
       setEditDraft(null);
+      setEditFieldErrors({});
       toast("ok", t("pages.kiosks.toasts.reasonUpdateSuccess"));
     } catch (error) {
       setEditError(getErrorMessage(error, t("pages.kiosks.reasons.errors.updateFailed")));
@@ -239,136 +346,187 @@ function AuthorizedReasonsEditor({
       }
       onViewNavigate={(to) => requestAction({ kind: "navigate", to })}
     >
+      {showRefetchWarning ? <ReasonsRefetchWarning retry={onRetry} /> : null}
       <Card title={t("pages.kiosks.reasons.title")}>
         <div className="mk-kiosks-reasons">
-          {items.length === 0 ? (
+          {items.length === 0 && !createOpen ? (
             <p className="mk-kiosks-reasons__empty">{t("pages.kiosks.reasons.emptyHint")}</p>
           ) : (
-            <ul className="mk-kiosks-reasons__list">
-              {items.map((reason) => {
-                const editing = editId === reason.id && editDraft !== null;
-                return (
-                  <li key={reason.id} className="mk-kiosks-reason-row">
-                    {editing ? (
-                      <div className="mk-kiosks-reason-row__editor">
-                        <Input
-                          label={t("pages.kiosks.reasons.nameLabel")}
-                          value={editDraft.name}
-                          disabled={busy}
-                          onChange={(event) => {
-                            setEditDraft((draft) =>
-                              draft ? { ...draft, name: event.target.value } : draft,
-                            );
-                            setEditError(null);
-                          }}
-                        />
-                        <Input
-                          label={t("pages.kiosks.reasons.sortOrderLabel")}
-                          mono
-                          inputMode="numeric"
-                          value={editDraft.sortOrder}
-                          disabled={busy}
-                          onChange={(event) => {
-                            setEditDraft((draft) =>
-                              draft ? { ...draft, sortOrder: event.target.value } : draft,
-                            );
-                            setEditError(null);
-                          }}
-                        />
-                        <div className="mk-kiosks-reason-row__actions">
-                          <Button
-                            type="button"
-                            size="compact"
-                            loading={updateMutation.isPending}
-                            onClick={() => void handleSave()}
-                          >
-                            {t("pages.kiosks.reasons.saveAction")}
-                          </Button>
-                          <Button
-                            type="button"
-                            size="compact"
-                            variant="secondary"
+            <div className="mk-kiosks-reasons__table-scroll">
+              <table className="mk-kiosks-reasons__table">
+                <ReasonsTableHead />
+                <tbody>
+                  {createOpen ? (
+                    <>
+                      <tr className="mk-kiosks-reasons__create">
+                        <td>
+                          <Input
+                            label={t("pages.kiosks.reasons.nameLabel")}
+                            value={newName}
                             disabled={busy}
-                            onClick={() => {
-                              setEditId(null);
-                              setEditDraft(null);
-                              setEditError(null);
+                            {...errorProp(createNameError ?? undefined)}
+                            onChange={(event) => {
+                              setNewName(event.target.value);
+                              setCreateNameError(null);
+                              setCreateError(null);
                             }}
-                          >
-                            {t("pages.kiosks.reasons.cancelAction")}
-                          </Button>
-                        </div>
-                        {editError ? <Alert tone="error">{editError}</Alert> : null}
-                      </div>
-                    ) : (
-                      <>
-                        <span>{reason.name}</span>
-                        <span className="mk-kiosks-reason-row__order">{reason.sortOrder}</span>
-                        <div className="mk-kiosks-reason-row__actions">
-                          <Button
-                            type="button"
-                            size="compact"
-                            variant="secondary"
-                            disabled={busy}
-                            onClick={() => requestAction({ kind: "edit", reasonId: reason.id })}
-                          >
-                            {t("pages.kiosks.edit")}
-                          </Button>
-                          <Button
-                            type="button"
-                            size="compact"
-                            variant="destructive"
-                            disabled={busy}
-                            onClick={() => {
-                              setDeleteError(null);
-                              setDeleteTarget(reason);
-                            }}
-                          >
-                            {t("pages.kiosks.reasons.archiveAction")}
-                          </Button>
-                        </div>
-                      </>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          {createOpen ? (
-            <div className="mk-kiosks-reasons__create">
-              <Input
-                label={t("pages.kiosks.reasons.nameLabel")}
-                value={newName}
-                disabled={busy}
-                onChange={(event) => {
-                  setNewName(event.target.value);
-                  setCreateError(null);
-                }}
-              />
-              <div className="mk-kiosks-reason-row__actions">
-                <Button
-                  type="button"
-                  loading={createMutation.isPending}
-                  onClick={() => void handleCreate()}
-                >
-                  {t("pages.kiosks.reasons.createAction")}
-                </Button>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  disabled={busy}
-                  onClick={() => {
-                    setCreateOpen(false);
-                    setNewName("");
-                    setCreateError(null);
-                  }}
-                >
-                  {t("pages.kiosks.reasons.cancelAction")}
-                </Button>
-              </div>
-              {createError ? <Alert tone="error">{createError}</Alert> : null}
+                          />
+                        </td>
+                        <td className="mk-kiosks-reason-row__order">
+                          <span aria-hidden="true">—</span>
+                        </td>
+                        <td className="mk-kiosks-reason-row__actions">
+                          <div>
+                            <Button
+                              type="button"
+                              loading={createMutation.isPending}
+                              onClick={() => void handleCreate()}
+                            >
+                              {t("pages.kiosks.reasons.createAction")}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              disabled={busy}
+                              onClick={() => {
+                                setCreateOpen(false);
+                                setNewName("");
+                                setCreateNameError(null);
+                                setCreateError(null);
+                              }}
+                            >
+                              {t("pages.kiosks.reasons.cancelAction")}
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                      {createError ? (
+                        <tr className="mk-kiosks-reason-row__error">
+                          <td colSpan={3}>
+                            <Alert tone="error">{createError}</Alert>
+                          </td>
+                        </tr>
+                      ) : null}
+                    </>
+                  ) : null}
+                  {items.map((reason) => {
+                    const editing = editId === reason.id && editDraft !== null;
+                    return (
+                      <Fragment key={reason.id}>
+                        <tr className="mk-kiosks-reason-row">
+                          {editing ? (
+                            <>
+                              <td>
+                                <Input
+                                  label={t("pages.kiosks.reasons.nameLabel")}
+                                  value={editDraft.name}
+                                  disabled={busy}
+                                  {...errorProp(editFieldErrors.name)}
+                                  onChange={(event) => {
+                                    setEditDraft((draft) =>
+                                      draft ? { ...draft, name: event.target.value } : draft,
+                                    );
+                                    setEditFieldErrors((current) =>
+                                      clearFieldError(current, "name"),
+                                    );
+                                    setEditError(null);
+                                  }}
+                                />
+                              </td>
+                              <td>
+                                <Input
+                                  label={t("pages.kiosks.reasons.sortOrderLabel")}
+                                  mono
+                                  inputMode="numeric"
+                                  value={editDraft.sortOrder}
+                                  disabled={busy}
+                                  {...errorProp(editFieldErrors.sortOrder)}
+                                  onChange={(event) => {
+                                    setEditDraft((draft) =>
+                                      draft ? { ...draft, sortOrder: event.target.value } : draft,
+                                    );
+                                    setEditFieldErrors((current) =>
+                                      clearFieldError(current, "sortOrder"),
+                                    );
+                                    setEditError(null);
+                                  }}
+                                />
+                              </td>
+                              <td className="mk-kiosks-reason-row__actions">
+                                <div>
+                                  <Button
+                                    type="button"
+                                    size="compact"
+                                    loading={updateMutation.isPending}
+                                    onClick={() => void handleSave()}
+                                  >
+                                    {t("pages.kiosks.reasons.saveAction")}
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="compact"
+                                    variant="secondary"
+                                    disabled={busy}
+                                    onClick={() => {
+                                      setEditId(null);
+                                      setEditDraft(null);
+                                      setEditFieldErrors({});
+                                      setEditError(null);
+                                    }}
+                                  >
+                                    {t("pages.kiosks.reasons.cancelAction")}
+                                  </Button>
+                                </div>
+                              </td>
+                            </>
+                          ) : (
+                            <>
+                              <td>{reason.name}</td>
+                              <td className="mk-kiosks-reason-row__order">{reason.sortOrder}</td>
+                              <td className="mk-kiosks-reason-row__actions">
+                                <div>
+                                  <Button
+                                    type="button"
+                                    size="compact"
+                                    variant="secondary"
+                                    disabled={busy}
+                                    onClick={() =>
+                                      requestAction({ kind: "edit", reasonId: reason.id })
+                                    }
+                                  >
+                                    {t("pages.kiosks.edit")}
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="compact"
+                                    variant="destructive"
+                                    disabled={busy}
+                                    onClick={() => {
+                                      setDeleteError(null);
+                                      setDeleteTarget(reason);
+                                    }}
+                                  >
+                                    {t("pages.kiosks.reasons.archiveAction")}
+                                  </Button>
+                                </div>
+                              </td>
+                            </>
+                          )}
+                        </tr>
+                        {editing && editError ? (
+                          <tr className="mk-kiosks-reason-row__error">
+                            <td colSpan={3}>
+                              <Alert tone="error">{editError}</Alert>
+                            </td>
+                          </tr>
+                        ) : null}
+                      </Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-          ) : null}
+          )}
         </div>
       </Card>
       <ConfirmDialog
