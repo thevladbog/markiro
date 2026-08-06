@@ -325,6 +325,32 @@ function renderWork(overrides: RenderWorkOverrides = {}) {
 }
 
 describe("WorkScreen", () => {
+  it("keeps sequential scan commit and notification order before presentation extraction", async () => {
+    const source = manualSource();
+    const base = makeExec();
+    const order: string[] = [];
+    const exec: SqlExecutor = {
+      all: base.all,
+      async run(sql, params = []) {
+        await base.run(sql, params);
+        if (sql.includes("INSERT INTO outbox")) order.push(`commit:${String(params[2])}`);
+      },
+    };
+    renderWorkScreen({
+      source,
+      exec,
+      onScanRecorded: () => order.push("notify"),
+    });
+
+    act(() => {
+      source.emit(KM);
+      source.emit(OTHER_KM);
+    });
+
+    await waitFor(() => expect(order).toHaveLength(4));
+    expect(order).toEqual([`commit:${KM}`, "notify", `commit:${OTHER_KM}`, "notify"]);
+  });
+
   it("accepts a valid code, counts it and journals it", async () => {
     const source = manualSource();
     const exec = makeExec();
@@ -337,6 +363,49 @@ describe("WorkScreen", () => {
       expect(rows).toHaveLength(1);
     });
     expect(await screen.findByText("1")).toBeDefined();
+  });
+
+  it("renders the fixed instrument split with a bounded recent list and footer actions", async () => {
+    const source = manualSource();
+    const view = renderWorkScreen({ source });
+
+    expect(view.container.querySelector(".work-screen__instruments")).not.toBeNull();
+    expect(screen.getByRole("heading", { name: "Recent operations" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Exceptions" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Pause / finish" })).toBeDefined();
+  });
+
+  it("does not let a delayed recent-operation refresh delay notification or the next scan", async () => {
+    const source = manualSource();
+    const base = makeExec();
+    let recentReads = 0;
+    let releaseRefresh!: () => void;
+    const refreshGate = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    const exec: SqlExecutor = {
+      run: base.run,
+      async all<T>(sql: string, params: unknown[] = []) {
+        if (sql.includes("FROM scan_events_mirror") && sql.includes("LIMIT ?")) {
+          recentReads += 1;
+          if (recentReads > 1) await refreshGate;
+        }
+        return base.all<T>(sql, params);
+      },
+    };
+    const onScanRecorded = vi.fn();
+    renderWorkScreen({ source, exec, onScanRecorded });
+    await waitFor(() => expect(recentReads).toBe(1));
+
+    act(() => {
+      source.emit(KM);
+      source.emit(OTHER_KM);
+    });
+
+    await waitFor(() => expect(onScanRecorded).toHaveBeenCalledTimes(2));
+    expect(await exec.all("SELECT code_hash FROM codes_mirror")).toHaveLength(2);
+    expect(recentReads).toBeGreaterThanOrEqual(2);
+    releaseRefresh();
   });
 
   it("keeps an unmounted queue registered until an accepted scan write becomes idle", async () => {
@@ -509,7 +578,7 @@ describe("WorkScreen", () => {
     const onExit = vi.fn();
     renderWorkScreen({ onExit, pendingSync: 0 });
 
-    fireEvent.click(screen.getByRole("button", { name: "Leave shift" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pause / finish" }));
     expect(onExit).toHaveBeenCalledTimes(1);
   });
 
@@ -517,7 +586,7 @@ describe("WorkScreen", () => {
     const onExit = vi.fn();
     renderWorkScreen({ onExit, pendingSync: 12 });
 
-    fireEvent.click(screen.getByRole("button", { name: "Leave shift" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pause / finish" }));
     expect(onExit).not.toHaveBeenCalled();
     expect(screen.getByText("12 scans have not reached the server yet.")).toBeDefined();
 
@@ -529,7 +598,7 @@ describe("WorkScreen", () => {
     const onExit = vi.fn();
     renderWorkScreen({ onExit, pendingSync: 12 });
 
-    fireEvent.click(screen.getByRole("button", { name: "Leave shift" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pause / finish" }));
     fireEvent.click(screen.getByRole("button", { name: "Stay" }));
     expect(onExit).not.toHaveBeenCalled();
   });
@@ -544,7 +613,7 @@ describe("WorkScreen", () => {
     const onExit = vi.fn();
     renderWorkScreen({ onExit, pendingSync: 12 });
 
-    const exitButton = screen.getByRole("button", { name: "Leave shift" });
+    const exitButton = screen.getByRole("button", { name: "Pause / finish" });
     exitButton.focus();
     expect(document.activeElement).toBe(exitButton);
 
@@ -557,7 +626,7 @@ describe("WorkScreen", () => {
     const onExit = vi.fn();
     renderWorkScreen({ onExit, pendingSync: 1 });
 
-    fireEvent.click(screen.getByRole("button", { name: "Leave shift" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pause / finish" }));
     expect(screen.getByText("1 scan has not reached the server yet.")).toBeDefined();
   });
 });
@@ -673,6 +742,7 @@ describe("WorkScreen box progress, closing and printing", () => {
       onScanRecorded,
     });
 
+    fireEvent.click(screen.getByRole("button", { name: "Исключения" }));
     fireEvent.click(await screen.findByRole("button", { name: "Перепечатать" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Причина" }), {
       target: { value: "Замятие этикетки" },
@@ -695,6 +765,7 @@ describe("WorkScreen box progress, closing and printing", () => {
     const onScan = vi.fn();
     renderWorkTracked({ exec, onScan });
 
+    fireEvent.click(screen.getByRole("button", { name: "Исключения" }));
     fireEvent.click(await screen.findByRole("button", { name: "Перепечатать" }));
     act(() => scan(KM));
     expect(onScan).not.toHaveBeenCalled();
@@ -710,6 +781,7 @@ describe("WorkScreen box progress, closing and printing", () => {
     const onScanRecorded = vi.fn();
     renderWorkTracked({ exec, onScanRecorded });
 
+    fireEvent.click(screen.getByRole("button", { name: "Исключения" }));
     fireEvent.click(await screen.findByRole("button", { name: "Расформировать" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Причина" }), {
       target: { value: "Чужой заказ" },

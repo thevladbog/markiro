@@ -23,7 +23,14 @@ import {
 import { closeCurrentBox as closeCurrentBoxLib, type CloseBoxResult } from "../lib/close-box.js";
 import type { PrintTarget } from "../lib/hardware.js";
 import type { PrinterLanguage } from "../lib/hardware-config.js";
-import { findFirstSeen, loadCodeKeys, recordScan, undoLastScan } from "../lib/journal.js";
+import {
+  findFirstSeen,
+  listRecentOperations,
+  loadCodeKeys,
+  recordScan,
+  undoLastScan,
+  type RecentOperation,
+} from "../lib/journal.js";
 import { readShiftMirror, type SqlExecutor } from "../lib/mirror.js";
 import { renderLabelBytes } from "../lib/print-label.js";
 import { rasterizeText } from "../lib/rasterizer.js";
@@ -32,6 +39,11 @@ import type { ScanSource } from "../lib/scan-source.js";
 import { playSignalTone, type SoundSettings } from "../lib/signal-sound.js";
 import { PrintVerification } from "../ui/PrintVerification.js";
 import { ShiftBoxesPanel } from "../ui/ShiftBoxesPanel.js";
+import { BoxFillInstrument } from "../ui/work/BoxFillInstrument.js";
+import { RecentOperations } from "../ui/work/RecentOperations.js";
+import { ScanResultInstrument, type ScanResultLabels } from "../ui/work/ScanResultInstrument.js";
+import { WorkCounters } from "../ui/work/WorkCounters.js";
+import { WorkFooter } from "../ui/work/WorkFooter.js";
 
 export interface WorkScreenProps {
   exec: SqlExecutor;
@@ -115,6 +127,23 @@ export function WorkScreen({
     null,
   );
   const [confirmExit, setConfirmExit] = useState(false);
+  const [showExceptions, setShowExceptions] = useState(false);
+  const [recentOperations, setRecentOperations] = useState<RecentOperation[]>([]);
+  const recentReadGeneration = useRef(0);
+
+  const refreshRecentOperations = useCallback(async (): Promise<void> => {
+    const generation = ++recentReadGeneration.current;
+    try {
+      const rows = await listRecentOperations(exec, shiftId);
+      if (generation === recentReadGeneration.current) setRecentOperations(rows);
+    } catch (err) {
+      console.error("station: failed to read recent scan operations", err);
+    }
+  }, [exec, shiftId]);
+
+  useEffect(() => {
+    void refreshRecentOperations();
+  }, [refreshRecentOperations]);
 
   // Box aggregation state -- null (never loaded / no `issuerPrefix`) means no
   // box UI at all, per Task 13's correction: a validation-mode shift, or a
@@ -597,6 +626,7 @@ export function WorkScreen({
     onScan,
     operatorId,
     refreshBox: refreshBoxAndMaybeClose,
+    refreshRecentOperations,
   });
   useEffect(() => {
     live.current = {
@@ -607,6 +637,7 @@ export function WorkScreen({
       onScan,
       operatorId,
       refreshBox: refreshBoxAndMaybeClose,
+      refreshRecentOperations,
     };
   });
 
@@ -731,6 +762,10 @@ export function WorkScreen({
           // `nudge()` cannot throw synchronously -- but the operator's
           // feedback must stay ahead of background sync work regardless.
           liveOnScanRecorded?.();
+          // The journal commit and sync nudge remain the scan queue's critical
+          // path. This display-only read is deliberately detached so a slow
+          // mirror query cannot delay intake or the next queued scan.
+          void live.current.refreshRecentOperations();
         },
         onError() {
           // A throw from process() (e.g. the journal write) must never leave
@@ -899,161 +934,125 @@ export function WorkScreen({
     }
   }, [exec, queue]);
 
+  const statusLabels: ScanResultLabels = {
+    waiting: t("work.waiting"),
+    ok: t("work.accepted"),
+    duplicate: t("signal.duplicate"),
+    invalid: t("signal.wrongCode"),
+    wrong_gtin: t("signal.wrongGtin"),
+    unknown: t("work.rejected"),
+  };
+  const locale = i18n.language.startsWith("ru") ? "ru-RU" : "en-US";
+
   return (
-    <main
-      style={{ minHeight: "100%", padding: 32, display: "flex", flexDirection: "column", gap: 24 }}
-    >
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <span style={{ fontSize: "2rem", fontWeight: 700 }}>{productName}</span>
-          {counterpartyName ? (
-            <span style={{ fontSize: "1.25rem", opacity: 0.85 }}>
-              {t("shifts.forCounterparty")} {counterpartyName}
-            </span>
-          ) : null}
-        </div>
-        <Button
-          type="button"
-          variant="secondary"
-          style={{ minHeight: 64 }}
-          onClick={(event) => {
-            requestExit();
-            // A tap leaves this button focused in Chromium-based webviews.
-            // Left focused, the terminating Enter of the operator's next
-            // scan would fire a native click on it (see scan-source.ts) --
-            // possibly re-running requestExit() with the queue since
-            // drained and exiting with no operator decision. Blur it so no
-            // control holds focus while scanning continues.
-            event.currentTarget.blur();
-          }}
-        >
-          {t("work.exit")}
-        </Button>
-      </div>
-
-      {confirmExit ? (
-        // Given a higher stacking context (not just later JSX) than
-        // SignalOverlay: SignalOverlay is `position: fixed`, so it is a
-        // positioned box that paints after this alert's normal-flow content
-        // regardless of DOM order (CSS painting order puts non-positioned
-        // in-flow content before positioned descendants). An explicit
-        // z-index here -- but not on SignalOverlay -- lifts this whole
-        // block, including its buttons, above the fixed flash so the
-        // confirmation stays reachable while a verdict is still showing,
-        // without touching the flash's own full-screen visibility.
-        <Alert tone="warn" style={{ position: "relative", zIndex: 1 }}>
-          <p>{t("work.exitPending", { count: pendingSync })}</p>
-          <Button
-            type="button"
-            style={{ minHeight: 64 }}
-            onClick={(event) => {
-              onExit();
-              event.currentTarget.blur();
-            }}
-          >
-            {t("work.exitAnyway")}
-          </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            style={{ minHeight: 64 }}
-            onClick={(event) => {
-              setConfirmExit(false);
-              event.currentTarget.blur();
-            }}
-          >
-            {t("work.stay")}
-          </Button>
-        </Alert>
-      ) : null}
-
-      <div style={{ display: "flex", gap: 48 }}>
-        <div style={{ display: "flex", flexDirection: "column" }}>
-          <span style={{ fontSize: "1.25rem", opacity: 0.8 }}>{t("work.accepted")}</span>
-          <span style={{ fontSize: "6rem", fontWeight: 800, lineHeight: 1 }}>{accepted}</span>
-        </div>
-        <div style={{ display: "flex", flexDirection: "column" }}>
-          <span style={{ fontSize: "1.25rem", opacity: 0.8 }}>{t("work.rejected")}</span>
-          <span style={{ fontSize: "6rem", fontWeight: 800, lineHeight: 1 }}>{rejected}</span>
-        </div>
-      </div>
-
-      <span style={{ fontSize: "1.25rem", opacity: 0.7 }}>{t("work.waiting")}</span>
-
-      {/* Null `issuerPrefix` is a validation-mode shift, or a device the
-          server could not resolve one for -- no box section at all, not
-          even a disabled one. */}
-      {issuerPrefix !== null ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {box ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
-              <div data-testid="box-progress" style={{ fontSize: "1.5rem" }}>
-                {boxCapacity !== null
-                  ? t("box.progress", { items: box.itemCount, capacity: boxCapacity })
-                  : box.itemCount}
-              </div>
-              <Button
-                type="button"
-                variant="secondary"
-                style={{ minHeight: 64 }}
-                disabled={closing}
-                onClick={(event) => {
-                  enqueueManualClose();
-                  event.currentTarget.blur();
-                }}
-              >
-                {t("box.close")}
+    <main className="work-screen" aria-label={productName}>
+      <div className="work-screen__content">
+        {showExceptions ? (
+          <section className="work-screen__exceptions" aria-labelledby="work-exceptions-title">
+            <header>
+              <h2 id="work-exceptions-title">{t("work.exceptions")}</h2>
+              <Button size="floor" variant="secondary" onClick={() => setShowExceptions(false)}>
+                {t("work.backToWork")}
               </Button>
-              {lastScanned?.boxId === box.boxId ? (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  style={{ minHeight: 64 }}
-                  onClick={(event) => {
-                    handleUndo();
-                    event.currentTarget.blur();
-                  }}
-                >
-                  {t("box.undoLastScan")}
-                </Button>
-              ) : null}
-              <Button
-                type="button"
-                variant="secondary"
-                style={{ minHeight: 64 }}
-                onClick={(event) => {
-                  setConfirmClear(true);
-                  event.currentTarget.blur();
-                }}
-              >
-                {t("box.clear")}
-              </Button>
-            </div>
-          ) : null}
-          {confirmClear ? (
-            <Alert tone="warn" title={t("box.confirmClearTitle")}>
-              <p>{t("box.confirmClearDetail")}</p>
-              <Button type="button" onClick={confirmClearBox}>
-                {t("box.confirmClear")}
-              </Button>
-              <Button type="button" variant="secondary" onClick={() => setConfirmClear(false)}>
-                {t("box.cancelClear")}
-              </Button>
-            </Alert>
-          ) : null}
-          {noSerials ? <Alert tone="warn" title={t("box.noSerials")} /> : null}
-          {invalidSerial ? <Alert tone="warn" title={t("box.invalidSerial")} /> : null}
-          {printUnavailable ? <Alert tone="warn" title={t("box.printNotAvailable")} /> : null}
-          {verification ? null : (
+            </header>
             <ShiftBoxesPanel
               boxes={closedBoxes}
               onReprint={handleReprint}
               onDisassemble={handleDisassemble}
               onPendingChange={setBoxActionPending}
             />
-          )}
-        </div>
-      ) : null}
+          </section>
+        ) : (
+          <div className="work-screen__instruments">
+            <div className="work-screen__primary">
+              <ScanResultInstrument
+                productName={productName}
+                counterpartyName={counterpartyName ?? null}
+                operation={recentOperations[0] ?? null}
+                labels={statusLabels}
+              />
+              {issuerPrefix !== null ? (
+                <BoxFillInstrument
+                  box={box}
+                  capacity={boxCapacity}
+                  canUndo={lastScanned?.boxId === box?.boxId}
+                  closeDisabled={closing}
+                  labels={{
+                    title: t("work.openBox"),
+                    absent: t("work.noOpenBox"),
+                    count: t("work.boxItems"),
+                    capacityUnknown: t("work.capacityUnknown"),
+                    close: t("box.close"),
+                    undo: t("box.undoLastScan"),
+                    clear: t("box.clear"),
+                  }}
+                  onClose={enqueueManualClose}
+                  onUndo={handleUndo}
+                  onClear={() => setConfirmClear(true)}
+                />
+              ) : null}
+            </div>
+            <aside className="work-screen__secondary" aria-label={t("work.summary")}>
+              <WorkCounters
+                accepted={accepted}
+                rejected={rejected}
+                pendingSync={pendingSync}
+                locale={locale}
+                labels={{
+                  accepted: t("work.accepted"),
+                  rejected: t("work.rejected"),
+                  synchronized: t("work.synchronized"),
+                  pending: (count) => t("work.pendingSync", { count }),
+                }}
+              />
+              <RecentOperations
+                operations={recentOperations}
+                labels={{
+                  title: t("work.recentOperations"),
+                  empty: t("work.noRecentOperations"),
+                  invalidTime: t("work.timeUnknown"),
+                }}
+                statusLabels={statusLabels}
+                locale={locale}
+              />
+            </aside>
+          </div>
+        )}
+      </div>
+
+      <WorkFooter
+        labels={{ exceptions: t("work.exceptions"), exit: t("work.pauseFinish") }}
+        onExceptions={() => setShowExceptions(true)}
+        onExit={requestExit}
+      />
+
+      <div className="work-screen__overlays">
+        {confirmExit ? (
+          <Alert tone="warn" style={{ position: "relative", zIndex: 1 }}>
+            <p>{t("work.exitPending", { count: pendingSync })}</p>
+            <Button size="floor" onClick={onExit}>
+              {t("work.exitAnyway")}
+            </Button>
+            <Button size="floor" variant="secondary" onClick={() => setConfirmExit(false)}>
+              {t("work.stay")}
+            </Button>
+          </Alert>
+        ) : null}
+        {confirmClear ? (
+          <Alert tone="warn" title={t("box.confirmClearTitle")}>
+            <p>{t("box.confirmClearDetail")}</p>
+            <Button size="floor" onClick={confirmClearBox}>
+              {t("box.confirmClear")}
+            </Button>
+            <Button size="floor" variant="secondary" onClick={() => setConfirmClear(false)}>
+              {t("box.cancelClear")}
+            </Button>
+          </Alert>
+        ) : null}
+        {noSerials ? <Alert tone="warn" title={t("box.noSerials")} /> : null}
+        {invalidSerial ? <Alert tone="warn" title={t("box.invalidSerial")} /> : null}
+        {printUnavailable ? <Alert tone="warn" title={t("box.printNotAvailable")} /> : null}
+      </div>
 
       {signal ? (
         <SignalOverlay

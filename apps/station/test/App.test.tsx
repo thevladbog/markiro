@@ -2253,13 +2253,13 @@ describe("App", () => {
       fireEvent.click(screen.getByRole("button", { name: "Start" }));
 
       // Reached the floor via NewShift's own path -- floorView is "new" here.
-      // WorkScreen's exit button reads "Leave shift" (work.exit, en.json);
+      // WorkScreen's fixed footer reads "Pause / finish" (work.pauseFinish, en.json);
       // waiting for it also proves shiftContext landed.
       await waitFor(() =>
-        expect(screen.getByRole("button", { name: "Leave shift" })).toBeDefined(),
+        expect(screen.getByRole("button", { name: "Pause / finish" })).toBeDefined(),
       );
 
-      fireEvent.click(screen.getByRole("button", { name: "Leave shift" }));
+      fireEvent.click(screen.getByRole("button", { name: "Pause / finish" }));
 
       // No scans were queued for this shift, so Exit leaves immediately
       // without the pending-sync confirmation step.
@@ -2392,7 +2392,7 @@ describe("App", () => {
       // Reaches the work screen despite `readShiftMirror`'s rejection --
       // stuck on "Preparing the shift…" is exactly the bug this fix removes.
       await waitFor(() =>
-        expect(screen.getByRole("button", { name: "Leave shift" })).toBeDefined(),
+        expect(screen.getByRole("button", { name: "Pause / finish" })).toBeDefined(),
       );
       expect(screen.queryByText("Preparing the shift…")).toBeNull();
     } finally {

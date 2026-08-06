@@ -33,6 +33,49 @@ export interface AcceptedCode {
   boxId: string | null;
 }
 
+/** Display-only scan fact. Raw scanner payloads never leave this boundary. */
+export interface RecentOperation {
+  verdict: string;
+  /** Null when a legacy/corrupt row does not contain a parseable timestamp. */
+  scannedAt: string | null;
+  /** A deliberately short suffix for operator recognition, never the full code. */
+  codeSuffix: string | null;
+}
+
+const RECENT_OPERATION_LIMIT = 6;
+
+/**
+ * The latest bounded scan facts for one shift. Valid timestamps sort newest
+ * first, ties are resolved by the mirror's monotonic id, and malformed legacy
+ * timestamps remain visible after valid rows without reaching date formatting.
+ */
+export async function listRecentOperations(
+  exec: SqlExecutor,
+  shiftId: string,
+): Promise<RecentOperation[]> {
+  const rows = await exec.all<{
+    raw: string;
+    verdict: string;
+    scanned_at: string;
+  }>(
+    `SELECT raw, verdict, scanned_at
+       FROM scan_events_mirror
+      WHERE shift_id = ?
+      ORDER BY (julianday(scanned_at) IS NULL) ASC, julianday(scanned_at) DESC, id DESC
+      LIMIT ?`,
+    [shiftId, RECENT_OPERATION_LIMIT],
+  );
+
+  return rows.map((row) => {
+    const characters = Array.from(row.raw).filter((character) => /[\p{L}\p{N}]/u.test(character));
+    return {
+      verdict: row.verdict,
+      scannedAt: Number.isNaN(Date.parse(row.scanned_at)) ? null : row.scanned_at,
+      codeSuffix: characters.length < 8 ? null : `…${characters.slice(-4).join("")}`,
+    };
+  });
+}
+
 /**
  * Every accepted code key on this device, as a Set for the domain's
  * SYNCHRONOUS `isDuplicate(key)` contract (SQLite itself is async, so the
