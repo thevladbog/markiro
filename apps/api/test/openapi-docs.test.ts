@@ -1,8 +1,21 @@
 import express from "express";
 import { createServer, type Server } from "node:http";
+import { Test } from "@nestjs/testing";
+import { DocumentBuilder, SwaggerModule, type OpenAPIObject } from "@nestjs/swagger";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { AuthorizationGuard } from "../src/authorization/authorization.guard";
+import { SecurityAuditService } from "../src/authorization/security-audit.service";
+import { KioskPairController } from "../src/modules/kiosk/kiosk-pair.controller";
+import { PairingService } from "../src/modules/kiosk/pairing.service";
+import { KiosksController } from "../src/modules/kiosks/kiosks.controller";
+import { KiosksService } from "../src/modules/kiosks/kiosks.service";
+import { StationDevicesController } from "../src/modules/station-devices/station-devices.controller";
+import { StationDevicesService } from "../src/modules/station-devices/station-devices.service";
+import { StationPairController } from "../src/modules/station-pairing/station-pair.controller";
+import { StationPairingService } from "../src/modules/station-pairing/station-pairing.service";
 import { disableScalarDynamicCodeProbe, mountOpenApiDocs } from "../src/openapi-docs";
+import { TenantGuard } from "../src/tenancy/tenant.guard";
 
 function scriptElements(html: string): Array<{ attributes: string; body: string }> {
   const lower = html.toLowerCase();
@@ -47,6 +60,19 @@ function scriptSources(html: string): string[] {
     if (!source) throw new Error("documentation HTML contains an inline script");
     return source;
   });
+}
+
+function operationResponse(
+  document: OpenAPIObject,
+  path: string,
+  status: "200" | "201",
+): Record<string, unknown> {
+  const operation = document.paths[path]?.post;
+  if (!operation) throw new Error(`Missing POST operation for ${path}`);
+  const response = operation.responses[status];
+  if (!response || "$ref" in response)
+    throw new Error(`Missing inline ${status} response for ${path}`);
+  return response as unknown as Record<string, unknown>;
 }
 
 describe("self-hosted OpenAPI documentation", () => {
@@ -128,5 +154,63 @@ describe("self-hosted OpenAPI documentation", () => {
 
   it("does not turn unknown documentation resources into the documentation shell", async () => {
     await request(server).get("/docs/missing.js").expect(404);
+  });
+
+  it("documents every one-time secret response with no-store and a concrete body schema", async () => {
+    const moduleRef = await Test.createTestingModule({
+      controllers: [
+        KiosksController,
+        KioskPairController,
+        StationDevicesController,
+        StationPairController,
+      ],
+      providers: [
+        { provide: KiosksService, useValue: {} },
+        { provide: PairingService, useValue: {} },
+        { provide: StationDevicesService, useValue: {} },
+        { provide: StationPairingService, useValue: {} },
+        { provide: SecurityAuditService, useValue: {} },
+      ],
+    })
+      .overrideGuard(TenantGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(AuthorizationGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
+    const app = moduleRef.createNestApplication();
+    await app.init();
+
+    try {
+      const document = SwaggerModule.createDocument(
+        app,
+        new DocumentBuilder().setTitle("contract test").setVersion("test").build(),
+      );
+      const contracts = [
+        ["/station-devices/{id}/pairing-code", "201", ["code", "expiresAt"]],
+        ["/station/pair", "201", ["device", "credential", "operators"]],
+        ["/kiosks/{id}/pairing-code", "201", ["code", "expiresAt"]],
+        ["/kiosk/pair", "201", ["device", "token", "nextDeviceSeq", "bootstrap"]],
+        ["/kiosks/{id}/enroll", "200", ["token"]],
+      ] as const;
+
+      for (const [path, status, fields] of contracts) {
+        const response = operationResponse(document, path, status);
+        expect(response).toMatchObject({
+          headers: {
+            "Cache-Control": { schema: { type: "string", enum: ["no-store"] } },
+          },
+          content: {
+            "application/json": {
+              schema: { type: "object", required: [...fields] },
+            },
+          },
+        });
+        const serialized = JSON.stringify(response);
+        expect(serialized).not.toMatch(/example/i);
+        for (const field of fields) expect(serialized).toContain(`"${field}"`);
+      }
+    } finally {
+      await app.close();
+    }
   });
 });

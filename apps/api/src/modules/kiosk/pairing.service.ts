@@ -19,12 +19,19 @@ import {
   mintPairingCode,
   pairAttemptWindowStart,
 } from "../device-pairing/pairing-policy";
+import { SecurityAuditService } from "../../authorization/security-audit.service";
 
 /** Bounded retries so a live-code hash collision can never be minted. */
 const MINT_ATTEMPTS = 5;
 
 /** Rolls back a mint attempt before the next random code is tried. */
 class PairingCodeHashCollisionError extends Error {}
+
+interface KioskPairAuditContext {
+  tenantId: string | null;
+  kioskId: string | null;
+  action: "kiosk.pair" | "kiosk.repair";
+}
 
 // The pairing code is hashed with `hashPairingCode` (HMAC-SHA256 keyed by
 // the server-held `PAIRING_CODE_PEPPER`), never `hashDeviceToken`'s plain
@@ -49,6 +56,7 @@ export class PairingService {
     @Inject(DB) private readonly db: Db,
     private readonly pickupOrdersService: PickupOrdersService,
     private readonly pairAttemptsService: PairAttemptsService,
+    private readonly audit: SecurityAuditService,
   ) {}
 
   /**
@@ -132,6 +140,11 @@ export class PairingService {
   async redeem(code: string, source: string): Promise<PairKioskResultDto> {
     const now = new Date();
     const windowStart = pairAttemptWindowStart(now);
+    const auditContext: KioskPairAuditContext = {
+      tenantId: null,
+      kioskId: null,
+      action: "kiosk.pair",
+    };
     // Record-then-check, atomically, BEFORE the code lookup: the per-code
     // counter below cannot bound guessing at all (a wrong guess matches no
     // row), so this is the only thing standing between the unauthenticated
@@ -140,8 +153,15 @@ export class PairingService {
     // `assertUnderPairRateLimit` -- which closes a concurrency race a
     // check-then-record shape would leave open: N concurrent callers could
     // otherwise all read the same pre-increment count and all pass.
-    await this.pairAttemptsService.assertUnderPairRateLimit(source, windowStart);
-    const result = await this.attemptRedeem(code, now);
+    let result: PairKioskResultDto;
+    try {
+      await this.pairAttemptsService.assertUnderPairRateLimit(source, windowStart);
+      result = await this.attemptRedeem(code, now, auditContext);
+    } catch (error) {
+      this.auditPairing(auditContext, "failed");
+      throw error;
+    }
+    this.auditPairing(auditContext, "succeeded");
     // Compensating decrement, reached only once `attemptRedeem` has fully
     // resolved -- i.e. only after its internal transaction committed. Any
     // throw above (wrong/expired/used/attempts-exhausted code, a lost claim
@@ -175,7 +195,11 @@ export class PairingService {
     return result;
   }
 
-  private async attemptRedeem(code: string, now: Date): Promise<PairKioskResultDto> {
+  private async attemptRedeem(
+    code: string,
+    now: Date,
+    auditContext: KioskPairAuditContext,
+  ): Promise<PairKioskResultDto> {
     const codeHash = hashPairingCode(code, loadEnv().PAIRING_CODE_PEPPER);
     const rows = await this.db
       .select()
@@ -209,6 +233,8 @@ export class PairingService {
     // the per-code lockout necessarily applies per issued code, exactly as
     // designed.
     if (!candidate) throw new UnauthorizedException();
+    auditContext.tenantId = candidate.tenantId;
+    auditContext.kioskId = candidate.kioskId;
     if (candidate.attempts >= PAIR_CODE_MAX_ATTEMPTS) throw new UnauthorizedException();
     if (candidate.usedAt || candidate.expiresAt.getTime() <= now.getTime()) {
       await this.db
@@ -248,11 +274,17 @@ export class PairingService {
       // code first would let an archive hold the kiosk while waiting on this
       // code, deadlocking both paths and leaving the old token usable.
       const [lockedKiosk] = await tx
-        .select({ id: schema.kiosks.id, status: schema.kiosks.status })
+        .select({
+          id: schema.kiosks.id,
+          status: schema.kiosks.status,
+          deviceTokenHash: schema.kiosks.deviceTokenHash,
+        })
         .from(schema.kiosks)
         .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, kioskId)))
         .for("update");
-      if (!lockedKiosk || lockedKiosk.status !== "active") throw new UnauthorizedException();
+      if (!lockedKiosk) throw new UnauthorizedException();
+      auditContext.action = lockedKiosk.deviceTokenHash === null ? "kiosk.pair" : "kiosk.repair";
+      if (lockedKiosk.status !== "active") throw new UnauthorizedException();
 
       const [claimed] = await tx
         .update(schema.kioskPairingCodes)
@@ -326,6 +358,22 @@ export class PairingService {
       nextDeviceSeq,
       bootstrap,
     };
+  }
+
+  private auditPairing(context: KioskPairAuditContext, outcome: "succeeded" | "failed"): void {
+    try {
+      this.audit.deviceCredentialMutation({
+        tenantId: context.tenantId,
+        actorType: "unauthenticated_device",
+        actorId: null,
+        action: context.action,
+        resourceId: context.kioskId,
+        outcome,
+      });
+    } catch {
+      // Pairing audit is best-effort. It must never replace the original
+      // validation, rate-limit, bootstrap, or transaction result.
+    }
   }
 
   private isOneLiveCodeViolation(error: unknown): boolean {

@@ -29,6 +29,7 @@ import {
 import { StationDevicesService } from "./station-devices.service";
 import { type IssueStationPairingCodeResultDto } from "../station-pairing/dto";
 import { StationPairingService } from "../station-pairing/station-pairing.service";
+import { ApiPairingCodeSecretResponse } from "../device-pairing/secret-response.openapi";
 
 @ApiTags("station-devices")
 @Controller("station-devices")
@@ -91,6 +92,7 @@ export class StationDevicesController {
 
   @Post(":id/pairing-code")
   @Header("Cache-Control", "no-store")
+  @ApiPairingCodeSecretResponse()
   async issuePairingCode(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,

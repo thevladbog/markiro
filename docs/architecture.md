@@ -130,11 +130,16 @@ registry, `save-exact`, `engine-strict`, `minimum-release-age=10080`
   Plugins: `organization` (tenancy: orgs, invites, admin/manager roles),
   `api-key` (public API), email+password with Argon2, httpOnly sessions;
   2FA available later.
-- **Station: custom** (offline-first, outside Better Auth): a pre-created
-  durable device redeems a single-use pairing code for an organization-owned
-  API key; operators authenticate locally by numeric PIN or badge barcode
-  against synced hashes. Station and kiosk credentials use the same generation
-  policy while retaining separate headers, guards, and device tables.
+- **Station device: Better Auth API key.** A pre-created durable station
+  redeems a single-use pairing code for an organization-owned key from Better
+  Auth's dedicated `station` API-key configuration. Operators authenticate
+  locally by numeric PIN or badge barcode against synced hashes.
+- **Kiosk device: separate token.** Kiosk pairing generates its own random
+  device token and stores only that token's hash; it is not a Better Auth API
+  key. Station and kiosk share pairing-code generation, expiry,
+  single-consumption, attempt-lockout, and source/global rate-limit policy —
+  not credential generation. Their credentials retain separate headers,
+  guards, persistence, and device tables.
 
 ### Cabinet authorization
 

@@ -33,6 +33,10 @@ import {
   type UpdateKioskDto,
 } from "./dto";
 import { KiosksService } from "./kiosks.service";
+import {
+  ApiLegacyKioskEnrollSecretResponse,
+  ApiPairingCodeSecretResponse,
+} from "../device-pairing/secret-response.openapi";
 
 // Cabinet-only: the kiosk device talks to /kiosk/* behind KioskDeviceGuard and
 // never needs this module, so no device key — station or kiosk — should reach
@@ -59,7 +63,14 @@ export class KiosksController {
     @Req() req: RequestWithTenant,
     @Body(new ZodValidationPipe(createKioskSchema)) body: CreateKioskDto,
   ): Promise<KioskDto> {
-    return this.kiosksService.createKiosk(req.tenantId!, body);
+    try {
+      const result = await this.kiosksService.createKiosk(req.tenantId!, body);
+      this.auditMutation(req, "kiosk.create", result.id, "succeeded");
+      return result;
+    } catch (error) {
+      this.auditMutation(req, "kiosk.create", null, "failed");
+      throw error;
+    }
   }
 
   @Patch(":id")
@@ -69,7 +80,14 @@ export class KiosksController {
     @Param("id") id: string,
     @Body(new ZodValidationPipe(updateKioskSchema)) body: UpdateKioskDto,
   ): Promise<KioskDto> {
-    return this.kiosksService.updateKiosk(req.tenantId!, id, body);
+    try {
+      const result = await this.kiosksService.updateKiosk(req.tenantId!, id, body);
+      this.auditMutation(req, "kiosk.update", id, "succeeded");
+      return result;
+    } catch (error) {
+      this.auditMutation(req, "kiosk.update", id, "failed");
+      throw error;
+    }
   }
 
   @Delete(":id")
@@ -113,53 +131,64 @@ export class KiosksController {
   @Post(":id/enroll")
   @HttpCode(200)
   @Header("Cache-Control", "no-store")
+  @ApiLegacyKioskEnrollSecretResponse()
   @RequirePermissions(CABINET_CAPABILITY.CREDENTIALS_MANAGE)
   async enroll(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
   ): Promise<EnrollKioskResponseDto> {
-    const result = await this.kiosksService.enroll(req.tenantId!, id);
-    this.audit.credentialMutation({
-      tenantId: req.tenantId!,
-      userId: req.userId!,
-      action: "kiosk.enroll",
-      resourceId: id,
-      outcome: "succeeded",
-    });
-    return result;
+    try {
+      const result = await this.kiosksService.enroll(req.tenantId!, id);
+      this.auditMutation(req, "kiosk.enroll", id, "succeeded");
+      return result;
+    } catch (error) {
+      this.auditMutation(req, "kiosk.enroll", id, "failed");
+      throw error;
+    }
   }
 
   /** Credential-only: a stolen device must not be able to mint pairing codes. */
   @Post(":id/pairing-code")
   @Header("Cache-Control", "no-store")
+  @ApiPairingCodeSecretResponse()
   @RequirePermissions(CABINET_CAPABILITY.CREDENTIALS_MANAGE)
   async issuePairingCode(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
   ): Promise<IssuePairingCodeResultDto> {
-    const result = await this.pairingService.issueCode(req.tenantId!, id);
-    this.audit.credentialMutation({
-      tenantId: req.tenantId!,
-      userId: req.userId!,
-      action: "kiosk_pairing_code.issue",
-      resourceId: id,
-      outcome: "succeeded",
-    });
-    return result;
+    try {
+      const result = await this.pairingService.issueCode(req.tenantId!, id);
+      this.auditMutation(req, "kiosk_pairing_code.issue", id, "succeeded");
+      return result;
+    } catch (error) {
+      this.auditMutation(req, "kiosk_pairing_code.issue", id, "failed");
+      throw error;
+    }
   }
 
   private auditMutation(
     req: RequestWithTenant,
-    action: "kiosk.archive" | "kiosk.unbind",
-    resourceId: string,
+    action:
+      | "kiosk.create"
+      | "kiosk.update"
+      | "kiosk.archive"
+      | "kiosk.unbind"
+      | "kiosk.enroll"
+      | "kiosk_pairing_code.issue",
+    resourceId: string | null,
     outcome: "succeeded" | "failed",
   ): void {
-    this.audit.credentialMutation({
-      tenantId: req.tenantId!,
-      userId: req.userId!,
-      action,
-      resourceId,
-      outcome,
-    });
+    try {
+      this.audit.credentialMutation({
+        tenantId: req.tenantId!,
+        userId: req.userId!,
+        action,
+        resourceId,
+        outcome,
+      });
+    } catch {
+      // Audit is best-effort. A logging sink failure must never replace the
+      // cabinet mutation's original result or transient infrastructure error.
+    }
   }
 }

@@ -3,6 +3,7 @@ import { ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "../../zod.pipe";
 import { pairStationSchema, type PairStationDto, type PairStationResultDto } from "./dto";
 import { StationPairingService } from "./station-pairing.service";
+import { ApiStationPairSecretResponse } from "../device-pairing/secret-response.openapi";
 
 /**
  * Deliberately unauthenticated: an unpaired station has no credential yet.
@@ -16,6 +17,7 @@ export class StationPairController {
 
   @Post("pair")
   @Header("Cache-Control", "no-store")
+  @ApiStationPairSecretResponse()
   async pair(
     @Body(new ZodValidationPipe(pairStationSchema)) body: PairStationDto,
     @Ip() ip: string,

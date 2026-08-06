@@ -218,6 +218,92 @@ describe("credential mutation audit", () => {
     expect(JSON.stringify(audit.credentialMutation.mock.calls)).not.toContain("issuance failed");
   });
 
+  it("audits kiosk creation with the cabinet actor and durable result id", async () => {
+    const created = { id: "kiosk_1" };
+    const kiosks = { createKiosk: vi.fn().mockResolvedValue(created) };
+    const audit = auditDouble();
+    const controller = new KiosksController(kiosks as never, {} as never, audit as never);
+
+    const result = await controller.createKiosk(req, {
+      name: "Front gate",
+      dayLimitPerEmployee: 5,
+      showPrices: true,
+    });
+
+    expect(result).toBe(created);
+    expect(audit.credentialMutation).toHaveBeenCalledWith({
+      tenantId: "org_1",
+      userId: "user_1",
+      action: "kiosk.create",
+      resourceId: "kiosk_1",
+      outcome: "succeeded",
+    });
+    expect(JSON.stringify(audit.credentialMutation.mock.calls)).not.toContain("Front gate");
+  });
+
+  it("audits rejected kiosk creation without request-body data", async () => {
+    const businessError = new Error("create failed with internal detail");
+    const kiosks = { createKiosk: vi.fn().mockRejectedValue(businessError) };
+    const audit = auditDouble();
+    const controller = new KiosksController(kiosks as never, {} as never, audit as never);
+
+    await expect(
+      controller.createKiosk(req, {
+        name: "Sensitive kiosk name",
+        dayLimitPerEmployee: 5,
+        showPrices: true,
+      }),
+    ).rejects.toBe(businessError);
+    expect(audit.credentialMutation).toHaveBeenCalledWith({
+      tenantId: "org_1",
+      userId: "user_1",
+      action: "kiosk.create",
+      resourceId: null,
+      outcome: "failed",
+    });
+    const calls = JSON.stringify(audit.credentialMutation.mock.calls);
+    expect(calls).not.toContain("Sensitive kiosk name");
+    expect(calls).not.toContain("internal detail");
+  });
+
+  it("audits kiosk update/change-place success and failure against the route id", async () => {
+    const kiosks = {
+      updateKiosk: vi
+        .fn()
+        .mockResolvedValueOnce({ id: "kiosk_2" })
+        .mockRejectedValueOnce(new Error("update failed")),
+    };
+    const audit = auditDouble();
+    const controller = new KiosksController(kiosks as never, {} as never, audit as never);
+
+    await controller.updateKiosk(req, "kiosk_2", { location: "Loading bay" });
+    await expect(
+      controller.updateKiosk(req, "kiosk_2", { location: "Secret place" }),
+    ).rejects.toThrow("update failed");
+
+    expect(audit.credentialMutation.mock.calls).toEqual([
+      [
+        {
+          tenantId: "org_1",
+          userId: "user_1",
+          action: "kiosk.update",
+          resourceId: "kiosk_2",
+          outcome: "succeeded",
+        },
+      ],
+      [
+        {
+          tenantId: "org_1",
+          userId: "user_1",
+          action: "kiosk.update",
+          resourceId: "kiosk_2",
+          outcome: "failed",
+        },
+      ],
+    ]);
+    expect(JSON.stringify(audit.credentialMutation.mock.calls)).not.toContain("Secret place");
+  });
+
   it("audits kiosk enrollment without the plaintext token", async () => {
     const kiosks = { enroll: vi.fn().mockResolvedValue({ token: "plain-token" }) };
     const pairing = {};
@@ -259,6 +345,22 @@ describe("credential mutation audit", () => {
     expect(JSON.stringify(audit.credentialMutation.mock.calls)).not.toContain("12345678");
   });
 
+  it("audits rejected kiosk pairing-code issuance without the error or code", async () => {
+    const pairing = { issueCode: vi.fn().mockRejectedValue(new Error("issuance failed")) };
+    const audit = auditDouble();
+    const controller = new KiosksController({} as never, pairing as never, audit as never);
+
+    await expect(controller.issuePairingCode(req, "kiosk_2")).rejects.toThrow("issuance failed");
+    expect(audit.credentialMutation).toHaveBeenCalledWith({
+      tenantId: "org_1",
+      userId: "user_1",
+      action: "kiosk_pairing_code.issue",
+      resourceId: "kiosk_2",
+      outcome: "failed",
+    });
+    expect(JSON.stringify(audit.credentialMutation.mock.calls)).not.toContain("issuance failed");
+  });
+
   it("audits kiosk archive and unbind outcomes with only the durable resource id", async () => {
     const kiosks = {
       archiveKiosk: vi.fn().mockResolvedValue(undefined),
@@ -293,14 +395,58 @@ describe("credential mutation audit", () => {
     expect(JSON.stringify(audit.credentialMutation.mock.calls)).not.toContain("unbind failed");
   });
 
-  it("does not audit a rejected kiosk mutation", async () => {
-    const kiosks = { enroll: vi.fn().mockRejectedValue(new Error("enroll failed")) };
-    const pairing = {};
+  it("audits rejected archive and successful unbind outcomes independently", async () => {
+    const kiosks = {
+      archiveKiosk: vi.fn().mockRejectedValue(new Error("archive failed")),
+      unbindKiosk: vi.fn().mockResolvedValue(undefined),
+    };
     const audit = auditDouble();
+    const controller = new KiosksController(kiosks as never, {} as never, audit as never);
+
+    await expect(controller.archiveKiosk(req, "kiosk_4")).rejects.toThrow("archive failed");
+    await controller.unbindKiosk(req, "kiosk_4");
+
+    expect(audit.credentialMutation.mock.calls).toEqual([
+      [
+        {
+          tenantId: "org_1",
+          userId: "user_1",
+          action: "kiosk.archive",
+          resourceId: "kiosk_4",
+          outcome: "failed",
+        },
+      ],
+      [
+        {
+          tenantId: "org_1",
+          userId: "user_1",
+          action: "kiosk.unbind",
+          resourceId: "kiosk_4",
+          outcome: "succeeded",
+        },
+      ],
+    ]);
+  });
+
+  it("best-effort audits rejected kiosk enrollment without obscuring the business error", async () => {
+    const businessError = new Error("enroll failed");
+    const kiosks = { enroll: vi.fn().mockRejectedValue(businessError) };
+    const pairing = {};
+    const audit = {
+      credentialMutation: vi.fn(() => {
+        throw new Error("audit sink unavailable");
+      }),
+    };
     const controller = new KiosksController(kiosks as never, pairing as never, audit as never);
 
-    await expect(controller.enroll(req, "kiosk_1")).rejects.toThrow("enroll failed");
-    expect(audit.credentialMutation).not.toHaveBeenCalled();
+    await expect(controller.enroll(req, "kiosk_1")).rejects.toBe(businessError);
+    expect(audit.credentialMutation).toHaveBeenCalledWith({
+      tenantId: "org_1",
+      userId: "user_1",
+      action: "kiosk.enroll",
+      resourceId: "kiosk_1",
+      outcome: "failed",
+    });
   });
 
   it("audits integration credential issuance without the plaintext login or secret", async () => {

@@ -4,7 +4,7 @@ import express from "express";
 import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { AppModule } from "../src/app.module";
 import { DB_POOL } from "../src/auth/auth.module";
@@ -24,6 +24,7 @@ import { PairingService } from "../src/modules/kiosk/pairing.service";
 import { schema, type Db } from "@markiro/db";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { createTestStationDevice } from "./support/auth";
+import { SecurityAuditService } from "../src/authorization/security-audit.service";
 
 // Only `randomInt` is ever mocked (F3 below, one call, one test) -- every
 // other export (including `randomUUID`, used throughout this file) passes
@@ -152,6 +153,7 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
   let kioskId: string;
   let seededOrder: string;
   let pairingCodePepper: string;
+  let audit: SecurityAuditService;
 
   /**
    * This suite's own stand-in for `PairingService`'s real `hashPairingCode`
@@ -181,10 +183,15 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
     server.use(express.json());
     await app.init();
     await listenOnLoopback(app);
+    audit = app.get(SecurityAuditService);
   });
 
   afterAll(async () => {
     await app?.close();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   async function signUpWithInactiveOrg(agent: ReturnType<typeof request.agent>): Promise<string> {
@@ -267,6 +274,8 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
 
     otherAgent = request.agent(app!.getHttpServer());
     await signUpAndActivate(otherAgent);
+
+    vi.spyOn(audit, "deviceCredentialMutation").mockImplementation(() => undefined);
   });
 
   it("issues an 8-digit code that expires in 15 minutes", async () => {
@@ -377,6 +386,126 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
       .get("/kiosk/bootstrap")
       .set("x-kiosk-token", paired.body.token)
       .expect(200);
+
+    expect(audit.deviceCredentialMutation).toHaveBeenCalledWith({
+      tenantId,
+      actorType: "unauthenticated_device",
+      actorId: null,
+      action: "kiosk.pair",
+      resourceId: kioskId,
+      outcome: "succeeded",
+    });
+    const auditCalls = JSON.stringify(vi.mocked(audit.deviceCredentialMutation).mock.calls);
+    expect(auditCalls).not.toContain(issued.body.code as string);
+    expect(auditCalls).not.toContain(paired.body.token as string);
+  });
+
+  it("audits re-pair as a distinct unauthenticated-device credential rotation", async () => {
+    const first = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    await request(app!.getHttpServer())
+      .post("/kiosk/pair")
+      .send({ code: first.body.code })
+      .expect(201);
+
+    vi.mocked(audit.deviceCredentialMutation).mockClear();
+    const replacement = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    await request(app!.getHttpServer())
+      .post("/kiosk/pair")
+      .send({ code: replacement.body.code })
+      .expect(201);
+
+    expect(audit.deviceCredentialMutation).toHaveBeenCalledWith({
+      tenantId,
+      actorType: "unauthenticated_device",
+      actorId: null,
+      action: "kiosk.repair",
+      resourceId: kioskId,
+      outcome: "succeeded",
+    });
+  });
+
+  it("audits a failed re-pair after the known kiosk becomes inactive", async () => {
+    const first = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    await request(app!.getHttpServer())
+      .post("/kiosk/pair")
+      .send({ code: first.body.code })
+      .expect(201);
+    const replacement = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    vi.mocked(audit.deviceCredentialMutation).mockClear();
+
+    const pickupOrders = app!.get(PickupOrdersService);
+    const originalBootstrap = pickupOrders.bootstrap.bind(pickupOrders);
+    vi.spyOn(pickupOrders, "bootstrap").mockImplementationOnce(async (...args) => {
+      const bootstrap = await originalBootstrap(...args);
+      await db
+        .update(schema.kiosks)
+        .set({ status: "archived" })
+        .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, kioskId)));
+      return bootstrap;
+    });
+
+    await request(app!.getHttpServer())
+      .post("/kiosk/pair")
+      .send({ code: replacement.body.code })
+      .expect(401);
+
+    expect(audit.deviceCredentialMutation).toHaveBeenCalledWith({
+      tenantId,
+      actorType: "unauthenticated_device",
+      actorId: null,
+      action: "kiosk.repair",
+      resourceId: kioskId,
+      outcome: "failed",
+    });
+  });
+
+  it("audits a failed resolved-code redemption against its durable kiosk without the code", async () => {
+    const issued = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    await db
+      .update(schema.kioskPairingCodes)
+      .set({ expiresAt: new Date(Date.now() - 1_000) })
+      .where(eq(schema.kioskPairingCodes.codeHash, codeHashOf(issued.body.code)));
+
+    await request(app!.getHttpServer())
+      .post("/kiosk/pair")
+      .send({ code: issued.body.code })
+      .expect(401);
+
+    expect(audit.deviceCredentialMutation).toHaveBeenCalledWith({
+      tenantId,
+      actorType: "unauthenticated_device",
+      actorId: null,
+      action: "kiosk.pair",
+      resourceId: kioskId,
+      outcome: "failed",
+    });
+    expect(JSON.stringify(vi.mocked(audit.deviceCredentialMutation).mock.calls)).not.toContain(
+      issued.body.code as string,
+    );
+  });
+
+  it("does not let an audit sink failure obscure a transient pairing failure", async () => {
+    const issued = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    const transientError = new Error("bootstrap storage unavailable");
+    vi.spyOn(app!.get(PickupOrdersService), "bootstrap").mockRejectedValueOnce(transientError);
+    vi.mocked(audit.deviceCredentialMutation).mockImplementation(() => {
+      throw new Error("audit sink unavailable");
+    });
+
+    await expect(
+      app!.get(PairingService).redeem(issued.body.code as string, `test-${randomUUID()}`),
+    ).rejects.toBe(transientError);
+    expect(audit.deviceCredentialMutation).toHaveBeenCalledWith({
+      tenantId,
+      actorType: "unauthenticated_device",
+      actorId: null,
+      action: "kiosk.pair",
+      resourceId: kioskId,
+      outcome: "failed",
+    });
+    expect(JSON.stringify(vi.mocked(audit.deviceCredentialMutation).mock.calls)).not.toContain(
+      "bootstrap storage unavailable",
+    );
   });
 
   it("archives durably, rejects the old token, and permits a fresh pairing without losing pickup state", async () => {
