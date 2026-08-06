@@ -1,5 +1,6 @@
 import {
   Inject,
+  InternalServerErrorException,
   Injectable,
   Logger,
   NotFoundException,
@@ -7,7 +8,8 @@ import {
 } from "@nestjs/common";
 import { and, asc, desc, eq, gt, isNull, lt, sql } from "drizzle-orm";
 import { schema, type Auth, type Db } from "@markiro/db";
-import { AUTH, DB } from "../../auth/auth.module";
+import type { AuthSetup } from "../../auth/auth.setup";
+import { AUTH, DB, DB_POOL } from "../../auth/auth.module";
 import { loadEnv } from "../../env";
 import { hashPairingCode } from "../../pickup/device-token";
 import { PairAttemptsService } from "../device-pairing/pair-attempts.service";
@@ -41,6 +43,7 @@ export class StationPairingService {
   constructor(
     @Inject(DB) private readonly db: Db,
     @Inject(AUTH) private readonly auth: Auth,
+    @Inject(DB_POOL) private readonly pool: AuthSetup["pool"],
     private readonly operators: OperatorsService,
     private readonly pairAttempts: PairAttemptsService,
   ) {}
@@ -164,6 +167,7 @@ export class StationPairingService {
         id: schema.stationDevices.id,
         tenantId: schema.stationDevices.tenantId,
         name: schema.stationDevices.name,
+        apiKeyId: schema.stationDevices.apiKeyId,
         lineId: schema.stationDevices.lineId,
         lineName: schema.lines.name,
         organizationName: schema.organization.name,
@@ -202,6 +206,12 @@ export class StationPairingService {
     });
 
     try {
+      // A replacement must never leave both credentials usable. This runs
+      // before the durable link moves to `key.id`: if the old row cannot be
+      // proven absent, the new link is not committed and the candidate is
+      // compensated below.
+      if (station.apiKeyId !== null) await this.deletePersistedApiKey(station.apiKeyId);
+
       await this.db.transaction(async (tx) => {
         const [claimed] = await tx
           .update(schema.stationPairingCodes)
@@ -225,6 +235,9 @@ export class StationPairingService {
             and(
               eq(schema.stationDevices.tenantId, candidate.tenantId),
               eq(schema.stationDevices.id, candidate.stationDeviceId),
+              station.apiKeyId === null
+                ? isNull(schema.stationDevices.apiKeyId)
+                : eq(schema.stationDevices.apiKeyId, station.apiKeyId),
             ),
           )
           .returning({ id: schema.stationDevices.id });
@@ -268,14 +281,37 @@ export class StationPairingService {
   }
 
   private async deleteCandidateKey(keyId: string): Promise<void> {
+    await this.deletePersistedApiKey(keyId);
+  }
+
+  /**
+   * Better Auth's station config uses database storage, so an `apikey` row is
+   * the credential itself. Prefer Drizzle for the normal path, but use the
+   * already-injected pg pool as a narrow persisted fallback when that adapter
+   * call fails. The fallback verifies the row is absent before returning;
+   * callers therefore never suppress a cleanup failure that could leave a
+   * usable credential behind.
+   */
+  private async deletePersistedApiKey(keyId: string): Promise<void> {
     try {
-      await this.db.delete(schema.apikey).where(eq(schema.apikey.id, keyId));
-    } catch (error) {
-      this.logger.error(
-        "failed to delete a station pairing candidate key",
-        error instanceof Error ? error.stack : undefined,
-      );
+      const [deleted] = await this.db
+        .delete(schema.apikey)
+        .where(eq(schema.apikey.id, keyId))
+        .returning({ id: schema.apikey.id });
+      if (deleted) return;
+    } catch {
+      // The fallback below performs and verifies the same physical deletion.
     }
+
+    try {
+      await this.pool.query('DELETE FROM "apikey" WHERE "id" = $1', [keyId]);
+      const remaining = await this.pool.query('SELECT 1 FROM "apikey" WHERE "id" = $1', [keyId]);
+      if (remaining.rowCount === 0) return;
+    } catch {
+      // Do not include an api-key value, id, or database error in this public
+      // failure. An unlinked key is additionally rejected by TenantGuard.
+    }
+    throw new InternalServerErrorException("Station credential cleanup failed");
   }
 
   private isOneLiveCodeViolation(error: unknown): boolean {

@@ -89,7 +89,12 @@ export class TenantGuard implements CanActivate {
               eq(schema.stationDevices.apiKeyId, result.key.id),
             ),
           );
-        if (device) req.deviceId = device.id;
+        // A verified Better Auth key is not a station principal by itself.
+        // The durable row is the authoritative device identity: reject an
+        // unlinked/orphaned key so a failed pairing compensation cannot turn
+        // into access to station-only endpoints.
+        if (!device) throw new UnauthorizedException();
+        req.deviceId = device.id;
         return true;
       }
     }

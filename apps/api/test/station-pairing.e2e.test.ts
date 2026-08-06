@@ -4,9 +4,11 @@ import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import { and, eq, inArray } from "drizzle-orm";
 import request from "supertest";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { schema, type Db } from "@markiro/db";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { schema, type Auth, type Db } from "@markiro/db";
 import { AppModule } from "../src/app.module";
+import type { AuthSetup } from "../src/auth/auth.setup";
+import { AUTH, DB_POOL } from "../src/auth/auth.module";
 import { mountAuth, setupAuth } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { hashPairingCode } from "../src/pickup/device-token";
@@ -43,6 +45,7 @@ describe.skipIf(!ready)("station pairing e2e", () => {
   let app: INestApplication | undefined;
   let db: Db;
   let agent: ReturnType<typeof request.agent>;
+  let otherAgent: ReturnType<typeof request.agent>;
   let tenantId: string;
   let deviceId: string;
   let pairingCodePepper: string;
@@ -71,6 +74,8 @@ describe.skipIf(!ready)("station pairing e2e", () => {
     await clearPairAttemptBudget(db);
     agent = request.agent(app!.getHttpServer());
     tenantId = await signUpAndActivate(agent);
+    otherAgent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(otherAgent);
     const [line] = await db.insert(schema.lines).values({ tenantId, name: "Packing" }).returning();
     const created = await agent
       .post("/station-devices")
@@ -305,5 +310,163 @@ describe.skipIf(!ready)("station pairing e2e", () => {
       .from(schema.stationDevices)
       .where(eq(schema.stationDevices.id, deviceId));
     expect(station).toMatchObject({ apiKeyId: expect.any(String), revokedAt: null });
+  });
+
+  it("rotates an active station key so only the replacement can reach station routes", async () => {
+    const firstCode = await agent
+      .post(`/station-devices/${deviceId}/pairing-code`)
+      .send({})
+      .expect(201);
+    const firstPair = await request(app!.getHttpServer())
+      .post("/station/pair")
+      .send({ code: firstCode.body.code })
+      .expect(201);
+    const oldKey = firstPair.body.credential.apiKey as string;
+
+    const replacementCode = await agent
+      .post(`/station-devices/${deviceId}/pairing-code`)
+      .send({})
+      .expect(201);
+    const replacementPair = await request(app!.getHttpServer())
+      .post("/station/pair")
+      .send({ code: replacementCode.body.code })
+      .expect(201);
+    const newKey = replacementPair.body.credential.apiKey as string;
+
+    expect(replacementPair.body.device.id).toBe(deviceId);
+    expect(newKey).not.toBe(oldKey);
+    await request(app!.getHttpServer())
+      .get("/station/operators")
+      .set("x-api-key", oldKey)
+      .expect(401);
+    await request(app!.getHttpServer())
+      .get("/station/operators")
+      .set("x-api-key", newKey)
+      .expect(200);
+
+    const keys = await db
+      .select({ id: schema.apikey.id })
+      .from(schema.apikey)
+      .where(and(eq(schema.apikey.referenceId, tenantId), eq(schema.apikey.configId, "station")));
+    expect(keys).toHaveLength(1);
+  });
+
+  it("deletes a losing candidate with the persisted fallback when direct deletion fails", async () => {
+    const issued = await agent
+      .post(`/station-devices/${deviceId}/pairing-code`)
+      .send({})
+      .expect(201);
+    const directDelete = vi.spyOn(db, "delete").mockImplementationOnce(() => {
+      throw new Error("forced direct key delete failure");
+    });
+    try {
+      const [first, second] = await Promise.all([
+        request(app!.getHttpServer()).post("/station/pair").send({ code: issued.body.code }),
+        request(app!.getHttpServer()).post("/station/pair").send({ code: issued.body.code }),
+      ]);
+      expect([first.status, second.status].sort()).toEqual([201, 401]);
+    } finally {
+      directDelete.mockRestore();
+    }
+
+    const keys = await db
+      .select({ id: schema.apikey.id })
+      .from(schema.apikey)
+      .where(and(eq(schema.apikey.referenceId, tenantId), eq(schema.apikey.configId, "station")));
+    expect(keys).toHaveLength(1);
+  });
+
+  it("does not relink an active station when old-key deletion cannot be proven", async () => {
+    const firstCode = await agent
+      .post(`/station-devices/${deviceId}/pairing-code`)
+      .send({})
+      .expect(201);
+    const firstPair = await request(app!.getHttpServer())
+      .post("/station/pair")
+      .send({ code: firstCode.body.code })
+      .expect(201);
+    const oldKey = firstPair.body.credential.apiKey as string;
+    const replacementCode = await agent
+      .post(`/station-devices/${deviceId}/pairing-code`)
+      .send({})
+      .expect(201);
+
+    const pool = app!.get<AuthSetup["pool"]>(DB_POOL);
+    const query = pool.query.bind(pool);
+    const directDelete = vi.spyOn(db, "delete").mockImplementationOnce(() => {
+      throw new Error("forced direct old-key delete failure");
+    });
+    const fallbackDelete = vi.spyOn(pool, "query").mockImplementation((...args) => {
+      if (args[0] === 'DELETE FROM "apikey" WHERE "id" = $1') {
+        return Promise.reject(new Error("forced persisted old-key delete failure"));
+      }
+      return query(...args);
+    });
+    try {
+      await request(app!.getHttpServer())
+        .post("/station/pair")
+        .send({ code: replacementCode.body.code })
+        .expect(500);
+    } finally {
+      fallbackDelete.mockRestore();
+      directDelete.mockRestore();
+    }
+
+    await request(app!.getHttpServer())
+      .get("/station/operators")
+      .set("x-api-key", oldKey)
+      .expect(200);
+    const [station] = await db
+      .select({ apiKeyId: schema.stationDevices.apiKeyId })
+      .from(schema.stationDevices)
+      .where(eq(schema.stationDevices.id, deviceId));
+    const keys = await db
+      .select({ id: schema.apikey.id })
+      .from(schema.apikey)
+      .where(and(eq(schema.apikey.referenceId, tenantId), eq(schema.apikey.configId, "station")));
+    expect(keys).toEqual([{ id: station!.apiKeyId! }]);
+  });
+
+  it("rejects a previously used station code with PAIR_INVALID", async () => {
+    const issued = await agent
+      .post(`/station-devices/${deviceId}/pairing-code`)
+      .send({})
+      .expect(201);
+    await request(app!.getHttpServer())
+      .post("/station/pair")
+      .send({ code: issued.body.code })
+      .expect(201);
+
+    const reused = await request(app!.getHttpServer())
+      .post("/station/pair")
+      .send({ code: issued.body.code })
+      .expect(401);
+    expect(reused.body).toMatchObject({ code: "PAIR_INVALID" });
+  });
+
+  it("hides a station from another tenant when issuing a pairing code", async () => {
+    await otherAgent.post(`/station-devices/${deviceId}/pairing-code`).send({}).expect(404);
+  });
+
+  it("rejects a verified but unlinked station key from station-only routes", async () => {
+    const [member] = await db
+      .select({ userId: schema.member.userId })
+      .from(schema.member)
+      .where(eq(schema.member.organizationId, tenantId));
+    const auth = app!.get<Auth>(AUTH);
+    const orphan = await auth.api.createApiKey({
+      body: {
+        configId: "station",
+        organizationId: tenantId,
+        userId: member!.userId,
+        name: "Station device",
+        metadata: { kind: "station" },
+      },
+    });
+
+    await request(app!.getHttpServer())
+      .get("/station/operators")
+      .set("x-api-key", orphan.key)
+      .expect(401);
   });
 });
