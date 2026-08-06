@@ -63,24 +63,95 @@ pub fn read_config(dir: &Path) -> Result<StationConfig, String> {
 }
 
 /// Atomically replaces `station.json` (create dir, write a private sibling,
-/// sync, then rename). A failed write therefore leaves the previous readable
-/// provisioning bundle in place instead of truncating it. On Unix the sibling
-/// is created at mode 0600; Windows uses the per-user app-config directory.
+/// sync, then replace). A failed write restores the previous readable
+/// provisioning bundle instead of truncating it. On Unix the sibling is
+/// created at mode 0600; Windows uses the per-user app-config directory.
 pub fn write_config(dir: &Path, cfg: &StationConfig) -> Result<(), String> {
+    write_config_with_parent_sync(dir, cfg, sync_parent_directory)
+}
+
+/// The sync operation is injected only so the post-replacement failure path
+/// can be proven in a unit test. Production always uses `sync_parent_directory`.
+fn write_config_with_parent_sync<F>(
+    dir: &Path,
+    cfg: &StationConfig,
+    parent_sync: F,
+) -> Result<(), String>
+where
+    F: Fn(&Path) -> Result<(), String>,
+{
     fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let path = config_path(dir);
     let data = serde_json::to_string_pretty(cfg).map_err(|e| e.to_string())?;
     let temporary = dir.join(format!(".station-{}.tmp", Uuid::new_v4()));
-    let write_result = write_owner_only(&temporary, data.as_bytes());
-    if let Err(error) = write_result {
+    if let Err(error) = write_owner_only(&temporary, data.as_bytes()) {
         let _ = fs::remove_file(&temporary);
         return Err(error);
     }
+    let backup = dir.join(format!(".station-{}.bak", Uuid::new_v4()));
+    let had_previous = match backup_existing_config(&path, &backup) {
+        Ok(had_previous) => had_previous,
+        Err(error) => {
+            let _ = fs::remove_file(&temporary);
+            let _ = fs::remove_file(&backup);
+            return Err(error);
+        }
+    };
+    // The backup must itself be durable before the destination can change.
+    if had_previous {
+        if let Err(error) = sync_parent_directory(dir) {
+            let _ = fs::remove_file(&temporary);
+            let _ = fs::remove_file(&backup);
+            return Err(error);
+        }
+    }
     replace_config_file(&temporary, &path).map_err(|e| {
         let _ = fs::remove_file(&temporary);
+        let _ = fs::remove_file(&backup);
         e.to_string()
     })?;
-    sync_parent_directory(dir)
+    match parent_sync(dir) {
+        Ok(()) => {
+            let _ = fs::remove_file(&backup);
+            Ok(())
+        }
+        Err(sync_error) => {
+            let restored = if had_previous {
+                replace_config_file(&backup, &path).map_err(|error| error.to_string())
+            } else {
+                fs::remove_file(&path).map_err(|error| error.to_string())
+            };
+            match restored {
+                Ok(()) => {
+                    // Restore uses the real fsync primitive: the injected
+                    // failure models only the failed commit, not a second
+                    // failed rollback. The old config is readable even if a
+                    // later physical flush remains uncertain.
+                    let _ = sync_parent_directory(dir);
+                    let _ = fs::remove_file(&backup);
+                    Err(format!(
+                        "Configuration write was rolled back after directory sync failed: {sync_error}"
+                    ))
+                }
+                Err(restore_error) => Err(format!(
+                    "Configuration durability is uncertain after replacement; automatic restoration failed: {restore_error}; original sync error: {sync_error}"
+                )),
+            }
+        }
+    }
+}
+
+/// Makes a private byte-for-byte recovery copy of an existing config. A
+/// missing destination is the first-write case and needs no backup.
+fn backup_existing_config(destination: &Path, backup: &Path) -> Result<bool, String> {
+    match fs::read(destination) {
+        Ok(data) => {
+            write_owner_only(backup, &data)?;
+            Ok(true)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 /// Replaces the destination without truncating it in place. Windows cannot
@@ -259,6 +330,50 @@ mod tests {
             .file_name()
             .to_string_lossy()
             .ends_with(".tmp")));
+    }
+
+    #[test]
+    fn parent_sync_failure_restores_the_previous_config_and_cleans_recovery_files() {
+        let dir = temp_dir();
+        let mut original = read_config(&dir).unwrap();
+        original.device_id = Some("device_before".into());
+        original.api_key = Some("credential-before".into());
+        original.server_url = Some("https://api.before.example".into());
+        write_config(&dir, &original).unwrap();
+
+        let mut replacement = original.clone();
+        replacement.api_key = Some("credential-after".into());
+        replacement.server_url = Some("https://api.after.example".into());
+
+        let result = write_config_with_parent_sync(&dir, &replacement, |_| {
+            Err("injected directory sync failure".to_string())
+        });
+
+        assert!(result.is_err());
+        assert_eq!(read_config(&dir).unwrap(), original);
+        assert!(fs::read_dir(&dir).unwrap().all(|entry| {
+            let name = entry.unwrap().file_name();
+            let name = name.to_string_lossy();
+            !name.ends_with(".tmp") && !name.ends_with(".bak")
+        }));
+    }
+
+    #[test]
+    fn parent_sync_failure_on_first_write_removes_the_new_config_and_recovery_files() {
+        let dir = temp_dir();
+        let cfg = StationConfig::new_with_machine_id();
+
+        let result = write_config_with_parent_sync(&dir, &cfg, |_| {
+            Err("injected directory sync failure".to_string())
+        });
+
+        assert!(result.is_err());
+        assert!(!config_path(&dir).exists());
+        assert!(fs::read_dir(&dir).unwrap().all(|entry| {
+            let name = entry.unwrap().file_name();
+            let name = name.to_string_lossy();
+            !name.ends_with(".tmp") && !name.ends_with(".bak")
+        }));
     }
 
     #[test]

@@ -202,6 +202,12 @@ function mockInvokeForFloor(
   pinHash: string,
   hardwareConfig: HardwareConfig,
   outboxRows: OutboxSeedRow[] = [],
+  stationConfig: Record<string, unknown> = {
+    machine_id: "m1",
+    device_id: "device-1",
+    api_key: "mk_key",
+    server_url: "http://localhost:3000",
+  },
 ): OutboxSeedRow[] {
   const outbox = [...outboxRows];
   // Mutated by a real `recordConflicts`/`conflictCount` round-trip through
@@ -212,11 +218,16 @@ function mockInvokeForFloor(
   const conflicts: ConflictSeedRow[] = [];
   invokeMock.mockImplementation((cmd: string, payload?: unknown): Promise<unknown> => {
     if (cmd === "read_config") {
-      return Promise.resolve({
-        machine_id: "m1",
-        api_key: "mk_key",
-        server_url: "http://localhost:3000",
-      });
+      return Promise.resolve(stationConfig);
+    }
+    if (cmd === "clear_credential") {
+      delete stationConfig.api_key;
+      delete stationConfig.tenant_id;
+      delete stationConfig.device_name;
+      delete stationConfig.organization_name;
+      delete stationConfig.line_id;
+      delete stationConfig.line_name;
+      return Promise.resolve(undefined);
     }
     if (cmd === "plugin:sql|load") return Promise.resolve("sqlite:station-mirror.db");
     if (cmd === "plugin:sql|execute") {
@@ -721,6 +732,102 @@ describe("App", () => {
     await waitFor(() =>
       expect(hardwareMock.openScanner.mock.calls.length).toBeGreaterThan(openCallsBeforeSetup),
     );
+  });
+
+  it("explicit reset clears the shell credential then returns the same device record to pairing", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const persistedConfig: Record<string, unknown> = {
+      machine_id: "m1",
+      device_id: "device-1",
+      tenant_id: "tenant-1",
+      api_key: "credential-not-to-render",
+      server_url: "https://api.factory.example",
+    };
+    mockInvokeForFloor(
+      pinHash,
+      { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+      [],
+      persistedConfig,
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ items: [] }), { status: 200 })),
+    );
+
+    render(<App />);
+    await signInAsOperator();
+    fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Re-pair this station" }));
+
+    await waitFor(() => expect(screen.getByText("Connect station")).toBeDefined());
+    expect(invokeMock).toHaveBeenCalledWith("clear_credential");
+    expect(persistedConfig).toEqual({
+      machine_id: "m1",
+      device_id: "device-1",
+      server_url: "https://api.factory.example",
+    });
+    expect(screen.queryByText("credential-not-to-render")).toBeNull();
+  });
+
+  it("keeps the enrolled state and shows a useful error when explicit credential reset fails", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    mockInvokeForFloor(pinHash, {
+      scanner: null,
+      printer: null,
+      printerLanguage: "zpl",
+      verifyPrintedLabel: false,
+    });
+    invokeMock.mockImplementation((cmd: string, payload?: unknown): Promise<unknown> => {
+      if (cmd === "clear_credential") return Promise.reject(new Error("shell unavailable"));
+      if (cmd === "read_config") {
+        return Promise.resolve({
+          machine_id: "m1",
+          device_id: "device-1",
+          api_key: "mk_key",
+          server_url: "http://localhost:3000",
+        });
+      }
+      if (cmd === "plugin:sql|load") return Promise.resolve("sqlite:station-mirror.db");
+      if (cmd === "plugin:sql|execute") return Promise.resolve([0, 0]);
+      if (cmd === "plugin:sql|select") {
+        const { query, values } = (payload ?? {}) as { query: string; values?: unknown[] };
+        if (/FROM operators_mirror\b/.test(query))
+          return Promise.resolve([operatorMirrorRow(pinHash)]);
+        if (query.includes("station_meta") && values?.[0] === "hardware_config") {
+          return Promise.resolve([
+            {
+              value: JSON.stringify({
+                scanner: null,
+                printer: null,
+                printerLanguage: "zpl",
+                verifyPrintedLabel: false,
+              }),
+            },
+          ]);
+        }
+        if (query.includes("station_meta") && values?.[0] === "install_id") {
+          return Promise.resolve([{ value: "test-install-id" }]);
+        }
+        return Promise.resolve([]);
+      }
+      return Promise.resolve(undefined);
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ items: [] }), { status: 200 })),
+    );
+
+    render(<App />);
+    await signInAsOperator();
+    fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Re-pair this station" }));
+
+    expect(
+      await screen.findByText("Could not reset station credentials. Try again or contact support."),
+    ).toBeDefined();
+    expect(screen.queryByText("Connect station")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    await waitFor(() => expect(screen.getByText("Shifts")).toBeDefined());
   });
 
   it("regression (Finding 2, Back): leaving Setup via Back after a manual test-connect retires that session without saving it", async () => {

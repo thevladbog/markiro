@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { OperatorMirrorRecord } from "@markiro/db";
-import { isEnrolled, readConfig, type StationConfig } from "./lib/config.js";
+import { clearCredential, isEnrolled, readConfig, type StationConfig } from "./lib/config.js";
 import { createStationClient } from "./lib/api-client.js";
 import {
   DEFAULT_HARDWARE_CONFIG,
@@ -338,6 +338,38 @@ export function App() {
     setConfig(await readConfig());
   }
 
+  /**
+   * Explicit service action only. Task 11 owns automatic 401 sealing; this
+   * handler is never called by a network failure path.
+   */
+  async function resetCredentialForPairing() {
+    if (!config) throw new Error(t("setup.resetCredentialFailed"));
+    const previous = config;
+    try {
+      await clearCredential();
+      const cleared = await readConfig();
+      // The Rust contract keeps the durable station record and its trusted
+      // recovery base. Refuse to show a false pairing state if that boundary
+      // is ever violated by the shell.
+      if (
+        cleared.machineId !== previous.machineId ||
+        cleared.deviceId !== previous.deviceId ||
+        cleared.serverUrl !== previous.serverUrl ||
+        cleared.apiKey !== undefined
+      ) {
+        throw new Error("credential reset contract violation");
+      }
+      setOperator(null);
+      setShift(null);
+      setFloorView("select");
+      setShowSetup(false);
+      setConfig(cleared);
+    } catch {
+      // Never expose IPC details or a device key in the service UI.
+      throw new Error(t("setup.resetCredentialFailed"));
+    }
+  }
+
   if (!config) {
     return (
       <main style={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>
@@ -417,6 +449,7 @@ export function App() {
           sound={sound}
           onSoundChange={setSound}
           onConfigChange={setHardwareConfig}
+          onResetCredential={resetCredentialForPairing}
           onDone={() => {
             setShowSetup(false);
             // Covers both exits from Setup with one line: `finish()` calls

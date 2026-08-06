@@ -21,6 +21,8 @@ export interface WorkstationSetupProps {
   onSoundChange: (s: SoundSettings) => void;
   /** Fired after the configuration is persisted, so the app can apply it. */
   onConfigChange: (config: HardwareConfig) => void;
+  /** Explicit service-only transition back to station pairing. */
+  onResetCredential?: () => Promise<void>;
   onDone: () => void;
 }
 
@@ -78,6 +80,7 @@ export function WorkstationSetup({
   sound,
   onSoundChange,
   onConfigChange,
+  onResetCredential,
   onDone,
 }: WorkstationSetupProps) {
   const { t } = useTranslation();
@@ -355,6 +358,19 @@ export function WorkstationSetup({
     }
   }
 
+  async function resetCredential() {
+    if (!onResetCredential || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await onResetCredential();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("setup.resetCredentialFailed"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <main style={{ padding: 32, display: "flex", flexDirection: "column", gap: 32 }}>
       <h1 style={{ fontSize: "2rem" }}>{t("setup.title")}</h1>
@@ -602,6 +618,22 @@ export function WorkstationSetup({
           />
         </label>
       </section>
+
+      {onResetCredential ? (
+        <section style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <h2 style={{ fontSize: "1.5rem" }}>{t("setup.repairTitle")}</h2>
+          <p>{t("setup.repairHint")}</p>
+          <Button
+            type="button"
+            variant="secondary"
+            style={{ minHeight: 64, alignSelf: "flex-start" }}
+            disabled={busy || loading}
+            onClick={() => void resetCredential()}
+          >
+            {t("setup.repairAction")}
+          </Button>
+        </section>
+      ) : null}
 
       {error !== null && <p role="alert">{error}</p>}
 
