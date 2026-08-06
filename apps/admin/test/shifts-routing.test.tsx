@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { createMemoryRouter, createRoutesFromElements, Route, RouterProvider } from "react-router";
 import { afterEach, expect, it, vi } from "vitest";
@@ -62,11 +62,14 @@ function jsonResponse(status: number, body: unknown): Response {
   });
 }
 
-function stubDependencies(shifts = [SHIFT]) {
+function stubDependencies(shifts = [SHIFT], createError?: string) {
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (url: string) => {
+    vi.fn(async (url: string, init?: RequestInit) => {
       const path = String(url);
+      if (path === "/api/shifts" && init?.method === "POST" && createError) {
+        return jsonResponse(409, { message: createError });
+      }
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: shifts });
       if (path.startsWith("/api/products")) return jsonResponse(200, { items: [PRODUCT] });
       return jsonResponse(200, { items: [] });
@@ -131,6 +134,26 @@ it("shows a not-found state instead of a blank edit form", async () => {
 
   expect(await screen.findByText("Смена не найдена")).toBeDefined();
   expect(screen.queryByLabelText("Плановое количество, шт")).toBeNull();
+});
+
+it("keeps the create panel open and shows the server message after a conflict", async () => {
+  stubDependencies([], "A shift already exists for this production slot");
+  const { router, user } = renderPanel(["/shifts/new"]);
+
+  const product = await screen.findByRole("combobox", { name: "Продукт" });
+  fireEvent.pointerDown(product, {
+    button: 0,
+    ctrlKey: false,
+    pointerId: 1,
+    pointerType: "mouse",
+  });
+  fireEvent.click(screen.getByRole("option", { name: "Молоко 1л" }));
+  await user.click(screen.getByRole("button", { name: "Запланировать" }));
+
+  const panel = screen.getByRole("dialog", { name: "Новая смена" });
+  const alert = await within(panel).findByRole("alert");
+  expect(alert.textContent).toContain("A shift already exists for this production slot");
+  expect(router.state.location.pathname).toBe("/shifts/new");
 });
 
 it("blocks Back after a planning field changes until discard", async () => {

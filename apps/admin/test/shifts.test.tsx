@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { createMemoryRouter, createRoutesFromElements, Route, RouterProvider } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -8,8 +9,10 @@ import { CABINET_CAPABILITY } from "@markiro/domain";
 
 import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider } from "../src/access/context.js";
+import type { ProductDto } from "../src/pages/catalog/api.js";
 import type * as ShiftsApiModule from "../src/pages/shifts/api.js";
 import { ShiftsPage } from "../src/pages/shifts/index.js";
+import { ShiftForm, type ShiftFormValues } from "../src/pages/shifts/ShiftForm.js";
 import { ShiftPanelRoute } from "../src/pages/shifts/ShiftPanelRoute.js";
 
 const { writeHookMountSpy } = vi.hoisted(() => ({ writeHookMountSpy: vi.fn() }));
@@ -103,13 +106,16 @@ async function chooseOption(
   expect(trigger.textContent).toContain(option);
 }
 
-const PRODUCT_A = {
+const PRODUCT_A: ProductDto = {
   id: "p1",
   gtin14: "04006381333931",
   name: "Молоко 1л",
   productGroup: "Молочные продукты",
   boxCapacity: 12,
   palletCapacity: 48,
+  unitPrice: null,
+  egaisCode: null,
+  externalRef: null,
   status: "active",
   defaultCounterpartyId: "cp1",
   defaultLabelTemplateId: "lt1",
@@ -165,6 +171,56 @@ const LABEL_TEMPLATE = {
   language: "zpl",
   updatedAt: "2026-01-01T00:00:00.000Z",
 };
+
+const INITIAL_SHIFT_FORM_VALUES: ShiftFormValues = {
+  productId: PRODUCT_A.id,
+  mode: "validation",
+  plannedQty: "500",
+  plannedDate: "2026-08-06",
+  lineId: "",
+  counterpartyId: "",
+  labelTemplateId: "",
+  ssccIssuerCounterpartyId: "",
+  boxLabelTemplateId: "",
+  boxCapacity: "",
+  palletCapacity: "",
+  palletsEnabled: false,
+};
+
+function DirtyReseedHarness() {
+  const [initialValues, setInitialValues] = useState(INITIAL_SHIFT_FORM_VALUES);
+  return (
+    <div
+      onChange={() =>
+        setInitialValues({
+          ...INITIAL_SHIFT_FORM_VALUES,
+          plannedQty: "900",
+        })
+      }
+    >
+      <ShiftForm
+        mode="edit"
+        initialValues={initialValues}
+        products={[PRODUCT_A]}
+        lines={[]}
+        counterparties={[]}
+        labelTemplates={[]}
+        onSubmit={() => undefined}
+        onDirtyChange={() => undefined}
+        onClose={() => undefined}
+      />
+    </div>
+  );
+}
+
+it("does not re-seed over an operator edit when initial values change in the same commit", () => {
+  render(<DirtyReseedHarness />);
+
+  const quantity = screen.getByLabelText("Плановое количество, шт");
+  fireEvent.change(quantity, { target: { value: "501" } });
+
+  expect((quantity as HTMLInputElement).value).toBe("501");
+});
 
 // Task 6: a second, distinct label template -- used together with
 // LABEL_TEMPLATE so the item-label-template select and the box-label-template

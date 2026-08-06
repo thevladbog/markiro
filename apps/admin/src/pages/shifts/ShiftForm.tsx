@@ -159,6 +159,11 @@ export function ShiftForm({
 
   const isDirtyRef = useRef(false);
 
+  useEffect(() => {
+    isDirtyRef.current = isDirty;
+    onDirtyChange(isDirty);
+  }, [isDirty, onDirtyChange]);
+
   // Re-seed clean forms only. Background dependency refetches must not erase
   // operator input from a still-open route panel.
   useEffect(() => {
@@ -171,11 +176,6 @@ export function ShiftForm({
     ssccIssuerTouchedRef.current = false;
     boxLabelTemplateTouchedRef.current = false;
   }, [initialValues, reset, formMode]);
-
-  useEffect(() => {
-    isDirtyRef.current = isDirty;
-    onDirtyChange(isDirty);
-  }, [isDirty, onDirtyChange]);
 
   // Product-change prefill (create mode only -- the product can't change once
   // a shift exists, and the product select is disabled while editing): applies

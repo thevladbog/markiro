@@ -67,10 +67,12 @@ function PanelState({ mode }: { mode: "create" | "edit" }) {
   if (context.counterpartiesError) {
     return (
       <SidePanel open size="standard" title={title} closeLabel={t("common.close")} onClose={close}>
-        <Alert tone="error">{t("pages.counterparties.form.loadError")}</Alert>
-        <Button type="button" variant="secondary" onClick={() => void context.retryPanelData()}>
-          {t("pages.counterparties.form.retry")}
-        </Button>
+        <div className="mk-counterparty-section-state">
+          <Alert tone="error">{t("pages.counterparties.form.loadError")}</Alert>
+          <Button type="button" variant="secondary" onClick={() => void context.retryPanelData()}>
+            {t("pages.counterparties.form.retry")}
+          </Button>
+        </div>
       </SidePanel>
     );
   }

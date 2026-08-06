@@ -105,6 +105,32 @@ it("shows a not-found state instead of a blank edit form", async () => {
   expect(screen.queryByLabelText("Название")).toBeNull();
 });
 
+it("shows the panel load error in its state layout and retries the counterparties request", async () => {
+  let attempts = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      if (String(url).startsWith("/api/counterparties")) {
+        attempts += 1;
+        return attempts === 1
+          ? jsonResponse(500, { message: "Unavailable" })
+          : jsonResponse(200, { items: [] });
+      }
+      return jsonResponse(200, { items: [] });
+    }),
+  );
+  const { user } = renderPanel(["/counterparties/new"]);
+
+  const panel = await screen.findByRole("dialog", { name: "Новый контрагент" });
+  const alert = await within(panel).findByRole("alert");
+  expect(alert.textContent).toContain("Не удалось загрузить данные контрагента.");
+  expect(alert.parentElement?.classList).toContain("mk-counterparty-section-state");
+
+  await user.click(within(panel).getByRole("button", { name: "Повторить" }));
+
+  expect(await screen.findByLabelText("Название")).toBeDefined();
+});
+
 it("guards a dirty create panel from Back until discard is confirmed", async () => {
   vi.stubGlobal(
     "fetch",
