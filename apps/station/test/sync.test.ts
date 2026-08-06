@@ -483,6 +483,163 @@ describe("sync engine", () => {
     fresh.stop();
   });
 
+  it("a sibling 200 received after the shared seal performs no local writes or acknowledgements", async () => {
+    const exec = await migratedExec();
+    await seed(exec, 1);
+    await exec.run(
+      `INSERT INTO boxes_mirror
+         (box_id, shift_id, terminal_id, sscc, opened_at, closed_at, closed_by)
+       VALUES (?,?,?,?,?,?,?)`,
+      [
+        "box-1",
+        "s1",
+        "t1",
+        "004601234560000017",
+        "2026-08-06T07:00:00Z",
+        "2026-08-06T08:00:00Z",
+        null,
+      ],
+    );
+    await exec.run(
+      `INSERT INTO box_exceptions_mirror
+         (kind, box_id, code_hash, target_scanned_at, shift_id, terminal_id, operator_id, reason, at)
+       VALUES (?,?,?,?,?,?,?,?,?)`,
+      ["reprint", "box-1", null, null, "s1", "t1", null, "damaged", "2026-08-06T08:01:00Z"],
+    );
+    let rejectA!: (reason: unknown) => void;
+    let resolveB!: (value: unknown) => void;
+    const postA = vi.fn(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectA = reject;
+        }),
+    );
+    const postB = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveB = resolve;
+          }),
+      )
+      .mockResolvedValue({ applied: 1, alreadyApplied: false, conflicts: [] });
+    const generation = createCredentialGeneration();
+    const onCredentialRejected = vi.fn();
+    const a = createSyncEngine({
+      exec,
+      client: { post: <T>() => postA() as Promise<T> },
+      machineId: "machine-1",
+      credentialGeneration: generation,
+      onState: () => {},
+      onCredentialRejected,
+    });
+    const b = createSyncEngine({
+      exec,
+      client: { post: <T>() => postB() as Promise<T> },
+      machineId: "machine-1",
+      credentialGeneration: generation,
+      onState: () => {},
+      onCredentialRejected,
+    });
+    a.nudge();
+    b.nudge();
+    await vi.waitFor(() => {
+      expect(postA).toHaveBeenCalledTimes(1);
+      expect(postB).toHaveBeenCalledTimes(1);
+    });
+    const snapshot = async () =>
+      JSON.stringify({
+        outbox: await exec.all("SELECT * FROM outbox ORDER BY id"),
+        boxes: await exec.all("SELECT * FROM boxes_mirror ORDER BY box_id"),
+        exceptions: await exec.all("SELECT * FROM box_exceptions_mirror ORDER BY id"),
+        meta: await exec.all(
+          "SELECT * FROM station_meta WHERE key LIKE 'sync_pending_%' ORDER BY key",
+        ),
+        conflicts: await exec.all("SELECT * FROM conflicts_mirror ORDER BY code_hash"),
+        pool: await exec.all(
+          "SELECT * FROM sscc_pool ORDER BY issuer_prefix, extension_digit, from_serial",
+        ),
+      });
+    const atSeal = await snapshot();
+
+    rejectA(new StationApiError(401, "rejected"));
+    await a.idle();
+    resolveB({
+      applied: 1,
+      alreadyApplied: false,
+      conflicts: [
+        {
+          codeHash: "h1",
+          winningTerminalId: "other",
+          winningScannedAt: "2026-08-06T07:59:00Z",
+        },
+      ],
+      ssccBlock: { issuerPrefix: "460123456", extensionDigit: 0, fromSerial: 1, toSerial: 5 },
+    });
+    await b.idle();
+
+    expect(onCredentialRejected).toHaveBeenCalledTimes(1);
+    expect(await snapshot()).toBe(atSeal);
+    a.stop();
+    b.stop();
+  });
+
+  it("a sibling retryable failure received after the shared seal schedules no old-key retry", async () => {
+    vi.useFakeTimers();
+    try {
+      const exec = await migratedExec();
+      await seed(exec, 1);
+      let rejectA!: (reason: unknown) => void;
+      let rejectB!: (reason: unknown) => void;
+      const postA = vi.fn(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectA = reject;
+          }),
+      );
+      const postB = vi.fn(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectB = reject;
+          }),
+      );
+      const generation = createCredentialGeneration();
+      const a = createSyncEngine({
+        exec,
+        client: { post: <T>() => postA() as Promise<T> },
+        machineId: "machine-1",
+        credentialGeneration: generation,
+        onState: () => {},
+      });
+      const b = createSyncEngine({
+        exec,
+        client: { post: <T>() => postB() as Promise<T> },
+        machineId: "machine-1",
+        credentialGeneration: generation,
+        onState: () => {},
+      });
+      a.nudge();
+      b.nudge();
+      await vi.waitFor(() => {
+        expect(postA).toHaveBeenCalledTimes(1);
+        expect(postB).toHaveBeenCalledTimes(1);
+      });
+
+      rejectA(new StationApiError(401, "rejected"));
+      await a.idle();
+      rejectB(new StationApiError(503, "unavailable"));
+      await b.idle();
+      await vi.advanceTimersByTimeAsync(BACKOFF_START_MS * 4);
+
+      expect(postA).toHaveBeenCalledTimes(1);
+      expect(postB).toHaveBeenCalledTimes(1);
+      a.stop();
+      b.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each([
     ["network", new Error("offline")],
     ["timeout", new DOMException("timed out", "AbortError")],

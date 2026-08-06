@@ -27,7 +27,7 @@ import { findFirstSeen, loadCodeKeys, recordScan, undoLastScan } from "../lib/jo
 import { readShiftMirror, type SqlExecutor } from "../lib/mirror.js";
 import { renderLabelBytes } from "../lib/print-label.js";
 import { rasterizeText } from "../lib/rasterizer.js";
-import { createScanQueue, type ScanOutcome } from "../lib/scan-queue.js";
+import { createScanQueue, type ScanOutcome, type ScanQueue } from "../lib/scan-queue.js";
 import type { ScanSource } from "../lib/scan-source.js";
 import { playSignalTone, type SoundSettings } from "../lib/signal-sound.js";
 import { PrintVerification } from "../ui/PrintVerification.js";
@@ -46,6 +46,8 @@ export interface WorkScreenProps {
   /** Signals a scan was just written, so a queued outbox row does not have
    * to wait for the sync engine's 15s heartbeat before draining. */
   onScanRecorded?: () => void;
+  /** Registers the ordered scan/job queue with App's credential-recovery barrier. */
+  onScanQueueRegister?: (queue: ScanQueue) => () => void;
   /** Return to shift selection. Does NOT close the shift — that is a cabinet action. */
   onExit: () => void;
   /** Scans still queued on this device, shown before the operator walks away. */
@@ -96,6 +98,7 @@ export function WorkScreen({
   source,
   sound,
   onScanRecorded,
+  onScanQueueRegister,
   onExit,
   pendingSync,
   issuerPrefix,
@@ -812,6 +815,22 @@ export function WorkScreen({
       live.current.onScanRecorded?.();
     });
   }
+
+  // Registration owns the intake lifecycle too. Closing first prevents a
+  // source callback racing unmount from adding work after recovery's barrier
+  // snapshot; unregister only after every scan/job accepted before close has
+  // settled. `open()` makes StrictMode's setup -> cleanup -> setup cycle safe
+  // even though useMemo deliberately preserves this one queue instance.
+  useEffect(() => {
+    queue.open();
+    const unregister = onScanQueueRegister?.(queue);
+    return () => {
+      void queue.close().then(
+        () => unregister?.(),
+        () => unregister?.(),
+      );
+    };
+  }, [onScanQueueRegister, queue]);
 
   // Paused while print verification is up: that scan source is reading the
   // box label's SSCC, not a product KM, and feeding it into this ordinary

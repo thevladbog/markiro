@@ -156,4 +156,32 @@ describe("scan queue", () => {
     expect(done).toEqual(["after"]);
     consoleError.mockRestore();
   });
+
+  it("closes intake while draining accepted work and can reopen under StrictMode setup", async () => {
+    const seen: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const queue = createScanQueue({
+      async process(raw) {
+        if (raw === "accepted") await gate;
+        seen.push(raw);
+        return outcome(raw);
+      },
+      onOutcome: () => {},
+    });
+
+    queue.enqueue("accepted");
+    const closed = queue.close();
+    queue.enqueue("after-close");
+    release();
+    await closed;
+    expect(seen).toEqual(["accepted"]);
+
+    queue.open();
+    queue.enqueue("after-reopen");
+    await queue.idle();
+    expect(seen).toEqual(["accepted", "after-reopen"]);
+  });
 });

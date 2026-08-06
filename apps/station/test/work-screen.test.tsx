@@ -9,6 +9,7 @@ import type { PrinterLanguage } from "../src/lib/hardware-config.js";
 import type { PrintTarget } from "../src/lib/hardware.js";
 import type { SqlExecutor } from "../src/lib/mirror.js";
 import type { ScanListener, ScanSource } from "../src/lib/scan-source.js";
+import type { ScanQueue } from "../src/lib/scan-queue.js";
 import type { SoundSettings } from "../src/lib/signal-sound.js";
 import { addRange } from "../src/lib/sscc-pool.js";
 import { WorkScreen } from "../src/pages/WorkScreen.js";
@@ -117,6 +118,7 @@ interface RenderWorkScreenOverrides {
   source?: ScanSource;
   sound?: SoundSettings;
   onScanRecorded?: () => void;
+  onScanQueueRegister?: (queue: ScanQueue) => () => void;
   onExit?: () => void;
   pendingSync?: number;
 }
@@ -133,6 +135,7 @@ function renderWorkScreen(overrides: RenderWorkScreenOverrides = {}) {
     source = manualSource(),
     sound = { muted: true, volume: 1 },
     onScanRecorded,
+    onScanQueueRegister,
     onExit = () => {},
     pendingSync = 0,
   } = overrides;
@@ -149,6 +152,7 @@ function renderWorkScreen(overrides: RenderWorkScreenOverrides = {}) {
       source={source}
       sound={sound}
       {...(onScanRecorded ? { onScanRecorded } : {})}
+      {...(onScanQueueRegister ? { onScanQueueRegister } : {})}
       onExit={onExit}
       pendingSync={pendingSync}
       // None of the tests in this file's outer `describe` care about boxes:
@@ -330,6 +334,48 @@ describe("WorkScreen", () => {
       expect(rows).toHaveLength(1);
     });
     expect(await screen.findByText("1")).toBeDefined();
+  });
+
+  it("keeps an unmounted queue registered until an accepted scan write becomes idle", async () => {
+    const source = manualSource();
+    const base = makeExec();
+    let releaseOutbox!: () => void;
+    let announceOutbox!: () => void;
+    const outboxGate = new Promise<void>((resolve) => {
+      releaseOutbox = resolve;
+    });
+    const outboxReached = new Promise<void>((resolve) => {
+      announceOutbox = resolve;
+    });
+    const exec: SqlExecutor = {
+      all: base.all,
+      async run(sql, params = []) {
+        if (sql.includes("INSERT INTO outbox")) {
+          announceOutbox();
+          await outboxGate;
+        }
+        await base.run(sql, params);
+      },
+    };
+    const registered = new Set<ScanQueue>();
+    const view = renderWorkScreen({
+      source,
+      exec,
+      onScanQueueRegister(queue) {
+        registered.add(queue);
+        return () => registered.delete(queue);
+      },
+    });
+
+    act(() => source.emit(KM));
+    await outboxReached;
+    view.unmount();
+    expect(registered.size).toBe(1);
+
+    releaseOutbox();
+    await Promise.all([...registered].map((queue) => queue.idle()));
+    await waitFor(() => expect(registered.size).toBe(0));
+    expect(await exec.all("SELECT raw FROM outbox")).toHaveLength(1);
   });
 
   it("flags the second scan of the same code as a duplicate", async () => {

@@ -688,11 +688,11 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
   }
 
   async function drain(): Promise<void> {
-    if (draining || stopped) return;
+    if (draining || stopped || credentialGeneration.sealed) return;
     draining = true;
     try {
       for (;;) {
-        if (stopped) break;
+        if (stopped || credentialGeneration.sealed) break;
         // A ceiling from a previous failed attempt on THIS batch — whether
         // pinned earlier in this same process or persisted by a process
         // that pinned it and then never got to clear it — re-reads exactly
@@ -719,6 +719,8 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
         const exceptionCeiling = await ensurePendingExceptionCeiling();
         await ensurePendingBatchId();
         let exceptions = await readExceptions(deps.exec, BATCH_SIZE, exceptionCeiling);
+
+        if (credentialGeneration.sealed) break;
 
         // Corrections and scans share one logical timeline even though they
         // live in separate SQLite tables. On a fresh attempt, send only the
@@ -763,8 +765,11 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
             pendingExceptionCeiling = null;
             pendingBatchId = null;
             await clearPersistedCeiling(deps.exec, CEILING_META_KEY);
+            if (credentialGeneration.sealed) break;
             await clearPersistedCeiling(deps.exec, BOX_CEILING_META_KEY);
+            if (credentialGeneration.sealed) break;
             await clearPersistedCeiling(deps.exec, EXCEPTION_CEILING_META_KEY);
+            if (credentialGeneration.sealed) break;
             await clearPersistedCeiling(deps.exec, BATCH_ID_META_KEY);
             continue;
           }
@@ -790,13 +795,17 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
         pendingBoxCeiling = newBoxCeiling ?? 0;
         pendingExceptionCeiling = newExceptionCeiling ?? 0;
         try {
+          if (credentialGeneration.sealed) break;
           await savePersistedCeiling(deps.exec, CEILING_META_KEY, pendingCeiling);
+          if (credentialGeneration.sealed) break;
           await savePersistedCeiling(deps.exec, BOX_CEILING_META_KEY, pendingBoxCeiling);
+          if (credentialGeneration.sealed) break;
           await savePersistedCeiling(
             deps.exec,
             EXCEPTION_CEILING_META_KEY,
             pendingExceptionCeiling,
           );
+          if (credentialGeneration.sealed) break;
           const instId = await ensureInstallId();
           // A batch's box set (when non-empty) is folded into `batchId`
           // (Finding 1) via `boxSetSignature`, on top of `maxId` when items
@@ -829,6 +838,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
             await savePersistedValue(deps.exec, BATCH_ID_META_KEY, batchId);
           }
           const serialsLeft = await computeSerialsLeft(deps.exec);
+          if (credentialGeneration.sealed) break;
           const res = await deps.client.post<BatchResponse>("/station/scans", {
             batchId,
             items: toPayload(batch),
@@ -836,6 +846,10 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
             exceptions: toExceptionPayload(exceptions),
             serialsLeft,
           });
+          // Another engine sharing this key may have received the terminal
+          // 401 while this request was in flight. Its response is now stale:
+          // do not record conflicts/ranges, ack facts, or clear retry state.
+          if (credentialGeneration.sealed) break;
           if (!isBatchResponse(res)) {
             // Parsed fine but isn't this endpoint's contract — could be a
             // proxy/captive portal on the plant network. Fall into the
@@ -854,6 +868,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
             ? res.conflicts.filter(isBatchConflict)
             : [];
           if (reported.length > 0) {
+            if (credentialGeneration.sealed) break;
             // Recorded BEFORE the ack, on purpose: `recordConflicts` and
             // `ackThrough` are two separate device-side writes (this pool
             // has no multi-call transaction — see the module doc comment),
@@ -886,6 +901,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
             // authoritative record either way.
             try {
               await recordConflicts(deps.exec, reported, new Date(now()).toISOString());
+              if (credentialGeneration.sealed) break;
               // A still-open box corrects itself: the operator simply scans
               // one more item. A CLOSED box is taped and labelled, so it
               // stays as printed and ends one position short — the cabinet
@@ -894,6 +910,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
               // deleting it. Same try/catch as `recordConflicts` above, for
               // the same reason: this is bookkeeping, not delivery.
               for (const c of reported) {
+                if (credentialGeneration.sealed) break;
                 await deps.exec.run(
                   `UPDATE codes_mirror SET box_id = NULL
                          WHERE code_hash = ?
@@ -912,6 +929,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
           // response carries another block. Losing one block costs at most
           // some burnt numbers, and SSCCs need not be contiguous.
           if (res.ssccBlock && isBatchSsccBlock(res.ssccBlock)) {
+            if (credentialGeneration.sealed) break;
             try {
               await addRange(deps.exec, res.ssccBlock);
             } catch (err) {
@@ -922,29 +940,39 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
           // server already, so holding on to it would wedge the queue
           // forever.
           if (maxId !== null) {
+            if (credentialGeneration.sealed) break;
             await ackThrough(deps.exec, maxId);
           }
           if (boxes.length > 0) {
+            if (credentialGeneration.sealed) break;
             // `boxes` itself -- not just the ids -- so the ack can gate each
             // row on the outcome fields actually read into THIS payload
             // (Finding 6): see `ackBoxes`'s own doc comment.
             await ackBoxes(deps.exec, boxes, new Date(now()).toISOString());
           }
           if (newExceptionCeiling !== null) {
+            if (credentialGeneration.sealed) break;
             await ackExceptionsThrough(deps.exec, newExceptionCeiling);
           }
+          if (credentialGeneration.sealed) break;
           // Clear the identity first, then its ceilings. A crash in between
           // leaves stale ceilings that exclude newer rows and are safely
           // discarded by the empty-prefix branch above. The reverse order
           // could expose newer rows under an already-applied batch id.
           await clearPersistedCeiling(deps.exec, BATCH_ID_META_KEY);
+          if (credentialGeneration.sealed) break;
           pendingBatchId = null;
-          if (pendingCeiling !== null) await clearPersistedCeiling(deps.exec, CEILING_META_KEY);
+          if (pendingCeiling !== null) {
+            await clearPersistedCeiling(deps.exec, CEILING_META_KEY);
+            if (credentialGeneration.sealed) break;
+          }
           if (pendingBoxCeiling !== null) {
             await clearPersistedCeiling(deps.exec, BOX_CEILING_META_KEY);
+            if (credentialGeneration.sealed) break;
           }
           if (pendingExceptionCeiling !== null) {
             await clearPersistedCeiling(deps.exec, EXCEPTION_CEILING_META_KEY);
+            if (credentialGeneration.sealed) break;
           }
           pendingCeiling = null;
           pendingBoxCeiling = null;
@@ -956,6 +984,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
             rejectCredential();
             break;
           }
+          if (credentialGeneration.sealed) break;
           // Every non-credential failure here — network error, timeout,
           // non-401 response, bad JSON, or wrong shape — is retried
           // indefinitely. A real authenticated 401 is the one terminal
@@ -978,7 +1007,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
       // promise, so an uncaught rejection would silently kill sync with the
       // indicator frozen at its last value.
       console.error("station: sync drain failed", err);
-      scheduleRetry();
+      if (!credentialGeneration.sealed) scheduleRetry();
       try {
         await publishState();
       } catch (publishErr) {
@@ -1005,7 +1034,8 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
       // after it). Dropping a stale `requested` in that case is safe: the
       // scheduled retry performs a full drain of whatever is queued by the
       // time it fires, so no request is actually lost, only its timing.
-      const shouldContinue = requested && !stopped && retryTimer === null;
+      const shouldContinue =
+        requested && !stopped && !credentialGeneration.sealed && retryTimer === null;
       requested = false;
       if (shouldContinue) {
         void drain();
@@ -1016,7 +1046,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
   }
 
   function scheduleRetry(): void {
-    if (stopped || retryTimer !== null) return;
+    if (stopped || credentialGeneration.sealed || retryTimer !== null) return;
     const delay = backoffMs;
     backoffMs = Math.min(backoffMs * 2, BACKOFF_CAP_MS);
     retryTimer = setTimeout(() => {
@@ -1027,7 +1057,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
 
   return {
     nudge() {
-      if (stopped) return;
+      if (stopped || credentialGeneration.sealed) return;
       if (draining) {
         requested = true;
         return;

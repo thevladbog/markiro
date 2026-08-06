@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
 import {
   clearRejectedCredentialState,
+  createFloorWorkRegistry,
   readSealedWorkSummary,
 } from "../src/lib/credential-recovery.js";
 import {
@@ -12,6 +13,7 @@ import {
   type StationBundle,
 } from "../src/lib/mirror.js";
 import { mirrorShiftBundle } from "../src/lib/shift-bundle.js";
+import { createScanQueue } from "../src/lib/scan-queue.js";
 
 async function migratedExec(
   onRun?: (sql: string, params: unknown[]) => void,
@@ -203,6 +205,63 @@ describe("credential rejection recovery", () => {
       total: 4,
     });
     expect(snapshotQueries).toBe(1);
+  });
+
+  it("waits for an accepted floor scan to finish journalling before taking the summary snapshot", async () => {
+    const exec = await migratedExec();
+    let releaseWrite!: () => void;
+    const writeGate = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    const queue = createScanQueue({
+      async process(raw) {
+        await writeGate;
+        await exec.run(
+          `INSERT INTO outbox
+             (shift_id, terminal_id, raw, verdict, scanned_at, code_hash, gtin14, serial)
+           VALUES (?,?,?,?,?,?,?,?)`,
+          [
+            "shift-1",
+            "device-1",
+            raw,
+            "ok",
+            "2026-08-06T08:00:00Z",
+            "hash",
+            "04600000000017",
+            "SERIAL",
+          ],
+        );
+        return { raw, verdict: { status: "ok", key: "hash" }, firstSeen: null };
+      },
+      onOutcome: () => {},
+    });
+    queue.enqueue("ACCEPTED-BEFORE-UNMOUNT");
+    const summary = readSealedWorkSummary(exec, [queue], 1_000);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    releaseWrite();
+
+    await expect(summary).resolves.toEqual({ scans: 1, boxes: 0, exceptions: 0, total: 1 });
+  });
+
+  it("fails safely instead of hanging forever when a floor work barrier never settles", async () => {
+    const exec = await migratedExec();
+    const neverIdle = { idle: () => new Promise<void>(() => {}) };
+
+    await expect(readSealedWorkSummary(exec, [neverIdle], 5)).rejects.toThrow(
+      "floor work barrier timed out",
+    );
+  });
+
+  it("keeps a StrictMode replacement registration when the simulated cleanup settles late", () => {
+    const registry = createFloorWorkRegistry();
+    const barrier = { idle: async () => {} };
+    const unregisterFirstSetup = registry.register(barrier);
+    const unregisterReplacementSetup = registry.register(barrier);
+
+    unregisterFirstSetup();
+    expect([...registry.current()]).toEqual([barrier]);
+    unregisterReplacementSetup();
+    expect([...registry.current()]).toEqual([]);
   });
 
   it("clears only explicit reproducible caches after the durable credential boundary", async () => {

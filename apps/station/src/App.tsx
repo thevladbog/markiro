@@ -7,10 +7,12 @@ import { createStationClient } from "./lib/api-client.js";
 import {
   clearRejectedCredentialState,
   createCredentialGeneration,
+  createFloorWorkRegistry,
   credentialGenerationIsCurrent,
   readSealedWorkSummary,
   type CredentialGeneration,
   type CredentialRejectedEvent,
+  type FloorWorkBarrier,
   type SealedWorkSummary,
 } from "./lib/credential-recovery.js";
 import {
@@ -142,6 +144,11 @@ export function App() {
     null,
   );
   const recoveryCleanupStarted = useRef<CredentialRejectedEvent | null>(null);
+  const floorWorkRegistry = useMemo(() => createFloorWorkRegistry(), []);
+  const registerFloorWorkBarrier = useCallback(
+    (barrier: FloorWorkBarrier) => floorWorkRegistry.register(barrier),
+    [floorWorkRegistry],
+  );
   // Bumped every time the operator leaves the setup screen (Done or Back),
   // so the scanner-session effect below re-runs even when the saved
   // `hardwareConfig.scanner` port/baud are unchanged -- e.g. Setup's own
@@ -375,7 +382,7 @@ export function App() {
         // The recovery render above has already removed every authenticated
         // action. Count all durable unsent facts in one SQLite snapshot before
         // deleting any reproducible state; a count failure stays fail-closed.
-        const sealed = await readSealedWorkSummary(tauriExecutor);
+        const sealed = await readSealedWorkSummary(tauriExecutor, floorWorkRegistry.current());
         await clearRejectedCredentialState({ exec: tauriExecutor, clearCredential });
         const cleared = await readConfig();
         if (
@@ -400,7 +407,7 @@ export function App() {
         );
       }
     })();
-  }, [config, credentialRecovery]);
+  }, [config, credentialRecovery, floorWorkRegistry]);
 
   // Initialization sync: as soon as the device has a credential — right after
   // enrollment, and on every later start — pull the operator roster so the
@@ -628,6 +635,7 @@ export function App() {
             source={scanSource}
             sound={sound}
             onScanRecorded={nudgeSync}
+            onScanQueueRegister={registerFloorWorkBarrier}
             onExit={() => {
               // Both cleared together: `floorView` is separate state that
               // stays "new" when this shift was entered through NewShift, so
