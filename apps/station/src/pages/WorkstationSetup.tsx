@@ -23,6 +23,8 @@ export interface WorkstationSetupProps {
   onConfigChange: (config: HardwareConfig) => void;
   /** Explicit service-only transition back to station pairing. */
   onResetCredential?: () => Promise<void>;
+  /** Why credential reset is unavailable for a config that cannot prove queue ownership yet. */
+  credentialResetBlockedReason?: string;
   onDone: () => void;
 }
 
@@ -81,6 +83,7 @@ export function WorkstationSetup({
   onSoundChange,
   onConfigChange,
   onResetCredential,
+  credentialResetBlockedReason,
   onDone,
 }: WorkstationSetupProps) {
   const { t } = useTranslation();
@@ -619,19 +622,25 @@ export function WorkstationSetup({
         </label>
       </section>
 
-      {onResetCredential ? (
+      {onResetCredential || credentialResetBlockedReason ? (
         <section style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <h2 style={{ fontSize: "1.5rem" }}>{t("setup.repairTitle")}</h2>
-          <p>{t("setup.repairHint")}</p>
-          <Button
-            type="button"
-            variant="secondary"
-            style={{ minHeight: 64, alignSelf: "flex-start" }}
-            disabled={busy || loading}
-            onClick={() => void resetCredential()}
-          >
-            {t("setup.repairAction")}
-          </Button>
+          {credentialResetBlockedReason ? (
+            <p role="status">{credentialResetBlockedReason}</p>
+          ) : (
+            <>
+              <p>{t("setup.repairHint")}</p>
+              <Button
+                type="button"
+                variant="secondary"
+                style={{ minHeight: 64, alignSelf: "flex-start" }}
+                disabled={busy || loading}
+                onClick={() => void resetCredential()}
+              >
+                {t("setup.repairAction")}
+              </Button>
+            </>
+          )}
         </section>
       ) : null}
 

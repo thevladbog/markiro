@@ -2,7 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { OperatorMirrorRecord } from "@markiro/db";
 import { Button, Card } from "@markiro/ui";
-import { clearCredential, isEnrolled, readConfig, type StationConfig } from "./lib/config.js";
+import {
+  clearCredential,
+  isEnrolled,
+  readConfig,
+  writeConfig,
+  type StationConfig,
+} from "./lib/config.js";
 import { createStationClient, StationApiError, type StationClient } from "./lib/api-client.js";
 import {
   clearRejectedCredentialState,
@@ -33,7 +39,12 @@ import { createKeyboardWedgeSource } from "./lib/scan-source.js";
 import { canonicalStationApiUrl } from "./lib/station-api-url.js";
 import { loadSoundSettings, type SoundSettings } from "./lib/signal-sound.js";
 import { tauriExecutor } from "./lib/sqlite.js";
-import { backfillLegacyStationIdentity } from "./lib/legacy-identity.js";
+import { resolveLegacyStationIdentity } from "./lib/legacy-identity.js";
+import { ConfigTransitionCoordinator } from "./lib/config-transition.js";
+import {
+  resetCredentialForPairing as resetCredentialConfig,
+  type RunConfigTransition,
+} from "./lib/credential-reset.js";
 import { useSyncEngine } from "./lib/use-sync-engine.js";
 import { ConflictList } from "./pages/ConflictList.js";
 import { Enrollment } from "./pages/Enrollment.js";
@@ -137,6 +148,8 @@ export function scannerIndicator(
 export function App() {
   const { t } = useTranslation();
   const [config, setConfig] = useState<StationConfig | null>(null);
+  const configRef = useRef<StationConfig | null>(null);
+  const configTransitions = useRef(new ConfigTransitionCoordinator());
   const [operator, setOperator] = useState<OperatorMirrorRecord | null>(null);
   const [floorView, setFloorView] = useState<"select" | "new">("select");
   const [shift, setShift] = useState<ActiveShift | null>(null);
@@ -159,12 +172,38 @@ export function App() {
     null,
   );
   const [legacyIdentityState, setLegacyIdentityState] = useState<LegacyIdentityState>(null);
-  const legacyIdentityAttempt = useRef<Promise<void> | null>(null);
+  const legacyIdentityAttempt = useRef<Promise<unknown> | null>(null);
   const recoveryCleanupStarted = useRef<CredentialRejectedEvent | null>(null);
   const floorWorkRegistry = useMemo(() => createFloorWorkRegistry(), []);
   const registerFloorWorkBarrier = useCallback(
     (barrier: FloorWorkBarrier) => floorWorkRegistry.register(barrier),
     [floorWorkRegistry],
+  );
+  const publishConfig = useCallback((next: StationConfig) => {
+    configRef.current = next;
+    setConfig(next);
+  }, []);
+  const runConfigTransition: RunConfigTransition = useCallback(
+    async <T,>(transition: () => Promise<T>, publish: (value: T) => void): Promise<T> => {
+      const generation = configTransitions.current.begin();
+      let committedValue: T | undefined;
+      const result = await configTransitions.current.commit({
+        generation,
+        isOriginCurrent: () => true,
+        transition,
+        publish: (value) => {
+          committedValue = value;
+          publish(value);
+        },
+      });
+      if (result === "stale") throw new Error("config transition superseded");
+      return committedValue as T;
+    },
+    [],
+  );
+  const runEnrollmentConfigTransition = useCallback(
+    (transition: () => Promise<void>) => runConfigTransition(transition, () => {}),
+    [runConfigTransition],
   );
   // Bumped every time the operator leaves the setup screen (Done or Back),
   // so the scanner-session effect below re-runs even when the saved
@@ -184,6 +223,17 @@ export function App() {
   useEffect(() => {
     void loadHardwareConfig(tauriExecutor).then(setHardwareConfig);
   }, []);
+
+  useEffect(
+    () => () => {
+      // Invalidate responses from both initial and reconnect identity attempts.
+      // Clearing the ref lets React StrictMode's effect remount launch a fresh
+      // generation while the first development-only request becomes a no-op.
+      configTransitions.current.seal();
+      legacyIdentityAttempt.current = null;
+    },
+    [],
+  );
 
   // Open a configured scanner at start so a set-up station comes up ready,
   // and again whenever the configured scanner changes (e.g. from Setup).
@@ -307,12 +357,12 @@ export function App() {
         console.error("station: applyMigrations failed", err);
       }
       const cfg = await readConfig();
-      if (!cancelled) setConfig(cfg);
+      if (!cancelled) publishConfig(cfg);
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [publishConfig]);
 
   useEffect(() => {
     const goOnline = () => setOnline(true);
@@ -342,13 +392,28 @@ export function App() {
   const attemptLegacyIdentity = useCallback(() => {
     if (!config || !client || config.deviceId || legacyIdentityState === "rejected") return;
     if (legacyIdentityAttempt.current) return;
+    const origin = config;
+    const generation = configTransitions.current.begin();
     setLegacyIdentityState("resolving");
-    const attempt = backfillLegacyStationIdentity(client, config)
+    const attempt = resolveLegacyStationIdentity(client, origin)
       .then((backfilled) => {
-        setConfig(backfilled);
-        setLegacyIdentityState(null);
+        return configTransitions.current.commit({
+          generation,
+          isOriginCurrent: () => configRef.current === origin,
+          transition: async () => {
+            await writeConfig(backfilled);
+            return backfilled;
+          },
+          publish: (committed) => {
+            publishConfig(committed);
+            setLegacyIdentityState(null);
+          },
+        });
       })
       .catch((error: unknown) => {
+        if (!configTransitions.current.isCurrent(generation) || configRef.current !== origin) {
+          return;
+        }
         setLegacyIdentityState(
           error instanceof StationApiError && error.status === 401 ? "rejected" : "degraded",
         );
@@ -357,10 +422,17 @@ export function App() {
         if (legacyIdentityAttempt.current === attempt) legacyIdentityAttempt.current = null;
       });
     legacyIdentityAttempt.current = attempt;
-  }, [client, config, legacyIdentityState]);
+  }, [client, config, legacyIdentityState, publishConfig]);
 
   useEffect(() => {
-    if (!config || !client || config.deviceId || legacyIdentityState !== null) return;
+    if (
+      !config ||
+      !client ||
+      config.deviceId ||
+      (legacyIdentityState !== null && legacyIdentityState !== "resolving")
+    ) {
+      return;
+    }
     attemptLegacyIdentity();
   }, [attemptLegacyIdentity, client, config, legacyIdentityState]);
 
@@ -383,6 +455,7 @@ export function App() {
 
   const onCredentialRejected = useCallback((event: CredentialRejectedEvent) => {
     if (currentCredentialGeneration.current !== event.generation) return;
+    configTransitions.current.seal();
     // These updates gate every authenticated surface in the next render.
     // Cache deletion happens only from the post-commit effect below.
     setOperator(null);
@@ -421,8 +494,8 @@ export function App() {
     if (recoveryCleanupStarted.current === credentialRecovery.event) return;
     recoveryCleanupStarted.current = credentialRecovery.event;
     const previous = config;
-    void (async () => {
-      try {
+    void runConfigTransition(
+      async () => {
         if (
           !previous.deviceId ||
           previous.machineId !== credentialRecovery.event.machineId ||
@@ -444,21 +517,24 @@ export function App() {
         ) {
           throw new Error("credential recovery clear contract violation");
         }
-        setConfig(cleared);
+        return { cleared, sealed };
+      },
+      ({ cleared, sealed }) => {
+        publishConfig(cleared);
         setCredentialRecovery((current) =>
           current?.event === credentialRecovery.event
             ? { event: credentialRecovery.event, phase: "ready", sealed }
             : current,
         );
-      } catch {
-        setCredentialRecovery((current) =>
-          current?.event === credentialRecovery.event
-            ? { event: credentialRecovery.event, phase: "failed" }
-            : current,
-        );
-      }
-    })();
-  }, [config, credentialRecovery, floorWorkRegistry]);
+      },
+    ).catch(() => {
+      setCredentialRecovery((current) =>
+        current?.event === credentialRecovery.event
+          ? { event: credentialRecovery.event, phase: "failed" }
+          : current,
+      );
+    });
+  }, [config, credentialRecovery, floorWorkRegistry, publishConfig, runConfigTransition]);
 
   // Initialization sync: as soon as the device has a credential — right after
   // enrollment, and on every later start — pull the operator roster so the
@@ -487,24 +563,34 @@ export function App() {
   }, [authenticatedClient, credentialGeneration, nudgeSync]);
 
   async function refreshConfig() {
-    setConfig(await readConfig());
+    await runConfigTransition(readConfig, publishConfig);
   }
 
   async function finishCredentialRecovery() {
-    const refreshed = await readConfig();
-    if (
-      !credentialRecovery ||
-      refreshed.machineId !== credentialRecovery.event.machineId ||
-      refreshed.deviceId !== config?.deviceId
-    ) {
+    try {
+      await runConfigTransition(
+        async () => {
+          const refreshed = await readConfig();
+          if (
+            !credentialRecovery ||
+            refreshed.machineId !== credentialRecovery.event.machineId ||
+            refreshed.deviceId !== configRef.current?.deviceId
+          ) {
+            throw new Error("credential recovery identity changed");
+          }
+          return refreshed;
+        },
+        (refreshed) => {
+          publishConfig(refreshed);
+          recoveryCleanupStarted.current = null;
+          setCredentialRecovery(null);
+        },
+      );
+    } catch {
       setCredentialRecovery((current) =>
         current ? { event: current.event, phase: "failed" } : current,
       );
-      return;
     }
-    setConfig(refreshed);
-    recoveryCleanupStarted.current = null;
-    setCredentialRecovery(null);
   }
 
   /**
@@ -512,27 +598,19 @@ export function App() {
    * handler is never called by a network failure path.
    */
   async function resetCredentialForPairing() {
-    if (!config) throw new Error(t("setup.resetCredentialFailed"));
-    const previous = config;
+    const previous = configRef.current;
+    if (!previous) throw new Error(t("setup.resetCredentialFailed"));
     try {
-      await clearCredential();
-      const cleared = await readConfig();
-      // The Rust contract keeps the durable station record and its trusted
-      // recovery base. Refuse to show a false pairing state if that boundary
-      // is ever violated by the shell.
-      if (
-        cleared.machineId !== previous.machineId ||
-        cleared.deviceId !== previous.deviceId ||
-        cleared.serverUrl !== previous.serverUrl ||
-        cleared.apiKey !== undefined
-      ) {
-        throw new Error("credential reset contract violation");
-      }
+      await resetCredentialConfig(previous, {
+        clearCredential,
+        readConfig,
+        runTransition: runConfigTransition,
+        publishConfig,
+      });
       setOperator(null);
       setShift(null);
       setFloorView("select");
       setShowSetup(false);
-      setConfig(cleared);
     } catch {
       // Never expose IPC details or a device key in the service UI.
       throw new Error(t("setup.resetCredentialFailed"));
@@ -555,6 +633,7 @@ export function App() {
           {...(config.deviceId ? { expectedDeviceId: config.deviceId } : {})}
           sealedWork={credentialRecovery.sealed}
           onEnrolled={() => void finishCredentialRecovery()}
+          runConfigTransition={runEnrollmentConfigTransition}
           scanSource={scanSource}
           pairingServerUrl={pairingServerUrl(config, configuredStationApiUrl())}
         />
@@ -629,6 +708,7 @@ export function App() {
 
   // `config` is narrowed to non-null for the rest of this render.
   const stage = nextStationView(config, operator);
+  const legacyCredentialResetBlocked = Boolean(config.apiKey && !config.deviceId);
 
   if (stage === "pairing") {
     if (showSetup) {
@@ -651,6 +731,7 @@ export function App() {
         machineId={config.machineId}
         {...(config.deviceId ? { expectedDeviceId: config.deviceId } : {})}
         onEnrolled={() => void refreshConfig()}
+        runConfigTransition={runEnrollmentConfigTransition}
         onSetup={() => setShowSetup(true)}
         scanSource={scanSource}
         pairingServerUrl={pairingServerUrl(config, configuredStationApiUrl())}
@@ -709,7 +790,9 @@ export function App() {
           sound={sound}
           onSoundChange={setSound}
           onConfigChange={setHardwareConfig}
-          onResetCredential={resetCredentialForPairing}
+          {...(legacyCredentialResetBlocked
+            ? { credentialResetBlockedReason: t("setup.legacyRepairBlocked") }
+            : { onResetCredential: resetCredentialForPairing })}
           onDone={() => {
             setShowSetup(false);
             // Covers both exits from Setup with one line: `finish()` calls

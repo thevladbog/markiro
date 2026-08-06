@@ -132,6 +132,7 @@
     "sound": "Sound",
     "repairTitle": "Station pairing",
     "repairHint": "Use this only when a service user needs to pair this same station again. The device key will be removed; local production records stay on this station.",
+    "legacyRepairBlocked": "Re-pairing is unavailable until this legacy station identity is safely updated. Local production records remain preserved; retry the identity update or contact support.",
     "repairAction": "Re-pair this station",
     "resetCredentialFailed": "Could not reset station credentials. Try again or contact support.",
     "mute": "Mute",

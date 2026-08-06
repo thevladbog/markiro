@@ -21,6 +21,8 @@ export interface EnrollmentProps {
   pairingServerUrl: string | null;
   onSetup?: () => void;
   scanSource?: ScanSource;
+  /** Serializes credential/config persistence with any identity migration. */
+  runConfigTransition?: (transition: () => Promise<void>) => Promise<void>;
 }
 
 type EnrollmentState = "waiting" | "redeeming" | "success" | "service";
@@ -38,6 +40,7 @@ export function Enrollment({
   pairingServerUrl,
   onSetup,
   scanSource,
+  runConfigTransition = (transition) => transition(),
 }: EnrollmentProps) {
   const { t } = useTranslation();
   const [code, setCode] = useState("");
@@ -76,12 +79,14 @@ export function Enrollment({
     }
 
     try {
-      await persistStationProvisioning(result.provisioning, {
-        machineId,
-        ...(expectedDeviceId ? { expectedDeviceId } : {}),
-        exec: tauriExecutor,
-        writeConfig,
-      });
+      await runConfigTransition(() =>
+        persistStationProvisioning(result.provisioning, {
+          machineId,
+          ...(expectedDeviceId ? { expectedDeviceId } : {}),
+          exec: tauriExecutor,
+          writeConfig,
+        }),
+      );
       setState("success");
       onEnrolled();
     } catch {
@@ -99,7 +104,7 @@ export function Enrollment({
     try {
       const client = createStationClient({ machineId, apiKey, serverUrl });
       await client.whoami();
-      await writeConfig({ machineId, apiKey, serverUrl });
+      await runConfigTransition(() => writeConfig({ machineId, apiKey, serverUrl }));
       setState("success");
       onEnrolled();
     } catch {

@@ -1,5 +1,5 @@
 import type { StationClient } from "./api-client.js";
-import { writeConfig, type StationConfig } from "./config.js";
+import type { StationConfig } from "./config.js";
 
 interface StationIdentity {
   device: {
@@ -58,12 +58,11 @@ function decodeStationIdentity(value: unknown): StationIdentity | null {
 }
 
 /**
- * Migrates a pre-deviceId config only after the existing key proves its own
- * durable server-side station row. `writeConfig` is the Rust atomic
- * temp-file/fsync/rename boundary; no normal authenticated client is exposed
- * until this promise resolves.
+ * Resolves the config a pre-deviceId station may atomically persist only after
+ * the existing key proves its own durable server-side station row. The caller
+ * owns the generation check and serialized write boundary.
  */
-export async function backfillLegacyStationIdentity(
+export async function resolveLegacyStationIdentity(
   client: Pick<StationClient, "get">,
   config: StationConfig,
 ): Promise<StationConfig> {
@@ -84,6 +83,5 @@ export async function backfillLegacyStationIdentity(
       ? { lineId: identity.device.line.id, lineName: identity.device.line.name }
       : {}),
   };
-  await writeConfig(next);
   return next;
 }

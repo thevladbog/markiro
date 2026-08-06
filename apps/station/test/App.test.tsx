@@ -704,6 +704,188 @@ describe("App", () => {
     resolveReconnect(new Response("{}", { status: 503 }));
   });
 
+  it("keeps re-pairing unavailable in Setup while a legacy identity request is pending", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const persistedConfig: Record<string, unknown> = {
+      machine_id: "legacy-machine",
+      api_key: "legacy-key",
+      server_url: "https://api.factory.example",
+    };
+    const outbox = mockInvokeForFloor(
+      pinHash,
+      { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+      [outboxRow(1)],
+      persistedConfig,
+    );
+    const originalQueue = JSON.stringify(outbox);
+    let resolveIdentity!: (response: Response) => void;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveIdentity = resolve;
+          }),
+      ),
+    );
+
+    const view = render(<App />);
+    await screen.findByText("Updating station identity. Cached offline work remains available.");
+    await signInAsOperator();
+    fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
+
+    expect(
+      await screen.findByText(
+        "Re-pairing is unavailable until this legacy station identity is safely updated. Local production records remain preserved; retry the identity update or contact support.",
+      ),
+    ).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Re-pair this station" })).toBeNull();
+    expect(invokeMock).not.toHaveBeenCalledWith("clear_credential");
+    expect(screen.queryByLabelText("Pairing code")).toBeNull();
+    expect(JSON.stringify(outbox)).toBe(originalQueue);
+
+    view.unmount();
+    resolveIdentity(
+      new Response(
+        JSON.stringify({
+          device: {
+            id: "legacy-device",
+            name: "Legacy station",
+            tenantId: "tenant-legacy",
+            organizationName: "Factory",
+            line: null,
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(invokeMock).not.toHaveBeenCalledWith("write_config", expect.anything());
+    expect(persistedConfig).toEqual({
+      machine_id: "legacy-machine",
+      api_key: "legacy-key",
+      server_url: "https://api.factory.example",
+    });
+    expect(JSON.stringify(outbox)).toBe(originalQueue);
+  });
+
+  it("seals a degraded retry on unmount before a late identity response can write", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const persistedConfig: Record<string, unknown> = {
+      machine_id: "legacy-machine",
+      api_key: "legacy-key",
+      server_url: "https://api.factory.example",
+    };
+    const outbox = mockInvokeForFloor(
+      pinHash,
+      { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+      [outboxRow(1)],
+      persistedConfig,
+    );
+    const originalQueue = JSON.stringify(outbox);
+    let resolveRetry!: (response: Response) => void;
+    const fetchMock = vi
+      .fn<() => Promise<Response>>()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveRetry = resolve;
+          }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const view = render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Retry identity update" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    view.unmount();
+    resolveRetry(
+      new Response(
+        JSON.stringify({
+          device: {
+            id: "legacy-device",
+            name: "Legacy station",
+            tenantId: "tenant-legacy",
+            organizationName: "Factory",
+            line: null,
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(invokeMock).not.toHaveBeenCalledWith("write_config", expect.anything());
+    expect(persistedConfig).toEqual({
+      machine_id: "legacy-machine",
+      api_key: "legacy-key",
+      server_url: "https://api.factory.example",
+    });
+    expect(JSON.stringify(outbox)).toBe(originalQueue);
+  });
+
+  it("keeps only the current legacy identity generation under StrictMode effect remounting", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const persistedConfig: Record<string, unknown> = {
+      machine_id: "legacy-machine",
+      api_key: "legacy-key",
+      server_url: "https://api.factory.example",
+    };
+    const outbox = mockInvokeForFloor(
+      pinHash,
+      { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+      [outboxRow(1)],
+      persistedConfig,
+    );
+    const originalQueue = JSON.stringify(outbox);
+    const identityResolvers: Array<(response: Response) => void> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) => {
+        if (new URL(url).pathname !== "/station/identity") {
+          return new Promise<Response>(() => {});
+        }
+        return new Promise<Response>((resolve) => identityResolvers.push(resolve));
+      }),
+    );
+
+    const view = render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
+    await waitFor(() => expect(identityResolvers.length).toBeGreaterThan(0));
+    act(() => {
+      for (const resolve of identityResolvers) {
+        resolve(
+          new Response(
+            JSON.stringify({
+              device: {
+                id: "legacy-device",
+                name: "Legacy station",
+                tenantId: "tenant-legacy",
+                organizationName: "Factory",
+                line: null,
+              },
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        );
+      }
+    });
+
+    await waitFor(() =>
+      expect(invokeMock.mock.calls.filter(([cmd]) => cmd === "write_config")).toHaveLength(1),
+    );
+    expect(persistedConfig).toMatchObject({
+      machine_id: "legacy-machine",
+      device_id: "legacy-device",
+      api_key: "legacy-key",
+    });
+    expect(JSON.stringify(outbox)).toBe(originalQueue);
+    view.unmount();
+  });
+
   it("holds a rejected legacy identity in stable service recovery without clearing or pairing the queue", async () => {
     const pinHash = await hashSecret(OPERATOR_PIN);
     const invoked: string[] = [];
