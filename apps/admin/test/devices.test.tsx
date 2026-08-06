@@ -131,6 +131,117 @@ it("sends filter and pager state to the bounded devices endpoint", async () => {
   await waitFor(() => expect(requests).toContain("/api/devices?page=2&pageSize=8&type=kiosk"));
 });
 
+it("hydrates and clears URL filters independently while resetting the page", async () => {
+  const requests: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      requests.push(url);
+      if (url.startsWith("/api/devices"))
+        return response({ items: [], page: 1, pageSize: 8, total: 0 });
+      if (url === "/api/lines") return response({ items: [] });
+      throw new Error(`Unexpected request: ${url}`);
+    }),
+  );
+  render(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <ThemeProvider defaultTheme="light">
+        <MemoryRouter initialEntries={["/devices?type=kiosk&status=offline&page=2"]}>
+          <AccessProvider
+            value={{ roles: ["admin"], capabilities: [CABINET_CAPABILITY.OPERATIONS_READ] }}
+          >
+            <DevicesPage />
+          </AccessProvider>
+        </MemoryRouter>
+      </ThemeProvider>
+    </QueryClientProvider>,
+  );
+  await waitFor(() =>
+    expect(requests).toContain("/api/devices?page=2&pageSize=8&type=kiosk&status=offline"),
+  );
+  expect((screen.getByLabelText("Тип") as HTMLSelectElement).value).toBe("kiosk");
+  expect((screen.getByLabelText("Статус") as HTMLSelectElement).value).toBe("offline");
+  fireEvent.change(screen.getByLabelText("Тип"), { target: { value: "" } });
+  await waitFor(() => expect(requests).toContain("/api/devices?page=1&pageSize=8&status=offline"));
+  fireEvent.change(screen.getByLabelText("Статус"), { target: { value: "" } });
+  await waitFor(() => expect(requests).toContain("/api/devices?page=1&pageSize=8"));
+});
+
+it("hides Add device when the grant cannot create either type", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => response({ items: [], page: 1, pageSize: 8, total: 0 })),
+  );
+  render(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <ThemeProvider defaultTheme="light">
+        <MemoryRouter>
+          <AccessProvider value={{ roles: [], capabilities: [CABINET_CAPABILITY.OPERATIONS_READ] }}>
+            <DevicesPage />
+          </AccessProvider>
+        </MemoryRouter>
+      </ThemeProvider>
+    </QueryClientProvider>,
+  );
+  await screen.findByText("Устройства не добавлены");
+  expect(screen.queryByRole("button", { name: "Добавить устройство" })).toBeNull();
+});
+
+it("lets an operations-only user create a kiosk without issuing a pairing code", async () => {
+  const requests: Array<{ url: string; method?: string }> = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      requests.push({ url, ...(init?.method ? { method: init.method } : {}) });
+      if (url.startsWith("/api/devices"))
+        return response({ items: [], page: 1, pageSize: 8, total: 0 });
+      if (url === "/api/lines") return response({ items: [] });
+      if (url === "/api/kiosks") return response({ id: "kiosk-ops", name: "Ops kiosk" });
+      throw new Error(`Unexpected request: ${url}`);
+    }),
+  );
+  render(
+    <QueryClientProvider
+      client={
+        new QueryClient({
+          defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+        })
+      }
+    >
+      <ThemeProvider defaultTheme="light">
+        <MemoryRouter>
+          <AccessProvider
+            value={{
+              roles: ["manager"],
+              capabilities: [
+                CABINET_CAPABILITY.OPERATIONS_READ,
+                CABINET_CAPABILITY.OPERATIONS_WRITE,
+              ],
+            }}
+          >
+            <DevicesPage />
+          </AccessProvider>
+        </MemoryRouter>
+      </ThemeProvider>
+    </QueryClientProvider>,
+  );
+  await screen.findByText("Устройства не добавлены");
+  fireEvent.click(screen.getByRole("button", { name: "Добавить устройство" }));
+  const drawer = await screen.findByRole("dialog", { name: "Новое устройство" });
+  expect((within(drawer).getByLabelText("Тип") as HTMLSelectElement).value).toBe("kiosk");
+  expect(within(drawer).queryByRole("option", { name: "Станция" })).toBeNull();
+  fireEvent.change(within(drawer).getByLabelText("Название"), { target: { value: "Ops kiosk" } });
+  fireEvent.click(within(drawer).getByRole("button", { name: "Создать" }));
+  await screen.findByText(/ожидает привязки/);
+  expect(requests.some((request) => request.url.includes("pairing-code"))).toBe(false);
+});
+
 it("keeps the drawer open in its code stage after creating a kiosk", async () => {
   vi.stubGlobal(
     "fetch",
