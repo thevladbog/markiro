@@ -103,7 +103,9 @@ export function EmployeeBadgesSection({
         role="region"
         aria-label={t("pages.employees.badges.title")}
       >
-        <h3 className="mk-employee-badges-section__title">{t("pages.employees.badges.title")}</h3>
+        <h3 className="mk-employee-badges-section__title" tabIndex={-1}>
+          {t("pages.employees.badges.title")}
+        </h3>
 
         {issueError ? <Alert tone="error">{issueError}</Alert> : null}
 
@@ -116,7 +118,13 @@ export function EmployeeBadgesSection({
             {employee.badges.map((badge) => (
               <li className="mk-employee-badges-section__item" key={badge.id}>
                 <div className="mk-employee-badges-section__details">
-                  <span className="mk-employee-badges-section__name">
+                  <span
+                    className={
+                      badge.label
+                        ? "mk-employee-badges-section__name"
+                        : "mk-employee-badges-section__name mk-employee-badges-section__name--code"
+                    }
+                  >
                     {badge.label ?? badge.badgeCode}
                   </span>
                   <span className="mk-employee-badges-section__issued-at">

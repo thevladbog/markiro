@@ -10,10 +10,18 @@ import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider, RequireCapability } from "../src/access/context.js";
 import i18n from "../src/i18n/index.js";
 import type * as EmployeesApiModule from "../src/pages/employees/api.js";
-import { EmployeeCreatePanelRoute } from "../src/pages/employees/EmployeePanelRoute.js";
+import {
+  EmployeeCreatePanelRoute,
+  EmployeeEditPanelRoute,
+} from "../src/pages/employees/EmployeePanelRoute.js";
 import { EmployeesPage } from "../src/pages/employees/index.js";
+import type * as StationAccessApiModule from "../src/pages/employees/station-access-api.js";
 
-const { createHookMountSpy } = vi.hoisted(() => ({ createHookMountSpy: vi.fn() }));
+const { createHookMountSpy, operatorsHookMountSpy, updateHookMountSpy } = vi.hoisted(() => ({
+  createHookMountSpy: vi.fn(),
+  operatorsHookMountSpy: vi.fn(),
+  updateHookMountSpy: vi.fn(),
+}));
 
 vi.mock("../src/pages/employees/api.js", async (importOriginal) => {
   const actual = await importOriginal<typeof EmployeesApiModule>();
@@ -22,6 +30,21 @@ vi.mock("../src/pages/employees/api.js", async (importOriginal) => {
     useCreateEmployee: () => {
       createHookMountSpy();
       return actual.useCreateEmployee();
+    },
+    useUpdateEmployee: () => {
+      updateHookMountSpy();
+      return actual.useUpdateEmployee();
+    },
+  };
+});
+
+vi.mock("../src/pages/employees/station-access-api.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof StationAccessApiModule>();
+  return {
+    ...actual,
+    useOperators: () => {
+      operatorsHookMountSpy();
+      return actual.useOperators();
     },
   };
 });
@@ -45,11 +68,37 @@ const JANE = {
   createdAt: "2026-01-01T00:00:00.000Z",
 };
 
+const ACTIVE_OPERATOR = {
+  employeeId: "1",
+  fullName: "Jane Doe",
+  role: "Кассир",
+  login: "123456",
+  active: true,
+  hasBadge: false,
+};
+
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(body === undefined ? null : JSON.stringify(body), {
     status,
     headers: { "content-type": "application/json" },
   });
+}
+
+function stubEmployeeAndOperators({
+  employees = [JANE],
+  operators = [ACTIVE_OPERATOR],
+}: {
+  employees?: (typeof JANE)[];
+  operators?: (typeof ACTIVE_OPERATOR)[];
+} = {}) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      if (String(url) === "/api/employees") return jsonResponse(200, { items: employees });
+      if (String(url) === "/api/operators") return jsonResponse(200, { items: operators });
+      throw new Error(`Unexpected request: ${String(url)}`);
+    }),
+  );
 }
 
 function renderPanel(
@@ -71,6 +120,14 @@ function renderPanel(
           element={
             <RequireCapability capability={CABINET_CAPABILITY.OPERATIONS_WRITE}>
               <EmployeeCreatePanelRoute />
+            </RequireCapability>
+          }
+        />
+        <Route
+          path=":employeeId/edit"
+          element={
+            <RequireCapability capability={CABINET_CAPABILITY.OPERATIONS_WRITE}>
+              <EmployeeEditPanelRoute />
             </RequireCapability>
           }
         />
@@ -99,6 +156,8 @@ afterEach(async () => {
   cleanup();
   vi.unstubAllGlobals();
   createHookMountSpy.mockClear();
+  operatorsHookMountSpy.mockClear();
+  updateHookMountSpy.mockClear();
   await i18n.changeLanguage("ru");
 });
 
@@ -318,4 +377,380 @@ it("denies a direct read-only URL before the privileged create hook mounts", asy
   expect(await screen.findByTestId("forbidden-page")).toBeDefined();
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(createHookMountSpy).not.toHaveBeenCalled();
+});
+
+it("opens editing over the mounted list, identifies the employee, and returns focus", async () => {
+  stubEmployeeAndOperators();
+  const { router, user } = renderPanel();
+
+  const editAction = await screen.findByRole("button", { name: "Изменить" });
+  await user.click(editAction);
+
+  expect(router.state.location.pathname).toBe("/employees/1/edit");
+  expect(screen.getByText("Jane Doe")).toBeDefined();
+  const panel = screen.getByRole("dialog", { name: "Изменить сотрудника" });
+  expect(panel.textContent).toContain("Jane Doe");
+  expect(panel.textContent).toContain("Кассир");
+
+  await user.click(within(panel).getByRole("button", { name: "Закрыть" }));
+
+  await waitFor(() => expect(router.state.location.pathname).toBe("/employees"));
+  expect(document.activeElement).toBe(editAction);
+});
+
+it("falls back to the employees list when a directly entered edit panel closes", async () => {
+  stubEmployeeAndOperators();
+  const { router, user } = renderPanel(["/employees/1/edit"]);
+
+  await screen.findByLabelText("ФИО");
+  const panel = screen.getByRole("dialog", { name: "Изменить сотрудника" });
+  await user.click(within(panel).getByRole("button", { name: "Закрыть" }));
+
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  await waitFor(() => expect(router.state.location.pathname).toBe("/employees"));
+});
+
+it("shows a translated not-found state for an unknown employee", async () => {
+  stubEmployeeAndOperators({ employees: [], operators: [] });
+  const { router, user } = renderPanel(["/employees/missing/edit"]);
+
+  expect((await screen.findByRole("alert")).textContent).toContain("Сотрудник не найден.");
+  const panel = screen.getByRole("dialog", { name: "Изменить сотрудника" });
+  expect(operatorsHookMountSpy).not.toHaveBeenCalled();
+
+  await user.click(within(panel).getByRole("button", { name: "Закрыть" }));
+  await waitFor(() => expect(router.state.location.pathname).toBe("/employees"));
+});
+
+it("shows the edit-panel load error and retries before mounting employee resources", async () => {
+  let attempts = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      if (String(url) === "/api/employees") {
+        attempts += 1;
+        return attempts === 1
+          ? jsonResponse(500, { message: "Unavailable" })
+          : jsonResponse(200, { items: [JANE] });
+      }
+      if (String(url) === "/api/operators") {
+        return jsonResponse(200, { items: [ACTIVE_OPERATOR] });
+      }
+      throw new Error(`Unexpected request: ${String(url)}`);
+    }),
+  );
+  renderPanel(["/employees/1/edit"]);
+
+  await screen.findByText("Не удалось загрузить данные сотрудника.");
+  let panel = screen.getByRole("dialog", { name: "Изменить сотрудника" });
+  expect(within(panel).getByRole("alert").textContent).toContain(
+    "Не удалось загрузить данные сотрудника.",
+  );
+  expect(operatorsHookMountSpy).not.toHaveBeenCalled();
+
+  fireEvent.click(within(panel).getByRole("button", { name: "Повторить" }));
+
+  expect(await screen.findByLabelText("ФИО")).toBeDefined();
+  panel = screen.getByRole("dialog", { name: "Изменить сотрудника" });
+  expect(within(panel).getByLabelText("ФИО")).toBeDefined();
+  expect(attempts).toBe(2);
+  expect(operatorsHookMountSpy).toHaveBeenCalled();
+});
+
+it("keeps all employee resources mounted and navigates between named sections", async () => {
+  stubEmployeeAndOperators();
+  const { user } = renderPanel(["/employees/1/edit"]);
+
+  await screen.findByRole("region", { name: "Профиль" });
+  const panel = screen.getByRole("dialog", { name: "Изменить сотрудника" });
+  const profile = within(panel).getByRole("region", { name: "Профиль" });
+  const badges = within(panel).getByRole("region", { name: "Бейджи" });
+  const stationAccess = within(panel).getByRole("region", { name: "Доступ на станцию" });
+  expect(profile).toBeDefined();
+  expect(badges).toBeDefined();
+  expect(stationAccess).toBeDefined();
+  await within(stationAccess).findByText("Табельный номер 123456");
+
+  const sectionNav = within(panel).getByRole("navigation", {
+    name: "Разделы сотрудника",
+  });
+  const profileNav = within(sectionNav).getByRole("button", { name: /Профиль/ });
+  const badgesNav = within(sectionNav).getByRole("button", { name: /Бейджи/ });
+  const stationAccessNav = within(sectionNav).getByRole("button", {
+    name: /Доступ на станцию/,
+  });
+  expect(profileNav.getAttribute("aria-current")).toBe("location");
+  expect(badgesNav.textContent).toContain("0");
+  await waitFor(() => expect(stationAccessNav.textContent).toContain("Активен"));
+
+  const stationHeading = within(stationAccess).getByRole("heading", {
+    name: "Доступ на станцию",
+  });
+  const scrollIntoView = vi.fn();
+  Object.defineProperty(stationHeading, "scrollIntoView", {
+    configurable: true,
+    value: scrollIntoView,
+  });
+  await user.click(stationAccessNav);
+
+  expect(stationAccessNav.getAttribute("aria-current")).toBe("location");
+  expect(profileNav.hasAttribute("aria-current")).toBe(false);
+  expect(scrollIntoView).toHaveBeenCalledWith({ block: "start" });
+  expect(document.activeElement).toBe(stationHeading);
+});
+
+it("tracks the current employee section from panel-body scrolling", async () => {
+  stubEmployeeAndOperators();
+  renderPanel(["/employees/1/edit"]);
+
+  await screen.findByRole("region", { name: "Профиль" });
+  const panel = screen.getByRole("dialog", { name: "Изменить сотрудника" });
+  const profile = within(panel).getByRole("region", { name: "Профиль" });
+  const badges = within(panel).getByRole("region", { name: "Бейджи" });
+  const stationAccess = within(panel).getByRole("region", { name: "Доступ на станцию" });
+  Object.defineProperty(profile, "offsetTop", { configurable: true, value: 0 });
+  Object.defineProperty(badges, "offsetTop", { configurable: true, value: 240 });
+  Object.defineProperty(stationAccess, "offsetTop", { configurable: true, value: 520 });
+  const scrollRoot = panel.querySelector<HTMLElement>(".mk-side-panel__body");
+  if (!scrollRoot) throw new Error("Panel scroll root not found");
+  Object.defineProperty(scrollRoot, "scrollTop", { configurable: true, value: 500 });
+
+  fireEvent.scroll(scrollRoot);
+
+  const sectionNav = within(panel).getByRole("navigation", {
+    name: "Разделы сотрудника",
+  });
+  await waitFor(() =>
+    expect(
+      within(sectionNav)
+        .getByRole("button", { name: /Доступ на станцию/ })
+        .getAttribute("aria-current"),
+    ).toBe("location"),
+  );
+});
+
+it("marks Profile navigation when client-side validation fails", async () => {
+  stubEmployeeAndOperators();
+  const { user } = renderPanel(["/employees/1/edit"]);
+
+  const fullName = await screen.findByLabelText("ФИО");
+  const panel = screen.getByRole("dialog", { name: "Изменить сотрудника" });
+  await user.clear(fullName);
+  await user.click(within(panel).getByRole("button", { name: "Сохранить" }));
+
+  const sectionNav = within(panel).getByRole("navigation", {
+    name: "Разделы сотрудника",
+  });
+  expect(await within(sectionNav).findByRole("button", { name: /Профиль.*Ошибка/ })).toBeDefined();
+});
+
+it("submits only the exact normalized profile PATCH and closes after success", async () => {
+  const updated = { ...JANE, fullName: "Jane Updated", role: null };
+  let didPatch = false;
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    if (String(url) === "/api/employees/1" && init?.method === "PATCH") {
+      didPatch = true;
+      return jsonResponse(200, updated);
+    }
+    if (String(url) === "/api/employees") {
+      return jsonResponse(200, { items: [didPatch ? updated : JANE] });
+    }
+    if (String(url) === "/api/operators") {
+      return jsonResponse(200, { items: [ACTIVE_OPERATOR] });
+    }
+    throw new Error(`Unexpected request: ${String(url)}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const { router, user } = renderPanel(["/employees", "/employees/1/edit"]);
+
+  await screen.findByLabelText("ФИО");
+  const panel = screen.getByRole("dialog", { name: "Изменить сотрудника" });
+  const fullName = within(panel).getByLabelText("ФИО");
+  const role = within(panel).getByLabelText("Должность");
+  await user.clear(fullName);
+  await user.type(fullName, "  Jane Updated  ");
+  await user.clear(role);
+  await user.click(within(panel).getByRole("button", { name: "Сохранить" }));
+
+  await waitFor(() =>
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/employees/1",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ fullName: "Jane Updated", role: null }),
+      }),
+    ),
+  );
+  await waitFor(() => expect(router.state.location.pathname).toBe("/employees"));
+  expect(await screen.findByText("Сотрудник обновлён")).toBeDefined();
+});
+
+it("keeps every resource and the profile values after a failed profile PATCH", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url) === "/api/employees/1" && init?.method === "PATCH") {
+        return jsonResponse(409, { message: "Employee already exists" });
+      }
+      if (String(url) === "/api/employees") return jsonResponse(200, { items: [JANE] });
+      if (String(url) === "/api/operators") {
+        return jsonResponse(200, { items: [ACTIVE_OPERATOR] });
+      }
+      throw new Error(`Unexpected request: ${String(url)}`);
+    }),
+  );
+  const { router, user } = renderPanel(["/employees/1/edit"]);
+
+  await screen.findByLabelText("ФИО");
+  const panel = screen.getByRole("dialog", { name: "Изменить сотрудника" });
+  const fullName = within(panel).getByLabelText("ФИО");
+  await user.clear(fullName);
+  await user.type(fullName, "Jane Conflict");
+  await user.type(within(panel).getByLabelText("Код бейджа"), "BADGE-DRAFT");
+  await user.click(within(panel).getByRole("button", { name: "Сохранить" }));
+
+  const profile = within(panel).getByRole("region", { name: "Профиль" });
+  expect((await within(profile).findByRole("alert")).textContent).toContain(
+    "Employee already exists",
+  );
+  expect((fullName as HTMLInputElement).value).toBe("Jane Conflict");
+  expect((within(panel).getByLabelText("Код бейджа") as HTMLInputElement).value).toBe(
+    "BADGE-DRAFT",
+  );
+  expect(within(panel).getByRole("region", { name: "Доступ на станцию" })).toBeDefined();
+  expect(router.state.location.pathname).toBe("/employees/1/edit");
+
+  const sectionNav = within(panel).getByRole("navigation", {
+    name: "Разделы сотрудника",
+  });
+  expect(within(sectionNav).getByRole("button", { name: /Профиль.*Ошибка/ })).toBeDefined();
+});
+
+it("blocks Back after the edit profile becomes dirty until discard is confirmed", async () => {
+  stubEmployeeAndOperators();
+  const { router, user } = renderPanel(["/employees", "/employees/1/edit"]);
+
+  await user.type(await screen.findByLabelText("ФИО"), " draft");
+  await router.navigate(-1);
+
+  expect(router.state.location.pathname).toBe("/employees/1/edit");
+  const confirmation = await screen.findByRole("alertdialog", { name: "Отменить изменения?" });
+  await user.click(within(confirmation).getByRole("button", { name: "Не сохранять" }));
+  await waitFor(() => expect(router.state.location.pathname).toBe("/employees"));
+});
+
+it.each([
+  { label: "Код бейджа", value: "DRAFT-BADGE" },
+  { label: "ПИН-код", value: "4321" },
+])("treats a non-empty $label as dirty while Profile stays clean", async ({ label, value }) => {
+  stubEmployeeAndOperators({ operators: label === "ПИН-код" ? [] : [ACTIVE_OPERATOR] });
+  const { user } = renderPanel(["/employees/1/edit"]);
+
+  await user.type(await screen.findByLabelText(label), value);
+  const panel = screen.getByRole("dialog", { name: "Изменить сотрудника" });
+  await user.click(within(panel).getByRole("button", { name: "Закрыть" }));
+
+  expect(screen.getByRole("alertdialog", { name: "Отменить изменения?" })).toBeDefined();
+});
+
+it("blocks panel dismissal while a badge mutation is pending and stays open after local success", async () => {
+  let resolveIssue: ((response: Response) => void) | undefined;
+  const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+    if (String(url) === "/api/employees/1/badges" && init?.method === "POST") {
+      return new Promise<Response>((resolve) => {
+        resolveIssue = resolve;
+      });
+    }
+    if (String(url) === "/api/employees") {
+      return Promise.resolve(jsonResponse(200, { items: [JANE] }));
+    }
+    if (String(url) === "/api/operators") {
+      return Promise.resolve(jsonResponse(200, { items: [ACTIVE_OPERATOR] }));
+    }
+    return Promise.reject(new Error(`Unexpected request: ${String(url)}`));
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const { router, user } = renderPanel(["/employees", "/employees/1/edit"]);
+
+  await screen.findByLabelText("Код бейджа");
+  const panel = screen.getByRole("dialog", { name: "Изменить сотрудника" });
+  await user.type(within(panel).getByLabelText("Код бейджа"), "CCC333");
+  await user.click(within(panel).getByRole("button", { name: "Выпустить бейдж" }));
+
+  await waitFor(() => expect(panel.getAttribute("aria-busy")).toBe("true"));
+  expect(
+    (within(panel).getByRole("button", { name: "Закрыть" }) as HTMLButtonElement).disabled,
+  ).toBe(true);
+  expect(
+    (within(panel).getByRole("button", { name: "Отмена" }) as HTMLButtonElement).disabled,
+  ).toBe(true);
+  expect(
+    (within(panel).getByRole("button", { name: "Сохранить" }) as HTMLButtonElement).disabled,
+  ).toBe(true);
+  await user.keyboard("{Escape}");
+  fireEvent.mouseDown(document.querySelector<HTMLElement>(".mk-side-panel__scrim")!);
+  await router.navigate(-1);
+  expect(router.state.location.pathname).toBe("/employees/1/edit");
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+
+  resolveIssue?.(jsonResponse(201, JANE));
+
+  await waitFor(() => expect(panel.hasAttribute("aria-busy")).toBe(false));
+  expect(router.state.location.pathname).toBe("/employees/1/edit");
+  expect((within(panel).getByLabelText("Код бейджа") as HTMLInputElement).value).toBe("");
+});
+
+it("blocks panel dismissal while a station-access mutation is pending", async () => {
+  let resolveGrant: ((response: Response) => void) | undefined;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((url: string, init?: RequestInit) => {
+      if (String(url) === "/api/operators/1" && init?.method === "PUT") {
+        return new Promise<Response>((resolve) => {
+          resolveGrant = resolve;
+        });
+      }
+      if (String(url) === "/api/employees") {
+        return Promise.resolve(jsonResponse(200, { items: [JANE] }));
+      }
+      if (String(url) === "/api/operators") {
+        return Promise.resolve(jsonResponse(200, { items: [] }));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${String(url)}`));
+    }),
+  );
+  const { router, user } = renderPanel(["/employees", "/employees/1/edit"]);
+
+  await screen.findByLabelText("Табельный номер");
+  const panel = screen.getByRole("dialog", { name: "Изменить сотрудника" });
+  await user.type(within(panel).getByLabelText("Табельный номер"), "123456");
+  await user.type(within(panel).getByLabelText("ПИН-код"), "4321");
+  await user.click(within(panel).getByRole("button", { name: "Выдать доступ" }));
+
+  await waitFor(() => expect(panel.getAttribute("aria-busy")).toBe("true"));
+  await router.navigate(-1);
+  expect(router.state.location.pathname).toBe("/employees/1/edit");
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+
+  resolveGrant?.(
+    jsonResponse(200, {
+      employeeId: "1",
+      login: "123456",
+      active: true,
+      createdAt: "2026-01-03T00:00:00.000Z",
+      updatedAt: "2026-01-03T00:00:00.000Z",
+    }),
+  );
+  await waitFor(() => expect(panel.hasAttribute("aria-busy")).toBe(false));
+  expect(router.state.location.pathname).toBe("/employees/1/edit");
+});
+
+it("denies a direct read-only edit URL before privileged edit hooks mount", async () => {
+  stubEmployeeAndOperators();
+  renderPanel(["/employees/1/edit"], READ_ONLY_ACCESS);
+
+  expect(await screen.findByTestId("forbidden-page")).toBeDefined();
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(updateHookMountSpy).not.toHaveBeenCalled();
+  expect(operatorsHookMountSpy).not.toHaveBeenCalled();
 });

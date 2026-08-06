@@ -998,12 +998,16 @@
       "form": {
         "createTitle": "Новый сотрудник",
         "editTitle": "Изменить сотрудника",
+        "editIdentity": "{{name}}",
+        "editIdentityWithRole": "{{name}} · {{role}}",
         "fullNameLabel": "ФИО",
         "roleLabel": "Должность",
         "submitCreate": "Создать",
         "submitUpdate": "Сохранить",
         "loadError": "Не удалось загрузить данные сотрудника.",
         "retry": "Повторить",
+        "notFound": "Сотрудник не найден.",
+        "updateError": "Не удалось сохранить профиль сотрудника.",
         "discardTitle": "Отменить изменения?",
         "discardBody": "Несохранённые изменения будут потеряны.",
         "continueEditing": "Продолжить редактирование",
@@ -1013,6 +1017,11 @@
           "fullNameTooLong": "Не более 200 символов",
           "roleTooLong": "Не более 120 символов"
         }
+      },
+      "sections": {
+        "navigationLabel": "Разделы сотрудника",
+        "profile": "Профиль",
+        "error": "Ошибка"
       },
       "badges": {
         "title": "Бейджи",

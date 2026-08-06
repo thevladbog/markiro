@@ -23,15 +23,7 @@ import { CABINET_CAPABILITY } from "@markiro/domain";
 import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
 import { toast } from "../../lib/toast.js";
-import { EmployeeForm, type EmployeeFormValues } from "./EmployeeForm.js";
-import {
-  useArchiveEmployee,
-  useEmployees,
-  useUpdateEmployee,
-  type CreateEmployeeInput,
-  type EmployeeDto,
-  type EmployeeStatus,
-} from "./api.js";
+import { useArchiveEmployee, useEmployees, type EmployeeDto, type EmployeeStatus } from "./api.js";
 import type { EmployeesPanelContext, EmployeesPanelLocationState } from "./EmployeePanelRoute.js";
 import "./employees.css";
 
@@ -62,28 +54,10 @@ function AuthorizedCreateEmployeeAction() {
 
 function AuthorizedEmployeeRowActions({ employee }: { employee: EmployeeDto }) {
   const { t } = useTranslation();
-  const updateMutation = useUpdateEmployee();
+  const navigate = useNavigate();
   const archiveMutation = useArchiveEmployee();
-  const [editing, setEditing] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const [archiveError, setArchiveError] = useState<string | null>(null);
-  const initialValues: EmployeeFormValues = {
-    fullName: employee.fullName,
-    role: employee.role ?? "",
-  };
-
-  const handleUpdate = async (input: CreateEmployeeInput) => {
-    try {
-      await updateMutation.mutateAsync({ id: employee.id, input });
-      toast("ok", t("pages.employees.toasts.updateSuccess"));
-      setEditing(false);
-    } catch (error) {
-      toast(
-        "error",
-        error instanceof ApiRequestError ? error.message : t("pages.employees.toasts.updateError"),
-      );
-    }
-  };
 
   const handleArchive = async () => {
     try {
@@ -103,7 +77,16 @@ function AuthorizedEmployeeRowActions({ employee }: { employee: EmployeeDto }) {
   return (
     <>
       <RowActions>
-        <Button type="button" size="compact" variant="secondary" onClick={() => setEditing(true)}>
+        <Button
+          type="button"
+          size="compact"
+          variant="secondary"
+          onClick={() =>
+            void navigate(`${employee.id}/edit`, {
+              state: { employeesBackground: true } satisfies EmployeesPanelLocationState,
+            })
+          }
+        >
           {t("pages.employees.edit")}
         </Button>
         {employee.status === "active" ? (
@@ -120,15 +103,6 @@ function AuthorizedEmployeeRowActions({ employee }: { employee: EmployeeDto }) {
           </Button>
         ) : null}
       </RowActions>
-      <EmployeeForm
-        open={editing}
-        mode="edit"
-        employee={employee}
-        initialValues={initialValues}
-        submitting={updateMutation.isPending}
-        onSubmit={handleUpdate}
-        onClose={() => setEditing(false)}
-      />
       <ConfirmDialog
         open={archiving}
         title={t("pages.employees.archiveConfirmTitle")}

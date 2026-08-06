@@ -30,6 +30,7 @@ export interface EmployeeProfileFormProps {
   submissionError: string | null;
   onSubmit: (input: CreateEmployeeInput) => void | Promise<void>;
   onDirtyChange: (dirty: boolean) => void;
+  onErrorChange?: (hasError: boolean) => void;
 }
 
 const EMPTY_VALUES: EmployeeFormValues = { fullName: "", role: "" };
@@ -52,6 +53,7 @@ export function EmployeeProfileForm({
   submissionError,
   onSubmit,
   onDirtyChange,
+  onErrorChange,
 }: EmployeeProfileFormProps) {
   const { t } = useTranslation();
   const {
@@ -69,6 +71,10 @@ export function EmployeeProfileForm({
     isDirtyRef.current = isDirty;
     onDirtyChange(isDirty);
   }, [isDirty, onDirtyChange]);
+
+  useEffect(() => {
+    onErrorChange?.(errors.fullName !== undefined || errors.role !== undefined);
+  }, [errors.fullName, errors.role, onErrorChange]);
 
   useEffect(() => {
     if (isDirtyRef.current) return;

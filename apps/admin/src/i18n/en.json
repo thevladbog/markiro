@@ -998,12 +998,16 @@
       "form": {
         "createTitle": "New employee",
         "editTitle": "Edit employee",
+        "editIdentity": "{{name}}",
+        "editIdentityWithRole": "{{name}} · {{role}}",
         "fullNameLabel": "Full name",
         "roleLabel": "Role",
         "submitCreate": "Create",
         "submitUpdate": "Save",
         "loadError": "Could not load employee data.",
         "retry": "Retry",
+        "notFound": "Employee not found.",
+        "updateError": "Could not save the employee profile.",
         "discardTitle": "Discard changes?",
         "discardBody": "Your unsaved changes will be lost.",
         "continueEditing": "Continue editing",
@@ -1013,6 +1017,11 @@
           "fullNameTooLong": "200 characters or fewer",
           "roleTooLong": "120 characters or fewer"
         }
+      },
+      "sections": {
+        "navigationLabel": "Employee sections",
+        "profile": "Profile",
+        "error": "Error"
       },
       "badges": {
         "title": "Badges",

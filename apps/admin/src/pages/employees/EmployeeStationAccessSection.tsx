@@ -147,7 +147,7 @@ export function EmployeeStationAccessSection({
         role="region"
         aria-label={t("pages.employees.stationAccess.title")}
       >
-        <h3 className="mk-employee-station-access-section__title">
+        <h3 className="mk-employee-station-access-section__title" tabIndex={-1}>
           {t("pages.employees.stationAccess.title")}
         </h3>
 
