@@ -73,6 +73,10 @@ body,
   transform: none;
 }
 
+.kiosk-control--floor {
+  min-height: var(--control-floor);
+}
+
 .kiosk-idle,
 .kiosk-blocked,
 .kiosk-done {
@@ -202,6 +206,33 @@ body,
   margin: 0;
 }
 
+.kiosk-credential-gate__title,
+.kiosk-setup__title {
+  font: var(--text-display);
+}
+
+.kiosk-credential-gate__prompt,
+.kiosk-credential-gate__entry-label,
+.kiosk-setup__prompt {
+  font: var(--floor-body);
+}
+
+.kiosk-credential-gate__display {
+  min-height: var(--sp-9);
+  font: var(--floor-counter-sm);
+  letter-spacing: var(--sp-2);
+}
+
+.kiosk-credential-gate__recovery {
+  max-width: 40rem;
+  color: var(--fg-3);
+  font: var(--text-body-lg);
+}
+
+.kiosk-credential-gate__entry-label {
+  color: var(--fg-3);
+}
+
 .kiosk-credential-gate__entry {
   align-items: center;
   border-left: 1px solid var(--line);
@@ -224,6 +255,15 @@ body,
 .kiosk-setup__header h1,
 .kiosk-setup__panel h2 {
   margin: 0;
+}
+
+.kiosk-setup__transport-title,
+.kiosk-setup__panel-title {
+  font: var(--floor-lg);
+}
+
+.kiosk-setup__transport-title {
+  padding-bottom: var(--sp-3);
 }
 
 .kiosk-setup__workspace {
@@ -255,15 +295,49 @@ body,
   border-left: 1px solid var(--line);
 }
 
+.kiosk-setup__option {
+  display: grid;
+  gap: var(--sp-1);
+}
+
 .kiosk-radio-option {
   min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  font: var(--floor-body);
   touch-action: manipulation;
   cursor: pointer;
+}
+
+.kiosk-radio-option__input {
+  width: 28px;
+  height: 28px;
+}
+
+.kiosk-setup__hint {
+  margin: 0;
+  color: var(--fg-3);
+  font: var(--text-body-lg);
+}
+
+.kiosk-setup__prompt {
+  margin: 0;
+}
+
+.kiosk-setup__result {
+  min-height: var(--control-floor);
+  max-width: 40rem;
+  font: var(--floor-lg);
 }
 
 .kiosk-setup__footer {
   display: flex;
   justify-content: flex-end;
+}
+
+.kiosk-setup__done {
+  min-width: 15rem;
 }
 
 @media (orientation: portrait), (max-width: 899px) {

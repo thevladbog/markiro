@@ -48,6 +48,8 @@ function resultKey(kind: KioskScan["kind"], serialSupported: boolean): string {
  * the same way (`Pairing.tsx`, `CODE_LENGTH`).
  */
 const ENTRY_MAX = 12;
+const KEYBOARD_HINT_ID = "kiosk-scanner-keyboard-hint";
+const SERIAL_HINT_ID = "kiosk-scanner-serial-hint";
 
 /** Personnel number first, then PIN — the station's two stages
  * (`apps/station/src/pages/OperatorLogin.tsx`), in kiosk styling. Never a
@@ -340,17 +342,14 @@ export function ScannerSetup({
     return (
       <main className="kiosk-screen kiosk-credential-gate" aria-labelledby="kiosk-gate-title">
         <section className="kiosk-credential-gate__details" aria-labelledby="kiosk-gate-title">
-          <h1 id="kiosk-gate-title" style={{ fontSize: "2.25rem" }}>
+          <h1 id="kiosk-gate-title" className="kiosk-credential-gate__title">
             {t("scannerSetup.gateTitle")}
           </h1>
-          <p style={{ fontSize: "1.25rem" }}>{t("scannerSetup.gatePrompt")}</p>
+          <p className="kiosk-credential-gate__prompt">{t("scannerSetup.gatePrompt")}</p>
           {/* The single live region of this branch — the settings branch has its
               own, and the two never coexist. The PIN is shown as dots: a kiosk
               screen is a public one. */}
-          <div
-            role="status"
-            style={{ fontSize: "3rem", letterSpacing: "0.5rem", minHeight: "3rem" }}
-          >
+          <div role="status" className="kiosk-credential-gate__display">
             {stage === "login" ? login : "•".repeat(pin.length)}
           </div>
           {failed ? <Alert tone="error">{t("scannerSetup.gateError")}</Alert> : null}
@@ -359,12 +358,10 @@ export function ScannerSetup({
               this line such a kiosk is bricked with no visible exit; with it, the
               cabinet can unbind the device and issue a new code, and the unpaired
               tier above opens setup again. */}
-          <p style={{ maxWidth: 640, fontSize: "1rem", color: "var(--fg-3)" }}>
-            {t("scannerSetup.gateRecovery")}
-          </p>
+          <p className="kiosk-credential-gate__recovery">{t("scannerSetup.gateRecovery")}</p>
         </section>
         <section className="kiosk-credential-gate__entry" aria-labelledby="kiosk-gate-entry-label">
-          <p id="kiosk-gate-entry-label" style={{ fontSize: "1.25rem", color: "var(--fg-3)" }}>
+          <p id="kiosk-gate-entry-label" className="kiosk-credential-gate__entry-label">
             {stage === "login" ? t("scannerSetup.gateLogin") : t("scannerSetup.gatePin")}
           </p>
           <div className="kiosk-pin-pad">
@@ -376,9 +373,8 @@ export function ScannerSetup({
           </div>
           <div className="kiosk-credential-gate__actions">
             <Button
-              className="kiosk-control"
+              className="kiosk-control kiosk-control--floor"
               variant="secondary"
-              style={{ minHeight: 64 }}
               onClick={onClose}
             >
               {t("scannerSetup.cancel")}
@@ -391,9 +387,8 @@ export function ScannerSetup({
                 failed sign-in does, and conflating the two would throw away a
                 correct personnel number to fix a PIN. */}
             <Button
-              className="kiosk-control"
+              className="kiosk-control kiosk-control--floor"
               variant="secondary"
-              style={{ minHeight: 64 }}
               disabled={(stage === "login" ? login : pin).length === 0 || busy}
               onClick={() => {
                 if (stage === "login") setLogin("");
@@ -404,8 +399,7 @@ export function ScannerSetup({
             </Button>
             {stage === "login" ? (
               <Button
-                className="kiosk-control"
-                style={{ minHeight: 64 }}
+                className="kiosk-control kiosk-control--floor"
                 disabled={login.length === 0}
                 onClick={() => {
                   setFailed(false);
@@ -416,8 +410,7 @@ export function ScannerSetup({
               </Button>
             ) : (
               <Button
-                className="kiosk-control"
-                style={{ minHeight: 64 }}
+                className="kiosk-control kiosk-control--floor"
                 loading={busy}
                 disabled={pin.length === 0}
                 onClick={() => void submitPin()}
@@ -434,7 +427,7 @@ export function ScannerSetup({
   return (
     <main className="kiosk-screen kiosk-setup" aria-labelledby="kiosk-setup-title">
       <header className="kiosk-setup__header">
-        <h1 id="kiosk-setup-title" style={{ fontSize: "2.25rem" }}>
+        <h1 id="kiosk-setup-title" className="kiosk-setup__title">
           {t("scannerSetup.title")}
         </h1>
       </header>
@@ -442,26 +435,23 @@ export function ScannerSetup({
         {/* `fieldset`/`legend` rather than a div and a heading: the radios are one
             answer to one question, and that is exactly what the group role says. */}
         <fieldset className="kiosk-setup__panel">
-          <legend style={{ fontSize: "1.5rem", paddingBottom: 12 }}>
+          <legend className="kiosk-setup__transport-title">
             {t("scannerSetup.transportTitle")}
           </legend>
-          <div style={{ display: "grid", gap: 4 }}>
-            <label
-              className="kiosk-radio-option"
-              style={{ display: "flex", alignItems: "center", gap: 12, fontSize: "1.25rem" }}
-            >
+          <div className="kiosk-setup__option">
+            <label className="kiosk-radio-option">
               <input
-                className="kiosk-control"
+                className="kiosk-control kiosk-radio-option__input"
                 type="radio"
                 name="kiosk-scan-transport"
                 value="keyboard"
                 checked={transport === "keyboard"}
+                aria-describedby={KEYBOARD_HINT_ID}
                 onChange={() => choose("keyboard")}
-                style={{ width: 28, height: 28 }}
               />
               <span>{t("scannerSetup.transportKeyboard")}</span>
             </label>
-            <p style={{ margin: 0, fontSize: "1rem", color: "var(--fg-3)" }}>
+            <p id={KEYBOARD_HINT_ID} className="kiosk-setup__hint">
               {t("scannerSetup.transportKeyboardHint")}
             </p>
           </div>
@@ -469,23 +459,20 @@ export function ScannerSetup({
               `navigator.serial`, and showing it a port picker it cannot open
               would be an installer's dead end, not a choice. */}
           {serialSupported ? (
-            <div style={{ display: "grid", gap: 4 }}>
-              <label
-                className="kiosk-radio-option"
-                style={{ display: "flex", alignItems: "center", gap: 12, fontSize: "1.25rem" }}
-              >
+            <div className="kiosk-setup__option">
+              <label className="kiosk-radio-option">
                 <input
-                  className="kiosk-control"
+                  className="kiosk-control kiosk-radio-option__input"
                   type="radio"
                   name="kiosk-scan-transport"
                   value="serial"
                   checked={transport === "serial"}
+                  aria-describedby={SERIAL_HINT_ID}
                   onChange={() => choose("serial")}
-                  style={{ width: 28, height: 28 }}
                 />
                 <span>{t("scannerSetup.transportSerial")}</span>
               </label>
-              <p style={{ margin: 0, fontSize: "1rem", color: "var(--fg-3)" }}>
+              <p id={SERIAL_HINT_ID} className="kiosk-setup__hint">
                 {t("scannerSetup.transportSerialHint")}
               </p>
               {/* The picker was dismissed, so the pick did not happen. Naming
@@ -495,30 +482,24 @@ export function ScannerSetup({
               {portRefused ? <Alert tone="warn">{t("scannerSetup.serialNotGranted")}</Alert> : null}
             </div>
           ) : (
-            <p style={{ margin: 0, fontSize: "1rem", color: "var(--fg-3)" }}>
-              {t("scannerSetup.transportSerialUnavailable")}
-            </p>
+            <p className="kiosk-setup__hint">{t("scannerSetup.transportSerialUnavailable")}</p>
           )}
         </fieldset>
         <section className="kiosk-setup__panel" aria-labelledby="kiosk-setup-test-title">
-          <h2 id="kiosk-setup-test-title" style={{ fontSize: "1.5rem", margin: 0 }}>
+          <h2 id="kiosk-setup-test-title" className="kiosk-setup__panel-title">
             {t("scannerSetup.testTitle")}
           </h2>
-          <p style={{ margin: 0, fontSize: "1.125rem" }}>{t("scannerSetup.testPrompt")}</p>
+          <p className="kiosk-setup__prompt">{t("scannerSetup.testPrompt")}</p>
           {/* Only the recognised KIND is echoed, never the payload: a badge is a
               credential, and printing it at arm's length on an unattended screen
               would hand it to whoever is standing there. */}
-          <div role="status" style={{ minHeight: "4rem", fontSize: "1.5rem", maxWidth: 640 }}>
+          <div role="status" className="kiosk-setup__result">
             {result ? t(resultKey(result.kind, serialSupported)) : t("scannerSetup.testWaiting")}
           </div>
         </section>
       </div>
       <footer className="kiosk-setup__footer">
-        <Button
-          className="kiosk-control"
-          style={{ minHeight: 64, minWidth: 240 }}
-          onClick={onClose}
-        >
+        <Button className="kiosk-control kiosk-control--floor kiosk-setup__done" onClick={onClose}>
           {t("scannerSetup.done")}
         </Button>
       </footer>

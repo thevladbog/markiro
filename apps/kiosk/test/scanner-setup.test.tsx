@@ -161,7 +161,9 @@ function setWebSerial(present: boolean, requestPort?: () => Promise<SerialPort>)
 }
 
 const KEYBOARD = "Keyboard wedge (HID)";
+const KEYBOARD_HINT = "Works on any device: the scanner types the code as if it were a keyboard.";
 const SERIAL = "Web Serial (COM port)";
+const SERIAL_HINT = "More reliable: the GS separator inside a marking code survives.";
 const TRANSPORTS = "How the scanner is connected";
 const TEST_SCAN = "Test scan";
 
@@ -203,7 +205,15 @@ describe("ScannerSetup — transports offered", () => {
     render(<ScannerSetup paired={false} bootstrap={null} subscribe={noFanOut} onClose={vi.fn()} />);
 
     expect(screen.getAllByRole("radio")).toHaveLength(2);
-    expect(radio(SERIAL)).toBeTruthy();
+    const keyboard = radio(KEYBOARD);
+    const serial = radio(SERIAL);
+    const keyboardHint = screen.getByText(KEYBOARD_HINT);
+    const serialHint = screen.getByText(SERIAL_HINT);
+
+    expect(serial).toBeTruthy();
+    expect(keyboard.getAttribute("aria-describedby")).toBe(keyboardHint.id);
+    expect(serial.getAttribute("aria-describedby")).toBe(serialHint.id);
+    expect(keyboardHint.id).not.toBe(serialHint.id);
   });
 });
 

@@ -132,7 +132,17 @@ describe("productMonogram", () => {
   it("uses the first letter or digit and returns one upper-case code point", () => {
     expect(productMonogram("  молоко 3,2% ")).toBe("М");
     expect(productMonogram("3.2% кефир")).toBe("3");
-    expect([...productMonogram("ßbrot")]).toHaveLength(1);
+    expect(productMonogram("ßbrot")).toBe("S");
+  });
+
+  it("uses locale-independent casing for locale-sensitive characters", () => {
+    const localeUpperCase = vi.spyOn(String.prototype, "toLocaleUpperCase").mockReturnValue("İ");
+
+    try {
+      expect(productMonogram("i")).toBe("I");
+    } finally {
+      localeUpperCase.mockRestore();
+    }
   });
 
   it("uses a deterministic fallback when a malformed name has no letter or digit", () => {
