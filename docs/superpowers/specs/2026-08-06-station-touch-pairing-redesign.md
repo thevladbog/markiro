@@ -1,8 +1,8 @@
 # Station Touch Workplace & Device Pairing Redesign
 
-**Date:** 2026-08-06  
-**Status:** Design approved; implementation pending  
-**Supersedes for the station surface:** the interim manual station enrollment in `2026-07-23-05a-station-foundation.md` and the station-specific parts of `2026-07-24-device-commissioning-design.md` where this document is more precise  
+**Date:** 2026-08-06
+**Status:** Design approved; implementation pending
+**Supersedes for the station surface:** the interim manual station enrollment in `2026-07-23-05a-station-foundation.md` and the station-specific parts of `2026-07-24-device-commissioning-design.md` where this document is more precise
 **Related:** `docs/design-briefs/04-line-station.md`, `docs/design-briefs/07-device-commissioning.md`, `docs/superpowers/specs/2026-07-28-station-sync-design.md`, `docs/superpowers/specs/2026-07-30-station-exceptions-design.md`
 
 ## Problem
