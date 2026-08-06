@@ -10,6 +10,7 @@ import { BoxExceptionsController } from "../src/modules/box-exceptions/box-excep
 import { BoxesController } from "../src/modules/boxes/boxes.controller";
 import { ConflictsController } from "../src/modules/conflicts/conflicts.controller";
 import { CounterpartiesController } from "../src/modules/counterparties/counterparties.controller";
+import { DevicesController } from "../src/modules/devices/devices.controller";
 import { EmployeesController } from "../src/modules/employees/employees.controller";
 import { LabelTemplatesController } from "../src/modules/label-templates/label-templates.controller";
 import { LinesController } from "../src/modules/lines/lines.controller";
@@ -81,6 +82,7 @@ const OPERATIONAL_CONTROLLERS: readonly [
   ControllerClass,
   Readonly<Record<string, RouteAccessPolicy>>,
 ][] = [
+  [DevicesController, { listDevices: readPolicy }],
   [BoxesController, { listBoxes: readPolicy }],
   [BoxExceptionsController, { listBoxExceptions: readPolicy }],
   [

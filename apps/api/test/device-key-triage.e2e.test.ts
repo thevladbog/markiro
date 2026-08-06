@@ -78,6 +78,10 @@ describe.skipIf(!ready)("device key surface triage e2e", () => {
     await request(app!.getHttpServer()).get("/kiosks").set("x-api-key", stationKey).expect(403);
   });
 
+  it("refuses a station api-key on the unified devices read model", async () => {
+    await request(app!.getHttpServer()).get("/devices").set("x-api-key", stationKey).expect(403);
+  });
+
   it("refuses a station api-key on the pickup order flow", async () => {
     await request(app!.getHttpServer())
       .get("/pickup-orders")

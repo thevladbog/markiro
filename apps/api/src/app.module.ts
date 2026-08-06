@@ -11,6 +11,7 @@ import { LinesModule } from "./modules/lines/lines.module";
 import { ShiftsModule } from "./modules/shifts/shifts.module";
 import { LabelTemplatesModule } from "./modules/label-templates/label-templates.module";
 import { StationDevicesModule } from "./modules/station-devices/station-devices.module";
+import { DevicesModule } from "./modules/devices/devices.module";
 import { StationPairingModule } from "./modules/station-pairing/station-pairing.module";
 import { StationScansModule } from "./modules/station-scans/station-scans.module";
 import { EmployeesModule } from "./modules/employees/employees.module";
@@ -67,6 +68,7 @@ export class AppModule {
         ShiftsModule,
         LabelTemplatesModule,
         StationDevicesModule,
+        DevicesModule,
         StationPairingModule,
         StationScansModule,
         EmployeesModule,
