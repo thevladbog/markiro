@@ -34,6 +34,7 @@ export function stationDeviceLifecycle(
   if (device.apiKeyId === null) return "awaiting_pairing";
   if (
     device.lastSeenAt !== null &&
+    device.lastSeenAt.getTime() <= now.getTime() &&
     now.getTime() - device.lastSeenAt.getTime() <= STATION_ONLINE_THRESHOLD_MS
   ) {
     return "online";

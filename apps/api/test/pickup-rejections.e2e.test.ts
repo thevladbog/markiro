@@ -12,6 +12,7 @@ import { loadEnv } from "../src/env";
 import { hashDeviceToken } from "../src/pickup/device-token";
 import { schema, type Db } from "@markiro/db";
 import { listenOnLoopback } from "./support/listen-loopback";
+import { createTestStationDevice } from "./support/auth";
 
 /** Check-digit VALID GTINs. GTIN is allowlisted on the kiosk; GTIN_NOT_ALLOWED is not. */
 const GTIN = "04600682000013";
@@ -505,8 +506,7 @@ describe.skipIf(!ready)("pickup scan rejections e2e", () => {
   // A station api-key DOES pass TenantGuard, so this is the credential
   // SessionOnlyGuard exists to refuse -- with 403, not 401.
   it("refuses a station api-key on both routes", async () => {
-    const enroll = await agent.post("/station-devices").send({ name: "Terminal" }).expect(201);
-    const stationKey = enroll.body.apiKey as string;
+    const stationKey = (await createTestStationDevice(app!, agent, "Terminal")).apiKey;
 
     await request(app!.getHttpServer())
       .get("/pickup-rejections")

@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { schema, type Db } from "@markiro/db";
+import { schema, type Auth, type Db } from "@markiro/db";
+import type { INestApplication } from "@nestjs/common";
 import type request from "supertest";
+import { AUTH, DB } from "../../src/auth/auth.module";
 
 /**
  * Signs up a fresh user and creates an org for them, WITHOUT activating it
@@ -58,4 +60,55 @@ export async function setOnlyOrganizationMemberRole(
   if (rows.length !== 1) {
     throw new Error("Expected exactly one organization member in test fixture");
   }
+}
+
+/**
+ * Test-only station fixture. Production pairing is deliberately the only
+ * production credential path; tests needing an already-paired station seed a
+ * durable record through the normal create route, then link a Better Auth key
+ * directly through the test harness.
+ */
+export async function createTestStationDevice(
+  app: INestApplication,
+  agent: ReturnType<typeof request.agent>,
+  name: string,
+): Promise<{ apiKey: string; deviceId: string; body: { apiKey: string; deviceId: string } }> {
+  if (process.env.NODE_ENV !== "test") {
+    throw new Error("createTestStationDevice is restricted to tests");
+  }
+  const db = app.get<Db>(DB);
+
+  const created = await agent.post("/station-devices").send({ name, lineId: null }).expect(201);
+  const deviceId = (created.body as { id: string }).id;
+  const [device] = await db
+    .select({ tenantId: schema.stationDevices.tenantId })
+    .from(schema.stationDevices)
+    .where(eq(schema.stationDevices.id, deviceId));
+  if (!device) throw new Error("Expected test station device to persist");
+  const [member] = await db
+    .select({ userId: schema.member.userId })
+    .from(schema.member)
+    .where(eq(schema.member.organizationId, device.tenantId));
+  if (!member) throw new Error("Expected test station tenant to have a member");
+
+  const auth = app.get<Auth>(AUTH);
+  const key = await auth.api.createApiKey({
+    body: {
+      configId: "station",
+      organizationId: device.tenantId,
+      userId: member.userId,
+      name,
+      metadata: { kind: "station" },
+    },
+  });
+  try {
+    await db
+      .update(schema.stationDevices)
+      .set({ apiKeyId: key.id, pairedAt: new Date(), revokedAt: null })
+      .where(eq(schema.stationDevices.id, deviceId));
+  } catch (error) {
+    await db.delete(schema.apikey).where(eq(schema.apikey.id, key.id));
+    throw error;
+  }
+  return { apiKey: key.key, deviceId, body: { apiKey: key.key, deviceId } };
 }

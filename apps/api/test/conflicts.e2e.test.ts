@@ -9,7 +9,7 @@ import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import type { ScanItemDto } from "../src/modules/station-scans/dto";
 import { listenOnLoopback } from "./support/listen-loopback";
-import { signUpAndActivate } from "./support/auth";
+import { createTestStationDevice, signUpAndActivate } from "./support/auth";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -40,8 +40,7 @@ describe.skipIf(!ready)("conflicts e2e", () => {
   });
 
   async function deviceKey(agent: ReturnType<typeof request.agent>): Promise<string> {
-    const device = await agent.post("/station-devices").send({ name: "Line 1" }).expect(201);
-    return (device.body as { apiKey: string }).apiKey;
+    return (await createTestStationDevice(app!, agent, "Line 1")).apiKey;
   }
 
   // Same fixture as station-scans.e2e.test.ts / products.e2e.test.ts.
@@ -215,16 +214,8 @@ describe.skipIf(!ready)("conflicts e2e", () => {
   it("attributes a cross-shift conflict to the correct shift on each side", async () => {
     const agent = request.agent(app!.getHttpServer());
     await signUpAndActivate(agent);
-    const deviceAResponse = await agent
-      .post("/station-devices")
-      .send({ name: "Terminal A" })
-      .expect(201);
-    const deviceA = deviceAResponse.body as { apiKey: string; deviceId: string };
-    const deviceBResponse = await agent
-      .post("/station-devices")
-      .send({ name: "Terminal B" })
-      .expect(201);
-    const deviceB = deviceBResponse.body as { apiKey: string; deviceId: string };
+    const deviceA = await createTestStationDevice(app!, agent, "Terminal A");
+    const deviceB = await createTestStationDevice(app!, agent, "Terminal B");
     const productId = await createActiveProduct(agent);
     const shift1 = await openShiftForProduct(agent, productId);
     const shift2 = await openShiftForProduct(agent, productId);

@@ -10,6 +10,7 @@ import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { schema, type Db } from "@markiro/db";
 import { listenOnLoopback } from "./support/listen-loopback";
+import { createTestStationDevice } from "./support/auth";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -266,11 +267,8 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     const created = await agent.post("/shifts").send({ productId, mode: "validation" }).expect(201);
     const id = created.body.id as string;
 
-    const device = await agent
-      .post("/station-devices")
-      .send({ name: "Line 1 terminal" })
-      .expect(201);
-    const apiKey = (device.body as { apiKey: string }).apiKey;
+    const device = await createTestStationDevice(app!, agent, "Line 1 terminal");
+    const apiKey = device.apiKey;
     const server = app!.getHttpServer();
 
     const opened = await request(server)
@@ -322,11 +320,8 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
       // sscc_blocks.device_id carries a real FK to station_devices -- the
       // block must be attributed to an actual enrolled device, not an
       // invented uuid (see sscc.e2e.test.ts's registerDevice).
-      const device = await agent
-        .post("/station-devices")
-        .send({ name: "Box-block terminal" })
-        .expect(201);
-      stationKey = (device.body as { apiKey: string }).apiKey;
+      const device = await createTestStationDevice(app!, agent, "Box-block terminal");
+      stationKey = device.apiKey;
 
       const plain = await agent
         .post("/shifts")
@@ -410,11 +405,8 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     });
 
     it("a fetch by a different device for the same shift cuts its own block (Task 7 finding 3)", async () => {
-      const otherDevice = await agent
-        .post("/station-devices")
-        .send({ name: "Second box-block terminal" })
-        .expect(201);
-      const otherKey = (otherDevice.body as { apiKey: string }).apiKey;
+      const otherDevice = await createTestStationDevice(app!, agent, "Second box-block terminal");
+      const otherKey = otherDevice.apiKey;
       const rowsBefore = await blocksForOrgGln();
 
       const res = await request(app!.getHttpServer())
@@ -458,11 +450,8 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
         .expect(201);
       const shiftId = (shift.body as { id: string }).id;
 
-      const device = await agent
-        .post("/station-devices")
-        .send({ name: "No-GLN terminal" })
-        .expect(201);
-      const apiKey = (device.body as { apiKey: string }).apiKey;
+      const device = await createTestStationDevice(app!, agent, "No-GLN terminal");
+      const apiKey = device.apiKey;
 
       const res = await request(app!.getHttpServer())
         .get(`/shifts/${shiftId}/bundle`)
@@ -504,12 +493,9 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
         .expect(201);
       const shiftId = (shift.body as { id: string }).id;
 
-      const device = await callerAgent
-        .post("/station-devices")
-        .send({ name: "Caller terminal" })
-        .expect(201);
-      const deviceId = (device.body as { deviceId: string }).deviceId;
-      const apiKey = (device.body as { apiKey: string }).apiKey;
+      const device = await createTestStationDevice(app!, callerAgent, "Caller terminal");
+      const deviceId = device.deviceId;
+      const apiKey = device.apiKey;
 
       // The row keeps the caller's real api-key id but now claims the
       // victim's tenantId -- TenantGuard must still resolve req.tenantId

@@ -10,6 +10,7 @@ import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { SsccService } from "../src/modules/sscc/sscc.service";
+import { createTestStationDevice } from "./support/auth";
 import { listenOnLoopback } from "./support/listen-loopback";
 
 const ready = Boolean(
@@ -180,5 +181,44 @@ describe.skipIf(!ready)("station device lifecycle e2e", () => {
     await other.delete(`/station-devices/${created.body.id as string}`).expect(404);
     const list = await other.get("/station-devices").expect(200);
     expect(list.body.items.map((item: { id: string }) => item.id)).not.toContain(created.body.id);
+  });
+
+  it("preserves exactly one first revocation timestamp under concurrent revokes", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+    const station = await createTestStationDevice(app!, agent, "Concurrent terminal");
+    await db.insert(schema.stationPairingCodes).values({
+      tenantId: (
+        await db
+          .select({ tenantId: schema.stationDevices.tenantId })
+          .from(schema.stationDevices)
+          .where(eq(schema.stationDevices.id, station.deviceId))
+      )[0]!.tenantId,
+      stationDeviceId: station.deviceId,
+      codeHash: "b".repeat(64),
+      expiresAt: new Date(Date.now() + 60_000),
+      issuedByUserId: "cabinet-user",
+    });
+
+    const responses = await Promise.all([
+      agent.delete(`/station-devices/${station.deviceId}`),
+      agent.delete(`/station-devices/${station.deviceId}`),
+    ]);
+    expect(responses.map((response) => response.status)).toEqual([204, 204]);
+
+    const [device] = await db
+      .select({
+        apiKeyId: schema.stationDevices.apiKeyId,
+        revokedAt: schema.stationDevices.revokedAt,
+      })
+      .from(schema.stationDevices)
+      .where(eq(schema.stationDevices.id, station.deviceId));
+    expect(device).toMatchObject({ apiKeyId: null });
+    expect(device!.revokedAt).toBeInstanceOf(Date);
+    const [code] = await db
+      .select({ usedAt: schema.stationPairingCodes.usedAt })
+      .from(schema.stationPairingCodes)
+      .where(eq(schema.stationPairingCodes.stationDeviceId, station.deviceId));
+    expect(code!.usedAt).toEqual(device!.revokedAt);
   });
 });

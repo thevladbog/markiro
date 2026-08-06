@@ -8,6 +8,7 @@ import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { listenOnLoopback } from "./support/listen-loopback";
+import { createTestStationDevice } from "./support/auth";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -74,13 +75,10 @@ describe.skipIf(!ready)("station api-key auth e2e", () => {
 
     await agent.get("/station/operators").expect(403);
 
-    const enrolled = await agent
-      .post("/station-devices")
-      .send({ name: "Roster terminal" })
-      .expect(201);
+    const enrolled = await createTestStationDevice(app!, agent, "Roster terminal");
     const roster = await request(app!.getHttpServer())
       .get("/station/operators")
-      .set("x-api-key", enrolled.body.apiKey as string)
+      .set("x-api-key", enrolled.apiKey)
       .expect(200);
 
     expect(roster.body).toEqual({ items: [] });

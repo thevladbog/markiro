@@ -11,7 +11,7 @@ import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { atomicSeedSscc, seedFloor, SsccService } from "../src/modules/sscc/sscc.service";
 import { listenOnLoopback } from "./support/listen-loopback";
-import { signUpAndActivate } from "./support/auth";
+import { createTestStationDevice, signUpAndActivate } from "./support/auth";
 
 /**
  * Same env-gating as sscc.e2e.test.ts / org-profile.e2e.test.ts -- requires a
@@ -83,12 +83,9 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
       .expect(201);
     counterpartyId = (counterparty.body as { id: string }).id;
 
-    const device = await agent
-      .post("/station-devices")
-      .send({ name: "Line 1 terminal" })
-      .expect(201);
-    stationKey = (device.body as { apiKey: string }).apiKey;
-    deviceId = (device.body as { deviceId: string }).deviceId;
+    const device = await createTestStationDevice(app!, agent, "Line 1 terminal");
+    stationKey = device.apiKey;
+    deviceId = device.deviceId;
   });
 
   afterAll(async () => {

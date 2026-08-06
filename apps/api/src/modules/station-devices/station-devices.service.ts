@@ -78,10 +78,18 @@ export class StationDevicesService {
 
     const revokedAt = new Date();
     await this.db.transaction(async (tx) => {
-      await tx
+      const [revoked] = await tx
         .update(schema.stationDevices)
         .set({ apiKeyId: null, revokedAt })
-        .where(and(eq(schema.stationDevices.tenantId, tenantId), eq(schema.stationDevices.id, id)));
+        .where(
+          and(
+            eq(schema.stationDevices.tenantId, tenantId),
+            eq(schema.stationDevices.id, id),
+            isNull(schema.stationDevices.revokedAt),
+          ),
+        )
+        .returning({ id: schema.stationDevices.id });
+      if (!revoked) return;
       await tx
         .update(schema.stationPairingCodes)
         .set({ usedAt: revokedAt })

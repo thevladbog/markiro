@@ -142,6 +142,43 @@ describe("credential mutation audit", () => {
     expect(JSON.stringify(audit.credentialMutation.mock.calls)).not.toContain("Packing station");
   });
 
+  it("audits a rejected station update with the durable resource ID and no request-body metadata", async () => {
+    const service = { update: vi.fn().mockRejectedValue(new Error("update failed")) };
+    const audit = auditDouble();
+    const controller = new StationDevicesController(service as never, audit as never);
+
+    await expect(
+      controller.update(req, "station_2", { name: "Secret station name" }),
+    ).rejects.toThrow("update failed");
+
+    expect(audit.credentialMutation).toHaveBeenCalledWith({
+      tenantId: "org_1",
+      userId: "user_1",
+      action: "station_device.update",
+      resourceId: "station_2",
+      outcome: "failed",
+    });
+    expect(JSON.stringify(audit.credentialMutation.mock.calls)).not.toContain(
+      "Secret station name",
+    );
+  });
+
+  it("audits a rejected station revoke with the durable resource ID", async () => {
+    const service = { revoke: vi.fn().mockRejectedValue(new Error("revoke failed")) };
+    const audit = auditDouble();
+    const controller = new StationDevicesController(service as never, audit as never);
+
+    await expect(controller.revoke(req, "station_3")).rejects.toThrow("revoke failed");
+
+    expect(audit.credentialMutation).toHaveBeenCalledWith({
+      tenantId: "org_1",
+      userId: "user_1",
+      action: "station_device.revoke",
+      resourceId: "station_3",
+      outcome: "failed",
+    });
+  });
+
   it("audits kiosk enrollment without the plaintext token", async () => {
     const kiosks = { enroll: vi.fn().mockResolvedValue({ token: "plain-token" }) };
     const pairing = {};

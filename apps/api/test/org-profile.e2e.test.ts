@@ -8,6 +8,7 @@ import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { listenOnLoopback } from "./support/listen-loopback";
+import { createTestStationDevice } from "./support/auth";
 
 /**
  * Same env-gating as auth.e2e.test.ts -- requires a reachable Postgres with
@@ -210,11 +211,8 @@ describe.skipIf(!ready)("org profile e2e", () => {
       .send({ organizationId: orgId })
       .expect(200);
 
-    const device = await agent
-      .post("/station-devices")
-      .send({ name: "Line 1 terminal" })
-      .expect(201);
-    const apiKey = (device.body as { apiKey: string }).apiKey;
+    const device = await createTestStationDevice(app!, agent, "Line 1 terminal");
+    const apiKey = device.apiKey;
 
     await request(app!.getHttpServer()).get("/org/profile").set("x-api-key", apiKey).expect(403);
   });

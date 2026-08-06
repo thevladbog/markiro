@@ -11,7 +11,7 @@ import { AppModule } from "../src/app.module";
 import { loadEnv } from "../src/env";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { listenOnLoopback } from "./support/listen-loopback";
-import { signUpAndActivate } from "./support/auth";
+import { createTestStationDevice, signUpAndActivate } from "./support/auth";
 import {
   assertUnderCheckauthLimit,
   CHECKAUTH_BUDGET,
@@ -240,8 +240,7 @@ describe("integrations (cabinet) — issue exchange credentials", () => {
   });
 
   it("не пускает ключ станции в кабинетный маршрут", async () => {
-    const enroll = await agent.post("/station-devices").send({ name: "Terminal" }).expect(201);
-    const stationKey = enroll.body.apiKey as string;
+    const stationKey = (await createTestStationDevice(app!, agent, "Terminal")).apiKey;
 
     await request(app!.getHttpServer())
       .post("/integrations/commerceml/credentials")

@@ -22,6 +22,7 @@ import { PickupOrdersService } from "../src/modules/pickup-orders/pickup-orders.
 import { PairingService } from "../src/modules/kiosk/pairing.service";
 import { schema, type Db } from "@markiro/db";
 import { listenOnLoopback } from "./support/listen-loopback";
+import { createTestStationDevice } from "./support/auth";
 
 // Only `randomInt` is ever mocked (F3 below, one call, one test) -- every
 // other export (including `randomUUID`, used throughout this file) passes
@@ -269,11 +270,8 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
   // must never be able to mint a kiosk pairing code -- SessionOnlyGuard is
   // what actually blocks it.
   it("rejects a station device api-key even though TenantGuard would accept it", async () => {
-    const device = await agent
-      .post("/station-devices")
-      .send({ name: "Kiosk cabinet terminal" })
-      .expect(201);
-    const apiKey = (device.body as { apiKey: string }).apiKey;
+    const device = await createTestStationDevice(app!, agent, "Kiosk cabinet terminal");
+    const apiKey = device.apiKey;
 
     await request(app!.getHttpServer())
       .post(`/kiosks/${kioskId}/pairing-code`)
