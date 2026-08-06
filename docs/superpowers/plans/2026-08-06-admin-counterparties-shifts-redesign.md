@@ -64,7 +64,7 @@
 - Produces: `AdminPageProps`, `FilterBarProps`, and `RowActionsProps` as small presentational APIs.
 - Consumers: Catalog in this task; Counterparties and Shifts in later tasks.
 
-- [ ] **Step 1: Write failing shared-component tests**
+- [x] **Step 1: Write failing shared-component tests**
 
 Add tests that render the exact public contracts:
 
@@ -95,13 +95,13 @@ expect(screen.getByText("Edit").parentElement?.classList).toContain("mk-row-acti
 
 Define `FilterBarProps` so reset is rendered only when both `resetLabel` and `onReset` are supplied; `resultSummary` remains mounted and may be an empty string during loading/error.
 
-- [ ] **Step 2: Run the shared test and verify RED**
+- [x] **Step 2: Run the shared test and verify RED**
 
 Run: `pnpm --filter @markiro/ui exec vitest run test/components.test.tsx`
 
 Expected: FAIL because the three exports do not exist.
 
-- [ ] **Step 3: Implement the minimal components and token-only CSS**
+- [x] **Step 3: Implement the minimal components and token-only CSS**
 
 Use these interfaces:
 
@@ -125,11 +125,11 @@ export interface RowActionsProps extends HTMLAttributes<HTMLDivElement> {
 
 `AdminPage` merges `mk-admin-page`; `FilterBar` renders one `role="group"`, a `.mk-filter-bar__controls`, an always-mounted polite `.mk-filter-bar__result`, and an optional secondary compact reset `Button`; `RowActions` renders a visible flex action region. Add responsive wrapping below 768 px and preserve the Catalog maximum width and padding already encoded in `catalog.css`.
 
-- [ ] **Step 4: Adopt the components in Catalog without behavior changes**
+- [x] **Step 4: Adopt the components in Catalog without behavior changes**
 
 Replace only the Catalog page wrapper, labelled filter wrapper/result paragraph, and `.mk-catalog-row-actions`. Keep all labels, queries, routes, buttons, debounce, and result-count behavior unchanged. Remove only CSS made redundant by the shared classes.
 
-- [ ] **Step 5: Run UI and Catalog tests and verify GREEN**
+- [x] **Step 5: Run UI and Catalog tests and verify GREEN**
 
 Run: `pnpm --filter @markiro/ui exec vitest run test/components.test.tsx`
 
@@ -139,7 +139,7 @@ Run: `pnpm --filter @markiro/admin exec vitest run test/catalog.test.tsx test/ca
 
 Expected: PASS; Catalog still exposes `data-testid="catalog-page"`, the labelled filter group, result pluralization, and visible Edit/Delete actions.
 
-- [ ] **Step 6: Commit the shared page primitives**
+- [x] **Step 6: Commit the shared page primitives**
 
 ```bash
 git add packages/ui/src/components/AdminPage.tsx packages/ui/src/components/FilterBar.tsx packages/ui/src/components/RowActions.tsx packages/ui/src/components/index.ts packages/ui/src/components.css packages/ui/test/components.test.tsx apps/admin/src/pages/catalog/index.tsx apps/admin/src/pages/catalog/catalog.css apps/admin/test/catalog.test.tsx
@@ -176,7 +176,7 @@ export function useRoutePanelGuard(close: () => void, busy: boolean): RoutePanel
 
 - Consumers: Product, Counterparty, and Shift panel controllers.
 
-- [ ] **Step 1: Write a failing harness test for the state machine**
+- [x] **Step 1: Write a failing harness test for the state machine**
 
 Create a memory-router harness with `/list` and nested `/list/new`. Assert four paths:
 
@@ -187,17 +187,17 @@ Create a memory-router harness with `/list` and nested `/list/new`. Assert four 
 
 The test must use `createMemoryRouter`, not mock `useBlocker`.
 
-- [ ] **Step 2: Run the guard test and verify RED**
+- [x] **Step 2: Run the guard test and verify RED**
 
 Run: `pnpm --filter @markiro/admin exec vitest run test/route-panel-guard.test.tsx`
 
 Expected: FAIL because the hook does not exist.
 
-- [ ] **Step 3: Extract the proven Catalog state machine**
+- [x] **Step 3: Extract the proven Catalog state machine**
 
 Move the current `useDirtyGuard` behavior without semantic changes. Preserve the `allowNavigationRef`, reset a blocked transition when `busy || !dirty`, and expose the renamed methods above. The hook owns only dirty/busy navigation state; feature copy and `ConfirmDialog` rendering stay in each panel route.
 
-- [ ] **Step 4: Migrate ProductPanelRoute to the shared hook**
+- [x] **Step 4: Migrate ProductPanelRoute to the shared hook**
 
 Replace the local hook and rename only call sites:
 
@@ -210,13 +210,13 @@ const guard = useRoutePanelGuard(close, mutation.isPending);
 
 Do not change Product loading, stable edit values, mutations, copy, or route fallback.
 
-- [ ] **Step 5: Run guard and complete Catalog routing tests**
+- [x] **Step 5: Run guard and complete Catalog routing tests**
 
 Run: `pnpm --filter @markiro/admin exec vitest run test/route-panel-guard.test.tsx test/catalog-routing.test.tsx test/catalog.test.tsx`
 
 Expected: PASS for close button, Escape, backdrop, Back, pending submit, direct entry, load failure, and not-found behavior.
 
-- [ ] **Step 6: Commit the route guard**
+- [x] **Step 6: Commit the route guard**
 
 ```bash
 git add apps/admin/src/lib/useRoutePanelGuard.ts apps/admin/src/pages/catalog/ProductPanelRoute.tsx apps/admin/test/route-panel-guard.test.tsx apps/admin/test/catalog-routing.test.tsx
@@ -245,7 +245,7 @@ git commit -m "refactor(admin): share route panel dismissal guard"
 - Produces `CounterpartyPanelRoute({ mode }: { mode: "create" | "edit" })` and `CounterpartiesPanelContext` supplied by the list page.
 - Consumes `SidePanel size="standard"`, `useRoutePanelGuard`, existing counterparty/SSCC hooks, and nested React Router context.
 
-- [ ] **Step 1: Add failing nested-route and authorization tests**
+- [x] **Step 1: Add failing nested-route and authorization tests**
 
 Cover `/counterparties/new` and `/counterparties/:counterpartyId/edit` through the real route tree:
 
@@ -256,7 +256,7 @@ expect(router.state.location.pathname).toBe("/counterparties/new");
 
 Assert list state remains mounted behind the panel, direct close replaces to `/counterparties`, Back closes an opened-from-list panel, an unknown ID shows a translated not-found state, and read-only direct URLs render `forbidden-page` without mounting create/update/SSCC write hooks. Change every modified test `jsonResponse` helper to a native `Response`.
 
-- [ ] **Step 2: Add failing dirty, pending, load, and independent-section tests**
+- [x] **Step 2: Add failing dirty, pending, load, and independent-section tests**
 
 Assert:
 
@@ -273,7 +273,7 @@ Run: `pnpm --filter @markiro/admin exec vitest run test/counterparties-routing.t
 
 Expected: FAIL because Counterparties still owns local modal state and the form does not publish dirty/section state.
 
-- [ ] **Step 3: Implement route-owned list context and close fallback**
+- [x] **Step 3: Implement route-owned list context and close fallback**
 
 The list page owns `items`, `isPending`, `isError`, and `refetch`. It renders `<Outlet context={... satisfies CounterpartiesPanelContext} />`. Navigation from the header/empty state uses `new`; row Edit uses `${id}/edit`; both pass `{ counterpartiesBackground: true }`.
 
@@ -289,7 +289,7 @@ if ((location.state as CounterpartiesPanelLocationState | null)?.counterpartiesB
 
 Split create/edit route controllers so create mounts only `useCreateCounterparty` and edit mounts only `useUpdateCounterparty`. Required list data pending/error renders a shape-matched panel skeleton or Retry/Close state; missing edit entity never mounts a blank form.
 
-- [ ] **Step 4: Convert CounterpartyForm to a standard SidePanel**
+- [x] **Step 4: Convert CounterpartyForm to a standard SidePanel**
 
 Remove `open`; add:
 
@@ -304,7 +304,7 @@ Render two semantic sections: `Identity and GS1` for profile fields and `SSCC se
 
 Inside `CounterpartySsccSection`, expose `onDirtyChange` and `onBusyChange`, use `formState.isDirty`, and after a successful PUT call `reset({ nextSerial: savedSerial })`. Keep SSCC query loading/error isolated; Retry invokes `ssccQuery.refetch()`. If GLN cannot derive a prefix, render the existing unavailable state and keep Save disabled rather than treating it as a query failure.
 
-- [ ] **Step 5: Add bilingual panel/state copy and feature CSS**
+- [x] **Step 5: Add bilingual panel/state copy and feature CSS**
 
 Add matched keys for:
 
@@ -316,11 +316,11 @@ Add matched keys for:
 
 Use `.mk-counterparty-panel-section` headings, a profile grid that collapses below 560 px, an SSCC subsection boundary, and a skeleton matching both sections. Use tokens only.
 
-- [ ] **Step 6: Implement route-owned create/update success and failure**
+- [x] **Step 6: Implement route-owned create/update success and failure**
 
 Clear the persistent error before mutation. On success, keep the existing toast and call `guard.finish()`. On failure, prefer `ApiRequestError.message`, otherwise the existing translated generic error; keep panel and input mounted. Preserve the exact normalized POST/PATCH body already asserted in `counterparties.test.tsx`.
 
-- [ ] **Step 7: Run focused tests and verify GREEN**
+- [x] **Step 7: Run focused tests and verify GREEN**
 
 Run: `pnpm --filter @markiro/ui build`
 
@@ -328,7 +328,7 @@ Run: `pnpm --filter @markiro/admin exec vitest run test/route-panel-guard.test.t
 
 Expected: PASS with independent SSCC saving, exact payloads, direct-route authorization, dirty/pending safety, and no missing-translation warnings.
 
-- [ ] **Step 8: Commit the Counterparty panel**
+- [x] **Step 8: Commit the Counterparty panel**
 
 ```bash
 git add apps/admin/src/pages/counterparties apps/admin/src/app.tsx apps/admin/src/i18n/ru.json apps/admin/src/i18n/en.json apps/admin/test/counterparties-routing.test.tsx apps/admin/test/counterparties.test.tsx apps/admin/test/access-routing.test.tsx
@@ -352,27 +352,27 @@ git commit -m "feat(admin): move counterparties to side panels"
 - Consumes `AdminPage`, `RowActions`, and `ConfirmDialog`.
 - Produces the completed Counterparties list surface; no new package API.
 
-- [ ] **Step 1: Add failing confirmation and layout tests**
+- [x] **Step 1: Add failing confirmation and layout tests**
 
 Assert `AdminPage` class/data-testid, a polite localized result count, and visible Edit/Delete action order. For deletion, assert `role="alertdialog"`, exact counterparty name plus GLN entity, Cancel initial focus, Escape cancellation, exactly one DELETE while pending, disabled dismissal while pending, persistent 409 error inside the still-open dialog, and closure/refetch after success. Repeat the heading/result/action assertions in English.
 
-- [ ] **Step 2: Run Counterparty tests and verify RED**
+- [x] **Step 2: Run Counterparty tests and verify RED**
 
 Run: `pnpm --filter @markiro/admin exec vitest run test/counterparties.test.tsx`
 
 Expected: FAIL because deletion still uses `Modal`, failures are toast-only, and page layout is inline.
 
-- [ ] **Step 3: Replace delete Modal and apply shared layout**
+- [x] **Step 3: Replace delete Modal and apply shared layout**
 
 Use `ConfirmDialog` with `tone="destructive"`, `busy={deleteMutation.isPending}`, GLN as `entity`, and a description fragment containing consequence copy plus `Alert` when `deleteError` exists. Clear the error on open and before retry. Wrap the page in `AdminPage data-testid="counterparties-page"`, actions in `RowActions`, and keep the result live region mounted but blank during loading/error.
 
-- [ ] **Step 4: Run focused Counterparty tests**
+- [x] **Step 4: Run focused Counterparty tests**
 
 Run: `pnpm --filter @markiro/admin exec vitest run test/counterparties.test.tsx test/counterparties-routing.test.tsx test/access-routing.test.tsx`
 
 Expected: PASS with unchanged DELETE endpoint/query invalidation and no legacy Counterparty `Modal` import.
 
-- [ ] **Step 5: Commit Counterparty confirmation and layout**
+- [x] **Step 5: Commit Counterparty confirmation and layout**
 
 ```bash
 git add apps/admin/src/pages/counterparties/index.tsx apps/admin/src/pages/counterparties/counterparties.css apps/admin/src/i18n/ru.json apps/admin/src/i18n/en.json apps/admin/test/counterparties.test.tsx
@@ -401,15 +401,15 @@ git commit -m "style(admin): align counterparties with catalog"
 - Produces `ShiftPanelRoute({ mode }: { mode: "create" | "edit" })` and `ShiftsPanelContext` with shifts plus all form dependencies and retry functions.
 - Consumes `SidePanel size="complex"`, `useRoutePanelGuard`, and existing Shift hooks/payload types.
 
-- [ ] **Step 1: Add failing nested-route and authorization tests**
+- [x] **Step 1: Add failing nested-route and authorization tests**
 
 Cover `/shifts/new` and `/shifts/:shiftId/edit`. Assert list/filter state survives opening and Back; direct close falls back to `/shifts`; unknown shift shows not-found; read-only direct routes render forbidden without mounting create/update hooks; write-capable routes open translated dialogs. Use native `Response` helpers.
 
-- [ ] **Step 2: Add failing dirty, pending, and dependency-state tests**
+- [x] **Step 2: Add failing dirty, pending, and dependency-state tests**
 
 Parameterize close button, Escape, backdrop, and Back after changing Product, mode, date, a Select, or aggregation capacity. Assert cancel preserves all conditional values and discard closes. Controlled POST/PATCH promises must block all dismissal and duplicate submits. Test each dependency family (`shifts`, products, lines, counterparties, templates): pending produces skeleton; failure produces Retry/Close; Retry makes exactly one additional request per required path. A background refetch changing a different shift must not reset the dirty edit form.
 
-- [ ] **Step 3: Preserve exact Shift payload regression matrix**
+- [x] **Step 3: Preserve exact Shift payload regression matrix**
 
 Retain all existing tests for:
 
@@ -423,11 +423,11 @@ Retain all existing tests for:
 
 Move only harness/navigation setup required by nested routes. Do not weaken exact `JSON.stringify` body assertions.
 
-- [ ] **Step 4: Implement Shifts list context and nested routes**
+- [x] **Step 4: Implement Shifts list context and nested routes**
 
 The list owns status/date filters and all five query states. It supplies stable arrays, pending/error flags, and `retryPanelData()` through `<Outlet>`. Add write-gated child routes in `app.tsx`. Header/empty action navigates to `new`; planned-row Edit navigates to `${id}/edit`; both mark `{ shiftsBackground: true }`. Route controllers own create/update mutations and the same background/direct close fallback used by Catalog and Counterparties.
 
-- [ ] **Step 5: Convert ShiftForm to a complex SidePanel**
+- [x] **Step 5: Convert ShiftForm to a complex SidePanel**
 
 Remove `open`; add `submissionError` and `onDirtyChange`. Render semantic sections:
 
@@ -439,11 +439,11 @@ Remove `open`; add `submissionError` and `onDirtyChange`. Render semantic sectio
 
 Publish `formState.isDirty`. Keep all four touched refs and every `setValue(..., { shouldDirty: true })` contract. Seed only when panel identity changes; hold an `isDirtyRef` so dependency/query refetches cannot reset unsaved values. Compute edit `initialValues` with `useMemo` from editable primitive fields, not the whole Shift object.
 
-- [ ] **Step 6: Implement route mutation/load behavior and bilingual copy**
+- [x] **Step 6: Implement route mutation/load behavior and bilingual copy**
 
 Use route-owned persistent errors, existing success toasts, `guard.finish()` only after success, and Retry/Close/not-found states. Add matched RU/EN section, load, retry, not-found, discard, result-count, filter-label, and reset-filter keys. Add a complex-panel grid that collapses below 640 px and a five-section skeleton. Use tokens only.
 
-- [ ] **Step 7: Run focused Shift tests and verify GREEN**
+- [x] **Step 7: Run focused Shift tests and verify GREEN**
 
 Run: `pnpm --filter @markiro/ui build`
 
@@ -451,7 +451,7 @@ Run: `pnpm --filter @markiro/admin exec vitest run test/route-panel-guard.test.t
 
 Expected: PASS with all existing exact payload assertions plus route, dirty, pending, dependency, retry, and authorization coverage.
 
-- [ ] **Step 8: Commit Shift panel routing and form**
+- [x] **Step 8: Commit Shift panel routing and form**
 
 ```bash
 git add apps/admin/src/pages/shifts/ShiftPanelRoute.tsx apps/admin/src/pages/shifts/ShiftForm.tsx apps/admin/src/pages/shifts/index.tsx apps/admin/src/pages/shifts/shifts.css apps/admin/src/app.tsx apps/admin/src/i18n/ru.json apps/admin/src/i18n/en.json apps/admin/test/shifts-routing.test.tsx apps/admin/test/shifts.test.tsx apps/admin/test/access-routing.test.tsx
@@ -475,7 +475,7 @@ git commit -m "feat(admin): move shift editing to side panels"
 - Consumes `AdminPage`, `FilterBar`, `RowActions`, `ConfirmDialog`, existing `useDeleteShift`, and `useCloseShift`.
 - Produces completed Shift list decisions and filters; no shared API changes.
 
-- [ ] **Step 1: Add failing delete and close confirmation tests**
+- [x] **Step 1: Add failing delete and close confirmation tests**
 
 Delete tests mirror Counterparties: exact shift/product identity, Cancel initial focus, Escape/backdrop cancellation, one request while pending, disabled dismissal, persistent failure, and success closure.
 
@@ -487,23 +487,23 @@ For active-shift close, keep the required reason as the only input inside `Confi
 
 Reset reason/error only after success or an idle Cancel.
 
-- [ ] **Step 2: Add failing filter/page tests**
+- [x] **Step 2: Add failing filter/page tests**
 
 Assert `AdminPage`, a `FilterBar` named in RU/EN, always-mounted localized result count, and a Reset button visible only when status/from/to differs from defaults. Clicking Reset must clear all three controls and issue an unfiltered `/api/shifts` request. Preserve the existing date locale and exact query-parameter tests.
 
-- [ ] **Step 3: Run Shift tests and verify RED**
+- [x] **Step 3: Run Shift tests and verify RED**
 
 Run: `pnpm --filter @markiro/admin exec vitest run test/shifts.test.tsx`
 
 Expected: FAIL because delete/close use legacy `Modal`, failure is toast-only, and filters/page layout are inline.
 
-- [ ] **Step 4: Implement semantic confirmations and shared layout**
+- [x] **Step 4: Implement semantic confirmations and shared layout**
 
 Replace both Modals with `ConfirmDialog`. Use `tone="destructive"` for delete and the state-ending close action. Render the close-reason `Input` and optional `Alert` in a fragment passed to `description`; keep the confirm disabled for invalid reason by preventing invocation and, if needed, extend `ConfirmDialog` with an optional `confirmDisabled?: boolean` covered by a focused UI test. Do not use `busy` to represent invalid input.
 
 Wrap the page in `AdminPage data-testid="shifts-page"`, filters/result/reset in `FilterBar`, and row controls in `RowActions`. Preserve visible Edit/Delete/Close text buttons.
 
-- [ ] **Step 5: Run focused UI and Shift tests**
+- [x] **Step 5: Run focused UI and Shift tests**
 
 Run: `pnpm --filter @markiro/ui exec vitest run test/components.test.tsx test/overlays.test.tsx`
 
@@ -513,7 +513,7 @@ Run: `pnpm --filter @markiro/admin exec vitest run test/shifts.test.tsx test/shi
 
 Expected: PASS with exact filter queries, exact close payload, retained conditional-form payloads, and no legacy Shift `Modal` import.
 
-- [ ] **Step 6: Commit Shift confirmation and page alignment**
+- [x] **Step 6: Commit Shift confirmation and page alignment**
 
 ```bash
 git add packages/ui/src/components/ConfirmDialog.tsx packages/ui/test/overlays.test.tsx apps/admin/src/pages/shifts/index.tsx apps/admin/src/pages/shifts/shifts.css apps/admin/src/i18n/ru.json apps/admin/src/i18n/en.json apps/admin/test/shifts.test.tsx
@@ -535,7 +535,7 @@ If `ConfirmDialog` already supports disabling the confirm action when this task 
 
 - Produces a review-ready Counterparties and Shifts stage with explicit automated/manual evidence.
 
-- [ ] **Step 1: Audit scope and legacy Modal use**
+- [x] **Step 1: Audit scope and legacy Modal use**
 
 Run: `rg -n "\bModal\b" apps/admin/src/pages/counterparties apps/admin/src/pages/shifts`
 
@@ -545,7 +545,7 @@ Run: `git diff --name-only origin/main...HEAD`
 
 Expected: only shared UI/admin primitives, Catalog adoption, Counterparties, Shifts, routing, i18n, tests, and this plan. No backend, DTO, dependency, lockfile, Dashboard, or later-wave page changes.
 
-- [ ] **Step 2: Run focused tests**
+- [x] **Step 2: Run focused tests**
 
 Run: `pnpm --filter @markiro/ui exec vitest run test/components.test.tsx test/overlays.test.tsx test/feedback.test.tsx`
 
@@ -555,7 +555,7 @@ Run: `pnpm --filter @markiro/admin exec vitest run test/route-panel-guard.test.t
 
 Expected: PASS with no act, duplicate-key, missing-translation, or focus-restoration warnings caused by this stage.
 
-- [ ] **Step 3: Run full UI and Admin package gates**
+- [x] **Step 3: Run full UI and Admin package gates**
 
 Run each command separately:
 
@@ -572,7 +572,7 @@ pnpm --filter @markiro/admin build
 
 Expected: every command exits 0. Record existing warnings separately; do not call them new regressions without diff evidence.
 
-- [ ] **Step 4: Run repository hygiene checks**
+- [x] **Step 4: Run repository hygiene checks**
 
 Run: `git diff --check origin/main...HEAD`
 
@@ -584,6 +584,11 @@ Expected: no whitespace errors, formatting passes, and the added-line dash audit
 
 - [ ] **Step 5: Perform browser and accessibility review if infrastructure permits**
 
+Not run in this worktree: no authenticated Admin API/session was available for exercising the
+real route tree in a browser. Automated DOM coverage verifies route authorization, focus trapping,
+Escape/backdrop handling, inert background behavior, and responsive class contracts; live theme,
+viewport, screen-reader, and mobile-keyboard checks remain external.
+
 Run Admin with its normal authenticated API and verify Counterparties and Shifts at 1440, 1024, 768, and one viewport below 768 px in light and dark themes. Exercise:
 
 - create, edit, direct link, not found, read-only denial, load failure, mutation failure, and pending mutation;
@@ -594,7 +599,7 @@ Run Admin with its normal authenticated API and verify Counterparties and Shifts
 
 Report untested screen reader, mobile virtual keyboard, browser, or infrastructure behavior explicitly.
 
-- [ ] **Step 6: Review and commit verification evidence**
+- [x] **Step 6: Review and commit verification evidence**
 
 Update only completed checkboxes/evidence in this plan. Inspect `git diff --stat origin/main...HEAD` and the complete Admin/UI diff. Then commit:
 
