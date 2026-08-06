@@ -8,7 +8,6 @@ import { createRoot } from "react-dom/client";
 
 import { ThemeProvider } from "@markiro/ui";
 
-import { App } from "./App.js";
 import { shouldRenderGallery } from "./dev/gallery-guard.js";
 
 const queryClient = new QueryClient();
@@ -30,14 +29,17 @@ function render(content: ReactNode) {
   );
 }
 
-if (import.meta.env.DEV) {
-  if (shouldRenderGallery(true, window.location.search)) {
-    void import("./dev/StationScreenGallery.js").then(({ StationScreenGalleryRoute }) => {
+async function bootstrap() {
+  if (import.meta.env.DEV) {
+    if (shouldRenderGallery(true, window.location.search)) {
+      const { StationScreenGalleryRoute } = await import("./dev/StationScreenGallery.js");
       render(<StationScreenGalleryRoute search={window.location.search} />);
-    });
-  } else {
-    render(<App />);
+      return;
+    }
   }
-} else {
+
+  const { App } = await import("./App.js");
   render(<App />);
 }
+
+void bootstrap();
