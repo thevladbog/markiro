@@ -61,8 +61,12 @@ interface ListKiosksResponse {
 
 /** Shared TanStack Query cache key for the kiosks list. */
 export const KIOSKS_QUERY_KEY = ["kiosks"] as const;
-/** Mutation entries under this key can hold a one-time pairing secret. */
+/** Base key for per-kiosk mutations that can hold a one-time pairing secret. */
 export const KIOSK_PAIRING_CODE_MUTATION_KEY = ["kiosk-pairing-code"] as const;
+
+function kioskPairingCodeMutationKey(kioskId: string) {
+  return [...KIOSK_PAIRING_CODE_MUTATION_KEY, kioskId] as const;
+}
 
 async function fetchKiosks(): Promise<KioskDto[]> {
   const response = await apiFetch<ListKiosksResponse>("/kiosks");
@@ -165,24 +169,28 @@ export function useSetKioskProducts(): UseMutationResult<
  * above: issuing a code touches nothing `KioskDto` exposes, so a refetch would
  * be pure noise.
  */
-export function useIssueKioskPairingCode(): UseMutationResult<
-  IssuePairingCodeResult,
-  Error,
-  string
-> {
+export function useIssueKioskPairingCode(
+  kioskId: string,
+): UseMutationResult<IssuePairingCodeResult, Error, void> {
   return useMutation({
-    mutationKey: KIOSK_PAIRING_CODE_MUTATION_KEY,
-    mutationFn: postKioskPairingCode,
+    mutationKey: kioskPairingCodeMutationKey(kioskId),
+    mutationFn: () => postKioskPairingCode(kioskId),
     gcTime: 0,
   });
 }
 
 /** Explicitly removes one-time pairing responses when their reveal is dismissed. */
-export function clearKioskPairingCodeMutations(queryClient: QueryClient): void {
+export function clearKioskPairingCodeMutations(
+  queryClient: QueryClient,
+  kioskId: string,
+  expectedResult?: IssuePairingCodeResult,
+): void {
   for (const mutation of queryClient
     .getMutationCache()
-    .findAll({ mutationKey: KIOSK_PAIRING_CODE_MUTATION_KEY })) {
-    queryClient.getMutationCache().remove(mutation);
+    .findAll({ mutationKey: kioskPairingCodeMutationKey(kioskId) })) {
+    if (expectedResult === undefined || mutation.state.data === expectedResult) {
+      queryClient.getMutationCache().remove(mutation);
+    }
   }
 }
 

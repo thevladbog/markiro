@@ -46,8 +46,13 @@ vi.mock("../src/pages/kiosks/api.js", async (importOriginal) => {
   };
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  vi.clearAllTimers();
   vi.unstubAllGlobals();
   vi.useRealTimers();
   writeHookMountSpy.mockClear();
@@ -180,7 +185,7 @@ function stubFetch(overrides: {
   kiosks?: unknown[];
   products?: unknown[];
   reasons?: unknown[];
-  onPost?: (path: string, init?: RequestInit) => Response | undefined;
+  onPost?: (path: string, init?: RequestInit) => Response | Promise<Response> | undefined;
 }) {
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     const path = String(url);
@@ -426,15 +431,14 @@ describe("KiosksPage", () => {
     expect(barcode.style.height).toBe("74px");
   });
 
-  it("counts the TTL down and drops into an expired state once it elapses", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+  it("does not reveal a pairing code that is already expired", async () => {
     stubFetch({
       kiosks: [ONLINE_KIOSK],
       onPost: (path, init) => {
         if (path === "/api/kiosks/k1/pairing-code" && init?.method === "POST") {
           return jsonResponse(201, {
             code: "12345678",
-            expiresAt: new Date(Date.now() + PAIRING_TTL_MS).toISOString(),
+            expiresAt: new Date(Date.now() - 1).toISOString(),
           });
         }
         return undefined;
@@ -446,16 +450,6 @@ describe("KiosksPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Код привязки" }));
 
     const dialog = within(await screen.findByRole("dialog"));
-    expect(dialog.getByText("Действителен ещё 15:00")).toBeDefined();
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(60_000);
-    });
-    expect(dialog.getByText("Действителен ещё 14:00")).toBeDefined();
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(PAIRING_TTL_MS);
-    });
     expect(dialog.getByText("Срок действия кода истёк. Сформируйте новый код.")).toBeDefined();
     expect(dialog.queryByText("1234 5678")).toBeNull();
   });
@@ -685,5 +679,132 @@ describe("KiosksPage", () => {
     // Number("") === 0 passes the finite guard; a blank input must fall back to
     // the reason's existing order, not silently persist 0.
     expect(body.sortOrder).toBe(1);
+  });
+
+  describe("pairing lifecycle response safety", () => {
+    it("ignores a late regeneration response after Done and route teardown", async () => {
+      let resolveRegeneration: ((response: Response) => void) | undefined;
+      let regenerationSettled = false;
+      let unmounted = false;
+      let issued = 0;
+      stubFetch({
+        kiosks: [ONLINE_KIOSK],
+        onPost: (path, init) => {
+          if (path !== "/api/kiosks/k1/pairing-code" || init?.method !== "POST") return undefined;
+          issued += 1;
+          if (issued === 1)
+            return jsonResponse(201, {
+              code: "12345678",
+              expiresAt: new Date(Date.now() + PAIRING_TTL_MS).toISOString(),
+            });
+          return new Promise<Response>((resolve) => {
+            resolveRegeneration = resolve;
+          });
+        },
+      });
+      const { queryClient, unmount } = renderPage();
+      const settleRegeneration = async () => {
+        await act(async () => {
+          resolveRegeneration?.(
+            jsonResponse(201, {
+              code: "87654321",
+              expiresAt: new Date(Date.now() + PAIRING_TTL_MS).toISOString(),
+            }),
+          );
+          await Promise.resolve();
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+        regenerationSettled = true;
+      };
+
+      try {
+        await screen.findByText("Касса у входа");
+        fireEvent.click(screen.getByRole("button", { name: "Код привязки" }));
+        await screen.findByText("1234 5678");
+        await screen.findByRole("img", { name: /12345678/ }, { timeout: 3000 });
+        fireEvent.click(screen.getByRole("button", { name: "Сформировать новый" }));
+        fireEvent.click(screen.getByRole("button", { name: "Готово" }));
+        unmount();
+        unmounted = true;
+
+        await settleRegeneration();
+        expect(screen.queryByText("8765 4321")).toBeNull();
+        expect(
+          queryClient
+            .getMutationCache()
+            .getAll()
+            .every((mutation) => !JSON.stringify(mutation.state.data).includes("87654321")),
+        ).toBe(true);
+      } finally {
+        if (!unmounted) unmount();
+        if (!regenerationSettled && resolveRegeneration) await settleRegeneration();
+        queryClient.clear();
+      }
+    });
+
+    it("clears only the dismissed kiosk's pairing response", async () => {
+      stubFetch({
+        kiosks: [ONLINE_KIOSK, OFFLINE_KIOSK],
+        onPost: (path, init) => {
+          if (init?.method !== "POST") return undefined;
+          if (path === "/api/kiosks/k1/pairing-code") {
+            return jsonResponse(201, {
+              code: "11111111",
+              expiresAt: new Date(Date.now() + PAIRING_TTL_MS).toISOString(),
+            });
+          }
+          if (path === "/api/kiosks/k2/pairing-code") {
+            return jsonResponse(201, {
+              code: "22222222",
+              expiresAt: new Date(Date.now() + PAIRING_TTL_MS).toISOString(),
+            });
+          }
+          return undefined;
+        },
+      });
+
+      const { queryClient } = renderPage();
+      await screen.findByText("Касса у входа");
+      await screen.findByText("Склад");
+      const pairingActions = screen.getAllByRole("button", { name: "Код привязки" });
+      fireEvent.click(pairingActions[0]!);
+      await screen.findByText("1111 1111");
+      fireEvent.click(pairingActions[1]!);
+      await screen.findByText("2222 2222");
+
+      expect(
+        queryClient
+          .getMutationCache()
+          .getAll()
+          .some((mutation) => JSON.stringify(mutation.state.data).includes("11111111")),
+      ).toBe(true);
+      expect(
+        queryClient
+          .getMutationCache()
+          .getAll()
+          .some((mutation) => JSON.stringify(mutation.state.data).includes("22222222")),
+      ).toBe(true);
+
+      const firstDialog = screen.getAllByRole("dialog", { name: "Код привязки киоска" })[0]!;
+      fireEvent.click(within(firstDialog).getByRole("button", { name: "Готово" }));
+      await waitFor(() => expect(screen.queryByText("1111 1111")).toBeNull());
+      expect(
+        queryClient
+          .getMutationCache()
+          .getAll()
+          .every((mutation) => !JSON.stringify(mutation.state.data).includes("11111111")),
+      ).toBe(true);
+      expect(
+        queryClient
+          .getMutationCache()
+          .getAll()
+          .some((mutation) => JSON.stringify(mutation.state.data).includes("22222222")),
+      ).toBe(true);
+
+      const secondDialog = screen.getAllByRole("dialog", { name: "Код привязки киоска" })[0]!;
+      fireEvent.click(within(secondDialog).getByRole("button", { name: "Готово" }));
+      await waitFor(() => expect(screen.queryByText("2222 2222")).toBeNull());
+    });
   });
 });

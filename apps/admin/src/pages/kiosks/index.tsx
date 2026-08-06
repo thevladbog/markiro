@@ -312,34 +312,51 @@ export function KiosksPage() {
 /** Owns the credential mutation so it never mounts for an unauthorized manager. */
 function KioskPairingAction({ kiosk }: { kiosk: KioskDto }) {
   const { t } = useTranslation();
-  const pairingMutation = useIssueKioskPairingCode();
+  const pairingMutation = useIssueKioskPairingCode(kiosk.id);
   const queryClient = useQueryClient();
   const [pairing, setPairing] = useState<PairingState>(null);
   const resetPairingMutation = useRef<() => void>(() => {});
+  const requestGeneration = useRef(0);
+  const mounted = useRef(false);
   resetPairingMutation.current = pairingMutation.reset;
 
   const clearPairing = () => {
+    requestGeneration.current += 1;
     setPairing(null);
     resetPairingMutation.current();
-    clearKioskPairingCodeMutations(queryClient);
+    clearKioskPairingCodeMutations(queryClient, kiosk.id);
   };
 
   // A route change tears the row down without a close click; do not retain the
   // one-time plaintext in the mutation cache after that unmount.
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mounted.current = true;
+
+    return () => {
+      mounted.current = false;
+      requestGeneration.current += 1;
       resetPairingMutation.current();
-      clearKioskPairingCodeMutations(queryClient);
-    },
-    [queryClient],
-  );
+      clearKioskPairingCodeMutations(queryClient, kiosk.id);
+    };
+  }, [kiosk.id, queryClient]);
 
   const handleIssuePairingCode = async () => {
+    const generation = ++requestGeneration.current;
+
     try {
-      const result = await pairingMutation.mutateAsync(kiosk.id);
+      const result = await pairingMutation.mutateAsync();
+      if (!mounted.current || generation !== requestGeneration.current) {
+        clearKioskPairingCodeMutations(queryClient, kiosk.id, result);
+        return;
+      }
+
       setPairing({ kiosk, code: result.code, expiresAt: result.expiresAt });
       toast("ok", t("pages.kiosks.toasts.pairingSuccess"));
     } catch (error) {
+      if (!mounted.current || generation !== requestGeneration.current) {
+        return;
+      }
+
       toast(
         "error",
         error instanceof ApiRequestError ? error.message : t("pages.kiosks.toasts.pairingError"),
