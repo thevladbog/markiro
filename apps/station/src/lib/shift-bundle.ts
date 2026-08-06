@@ -1,4 +1,5 @@
 import type { StationClient } from "./api-client.js";
+import type { CredentialGeneration } from "./credential-recovery.js";
 import { upsertBundle, type SqlExecutor, type StationBundle } from "./mirror.js";
 import { addRange } from "./sscc-pool.js";
 
@@ -60,13 +61,16 @@ export function mirrorShiftBundle(
   client: Pick<StationClient, "get">,
   exec: SqlExecutor,
   shiftId: string,
+  generation?: CredentialGeneration,
 ): Promise<void> {
   const operation = (async () => {
     try {
       const bundle = await client.get<StationBundle>(`/shifts/${shiftId}/bundle`);
+      if (generation?.sealed) return;
       if (bundle.sscc) {
         await addRange(exec, bundle.sscc);
       }
+      if (generation?.sealed) return;
       await upsertBundle(exec, bundle);
     } catch (err) {
       console.error("station: shift bundle download/mirror failed", err);

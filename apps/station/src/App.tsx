@@ -6,7 +6,12 @@ import { clearCredential, isEnrolled, readConfig, type StationConfig } from "./l
 import { createStationClient } from "./lib/api-client.js";
 import {
   clearRejectedCredentialState,
+  createCredentialGeneration,
+  credentialGenerationIsCurrent,
+  readSealedWorkSummary,
+  type CredentialGeneration,
   type CredentialRejectedEvent,
+  type SealedWorkSummary,
 } from "./lib/credential-recovery.js";
 import {
   DEFAULT_HARDWARE_CONFIG,
@@ -43,10 +48,9 @@ interface ActiveShift {
   mode: string;
 }
 
-interface CredentialRecoveryState {
-  event: CredentialRejectedEvent;
-  phase: "sealing" | "ready" | "failed";
-}
+type CredentialRecoveryState =
+  | { event: CredentialRejectedEvent; phase: "sealing" | "failed" }
+  | { event: CredentialRejectedEvent; phase: "ready"; sealed: SealedWorkSummary };
 
 /**
  * Pure routing decision for the top-level App state machine, factored out so
@@ -309,7 +313,18 @@ export function App() {
     [config?.apiKey, config?.serverUrl],
   );
 
+  // One shared generation per authenticated key, not per sync-engine instance.
+  // This makes React StrictMode overlap and any late async response obey the
+  // same terminal seal. A newly provisioned apiKey creates a fresh generation.
+  const credentialGeneration = useMemo(
+    () => (client ? createCredentialGeneration() : null),
+    [client],
+  );
+  const currentCredentialGeneration = useRef<CredentialGeneration | null>(null);
+  currentCredentialGeneration.current = credentialGeneration;
+
   const onCredentialRejected = useCallback((event: CredentialRejectedEvent) => {
+    if (currentCredentialGeneration.current !== event.generation) return;
     // These updates gate every authenticated surface in the next render.
     // Cache deletion happens only from the post-commit effect below.
     setOperator(null);
@@ -336,6 +351,7 @@ export function App() {
     exec: tauriExecutor,
     client: authenticatedClient,
     machineId: config?.machineId,
+    ...(credentialGeneration ? { credentialGeneration } : {}),
     onCredentialRejected,
   });
 
@@ -356,6 +372,10 @@ export function App() {
         ) {
           throw new Error("credential recovery identity unavailable");
         }
+        // The recovery render above has already removed every authenticated
+        // action. Count all durable unsent facts in one SQLite snapshot before
+        // deleting any reproducible state; a count failure stays fail-closed.
+        const sealed = await readSealedWorkSummary(tauriExecutor);
         await clearRejectedCredentialState({ exec: tauriExecutor, clearCredential });
         const cleared = await readConfig();
         if (
@@ -369,7 +389,7 @@ export function App() {
         setConfig(cleared);
         setCredentialRecovery((current) =>
           current?.event === credentialRecovery.event
-            ? { event: credentialRecovery.event, phase: "ready" }
+            ? { event: credentialRecovery.event, phase: "ready", sealed }
             : current,
         );
       } catch {
@@ -387,9 +407,9 @@ export function App() {
   // sign-in screen has someone to authenticate. Without this a freshly
   // enrolled station shows a PIN pad no PIN can ever satisfy.
   useEffect(() => {
-    if (!authenticatedClient) return;
-    void syncOperatorRoster(authenticatedClient, tauriExecutor);
-  }, [authenticatedClient]);
+    if (!authenticatedClient || !credentialGeneration) return;
+    void syncOperatorRoster(authenticatedClient, tauriExecutor, credentialGeneration);
+  }, [authenticatedClient, credentialGeneration]);
 
   // Retry: the initial sync above runs exactly once, so a device that is
   // briefly offline at that moment would otherwise strand the operator at a
@@ -399,14 +419,14 @@ export function App() {
   // second, independent consumer of the same event — one listener, two
   // reasons to nudge.
   useEffect(() => {
-    if (!authenticatedClient) return;
+    if (!authenticatedClient || !credentialGeneration) return;
     const retrySync = () => {
-      void syncOperatorRoster(authenticatedClient, tauriExecutor);
+      void syncOperatorRoster(authenticatedClient, tauriExecutor, credentialGeneration);
       nudgeSync();
     };
     window.addEventListener("online", retrySync);
     return () => window.removeEventListener("online", retrySync);
-  }, [authenticatedClient, nudgeSync]);
+  }, [authenticatedClient, credentialGeneration, nudgeSync]);
 
   async function refreshConfig() {
     setConfig(await readConfig());
@@ -475,7 +495,7 @@ export function App() {
         <Enrollment
           machineId={config.machineId}
           {...(config.deviceId ? { expectedDeviceId: config.deviceId } : {})}
-          sealedWork={credentialRecovery.event.sealed}
+          sealedWork={credentialRecovery.sealed}
           onEnrolled={() => void finishCredentialRecovery()}
           scanSource={scanSource}
           pairingServerUrl={pairingServerUrl(config, configuredStationApiUrl())}
@@ -547,6 +567,7 @@ export function App() {
   // serverUrl truthy) — the same condition the `client` memo above builds
   // from, so it is guaranteed non-null in this branch.
   const activeClient = client!;
+  const floorGeneration = credentialGeneration!;
 
   // Shared by ShiftSelection's `onSelected` and NewShift's `onStarted`: the
   // shift is entered immediately (never blocked on the network), and the
@@ -554,8 +575,9 @@ export function App() {
   // available offline afterward. See `mirrorShiftBundle` for the
   // resilience contract (a download failure must not block entry).
   function handleShiftEntered(entered: ActiveShift) {
+    if (!credentialGenerationIsCurrent(floorGeneration)) return;
     setShift(entered);
-    void mirrorShiftBundle(activeClient, tauriExecutor, entered.id);
+    void mirrorShiftBundle(activeClient, tauriExecutor, entered.id, floorGeneration);
   }
 
   return (
@@ -642,6 +664,7 @@ export function App() {
         <ShiftSelection
           client={activeClient}
           onSelected={handleShiftEntered}
+          isCurrent={() => credentialGenerationIsCurrent(floorGeneration)}
           onNew={() => setFloorView("new")}
           onSetup={() => setShowSetup(true)}
           onConflicts={() => setShowConflicts(true)}

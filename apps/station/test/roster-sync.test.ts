@@ -2,6 +2,11 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
 import { applyMigrations, readOperatorsMirror, type SqlExecutor } from "../src/lib/mirror.js";
 import { syncOperatorRoster } from "../src/lib/roster-sync.js";
+import {
+  clearRejectedCredentialState,
+  createCredentialGeneration,
+  sealCredentialGeneration,
+} from "../src/lib/credential-recovery.js";
 
 function makeExec(): SqlExecutor {
   const db = new DatabaseSync(":memory:");
@@ -66,5 +71,51 @@ describe("syncOperatorRoster", () => {
       syncOperatorRoster({ get: vi.fn().mockRejectedValue(new Error("offline")) }, exec),
     ).resolves.toBeUndefined();
     expect(await readOperatorsMirror(exec)).toHaveLength(1);
+  });
+
+  it("cannot publish a roster GET that resolves after credential cleanup", async () => {
+    const exec = makeExec();
+    await applyMigrations(exec);
+    let resolveGet!: (value: { items: (typeof OPERATOR)[] }) => void;
+    const response = new Promise<{ items: (typeof OPERATOR)[] }>((resolve) => {
+      resolveGet = resolve;
+    });
+    const generation = createCredentialGeneration();
+    const late = syncOperatorRoster({ get: vi.fn().mockReturnValue(response) }, exec, generation);
+
+    sealCredentialGeneration(generation);
+    await clearRejectedCredentialState({ exec, clearCredential: async () => {} });
+    resolveGet({ items: [OPERATOR] });
+    await late;
+
+    expect(await readOperatorsMirror(exec)).toEqual([]);
+  });
+
+  it("cannot replace a newly provisioned roster when an old GET resolves late", async () => {
+    const exec = makeExec();
+    await applyMigrations(exec);
+    let resolveOld!: (value: { items: (typeof OPERATOR)[] }) => void;
+    const oldResponse = new Promise<{ items: (typeof OPERATOR)[] }>((resolve) => {
+      resolveOld = resolve;
+    });
+    const oldGeneration = createCredentialGeneration();
+    const late = syncOperatorRoster(
+      { get: vi.fn().mockReturnValue(oldResponse) },
+      exec,
+      oldGeneration,
+    );
+    sealCredentialGeneration(oldGeneration);
+    await clearRejectedCredentialState({ exec, clearCredential: async () => {} });
+
+    const fresh = { ...OPERATOR, operatorId: "op-fresh", login: "900" };
+    await syncOperatorRoster(
+      { get: vi.fn().mockResolvedValue({ items: [fresh] }) },
+      exec,
+      createCredentialGeneration(),
+    );
+    resolveOld({ items: [OPERATOR] });
+    await late;
+
+    expect(await readOperatorsMirror(exec)).toEqual([fresh]);
   });
 });

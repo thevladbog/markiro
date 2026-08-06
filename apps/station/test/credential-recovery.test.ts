@@ -166,15 +166,43 @@ async function snapshot(exec: SqlExecutor, table: string, orderBy: string): Prom
 
 describe("credential rejection recovery", () => {
   it("reports exact unsynchronized scan, box, and exception counts", async () => {
-    const exec = await migratedExec();
-    await seedRecoveryFixture(exec);
+    const base = await migratedExec();
+    await seedRecoveryFixture(base);
+    let snapshotQueries = 0;
+    let insertedAtSnapshot = false;
+    const exec: SqlExecutor = {
+      run: base.run,
+      async all<T>(sql: string, params: unknown[] = []): Promise<T[]> {
+        snapshotQueries += 1;
+        if (!insertedAtSnapshot) {
+          insertedAtSnapshot = true;
+          await base.run(
+            `INSERT INTO outbox
+               (shift_id, terminal_id, raw, verdict, scanned_at, code_hash, gtin14, serial)
+             VALUES (?,?,?,?,?,?,?,?)`,
+            [
+              "shift-1",
+              "device-1",
+              "RAW-AROUND-REJECTION",
+              "ok",
+              "2026-08-06T08:00:01.000Z",
+              "hash-2",
+              "04600000000017",
+              "SERIAL-2",
+            ],
+          );
+        }
+        return base.all<T>(sql, params);
+      },
+    };
 
     await expect(readSealedWorkSummary(exec)).resolves.toEqual({
-      scans: 1,
+      scans: 2,
       boxes: 1,
       exceptions: 1,
-      total: 3,
+      total: 4,
     });
+    expect(snapshotQueries).toBe(1);
   });
 
   it("clears only explicit reproducible caches after the durable credential boundary", async () => {
@@ -221,11 +249,11 @@ describe("credential rejection recovery", () => {
     expect(await exec.all("SELECT * FROM shift_mirror")).toEqual([]);
     expect(await exec.all("SELECT * FROM product_mirror")).toEqual([]);
     expect(deletes).toEqual([
-      { sql: "DELETE FROM operators_mirror_b", params: [] },
       { sql: "DELETE FROM operators_mirror", params: [] },
+      { sql: "DELETE FROM operators_mirror_b", params: [] },
+      { sql: "DELETE FROM station_meta WHERE key = ?", params: ["operators_slot"] },
       { sql: "DELETE FROM shift_mirror", params: [] },
       { sql: "DELETE FROM product_mirror", params: [] },
-      { sql: "DELETE FROM station_meta WHERE key = ?", params: ["operators_slot"] },
     ]);
 
     const retainedMeta = await exec.all<{ key: string; value: string }>(
@@ -234,12 +262,48 @@ describe("credential rejection recovery", () => {
     expect(retainedMeta).toEqual([
       { key: "hardware_config", value: '{"scanner":null}' },
       { key: "install_id", value: "install-1" },
+      { key: "operators_blocked", value: "1" },
       { key: "sync_pending_batch_id", value: "machine-1:install-1:1" },
       { key: "sync_pending_box_ceiling", value: "1" },
       { key: "sync_pending_ceiling", value: "1" },
       { key: "sync_pending_exception_ceiling", value: "1" },
     ]);
   });
+
+  it.each(["slot-a", "slot-b", "selector"])(
+    "keeps roster authentication fail-closed when strict %s purge fails",
+    async (failure) => {
+      const base = await migratedExec();
+      await seedRecoveryFixture(base);
+      const factsBefore = await snapshot(base, "outbox", "id");
+      const exec: SqlExecutor = {
+        all: base.all,
+        async run(sql, params = []) {
+          const normalized = sql.replace(/\s+/g, " ").trim();
+          if (
+            (failure === "slot-a" && normalized === "DELETE FROM operators_mirror") ||
+            (failure === "slot-b" && normalized === "DELETE FROM operators_mirror_b") ||
+            (failure === "selector" &&
+              normalized === "DELETE FROM station_meta WHERE key = ?" &&
+              params[0] === "operators_slot")
+          ) {
+            throw new Error(`purge failed: ${failure}`);
+          }
+          await base.run(sql, params);
+        },
+      };
+
+      await expect(
+        clearRejectedCredentialState({ exec, clearCredential: async () => {} }),
+      ).rejects.toThrow(`purge failed: ${failure}`);
+
+      expect(await readOperatorsMirror(exec)).toEqual([]);
+      expect(await snapshot(exec, "outbox", "id")).toBe(factsBefore);
+      expect(
+        await exec.all("SELECT value FROM station_meta WHERE key = 'operators_blocked'"),
+      ).toEqual([{ value: "1" }]);
+    },
+  );
 
   it("does not touch any cache when durable credential clearing fails", async () => {
     const exec = await migratedExec();

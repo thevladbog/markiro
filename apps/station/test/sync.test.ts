@@ -24,6 +24,7 @@ import {
   readExceptions,
   type ExceptionInput,
 } from "../src/lib/box-exceptions-mirror.js";
+import { createCredentialGeneration } from "../src/lib/credential-recovery.js";
 
 // Several tests below deliberately fail the POST (or the device DB) to
 // exercise the retry path, which logs through `console.error` by design.
@@ -380,10 +381,9 @@ describe("sync engine", () => {
 
       expect(post).toHaveBeenCalledTimes(1);
       expect(onCredentialRejected).toHaveBeenCalledTimes(1);
-      expect(onCredentialRejected).toHaveBeenCalledWith({
-        machineId: "machine-1",
-        sealed: { scans: 2, boxes: 0, exceptions: 0, total: 2 },
-      });
+      expect(onCredentialRejected).toHaveBeenCalledWith(
+        expect.objectContaining({ machineId: "machine-1" }),
+      );
       expect(await exec.all<{ raw: string }>("SELECT raw FROM outbox ORDER BY id")).toEqual([
         { raw: "RAW1" },
         { raw: "RAW2" },
@@ -402,6 +402,85 @@ describe("sync engine", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("publishes terminal rejection before a sealed-count query failure can hide the event", async () => {
+    const base = await migratedExec();
+    await seed(base, 1);
+    const exec: SqlExecutor = {
+      run: base.run,
+      async all<T>(sql: string, params: unknown[] = []): Promise<T[]> {
+        if (sql.includes("AS scans")) {
+          throw new Error("count snapshot unavailable");
+        }
+        return base.all<T>(sql, params);
+      },
+    };
+    const post = vi.fn().mockRejectedValue(new StationApiError(401, "rejected"));
+    const onCredentialRejected = vi.fn();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const engine = createSyncEngine({
+      exec,
+      client: { post },
+      machineId: "machine-1",
+      onState: () => {},
+      onCredentialRejected,
+    });
+
+    engine.nudge();
+    await engine.idle();
+
+    expect(onCredentialRejected).toHaveBeenCalledTimes(1);
+    expect(onCredentialRejected).toHaveBeenCalledWith(
+      expect.objectContaining({ machineId: "machine-1" }),
+    );
+    expect(post).toHaveBeenCalledTimes(1);
+    engine.stop();
+  });
+
+  it("publishes one rejection across overlapping engines and permits a fresh key generation", async () => {
+    const exec = await migratedExec();
+    await seed(exec, 1);
+    const rejectedPost = vi.fn().mockRejectedValue(new StationApiError(401, "rejected"));
+    const onCredentialRejected = vi.fn();
+    const rejectedGeneration = createCredentialGeneration();
+    const engines = [0, 1].map(() =>
+      createSyncEngine({
+        exec,
+        client: { post: rejectedPost },
+        machineId: "machine-1",
+        credentialGeneration: rejectedGeneration,
+        onState: () => {},
+        onCredentialRejected,
+      }),
+    );
+
+    engines.forEach((engine) => engine.nudge());
+    await Promise.all(engines.map((engine) => engine.idle()));
+
+    expect(onCredentialRejected).toHaveBeenCalledTimes(1);
+    expect(rejectedGeneration).toEqual({ sealed: true, rejectionPublished: true });
+    expect(await outboxDepth(exec)).toBe(1);
+    engines.forEach((engine) => engine.stop());
+
+    const freshGeneration = createCredentialGeneration();
+    const acceptedPost = vi.fn().mockResolvedValue({ applied: 1, alreadyApplied: false });
+    const fresh = createSyncEngine({
+      exec,
+      client: { post: acceptedPost },
+      machineId: "machine-1",
+      credentialGeneration: freshGeneration,
+      onState: () => {},
+      onCredentialRejected,
+    });
+    fresh.nudge();
+    await fresh.idle();
+
+    expect(acceptedPost).toHaveBeenCalledTimes(1);
+    expect(freshGeneration).toEqual({ sealed: false, rejectionPublished: false });
+    expect(await outboxDepth(exec)).toBe(0);
+    expect(onCredentialRejected).toHaveBeenCalledTimes(1);
+    fresh.stop();
   });
 
   it.each([

@@ -209,6 +209,7 @@ function mockInvokeForFloor(
     server_url: "http://localhost:3000",
   },
   onInvoke?: (cmd: string, payload: unknown) => void,
+  recoverySnapshotFailure?: Error,
 ): OutboxSeedRow[] {
   const outbox = [...outboxRows];
   // Mutated by a real `recordConflicts`/`conflictCount` round-trip through
@@ -265,6 +266,10 @@ function mockInvokeForFloor(
     }
     if (cmd === "plugin:sql|select") {
       const { query, values } = (payload ?? {}) as { query: string; values?: unknown[] };
+      if (query.includes("AS scans")) {
+        if (recoverySnapshotFailure) return Promise.reject(recoverySnapshotFailure);
+        return Promise.resolve([{ scans: outbox.length, boxes: 0, exceptions: 0 }]);
+      }
       // Checked before every other branch: none of the other queries below
       // reference the outbox table, so matching on it first is just the
       // narrowest check, not a correctness requirement.
@@ -818,7 +823,7 @@ describe("App", () => {
     await signInAsOperator();
     rejectSync();
 
-    await waitFor(() => expect(screen.getByText("Connect station")).toBeDefined());
+    await waitFor(() => expect(screen.getByTestId("sealed-work-summary")).toBeDefined());
     expect(checkedFloorExit).toBe(true);
     expect(screen.getByTestId("sealed-work-summary").textContent).toContain("1");
     expect(screen.getByTestId("sealed-work-summary").textContent).toContain("0");
@@ -831,6 +836,59 @@ describe("App", () => {
     });
     expect(screen.queryByRole("button", { name: "Service setup" })).toBeNull();
     expect(screen.queryByText("credential-not-to-render")).toBeNull();
+  });
+
+  it("stays fail-closed when the sealed-work snapshot cannot be read", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const invoked: string[] = [];
+    const outbox = mockInvokeForFloor(
+      pinHash,
+      { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+      [outboxRow(1)],
+      {
+        machine_id: "m1",
+        device_id: "device-1",
+        api_key: "mk_key",
+        server_url: "https://api.factory.example",
+      },
+      (cmd) => invoked.push(cmd),
+      new Error("snapshot unavailable"),
+    );
+    let rejectSync!: () => void;
+    const rejectedResponse = new Promise<Response>((resolve) => {
+      rejectSync = () =>
+        resolve(
+          new Response(JSON.stringify({ message: "revoked" }), {
+            status: 401,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+    });
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit): Promise<Response> => {
+      if (init?.method === "POST" && new URL(url).pathname === "/station/scans") {
+        return rejectedResponse;
+      }
+      return new Response(JSON.stringify({ items: [] }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    await signInAsOperator();
+    act(() => rejectSync());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Retry recovery" })).toBeDefined(),
+    );
+
+    expect(screen.queryByTestId("scanner-status")).toBeNull();
+    expect(screen.queryByLabelText("Pairing code")).toBeNull();
+    expect(invoked).not.toContain("clear_credential");
+    expect(outbox).toHaveLength(1);
+    expect(
+      fetchMock.mock.calls.filter(
+        ([url, init]) =>
+          init?.method === "POST" && new URL(url as string).pathname === "/station/scans",
+      ),
+    ).toHaveLength(1);
   });
 
   it("keeps the enrolled state and shows a useful error when explicit credential reset fails", async () => {

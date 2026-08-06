@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, Card } from "@markiro/ui";
 import { StationApiError, type StationClient } from "../lib/api-client.js";
@@ -20,6 +20,8 @@ export interface ShiftSelectionProps {
   onSetup?: () => void;
   /** Opens the conflict list; omitted where there is no way in. */
   onConflicts?: () => void;
+  /** False once this credential generation is sealed or this floor is retired. */
+  isCurrent?: () => boolean;
 }
 
 export function ShiftSelection({
@@ -28,11 +30,20 @@ export function ShiftSelection({
   onNew,
   onSetup,
   onConflicts,
+  isCurrent,
 }: ShiftSelectionProps) {
   const { t } = useTranslation();
   const [items, setItems] = useState<ShiftListItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -59,16 +70,19 @@ export function ShiftSelection({
       const opened = await client.post<{ id: string; status: string; mode: string }>(
         `/shifts/${shift.id}/open`,
       );
+      if (!mounted.current || isCurrent?.() === false) return;
       onSelected(opened);
     } catch (err) {
+      if (!mounted.current || isCurrent?.() === false) return;
       setError(err instanceof StationApiError ? err.message : t("shifts.actionFailed"));
     } finally {
-      setBusy(false);
+      if (mounted.current && isCurrent?.() !== false) setBusy(false);
     }
   }
 
   function rejoin(shift: ShiftListItem) {
     if (busy) return;
+    if (isCurrent?.() === false) return;
     onSelected(shift);
   }
 

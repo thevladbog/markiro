@@ -157,4 +157,66 @@ describe("ShiftSelection", () => {
     await waitFor(() => expect(screen.getByText("Shift already closed")).toBeDefined());
     expect(onSelected).not.toHaveBeenCalled();
   });
+
+  it("ignores an old open response after cleanup and a replacement floor mounts", async () => {
+    let resolveOpen!: (response: Response) => void;
+    const pendingOpen = new Promise<Response>((resolve) => {
+      resolveOpen = resolve;
+    });
+    const list = new Response(
+      JSON.stringify({
+        items: [
+          {
+            id: "s1",
+            status: "planned",
+            mode: "validation",
+            productName: "Cola",
+            plannedQty: 100,
+          },
+        ],
+      }),
+      { status: 200 },
+    );
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(list)
+      .mockReturnValueOnce(pendingOpen)
+      .mockResolvedValueOnce(list.clone());
+    const oldSelected = vi.fn();
+    const oldFloor = render(
+      <ShiftSelection
+        client={client}
+        onSelected={oldSelected}
+        onNew={() => {}}
+        isCurrent={() => false}
+      />,
+    );
+    await waitFor(() => expect(screen.getByText("Cola")).toBeDefined());
+    // The request began while current; credential recovery happens while it
+    // is in flight and unmounts the authenticated floor.
+    oldFloor.rerender(
+      <ShiftSelection
+        client={client}
+        onSelected={oldSelected}
+        onNew={() => {}}
+        isCurrent={() => true}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    oldFloor.unmount();
+
+    const freshSelected = vi.fn();
+    render(
+      <ShiftSelection
+        client={client}
+        onSelected={freshSelected}
+        onNew={() => {}}
+        isCurrent={() => true}
+      />,
+    );
+    resolveOpen(new Response(JSON.stringify({ id: "s1", status: "active", mode: "validation" })));
+    await waitFor(() => expect(screen.getByText("Cola")).toBeDefined());
+
+    expect(oldSelected).not.toHaveBeenCalled();
+    expect(freshSelected).not.toHaveBeenCalled();
+  });
 });

@@ -1,7 +1,12 @@
 import { MAX_BOX_CLOSURES_PER_SYNC_BATCH } from "@markiro/domain";
 import { StationApiError, type StationClient } from "./api-client.js";
 import { conflictCount, recordConflicts } from "./conflicts.js";
-import { readSealedWorkSummary, type CredentialRejectedEvent } from "./credential-recovery.js";
+import {
+  createCredentialGeneration,
+  sealCredentialGeneration,
+  type CredentialGeneration,
+  type CredentialRejectedEvent,
+} from "./credential-recovery.js";
 import { getInstallId } from "./install-id.js";
 import type { SqlExecutor } from "./mirror.js";
 import { ackThrough, oldestQueuedAt, outboxDepth, readBatch, type OutboxItem } from "./outbox.js";
@@ -60,6 +65,8 @@ export interface SyncEngineDeps {
   machineId: string;
   now?: () => number;
   onState(state: SyncState): void;
+  /** Shared by every engine using the same durable API-key generation. */
+  credentialGeneration?: CredentialGeneration;
   /** Terminal notification for a server-rejected device credential. */
   onCredentialRejected?(event: CredentialRejectedEvent): void;
 }
@@ -516,6 +523,7 @@ async function clearPersistedCeiling(exec: SqlExecutor, key: string): Promise<vo
  */
 export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
   const now = deps.now ?? (() => Date.now());
+  const credentialGeneration = deps.credentialGeneration ?? createCredentialGeneration();
   let draining = false;
   let stopped = false;
   let credentialRejected = false;
@@ -605,7 +613,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
     for (const resolve of resolvers) resolve();
   }
 
-  async function rejectCredential(): Promise<void> {
+  function rejectCredential(): void {
     if (credentialRejected) return;
     // Terminal before the first await: no nudge, retry timer, or continuation
     // can start another request with the rejected client once the 401 is known.
@@ -616,8 +624,9 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
       clearTimeout(retryTimer);
       retryTimer = null;
     }
-    const sealed = await readSealedWorkSummary(deps.exec);
-    deps.onCredentialRejected?.({ machineId: deps.machineId, sealed });
+    if (sealCredentialGeneration(credentialGeneration)) {
+      deps.onCredentialRejected?.({ machineId: deps.machineId, generation: credentialGeneration });
+    }
   }
 
   async function publishState(): Promise<void> {
@@ -944,7 +953,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
           backoffMs = BACKOFF_START_MS;
         } catch (err) {
           if (err instanceof StationApiError && err.status === 401) {
-            await rejectCredential();
+            rejectCredential();
             break;
           }
           // Every non-credential failure here — network error, timeout,
