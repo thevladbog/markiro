@@ -283,4 +283,208 @@ describe("Enrollment", () => {
     expect(screen.queryByText("Station connected")).toBeNull();
     newView.unmount();
   });
+
+  it("resets a pending code operation on lifecycle change and accepts a new valid attempt", async () => {
+    let resolveOldRedeem!: (value: {
+      ok: true;
+      provisioning: {
+        deviceId: string;
+        deviceName: string;
+        tenantId: string;
+        organizationName: string;
+        apiKey: string;
+        serverUrl: string;
+        operators: never[];
+      };
+    }) => void;
+    pairingMock.redeemStationPairing
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveOldRedeem = resolve;
+        }),
+      )
+      .mockResolvedValueOnce({
+        ok: true,
+        provisioning: {
+          deviceId: "new-device",
+          deviceName: "New station",
+          tenantId: "new-tenant",
+          organizationName: "New factory",
+          apiKey: "new-key",
+          serverUrl: "https://new.factory.example",
+          operators: [],
+        },
+      });
+    pairingMock.persistStationProvisioning.mockResolvedValue(undefined);
+    const oldEnrolled = vi.fn();
+    const newEnrolled = vi.fn();
+
+    const view = render(
+      <Enrollment
+        machineId="old-machine"
+        onEnrolled={oldEnrolled}
+        pairingServerUrl="https://old.factory.example"
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Pairing code"), { target: { value: "12345678" } });
+    fireEvent.click(screen.getByRole("button", { name: "Pair station" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Pairing…" })).toBeDefined());
+
+    view.rerender(
+      <Enrollment
+        machineId="new-machine"
+        onEnrolled={newEnrolled}
+        pairingServerUrl="https://new.factory.example"
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Pair station" })).toBeDefined();
+    expect((screen.getByLabelText("Pairing code") as HTMLInputElement).value).toBe("");
+
+    resolveOldRedeem({
+      ok: true,
+      provisioning: {
+        deviceId: "old-device",
+        deviceName: "Old station",
+        tenantId: "old-tenant",
+        organizationName: "Old factory",
+        apiKey: "old-key",
+        serverUrl: "https://old.factory.example",
+        operators: [],
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(pairingMock.persistStationProvisioning).not.toHaveBeenCalled();
+    expect(oldEnrolled).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText("Pairing code"), { target: { value: "87654321" } });
+    fireEvent.click(screen.getByRole("button", { name: "Pair station" }));
+    await waitFor(() => expect(pairingMock.persistStationProvisioning).toHaveBeenCalledTimes(1));
+    expect(pairingMock.persistStationProvisioning).toHaveBeenCalledWith(
+      expect.objectContaining({ deviceId: "new-device", apiKey: "new-key" }),
+      expect.objectContaining({ machineId: "new-machine" }),
+    );
+    expect(newEnrolled).toHaveBeenCalledTimes(1);
+  });
+
+  it("resets pending service state and clears secret inputs on a normal lifecycle change", async () => {
+    let resolveOldWhoami!: (response: Response) => void;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveOldWhoami = resolve;
+          }),
+      ),
+    );
+
+    const view = render(
+      <Enrollment
+        machineId="old-machine"
+        onEnrolled={() => {}}
+        pairingServerUrl="https://old.factory.example"
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Service setup" }));
+    fireEvent.change(screen.getByLabelText("Server URL"), {
+      target: { value: "https://secret-old.factory.example" },
+    });
+    fireEvent.change(screen.getByLabelText("Device key"), { target: { value: "secret-old-key" } });
+    fireEvent.click(screen.getByRole("button", { name: "Connect service credentials" }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+
+    view.rerender(
+      <Enrollment
+        machineId="new-machine"
+        onEnrolled={() => {}}
+        pairingServerUrl="https://new.factory.example"
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Pair station" })).toBeDefined();
+    expect(screen.queryByLabelText("Server URL")).toBeNull();
+    expect(screen.queryByLabelText("Device key")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Service setup" }));
+    expect((screen.getByLabelText("Server URL") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("Device key") as HTMLInputElement).value).toBe("");
+
+    resolveOldWhoami(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(invokeMock).not.toHaveBeenCalledWith("write_config", expect.anything());
+  });
+
+  it("closes service mode and blocks its pending writer when lifecycle becomes recovery", async () => {
+    let resolveOldWhoami!: (response: Response) => void;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveOldWhoami = resolve;
+          }),
+      ),
+    );
+
+    const view = render(
+      <Enrollment
+        machineId="machine-1"
+        onEnrolled={() => {}}
+        pairingServerUrl="https://api.factory.example"
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Service setup" }));
+    fireEvent.change(screen.getByLabelText("Server URL"), {
+      target: { value: "https://service.factory.example" },
+    });
+    fireEvent.change(screen.getByLabelText("Device key"), { target: { value: "service-key" } });
+    fireEvent.click(screen.getByRole("button", { name: "Connect service credentials" }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+
+    view.rerender(
+      <Enrollment
+        machineId="machine-1"
+        expectedDeviceId="durable-device"
+        onEnrolled={() => {}}
+        pairingServerUrl="https://api.factory.example"
+      />,
+    );
+    expect(screen.getByLabelText("Pairing code")).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Service setup" })).toBeNull();
+    expect(screen.queryByLabelText("Server URL")).toBeNull();
+    expect(screen.queryByLabelText("Device key")).toBeNull();
+
+    resolveOldWhoami(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(invokeMock).not.toHaveBeenCalledWith("write_config", expect.anything());
+  });
+
+  it("removes fresh service credential controls when lifecycle becomes recovery", () => {
+    const view = render(
+      <Enrollment
+        machineId="machine-1"
+        onEnrolled={() => {}}
+        pairingServerUrl="https://api.factory.example"
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Service setup" }));
+    fireEvent.change(screen.getByLabelText("Server URL"), {
+      target: { value: "https://service.factory.example" },
+    });
+    fireEvent.change(screen.getByLabelText("Device key"), { target: { value: "service-key" } });
+
+    view.rerender(
+      <Enrollment
+        machineId="machine-1"
+        expectedDeviceId="durable-device"
+        onEnrolled={() => {}}
+        pairingServerUrl="https://api.factory.example"
+      />,
+    );
+
+    expect(screen.getByLabelText("Pairing code")).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Service setup" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Connect service credentials" })).toBeNull();
+    expect(screen.queryByLabelText("Server URL")).toBeNull();
+    expect(screen.queryByLabelText("Device key")).toBeNull();
+    expect(invokeMock).not.toHaveBeenCalledWith("write_config", expect.anything());
+  });
 });

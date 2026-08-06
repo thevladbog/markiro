@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, Card, Input } from "@markiro/ui";
 import { createStationClient } from "../lib/api-client.js";
@@ -32,6 +32,13 @@ interface EnrollmentOperation {
   readonly controller: AbortController;
 }
 
+interface EnrollmentLifecycleIdentity {
+  readonly machineId: string;
+  readonly expectedDeviceId: string | undefined;
+  readonly pairingServerUrl: string | null;
+  readonly runConfigTransition: (transition: () => Promise<void>) => Promise<void>;
+}
+
 const directConfigTransition = (transition: () => Promise<void>): Promise<void> => transition();
 
 /**
@@ -59,6 +66,12 @@ export function Enrollment({
   const [apiKey, setApiKey] = useState("");
   const operationSequence = useRef(0);
   const activeOperation = useRef<EnrollmentOperation | null>(null);
+  const lifecycleIdentity = useRef<EnrollmentLifecycleIdentity>({
+    machineId,
+    expectedDeviceId,
+    pairingServerUrl,
+    runConfigTransition,
+  });
 
   const busy = state === "redeeming";
 
@@ -80,14 +93,32 @@ export function Enrollment({
     if (activeOperation.current === operation) activeOperation.current = null;
   }
 
-  useEffect(
-    () => () => {
+  useLayoutEffect(() => {
+    const previous = lifecycleIdentity.current;
+    const changed =
+      previous.machineId !== machineId ||
+      previous.expectedDeviceId !== expectedDeviceId ||
+      previous.pairingServerUrl !== pairingServerUrl ||
+      previous.runConfigTransition !== runConfigTransition;
+    lifecycleIdentity.current = {
+      machineId,
+      expectedDeviceId,
+      pairingServerUrl,
+      runConfigTransition,
+    };
+    if (changed) {
+      setCode("");
+      setState("waiting");
+      setError(pairingServerUrl ? null : "setup_required");
+      setServerUrl("");
+      setApiKey("");
+    }
+    return () => {
       operationSequence.current += 1;
       activeOperation.current?.controller.abort();
       activeOperation.current = null;
-    },
-    [machineId, expectedDeviceId, pairingServerUrl, runConfigTransition],
-  );
+    };
+  }, [machineId, expectedDeviceId, pairingServerUrl, runConfigTransition]);
 
   // A configured serial scanner has no focused DOM input to type into. The
   // same source is therefore consumed here and in the floor, but only an
@@ -143,7 +174,7 @@ export function Enrollment({
   }
 
   async function serviceConnect() {
-    if (busy || !serverUrl || !apiKey) return;
+    if (expectedDeviceId || busy || !serverUrl || !apiKey) return;
     const operation = beginOperation();
     setState("redeeming");
     setError(null);
@@ -164,7 +195,7 @@ export function Enrollment({
     }
   }
 
-  const serviceMode = state === "service";
+  const serviceMode = state === "service" && !expectedDeviceId;
 
   return (
     <main style={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>
