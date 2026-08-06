@@ -1,7 +1,7 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { parseScannedSscc } from "@markiro/domain";
-import { Alert, Button } from "@markiro/ui";
+import { Alert, Button, FullScreenDialog } from "@markiro/ui";
 import type { ScanSource } from "../lib/scan-source.js";
 
 export interface PrintVerificationProps {
@@ -39,7 +39,6 @@ export function PrintVerification({
   scanSource,
 }: PrintVerificationProps) {
   const { t } = useTranslation();
-  const titleId = useId();
   const [feedback, setFeedback] = useState<{
     expected: string;
     message: PrintVerificationMessage;
@@ -69,37 +68,36 @@ export function PrintVerification({
   }, [scanSource, expected, onVerified]);
 
   return (
-    <section
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby={titleId}
-      tabIndex={-1}
-      style={{
-        position: "fixed",
-        inset: 0,
-        display: "flex",
-        flexDirection: "column",
-        gap: 24,
-        padding: 32,
-        background: "var(--surface-page, #fff)",
-      }}
-    >
-      <h1 id={titleId} style={{ fontSize: "2rem" }}>
-        {t("box.printExpected")}
-      </h1>
-      <p style={{ fontSize: "2rem", fontWeight: 800, letterSpacing: "0.05em" }}>{expected}</p>
-
-      {message === "mismatch" && <Alert tone="error" title={t("box.printMismatch")} />}
-      {message === "notSscc" && <Alert tone="error" title={t("box.printNotSscc")} />}
-
-      <div style={{ display: "flex", gap: 12, marginTop: "auto" }}>
+    <FullScreenDialog
+      open
+      title={t("box.printExpected")}
+      backLabel={t("box.printSkip")}
+      onClose={onSkip}
+      initialFocus="dialog"
+      footer={
         <Button type="button" size="floor" onClick={onReprint}>
           {t("box.printReprint")}
         </Button>
-        <Button type="button" size="floor" variant="secondary" onClick={onSkip}>
-          {t("box.printSkip")}
-        </Button>
+      }
+    >
+      <div
+        style={{
+          height: "100%",
+          minHeight: 0,
+          minWidth: 0,
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+          gap: 24,
+        }}
+      >
+        <p style={{ margin: 0, fontSize: "2rem", fontWeight: 800, letterSpacing: "0.05em" }}>
+          {expected}
+        </p>
+
+        {message === "mismatch" && <Alert tone="error" title={t("box.printMismatch")} />}
+        {message === "notSscc" && <Alert tone="error" title={t("box.printNotSscc")} />}
       </div>
-    </section>
+    </FullScreenDialog>
   );
 }

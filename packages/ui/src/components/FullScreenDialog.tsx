@@ -17,6 +17,11 @@ export interface FullScreenDialogProps {
   footer?: ReactNode;
   onClose: () => void;
   backLabel?: string;
+  /**
+   * Focus the inert dialog container when opening flows where the first
+   * action must not be triggerable by the key event that opened the dialog.
+   */
+  initialFocus?: "first" | "dialog";
   className?: string;
   style?: CSSProperties;
 }
@@ -115,6 +120,7 @@ export function FullScreenDialog({
   footer,
   onClose,
   backLabel = "Back",
+  initialFocus = "first",
   className,
   style,
 }: FullScreenDialogProps) {
@@ -128,13 +134,16 @@ export function FullScreenDialog({
     const dialog = dialogRef.current;
     if (!dialog) return undefined;
     const { entry, unregister } = registerDialog(dialog, previouslyFocused);
-    if (isTopmostDialog(dialog)) focusFirst(dialog);
+    if (isTopmostDialog(dialog)) {
+      if (initialFocus === "dialog") dialog.focus();
+      else focusFirst(dialog);
+    }
 
     return () => {
       unregister();
       restoreFocusAfterClose(entry);
     };
-  }, [open]);
+  }, [initialFocus, open]);
 
   if (!open) return null;
 
@@ -159,7 +168,10 @@ export function FullScreenDialog({
     }
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
-    if (event.shiftKey && document.activeElement === first) {
+    if (document.activeElement === dialog) {
+      event.preventDefault();
+      (event.shiftKey ? last : first)?.focus();
+    } else if (event.shiftKey && document.activeElement === first) {
       event.preventDefault();
       last?.focus();
     } else if (!event.shiftKey && document.activeElement === last) {

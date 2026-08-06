@@ -439,6 +439,32 @@ describe("FullScreenDialog", () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
+  it("can initially focus the dialog container before exposing any destructive action", async () => {
+    const user = userEvent.setup();
+    render(
+      <FullScreenDialog
+        open
+        title="Verify print"
+        backLabel="Skip verification"
+        onClose={() => undefined}
+        initialFocus="dialog"
+        footer={<button type="button">Reprint</button>}
+      >
+        Scan the label
+      </FullScreenDialog>,
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "Verify print" });
+    const skip = screen.getByRole("button", { name: "Skip verification" });
+    const reprint = screen.getByRole("button", { name: "Reprint" });
+    expect(document.activeElement).toBe(dialog);
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(reprint);
+    dialog.focus();
+    await user.tab();
+    expect(document.activeElement).toBe(skip);
+  });
+
   it("traps focus, closes on Escape, and restores focus to its opener", async () => {
     const user = userEvent.setup();
     render(<DialogHarness />);

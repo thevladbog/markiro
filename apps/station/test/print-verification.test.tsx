@@ -1,7 +1,12 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { buildSscc } from "@markiro/domain";
-import type { ScanListener, ScanSource } from "../src/lib/scan-source.js";
+import {
+  createKeyboardWedgeSource,
+  type ScanListener,
+  type ScanSource,
+} from "../src/lib/scan-source.js";
 import { PrintVerification } from "../src/ui/PrintVerification.js";
 
 // This test file never touches `i18n.changeLanguage` -- the station's i18n
@@ -28,7 +33,107 @@ function manualSource(): ScanSource & { emit: ScanListener } {
   };
 }
 
+function VerificationHarness({
+  scanSource = manualSource(),
+  onSkip = () => undefined,
+  onReprint = () => undefined,
+}: {
+  scanSource?: ScanSource;
+  onSkip?: () => void;
+  onReprint?: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)}>
+        Verify printed label
+      </button>
+      {open ? (
+        <PrintVerification
+          expected={SSCC}
+          onVerified={() => setOpen(false)}
+          onReprint={onReprint}
+          onSkip={() => {
+            onSkip();
+            setOpen(false);
+          }}
+          scanSource={scanSource}
+        />
+      ) : null}
+    </>
+  );
+}
+
 describe("PrintVerification", () => {
+  it("moves focus inside, traps both tab directions, and restores the surviving opener on skip", () => {
+    const onSkip = vi.fn();
+    render(<VerificationHarness onSkip={onSkip} />);
+    const opener = screen.getByRole("button", { name: "Verify printed label" });
+    opener.focus();
+    fireEvent.click(opener);
+
+    const dialog = screen.getByRole("dialog", { name: "Отсканируйте распечатанную этикетку" });
+    const skip = screen.getByRole("button", { name: "Пропустить" });
+    const reprint = screen.getByRole("button", { name: "Печатать заново" });
+    expect(document.activeElement).toBe(dialog);
+    fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(reprint);
+    dialog.focus();
+    fireEvent.keyDown(dialog, { key: "Tab" });
+    expect(document.activeElement).toBe(skip);
+    reprint.focus();
+    fireEvent.keyDown(reprint, { key: "Tab" });
+    expect(document.activeElement).toBe(skip);
+    expect(dialog.contains(document.activeElement)).toBe(true);
+
+    fireEvent.click(skip);
+    expect(onSkip).toHaveBeenCalledOnce();
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it("unmounts safely when the element that had focus no longer survives", () => {
+    const formerFocus = document.createElement("button");
+    document.body.append(formerFocus);
+    formerFocus.focus();
+    const view = render(
+      <PrintVerification
+        expected={SSCC}
+        onVerified={vi.fn()}
+        onReprint={vi.fn()}
+        onSkip={vi.fn()}
+        scanSource={manualSource()}
+      />,
+    );
+    expect(document.activeElement).toBe(
+      screen.getByRole("dialog", { name: "Отсканируйте распечатанную этикетку" }),
+    );
+    formerFocus.remove();
+    expect(() => view.unmount()).not.toThrow();
+  });
+
+  it("does not activate a focused action with the terminating Enter from a HID scan", async () => {
+    const source = createKeyboardWedgeSource(window);
+    const onSkip = vi.fn();
+    const onReprint = vi.fn();
+    render(<VerificationHarness scanSource={source} onSkip={onSkip} onReprint={onReprint} />);
+    const opener = screen.getByRole("button", { name: "Verify printed label" });
+    opener.focus();
+    fireEvent.click(opener);
+    const dialog = screen.getByRole("dialog", { name: "Отсканируйте распечатанную этикетку" });
+    expect(document.activeElement).toBe(dialog);
+
+    for (const key of `]C100${OTHER_SSCC}`) {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+    }
+    const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    expect(window.dispatchEvent(enter)).toBe(false);
+
+    await screen.findByText("Это другая этикетка");
+    expect(onSkip).not.toHaveBeenCalled();
+    expect(onReprint).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(dialog);
+  });
+
   it("accepts a scan of the expected label", async () => {
     const source = manualSource();
     const onVerified = vi.fn();
