@@ -1,4 +1,4 @@
-import { STATION_MIGRATIONS, type OperatorMirrorRecord } from "@markiro/db";
+import { STATION_MIGRATIONS, type OperatorMirrorRecord } from "@markiro/db/station-sqlite";
 
 /** Backend-agnostic SQL surface so mirror logic is testable with node:sqlite. */
 export interface SqlExecutor {

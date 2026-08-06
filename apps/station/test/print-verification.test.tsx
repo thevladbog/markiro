@@ -94,7 +94,7 @@ describe("PrintVerification", () => {
     expect(screen.getByRole("button", { name: "Пропустить" })).toBeDefined();
   });
 
-  it("gives both exits a 64px touch target", () => {
+  it("gives both exits floor-sized targets and text", () => {
     const source = manualSource();
     render(
       <PrintVerification
@@ -106,7 +106,10 @@ describe("PrintVerification", () => {
       />,
     );
     for (const name of ["Печатать заново", "Пропустить"]) {
-      expect(screen.getByRole("button", { name }).style.minHeight).toBe("64px");
+      const button = screen.getByRole("button", { name });
+      expect(button.className).toContain("mk-btn--floor");
+      expect(button.style.height).toBe("var(--control-floor)");
+      expect(button.style.fontSize).toBe("18px");
     }
   });
 

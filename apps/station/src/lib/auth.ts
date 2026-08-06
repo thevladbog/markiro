@@ -1,4 +1,4 @@
-import type { OperatorMirrorRecord } from "@markiro/db";
+import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
 import { readOperatorsMirror, type SqlExecutor } from "./mirror.js";
 import { verifyBadge, verifyPin } from "./crypto.js";
 

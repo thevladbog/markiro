@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { OperatorMirrorRecord } from "@markiro/db";
+import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
 import { normalizeOperatorNameQuery, searchOperatorsByName } from "../src/lib/operator-search.js";
 
 function operator(

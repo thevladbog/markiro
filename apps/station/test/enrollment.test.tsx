@@ -26,6 +26,39 @@ afterEach(() => {
 });
 
 describe("Enrollment", () => {
+  it("uses floor-sized controls for pairing and service setup", () => {
+    render(
+      <Enrollment
+        machineId="machine-1"
+        onEnrolled={() => {}}
+        onSetup={() => {}}
+        pairingServerUrl="https://api.factory.example"
+      />,
+    );
+
+    expect(screen.getByLabelText("Pairing code").closest(".mk-input")?.className).toContain(
+      "mk-input",
+    );
+    expect(
+      (screen.getByLabelText("Pairing code").closest(".mk-input") as HTMLElement).style.height,
+    ).toBe("var(--control-floor)");
+    for (const button of screen.getAllByRole("button")) {
+      expect(button.className).toContain("mk-btn--floor");
+    }
+
+    fireEvent.click(screen.getByRole("button", { name: "Service setup" }));
+
+    for (const input of [
+      screen.getByLabelText("Server URL"),
+      screen.getByLabelText("Device key"),
+    ]) {
+      expect((input.closest(".mk-input") as HTMLElement).style.height).toBe("var(--control-floor)");
+    }
+    for (const button of screen.getAllByRole("button")) {
+      expect(button.className).toContain("mk-btn--floor");
+    }
+  });
+
   it("starts with only the short code flow and persists before signaling success", async () => {
     pairingMock.redeemStationPairing.mockResolvedValue({
       ok: true,

@@ -107,7 +107,7 @@ import type * as LockdownModule from "../src/lib/lockdown.js";
 import { readShiftContext } from "../src/lib/mirror.js";
 import { tauriExecutor } from "../src/lib/sqlite.js";
 import { BACKOFF_START_MS } from "../src/lib/sync.js";
-import type { OperatorMirrorRecord } from "@markiro/db";
+import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");

@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
-import { STATION_MIGRATIONS } from "@markiro/db";
+import { STATION_MIGRATIONS } from "@markiro/db/station-sqlite";
 import type { SqlExecutor } from "../src/lib/mirror.js";
 import {
   appendScanEvent,

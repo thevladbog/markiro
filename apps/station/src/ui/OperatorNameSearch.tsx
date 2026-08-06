@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Input } from "@markiro/ui";
-import type { OperatorMirrorRecord } from "@markiro/db";
+import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
 import {
   normalizeOperatorNameQuery,
   searchOperatorsByName,

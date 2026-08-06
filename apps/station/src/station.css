@@ -7,6 +7,10 @@ body,
   overflow: hidden;
 }
 
+#root {
+  font-family: var(--font-ui);
+}
+
 .station-root {
   display: flex;
   width: 100%;
@@ -14,7 +18,25 @@ body,
   overflow: hidden;
   background: var(--surface-page);
   color: var(--fg-1);
+  font-family: var(--font-ui);
   flex-direction: column;
+}
+
+.station-centered-screen {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  place-items: center;
+}
+
+#root .mk-alert > span,
+#root .mk-alert > div > span,
+#root .mk-alert > div > div {
+  font-size: 18px !important;
+  line-height: 26px !important;
 }
 
 .station-screen-slot {

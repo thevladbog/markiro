@@ -31,11 +31,43 @@
 
 ```ts
 type SelectOption = string | { value: string; label: string; disabled?: boolean };
-interface SelectProps { options: SelectOption[]; value?: string; onValueChange?: (value: string) => void; label?: string; error?: string; disabled?: boolean; name?: string; }
-interface CheckboxProps { label: ReactNode; checked?: boolean; onCheckedChange?: (checked: boolean) => void; error?: string; disabled?: boolean; name?: string; }
-interface RadioGroupProps { options: { value: string; label: ReactNode; disabled?: boolean }[]; value?: string; onValueChange?: (value: string) => void; label?: string; error?: string; name?: string; }
-interface DatePickerProps { value?: string; onValueChange?: (value: string | undefined) => void; label?: string; error?: string; disabled?: boolean; name?: string; }
-interface IconButtonProps extends Omit<ButtonProps, "children"> { "aria-label": string; icon: ReactNode; }
+interface SelectProps {
+  options: SelectOption[];
+  value?: string;
+  onValueChange?: (value: string) => void;
+  label?: string;
+  error?: string;
+  disabled?: boolean;
+  name?: string;
+}
+interface CheckboxProps {
+  label: ReactNode;
+  checked?: boolean;
+  onCheckedChange?: (checked: boolean) => void;
+  error?: string;
+  disabled?: boolean;
+  name?: string;
+}
+interface RadioGroupProps {
+  options: { value: string; label: ReactNode; disabled?: boolean }[];
+  value?: string;
+  onValueChange?: (value: string) => void;
+  label?: string;
+  error?: string;
+  name?: string;
+}
+interface DatePickerProps {
+  value?: string;
+  onValueChange?: (value: string | undefined) => void;
+  label?: string;
+  error?: string;
+  disabled?: boolean;
+  name?: string;
+}
+interface IconButtonProps extends Omit<ButtonProps, "children"> {
+  "aria-label": string;
+  icon: ReactNode;
+}
 ```
 
 ### Task 1: Establish Radix UI primitives and custom Select
@@ -78,7 +110,17 @@ interface IconButtonProps extends Omit<ButtonProps, "children"> { "aria-label": 
 - [ ] Convert local selects to `onValueChange`; use `Controller` for registered select, checkbox, radio, and date fields. Preserve option values and submit transforms exactly:
 
 ```tsx
-<Controller control={control} name="palletsEnabled" render={({ field }) => <Checkbox label={t("pages.shifts.form.palletsEnabledLabel")} checked={field.value} onCheckedChange={field.onChange} />} />
+<Controller
+  control={control}
+  name="palletsEnabled"
+  render={({ field }) => (
+    <Checkbox
+      label={t("pages.shifts.form.palletsEnabledLabel")}
+      checked={field.value}
+      onCheckedChange={field.onChange}
+    />
+  )}
+/>
 ```
 
 - [ ] Use `RadioGroup` for shift mode, `Checkbox` for all current booleans/table selection, `IconButton` for Header/Palette, and `DatePicker` for `plannedDate`; preserve row `aria-label`s.

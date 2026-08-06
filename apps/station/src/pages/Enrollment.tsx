@@ -199,7 +199,7 @@ export function Enrollment({
   const serviceMode = state === "service" && !expectedDeviceId;
 
   return (
-    <main style={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>
+    <main className="station-centered-screen">
       <Card style={{ minWidth: 480, padding: 32 }}>
         <h1 style={{ fontSize: "2rem", marginBottom: 24 }}>{t("enroll.title")}</h1>
         {sealedWork ? (
@@ -218,28 +218,40 @@ export function Enrollment({
         {serviceMode ? (
           <>
             <Input
+              size="floor"
               label={t("enroll.serverUrl")}
               value={serverUrl}
               onChange={(event) => setServerUrl(event.target.value)}
               autoComplete="url"
             />
             <Input
+              size="floor"
               label={t("enroll.apiKey")}
               type="password"
               value={apiKey}
               onChange={(event) => setApiKey(event.target.value)}
               autoComplete="off"
             />
-            <Button onClick={() => void serviceConnect()} disabled={busy || !serverUrl || !apiKey}>
+            <Button
+              size="floor"
+              onClick={() => void serviceConnect()}
+              disabled={busy || !serverUrl || !apiKey}
+            >
               {t("enroll.serviceConnect")}
             </Button>
-            <Button variant="secondary" onClick={() => setState("waiting")} disabled={busy}>
+            <Button
+              size="floor"
+              variant="secondary"
+              onClick={() => setState("waiting")}
+              disabled={busy}
+            >
               {t("enroll.backToPairing")}
             </Button>
           </>
         ) : (
           <>
             <Input
+              size="floor"
               label={t("enroll.code")}
               value={code}
               inputMode="numeric"
@@ -256,18 +268,24 @@ export function Enrollment({
               }}
             />
             <Button
+              size="floor"
               onClick={() => void redeem()}
               disabled={busy || code.length !== 8 || !pairingServerUrl}
             >
               {busy ? t("enroll.redeeming") : t("enroll.submit")}
             </Button>
             {onSetup ? (
-              <Button variant="secondary" onClick={onSetup} disabled={busy}>
+              <Button size="floor" variant="secondary" onClick={onSetup} disabled={busy}>
                 {t("enroll.setup")}
               </Button>
             ) : null}
             {expectedDeviceId ? null : (
-              <Button variant="secondary" onClick={() => setState("service")} disabled={busy}>
+              <Button
+                size="floor"
+                variant="secondary"
+                onClick={() => setState("service")}
+                disabled={busy}
+              >
                 {t("enroll.serviceMode")}
               </Button>
             )}

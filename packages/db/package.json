@@ -17,6 +17,10 @@
     "./runtime-migrate": {
       "types": "./dist/runtime-migrate.d.ts",
       "default": "./dist/runtime-migrate.js"
+    },
+    "./station-sqlite": {
+      "types": "./dist/station-sqlite.d.ts",
+      "default": "./dist/station-sqlite.js"
     }
   },
   "scripts": {

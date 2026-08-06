@@ -1,4 +1,4 @@
-import type { OperatorMirrorRecord } from "@markiro/db";
+import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
 import type { StationClient } from "./api-client.js";
 import { credentialGenerationIsCurrent, type CredentialGeneration } from "./credential-recovery.js";
 import { replaceOperatorsMirror, type SqlExecutor } from "./mirror.js";

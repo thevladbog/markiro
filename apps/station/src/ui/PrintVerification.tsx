@@ -76,10 +76,10 @@ export function PrintVerification({
       {message === "notSscc" && <Alert tone="error" title={t("box.printNotSscc")} />}
 
       <div style={{ display: "flex", gap: 12, marginTop: "auto" }}>
-        <Button type="button" style={{ minHeight: 64 }} onClick={onReprint}>
+        <Button type="button" size="floor" onClick={onReprint}>
           {t("box.printReprint")}
         </Button>
-        <Button type="button" variant="secondary" style={{ minHeight: 64 }} onClick={onSkip}>
+        <Button type="button" size="floor" variant="secondary" onClick={onSkip}>
           {t("box.printSkip")}
         </Button>
       </div>

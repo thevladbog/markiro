@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, PinPad } from "@markiro/ui";
-import type { OperatorMirrorRecord } from "@markiro/db";
+import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
 import type { SqlExecutor } from "../lib/mirror.js";
 import { readOperatorsMirror } from "../lib/mirror.js";
 import type { ScanSource } from "../lib/scan-source.js";

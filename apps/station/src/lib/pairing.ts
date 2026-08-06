@@ -1,5 +1,5 @@
 import { parsePhc } from "@markiro/domain";
-import type { OperatorMirrorRecord } from "@markiro/db";
+import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
 import { postUnauthenticatedStationRequest } from "./api-client.js";
 import type { StationConfig } from "./config.js";
 import { replaceOperatorsMirror, type SqlExecutor } from "./mirror.js";

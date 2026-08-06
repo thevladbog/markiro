@@ -1,4 +1,4 @@
-import type { OperatorMirrorRecord } from "@markiro/db";
+import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
 
 export interface OperatorSearchResult {
   operatorId: string;

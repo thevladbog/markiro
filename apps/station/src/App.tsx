@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { OperatorMirrorRecord } from "@markiro/db";
+import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
 import { Button, Card } from "@markiro/ui";
 import {
   clearCredential,
@@ -696,7 +696,7 @@ export function App() {
 
   if (!config) {
     return (
-      <main style={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>
+      <main className="station-centered-screen">
         <h1 style={{ fontSize: "2rem" }}>{t("app.booting")}</h1>
       </main>
     );
@@ -704,7 +704,7 @@ export function App() {
 
   if (legacyKeyedConfig && !legacyApiUrl) {
     return (
-      <main style={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>
+      <main className="station-centered-screen">
         <Card style={{ width: "min(720px, calc(100vw - 64px))", padding: 32 }}>
           <h1 style={{ fontSize: "2rem", marginBottom: 24 }}>{t("legacyIdentity.title")}</h1>
           <p role="alert">{t("legacyIdentity.missingServer")}</p>
@@ -728,7 +728,7 @@ export function App() {
       );
     }
     return (
-      <main style={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>
+      <main className="station-centered-screen">
         <Card style={{ minWidth: 480, padding: 32 }}>
           <h1 style={{ fontSize: "2rem", marginBottom: 24 }}>{t("enroll.title")}</h1>
           <p role="status">
@@ -756,7 +756,7 @@ export function App() {
 
   if (legacyIdentityState === "rejected") {
     return (
-      <main style={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>
+      <main className="station-centered-screen">
         <Card style={{ width: "min(720px, calc(100vw - 64px))", padding: 32 }}>
           <h1 style={{ fontSize: "2rem", marginBottom: 24 }}>{t("legacyIdentity.title")}</h1>
           <p role="alert">{t("legacyIdentity.rejected")}</p>

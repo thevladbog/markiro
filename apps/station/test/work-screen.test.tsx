@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { STATION_MIGRATIONS } from "@markiro/db";
+import { STATION_MIGRATIONS } from "@markiro/db/station-sqlite";
 import { buildSscc, kmHash, parseKm, type LabelTemplateSpec } from "@markiro/domain";
 import i18n from "../src/i18n/index.js";
 import { readExceptions, type PendingException } from "../src/lib/box-exceptions-mirror.js";

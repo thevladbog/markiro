@@ -19,14 +19,14 @@ checkbox, radio, and date-picker interfaces with the project UI.
 
 The first implementation wave provides these `@markiro/ui` controls:
 
-| Component | Foundation | Public behaviour |
-| --- | --- | --- |
-| `Select` | Radix Select | Custom trigger and option list, disabled options, keyboard selection, Escape and outside-close. |
-| `Checkbox` | Radix Checkbox | Custom checked, unchecked, disabled, error, and label states. |
-| `RadioGroup` | Radix Radio Group | Custom mutually-exclusive options with arrow-key navigation. |
-| `IconButton` | Existing `Button` extended or a dedicated wrapper | Tokenised icon action with required accessible name. |
-| `DatePicker` | Radix Popover plus an internal tokenised calendar grid | Date entry and calendar selection without a browser date picker. |
-| `Combobox` | Radix Popover when required by large searchable lists | Custom searchable selection; not introduced until a current admin use case needs it. |
+| Component    | Foundation                                             | Public behaviour                                                                                |
+| ------------ | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| `Select`     | Radix Select                                           | Custom trigger and option list, disabled options, keyboard selection, Escape and outside-close. |
+| `Checkbox`   | Radix Checkbox                                         | Custom checked, unchecked, disabled, error, and label states.                                   |
+| `RadioGroup` | Radix Radio Group                                      | Custom mutually-exclusive options with arrow-key navigation.                                    |
+| `IconButton` | Existing `Button` extended or a dedicated wrapper      | Tokenised icon action with required accessible name.                                            |
+| `DatePicker` | Radix Popover plus an internal tokenised calendar grid | Date entry and calendar selection without a browser date picker.                                |
+| `Combobox`   | Radix Popover when required by large searchable lists  | Custom searchable selection; not introduced until a current admin use case needs it.            |
 
 Radix supplies accessible interaction primitives. It does not supply the
 calendar grid itself, so `DatePicker` composes a Radix popover with a

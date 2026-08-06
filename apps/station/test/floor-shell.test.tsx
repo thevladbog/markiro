@@ -1,9 +1,17 @@
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { render, screen } from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import i18n from "../src/i18n/index.js";
 import { FloorFooter } from "../src/ui/FloorFooter.js";
 import { FloorShell } from "../src/ui/FloorShell.js";
 import { StationScreen } from "../src/ui/StationScreen.js";
+import "../src/station.css";
+
+const repositoryRoot = existsSync(resolve(process.cwd(), "apps/station/src/station.css"))
+  ? process.cwd()
+  : resolve(process.cwd(), "../..");
+const stationCss = readFileSync(resolve(repositoryRoot, "apps/station/src/station.css"), "utf8");
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -48,6 +56,30 @@ function CurrentFloorScreen() {
 }
 
 describe("FloorShell", () => {
+  it("renders the station root with the bundled UI family as its computed default", () => {
+    const bundledUiFamily = '"IBM Plex Sans", system-ui, -apple-system, sans-serif';
+    document.documentElement.style.setProperty("--font-ui", bundledUiFamily);
+    const stylesheet = document.createElement("style");
+    stylesheet.textContent = stationCss;
+    document.head.append(stylesheet);
+
+    const { container } = render(
+      <FloorShell {...status}>
+        <CurrentFloorScreen />
+      </FloorShell>,
+    );
+
+    const root = container.querySelector(".station-root");
+    expect(root).not.toBeNull();
+    expect(getComputedStyle(document.documentElement).getPropertyValue("--font-ui")).toBe(
+      bundledUiFamily,
+    );
+    expect(getComputedStyle(root as Element).fontFamily).toBe("var(--font-ui)");
+
+    stylesheet.remove();
+    document.documentElement.style.removeProperty("--font-ui");
+  });
+
   it("provides one persistent status banner and one labelled active screen region", () => {
     render(
       <FloorShell {...status} tasks={[]} activeTaskId="" onSelectTask={vi.fn()}>
