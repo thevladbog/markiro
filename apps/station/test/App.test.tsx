@@ -352,9 +352,10 @@ function clickDigits(value: string) {
   }
 }
 
-/** Drives the real OperatorLogin PIN-pad flow to reach the floor stage. */
+/** Drives the real badge-first OperatorLogin fallback to reach the floor stage. */
 async function signInAsOperator() {
   await waitFor(() => expect(screen.getByText("Operator sign-in")).toBeDefined());
+  fireEvent.click(screen.getByRole("button", { name: "Use personnel number" }));
   clickDigits(OPERATOR_LOGIN);
   fireEvent.click(screen.getByRole("button", { name: "Next" }));
   clickDigits(OPERATOR_PIN);

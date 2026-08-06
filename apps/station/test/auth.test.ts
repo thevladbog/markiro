@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { applyMigrations, replaceOperatorsMirror, type SqlExecutor } from "../src/lib/mirror.js";
 import * as crypto from "../src/lib/crypto.js";
 import { hashSecret } from "../src/lib/crypto.js";
-import { verifyOperatorBadge, verifyOperatorPin } from "../src/lib/auth.js";
+import { padShortOperatorLogin, verifyOperatorBadge, verifyOperatorPin } from "../src/lib/auth.js";
 
 function makeExec(): SqlExecutor {
   const db = new DatabaseSync(":memory:");
@@ -17,6 +17,34 @@ function makeExec(): SqlExecutor {
 }
 
 describe("operator auth (login + PIN)", () => {
+  it("pads only logins shorter than the 3-digit storage minimum", () => {
+    expect(padShortOperatorLogin("1")).toBe("001");
+    expect(padShortOperatorLogin("12")).toBe("012");
+    expect(padShortOperatorLogin("123")).toBe("123");
+    expect(padShortOperatorLogin("000123")).toBe("000123");
+    expect(padShortOperatorLogin("12a")).toBeNull();
+    expect(padShortOperatorLogin("1234567890123")).toBeNull();
+  });
+
+  it("keeps 3-or-more digit logins exact", async () => {
+    const exec = makeExec();
+    await applyMigrations(exec);
+    await replaceOperatorsMirror(exec, [
+      {
+        operatorId: "op-padded",
+        name: "Exact",
+        login: "000123",
+        role: "operator",
+        pinHash: await hashSecret("1234"),
+        badgeHash: null,
+        active: true,
+      },
+    ]);
+
+    expect(await verifyOperatorPin(exec, "123", "1234")).toBeNull();
+    expect((await verifyOperatorPin(exec, "000123", "1234"))?.operatorId).toBe("op-padded");
+  });
+
   it("signs in the operator whose personnel number matches, not merely a matching PIN", async () => {
     const exec = makeExec();
     await applyMigrations(exec);

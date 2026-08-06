@@ -12,6 +12,16 @@ const DUMMY_PHC =
   "pbkdf2$sha256$100000$fwGrIt01vwgBxxDlhqLVRQ==$PGnhdQA2lW09CcvuOhCmvp0z4HbztWXaYIq7+dqmLoQ=";
 
 /**
+ * Turns the deliberately forgiving floor entry into the exact storage key.
+ * Only values below the three-digit API minimum are padded; longer values are
+ * never canonicalized because leading zeroes are part of the operator login.
+ */
+export function padShortOperatorLogin(login: string): string | null {
+  if (!/^\d{1,12}$/.test(login)) return null;
+  return login.padStart(3, "0");
+}
+
+/**
  * Returns the active operator whose personnel number is `login` when `pin`
  * matches their verifier, else null. Looking up by login first is not just the
  * UX from the sign-in design — it is correctness: 4-digit PINs collide across a
@@ -29,7 +39,7 @@ export async function verifyOperatorPin(
   pin: string,
 ): Promise<OperatorMirrorRecord | null> {
   if (!/^\d{4,}$/.test(pin)) return null;
-  if (login.length === 0) return null;
+  if (!/^\d{3,12}$/.test(login)) return null;
   const operator = (await readOperatorsMirror(exec)).find((op) => op.active && op.login === login);
   const ok = await verifyPin(pin, operator ? operator.pinHash : DUMMY_PHC);
   return ok && operator ? operator : null;

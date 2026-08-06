@@ -3,8 +3,11 @@ import { useTranslation } from "react-i18next";
 import { Alert, Button, PinPad } from "@markiro/ui";
 import type { OperatorMirrorRecord } from "@markiro/db";
 import type { SqlExecutor } from "../lib/mirror.js";
+import { readOperatorsMirror } from "../lib/mirror.js";
 import type { ScanSource } from "../lib/scan-source.js";
-import { verifyOperatorBadge, verifyOperatorPin } from "../lib/auth.js";
+import { padShortOperatorLogin, verifyOperatorBadge, verifyOperatorPin } from "../lib/auth.js";
+import type { OperatorSearchResult } from "../lib/operator-search.js";
+import { OperatorNameSearch } from "../ui/OperatorNameSearch.js";
 
 export interface OperatorLoginProps {
   exec: SqlExecutor;
@@ -12,16 +15,18 @@ export interface OperatorLoginProps {
   onAuthed: (operator: OperatorMirrorRecord) => void;
 }
 
-/**
- * Floor sign-in: scan a badge, or fall back to personnel number + PIN.
- * Deliberately NOT a picker of every operator — the roster is org-wide and can
- * be large, and a PIN-only entry cannot identify a person (PINs collide).
- */
+type LoginStage = "badge" | "login" | "pin" | "search";
+
+/** Badge-first fixed-viewport operator sign-in with bounded offline fallbacks. */
 export function OperatorLogin({ exec, source, onAuthed }: OperatorLoginProps) {
   const { t } = useTranslation();
-  const [stage, setStage] = useState<"login" | "pin">("login");
+  const [stage, setStage] = useState<LoginStage>("badge");
   const [login, setLogin] = useState("");
   const [pin, setPin] = useState("");
+  const [pinOrigin, setPinOrigin] = useState<"login" | "search">("login");
+  const [selectedName, setSelectedName] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [roster, setRoster] = useState<OperatorMirrorRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const authInFlight = useRef(false);
@@ -71,6 +76,24 @@ export function OperatorLogin({ exec, source, onAuthed }: OperatorLoginProps) {
     };
   }, [source]);
 
+  async function openNameSearch() {
+    if (admitted.current || authInFlight.current) return;
+    authInFlight.current = true;
+    setError(null);
+    setBusy(true);
+    setStage("search");
+    try {
+      const operators = await readOperatorsMirror(exec);
+      if (mounted.current) setRoster(operators);
+    } catch (err) {
+      console.error("station: readOperatorsMirror failed", err);
+      if (mounted.current) setError(t("login.searchUnavailable"));
+    } finally {
+      authInFlight.current = false;
+      if (mounted.current && !admitted.current) setBusy(false);
+    }
+  }
+
   async function submit() {
     if (admitted.current || authInFlight.current) return;
     authInFlight.current = true;
@@ -81,10 +104,8 @@ export function OperatorLogin({ exec, source, onAuthed }: OperatorLoginProps) {
       try {
         operator = await verifyOperatorPin(exec, login, pin);
       } catch (err) {
-        // If boot migrations failed (App.tsx logs and continues rather than
-        // strand the device), `operators_mirror` may not exist yet and this
-        // query throws — surface the same wrong-credentials slot instead of an
-        // unhandled rejection.
+        // A failed boot migration is presented in the same reserved slot as
+        // any other failed credential check, never as an unhandled rejection.
         console.error("station: verifyOperatorPin failed", err);
         operator = null;
       }
@@ -95,65 +116,170 @@ export function OperatorLogin({ exec, source, onAuthed }: OperatorLoginProps) {
         return;
       }
       if (!mounted.current) return;
-      // Never say WHICH half was wrong — that would enumerate personnel numbers.
       setError(live.current.t("login.wrong"));
       setPin("");
-      setStage("login");
-      setLogin("");
     } finally {
       authInFlight.current = false;
       if (mounted.current && !admitted.current) setBusy(false);
     }
   }
 
-  const value = stage === "login" ? login : pin;
-  const setValue = stage === "login" ? setLogin : setPin;
+  function moveToPin(exactLogin: string, origin: "login" | "search", name: string | null) {
+    setError(null);
+    setPin("");
+    setLogin(exactLogin);
+    setPinOrigin(origin);
+    setSelectedName(name);
+    setStage("pin");
+  }
+
+  function advanceLogin() {
+    const exactLogin = padShortOperatorLogin(login);
+    if (!exactLogin) {
+      setError(t("login.loginInvalid"));
+      return;
+    }
+    moveToPin(exactLogin, "login", null);
+  }
+
+  function selectName(operator: OperatorSearchResult) {
+    moveToPin(operator.login, "search", operator.name);
+  }
+
+  function back() {
+    if (busy) return;
+    setError(null);
+    setPin("");
+    if (stage === "pin") {
+      setStage(pinOrigin);
+      return;
+    }
+    setStage("badge");
+  }
+
+  const prompt =
+    stage === "badge"
+      ? t("login.badgePrimary")
+      : stage === "login"
+        ? t("login.loginPrompt")
+        : stage === "search"
+          ? t("login.nameSearchPrompt")
+          : selectedName
+            ? t("login.pinFor", { name: selectedName })
+            : t("login.pinPrompt");
 
   return (
-    <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", gap: 24 }}>
-      <h1 style={{ fontSize: "2.25rem" }}>{t("login.title")}</h1>
-      <p style={{ fontSize: "1.25rem" }}>
-        {stage === "login" ? t("login.loginPrompt") : t("login.pinPrompt")}
-      </p>
-      <p style={{ fontSize: "1.25rem", opacity: 0.8 }}>{t("login.badgePrompt")}</p>
-      <div
-        aria-label={stage === "login" ? "login" : "pin"}
-        style={{ fontSize: "3rem", letterSpacing: "0.5rem" }}
-      >
-        {stage === "login" ? login : "•".repeat(pin.length)}
+    <main className="operator-login" aria-labelledby="operator-login-title">
+      <header className="operator-login__prompt">
+        <h1 id="operator-login-title">{t("login.title")}</h1>
+        <p>{prompt}</p>
+      </header>
+
+      <div className="operator-login__message" aria-live="polite">
+        {error ? <Alert tone="error">{error}</Alert> : null}
       </div>
-      {error ? <Alert tone="error">{error}</Alert> : null}
-      <PinPad value={value} onChange={setValue} />
-      <div style={{ display: "flex", gap: 12 }}>
-        <Button
-          variant="secondary"
-          style={{ minHeight: 64 }}
-          disabled={busy}
-          onClick={() => {
-            if (stage === "pin") {
-              setPin("");
-              setStage("login");
-            } else {
-              setLogin("");
-            }
-          }}
-        >
-          {stage === "pin" ? t("login.back") : t("login.clear")}
-        </Button>
-        <Button
-          style={{ minHeight: 64 }}
-          disabled={value.length === 0 || busy}
-          onClick={() => {
-            if (stage === "login") {
-              setError(null);
-              setStage("pin");
-            } else {
-              void submit();
-            }
-          }}
-        >
-          {stage === "login" ? t("login.next") : t("login.submit")}
-        </Button>
+
+      <div className="operator-login__body">
+        {stage === "search" ? (
+          <OperatorNameSearch
+            operators={roster}
+            query={searchQuery}
+            onQueryChange={setSearchQuery}
+            onSelect={selectName}
+            disabled={busy}
+          />
+        ) : (
+          <>
+            <div
+              className="operator-login__readout"
+              aria-label={stage === "login" ? "login" : stage === "pin" ? "pin" : undefined}
+            >
+              {stage === "badge"
+                ? t("login.badgeReady")
+                : stage === "login"
+                  ? login
+                  : "•".repeat(pin.length)}
+            </div>
+            <div className="operator-login__keypad-zone">
+              {stage === "badge" ? (
+                <div className="operator-login__badge-panel" aria-hidden="true">
+                  <span>▣</span>
+                </div>
+              ) : (
+                <PinPad
+                  value={stage === "login" ? login : pin}
+                  onChange={stage === "login" ? setLogin : setPin}
+                  {...(stage === "login" ? { maxLength: 12 } : {})}
+                  size="floor"
+                  disabled={busy}
+                  ariaLabel={stage === "login" ? t("login.loginKeypad") : t("login.pinKeypad")}
+                  backspaceLabel={t("login.backspace")}
+                  clearLabel={t("login.clear")}
+                />
+              )}
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="operator-login__actions">
+        {stage === "badge" ? (
+          <>
+            <Button
+              size="floor"
+              variant="secondary"
+              disabled={busy}
+              onClick={() => void openNameSearch()}
+            >
+              {t("login.findByName")}
+            </Button>
+            <Button size="floor" disabled={busy} onClick={() => setStage("login")}>
+              {t("login.useLogin")}
+            </Button>
+          </>
+        ) : stage === "login" ? (
+          <>
+            <Button size="floor" variant="secondary" disabled={busy} onClick={back}>
+              {t("login.back")}
+            </Button>
+            <Button
+              size="floor"
+              variant="secondary"
+              disabled={busy}
+              onClick={() => void openNameSearch()}
+            >
+              {t("login.findByName")}
+            </Button>
+            <Button size="floor" disabled={busy || login.length === 0} onClick={advanceLogin}>
+              {t("login.next")}
+            </Button>
+          </>
+        ) : stage === "pin" ? (
+          <>
+            <Button size="floor" variant="secondary" disabled={busy} onClick={back}>
+              {t("login.back")}
+            </Button>
+            <Button size="floor" disabled={busy || pin.length === 0} onClick={() => void submit()}>
+              {t("login.submit")}
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button size="floor" variant="secondary" disabled={busy} onClick={back}>
+              {t("login.back")}
+            </Button>
+            <Button
+              size="floor"
+              disabled={busy}
+              onClick={() => {
+                setError(null);
+                setStage("login");
+              }}
+            >
+              {t("login.useLogin")}
+            </Button>
+          </>
+        )}
       </div>
     </main>
   );

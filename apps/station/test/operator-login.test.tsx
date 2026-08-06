@@ -64,7 +64,106 @@ beforeAll(async () => {
   await i18n.changeLanguage("en");
 });
 
+function openNumericFallback() {
+  fireEvent.click(screen.getByRole("button", { name: "Use personnel number" }));
+}
+
 describe("OperatorLogin", () => {
+  it("starts in a badge-first state and opens the numeric fallback on a deliberate touch", () => {
+    render(<OperatorLogin exec={makeExec()} source={silentSource} onAuthed={vi.fn()} />);
+
+    expect(screen.getByText("Scan your badge to sign in")).toBeDefined();
+    expect(screen.queryByRole("button", { name: "1" })).toBeNull();
+
+    openNumericFallback();
+    expect(screen.getByRole("button", { name: "1" })).toBeDefined();
+  });
+
+  it("pads a one-digit login only to the 3-digit storage minimum", async () => {
+    const exec = makeExec();
+    await applyMigrations(exec);
+    await replaceOperatorsMirror(exec, [
+      {
+        operatorId: "op-short",
+        name: "Short Login",
+        login: "001",
+        role: "operator",
+        pinHash: await hashSecret("4821"),
+        badgeHash: null,
+        active: true,
+      },
+    ]);
+    const onAuthed = vi.fn();
+    render(<OperatorLogin exec={exec} source={silentSource} onAuthed={onAuthed} />);
+
+    openNumericFallback();
+    fireEvent.click(screen.getByRole("button", { name: "1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    for (const digit of "4821") fireEvent.click(screen.getByRole("button", { name: digit }));
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await waitFor(() => expect(onAuthed).toHaveBeenCalledTimes(1));
+    expect(onAuthed.mock.calls[0]![0]).toMatchObject({ login: "001" });
+  });
+
+  it("selects a bounded name result but still requires the selected exact login's PIN", async () => {
+    const exec = makeExec();
+    await applyMigrations(exec);
+    await replaceOperatorsMirror(exec, [
+      {
+        operatorId: "op-name",
+        name: "Alex Morgan",
+        login: "000123",
+        role: "operator",
+        pinHash: await hashSecret("4821"),
+        badgeHash: null,
+        active: true,
+      },
+    ]);
+    const onAuthed = vi.fn();
+    render(<OperatorLogin exec={exec} source={silentSource} onAuthed={onAuthed} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Find by name" }));
+    const search = screen.getByRole("textbox", { name: "Operator name" });
+    fireEvent.change(search, { target: { value: "  AL " } });
+    fireEvent.click(await screen.findByRole("button", { name: "Alex Morgan" }));
+    expect(screen.getByText("Enter PIN for Alex Morgan")).toBeDefined();
+
+    for (const digit of "4821") fireEvent.click(screen.getByRole("button", { name: digit }));
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await waitFor(() => expect(onAuthed).toHaveBeenCalledTimes(1));
+    expect(onAuthed.mock.calls[0]![0]).toMatchObject({ login: "000123" });
+  });
+
+  it("returns from a selected name to the same bounded roster search", async () => {
+    const exec = makeExec();
+    await applyMigrations(exec);
+    await replaceOperatorsMirror(exec, [
+      {
+        operatorId: "op-name",
+        name: "Alex Morgan",
+        login: "123",
+        role: "operator",
+        pinHash: await hashSecret("4821"),
+        badgeHash: null,
+        active: true,
+      },
+    ]);
+    render(<OperatorLogin exec={exec} source={silentSource} onAuthed={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Find by name" }));
+    const search = screen.getByRole("textbox", { name: "Operator name" });
+    fireEvent.change(search, { target: { value: "al" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Alex Morgan" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+
+    expect((screen.getByRole("textbox", { name: "Operator name" }) as HTMLInputElement).value).toBe(
+      "al",
+    );
+    expect(screen.getByRole("button", { name: "Alex Morgan" })).toBeDefined();
+  });
+
   it("signs in with a personnel number then a PIN", async () => {
     const exec = makeExec();
     await applyMigrations(exec);
@@ -82,6 +181,7 @@ describe("OperatorLogin", () => {
     const onAuthed = vi.fn();
     render(<OperatorLogin exec={exec} source={silentSource} onAuthed={onAuthed} />);
 
+    openNumericFallback();
     // Stage 1: personnel number -> Next
     for (const digit of "1042") {
       fireEvent.click(screen.getByRole("button", { name: digit }));
@@ -98,7 +198,7 @@ describe("OperatorLogin", () => {
     expect(onAuthed.mock.calls[0]![0]).toMatchObject({ operatorId: "op-1", login: "1042" });
   });
 
-  it("shows a floor error on a wrong PIN and returns to the personnel-number stage", async () => {
+  it("shows a floor error on a wrong PIN and clears only the secret entry", async () => {
     const exec = makeExec();
     await applyMigrations(exec);
     await replaceOperatorsMirror(exec, [
@@ -115,6 +215,7 @@ describe("OperatorLogin", () => {
     const onAuthed = vi.fn();
     render(<OperatorLogin exec={exec} source={silentSource} onAuthed={onAuthed} />);
 
+    openNumericFallback();
     for (const digit of "1042") {
       fireEvent.click(screen.getByRole("button", { name: digit }));
     }
@@ -127,9 +228,8 @@ describe("OperatorLogin", () => {
 
     await waitFor(() => expect(screen.getByText("Wrong personnel number or PIN")).toBeDefined());
     expect(onAuthed).not.toHaveBeenCalled();
-    // Back at stage 1: the personnel-number prompt is shown again, cleared.
-    expect(screen.getByText("Enter your personnel number")).toBeDefined();
-    expect(screen.getByLabelText("login").textContent).toBe("");
+    expect(screen.getByText("Enter PIN")).toBeDefined();
+    expect(screen.getByLabelText("pin").textContent).toBe("");
   });
 
   it("shows the wrong-credentials error (not an unhandled rejection) when the mirror query throws, e.g. after failed boot migrations (regression for M6)", async () => {
@@ -141,6 +241,7 @@ describe("OperatorLogin", () => {
     const onAuthed = vi.fn();
     render(<OperatorLogin exec={exec} source={silentSource} onAuthed={onAuthed} />);
 
+    openNumericFallback();
     for (const digit of "1042") {
       fireEvent.click(screen.getByRole("button", { name: digit }));
     }
@@ -173,6 +274,7 @@ describe("OperatorLogin", () => {
     const onAuthed = vi.fn();
     render(<OperatorLogin exec={exec} source={silentSource} onAuthed={onAuthed} />);
 
+    openNumericFallback();
     for (const digit of "1042") {
       fireEvent.click(screen.getByRole("button", { name: digit }));
     }
@@ -208,6 +310,7 @@ describe("OperatorLogin", () => {
     const onAuthed = vi.fn();
     render(<OperatorLogin exec={exec} source={silentSource} onAuthed={onAuthed} />);
 
+    openNumericFallback();
     for (const digit of "1042") {
       fireEvent.click(screen.getByRole("button", { name: digit }));
     }
@@ -235,9 +338,9 @@ describe("OperatorLogin", () => {
     releaseQuery?.();
     await waitFor(() => expect(onAuthed).not.toHaveBeenCalled());
     // readOperatorsMirror resolved to an empty roster, so the credentials
-    // don't match: the UI settles back on the login stage with Back re-enabled.
+    // don't match: the UI keeps the identified login and re-enables correction.
     await waitFor(() =>
-      expect((screen.getByRole("button", { name: "Clear" }) as HTMLButtonElement).disabled).toBe(
+      expect((screen.getByRole("button", { name: "Back" }) as HTMLButtonElement).disabled).toBe(
         false,
       ),
     );
@@ -261,7 +364,7 @@ describe("OperatorLogin", () => {
     const onAuthed = vi.fn();
     render(<OperatorLogin exec={exec} source={scanner.source} onAuthed={onAuthed} />);
 
-    expect(screen.getByText("Or scan your badge")).toBeDefined();
+    expect(screen.getByText("Scan your badge to sign in")).toBeDefined();
     act(() => scanner.scan("badge-1"));
 
     await waitFor(() => expect(onAuthed).toHaveBeenCalledTimes(1));
@@ -285,6 +388,7 @@ describe("OperatorLogin", () => {
     const scanner = manualSource();
     const onAuthed = vi.fn();
     render(<OperatorLogin exec={exec} source={scanner.source} onAuthed={onAuthed} />);
+    openNumericFallback();
     fireEvent.click(screen.getByRole("button", { name: "1" }));
 
     act(() => scanner.scan("unknown-badge"));
