@@ -810,6 +810,11 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
         .then((response) => response);
       await waitForCodeClaimPause(pool);
       archive = agent.delete(`/kiosks/${kioskId}`).then((response) => response);
+      // The archive has now reached the opposite lock boundary. Without this
+      // barrier, a fast host can let the trigger sleep end before archive has
+      // attempted `kiosks ... FOR UPDATE`, turning this into a timing probe
+      // rather than a forced lock-order regression.
+      await waitForKioskLockWait(pool);
 
       const [paired, archived] = await Promise.all([pair, archive]);
       expect(paired.status).toBe(201);
