@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
@@ -37,13 +38,11 @@ afterEach(() => {
   writeHookMountSpy.mockClear();
 });
 
-/** Minimal Response stand-in -- only what apps/admin/src/api/client.ts reads. */
 function jsonResponse(status: number, body: unknown): Response {
-  return {
-    ok: status >= 200 && status < 300,
+  return new Response(body === undefined ? null : JSON.stringify(body), {
     status,
-    json: async () => body,
-  } as Response;
+    headers: { "content-type": "application/json" },
+  });
 }
 
 const OPERATIONS_READ_ONLY: AccessDocument = {
@@ -60,13 +59,34 @@ function renderPage(access: AccessDocument = OPERATIONS_WRITE_ACCESS) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <AccessProvider value={access}>
-        <EmployeesPage />
-      </AccessProvider>
-    </QueryClientProvider>,
-  );
+  return {
+    queryClient,
+    ...render(
+      <QueryClientProvider client={queryClient}>
+        <AccessProvider value={access}>
+          <EmployeesPage />
+        </AccessProvider>
+      </QueryClientProvider>,
+    ),
+  };
+}
+
+async function chooseOption(
+  _user: ReturnType<typeof userEvent.setup>,
+  label: string,
+  option: string,
+) {
+  const trigger = screen.getByRole("combobox", { name: label });
+  fireEvent.pointerDown(trigger, {
+    button: 0,
+    ctrlKey: false,
+    pageX: 0,
+    pageY: 0,
+    pointerId: 1,
+    pointerType: "mouse",
+  });
+  fireEvent.click(screen.getByRole("option", { name: option }));
+  expect(trigger.textContent).toContain(option);
 }
 
 const JANE = {
@@ -94,6 +114,82 @@ const JANE = {
 };
 
 describe("EmployeesPage", () => {
+  it("uses the shared page/filter layout and requests the selected status", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(200, { items: [JANE] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByTestId("employees-page")).toBeDefined();
+    expect(screen.getByRole("group", { name: "Фильтры сотрудников" })).toBeDefined();
+    await chooseOption(user, "Статус", "Активные");
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/employees?status=active", expect.any(Object)),
+    );
+    expect(screen.getByText("1 сотрудник").getAttribute("aria-live")).toBe("polite");
+  });
+
+  it("uses the unfiltered request by default and resets a selected status to all", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(200, { items: [JANE] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByText(JANE.fullName);
+    expect(fetchMock).toHaveBeenCalledWith("/api/employees", expect.any(Object));
+
+    await chooseOption(user, "Статус", "В архиве");
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/employees?status=archived", expect.any(Object)),
+    );
+    await user.click(screen.getByRole("button", { name: "Сбросить" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenLastCalledWith("/api/employees", expect.any(Object)),
+    );
+  });
+
+  it("offers reset instead of a duplicate create action for an empty filtered list", async () => {
+    const fetchMock = vi.fn(async (url: string) =>
+      jsonResponse(200, { items: url.includes("status=archived") ? [] : [JANE] }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByText(JANE.fullName);
+    await chooseOption(user, "Статус", "В архиве");
+
+    expect(await screen.findByText("Нет сотрудников с выбранным статусом")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Сбросить" })).toBeDefined();
+    expect(screen.getAllByRole("button", { name: "Добавить сотрудника" })).toHaveLength(1);
+  });
+
+  it("keeps archive confirmation open with the server error", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) =>
+        init?.method === "DELETE"
+          ? jsonResponse(409, { message: "Employee has an active shift" })
+          : jsonResponse(200, { items: [JANE] }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "В архив" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Отправить сотрудника в архив?" });
+    await user.click(within(dialog).getByRole("button", { name: "В архив" }));
+
+    expect((await within(dialog).findByRole("alert")).textContent).toContain(
+      "Employee has an active shift",
+    );
+    expect(
+      screen.getByRole("alertdialog", { name: "Отправить сотрудника в архив?" }),
+    ).toBeDefined();
+  });
+
   it("keeps employee rows readable while hiding all mutations without operations.write", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (String(url).startsWith("/api/employees")) {
@@ -282,7 +378,7 @@ describe("EmployeesPage", () => {
     expect(await screen.findByText("Jane Updated")).toBeDefined();
   });
 
-  it("calls DELETE after confirming archive in the archive-confirm modal", async () => {
+  it("calls DELETE after confirming archive in the archive confirmation", async () => {
     let didArchive = false;
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === "DELETE" && !url.includes("/badges")) {
@@ -297,7 +393,7 @@ describe("EmployeesPage", () => {
     await screen.findByText("Jane Doe");
 
     fireEvent.click(screen.getByRole("button", { name: "В архив" }));
-    const dialog = await screen.findByRole("dialog");
+    const dialog = await screen.findByRole("alertdialog");
     expect(within(dialog).getByText("Отправить сотрудника в архив?")).toBeDefined();
 
     fireEvent.click(within(dialog).getByRole("button", { name: "В архив" }));

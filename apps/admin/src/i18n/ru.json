@@ -959,10 +959,18 @@
       "title": "Сотрудники",
       "emptyTitle": "Сотрудники не добавлены",
       "emptyHint": "Добавьте первого сотрудника, чтобы выдать ему QR-бейдж для самообслуживания.",
+      "filteredEmptyTitle": "Нет сотрудников с выбранным статусом",
+      "filteredEmptyHint": "Измените фильтр или сбросьте его, чтобы увидеть сотрудников.",
       "addAction": "Добавить сотрудника",
+      "resultCount_one": "{{count}} сотрудник",
+      "resultCount_few": "{{count}} сотрудника",
+      "resultCount_many": "{{count}} сотрудников",
+      "resultCount_other": "{{count}} сотрудника",
       "edit": "Изменить",
       "archive": "В архив",
       "cancel": "Отмена",
+      "retry": "Повторить",
+      "archivePersistentError": "Не удалось отправить сотрудника в архив.",
       "archiveConfirmTitle": "Отправить сотрудника в архив?",
       "archiveConfirmBody": "Сотрудник «{{name}}» будет перемещён в архив; выпущенные бейджи будут отозваны.",
       "archiveConfirmAction": "В архив",
@@ -971,6 +979,8 @@
         "archived": "В архиве"
       },
       "filters": {
+        "label": "Фильтры сотрудников",
+        "reset": "Сбросить",
         "statusLabel": "Статус",
         "status": {
           "all": "Все статусы",

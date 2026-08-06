@@ -1,0 +1,23 @@
+.mk-employees-page {
+  min-width: 0;
+}
+
+.mk-employees-filter--status {
+  width: 200px;
+}
+
+.mk-employees-section-state {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.mk-employee-badge-count {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 639px) {
+  .mk-employees-filter--status {
+    width: 100%;
+  }
+}

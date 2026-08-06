@@ -959,10 +959,18 @@
       "title": "Employees",
       "emptyTitle": "No employees yet",
       "emptyHint": "Add your first employee to issue them a self-service QR badge.",
+      "filteredEmptyTitle": "No employees match the selected status",
+      "filteredEmptyHint": "Change or reset the filter to see employees.",
       "addAction": "Add employee",
+      "resultCount_one": "{{count}} employee",
+      "resultCount_few": "{{count}} employees",
+      "resultCount_many": "{{count}} employees",
+      "resultCount_other": "{{count}} employees",
       "edit": "Edit",
       "archive": "Archive",
       "cancel": "Cancel",
+      "retry": "Retry",
+      "archivePersistentError": "Could not archive the employee.",
       "archiveConfirmTitle": "Archive this employee?",
       "archiveConfirmBody": "Employee \"{{name}}\" will be archived; their issued badges will be revoked.",
       "archiveConfirmAction": "Archive",
@@ -971,6 +979,8 @@
         "archived": "Archived"
       },
       "filters": {
+        "label": "Employee filters",
+        "reset": "Reset",
         "statusLabel": "Status",
         "status": {
           "all": "All statuses",
