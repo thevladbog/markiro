@@ -772,6 +772,14 @@ describe("ScannerSetup — granting the serial port", () => {
 });
 
 describe("ScannerSetup — the gate's entry", () => {
+  it("renders only the gate's localized clear action beside the digit-only keypad", async () => {
+    const bootstrap = await bootstrapWith([{ login: "1042", pin: "4821" }]);
+    render(<ScannerSetup paired bootstrap={bootstrap} subscribe={noFanOut} onClose={vi.fn()} />);
+
+    expect(screen.getAllByRole("button", { name: "Clear" })).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Backspace" })).toBeNull();
+  });
+
   it("lets a mistyped digit be cleared instead of forcing a failed sign-in", async () => {
     // A gloved hand on a floor kiosk mistypes. Without a clear control the
     // only way out is to submit, absorb the deliberately generic error, and

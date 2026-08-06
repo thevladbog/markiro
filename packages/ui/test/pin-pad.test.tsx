@@ -12,6 +12,17 @@ describe("PinPad", () => {
     expect(onChange).toHaveBeenCalledWith("123");
   });
 
+  it("keeps the backward-compatible default keypad digit-only", () => {
+    render(<PinPad value="12" onChange={() => undefined} />);
+
+    expect(screen.getAllByRole("button")).toHaveLength(10);
+    expect(screen.queryByRole("button", { name: "Backspace" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Clear" })).toBeNull();
+    const zero = screen.getByRole("button", { name: "0" });
+    expect(zero.style.minHeight).toBe("var(--control-keypad)");
+    expect(zero.style.fontSize).toBe("2rem");
+  });
+
   it("refuses to grow past maxLength — the pairing code is exactly eight digits", () => {
     const onChange = vi.fn();
     render(<PinPad value="12345678" onChange={onChange} maxLength={8} />);

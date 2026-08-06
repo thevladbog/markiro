@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { parseScannedSscc } from "@markiro/domain";
 import { Alert, Button } from "@markiro/ui";
@@ -39,26 +39,41 @@ export function PrintVerification({
   scanSource,
 }: PrintVerificationProps) {
   const { t } = useTranslation();
-  const [message, setMessage] = useState<PrintVerificationMessage>("waiting");
+  const titleId = useId();
+  const [feedback, setFeedback] = useState<{
+    expected: string;
+    message: PrintVerificationMessage;
+  }>({ expected, message: "waiting" });
+  const message = feedback.expected === expected ? feedback.message : "waiting";
 
   useEffect(() => {
-    return scanSource.start((raw) => {
+    let active = true;
+    const stop = scanSource.start((raw) => {
+      if (!active) return;
       const parsed = parseScannedSscc(raw);
       if (parsed === null) {
-        setMessage("notSscc");
+        setFeedback({ expected, message: "notSscc" });
         return;
       }
       if (parsed !== expected) {
-        setMessage("mismatch");
+        setFeedback({ expected, message: "mismatch" });
         return;
       }
-      setMessage("waiting");
+      setFeedback({ expected, message: "waiting" });
       onVerified();
     });
+    return () => {
+      active = false;
+      stop();
+    };
   }, [scanSource, expected, onVerified]);
 
   return (
-    <main
+    <section
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      tabIndex={-1}
       style={{
         position: "fixed",
         inset: 0,
@@ -69,7 +84,9 @@ export function PrintVerification({
         background: "var(--surface-page, #fff)",
       }}
     >
-      <h1 style={{ fontSize: "2rem" }}>{t("box.printExpected")}</h1>
+      <h1 id={titleId} style={{ fontSize: "2rem" }}>
+        {t("box.printExpected")}
+      </h1>
       <p style={{ fontSize: "2rem", fontWeight: 800, letterSpacing: "0.05em" }}>{expected}</p>
 
       {message === "mismatch" && <Alert tone="error" title={t("box.printMismatch")} />}
@@ -83,6 +100,6 @@ export function PrintVerification({
           {t("box.printSkip")}
         </Button>
       </div>
-    </main>
+    </section>
   );
 }

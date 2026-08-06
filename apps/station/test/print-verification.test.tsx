@@ -168,4 +168,32 @@ describe("PrintVerification", () => {
     expect(screen.getByRole("button", { name: "Печатать заново" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Пропустить" })).toBeDefined();
   });
+
+  it("does not carry a mismatch into the next expected label", async () => {
+    const source = manualSource();
+    const view = render(
+      <PrintVerification
+        expected={SSCC}
+        onVerified={vi.fn()}
+        onReprint={vi.fn()}
+        onSkip={vi.fn()}
+        scanSource={source}
+      />,
+    );
+    act(() => source.emit(`00${OTHER_SSCC}`));
+    await screen.findByText("Это другая этикетка");
+
+    view.rerender(
+      <PrintVerification
+        expected={OTHER_SSCC}
+        onVerified={vi.fn()}
+        onReprint={vi.fn()}
+        onSkip={vi.fn()}
+        scanSource={source}
+      />,
+    );
+
+    expect(screen.queryByText("Это другая этикетка")).toBeNull();
+    expect(screen.getByText(OTHER_SSCC)).toBeDefined();
+  });
 });

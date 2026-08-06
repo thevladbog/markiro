@@ -208,6 +208,7 @@ const OTHER_KM = "0104600000000015215Ab2";
 const THIRD_KM = "0104600000000015215Ab3";
 
 const SSCC = buildSscc(0, TEST_ISSUER_PREFIX, 777);
+const MISMATCH_SSCC = buildSscc(0, TEST_ISSUER_PREFIX, 999);
 
 interface RenderWorkOverrides extends RenderWorkScreenOverrides {
   issuerPrefix?: string | null;
@@ -1455,6 +1456,10 @@ describe("WorkScreen box progress, closing and printing", () => {
     act(() => scan(KM));
     await waitFor(() => expect(close).toHaveBeenCalled());
     expect(await screen.findByText("Отсканируйте распечатанную этикетку")).toBeDefined();
+    expect(screen.getAllByRole("main")).toHaveLength(1);
+    expect(
+      screen.getByRole("dialog", { name: "Отсканируйте распечатанную этикетку" }),
+    ).toBeDefined();
   });
 
   // Task 13 review, Finding 3: opening the verification prompt when the
@@ -1830,6 +1835,7 @@ describe("WorkScreen box progress, closing and printing", () => {
   // the first one being silently lost.
   it("serializes concurrent box-label prints and loses neither box's verification outcome", async () => {
     const exec = makeExec();
+    const source = retainingSource();
     await seedLabelSpec(exec, "s1");
     await addRange(exec, {
       issuerPrefix: TEST_ISSUER_PREFIX,
@@ -1852,6 +1858,7 @@ describe("WorkScreen box progress, closing and printing", () => {
 
     renderWorkTracked({
       exec,
+      source,
       boxCapacity: 1,
       boxItemCount: 0,
       verifyPrintedLabel: true,
@@ -1869,6 +1876,7 @@ describe("WorkScreen box progress, closing and printing", () => {
     // The core serialization assertion: never more than one physical
     // print call in flight, however close together the two boxes closed.
     expect(maxInFlight).toBe(1);
+    await waitFor(() => expect(inFlight).toBe(0));
 
     await waitFor(async () => {
       const rows = await exec.all<{ n: number }>(
@@ -1877,10 +1885,16 @@ describe("WorkScreen box progress, closing and printing", () => {
       expect(rows[0]?.n).toBe(2);
     });
 
-    // First prompt: resolve it (skip), then the SECOND must appear --
-    // proving it was queued, not dropped, while the first was showing.
+    // First prompt: show a mismatch, resolve it (skip), then the SECOND must
+    // appear clean -- proving both that it was queued (not dropped) and that
+    // feedback belongs to the expected label which produced it.
     const firstSscc = (await screen.findByText(/^\d{18}$/)).textContent;
+    const firstPromptListener = source.latestSubscribed();
+    act(() => scan(`]C100${MISMATCH_SSCC}`));
+    await screen.findByText("Это другая этикетка");
     fireEvent.click(screen.getByRole("button", { name: "Пропустить" }));
+
+    expect(screen.queryByText("Это другая этикетка")).toBeNull();
 
     const secondSscc = await waitFor(() => {
       const text = screen.getByText(/^\d{18}$/).textContent;
@@ -1888,6 +1902,8 @@ describe("WorkScreen box progress, closing and printing", () => {
       return text;
     });
     expect(secondSscc).not.toBe(firstSscc);
+    act(() => firstPromptListener(`]C100${MISMATCH_SSCC}`));
+    expect(screen.queryByText("Это другая этикетка")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Пропустить" }));
 
     // Neither box was left without an outcome -- both boxes_mirror rows

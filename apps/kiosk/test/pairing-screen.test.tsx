@@ -179,6 +179,20 @@ function stubFetch(impl: (...args: Parameters<typeof fetch>) => Promise<Response
 }
 
 describe("Pairing", () => {
+  it("renders only the screen's localized clear action beside the digit-only keypad", () => {
+    render(
+      <Pairing
+        defaultServerUrl={SERVER}
+        subscribe={fakeFanOut().subscribe}
+        onPaired={vi.fn()}
+        onConfigureScanner={vi.fn()}
+      />,
+    );
+
+    expect(screen.getAllByRole("button", { name: "Clear" })).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Backspace" })).toBeNull();
+  });
+
   it("enables the submit only once all eight digits are entered", () => {
     render(
       <Pairing

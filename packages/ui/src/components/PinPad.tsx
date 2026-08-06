@@ -22,7 +22,7 @@ export function PinPad({
   value,
   onChange,
   maxLength,
-  size = "floor",
+  size = "md",
   disabled = false,
   ariaLabel = "Numeric keypad",
   backspaceLabel = "Backspace",
@@ -33,13 +33,13 @@ export function PinPad({
     if (disabled || atLimit) return;
     onChange(value + digit);
   };
-  const keySize = size === "floor" ? "var(--control-keypad)" : "var(--control-floor)";
+  const keySize = "var(--control-keypad)";
   const keyStyle = {
     minWidth: keySize,
     minHeight: keySize,
     padding: "0 8px",
     font: size === "floor" ? "var(--floor-lg)" : undefined,
-    fontSize: size === "floor" ? 22 : undefined,
+    fontSize: size === "floor" ? 22 : "2rem",
   } as const;
 
   return (
@@ -63,15 +63,17 @@ export function PinPad({
           {digit}
         </Button>
       ))}
-      <Button
-        size={size === "floor" ? "floor" : "md"}
-        variant="secondary"
-        disabled={disabled || value.length === 0}
-        style={{ ...keyStyle, fontSize: size === "floor" ? 18 : undefined }}
-        onClick={() => onChange(value.slice(0, -1))}
-      >
-        {backspaceLabel}
-      </Button>
+      {size === "floor" ? (
+        <Button
+          size="floor"
+          variant="secondary"
+          disabled={disabled || value.length === 0}
+          style={{ ...keyStyle, fontSize: 18 }}
+          onClick={() => onChange(value.slice(0, -1))}
+        >
+          {backspaceLabel}
+        </Button>
+      ) : null}
       <Button
         size={size === "floor" ? "floor" : "md"}
         disabled={disabled || atLimit}
@@ -80,15 +82,17 @@ export function PinPad({
       >
         0
       </Button>
-      <Button
-        size={size === "floor" ? "floor" : "md"}
-        variant="secondary"
-        disabled={disabled || value.length === 0}
-        style={{ ...keyStyle, fontSize: size === "floor" ? 18 : undefined }}
-        onClick={() => onChange("")}
-      >
-        {clearLabel}
-      </Button>
+      {size === "floor" ? (
+        <Button
+          size="floor"
+          variant="secondary"
+          disabled={disabled || value.length === 0}
+          style={{ ...keyStyle, fontSize: 18 }}
+          onClick={() => onChange("")}
+        >
+          {clearLabel}
+        </Button>
+      ) : null}
     </div>
   );
 }
