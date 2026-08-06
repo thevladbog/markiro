@@ -92,6 +92,7 @@ export function StatusStrip({
   return (
     <div
       role="status"
+      className="kiosk-status-strip"
       style={{
         flexShrink: 0,
         display: "flex",

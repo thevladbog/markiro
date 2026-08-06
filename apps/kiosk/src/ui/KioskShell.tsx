@@ -44,6 +44,7 @@ import {
   REFRESH_INTERVAL_MS,
   type CacheAge,
 } from "../sync/worker.js";
+import { KioskLayout } from "./KioskLayout.js";
 import { StatusStrip } from "./StatusStrip.js";
 
 /** Matches the dev proxy in `vite.config.ts`; an on-prem install overrides it
@@ -816,7 +817,7 @@ export function KioskShell(): React.JSX.Element {
 
   let screen: React.JSX.Element;
   if (view === "loading") {
-    screen = <main>{t("app.booting")}</main>;
+    screen = <main className="kiosk-screen kiosk-screen--centered">{t("app.booting")}</main>;
   } else if (view === "scanner-setup") {
     screen = (
       <ScannerSetup
@@ -974,16 +975,14 @@ export function KioskShell(): React.JSX.Element {
     );
   }
 
-  return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-      {/* On the working screens only. Before pairing there is no dataset to
-          state an age for and no authenticated link to report on, and the
-          installer screens would only be reading a strip about a device that is
-          not yet a kiosk. */}
-      {view === "idle" || view === "cart" || view === "done" || view === "blocked" ? (
-        <StatusStrip online={online} age={age} ageMs={ageMs} quarantined={quarantinedCount} />
-      ) : null}
-      {screen}
-    </div>
-  );
+  // On the working screens only. Before pairing there is no dataset to state
+  // an age for and no authenticated link to report on, and the installer
+  // screens would only be reading a strip about a device that is not yet a
+  // kiosk.
+  const status =
+    view === "idle" || view === "cart" || view === "done" || view === "blocked" ? (
+      <StatusStrip online={online} age={age} ageMs={ageMs} quarantined={quarantinedCount} />
+    ) : undefined;
+
+  return <KioskLayout status={status}>{screen}</KioskLayout>;
 }

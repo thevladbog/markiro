@@ -18,6 +18,7 @@ import {
 // the confirmation that summarises it cannot drift apart on a separator or a
 // rounding step.
 import { formatMoney, moneyFormat, toKopecks, totalKopecks, UNPRICED } from "./money.js";
+import { productMonogram } from "./product-monogram.js";
 
 export type KioskOrientation = "landscape" | "portrait";
 
@@ -235,15 +236,7 @@ export function Cart({
   } as const;
 
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        flexDirection: "column",
-        background: "var(--surface-page)",
-        color: "var(--fg-1)",
-      }}
-    >
+    <main className="kiosk-screen kiosk-cart">
       <header
         style={{
           height: 76,
@@ -304,6 +297,7 @@ export function Cart({
           </span>
         </span>
         <button
+          className="kiosk-control"
           type="button"
           onClick={onNotMe}
           style={{ ...ghostButton, height: 56, padding: "0 22px", flexShrink: 0 }}
@@ -435,10 +429,10 @@ export function Cart({
         </div>
 
         <section
+          aria-labelledby="kiosk-cart-list-title"
           style={{
             width: portrait ? "auto" : 460,
             flex: portrait ? "1 1 0" : "0 0 auto",
-            flexShrink: 0,
             borderLeft: portrait ? "none" : "1px solid var(--line)",
             borderTop: portrait ? "1px solid var(--line)" : "none",
             display: "flex",
@@ -457,7 +451,10 @@ export function Cart({
               borderBottom: "1px solid var(--line)",
             }}
           >
-            <h1 style={{ margin: 0, font: "700 24px/30px var(--font-ui)" }}>
+            <h1
+              id="kiosk-cart-list-title"
+              style={{ margin: 0, font: "700 24px/30px var(--font-ui)" }}
+            >
               {t("cart.listTitle")}
             </h1>
             <span
@@ -471,7 +468,7 @@ export function Cart({
             </span>
           </div>
 
-          <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
+          <div className="kiosk-cart__list" style={{ flex: 1 }}>
             {count === 0 ? (
               <div
                 style={{
@@ -505,18 +502,9 @@ export function Cart({
                         borderBottom: "1px solid var(--line)",
                       }}
                     >
-                      {/* Product images are deliberately out of scope; the slot
-                        keeps the row's rhythm so adding them later is a swap. */}
-                      <span
-                        aria-hidden="true"
-                        style={{
-                          width: 56,
-                          height: 56,
-                          flexShrink: 0,
-                          borderRadius: 8,
-                          background: "var(--surface-panel)",
-                        }}
-                      />
+                      <span aria-hidden="true" className="kiosk-product-monogram">
+                        {productMonogram(item.name)}
+                      </span>
                       <span
                         style={{
                           flex: 1,
@@ -556,6 +544,7 @@ export function Cart({
                         </span>
                       ) : null}
                       <button
+                        className="kiosk-control"
                         type="button"
                         aria-label={t("cart.remove", { name: item.name })}
                         onClick={() => dispatch({ type: "remove", kmKey: item.kmKey })}
@@ -599,7 +588,10 @@ export function Cart({
               gap: 12,
             }}
           >
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div
+              className="kiosk-cart__reason-scroll"
+              style={{ display: "flex", flexDirection: "column", gap: 8 }}
+            >
               <span style={{ font: "500 14px/1 var(--font-ui)", color: "var(--fg-3)" }}>
                 {t("cart.reason")}
               </span>
@@ -608,6 +600,7 @@ export function Cart({
                   const on = state.reason === reason;
                   return (
                     <button
+                      className="kiosk-control"
                       key={reason}
                       type="button"
                       aria-pressed={on}
@@ -635,6 +628,7 @@ export function Cart({
                     const on = state.writeoffReasonId === sub.id;
                     return (
                       <button
+                        className="kiosk-control"
                         key={sub.id}
                         type="button"
                         aria-pressed={on}
@@ -684,6 +678,7 @@ export function Cart({
             </span>
 
             <button
+              className="kiosk-control"
               type="button"
               disabled={!submittable}
               onClick={() => onSubmit(state)}
@@ -725,6 +720,7 @@ export function Cart({
         style={{ border: "2px solid var(--err-border)" }}
         footer={
           <button
+            className="kiosk-control"
             type="button"
             onClick={() => dispatch({ type: "dismissNotice" })}
             style={{

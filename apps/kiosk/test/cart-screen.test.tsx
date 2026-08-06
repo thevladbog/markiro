@@ -5,6 +5,7 @@ import { classifyKioskScan, type KioskScan } from "../src/domain-guard/classify.
 import i18n from "../src/i18n/index.js";
 import type { ScanListener } from "../src/scanner/source.js";
 import { Cart, orientationOf } from "../src/screens/Cart.js";
+import { productMonogram } from "../src/screens/product-monogram.js";
 
 afterEach(cleanup);
 
@@ -127,6 +128,28 @@ const totalMoney = () => {
 const submitButton = () => screen.getByRole("button", { name: SUBMIT }) as HTMLButtonElement;
 const click = (name: string) => fireEvent.click(screen.getByRole("button", { name }));
 
+describe("productMonogram", () => {
+  it("uses the first letter or digit and returns one upper-case code point", () => {
+    expect(productMonogram("  молоко 3,2% ")).toBe("М");
+    expect(productMonogram("3.2% кефир")).toBe("3");
+    expect(productMonogram("ßbrot")).toBe("S");
+  });
+
+  it("uses locale-independent casing for locale-sensitive characters", () => {
+    const localeUpperCase = vi.spyOn(String.prototype, "toLocaleUpperCase").mockReturnValue("İ");
+
+    try {
+      expect(productMonogram("i")).toBe("I");
+    } finally {
+      localeUpperCase.mockRestore();
+    }
+  });
+
+  it("uses a deterministic fallback when a malformed name has no letter or digit", () => {
+    expect(productMonogram("  ***  ")).toBe("?");
+  });
+});
+
 describe("Cart", () => {
   it("shows a scanned product with its name, its code tail and its price", () => {
     const { scan } = renderCart();
@@ -140,6 +163,9 @@ describe("Cart", () => {
     // The decimal COMMA: this kiosk speaks Russian, the price list it is fed
     // is written «89,90», and a dot here is the screen contradicting both.
     expect(row).toContain("89,90 ₽");
+
+    const monogram = screen.getByText("М", { selector: ".kiosk-product-monogram" });
+    expect(monogram.getAttribute("aria-hidden")).toBe("true");
   });
 
   it("adds up the prices of everything in the list", () => {
