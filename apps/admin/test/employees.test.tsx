@@ -435,7 +435,7 @@ describe("EmployeesPage", () => {
     });
   });
 
-  it("shows a toast with the server message when issuing a duplicate badge returns 409", async () => {
+  it("shows the server message in the badges section when issuing a duplicate badge returns 409", async () => {
     const conflictMessage = "Badge code already active";
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === "POST" && url.includes("/badges")) {
@@ -454,10 +454,11 @@ describe("EmployeesPage", () => {
     fireEvent.change(screen.getByLabelText("Код бейджа"), { target: { value: "AAA111" } });
     fireEvent.click(screen.getByRole("button", { name: "Выпустить бейдж" }));
 
-    expect(await screen.findByText(conflictMessage)).toBeDefined();
+    const badges = screen.getByRole("region", { name: "Бейджи" });
+    expect(await within(badges).findByText(conflictMessage)).toBeDefined();
   });
 
-  it("revokes an active badge (DELETE /api/employees/:id/badges/:badgeId)", async () => {
+  it("revokes an active badge after confirmation (DELETE /api/employees/:id/badges/:badgeId)", async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === "DELETE" && url.includes("/badges/")) {
         return jsonResponse(204, undefined);
@@ -473,6 +474,8 @@ describe("EmployeesPage", () => {
     await screen.findByText("Изменить сотрудника");
 
     fireEvent.click(screen.getByRole("button", { name: "Отозвать" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Отозвать бейдж?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Отозвать" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(

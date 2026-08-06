@@ -16,8 +16,78 @@
   font-variant-numeric: tabular-nums;
 }
 
+.mk-employee-badges-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  border-top: 1px solid var(--line);
+  padding-top: var(--sp-4);
+}
+
+.mk-employee-badges-section__title {
+  margin: 0;
+  color: var(--fg-1);
+  font: 600 13px/1 var(--font-ui);
+}
+
+.mk-employee-badges-section__empty,
+.mk-employee-badges-section__issued-at {
+  margin: 0;
+  color: var(--fg-3);
+  font: var(--text-caption);
+}
+
+.mk-employee-badges-section__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mk-employee-badges-section__item,
+.mk-employee-badges-section__actions,
+.mk-employee-badges-section__issue-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.mk-employee-badges-section__item {
+  justify-content: space-between;
+}
+
+.mk-employee-badges-section__details {
+  display: flex;
+  flex-direction: column;
+}
+
+.mk-employee-badges-section__name {
+  color: var(--fg-1);
+  font: var(--text-body);
+}
+
+.mk-employee-badges-section__issue-row {
+  align-items: flex-end;
+}
+
+.mk-employee-badges-section__issue-row > :not(button) {
+  flex: 1;
+}
+
 @media (max-width: 639px) {
   .mk-employees-filter--status {
     width: 100%;
+  }
+
+  .mk-employee-badges-section__item,
+  .mk-employee-badges-section__issue-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .mk-employee-badges-section__actions {
+    justify-content: flex-end;
   }
 }

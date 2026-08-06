@@ -1014,8 +1014,14 @@
         "codeLabel": "Badge code",
         "labelLabel": "Label",
         "issueAction": "Issue badge",
+        "issueError": "Could not issue the badge",
         "revokeAction": "Revoke",
+        "revokeTitle": "Revoke badge?",
+        "revokeBody": "The badge will be revoked and can no longer be used to confirm identity.",
+        "revokeConfirmAction": "Revoke",
+        "activeBadge": "Active",
         "revokedBadge": "Revoked",
+        "revokeError": "Could not revoke the badge",
         "issuedAt": "Issued {{date}}"
       },
       "stationAccess": {
