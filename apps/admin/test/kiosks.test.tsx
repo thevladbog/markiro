@@ -54,13 +54,19 @@ afterEach(() => {
   writeHookMountSpy.mockClear();
 });
 
-/** Minimal Response stand-in -- only what apps/admin/src/api/client.ts reads. */
 function jsonResponse(status: number, body: unknown): Response {
-  return {
-    ok: status >= 200 && status < 300,
+  return new Response(JSON.stringify(body), {
     status,
-    json: async () => body,
-  } as Response;
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+function deferred<T>() {
+  let resolve: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve: resolve! };
 }
 
 const ADMIN_ACCESS: AccessDocument = {
@@ -101,6 +107,15 @@ function renderPage(access: AccessDocument = ADMIN_ACCESS) {
       </AccessProvider>
     </QueryClientProvider>,
   );
+}
+
+async function chooseOption(
+  user: ReturnType<typeof userEvent.setup>,
+  label: string,
+  option: string,
+) {
+  await user.click(screen.getByRole("combobox", { name: label }));
+  await user.click(await screen.findByRole("option", { name: option }));
 }
 
 // A few seconds in the past -- well within the ~2 minute online window, and
@@ -180,7 +195,7 @@ function stubFetch(overrides: {
   kiosks?: unknown[];
   products?: unknown[];
   reasons?: unknown[];
-  onPost?: (path: string, init?: RequestInit) => Response | undefined;
+  onPost?: (path: string, init?: RequestInit) => Response | Promise<Response> | undefined;
 }) {
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     const path = String(url);
@@ -202,6 +217,171 @@ function stubFetch(overrides: {
 }
 
 describe("KiosksPage", () => {
+  it("renders the table-shaped loading state until the kiosk request resolves", async () => {
+    const kioskResponse = deferred<Response>();
+    stubFetch({
+      onPost: (path) => (path === "/api/kiosks" ? kioskResponse.promise : undefined),
+    });
+    renderPage();
+
+    expect(screen.getByRole("status", { name: "Загрузка…" }).querySelector("table")).not.toBeNull();
+    await act(async () => {
+      kioskResponse.resolve(jsonResponse(200, { items: [ONLINE_KIOSK] }));
+    });
+    expect(await screen.findByText(ONLINE_KIOSK.name)).toBeDefined();
+  });
+
+  it("retries a failed kiosk list request", async () => {
+    let kioskRequests = 0;
+    const fetchMock = stubFetch({
+      kiosks: [ONLINE_KIOSK],
+      onPost: (path) => {
+        if (path !== "/api/kiosks") return undefined;
+        kioskRequests += 1;
+        return kioskRequests === 1
+          ? jsonResponse(500, { message: "Temporary error" })
+          : jsonResponse(200, { items: [ONLINE_KIOSK] });
+      },
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByRole("alert")).toBeDefined();
+    await user.click(screen.getByRole("button", { name: "Повторить" }));
+    expect(await screen.findByText(ONLINE_KIOSK.name)).toBeDefined();
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/kiosks")).toHaveLength(2);
+  });
+
+  it("distinguishes awaiting pairing from an enrolled offline kiosk", async () => {
+    const now = Date.parse("2026-08-06T10:00:00.000Z");
+    vi.setSystemTime(now);
+    stubFetch({
+      kiosks: [
+        { ...OFFLINE_KIOSK, id: "awaiting", enrolled: false, lastSeenAt: null },
+        {
+          ...OFFLINE_KIOSK,
+          id: "offline",
+          enrolled: true,
+          lastSeenAt: new Date(now - 2 * 60_000 - 1).toISOString(),
+        },
+      ],
+      products: [],
+      reasons: [],
+    });
+    renderPage();
+
+    expect(await screen.findByText("Ожидает привязки")).toBeDefined();
+    expect(screen.getByText("Не в сети")).toBeDefined();
+  });
+
+  it("gives archived kiosks precedence and treats the online threshold as online", async () => {
+    const now = Date.parse("2026-08-06T10:00:00.000Z");
+    vi.setSystemTime(now);
+    stubFetch({
+      kiosks: [
+        { ...ARCHIVED_KIOSK, lastSeenAt: null, enrolled: false },
+        {
+          ...ONLINE_KIOSK,
+          id: "threshold",
+          lastSeenAt: new Date(now - 2 * 60_000).toISOString(),
+        },
+      ],
+      products: [],
+      reasons: [],
+    });
+    renderPage();
+
+    expect(await screen.findByText("В архиве")).toBeDefined();
+    expect(screen.getByText("В сети")).toBeDefined();
+  });
+
+  it("shows Never for a kiosk with no recorded activity", async () => {
+    stubFetch({ kiosks: [OFFLINE_KIOSK], products: [], reasons: [] });
+    renderPage();
+
+    expect(await screen.findByText("Никогда")).toBeDefined();
+  });
+
+  it("filters the fetched rows without adding query parameters", async () => {
+    const now = Date.parse("2026-08-06T10:00:00.000Z");
+    vi.setSystemTime(now);
+    const fetchMock = stubFetch({
+      kiosks: [
+        { ...ONLINE_KIOSK, lastSeenAt: new Date(now - 1_000).toISOString() },
+        { ...OFFLINE_KIOSK, enrolled: true },
+      ],
+      products: [],
+      reasons: [],
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await chooseOption(user, "Состояние", "В сети");
+    expect(screen.getByText(ONLINE_KIOSK.name)).toBeDefined();
+    expect(screen.queryByText(OFFLINE_KIOSK.name)).toBeNull();
+    const kioskCalls = fetchMock.mock.calls.filter(([url]) =>
+      String(url).startsWith("/api/kiosks"),
+    );
+    expect(kioskCalls).toHaveLength(1);
+    expect(kioskCalls[0]?.[0]).toBe("/api/kiosks");
+  });
+
+  it("resets the state filter and renders the filtered empty state", async () => {
+    const user = userEvent.setup();
+    stubFetch({ kiosks: [OFFLINE_KIOSK], products: [], reasons: [] });
+    renderPage();
+
+    await chooseOption(user, "Состояние", "В сети");
+    expect(await screen.findByText("Нет киосков в выбранном состоянии")).toBeDefined();
+    await user.click(screen.getByRole("button", { name: "Сбросить" }));
+    expect(await screen.findByText(OFFLINE_KIOSK.name)).toBeDefined();
+  });
+
+  it("updates all rows from online to offline on the shared clock tick", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const now = Date.parse("2026-08-06T10:00:00.000Z");
+    vi.setSystemTime(now);
+    stubFetch({
+      kiosks: [
+        {
+          ...ONLINE_KIOSK,
+          lastSeenAt: new Date(now - 2 * 60_000 + 1).toISOString(),
+        },
+      ],
+      products: [],
+      reasons: [],
+    });
+    renderPage();
+
+    expect(await screen.findByText("В сети")).toBeDefined();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(screen.getByText("Не в сети")).toBeDefined();
+  });
+
+  it("keeps kiosk archive confirmation open with the server error", async () => {
+    stubFetch({
+      kiosks: [ONLINE_KIOSK],
+      products: [],
+      reasons: [],
+      onPost: (_path, init) =>
+        init?.method === "DELETE"
+          ? jsonResponse(409, { message: "Kiosk has pending pickup work" })
+          : undefined,
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "В архив" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Отправить киоск в архив?" });
+    await user.click(within(dialog).getByRole("button", { name: "В архив" }));
+
+    expect((await within(dialog).findByRole("alert")).textContent).toContain(
+      "Kiosk has pending pickup work",
+    );
+  });
+
   it("keeps kiosk rows readable while hiding operational mutations without operations.write", async () => {
     const fetchMock = stubFetch({
       kiosks: [ONLINE_KIOSK],
@@ -235,7 +415,7 @@ describe("KiosksPage", () => {
     expect(screen.queryByRole("button", { name: "В архив" })).toBeNull();
   });
 
-  it("renders the kiosks list with online/offline status derived from lastSeenAt", async () => {
+  it("renders the kiosks list with state derived from enrollment and last activity", async () => {
     stubFetch({ kiosks: [ONLINE_KIOSK, OFFLINE_KIOSK], products: [PRODUCT_A, PRODUCT_B] });
 
     renderPage();
@@ -245,7 +425,7 @@ describe("KiosksPage", () => {
     expect(screen.getByText("Зал 1")).toBeDefined();
     expect(screen.getByText("—")).toBeDefined(); // OFFLINE_KIOSK.location is null
     expect(screen.getByText("В сети")).toBeDefined();
-    expect(screen.getByText("Не в сети")).toBeDefined();
+    expect(screen.getByText("Ожидает привязки")).toBeDefined();
     expect(screen.getByText("5")).toBeDefined();
     expect(screen.getByText("3")).toBeDefined();
     expect(screen.getByText("Да")).toBeDefined();
@@ -559,7 +739,7 @@ describe("KiosksPage", () => {
     await screen.findByText("Касса у входа");
 
     fireEvent.click(screen.getByRole("button", { name: "В архив" }));
-    const dialog = await screen.findByRole("dialog");
+    const dialog = await screen.findByRole("alertdialog");
     fireEvent.click(within(dialog).getByRole("button", { name: "В архив" }));
 
     await waitFor(() => {

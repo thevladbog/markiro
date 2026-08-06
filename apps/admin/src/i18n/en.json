@@ -1098,6 +1098,28 @@
       "archiveConfirmTitle": "Archive this kiosk?",
       "archiveConfirmBody": "Kiosk \"{{name}}\" will be archived.",
       "archiveConfirmAction": "Archive",
+      "archivePersistentError": "Could not archive the kiosk. Try again.",
+      "retry": "Retry",
+      "resultCount_one": "{{count}} kiosk",
+      "resultCount_other": "{{count}} kiosks",
+      "lastActivity": "Last activity",
+      "neverActivity": "Never",
+      "filteredEmptyTitle": "No kiosks match this state",
+      "filteredEmptyHint": "Change or reset the state filter to see all kiosks.",
+      "filters": {
+        "label": "Kiosk filters",
+        "reset": "Reset",
+        "stateLabel": "State",
+        "state": {
+          "all": "All states"
+        }
+      },
+      "states": {
+        "archived": "Archived",
+        "awaiting-pairing": "Awaiting pairing",
+        "online": "Online",
+        "offline": "Offline"
+      },
       "onlineStatus": {
         "online": "Online",
         "offline": "Offline"
@@ -1110,6 +1132,8 @@
         "name": "Name",
         "location": "Location",
         "online": "Status",
+        "state": "State",
+        "lastActivity": "Activity",
         "dayLimit": "Limit/employee",
         "showPrices": "Prices",
         "actions": "Actions"
