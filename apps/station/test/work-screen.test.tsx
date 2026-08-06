@@ -9,7 +9,11 @@ import { createFloorWorkRegistry, readSealedWorkSummary } from "../src/lib/crede
 import type { PrinterLanguage } from "../src/lib/hardware-config.js";
 import type { PrintTarget } from "../src/lib/hardware.js";
 import type { SqlExecutor } from "../src/lib/mirror.js";
-import type { ScanListener, ScanSource } from "../src/lib/scan-source.js";
+import {
+  createKeyboardWedgeSource,
+  type ScanListener,
+  type ScanSource,
+} from "../src/lib/scan-source.js";
 import type { ScanQueue } from "../src/lib/scan-queue.js";
 import type { SoundSettings } from "../src/lib/signal-sound.js";
 import { addRange } from "../src/lib/sscc-pool.js";
@@ -1110,6 +1114,39 @@ describe("WorkScreen box progress, closing and printing", () => {
     expect(dialog.isConnected).toBe(false);
     act(() => scan(OTHER_KM));
     await waitFor(() => expect(onScan).toHaveBeenCalledTimes(2));
+  });
+
+  it("discards a keyboard-wedge scan and suppresses its terminating Enter while serial recovery owns focus", async () => {
+    const close = vi
+      .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
+      .mockResolvedValue({ status: "no-serials" });
+    const source = createKeyboardWedgeSource(window);
+    const onScan = vi.fn();
+    renderWorkTracked({ source, boxCapacity: 10, boxItemCount: 9, closeCurrentBox: close, onScan });
+
+    act(() => {
+      for (const key of KM) window.dispatchEvent(new KeyboardEvent("keydown", { key }));
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", cancelable: true }));
+    });
+    const dialog = await screen.findByRole("dialog", {
+      name: /номера для коробов закончились/i,
+    });
+    const action = screen.getByRole("button", { name: "Вернуться к работе" });
+    action.focus();
+    expect(document.activeElement).toBe(action);
+
+    const terminatingEnter = new KeyboardEvent("keydown", { key: "Enter", cancelable: true });
+    act(() => {
+      for (const key of OTHER_KM) window.dispatchEvent(new KeyboardEvent("keydown", { key }));
+      window.dispatchEvent(terminatingEnter);
+    });
+
+    expect(terminatingEnter.defaultPrevented).toBe(true);
+    expect(dialog.isConnected).toBe(true);
+    expect(onScan).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(action);
+    expect(dialog.isConnected).toBe(false);
   });
 
   // CodeRabbit PR33 review, Finding 4: `closeCurrentBox` used to only ever

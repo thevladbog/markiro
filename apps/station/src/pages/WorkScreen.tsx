@@ -946,7 +946,13 @@ export function WorkScreen({
   // to compete with anything is print verification itself, not a stray
   // rejection from the loop underneath it.
   useEffect(() => {
-    if (verification || noSerials || confirmClear || boxActionPending) return;
+    if (verification || confirmClear || boxActionPending) return;
+    // Keep the physical source subscribed while serial recovery owns the
+    // screen, but deliberately discard its payloads. A keyboard-wedge source
+    // must still preventDefault() on its terminating Enter; unsubscribing it
+    // would let that Enter activate the dialog's focused recovery button and
+    // dismiss a blocking state without an intentional operator action.
+    if (noSerials) return source.start(() => {});
     return source.start((raw) => queue.enqueue(raw));
   }, [source, queue, verification, noSerials, confirmClear, boxActionPending]);
 
