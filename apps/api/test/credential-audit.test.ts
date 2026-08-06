@@ -63,28 +63,49 @@ describe("credential mutation audit", () => {
     expect(audit.credentialMutation).not.toHaveBeenCalled();
   });
 
-  it("audits station enrollment without the plaintext API key", async () => {
-    const issued = {
-      deviceId: "station_1",
+  it("audits station creation without credential or pairing-code plaintext", async () => {
+    const created = {
+      id: "station_1",
       name: "Packing station",
-      apiKey: "station-plaintext",
-      serverUrl: "https://api.example.test",
+      lineId: null,
+      lineName: null,
+      lifecycle: "awaiting_pairing",
+      pairedAt: null,
+      revokedAt: null,
+      lastSeenAt: null,
+      createdAt: new Date(),
     };
-    const service = { enroll: vi.fn().mockResolvedValue(issued) };
+    const service = { create: vi.fn().mockResolvedValue(created) };
     const audit = auditDouble();
     const controller = new StationDevicesController(service as never, audit as never);
 
-    const result = await controller.enroll(req, { name: "Packing station" });
+    const result = await controller.create(req, { name: "Packing station", lineId: null });
 
-    expect(result).toEqual(issued);
+    expect(result).toEqual(created);
     expect(audit.credentialMutation).toHaveBeenCalledWith({
       tenantId: "org_1",
       userId: "user_1",
-      action: "station_device.enroll",
+      action: "station_device.create",
       resourceId: "station_1",
       outcome: "succeeded",
     });
-    expect(JSON.stringify(audit.credentialMutation.mock.calls)).not.toContain("station-plaintext");
+    expect(JSON.stringify(audit.credentialMutation.mock.calls)).not.toContain("plaintext");
+  });
+
+  it("audits station update with its durable resource ID", async () => {
+    const service = { update: vi.fn().mockResolvedValue({ id: "station_1" }) };
+    const audit = auditDouble();
+    const controller = new StationDevicesController(service as never, audit as never);
+
+    await controller.update(req, "station_1", { lineId: null });
+
+    expect(audit.credentialMutation).toHaveBeenCalledWith({
+      tenantId: "org_1",
+      userId: "user_1",
+      action: "station_device.update",
+      resourceId: "station_1",
+      outcome: "succeeded",
+    });
   });
 
   it("audits station revocation after the service succeeds", async () => {
@@ -103,15 +124,22 @@ describe("credential mutation audit", () => {
     });
   });
 
-  it("does not audit a rejected station-device mutation", async () => {
-    const service = { enroll: vi.fn().mockRejectedValue(new Error("enroll failed")) };
+  it("audits a rejected station-device creation with a failed outcome and no body data", async () => {
+    const service = { create: vi.fn().mockRejectedValue(new Error("create failed")) };
     const audit = auditDouble();
     const controller = new StationDevicesController(service as never, audit as never);
 
-    await expect(controller.enroll(req, { name: "Packing station" })).rejects.toThrow(
-      "enroll failed",
+    await expect(controller.create(req, { name: "Packing station", lineId: null })).rejects.toThrow(
+      "create failed",
     );
-    expect(audit.credentialMutation).not.toHaveBeenCalled();
+    expect(audit.credentialMutation).toHaveBeenCalledWith({
+      tenantId: "org_1",
+      userId: "user_1",
+      action: "station_device.create",
+      resourceId: null,
+      outcome: "failed",
+    });
+    expect(JSON.stringify(audit.credentialMutation.mock.calls)).not.toContain("Packing station");
   });
 
   it("audits kiosk enrollment without the plaintext token", async () => {

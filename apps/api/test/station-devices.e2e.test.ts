@@ -4,7 +4,7 @@ import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
@@ -16,7 +16,7 @@ const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
 );
 
-describe.skipIf(!ready)("station devices e2e", () => {
+describe.skipIf(!ready)("station device lifecycle e2e", () => {
   let app: INestApplication | undefined;
   let db: Db;
 
@@ -56,118 +56,129 @@ describe.skipIf(!ready)("station devices e2e", () => {
     return org.body.id as string;
   }
 
-  it("enroll -> list -> delete, cross-tenant isolation", async () => {
+  it("pre-creates, reassigns, and durably revokes a station without deleting its SSCC history", async () => {
     const agent = request.agent(app!.getHttpServer());
-    await signUpAndActivate(agent);
+    const tenantId = await signUpAndActivate(agent);
+    const [line] = await db.insert(schema.lines).values({ tenantId, name: "Packing" }).returning();
 
-    const enroll = await agent.post("/station-devices").send({ name: "Terminal 1" }).expect(201);
-    expect(enroll.body).toMatchObject({ name: "Terminal 1" });
-    expect(typeof enroll.body.apiKey).toBe("string");
-    expect(enroll.body.serverUrl).toBe("http://localhost:3000");
-    const deviceId = enroll.body.deviceId as string;
-
-    // The freshly issued key authenticates a session-less station request.
-    await request(app!.getHttpServer())
-      .get("/shifts")
-      .set("x-api-key", enroll.body.apiKey)
-      .expect(200);
+    const create = await agent
+      .post("/station-devices")
+      .send({ name: "Terminal 1", lineId: line!.id })
+      .expect(201);
+    expect(create.body).toMatchObject({
+      name: "Terminal 1",
+      lineId: line!.id,
+      lineName: "Packing",
+      lifecycle: "awaiting_pairing",
+      pairedAt: null,
+      revokedAt: null,
+      lastSeenAt: null,
+    });
+    expect(create.body).toHaveProperty("id");
+    expect(create.body).toHaveProperty("createdAt");
+    expect(create.body).not.toHaveProperty("apiKey");
+    expect(create.body).not.toHaveProperty("serverUrl");
+    const deviceId = create.body.id as string;
 
     const list = await agent.get("/station-devices").expect(200);
-    expect(list.body.items.map((d: { id: string }) => d.id)).toContain(deviceId);
-    expect(list.body.items[0]).not.toHaveProperty("apiKey");
+    expect(list.body.items).toContainEqual(
+      expect.objectContaining({
+        id: deviceId,
+        lineId: line!.id,
+        lineName: "Packing",
+        lifecycle: "awaiting_pairing",
+      }),
+    );
 
-    // Another tenant cannot delete this device, nor see it in their list.
-    const other = request.agent(app!.getHttpServer());
-    await signUpAndActivate(other);
-    await other.delete(`/station-devices/${deviceId}`).expect(404);
+    const [stored] = await db
+      .select()
+      .from(schema.stationDevices)
+      .where(
+        and(eq(schema.stationDevices.tenantId, tenantId), eq(schema.stationDevices.id, deviceId)),
+      );
+    expect(stored).toMatchObject({ apiKeyId: null, lineId: line!.id });
 
-    const otherList = await other.get("/station-devices").expect(200);
-    expect(otherList.body.items.map((d: { id: string }) => d.id)).not.toContain(deviceId);
+    const update = await agent
+      .patch(`/station-devices/${deviceId}`)
+      .send({ name: "Terminal 1A", lineId: null })
+      .expect(200);
+    expect(update.body).toMatchObject({
+      id: deviceId,
+      name: "Terminal 1A",
+      lineId: null,
+      lineName: null,
+      lifecycle: "awaiting_pairing",
+    });
 
-    // Owner deletes it; the key stops working afterward.
+    await app!.get(SsccService).allocate(tenantId, "460000009", 0, deviceId, 10);
+    await db.insert(schema.stationPairingCodes).values({
+      tenantId,
+      stationDeviceId: deviceId,
+      codeHash: "a".repeat(64),
+      expiresAt: new Date(Date.now() + 60_000),
+      issuedByUserId: "cabinet-user",
+    });
+
     await agent.delete(`/station-devices/${deviceId}`).expect(204);
-    await request(app!.getHttpServer())
-      .get("/shifts")
-      .set("x-api-key", enroll.body.apiKey)
-      .expect(401);
+    const [revoked] = await db
+      .select()
+      .from(schema.stationDevices)
+      .where(
+        and(eq(schema.stationDevices.tenantId, tenantId), eq(schema.stationDevices.id, deviceId)),
+      );
+    expect(revoked).toMatchObject({ id: deviceId, apiKeyId: null });
+    expect(revoked!.revokedAt).toBeInstanceOf(Date);
+
+    const [retiredCode] = await db
+      .select()
+      .from(schema.stationPairingCodes)
+      .where(eq(schema.stationPairingCodes.stationDeviceId, deviceId));
+    expect(retiredCode!.usedAt).toBeInstanceOf(Date);
+    const blocks = await db
+      .select({ id: schema.ssccBlocks.id })
+      .from(schema.ssccBlocks)
+      .where(
+        and(eq(schema.ssccBlocks.tenantId, tenantId), eq(schema.ssccBlocks.deviceId, deviceId)),
+      );
+    expect(blocks).toHaveLength(1);
+
+    const revokedAt = revoked!.revokedAt;
+    await agent.delete(`/station-devices/${deviceId}`).expect(204);
+    const [repeated] = await db
+      .select({ revokedAt: schema.stationDevices.revokedAt })
+      .from(schema.stationDevices)
+      .where(eq(schema.stationDevices.id, deviceId));
+    expect(repeated!.revokedAt).toEqual(revokedAt);
   });
 
-  it("rejects device-management requests authenticated by a station api-key (session required)", async () => {
-    const agent = request.agent(app!.getHttpServer());
-    await signUpAndActivate(agent);
-
-    const enroll = await agent.post("/station-devices").send({ name: "Terminal 2" }).expect(201);
-    const apiKey = enroll.body.apiKey as string;
-
-    // A valid station key satisfies TenantGuard (tenant resolution), but
-    // device management is an admin-only action requiring a user session.
-    await request(app!.getHttpServer())
-      .get("/station-devices")
-      .set("x-api-key", apiKey)
-      .expect(403);
-
-    await request(app!.getHttpServer())
-      .delete(`/station-devices/${enroll.body.deviceId}`)
-      .set("x-api-key", apiKey)
-      .expect(403);
-
-    await request(app!.getHttpServer())
+  it("rejects a foreign line and hides station records from another tenant", async () => {
+    const owner = request.agent(app!.getHttpServer());
+    const ownerTenantId = await signUpAndActivate(owner);
+    const [ownerLine] = await db
+      .insert(schema.lines)
+      .values({ tenantId: ownerTenantId, name: "Owner line" })
+      .returning();
+    const created = await owner
       .post("/station-devices")
-      .set("x-api-key", apiKey)
-      .send({ name: "Terminal 3" })
-      .expect(403);
+      .send({ name: "Owner station", lineId: ownerLine!.id })
+      .expect(201);
+
+    const other = request.agent(app!.getHttpServer());
+    const otherTenantId = await signUpAndActivate(other);
+    const [otherLine] = await db
+      .insert(schema.lines)
+      .values({ tenantId: otherTenantId, name: "Other line" })
+      .returning();
+    await owner
+      .post("/station-devices")
+      .send({ name: "Wrong line", lineId: otherLine!.id })
+      .expect(400);
+    await other
+      .patch(`/station-devices/${created.body.id as string}`)
+      .send({ name: "Nope" })
+      .expect(404);
+    await other.delete(`/station-devices/${created.body.id as string}`).expect(404);
+    const list = await other.get("/station-devices").expect(200);
+    expect(list.body.items.map((item: { id: string }) => item.id)).not.toContain(created.body.id);
   });
-
-  // CodeRabbit PR33 review, Finding 8: sscc_blocks' composite FK to
-  // station_devices has no `onDelete` (defaults to NO ACTION). The OLD
-  // revoke() deleted station_devices first, inside one transaction with the
-  // apikey delete -- so a device that had ever issued a box serial block hit
-  // that FK violation, which rolled back the WHOLE transaction (including
-  // the apikey delete), leaving the credential silently still live. The fix
-  // deletes apikey FIRST, as its own committed statement, so the credential
-  // dies regardless of whatever the (still FK-blocked) device-row delete
-  // does afterward.
-  it(
-    "revoking a device with an sscc_blocks row referencing it still kills the api-key, even " +
-      "though the device-row delete itself is blocked by the FK",
-    async () => {
-      const agent = request.agent(app!.getHttpServer());
-      const tenantId = await signUpAndActivate(agent);
-
-      const enroll = await agent
-        .post("/station-devices")
-        .send({ name: "Bundle terminal" })
-        .expect(201);
-      const deviceId = enroll.body.deviceId as string;
-      const apiKey = enroll.body.apiKey as string;
-
-      // The key works before revoking -- baseline.
-      await request(app!.getHttpServer()).get("/shifts").set("x-api-key", apiKey).expect(200);
-
-      // Cuts a REAL sscc_blocks row referencing this device -- the only way
-      // to reach the FK this finding is about (no HTTP route allocates
-      // directly; see sscc.e2e.test.ts's own use of the service this way).
-      await app!.get(SsccService).allocate(tenantId, "460000009", 0, deviceId, 10);
-
-      // The device-row delete itself is expected to fail deterministically
-      // (the FK this finding documents raises before any custom handling
-      // catches it, so NestJS's default filter turns it into a 500) -- but
-      // the important assertion is what happens to the credential
-      // regardless of this response's own status.
-      await agent.delete(`/station-devices/${deviceId}`).expect(500);
-
-      // The fix under test: the api-key is dead, unconditionally -- even
-      // though the request above did not return success.
-      await request(app!.getHttpServer()).get("/shifts").set("x-api-key", apiKey).expect(401);
-
-      // The device row itself is left orphaned (its own delete blocked by
-      // the FK) -- accepted bookkeeping debt, not a live credential, which
-      // is exactly the trade-off this finding's fix makes on purpose.
-      const rows = await db
-        .select({ id: schema.stationDevices.id })
-        .from(schema.stationDevices)
-        .where(eq(schema.stationDevices.id, deviceId));
-      expect(rows).toHaveLength(1);
-    },
-  );
 });

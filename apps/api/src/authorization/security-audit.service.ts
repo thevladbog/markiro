@@ -15,7 +15,7 @@ interface CredentialMutationEvent {
   userId: string;
   action: string;
   resourceId: string | null;
-  outcome: "succeeded";
+  outcome: "succeeded" | "failed";
 }
 
 @Injectable()
