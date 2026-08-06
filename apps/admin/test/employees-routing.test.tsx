@@ -17,6 +17,7 @@ import {
 } from "../src/pages/employees/EmployeePanelRoute.js";
 import { EmployeesPage } from "../src/pages/employees/index.js";
 import type * as StationAccessApiModule from "../src/pages/employees/station-access-api.js";
+import { jsonResponse } from "./helpers/http.js";
 
 const { createHookMountSpy, operatorsHookMountSpy, updateHookMountSpy } = vi.hoisted(() => ({
   createHookMountSpy: vi.fn(),
@@ -93,11 +94,10 @@ const JOHN_OPERATOR: typeof ACTIVE_OPERATOR = {
   login: "654321",
 };
 
-function jsonResponse(status: number, body: unknown): Response {
-  return new Response(body === undefined ? null : JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
+function requiredElement<T extends Element>(selector: string): T {
+  const element = document.querySelector<T>(selector);
+  if (!element) throw new Error(`Required element not found: ${selector}`);
+  return element;
 }
 
 function stubEmployeeAndOperators({
@@ -323,7 +323,7 @@ it("blocks every dismissal and duplicate submission while creation is pending", 
   expect((submit as HTMLButtonElement).disabled).toBe(true);
   await user.click(submit);
   await user.keyboard("{Escape}");
-  fireEvent.mouseDown(document.querySelector<HTMLElement>(".mk-side-panel__scrim")!);
+  fireEvent.mouseDown(requiredElement<HTMLElement>(".mk-side-panel__scrim"));
   await router.navigate(-1);
 
   expect(router.state.location.pathname).toBe("/employees/new");
@@ -1020,7 +1020,7 @@ it("blocks panel dismissal while a badge mutation is pending and stays open afte
     (within(panel).getByRole("button", { name: "Сохранить" }) as HTMLButtonElement).disabled,
   ).toBe(true);
   await user.keyboard("{Escape}");
-  fireEvent.mouseDown(document.querySelector<HTMLElement>(".mk-side-panel__scrim")!);
+  fireEvent.mouseDown(requiredElement<HTMLElement>(".mk-side-panel__scrim"));
   await router.navigate(-1);
   expect(router.state.location.pathname).toBe("/employees/1/edit");
   expect(screen.queryByRole("alertdialog")).toBeNull();

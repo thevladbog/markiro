@@ -118,14 +118,8 @@ export function EmployeeBadgesSection({
             {employee.badges.map((badge) => (
               <li className="mk-employee-badges-section__item" key={badge.id}>
                 <div className="mk-employee-badges-section__details">
-                  <span
-                    className={
-                      badge.label
-                        ? "mk-employee-badges-section__name"
-                        : "mk-employee-badges-section__name mk-employee-badges-section__name--code"
-                    }
-                  >
-                    {badge.label ?? badge.badgeCode}
+                  <span className="mk-employee-badges-section__name">
+                    {badge.label ?? t("pages.employees.badges.unnamedBadge")}
                   </span>
                   <span className="mk-employee-badges-section__issued-at">
                     {t("pages.employees.badges.issuedAt", {
@@ -183,7 +177,7 @@ export function EmployeeBadgesSection({
         open={revokeTarget !== null}
         title={t("pages.employees.badges.revokeTitle")}
         description={t("pages.employees.badges.revokeBody")}
-        entity={revokeTarget?.label ?? revokeTarget?.badgeCode}
+        entity={revokeTarget?.label ?? t("pages.employees.badges.unnamedBadge")}
         error={revokeError ?? undefined}
         confirmLabel={t("pages.employees.badges.revokeConfirmAction")}
         cancelLabel={t("pages.employees.cancel")}

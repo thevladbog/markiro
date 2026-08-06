@@ -12,6 +12,7 @@ import { AccessProvider } from "../src/access/context.js";
 import type * as EmployeesApiModule from "../src/pages/employees/api.js";
 import { EmployeeProfileForm } from "../src/pages/employees/EmployeeProfileForm.js";
 import { EmployeesPage } from "../src/pages/employees/index.js";
+import { jsonResponse } from "./helpers/http.js";
 
 const { writeHookMountSpy } = vi.hoisted(() => ({ writeHookMountSpy: vi.fn() }));
 
@@ -39,13 +40,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
   writeHookMountSpy.mockClear();
 });
-
-function jsonResponse(status: number, body: unknown): Response {
-  return new Response(body === undefined ? null : JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
-}
 
 const OPERATIONS_READ_ONLY: AccessDocument = {
   roles: [],
@@ -75,11 +69,7 @@ function renderPage(access: AccessDocument = OPERATIONS_WRITE_ACCESS) {
   };
 }
 
-async function chooseOption(
-  _user: ReturnType<typeof userEvent.setup>,
-  label: string,
-  option: string,
-) {
+async function chooseOption(label: string, option: string) {
   const trigger = screen.getByRole("combobox", { name: label });
   fireEvent.pointerDown(trigger, {
     button: 0,
@@ -142,24 +132,26 @@ function DirtyProfileReseedHarness() {
   );
 }
 
-describe("EmployeesPage", () => {
+describe("EmployeeProfileForm", () => {
   it("does not reseed over an employee edit when initial values change in the same commit", () => {
     render(<DirtyProfileReseedHarness />);
     const name = screen.getByLabelText("ФИО") as HTMLInputElement;
+    // The input change and incoming initial values are committed together.
     fireEvent.change(name, { target: { value: "Jane Draft" } });
 
     expect(name.value).toBe("Jane Draft");
   });
+});
 
+describe("EmployeesPage", () => {
   it("uses the shared page/filter layout and requests the selected status", async () => {
     const fetchMock = vi.fn(async () => jsonResponse(200, { items: [JANE] }));
     vi.stubGlobal("fetch", fetchMock);
-    const user = userEvent.setup();
     renderPage();
 
     expect(await screen.findByTestId("employees-page")).toBeDefined();
     expect(screen.getByRole("group", { name: "Фильтры сотрудников" })).toBeDefined();
-    await chooseOption(user, "Статус", "Активные");
+    await chooseOption("Статус", "Активные");
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith("/api/employees?status=active", expect.any(Object)),
@@ -176,7 +168,7 @@ describe("EmployeesPage", () => {
     await screen.findByText(JANE.fullName);
     expect(fetchMock).toHaveBeenCalledWith("/api/employees", expect.any(Object));
 
-    await chooseOption(user, "Статус", "В архиве");
+    await chooseOption("Статус", "В архиве");
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith("/api/employees?status=archived", expect.any(Object)),
     );
@@ -192,11 +184,10 @@ describe("EmployeesPage", () => {
       jsonResponse(200, { items: url.includes("status=archived") ? [] : [JANE] }),
     );
     vi.stubGlobal("fetch", fetchMock);
-    const user = userEvent.setup();
     renderPage();
 
     await screen.findByText(JANE.fullName);
-    await chooseOption(user, "Статус", "В архиве");
+    await chooseOption("Статус", "В архиве");
 
     expect(await screen.findByText("Нет сотрудников с выбранным статусом")).toBeDefined();
     expect(screen.getByRole("button", { name: "Сбросить" })).toBeDefined();

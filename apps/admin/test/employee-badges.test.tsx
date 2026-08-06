@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { EmployeeBadgesSection } from "../src/pages/employees/EmployeeBadgesSection.js";
 import type { EmployeeDto } from "../src/pages/employees/api.js";
+import { jsonResponse } from "./helpers/http.js";
 
 const JANE: EmployeeDto = {
   id: "1",
@@ -29,13 +30,6 @@ const JANE: EmployeeDto = {
   ],
   createdAt: "2026-01-01T00:00:00.000Z",
 };
-
-function jsonResponse(status: number, body: unknown): Response {
-  return new Response(body === undefined ? null : JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
-}
 
 function stubBadgePost(status: number, body: unknown) {
   vi.stubGlobal(
@@ -87,6 +81,25 @@ afterEach(() => {
 });
 
 describe("EmployeeBadgesSection", () => {
+  it("never renders an unlabeled badge credential", async () => {
+    const activeBadge = JANE.badges[0];
+    if (!activeBadge) throw new Error("Active badge fixture is missing");
+    const employee = {
+      ...JANE,
+      badges: [{ ...activeBadge, badgeCode: "SECRET-BADGE", label: null }],
+    };
+    renderBadgesSection(employee);
+    const user = userEvent.setup();
+
+    expect(screen.getByText("Без названия")).toBeDefined();
+    expect(screen.queryByText("SECRET-BADGE")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Отозвать" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Отозвать бейдж?" });
+    expect(within(dialog).getByText("Без названия")).toBeDefined();
+    expect(within(dialog).queryByText("SECRET-BADGE")).toBeNull();
+  });
+
   it("keeps a badge code out of the real MutationCache while issuing it", async () => {
     let resolvePost: ((response: Response) => void) | undefined;
     vi.stubGlobal(
@@ -121,6 +134,9 @@ describe("EmployeeBadgesSection", () => {
     ).toBe(false);
 
     resolvePost?.(jsonResponse(201, JANE));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Код бейджа") as HTMLInputElement).value).toBe(""),
+    );
   });
 
   it("preserves badge inputs and reports a persistent issue error", async () => {

@@ -1028,6 +1028,7 @@
       "badges": {
         "title": "Badges",
         "emptyHint": "No badges issued",
+        "unnamedBadge": "Unnamed badge",
         "codeLabel": "Badge code",
         "labelLabel": "Label",
         "issueAction": "Issue badge",

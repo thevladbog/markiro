@@ -309,11 +309,6 @@
   overflow-wrap: anywhere;
 }
 
-.mk-employee-badges-section__name--code {
-  font: var(--text-code);
-  font-variant-numeric: tabular-nums;
-}
-
 .mk-employee-badges-section__issue-row {
   align-items: flex-end;
 }

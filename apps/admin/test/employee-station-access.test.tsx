@@ -8,10 +8,12 @@ import {
   type EmployeeStationAccessSectionProps,
 } from "../src/pages/employees/EmployeeStationAccessSection.js";
 import type { EmployeeDto } from "../src/pages/employees/api.js";
-import type {
-  OperatorListItemDto,
-  StationAccessDto,
+import {
+  OPERATORS_QUERY_KEY,
+  type OperatorListItemDto,
+  type StationAccessDto,
 } from "../src/pages/employees/station-access-api.js";
+import { jsonResponse } from "./helpers/http.js";
 
 const JANE: EmployeeDto = {
   id: "1",
@@ -39,11 +41,13 @@ const UPDATED_ACCESS: StationAccessDto = {
   updatedAt: "2026-01-04T00:00:00.000Z",
 };
 
-function jsonResponse(status: number, body: unknown): Response {
-  return new Response(body === undefined ? null : JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
+function makeReporters() {
+  return {
+    onDirtyChange: vi.fn(),
+    onBusyChange: vi.fn(),
+    onErrorChange: vi.fn(),
+    onStatusChange: vi.fn(),
+  };
 }
 
 function stubOperators(handler: () => Response | Promise<Response>) {
@@ -66,12 +70,7 @@ function renderStationAccess(
   reporters: Pick<
     EmployeeStationAccessSectionProps,
     "onDirtyChange" | "onBusyChange" | "onErrorChange" | "onStatusChange"
-  > = {
-    onDirtyChange: vi.fn(),
-    onBusyChange: vi.fn(),
-    onErrorChange: vi.fn(),
-    onStatusChange: vi.fn(),
-  },
+  > = makeReporters(),
 ) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -95,12 +94,7 @@ afterEach(() => {
 describe("EmployeeStationAccessSection query states", () => {
   it("reports loading and withholds Grant while operators are pending", async () => {
     stubOperators(() => new Promise<Response>(() => {}));
-    const reporters = {
-      onDirtyChange: vi.fn(),
-      onBusyChange: vi.fn(),
-      onErrorChange: vi.fn(),
-      onStatusChange: vi.fn(),
-    };
+    const reporters = makeReporters();
     renderStationAccess(JANE, reporters);
 
     const section = screen.getByRole("region", { name: "Доступ на станцию" });
@@ -121,12 +115,7 @@ describe("EmployeeStationAccessSection query states", () => {
         ? jsonResponse(500, { message: "Unavailable" })
         : jsonResponse(200, { items: [] });
     });
-    const reporters = {
-      onDirtyChange: vi.fn(),
-      onBusyChange: vi.fn(),
-      onErrorChange: vi.fn(),
-      onStatusChange: vi.fn(),
-    };
+    const reporters = makeReporters();
     renderStationAccess(JANE, reporters);
     const user = userEvent.setup();
     const section = await screen.findByRole("region", { name: "Доступ на станцию" });
@@ -149,12 +138,7 @@ describe("EmployeeStationAccessSection query states", () => {
     { active: false, badge: "Отключён", action: "Включить", status: "disabled" },
   ] as const)("renders and reports $status access", async ({ active, badge, action, status }) => {
     stubExistingAccess({ active });
-    const reporters = {
-      onDirtyChange: vi.fn(),
-      onBusyChange: vi.fn(),
-      onErrorChange: vi.fn(),
-      onStatusChange: vi.fn(),
-    };
+    const reporters = makeReporters();
     renderStationAccess(JANE, reporters);
     const section = await screen.findByRole("region", { name: "Доступ на станцию" });
 
@@ -169,12 +153,7 @@ describe("EmployeeStationAccessSection query states", () => {
 describe("EmployeeStationAccessSection mutations", () => {
   it("surfaces and discards an absent-access draft when access appears", async () => {
     stubOperators(() => jsonResponse(200, { items: [] }));
-    const reporters = {
-      onDirtyChange: vi.fn(),
-      onBusyChange: vi.fn(),
-      onErrorChange: vi.fn(),
-      onStatusChange: vi.fn(),
-    };
+    const reporters = makeReporters();
     const { queryClient } = renderStationAccess(JANE, reporters);
     const user = userEvent.setup();
 
@@ -182,7 +161,7 @@ describe("EmployeeStationAccessSection mutations", () => {
     await user.type(screen.getByLabelText("ПИН-код"), "4321");
 
     await act(async () => {
-      queryClient.setQueryData(["operators"], [EXISTING_ACCESS]);
+      queryClient.setQueryData(OPERATORS_QUERY_KEY, [EXISTING_ACCESS]);
     });
 
     const section = screen.getByRole("region", { name: "Доступ на станцию" });
@@ -305,12 +284,7 @@ describe("EmployeeStationAccessSection mutations", () => {
       return Promise.resolve(jsonResponse(200, { items: [] }));
     });
     vi.stubGlobal("fetch", fetchMock);
-    const reporters = {
-      onDirtyChange: vi.fn(),
-      onBusyChange: vi.fn(),
-      onErrorChange: vi.fn(),
-      onStatusChange: vi.fn(),
-    };
+    const reporters = makeReporters();
     renderStationAccess(JANE, reporters);
     const user = userEvent.setup();
 
@@ -347,12 +321,7 @@ describe("EmployeeStationAccessSection mutations", () => {
         : jsonResponse(200, { items: [] }),
     );
     vi.stubGlobal("fetch", fetchMock);
-    const reporters = {
-      onDirtyChange: vi.fn(),
-      onBusyChange: vi.fn(),
-      onErrorChange: vi.fn(),
-      onStatusChange: vi.fn(),
-    };
+    const reporters = makeReporters();
     renderStationAccess(JANE, reporters);
     const user = userEvent.setup();
 
@@ -377,12 +346,7 @@ describe("EmployeeStationAccessSection mutations", () => {
       return jsonResponse(200, { items: [EXISTING_ACCESS] });
     });
     vi.stubGlobal("fetch", fetchMock);
-    const reporters = {
-      onDirtyChange: vi.fn(),
-      onBusyChange: vi.fn(),
-      onErrorChange: vi.fn(),
-      onStatusChange: vi.fn(),
-    };
+    const reporters = makeReporters();
     renderStationAccess(JANE, reporters);
     const user = userEvent.setup();
 
@@ -459,12 +423,7 @@ describe("EmployeeStationAccessSection mutations", () => {
       return Promise.resolve(jsonResponse(200, { items: [EXISTING_ACCESS] }));
     });
     vi.stubGlobal("fetch", fetchMock);
-    const reporters = {
-      onDirtyChange: vi.fn(),
-      onBusyChange: vi.fn(),
-      onErrorChange: vi.fn(),
-      onStatusChange: vi.fn(),
-    };
+    const reporters = makeReporters();
     renderStationAccess(JANE, reporters);
     const user = userEvent.setup();
 

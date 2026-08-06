@@ -1028,6 +1028,7 @@
       "badges": {
         "title": "Бейджи",
         "emptyHint": "Бейджи не выпущены",
+        "unnamedBadge": "Без названия",
         "codeLabel": "Код бейджа",
         "labelLabel": "Метка",
         "issueAction": "Выпустить бейдж",
