@@ -23,7 +23,7 @@ export const PAIRING_BARCODE_HEIGHT = 74;
  * for the other cannot shift the surrounding layout.
  *
  * Deliberately kept in its own module with no `@markiro/domain` import: pulling
- * these constants straight from `PairingBarcode.tsx` would make the modal
+ * these constants straight from `PairingBarcode.tsx` would make the reveal panel
  * statically depend on it and drag bwip-js back into the main admin bundle,
  * defeating the `React.lazy` split it exists for.
  */

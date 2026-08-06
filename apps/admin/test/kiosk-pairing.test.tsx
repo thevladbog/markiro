@@ -18,6 +18,10 @@ import {
 import i18n from "../src/i18n/index.js";
 import { jsonResponse } from "./helpers/http.js";
 
+const toastMock = vi.hoisted(() => vi.fn());
+
+vi.mock("../src/lib/toast.js", () => ({ toast: toastMock }));
+
 const ACTIVE_SESSION: SessionData = {
   session: { activeOrganizationId: "org_1" },
   user: { id: "user_1", email: "user@example.com", name: "Елена Ким" },
@@ -173,6 +177,7 @@ function renderKiosksRouter(
 
 afterEach(async () => {
   cleanup();
+  toastMock.mockClear();
   vi.unstubAllGlobals();
   vi.useRealTimers();
   localStorage.clear();
@@ -308,6 +313,8 @@ describe("one-time pairing reveal", () => {
     await user.click(await within(panel).findByRole("button", { name: "Сформировать код" }));
 
     expect(await within(panel).findByText("1234 5678")).toBeDefined();
+    expect(toastMock).toHaveBeenCalledWith("ok", "Код привязки сформирован");
+    expect(JSON.stringify(toastMock.mock.calls)).not.toContain("12345678");
     expect(within(panel).getByRole("group", { name: "12345678" })).toBeDefined();
     expect(
       await within(panel).findByRole(
@@ -347,7 +354,11 @@ describe("one-time pairing reveal", () => {
 
     await user.click(await screen.findByRole("button", { name: "Сформировать код" }));
 
-    expect((await screen.findByRole("alert")).textContent).toContain("Gateway timeout");
+    const announcement = await screen.findByRole("status");
+    expect(announcement.textContent).toContain("Gateway timeout");
+    expect(announcement.getAttribute("aria-live")).toBe("polite");
+    expect(announcement.getAttribute("aria-atomic")).toBe("true");
+    expect(screen.getAllByRole("status")).toHaveLength(1);
     expect(screen.queryByText("1234 5678")).toBeNull();
     expect(screen.getByRole("button", { name: "Сформировать код" })).toBeDefined();
   });
@@ -365,7 +376,11 @@ describe("one-time pairing reveal", () => {
     await user.click(screen.getByRole("button", { name: "Сформировать новый" }));
 
     expect(screen.queryByText("1234 5678")).toBeNull();
-    expect((await screen.findByRole("alert")).textContent).toContain("Gateway timeout");
+    const announcement = await screen.findByRole("status");
+    expect(announcement.textContent).toContain("Gateway timeout");
+    expect(announcement.getAttribute("aria-live")).toBe("polite");
+    expect(announcement.getAttribute("aria-atomic")).toBe("true");
+    expect(screen.getAllByRole("status")).toHaveLength(1);
   });
 
   it("replaces a reveal with the successfully regenerated code", async () => {
@@ -382,6 +397,8 @@ describe("one-time pairing reveal", () => {
 
     expect(await screen.findByText("8765 4321")).toBeDefined();
     expect(screen.queryByText("1234 5678")).toBeNull();
+    expect(toastMock).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(toastMock.mock.calls)).not.toMatch(/12345678|87654321/);
     expect(
       fetchMock.mock.calls.filter(([url]) => String(url).includes("/pairing-code")),
     ).toHaveLength(2);
@@ -401,9 +418,14 @@ describe("one-time pairing reveal", () => {
       await vi.advanceTimersByTimeAsync(2_000);
     });
 
-    expect(
-      await screen.findByText("Срок действия кода истёк. Сформируйте новый код."),
-    ).toBeDefined();
+    const expiryMessage = await screen.findByText(
+      "Срок действия кода истёк. Сформируйте новый код.",
+    );
+    const announcement = expiryMessage.closest<HTMLElement>("[role='status']");
+    expect(announcement).not.toBeNull();
+    expect(announcement?.getAttribute("aria-live")).toBe("polite");
+    expect(announcement?.getAttribute("aria-atomic")).toBe("true");
+    expect(screen.getAllByRole("status")).toHaveLength(1);
     expect(screen.queryByText("1234 5678")).toBeNull();
     expect(screen.queryByRole("img", { name: /12345678/ })).toBeNull();
     expect(screen.queryByRole("button", { name: "Скопировать" })).toBeNull();

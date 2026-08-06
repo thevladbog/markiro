@@ -5,6 +5,7 @@ import { useLocation, useNavigate, useOutletContext, useParams } from "react-rou
 import { Alert, Button, SidePanel, Spinner } from "@markiro/ui";
 
 import { ApiRequestError } from "../../api/client.js";
+import { toast } from "../../lib/toast.js";
 import { useRoutePanelGuard } from "../../lib/useRoutePanelGuard.js";
 import { issueKioskPairingCode } from "./api.js";
 import {
@@ -50,6 +51,7 @@ function KioskPairingPanelContent({ kioskId }: { kioskId: string | undefined }):
     try {
       const next = await issueKioskPairingCode(kiosk.id);
       setReveal(next);
+      toast("ok", t("pages.kiosks.toasts.pairingSuccess"));
     } catch (cause) {
       setReveal(null);
       setError(
@@ -157,8 +159,16 @@ function KioskPairingPanelContent({ kioskId }: { kioskId: string | undefined }):
       }
     >
       <div className="mk-kiosk-pairing-panel__content">
-        {error ? <Alert tone="error">{error}</Alert> : null}
-        {expired ? <Alert tone="warn">{t("pages.kiosks.pairing.expired")}</Alert> : null}
+        {error ? (
+          <Alert tone="error" role="status" aria-live="polite" aria-atomic="true">
+            {error}
+          </Alert>
+        ) : null}
+        {expired ? (
+          <Alert tone="warn" role="status" aria-live="polite" aria-atomic="true">
+            {t("pages.kiosks.pairing.expired")}
+          </Alert>
+        ) : null}
         {reveal ? (
           <>
             <p className="mk-kiosk-pairing-panel__hint">
