@@ -10,6 +10,7 @@ import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { hashPairingCode } from "../src/pickup/device-token";
+import { PairAttemptsService } from "../src/modules/device-pairing/pair-attempts.service";
 import { normalizePairSource } from "../src/modules/device-pairing/pair-source";
 import {
   GLOBAL_PAIR_ATTEMPT_BUDGET,
@@ -18,6 +19,7 @@ import {
   PAIR_ATTEMPT_WINDOW_MS,
 } from "../src/modules/device-pairing/pairing-policy";
 import { PickupOrdersService } from "../src/modules/pickup-orders/pickup-orders.service";
+import { PairingService } from "../src/modules/kiosk/pairing.service";
 import { schema, type Db } from "@markiro/db";
 import { listenOnLoopback } from "./support/listen-loopback";
 
@@ -308,8 +310,27 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
       .send({ code: issued.body.code })
       .expect(201);
 
-    expect(paired.body.device.kioskId).toBe(kioskId);
-    expect(paired.body.nextDeviceSeq).toBe(0);
+    expect(paired.body).toStrictEqual({
+      device: {
+        kioskId,
+        kioskName: expect.any(String),
+        place: null,
+      },
+      token: expect.any(String),
+      nextDeviceSeq: 0,
+      bootstrap: {
+        generatedAt: expect.any(String),
+        config: {
+          dayLimitPerEmployee: expect.any(Number),
+          showPrices: expect.any(Boolean),
+        },
+        badgeSalt: expect.any(String),
+        reasons: expect.any(Array),
+        products: expect.any(Array),
+        employees: expect.any(Array),
+        operators: expect.any(Array),
+      },
+    });
     expect(paired.body.bootstrap.products.length).toBeGreaterThan(0);
 
     // the token works straight away
@@ -329,6 +350,96 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
       .post("/kiosk/pair")
       .send({ code: issued.body.code })
       .expect(401);
+  });
+
+  it("allows exactly one winner when the same issued code is redeemed concurrently", async () => {
+    const issued = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+
+    const [first, second] = await Promise.all([
+      request(app!.getHttpServer()).post("/kiosk/pair").send({ code: issued.body.code }),
+      request(app!.getHttpServer()).post("/kiosk/pair").send({ code: issued.body.code }),
+    ]);
+
+    expect([first.status, second.status].sort()).toEqual([201, 401]);
+    const winner = [first, second].find((response) => response.status === 201);
+    expect(winner?.body.device.kioskId).toBe(kioskId);
+  });
+
+  it("refunds persisted source and global attempts after a successful redemption", async () => {
+    const issued = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    await request(app!.getHttpServer())
+      .post("/kiosk/pair")
+      .send({ code: issued.body.code })
+      .expect(201);
+
+    const currentWindow = pairAttemptWindowStart(Date.now());
+    const previousWindow = new Date(currentWindow.getTime() - PAIR_ATTEMPT_WINDOW_MS);
+    const rows = await db
+      .select({
+        source: schema.kioskPairAttempts.source,
+        failures: schema.kioskPairAttempts.failures,
+      })
+      .from(schema.kioskPairAttempts)
+      .where(
+        and(
+          inArray(schema.kioskPairAttempts.source, [...LOOPBACK_PAIR_SOURCES, GLOBAL_PAIR_SOURCE]),
+          inArray(schema.kioskPairAttempts.windowStartedAt, [currentWindow, previousWindow]),
+        ),
+      );
+
+    expect(rows).toContainEqual({ source: GLOBAL_PAIR_SOURCE, failures: 0 });
+    expect(rows.filter((row) => LOOPBACK_PAIR_SOURCES.includes(row.source))).toEqual([
+      expect.objectContaining({ failures: 0 }),
+    ]);
+  });
+
+  it("floors an unattributable source refund at zero", async () => {
+    const pairAttemptsService = app!.get(PairAttemptsService);
+    const windowStart = pairAttemptWindowStart(Date.now());
+    await db.insert(schema.kioskPairAttempts).values({
+      source: GLOBAL_PAIR_SOURCE,
+      windowStartedAt: windowStart,
+      failures: 0,
+    });
+
+    await pairAttemptsService.refundPairAttempt("", windowStart);
+
+    const [row] = await db
+      .select({ failures: schema.kioskPairAttempts.failures })
+      .from(schema.kioskPairAttempts)
+      .where(
+        and(
+          eq(schema.kioskPairAttempts.source, GLOBAL_PAIR_SOURCE),
+          eq(schema.kioskPairAttempts.windowStartedAt, windowStart),
+        ),
+      );
+    expect(row).toEqual({ failures: 0 });
+  });
+
+  it("charges an unattributable failed redemption only to the global limiter", async () => {
+    const pairingService = app!.get(PairingService);
+    await expect(pairingService.redeem("99999999", "")).rejects.toMatchObject({ status: 401 });
+
+    const currentWindow = pairAttemptWindowStart(Date.now());
+    const previousWindow = new Date(currentWindow.getTime() - PAIR_ATTEMPT_WINDOW_MS);
+    const rows = await db
+      .select({
+        source: schema.kioskPairAttempts.source,
+        failures: schema.kioskPairAttempts.failures,
+      })
+      .from(schema.kioskPairAttempts)
+      .where(
+        and(
+          inArray(schema.kioskPairAttempts.windowStartedAt, [currentWindow, previousWindow]),
+          inArray(schema.kioskPairAttempts.source, [
+            "",
+            ...LOOPBACK_PAIR_SOURCES,
+            GLOBAL_PAIR_SOURCE,
+          ]),
+        ),
+      );
+
+    expect(rows).toEqual([{ source: GLOBAL_PAIR_SOURCE, failures: 1 }]);
   });
 
   it("refuses an expired code", async () => {

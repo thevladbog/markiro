@@ -27,7 +27,7 @@ export class PairAttemptsService {
       if (sourceAttempts > PAIR_ATTEMPT_BUDGET) {
         if (sourceAttempts === PAIR_ATTEMPT_BUDGET + 1) {
           this.logger.warn(
-            `kiosk pairing per-source budget exceeded for source ${normalizedSource}: ${sourceAttempts} attempts in window`,
+            `device pairing per-source budget exceeded for source ${normalizedSource}: ${sourceAttempts} attempts in window`,
           );
         }
         throw new UnauthorizedException();
@@ -38,7 +38,7 @@ export class PairAttemptsService {
     if (globalAttempts > GLOBAL_PAIR_ATTEMPT_BUDGET) {
       if (globalAttempts === GLOBAL_PAIR_ATTEMPT_BUDGET + 1) {
         this.logger.warn(
-          `kiosk pairing global budget exceeded: ${globalAttempts} attempts in window`,
+          `device pairing global budget exceeded: ${globalAttempts} attempts in window`,
         );
       }
       throw new UnauthorizedException();

@@ -10,6 +10,10 @@ describe("normalizePairSource", () => {
     expect(normalizePairSource("*")).toBe("*");
   });
 
+  it("leaves an unattributable empty source empty", () => {
+    expect(normalizePairSource("")).toBe("");
+  });
+
   it("collapses a full 8-hextet IPv6 address to its /64 prefix", () => {
     expect(normalizePairSource("2001:db8:85a3:8d3:1319:8a2e:370:7348")).toBe(
       "2001:db8:85a3:8d3::/64",
