@@ -69,12 +69,14 @@ export function KioskProductsSection({
     const kioskChanged =
       previousKiosk.id !== kiosk.id || !sameIds(previousKiosk.productIds, incomingIds);
 
-    if (kioskChanged && !dirty) {
+    if (kioskChanged) {
+      if (dirty) return;
+
       setSelectedIds(incomingIds);
       setSavedIds(new Set(incomingIds));
       setMutationError(null);
+      previousKioskRef.current = { id: kiosk.id, productIds: incomingIds };
     }
-    previousKioskRef.current = { id: kiosk.id, productIds: incomingIds };
   }, [dirty, kiosk.id, kiosk.productIds]);
 
   const toggleProduct = (productId: string) => {

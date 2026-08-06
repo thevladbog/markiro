@@ -44,6 +44,14 @@ const PRODUCT_B = {
   createdAt: "2026-01-02T00:00:00.000Z",
 };
 
+const PRODUCT_C = {
+  ...PRODUCT_A,
+  id: "p3",
+  gtin14: "04600000000025",
+  name: "Йогурт",
+  createdAt: "2026-01-03T00:00:00.000Z",
+};
+
 function deferred<T>() {
   let resolve: (value: T) => void;
   const promise = new Promise<T>((resolvePromise) => {
@@ -63,13 +71,20 @@ function renderProductsSection(
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+  const view = render(
+    <QueryClientProvider client={queryClient}>
+      <KioskProductsSection kiosk={kiosk} {...reporters} />
+    </QueryClientProvider>,
+  );
   return {
     ...reporters,
-    ...render(
-      <QueryClientProvider client={queryClient}>
-        <KioskProductsSection kiosk={kiosk} {...reporters} />
-      </QueryClientProvider>,
-    ),
+    ...view,
+    rerenderProductsSection: (nextKiosk: KioskDto) =>
+      view.rerender(
+        <QueryClientProvider client={queryClient}>
+          <KioskProductsSection kiosk={nextKiosk} {...reporters} />
+        </QueryClientProvider>,
+      ),
   };
 }
 
@@ -92,7 +107,12 @@ describe("KioskProductsSection", () => {
       return Promise.resolve(jsonResponse(200, { items: [] }));
     });
     vi.stubGlobal("fetch", fetchMock);
-    renderProductsSection();
+    const reporters = {
+      onDirtyChange: vi.fn(),
+      onBusyChange: vi.fn(),
+      onErrorChange: vi.fn(),
+    };
+    renderProductsSection(ONLINE_KIOSK, reporters);
 
     const section = screen.getByRole("region", { name: "Разрешённые товары" });
     expect(within(section).getByRole("status", { name: "Загрузка товаров…" })).toBeDefined();
@@ -102,11 +122,13 @@ describe("KioskProductsSection", () => {
     expect((await within(section).findByRole("alert")).textContent).toContain(
       "Не удалось загрузить товары.",
     );
+    expect(reporters.onErrorChange).toHaveBeenLastCalledWith(true);
     await userEvent.setup().click(within(section).getByRole("button", { name: "Повторить" }));
     expect(
       fetchMock.mock.calls.filter(([url]) => url === "/api/products?status=active"),
     ).toHaveLength(2);
     expect(await within(section).findByRole("checkbox", { name: PRODUCT_A.name })).toBeDefined();
+    expect(reporters.onErrorChange).toHaveBeenLastCalledWith(false);
   });
 
   it("explains an empty active catalog without offering a save", async () => {
@@ -122,17 +144,23 @@ describe("KioskProductsSection", () => {
   });
 
   it("keeps selected ids hidden by the local filter and sends the catalog-ordered exact list", async () => {
-    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    const saveResponse = deferred<Response>();
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
       if (url === "/api/products?status=active") {
-        return jsonResponse(200, { items: [PRODUCT_A, PRODUCT_B] });
+        return Promise.resolve(jsonResponse(200, { items: [PRODUCT_A, PRODUCT_B] }));
       }
       if (url === "/api/kiosks/k1/products" && init?.method === "PUT") {
-        return jsonResponse(200, { ...ONLINE_KIOSK, productIds: ["p1", "p2"] });
+        return saveResponse.promise;
       }
-      return jsonResponse(200, { items: [] });
+      return Promise.resolve(jsonResponse(200, { items: [] }));
     });
     vi.stubGlobal("fetch", fetchMock);
-    renderProductsSection({ ...ONLINE_KIOSK, productIds: [PRODUCT_B.id] });
+    const reporters = {
+      onDirtyChange: vi.fn(),
+      onBusyChange: vi.fn(),
+      onErrorChange: vi.fn(),
+    };
+    renderProductsSection({ ...ONLINE_KIOSK, productIds: [PRODUCT_B.id] }, reporters);
     const user = userEvent.setup();
 
     await user.type(await screen.findByLabelText("Поиск по товарам"), "молоко");
@@ -158,17 +186,26 @@ describe("KioskProductsSection", () => {
         }),
       );
     });
+    await waitFor(() => expect(reporters.onBusyChange).toHaveBeenLastCalledWith(true));
+
+    saveResponse.resolve(jsonResponse(200, { ...ONLINE_KIOSK, productIds: ["p1", "p2"] }));
+
+    await waitFor(() => expect(reporters.onDirtyChange).toHaveBeenLastCalledWith(false));
+    expect(screen.getByRole("region", { name: "Разрешённые товары" })).toBeDefined();
+    expect(await screen.findByText("Список товаров обновлён")).toBeDefined();
+    expect(reporters.onBusyChange).toHaveBeenLastCalledWith(false);
   });
 
   it("reports a changed selection and retains it with the server error after a failed save", async () => {
-    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    const saveResponse = deferred<Response>();
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
       if (url === "/api/products?status=active") {
-        return jsonResponse(200, { items: [PRODUCT_A, PRODUCT_B] });
+        return Promise.resolve(jsonResponse(200, { items: [PRODUCT_A, PRODUCT_B] }));
       }
       if (url === "/api/kiosks/k1/products" && init?.method === "PUT") {
-        return jsonResponse(409, { message: "Product is unavailable" });
+        return saveResponse.promise;
       }
-      return jsonResponse(200, { items: [] });
+      return Promise.resolve(jsonResponse(200, { items: [] }));
     });
     vi.stubGlobal("fetch", fetchMock);
     const reporters = {
@@ -182,6 +219,9 @@ describe("KioskProductsSection", () => {
     await user.click(await screen.findByRole("checkbox", { name: PRODUCT_B.name }));
     expect(reporters.onDirtyChange).toHaveBeenLastCalledWith(true);
     await user.click(screen.getByRole("button", { name: "Сохранить список" }));
+    await waitFor(() => expect(reporters.onBusyChange).toHaveBeenLastCalledWith(true));
+
+    saveResponse.resolve(jsonResponse(409, { message: "Product is unavailable" }));
 
     const section = screen.getByRole("region", { name: "Разрешённые товары" });
     expect((await within(section).findByRole("alert")).textContent).toContain(
@@ -192,5 +232,24 @@ describe("KioskProductsSection", () => {
     ).toBe("true");
     expect(reporters.onErrorChange).toHaveBeenLastCalledWith(true);
     expect(reporters.onBusyChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it("adopts an incoming server selection after a dirty local selection is reverted", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(200, { items: [PRODUCT_A, PRODUCT_B, PRODUCT_C] })),
+    );
+    const { rerenderProductsSection } = renderProductsSection();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("checkbox", { name: PRODUCT_B.name }));
+    rerenderProductsSection({ ...ONLINE_KIOSK, productIds: [PRODUCT_A.id, PRODUCT_C.id] });
+    await user.click(screen.getByRole("checkbox", { name: PRODUCT_B.name }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("checkbox", { name: PRODUCT_C.name }).getAttribute("aria-checked"),
+      ).toBe("true"),
+    );
   });
 });
