@@ -6,14 +6,17 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import componentStyles from "virtual:ui-component-styles";
 
 import {
+  AdminPage,
   Badge,
   Button,
   Card,
   Checkbox,
   Field,
+  FilterBar,
   IconButton,
   Input,
   RadioGroup,
+  RowActions,
   Select,
   StatusChip,
   Table,
@@ -40,6 +43,55 @@ beforeAll(() => {
     setPointerCapture: { value: () => undefined },
     releasePointerCapture: { value: () => undefined },
     scrollIntoView: { value: () => undefined },
+  });
+});
+
+describe("Admin page layout", () => {
+  it("provides a bounded page wrapper while preserving native div props", () => {
+    render(
+      <AdminPage data-testid="admin-page" className="feature-page">
+        <h1>Title</h1>
+      </AdminPage>,
+    );
+
+    const page = screen.getByTestId("admin-page");
+    expect(page.classList).toContain("mk-admin-page");
+    expect(page.classList).toContain("feature-page");
+  });
+
+  it("labels filters, keeps the polite result summary mounted, and exposes reset", async () => {
+    const user = userEvent.setup();
+    const onReset = vi.fn();
+    render(
+      <FilterBar
+        label="Shift filters"
+        resultSummary="3 shifts"
+        resetLabel="Reset"
+        onReset={onReset}
+      >
+        <input aria-label="Status" />
+      </FilterBar>,
+    );
+
+    expect(screen.getByRole("group", { name: "Shift filters" })).toBeDefined();
+    expect(screen.getByText("3 shifts").getAttribute("aria-live")).toBe("polite");
+    await user.click(screen.getByRole("button", { name: "Reset" }));
+    expect(onReset).toHaveBeenCalledOnce();
+  });
+
+  it("keeps row actions visible in a consistent action region", () => {
+    render(
+      <RowActions data-testid="row-actions">
+        <button>Edit</button>
+        <button>Delete</button>
+      </RowActions>,
+    );
+
+    expect(screen.getByTestId("row-actions").classList).toContain("mk-row-actions");
+    expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual([
+      "Edit",
+      "Delete",
+    ]);
   });
 });
 
