@@ -16,21 +16,87 @@ const C = CABINET_CAPABILITY;
 export const NAV_ITEMS: ReadonlyArray<{
   to: string;
   key: string;
+  sectionKey: string;
   capability: CabinetCapability;
 }> = [
-  { to: "/", key: "nav.dashboard", capability: C.OPERATIONS_READ },
-  { to: "/catalog", key: "nav.catalog", capability: C.OPERATIONS_READ },
-  { to: "/shifts", key: "nav.shifts", capability: C.OPERATIONS_READ },
-  { to: "/boxes", key: "nav.boxes", capability: C.OPERATIONS_READ },
-  { to: "/conflicts", key: "nav.conflicts", capability: C.OPERATIONS_READ },
-  { to: "/counterparties", key: "nav.counterparties", capability: C.OPERATIONS_READ },
-  { to: "/employees", key: "nav.employees", capability: C.OPERATIONS_READ },
-  { to: "/devices", key: "nav.devices", capability: C.OPERATIONS_READ },
-  { to: "/integrations", key: "nav.integrations", capability: C.INTEGRATIONS_READ },
-  { to: "/labels", key: "nav.labels", capability: C.OPERATIONS_READ },
-  { to: "/pickup", key: "nav.pickup", capability: C.OPERATIONS_READ },
-  { to: "/team", key: "nav.team", capability: C.MEMBERS_MANAGE },
-  { to: "/settings", key: "nav.settings", capability: C.TENANT_SETTINGS_MANAGE },
+  {
+    to: "/",
+    key: "nav.dashboard",
+    sectionKey: "shell.sections.production",
+    capability: C.OPERATIONS_READ,
+  },
+  {
+    to: "/shifts",
+    key: "nav.shifts",
+    sectionKey: "shell.sections.production",
+    capability: C.OPERATIONS_READ,
+  },
+  {
+    to: "/boxes",
+    key: "nav.boxes",
+    sectionKey: "shell.sections.production",
+    capability: C.OPERATIONS_READ,
+  },
+  {
+    to: "/conflicts",
+    key: "nav.conflicts",
+    sectionKey: "shell.sections.production",
+    capability: C.OPERATIONS_READ,
+  },
+  {
+    to: "/pickup",
+    key: "nav.pickup",
+    sectionKey: "shell.sections.production",
+    capability: C.OPERATIONS_READ,
+  },
+  {
+    to: "/catalog",
+    key: "nav.catalog",
+    sectionKey: "shell.sections.reference",
+    capability: C.OPERATIONS_READ,
+  },
+  {
+    to: "/counterparties",
+    key: "nav.counterparties",
+    sectionKey: "shell.sections.reference",
+    capability: C.OPERATIONS_READ,
+  },
+  {
+    to: "/employees",
+    key: "nav.employees",
+    sectionKey: "shell.sections.reference",
+    capability: C.OPERATIONS_READ,
+  },
+  {
+    to: "/labels",
+    key: "nav.labels",
+    sectionKey: "shell.sections.reference",
+    capability: C.OPERATIONS_READ,
+  },
+  {
+    to: "/devices",
+    key: "nav.devices",
+    sectionKey: "shell.sections.equipment",
+    capability: C.OPERATIONS_READ,
+  },
+  {
+    to: "/integrations",
+    key: "nav.integrations",
+    sectionKey: "shell.sections.equipment",
+    capability: C.INTEGRATIONS_READ,
+  },
+  {
+    to: "/team",
+    key: "nav.team",
+    sectionKey: "shell.sections.organization",
+    capability: C.MEMBERS_MANAGE,
+  },
+  {
+    to: "/settings",
+    key: "nav.settings",
+    sectionKey: "shell.sections.organization",
+    capability: C.TENANT_SETTINGS_MANAGE,
+  },
 ];
 
 /**
@@ -69,9 +135,10 @@ export function AppShell() {
     if (capability === C.TENANT_SETTINGS_MANAGE) return canManageSettings;
     if (capability === C.MEMBERS_MANAGE) return canManageMembers;
     return false;
-  }).map(({ to, key }) => ({
+  }).map(({ to, key, sectionKey }) => ({
     to,
     labelKey: t(key),
+    section: t(sectionKey),
     ...(to === "/pickup" && pendingOrderCount > 0 ? { badge: pendingOrderCount } : {}),
   }));
 

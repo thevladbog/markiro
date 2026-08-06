@@ -6,7 +6,14 @@
     "close": "Close",
     "loadError": "Failed to load data. Refresh the page or sign in again.",
     "yes": "Yes",
-    "no": "No"
+    "no": "No",
+    "datePicker": {
+      "placeholder": "Select a date",
+      "clear": "Clear date",
+      "calendar": "Calendar",
+      "previousMonth": "Previous month",
+      "nextMonth": "Next month"
+    }
   },
   "auth": {
     "login": {
@@ -137,15 +144,21 @@
     "counterparties": "Counterparties",
     "labels": "Labels",
     "pickup": "Self-pickup",
-    "employees": "Employees",
+    "employees": "Operators and employees",
     "kiosks": "Kiosks",
     "devices": "Devices",
     "integrations": "Integrations",
-    "team": "Team",
+    "team": "Cabinet access",
     "settings": "Settings"
   },
   "shell": {
     "navLabel": "Main navigation",
+    "sections": {
+      "production": "Production",
+      "reference": "Reference data",
+      "equipment": "Equipment and exchange",
+      "organization": "Organization"
+    },
     "header": {
       "noOrgName": "No organization selected",
       "toggleTheme": "Toggle theme",
@@ -274,8 +287,67 @@
     },
     "dashboard": {
       "title": "Overview",
+      "loading": "Loading overview",
       "emptyTitle": "No data yet",
-      "emptyHint": "A summary of shifts and production will appear here once the first shift runs."
+      "emptyHint": "A summary of shifts and production will appear here once the first shift runs.",
+      "setup": {
+        "title": "Prepare the first shift",
+        "hint": "Three actions take a new cabinet to its first production run.",
+        "product": "Add a product and complete its required settings.",
+        "shift": "Plan a shift with its product, mode, and quantity.",
+        "launch": "Open the shift on a line station.",
+        "addProduct": "Add product",
+        "openCatalog": "Open catalog",
+        "planShift": "Plan shift",
+        "openShifts": "Open shifts"
+      },
+      "error": {
+        "title": "Could not load the overview",
+        "hint": "Some data is unavailable. Retry before making decisions from an incomplete summary.",
+        "retry": "Retry"
+      },
+      "summary": {
+        "label": "Summary",
+        "active": "Active shifts",
+        "planned": "Planned",
+        "products": "Ready products",
+        "conflicts": "Unreviewed conflicts"
+      },
+      "attention": {
+        "title": "Needs attention",
+        "conflicts_one": "{{count}} unreviewed conflict",
+        "conflicts_few": "{{count}} unreviewed conflicts",
+        "conflicts_many": "{{count}} unreviewed conflicts",
+        "conflicts_other": "{{count}} unreviewed conflicts",
+        "conflictsHint": "Review which scan must remain in the registry.",
+        "drafts_one": "{{count}} draft product",
+        "drafts_few": "{{count}} draft products",
+        "drafts_many": "{{count}} draft products",
+        "drafts_other": "{{count}} draft products",
+        "draftsHint": "Incomplete products cannot be used to start a shift."
+      },
+      "active": {
+        "title": "Shifts running now",
+        "product": "Product",
+        "line": "Line",
+        "mode": "Mode",
+        "plan": "Plan",
+        "started": "Opened",
+        "empty": "No shifts are active now.",
+        "openShifts": "Open shifts"
+      },
+      "planned": {
+        "title": "Upcoming shifts",
+        "empty": "No shifts are planned yet.",
+        "plan": "Plan shift",
+        "noDate": "Date not set"
+      },
+      "mode": {
+        "validation": "Validation only",
+        "aggregation": "Validation and aggregation"
+      },
+      "viewAll": "All shifts",
+      "notSpecified": "Not specified"
     },
     "catalog": {
       "title": "Product catalog",
@@ -287,6 +359,11 @@
       "cancel": "Cancel",
       "searchLabel": "Search",
       "searchPlaceholder": "Name or GTIN",
+      "filtersLabel": "Catalog filters",
+      "resultCount_one": "{{count}} product",
+      "resultCount_few": "{{count}} products",
+      "resultCount_many": "{{count}} products",
+      "resultCount_other": "{{count}} products",
       "statusFilterLabel": "Status",
       "statusFilter": {
         "all": "All statuses",
@@ -312,6 +389,13 @@
       "form": {
         "createTitle": "New product",
         "editTitle": "Edit product",
+        "loadError": "Could not load the product form data.",
+        "notFound": "Product not found.",
+        "retry": "Retry",
+        "discardTitle": "Discard changes?",
+        "discardBody": "Your unsaved changes will be lost.",
+        "continueEditing": "Continue editing",
+        "discardAction": "Discard",
         "gtinLabel": "GTIN",
         "nameLabel": "Name",
         "productGroupLabel": "Product group",
@@ -325,6 +409,11 @@
         "noLabelTemplate": "None selected",
         "submitCreate": "Create",
         "submitUpdate": "Save",
+        "sections": {
+          "basic": "Basic",
+          "aggregation": "Aggregation and price",
+          "defaults": "Defaults"
+        },
         "draftBanner": "Draft — fill in the group and capacities to run shifts",
         "gtinOwnerHint": "GTIN owner — {{name}}",
         "applyCounterparty": "Apply counterparty",
@@ -363,12 +452,20 @@
       "emptyTitle": "No counterparties yet",
       "emptyHint": "Add your first counterparty — a GTIN owner or tolling partner.",
       "addAction": "Add counterparty",
+      "resultCount_one": "{{count}} counterparty",
+      "resultCount_few": "{{count}} counterparties",
+      "resultCount_many": "{{count}} counterparties",
+      "resultCount_other": "{{count}} counterparties",
       "edit": "Edit",
       "delete": "Delete",
       "cancel": "Cancel",
       "deleteConfirmTitle": "Delete counterparty?",
       "deleteConfirmBody": "Counterparty \"{{name}}\" will be permanently deleted.",
       "deleteConfirmAction": "Delete",
+      "sections": {
+        "identity": "Identity and GS1",
+        "sscc": "SSCC sequence"
+      },
       "table": {
         "name": "Name",
         "gln": "GLN",
@@ -379,6 +476,13 @@
       "form": {
         "createTitle": "New counterparty",
         "editTitle": "Edit counterparty",
+        "loadError": "Could not load counterparty data.",
+        "notFound": "Counterparty not found",
+        "retry": "Retry",
+        "discardTitle": "Discard changes?",
+        "discardBody": "Your unsaved changes will be lost.",
+        "continueEditing": "Continue editing",
+        "discardAction": "Discard",
         "nameLabel": "Name",
         "glnLabel": "GLN",
         "innLabel": "Tax ID",
@@ -399,7 +503,10 @@
           "description": "The starting serial counts within the prefix below. Set it when migrating box numbers already issued by another system under this GLN.",
           "prefixLabel": "Derived prefix",
           "nextSerialLabel": "Starting serial",
-          "save": "Save",
+          "save": "Save SSCC",
+          "loadError": "Could not load the SSCC sequence.",
+          "retry": "Retry",
+          "prefixUnavailable": "Saving is unavailable because a prefix could not be derived from the GLN.",
           "errors": {
             "nextSerialInvalid": "Enter a whole number from 0 to 9,999,999"
           },
@@ -521,6 +628,10 @@
       "emptyTitle": "No shifts planned",
       "emptyHint": "Plan your first shift to start production.",
       "addAction": "Plan a shift",
+      "resultCount_one": "{{count}} shift",
+      "resultCount_few": "{{count}} shifts",
+      "resultCount_many": "{{count}} shifts",
+      "resultCount_other": "{{count}} shifts",
       "edit": "Edit",
       "delete": "Delete",
       "close": "Close shift",
@@ -529,7 +640,16 @@
       "deleteConfirmTitle": "Delete shift?",
       "deleteConfirmBody": "The shift for \"{{name}}\" will be permanently deleted.",
       "deleteConfirmAction": "Delete",
+      "sections": {
+        "product": "Product and mode",
+        "planning": "Planning",
+        "assignment": "Production assignment",
+        "templates": "Templates",
+        "aggregation": "Aggregation"
+      },
       "filters": {
+        "label": "Shift filters",
+        "reset": "Reset",
         "statusLabel": "Status",
         "fromLabel": "From",
         "toLabel": "To",
@@ -562,6 +682,13 @@
       "form": {
         "createTitle": "New shift",
         "editTitle": "Edit shift",
+        "loadError": "Could not load shift data.",
+        "notFound": "Shift not found",
+        "retry": "Retry",
+        "discardTitle": "Discard changes?",
+        "discardBody": "Your unsaved shift changes will be lost.",
+        "continueEditing": "Continue editing",
+        "discardAction": "Discard",
         "productLabel": "Product",
         "productPlaceholder": "Select a product",
         "draftHint": "draft -- unavailable",
@@ -833,10 +960,19 @@
       "title": "Employees",
       "emptyTitle": "No employees yet",
       "emptyHint": "Add your first employee to issue them a self-service QR badge.",
+      "emptyReadOnlyHint": "Ask an administrator with edit access to add employees.",
+      "filteredEmptyTitle": "No employees match the selected status",
+      "filteredEmptyHint": "Change or reset the filter to see employees.",
       "addAction": "Add employee",
+      "resultCount_one": "{{count}} employee",
+      "resultCount_few": "{{count}} employees",
+      "resultCount_many": "{{count}} employees",
+      "resultCount_other": "{{count}} employees",
       "edit": "Edit",
       "archive": "Archive",
       "cancel": "Cancel",
+      "retry": "Retry",
+      "archivePersistentError": "Could not archive the employee.",
       "archiveConfirmTitle": "Archive this employee?",
       "archiveConfirmBody": "Employee \"{{name}}\" will be archived; their issued badges will be revoked.",
       "archiveConfirmAction": "Archive",
@@ -845,6 +981,8 @@
         "archived": "Archived"
       },
       "filters": {
+        "label": "Employee filters",
+        "reset": "Reset",
         "statusLabel": "Status",
         "status": {
           "all": "All statuses",
@@ -862,31 +1000,57 @@
       "form": {
         "createTitle": "New employee",
         "editTitle": "Edit employee",
+        "editIdentity": "{{name}}",
+        "editIdentityWithRole": "{{name}} · {{role}}",
         "fullNameLabel": "Full name",
         "roleLabel": "Role",
         "submitCreate": "Create",
         "submitUpdate": "Save",
+        "loadError": "Could not load employee data.",
+        "retry": "Retry",
+        "notFound": "Employee not found.",
+        "disappearedConflict": "This employee is no longer in the current list. Drafts remain available while this panel is open.",
+        "updateError": "Could not save the employee profile.",
+        "discardTitle": "Discard changes?",
+        "discardBody": "Your unsaved changes will be lost.",
+        "continueEditing": "Continue editing",
+        "discardAction": "Discard",
         "errors": {
           "fullNameRequired": "Enter a full name",
           "fullNameTooLong": "200 characters or fewer",
           "roleTooLong": "120 characters or fewer"
         }
       },
+      "sections": {
+        "navigationLabel": "Employee sections",
+        "profile": "Profile",
+        "error": "Error"
+      },
       "badges": {
         "title": "Badges",
         "emptyHint": "No badges issued",
+        "unnamedBadge": "Unnamed badge",
         "codeLabel": "Badge code",
         "labelLabel": "Label",
         "issueAction": "Issue badge",
+        "issueError": "Could not issue the badge",
         "revokeAction": "Revoke",
+        "revokeTitle": "Revoke badge?",
+        "revokeBody": "The badge will be revoked and can no longer be used to confirm identity.",
+        "revokeConfirmAction": "Revoke",
+        "activeBadge": "Active",
         "revokedBadge": "Revoked",
+        "revokeError": "Could not revoke the badge",
         "issuedAt": "Issued {{date}}"
       },
       "stationAccess": {
         "title": "Station access",
         "emptyHint": "No line-station access granted",
-        "loadError": "Could not load station access status. Refresh the page before granting access.",
+        "draftConflict": "The access draft conflicts with access that has already been granted.",
+        "discardDraftAction": "Discard draft",
+        "loadError": "Could not load station access status.",
         "loading": "Loading station access status…",
+        "retryAction": "Retry",
         "loginLabel": "Personnel number",
         "pinLabel": "PIN",
         "grantAction": "Grant access",
@@ -896,7 +1060,18 @@
         "revokeAction": "Remove access",
         "activeBadge": "Active",
         "disabledBadge": "Disabled",
-        "current": "Personnel number {{login}}"
+        "current": "Personnel number {{login}}",
+        "revokeTitle": "Remove station access?",
+        "revokeBody": "The employee will no longer be able to sign in at the line station.",
+        "revokeConfirmAction": "Remove access",
+        "revokeError": "Could not remove station access",
+        "status": {
+          "loading": "Loading",
+          "error": "Error",
+          "none": "No access",
+          "active": "Active",
+          "disabled": "Disabled"
+        }
       },
       "toasts": {
         "createSuccess": "Employee added",

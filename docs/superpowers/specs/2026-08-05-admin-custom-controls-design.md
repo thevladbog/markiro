@@ -89,8 +89,9 @@ the API still receives `YYYY-MM-DD`.
 6. Replace tests that assert native-element casts or `<option>` markup with
    user-visible interaction and form-payload assertions.
 7. Add a source-level lint rule for `apps/admin/src` that prevents direct use
-   of native `select`, `input[type=date|checkbox|radio]`, and `button`.
-   Document tightly-scoped technical exceptions if any are proven necessary.
+   of native `input`, `select`, `textarea`, `option`, `datalist`, and `button`
+   elements. Document tightly-scoped technical exceptions if any are proven
+   necessary.
 
 ## Verification
 

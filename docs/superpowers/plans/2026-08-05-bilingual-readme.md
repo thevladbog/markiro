@@ -617,13 +617,34 @@ node <<'NODE'
 const fs = require('node:fs');
 const en = fs.readFileSync('README.md', 'utf8');
 const ru = fs.readFileSync('README.ru.md', 'utf8');
-const urls = (s) => [...s.matchAll(/(?:src|href)="([^"]+)"/g)].map((m) => m[1]).sort();
-const fences = (s) => [...s.matchAll(/```(?:bash|text|mermaid)\n([\s\S]*?)```/g)].map((m) => m[1]);
+const normalizeUrl = (url) => url.replace(/^\.\/README(?:\.ru)?\.md(?=$|#)/, './README.<lang>.md');
+const urls = (s) => {
+  const found = [];
+  for (const match of s.matchAll(/!?\[[^\]]*\]\((?:<([^>]+)>|([^\s)]+))(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\)/g)) {
+    found.push(match[1] || match[2]);
+  }
+  for (const match of s.matchAll(/\b(?:src|href)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/gi)) {
+    found.push(match[1] || match[2] || match[3]);
+  }
+  for (const match of s.matchAll(/\bsrcset\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)) {
+    for (const candidate of (match[1] || match[2]).split(',')) found.push(candidate.trim().split(/\s+/)[0]);
+  }
+  return found.map(normalizeUrl).sort();
+};
+const fences = (s) => [...s.matchAll(/```([^\n]*)\n([\s\S]*?)```/g)].map((m) => ({
+  language: m[1].trim(),
+  content: m[2]
+    .replace(/\r\n/g, '\n')
+    .replace(/[ \t]+$/gm, '')
+    .replace(/--tenant-name "(?:First factory|Первый завод)"/, '--tenant-name "<tenant>"')
+    .trimEnd(),
+}));
 if (JSON.stringify(urls(en)) !== JSON.stringify(urls(ru))) throw new Error('README URL parity failed');
-const enFences = fences(en);
-const ruFences = fences(ru);
-if (enFences.length !== ruFences.length) throw new Error('README code-fence count drift');
-for (const token of ['README.md','README.ru.md','station.webp','admin.webp','kiosk.webp','License-Proprietary','DATABASE_URL','pnpm turbo lint typecheck test build']) {
+if (JSON.stringify(fences(en)) !== JSON.stringify(fences(ru))) throw new Error('README code-fence content drift');
+if (!en.includes('<strong>English</strong> · <a href="./README.ru.md">Русский</a>')) throw new Error('English language switch drifted');
+if (!ru.includes('<a href="./README.md">English</a> · <strong>Русский</strong>')) throw new Error('Russian language switch drifted');
+if (!en.includes('--tenant-name "First factory"') || !ru.includes('--tenant-name "Первый завод"')) throw new Error('tenant-name examples drifted');
+for (const token of ['station.webp','admin.webp','kiosk.webp','License-Proprietary','DATABASE_URL','pnpm turbo lint typecheck test build']) {
   if (!en.includes(token) || !ru.includes(token)) throw new Error('missing shared token: '+token);
 }
 for (const token of ['Что такое «Маркиро»?','Интерфейсы продукта','Быстрый запуск','все права защищены']) {
@@ -663,14 +684,42 @@ git commit -m "docs: add the Russian product README"
 
 Run:
 
-```bash
+````bash
 node <<'NODE'
 const fs = require('node:fs');
 const path = require('node:path');
-for (const file of ['README.md', 'README.ru.md']) {
-  const text = fs.readFileSync(file, 'utf8');
-  const refs = [...text.matchAll(/(?:src|href)="?(\.\.?\/[^)"\s]+)|\]\((\.\.?\/[^)\s]+)\)/g)]
-    .map((m) => m[1] || m[2])
+const normalizeUrl = (url) => url.replace(/^\.\/README(?:\.ru)?\.md(?=$|#)/, './README.<lang>.md');
+const urls = (s) => {
+  const found = [];
+  for (const match of s.matchAll(/!?\[[^\]]*\]\((?:<([^>]+)>|([^\s)]+))(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\)/g)) {
+    found.push(match[1] || match[2]);
+  }
+  for (const match of s.matchAll(/\b(?:src|href)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/gi)) {
+    found.push(match[1] || match[2] || match[3]);
+  }
+  for (const match of s.matchAll(/\bsrcset\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)) {
+    for (const candidate of (match[1] || match[2]).split(',')) found.push(candidate.trim().split(/\s+/)[0]);
+  }
+  return found.map(normalizeUrl).sort();
+};
+const fences = (s) => [...s.matchAll(/```([^\n]*)\n([\s\S]*?)```/g)].map((m) => ({
+  language: m[1].trim(),
+  content: m[2]
+    .replace(/\r\n/g, '\n')
+    .replace(/[ \t]+$/gm, '')
+    .replace(/--tenant-name "(?:First factory|Первый завод)"/, '--tenant-name "<tenant>"')
+    .trimEnd(),
+}));
+const readmes = ['README.md', 'README.ru.md'].map((file) => ({ file, text: fs.readFileSync(file, 'utf8') }));
+if (JSON.stringify(urls(readmes[0].text)) !== JSON.stringify(urls(readmes[1].text))) throw new Error('README URL parity failed');
+if (JSON.stringify(fences(readmes[0].text)) !== JSON.stringify(fences(readmes[1].text))) throw new Error('README code-fence content drift');
+if (!readmes[0].text.includes('<strong>English</strong> · <a href="./README.ru.md">Русский</a>')) throw new Error('English language switch drifted');
+if (!readmes[1].text.includes('<a href="./README.md">English</a> · <strong>Русский</strong>')) throw new Error('Russian language switch drifted');
+if (!readmes[0].text.includes('--tenant-name "First factory"') || !readmes[1].text.includes('--tenant-name "Первый завод"')) throw new Error('tenant-name examples drifted');
+for (const { file, text } of readmes) {
+  const refs = urls(text)
+    .filter((ref) => ref.startsWith('./') || ref.startsWith('../'))
+    .map((ref) => ref.replace('./README.<lang>.md', file === 'README.md' ? './README.ru.md' : './README.md'))
     .map((ref) => ref.split('#')[0]);
   for (const ref of new Set(refs)) {
     const target = path.resolve(path.dirname(file), ref);
@@ -678,7 +727,7 @@ for (const file of ['README.md', 'README.ru.md']) {
   }
 }
 NODE
-```
+````
 
 Expected: no missing targets.
 
@@ -706,9 +755,9 @@ for url in \
   'https://github.com/thevladbog/markiro/actions/workflows/ci.yml/badge.svg?branch=main' \
   'https://github.com/thevladbog/markiro/actions/workflows/codeql.yml/badge.svg' \
   'https://img.shields.io/badge/Node.js-24%2B-339933?logo=nodedotjs&logoColor=white' \
-  'https://img.shields.io/badge/pnpm-11.10.0-F69220?logo=pnpm&logoColor=white' \
-  'https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white' \
-  'https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white' \
+  'https://img.shields.io/badge/pnpm-11.10-F69220?logo=pnpm&logoColor=white' \
+  'https://img.shields.io/badge/TypeScript-6-3178C6?logo=typescript&logoColor=white' \
+  'https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white' \
   'https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white' \
   'https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white' \
   'https://img.shields.io/badge/License-Proprietary-17161A'; do
@@ -740,10 +789,13 @@ Expected: formatting and whitespace checks pass. Status contains no temporary ca
 Run:
 
 ```bash
-git diff HEAD~4..HEAD -- README.md README.ru.md LICENSE docs/assets/readme
+base_ref="${README_PR_BASE_REF:-origin/main}"
+merge_base="$(git merge-base "$base_ref" HEAD)"
+git diff --name-status "$merge_base"..HEAD
+git diff "$merge_base"..HEAD
 ```
 
-Expected: only the approved bilingual README, license, and local assets. If final validation required corrections, stage only their exact paths, inspect `git diff --cached`, and commit them as `docs: finalize bilingual README`; otherwise create no empty commit.
+Expected: the full PR diff contains only the approved bilingual README work: its design and implementation documents, README files, license, and local assets. If final validation required corrections, stage only their exact paths, inspect `git diff --cached`, and commit them as `docs: finalize bilingual README`; otherwise create no empty commit.
 
 - [ ] **Step 7: Report verification boundaries**
 

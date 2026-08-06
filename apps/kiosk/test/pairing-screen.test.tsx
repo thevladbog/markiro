@@ -179,7 +179,7 @@ function stubFetch(impl: (...args: Parameters<typeof fetch>) => Promise<Response
 }
 
 describe("Pairing", () => {
-  it("renders only the screen's localized clear action beside the digit-only keypad", () => {
+  it("separates commissioning details and keeps the digit-only keypad contract", () => {
     render(
       <Pairing
         defaultServerUrl={SERVER}
@@ -189,6 +189,15 @@ describe("Pairing", () => {
       />,
     );
 
+    const details = screen.getByRole("region", { name: "Connect this kiosk" });
+    const keypad = screen.getByRole("region", {
+      name: "Enter the eight-digit pairing code from the admin panel",
+    });
+
+    expect(details.contains(scanButton())).toBe(true);
+    expect(details.contains(scannerSetupButton())).toBe(true);
+    expect(keypad.contains(submitButton())).toBe(true);
+    expect(submitButton().classList.contains("kiosk-control")).toBe(true);
     expect(screen.getAllByRole("button", { name: "Clear" })).toHaveLength(1);
     expect(screen.queryByRole("button", { name: "Backspace" })).toBeNull();
   });

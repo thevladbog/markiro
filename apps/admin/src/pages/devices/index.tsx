@@ -143,18 +143,20 @@ export function DevicesPage() {
       />
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
         <Select
+          native
           label={t("pages.devices.typeLabel")}
           value={type ?? ""}
-          onChange={(value) => setFilters({ type: parseType(value) ?? null, page: 1 })}
+          onValueChange={(value) => setFilters({ type: parseType(value) ?? null, page: 1 })}
           options={[
             { value: "", label: t("pages.devices.allTypes") },
             ...deviceTypes.map((item) => ({ value: item, label: t(`pages.devices.type.${item}`) })),
           ]}
         />
         <Select
+          native
           label={t("pages.devices.statusLabel")}
           value={status ?? ""}
-          onChange={(value) => setFilters({ status: parseStatus(value) ?? null, page: 1 })}
+          onValueChange={(value) => setFilters({ status: parseStatus(value) ?? null, page: 1 })}
           options={[
             { value: "", label: t("pages.devices.allStatuses") },
             ...deviceStatuses.map((item) => ({

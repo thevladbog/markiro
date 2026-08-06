@@ -95,7 +95,7 @@ interface IconButtonProps extends Omit<ButtonProps, "children"> {
 
 **Files:** Create `packages/ui/src/components/DatePicker.tsx`, `packages/ui/test/date-picker.test.tsx`; modify `packages/ui/src/components/index.ts`.
 
-- [ ] Write a failing test that opens `getByRole("button", { name: /плановая дата/i })`, selects `6 августа 2026`, receives `onValueChange("2026-08-06")`, and covers Russian heading, next/previous month, Escape focus restoration, disabled state, and invalid ISO input.
+- [ ] Write a failing test that opens `getByRole("button", { name: /плановая дата/i })`, with the clock fixed to a known month, selects `6 августа 2026`, receives `onValueChange("2026-08-06")`, and covers Russian heading, next/previous month, Escape focus restoration, disabled state, and invalid ISO input.
 - [ ] Run `pnpm --filter @markiro/ui exec vitest run test/date-picker.test.tsx`; expect missing-module failure.
 - [ ] Implement a Radix Popover trigger and project calendar grid. Keep pure helpers `parseIsoDate`, `formatIsoDate`, `getCalendarDays`, and `formatRussianDate` in the module. Construct dates locally, never through UTC; each day is a labelled button and selection closes the popover.
 - [ ] Run date test then full UI `test`, `typecheck`, `lint`, `build`; expect PASS.

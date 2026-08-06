@@ -5,8 +5,8 @@ import { Link } from "react-router";
 import {
   Alert,
   Button,
+  DatePicker,
   EmptyState,
-  Input,
   PageHeader,
   Select,
   Spinner,
@@ -59,7 +59,7 @@ export function RejectionsPage() {
     ...(kiosks ?? []).map((kiosk) => ({ value: kiosk.id, label: kiosk.name })),
   ];
 
-  const stateOptions: SelectOption[] = [
+  const stateOptions: SelectOption<RejectionState>[] = [
     { value: "all", label: t("pages.pickup.rejections.filters.state.all") },
     { value: "open", label: t("pages.pickup.rejections.filters.state.open") },
     { value: "acknowledged", label: t("pages.pickup.rejections.filters.state.acknowledged") },
@@ -170,7 +170,7 @@ export function RejectionsPage() {
             label={t("pages.pickup.rejections.filters.kioskLabel")}
             options={kioskOptions}
             value={kioskId}
-            onChange={(value) => setKioskId(value)}
+            onValueChange={setKioskId}
           />
         </div>
         <div style={{ width: 200 }}>
@@ -178,23 +178,33 @@ export function RejectionsPage() {
             label={t("pages.pickup.rejections.filters.stateLabel")}
             options={stateOptions}
             value={stateFilter}
-            onChange={(value) => setStateFilter(value as RejectionState)}
+            onValueChange={setStateFilter}
           />
         </div>
         <div style={{ width: 180 }}>
-          <Input
+          <DatePicker
             label={t("pages.pickup.rejections.filters.fromLabel")}
-            type="date"
-            value={fromDate}
-            onChange={(event) => setFromDate(event.target.value)}
+            placeholder={t("common.datePicker.placeholder")}
+            clearLabel={t("common.datePicker.clear")}
+            calendarLabel={t("common.datePicker.calendar")}
+            previousMonthLabel={t("common.datePicker.previousMonth")}
+            nextMonthLabel={t("common.datePicker.nextMonth")}
+            locale={i18n.language}
+            {...(fromDate ? { value: fromDate } : {})}
+            onValueChange={(value) => setFromDate(value ?? "")}
           />
         </div>
         <div style={{ width: 180 }}>
-          <Input
+          <DatePicker
             label={t("pages.pickup.rejections.filters.toLabel")}
-            type="date"
-            value={toDate}
-            onChange={(event) => setToDate(event.target.value)}
+            placeholder={t("common.datePicker.placeholder")}
+            clearLabel={t("common.datePicker.clear")}
+            calendarLabel={t("common.datePicker.calendar")}
+            previousMonthLabel={t("common.datePicker.previousMonth")}
+            nextMonthLabel={t("common.datePicker.nextMonth")}
+            locale={i18n.language}
+            {...(toDate ? { value: toDate } : {})}
+            onValueChange={(value) => setToDate(value ?? "")}
           />
         </div>
       </div>

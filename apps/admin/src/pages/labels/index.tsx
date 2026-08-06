@@ -19,7 +19,7 @@ const LANGUAGE_LABEL: Record<LabelTemplateSummaryDto["language"], string> = {
  * Primary-CTA styling shared by the page-header "add" action, the
  * EmptyState's action, and (implicitly, via its own dashed-border style
  * below) the "+ Новый шаблон" grid tile. All three are plain `<Link>`s
- * rather than a `<button>` nested inside an `<a>`: nesting interactive
+ * rather than nesting one interactive control inside another: nesting
  * content is invalid HTML (and would give this page two overlapping click
  * targets), so a single real `<a href="/labels/new">` is used everywhere,
  * matching `@markiro/ui`'s `Button` (`variant="primary"`) visually via its

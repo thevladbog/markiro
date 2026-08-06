@@ -1,13 +1,19 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { useState } from "react";
+import { createMemoryRouter, createRoutesFromElements, Route, RouterProvider } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
 
 import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider } from "../src/access/context.js";
+import type { ProductDto } from "../src/pages/catalog/api.js";
 import type * as ShiftsApiModule from "../src/pages/shifts/api.js";
 import { ShiftsPage } from "../src/pages/shifts/index.js";
+import { ShiftForm, type ShiftFormValues } from "../src/pages/shifts/ShiftForm.js";
+import { ShiftPanelRoute } from "../src/pages/shifts/ShiftPanelRoute.js";
 
 const { writeHookMountSpy } = vi.hoisted(() => ({ writeHookMountSpy: vi.fn() }));
 
@@ -36,17 +42,16 @@ vi.mock("../src/pages/shifts/api.js", async (importOriginal) => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   writeHookMountSpy.mockClear();
 });
 
-/** Minimal Response stand-in -- only what apps/admin/src/api/client.ts reads. */
 function jsonResponse(status: number, body: unknown): Response {
-  return {
-    ok: status >= 200 && status < 300,
+  return new Response(body === undefined ? null : JSON.stringify(body), {
     status,
-    json: async () => body,
-  } as Response;
+    headers: { "content-type": "application/json" },
+  });
 }
 
 const OPERATIONS_READ_ONLY: AccessDocument = {
@@ -66,19 +71,51 @@ function renderPage(access: AccessDocument = OPERATIONS_WRITE_ACCESS) {
   return render(
     <QueryClientProvider client={queryClient}>
       <AccessProvider value={access}>
-        <ShiftsPage />
+        <RouterProvider
+          router={createMemoryRouter(
+            createRoutesFromElements(
+              <Route path="/shifts" element={<ShiftsPage />}>
+                <Route path="new" element={<ShiftPanelRoute mode="create" />} />
+                <Route path=":shiftId/edit" element={<ShiftPanelRoute mode="edit" />} />
+              </Route>,
+            ),
+            { initialEntries: ["/shifts"] },
+          )}
+        />
       </AccessProvider>
     </QueryClientProvider>,
   );
 }
 
-const PRODUCT_A = {
+async function chooseOption(
+  _user: ReturnType<typeof userEvent.setup>,
+  label: string,
+  option: string,
+) {
+  const trigger = screen.getByRole("combobox", { name: label });
+  fireEvent.pointerDown(trigger, {
+    button: 0,
+    ctrlKey: false,
+    pageX: 0,
+    pageY: 0,
+    pointerId: 1,
+    pointerType: "mouse",
+  });
+  const optionElement = screen.getByRole("option", { name: option });
+  fireEvent.click(optionElement);
+  expect(trigger.textContent).toContain(option);
+}
+
+const PRODUCT_A: ProductDto = {
   id: "p1",
   gtin14: "04006381333931",
   name: "Молоко 1л",
   productGroup: "Молочные продукты",
   boxCapacity: 12,
   palletCapacity: 48,
+  unitPrice: null,
+  egaisCode: null,
+  externalRef: null,
   status: "active",
   defaultCounterpartyId: "cp1",
   defaultLabelTemplateId: "lt1",
@@ -95,6 +132,12 @@ const PRODUCT_B = {
   status: "active",
   defaultCounterpartyId: null,
   createdAt: "2026-01-02T00:00:00.000Z",
+};
+
+const PRODUCT_B_WITH_DEFAULTS = {
+  ...PRODUCT_B,
+  defaultCounterpartyId: "cp2",
+  defaultLabelTemplateId: "lt1",
 };
 
 const DRAFT_PRODUCT = {
@@ -128,6 +171,56 @@ const LABEL_TEMPLATE = {
   language: "zpl",
   updatedAt: "2026-01-01T00:00:00.000Z",
 };
+
+const INITIAL_SHIFT_FORM_VALUES: ShiftFormValues = {
+  productId: PRODUCT_A.id,
+  mode: "validation",
+  plannedQty: "500",
+  plannedDate: "2026-08-06",
+  lineId: "",
+  counterpartyId: "",
+  labelTemplateId: "",
+  ssccIssuerCounterpartyId: "",
+  boxLabelTemplateId: "",
+  boxCapacity: "",
+  palletCapacity: "",
+  palletsEnabled: false,
+};
+
+function DirtyReseedHarness() {
+  const [initialValues, setInitialValues] = useState(INITIAL_SHIFT_FORM_VALUES);
+  return (
+    <div
+      onChange={() =>
+        setInitialValues({
+          ...INITIAL_SHIFT_FORM_VALUES,
+          plannedQty: "900",
+        })
+      }
+    >
+      <ShiftForm
+        mode="edit"
+        initialValues={initialValues}
+        products={[PRODUCT_A]}
+        lines={[]}
+        counterparties={[]}
+        labelTemplates={[]}
+        onSubmit={() => undefined}
+        onDirtyChange={() => undefined}
+        onClose={() => undefined}
+      />
+    </div>
+  );
+}
+
+it("does not re-seed over an operator edit when initial values change in the same commit", () => {
+  render(<DirtyReseedHarness />);
+
+  const quantity = screen.getByLabelText("Плановое количество, шт");
+  fireEvent.change(quantity, { target: { value: "501" } });
+
+  expect((quantity as HTMLInputElement).value).toBe("501");
+});
 
 // Task 6: a second, distinct label template -- used together with
 // LABEL_TEMPLATE so the item-label-template select and the box-label-template
@@ -270,6 +363,9 @@ describe("ShiftsPage", () => {
     expect(table.getByText("Активна")).toBeDefined();
     expect(table.getByText("Закрыта")).toBeDefined();
     expect(table.getByText("Брак линии")).toBeDefined();
+    expect(screen.getByTestId("shifts-page").classList).toContain("mk-admin-page");
+    expect(screen.getByRole("group", { name: "Фильтры смен" })).toBeDefined();
+    expect(screen.getByText("3 смены").getAttribute("aria-live")).toBe("polite");
     expect(fetchMock).toHaveBeenCalledWith("/api/shifts", expect.any(Object));
   });
 
@@ -366,7 +462,7 @@ describe("ShiftsPage", () => {
     await screen.findByText("Сыр Российский");
 
     fireEvent.click(screen.getByRole("button", { name: "Закрыть смену" }));
-    const dialog = await screen.findByRole("dialog");
+    const dialog = await screen.findByRole("alertdialog", { name: "Закрыть смену" });
     fireEvent.change(within(dialog).getByLabelText("Причина закрытия"), {
       target: { value: "Плановая остановка" },
     });
@@ -383,7 +479,58 @@ describe("ShiftsPage", () => {
     });
   });
 
+  it("keeps a close failure and its reason inside the confirmation", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/shifts/s2/close" && init?.method === "POST") {
+        return jsonResponse(409, { message: "Shift already closed" });
+      }
+      if (path.startsWith("/api/shifts")) {
+        return jsonResponse(200, { items: [ACTIVE_TOLLING_SHIFT] });
+      }
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Закрыть смену" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Закрыть смену" });
+    fireEvent.change(within(dialog).getByLabelText("Причина закрытия"), {
+      target: { value: "Переналадка линии" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Закрыть смену" }));
+
+    expect(await within(dialog).findByText("Shift already closed")).toBeDefined();
+    expect((within(dialog).getByLabelText("Причина закрытия") as HTMLInputElement).value).toBe(
+      "Переналадка линии",
+    );
+  });
+
+  it("confirms planned-shift deletion and keeps API failures in the dialog", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/shifts/s1" && init?.method === "DELETE") {
+        return jsonResponse(409, { message: "Shift has production data" });
+      }
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [PLANNED_SHIFT] });
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Удалить" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Удалить смену?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Удалить" }));
+
+    expect(await within(dialog).findByText("Shift has production data")).toBeDefined();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/shifts/s1",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+
   it("disables draft products in the shift form's product select and shows a hint", async () => {
+    const user = userEvent.setup();
     const fetchMock = vi.fn(async (url: string) => {
       const path = String(url);
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
@@ -398,16 +545,18 @@ describe("ShiftsPage", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Запланировать смену" })[0]!);
     await screen.findByText("Новая смена");
 
+    await user.click(screen.getByRole("combobox", { name: "Продукт" }));
     const draftOption = screen.getByRole("option", {
       name: `${DRAFT_PRODUCT.name} (черновик — недоступно)`,
-    }) as HTMLOptionElement;
-    expect(draftOption.disabled).toBe(true);
+    });
+    expect(draftOption.getAttribute("data-disabled")).toBe("");
 
-    const activeOption = screen.getByRole("option", { name: PRODUCT_A.name }) as HTMLOptionElement;
-    expect(activeOption.disabled).toBe(false);
+    const activeOption = screen.getByRole("option", { name: PRODUCT_A.name });
+    expect(activeOption.getAttribute("data-disabled")).toBeNull();
   });
 
   it("prefills capacity inputs and preselects the counterparty when the product changes (aggregation mode)", async () => {
+    const user = userEvent.setup();
     const fetchMock = vi.fn(async (url: string) => {
       const path = String(url);
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
@@ -422,19 +571,19 @@ describe("ShiftsPage", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Запланировать смену" })[0]!);
     await screen.findByText("Новая смена");
 
-    fireEvent.click(screen.getByLabelText("Агрегация"));
-    fireEvent.change(screen.getByLabelText("Продукт"), { target: { value: PRODUCT_A.id } });
+    await user.click(screen.getByLabelText("Агрегация"));
+    await chooseOption(user, "Продукт", PRODUCT_A.name);
 
     const boxInput = (await screen.findByLabelText("Вместимость короба, шт")) as HTMLInputElement;
     expect(boxInput.value).toBe(String(PRODUCT_A.boxCapacity));
 
-    const counterpartySelect = screen.getByLabelText(
-      "Для контрагента (толлинг)",
-    ) as HTMLSelectElement;
-    expect(counterpartySelect.value).toBe(PRODUCT_A.defaultCounterpartyId);
+    expect(
+      screen.getByRole("combobox", { name: "Для контрагента (толлинг)" }).textContent,
+    ).toContain(COUNTERPARTY.name);
   });
 
   it("sends counterpartyId: null when the user clears the prefilled counterparty before submitting", async () => {
+    const user = userEvent.setup();
     const created = { ...ACTIVE_TOLLING_SHIFT, id: "new1" };
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       const path = String(url);
@@ -451,16 +600,14 @@ describe("ShiftsPage", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Запланировать смену" })[0]!);
     await screen.findByText("Новая смена");
 
-    fireEvent.change(screen.getByLabelText("Продукт"), { target: { value: PRODUCT_A.id } });
+    await chooseOption(user, "Продукт", PRODUCT_A.name);
     await waitFor(() => {
-      expect((screen.getByLabelText("Для контрагента (толлинг)") as HTMLSelectElement).value).toBe(
-        PRODUCT_A.defaultCounterpartyId,
-      );
+      expect(
+        screen.getByRole("combobox", { name: "Для контрагента (толлинг)" }).textContent,
+      ).toContain(COUNTERPARTY.name);
     });
 
-    fireEvent.change(screen.getByLabelText("Для контрагента (толлинг)"), {
-      target: { value: "" },
-    });
+    await chooseOption(user, "Для контрагента (толлинг)", "Не выбран");
     fireEvent.click(screen.getByRole("button", { name: "Запланировать" }));
 
     await waitFor(() => {
@@ -482,6 +629,7 @@ describe("ShiftsPage", () => {
   });
 
   it("omits counterpartyId from the create payload when left untouched and the product has no default", async () => {
+    const user = userEvent.setup();
     const created = { ...PLANNED_SHIFT, id: "new2", productId: PRODUCT_B.id };
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       const path = String(url);
@@ -497,7 +645,7 @@ describe("ShiftsPage", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Запланировать смену" })[0]!);
     await screen.findByText("Новая смена");
 
-    fireEvent.change(screen.getByLabelText("Продукт"), { target: { value: PRODUCT_B.id } });
+    await chooseOption(user, "Продукт", PRODUCT_B.name);
     fireEvent.click(screen.getByRole("button", { name: "Запланировать" }));
 
     await waitFor(() => {
@@ -518,6 +666,7 @@ describe("ShiftsPage", () => {
   });
 
   it("prefills the label template select from the product's default when the product changes", async () => {
+    const user = userEvent.setup();
     const fetchMock = vi.fn(async (url: string) => {
       const path = String(url);
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
@@ -532,16 +681,81 @@ describe("ShiftsPage", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Запланировать смену" })[0]!);
     await screen.findByText("Новая смена");
 
-    fireEvent.change(screen.getByLabelText("Продукт"), { target: { value: PRODUCT_A.id } });
+    await chooseOption(user, "Продукт", PRODUCT_A.name);
 
     await waitFor(() => {
-      expect((screen.getByLabelText("Шаблон этикетки") as HTMLSelectElement).value).toBe(
-        PRODUCT_A.defaultLabelTemplateId,
+      expect(screen.getByRole("combobox", { name: "Шаблон этикетки" }).textContent).toContain(
+        LABEL_TEMPLATE.name,
       );
     });
   });
 
+  it("applies product B defaults after counterparty and template were touched for product A", async () => {
+    const user = userEvent.setup();
+    const created = {
+      ...PLANNED_SHIFT,
+      id: "new-defaults",
+      productId: PRODUCT_B_WITH_DEFAULTS.id,
+    };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/shifts" && init?.method === "POST") return jsonResponse(201, created);
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
+      if (path === "/api/products") {
+        return jsonResponse(200, { items: [PRODUCT_A, PRODUCT_B_WITH_DEFAULTS] });
+      }
+      if (path === "/api/counterparties") {
+        return jsonResponse(200, { items: [COUNTERPARTY, BUYER, BRAND_OWNER] });
+      }
+      if (path === "/api/label-templates") {
+        return jsonResponse(200, { items: [LABEL_TEMPLATE, BOX_LABEL_TEMPLATE] });
+      }
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Смены не запланированы");
+    fireEvent.click(screen.getAllByRole("button", { name: "Запланировать смену" })[0]!);
+    await screen.findByText("Новая смена");
+
+    await chooseOption(user, "Продукт", PRODUCT_A.name);
+    await chooseOption(user, "Для контрагента (толлинг)", BUYER.name);
+    await chooseOption(user, "Шаблон этикетки", BOX_LABEL_TEMPLATE.name);
+    await chooseOption(user, "Продукт", PRODUCT_B_WITH_DEFAULTS.name);
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("combobox", { name: "Для контрагента (толлинг)" }).textContent,
+      ).toContain(BRAND_OWNER.name);
+      expect(screen.getByRole("combobox", { name: "Шаблон этикетки" }).textContent).toContain(
+        LABEL_TEMPLATE.name,
+      );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Запланировать" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/shifts",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            mode: "validation",
+            lineId: null,
+            plannedQty: null,
+            plannedDate: null,
+            counterpartyId: BRAND_OWNER.id,
+            labelTemplateId: LABEL_TEMPLATE.id,
+            productId: PRODUCT_B_WITH_DEFAULTS.id,
+          }),
+        }),
+      );
+    });
+  }, 10_000);
+
   it("sends labelTemplateId: null when the user clears the prefilled label template before submitting", async () => {
+    const user = userEvent.setup();
     const created = { ...PLANNED_SHIFT, id: "new5", productId: PRODUCT_A.id };
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       const path = String(url);
@@ -559,14 +773,14 @@ describe("ShiftsPage", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Запланировать смену" })[0]!);
     await screen.findByText("Новая смена");
 
-    fireEvent.change(screen.getByLabelText("Продукт"), { target: { value: PRODUCT_A.id } });
+    await chooseOption(user, "Продукт", PRODUCT_A.name);
     await waitFor(() => {
-      expect((screen.getByLabelText("Шаблон этикетки") as HTMLSelectElement).value).toBe(
-        PRODUCT_A.defaultLabelTemplateId,
+      expect(screen.getByRole("combobox", { name: "Шаблон этикетки" }).textContent).toContain(
+        LABEL_TEMPLATE.name,
       );
     });
 
-    fireEvent.change(screen.getByLabelText("Шаблон этикетки"), { target: { value: "" } });
+    await chooseOption(user, "Шаблон этикетки", "Не выбран");
     fireEvent.click(screen.getByRole("button", { name: "Запланировать" }));
 
     await waitFor(() => {
@@ -588,6 +802,7 @@ describe("ShiftsPage", () => {
   });
 
   it("omits labelTemplateId from the create payload when left untouched", async () => {
+    const user = userEvent.setup();
     const created = { ...PLANNED_SHIFT, id: "new6", productId: PRODUCT_B.id };
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       const path = String(url);
@@ -604,7 +819,7 @@ describe("ShiftsPage", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Запланировать смену" })[0]!);
     await screen.findByText("Новая смена");
 
-    fireEvent.change(screen.getByLabelText("Продукт"), { target: { value: PRODUCT_B.id } });
+    await chooseOption(user, "Продукт", PRODUCT_B.name);
     fireEvent.click(screen.getByRole("button", { name: "Запланировать" }));
 
     await waitFor(() => {
@@ -654,18 +869,23 @@ describe("ShiftsPage", () => {
   });
 
   it("applies the status and date-range filters to the GET /shifts query", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-08-05T12:00:00"));
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     const fetchMock = vi.fn(async () => jsonResponse(200, { items: [] }));
     vi.stubGlobal("fetch", fetchMock);
 
     renderPage();
     await screen.findByText("Смены не запланированы");
 
-    fireEvent.change(screen.getByLabelText("Статус"), { target: { value: "active" } });
+    await chooseOption(user, "Статус", "Активна");
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith("/api/shifts?status=active", expect.any(Object));
     });
 
-    fireEvent.change(screen.getByLabelText("С даты"), { target: { value: "2026-07-01" } });
+    await user.click(screen.getByRole("button", { name: "С даты" }));
+    await user.click(screen.getByRole("button", { name: "Предыдущий месяц" }));
+    await user.click(screen.getByRole("button", { name: "1 июля 2026" }));
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/shifts?status=active&from=2026-07-01",
@@ -673,12 +893,60 @@ describe("ShiftsPage", () => {
       );
     });
 
-    fireEvent.change(screen.getByLabelText("По дату"), { target: { value: "2026-07-31" } });
+    await user.click(screen.getByRole("button", { name: "По дату" }));
+    await user.click(screen.getByRole("button", { name: "Предыдущий месяц" }));
+    await user.click(screen.getByRole("button", { name: "31 июля 2026" }));
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/shifts?status=active&from=2026-07-01&to=2026-07-31",
         expect.any(Object),
       );
+    });
+
+    await user.click(screen.getByRole("button", { name: "Очистить дату: С даты" }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/shifts?status=active&to=2026-07-31",
+        expect.any(Object),
+      );
+    });
+
+    await user.click(screen.getByRole("button", { name: "Очистить дату: По дату" }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/shifts?status=active", expect.any(Object));
+    });
+
+    await user.click(screen.getByRole("button", { name: "Сбросить" }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/shifts", expect.any(Object));
+    });
+  }, 10_000);
+
+  it("clears a planned date to null in the update payload", async () => {
+    const user = userEvent.setup();
+    const updated = { ...PLANNED_SHIFT, plannedDate: null };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/shifts/s1" && init?.method === "PATCH") return jsonResponse(200, updated);
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [PLANNED_SHIFT] });
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Молоко 1л");
+    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+    await screen.findByText("Изменить смену");
+
+    await user.click(screen.getByRole("button", { name: "Очистить дату: Дата смены" }));
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    await waitFor(() => {
+      const patchCall = fetchMock.mock.calls.find(
+        (call) => call[0] === "/api/shifts/s1" && call[1]?.method === "PATCH",
+      );
+      const body = JSON.parse(patchCall?.[1]?.body as string);
+      expect(body.plannedDate).toBeNull();
     });
   });
 
@@ -733,6 +1001,7 @@ describe("ShiftsPage", () => {
   });
 
   it("submits the sscc issuer separately from the counterparty", async () => {
+    const user = userEvent.setup();
     const updated = {
       ...PLANNED_SHIFT,
       counterpartyId: BUYER.id,
@@ -757,17 +1026,11 @@ describe("ShiftsPage", () => {
 
     // The issuer select defaults to "our own organization", not "none" --
     // it must read as a real choice with its own identity, not an absence.
-    const ssccIssuerSelect = screen.getByLabelText("Эмитент группового кода");
-    expect(
-      within(ssccIssuerSelect).getByRole("option", { name: "Наша организация" }),
-    ).toBeDefined();
+    await user.click(screen.getByRole("combobox", { name: "Эмитент группового кода" }));
+    await user.click(screen.getByRole("option", { name: "Наша организация" }));
 
-    fireEvent.change(screen.getByLabelText("Для контрагента (толлинг)"), {
-      target: { value: BUYER.id },
-    });
-    fireEvent.change(ssccIssuerSelect, {
-      target: { value: BRAND_OWNER.id },
-    });
+    await chooseOption(user, "Для контрагента (толлинг)", BUYER.name);
+    await chooseOption(user, "Эмитент группового кода", BRAND_OWNER.name);
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
 
     await waitFor(
@@ -789,6 +1052,7 @@ describe("ShiftsPage", () => {
   });
 
   it("sends ssccIssuerCounterpartyId: null when the user selects then clears it back to the default", async () => {
+    const user = userEvent.setup();
     const updated = { ...PLANNED_SHIFT, ssccIssuerCounterpartyId: null };
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       const path = String(url);
@@ -812,9 +1076,8 @@ describe("ShiftsPage", () => {
     // above) -- touch the select away from its default, then clear it back
     // to "Наша организация" ("") before submitting. Deleting the `? : null`
     // ternary in toPayload would send a raw "" here instead of null.
-    const ssccIssuerSelect = screen.getByLabelText("Эмитент группового кода");
-    fireEvent.change(ssccIssuerSelect, { target: { value: BRAND_OWNER.id } });
-    fireEvent.change(ssccIssuerSelect, { target: { value: "" } });
+    await chooseOption(user, "Эмитент группового кода", BRAND_OWNER.name);
+    await chooseOption(user, "Эмитент группового кода", "Наша организация");
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
 
     await waitFor(
@@ -831,6 +1094,7 @@ describe("ShiftsPage", () => {
   });
 
   it("sends boxLabelTemplateId: null when the user selects then clears it back to the default", async () => {
+    const user = userEvent.setup();
     const updated = { ...PLANNED_SHIFT, boxLabelTemplateId: null };
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       const path = String(url);
@@ -853,9 +1117,8 @@ describe("ShiftsPage", () => {
     // away from its default, then clear it back to the no-template option
     // ("") before submitting, and confirm the payload carries an explicit
     // null rather than a raw empty string.
-    const boxLabelTemplateSelect = screen.getByLabelText("Шаблон этикетки короба");
-    fireEvent.change(boxLabelTemplateSelect, { target: { value: LABEL_TEMPLATE.id } });
-    fireEvent.change(boxLabelTemplateSelect, { target: { value: "" } });
+    await chooseOption(user, "Шаблон этикетки короба", LABEL_TEMPLATE.name);
+    await chooseOption(user, "Шаблон этикетки короба", "Не выбран");
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
 
     await waitFor(
@@ -908,21 +1171,22 @@ describe("ShiftsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
     await screen.findByText("Изменить смену");
 
-    expect((screen.getByLabelText("Для контрагента (толлинг)") as HTMLSelectElement).value).toBe(
-      BUYER.id,
+    expect(
+      screen.getByRole("combobox", { name: "Для контрагента (толлинг)" }).textContent,
+    ).toContain(BUYER.name);
+    expect(screen.getByRole("combobox", { name: "Эмитент группового кода" }).textContent).toContain(
+      BRAND_OWNER.name,
     );
-    expect((screen.getByLabelText("Эмитент группового кода") as HTMLSelectElement).value).toBe(
-      BRAND_OWNER.id,
+    expect(screen.getByRole("combobox", { name: "Шаблон этикетки" }).textContent).toContain(
+      LABEL_TEMPLATE.name,
     );
-    expect((screen.getByLabelText("Шаблон этикетки") as HTMLSelectElement).value).toBe(
-      LABEL_TEMPLATE.id,
-    );
-    expect((screen.getByLabelText("Шаблон этикетки короба") as HTMLSelectElement).value).toBe(
-      BOX_LABEL_TEMPLATE.id,
+    expect(screen.getByRole("combobox", { name: "Шаблон этикетки короба" }).textContent).toContain(
+      BOX_LABEL_TEMPLATE.name,
     );
   });
 
   it("sends POST with prefilled boxCapacity and mode aggregation; palletCapacity omitted while pallets disabled", async () => {
+    const user = userEvent.setup();
     const created = {
       ...PLANNED_SHIFT,
       id: "new3",
@@ -949,8 +1213,8 @@ describe("ShiftsPage", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Запланировать смену" })[0]!);
     await screen.findByText("Новая смена");
 
-    fireEvent.click(screen.getByLabelText("Агрегация"));
-    fireEvent.change(screen.getByLabelText("Продукт"), { target: { value: PRODUCT_A.id } });
+    await user.click(screen.getByLabelText("Агрегация"));
+    await chooseOption(user, "Продукт", PRODUCT_A.name);
     await waitFor(() => {
       expect((screen.getByLabelText("Вместимость короба, шт") as HTMLInputElement).value).toBe(
         String(PRODUCT_A.boxCapacity),
@@ -982,6 +1246,7 @@ describe("ShiftsPage", () => {
   });
 
   it("sends POST with palletsEnabled:true and prefilled palletCapacity when pallets checkbox is toggled", async () => {
+    const user = userEvent.setup();
     const created = {
       ...PLANNED_SHIFT,
       id: "new4",
@@ -1008,8 +1273,8 @@ describe("ShiftsPage", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Запланировать смену" })[0]!);
     await screen.findByText("Новая смена");
 
-    fireEvent.click(screen.getByLabelText("Агрегация"));
-    fireEvent.change(screen.getByLabelText("Продукт"), { target: { value: PRODUCT_A.id } });
+    await user.click(screen.getByLabelText("Агрегация"));
+    await chooseOption(user, "Продукт", PRODUCT_A.name);
     await waitFor(() => {
       expect((screen.getByLabelText("Вместимость короба, шт") as HTMLInputElement).value).toBe(
         String(PRODUCT_A.boxCapacity),
@@ -1017,7 +1282,7 @@ describe("ShiftsPage", () => {
     });
 
     // Toggle the pallets checkbox to show and prefill the pallet capacity field
-    fireEvent.click(screen.getByLabelText("Использовать паллеты"));
+    await user.click(screen.getByLabelText("Использовать паллеты"));
     await waitFor(() => {
       expect((screen.getByLabelText("Вместимость паллеты, шт") as HTMLInputElement).value).toBe(
         String(PRODUCT_A.palletCapacity),

@@ -113,7 +113,7 @@ export function BoxesPage() {
             label={t("pages.boxes.filters.shiftLabel")}
             options={shiftFilterOptions}
             value={shiftFilter}
-            onChange={(value) => setShiftFilter(value)}
+            onValueChange={setShiftFilter}
           />
         </div>
       </div>

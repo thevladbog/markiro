@@ -292,18 +292,7 @@ export function Pairing({
    */
   if (bound) {
     return (
-      <main
-        role="status"
-        style={{
-          minHeight: "100vh",
-          display: "grid",
-          placeItems: "center",
-          alignContent: "center",
-          gap: 20,
-          padding: 40,
-          textAlign: "center",
-        }}
-      >
+      <main role="status" className="kiosk-screen kiosk-screen--centered kiosk-pairing-success">
         {/* Decoration: the tick `Done` uses, in the same square. Hidden from
             assistive tech — everything it signals is said in words below. */}
         <svg
@@ -334,7 +323,11 @@ export function Pairing({
         <p style={{ fontSize: "1rem", margin: 0, color: "var(--fg-3)" }}>
           {t("pairing.boundHint")}
         </p>
-        <Button style={{ minHeight: 88, minWidth: 320, fontSize: "1.5rem" }} onClick={handOver}>
+        <Button
+          className="kiosk-control"
+          style={{ minHeight: 88, minWidth: 320, fontSize: "1.5rem" }}
+          onClick={handOver}
+        >
           {t("pairing.boundContinue")}
         </Button>
       </main>
@@ -342,155 +335,175 @@ export function Pairing({
   }
 
   return (
-    <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", gap: 20 }}>
-      <h1 style={{ fontSize: "2.25rem" }}>{t("pairing.title")}</h1>
-      <p style={{ fontSize: "1.25rem" }}>{t("pairing.prompt")}</p>
-      {/* `role="status"`: what has been entered so far is announced as it
-          changes, which is what a worker filling it by scanner needs. It was an
-          `aria-label="code"` — a test hook no screen reader reads out. */}
-      <div role="status" style={{ fontSize: "3rem", letterSpacing: "0.5rem", minHeight: "3rem" }}>
-        {code}
-      </div>
-      {/* Binding in progress. Redeeming the code also pulls the whole dataset
-          down in the same response, and on a gate link that is long enough for
-          a worker to decide the device is dead — so the wait is named, not left
-          to a greyed-out button. `aria-live` rather than `role="status"`: the
-          code display above already owns that role, and two of them would make
-          "the status" ambiguous to a screen reader and to the tests. The
-          spinner is `aria-hidden` for the same reason — it is decoration beside
-          text that already says what is happening. */}
-      {busy ? (
-        <div aria-live="polite" style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <Spinner size={32} aria-hidden="true" />
-          <span style={{ fontSize: "1.25rem" }}>{t("pairing.binding")}</span>
+    <main className="kiosk-screen kiosk-pairing" aria-labelledby="kiosk-pairing-title">
+      <section className="kiosk-pairing__details" aria-labelledby="kiosk-pairing-title">
+        <header>
+          <h1 id="kiosk-pairing-title" style={{ fontSize: "2.25rem" }}>
+            {t("pairing.title")}
+          </h1>
+          <p style={{ fontSize: "1.25rem" }}>{t("pairing.prompt")}</p>
+        </header>
+        {/* `role="status"`: what has been entered so far is announced as it
+            changes, which is what a worker filling it by scanner needs. It was an
+            `aria-label="code"` — a test hook no screen reader reads out. */}
+        <div role="status" style={{ fontSize: "3rem", letterSpacing: "0.5rem", minHeight: "3rem" }}>
+          {code}
         </div>
-      ) : null}
-      {error ? (
-        <Alert
-          tone="error"
-          action={
-            // Retry is offered ONLY where retrying can work, which is the one
-            // case where the code was never redeemed. A wrong code has to be
-            // retyped, and a code already spent — on an unusable bundle, or on
-            // a response the store then refused to keep — cannot be redeemed
-            // twice, so a button there would loop the worker through 401s.
-            error === "connection" ? (
-              <Button style={{ minHeight: 56 }} disabled={busy} onClick={() => void submit()}>
-                {t("pairing.retry")}
-              </Button>
-            ) : null
-          }
-        >
-          {t(MESSAGE_KEY[error])}
-        </Alert>
-      ) : null}
-      <PinPad
-        value={code}
-        // Typing is a decision to use the pad instead, so the screen stops
-        // claiming it is waiting for a scan. The listener stays armed either
-        // way — only the announcement ends.
-        onChange={(next) => {
-          setCode(next);
-          setAwaitingScan(false);
-        }}
-        maxLength={CODE_LENGTH}
-      />
-      <div style={{ display: "flex", gap: 12 }}>
-        <Button
-          variant="secondary"
-          style={{ minHeight: 64 }}
-          disabled={busy || code.length === 0}
-          onClick={() => setCode("")}
-        >
-          {t("pairing.clear")}
-        </Button>
-        <Button
-          style={{ minHeight: 64 }}
-          loading={busy}
-          disabled={code.length !== CODE_LENGTH}
-          onClick={() => void submit()}
-        >
-          {t("pairing.submit")}
-        </Button>
-      </div>
-      {/* The keypad's twin, as the brief has it. It does NOT arm the listener —
-          that happens at mount, so a worker who simply scans still pairs
-          (`awaitingScan` is presentation only). What it does is announce the
-          capability at a size that is legible across a room, and put the screen
-          into the waiting state so the worker knows the scan will be taken.
-          Hidden exactly when scanning cannot work, which is now one case and
-          not two: the server field is holding the keyboard the wedge listens
-          on, so this screen has left the fan-out. There is no second case —
-          the shell always runs a transport (the wedge is available everywhere,
-          and a serial source exists only where a port was granted), so a
-          «scanning is impossible» state cannot be reached. */}
-      {!serverOpen ? (
-        <div style={{ display: "grid", justifyItems: "center", gap: 12 }}>
-          <Button
-            variant="secondary"
-            style={{ minHeight: 88, minWidth: 320, fontSize: "1.5rem" }}
-            aria-pressed={awaitingScan}
-            disabled={busy}
-            onClick={() => setAwaitingScan(true)}
+        {/* Binding in progress. Redeeming the code also pulls the whole dataset
+            down in the same response, and on a gate link that is long enough for
+            a worker to decide the device is dead — so the wait is named, not left
+            to a greyed-out button. `aria-live` rather than `role="status"`: the
+            code display above already owns that role, and two of them would make
+            "the status" ambiguous to a screen reader and to the tests. The
+            spinner is `aria-hidden` for the same reason — it is decoration beside
+            text that already says what is happening. */}
+        {busy ? (
+          <div aria-live="polite" style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <Spinner size={32} aria-hidden="true" />
+            <span style={{ fontSize: "1.25rem" }}>{t("pairing.binding")}</span>
+          </div>
+        ) : null}
+        {error ? (
+          <Alert
+            tone="error"
+            action={
+              // Retry is offered ONLY where retrying can work, which is the one
+              // case where the code was never redeemed. A wrong code has to be
+              // retyped, and a code already spent — on an unusable bundle, or on
+              // a response the store then refused to keep — cannot be redeemed
+              // twice, so a button there would loop the worker through 401s.
+              error === "connection" ? (
+                <Button
+                  className="kiosk-control"
+                  style={{ minHeight: 56 }}
+                  disabled={busy}
+                  onClick={() => void submit()}
+                >
+                  {t("pairing.retry")}
+                </Button>
+              ) : null
+            }
           >
-            {t("pairing.scan")}
-          </Button>
-          {awaitingScan ? (
-            <div
-              aria-live="polite"
-              style={{ display: "grid", justifyItems: "center", gap: 8, textAlign: "center" }}
+            {t(MESSAGE_KEY[error])}
+          </Alert>
+        ) : null}
+        {/* The keypad's twin, as the brief has it. It does NOT arm the listener —
+            that happens at mount, so a worker who simply scans still pairs
+            (`awaitingScan` is presentation only). What it does is announce the
+            capability at a size that is legible across a room, and put the screen
+            into the waiting state so the worker knows the scan will be taken.
+            Hidden exactly when scanning cannot work, which is now one case and
+            not two: the server field is holding the keyboard the wedge listens
+            on, so this screen has left the fan-out. There is no second case —
+            the shell always runs a transport (the wedge is available everywhere,
+            and a serial source exists only where a port was granted), so a
+            «scanning is impossible» state cannot be reached. */}
+        {!serverOpen ? (
+          <div style={{ display: "grid", justifyItems: "center", gap: 12 }}>
+            <Button
+              className="kiosk-control"
+              variant="secondary"
+              style={{ minHeight: 88, minWidth: 320, fontSize: "1.5rem" }}
+              aria-pressed={awaitingScan}
+              disabled={busy}
+              onClick={() => setAwaitingScan(true)}
             >
-              <Spinner size={40} aria-hidden="true" />
-              <p style={{ fontSize: "1.75rem" }}>{t("pairing.scanWaiting")}</p>
-              <p style={{ fontSize: "1rem", color: "var(--fg-3)" }}>
-                {t("pairing.scanWaitingHint")}
-              </p>
-            </div>
-          ) : (
-            // The line the previous round put here on its own. It stays, folded
-            // under the button, because it carries the one thing the button
-            // cannot say: pressing it is optional.
-            <p style={{ fontSize: "1rem", color: "var(--fg-3)" }}>{t("pairing.scanHint")}</p>
-          )}
+              {t("pairing.scan")}
+            </Button>
+            {awaitingScan ? (
+              <div
+                aria-live="polite"
+                style={{ display: "grid", justifyItems: "center", gap: 8, textAlign: "center" }}
+              >
+                <Spinner size={40} aria-hidden="true" />
+                <p style={{ fontSize: "1.75rem" }}>{t("pairing.scanWaiting")}</p>
+                <p style={{ fontSize: "1rem", color: "var(--fg-3)" }}>
+                  {t("pairing.scanWaitingHint")}
+                </p>
+              </div>
+            ) : (
+              // The line the previous round put here on its own. It stays, folded
+              // under the button, because it carries the one thing the button
+              // cannot say: pressing it is optional.
+              <p style={{ fontSize: "1rem", color: "var(--fg-3)" }}>{t("pairing.scanHint")}</p>
+            )}
+          </div>
+        ) : null}
+        <div className="kiosk-pairing__service">
+          {/* Disabled while a pair is in flight: leaving this screen mid-request
+              would let the pair complete behind the scanner-setup screen, with
+              the device silently paired under a screen that knows nothing of it. */}
+          <Button
+            className="kiosk-control"
+            variant="secondary"
+            style={{ minHeight: 44 }}
+            disabled={busy}
+            onClick={onConfigureScanner}
+          >
+            {t("pairing.scannerSetup")}
+          </Button>
+          {/* Collapsed by default: an on-prem deployment must be able to change
+              the address, but a SaaS build bakes the origin in and the field
+              would only be one more thing between a worker and a paired kiosk. */}
+          <Button
+            className="kiosk-control"
+            variant="secondary"
+            style={{ minHeight: 44 }}
+            onClick={() => {
+              setServerOpen((open) => !open);
+              // The wedge is paused while this field has the keyboard, so a
+              // waiting state left standing across the toggle would be a lie.
+              setAwaitingScan(false);
+            }}
+          >
+            {t("pairing.serverToggle")}
+          </Button>
         </div>
-      ) : null}
-      <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-        {/* Disabled while a pair is in flight: leaving this screen mid-request
-            would let the pair complete behind the scanner-setup screen, with
-            the device silently paired under a screen that knows nothing of it. */}
-        <Button
-          variant="secondary"
-          style={{ minHeight: 44 }}
-          disabled={busy}
-          onClick={onConfigureScanner}
-        >
-          {t("pairing.scannerSetup")}
-        </Button>
-        {/* Collapsed by default: an on-prem deployment must be able to change
-            the address, but a SaaS build bakes the origin in and the field
-            would only be one more thing between a worker and a paired kiosk. */}
-        <Button
-          variant="secondary"
-          style={{ minHeight: 44 }}
-          onClick={() => {
-            setServerOpen((open) => !open);
-            // The wedge is paused while this field has the keyboard, so a
-            // waiting state left standing across the toggle would be a lie.
-            setAwaitingScan(false);
-          }}
-        >
-          {t("pairing.serverToggle")}
-        </Button>
-      </div>
-      {serverOpen ? (
-        <Input
-          label={t("pairing.server")}
-          value={serverUrl}
-          inputMode="url"
-          mono
-          onChange={(event) => setServerUrl(event.target.value)}
-        />
-      ) : null}
+        {serverOpen ? (
+          <Input
+            label={t("pairing.server")}
+            value={serverUrl}
+            inputMode="url"
+            mono
+            onChange={(event) => setServerUrl(event.target.value)}
+          />
+        ) : null}
+      </section>
+      <section className="kiosk-pairing__keypad" aria-label={t("pairing.prompt")}>
+        <div className="kiosk-pin-pad">
+          <PinPad
+            value={code}
+            // Typing is a decision to use the pad instead, so the screen stops
+            // claiming it is waiting for a scan. The listener stays armed either
+            // way — only the announcement ends.
+            onChange={(next) => {
+              setCode(next);
+              setAwaitingScan(false);
+            }}
+            maxLength={CODE_LENGTH}
+          />
+        </div>
+        <div className="kiosk-pairing__actions">
+          <Button
+            className="kiosk-control"
+            variant="secondary"
+            style={{ minHeight: 64 }}
+            disabled={busy || code.length === 0}
+            onClick={() => setCode("")}
+          >
+            {t("pairing.clear")}
+          </Button>
+          <Button
+            className="kiosk-control"
+            style={{ minHeight: 64 }}
+            loading={busy}
+            disabled={code.length !== CODE_LENGTH}
+            onClick={() => void submit()}
+          >
+            {t("pairing.submit")}
+          </Button>
+        </div>
+      </section>
     </main>
   );
 }

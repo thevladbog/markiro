@@ -6,13 +6,15 @@ import {
   Alert,
   Badge,
   Button,
+  Checkbox,
+  DatePicker,
   EmptyState,
-  Input,
   PageHeader,
   Select,
   Spinner,
   StatusChip,
   Table,
+  VisuallyHidden,
 } from "@markiro/ui";
 import type { SelectOption, StatusChipStatus, TableColumn } from "@markiro/ui";
 
@@ -131,7 +133,7 @@ function PickupPageContent({
   const shownKiosks = rejections.kioskNames.slice(0, 3);
   const hiddenKioskCount = rejections.kioskNames.length - shownKiosks.length;
 
-  const statusOptions: SelectOption[] = [
+  const statusOptions: SelectOption<StatusFilter>[] = [
     { value: "all", label: t("pages.pickup.filters.status.all") },
     { value: "pending", label: t("pages.pickup.filters.status.pending") },
     { value: "punched", label: t("pages.pickup.filters.status.punched") },
@@ -139,7 +141,7 @@ function PickupPageContent({
     { value: "cancelled", label: t("pages.pickup.filters.status.cancelled") },
   ];
 
-  const reasonOptions: SelectOption[] = [
+  const reasonOptions: SelectOption<ReasonFilter>[] = [
     { value: "all", label: t("pages.pickup.filters.reason.all") },
     { value: "buy", label: t("pages.pickup.filters.reason.buy") },
     { value: "writeoff", label: t("pages.pickup.filters.reason.writeoff") },
@@ -214,11 +216,15 @@ function PickupPageContent({
             title: "",
             width: 32,
             render: (row) => (
-              <input
-                type="checkbox"
+              <Checkbox
+                label={
+                  <VisuallyHidden>
+                    {t("pages.pickup.bulkExport.selectRow", { orderNo: row.orderNo })}
+                  </VisuallyHidden>
+                }
                 aria-label={t("pages.pickup.bulkExport.selectRow", { orderNo: row.orderNo })}
                 checked={write.selectedIds.has(row.id)}
-                onChange={() => write.onToggleSelected(row.id)}
+                onCheckedChange={() => write.onToggleSelected(row.id)}
               />
             ),
           },
@@ -268,7 +274,7 @@ function PickupPageContent({
             label={t("pages.pickup.filters.statusLabel")}
             options={statusOptions}
             value={statusFilter}
-            onChange={(value) => onStatusFilterChange(value as StatusFilter)}
+            onValueChange={onStatusFilterChange}
           />
         </div>
         <div style={{ width: 200 }}>
@@ -276,23 +282,33 @@ function PickupPageContent({
             label={t("pages.pickup.filters.reasonLabel")}
             options={reasonOptions}
             value={reasonFilter}
-            onChange={(value) => onReasonFilterChange(value as ReasonFilter)}
+            onValueChange={onReasonFilterChange}
           />
         </div>
         <div style={{ width: 180 }}>
-          <Input
+          <DatePicker
             label={t("pages.pickup.filters.fromLabel")}
-            type="date"
-            value={fromDate}
-            onChange={(event) => onFromDateChange(event.target.value)}
+            placeholder={t("common.datePicker.placeholder")}
+            clearLabel={t("common.datePicker.clear")}
+            calendarLabel={t("common.datePicker.calendar")}
+            previousMonthLabel={t("common.datePicker.previousMonth")}
+            nextMonthLabel={t("common.datePicker.nextMonth")}
+            locale={i18n.language}
+            {...(fromDate ? { value: fromDate } : {})}
+            onValueChange={(value) => onFromDateChange(value ?? "")}
           />
         </div>
         <div style={{ width: 180 }}>
-          <Input
+          <DatePicker
             label={t("pages.pickup.filters.toLabel")}
-            type="date"
-            value={toDate}
-            onChange={(event) => onToDateChange(event.target.value)}
+            placeholder={t("common.datePicker.placeholder")}
+            clearLabel={t("common.datePicker.clear")}
+            calendarLabel={t("common.datePicker.calendar")}
+            previousMonthLabel={t("common.datePicker.previousMonth")}
+            nextMonthLabel={t("common.datePicker.nextMonth")}
+            locale={i18n.language}
+            {...(toDate ? { value: toDate } : {})}
+            onValueChange={(value) => onToDateChange(value ?? "")}
           />
         </div>
       </div>

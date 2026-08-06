@@ -161,7 +161,9 @@ function setWebSerial(present: boolean, requestPort?: () => Promise<SerialPort>)
 }
 
 const KEYBOARD = "Keyboard wedge (HID)";
+const KEYBOARD_HINT = "Works on any device: the scanner types the code as if it were a keyboard.";
 const SERIAL = "Web Serial (COM port)";
+const SERIAL_HINT = "More reliable: the GS separator inside a marking code survives.";
 const TRANSPORTS = "How the scanner is connected";
 const TEST_SCAN = "Test scan";
 
@@ -203,7 +205,15 @@ describe("ScannerSetup — transports offered", () => {
     render(<ScannerSetup paired={false} bootstrap={null} subscribe={noFanOut} onClose={vi.fn()} />);
 
     expect(screen.getAllByRole("radio")).toHaveLength(2);
-    expect(radio(SERIAL)).toBeTruthy();
+    const keyboard = radio(KEYBOARD);
+    const serial = radio(SERIAL);
+    const keyboardHint = screen.getByText(KEYBOARD_HINT);
+    const serialHint = screen.getByText(SERIAL_HINT);
+
+    expect(serial).toBeTruthy();
+    expect(keyboard.getAttribute("aria-describedby")).toBe(keyboardHint.id);
+    expect(serial.getAttribute("aria-describedby")).toBe(serialHint.id);
+    expect(keyboardHint.id).not.toBe(serialHint.id);
   });
 });
 
@@ -329,7 +339,15 @@ describe("ScannerSetup — access before pairing", () => {
     render(<ScannerSetup paired={false} bootstrap={null} subscribe={noFanOut} onClose={vi.fn()} />);
 
     expect(transportGroup()).toBeTruthy();
-    expect(screen.getByText(TEST_SCAN)).toBeTruthy();
+    expect(screen.getByRole("region", { name: TEST_SCAN })).toBeDefined();
+    const done = screen.getByRole("button", { name: "Done" });
+    expect(done.closest("footer")).not.toBeNull();
+    expect(
+      screen
+        .getByRole("radio", { name: KEYBOARD })
+        .closest("label")
+        ?.classList.contains("kiosk-radio-option"),
+    ).toBe(true);
     expect(screen.queryByRole("button", { name: "Sign in" })).toBeNull();
   });
 });
@@ -349,6 +367,8 @@ describe("ScannerSetup — access after pairing", () => {
     expect(container.textContent).not.toContain(KEYBOARD);
     expect(container.textContent).not.toContain(TEST_SCAN);
     expect(screen.getByRole("heading", { name: "Sign in to the settings" })).toBeTruthy();
+    const entry = screen.getByRole("region", { name: "Personnel number" });
+    expect(entry.contains(screen.getByRole("button", { name: "Next" }))).toBe(true);
   });
 
   it("keeps it closed on a wrong PIN and says only that sign-in failed", async () => {

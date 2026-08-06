@@ -1,11 +1,11 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import type { TFunction } from "i18next";
 import { useEffect, useState } from "react";
-import { useForm } from "react-hook-form";
+import { Controller, useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
 
-import { Button, Input, Modal } from "@markiro/ui";
+import { Button, Checkbox, Input, Modal } from "@markiro/ui";
 
 import { errorProp } from "../../lib/form-error.js";
 import type { ProductDto } from "../catalog/api.js";
@@ -86,6 +86,7 @@ export function KioskForm({
   const { t } = useTranslation();
 
   const {
+    control,
     register,
     handleSubmit,
     reset,
@@ -168,10 +169,17 @@ export function KioskForm({
           {...errorProp(translateFieldError(t, errors.dayLimitPerEmployee?.message))}
           {...register("dayLimitPerEmployee")}
         />
-        <label style={{ display: "flex", alignItems: "center", gap: 8, font: "var(--text-body)" }}>
-          <input type="checkbox" {...register("showPrices")} />
-          {t("pages.kiosks.form.showPricesLabel")}
-        </label>
+        <Controller
+          control={control}
+          name="showPrices"
+          render={({ field }) => (
+            <Checkbox
+              label={t("pages.kiosks.form.showPricesLabel")}
+              checked={field.value}
+              onCheckedChange={field.onChange}
+            />
+          )}
+        />
       </form>
 
       {mode === "edit" && kiosk && (
@@ -209,22 +217,12 @@ export function KioskForm({
               }}
             >
               {products.map((product) => (
-                <label
+                <Checkbox
                   key={product.id}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    font: "var(--text-body)",
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedProductIds.has(product.id)}
-                    onChange={() => toggleProduct(product.id)}
-                  />
-                  {product.name}
-                </label>
+                  label={product.name}
+                  checked={selectedProductIds.has(product.id)}
+                  onCheckedChange={() => toggleProduct(product.id)}
+                />
               ))}
             </div>
           </fieldset>

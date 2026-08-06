@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
@@ -539,6 +540,7 @@ describe("KiosksPage", () => {
   });
 
   it("edits a kiosk and toggles the product allowlist, saving via PUT /api/kiosks/:id/products", async () => {
+    const user = userEvent.setup();
     const updated = { ...ONLINE_KIOSK, productIds: ["p1", "p2"] };
     const fetchMock = stubFetch({
       kiosks: [ONLINE_KIOSK],
@@ -557,12 +559,12 @@ describe("KiosksPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
     await screen.findByText("Изменить киоск");
 
-    const productBCheckbox = screen.getByLabelText(PRODUCT_B.name) as HTMLInputElement;
-    expect(productBCheckbox.checked).toBe(false);
-    const productACheckbox = screen.getByLabelText(PRODUCT_A.name) as HTMLInputElement;
-    expect(productACheckbox.checked).toBe(true);
+    const productBCheckbox = screen.getByRole("checkbox", { name: PRODUCT_B.name });
+    expect(productBCheckbox.getAttribute("aria-checked")).toBe("false");
+    const productACheckbox = screen.getByRole("checkbox", { name: PRODUCT_A.name });
+    expect(productACheckbox.getAttribute("aria-checked")).toBe("true");
 
-    fireEvent.click(productBCheckbox);
+    await user.click(productBCheckbox);
     fireEvent.click(screen.getByRole("button", { name: "Сохранить список" }));
 
     await waitFor(() => {

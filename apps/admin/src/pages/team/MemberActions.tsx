@@ -132,7 +132,7 @@ export function MemberActions({ member, team }: { member: TeamMember; team: Team
           <Select
             label={t("pages.team.invite.role")}
             value={role}
-            onChange={(value) => setRole(value as TeamRole)}
+            onValueChange={setRole}
             options={[
               { value: "manager", label: t("pages.team.roles.manager") },
               { value: "admin", label: t("pages.team.roles.admin") },
@@ -148,7 +148,7 @@ export function MemberActions({ member, team }: { member: TeamMember; team: Team
             label={t("pages.team.invite.employee")}
             value={employeeId}
             disabled={employees.isPending || employees.isError}
-            onChange={setEmployeeId}
+            onValueChange={setEmployeeId}
             options={[
               { value: "", label: t("pages.team.invite.noEmployee") },
               ...available.map((employee) => ({ value: employee.id, label: employee.fullName })),

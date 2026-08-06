@@ -1,13 +1,13 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
+import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import { ThemeProvider } from "@markiro/ui";
 
 import type { AccessDocument } from "../src/access/api.js";
-import { AppRoutes } from "../src/app.js";
+import { appRoutes } from "../src/app.js";
 import {
   AuthClientProvider,
   type AuthClientLike,
@@ -51,12 +51,20 @@ const INTEGRATIONS_ONLY_ACCESS: AccessDocument = {
   capabilities: [CABINET_CAPABILITY.INTEGRATIONS_READ],
 };
 
+const JANE = {
+  id: "1",
+  fullName: "Jane Doe",
+  role: "Кассир",
+  status: "active",
+  badges: [],
+  createdAt: "2026-01-01T00:00:00.000Z",
+};
+
 function jsonResponse(status: number, body: unknown): Response {
-  return {
-    ok: status >= 200 && status < 300,
+  return new Response(body === undefined ? null : JSON.stringify(body), {
     status,
-    json: async () => body,
-  } as Response;
+    headers: { "content-type": "application/json" },
+  });
 }
 
 function createFakeAuthClient(): AuthClientLike {
@@ -101,9 +109,12 @@ function renderAccessRoute(
       }
       if (path.endsWith("/api/products")) return jsonResponse(200, { items: [] });
       if (path.endsWith("/api/counterparties")) return jsonResponse(200, { items: [] });
+      if (path.endsWith("/api/employees")) return jsonResponse(200, { items: [JANE] });
+      if (path.endsWith("/api/operators")) return jsonResponse(200, { items: [] });
       if (path.endsWith("/api/label-templates")) return jsonResponse(200, { items: [] });
       if (path.includes("/api/devices"))
         return jsonResponse(200, { items: [], page: 1, pageSize: 8, total: 0 });
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
       if (path.endsWith("/api/lines")) return jsonResponse(200, { items: [] });
       if (path.includes("/api/integrations/commerceml/candidates")) {
         return jsonResponse(200, { candidates: [] });
@@ -118,11 +129,11 @@ function renderAccessRoute(
   const view = render(
     <QueryClientProvider client={queryClient}>
       <ThemeProvider defaultTheme="light">
-        <MemoryRouter initialEntries={[initialPath]}>
-          <AuthClientProvider client={createFakeAuthClient()}>
-            <AppRoutes />
-          </AuthClientProvider>
-        </MemoryRouter>
+        <AuthClientProvider client={createFakeAuthClient()}>
+          <RouterProvider
+            router={createMemoryRouter(appRoutes, { initialEntries: [initialPath] })}
+          />
+        </AuthClientProvider>
       </ThemeProvider>
     </QueryClientProvider>,
   );
@@ -169,6 +180,59 @@ it("redirects the legacy kiosks index to the kiosk-filtered devices page", async
   await expect.poll(() => requests).toContain("/api/devices?page=1&pageSize=8&type=kiosk");
 });
 
+it.each(["/catalog/new", "/catalog/p1/edit"])(
+  "forbids the direct write route %s for a read-only operator",
+  async (path) => {
+    renderAccessRoute(path, OPERATIONS_READ_ONLY);
+
+    expect(await screen.findByTestId("forbidden-page")).toBeDefined();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  },
+);
+
+it.each(["/counterparties/new", "/counterparties/p1/edit"])(
+  "forbids the direct counterparty write route %s for a read-only operator",
+  async (path) => {
+    renderAccessRoute(path, OPERATIONS_READ_ONLY);
+
+    expect(await screen.findByTestId("forbidden-page")).toBeDefined();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  },
+);
+
+it.each(["/shifts/new", "/shifts/s1/edit"])(
+  "forbids the direct shift write route %s for a read-only operator",
+  async (path) => {
+    renderAccessRoute(path, OPERATIONS_READ_ONLY);
+
+    expect(await screen.findByTestId("forbidden-page")).toBeDefined();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  },
+);
+
+it.each(["/employees/new", "/employees/1/edit"])(
+  "forbids the direct employee write route %s for a read-only operator",
+  async (path) => {
+    const { requests } = renderAccessRoute(path, OPERATIONS_READ_ONLY);
+
+    expect(await screen.findByTestId("forbidden-page")).toBeDefined();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(requests.some((request) => request.endsWith("/api/operators"))).toBe(false);
+  },
+);
+
+it.each([
+  ["/catalog/new", "Новый продукт"],
+  ["/catalog/p1/edit", "Изменить продукт"],
+  ["/employees/new", "Новый сотрудник"],
+  ["/employees/1/edit", "Изменить сотрудника"],
+])("opens the direct write route %s for a write-capable operator", async (path, title) => {
+  renderAccessRoute(path, MANAGER_ACCESS);
+
+  expect(await screen.findByRole("dialog", { name: title })).toBeDefined();
+  expect(screen.queryByTestId("forbidden-page")).toBeNull();
+});
+
 it("keeps the label library readable but blocks editor routes", async () => {
   renderAccessRoute("/labels", OPERATIONS_READ_ONLY);
   expect(await screen.findByRole("heading", { name: "Шаблоны этикеток" })).toBeDefined();
@@ -187,7 +251,7 @@ it("shows integrations and settings navigation to administrators", async () => {
 
   expect(await screen.findByRole("link", { name: "Интеграции" })).toBeDefined();
   expect(screen.getByRole("link", { name: "Настройки" })).toBeDefined();
-  expect(screen.getByRole("link", { name: "Команда" })).toBeDefined();
+  expect(screen.getByRole("link", { name: "Доступ в кабинет" })).toBeDefined();
   expect(screen.getByRole("link", { name: "Открыть профиль Елена Ким" })).toBeDefined();
 });
 

@@ -1,14 +1,19 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Outlet, useNavigate } from "react-router";
 
 import {
+  AdminPage,
   Alert,
   Badge,
   Button,
+  ConfirmDialog,
+  DatePicker,
   EmptyState,
+  FilterBar,
   Input,
-  Modal,
   PageHeader,
+  RowActions,
   Select,
   Spinner,
   StatusChip,
@@ -21,23 +26,19 @@ import { CABINET_CAPABILITY } from "@markiro/domain";
 import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
 import { toast } from "../../lib/toast.js";
-import { useProducts, type ProductDto } from "../catalog/api.js";
-import { useCounterparties, type CounterpartyDto } from "../counterparties/api.js";
-import { useLabelTemplates, type LabelTemplateSummaryDto } from "../labels/api.js";
-import { ShiftForm, type ShiftFormValues } from "./ShiftForm.js";
+import { useProducts } from "../catalog/api.js";
+import { useCounterparties } from "../counterparties/api.js";
+import { useLabelTemplates } from "../labels/api.js";
 import {
   useCloseShift,
-  useCreateShift,
   useDeleteShift,
   useLines,
   useShifts,
-  useUpdateShift,
-  type CreateShiftInput,
-  type LineDto,
   type ShiftDto,
   type ShiftStatus,
-  type UpdateShiftInput,
 } from "./api.js";
+import type { ShiftsPanelContext, ShiftsPanelLocationState } from "./ShiftPanelRoute.js";
+import "./shifts.css";
 
 type StatusFilter = "all" | ShiftStatus;
 
@@ -52,100 +53,39 @@ const MODE_TO_BADGE_TONE: Record<ShiftDto["mode"], BadgeTone> = {
   aggregation: "accent",
 };
 
-interface ShiftFormOptions {
-  products: ProductDto[];
-  lines: LineDto[];
-  counterparties: CounterpartyDto[];
-  labelTemplates: LabelTemplateSummaryDto[];
-}
-
-function AuthorizedCreateShiftAction(props: ShiftFormOptions) {
+function AuthorizedCreateShiftAction() {
   const { t } = useTranslation();
-  const createMutation = useCreateShift();
-  const [open, setOpen] = useState(false);
-
-  const handleSubmit = async (input: CreateShiftInput | UpdateShiftInput) => {
-    try {
-      await createMutation.mutateAsync(input as CreateShiftInput);
-      toast("ok", t("pages.shifts.toasts.createSuccess"));
-      setOpen(false);
-    } catch (error) {
-      toast(
-        "error",
-        error instanceof ApiRequestError ? error.message : t("pages.shifts.toasts.createError"),
-      );
-    }
-  };
+  const navigate = useNavigate();
 
   return (
-    <>
-      <Button type="button" onClick={() => setOpen(true)}>
-        {t("pages.shifts.addAction")}
-      </Button>
-      {open ? (
-        <ShiftForm
-          open
-          mode="create"
-          {...props}
-          submitting={createMutation.isPending}
-          onSubmit={handleSubmit}
-          onClose={() => setOpen(false)}
-        />
-      ) : null}
-    </>
+    <Button
+      type="button"
+      onClick={() =>
+        void navigate("new", {
+          state: { shiftsBackground: true } satisfies ShiftsPanelLocationState,
+        })
+      }
+    >
+      {t("pages.shifts.addAction")}
+    </Button>
   );
 }
 
-function AuthorizedPlannedShiftActions({
-  shift,
-  ...options
-}: ShiftFormOptions & { shift: ShiftDto }) {
+function AuthorizedPlannedShiftActions({ shift }: { shift: ShiftDto }) {
   const { t } = useTranslation();
-  const updateMutation = useUpdateShift();
+  const navigate = useNavigate();
   const deleteMutation = useDeleteShift();
-  const [editingShift, setEditingShift] = useState<ShiftDto | null>(null);
   const [deleting, setDeleting] = useState(false);
-
-  const initialValues: ShiftFormValues | undefined = editingShift
-    ? {
-        productId: editingShift.productId,
-        mode: editingShift.mode,
-        plannedQty: editingShift.plannedQty !== null ? String(editingShift.plannedQty) : "",
-        plannedDate: editingShift.plannedDate ?? "",
-        lineId: editingShift.lineId ?? "",
-        counterpartyId: editingShift.counterpartyId ?? "",
-        labelTemplateId: editingShift.labelTemplateId ?? "",
-        ssccIssuerCounterpartyId: editingShift.ssccIssuerCounterpartyId ?? "",
-        boxLabelTemplateId: editingShift.boxLabelTemplateId ?? "",
-        boxCapacity: editingShift.boxCapacity !== null ? String(editingShift.boxCapacity) : "",
-        palletCapacity:
-          editingShift.palletCapacity !== null ? String(editingShift.palletCapacity) : "",
-        palletsEnabled: editingShift.palletsEnabled,
-      }
-    : undefined;
-
-  const handleUpdate = async (input: CreateShiftInput | UpdateShiftInput) => {
-    if (!editingShift) return;
-    try {
-      await updateMutation.mutateAsync({ id: editingShift.id, input });
-      toast("ok", t("pages.shifts.toasts.updateSuccess"));
-      setEditingShift(null);
-    } catch (error) {
-      toast(
-        "error",
-        error instanceof ApiRequestError ? error.message : t("pages.shifts.toasts.updateError"),
-      );
-    }
-  };
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const handleDelete = async () => {
     try {
+      setDeleteError(null);
       await deleteMutation.mutateAsync(shift.id);
       toast("ok", t("pages.shifts.toasts.deleteSuccess"));
       setDeleting(false);
     } catch (error) {
-      toast(
-        "error",
+      setDeleteError(
         error instanceof ApiRequestError ? error.message : t("pages.shifts.toasts.deleteError"),
       );
     }
@@ -153,12 +93,16 @@ function AuthorizedPlannedShiftActions({
 
   return (
     <>
-      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+      <RowActions>
         <Button
           type="button"
           size="compact"
           variant="secondary"
-          onClick={() => setEditingShift(shift)}
+          onClick={() =>
+            void navigate(`${shift.id}/edit`, {
+              state: { shiftsBackground: true } satisfies ShiftsPanelLocationState,
+            })
+          }
         >
           {t("pages.shifts.edit")}
         </Button>
@@ -166,47 +110,31 @@ function AuthorizedPlannedShiftActions({
           type="button"
           size="compact"
           variant="destructive"
-          onClick={() => setDeleting(true)}
+          onClick={() => {
+            setDeleteError(null);
+            setDeleting(true);
+          }}
         >
           {t("pages.shifts.delete")}
         </Button>
-      </div>
-      {editingShift && initialValues ? (
-        <ShiftForm
-          open
-          mode="edit"
-          initialValues={initialValues}
-          {...options}
-          submitting={updateMutation.isPending}
-          onSubmit={handleUpdate}
-          onClose={() => setEditingShift(null)}
-        />
-      ) : null}
-      <Modal
+      </RowActions>
+      <ConfirmDialog
         open={deleting}
-        onClose={() => setDeleting(false)}
-        closeLabel={t("common.close")}
         title={t("pages.shifts.deleteConfirmTitle")}
-        footer={
+        description={
           <>
-            <Button type="button" variant="secondary" onClick={() => setDeleting(false)}>
-              {t("pages.shifts.cancel")}
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              loading={deleteMutation.isPending}
-              onClick={() => void handleDelete()}
-            >
-              {t("pages.shifts.deleteConfirmAction")}
-            </Button>
+            <p>{t("pages.shifts.deleteConfirmBody", { name: shift.productName ?? "" })}</p>
+            {deleteError ? <Alert tone="error">{deleteError}</Alert> : null}
           </>
         }
-      >
-        <p style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>
-          {t("pages.shifts.deleteConfirmBody", { name: shift.productName ?? "" })}
-        </p>
-      </Modal>
+        entity={shift.productName ?? shift.id}
+        cancelLabel={t("pages.shifts.cancel")}
+        confirmLabel={t("pages.shifts.deleteConfirmAction")}
+        tone="destructive"
+        busy={deleteMutation.isPending}
+        onCancel={() => setDeleting(false)}
+        onConfirm={() => void handleDelete()}
+      />
     </>
   );
 }
@@ -216,16 +144,17 @@ function AuthorizedCloseShiftAction({ shift }: { shift: ShiftDto }) {
   const closeMutation = useCloseShift();
   const [open, setOpen] = useState(false);
   const [closeReason, setCloseReason] = useState("");
+  const [closeError, setCloseError] = useState<string | null>(null);
 
   const handleCloseShift = async () => {
     try {
+      setCloseError(null);
       await closeMutation.mutateAsync({ id: shift.id, reason: closeReason.trim() });
       toast("ok", t("pages.shifts.toasts.closeSuccess"));
       setOpen(false);
       setCloseReason("");
     } catch (error) {
-      toast(
-        "error",
+      setCloseError(
         error instanceof ApiRequestError ? error.message : t("pages.shifts.toasts.closeError"),
       );
     }
@@ -233,67 +162,77 @@ function AuthorizedCloseShiftAction({ shift }: { shift: ShiftDto }) {
 
   return (
     <>
-      <Button type="button" size="compact" variant="secondary" onClick={() => setOpen(true)}>
-        {t("pages.shifts.close")}
-      </Button>
-      <Modal
+      <RowActions>
+        <Button
+          type="button"
+          size="compact"
+          variant="secondary"
+          onClick={() => {
+            setCloseError(null);
+            setOpen(true);
+          }}
+        >
+          {t("pages.shifts.close")}
+        </Button>
+      </RowActions>
+      <ConfirmDialog
         open={open}
-        onClose={() => setOpen(false)}
-        closeLabel={t("common.close")}
         title={t("pages.shifts.closeModal.title")}
-        footer={
+        description={
           <>
-            <Button type="button" variant="secondary" onClick={() => setOpen(false)}>
-              {t("pages.shifts.closeModal.cancel")}
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              loading={closeMutation.isPending}
-              disabled={closeReason.trim().length < 3}
-              onClick={() => void handleCloseShift()}
-            >
-              {t("pages.shifts.closeModal.submit")}
-            </Button>
+            <Input
+              label={t("pages.shifts.closeModal.reasonLabel")}
+              value={closeReason}
+              onChange={(event) => setCloseReason(event.target.value)}
+            />
+            {closeError ? <Alert tone="error">{closeError}</Alert> : null}
           </>
         }
-      >
-        <Input
-          label={t("pages.shifts.closeModal.reasonLabel")}
-          value={closeReason}
-          onChange={(event) => setCloseReason(event.target.value)}
-        />
-      </Modal>
+        entity={shift.productName ?? shift.id}
+        cancelLabel={t("pages.shifts.closeModal.cancel")}
+        confirmLabel={t("pages.shifts.closeModal.submit")}
+        tone="destructive"
+        busy={closeMutation.isPending}
+        confirmDisabled={closeReason.trim().length < 3}
+        onCancel={() => {
+          if (closeMutation.isPending) return;
+          setOpen(false);
+          setCloseReason("");
+          setCloseError(null);
+        }}
+        onConfirm={() => void handleCloseShift()}
+      />
     </>
   );
 }
 
 /** Admin shift-planning screen -- Plan 03 Task 13 (list/create/edit/delete/close). */
 export function ShiftsPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
 
-  const { data, isPending, isError } = useShifts({
+  const shiftsQuery = useShifts({
     ...(statusFilter !== "all" ? { status: statusFilter } : {}),
     ...(fromDate ? { from: fromDate } : {}),
     ...(toDate ? { to: toDate } : {}),
   });
-  const { data: productsData } = useProducts();
-  const { data: linesData } = useLines();
-  const { data: counterpartiesData } = useCounterparties();
-  const { data: labelTemplatesData } = useLabelTemplates();
+  const productsQuery = useProducts();
+  const linesQuery = useLines();
+  const counterpartiesQuery = useCounterparties();
+  const labelTemplatesQuery = useLabelTemplates();
 
-  const items = data ?? [];
-  const products = useMemo(() => productsData ?? [], [productsData]);
-  const lines = useMemo(() => linesData ?? [], [linesData]);
-  const counterparties = useMemo(() => counterpartiesData ?? [], [counterpartiesData]);
-  const labelTemplates = useMemo(() => labelTemplatesData ?? [], [labelTemplatesData]);
+  const items = shiftsQuery.data ?? [];
+  const products = useMemo(() => productsQuery.data ?? [], [productsQuery.data]);
+  const lines = useMemo(() => linesQuery.data ?? [], [linesQuery.data]);
+  const counterparties = useMemo(() => counterpartiesQuery.data ?? [], [counterpartiesQuery.data]);
+  const labelTemplates = useMemo(() => labelTemplatesQuery.data ?? [], [labelTemplatesQuery.data]);
+  const filtersActive = statusFilter !== "all" || Boolean(fromDate) || Boolean(toDate);
 
-  const statusFilterOptions: SelectOption[] = [
+  const statusFilterOptions: SelectOption<StatusFilter>[] = [
     { value: "all", label: t("pages.shifts.filters.status.all") },
     { value: "planned", label: t("pages.shifts.filters.status.planned") },
     { value: "active", label: t("pages.shifts.filters.status.active") },
@@ -366,89 +305,124 @@ export function ShiftsPage() {
         render: (row) =>
           canWrite ? (
             row.status === "planned" ? (
-              <AuthorizedPlannedShiftActions
-                shift={row}
-                products={products}
-                lines={lines}
-                counterparties={counterparties}
-                labelTemplates={labelTemplates}
-              />
+              <AuthorizedPlannedShiftActions shift={row} />
             ) : row.status === "active" ? (
               <AuthorizedCloseShiftAction shift={row} />
             ) : null
           ) : null,
       },
     ],
-    [t, canWrite, products, lines, counterparties, labelTemplates],
+    [t, canWrite],
   );
 
   return (
-    <div style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: 20 }}>
+    <AdminPage className="mk-shifts-page" data-testid="shifts-page">
       <PageHeader
         title={t("pages.shifts.title")}
-        actions={
-          canWrite ? (
-            <AuthorizedCreateShiftAction
-              products={products}
-              lines={lines}
-              counterparties={counterparties}
-              labelTemplates={labelTemplates}
-            />
-          ) : null
-        }
+        actions={canWrite ? <AuthorizedCreateShiftAction /> : null}
       />
 
-      <div style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
-        <div style={{ width: 200 }}>
+      <FilterBar
+        label={t("pages.shifts.filters.label")}
+        resultSummary={
+          !shiftsQuery.isPending && !shiftsQuery.isError
+            ? t("pages.shifts.resultCount", { count: items.length })
+            : ""
+        }
+        {...(filtersActive
+          ? {
+              resetLabel: t("pages.shifts.filters.reset"),
+              onReset: () => {
+                setStatusFilter("all");
+                setFromDate("");
+                setToDate("");
+              },
+            }
+          : {})}
+      >
+        <div className="mk-shifts-filter mk-shifts-filter--status">
           <Select
             label={t("pages.shifts.filters.statusLabel")}
             options={statusFilterOptions}
             value={statusFilter}
-            onChange={(value) => setStatusFilter(value as StatusFilter)}
+            onValueChange={setStatusFilter}
           />
         </div>
-        <div style={{ width: 180 }}>
-          <Input
+        <div className="mk-shifts-filter mk-shifts-filter--date">
+          <DatePicker
             label={t("pages.shifts.filters.fromLabel")}
-            type="date"
-            value={fromDate}
-            onChange={(event) => setFromDate(event.target.value)}
+            placeholder={t("common.datePicker.placeholder")}
+            clearLabel={t("common.datePicker.clear")}
+            calendarLabel={t("common.datePicker.calendar")}
+            previousMonthLabel={t("common.datePicker.previousMonth")}
+            nextMonthLabel={t("common.datePicker.nextMonth")}
+            locale={i18n.language}
+            {...(fromDate ? { value: fromDate } : {})}
+            onValueChange={(value) => setFromDate(value ?? "")}
           />
         </div>
-        <div style={{ width: 180 }}>
-          <Input
+        <div className="mk-shifts-filter mk-shifts-filter--date">
+          <DatePicker
             label={t("pages.shifts.filters.toLabel")}
-            type="date"
-            value={toDate}
-            onChange={(event) => setToDate(event.target.value)}
+            placeholder={t("common.datePicker.placeholder")}
+            clearLabel={t("common.datePicker.clear")}
+            calendarLabel={t("common.datePicker.calendar")}
+            previousMonthLabel={t("common.datePicker.previousMonth")}
+            nextMonthLabel={t("common.datePicker.nextMonth")}
+            locale={i18n.language}
+            {...(toDate ? { value: toDate } : {})}
+            onValueChange={(value) => setToDate(value ?? "")}
           />
         </div>
-      </div>
+      </FilterBar>
 
-      {isPending ? (
+      {shiftsQuery.isPending ? (
         <div style={{ display: "flex", justifyContent: "center", padding: 48 }}>
           <Spinner label={t("common.loading")} />
         </div>
-      ) : isError ? (
+      ) : shiftsQuery.isError ? (
         <Alert tone="error">{t("common.loadError")}</Alert>
       ) : items.length === 0 ? (
         <EmptyState
           title={t("pages.shifts.emptyTitle")}
           hint={t("pages.shifts.emptyHint")}
-          action={
-            canWrite ? (
-              <AuthorizedCreateShiftAction
-                products={products}
-                lines={lines}
-                counterparties={counterparties}
-                labelTemplates={labelTemplates}
-              />
-            ) : null
-          }
+          action={canWrite ? <AuthorizedCreateShiftAction /> : null}
         />
       ) : (
         <Table columns={columns} rows={items} />
       )}
-    </div>
+      <Outlet
+        context={
+          {
+            shifts: items,
+            products,
+            lines,
+            counterparties,
+            labelTemplates,
+            panelPending:
+              shiftsQuery.isPending ||
+              productsQuery.isPending ||
+              linesQuery.isPending ||
+              counterpartiesQuery.isPending ||
+              labelTemplatesQuery.isPending,
+            panelError:
+              shiftsQuery.isError ||
+              productsQuery.isError ||
+              linesQuery.isError ||
+              counterpartiesQuery.isError ||
+              labelTemplatesQuery.isError,
+            retryPanelData: async () => {
+              await Promise.all([
+                shiftsQuery.refetch(),
+                productsQuery.refetch(),
+                linesQuery.refetch(),
+                counterpartiesQuery.refetch(),
+                labelTemplatesQuery.refetch(),
+              ]);
+            },
+          } satisfies ShiftsPanelContext
+        }
+      />
+    </AdminPage>
   );
 }

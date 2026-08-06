@@ -41,7 +41,7 @@ export function ScannerSetupPanel({
         value={port}
         options={choices}
         disabled={disabled}
-        onChange={onPortChange}
+        onValueChange={onPortChange}
       />
       <Input
         size="floor"

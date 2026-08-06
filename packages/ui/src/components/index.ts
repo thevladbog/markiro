@@ -7,6 +7,20 @@ export type { InputProps, InputSize } from "./Input.js";
 export { Select } from "./Select.js";
 export type { SelectOption, SelectProps, SelectSize } from "./Select.js";
 
+export { Checkbox } from "./Checkbox.js";
+export type { CheckboxProps } from "./Checkbox.js";
+
+export { RadioGroup } from "./RadioGroup.js";
+export type { RadioGroupOption, RadioGroupProps } from "./RadioGroup.js";
+
+export { IconButton } from "./IconButton.js";
+export type { IconButtonProps } from "./IconButton.js";
+
+export { DatePicker } from "./DatePicker.js";
+export type { DatePickerProps } from "./DatePicker.js";
+export { VisuallyHidden } from "./VisuallyHidden.js";
+export type { VisuallyHiddenProps } from "./VisuallyHidden.js";
+
 export { Field } from "./Field.js";
 export type { FieldProps } from "./Field.js";
 
@@ -31,6 +45,12 @@ export type { ModalProps } from "./Modal.js";
 export { Drawer } from "./Drawer.js";
 export type { DrawerProps } from "./Drawer.js";
 
+export { SidePanel } from "./SidePanel.js";
+export type { OverlayDismissReason, SidePanelProps, SidePanelSize } from "./SidePanel.js";
+
+export { ConfirmDialog } from "./ConfirmDialog.js";
+export type { ConfirmDialogProps, ConfirmDialogTone } from "./ConfirmDialog.js";
+
 export { EmptyState } from "./EmptyState.js";
 export type { EmptyStateProps } from "./EmptyState.js";
 
@@ -42,6 +62,15 @@ export type { SidebarItem, SidebarProps } from "./Sidebar.js";
 
 export { PageHeader } from "./PageHeader.js";
 export type { PageHeaderProps } from "./PageHeader.js";
+
+export { AdminPage } from "./AdminPage.js";
+export type { AdminPageProps } from "./AdminPage.js";
+
+export { FilterBar } from "./FilterBar.js";
+export type { FilterBarProps } from "./FilterBar.js";
+
+export { RowActions } from "./RowActions.js";
+export type { RowActionsProps } from "./RowActions.js";
 
 export { toast } from "./Toast.js";
 export type { ToastTone } from "./Toast.js";

@@ -24,20 +24,7 @@ export function Blocked({ queuedCount }: BlockedProps): React.JSX.Element {
   const { t } = useTranslation();
 
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        boxSizing: "border-box",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 28,
-        padding: 40,
-        background: "var(--surface-page)",
-        color: "var(--fg-1)",
-      }}
-    >
+    <main className="kiosk-screen kiosk-screen--centered kiosk-blocked">
       {/* Decoration only — the words below carry the whole message. */}
       <svg
         width="96"
