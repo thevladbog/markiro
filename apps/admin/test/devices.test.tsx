@@ -11,6 +11,11 @@ import { DevicesPage } from "../src/pages/devices/index.js";
 function response(body: unknown): Response {
   return { ok: true, status: 200, json: async () => body } as Response;
 }
+
+function activeExpiry(): string {
+  return new Date(Date.now() + 60_000).toISOString();
+}
+
 function renderPage() {
   vi.stubGlobal(
     "fetch",
@@ -208,7 +213,7 @@ it("lets a credentials-only operator create and pair a station without operation
         url === "/api/station-devices/station-credentials/pairing-code" &&
         init?.method === "POST"
       )
-        return response({ code: "12345678", expiresAt: "2026-08-06T12:00:00.000Z" });
+        return response({ code: "12345678", expiresAt: activeExpiry() });
       throw new Error(`Unexpected request: ${url}`);
     }),
   );
@@ -317,7 +322,7 @@ it("keeps the drawer open in its code stage after creating a kiosk", async () =>
       if (url === "/api/kiosks" && init?.method === "POST")
         return response({ id: "kiosk-2", name: "Lobby kiosk" });
       if (url === "/api/kiosks/kiosk-2/pairing-code" && init?.method === "POST")
-        return response({ code: "12345678", expiresAt: "2026-08-06T12:00:00.000Z" });
+        return response({ code: "12345678", expiresAt: activeExpiry() });
       throw new Error(`Unexpected request: ${url}`);
     }),
   );

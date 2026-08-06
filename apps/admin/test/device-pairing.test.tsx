@@ -13,6 +13,10 @@ function response(body: unknown): Response {
   return { ok: true, status: 200, json: async () => body } as Response;
 }
 
+function activeExpiry(offsetMs = 60_000): string {
+  return new Date(Date.now() + offsetMs).toISOString();
+}
+
 function renderDrawer(
   queryClient = new QueryClient({ defaultOptions: { mutations: { retry: false } } }),
 ) {
@@ -54,8 +58,8 @@ it("keeps the one-time pairing secret only in the active drawer and clears its m
       if (url === "/api/station-devices/station-1/pairing-code" && init?.method === "POST")
         return response(
           ++issueCount === 1
-            ? { code: "12345678", expiresAt: "2026-08-06T12:00:00.000Z" }
-            : { code: "87654321", expiresAt: "2026-08-06T12:01:00.000Z" },
+            ? { code: "12345678", expiresAt: activeExpiry() }
+            : { code: "87654321", expiresAt: activeExpiry(120_000) },
         );
       throw new Error(`Unexpected request: ${url}`);
     }),
@@ -104,7 +108,7 @@ it("keeps a failed station code issue retryable in the same drawer", async () =>
             statusText: "Unavailable",
             json: async () => ({ message: "offline" }),
           } as Response;
-        return response({ code: "12345678", expiresAt: "2026-08-06T12:00:00.000Z" });
+        return response({ code: "12345678", expiresAt: activeExpiry() });
       }
       throw new Error(`Unexpected request: ${url}`);
     }),
