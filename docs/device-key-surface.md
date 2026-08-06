@@ -72,6 +72,13 @@ belong in either section:
   dimension only distinguishes callers when `TRUST_PROXY_HOPS` is set correctly behind
   a proxy; misconfigured, every caller collapses onto the proxy's own address and only
   the (much larger) global backstop bounds guessing.
+- `POST /station/pair` (`apps/api/src/modules/station-pairing/station-pair.controller.ts`)
+  also carries **no guard**: a factory station has no credential until it redeems its
+  one-time eight-digit pairing code. Its HMAC-protected code and the same persisted
+  per-source/global pairing limiter are the deliberate boundary; it must not gain
+  `TenantGuard` or a cabinet authorization policy. Conversely,
+  `POST /station-devices/:id/pairing-code` stays cabinet-only under
+  `CREDENTIALS_MANAGE`, so a station key cannot issue a replacement credential.
 - `GET/POST /1c_exchange` (`apps/api/src/modules/exchange/exchange.controller.ts`)
   carries **no guard either**, and unlike every other exception in this section, it
   never falls back on `TenantGuard`/`AuthorizationGuard` at all — not even indirectly.

@@ -27,6 +27,7 @@ import { PickupRejectionsController } from "../src/modules/pickup-rejections/pic
 import { ProductsController } from "../src/modules/products/products.controller";
 import { ShiftsController } from "../src/modules/shifts/shifts.controller";
 import { StationDevicesController } from "../src/modules/station-devices/station-devices.controller";
+import { StationPairController } from "../src/modules/station-pairing/station-pair.controller";
 import { StationScansController } from "../src/modules/station-scans/station-scans.controller";
 import { StationOnlyGuard } from "../src/tenancy/station-only.guard";
 import { TenantGuard } from "../src/tenancy/tenant.guard";
@@ -217,7 +218,13 @@ const ADMINISTRATIVE_CONTROLLERS: readonly [
   ],
   [
     StationDevicesController,
-    { list: credentialsPolicy, enroll: credentialsPolicy, revoke: credentialsPolicy },
+    {
+      list: credentialsPolicy,
+      create: credentialsPolicy,
+      update: credentialsPolicy,
+      revoke: credentialsPolicy,
+      issuePairingCode: credentialsPolicy,
+    },
   ],
   [
     KiosksController,
@@ -287,4 +294,11 @@ describe("cabinet route authorization metadata", () => {
       expect(routeMethods(controller).sort()).toEqual([...expectedMethods].sort());
     },
   );
+
+  it("keeps station pairing unauthenticated because an unpaired device has no credential", () => {
+    const guards = Reflect.getMetadata(GUARDS_METADATA, StationPairController) ?? [];
+    expect(guards).not.toContain(TenantGuard);
+    expect(guards).not.toContain(AuthorizationGuard);
+    expect(routeMethods(StationPairController)).toEqual(["pair"]);
+  });
 });

@@ -1,0 +1,309 @@
+import { randomUUID } from "node:crypto";
+import express from "express";
+import { Test } from "@nestjs/testing";
+import type { INestApplication } from "@nestjs/common";
+import { and, eq, inArray } from "drizzle-orm";
+import request from "supertest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { schema, type Db } from "@markiro/db";
+import { AppModule } from "../src/app.module";
+import { mountAuth, setupAuth } from "../src/auth/auth.setup";
+import { loadEnv } from "../src/env";
+import { hashPairingCode } from "../src/pickup/device-token";
+import {
+  GLOBAL_PAIR_SOURCE,
+  PAIR_ATTEMPT_WINDOW_MS,
+} from "../src/modules/device-pairing/pairing-policy";
+import { listenOnLoopback } from "./support/listen-loopback";
+import { signUpAndActivate } from "./support/auth";
+
+const ready = Boolean(
+  process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
+);
+
+function pairAttemptWindowStart(now: number): Date {
+  return new Date(Math.floor(now / PAIR_ATTEMPT_WINDOW_MS) * PAIR_ATTEMPT_WINDOW_MS);
+}
+
+/** Only clears this suite's loopback/global limiter rows in the shared test DB. */
+async function clearPairAttemptBudget(db: Db): Promise<void> {
+  const current = pairAttemptWindowStart(Date.now());
+  const previous = new Date(current.getTime() - PAIR_ATTEMPT_WINDOW_MS);
+  await db
+    .delete(schema.kioskPairAttempts)
+    .where(
+      and(
+        inArray(schema.kioskPairAttempts.source, ["127.0.0.1", "0:0:0:0::/64", GLOBAL_PAIR_SOURCE]),
+        inArray(schema.kioskPairAttempts.windowStartedAt, [current, previous]),
+      ),
+    );
+}
+
+describe.skipIf(!ready)("station pairing e2e", () => {
+  let app: INestApplication | undefined;
+  let db: Db;
+  let agent: ReturnType<typeof request.agent>;
+  let tenantId: string;
+  let deviceId: string;
+  let pairingCodePepper: string;
+
+  beforeAll(async () => {
+    const env = loadEnv();
+    const setup = setupAuth(env);
+    db = setup.db;
+    pairingCodePepper = env.PAIRING_CODE_PEPPER;
+    const ref = await Test.createTestingModule({
+      imports: [AppModule.forRoot({ ...setup, databaseUrl: env.DATABASE_URL })],
+    }).compile();
+    app = ref.createNestApplication({ bodyParser: false });
+    const server = app.getHttpAdapter().getInstance();
+    mountAuth(server, setup.auth);
+    server.use(express.json());
+    await app.init();
+    await listenOnLoopback(app);
+  });
+
+  afterAll(async () => {
+    await app?.close();
+  });
+
+  beforeEach(async () => {
+    await clearPairAttemptBudget(db);
+    agent = request.agent(app!.getHttpServer());
+    tenantId = await signUpAndActivate(agent);
+    const [line] = await db.insert(schema.lines).values({ tenantId, name: "Packing" }).returning();
+    const created = await agent
+      .post("/station-devices")
+      .send({ name: `Station ${randomUUID()}`, lineId: line!.id })
+      .expect(201);
+    deviceId = created.body.id as string;
+    const operatorId = randomUUID();
+    await db.insert(schema.employees).values({
+      id: operatorId,
+      tenantId,
+      fullName: "Pairing operator",
+    });
+    await db.insert(schema.operatorCredentials).values({
+      tenantId,
+      employeeId: operatorId,
+      login: "4001",
+      pinHash: "test-pbkdf2-verifier",
+    });
+  });
+
+  it("issues an HMAC-protected 8-digit code and redeems it into one durable station credential", async () => {
+    const issued = await agent
+      .post(`/station-devices/${deviceId}/pairing-code`)
+      .send({})
+      .expect(201);
+
+    expect(issued.body.code).toMatch(/^\d{8}$/);
+    expect(new Date(issued.body.expiresAt).getTime() - Date.now()).toBeGreaterThan(13 * 60_000);
+    expect(new Date(issued.body.expiresAt).getTime() - Date.now()).toBeLessThanOrEqual(15 * 60_000);
+
+    const [storedCode] = await db
+      .select()
+      .from(schema.stationPairingCodes)
+      .where(
+        and(
+          eq(schema.stationPairingCodes.tenantId, tenantId),
+          eq(schema.stationPairingCodes.stationDeviceId, deviceId),
+        ),
+      );
+    expect(storedCode!.codeHash).toBe(
+      hashPairingCode(issued.body.code as string, pairingCodePepper),
+    );
+    expect(storedCode!.codeHash).not.toBe(issued.body.code);
+
+    const paired = await request(app!.getHttpServer())
+      .post("/station/pair")
+      .send({ code: issued.body.code })
+      .expect(201);
+
+    expect(paired.body).toMatchObject({
+      device: {
+        id: deviceId,
+        tenantId,
+        organizationName: "Test Plant",
+        line: { id: expect.any(String), name: "Packing" },
+      },
+      credential: { apiKey: expect.any(String), serverUrl: loadEnv().BETTER_AUTH_URL },
+      operators: [
+        {
+          operatorId: expect.any(String),
+          name: "Pairing operator",
+          login: "4001",
+          pinHash: "test-pbkdf2-verifier",
+          badgeHash: null,
+          active: true,
+        },
+      ],
+    });
+    expect(paired.body.operators[0]).not.toHaveProperty("pin");
+    expect(paired.body.operators[0]).not.toHaveProperty("badgeCode");
+
+    const [device] = await db
+      .select()
+      .from(schema.stationDevices)
+      .where(
+        and(eq(schema.stationDevices.tenantId, tenantId), eq(schema.stationDevices.id, deviceId)),
+      );
+    expect(device!.apiKeyId).toEqual(expect.any(String));
+    expect(device!.pairedAt).toBeInstanceOf(Date);
+    expect(device!.revokedAt).toBeNull();
+
+    const [claimedCode] = await db
+      .select({ usedAt: schema.stationPairingCodes.usedAt })
+      .from(schema.stationPairingCodes)
+      .where(eq(schema.stationPairingCodes.id, storedCode!.id));
+    expect(claimedCode!.usedAt).toBeInstanceOf(Date);
+
+    await request(app!.getHttpServer())
+      .post(`/station-devices/${deviceId}/pairing-code`)
+      .set("x-api-key", paired.body.credential.apiKey as string)
+      .send({})
+      .expect(403);
+  });
+
+  it("retires a previous live code and preserves one live code per station", async () => {
+    const first = await agent
+      .post(`/station-devices/${deviceId}/pairing-code`)
+      .send({})
+      .expect(201);
+    await agent.post(`/station-devices/${deviceId}/pairing-code`).send({}).expect(201);
+
+    const rows = await db
+      .select()
+      .from(schema.stationPairingCodes)
+      .where(
+        and(
+          eq(schema.stationPairingCodes.tenantId, tenantId),
+          eq(schema.stationPairingCodes.stationDeviceId, deviceId),
+        ),
+      );
+    expect(rows.filter((row) => row.usedAt === null)).toHaveLength(1);
+    expect(
+      rows.find((row) => row.codeHash === hashPairingCode(first.body.code, pairingCodePepper))
+        ?.usedAt,
+    ).toBeInstanceOf(Date);
+  });
+
+  it("uses stable public error codes without exposing station details", async () => {
+    const unknown = await request(app!.getHttpServer())
+      .post("/station/pair")
+      .send({ code: "99999999" })
+      .expect(401);
+    expect(unknown.body).toMatchObject({ code: "PAIR_INVALID" });
+    expect(JSON.stringify(unknown.body)).not.toContain(deviceId);
+
+    const expired = await agent
+      .post(`/station-devices/${deviceId}/pairing-code`)
+      .send({})
+      .expect(201);
+    await db
+      .update(schema.stationPairingCodes)
+      .set({ expiresAt: new Date(Date.now() - 1_000) })
+      .where(
+        eq(
+          schema.stationPairingCodes.codeHash,
+          hashPairingCode(expired.body.code, pairingCodePepper),
+        ),
+      );
+    const expiredResult = await request(app!.getHttpServer())
+      .post("/station/pair")
+      .send({ code: expired.body.code })
+      .expect(401);
+    expect(expiredResult.body).toMatchObject({ code: "PAIR_EXPIRED" });
+
+    const locked = await agent
+      .post(`/station-devices/${deviceId}/pairing-code`)
+      .send({})
+      .expect(201);
+    await db
+      .update(schema.stationPairingCodes)
+      .set({ attempts: 5 })
+      .where(
+        eq(
+          schema.stationPairingCodes.codeHash,
+          hashPairingCode(locked.body.code, pairingCodePepper),
+        ),
+      );
+    const lockedResult = await request(app!.getHttpServer())
+      .post("/station/pair")
+      .send({ code: locked.body.code })
+      .expect(401);
+    expect(lockedResult.body).toMatchObject({ code: "PAIR_LOCKED" });
+  });
+
+  it("applies the global limiter before lookup and leaves its code live", async () => {
+    const issued = await agent
+      .post(`/station-devices/${deviceId}/pairing-code`)
+      .send({})
+      .expect(201);
+    await db.insert(schema.kioskPairAttempts).values({
+      source: GLOBAL_PAIR_SOURCE,
+      windowStartedAt: pairAttemptWindowStart(Date.now()),
+      failures: 401,
+    });
+
+    const limited = await request(app!.getHttpServer())
+      .post("/station/pair")
+      .send({ code: issued.body.code })
+      .expect(401);
+    expect(limited.body).toMatchObject({ code: "PAIR_RATE_LIMITED" });
+    const [code] = await db
+      .select({ usedAt: schema.stationPairingCodes.usedAt })
+      .from(schema.stationPairingCodes)
+      .where(
+        eq(
+          schema.stationPairingCodes.codeHash,
+          hashPairingCode(issued.body.code, pairingCodePepper),
+        ),
+      );
+    expect(code!.usedAt).toBeNull();
+  });
+
+  it("allows one concurrent winner and deletes the losing candidate key", async () => {
+    const issued = await agent
+      .post(`/station-devices/${deviceId}/pairing-code`)
+      .send({})
+      .expect(201);
+    const [first, second] = await Promise.all([
+      request(app!.getHttpServer()).post("/station/pair").send({ code: issued.body.code }),
+      request(app!.getHttpServer()).post("/station/pair").send({ code: issued.body.code }),
+    ]);
+    expect([first.status, second.status].sort()).toEqual([201, 401]);
+
+    const [station] = await db
+      .select({ apiKeyId: schema.stationDevices.apiKeyId })
+      .from(schema.stationDevices)
+      .where(eq(schema.stationDevices.id, deviceId));
+    const keys = await db
+      .select({ id: schema.apikey.id })
+      .from(schema.apikey)
+      .where(and(eq(schema.apikey.referenceId, tenantId), eq(schema.apikey.configId, "station")));
+    expect(keys).toEqual([{ id: station!.apiKeyId! }]);
+  });
+
+  it("re-pairs the same revoked durable station record", async () => {
+    await agent.delete(`/station-devices/${deviceId}`).expect(204);
+    const issued = await agent
+      .post(`/station-devices/${deviceId}/pairing-code`)
+      .send({})
+      .expect(201);
+    const paired = await request(app!.getHttpServer())
+      .post("/station/pair")
+      .send({ code: issued.body.code })
+      .expect(201);
+
+    expect(paired.body.device.id).toBe(deviceId);
+    const [station] = await db
+      .select({
+        apiKeyId: schema.stationDevices.apiKeyId,
+        revokedAt: schema.stationDevices.revokedAt,
+      })
+      .from(schema.stationDevices)
+      .where(eq(schema.stationDevices.id, deviceId));
+    expect(station).toMatchObject({ apiKeyId: expect.any(String), revokedAt: null });
+  });
+});

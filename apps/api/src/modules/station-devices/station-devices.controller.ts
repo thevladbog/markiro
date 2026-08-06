@@ -26,6 +26,8 @@ import {
   type UpdateStationDeviceDto,
 } from "./dto";
 import { StationDevicesService } from "./station-devices.service";
+import { type IssueStationPairingCodeResultDto } from "../station-pairing/dto";
+import { StationPairingService } from "../station-pairing/station-pairing.service";
 
 @ApiTags("station-devices")
 @Controller("station-devices")
@@ -34,6 +36,7 @@ import { StationDevicesService } from "./station-devices.service";
 export class StationDevicesController {
   constructor(
     private readonly service: StationDevicesService,
+    private readonly pairing: StationPairingService,
     private readonly audit: SecurityAuditService,
   ) {}
 
@@ -85,9 +88,28 @@ export class StationDevicesController {
     this.auditMutation(req, "station_device.revoke", id, "succeeded");
   }
 
+  @Post(":id/pairing-code")
+  async issuePairingCode(
+    @Req() req: RequestWithTenant,
+    @Param("id") id: string,
+  ): Promise<IssueStationPairingCodeResultDto> {
+    try {
+      const result = await this.pairing.issueCode(req.tenantId!, id, req.userId!);
+      this.auditMutation(req, "station_pairing_code.issue", id, "succeeded");
+      return result;
+    } catch (error) {
+      this.auditMutation(req, "station_pairing_code.issue", id, "failed");
+      throw error;
+    }
+  }
+
   private auditMutation(
     req: RequestWithTenant,
-    action: "station_device.create" | "station_device.update" | "station_device.revoke",
+    action:
+      | "station_device.create"
+      | "station_device.update"
+      | "station_device.revoke"
+      | "station_pairing_code.issue",
     resourceId: string | null,
     outcome: "succeeded" | "failed",
   ): void {
