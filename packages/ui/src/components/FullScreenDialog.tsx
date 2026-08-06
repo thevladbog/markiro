@@ -34,6 +34,27 @@ function getFocusable(container: HTMLElement): HTMLElement[] {
   return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
 }
 
+const OPEN_DIALOGS: HTMLElement[] = [];
+
+function registerDialog(dialog: HTMLElement): () => void {
+  OPEN_DIALOGS.push(dialog);
+  return () => {
+    const index = OPEN_DIALOGS.lastIndexOf(dialog);
+    if (index !== -1) OPEN_DIALOGS.splice(index, 1);
+  };
+}
+
+function isTopmostDialog(dialog: HTMLElement): boolean {
+  const connectedDialogs = OPEN_DIALOGS.filter((candidate) => candidate.isConnected);
+  if (connectedDialogs.some((candidate) => candidate !== dialog && dialog.contains(candidate))) {
+    return false;
+  }
+  if (connectedDialogs.some((candidate) => candidate !== dialog && candidate.contains(dialog))) {
+    return true;
+  }
+  return connectedDialogs.at(-1) === dialog;
+}
+
 export function FullScreenDialog({
   open,
   title,
@@ -52,23 +73,31 @@ export function FullScreenDialog({
 
     const previouslyFocused = document.activeElement as HTMLElement | null;
     const dialog = dialogRef.current;
+    if (!dialog) return undefined;
+    const unregister = registerDialog(dialog);
     (dialog ? getFocusable(dialog)[0] : undefined)?.focus();
 
-    return () => previouslyFocused?.focus();
+    return () => {
+      unregister();
+      previouslyFocused?.focus();
+    };
   }, [open]);
 
   if (!open) return null;
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const dialog = dialogRef.current;
+    if (event.defaultPrevented || !dialog || !isTopmostDialog(dialog)) return;
+
     if (event.key === "Escape") {
       event.preventDefault();
+      event.stopPropagation();
       onClose();
       return;
     }
     if (event.key !== "Tab") return;
 
-    const dialog = dialogRef.current;
-    if (!dialog) return;
+    event.stopPropagation();
     const focusable = getFocusable(dialog);
     if (focusable.length === 0) {
       event.preventDefault();

@@ -91,6 +91,7 @@ describe("Button", () => {
     const button = screen.getByRole("button", { name: "Start shift" });
     expect(button.className).toContain("mk-btn--floor");
     expect(button.style.height).toBe("var(--control-floor)");
+    expect(button.style.minWidth).toBe("var(--control-floor)");
     expect(button.style.font).toBe("var(--floor-body-strong)");
     expect((button as HTMLButtonElement).disabled).toBe(true);
 
@@ -199,6 +200,20 @@ describe("Input", () => {
       "Too large",
     );
   });
+
+  it("makes the floor input itself a 64px target and focuses it from the visual field", async () => {
+    const user = userEvent.setup();
+    render(<Input size="floor" label="Code" prefix="01" suffix="GTIN" />);
+
+    const input = screen.getByRole("textbox", { name: "Code" });
+    const visualField = input.parentElement;
+    expect(visualField).not.toBeNull();
+    expect(input.style.minHeight).toBe("var(--control-floor)");
+    expect(input.style.height).toBe("100%");
+
+    await user.click(visualField!);
+    expect(document.activeElement).toBe(input);
+  });
 });
 
 describe("Select", () => {
@@ -249,6 +264,7 @@ describe("Select", () => {
 
     const select = screen.getByRole("combobox", { name: "Line" });
     expect((select as HTMLSelectElement).disabled).toBe(true);
+    expect(select.tagName).toBe("SELECT");
     expect(select.style.height).toBe("var(--control-floor)");
     expect(select.style.font).toBe("var(--floor-body)");
     expect(screen.getByText("Line").style.font).toBe("var(--floor-body-strong)");
@@ -301,6 +317,29 @@ describe("Pager", () => {
     await user.click(next);
     expect(onPageChange).not.toHaveBeenCalled();
   });
+
+  it("normalizes non-finite and non-positive inputs to finite pages and callbacks", async () => {
+    const user = userEvent.setup();
+    const onPageChange = vi.fn();
+    const { rerender } = render(
+      <Pager page={Number.NaN} pageCount={Number.POSITIVE_INFINITY} onPageChange={onPageChange} />,
+    );
+
+    expect(screen.getByText("Page 1 of 1")).toBeDefined();
+    expect((screen.getByRole("button", { name: "Previous" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect((screen.getByRole("button", { name: "Next" }) as HTMLButtonElement).disabled).toBe(true);
+
+    rerender(<Pager page={Number.POSITIVE_INFINITY} pageCount={4} onPageChange={onPageChange} />);
+    expect(screen.getByText("Page 4 of 4")).toBeDefined();
+    await user.click(screen.getByRole("button", { name: "Previous" }));
+    expect(onPageChange).toHaveBeenLastCalledWith(3);
+    expect(Number.isFinite(onPageChange.mock.calls.at(-1)?.[0])).toBe(true);
+
+    rerender(<Pager page={Number.NEGATIVE_INFINITY} pageCount={0} onPageChange={onPageChange} />);
+    expect(screen.getByText("Page 1 of 1")).toBeDefined();
+  });
 });
 
 describe("FullScreenDialog", () => {
@@ -319,6 +358,38 @@ describe("FullScreenDialog", () => {
           footer={<button type="button">Save setup</button>}
         >
           <input aria-label="Station name" />
+        </FullScreenDialog>
+      </>
+    );
+  }
+
+  function NestedDialogHarness() {
+    const [outerOpen, setOuterOpen] = useState(false);
+    const [innerOpen, setInnerOpen] = useState(false);
+    return (
+      <>
+        <button type="button" onClick={() => setOuterOpen(true)}>
+          Open outer
+        </button>
+        <FullScreenDialog
+          open={outerOpen}
+          title="Outer dialog"
+          backLabel="Back from outer"
+          onClose={() => setOuterOpen(false)}
+          footer={<button type="button">Outer action</button>}
+        >
+          <button type="button" onClick={() => setInnerOpen(true)}>
+            Open inner
+          </button>
+          <FullScreenDialog
+            open={innerOpen}
+            title="Inner dialog"
+            backLabel="Back from inner"
+            onClose={() => setInnerOpen(false)}
+            footer={<button type="button">Inner action</button>}
+          >
+            Inner content
+          </FullScreenDialog>
         </FullScreenDialog>
       </>
     );
@@ -360,6 +431,32 @@ describe("FullScreenDialog", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(document.activeElement).toBe(opener);
+  });
+
+  it("keeps Escape and Tab scoped to the topmost nested dialog and restores focus by layer", async () => {
+    const user = userEvent.setup();
+    render(<NestedDialogHarness />);
+    const originalOpener = screen.getByRole("button", { name: "Open outer" });
+    await user.click(originalOpener);
+    const innerOpener = screen.getByRole("button", { name: "Open inner" });
+    await user.click(innerOpener);
+
+    const innerBack = screen.getByRole("button", { name: "Back from inner" });
+    const innerLast = screen.getByRole("button", { name: "Inner action" });
+    expect(document.activeElement).toBe(innerBack);
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(innerLast);
+    await user.tab();
+    expect(document.activeElement).toBe(innerBack);
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Inner dialog" })).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Outer dialog" })).toBeDefined();
+    expect(document.activeElement).toBe(innerOpener);
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Outer dialog" })).toBeNull();
+    expect(document.activeElement).toBe(originalOpener);
   });
 });
 

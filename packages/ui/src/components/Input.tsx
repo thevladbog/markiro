@@ -1,4 +1,11 @@
-import { useId, useState, type FocusEvent, type InputHTMLAttributes, type ReactNode } from "react";
+import {
+  useId,
+  useRef,
+  useState,
+  type FocusEvent,
+  type InputHTMLAttributes,
+  type ReactNode,
+} from "react";
 
 import { cn } from "../cn.js";
 
@@ -35,6 +42,7 @@ export function Input({
   ...rest
 }: InputProps) {
   const [focus, setFocus] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
   const autoId = useId();
   const inputId = id ?? `mk-input-${autoId}`;
   const hintId = hint ? `${inputId}-hint` : undefined;
@@ -69,6 +77,7 @@ export function Input({
       )}
       <span
         className={cn("mk-input", error && "mk-input--error")}
+        onClick={size === "floor" && !disabled ? () => inputRef.current?.focus() : undefined}
         style={{
           display: "flex",
           alignItems: "center",
@@ -97,6 +106,7 @@ export function Input({
           </span>
         )}
         <input
+          ref={inputRef}
           id={inputId}
           disabled={disabled}
           aria-invalid={error ? true : undefined}
@@ -107,6 +117,8 @@ export function Input({
           style={{
             flex: 1,
             minWidth: 0,
+            height: size === "floor" ? "100%" : undefined,
+            minHeight: size === "floor" ? "var(--control-floor)" : undefined,
             border: "none",
             outline: "none",
             background: "transparent",

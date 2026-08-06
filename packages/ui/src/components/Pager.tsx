@@ -27,8 +27,15 @@ export function Pager({
   className,
   style,
 }: PagerProps) {
-  const count = Math.max(1, Math.trunc(pageCount));
-  const current = Math.min(count, Math.max(1, Math.trunc(page)));
+  const count = Number.isFinite(pageCount) ? Math.max(1, Math.trunc(pageCount)) : 1;
+  const requestedPage = Number.isNaN(page)
+    ? 1
+    : page === Number.POSITIVE_INFINITY
+      ? count
+      : page === Number.NEGATIVE_INFINITY
+        ? 1
+        : Math.trunc(page);
+  const current = Math.min(count, Math.max(1, requestedPage));
 
   return (
     <nav

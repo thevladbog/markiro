@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ALERT_TONE,
   Alert,
+  Button,
   EmptyState,
   Modal,
   PageHeader,
@@ -108,6 +109,25 @@ describe("SignalOverlay", () => {
       }
     },
   );
+
+  it("uses the contrast-safe error foreground for a dark-theme floor destructive button", () => {
+    document.documentElement.dataset.theme = "dark";
+    render(
+      <Button size="floor" variant="destructive">
+        Stop line
+      </Button>,
+    );
+
+    const button = screen.getByRole("button", { name: "Stop line" });
+    expect(button.style.color).toBe("var(--fg-on-err-solid)");
+    const styles = getComputedStyle(document.documentElement);
+    expect(
+      contrastRatio(
+        styles.getPropertyValue("--err-solid").trim(),
+        styles.getPropertyValue("--fg-on-err-solid").trim(),
+      ),
+    ).toBeGreaterThanOrEqual(4.5);
+  });
 });
 
 describe("Modal", () => {

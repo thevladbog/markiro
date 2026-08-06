@@ -77,6 +77,7 @@ export function Button({
         justifyContent: "center",
         gap: size === "floor" ? 12 : 8,
         height: HEIGHT[size],
+        minWidth: size === "floor" ? "var(--control-floor)" : undefined,
         padding: size === "floor" ? "0 24px" : "0 16px",
         borderRadius: "var(--r-2)",
         font: size === "floor" ? "var(--floor-body-strong)" : "600 14px/1 var(--font-ui)",
@@ -86,6 +87,9 @@ export function Button({
         opacity: disabled ? 0.45 : 1,
         transition: "filter 120ms, transform 60ms",
         ...VARIANT_STYLE[variant],
+        ...(size === "floor" && variant === "destructive"
+          ? { color: "var(--fg-on-err-solid)" }
+          : {}),
         ...style,
       }}
       {...rest}
