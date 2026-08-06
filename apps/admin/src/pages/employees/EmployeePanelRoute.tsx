@@ -153,7 +153,9 @@ export function EmployeeCreatePanelRoute(): ReactElement {
   const [error, setError] = useState<string | null>(null);
   const guard = useRoutePanelGuard(close, mutation.isPending);
 
-  if (context.employeesPending || context.employeesError) return <PanelState mode="create" />;
+  if (context.employeesPending || (context.employeesError && context.employees.length === 0)) {
+    return <PanelState mode="create" />;
+  }
 
   return (
     <>
@@ -215,10 +217,11 @@ export function EmployeeEditPanelRoute(): ReactElement {
   const { t } = useTranslation();
   const { context, close } = usePanelContext();
   const updateMutation = useUpdateEmployee();
-  const [profileError, setProfileError] = useState<string | null>(null);
+  const [profileApiError, setProfileApiError] = useState<string | null>(null);
+  const [profileValidationError, setProfileValidationError] = useState(false);
   const [dirty, setDirty] = useState<SectionFlags>(CLEAN_SECTIONS);
   const [busy, setBusy] = useState({ badges: false, access: false });
-  const [errors, setErrors] = useState<SectionFlags>(CLEAN_SECTIONS);
+  const [errors, setErrors] = useState({ badges: false, access: false });
   const [accessStatus, setAccessStatus] = useState<EmployeeAccessSectionStatus>("loading");
   const [activeSection, setActiveSection] = useState<EmployeeSectionId>("profile");
   const [scrollRoot, setScrollRoot] = useState<HTMLElement | null>(null);
@@ -248,8 +251,8 @@ export function EmployeeEditPanelRoute(): ReactElement {
   const reportProfileDirty = useCallback((value: boolean) => {
     setDirty((current) => (current.profile === value ? current : { ...current, profile: value }));
   }, []);
-  const reportProfileError = useCallback((value: boolean) => {
-    setErrors((current) => (current.profile === value ? current : { ...current, profile: value }));
+  const reportProfileValidationError = useCallback((value: boolean) => {
+    setProfileValidationError((current) => (current === value ? current : value));
   }, []);
   const reportBadgesDirty = useCallback((value: boolean) => {
     setDirty((current) => (current.badges === value ? current : { ...current, badges: value }));
@@ -301,7 +304,7 @@ export function EmployeeEditPanelRoute(): ReactElement {
       setActiveSection(id);
       const section = getSectionElement(id);
       const heading = section?.querySelector<HTMLElement>("h3");
-      heading?.scrollIntoView({ block: "start" });
+      section?.scrollIntoView({ block: "start" });
       heading?.focus({ preventScroll: true });
     },
     [getSectionElement],
@@ -311,11 +314,15 @@ export function EmployeeEditPanelRoute(): ReactElement {
     if (!scrollRoot) return undefined;
 
     const updateActiveSection = () => {
+      const scrollRootTop = scrollRoot.getBoundingClientRect().top;
       const threshold = scrollRoot.scrollTop + 32;
       let nextSection: EmployeeSectionId = "profile";
       SECTION_ORDER.forEach((id) => {
         const section = getSectionElement(id);
-        if (section && section.offsetTop <= threshold) nextSection = id;
+        if (!section) return;
+        const sectionTop =
+          section.getBoundingClientRect().top - scrollRootTop + scrollRoot.scrollTop;
+        if (sectionTop <= threshold) nextSection = id;
       });
       setActiveSection(nextSection);
     };
@@ -324,7 +331,9 @@ export function EmployeeEditPanelRoute(): ReactElement {
     return () => scrollRoot.removeEventListener("scroll", updateActiveSection);
   }, [getSectionElement, scrollRoot]);
 
-  if (context.employeesPending || context.employeesError) return <PanelState mode="edit" />;
+  if (context.employeesPending || (context.employeesError && context.employees.length === 0)) {
+    return <PanelState mode="edit" />;
+  }
 
   if (!employee || !initialValues) {
     return (
@@ -345,7 +354,7 @@ export function EmployeeEditPanelRoute(): ReactElement {
     {
       id: "profile",
       label: t("pages.employees.sections.profile"),
-      hasError: errors.profile,
+      hasError: profileApiError !== null || profileValidationError,
     },
     {
       id: "badges",
@@ -369,16 +378,14 @@ export function EmployeeEditPanelRoute(): ReactElement {
 
   const updateProfile = async (input: CreateEmployeeInput) => {
     try {
-      setProfileError(null);
-      setErrors((current) => (current.profile ? { ...current, profile: false } : current));
+      setProfileApiError(null);
       await updateMutation.mutateAsync({ id: employee.id, input });
       toast("ok", t("pages.employees.toasts.updateSuccess"));
       guard.finish();
     } catch (cause) {
-      setProfileError(
+      setProfileApiError(
         cause instanceof ApiRequestError ? cause.message : t("pages.employees.form.updateError"),
       );
-      setErrors((current) => (current.profile ? current : { ...current, profile: true }));
     }
   };
 
@@ -434,10 +441,10 @@ export function EmployeeEditPanelRoute(): ReactElement {
                 mode="edit"
                 initialValues={initialValues}
                 submitting={updateMutation.isPending}
-                submissionError={profileError}
+                submissionError={profileApiError}
                 onSubmit={updateProfile}
                 onDirtyChange={reportProfileDirty}
-                onErrorChange={reportProfileError}
+                onErrorChange={reportProfileValidationError}
               />
             </section>
             <div ref={badgesHostRef} className="mk-employee-edit-panel__section-host">

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { createMemoryRouter, createRoutesFromElements, Route, RouterProvider } from "react-router";
 import { afterEach, expect, it, vi } from "vitest";
@@ -10,6 +10,7 @@ import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider, RequireCapability } from "../src/access/context.js";
 import i18n from "../src/i18n/index.js";
 import type * as EmployeesApiModule from "../src/pages/employees/api.js";
+import { EMPLOYEES_QUERY_KEY } from "../src/pages/employees/api.js";
 import {
   EmployeeCreatePanelRoute,
   EmployeeEditPanelRoute,
@@ -105,6 +106,9 @@ function renderPanel(
   initialEntries: string[] = ["/employees"],
   access: AccessDocument = WRITE_ACCESS,
 ) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
   const router = createMemoryRouter(
     createRoutesFromElements(
       <Route
@@ -137,19 +141,13 @@ function renderPanel(
   );
   const user = userEvent.setup();
   render(
-    <QueryClientProvider
-      client={
-        new QueryClient({
-          defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-        })
-      }
-    >
+    <QueryClientProvider client={queryClient}>
       <AccessProvider value={access}>
         <RouterProvider router={router} />
       </AccessProvider>
     </QueryClientProvider>,
   );
-  return { router, user };
+  return { queryClient, router, user };
 }
 
 afterEach(async () => {
@@ -457,9 +455,71 @@ it("shows the edit-panel load error and retries before mounting employee resourc
   expect(operatorsHookMountSpy).toHaveBeenCalled();
 });
 
-it("keeps all employee resources mounted and navigates between named sections", async () => {
+it("keeps dirty editor resources and discard protection after a cached-list refetch fails", async () => {
+  let employeeAttempts = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      if (String(url) === "/api/employees") {
+        employeeAttempts += 1;
+        return employeeAttempts === 1
+          ? jsonResponse(200, { items: [JANE] })
+          : jsonResponse(503, { message: "Refetch unavailable" });
+      }
+      if (String(url) === "/api/operators") {
+        return jsonResponse(200, { items: [ACTIVE_OPERATOR] });
+      }
+      throw new Error(`Unexpected request: ${String(url)}`);
+    }),
+  );
+  const { queryClient, router, user } = renderPanel(["/employees/1/edit"]);
+
+  const fullName = await screen.findByLabelText("ФИО");
+  const panel = screen.getByRole("dialog", { name: "Изменить сотрудника" });
+  const badgeCode = within(panel).getByLabelText("Код бейджа");
+  const pin = await within(panel).findByLabelText("ПИН-код");
+  await user.type(fullName, " draft");
+  await user.type(badgeCode, "BADGE-DRAFT");
+  await user.type(pin, "4321");
+
+  await act(async () => {
+    await queryClient.refetchQueries({ queryKey: EMPLOYEES_QUERY_KEY });
+  });
+
+  expect(employeeAttempts).toBe(2);
+  await screen.findByText("Не удалось загрузить данные. Обновите страницу или войдите заново.");
+  await waitFor(() => expect(screen.getByRole("region", { name: "Профиль" })).toBeDefined());
+  const retainedPanel = screen.getByRole("dialog", { name: "Изменить сотрудника" });
+  expect(retainedPanel).toBe(panel);
+  expect(within(retainedPanel).getByRole("region", { name: "Бейджи" })).toBeDefined();
+  expect(within(retainedPanel).getByRole("region", { name: "Доступ на станцию" })).toBeDefined();
+  expect((within(retainedPanel).getByLabelText("ФИО") as HTMLInputElement).value).toBe(
+    "Jane Doe draft",
+  );
+  expect((within(retainedPanel).getByLabelText("Код бейджа") as HTMLInputElement).value).toBe(
+    "BADGE-DRAFT",
+  );
+  expect((within(retainedPanel).getByLabelText("ПИН-код") as HTMLInputElement).value).toBe("4321");
+
+  await user.click(within(retainedPanel).getByRole("button", { name: "Закрыть" }));
+  const confirmation = screen.getByRole("alertdialog", { name: "Отменить изменения?" });
+  await user.click(within(confirmation).getByRole("button", { name: "Продолжить редактирование" }));
+  expect((within(retainedPanel).getByLabelText("ФИО") as HTMLInputElement).value).toBe(
+    "Jane Doe draft",
+  );
+
+  await user.click(within(retainedPanel).getByRole("button", { name: "Закрыть" }));
+  await user.click(
+    within(screen.getByRole("alertdialog", { name: "Отменить изменения?" })).getByRole("button", {
+      name: "Не сохранять",
+    }),
+  );
+  await waitFor(() => expect(router.state.location.pathname).toBe("/employees"));
+});
+
+it("keeps all employee resources mounted with named section metadata", async () => {
   stubEmployeeAndOperators();
-  const { user } = renderPanel(["/employees/1/edit"]);
+  renderPanel(["/employees/1/edit"]);
 
   await screen.findByRole("region", { name: "Профиль" });
   const panel = screen.getByRole("dialog", { name: "Изменить сотрудника" });
@@ -482,51 +542,62 @@ it("keeps all employee resources mounted and navigates between named sections", 
   expect(profileNav.getAttribute("aria-current")).toBe("location");
   expect(badgesNav.textContent).toContain("0");
   await waitFor(() => expect(stationAccessNav.textContent).toContain("Активен"));
-
-  const stationHeading = within(stationAccess).getByRole("heading", {
-    name: "Доступ на станцию",
-  });
-  const scrollIntoView = vi.fn();
-  Object.defineProperty(stationHeading, "scrollIntoView", {
-    configurable: true,
-    value: scrollIntoView,
-  });
-  await user.click(stationAccessNav);
-
-  expect(stationAccessNav.getAttribute("aria-current")).toBe("location");
-  expect(profileNav.hasAttribute("aria-current")).toBe(false);
-  expect(scrollIntoView).toHaveBeenCalledWith({ block: "start" });
-  expect(document.activeElement).toBe(stationHeading);
 });
 
-it("tracks the current employee section from panel-body scrolling", async () => {
+it("normalizes section geometry to the panel body for scroll and click navigation", async () => {
   stubEmployeeAndOperators();
-  renderPanel(["/employees/1/edit"]);
+  const { user } = renderPanel(["/employees/1/edit"]);
 
   await screen.findByRole("region", { name: "Профиль" });
   const panel = screen.getByRole("dialog", { name: "Изменить сотрудника" });
   const profile = within(panel).getByRole("region", { name: "Профиль" });
   const badges = within(panel).getByRole("region", { name: "Бейджи" });
   const stationAccess = within(panel).getByRole("region", { name: "Доступ на станцию" });
-  Object.defineProperty(profile, "offsetTop", { configurable: true, value: 0 });
-  Object.defineProperty(badges, "offsetTop", { configurable: true, value: 240 });
-  Object.defineProperty(stationAccess, "offsetTop", { configurable: true, value: 520 });
   const scrollRoot = panel.querySelector<HTMLElement>(".mk-side-panel__body");
   if (!scrollRoot) throw new Error("Panel scroll root not found");
-  Object.defineProperty(scrollRoot, "scrollTop", { configurable: true, value: 500 });
+  Object.defineProperty(scrollRoot, "scrollTop", { configurable: true, value: 300 });
+  vi.spyOn(scrollRoot, "getBoundingClientRect").mockReturnValue({ top: 100 } as DOMRect);
+  vi.spyOn(profile, "getBoundingClientRect").mockReturnValue({ top: -200 } as DOMRect);
+  vi.spyOn(badges, "getBoundingClientRect").mockReturnValue({ top: 110 } as DOMRect);
+  let stationTop = 400;
+  vi.spyOn(stationAccess, "getBoundingClientRect").mockImplementation(
+    () => ({ top: stationTop }) as DOMRect,
+  );
 
   fireEvent.scroll(scrollRoot);
 
   const sectionNav = within(panel).getByRole("navigation", {
     name: "Разделы сотрудника",
   });
-  await waitFor(() =>
-    expect(
-      within(sectionNav)
-        .getByRole("button", { name: /Доступ на станцию/ })
-        .getAttribute("aria-current"),
-    ).toBe("location"),
-  );
+  const badgesNav = within(sectionNav).getByRole("button", { name: /Бейджи/ });
+  const stationAccessNav = within(sectionNav).getByRole("button", {
+    name: /Доступ на станцию/,
+  });
+  await waitFor(() => expect(badgesNav.getAttribute("aria-current")).toBe("location"));
+
+  const stationHeading = within(stationAccess).getByRole("heading", {
+    name: "Доступ на станцию",
+  });
+  const sectionScrollIntoView = vi.fn(() => {
+    stationTop = 132;
+  });
+  Object.defineProperty(stationAccess, "scrollIntoView", {
+    configurable: true,
+    value: sectionScrollIntoView,
+  });
+  Object.defineProperty(stationHeading, "scrollIntoView", {
+    configurable: true,
+    value: vi.fn(),
+  });
+
+  await user.click(stationAccessNav);
+
+  expect(sectionScrollIntoView).toHaveBeenCalledWith({ block: "start" });
+  expect(stationAccessNav.getAttribute("aria-current")).toBe("location");
+  expect(document.activeElement).toBe(stationHeading);
+
+  fireEvent.scroll(scrollRoot);
+  await waitFor(() => expect(stationAccessNav.getAttribute("aria-current")).toBe("location"));
 });
 
 it("marks Profile navigation when client-side validation fails", async () => {
@@ -624,6 +695,63 @@ it("keeps every resource and the profile values after a failed profile PATCH", a
     name: "Разделы сотрудника",
   });
   expect(within(sectionNav).getByRole("button", { name: /Профиль.*Ошибка/ })).toBeDefined();
+});
+
+it("keeps the Profile API marker when validation is corrected until the next API attempt", async () => {
+  let patchAttempts = 0;
+  let resolveRetry: ((response: Response) => void) | undefined;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((url: string, init?: RequestInit) => {
+      if (String(url) === "/api/employees/1" && init?.method === "PATCH") {
+        patchAttempts += 1;
+        if (patchAttempts === 1) {
+          return Promise.resolve(jsonResponse(409, { message: "Employee already exists" }));
+        }
+        return new Promise<Response>((resolve) => {
+          resolveRetry = resolve;
+        });
+      }
+      if (String(url) === "/api/employees") {
+        return Promise.resolve(jsonResponse(200, { items: [JANE] }));
+      }
+      if (String(url) === "/api/operators") {
+        return Promise.resolve(jsonResponse(200, { items: [ACTIVE_OPERATOR] }));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${String(url)}`));
+    }),
+  );
+  const { router, user } = renderPanel(["/employees", "/employees/1/edit"]);
+
+  const fullName = await screen.findByLabelText("ФИО");
+  const panel = screen.getByRole("dialog", { name: "Изменить сотрудника" });
+  const profile = within(panel).getByRole("region", { name: "Профиль" });
+  const sectionNav = within(panel).getByRole("navigation", {
+    name: "Разделы сотрудника",
+  });
+  const save = within(panel).getByRole("button", { name: "Сохранить" });
+  await user.clear(fullName);
+  await user.type(fullName, "Jane Conflict");
+  await user.click(save);
+
+  expect(await within(profile).findByText("Employee already exists")).toBeDefined();
+  expect(within(sectionNav).getByRole("button", { name: /Профиль.*Ошибка/ })).toBeDefined();
+
+  await user.clear(fullName);
+  await user.click(save);
+  expect(await within(profile).findByText("Укажите ФИО")).toBeDefined();
+  await user.type(fullName, "Jane Corrected");
+  await waitFor(() => expect(within(profile).queryByText("Укажите ФИО")).toBeNull());
+
+  expect(within(profile).getByText("Employee already exists")).toBeDefined();
+  expect(within(sectionNav).getByRole("button", { name: /Профиль.*Ошибка/ })).toBeDefined();
+
+  await user.click(save);
+  await waitFor(() => expect(within(profile).queryByText("Employee already exists")).toBeNull());
+  expect(within(sectionNav).getByRole("button", { name: /^Профиль$/ })).toBeDefined();
+
+  resolveRetry?.(jsonResponse(200, { ...JANE, fullName: "Jane Corrected" }));
+  await waitFor(() => expect(router.state.location.pathname).toBe("/employees"));
 });
 
 it("blocks Back after the edit profile becomes dirty until discard is confirmed", async () => {
