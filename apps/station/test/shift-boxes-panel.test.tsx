@@ -2,78 +2,63 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ShiftBoxesPanel } from "../src/ui/ShiftBoxesPanel.js";
 
-const BOXES = [
-  {
-    boxId: "b1",
-    sscc: "123456789012345675",
-    itemCount: 3,
-    closedAt: "2026-07-30T00:00:00.000Z",
-  },
-];
+const BOXES = Array.from({ length: 6 }, (_, index) => ({
+  boxId: `b${index + 1}`,
+  sscc: `12345678901234567${index}`,
+  itemCount: index + 1,
+  closedAt: `2026-07-30T00:0${5 - index}:00.000Z`,
+}));
 
 describe("ShiftBoxesPanel", () => {
-  it("requires a reason before disassembling a closed box", () => {
-    const onDisassemble = vi.fn();
-    render(<ShiftBoxesPanel boxes={BOXES} onReprint={vi.fn()} onDisassemble={onDisassemble} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Расформировать" }));
-    expect(screen.getByText("Номер короба будет аннулирован навсегда.")).toBeDefined();
-    const confirm = screen.getByRole("button", { name: "Подтвердить" }) as HTMLButtonElement;
-    expect(confirm.disabled).toBe(true);
-
-    fireEvent.change(screen.getByRole("textbox", { name: "Причина" }), {
-      target: { value: "Чужой заказ" },
-    });
-    expect(confirm.disabled).toBe(false);
-    fireEvent.click(confirm);
-
-    expect(onDisassemble).toHaveBeenCalledWith("b1", "Чужой заказ");
-  });
-
-  it("requires and passes a reason when reprinting", () => {
-    const onReprint = vi.fn();
-    render(<ShiftBoxesPanel boxes={BOXES} onReprint={onReprint} onDisassemble={vi.fn()} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Перепечатать" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Причина" }), {
-      target: { value: "Замятие этикетки" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Подтвердить" }));
-
-    expect(onReprint).toHaveBeenCalledWith("b1", "Замятие этикетки");
-  });
-
-  it("reports when a reason dialog opens and closes", () => {
-    const onPendingChange = vi.fn();
+  it("renders a bounded page of four boxes and pages in the supplied newest-first order", () => {
+    const onSelectionChange = vi.fn();
     render(
-      <ShiftBoxesPanel
-        boxes={BOXES}
-        onReprint={vi.fn()}
-        onDisassemble={vi.fn()}
-        onPendingChange={onPendingChange}
-      />,
+      <ShiftBoxesPanel boxes={BOXES} selectedBoxId={null} onSelectionChange={onSelectionChange} />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Перепечатать" }));
-    fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
+    expect(screen.getAllByRole("button", { name: /SSCC/ })).toHaveLength(4);
+    expect(screen.getByRole("button", { name: /123456789012345670/ })).toBeDefined();
+    expect(screen.queryByRole("button", { name: /123456789012345674/ })).toBeNull();
 
-    expect(onPendingChange.mock.calls).toEqual([[true], [false]]);
+    fireEvent.click(screen.getByRole("button", { name: "Следующая страница" }));
+    expect(screen.getAllByRole("button", { name: /SSCC/ })).toHaveLength(2);
+    expect(screen.getByRole("button", { name: /123456789012345674/ })).toBeDefined();
+    expect(screen.getByText("Страница 2 из 2")).toBeDefined();
   });
 
-  it("clears pending state if the panel unmounts while its dialog is open", () => {
-    const onPendingChange = vi.fn();
+  it("reports the selected box and drops selection when that box leaves the dataset", () => {
+    const onSelectionChange = vi.fn();
     const view = render(
-      <ShiftBoxesPanel
-        boxes={BOXES}
-        onReprint={vi.fn()}
-        onDisassemble={vi.fn()}
-        onPendingChange={onPendingChange}
-      />,
+      <ShiftBoxesPanel boxes={BOXES} selectedBoxId={null} onSelectionChange={onSelectionChange} />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Перепечатать" }));
-    view.unmount();
+    fireEvent.click(screen.getByRole("button", { name: /123456789012345670/ }));
+    expect(onSelectionChange).toHaveBeenLastCalledWith(BOXES[0]);
 
-    expect(onPendingChange.mock.calls).toEqual([[true], [false]]);
+    view.rerender(
+      <ShiftBoxesPanel
+        boxes={BOXES.slice(1)}
+        selectedBoxId="b1"
+        onSelectionChange={onSelectionChange}
+      />,
+    );
+    expect(onSelectionChange).toHaveBeenLastCalledWith(null);
+  });
+
+  it("clamps the current page when the dataset shrinks", () => {
+    const view = render(
+      <ShiftBoxesPanel boxes={BOXES} selectedBoxId={null} onSelectionChange={vi.fn()} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Следующая страница" }));
+    expect(screen.getByText("Страница 2 из 2")).toBeDefined();
+
+    view.rerender(
+      <ShiftBoxesPanel
+        boxes={BOXES.slice(0, 2)}
+        selectedBoxId={null}
+        onSelectionChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Страница 1 из 1")).toBeDefined();
   });
 });

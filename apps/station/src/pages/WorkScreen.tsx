@@ -38,12 +38,12 @@ import { createScanQueue, type ScanOutcome, type ScanQueue } from "../lib/scan-q
 import type { ScanSource } from "../lib/scan-source.js";
 import { playSignalTone, type SoundSettings } from "../lib/signal-sound.js";
 import { PrintVerification } from "../ui/PrintVerification.js";
-import { ShiftBoxesPanel } from "../ui/ShiftBoxesPanel.js";
 import { BoxFillInstrument } from "../ui/work/BoxFillInstrument.js";
 import { RecentOperations } from "../ui/work/RecentOperations.js";
 import { ScanResultInstrument, type ScanResultLabels } from "../ui/work/ScanResultInstrument.js";
 import { WorkCounters } from "../ui/work/WorkCounters.js";
 import { WorkFooter } from "../ui/work/WorkFooter.js";
+import { ExceptionFlow } from "./ExceptionFlow.js";
 
 export interface WorkScreenProps {
   exec: SqlExecutor;
@@ -842,10 +842,10 @@ export function WorkScreen({
     [exec, shiftId, terminalId, expectedGtin14],
   );
 
-  function handleUndo(): void {
+  function handleUndo(): Promise<void> {
     const target = lastScanned;
-    if (!target) return;
-    queue.enqueueJob(async () => {
+    if (!target) return Promise.reject(new Error("last scan is no longer available"));
+    return enqueueExceptionJob(async () => {
       await undoLastScan(exec, {
         boxId: target.boxId,
         codeHash: target.codeHash,
@@ -862,11 +862,10 @@ export function WorkScreen({
     });
   }
 
-  function confirmClearBox(): void {
-    setConfirmClear(false);
+  function clearCurrentBox(): Promise<void> {
     const boxId = boxRef.current?.boxId;
-    if (!boxId) return;
-    queue.enqueueJob(async () => {
+    if (!boxId) return Promise.reject(new Error("open box is no longer available"));
+    return enqueueExceptionJob(async () => {
       const clearedCodes = await exec.all<{ code_hash: string }>(
         "SELECT code_hash FROM codes_mirror WHERE box_id = ?",
         [boxId],
@@ -885,10 +884,30 @@ export function WorkScreen({
     });
   }
 
-  function handleReprint(boxId: string, reason: string): void {
+  function confirmClearBox(): void {
+    setConfirmClear(false);
+    void clearCurrentBox();
+  }
+
+  function enqueueExceptionJob(job: () => Promise<void>): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const accepted = queue.enqueueJob(async () => {
+        try {
+          await job();
+          resolve();
+        } catch (err) {
+          reject(err instanceof Error ? err : new Error(String(err)));
+          throw err;
+        }
+      });
+      if (!accepted) reject(new Error("station correction queue is closed"));
+    });
+  }
+
+  function handleReprint(boxId: string, reason: string): Promise<void> {
     const target = closedBoxes.find((candidate) => candidate.boxId === boxId);
-    if (!target) return;
-    queue.enqueueJob(async () => {
+    if (!target) return Promise.reject(new Error("closed box is no longer available"));
+    return enqueueExceptionJob(async () => {
       await reprintBox(exec, {
         boxId,
         shiftId,
@@ -903,8 +922,10 @@ export function WorkScreen({
     });
   }
 
-  function handleDisassemble(boxId: string, reason: string): void {
-    queue.enqueueJob(async () => {
+  function handleDisassemble(boxId: string, reason: string): Promise<void> {
+    const target = closedBoxes.find((candidate) => candidate.boxId === boxId);
+    if (!target) return Promise.reject(new Error("closed box is no longer available"));
+    return enqueueExceptionJob(async () => {
       const releasedCodes = await exec.all<{ code_hash: string }>(
         "SELECT code_hash FROM codes_mirror WHERE box_id = ?",
         [boxId],
@@ -1007,20 +1028,17 @@ export function WorkScreen({
     <main className="work-screen" aria-label={productName}>
       <div className="work-screen__content">
         {showExceptions ? (
-          <section className="work-screen__exceptions" aria-labelledby="work-exceptions-title">
-            <header>
-              <h2 id="work-exceptions-title">{t("work.exceptions")}</h2>
-              <Button size="floor" variant="secondary" onClick={() => setShowExceptions(false)}>
-                {t("work.backToWork")}
-              </Button>
-            </header>
-            <ShiftBoxesPanel
-              boxes={closedBoxes}
-              onReprint={handleReprint}
-              onDisassemble={handleDisassemble}
-              onPendingChange={setBoxActionPending}
-            />
-          </section>
+          <ExceptionFlow
+            boxes={closedBoxes}
+            canUndo={lastScanned?.boxId === box?.boxId}
+            hasOpenBox={box !== null}
+            onUndo={handleUndo}
+            onClear={clearCurrentBox}
+            onReprint={handleReprint}
+            onDisassemble={handleDisassemble}
+            onBack={() => setShowExceptions(false)}
+            onPendingChange={setBoxActionPending}
+          />
         ) : (
           <div className="work-screen__instruments">
             <div className="work-screen__primary">
@@ -1046,7 +1064,7 @@ export function WorkScreen({
                     clear: t("box.clear"),
                   }}
                   onClose={enqueueManualClose}
-                  onUndo={handleUndo}
+                  onUndo={() => void handleUndo()}
                   onClear={() => setConfirmClear(true)}
                 />
               ) : null}

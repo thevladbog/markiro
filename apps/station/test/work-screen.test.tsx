@@ -875,12 +875,18 @@ describe("WorkScreen box progress, closing and printing", () => {
       expect(await exec.all("SELECT code_hash FROM codes_mirror")).toHaveLength(1);
     });
 
+    fireEvent.click(screen.getByRole("button", { name: "Исключения" }));
     fireEvent.click(await screen.findByRole("button", { name: "Отменить последний скан" }));
 
     await waitFor(async () => {
       expect(await exec.all("SELECT code_hash FROM codes_mirror")).toHaveLength(0);
     });
-    expect(screen.queryByRole("button", { name: "Отменить последний скан" })).toBeNull();
+    fireEvent.click(await screen.findByRole("button", { name: "Вернуться к работе" }));
+    fireEvent.click(screen.getByRole("button", { name: "Исключения" }));
+    expect(
+      (screen.getByRole("button", { name: "Отменить последний скан" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
     const exceptions = await exec.all<{ kind: string; operator_id: string }>(
       "SELECT kind, operator_id FROM box_exceptions_mirror",
     );
@@ -901,6 +907,7 @@ describe("WorkScreen box progress, closing and printing", () => {
       expect(await exec.all("SELECT code_hash FROM codes_mirror")).toHaveLength(2);
     });
 
+    fireEvent.click(screen.getByRole("button", { name: "Исключения" }));
     fireEvent.click(await screen.findByRole("button", { name: "Очистить короб" }));
     act(() => scan(THIRD_KM));
     expect(onScan).toHaveBeenCalledTimes(2);
@@ -913,6 +920,7 @@ describe("WorkScreen box progress, closing and printing", () => {
     const exceptions = await exec.all<{ kind: string }>("SELECT kind FROM box_exceptions_mirror");
     expect(exceptions).toEqual([{ kind: "clear" }]);
 
+    fireEvent.click(await screen.findByRole("button", { name: "Вернуться к работе" }));
     act(() => scan(KM));
     await waitFor(async () => {
       expect(await exec.all("SELECT code_hash FROM codes_mirror")).toHaveLength(1);
@@ -932,11 +940,14 @@ describe("WorkScreen box progress, closing and printing", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Исключения" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Перепечатать" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Перепечатать этикетку" }));
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(`SSCC ${SSCC}`) }));
+    fireEvent.click(screen.getByRole("button", { name: "Другая причина" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Причина" }), {
       target: { value: "Замятие этикетки" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Подтвердить" }));
+    fireEvent.click(screen.getByRole("button", { name: "Использовать причину" }));
+    fireEvent.click(screen.getByRole("button", { name: "Подтвердить перепечатку" }));
 
     await waitFor(() => expect(print).toHaveBeenCalledOnce());
     await waitFor(async () => {
@@ -948,18 +959,17 @@ describe("WorkScreen box progress, closing and printing", () => {
     expect(onScanRecorded).toHaveBeenCalledOnce();
   });
 
-  it("pauses ordinary scanning while a box-action reason dialog is open", async () => {
+  it("pauses ordinary scanning while the exception flow is open", async () => {
     const exec = makeExec();
     await seedClosedBox(exec);
     const onScan = vi.fn();
     renderWorkTracked({ exec, onScan });
 
     fireEvent.click(screen.getByRole("button", { name: "Исключения" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Перепечатать" }));
     act(() => scan(KM));
     expect(onScan).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
+    fireEvent.click(screen.getByRole("button", { name: "Назад" }));
     act(() => scan(KM));
     await waitFor(() => expect(onScan).toHaveBeenCalledOnce());
   });
@@ -971,11 +981,14 @@ describe("WorkScreen box progress, closing and printing", () => {
     renderWorkTracked({ exec, onScanRecorded });
 
     fireEvent.click(screen.getByRole("button", { name: "Исключения" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Расформировать" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Расформировать короб" }));
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(`SSCC ${SSCC}`) }));
+    fireEvent.click(screen.getByRole("button", { name: "Другая причина" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Причина" }), {
       target: { value: "Чужой заказ" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Подтвердить" }));
+    fireEvent.click(screen.getByRole("button", { name: "Использовать причину" }));
+    fireEvent.click(screen.getByRole("button", { name: "Расформировать безвозвратно" }));
 
     await waitFor(async () => {
       const rows = await exec.all<{ disassembled_at: string | null }>(

@@ -698,15 +698,18 @@ body,
   place-items: center;
 }
 
-.work-screen__exceptions {
+.exception-flow {
   display: grid;
   width: 100%;
   height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   gap: var(--sp-3);
   grid-template-rows: 64px minmax(0, 1fr);
 }
 
-.work-screen__exceptions > header {
+.exception-flow__header {
   display: flex;
   min-width: 0;
   gap: var(--sp-3);
@@ -714,15 +717,148 @@ body,
   justify-content: space-between;
 }
 
-.work-screen__exceptions > header h2 {
+.exception-flow__header h2,
+.exception-stage h3,
+.shift-boxes h2 {
   margin: 0;
   font: var(--floor-title);
 }
 
-.work-screen__exceptions > section {
+.exception-flow__stage,
+.exception-stage,
+.shift-boxes,
+.shift-boxes__list,
+.shift-boxes__list > [role="listitem"] {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+}
+
+.exception-stage {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  gap: var(--sp-3);
+  align-content: center;
+}
+
+.exception-stage--action,
+.exception-confirm,
+.exception-result {
+  width: min(760px, 100%);
+  margin-inline: auto;
+  text-align: center;
+}
+
+.exception-stage p,
+.exception-confirm p {
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--floor-body);
+}
+
+.exception-actions {
+  display: grid;
+  width: min(720px, 100%);
+  margin-inline: auto;
+  gap: var(--sp-3);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.exception-reasons {
+  display: grid;
+  width: min(900px, 100%);
+  min-width: 0;
+  min-height: 0;
+  margin-inline: auto;
+  overflow: hidden;
+  gap: var(--sp-2);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: center;
+}
+
+.exception-reasons > :last-child {
+  grid-column: 1 / -1;
+}
+
+.exception-other-reason {
+  display: grid;
+  width: min(900px, 100%);
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  margin-inline: auto;
+  overflow: hidden;
+  gap: var(--sp-2);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.exception-other-reason label {
+  color: var(--fg-1);
+  font: var(--floor-body-strong);
+}
+
+.exception-other-reason textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--sp-3);
+  resize: none;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-2);
+  background: var(--surface-card);
+  color: var(--fg-1);
+  font: var(--floor-body);
+}
+
+.exception-confirm--danger {
+  display: grid;
+  height: 100%;
+  gap: var(--sp-3);
+  place-content: center;
+}
+
+.exception-result {
+  place-content: center;
+}
+
+.shift-boxes {
+  display: grid;
+  width: min(1040px, 100%);
+  height: 100%;
+  margin-inline: auto;
+  gap: var(--sp-2);
+  grid-template-rows: auto minmax(0, 1fr) 64px;
+}
+
+.shift-boxes__list {
+  display: grid;
+  gap: var(--sp-2);
+  grid-template-rows: repeat(4, minmax(64px, 1fr));
+}
+
+.shift-boxes__row {
+  justify-content: space-between;
+}
+
+.shift-boxes__row strong,
+.shift-boxes__row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shift-boxes__row strong {
+  font-family: var(--font-mono);
+}
+
+.shift-boxes__empty {
+  display: grid;
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--floor-body);
+  place-items: center;
 }
 
 .work-screen__overlays:empty {
