@@ -1002,6 +1002,12 @@
         "roleLabel": "Role",
         "submitCreate": "Create",
         "submitUpdate": "Save",
+        "loadError": "Could not load employee data.",
+        "retry": "Retry",
+        "discardTitle": "Discard changes?",
+        "discardBody": "Your unsaved changes will be lost.",
+        "continueEditing": "Continue editing",
+        "discardAction": "Discard",
         "errors": {
           "fullNameRequired": "Enter a full name",
           "fullNameTooLong": "200 characters or fewer",

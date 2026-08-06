@@ -190,9 +190,17 @@ it.each(["/shifts/new", "/shifts/s1/edit"])(
   },
 );
 
+it("forbids the direct employee create route for a read-only operator", async () => {
+  renderAccessRoute("/employees/new", OPERATIONS_READ_ONLY);
+
+  expect(await screen.findByTestId("forbidden-page")).toBeDefined();
+  expect(screen.queryByRole("dialog")).toBeNull();
+});
+
 it.each([
   ["/catalog/new", "Новый продукт"],
   ["/catalog/p1/edit", "Изменить продукт"],
+  ["/employees/new", "Новый сотрудник"],
 ])("opens the direct write route %s for a write-capable operator", async (path, title) => {
   renderAccessRoute(path, MANAGER_ACCESS);
 

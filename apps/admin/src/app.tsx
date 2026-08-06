@@ -19,6 +19,7 @@ import { CounterpartiesPage } from "./pages/counterparties/index.js";
 import { CounterpartyPanelRoute } from "./pages/counterparties/CounterpartyPanelRoute.js";
 import { DashboardPage } from "./pages/dashboard/index.js";
 import { EmployeesPage } from "./pages/employees/index.js";
+import { EmployeeCreatePanelRoute } from "./pages/employees/EmployeePanelRoute.js";
 import { ChannelPage } from "./pages/integrations/ChannelPage.js";
 import { IntegrationsPage } from "./pages/integrations/index.js";
 import { InvitationPage } from "./pages/invitations/InvitationPage.js";
@@ -160,7 +161,16 @@ function appRouteElements() {
               <EmployeesPage />
             </RequireCapability>
           }
-        />
+        >
+          <Route
+            path="new"
+            element={
+              <RequireCapability capability={C.OPERATIONS_WRITE}>
+                <EmployeeCreatePanelRoute />
+              </RequireCapability>
+            }
+          />
+        </Route>
         <Route
           path="kiosks"
           element={

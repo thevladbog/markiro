@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Outlet, useNavigate } from "react-router";
 
 import {
   AdminPage,
@@ -25,13 +26,13 @@ import { toast } from "../../lib/toast.js";
 import { EmployeeForm, type EmployeeFormValues } from "./EmployeeForm.js";
 import {
   useArchiveEmployee,
-  useCreateEmployee,
   useEmployees,
   useUpdateEmployee,
   type CreateEmployeeInput,
   type EmployeeDto,
   type EmployeeStatus,
 } from "./api.js";
+import type { EmployeesPanelContext, EmployeesPanelLocationState } from "./EmployeePanelRoute.js";
 import "./employees.css";
 
 type StatusFilter = "all" | EmployeeStatus;
@@ -43,37 +44,19 @@ const STATUS_TO_CHIP: Record<EmployeeStatus, StatusChipStatus> = {
 
 function AuthorizedCreateEmployeeAction() {
   const { t } = useTranslation();
-  const createMutation = useCreateEmployee();
-  const [open, setOpen] = useState(false);
-
-  const handleSubmit = async (input: CreateEmployeeInput) => {
-    try {
-      await createMutation.mutateAsync(input);
-      toast("ok", t("pages.employees.toasts.createSuccess"));
-      setOpen(false);
-    } catch (error) {
-      toast(
-        "error",
-        error instanceof ApiRequestError ? error.message : t("pages.employees.toasts.createError"),
-      );
-    }
-  };
+  const navigate = useNavigate();
 
   return (
-    <>
-      <Button type="button" onClick={() => setOpen(true)}>
-        {t("pages.employees.addAction")}
-      </Button>
-      {open ? (
-        <EmployeeForm
-          open
-          mode="create"
-          submitting={createMutation.isPending}
-          onSubmit={handleSubmit}
-          onClose={() => setOpen(false)}
-        />
-      ) : null}
-    </>
+    <Button
+      type="button"
+      onClick={() =>
+        void navigate("new", {
+          state: { employeesBackground: true } satisfies EmployeesPanelLocationState,
+        })
+      }
+    >
+      {t("pages.employees.addAction")}
+    </Button>
   );
 }
 
@@ -279,6 +262,19 @@ export function EmployeesPage() {
       ) : (
         <Table columns={columns} rows={items} />
       )}
+
+      <Outlet
+        context={
+          {
+            employees: items,
+            employeesPending: query.isPending,
+            employeesError: query.isError,
+            retryPanelData: async () => {
+              await query.refetch();
+            },
+          } satisfies EmployeesPanelContext
+        }
+      />
     </AdminPage>
   );
 }

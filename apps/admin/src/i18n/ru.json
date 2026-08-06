@@ -1002,6 +1002,12 @@
         "roleLabel": "Должность",
         "submitCreate": "Создать",
         "submitUpdate": "Сохранить",
+        "loadError": "Не удалось загрузить данные сотрудника.",
+        "retry": "Повторить",
+        "discardTitle": "Отменить изменения?",
+        "discardBody": "Несохранённые изменения будут потеряны.",
+        "continueEditing": "Продолжить редактирование",
+        "discardAction": "Не сохранять",
         "errors": {
           "fullNameRequired": "Укажите ФИО",
           "fullNameTooLong": "Не более 200 символов",

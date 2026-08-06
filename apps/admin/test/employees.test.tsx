@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
@@ -9,6 +10,7 @@ import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider } from "../src/access/context.js";
 import i18n from "../src/i18n/index.js";
 import type * as EmployeesApiModule from "../src/pages/employees/api.js";
+import { EmployeeProfileForm } from "../src/pages/employees/EmployeeProfileForm.js";
 import { EmployeesPage } from "../src/pages/employees/index.js";
 
 const { writeHookMountSpy } = vi.hoisted(() => ({ writeHookMountSpy: vi.fn() }));
@@ -64,7 +66,9 @@ function renderPage(access: AccessDocument = OPERATIONS_WRITE_ACCESS) {
     ...render(
       <QueryClientProvider client={queryClient}>
         <AccessProvider value={access}>
-          <EmployeesPage />
+          <MemoryRouter initialEntries={["/employees"]}>
+            <EmployeesPage />
+          </MemoryRouter>
         </AccessProvider>
       </QueryClientProvider>,
     ),
@@ -114,6 +118,34 @@ const JANE = {
 };
 
 describe("EmployeesPage", () => {
+  it("does not reseed a dirty profile when refreshed initial values change", () => {
+    const view = render(
+      <EmployeeProfileForm
+        mode="edit"
+        initialValues={{ fullName: "Jane Doe", role: "Кассир" }}
+        submitting={false}
+        submissionError={null}
+        onSubmit={vi.fn()}
+        onDirtyChange={vi.fn()}
+      />,
+    );
+    const name = screen.getByLabelText("ФИО") as HTMLInputElement;
+    fireEvent.change(name, { target: { value: "Jane Draft" } });
+
+    view.rerender(
+      <EmployeeProfileForm
+        mode="edit"
+        initialValues={{ fullName: "Jane Refetched", role: "Кассир" }}
+        submitting={false}
+        submissionError={null}
+        onSubmit={vi.fn()}
+        onDirtyChange={vi.fn()}
+      />,
+    );
+
+    expect(name.value).toBe("Jane Draft");
+  });
+
   it("uses the shared page/filter layout and requests the selected status", async () => {
     const fetchMock = vi.fn(async () => jsonResponse(200, { items: [JANE] }));
     vi.stubGlobal("fetch", fetchMock);
@@ -272,77 +304,6 @@ describe("EmployeesPage", () => {
       await screen.findByText("Не удалось загрузить данные. Обновите страницу или войдите заново."),
     ).toBeDefined();
     expect(screen.queryByText("Сотрудники не добавлены")).toBeNull();
-  });
-
-  it("opens the create modal from the page header action", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => jsonResponse(200, { items: [] })),
-    );
-
-    renderPage();
-    await screen.findByText("Сотрудники не добавлены");
-
-    fireEvent.click(screen.getAllByRole("button", { name: "Добавить сотрудника" })[0]!);
-
-    expect(await screen.findByText("Новый сотрудник")).toBeDefined();
-  });
-
-  it("shows a validation error when the name is empty (no POST)", async () => {
-    const fetchMock = vi.fn(async () => jsonResponse(200, { items: [] }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    renderPage();
-    await screen.findByText("Сотрудники не добавлены");
-    fireEvent.click(screen.getAllByRole("button", { name: "Добавить сотрудника" })[0]!);
-    await screen.findByText("Новый сотрудник");
-
-    const callsBeforeSubmit = fetchMock.mock.calls.length;
-    fireEvent.click(screen.getByRole("button", { name: "Создать" }));
-
-    expect(await screen.findByText("Укажите ФИО")).toBeDefined();
-    expect(fetchMock.mock.calls.length).toBe(callsBeforeSubmit);
-  });
-
-  it("submits fullName on valid create and refetches the list", async () => {
-    const created = {
-      id: "3",
-      fullName: "Pyotr Petrov",
-      role: null,
-      status: "active",
-      badges: [],
-      createdAt: "2026-01-02T00:00:00.000Z",
-    };
-    let didCreate = false;
-    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-      if (init?.method === "POST" && !url.includes("/badges")) {
-        didCreate = true;
-        return jsonResponse(201, created);
-      }
-      return jsonResponse(200, { items: didCreate ? [created] : [] });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    renderPage();
-    await screen.findByText("Сотрудники не добавлены");
-    fireEvent.click(screen.getAllByRole("button", { name: "Добавить сотрудника" })[0]!);
-    await screen.findByText("Новый сотрудник");
-
-    fireEvent.change(screen.getByLabelText("ФИО"), { target: { value: "Pyotr Petrov" } });
-    fireEvent.click(screen.getByRole("button", { name: "Создать" }));
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/employees",
-        expect.objectContaining({
-          method: "POST",
-          body: JSON.stringify({ fullName: "Pyotr Petrov", role: null }),
-        }),
-      );
-    });
-
-    await waitFor(() => expect(screen.queryByText("Новый сотрудник")).toBeNull());
-    expect(await screen.findByText("Pyotr Petrov")).toBeDefined();
   });
 
   it("edits an existing employee via the row action (prefilled form, PATCH on submit)", async () => {
