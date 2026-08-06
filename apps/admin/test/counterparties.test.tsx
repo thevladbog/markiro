@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { createMemoryRouter, createRoutesFromElements, Route, RouterProvider } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
@@ -8,6 +9,7 @@ import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider } from "../src/access/context.js";
 import type * as CounterpartiesApiModule from "../src/pages/counterparties/api.js";
 import { CounterpartiesPage } from "../src/pages/counterparties/index.js";
+import { CounterpartyPanelRoute } from "../src/pages/counterparties/CounterpartyPanelRoute.js";
 
 const { writeHookMountSpy } = vi.hoisted(() => ({ writeHookMountSpy: vi.fn() }));
 
@@ -36,13 +38,11 @@ afterEach(() => {
   writeHookMountSpy.mockClear();
 });
 
-/** Minimal Response stand-in -- only what apps/admin/src/api/client.ts reads. */
 function jsonResponse(status: number, body: unknown): Response {
-  return {
-    ok: status >= 200 && status < 300,
+  return new Response(body === undefined ? null : JSON.stringify(body), {
     status,
-    json: async () => body,
-  } as Response;
+    headers: { "content-type": "application/json" },
+  });
 }
 
 const OPERATIONS_READ_ONLY: AccessDocument = {
@@ -62,7 +62,20 @@ function renderPage(access: AccessDocument = OPERATIONS_WRITE_ACCESS) {
   return render(
     <QueryClientProvider client={queryClient}>
       <AccessProvider value={access}>
-        <CounterpartiesPage />
+        <RouterProvider
+          router={createMemoryRouter(
+            createRoutesFromElements(
+              <Route path="/counterparties" element={<CounterpartiesPage />}>
+                <Route path="new" element={<CounterpartyPanelRoute mode="create" />} />
+                <Route
+                  path=":counterpartyId/edit"
+                  element={<CounterpartyPanelRoute mode="edit" />}
+                />
+              </Route>,
+            ),
+            { initialEntries: ["/counterparties"] },
+          )}
+        />
       </AccessProvider>
     </QueryClientProvider>,
   );

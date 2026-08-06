@@ -30,7 +30,10 @@ export function useRoutePanelGuard(close: () => void, busy: boolean): RoutePanel
   const requestClose = () => {
     if (busy) return;
     if (dirty) setPendingDismiss(true);
-    else close();
+    else {
+      allowNavigationRef.current = true;
+      close();
+    }
   };
 
   const cancelDiscard = () => {

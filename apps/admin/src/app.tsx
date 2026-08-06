@@ -16,6 +16,7 @@ import { CatalogPage } from "./pages/catalog/index.js";
 import { ProductPanelRoute } from "./pages/catalog/ProductPanelRoute.js";
 import { ConflictsPage } from "./pages/conflicts/index.js";
 import { CounterpartiesPage } from "./pages/counterparties/index.js";
+import { CounterpartyPanelRoute } from "./pages/counterparties/CounterpartyPanelRoute.js";
 import { DashboardPage } from "./pages/dashboard/index.js";
 import { EmployeesPage } from "./pages/employees/index.js";
 import { ChannelPage } from "./pages/integrations/ChannelPage.js";
@@ -116,7 +117,24 @@ function appRouteElements() {
               <CounterpartiesPage />
             </RequireCapability>
           }
-        />
+        >
+          <Route
+            path="new"
+            element={
+              <RequireCapability capability={C.OPERATIONS_WRITE}>
+                <CounterpartyPanelRoute mode="create" />
+              </RequireCapability>
+            }
+          />
+          <Route
+            path=":counterpartyId/edit"
+            element={
+              <RequireCapability capability={C.OPERATIONS_WRITE}>
+                <CounterpartyPanelRoute mode="edit" />
+              </RequireCapability>
+            }
+          />
+        </Route>
         <Route
           path="employees"
           element={

@@ -52,7 +52,7 @@ function renderGuard(options: { busy?: boolean; initialEntries?: string[] } = {}
         path: "/list/new",
         element: (
           <Routes>
-            <Route index element={<GuardHarness busy={options.busy} />} />
+            <Route index element={<GuardHarness busy={options.busy ?? false} />} />
           </Routes>
         ),
       },

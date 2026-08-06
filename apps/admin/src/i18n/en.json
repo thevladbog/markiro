@@ -457,6 +457,10 @@
       "deleteConfirmTitle": "Delete counterparty?",
       "deleteConfirmBody": "Counterparty \"{{name}}\" will be permanently deleted.",
       "deleteConfirmAction": "Delete",
+      "sections": {
+        "identity": "Identity and GS1",
+        "sscc": "SSCC sequence"
+      },
       "table": {
         "name": "Name",
         "gln": "GLN",
@@ -467,6 +471,13 @@
       "form": {
         "createTitle": "New counterparty",
         "editTitle": "Edit counterparty",
+        "loadError": "Could not load counterparty data.",
+        "notFound": "Counterparty not found",
+        "retry": "Retry",
+        "discardTitle": "Discard changes?",
+        "discardBody": "Your unsaved changes will be lost.",
+        "continueEditing": "Continue editing",
+        "discardAction": "Discard",
         "nameLabel": "Name",
         "glnLabel": "GLN",
         "innLabel": "Tax ID",
@@ -487,7 +498,10 @@
           "description": "The starting serial counts within the prefix below. Set it when migrating box numbers already issued by another system under this GLN.",
           "prefixLabel": "Derived prefix",
           "nextSerialLabel": "Starting serial",
-          "save": "Save",
+          "save": "Save SSCC",
+          "loadError": "Could not load the SSCC sequence.",
+          "retry": "Retry",
+          "prefixUnavailable": "Saving is unavailable because a prefix could not be derived from the GLN.",
           "errors": {
             "nextSerialInvalid": "Enter a whole number from 0 to 9,999,999"
           },

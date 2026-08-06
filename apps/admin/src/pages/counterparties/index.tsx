@@ -1,91 +1,43 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-
-import { Alert, Button, EmptyState, Modal, PageHeader, Spinner, Table } from "@markiro/ui";
-import type { TableColumn } from "@markiro/ui";
+import { Outlet, useNavigate } from "react-router";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
+import { Alert, Button, EmptyState, Modal, PageHeader, Spinner, Table } from "@markiro/ui";
+import type { TableColumn } from "@markiro/ui";
 
 import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
 import { toast } from "../../lib/toast.js";
-import { CounterpartyForm, type CounterpartyFormValues } from "./CounterpartyForm.js";
-import {
-  useCounterparties,
-  useCreateCounterparty,
-  useDeleteCounterparty,
-  useUpdateCounterparty,
-  type CounterpartyDto,
-  type CreateCounterpartyInput,
-} from "./api.js";
+import { useCounterparties, useDeleteCounterparty, type CounterpartyDto } from "./api.js";
+import type {
+  CounterpartiesPanelContext,
+  CounterpartiesPanelLocationState,
+} from "./CounterpartyPanelRoute.js";
+import "./counterparties.css";
 
 function AuthorizedCreateCounterpartyAction() {
   const { t } = useTranslation();
-  const createMutation = useCreateCounterparty();
-  const [open, setOpen] = useState(false);
-
-  const handleSubmit = async (input: CreateCounterpartyInput) => {
-    try {
-      await createMutation.mutateAsync(input);
-      toast("ok", t("pages.counterparties.toasts.createSuccess"));
-      setOpen(false);
-    } catch (error) {
-      toast(
-        "error",
-        error instanceof ApiRequestError
-          ? error.message
-          : t("pages.counterparties.toasts.createError"),
-      );
-    }
-  };
-
+  const navigate = useNavigate();
   return (
-    <>
-      <Button type="button" onClick={() => setOpen(true)}>
-        {t("pages.counterparties.addAction")}
-      </Button>
-      {open ? (
-        <CounterpartyForm
-          open
-          mode="create"
-          submitting={createMutation.isPending}
-          onSubmit={handleSubmit}
-          onClose={() => setOpen(false)}
-        />
-      ) : null}
-    </>
+    <Button
+      type="button"
+      onClick={() =>
+        void navigate("new", {
+          state: { counterpartiesBackground: true } satisfies CounterpartiesPanelLocationState,
+        })
+      }
+    >
+      {t("pages.counterparties.addAction")}
+    </Button>
   );
 }
 
 function AuthorizedCounterpartyRowActions({ counterparty }: { counterparty: CounterpartyDto }) {
   const { t } = useTranslation();
-  const updateMutation = useUpdateCounterparty();
+  const navigate = useNavigate();
   const deleteMutation = useDeleteCounterparty();
-  const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
-
-  const initialValues: CounterpartyFormValues = {
-    name: counterparty.name,
-    gln: counterparty.gln,
-    inn: counterparty.inn ?? "",
-    gs1Prefixes: counterparty.gs1Prefixes.join(", "),
-    notes: counterparty.notes ?? "",
-  };
-
-  const handleUpdate = async (input: CreateCounterpartyInput) => {
-    try {
-      await updateMutation.mutateAsync({ id: counterparty.id, input });
-      toast("ok", t("pages.counterparties.toasts.updateSuccess"));
-      setEditing(false);
-    } catch (error) {
-      toast(
-        "error",
-        error instanceof ApiRequestError
-          ? error.message
-          : t("pages.counterparties.toasts.updateError"),
-      );
-    }
-  };
 
   const handleDelete = async () => {
     try {
@@ -104,8 +56,17 @@ function AuthorizedCounterpartyRowActions({ counterparty }: { counterparty: Coun
 
   return (
     <>
-      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-        <Button type="button" size="compact" variant="secondary" onClick={() => setEditing(true)}>
+      <div className="mk-row-actions">
+        <Button
+          type="button"
+          size="compact"
+          variant="secondary"
+          onClick={() =>
+            void navigate(`${counterparty.id}/edit`, {
+              state: { counterpartiesBackground: true } satisfies CounterpartiesPanelLocationState,
+            })
+          }
+        >
           {t("pages.counterparties.edit")}
         </Button>
         <Button
@@ -117,17 +78,6 @@ function AuthorizedCounterpartyRowActions({ counterparty }: { counterparty: Coun
           {t("pages.counterparties.delete")}
         </Button>
       </div>
-      {editing ? (
-        <CounterpartyForm
-          open
-          mode="edit"
-          initialValues={initialValues}
-          counterpartyId={counterparty.id}
-          submitting={updateMutation.isPending}
-          onSubmit={handleUpdate}
-          onClose={() => setEditing(false)}
-        />
-      ) : null}
       <Modal
         open={deleting}
         onClose={() => setDeleting(false)}
@@ -149,21 +99,17 @@ function AuthorizedCounterpartyRowActions({ counterparty }: { counterparty: Coun
           </>
         }
       >
-        <p style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>
-          {t("pages.counterparties.deleteConfirmBody", { name: counterparty.name })}
-        </p>
+        <p>{t("pages.counterparties.deleteConfirmBody", { name: counterparty.name })}</p>
       </Modal>
     </>
   );
 }
 
-/** Admin counterparties CRUD screen -- Plan 03 Task 11 (list/create/edit/delete). */
 export function CounterpartiesPage() {
   const { t } = useTranslation();
   const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
-  const { data, isPending, isError } = useCounterparties();
-
-  const items = data ?? [];
+  const query = useCounterparties();
+  const items = query.data ?? [];
 
   const columns: TableColumn<CounterpartyDto>[] = useMemo(
     () => [
@@ -189,21 +135,21 @@ export function CounterpartiesPage() {
           canWrite ? <AuthorizedCounterpartyRowActions counterparty={row} /> : null,
       },
     ],
-    [t, canWrite],
+    [canWrite, t],
   );
 
   return (
-    <div style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: 20 }}>
+    <div className="mk-counterparties-page" data-testid="counterparties-page">
       <PageHeader
         title={t("pages.counterparties.title")}
         actions={canWrite ? <AuthorizedCreateCounterpartyAction /> : null}
       />
 
-      {isPending ? (
-        <div style={{ display: "flex", justifyContent: "center", padding: 48 }}>
+      {query.isPending ? (
+        <div className="mk-counterparty-section-state">
           <Spinner label={t("common.loading")} />
         </div>
-      ) : isError ? (
+      ) : query.isError ? (
         <Alert tone="error">{t("common.loadError")}</Alert>
       ) : items.length === 0 ? (
         <EmptyState
@@ -214,6 +160,19 @@ export function CounterpartiesPage() {
       ) : (
         <Table columns={columns} rows={items} />
       )}
+
+      <Outlet
+        context={
+          {
+            counterparties: items,
+            counterpartiesPending: query.isPending,
+            counterpartiesError: query.isError,
+            retryPanelData: async () => {
+              await query.refetch();
+            },
+          } satisfies CounterpartiesPanelContext
+        }
+      />
     </div>
   );
 }
