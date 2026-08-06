@@ -7,7 +7,7 @@ import { ExceptionActions, type BoxExceptionAction } from "../ui/exceptions/Exce
 import { OtherReasonDialog } from "../ui/exceptions/OtherReasonDialog.js";
 import { ReasonPicker } from "../ui/exceptions/ReasonPicker.js";
 
-type ExceptionStage = "action" | "target" | "reason" | "confirm" | "applying" | "result";
+export type ExceptionStage = "action" | "target" | "reason" | "confirm" | "applying" | "result";
 
 export interface ExceptionFlowProps {
   boxes: ClosedBoxSummary[];

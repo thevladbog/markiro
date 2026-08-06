@@ -17,7 +17,7 @@ export interface PrintVerificationProps {
   scanSource: ScanSource;
 }
 
-type Message = "mismatch" | "notSscc" | null;
+export type PrintVerificationMessage = "waiting" | "mismatch" | "notSscc";
 
 /**
  * The one deliberate exception to "nothing competes with a scan verdict"
@@ -39,7 +39,7 @@ export function PrintVerification({
   scanSource,
 }: PrintVerificationProps) {
   const { t } = useTranslation();
-  const [message, setMessage] = useState<Message>(null);
+  const [message, setMessage] = useState<PrintVerificationMessage>("waiting");
 
   useEffect(() => {
     return scanSource.start((raw) => {
@@ -52,7 +52,7 @@ export function PrintVerification({
         setMessage("mismatch");
         return;
       }
-      setMessage(null);
+      setMessage("waiting");
       onVerified();
     });
   }, [scanSource, expected, onVerified]);

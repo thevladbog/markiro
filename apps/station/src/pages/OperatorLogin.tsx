@@ -16,7 +16,7 @@ export interface OperatorLoginProps {
   notice?: ReactNode;
 }
 
-type LoginStage = "badge" | "login" | "pin" | "search";
+export type LoginStage = "badge" | "login" | "pin" | "search";
 
 /** Badge-first fixed-viewport operator sign-in with bounded offline fallbacks. */
 export function OperatorLogin({ exec, source, onAuthed, notice }: OperatorLoginProps) {

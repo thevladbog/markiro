@@ -19,16 +19,17 @@ export interface NewShiftProps {
   onBack: () => void;
 }
 
-type View = "input" | "found" | "notFound";
+export type NewShiftView = "input" | "found" | "notFound";
+export type NewShiftMode = "validation" | "aggregation";
 
 export function NewShift({ client, onStarted, onBack }: NewShiftProps) {
   const { t } = useTranslation();
   const [raw, setRaw] = useState("");
-  const [view, setView] = useState<View>("input");
+  const [view, setView] = useState<NewShiftView>("input");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [product, setProduct] = useState<ResolvedProduct | null>(null);
-  const [mode, setMode] = useState<"validation" | "aggregation">("validation");
+  const [mode, setMode] = useState<NewShiftMode>("validation");
   const [unknownGtin, setUnknownGtin] = useState<string>("");
 
   async function resolve(e: FormEvent) {

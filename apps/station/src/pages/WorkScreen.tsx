@@ -90,6 +90,9 @@ export interface WorkScreenProps {
   } | null;
 }
 
+export type WorkBlockingState = "serial-exhaustion";
+export type WorkOverlayState = "exit-pending" | "clear-confirm";
+
 /** How long each verdict's full-screen flash stays up (design brief 04). */
 const FLASH_MS: Record<SignalTone, number> = { ok: 350, error: 1200, duplicate: 900 };
 
@@ -1035,6 +1038,12 @@ export function WorkScreen({
     unknown: t("work.rejected"),
   };
   const locale = i18n.language.startsWith("ru") ? "ru-RU" : "en-US";
+  const blockingState: WorkBlockingState | null = noSerials ? "serial-exhaustion" : null;
+  const overlayState: WorkOverlayState | null = confirmExit
+    ? "exit-pending"
+    : confirmClear
+      ? "clear-confirm"
+      : null;
 
   return (
     <main className="work-screen" aria-label={productName}>
@@ -1116,7 +1125,7 @@ export function WorkScreen({
       />
 
       <div className="work-screen__overlays">
-        {confirmExit ? (
+        {overlayState === "exit-pending" ? (
           <Alert tone="warn" style={{ position: "relative", zIndex: 1 }}>
             <p>{t("work.exitPending", { count: pendingSync })}</p>
             <Button size="floor" onClick={onExit}>
@@ -1127,7 +1136,7 @@ export function WorkScreen({
             </Button>
           </Alert>
         ) : null}
-        {confirmClear ? (
+        {overlayState === "clear-confirm" ? (
           <Alert tone="warn" title={t("box.confirmClearTitle")}>
             <p>{t("box.confirmClearDetail")}</p>
             <Button size="floor" onClick={confirmClearBox}>
@@ -1141,7 +1150,7 @@ export function WorkScreen({
       </div>
 
       <FullScreenDialog
-        open={noSerials}
+        open={blockingState === "serial-exhaustion"}
         title={t("box.noSerials")}
         backLabel={t("work.backToWork")}
         onClose={() => setNoSerials(false)}

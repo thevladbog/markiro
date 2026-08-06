@@ -25,7 +25,8 @@ export interface EnrollmentProps {
   runConfigTransition?: (transition: () => Promise<void>) => Promise<void>;
 }
 
-type EnrollmentState = "waiting" | "redeeming" | "success" | "service";
+export type EnrollmentState = "waiting" | "redeeming" | "success" | "service";
+export type EnrollmentErrorState = PairingError | "service" | "setup_required";
 
 interface EnrollmentOperation {
   readonly id: number;
@@ -59,7 +60,7 @@ export function Enrollment({
   const { t } = useTranslation();
   const [code, setCode] = useState("");
   const [state, setState] = useState<EnrollmentState>("waiting");
-  const [error, setError] = useState<PairingError | "service" | "setup_required" | null>(() =>
+  const [error, setError] = useState<EnrollmentErrorState | null>(() =>
     pairingServerUrl ? null : "setup_required",
   );
   const [serverUrl, setServerUrl] = useState(() => pairingServerUrl ?? "");

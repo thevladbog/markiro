@@ -9,6 +9,7 @@ import {
 } from "../src/dev/gallery-fixtures.js";
 import { shouldRenderGallery } from "../src/dev/gallery-guard.js";
 import { StationScreenGallery } from "../src/dev/StationScreenGallery.js";
+import { PERSISTENT_GALLERY_STATE_IDS } from "../src/ui/persistent-station-states.js";
 
 afterEach(() => {
   cleanup();
@@ -38,12 +39,36 @@ describe("development screen gallery", () => {
   });
 
   it("reports a missing fixture from the independently maintained expected-state list", () => {
-    expect(findMissingGalleryStates(GALLERY_FIXTURES)).toEqual([]);
+    expect(findMissingGalleryStates(GALLERY_FIXTURES, PERSISTENT_GALLERY_STATE_IDS)).toEqual([]);
+
+    expect(PERSISTENT_GALLERY_STATE_IDS).toEqual(
+      expect.arrayContaining([
+        "new-shift-input",
+        "new-shift-found",
+        "new-shift-not-found",
+        "shift-loading",
+        "shift-read-error",
+        "shift-empty",
+        "exception-applying",
+        "serial-exhaustion",
+        "conflicts-loading",
+        "conflicts-read-error",
+        "conflicts-empty",
+        "credential-recovery-sealing",
+        "credential-recovery-failed",
+        "credential-recovery-ready",
+        "print-verification",
+        "print-mismatch",
+        "print-not-sscc",
+      ]),
+    );
 
     const withoutPrintVerification = GALLERY_FIXTURES.filter(
       (fixture) => fixture.id !== "print-verification",
     );
-    expect(findMissingGalleryStates(withoutPrintVerification)).toEqual(["print-verification"]);
+    expect(
+      findMissingGalleryStates(withoutPrintVerification, PERSISTENT_GALLERY_STATE_IDS),
+    ).toEqual(["print-verification"]);
     expect(EXPECTED_GALLERY_STATE_IDS).toContain("print-verification");
   });
 
@@ -82,5 +107,27 @@ describe("development screen gallery", () => {
         name: "Extended offline operation on the production line",
       }),
     ).not.toBeNull();
+  });
+
+  it.each([
+    ["new-shift-input", "GTIN товара"],
+    ["new-shift-found", "Тестовый товар А"],
+    ["new-shift-not-found", "Товар не найден"],
+    ["shift-loading", "Загрузка смен"],
+    ["shift-read-error", "Не удалось загрузить смены"],
+    ["shift-empty", "Открытых смен нет"],
+    ["exception-applying", "Запись сохраняется в локальный журнал"],
+    ["serial-exhaustion", "Продолжение сканирования заблокировано"],
+    ["conflicts-loading", "Загрузка конфликтов"],
+    ["conflicts-read-error", "Не удалось прочитать локальные конфликты"],
+    ["conflicts-empty", "Конфликтов нет"],
+    ["credential-recovery-sealing", "подготавливаются к безопасному восстановлению"],
+    ["credential-recovery-failed", "Не удалось подготовить локальные данные"],
+    ["credential-recovery-ready", "Сохранено: 12 сканирований"],
+    ["print-mismatch", "SSCC другого короба"],
+    ["print-not-sscc", "не распознан SSCC"],
+  ] as const)("renders distinct persistent viewport %s", (state, expectedCopy) => {
+    const view = render(<StationScreenGallery request={{ state, locale: "ru" }} />);
+    expect(view.container.textContent).toContain(expectedCopy);
   });
 });

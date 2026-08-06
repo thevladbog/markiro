@@ -21,6 +21,17 @@ export interface BoxFillInstrumentProps {
   onClear: () => void;
 }
 
+export type BoxFillPersistentState = "empty" | "partial" | "full";
+
+export function boxFillPersistentState(
+  box: { itemCount: number } | null,
+  capacity: number | null,
+): BoxFillPersistentState {
+  if (!box || box.itemCount === 0) return "empty";
+  if (capacity !== null && capacity > 0 && box.itemCount >= capacity) return "full";
+  return "partial";
+}
+
 export function BoxFillInstrument({
   box,
   capacity,
@@ -33,8 +44,13 @@ export function BoxFillInstrument({
 }: BoxFillInstrumentProps) {
   const usableCapacity = capacity !== null && capacity > 0 ? capacity : null;
   const fill = box && usableCapacity ? Math.min(box.itemCount, usableCapacity) : 0;
+  const persistentState = boxFillPersistentState(box, capacity);
   return (
-    <section className="work-instrument work-box-fill" aria-labelledby="work-box-fill-title">
+    <section
+      className="work-instrument work-box-fill"
+      aria-labelledby="work-box-fill-title"
+      data-persistent-state={persistentState}
+    >
       <h2 id="work-box-fill-title">{labels.title}</h2>
       {box ? (
         <>

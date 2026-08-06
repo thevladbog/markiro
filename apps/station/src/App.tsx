@@ -64,11 +64,15 @@ interface ActiveShift {
   mode: string;
 }
 
-type CredentialRecoveryState =
-  | { event: CredentialRejectedEvent; phase: "sealing" | "failed" }
+export type CredentialRecoveryPhase = "sealing" | "failed" | "ready";
+
+export type CredentialRecoveryState =
+  | { event: CredentialRejectedEvent; phase: Exclude<CredentialRecoveryPhase, "ready"> }
   | { event: CredentialRejectedEvent; phase: "ready"; sealed: SealedWorkSummary };
 
-type LegacyIdentityState = "resolving" | "degraded" | "rejected" | null;
+export type LegacyIdentityState = "resolving" | "degraded" | "rejected" | null;
+
+export type StationView = "loading" | "pairing" | "login" | "floor";
 
 const legacyGatedClient: StationClient = {
   get<T>() {
@@ -96,7 +100,7 @@ const legacyGatedClient: StationClient = {
 export function nextStationView(
   config: StationConfig | null,
   operator: OperatorMirrorRecord | null,
-): "loading" | "pairing" | "login" | "floor" {
+): StationView {
   if (!config) return "loading";
   if (!isEnrolled(config)) return "pairing";
   if (!operator) return "login";

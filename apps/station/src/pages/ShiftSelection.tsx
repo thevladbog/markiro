@@ -30,6 +30,21 @@ export interface ShiftSelectionProps {
   isCurrent?: () => boolean;
 }
 
+export type ShiftSelectionPersistentState =
+  "loading" | "read-error" | "empty" | "page-1" | "page-2";
+
+export function shiftSelectionPersistentState(input: {
+  loading: boolean;
+  loadFailed: boolean;
+  openItemCount: number;
+  page: number;
+}): ShiftSelectionPersistentState {
+  if (input.loading) return "loading";
+  if (input.loadFailed) return "read-error";
+  if (input.openItemCount === 0) return "empty";
+  return input.page <= 1 ? "page-1" : "page-2";
+}
+
 export function ShiftSelection({
   client,
   onSelected,
@@ -80,6 +95,12 @@ export function ShiftSelection({
 
   const openItems = useMemo(() => items.filter((shift) => shift.status !== "closed"), [items]);
   const currentPage = paginate(openItems, requestedPage, SHIFT_PAGE_SIZE);
+  const persistentState = shiftSelectionPersistentState({
+    loading,
+    loadFailed,
+    openItemCount: openItems.length,
+    page: currentPage.page,
+  });
 
   useEffect(() => {
     if (requestedPage !== currentPage.page) setRequestedPage(currentPage.page);
@@ -136,17 +157,17 @@ export function ShiftSelection({
     >
       <div className="shift-selection__content">
         <div className="shift-selection__slot">
-          {loading ? (
+          {persistentState === "loading" ? (
             <p className="shift-selection__state" role="status">
               {t("shifts.loading")}
             </p>
-          ) : loadFailed ? (
+          ) : persistentState === "read-error" ? (
             <div className="shift-selection__state">
               <Button size="floor" variant="secondary" onClick={() => setLoadAttempt((n) => n + 1)}>
                 {t("shifts.retry")}
               </Button>
             </div>
-          ) : openItems.length === 0 ? (
+          ) : persistentState === "empty" ? (
             <p className="shift-selection__state">{t("shifts.empty")}</p>
           ) : (
             <div className="shift-selection__grid">

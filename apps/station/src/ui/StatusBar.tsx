@@ -2,6 +2,15 @@ import { useTranslation } from "react-i18next";
 
 /** What the station can honestly say about its scanner. */
 export type ScannerIndicator = "keyboard" | "connected" | "disconnected";
+export type FloorConnectivityState = "online" | "offline" | "sync-stuck";
+
+export function floorConnectivityState(
+  online: boolean,
+  syncStuck: boolean,
+): FloorConnectivityState {
+  if (syncStuck) return "sync-stuck";
+  return online ? "online" : "offline";
+}
 
 export interface StatusBarProps {
   stationName: string;
@@ -54,8 +63,13 @@ export function StatusBar({
       : scanner === "disconnected"
         ? t("shell.scannerDisconnected")
         : t("shell.scannerKeyboard");
+  const connectivityState = floorConnectivityState(online, syncStuck);
   return (
-    <header className="station-status-bar" aria-label={t("shell.statusBar")}>
+    <header
+      className="station-status-bar"
+      aria-label={t("shell.statusBar")}
+      data-connectivity-state={connectivityState}
+    >
       <dl className="station-status-group station-status-group--context">
         <StatusValue label={t("shell.station")} value={stationName} testId="station-status" />
         {lineName ? (

@@ -11,6 +11,20 @@ export interface ConflictListProps {
   onBack: () => void;
 }
 
+export type ConflictListPersistentState = "loading" | "read-error" | "empty" | "page-1" | "page-2";
+
+export function conflictListPersistentState(input: {
+  loading: boolean;
+  readFailed: boolean;
+  total: number;
+  page: number;
+}): ConflictListPersistentState {
+  if (input.loading) return "loading";
+  if (input.readFailed) return "read-error";
+  if (input.total === 0) return "empty";
+  return input.page <= 1 ? "page-1" : "page-2";
+}
+
 const EMPTY_PAGE: DeviceConflictPage = {
   items: [],
   page: 1,
@@ -68,6 +82,12 @@ export function ConflictList({ exec, onBack }: ConflictListProps) {
 
   const pageCount = Math.max(1, Math.ceil(pageData.total / pageData.pageSize));
   const showItems = !loading && !readFailed && pageData.total > 0;
+  const persistentState = conflictListPersistentState({
+    loading,
+    readFailed,
+    total: pageData.total,
+    page: pageData.page,
+  });
 
   return (
     <StationScreen
@@ -82,9 +102,9 @@ export function ConflictList({ exec, onBack }: ConflictListProps) {
     >
       <div className="conflict-list">
         <div className="conflict-list__message" aria-live="polite">
-          {loading ? (
+          {persistentState === "loading" ? (
             <p>{t("conflicts.loading")}</p>
-          ) : readFailed ? (
+          ) : persistentState === "read-error" ? (
             <>
               <p>{t("conflicts.readFailed")}</p>
               <Button
@@ -96,7 +116,7 @@ export function ConflictList({ exec, onBack }: ConflictListProps) {
                 {t("conflicts.retry")}
               </Button>
             </>
-          ) : pageData.total === 0 ? (
+          ) : persistentState === "empty" ? (
             <p>{t("conflicts.empty")}</p>
           ) : (
             <p>{t("conflicts.explanation")}</p>

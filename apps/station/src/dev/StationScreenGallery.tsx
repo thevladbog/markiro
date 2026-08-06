@@ -79,42 +79,139 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
 
 function GalleryState({ fixture, locale }: { fixture: GalleryFixture; locale: GalleryLocale }) {
   switch (fixture.kind) {
+    case "system":
+      return <SystemFixture locale={locale} />;
+    case "credential-recovery":
+      return <CredentialRecoveryFixture phase={fixture.variant} locale={locale} />;
+    case "legacy-identity":
+      return <LegacyIdentityFixture state={fixture.variant} locale={locale} />;
     case "pairing":
       return <PairingFixture variant={fixture.variant} locale={locale} />;
     case "login":
       return <LoginFixture variant={fixture.variant} locale={locale} />;
+    case "new-shift":
+      return <NewShiftFixture view={fixture.variant} locale={locale} />;
     case "shift":
-      return <ShiftFixture page={fixture.variant === "2" ? 2 : 1} locale={locale} />;
+      return <ShiftFixture variant={fixture.variant} locale={locale} />;
     case "work":
       return <WorkFixture mode={fixture.variant} locale={locale} />;
+    case "work-overlay":
+      return <WorkOverlayFixture overlay={fixture.variant} locale={locale} />;
     case "signal":
       return <SignalFixture tone={fixture.variant} locale={locale} />;
     case "box":
       return <BoxFixture full={fixture.variant === "full"} locale={locale} />;
+    case "serial-recovery":
+      return <SerialRecoveryFixture locale={locale} />;
     case "exception":
       return <ExceptionFixture stage={fixture.variant} locale={locale} />;
     case "conflicts":
-      return <ConflictFixture page={fixture.variant === "2" ? 2 : 1} locale={locale} />;
+      return <ConflictFixture variant={fixture.variant} locale={locale} />;
     case "setup":
       return <SetupFixture tab={fixture.variant} locale={locale} />;
     case "sync":
       return <SyncFixture stuck={fixture.variant === "stuck"} locale={locale} />;
     case "print":
-      return <PrintFixture locale={locale} />;
+      return <PrintFixture variant={fixture.variant} locale={locale} />;
     case "long-copy":
       return <LongCopyFixture locale={fixture.variant === "en" ? "en" : "ru"} />;
   }
+}
+
+function SystemFixture({ locale }: { locale: GalleryLocale }) {
+  const ru = locale === "ru";
+  return (
+    <StationScreen title={ru ? "Запуск рабочего места" : "Starting workstation"}>
+      <div className="gallery-centered-card">
+        <p className="gallery-state-message" role="status">
+          {ru ? "Загрузка локального рабочего состояния…" : "Loading local workstation state…"}
+        </p>
+      </div>
+    </StationScreen>
+  );
+}
+
+function CredentialRecoveryFixture({ phase, locale }: { phase: string; locale: GalleryLocale }) {
+  const ru = locale === "ru";
+  const failed = phase === "failed";
+  const ready = phase === "ready";
+  return (
+    <StationScreen
+      title={ru ? "Восстановление доступа" : "Credential recovery"}
+      actions={
+        failed ? <GalleryFooter locale={locale} primary={ru ? "Повторить" : "Retry"} /> : undefined
+      }
+    >
+      <div className="gallery-centered-card">
+        <Alert tone={failed ? "error" : ready ? "warn" : "info"}>
+          <p>
+            {failed
+              ? ru
+                ? "Не удалось подготовить локальные данные. Повторите попытку."
+                : "Local work could not be prepared. Try again."
+              : ready
+                ? ru
+                  ? "Сохранено: 12 сканирований, 2 короба и 1 исключение. Подключите станцию повторно."
+                  : "Retained: 12 scans, 2 boxes, and 1 exception. Pair the station again."
+                : ru
+                  ? "Локальные операции блокируются и подготавливаются к безопасному восстановлению."
+                  : "Local operations are being sealed for safe recovery."}
+          </p>
+        </Alert>
+      </div>
+    </StationScreen>
+  );
+}
+
+function LegacyIdentityFixture({ state, locale }: { state: string; locale: GalleryLocale }) {
+  const ru = locale === "ru";
+  const rejected = state === "rejected";
+  const degraded = state === "degraded";
+  return (
+    <StationScreen
+      title={ru ? "Проверка рабочего места" : "Workstation identity check"}
+      actions={
+        degraded ? (
+          <GalleryFooter locale={locale} primary={ru ? "Повторить" : "Retry"} />
+        ) : undefined
+      }
+    >
+      <div className="gallery-centered-card">
+        <Alert tone={rejected ? "error" : degraded ? "warn" : "info"}>
+          {rejected
+            ? ru
+              ? "Старые учётные данные отклонены. Требуется сервисное восстановление."
+              : "Legacy credentials were rejected. Service recovery is required."
+            : degraded
+              ? ru
+                ? "Сервер временно недоступен. Производственные данные сохранены локально."
+                : "The server is temporarily unavailable. Production data remains local."
+              : ru
+                ? "Проверяем привязку станции…"
+                : "Checking workstation identity…"}
+        </Alert>
+      </div>
+    </StationScreen>
+  );
 }
 
 function PairingFixture({ variant, locale }: { variant: string; locale: GalleryLocale }) {
   const ru = locale === "ru";
   const messages: Record<string, { tone: "info" | "error" | "ok" | "warn"; text: string }> = {
     waiting: { tone: "info", text: ru ? "Введите код подключения" : "Enter pairing code" },
+    redeeming: {
+      tone: "info",
+      text: ru ? "Проверяем код подключения…" : "Checking pairing code…",
+    },
     error: {
       tone: "error",
       text: ru ? "Код истёк. Запросите новый." : "Code expired. Request a new one.",
     },
     success: { tone: "ok", text: ru ? "Рабочее место подключено" : "Workstation paired" },
+    service: {
+      tone: "warn",
+      text: ru ? "Сервисное подключение для восстановления" : "Service recovery connection",
+    },
     recovery: {
       tone: "warn",
       text: ru
@@ -135,7 +232,7 @@ function PairingFixture({ variant, locale }: { variant: string; locale: GalleryL
         <Card padding="24px" className="gallery-card">
           <Alert tone={message.tone}>{message.text}</Alert>
           <div className="gallery-code" aria-label={ru ? "Код подключения" : "Pairing code"}>
-            0000 0000
+            {variant === "service" ? "DEMO-SERVICE-ENDPOINT" : "0000 0000"}
           </div>
           <p>{ru ? "Синтетический код для проверки макета" : "Synthetic layout-review code"}</p>
         </Card>
@@ -194,8 +291,104 @@ function LoginFixture({ variant, locale }: { variant: string; locale: GalleryLoc
   );
 }
 
-function ShiftFixture({ page, locale }: { page: number; locale: GalleryLocale }) {
+function NewShiftFixture({ view, locale }: { view: string; locale: GalleryLocale }) {
   const ru = locale === "ru";
+  const notFound = view === "not-found";
+  const found = view === "found";
+  return (
+    <StationScreen
+      title={ru ? "Новая смена" : "New shift"}
+      actions={
+        <GalleryFooter
+          locale={locale}
+          primary={
+            notFound
+              ? ru
+                ? "Сканировать снова"
+                : "Scan again"
+              : found
+                ? ru
+                  ? "Начать смену"
+                  : "Start shift"
+                : ru
+                  ? "Найти товар"
+                  : "Find product"
+          }
+        />
+      }
+    >
+      <div className="gallery-new-shift">
+        {notFound ? (
+          <Alert tone="warn" title={ru ? "Товар не найден" : "Product not found"}>
+            <p>GTIN: 04607000000999</p>
+            <p>
+              {ru
+                ? "Проверьте код или обратитесь к мастеру."
+                : "Check the code or contact a supervisor."}
+            </p>
+          </Alert>
+        ) : found ? (
+          <>
+            <Card className="gallery-card" title={ru ? "Тестовый товар А" : "Sample product A"}>
+              <p className="gallery-mono">04607000000042</p>
+            </Card>
+            <div className="gallery-two-actions">
+              <Button size="floor">{ru ? "Проверка" : "Validation"}</Button>
+              <Button size="floor" variant="secondary">
+                {ru ? "Агрегация" : "Aggregation"}
+              </Button>
+            </div>
+          </>
+        ) : (
+          <div className="gallery-search-field">
+            <span>{ru ? "GTIN товара" : "Product GTIN"}</span>
+            <strong className="gallery-mono">04607000000042</strong>
+          </div>
+        )}
+      </div>
+    </StationScreen>
+  );
+}
+
+function ShiftFixture({ variant, locale }: { variant: string; locale: GalleryLocale }) {
+  const ru = locale === "ru";
+  if (variant === "loading" || variant === "read-error" || variant === "empty") {
+    return (
+      <StationScreen
+        title={ru ? "Смены" : "Shifts"}
+        actions={<GalleryFooter locale={locale} primary={ru ? "Новая смена" : "New shift"} />}
+      >
+        <div className="gallery-centered-card">
+          {variant === "read-error" ? (
+            <Alert
+              tone="error"
+              action={
+                <Button size="floor" variant="secondary">
+                  {ru ? "Повторить" : "Retry"}
+                </Button>
+              }
+            >
+              {ru ? "Не удалось загрузить смены" : "Could not load shifts"}
+            </Alert>
+          ) : (
+            <p
+              className="gallery-state-message"
+              role={variant === "loading" ? "status" : undefined}
+            >
+              {variant === "loading"
+                ? ru
+                  ? "Загрузка смен…"
+                  : "Loading shifts…"
+                : ru
+                  ? "Открытых смен нет"
+                  : "There are no open shifts"}
+            </p>
+          )}
+        </div>
+      </StationScreen>
+    );
+  }
+  const page = variant === "2" ? 2 : 1;
   const shifts = page === 1 ? ["ДЕМО-01", "ДЕМО-02", "ДЕМО-03"] : ["ДЕМО-04", "ДЕМО-05"];
   return (
     <StationScreen title={ru ? "Выберите смену" : "Select shift"}>
@@ -267,6 +460,47 @@ function WorkFixture({ mode, locale }: { mode: string; locale: GalleryLocale }) 
   );
 }
 
+function WorkOverlayFixture({ overlay, locale }: { overlay: string; locale: GalleryLocale }) {
+  const ru = locale === "ru";
+  const clear = overlay === "clear-confirm";
+  return (
+    <StationScreen title={ru ? "Рабочая смена" : "Active shift"}>
+      <div className="gallery-centered-card">
+        <Alert
+          tone="warn"
+          title={
+            clear
+              ? ru
+                ? "Очистить короб?"
+                : "Clear the box?"
+              : ru
+                ? "Есть неотправленные операции"
+                : "Operations are still pending"
+          }
+        >
+          <p>
+            {clear
+              ? ru
+                ? "Все коды текущего тестового короба будут освобождены."
+                : "All codes in the current synthetic box will be released."
+              : ru
+                ? "7 операций сохранены локально и ещё не синхронизированы."
+                : "7 operations are stored locally and have not synced yet."}
+          </p>
+          <div className="gallery-two-actions">
+            <Button size="floor">
+              {clear ? (ru ? "Очистить" : "Clear") : ru ? "Выйти" : "Exit"}
+            </Button>
+            <Button size="floor" variant="secondary">
+              {ru ? "Остаться" : "Stay"}
+            </Button>
+          </div>
+        </Alert>
+      </div>
+    </StationScreen>
+  );
+}
+
 function SignalFixture({ tone, locale }: { tone: string; locale: GalleryLocale }) {
   const ru = locale === "ru";
   if (tone === "duplicate") {
@@ -315,6 +549,25 @@ function BoxFixture({ full, locale }: { full: boolean; locale: GalleryLocale }) 
   );
 }
 
+function SerialRecoveryFixture({ locale }: { locale: GalleryLocale }) {
+  const ru = locale === "ru";
+  return (
+    <StationScreen title={ru ? "Закончились номера коробов" : "Box serials exhausted"}>
+      <div className="gallery-dialog-panel" role="dialog" aria-modal="true">
+        <h2>{ru ? "Невозможно закрыть короб" : "The box cannot be closed"}</h2>
+        <p>
+          {ru
+            ? "Продолжение сканирования заблокировано. Дождитесь пополнения диапазона SSCC или вернитесь к работе с открытым коробом."
+            : "Scanning is blocked. Wait for the SSCC range to refill or return to the open box."}
+        </p>
+        <Button size="floor" variant="secondary">
+          {ru ? "Вернуться к работе" : "Back to work"}
+        </Button>
+      </div>
+    </StationScreen>
+  );
+}
+
 function ExceptionFixture({ stage, locale }: { stage: string; locale: GalleryLocale }) {
   const ru = locale === "ru";
   const title: Record<string, string> = {
@@ -322,6 +575,7 @@ function ExceptionFixture({ stage, locale }: { stage: string; locale: GalleryLoc
     target: ru ? "Выберите короб" : "Choose box",
     reason: ru ? "Укажите причину" : "Choose reason",
     confirm: ru ? "Подтвердите действие" : "Confirm action",
+    applying: ru ? "Выполняем действие" : "Applying action",
     result: ru ? "Действие выполнено" : "Action completed",
   };
   const items: Record<string, string[]> = {
@@ -338,6 +592,7 @@ function ExceptionFixture({ stage, locale }: { stage: string; locale: GalleryLoc
       ? ["Этикетка повреждена", "Этикетка не читается", "Замятие в принтере", "Другая причина"]
       : ["Damaged label", "Unreadable label", "Printer jam", "Other reason"],
     confirm: [ru ? "Повторно напечатать этикетку TEST-BOX-0001?" : "Reprint label TEST-BOX-0001?"],
+    applying: [ru ? "Запись сохраняется в локальный журнал…" : "Saving to the local journal…"],
     result: [ru ? "Этикетка отправлена на печать" : "Label sent to printer"],
   };
   return (
@@ -353,8 +608,8 @@ function ExceptionFixture({ stage, locale }: { stage: string; locale: GalleryLoc
     >
       <div className="gallery-action-grid">
         {(items[stage] ?? []).map((item) =>
-          stage === "result" ? (
-            <Alert key={item} tone="ok">
+          stage === "result" || stage === "applying" ? (
+            <Alert key={item} tone={stage === "result" ? "ok" : "info"}>
               {item}
             </Alert>
           ) : (
@@ -368,8 +623,47 @@ function ExceptionFixture({ stage, locale }: { stage: string; locale: GalleryLoc
   );
 }
 
-function ConflictFixture({ page, locale }: { page: number; locale: GalleryLocale }) {
+function ConflictFixture({ variant, locale }: { variant: string; locale: GalleryLocale }) {
   const ru = locale === "ru";
+  if (variant === "loading" || variant === "read-error" || variant === "empty") {
+    return (
+      <StationScreen
+        title={ru ? "Конфликты" : "Conflicts"}
+        actions={<GalleryFooter locale={locale} />}
+      >
+        <div className="gallery-centered-card">
+          {variant === "read-error" ? (
+            <Alert
+              tone="error"
+              action={
+                <Button size="floor" variant="secondary">
+                  {ru ? "Повторить" : "Retry"}
+                </Button>
+              }
+            >
+              {ru
+                ? "Не удалось прочитать локальные конфликты"
+                : "Local conflicts could not be read"}
+            </Alert>
+          ) : (
+            <p
+              className="gallery-state-message"
+              role={variant === "loading" ? "status" : undefined}
+            >
+              {variant === "loading"
+                ? ru
+                  ? "Загрузка конфликтов…"
+                  : "Loading conflicts…"
+                : ru
+                  ? "Конфликтов нет"
+                  : "There are no conflicts"}
+            </p>
+          )}
+        </div>
+      </StationScreen>
+    );
+  }
+  const page = variant === "2" ? 2 : 1;
   const serials = page === 1 ? ["TEST-000128", "TEST-000129"] : ["TEST-000130", "TEST-000131"];
   return (
     <StationScreen
@@ -495,8 +789,10 @@ function SyncFixture({ stuck, locale }: { stuck: boolean; locale: GalleryLocale 
   );
 }
 
-function PrintFixture({ locale }: { locale: GalleryLocale }) {
+function PrintFixture({ variant, locale }: { variant: string; locale: GalleryLocale }) {
   const ru = locale === "ru";
+  const mismatch = variant === "mismatch";
+  const notSscc = variant === "not-sscc";
   return (
     <StationScreen
       title={ru ? "Проверьте напечатанную этикетку" : "Verify the printed label"}
@@ -511,7 +807,19 @@ function PrintFixture({ locale }: { locale: GalleryLocale }) {
       <div className="gallery-print">
         <p>{ru ? "Отсканируйте SSCC с этикетки короба" : "Scan the SSCC on the box label"}</p>
         <strong className="gallery-code">000000000000000000</strong>
-        <Alert tone="info">{ru ? "Ожидание сканирования" : "Waiting for scan"}</Alert>
+        <Alert tone={mismatch || notSscc ? "error" : "info"}>
+          {mismatch
+            ? ru
+              ? "Отсканирован SSCC другого короба"
+              : "The scanned SSCC belongs to another box"
+            : notSscc
+              ? ru
+                ? "На этикетке не распознан SSCC"
+                : "No SSCC was recognized on the label"
+              : ru
+                ? "Ожидание сканирования"
+                : "Waiting for scan"}
+        </Alert>
       </div>
     </StationScreen>
   );
