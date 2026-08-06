@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useSearchParams } from "react-router";
+import { useSearchParams } from "react-router";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import {
@@ -16,6 +16,8 @@ import {
 import type { TableColumn } from "@markiro/ui";
 
 import { useCan } from "../../access/context.js";
+import { useActiveOrg } from "../../layout/useActiveOrg.js";
+import { DeviceActions } from "./DeviceActions.js";
 import { DeviceDrawer } from "./DeviceDrawer.js";
 import { DevicePager } from "./DevicePager.js";
 import { useDevices, type DeviceDto, type DeviceStatus, type DeviceType } from "./api.js";
@@ -43,7 +45,10 @@ function parsePage(value: string | null): number {
 export function DevicesPage() {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [open, setOpen] = useState(false);
+  const [drawer, setDrawer] = useState<
+    { mode: "create" } | { mode: "pair" | "reassign"; device: DeviceDto } | null
+  >(null);
+  const { orgName } = useActiveOrg();
   const type = parseType(searchParams.get("type"));
   const status = parseStatus(searchParams.get("status"));
   const page = parsePage(searchParams.get("page"));
@@ -111,15 +116,19 @@ export function DevicesPage() {
       {
         key: "actions",
         title: t("pages.devices.table.actions"),
-        render: (row) =>
-          row.type === "kiosk" ? (
-            <Link to={`/kiosks/${row.id}`} aria-label={t("pages.devices.kioskSettings")}>
-              {t("pages.devices.kioskSettings")}
-            </Link>
-          ) : null,
+        align: "right",
+        render: (row) => (
+          <DeviceActions
+            device={row}
+            canReassign={row.type === "station" ? canManageCredentials : canWriteOperations}
+            canManageCredentials={canManageCredentials}
+            onReassign={(device) => setDrawer({ mode: "reassign", device })}
+            onPair={(device) => setDrawer({ mode: "pair", device })}
+          />
+        ),
       },
     ],
-    [t],
+    [canManageCredentials, canWriteOperations, t],
   );
 
   return (
@@ -128,7 +137,7 @@ export function DevicesPage() {
         title={t("pages.devices.title")}
         actions={
           allowStation || allowKiosk ? (
-            <Button onClick={() => setOpen(true)}>{t("pages.devices.add")}</Button>
+            <Button onClick={() => setDrawer({ mode: "create" })}>{t("pages.devices.add")}</Button>
           ) : undefined
         }
       />
@@ -179,13 +188,16 @@ export function DevicesPage() {
           ) : null}
         </>
       ) : null}
-      {open ? (
+      {drawer ? (
         <DeviceDrawer
           open
           allowStation={allowStation}
           allowKiosk={allowKiosk}
           canIssueKiosk={canManageCredentials}
-          onClose={() => setOpen(false)}
+          organizationName={orgName}
+          {...(drawer.mode === "create" ? {} : { device: drawer.device })}
+          mode={drawer.mode}
+          onClose={() => setDrawer(null)}
         />
       ) : null}
     </div>

@@ -952,7 +952,40 @@
         "createError": "Could not create the device",
         "issueError": "The device was created, but its pairing code was not issued.",
         "retryIssue": "Retry issuing code",
-        "createdWithoutCode": "The device was created and awaits pairing. A credentials manager can issue its code later."
+        "createdWithoutCode": "The device was created and awaits pairing. A credentials manager can issue its code later.",
+        "reassignTitle": "Reassign device",
+        "reassignError": "Could not reassign the device"
+      },
+      "reassign": "Reassign",
+      "actions": {
+        "repair": "Issue new code",
+        "revoke": "Revoke",
+        "revokeTitle": "Revoke device?",
+        "revokeBody": "{{name}} will no longer be able to connect with its current credentials.",
+        "revokeOfflineNote": "An offline station or kiosk observes revocation only when it reconnects. Unsynchronized data stays on the device for recovery.",
+        "revokeError": "Could not revoke the device"
+      },
+      "pairing": {
+        "issue": "Issue pairing code",
+        "issueHint": "Issue a one-time code for {{name}} only when the device is ready to pair.",
+        "regenerate": "Generate new code",
+        "print": "Print instructions",
+        "expiresIn": "Remaining: {{time}}",
+        "expiresAt": "Expires: {{time}}",
+        "issuedAt": "Issued",
+        "expired": "This code has expired. Generate a new code.",
+        "barcodeLabel": "Pairing-code barcode {{code}}",
+        "printTitle": "Device pairing instructions",
+        "organization": "Organization",
+        "deviceType": "Device type",
+        "deviceName": "Device",
+        "place": "Place",
+        "rawDigits": "Code digits: {{code}}",
+        "instructions": {
+          "one": "Open the pairing screen on the device.",
+          "two": "Scan the barcode or enter the eight code digits.",
+          "three": "Complete the connection check before the expiry time."
+        }
       }
     },
     "kiosks": {

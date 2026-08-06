@@ -1,47 +1,73 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Alert, Button, Drawer, Input, Select } from "@markiro/ui";
 
 import { useLines } from "../shifts/api.js";
+import { PairingCodePanel } from "./PairingCodePanel.js";
 import {
   useCreateKiosk,
   useCreateStation,
   useIssueKioskCode,
   useIssueStationCode,
+  useUpdateKiosk,
+  useUpdateStation,
+  type DeviceDto,
   type DeviceType,
   type PairingCode,
 } from "./api.js";
 
-type PairingState = { deviceId: string; type: DeviceType; code: PairingCode };
+type DrawerMode = "create" | "pair" | "reassign";
+type PairingState = {
+  deviceId: string;
+  type: DeviceType;
+  name: string;
+  placeName: string | null;
+  code: PairingCode;
+  issuedAt: string;
+};
 
 export interface DeviceDrawerProps {
   open: boolean;
   allowStation: boolean;
   allowKiosk: boolean;
   canIssueKiosk: boolean;
+  organizationName?: string | null;
+  device?: DeviceDto;
+  mode?: DrawerMode;
   onClose: () => void;
 }
 
+/** Create, reassign, and active-only pairing-code drawer. */
 export function DeviceDrawer({
   open,
   allowStation,
   allowKiosk,
   canIssueKiosk,
+  organizationName = null,
+  device,
+  mode = device ? "pair" : "create",
   onClose,
 }: DeviceDrawerProps) {
   const { t } = useTranslation();
-  const initialType = allowStation ? "station" : "kiosk";
+  const initialType = device?.type ?? (allowStation ? "station" : "kiosk");
   const [type, setType] = useState<DeviceType>(initialType);
-  const [name, setName] = useState("");
-  const [place, setPlace] = useState("");
+  const [name, setName] = useState(device?.name ?? "");
+  const [place, setPlace] = useState(device?.place.id ?? device?.place.name ?? "");
   const [pairing, setPairing] = useState<PairingState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const lines = useLines();
   const createStation = useCreateStation();
   const createKiosk = useCreateKiosk();
+  const updateStation = useUpdateStation();
+  const updateKiosk = useUpdateKiosk();
   const issueStation = useIssueStationCode();
   const issueKiosk = useIssueKioskCode();
+  const resetMutationCache = useRef<() => void>(() => {});
+  resetMutationCache.current = () => {
+    issueStation.reset();
+    issueKiosk.reset();
+  };
 
   const types = useMemo(
     () => [
@@ -51,27 +77,34 @@ export function DeviceDrawer({
     [allowKiosk, allowStation, t],
   );
 
+  const clearSecret = useCallback(() => {
+    setPairing(null);
+    resetMutationCache.current();
+  }, []);
+
   const reset = useCallback(() => {
     setType(initialType);
-    setName("");
-    setPlace("");
-    setPairing(null);
+    setName(device?.name ?? "");
+    setPlace(device?.place.id ?? device?.place.name ?? "");
     setError(null);
-    issueStation.reset();
-    issueKiosk.reset();
-  }, [initialType, issueKiosk, issueStation]);
+    clearSecret();
+  }, [clearSecret, device?.name, device?.place.id, device?.place.name, initialType]);
+
+  // Route changes and conditional drawer teardown must clear mutation data too.
+  useEffect(() => () => resetMutationCache.current(), []);
 
   const issue = useCallback(
-    async (deviceId: string, deviceType: DeviceType) => {
+    async (target: { id: string; type: DeviceType; name: string; placeName: string | null }) => {
       setError(null);
       try {
         const code =
-          deviceType === "station"
-            ? await issueStation.mutateAsync(deviceId)
-            : await issueKiosk.mutateAsync(deviceId);
-        setPairing({ deviceId, type: deviceType, code });
+          target.type === "station"
+            ? await issueStation.mutateAsync(target.id)
+            : await issueKiosk.mutateAsync(target.id);
+        if (!/^\d{8}$/.test(code.code)) throw new Error("Invalid pairing code response");
+        setPairing({ deviceId: target.id, ...target, code, issuedAt: new Date().toISOString() });
       } catch {
-        setPairing({ deviceId, type: deviceType, code: { code: "", expiresAt: "" } });
+        // Retain a previously visible code after a failed regeneration.
         setError(t("pages.devices.drawer.issueError"));
       }
     },
@@ -81,6 +114,15 @@ export function DeviceDrawer({
   const submit = async () => {
     setError(null);
     try {
+      if (mode === "reassign" && device) {
+        if (device.type === "station") {
+          await updateStation.mutateAsync({ id: device.id, input: { lineId: place || null } });
+        } else {
+          await updateKiosk.mutateAsync({ id: device.id, input: { location: place || null } });
+        }
+        onClose();
+        return;
+      }
       const created =
         type === "station"
           ? await createStation.mutateAsync({ name, lineId: place || null })
@@ -90,46 +132,72 @@ export function DeviceDrawer({
               dayLimitPerEmployee: 5,
               showPrices: true,
             });
-      if (type === "station" || canIssueKiosk) await issue(created.id, type);
-      else setPairing({ deviceId: created.id, type, code: { code: "", expiresAt: "" } });
+      const placeName =
+        type === "station"
+          ? (lines.data?.find((line) => line.id === place)?.name ?? null)
+          : place || null;
+      if (type === "station" || canIssueKiosk)
+        await issue({ id: created.id, type, name: created.name, placeName });
+      else setError(t("pages.devices.drawer.createdWithoutCode"));
     } catch {
-      setError(t("pages.devices.drawer.createError"));
+      setError(
+        t(
+          mode === "reassign"
+            ? "pages.devices.drawer.reassignError"
+            : "pages.devices.drawer.createError",
+        ),
+      );
     }
   };
 
+  const target = device
+    ? { id: device.id, type: device.type, name: device.name, placeName: device.place.name }
+    : null;
+  const canIssue = target?.type === "station" || canIssueKiosk;
+  const isPending =
+    createStation.isPending ||
+    createKiosk.isPending ||
+    updateStation.isPending ||
+    updateKiosk.isPending ||
+    issueStation.isPending ||
+    issueKiosk.isPending;
   const close = () => {
     reset();
     onClose();
   };
-
-  const isPending =
-    createStation.isPending ||
-    createKiosk.isPending ||
-    issueStation.isPending ||
-    issueKiosk.isPending;
-  const hasCode = pairing?.code.code.length === 8;
+  const title = pairing
+    ? t("pages.devices.drawer.codeTitle")
+    : mode === "reassign"
+      ? t("pages.devices.drawer.reassignTitle")
+      : mode === "pair"
+        ? t("pages.devices.drawer.codeTitle")
+        : t("pages.devices.drawer.title");
 
   return (
     <Drawer
       open={open}
-      title={t(pairing ? "pages.devices.drawer.codeTitle" : "pages.devices.drawer.title")}
+      title={title}
       onClose={close}
       closeLabel={t("common.close")}
       footer={
         pairing ? (
+          <Button type="button" onClick={close}>
+            {t("pages.devices.done")}
+          </Button>
+        ) : mode === "pair" ? (
           <>
-            {!hasCode && (pairing.type === "station" || canIssueKiosk) && (
+            <Button type="button" variant="secondary" onClick={close}>
+              {t("pages.devices.cancel")}
+            </Button>
+            {canIssue ? (
               <Button
                 type="button"
                 loading={isPending}
-                onClick={() => void issue(pairing.deviceId, pairing.type)}
+                onClick={() => target && void issue(target)}
               >
-                {t("pages.devices.drawer.retryIssue")}
+                {t("pages.devices.pairing.issue")}
               </Button>
-            )}
-            <Button type="button" onClick={close}>
-              {t("pages.devices.done")}
-            </Button>
+            ) : null}
           </>
         ) : (
           <>
@@ -139,10 +207,10 @@ export function DeviceDrawer({
             <Button
               type="button"
               loading={isPending}
-              disabled={!name.trim()}
+              disabled={mode === "create" && !name.trim()}
               onClick={() => void submit()}
             >
-              {t("pages.devices.create")}
+              {t(mode === "reassign" ? "pages.devices.reassign" : "pages.devices.create")}
             </Button>
           </>
         )
@@ -150,33 +218,48 @@ export function DeviceDrawer({
     >
       {error ? <Alert tone="error">{error}</Alert> : null}
       {pairing ? (
-        hasCode ? (
-          <div aria-live="polite">
-            <p style={{ font: "var(--text-code)", color: "var(--fg-1)" }}>{pairing.code.code}</p>
-            <p style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>
-              {pairing.code.expiresAt}
-            </p>
-          </div>
-        ) : (
-          <p>{t("pages.devices.drawer.createdWithoutCode")}</p>
-        )
+        <PairingCodePanel
+          pairing={pairing.code}
+          issuedAt={pairing.issuedAt}
+          deviceName={pairing.name}
+          deviceType={pairing.type}
+          placeName={pairing.placeName}
+          organizationName={organizationName}
+          regenerating={isPending}
+          onRegenerate={() =>
+            void issue({
+              id: pairing.deviceId,
+              type: pairing.type,
+              name: pairing.name,
+              placeName: pairing.placeName,
+            })
+          }
+        />
+      ) : mode === "pair" ? (
+        <p style={{ margin: 0, font: "var(--text-body)", color: "var(--fg-2)" }}>
+          {t("pages.devices.pairing.issueHint", { name: device?.name ?? "" })}
+        </p>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <Select
-            label={t("pages.devices.typeLabel")}
-            value={type}
-            onChange={(value) => {
-              setType(value as DeviceType);
-              setPlace("");
-              setError(null);
-            }}
-            options={types}
-          />
-          <Input
-            label={t("pages.devices.nameLabel")}
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-          />
+        <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-4)" }}>
+          {mode === "create" ? (
+            <>
+              <Select
+                label={t("pages.devices.typeLabel")}
+                value={type}
+                onChange={(value) => {
+                  setType(value as DeviceType);
+                  setPlace("");
+                  setError(null);
+                }}
+                options={types}
+              />
+              <Input
+                label={t("pages.devices.nameLabel")}
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+              />
+            </>
+          ) : null}
           {type === "station" ? (
             <Select
               label={t("pages.devices.lineLabel")}
