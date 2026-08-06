@@ -7,7 +7,7 @@ import {
   type ExecutionContext,
 } from "@nestjs/common";
 import { fromNodeHeaders } from "better-auth/node";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { Request } from "express";
 import { schema, type Auth, type Db } from "@markiro/db";
 import { AUTH, DB } from "../auth/auth.module";
@@ -28,6 +28,8 @@ export interface RequestWithTenant extends Request {
    * `deviceId` as "no device to allocate for", not invent one.
    */
   deviceId?: string;
+  /** Assigned production line for a station principal; null means no default line. */
+  deviceLineId?: string | null;
 }
 
 /**
@@ -81,12 +83,13 @@ export class TenantGuard implements CanActivate {
         // which physical device is calling. Tenant-scoped in the statement
         // itself, matching every other query in this codebase.
         const [device] = await this.db
-          .select({ id: schema.stationDevices.id })
+          .select({ id: schema.stationDevices.id, lineId: schema.stationDevices.lineId })
           .from(schema.stationDevices)
           .where(
             and(
               eq(schema.stationDevices.tenantId, req.tenantId),
               eq(schema.stationDevices.apiKeyId, result.key.id),
+              isNull(schema.stationDevices.revokedAt),
             ),
           );
         // A verified Better Auth key is not a station principal by itself.
@@ -95,6 +98,16 @@ export class TenantGuard implements CanActivate {
         // into access to station-only endpoints.
         if (!device) throw new UnauthorizedException();
         req.deviceId = device.id;
+        req.deviceLineId = device.lineId;
+        await this.db
+          .update(schema.stationDevices)
+          .set({ lastSeenAt: new Date() })
+          .where(
+            and(
+              eq(schema.stationDevices.tenantId, req.tenantId),
+              eq(schema.stationDevices.id, device.id),
+            ),
+          );
         return true;
       }
     }

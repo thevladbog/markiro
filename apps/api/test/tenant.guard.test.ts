@@ -18,6 +18,7 @@ vi.mock("drizzle-orm", async (importOriginal) => {
   return {
     ...actual,
     eq: (column: unknown, value: unknown) => ({ __op: "eq" as const, column, value }),
+    isNull: (column: unknown) => ({ __op: "is-null" as const, column }),
     and: (...conditions: unknown[]) => ({ __op: "and" as const, conditions }),
   };
 });
@@ -32,6 +33,7 @@ interface FakeRequest {
   tenantId?: string;
   userId?: string;
   deviceId?: string;
+  deviceLineId?: string | null;
   authKind?: "session" | "station";
 }
 
@@ -39,16 +41,23 @@ interface FakeDeviceRow {
   id: string;
   tenantId: string;
   apiKeyId: string;
+  lineId: string | null;
+  lastSeenAt: Date | null;
+  revokedAt: Date | null;
 }
 
 /** Maps the real drizzle column objects the guard filters on to a row field. */
 const COLUMN_FIELD = new Map<unknown, keyof FakeDeviceRow>([
   [schema.stationDevices.tenantId, "tenantId"],
   [schema.stationDevices.apiKeyId, "apiKeyId"],
+  [schema.stationDevices.id, "id"],
+  [schema.stationDevices.revokedAt, "revokedAt"],
 ]);
 
 type FakeCondition =
-  { __op: "eq"; column: unknown; value: unknown } | { __op: "and"; conditions: FakeCondition[] };
+  | { __op: "eq"; column: unknown; value: unknown }
+  | { __op: "is-null"; column: unknown }
+  | { __op: "and"; conditions: FakeCondition[] };
 
 function matches(condition: FakeCondition, row: FakeDeviceRow): boolean {
   if (condition.__op === "and") {
@@ -56,6 +65,9 @@ function matches(condition: FakeCondition, row: FakeDeviceRow): boolean {
   }
   const field = COLUMN_FIELD.get(condition.column);
   if (!field) throw new Error("fakeDb: unexpected column in test condition");
+  if (condition.__op === "is-null") return row[field] === null;
+  // SQL `column = NULL` never matches; callers must use Drizzle's `isNull`.
+  if (condition.value === null) return false;
   return row[field] === condition.value;
 }
 
@@ -77,7 +89,18 @@ function fakeDb(deviceRows: FakeDeviceRow[] = []): Db {
     select: () => ({
       from: () => ({
         where: async (condition: FakeCondition) =>
-          deviceRows.filter((row) => matches(condition, row)).map((row) => ({ id: row.id })),
+          deviceRows
+            .filter((row) => matches(condition, row))
+            .map((row) => ({ id: row.id, lineId: row.lineId })),
+      }),
+    }),
+    update: () => ({
+      set: (set: Pick<FakeDeviceRow, "lastSeenAt">) => ({
+        where: async (condition: FakeCondition) => {
+          for (const row of deviceRows.filter((candidate) => matches(condition, candidate))) {
+            row.lastSeenAt = set.lastSeenAt;
+          }
+        },
       }),
     }),
   } as unknown as Db;
@@ -150,7 +173,16 @@ describe("TenantGuard api-key path", () => {
           key: { id: "key_1", referenceId: "org_9", enabled: true },
         }),
       ),
-      fakeDb(),
+      fakeDb([
+        {
+          id: "device_1",
+          tenantId: "org_9",
+          apiKeyId: "key_1",
+          lineId: null,
+          lastSeenAt: null,
+          revokedAt: null,
+        },
+      ]),
     );
     const req: FakeRequest = { headers: { "x-api-key": "mk_valid" } };
 
@@ -172,7 +204,34 @@ describe("TenantGuard api-key path", () => {
     await expect(guard.canActivate(contextFor(req))).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
-  it("sets req.deviceId from the matching station_devices row (Task 7)", async () => {
+  it("resolves the tenant-scoped station identity, assigned line, and only that device heartbeat", async () => {
+    const otherLastSeenAt = new Date("2026-08-01T00:00:00.000Z");
+    const deviceRows: FakeDeviceRow[] = [
+      {
+        id: "device_1",
+        tenantId: "org_9",
+        apiKeyId: "key_1",
+        lineId: "line_1",
+        lastSeenAt: null,
+        revokedAt: null,
+      },
+      {
+        id: "device_2",
+        tenantId: "org_9",
+        apiKeyId: "key_2",
+        lineId: "line_2",
+        lastSeenAt: otherLastSeenAt,
+        revokedAt: null,
+      },
+      {
+        id: "device_other_tenant",
+        tenantId: "org_other",
+        apiKeyId: "key_1",
+        lineId: "line_other",
+        lastSeenAt: otherLastSeenAt,
+        revokedAt: null,
+      },
+    ];
     const guard = new TenantGuard(
       fakeAuthWithApiKey(
         async () => null,
@@ -182,15 +241,29 @@ describe("TenantGuard api-key path", () => {
           key: { id: "key_1", referenceId: "org_9", enabled: true },
         }),
       ),
-      fakeDb([{ id: "device_1", tenantId: "org_9", apiKeyId: "key_1" }]),
+      fakeDb(deviceRows),
     );
     const req: FakeRequest = { headers: { "x-api-key": "mk_valid" } };
 
     await expect(guard.canActivate(contextFor(req))).resolves.toBe(true);
     expect(req.deviceId).toBe("device_1");
+    expect(req.deviceLineId).toBe("line_1");
+    expect(deviceRows[0]?.lastSeenAt).toBeInstanceOf(Date);
+    expect(deviceRows[1]?.lastSeenAt).toBe(otherLastSeenAt);
+    expect(deviceRows[2]?.lastSeenAt).toBe(otherLastSeenAt);
   });
 
-  it("leaves req.deviceId undefined when no station_devices row matches the key", async () => {
+  it("rejects an unlinked valid key without updating any heartbeat", async () => {
+    const deviceRows: FakeDeviceRow[] = [
+      {
+        id: "device_2",
+        tenantId: "org_9",
+        apiKeyId: "key_2",
+        lineId: null,
+        lastSeenAt: null,
+        revokedAt: null,
+      },
+    ];
     const guard = new TenantGuard(
       fakeAuthWithApiKey(
         async () => null,
@@ -200,15 +273,15 @@ describe("TenantGuard api-key path", () => {
           key: { id: "key_1", referenceId: "org_9", enabled: true },
         }),
       ),
-      fakeDb([]),
+      fakeDb(deviceRows),
     );
     const req: FakeRequest = { headers: { "x-api-key": "mk_valid" } };
 
-    await expect(guard.canActivate(contextFor(req))).resolves.toBe(true);
-    expect(req.deviceId).toBeUndefined();
+    await expect(guard.canActivate(contextFor(req))).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(deviceRows[0]?.lastSeenAt).toBeNull();
   });
 
-  it("leaves req.deviceId undefined when the only row with that api-key id belongs to a different tenant", async () => {
+  it("rejects a key whose matching device belongs to another tenant without updating it", async () => {
     // The row's apiKeyId matches the verified key, but its tenantId does
     // not match the key's own referenceId (org_9) -- e.g. a device row
     // mistakenly tagged with another tenant. Nothing in the schema stops
@@ -228,12 +301,71 @@ describe("TenantGuard api-key path", () => {
           key: { id: "key_1", referenceId: "org_9", enabled: true },
         }),
       ),
-      fakeDb([{ id: "device_evil", tenantId: "org_other", apiKeyId: "key_1" }]),
+      fakeDb([
+        {
+          id: "device_evil",
+          tenantId: "org_other",
+          apiKeyId: "key_1",
+          lineId: null,
+          lastSeenAt: null,
+          revokedAt: null,
+        },
+      ]),
     );
     const req: FakeRequest = { headers: { "x-api-key": "mk_valid" } };
 
-    await expect(guard.canActivate(contextFor(req))).resolves.toBe(true);
-    expect(req.tenantId).toBe("org_9");
-    expect(req.deviceId).toBeUndefined();
+    await expect(guard.canActivate(contextFor(req))).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it("rejects an invalid or revoked key without updating a station heartbeat", async () => {
+    const deviceRows: FakeDeviceRow[] = [
+      {
+        id: "device_1",
+        tenantId: "org_9",
+        apiKeyId: "key_1",
+        lineId: "line_1",
+        lastSeenAt: null,
+        revokedAt: null,
+      },
+    ];
+    const guard = new TenantGuard(
+      fakeAuthWithApiKey(
+        async () => null,
+        async () => ({ valid: false, error: { message: "revoked", code: "INVALID" }, key: null }),
+      ),
+      fakeDb(deviceRows),
+    );
+    const req: FakeRequest = { headers: { "x-api-key": "mk_revoked" } };
+
+    await expect(guard.canActivate(contextFor(req))).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(deviceRows[0]?.lastSeenAt).toBeNull();
+  });
+
+  it("rejects a revoked durable station row without updating its heartbeat", async () => {
+    const deviceRows: FakeDeviceRow[] = [
+      {
+        id: "device_1",
+        tenantId: "org_9",
+        apiKeyId: "key_1",
+        lineId: "line_1",
+        lastSeenAt: null,
+        revokedAt: new Date("2026-08-01T00:00:00.000Z"),
+      },
+    ];
+    const guard = new TenantGuard(
+      fakeAuthWithApiKey(
+        async () => null,
+        async () => ({
+          valid: true,
+          error: null,
+          key: { id: "key_1", referenceId: "org_9", enabled: true },
+        }),
+      ),
+      fakeDb(deviceRows),
+    );
+    const req: FakeRequest = { headers: { "x-api-key": "mk_revoked" } };
+
+    await expect(guard.canActivate(contextFor(req))).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(deviceRows[0]?.lastSeenAt).toBeNull();
   });
 });

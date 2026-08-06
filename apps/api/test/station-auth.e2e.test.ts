@@ -4,7 +4,10 @@ import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { and, eq } from "drizzle-orm";
+import { schema, type Db } from "@markiro/db";
 import { AppModule } from "../src/app.module";
+import { DB } from "../src/auth/auth.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { listenOnLoopback } from "./support/listen-loopback";
@@ -58,15 +61,36 @@ describe.skipIf(!ready)("station api-key auth e2e", () => {
     return { orgId: org.body.id as string, userId: signUp.body.user.id as string };
   }
 
-  it("an org-owned station api-key (referenceId = tenantId) resolves the tenant with no session", async () => {
-    const { orgId, userId } = await signUpAndActivate(request.agent(app!.getHttpServer()));
-    // Mint an ORG-owned key (referenceId = orgId) exactly as Task 6 enrollment does.
-    const created = await setup.auth.api.createApiKey({
-      body: { configId: "station", organizationId: orgId, userId, name: "station" },
-    });
+  it("a paired station key resolves its tenant and updates only its durable device heartbeat", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const { orgId } = await signUpAndActivate(agent);
+    const station = await createTestStationDevice(app!, agent, "Heartbeat terminal");
+    const otherStation = await createTestStationDevice(app!, agent, "Other terminal");
+    const db = app!.get<Db>(DB);
 
-    // A fresh (session-less) client authenticates purely by x-api-key.
-    await request(app!.getHttpServer()).get("/shifts").set("x-api-key", created.key).expect(200);
+    await request(app!.getHttpServer()).get("/shifts").set("x-api-key", station.apiKey).expect(200);
+
+    const rows = await db
+      .select({ id: schema.stationDevices.id, lastSeenAt: schema.stationDevices.lastSeenAt })
+      .from(schema.stationDevices)
+      .where(
+        and(
+          eq(schema.stationDevices.tenantId, orgId),
+          eq(schema.stationDevices.id, station.deviceId),
+        ),
+      );
+    expect(rows).toEqual([{ id: station.deviceId, lastSeenAt: expect.any(Date) }]);
+
+    const [other] = await db
+      .select({ id: schema.stationDevices.id, lastSeenAt: schema.stationDevices.lastSeenAt })
+      .from(schema.stationDevices)
+      .where(
+        and(
+          eq(schema.stationDevices.tenantId, orgId),
+          eq(schema.stationDevices.id, otherStation.deviceId),
+        ),
+      );
+    expect(other).toEqual({ id: otherStation.deviceId, lastSeenAt: null });
   });
 
   it("keeps the station roster machine-only while preserving enrolled-device access", async () => {

@@ -4,7 +4,7 @@ import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
@@ -814,6 +814,67 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     );
 
     expect(byRange.body.items.some((i: { id: string }) => i.id === shift3.body.id)).toBe(false);
+  });
+
+  it("defaults a station shift list to its assigned line plus unassigned shifts without restricting explicit tenant filters", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      productGroup: "Beverages",
+      boxCapacity: 12,
+      palletCapacity: 48,
+    });
+    const lineRes = await agent.post("/lines").send({ name: "Station line" }).expect(201);
+    const stationLineId = lineRes.body.id as string;
+    const otherLineRes = await agent.post("/lines").send({ name: "Other line" }).expect(201);
+    const otherLineId = otherLineRes.body.id as string;
+
+    const [assigned, unassigned, otherLine] = await Promise.all([
+      agent
+        .post("/shifts")
+        .send({ productId, mode: "validation", lineId: stationLineId })
+        .expect(201),
+      agent.post("/shifts").send({ productId, mode: "validation" }).expect(201),
+      agent
+        .post("/shifts")
+        .send({ productId, mode: "validation", lineId: otherLineId })
+        .expect(201),
+    ]);
+    const station = await createTestStationDevice(app!, agent, "Shift-list terminal");
+    await db
+      .update(schema.stationDevices)
+      .set({ lineId: stationLineId })
+      .where(
+        and(
+          eq(schema.stationDevices.tenantId, orgId),
+          eq(schema.stationDevices.id, station.deviceId),
+        ),
+      );
+
+    const server = app!.getHttpServer();
+    const stationDefault = await request(server)
+      .get("/shifts")
+      .set("x-api-key", station.apiKey)
+      .expect(200);
+    expect(stationDefault.body.items.map((item: { id: string }) => item.id).sort()).toEqual(
+      [assigned.body.id, unassigned.body.id].sort(),
+    );
+
+    // A supplied line remains a tenant-scoped filter, not a station authorization boundary.
+    const stationExplicit = await request(server)
+      .get("/shifts")
+      .query({ lineId: otherLineId })
+      .set("x-api-key", station.apiKey)
+      .expect(200);
+    expect(stationExplicit.body.items.map((item: { id: string }) => item.id)).toEqual([
+      otherLine.body.id,
+    ]);
+
+    const cabinet = await agent.get("/shifts").expect(200);
+    expect(cabinet.body.items.map((item: { id: string }) => item.id).sort()).toEqual(
+      [assigned.body.id, unassigned.body.id, otherLine.body.id].sort(),
+    );
   });
 
   // ---------------------------------------------------------------------
