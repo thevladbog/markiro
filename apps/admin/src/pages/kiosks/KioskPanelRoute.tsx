@@ -1,9 +1,11 @@
 import { Alert, Button, ConfirmDialog, SidePanel, Spinner } from "@markiro/ui";
+import { CABINET_CAPABILITY } from "@markiro/domain";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate, useOutletContext, useParams } from "react-router";
 import type { Location, NavigateFunction } from "react-router";
 
+import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
 import { toast } from "../../lib/toast.js";
 import { useRoutePanelGuard } from "../../lib/useRoutePanelGuard.js";
@@ -138,8 +140,12 @@ function DiscardDialog({
 export function KioskCreatePanelRoute(): ReactElement {
   const { t } = useTranslation();
   const { context, close } = usePanelContext();
+  const canManageCredentials = useCan(CABINET_CAPABILITY.CREDENTIALS_MANAGE);
+  const location = useLocation();
+  const navigate = useNavigate();
   const mutation = useCreateKiosk();
   const [error, setError] = useState<string | null>(null);
+  const [created, setCreated] = useState<KioskDto | null>(null);
   const guard = useRoutePanelGuard(close, mutation.isPending);
 
   if (context.kiosksPending || (context.kiosksError && !context.kiosksResolved)) {
@@ -156,40 +162,73 @@ export function KioskCreatePanelRoute(): ReactElement {
         closeLabel={t("common.close")}
         onClose={guard.requestClose}
         footer={
-          <>
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={mutation.isPending}
-              onClick={guard.requestClose}
-            >
-              {t("pages.kiosks.cancel")}
-            </Button>
-            <Button type="submit" form={KIOSK_PROFILE_FORM_ID} loading={mutation.isPending}>
-              {t("pages.kiosks.form.submitCreate")}
-            </Button>
-          </>
+          created ? (
+            <>
+              <Button type="button" variant="secondary" onClick={guard.finish}>
+                {t("pages.kiosks.form.createdDoneAction")}
+              </Button>
+              <Button
+                type="button"
+                onClick={() => {
+                  void navigate(`/kiosks/${created.id}/pair`, {
+                    replace: true,
+                    state: (location.state as KiosksPanelLocationState | null)?.kiosksBackground
+                      ? ({ kiosksBackground: true } satisfies KiosksPanelLocationState)
+                      : null,
+                  });
+                }}
+              >
+                {t("pages.kiosks.form.setupPairingAction")}
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={mutation.isPending}
+                onClick={guard.requestClose}
+              >
+                {t("pages.kiosks.cancel")}
+              </Button>
+              <Button type="submit" form={KIOSK_PROFILE_FORM_ID} loading={mutation.isPending}>
+                {t("pages.kiosks.form.submitCreate")}
+              </Button>
+            </>
+          )
         }
       >
-        <KioskProfileForm
-          submitting={mutation.isPending}
-          submissionError={error}
-          onDirtyChange={guard.setDirty}
-          onSubmit={async (input) => {
-            try {
-              setError(null);
-              await mutation.mutateAsync(input);
-              toast("ok", t("pages.kiosks.toasts.createSuccess"));
-              guard.finish();
-            } catch (cause) {
-              setError(
-                cause instanceof ApiRequestError
-                  ? cause.message
-                  : t("pages.kiosks.form.createError"),
-              );
-            }
-          }}
-        />
+        {created ? (
+          <div className="mk-kiosk-create-success">
+            <h3>{t("pages.kiosks.form.createdTitle")}</h3>
+            <p>{t("pages.kiosks.form.createdHint", { name: created.name })}</p>
+          </div>
+        ) : (
+          <KioskProfileForm
+            submitting={mutation.isPending}
+            submissionError={error}
+            onDirtyChange={guard.setDirty}
+            onSubmit={async (input) => {
+              try {
+                setError(null);
+                const next = await mutation.mutateAsync(input);
+                toast("ok", t("pages.kiosks.toasts.createSuccess"));
+                if (canManageCredentials) {
+                  guard.setDirty(false);
+                  setCreated(next);
+                } else {
+                  guard.finish();
+                }
+              } catch (cause) {
+                setError(
+                  cause instanceof ApiRequestError
+                    ? cause.message
+                    : t("pages.kiosks.form.createError"),
+                );
+              }
+            }}
+          />
+        )}
       </SidePanel>
       <DiscardDialog
         open={guard.confirmOpen}

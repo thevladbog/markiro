@@ -32,6 +32,78 @@
   gap: var(--sp-4);
 }
 
+.mk-kiosk-create-success,
+.mk-kiosk-pairing-panel__content,
+.mk-kiosk-pairing-panel__safe-entry,
+.mk-kiosk-pairing-reveal {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.mk-kiosk-create-success h3,
+.mk-kiosk-create-success p,
+.mk-kiosk-pairing-panel__hint,
+.mk-kiosk-pairing-reveal__countdown {
+  margin: 0;
+}
+
+.mk-kiosk-create-success h3 {
+  color: var(--fg-1);
+  font: var(--text-h3);
+}
+
+.mk-kiosk-create-success p,
+.mk-kiosk-pairing-panel__hint {
+  color: var(--fg-2);
+  font: var(--text-body);
+}
+
+.mk-kiosk-pairing-panel__loading {
+  display: flex;
+  min-height: 220px;
+  align-items: center;
+  justify-content: center;
+}
+
+.mk-kiosk-pairing-reveal__code-box {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-5) var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface-panel);
+}
+
+.mk-kiosk-pairing-reveal__code {
+  color: var(--fg-1);
+  font: var(--text-h1);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.12em;
+}
+
+.mk-kiosk-pairing-reveal__countdown {
+  color: var(--fg-3);
+  font: var(--text-body-sm);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.mk-kiosk-pairing-reveal__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+}
+
+.mk-kiosk-pairing-reveal__actions > * {
+  flex: 1 1 180px;
+}
+
 .mk-kiosk-panel-skeleton {
   position: relative;
   display: flex;
@@ -487,6 +559,24 @@
   .mk-kiosk-products-section__product {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .mk-kiosk-pairing-reveal__code-box {
+    padding-inline: var(--sp-2);
+  }
+
+  .mk-kiosk-pairing-reveal__code {
+    font: var(--text-h2);
+    font-family: var(--font-mono);
+  }
+
+  .mk-kiosk-pairing-reveal__actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .mk-kiosk-pairing-reveal__actions > * {
+    flex-basis: auto;
   }
 
   .mk-kiosks-reason-row,

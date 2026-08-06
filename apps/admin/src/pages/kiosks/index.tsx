@@ -22,9 +22,8 @@ import { ApiRequestError } from "../../api/client.js";
 import { formatCreatedAt } from "../../lib/datetime.js";
 import { toast } from "../../lib/toast.js";
 import type { KiosksPanelContext, KiosksPanelLocationState } from "./KioskPanelRoute.js";
-import { PairingCodeModal } from "./PairingCodeModal.js";
 import { KiosksLayout } from "./KiosksLayout.js";
-import { useArchiveKiosk, useIssueKioskPairingCode, useKiosks, type KioskDto } from "./api.js";
+import { useArchiveKiosk, useKiosks, type KioskDto } from "./api.js";
 import {
   formatRelativeLastSeen,
   getKioskOperationalState,
@@ -32,13 +31,6 @@ import {
   type KioskStateFilter,
 } from "./kioskState.js";
 import "./kiosks.css";
-
-/**
- * The live pairing reveal. Holds the plaintext code, which the server returns
- * exactly once and stores only as a hash -- dropping this state is what makes
- * the reveal one-time, so nothing else may cache it.
- */
-type PairingState = { kiosk: KioskDto; code: string; expiresAt: string } | null;
 
 const STATE_TO_CHIP: Record<KioskOperationalState, StatusChipStatus> = {
   archived: "neutral",
@@ -345,45 +337,22 @@ export function KiosksPage() {
   );
 }
 
-/** Owns the credential mutation so it never mounts for an unauthorized manager. */
 function KioskPairingAction({ kiosk }: { kiosk: KioskDto }) {
   const { t } = useTranslation();
-  const pairingMutation = useIssueKioskPairingCode();
-  const [pairing, setPairing] = useState<PairingState>(null);
-
-  const handleIssuePairingCode = async () => {
-    try {
-      const result = await pairingMutation.mutateAsync(kiosk.id);
-      setPairing({ kiosk, code: result.code, expiresAt: result.expiresAt });
-      toast("ok", t("pages.kiosks.toasts.pairingSuccess"));
-    } catch (error) {
-      toast(
-        "error",
-        error instanceof ApiRequestError ? error.message : t("pages.kiosks.toasts.pairingError"),
-      );
-    }
-  };
+  const navigate = useNavigate();
 
   return (
-    <>
-      <Button
-        type="button"
-        size="compact"
-        variant="secondary"
-        onClick={() => void handleIssuePairingCode()}
-      >
-        {t("pages.kiosks.pairing.action")}
-      </Button>
-      {pairing ? (
-        <PairingCodeModal
-          kioskName={pairing.kiosk.name}
-          code={pairing.code}
-          expiresAt={pairing.expiresAt}
-          regenerating={pairingMutation.isPending}
-          onRegenerate={() => void handleIssuePairingCode()}
-          onClose={() => setPairing(null)}
-        />
-      ) : null}
-    </>
+    <Button
+      type="button"
+      size="compact"
+      variant="secondary"
+      onClick={() =>
+        void navigate(`${kiosk.id}/pair`, {
+          state: { kiosksBackground: true } satisfies KiosksPanelLocationState,
+        })
+      }
+    >
+      {t("pages.kiosks.pairing.action")}
+    </Button>
   );
 }

@@ -246,6 +246,25 @@ it.each(["/kiosks/new", "/kiosks/k1/edit"])(
 );
 
 it.each([
+  ["read-only operator", OPERATIONS_READ_ONLY],
+  ["operations writer", MANAGER_ACCESS],
+])("forbids the direct kiosk pairing route for a %s", async (_label, access) => {
+  const { requests } = renderAccessRoute("/kiosks/k1/pair", access);
+
+  expect(await screen.findByTestId("forbidden-page")).toBeDefined();
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(requests.some((request) => request.includes("/pairing-code"))).toBe(false);
+});
+
+it("opens the direct kiosk pairing route for a credential manager without minting", async () => {
+  const { requests } = renderAccessRoute("/kiosks/k1/pair", ADMIN_ACCESS);
+
+  expect(await screen.findByRole("dialog", { name: "Привязка киоска" })).toBeDefined();
+  expect(screen.queryByTestId("forbidden-page")).toBeNull();
+  expect(requests.some((request) => request.includes("/pairing-code"))).toBe(false);
+});
+
+it.each([
   ["/catalog/new", "Новый продукт"],
   ["/catalog/p1/edit", "Изменить продукт"],
   ["/employees/new", "Новый сотрудник"],

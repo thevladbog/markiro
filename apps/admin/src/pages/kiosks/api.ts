@@ -1,7 +1,8 @@
 /**
  * Typed fetchers + TanStack Query hooks for the kiosks endpoints (Task 4:
  * `GET /kiosks`, `POST /kiosks`, `PATCH /kiosks/:id`, `DELETE /kiosks/:id`
- * (archive), `PUT /kiosks/:id/products`, `POST /kiosks/:id/pairing-code`), plus the
+ * (archive), `PUT /kiosks/:id/products`, and an uncached
+ * `POST /kiosks/:id/pairing-code` request, plus the
  * pickup-reasons endpoints (Task 4: `GET /pickup-reasons`,
  * `POST /pickup-reasons`, `PATCH /pickup-reasons/:id`,
  * `DELETE /pickup-reasons/:id`). Thin wrapper over `../../api/client.ts`'s
@@ -92,7 +93,8 @@ function putKioskProducts(id: string, productIds: string[]): Promise<KioskDto> {
   });
 }
 
-function postKioskPairingCode(id: string): Promise<IssuePairingCodeResult> {
+/** Direct, uncached issue request. The mounted pairing route owns the plaintext response. */
+export async function issueKioskPairingCode(id: string): Promise<IssuePairingCodeResult> {
   return apiFetch<IssuePairingCodeResult>(`/kiosks/${id}/pairing-code`, { method: "POST" });
 }
 
@@ -151,24 +153,6 @@ export function useSetKioskProducts(): UseMutationResult<
       void queryClient.invalidateQueries({ queryKey: KIOSKS_QUERY_KEY });
     },
   });
-}
-
-/**
- * `POST /kiosks/:id/pairing-code` -- mints a single-use 8-digit pairing code
- * for the device to redeem via `POST /kiosk/pair`, retiring whatever code was
- * still live for that kiosk. The plaintext comes back exactly once (only its
- * hash is stored), so the caller owns the one-time reveal.
- *
- * Deliberately does NOT invalidate the kiosks list, unlike the mutations
- * above: issuing a code touches nothing `KioskDto` exposes, so a refetch would
- * be pure noise.
- */
-export function useIssueKioskPairingCode(): UseMutationResult<
-  IssuePairingCodeResult,
-  Error,
-  string
-> {
-  return useMutation({ mutationFn: postKioskPairingCode });
 }
 
 // --- Pickup reasons mini-api ------------------------------------------------

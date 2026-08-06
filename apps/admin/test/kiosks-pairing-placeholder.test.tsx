@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { PairingCodeModal } from "../src/pages/kiosks/PairingCodeModal.js";
+import { PairingCodeReveal } from "../src/pages/kiosks/PairingCodeReveal.js";
 import {
   PAIRING_BARCODE_HEIGHT,
   PAIRING_BARCODE_WIDTH,
@@ -26,22 +26,21 @@ afterEach(cleanup);
 
 const PAIRING_TTL_MS = 15 * 60_000;
 
-function renderModal() {
+function renderReveal() {
   return render(
-    <PairingCodeModal
-      kioskName="Касса у входа"
+    <PairingCodeReveal
       code="12345678"
       expiresAt={new Date(Date.now() + PAIRING_TTL_MS).toISOString()}
       regenerating={false}
       onRegenerate={() => {}}
-      onClose={() => {}}
+      onExpired={() => {}}
     />,
   );
 }
 
 describe("pairing code barcode placeholder", () => {
   it("reserves the barcode's exact box while the chunk is still loading", async () => {
-    renderModal();
+    renderReveal();
 
     const label = await screen.findByText("Загрузка штрихкода…");
     const box = label.closest("[aria-busy='true']");
@@ -54,7 +53,7 @@ describe("pairing code barcode placeholder", () => {
   });
 
   it("keeps the digits and the countdown usable while the barcode is pending", async () => {
-    renderModal();
+    renderReveal();
     await screen.findByText("Загрузка штрихкода…");
 
     // The barcode is a convenience on top of the code, never a gate on it --

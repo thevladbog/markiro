@@ -10,6 +10,7 @@ import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider, RequireCapability } from "../src/access/context.js";
 import i18n from "../src/i18n/index.js";
 import type * as KiosksApiModule from "../src/pages/kiosks/api.js";
+import { KioskPairingPanelRoute } from "../src/pages/kiosks/KioskPairingPanelRoute.js";
 import { KioskCreatePanelRoute, KioskEditPanelRoute } from "../src/pages/kiosks/KioskPanelRoute.js";
 import { KiosksPage } from "../src/pages/kiosks/index.js";
 import { jsonResponse } from "./helpers/http.js";
@@ -37,6 +38,15 @@ vi.mock("../src/pages/kiosks/api.js", async (importOriginal) => {
 const WRITE_ACCESS: AccessDocument = {
   roles: ["manager"],
   capabilities: [CABINET_CAPABILITY.OPERATIONS_READ, CABINET_CAPABILITY.OPERATIONS_WRITE],
+};
+
+const WRITE_AND_CREDENTIALS_ACCESS: AccessDocument = {
+  roles: ["admin"],
+  capabilities: [
+    CABINET_CAPABILITY.OPERATIONS_READ,
+    CABINET_CAPABILITY.OPERATIONS_WRITE,
+    CABINET_CAPABILITY.CREDENTIALS_MANAGE,
+  ],
 };
 
 const READ_ONLY_ACCESS: AccessDocument = {
@@ -144,6 +154,14 @@ function renderKiosksRouter(
             </RequireCapability>
           }
         />
+        <Route
+          path=":kioskId/pair"
+          element={
+            <RequireCapability capability={CABINET_CAPABILITY.CREDENTIALS_MANAGE}>
+              <KioskPairingPanelRoute />
+            </RequireCapability>
+          }
+        />
       </Route>,
     ),
     { initialEntries, initialIndex: initialEntries.length - 1 },
@@ -225,6 +243,70 @@ it("creates through the nested panel with the exact normalized payload and retur
   await waitFor(() => expect(router.state.location.pathname).toBe("/kiosks"));
   expect(document.activeElement).toBe(addAction);
   expect(await screen.findByText("Киоск склада")).toBeDefined();
+});
+
+it("keeps a credential manager in a post-create choice and prevents a second submit", async () => {
+  const created = { ...KIOSK, id: "k2", name: "Киоск склада" };
+  let didCreate = false;
+  const fetchMock = stubFetch((path, init) => {
+    if (path === "/api/kiosks" && init?.method === "POST") {
+      didCreate = true;
+      return jsonResponse(201, created);
+    }
+    if (path === "/api/kiosks") {
+      return jsonResponse(200, { items: didCreate ? [KIOSK, created] : [KIOSK] });
+    }
+    return undefined;
+  });
+  const { router } = renderKiosksRouter(["/kiosks/new"], WRITE_AND_CREDENTIALS_ACCESS);
+  const user = userEvent.setup();
+
+  await user.type(await screen.findByLabelText("Название"), "Киоск склада");
+  await user.click(screen.getByRole("button", { name: "Создать" }));
+
+  const panel = await screen.findByRole("dialog", { name: "Новый киоск" });
+  expect(await within(panel).findByText("Киоск создан")).toBeDefined();
+  expect(within(panel).getByRole("button", { name: "Настроить привязку" })).toBeDefined();
+  expect(within(panel).getByRole("button", { name: "Готово" })).toBeDefined();
+  expect(within(panel).queryByRole("button", { name: "Создать" })).toBeNull();
+  expect(router.state.location.pathname).toBe("/kiosks/new");
+  expect(
+    fetchMock.mock.calls.filter(
+      ([url, init]) => String(url) === "/api/kiosks" && init?.method === "POST",
+    ),
+  ).toHaveLength(1);
+
+  await user.click(within(panel).getByRole("button", { name: "Готово" }));
+  await waitFor(() => expect(router.state.location.pathname).toBe("/kiosks"));
+});
+
+it("continues from create to safe pairing without automatically issuing a code", async () => {
+  const created = { ...KIOSK, id: "k2", name: "Киоск склада" };
+  let didCreate = false;
+  const fetchMock = stubFetch((path, init) => {
+    if (path === "/api/kiosks" && init?.method === "POST") {
+      didCreate = true;
+      return jsonResponse(201, created);
+    }
+    if (path === "/api/kiosks") {
+      return jsonResponse(200, { items: didCreate ? [KIOSK, created] : [KIOSK] });
+    }
+    return undefined;
+  });
+  const { router } = renderKiosksRouter(
+    ["/kiosks", { pathname: "/kiosks/new", state: { kiosksBackground: true } }],
+    WRITE_AND_CREDENTIALS_ACCESS,
+  );
+  const user = userEvent.setup();
+
+  await user.type(await screen.findByLabelText("Название"), "Киоск склада");
+  await user.click(screen.getByRole("button", { name: "Создать" }));
+  await user.click(await screen.findByRole("button", { name: "Настроить привязку" }));
+
+  await waitFor(() => expect(router.state.location.pathname).toBe("/kiosks/k2/pair"));
+  expect(router.state.location.state).toEqual({ kiosksBackground: true });
+  expect(await screen.findByRole("button", { name: "Сформировать код" })).toBeDefined();
+  expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/pairing-code"))).toBe(false);
 });
 
 it("falls back to the kiosk list when a directly entered panel closes", async () => {
