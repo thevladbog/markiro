@@ -1,5 +1,6 @@
 import { useId, type ReactNode } from "react";
 
+import { Alert } from "./Alert.js";
 import { Button } from "./Button.js";
 import { OverlayLayer } from "./OverlayLayer.js";
 
@@ -10,6 +11,7 @@ export interface ConfirmDialogProps {
   title: ReactNode;
   description: ReactNode;
   entity?: ReactNode;
+  error?: ReactNode;
   confirmLabel: string;
   cancelLabel: string;
   tone?: ConfirmDialogTone;
@@ -24,6 +26,7 @@ export function ConfirmDialog({
   title,
   description,
   entity,
+  error,
   confirmLabel,
   cancelLabel,
   tone = "default",
@@ -63,6 +66,11 @@ export function ConfirmDialog({
               {description}
             </div>
             {entity ? <div className="mk-confirm-dialog__entity">{entity}</div> : null}
+            {error ? (
+              <div className="mk-confirm-dialog__error">
+                <Alert tone="error">{error}</Alert>
+              </div>
+            ) : null}
             <footer className="mk-confirm-dialog__actions">
               <Button data-overlay-cancel variant="secondary" disabled={busy} onClick={onCancel}>
                 {cancelLabel}

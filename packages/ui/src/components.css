@@ -285,6 +285,10 @@
   font: var(--text-h3);
 }
 
+.mk-confirm-dialog__error {
+  margin-top: var(--sp-4);
+}
+
 .mk-confirm-dialog__actions {
   display: flex;
   justify-content: flex-end;

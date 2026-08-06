@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
@@ -196,6 +196,28 @@ it("focuses Cancel and exposes one explicit destructive action", () => {
   expect(document.activeElement).toBe(screen.getByRole("button", { name: "Cancel" }));
   expect(screen.getByRole("button", { name: "Delete" }).className).toContain("destructive");
   expect(screen.getByText("This cannot be undone.").tagName).toBe("DIV");
+});
+
+it("keeps a confirmed mutation error visible without changing dialog actions", () => {
+  render(
+    <ConfirmDialog
+      open
+      title="Archive employee?"
+      description="The employee will be archived."
+      entity="Anna Smirnova"
+      error="Archive conflict"
+      cancelLabel="Cancel"
+      confirmLabel="Archive"
+      tone="destructive"
+      onCancel={() => {}}
+      onConfirm={() => {}}
+    />,
+  );
+
+  const dialog = screen.getByRole("alertdialog", { name: "Archive employee?" });
+  expect(within(dialog).getByRole("alert").textContent).toContain("Archive conflict");
+  expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeDefined();
+  expect(within(dialog).getByRole("button", { name: "Archive" })).toBeDefined();
 });
 
 it("maps Escape and backdrop to Cancel but blocks dismissal and submit while busy", async () => {
