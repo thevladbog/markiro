@@ -32,9 +32,12 @@ codes without deleting the device or its production history.
 A fresh station obtains its API base only from the trusted build-time
 `VITE_STATION_API_URL`; it never derives a backend host from the webview URL.
 After pairing, the durable station config retains that server URL for recovery.
-Cross-origin station requests require the exact `STATION_ORIGIN`, which is
-scoped to `/station` and `/station/*` and is not added to cabinet-session or
-kiosk routes.
+Cross-origin station requests require the exact `STATION_ORIGIN`. CORS grants
+it only to the exact method/path pairs in the device table below, including
+the shared `/shifts` and `/products` routes; it is not added to adjacent
+cabinet-only methods, cabinet-session routes, or kiosk routes. Preflight is
+classified by `Access-Control-Request-Method`, while path matching ignores a
+query string and normalizes a trailing slash in the same way as the router.
 
 An authenticated station `401` seals its current credential generation before
 recovery is shown. The station keeps its machine/device IDs and every local

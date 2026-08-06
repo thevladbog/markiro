@@ -95,6 +95,46 @@ describe("operator auth (login + PIN)", () => {
     expect(await verifyOperatorPin(exec, "2001", "12")).toBeNull();
   });
 
+  it("accepts exactly 4-6 PIN digits and rejects both length boundaries and non-digits", async () => {
+    const exec = makeExec();
+    await applyMigrations(exec);
+    await replaceOperatorsMirror(exec, [
+      {
+        operatorId: "op-four",
+        name: "Four",
+        login: "4001",
+        role: "operator",
+        pinHash: await hashSecret("1234"),
+        badgeHash: null,
+        active: true,
+      },
+      {
+        operatorId: "op-six",
+        name: "Six",
+        login: "6001",
+        role: "operator",
+        pinHash: await hashSecret("123456"),
+        badgeHash: null,
+        active: true,
+      },
+      {
+        operatorId: "op-seven",
+        name: "Seven",
+        login: "7001",
+        role: "operator",
+        pinHash: await hashSecret("1234567"),
+        badgeHash: null,
+        active: true,
+      },
+    ]);
+
+    expect(await verifyOperatorPin(exec, "4001", "123")).toBeNull();
+    expect((await verifyOperatorPin(exec, "4001", "1234"))?.operatorId).toBe("op-four");
+    expect((await verifyOperatorPin(exec, "6001", "123456"))?.operatorId).toBe("op-six");
+    expect(await verifyOperatorPin(exec, "7001", "1234567")).toBeNull();
+    expect(await verifyOperatorPin(exec, "4001", "12a4")).toBeNull();
+  });
+
   it("still signs in by badge without a personnel number", async () => {
     const exec = makeExec();
     await applyMigrations(exec);

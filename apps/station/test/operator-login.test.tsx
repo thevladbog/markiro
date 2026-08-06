@@ -398,6 +398,50 @@ describe("OperatorLogin", () => {
     expect(onAuthed.mock.calls[0]![0]).toMatchObject({ operatorId: "op-1", login: "1042" });
   });
 
+  it("enables submission only for 4-6 digits and caps the floor PIN pad at six", () => {
+    render(<OperatorLogin exec={makeExec()} source={silentSource} onAuthed={vi.fn()} />);
+
+    openNumericFallback();
+    for (const digit of "1042") fireEvent.click(screen.getByRole("button", { name: digit }));
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+
+    const signIn = screen.getByRole("button", { name: "Sign in" }) as HTMLButtonElement;
+    for (const digit of "123") fireEvent.click(screen.getByRole("button", { name: digit }));
+    expect(signIn.disabled).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "4" }));
+    expect(signIn.disabled).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "5" }));
+    fireEvent.click(screen.getByRole("button", { name: "6" }));
+    expect(signIn.disabled).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "7" }));
+    expect(screen.getByLabelText("pin").textContent).toBe("••••••");
+  });
+
+  it("disables PIN input and submission while a valid 6-digit verification is busy", async () => {
+    let releaseQuery: (() => void) | undefined;
+    const pending = new Promise<never[]>((resolve) => {
+      releaseQuery = () => resolve([]);
+    });
+    const exec: SqlExecutor = { run: async () => {}, all: async () => pending };
+    render(<OperatorLogin exec={exec} source={silentSource} onAuthed={vi.fn()} />);
+
+    openNumericFallback();
+    for (const digit of "1042") fireEvent.click(screen.getByRole("button", { name: digit }));
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    for (const digit of "123456") fireEvent.click(screen.getByRole("button", { name: digit }));
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await waitFor(() =>
+      expect((screen.getByRole("button", { name: "Sign in" }) as HTMLButtonElement).disabled).toBe(
+        true,
+      ),
+    );
+    expect((screen.getByRole("button", { name: "1" }) as HTMLButtonElement).disabled).toBe(true);
+    releaseQuery?.();
+    await screen.findByText("Wrong personnel number or PIN");
+  });
+
   it("shows a floor error on a wrong PIN and clears only the secret entry", async () => {
     const exec = makeExec();
     await applyMigrations(exec);

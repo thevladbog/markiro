@@ -22,19 +22,36 @@ function isKioskPath(path: string): boolean {
   return p === "/kiosk" || p.startsWith("/kiosk/");
 }
 
-/**
- * True only for device-facing station routes. Keep the trailing slash so the
- * session-guarded `/stations` cabinet controller never inherits the station
- * webview's CORS authority.
- */
-function isStationPath(path: string): boolean {
-  const p = path.toLowerCase();
-  return p === "/station" || p.startsWith("/station/");
+/** Exact method/path CORS surface used by the station webview. */
+function isStationRequest(req: Request): boolean {
+  const preflightMethod = req.headers["access-control-request-method"];
+  const method =
+    req.method.toUpperCase() === "OPTIONS"
+      ? typeof preflightMethod === "string"
+        ? preflightMethod.toUpperCase()
+        : "OPTIONS"
+      : req.method.toUpperCase();
+  const path = (req.path.replace(/\/+$/, "") || "/").toLowerCase();
+
+  if (
+    (method === "POST" && (path === "/station/pair" || path === "/station/scans")) ||
+    (method === "GET" && (path === "/station/identity" || path === "/station/operators")) ||
+    ((method === "GET" || method === "POST") && path === "/shifts") ||
+    (method === "GET" && path === "/products") ||
+    (method === "POST" && path === "/products/gtin-check")
+  ) {
+    return true;
+  }
+
+  return (
+    (method === "GET" && /^\/shifts\/[^/]+\/bundle$/.test(path)) ||
+    (method === "POST" && /^\/shifts\/[^/]+\/open$/.test(path))
+  );
 }
 
 /**
- * Per-route CORS policy: device origins are trusted only on their own
- * `/kiosk/*` or `/station/*` routes.
+ * Per-route CORS policy: device origins are trusted only on their documented
+ * method/path surfaces.
  *
  * A single global policy would make KIOSK_ORIGIN a credentialed reader of
  * every route in the API. That is a real exposure in the deployment this
@@ -60,7 +77,7 @@ export function corsDelegate(env: Env): CorsOptionsDelegate<Request> {
   // which would break the prefix test on any `/kiosk/...?x=1` request.
   return (req, cb) => {
     if (isKioskPath(req.path)) return cb(null, kiosk);
-    if (isStationPath(req.path)) return cb(null, station);
+    if (isStationRequest(req)) return cb(null, station);
     return cb(null, session);
   };
 }

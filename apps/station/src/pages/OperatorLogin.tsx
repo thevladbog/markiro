@@ -239,7 +239,7 @@ export function OperatorLogin({ exec, source, onAuthed, notice }: OperatorLoginP
                 <PinPad
                   value={stage === "login" ? login : pin}
                   onChange={stage === "login" ? setLogin : setPin}
-                  {...(stage === "login" ? { maxLength: 12 } : {})}
+                  maxLength={stage === "login" ? 12 : 6}
                   size="floor"
                   disabled={busy}
                   ariaLabel={stage === "login" ? t("login.loginKeypad") : t("login.pinKeypad")}
@@ -289,7 +289,11 @@ export function OperatorLogin({ exec, source, onAuthed, notice }: OperatorLoginP
             <Button size="floor" variant="secondary" disabled={busy} onClick={back}>
               {t("login.back")}
             </Button>
-            <Button size="floor" disabled={busy || pin.length === 0} onClick={() => void submit()}>
+            <Button
+              size="floor"
+              disabled={busy || !/^\d{4,6}$/.test(pin)}
+              onClick={() => void submit()}
+            >
               {t("login.submit")}
             </Button>
           </>

@@ -38,7 +38,7 @@ export async function verifyOperatorPin(
   login: string,
   pin: string,
 ): Promise<OperatorMirrorRecord | null> {
-  if (!/^\d{4,}$/.test(pin)) return null;
+  if (!/^\d{4,6}$/.test(pin)) return null;
   if (!/^\d{3,12}$/.test(login)) return null;
   const operator = (await readOperatorsMirror(exec)).find((op) => op.active && op.login === login);
   const ok = await verifyPin(pin, operator ? operator.pinHash : DUMMY_PHC);

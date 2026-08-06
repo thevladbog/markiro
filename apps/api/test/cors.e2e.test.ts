@@ -232,31 +232,71 @@ describe.skipIf(!ready)("cors e2e", () => {
     });
   });
 
-  describe("the station origin is scoped to /station/*", () => {
-    it("is accepted on a station route and refused on kiosk and session routes", async () => {
-      const granted = await request(app!.getHttpServer())
-        .options("/station/pair")
-        .set("Origin", STATION_ORIGIN)
-        .set("Access-Control-Request-Method", "POST")
-        .expect(204);
-      expect(granted.headers["access-control-allow-origin"]).toBe(STATION_ORIGIN);
+  describe("the station origin is scoped to its exact method/path surface", () => {
+    it("accepts a preflight for every documented station request", async () => {
+      for (const [method, path] of [
+        ["POST", "/station/pair"],
+        ["GET", "/station/identity"],
+        ["GET", "/station/operators"],
+        ["POST", "/station/scans"],
+        ["GET", "/shifts"],
+        ["POST", "/shifts"],
+        ["GET", "/shifts/shift-1/bundle"],
+        ["POST", "/shifts/shift-1/open"],
+        ["GET", "/products?search=04600000000000"],
+        ["POST", "/products/gtin-check/"],
+      ] as const) {
+        const granted = await request(app!.getHttpServer())
+          .options(path)
+          .set("Origin", STATION_ORIGIN)
+          .set("Access-Control-Request-Method", method)
+          .expect(204);
+        expect({ method, path, acao: granted.headers["access-control-allow-origin"] }).toEqual({
+          method,
+          path,
+          acao: STATION_ORIGIN,
+        });
+      }
+    });
 
-      for (const path of [
-        "/kiosk/bootstrap",
-        "/counterparties",
-        "/api/auth/sign-in/email",
-        "/stations",
-      ]) {
+    it("refuses adjacent methods, cabinet paths, kiosk/auth paths, and unknown routes", async () => {
+      for (const [method, path] of [
+        ["GET", "/station/pair"],
+        ["POST", "/station/identity"],
+        ["POST", "/station/operators"],
+        ["GET", "/station/scans"],
+        ["PATCH", "/shifts"],
+        ["GET", "/shifts/shift-1"],
+        ["POST", "/shifts/shift-1/close"],
+        ["POST", "/products"],
+        ["GET", "/products/product-1"],
+        ["POST", "/products/gtin-check/extra"],
+        ["GET", "/kiosk/bootstrap"],
+        ["GET", "/counterparties"],
+        ["POST", "/api/auth/sign-in/email"],
+        ["GET", "/stations"],
+        ["GET", "/station-devices"],
+        ["GET", "/unknown"],
+      ] as const) {
         const refused = await request(app!.getHttpServer())
           .options(path)
           .set("Origin", STATION_ORIGIN)
-          .set("Access-Control-Request-Method", "POST")
+          .set("Access-Control-Request-Method", method)
           .expect(204);
-        expect({ path, acao: refused.headers["access-control-allow-origin"] }).toEqual({
+        expect({ method, path, acao: refused.headers["access-control-allow-origin"] }).toEqual({
+          method,
           path,
           acao: undefined,
         });
       }
+    });
+
+    it("refuses OPTIONS without an Access-Control-Request-Method", async () => {
+      const refused = await request(app!.getHttpServer())
+        .options("/station/scans")
+        .set("Origin", STATION_ORIGIN)
+        .expect(204);
+      expect(refused.headers["access-control-allow-origin"]).toBeUndefined();
     });
   });
 
