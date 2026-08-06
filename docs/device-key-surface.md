@@ -44,10 +44,24 @@ reproducible operator/shift/product caches. Pairing the same device record then
 rebuilds those caches and resumes the unchanged queue; network errors, timeouts,
 `429`, and `5xx` do not enter this recovery path.
 
+Stations enrolled before the durable `deviceId` field was added require a
+one-time authenticated identity backfill. Roll out the API first: the station
+calls `GET /station/identity` with its existing key, persists the server-resolved
+device ID and display metadata through the atomic config writer, and only then
+starts roster, shift, or sync requests. A timeout, network error, `429`, or `5xx`
+leaves the key, config, and local facts untouched; cached offline sign-in remains
+available and the station retries only on reconnect or an explicit operator
+retry. A `401` at this pre-backfill boundary cannot safely enter ordinary
+same-device re-pairing because the local queue has no proven durable owner. It
+therefore stays in a service-recovery state without clearing the key or exposing
+pairing; service must restore a valid same-device credential/identity path before
+that legacy queue can be adopted.
+
 ## Reachable by a device key
 
 | Route                                                                            | Why the station needs it                                                                                                                                                                                                                                                                                                     |
 | -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /station/identity`                                                          | one-time migration of pre-`deviceId` configs; `TenantGuard` resolves the durable row solely from the presented station key and `StationOnlyGuard` rejects cabinet sessions; the request accepts no client device or tenant identifier                                                                                        |
 | `GET /station/operators`                                                         | the offline sign-in roster (hashes only); `StationOnlyGuard` explicitly rejects a Better Auth session                                                                                                                                                                                                                        |
 | `GET /shifts`, `POST /shifts`, `GET /shifts/:id/bundle`, `POST /shifts/:id/open` | shift selection, ad-hoc shift creation, and the offline bundle — `GET /shifts` is also the enrollment reachability probe (`whoami()` in `apps/station/src/lib/api-client.ts`, called by `Enrollment.tsx`); `AllowStationOrPermissions` keeps the station path while requiring the matching cabinet capability from a session |
 | `GET /products`, `POST /products/gtin-check`                                     | resolving a scanned GTIN when creating a shift; `AllowStationOrPermissions` keeps the station path while requiring `operations.read` from a cabinet session                                                                                                                                                                  |

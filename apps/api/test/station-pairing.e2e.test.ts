@@ -48,6 +48,7 @@ describe.skipIf(!ready)("station pairing e2e", () => {
   let otherAgent: ReturnType<typeof request.agent>;
   let tenantId: string;
   let deviceId: string;
+  let deviceName: string;
   let pairingCodePepper: string;
 
   beforeAll(async () => {
@@ -77,9 +78,10 @@ describe.skipIf(!ready)("station pairing e2e", () => {
     otherAgent = request.agent(app!.getHttpServer());
     await signUpAndActivate(otherAgent);
     const [line] = await db.insert(schema.lines).values({ tenantId, name: "Packing" }).returning();
+    deviceName = `Station ${randomUUID()}`;
     const created = await agent
       .post("/station-devices")
-      .send({ name: `Station ${randomUUID()}`, lineId: line!.id })
+      .send({ name: deviceName, lineId: line!.id })
       .expect(201);
     deviceId = created.body.id as string;
     const operatorId = randomUUID();
@@ -95,6 +97,18 @@ describe.skipIf(!ready)("station pairing e2e", () => {
       pinHash: "test-pbkdf2-verifier",
     });
   });
+
+  async function pairCurrentDevice(): Promise<string> {
+    const issued = await agent
+      .post(`/station-devices/${deviceId}/pairing-code`)
+      .send({})
+      .expect(201);
+    const paired = await request(app!.getHttpServer())
+      .post("/station/pair")
+      .send({ code: issued.body.code })
+      .expect(201);
+    return paired.body.credential.apiKey as string;
+  }
 
   it("issues an HMAC-protected 8-digit code and redeems it into one durable station credential", async () => {
     const issued = await agent
@@ -170,6 +184,68 @@ describe.skipIf(!ready)("station pairing e2e", () => {
       .set("x-api-key", paired.body.credential.apiKey as string)
       .send({})
       .expect(403);
+  });
+
+  it("resolves only the authenticated station identity without echoing its credential", async () => {
+    const otherDeviceName = `Other ${randomUUID()}`;
+    await otherAgent
+      .post("/station-devices")
+      .send({ name: otherDeviceName, lineId: null })
+      .expect(201);
+    const apiKey = await pairCurrentDevice();
+
+    const identity = await request(app!.getHttpServer())
+      .get("/station/identity")
+      .set("x-api-key", apiKey)
+      .expect("Cache-Control", "no-store")
+      .expect(200);
+
+    expect(identity.body).toEqual({
+      device: {
+        id: deviceId,
+        name: deviceName,
+        tenantId,
+        organizationName: "Test Plant",
+        line: { id: expect.any(String), name: "Packing" },
+      },
+    });
+    expect(JSON.stringify(identity.body)).not.toContain(apiKey);
+    expect(JSON.stringify(identity.body)).not.toContain(otherDeviceName);
+  });
+
+  it("rejects sessions and orphaned or revoked station keys at the identity boundary", async () => {
+    await agent.get("/station/identity").expect(403);
+
+    const orphanedKey = await pairCurrentDevice();
+    await db
+      .update(schema.stationDevices)
+      .set({ apiKeyId: null })
+      .where(
+        and(eq(schema.stationDevices.tenantId, tenantId), eq(schema.stationDevices.id, deviceId)),
+      );
+    await request(app!.getHttpServer())
+      .get("/station/identity")
+      .set("x-api-key", orphanedKey)
+      .expect(401);
+
+    const reparing = await agent
+      .post(`/station-devices/${deviceId}/pairing-code`)
+      .send({})
+      .expect(201);
+    const repaired = await request(app!.getHttpServer())
+      .post("/station/pair")
+      .send({ code: reparing.body.code })
+      .expect(201);
+    await db
+      .update(schema.stationDevices)
+      .set({ revokedAt: new Date() })
+      .where(
+        and(eq(schema.stationDevices.tenantId, tenantId), eq(schema.stationDevices.id, deviceId)),
+      );
+    await request(app!.getHttpServer())
+      .get("/station/identity")
+      .set("x-api-key", repaired.body.credential.apiKey as string)
+      .expect(401);
   });
 
   it("retires a previous live code and preserves one live code per station", async () => {

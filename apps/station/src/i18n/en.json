@@ -1,5 +1,12 @@
 {
   "app": { "title": "Markiro — Station", "booting": "Loading station…" },
+  "legacyIdentity": {
+    "title": "Station service required",
+    "resolving": "Updating station identity. Cached offline work remains available.",
+    "degraded": "Station identity update is waiting for a connection. Cached offline work remains available.",
+    "retry": "Retry identity update",
+    "rejected": "This legacy station key could not prove its device identity. Local work is preserved; contact service support before pairing again."
+  },
   "enroll": {
     "title": "Connect station",
     "code": "Pairing code",

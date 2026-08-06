@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { OperatorMirrorRecord } from "@markiro/db";
 import { Button, Card } from "@markiro/ui";
 import { clearCredential, isEnrolled, readConfig, type StationConfig } from "./lib/config.js";
-import { createStationClient } from "./lib/api-client.js";
+import { createStationClient, StationApiError, type StationClient } from "./lib/api-client.js";
 import {
   clearRejectedCredentialState,
   createCredentialGeneration,
@@ -33,6 +33,7 @@ import { createKeyboardWedgeSource } from "./lib/scan-source.js";
 import { canonicalStationApiUrl } from "./lib/station-api-url.js";
 import { loadSoundSettings, type SoundSettings } from "./lib/signal-sound.js";
 import { tauriExecutor } from "./lib/sqlite.js";
+import { backfillLegacyStationIdentity } from "./lib/legacy-identity.js";
 import { useSyncEngine } from "./lib/use-sync-engine.js";
 import { ConflictList } from "./pages/ConflictList.js";
 import { Enrollment } from "./pages/Enrollment.js";
@@ -53,6 +54,20 @@ interface ActiveShift {
 type CredentialRecoveryState =
   | { event: CredentialRejectedEvent; phase: "sealing" | "failed" }
   | { event: CredentialRejectedEvent; phase: "ready"; sealed: SealedWorkSummary };
+
+type LegacyIdentityState = "resolving" | "degraded" | "rejected" | null;
+
+const legacyGatedClient: StationClient = {
+  get<T>() {
+    return Promise.reject<T>(new Error("legacy station identity is not yet available"));
+  },
+  post<T>() {
+    return Promise.reject<T>(new Error("legacy station identity is not yet available"));
+  },
+  whoami() {
+    return Promise.reject(new Error("legacy station identity is not yet available"));
+  },
+};
 
 /**
  * Pure routing decision for the top-level App state machine, factored out so
@@ -143,6 +158,8 @@ export function App() {
   const [credentialRecovery, setCredentialRecovery] = useState<CredentialRecoveryState | null>(
     null,
   );
+  const [legacyIdentityState, setLegacyIdentityState] = useState<LegacyIdentityState>(null);
+  const legacyIdentityAttempt = useRef<Promise<void> | null>(null);
   const recoveryCleanupStarted = useRef<CredentialRejectedEvent | null>(null);
   const floorWorkRegistry = useMemo(() => createFloorWorkRegistry(), []);
   const registerFloorWorkBarrier = useCallback(
@@ -320,12 +337,46 @@ export function App() {
     [config?.apiKey, config?.serverUrl],
   );
 
+  const verifiedClient = config?.deviceId ? client : null;
+
+  const attemptLegacyIdentity = useCallback(() => {
+    if (!config || !client || config.deviceId || legacyIdentityState === "rejected") return;
+    if (legacyIdentityAttempt.current) return;
+    setLegacyIdentityState("resolving");
+    const attempt = backfillLegacyStationIdentity(client, config)
+      .then((backfilled) => {
+        setConfig(backfilled);
+        setLegacyIdentityState(null);
+      })
+      .catch((error: unknown) => {
+        setLegacyIdentityState(
+          error instanceof StationApiError && error.status === 401 ? "rejected" : "degraded",
+        );
+      })
+      .finally(() => {
+        if (legacyIdentityAttempt.current === attempt) legacyIdentityAttempt.current = null;
+      });
+    legacyIdentityAttempt.current = attempt;
+  }, [client, config, legacyIdentityState]);
+
+  useEffect(() => {
+    if (!config || !client || config.deviceId || legacyIdentityState !== null) return;
+    attemptLegacyIdentity();
+  }, [attemptLegacyIdentity, client, config, legacyIdentityState]);
+
+  useEffect(() => {
+    if (legacyIdentityState !== "degraded") return;
+    const retry = () => attemptLegacyIdentity();
+    window.addEventListener("online", retry);
+    return () => window.removeEventListener("online", retry);
+  }, [attemptLegacyIdentity, legacyIdentityState]);
+
   // One shared generation per authenticated key, not per sync-engine instance.
   // This makes React StrictMode overlap and any late async response obey the
   // same terminal seal. A newly provisioned apiKey creates a fresh generation.
   const credentialGeneration = useMemo(
-    () => (client ? createCredentialGeneration() : null),
-    [client],
+    () => (verifiedClient ? createCredentialGeneration() : null),
+    [verifiedClient],
   );
   const currentCredentialGeneration = useRef<CredentialGeneration | null>(null);
   currentCredentialGeneration.current = credentialGeneration;
@@ -345,7 +396,7 @@ export function App() {
     setCredentialRecovery((current) => current ?? { event, phase: "sealing" });
   }, []);
 
-  const authenticatedClient = credentialRecovery ? null : client;
+  const authenticatedClient = credentialRecovery ? null : verifiedClient;
 
   // One engine for the life of the app: the outbox belongs to the DEVICE, not
   // to a shift or an operator, so entering or leaving a shift must never stop
@@ -535,6 +586,47 @@ export function App() {
     );
   }
 
+  if (legacyIdentityState === "rejected") {
+    return (
+      <main style={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>
+        <Card style={{ width: "min(720px, calc(100vw - 64px))", padding: 32 }}>
+          <h1 style={{ fontSize: "2rem", marginBottom: 24 }}>{t("legacyIdentity.title")}</h1>
+          <p role="alert">{t("legacyIdentity.rejected")}</p>
+        </Card>
+      </main>
+    );
+  }
+
+  const legacyNotice = legacyIdentityState ? (
+    <Card
+      style={{
+        position: "fixed",
+        zIndex: 10,
+        insetInline: 32,
+        bottom: 24,
+        padding: 16,
+        display: "flex",
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 16,
+      }}
+    >
+      <p role="status">
+        {t(
+          legacyIdentityState === "resolving"
+            ? "legacyIdentity.resolving"
+            : "legacyIdentity.degraded",
+        )}
+      </p>
+      {legacyIdentityState === "degraded" ? (
+        <Button style={{ minHeight: 64 }} onClick={attemptLegacyIdentity}>
+          {t("legacyIdentity.retry")}
+        </Button>
+      ) : null}
+    </Card>
+  ) : null;
+
   // `config` is narrowed to non-null for the rest of this render.
   const stage = nextStationView(config, operator);
 
@@ -567,14 +659,19 @@ export function App() {
   }
 
   if (stage === "login") {
-    return <OperatorLogin exec={tauriExecutor} source={scanSource} onAuthed={setOperator} />;
+    return (
+      <>
+        <OperatorLogin exec={tauriExecutor} source={scanSource} onAuthed={setOperator} />
+        {legacyNotice}
+      </>
+    );
   }
 
   // stage === "floor" here, which requires `isEnrolled(config)` (apiKey +
   // serverUrl truthy) — the same condition the `client` memo above builds
   // from, so it is guaranteed non-null in this branch.
-  const activeClient = client!;
-  const floorGeneration = credentialGeneration!;
+  const activeClient = authenticatedClient ?? legacyGatedClient;
+  const floorGeneration = credentialGeneration;
 
   // Shared by ShiftSelection's `onSelected` and NewShift's `onStarted`: the
   // shift is entered immediately (never blocked on the network), and the
@@ -582,15 +679,17 @@ export function App() {
   // available offline afterward. See `mirrorShiftBundle` for the
   // resilience contract (a download failure must not block entry).
   function handleShiftEntered(entered: ActiveShift) {
-    if (!credentialGenerationIsCurrent(floorGeneration)) return;
+    if (floorGeneration && !credentialGenerationIsCurrent(floorGeneration)) return;
     setShift(entered);
-    void mirrorShiftBundle(activeClient, tauriExecutor, entered.id, floorGeneration);
+    if (floorGeneration) {
+      void mirrorShiftBundle(activeClient, tauriExecutor, entered.id, floorGeneration);
+    }
   }
 
+  // The scanner reads green only once the Rust side has confirmed a port is
+  // actually open; the printer only reflects whether one is configured,
+  // since it cannot be proven alive without printing to it.
   return (
-    // The scanner reads green only once the Rust side has confirmed a port
-    // is actually open; the printer only reflects whether one is configured,
-    // since it cannot be proven alive without printing to it.
     <FloorShell
       online={online}
       scanner={scannerIndicator(hardwareConfig, scannerStatus)}
@@ -602,6 +701,7 @@ export function App() {
       activeTaskId=""
       onSelectTask={() => {}}
     >
+      {legacyNotice}
       {showSetup ? (
         <WorkstationSetup
           hw={tauriHardware}
@@ -672,7 +772,9 @@ export function App() {
         <ShiftSelection
           client={activeClient}
           onSelected={handleShiftEntered}
-          isCurrent={() => credentialGenerationIsCurrent(floorGeneration)}
+          isCurrent={() =>
+            floorGeneration ? credentialGenerationIsCurrent(floorGeneration) : false
+          }
           onNew={() => setFloorView("new")}
           onSetup={() => setShowSetup(true)}
           onConflicts={() => setShowConflicts(true)}

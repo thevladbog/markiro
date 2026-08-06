@@ -25,3 +25,6 @@ export interface PairStationResultDto {
   credential: { apiKey: string; serverUrl: string };
   operators: OperatorMirrorRecord[];
 }
+
+/** Authenticated legacy-config bootstrap; deliberately contains no credential material. */
+export type StationIdentityResultDto = Pick<PairStationResultDto, "device">;

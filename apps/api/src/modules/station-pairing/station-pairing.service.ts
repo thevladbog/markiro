@@ -23,6 +23,7 @@ import { OperatorsService } from "../operators/operators.service";
 import type {
   IssueStationPairingCodeResultDto,
   PairStationResultDto,
+  StationIdentityResultDto,
   StationPairErrorCode,
 } from "./dto";
 
@@ -47,6 +48,48 @@ export class StationPairingService {
     private readonly operators: OperatorsService,
     private readonly pairAttempts: PairAttemptsService,
   ) {}
+
+  /** Resolves metadata only from the tenant/device principal proven by TenantGuard. */
+  async identity(tenantId: string, deviceId: string): Promise<StationIdentityResultDto> {
+    const [station] = await this.db
+      .select({
+        id: schema.stationDevices.id,
+        tenantId: schema.stationDevices.tenantId,
+        name: schema.stationDevices.name,
+        lineId: schema.stationDevices.lineId,
+        lineName: schema.lines.name,
+        organizationName: schema.organization.name,
+      })
+      .from(schema.stationDevices)
+      .innerJoin(schema.organization, eq(schema.organization.id, schema.stationDevices.tenantId))
+      .leftJoin(
+        schema.lines,
+        and(
+          eq(schema.lines.tenantId, schema.stationDevices.tenantId),
+          eq(schema.lines.id, schema.stationDevices.lineId),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.stationDevices.tenantId, tenantId),
+          eq(schema.stationDevices.id, deviceId),
+          isNull(schema.stationDevices.revokedAt),
+        ),
+      );
+    if (!station) throw new UnauthorizedException();
+    return {
+      device: {
+        id: station.id,
+        name: station.name,
+        tenantId: station.tenantId,
+        organizationName: station.organizationName,
+        line:
+          station.lineId !== null && station.lineName !== null
+            ? { id: station.lineId, name: station.lineName }
+            : null,
+      },
+    };
+  }
 
   async issueCode(
     tenantId: string,

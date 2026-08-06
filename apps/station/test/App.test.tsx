@@ -210,6 +210,7 @@ function mockInvokeForFloor(
   },
   onInvoke?: (cmd: string, payload: unknown) => void,
   recoverySnapshotFailure?: Error,
+  configWriteFailure?: Error,
 ): OutboxSeedRow[] {
   const outbox = [...outboxRows];
   // Mutated by a real `recordConflicts`/`conflictCount` round-trip through
@@ -222,6 +223,13 @@ function mockInvokeForFloor(
     onInvoke?.(cmd, payload);
     if (cmd === "read_config") {
       return Promise.resolve(stationConfig);
+    }
+    if (cmd === "write_config") {
+      if (configWriteFailure) return Promise.reject(configWriteFailure);
+      const next = (payload as { cfg: Record<string, unknown> }).cfg;
+      for (const key of Object.keys(stationConfig)) delete stationConfig[key];
+      Object.assign(stationConfig, next);
+      return Promise.resolve(undefined);
     }
     if (cmd === "clear_credential") {
       delete stationConfig.api_key;
@@ -523,6 +531,7 @@ describe("App", () => {
       if (cmd === "read_config") {
         return Promise.resolve({
           machine_id: "m1",
+          device_id: "device-1",
           api_key: "mk_key",
           server_url: "http://localhost:3000",
         });
@@ -575,6 +584,247 @@ describe("App", () => {
         }),
       ),
     );
+  });
+
+  it("backfills a real legacy config before sync and later recovers a 401 against the same durable device", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const persistedConfig: Record<string, unknown> = {
+      machine_id: "legacy-machine",
+      api_key: "legacy-key-not-to-render",
+      server_url: "https://api.factory.example",
+    };
+    const order: string[] = [];
+    let backfillWrite: Record<string, unknown> | null = null;
+    const outbox = mockInvokeForFloor(
+      pinHash,
+      { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+      [outboxRow(1)],
+      persistedConfig,
+      (cmd, payload) => {
+        if (cmd === "write_config") {
+          order.push("write-config");
+          backfillWrite = (payload as { cfg: Record<string, unknown> }).cfg;
+        }
+      },
+    );
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit): Promise<Response> => {
+      const path = new URL(url).pathname;
+      if (path === "/station/identity") {
+        order.push("identity");
+        return new Response(
+          JSON.stringify({
+            device: {
+              id: "device-legacy",
+              name: "Legacy packing station",
+              tenantId: "tenant-legacy",
+              organizationName: "Factory",
+              line: { id: "line-1", name: "Packing" },
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (init?.method === "POST" && path === "/station/scans") {
+        order.push("sync");
+        return new Response(JSON.stringify({ message: "revoked" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ items: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByTestId("sealed-work-summary")).toBeDefined());
+    expect(order.slice(0, 3)).toEqual(["identity", "write-config", "sync"]);
+    expect(backfillWrite).toMatchObject({
+      machine_id: "legacy-machine",
+      device_id: "device-legacy",
+      api_key: "legacy-key-not-to-render",
+      server_url: "https://api.factory.example",
+    });
+    expect(persistedConfig).toEqual({
+      machine_id: "legacy-machine",
+      device_id: "device-legacy",
+      server_url: "https://api.factory.example",
+    });
+    expect(outbox).toHaveLength(1);
+    expect(screen.queryByText("legacy-key-not-to-render")).toBeNull();
+  });
+
+  it("keeps cached floor login available while legacy identity is offline and coalesces reconnect retries", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const persistedConfig: Record<string, unknown> = {
+      machine_id: "legacy-machine",
+      api_key: "legacy-key",
+      server_url: "https://api.factory.example",
+    };
+    const outbox = mockInvokeForFloor(
+      pinHash,
+      { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+      [outboxRow(1)],
+      persistedConfig,
+    );
+    let resolveReconnect!: (response: Response) => void;
+    const reconnect = new Promise<Response>((resolve) => {
+      resolveReconnect = resolve;
+    });
+    const fetchMock = vi
+      .fn<(url: string, init?: RequestInit) => Promise<Response>>()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockReturnValueOnce(reconnect);
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(
+      await screen.findByText(
+        "Station identity update is waiting for a connection. Cached offline work remains available.",
+      ),
+    ).toBeDefined();
+    await signInAsOperator();
+    expect(outbox).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      window.dispatchEvent(new Event("online"));
+      window.dispatchEvent(new Event("online"));
+      window.dispatchEvent(new Event("online"));
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(
+      fetchMock.mock.calls.every(([url]) => new URL(url).pathname === "/station/identity"),
+    ).toBe(true);
+    expect(outbox).toHaveLength(1);
+    resolveReconnect(new Response("{}", { status: 503 }));
+  });
+
+  it("holds a rejected legacy identity in stable service recovery without clearing or pairing the queue", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const invoked: string[] = [];
+    const outbox = mockInvokeForFloor(
+      pinHash,
+      { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+      [outboxRow(1)],
+      {
+        machine_id: "legacy-machine",
+        api_key: "rejected-legacy-key",
+        server_url: "https://api.factory.example",
+      },
+      (cmd) => invoked.push(cmd),
+    );
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ message: "revoked" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(
+      await screen.findByText(
+        "This legacy station key could not prove its device identity. Local work is preserved; contact service support before pairing again.",
+      ),
+    ).toBeDefined();
+    window.dispatchEvent(new Event("online"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(invoked).not.toContain("clear_credential");
+    expect(invoked).not.toContain("write_config");
+    expect(outbox).toHaveLength(1);
+    expect(screen.queryByLabelText("Pairing code")).toBeNull();
+  });
+
+  it("keeps the legacy queue and key untouched when atomic identity persistence fails", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const persistedConfig: Record<string, unknown> = {
+      machine_id: "legacy-machine",
+      api_key: "legacy-key",
+      server_url: "https://api.factory.example",
+    };
+    const outbox = mockInvokeForFloor(
+      pinHash,
+      { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+      [outboxRow(1)],
+      persistedConfig,
+      undefined,
+      undefined,
+      new Error("disk full"),
+    );
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            device: {
+              id: "device-legacy",
+              name: "Legacy station",
+              tenantId: "tenant-legacy",
+              organizationName: "Factory",
+              line: null,
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(
+      await screen.findByText(
+        "Station identity update is waiting for a connection. Cached offline work remains available.",
+      ),
+    ).toBeDefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(persistedConfig).toEqual({
+      machine_id: "legacy-machine",
+      api_key: "legacy-key",
+      server_url: "https://api.factory.example",
+    });
+    expect(outbox).toHaveLength(1);
+  });
+
+  it("starts normally from a persisted backfill without requesting identity again", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const outbox = mockInvokeForFloor(
+      pinHash,
+      { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+      [outboxRow(1)],
+      {
+        machine_id: "legacy-machine",
+        device_id: "device-legacy",
+        tenant_id: "tenant-legacy",
+        api_key: "legacy-key",
+        server_url: "https://api.factory.example",
+      },
+    );
+    const paths: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const path = new URL(url).pathname;
+        paths.push(path);
+        if (init?.method === "POST" && path === "/station/scans") {
+          return new Response(JSON.stringify({ applied: 1, alreadyApplied: false }), {
+            status: 200,
+          });
+        }
+        return new Response(JSON.stringify({ items: [] }), { status: 200 });
+      }),
+    );
+
+    render(<App />);
+
+    await waitFor(() => expect(outbox).toHaveLength(0));
+    expect(paths).not.toContain("/station/identity");
   });
 
   it("readShiftContext resolves null for a shift whose bundle has not been mirrored yet, so the 'preparing' branch is genuinely reachable", async () => {
@@ -1274,6 +1524,7 @@ describe("App", () => {
         if (cmd === "read_config") {
           return Promise.resolve({
             machine_id: "m1",
+            device_id: "device-1",
             api_key: "mk_key",
             server_url: "http://localhost:3000",
           });
@@ -1409,6 +1660,7 @@ describe("App", () => {
         if (cmd === "read_config") {
           return Promise.resolve({
             machine_id: "m1",
+            device_id: "device-1",
             api_key: "mk_key",
             server_url: "http://localhost:3000",
           });
@@ -1536,6 +1788,7 @@ describe("App", () => {
         if (cmd === "read_config") {
           return Promise.resolve({
             machine_id: "m1",
+            device_id: "device-1",
             api_key: "mk_key",
             server_url: "http://localhost:3000",
           });

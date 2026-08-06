@@ -302,6 +302,16 @@ describe("cabinet route authorization metadata", () => {
     const guards = Reflect.getMetadata(GUARDS_METADATA, StationPairController) ?? [];
     expect(guards).not.toContain(TenantGuard);
     expect(guards).not.toContain(AuthorizationGuard);
-    expect(routeMethods(StationPairController)).toEqual(["pair"]);
+    expect(routeMethods(StationPairController).sort()).toEqual(["identity", "pair"]);
+
+    const prototype = StationPairController.prototype as unknown as Record<
+      string,
+      (...args: never[]) => unknown
+    >;
+    expect(Reflect.getMetadata(GUARDS_METADATA, prototype.pair!)).toBeUndefined();
+    expect(Reflect.getMetadata(GUARDS_METADATA, prototype.identity!)).toEqual([
+      TenantGuard,
+      StationOnlyGuard,
+    ]);
   });
 });

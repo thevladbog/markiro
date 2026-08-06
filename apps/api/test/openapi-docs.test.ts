@@ -16,6 +16,7 @@ import { StationPairController } from "../src/modules/station-pairing/station-pa
 import { StationPairingService } from "../src/modules/station-pairing/station-pairing.service";
 import { disableScalarDynamicCodeProbe, mountOpenApiDocs } from "../src/openapi-docs";
 import { TenantGuard } from "../src/tenancy/tenant.guard";
+import { StationOnlyGuard } from "../src/tenancy/station-only.guard";
 
 function scriptElements(html: string): Array<{ attributes: string; body: string }> {
   const lower = html.toLowerCase();
@@ -66,9 +67,10 @@ function operationResponse(
   document: OpenAPIObject,
   path: string,
   status: "200" | "201",
+  method: "get" | "post" = "post",
 ): Record<string, unknown> {
-  const operation = document.paths[path]?.post;
-  if (!operation) throw new Error(`Missing POST operation for ${path}`);
+  const operation = document.paths[path]?.[method];
+  if (!operation) throw new Error(`Missing ${method.toUpperCase()} operation for ${path}`);
   const response = operation.responses[status];
   if (!response || "$ref" in response)
     throw new Error(`Missing inline ${status} response for ${path}`);
@@ -113,6 +115,50 @@ describe("self-hosted OpenAPI documentation", () => {
     expect(scriptSources('<script src="/docs/scalar.js"></script   >')).toEqual([
       "/docs/scalar.js",
     ]);
+  });
+
+  it("documents the authenticated station identity backfill response exactly", async () => {
+    const moduleRef = await Test.createTestingModule({
+      controllers: [StationPairController],
+      providers: [{ provide: StationPairingService, useValue: {} }],
+    })
+      .overrideGuard(TenantGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(StationOnlyGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
+    const app = moduleRef.createNestApplication();
+    await app.init();
+
+    try {
+      const document = SwaggerModule.createDocument(
+        app,
+        new DocumentBuilder().setTitle("contract test").setVersion("test").build(),
+      );
+      const response = operationResponse(document, "/station/identity", "200", "get");
+      expect(response).toMatchObject({
+        headers: {
+          "Cache-Control": { schema: { type: "string", enum: ["no-store"] } },
+        },
+        content: {
+          "application/json": {
+            schema: { type: "object", required: ["device"] },
+          },
+        },
+      });
+      const schema = responseSchema(response);
+      expectExactObjectFields(schema, ["device"]);
+      expectExactObjectFields(schema.properties!.device!, [
+        "id",
+        "name",
+        "tenantId",
+        "organizationName",
+        "line",
+      ]);
+      expect(JSON.stringify(response)).not.toMatch(/apiKey|credential|secret/i);
+    } finally {
+      await app.close();
+    }
   });
 
   it("does not mistake data-src for the executable script src attribute", () => {
