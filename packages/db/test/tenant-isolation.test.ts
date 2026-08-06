@@ -144,10 +144,7 @@ describe.skipIf(!url)("tenant isolation (composite FKs + tenant-scoped uniquenes
   });
 
   it("allows a station without an API key to reference a line in its own tenant", async () => {
-    const [line] = await db
-      .insert(lines)
-      .values({ tenantId: orgA.id, name: "Line A" })
-      .returning();
+    const [line] = await db.insert(lines).values({ tenantId: orgA.id, name: "Line A" }).returning();
     lineIds.push(line!.id);
 
     const [station] = await db

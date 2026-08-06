@@ -507,15 +507,14 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
         .set({ tenantId: victimOrgId })
         .where(eq(schema.stationDevices.id, deviceId));
 
-      const res = await request(app!.getHttpServer())
+      await request(app!.getHttpServer())
         .get(`/shifts/${shiftId}/bundle`)
         .set("x-api-key", apiKey)
-        .expect(200);
+        .expect(401);
 
-      // No device resolves for the caller any more (the only row with this
-      // api-key now belongs to the victim), so the bundle must degrade to
-      // sscc: null rather than allocate against the victim-tagged row.
-      expect(res.body.sscc).toBeNull();
+      // A verified Better Auth key is not a station principal on its own.
+      // Once its durable row no longer matches the key's tenant, TenantGuard
+      // rejects the orphaned credential instead of serving any bundle data.
 
       const blocks = await db
         .select()

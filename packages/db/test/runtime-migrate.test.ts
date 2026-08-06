@@ -234,7 +234,12 @@ describe("runRuntimeMigrations", () => {
     async () => {
       const { stdout } = await execFile(
         process.execPath,
-        ["--experimental-strip-types", "--input-type=module", "--eval", legacyStationMigrationFixture],
+        [
+          "--experimental-strip-types",
+          "--input-type=module",
+          "--eval",
+          legacyStationMigrationFixture,
+        ],
         {
           env: {
             ...process.env,
