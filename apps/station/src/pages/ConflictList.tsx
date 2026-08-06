@@ -106,7 +106,12 @@ export function ConflictList({ exec, onBack }: ConflictListProps) {
         <div className="conflict-list__cards" role="list" aria-label={t("conflicts.items")}>
           {showItems
             ? pageData.items.map((conflict) => (
-                <Card key={conflict.codeHash} className="conflict-list__card" role="listitem">
+                <Card
+                  key={conflict.codeHash}
+                  className="conflict-list__card"
+                  role="listitem"
+                  padding="12px 20px"
+                >
                   <div className="conflict-list__identity">
                     {conflict.gtin14 !== null && conflict.serial !== null
                       ? `${conflict.gtin14} ${conflict.serial}`
@@ -114,14 +119,22 @@ export function ConflictList({ exec, onBack }: ConflictListProps) {
                   </div>
                   <div
                     className="conflict-list__winner"
-                    {...(conflict.winningTerminalId !== null
-                      ? { title: conflict.winningTerminalId }
-                      : {})}
-                  >
-                    {t("conflicts.wonBy", {
+                    aria-label={t("conflicts.wonBy", {
                       terminal: conflict.winningTerminalId ?? "—",
                       time: formatWinTime(conflict.winningScannedAt),
                     })}
+                  >
+                    <span className="conflict-list__winner-label">
+                      {t("conflicts.winningTerminal")}
+                    </span>
+                    <span className="conflict-list__terminal">
+                      {conflict.winningTerminalId ?? "—"}
+                    </span>
+                    <span className="conflict-list__winning-time">
+                      {t("conflicts.winningTime", {
+                        time: formatWinTime(conflict.winningScannedAt),
+                      })}
+                    </span>
                   </div>
                   <p className="conflict-list__recovery">{t("conflicts.recovery")}</p>
                 </Card>

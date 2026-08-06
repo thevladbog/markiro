@@ -105,8 +105,7 @@ body,
   grid-template-rows: auto auto minmax(0, 1fr);
 }
 
-.conflict-list__identity,
-.conflict-list__winner {
+.conflict-list__identity {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -119,8 +118,37 @@ body,
 }
 
 .conflict-list__winner {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  gap: var(--sp-1);
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
   color: var(--fg-1);
+  font: var(--floor-body);
+}
+
+.conflict-list__winner-label,
+.conflict-list__winning-time {
+  white-space: nowrap;
+}
+
+.conflict-list__winner-label {
   font: var(--floor-body-strong);
+}
+
+.conflict-list__terminal {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font: var(--floor-body-strong);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.conflict-list__winning-time {
+  color: var(--fg-2);
 }
 
 .conflict-list__recovery {

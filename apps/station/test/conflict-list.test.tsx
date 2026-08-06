@@ -247,7 +247,7 @@ describe("ConflictList", () => {
     }
   });
 
-  it("keeps a long winning terminal identifiable while explaining the server recovery", async () => {
+  it("shows a long winning terminal in touch-visible text without relying on hover", async () => {
     const exec = await migratedExec();
     const terminalId = "terminal-production-line-04-west-corridor-with-a-very-long-identifier";
     await addConflict(exec, {
@@ -260,7 +260,9 @@ describe("ConflictList", () => {
 
     render(<ConflictList exec={exec} onBack={() => {}} />);
 
-    expect(await screen.findByTitle(terminalId)).toBeDefined();
+    expect(await screen.findByText(terminalId)).toBeDefined();
+    expect(screen.getByText("Kept by")).toBeDefined();
+    expect(screen.queryByTitle(terminalId)).toBeNull();
     expect(
       screen.getByText("Do not rescan. Continue production; a manager will review it."),
     ).toBeDefined();

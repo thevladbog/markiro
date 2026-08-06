@@ -199,6 +199,8 @@
     "retry": "Retry",
     "explanation": "This device keeps a local copy. The server has already kept the earlier scan; production continues.",
     "wonBy": "Kept by {{terminal}} at {{time}}",
+    "winningTerminal": "Kept by",
+    "winningTime": "at {{time}}",
     "recovery": "Do not rescan. Continue production; a manager will review it.",
     "back": "Back",
     "unknownItem": "Item no longer on this device",
