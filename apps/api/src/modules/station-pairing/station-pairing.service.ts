@@ -206,12 +206,6 @@ export class StationPairingService {
     });
 
     try {
-      // A replacement must never leave both credentials usable. This runs
-      // before the durable link moves to `key.id`: if the old row cannot be
-      // proven absent, the new link is not committed and the candidate is
-      // compensated below.
-      if (station.apiKeyId !== null) await this.deletePersistedApiKey(station.apiKeyId);
-
       await this.db.transaction(async (tx) => {
         const [claimed] = await tx
           .update(schema.stationPairingCodes)
@@ -227,6 +221,20 @@ export class StationPairingService {
           )
           .returning({ id: schema.stationPairingCodes.id });
         if (!claimed) throw new PairClaimLostError();
+
+        // Claiming the code, retiring an old credential, and linking the
+        // candidate are one unit of work. In particular, a code that loses
+        // its claim after candidate provisioning cannot invalidate the
+        // station's existing credential.
+        if (station.apiKeyId !== null) {
+          const [deleted] = await tx
+            .delete(schema.apikey)
+            .where(eq(schema.apikey.id, station.apiKeyId))
+            .returning({ id: schema.apikey.id });
+          if (!deleted) {
+            throw new InternalServerErrorException("Station credential cleanup failed");
+          }
+        }
 
         const [paired] = await tx
           .update(schema.stationDevices)

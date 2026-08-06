@@ -386,30 +386,49 @@ describe.skipIf(!ready)("station pairing e2e", () => {
       .send({ code: firstCode.body.code })
       .expect(201);
     const oldKey = firstPair.body.credential.apiKey as string;
+    const [before] = await db
+      .select({ apiKeyId: schema.stationDevices.apiKeyId })
+      .from(schema.stationDevices)
+      .where(eq(schema.stationDevices.id, deviceId));
     const replacementCode = await agent
       .post(`/station-devices/${deviceId}/pairing-code`)
       .send({})
       .expect(201);
 
     const pool = app!.get<AuthSetup["pool"]>(DB_POOL);
-    const query = pool.query.bind(pool);
-    const directDelete = vi.spyOn(db, "delete").mockImplementationOnce(() => {
-      throw new Error("forced direct old-key delete failure");
-    });
-    const fallbackDelete = vi.spyOn(pool, "query").mockImplementation((...args) => {
-      if (args[0] === 'DELETE FROM "apikey" WHERE "id" = $1') {
-        return Promise.reject(new Error("forced persisted old-key delete failure"));
-      }
-      return query(...args);
-    });
+    await pool.query("CREATE TABLE station_pairing_test_blocked_key (id text PRIMARY KEY)");
+    await pool.query("INSERT INTO station_pairing_test_blocked_key (id) VALUES ($1)", [
+      before!.apiKeyId,
+    ]);
+    await pool.query(`
+      CREATE FUNCTION station_pairing_reject_old_key_delete()
+      RETURNS trigger
+      LANGUAGE plpgsql
+      AS $$
+      BEGIN
+        IF OLD.id = (SELECT id FROM station_pairing_test_blocked_key LIMIT 1) THEN
+          RAISE EXCEPTION 'forced persisted old-key delete failure';
+        END IF;
+        RETURN OLD;
+      END;
+      $$
+    `);
+    await pool.query(`
+      CREATE TRIGGER station_pairing_reject_old_key_delete_trigger
+      BEFORE DELETE ON apikey
+      FOR EACH ROW EXECUTE FUNCTION station_pairing_reject_old_key_delete()
+    `);
     try {
       await request(app!.getHttpServer())
         .post("/station/pair")
         .send({ code: replacementCode.body.code })
         .expect(500);
     } finally {
-      fallbackDelete.mockRestore();
-      directDelete.mockRestore();
+      await pool.query(
+        "DROP TRIGGER IF EXISTS station_pairing_reject_old_key_delete_trigger ON apikey",
+      );
+      await pool.query("DROP FUNCTION IF EXISTS station_pairing_reject_old_key_delete()");
+      await pool.query("DROP TABLE IF EXISTS station_pairing_test_blocked_key");
     }
 
     await request(app!.getHttpServer())
@@ -425,6 +444,60 @@ describe.skipIf(!ready)("station pairing e2e", () => {
       .from(schema.apikey)
       .where(and(eq(schema.apikey.referenceId, tenantId), eq(schema.apikey.configId, "station")));
     expect(keys).toEqual([{ id: station!.apiKeyId! }]);
+  });
+
+  it("keeps the active key when a regenerated code loses after candidate provisioning", async () => {
+    const firstCode = await agent
+      .post(`/station-devices/${deviceId}/pairing-code`)
+      .send({})
+      .expect(201);
+    const firstPair = await request(app!.getHttpServer())
+      .post("/station/pair")
+      .send({ code: firstCode.body.code })
+      .expect(201);
+    const oldKey = firstPair.body.credential.apiKey as string;
+    const [before] = await db
+      .select({ apiKeyId: schema.stationDevices.apiKeyId })
+      .from(schema.stationDevices)
+      .where(eq(schema.stationDevices.id, deviceId));
+
+    const issued = await agent
+      .post(`/station-devices/${deviceId}/pairing-code`)
+      .send({})
+      .expect(201);
+    const auth = app!.get<Auth>(AUTH);
+    const createApiKey = auth.api.createApiKey.bind(auth.api);
+    const candidateBeforeClaim = vi
+      .spyOn(auth.api, "createApiKey")
+      .mockImplementationOnce(async (input) => {
+        const candidate = await createApiKey(input);
+        await agent.post(`/station-devices/${deviceId}/pairing-code`).send({}).expect(201);
+        return candidate;
+      });
+    try {
+      const lost = await request(app!.getHttpServer())
+        .post("/station/pair")
+        .send({ code: issued.body.code })
+        .expect(401);
+      expect(lost.body).toMatchObject({ code: "PAIR_INVALID" });
+    } finally {
+      candidateBeforeClaim.mockRestore();
+    }
+
+    await request(app!.getHttpServer())
+      .get("/station/operators")
+      .set("x-api-key", oldKey)
+      .expect(200);
+    const [after] = await db
+      .select({ apiKeyId: schema.stationDevices.apiKeyId })
+      .from(schema.stationDevices)
+      .where(eq(schema.stationDevices.id, deviceId));
+    expect(after!.apiKeyId).toBe(before!.apiKeyId);
+    const keys = await db
+      .select({ id: schema.apikey.id })
+      .from(schema.apikey)
+      .where(and(eq(schema.apikey.referenceId, tenantId), eq(schema.apikey.configId, "station")));
+    expect(keys).toEqual([{ id: before!.apiKeyId! }]);
   });
 
   it("rejects a previously used station code with PAIR_INVALID", async () => {
