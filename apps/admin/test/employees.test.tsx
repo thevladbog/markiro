@@ -285,7 +285,24 @@ describe("EmployeesPage", () => {
     expect(await screen.findByText("Сотрудники не добавлены")).toBeDefined();
   });
 
-  it("shows a spinner (not EmptyState) while the list request is still pending", async () => {
+  it("gives read-only users empty guidance that does not suggest an unavailable action", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(200, { items: [] })),
+    );
+
+    renderPage(OPERATIONS_READ_ONLY);
+
+    expect(
+      await screen.findByText(
+        "Обратитесь к администратору с правом редактирования, чтобы добавить сотрудников.",
+      ),
+    ).toBeDefined();
+    expect(screen.queryByText(/Добавьте первого сотрудника/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Добавить сотрудника" })).toBeNull();
+  });
+
+  it("shows an accessible table-shaped skeleton (not EmptyState) while loading", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(() => new Promise<Response>(() => {})),
@@ -293,7 +310,10 @@ describe("EmployeesPage", () => {
 
     renderPage();
 
-    expect(await screen.findByRole("status")).toBeDefined();
+    const loading = await screen.findByRole("status");
+    expect(loading.classList).toContain("mk-employees-table-skeleton");
+    expect(loading.querySelectorAll("thead th")).toHaveLength(5);
+    expect(loading.querySelectorAll("tbody tr")).toHaveLength(3);
     expect(screen.queryByText("Сотрудники не добавлены")).toBeNull();
   });
 

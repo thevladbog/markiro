@@ -78,6 +78,21 @@ const ACTIVE_OPERATOR = {
   hasBadge: false,
 };
 
+const JOHN: typeof JANE = {
+  ...JANE,
+  id: "2",
+  fullName: "John Roe",
+  role: "Кладовщик",
+};
+
+const JOHN_OPERATOR: typeof ACTIVE_OPERATOR = {
+  ...ACTIVE_OPERATOR,
+  employeeId: "2",
+  fullName: "John Roe",
+  role: "Кладовщик",
+  login: "654321",
+};
+
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(body === undefined ? null : JSON.stringify(body), {
     status,
@@ -420,6 +435,44 @@ it("shows a translated not-found state for an unknown employee", async () => {
   await waitFor(() => expect(router.state.location.pathname).toBe("/employees"));
 });
 
+it("does not reuse a retained employee when the edit route changes to an unknown id", async () => {
+  stubEmployeeAndOperators();
+  const { router } = renderPanel(["/employees/1/edit"]);
+
+  expect(await screen.findByDisplayValue("Jane Doe")).toBeDefined();
+
+  await act(async () => {
+    await router.navigate("/employees/missing/edit");
+  });
+
+  expect((await screen.findByRole("alert")).textContent).toContain("Сотрудник не найден.");
+  expect(screen.queryByDisplayValue("Jane Doe")).toBeNull();
+});
+
+it("clears every resource draft after discarding navigation to another employee", async () => {
+  stubEmployeeAndOperators({
+    employees: [JANE, JOHN],
+    operators: [ACTIVE_OPERATOR, JOHN_OPERATOR],
+  });
+  const { router, user } = renderPanel(["/employees/1/edit"]);
+
+  const fullName = await screen.findByLabelText("ФИО");
+  const panel = screen.getByRole("dialog", { name: "Изменить сотрудника" });
+  await user.type(fullName, " draft");
+  await user.type(within(panel).getByLabelText("Код бейджа"), "BADGE-DRAFT");
+  await user.type(await within(panel).findByLabelText("ПИН-код"), "4321");
+
+  await router.navigate("/employees/2/edit");
+  const confirmation = await screen.findByRole("alertdialog", { name: "Отменить изменения?" });
+  await user.click(within(confirmation).getByRole("button", { name: "Не сохранять" }));
+
+  await waitFor(() => expect(router.state.location.pathname).toBe("/employees/2/edit"));
+  const nextPanel = screen.getByRole("dialog", { name: "Изменить сотрудника" });
+  expect((within(nextPanel).getByLabelText("ФИО") as HTMLInputElement).value).toBe("John Roe");
+  expect((within(nextPanel).getByLabelText("Код бейджа") as HTMLInputElement).value).toBe("");
+  expect((within(nextPanel).getByLabelText("ПИН-код") as HTMLInputElement).value).toBe("");
+});
+
 it("shows the edit-panel load error and retries before mounting employee resources", async () => {
   let attempts = 0;
   vi.stubGlobal(
@@ -517,6 +570,104 @@ it("keeps dirty editor resources and discard protection after a cached-list refe
   await waitFor(() => expect(router.state.location.pathname).toBe("/employees"));
 });
 
+it("keeps a dirty create editor and discard flow after an empty cached-list refetch fails", async () => {
+  let employeeAttempts = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      if (String(url) === "/api/employees") {
+        employeeAttempts += 1;
+        return employeeAttempts === 1
+          ? jsonResponse(200, { items: [] })
+          : jsonResponse(503, { message: "Refetch unavailable" });
+      }
+      throw new Error(`Unexpected request: ${String(url)}`);
+    }),
+  );
+  const { queryClient, router, user } = renderPanel(["/employees", "/employees/new"]);
+
+  const fullName = await screen.findByLabelText("ФИО");
+  await user.type(fullName, "Анна Чернова");
+
+  await act(async () => {
+    await queryClient.refetchQueries({ queryKey: EMPLOYEES_QUERY_KEY });
+  });
+
+  expect(employeeAttempts).toBe(2);
+  const panel = screen.getByRole("dialog", { name: "Новый сотрудник" });
+  expect((within(panel).getByLabelText("ФИО") as HTMLInputElement).value).toBe("Анна Чернова");
+
+  await user.click(within(panel).getByRole("button", { name: "Закрыть" }));
+  const confirmation = screen.getByRole("alertdialog", { name: "Отменить изменения?" });
+  await user.click(within(confirmation).getByRole("button", { name: "Продолжить редактирование" }));
+  expect((within(panel).getByLabelText("ФИО") as HTMLInputElement).value).toBe("Анна Чернова");
+
+  await user.click(within(panel).getByRole("button", { name: "Закрыть" }));
+  await user.click(
+    within(screen.getByRole("alertdialog", { name: "Отменить изменения?" })).getByRole("button", {
+      name: "Не сохранять",
+    }),
+  );
+  await waitFor(() => expect(router.state.location.pathname).toBe("/employees"));
+});
+
+it("keeps dirty Profile, Badge, and PIN drafts recoverable when a refetch omits the edited employee", async () => {
+  let employeeAttempts = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      if (String(url) === "/api/employees") {
+        employeeAttempts += 1;
+        return jsonResponse(200, { items: employeeAttempts === 1 ? [JANE] : [] });
+      }
+      if (String(url) === "/api/operators") {
+        return jsonResponse(200, { items: [ACTIVE_OPERATOR] });
+      }
+      throw new Error(`Unexpected request: ${String(url)}`);
+    }),
+  );
+  const { queryClient, router, user } = renderPanel(["/employees", "/employees/1/edit"]);
+
+  const fullName = await screen.findByLabelText("ФИО");
+  const panel = screen.getByRole("dialog", { name: "Изменить сотрудника" });
+  await user.type(fullName, " draft");
+  await user.type(within(panel).getByLabelText("Код бейджа"), "BADGE-DRAFT");
+  await user.type(await within(panel).findByLabelText("ПИН-код"), "4321");
+
+  await act(async () => {
+    await queryClient.refetchQueries({ queryKey: EMPLOYEES_QUERY_KEY });
+  });
+
+  expect(employeeAttempts).toBe(2);
+  expect(
+    await screen.findByText(
+      "Сотрудник больше не входит в текущий список. Черновики сохранятся, пока открыта эта панель.",
+    ),
+  ).toBeDefined();
+  const retainedPanel = screen.getByRole("dialog", { name: "Изменить сотрудника" });
+  expect(retainedPanel).toBe(panel);
+  expect((within(retainedPanel).getByLabelText("ФИО") as HTMLInputElement).value).toBe(
+    "Jane Doe draft",
+  );
+  expect((within(retainedPanel).getByLabelText("Код бейджа") as HTMLInputElement).value).toBe(
+    "BADGE-DRAFT",
+  );
+  expect((within(retainedPanel).getByLabelText("ПИН-код") as HTMLInputElement).value).toBe("4321");
+
+  await user.click(within(retainedPanel).getByRole("button", { name: "Закрыть" }));
+  const confirmation = screen.getByRole("alertdialog", { name: "Отменить изменения?" });
+  await user.click(within(confirmation).getByRole("button", { name: "Продолжить редактирование" }));
+  expect((within(retainedPanel).getByLabelText("ПИН-код") as HTMLInputElement).value).toBe("4321");
+
+  await user.click(within(retainedPanel).getByRole("button", { name: "Закрыть" }));
+  await user.click(
+    within(screen.getByRole("alertdialog", { name: "Отменить изменения?" })).getByRole("button", {
+      name: "Не сохранять",
+    }),
+  );
+  await waitFor(() => expect(router.state.location.pathname).toBe("/employees"));
+});
+
 it("keeps all employee resources mounted with named section metadata", async () => {
   stubEmployeeAndOperators();
   renderPanel(["/employees/1/edit"]);
@@ -542,6 +693,29 @@ it("keeps all employee resources mounted with named section metadata", async () 
   expect(profileNav.getAttribute("aria-current")).toBe("location");
   expect(badgesNav.textContent).toContain("0");
   await waitFor(() => expect(stationAccessNav.textContent).toContain("Активен"));
+});
+
+it("shows one Station access error marker instead of duplicating the error status", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      if (String(url) === "/api/employees") return jsonResponse(200, { items: [JANE] });
+      if (String(url) === "/api/operators") return jsonResponse(503, { message: "Unavailable" });
+      throw new Error(`Unexpected request: ${String(url)}`);
+    }),
+  );
+  renderPanel(["/employees/1/edit"]);
+
+  await screen.findByText("Не удалось загрузить статус доступа на станцию.");
+  const panel = screen.getByRole("dialog", { name: "Изменить сотрудника" });
+  const sectionNav = within(panel).getByRole("navigation", {
+    name: "Разделы сотрудника",
+  });
+  const stationAccessNav = within(sectionNav).getByRole("button", {
+    name: /Доступ на станцию/,
+  });
+
+  expect(within(stationAccessNav).getAllByText("Ошибка")).toHaveLength(1);
 });
 
 it("normalizes section geometry to the panel body for scroll and click navigation", async () => {
@@ -597,6 +771,36 @@ it("normalizes section geometry to the panel body for scroll and click navigatio
   expect(document.activeElement).toBe(stationHeading);
 
   fireEvent.scroll(scrollRoot);
+  await waitFor(() => expect(stationAccessNav.getAttribute("aria-current")).toBe("location"));
+});
+
+it("marks Station access active when the panel body reaches its real scroll bottom", async () => {
+  stubEmployeeAndOperators();
+  renderPanel(["/employees/1/edit"]);
+
+  await screen.findByRole("region", { name: "Профиль" });
+  const panel = screen.getByRole("dialog", { name: "Изменить сотрудника" });
+  const profile = within(panel).getByRole("region", { name: "Профиль" });
+  const badges = within(panel).getByRole("region", { name: "Бейджи" });
+  const stationAccess = within(panel).getByRole("region", { name: "Доступ на станцию" });
+  const scrollRoot = panel.querySelector<HTMLElement>(".mk-side-panel__body");
+  if (!scrollRoot) throw new Error("Panel scroll root not found");
+  Object.defineProperty(scrollRoot, "scrollTop", { configurable: true, value: 300 });
+  Object.defineProperty(scrollRoot, "clientHeight", { configurable: true, value: 500 });
+  Object.defineProperty(scrollRoot, "scrollHeight", { configurable: true, value: 800 });
+  vi.spyOn(scrollRoot, "getBoundingClientRect").mockReturnValue({ top: 100 } as DOMRect);
+  vi.spyOn(profile, "getBoundingClientRect").mockReturnValue({ top: -200 } as DOMRect);
+  vi.spyOn(badges, "getBoundingClientRect").mockReturnValue({ top: 110 } as DOMRect);
+  vi.spyOn(stationAccess, "getBoundingClientRect").mockReturnValue({ top: 400 } as DOMRect);
+
+  fireEvent.scroll(scrollRoot);
+
+  const sectionNav = within(panel).getByRole("navigation", {
+    name: "Разделы сотрудника",
+  });
+  const stationAccessNav = within(sectionNav).getByRole("button", {
+    name: /Доступ на станцию/,
+  });
   await waitFor(() => expect(stationAccessNav.getAttribute("aria-current")).toBe("location"));
 });
 

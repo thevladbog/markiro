@@ -3,6 +3,8 @@ import { userEvent } from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
 
+import componentStyles from "virtual:ui-component-styles";
+
 import {
   DatePicker,
   ConfirmDialog,
@@ -53,6 +55,10 @@ afterEach(() => {
 });
 
 beforeAll(() => {
+  const style = document.createElement("style");
+  style.textContent = componentStyles;
+  document.head.append(style);
+
   Object.defineProperties(HTMLElement.prototype, {
     hasPointerCapture: { value: () => false },
     setPointerCapture: { value: () => undefined },
@@ -150,6 +156,46 @@ it("blocks every dismissal path while busy", async () => {
 it.each(["compact", "standard", "complex"] as const)("applies the %s size token", (size) => {
   render(<SidePanel open size={size} title="Panel" closeLabel="Close" onClose={() => {}} />);
   expect(screen.getByRole("dialog").classList.contains(`mk-side-panel--${size}`)).toBe(true);
+});
+
+it("keeps panel and confirmation content viewport-bounded when copy is long", () => {
+  const longIdentity = "Employee-without-breaks-".repeat(20);
+  render(
+    <>
+      <SidePanel
+        open
+        title="Edit employee"
+        description={longIdentity}
+        closeLabel="Close"
+        onClose={() => {}}
+        footer={<button type="button">Save</button>}
+      >
+        Body
+      </SidePanel>
+      <ConfirmDialog
+        open
+        title="Remove access?"
+        description={longIdentity}
+        entity={longIdentity}
+        error={longIdentity}
+        cancelLabel="Cancel"
+        confirmLabel="Remove"
+        onCancel={() => {}}
+        onConfirm={() => {}}
+      />
+    </>,
+  );
+
+  const panel = screen.getByRole("dialog", { name: "Edit employee" });
+  const confirmation = screen.getByRole("alertdialog", { name: "Remove access?" });
+  const confirmationEntity = confirmation.querySelector<HTMLElement>(".mk-confirm-dialog__entity");
+  expect(confirmationEntity).not.toBeNull();
+  if (!confirmationEntity) throw new Error("Missing confirmation entity");
+  expect(getComputedStyle(panel).boxSizing).toBe("border-box");
+  expect(getComputedStyle(panel).maxHeight).toBe("100dvh");
+  expect(getComputedStyle(confirmation).boxSizing).toBe("border-box");
+  expect(getComputedStyle(confirmation).overflowY).toBe("auto");
+  expect(getComputedStyle(confirmationEntity).overflowWrap).toBe("anywhere");
 });
 
 it("keeps Radix child portals in the panel and lets each child consume Escape first", async () => {

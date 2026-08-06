@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Outlet, useNavigate } from "react-router";
 
@@ -12,7 +12,6 @@ import {
   PageHeader,
   RowActions,
   Select,
-  Spinner,
   StatusChip,
   Table,
 } from "@markiro/ui";
@@ -33,6 +32,47 @@ const STATUS_TO_CHIP: Record<EmployeeStatus, StatusChipStatus> = {
   active: "ok",
   archived: "neutral",
 };
+
+const TABLE_SKELETON_COLUMNS = ["full-name", "role", "status", "badges", "actions"];
+const TABLE_SKELETON_ROWS = ["first", "second", "third"];
+
+function EmployeesTableSkeleton({ label }: { label: string }) {
+  return (
+    <div
+      className="mk-employees-table-skeleton"
+      role="status"
+      aria-label={label}
+      aria-live="polite"
+      aria-busy="true"
+    >
+      <span className="mk-visually-hidden">{label}</span>
+      <div className="mk-employees-table-skeleton__scroll" aria-hidden="true">
+        <table>
+          <thead>
+            <tr>
+              {TABLE_SKELETON_COLUMNS.map((column) => (
+                <th key={column}>
+                  <span />
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {TABLE_SKELETON_ROWS.map((row) => (
+              <tr key={row}>
+                {TABLE_SKELETON_COLUMNS.map((column) => (
+                  <td key={column}>
+                    <span />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 
 function AuthorizedCreateEmployeeAction() {
   const { t } = useTranslation();
@@ -130,6 +170,11 @@ export function EmployeesPage() {
   const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
   const [status, setStatus] = useState<StatusFilter>("all");
   const query = useEmployees(status === "all" ? {} : { status });
+  const [employeesResolved, setEmployeesResolved] = useState(false);
+
+  useEffect(() => {
+    if (query.data !== undefined) setEmployeesResolved(true);
+  }, [query.data]);
 
   const items = query.data ?? [];
   const statusOptions: SelectOption<StatusFilter>[] = [
@@ -207,9 +252,7 @@ export function EmployeesPage() {
       </FilterBar>
 
       {query.isPending ? (
-        <div className="mk-employees-section-state">
-          <Spinner label={t("common.loading")} />
-        </div>
+        <EmployeesTableSkeleton label={t("common.loading")} />
       ) : query.isError ? (
         <div className="mk-employees-section-state">
           <Alert tone="error">{t("common.loadError")}</Alert>
@@ -228,7 +271,9 @@ export function EmployeesPage() {
           }
           hint={
             status === "all"
-              ? t("pages.employees.emptyHint")
+              ? canWrite
+                ? t("pages.employees.emptyHint")
+                : t("pages.employees.emptyReadOnlyHint")
               : t("pages.employees.filteredEmptyHint")
           }
           action={status === "all" ? canWrite ? <AuthorizedCreateEmployeeAction /> : null : null}
@@ -243,6 +288,7 @@ export function EmployeesPage() {
             employees: items,
             employeesPending: query.isPending,
             employeesError: query.isError,
+            employeesResolved,
             retryPanelData: async () => {
               await query.refetch();
             },

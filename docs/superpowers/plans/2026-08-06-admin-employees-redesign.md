@@ -924,7 +924,7 @@ Run: `rg -n "\bModal\b" apps/admin/src/pages/employees`
 
 Expected: no matches.
 
-Run: `rg -n "badgeCode|accessPin" apps/admin/src/pages/employees`
+Run: `rg -n "badgeCode|\\bpin\\b" apps/admin/src/pages/employees`
 
 Review every match manually. Expected: values exist only in transient component/form state and
 request construction; no URL, storage, logging, analytics, or toast interpolation.
@@ -936,6 +936,15 @@ this spec/plan; it contained no backend, database, dependency/lockfile, Kiosk, o
 returned only `BadgeDto`/`IssueBadgeInput`, the local badge issue state/request body, and current badge
 display/revoke confirmation entity; there were no `accessPin` matches and no URL, storage, logging,
 analytics, or toast interpolation of a badge/PIN value.
+
+Final-fix evidence (2026-08-06): the complete working tree against `origin/main` contains 25 paths,
+all limited to the shared Button/ConfirmDialog surface, Employees routes/components/styles/i18n/tests,
+the access-routing test, and this feature's spec/plan. There are no backend, database, dependency,
+lockfile, Kiosk, or later-wave paths. The Modal and TSX inline-style audits returned no matches. The
+badge/PIN audit found only DTOs, local input state, request construction, and the existing assigned
+badge display/confirmation entity; it found no URL, browser storage, logging, analytics, or toast
+interpolation. Real `MutationCache` regressions also proved pending badge issue, Station grant, and
+PIN reset requests never enter TanStack Query's mutation cache.
 
 - [x] **Step 2: Run focused shared and Admin tests**
 
@@ -956,6 +965,10 @@ Expected: every test passes with zero failures and zero skips.
 
 Evidence (2026-08-06): UI overlay test passed 1 file / 16 tests (0 failed, 0 skipped). The six
 Admin focused files passed 6 files / 80 tests (0 failed, 0 skipped).
+
+Final-fix evidence (2026-08-06): the UI overlay test passed 1 file / 17 tests and the six Admin
+focused files passed 6 files / 91 tests, all with 0 failures and 0 skips. The additional shared Button
+component file passed 1 file / 44 tests.
 
 - [x] **Step 3: Run package gates**
 
@@ -983,6 +996,13 @@ failed, 0 skipped); Admin typecheck and build passed. Admin test emitted 57 jsdo
 The Admin build emitted its existing >500 kB chunk-size advisory. These warnings were not changed in
 the reviewed Employees/UI diff.
 
+Final-fix evidence (2026-08-06): all eight commands exited 0 on the corrected final tree. UI tests
+passed 6 files / 106 tests; UI typecheck, lint, and build passed. Admin tests passed 40 files / 474
+tests; Admin typecheck, lint, and build passed. Both suites had 0 failures and 0 skips. Admin tests
+retained the known jsdom canvas and navigation-not-implemented messages. Admin lint retained 5
+`react-hooks/exhaustive-deps` warnings in Boxes and Conflicts, with 0 errors and no Employees match.
+The Admin build retained the existing >500 kB chunk-size advisory.
+
 - [x] **Step 4: Run repository hygiene checks**
 
 Run:
@@ -1000,6 +1020,10 @@ matches. The audit intentionally scans only added lines so pre-existing prose ca
 
 Evidence (2026-08-06): `pnpm format:check` passed; `git diff --check origin/main...HEAD` returned
 no whitespace errors; the added-line en/em-dash audit returned no matches.
+
+Final-fix evidence (2026-08-06): after the final fix wave, `pnpm format:check` passed,
+`git diff --check origin/main...HEAD` returned no whitespace errors, and the added-line en/em-dash
+audit returned no matches.
 
 - [ ] **Step 5: Perform browser and accessibility review if infrastructure permits**
 
@@ -1032,6 +1056,12 @@ Evidence (2026-08-06): reviewed `git diff --stat origin/main...HEAD` and the com
 including shared ConfirmDialog, routes, Employees components/styles/i18n, and focused test changes.
 The only untriaged observation remains the deferred create-panel cached-empty refetch observation;
 Task 7 intentionally does not modify it and the final whole-branch review owns triage.
+
+Final-fix evidence (2026-08-06): the whole-branch final-review findings were fixed and reviewed as a
+single scoped wave. The formerly untriaged cached-empty create-route observation is now covered by a
+regression that preserves the dirty editor and discard flow after a background error. Independent
+re-review also identified and verified fixes for employee-ID-scoped retention and a cached Station
+update input shape; the final re-review was clean.
 
 ## Completion Report Contract
 

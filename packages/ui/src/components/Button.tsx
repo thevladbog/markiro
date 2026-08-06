@@ -75,7 +75,7 @@ export function Button({
         alignItems: "center",
         justifyContent: "center",
         gap: 8,
-        height: HEIGHT[size],
+        minHeight: HEIGHT[size],
         padding: "0 16px",
         borderRadius: "var(--r-2)",
         font: "600 14px/1 var(--font-ui)",

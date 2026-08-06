@@ -12,6 +12,63 @@
   gap: var(--sp-4);
 }
 
+.mk-employees-table-skeleton {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  background: var(--surface-card);
+}
+
+.mk-employees-table-skeleton__scroll {
+  overflow-x: auto;
+}
+
+.mk-employees-table-skeleton table {
+  width: 100%;
+  min-width: 640px;
+  border-collapse: collapse;
+}
+
+.mk-employees-table-skeleton thead {
+  background: var(--surface-panel);
+}
+
+.mk-employees-table-skeleton th,
+.mk-employees-table-skeleton td {
+  padding: 11px 16px;
+  text-align: left;
+}
+
+.mk-employees-table-skeleton tbody tr {
+  border-top: 1px solid var(--line);
+}
+
+.mk-employees-table-skeleton th > span,
+.mk-employees-table-skeleton td > span {
+  display: block;
+  height: 12px;
+  border-radius: var(--r-1);
+  background: var(--surface-panel);
+}
+
+.mk-employees-table-skeleton th > span {
+  width: 64%;
+  background: var(--line);
+}
+
+.mk-employees-table-skeleton td:nth-child(1) > span {
+  width: 82%;
+}
+
+.mk-employees-table-skeleton td:nth-child(2) > span {
+  width: 68%;
+}
+
+.mk-employees-table-skeleton td:nth-child(n + 3) > span {
+  width: 52%;
+}
+
 .mk-employee-panel-skeleton {
   position: relative;
   display: flex;
@@ -141,6 +198,7 @@
 }
 
 .mk-employee-section-nav__markers {
+  min-width: 0;
   display: inline-flex;
   flex-shrink: 0;
   align-items: center;
@@ -239,6 +297,8 @@
 }
 
 .mk-employee-badges-section__details {
+  min-width: 0;
+  flex: 1 1 220px;
   display: flex;
   flex-direction: column;
 }
@@ -246,6 +306,7 @@
 .mk-employee-badges-section__name {
   color: var(--fg-1);
   font: var(--text-body);
+  overflow-wrap: anywhere;
 }
 
 .mk-employee-badges-section__name--code {
@@ -290,9 +351,12 @@
 }
 
 .mk-employee-station-access-section__current {
+  min-width: 0;
+  flex: 1 1 220px;
   color: var(--fg-1);
   font: var(--text-body);
   font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
 .mk-employee-station-access-section__form-row {
@@ -316,7 +380,40 @@
 }
 
 .mk-employee-station-access-section__error-state > :first-child {
+  min-width: 0;
   flex: 1;
+}
+
+.mk-employee-station-access-section__draft-conflict {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-2);
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  .mk-employee-edit-panel__layout {
+    grid-template-columns: minmax(156px, 0.48fr) minmax(0, 1fr);
+    gap: var(--sp-4);
+  }
+
+  .mk-employee-section-nav__button {
+    flex-direction: column;
+  }
+
+  .mk-employee-section-nav__label {
+    width: 100%;
+  }
+
+  .mk-employee-section-nav__markers {
+    max-width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .mk-employee-profile-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .mk-employee-station-access-section__skeleton {

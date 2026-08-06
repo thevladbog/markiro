@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Alert, Button, ConfirmDialog, Input, StatusChip } from "@markiro/ui";
@@ -10,6 +10,7 @@ import {
   useGrantStationAccess,
   useOperators,
   useRevokeStationAccess,
+  useResetStationAccessPin,
   useUpdateStationAccess,
 } from "./station-access-api.js";
 
@@ -42,6 +43,7 @@ export function EmployeeStationAccessSection({
   const { t } = useTranslation();
   const query = useOperators();
   const grantMutation = useGrantStationAccess();
+  const resetPinMutation = useResetStationAccessPin();
   const updateMutation = useUpdateStationAccess();
   const revokeMutation = useRevokeStationAccess();
   const [login, setLogin] = useState("");
@@ -49,6 +51,8 @@ export function EmployeeStationAccessSection({
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [revokeOpen, setRevokeOpen] = useState(false);
   const [revokeError, setRevokeError] = useState<string | null>(null);
+  const [draftConflict, setDraftConflict] = useState(false);
+  const previousAccessPresenceRef = useRef<boolean | null>(null);
 
   const access = query.data?.find((item) => item.employeeId === employee.id);
   const status: EmployeeAccessSectionStatus = query.isPending
@@ -61,13 +65,26 @@ export function EmployeeStationAccessSection({
           ? "active"
           : "disabled";
   const dirty = login.trim().length > 0 || pin.trim().length > 0;
-  const busy = grantMutation.isPending || updateMutation.isPending || revokeMutation.isPending;
+  const busy =
+    grantMutation.isPending ||
+    resetPinMutation.isPending ||
+    updateMutation.isPending ||
+    revokeMutation.isPending;
   const hasError = query.isError || mutationError !== null || revokeError !== null;
 
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
   useEffect(() => onBusyChange(busy), [busy, onBusyChange]);
   useEffect(() => onErrorChange(hasError), [hasError, onErrorChange]);
   useEffect(() => onStatusChange(status), [onStatusChange, status]);
+  useEffect(() => {
+    if (query.data === undefined) return;
+
+    const hasAccess = access !== undefined;
+    const previousAccessPresence = previousAccessPresenceRef.current;
+    if (previousAccessPresence === false && hasAccess && dirty) setDraftConflict(true);
+    if (!dirty) setDraftConflict(false);
+    previousAccessPresenceRef.current = hasAccess;
+  }, [access, dirty, query.data]);
 
   async function runAccess(action: () => Promise<unknown>): Promise<boolean> {
     try {
@@ -82,12 +99,13 @@ export function EmployeeStationAccessSection({
   }
 
   const grantAccess = async () => {
+    if (busy) return;
     const nextLogin = login.trim();
     const nextPin = pin.trim();
     if (!nextLogin || !nextPin) return;
 
     const succeeded = await runAccess(() =>
-      grantMutation.mutateAsync({
+      grantMutation.grant({
         employeeId: employee.id,
         input: { login: nextLogin, pin: nextPin },
       }),
@@ -99,17 +117,18 @@ export function EmployeeStationAccessSection({
   };
 
   const resetPin = async () => {
+    if (busy) return;
     const nextPin = pin.trim();
     if (!nextPin) return;
 
     const succeeded = await runAccess(() =>
-      updateMutation.mutateAsync({ employeeId: employee.id, input: { pin: nextPin } }),
+      resetPinMutation.resetPin({ employeeId: employee.id, pin: nextPin }),
     );
     if (succeeded) setPin("");
   };
 
   const toggleAccess = async () => {
-    if (!access) return;
+    if (busy || !access) return;
     await runAccess(() =>
       updateMutation.mutateAsync({
         employeeId: employee.id,
@@ -119,6 +138,7 @@ export function EmployeeStationAccessSection({
   };
 
   const openRevokeConfirmation = () => {
+    if (busy) return;
     setRevokeError(null);
     setRevokeOpen(true);
   };
@@ -129,7 +149,14 @@ export function EmployeeStationAccessSection({
     setRevokeError(null);
   };
 
+  const discardAccessDraft = () => {
+    setLogin("");
+    setPin("");
+    setDraftConflict(false);
+  };
+
   const revokeAccess = async () => {
+    if (busy) return;
     try {
       setRevokeError(null);
       await revokeMutation.mutateAsync(employee.id);
@@ -152,11 +179,25 @@ export function EmployeeStationAccessSection({
         </h3>
 
         {mutationError ? <Alert tone="error">{mutationError}</Alert> : null}
+        {access && draftConflict && dirty ? (
+          <div className="mk-employee-station-access-section__draft-conflict">
+            <Alert tone="warn">{t("pages.employees.stationAccess.draftConflict")}</Alert>
+            <Button
+              type="button"
+              size="compact"
+              variant="secondary"
+              disabled={busy}
+              onClick={discardAccessDraft}
+            >
+              {t("pages.employees.stationAccess.discardDraftAction")}
+            </Button>
+          </div>
+        ) : null}
 
         {status === "loading" ? (
           <div className="mk-employee-station-access-section__skeleton">
             <span className="mk-employee-station-access-section__skeleton-line" />
-            <span className="mk-employee-station-access-section__loading-label">
+            <span className="mk-employee-station-access-section__loading-label" role="status">
               {t("pages.employees.stationAccess.loading")}
             </span>
           </div>
@@ -167,6 +208,7 @@ export function EmployeeStationAccessSection({
               type="button"
               size="compact"
               variant="secondary"
+              disabled={busy}
               onClick={() => void query.refetch()}
             >
               {t("pages.employees.stationAccess.retryAction")}
@@ -191,6 +233,7 @@ export function EmployeeStationAccessSection({
                   type="button"
                   size="compact"
                   variant="secondary"
+                  disabled={busy}
                   loading={updateMutation.isPending}
                   onClick={() => void toggleAccess()}
                 >
@@ -202,6 +245,7 @@ export function EmployeeStationAccessSection({
                   type="button"
                   size="compact"
                   variant="destructive"
+                  disabled={busy}
                   onClick={openRevokeConfirmation}
                 >
                   {t("pages.employees.stationAccess.revokeAction")}
@@ -216,13 +260,14 @@ export function EmployeeStationAccessSection({
                 inputMode="numeric"
                 type="password"
                 value={pin}
+                disabled={busy}
                 onChange={(event) => setPin(event.target.value)}
               />
               <Button
                 type="button"
                 size="compact"
-                disabled={pin.trim().length === 0}
-                loading={updateMutation.isPending}
+                disabled={busy || pin.trim().length === 0}
+                loading={resetPinMutation.isPending}
                 onClick={() => void resetPin()}
               >
                 {t("pages.employees.stationAccess.resetAction")}
@@ -240,6 +285,7 @@ export function EmployeeStationAccessSection({
                 mono
                 inputMode="numeric"
                 value={login}
+                disabled={busy}
                 onChange={(event) => setLogin(event.target.value)}
               />
               <Input
@@ -248,12 +294,13 @@ export function EmployeeStationAccessSection({
                 inputMode="numeric"
                 type="password"
                 value={pin}
+                disabled={busy}
                 onChange={(event) => setPin(event.target.value)}
               />
               <Button
                 type="button"
                 size="compact"
-                disabled={login.trim().length === 0 || pin.trim().length === 0}
+                disabled={busy || login.trim().length === 0 || pin.trim().length === 0}
                 loading={grantMutation.isPending}
                 onClick={() => void grantAccess()}
               >
@@ -273,7 +320,7 @@ export function EmployeeStationAccessSection({
         confirmLabel={t("pages.employees.stationAccess.revokeConfirmAction")}
         cancelLabel={t("pages.employees.cancel")}
         tone="destructive"
-        busy={revokeMutation.isPending}
+        busy={busy}
         onConfirm={() => void revokeAccess()}
         onCancel={closeRevokeConfirmation}
       />

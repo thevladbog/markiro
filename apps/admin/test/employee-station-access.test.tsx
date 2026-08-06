@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -77,6 +77,7 @@ function renderStationAccess(
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return {
+    queryClient,
     ...reporters,
     ...render(
       <QueryClientProvider client={queryClient}>
@@ -104,6 +105,9 @@ describe("EmployeeStationAccessSection query states", () => {
 
     const section = screen.getByRole("region", { name: "Доступ на станцию" });
     expect(within(section).getByText("Загрузка статуса доступа на станцию…")).toBeDefined();
+    expect(within(section).getByRole("status").textContent).toContain(
+      "Загрузка статуса доступа на станцию…",
+    );
     expect(within(section).queryByRole("button", { name: "Выдать доступ" })).toBeNull();
     await waitFor(() => expect(reporters.onStatusChange).toHaveBeenLastCalledWith("loading"));
     expect(reporters.onErrorChange).toHaveBeenLastCalledWith(false);
@@ -163,6 +167,133 @@ describe("EmployeeStationAccessSection query states", () => {
 });
 
 describe("EmployeeStationAccessSection mutations", () => {
+  it("surfaces and discards an absent-access draft when access appears", async () => {
+    stubOperators(() => jsonResponse(200, { items: [] }));
+    const reporters = {
+      onDirtyChange: vi.fn(),
+      onBusyChange: vi.fn(),
+      onErrorChange: vi.fn(),
+      onStatusChange: vi.fn(),
+    };
+    const { queryClient } = renderStationAccess(JANE, reporters);
+    const user = userEvent.setup();
+
+    await user.type(await screen.findByLabelText("Табельный номер"), "654321");
+    await user.type(screen.getByLabelText("ПИН-код"), "4321");
+
+    await act(async () => {
+      queryClient.setQueryData(["operators"], [EXISTING_ACCESS]);
+    });
+
+    const section = screen.getByRole("region", { name: "Доступ на станцию" });
+    expect((await within(section).findByRole("alert")).textContent).toContain(
+      "Черновик доступа конфликтует с уже выданным доступом",
+    );
+    await user.click(within(section).getByRole("button", { name: "Отменить черновик" }));
+
+    await waitFor(() => expect(reporters.onDirtyChange).toHaveBeenLastCalledWith(false));
+    expect(within(section).queryByRole("button", { name: "Отменить черновик" })).toBeNull();
+
+    await user.type(within(section).getByLabelText("ПИН-код"), "9876");
+    expect(within(section).queryByRole("button", { name: "Отменить черновик" })).toBeNull();
+  });
+
+  it("disables every existing-access mutation control while a toggle is pending", async () => {
+    let resolvePatch: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      if (init?.method === "PATCH" && url === "/api/operators/1") {
+        return new Promise<Response>((resolve) => {
+          resolvePatch = resolve;
+        });
+      }
+      return Promise.resolve(jsonResponse(200, { items: [EXISTING_ACCESS] }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderStationAccess();
+    const user = userEvent.setup();
+
+    await user.type(await screen.findByLabelText("ПИН-код"), "4321");
+    await user.click(screen.getByRole("button", { name: "Отключить" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/operators/1",
+        expect.objectContaining({ method: "PATCH", body: JSON.stringify({ active: false }) }),
+      ),
+    );
+    expect(screen.getByRole("button", { name: "Отключить" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Сменить ПИН" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Убрать доступ" }).hasAttribute("disabled")).toBe(
+      true,
+    );
+
+    resolvePatch?.(jsonResponse(200, { ...UPDATED_ACCESS, active: false }));
+  });
+
+  it("keeps grant and PIN-reset values out of the real MutationCache", async () => {
+    let resolvePut: ((response: Response) => void) | undefined;
+    let resolvePatch: ((response: Response) => void) | undefined;
+    let hasAccess = false;
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      if (init?.method === "PUT" && url === "/api/operators/1") {
+        return new Promise<Response>((resolve) => {
+          resolvePut = resolve;
+        });
+      }
+      if (init?.method === "PATCH" && url === "/api/operators/1") {
+        return new Promise<Response>((resolve) => {
+          resolvePatch = resolve;
+        });
+      }
+      return Promise.resolve(jsonResponse(200, { items: hasAccess ? [EXISTING_ACCESS] : [] }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { queryClient, unmount } = renderStationAccess();
+    const user = userEvent.setup();
+    const grantPin = "CACHE-SECRET-GRANT-PIN";
+
+    await user.type(await screen.findByLabelText("Табельный номер"), "123456");
+    await user.type(screen.getByLabelText("ПИН-код"), grantPin);
+    await user.click(screen.getByRole("button", { name: "Выдать доступ" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/operators/1",
+        expect.objectContaining({ method: "PUT" }),
+      ),
+    );
+    expect(
+      queryClient
+        .getMutationCache()
+        .getAll()
+        .some((mutation) => JSON.stringify(mutation.state).includes(grantPin)),
+    ).toBe(false);
+
+    resolvePut?.(jsonResponse(200, UPDATED_ACCESS));
+    hasAccess = true;
+    unmount();
+
+    const resetPin = "CACHE-SECRET-RESET-PIN";
+    const { queryClient: resetQueryClient } = renderStationAccess();
+    await user.type(await screen.findByLabelText("ПИН-код"), resetPin);
+    await user.click(screen.getByRole("button", { name: "Сменить ПИН" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/operators/1",
+        expect.objectContaining({ method: "PATCH" }),
+      ),
+    );
+    expect(
+      resetQueryClient
+        .getMutationCache()
+        .getAll()
+        .some((mutation) => JSON.stringify(mutation.state).includes(resetPin)),
+    ).toBe(false);
+
+    resolvePatch?.(jsonResponse(200, UPDATED_ACCESS));
+  });
+
   it("PUTs login and PIN, reports transitions, and clears both only after success", async () => {
     let resolvePut: ((response: Response) => void) | undefined;
     const fetchMock = vi.fn((url: string, init?: RequestInit) => {

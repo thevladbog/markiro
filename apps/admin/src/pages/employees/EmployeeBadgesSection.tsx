@@ -59,7 +59,7 @@ export function EmployeeBadgesSection({
     if (!code) return;
 
     try {
-      await issueMutation.mutateAsync({
+      await issueMutation.issue({
         id: employee.id,
         input: { badgeCode: code, label: badgeLabel.trim() ? badgeLabel.trim() : null },
       });

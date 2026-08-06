@@ -96,7 +96,7 @@ describe("Admin page layout", () => {
 });
 
 describe("Button", () => {
-  it("renders variant and size class hooks with the office control height style hook", () => {
+  it("keeps the office control minimum height while allowing wrapped labels to grow", () => {
     const { rerender } = render(
       <Button variant="primary" size="md">
         Save
@@ -105,7 +105,8 @@ describe("Button", () => {
     const primary = screen.getByRole("button", { name: "Save" });
     expect(primary.className).toContain("mk-btn--primary");
     expect(primary.className).toContain("mk-btn--md");
-    expect(primary.style.height).toBe("var(--control-md)");
+    expect(primary.style.minHeight).toBe("var(--control-md)");
+    expect(primary.style.height).toBe("");
 
     rerender(
       <Button variant="secondary" size="compact">
@@ -115,7 +116,8 @@ describe("Button", () => {
     const secondary = screen.getByRole("button", { name: "Cancel" });
     expect(secondary.className).toContain("mk-btn--secondary");
     expect(secondary.className).toContain("mk-btn--compact");
-    expect(secondary.style.height).toBe("var(--control-sm)");
+    expect(secondary.style.minHeight).toBe("var(--control-sm)");
+    expect(secondary.style.height).toBe("");
 
     rerender(<Button variant="destructive">Delete</Button>);
     const destructive = screen.getByRole("button", { name: "Delete" });

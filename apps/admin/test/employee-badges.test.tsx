@@ -71,6 +71,7 @@ function renderBadgesSection(
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return {
+    queryClient,
     ...reporters,
     ...render(
       <QueryClientProvider client={queryClient}>
@@ -86,6 +87,42 @@ afterEach(() => {
 });
 
 describe("EmployeeBadgesSection", () => {
+  it("keeps a badge code out of the real MutationCache while issuing it", async () => {
+    let resolvePost: ((response: Response) => void) | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string, init?: RequestInit) => {
+        if (init?.method === "POST" && url === "/api/employees/1/badges") {
+          return new Promise<Response>((resolve) => {
+            resolvePost = resolve;
+          });
+        }
+        return Promise.resolve(jsonResponse(200, { items: [JANE] }));
+      }),
+    );
+    const { queryClient } = renderBadgesSection();
+    const user = userEvent.setup();
+    const badgeCode = "CACHE-SECRET-BADGE";
+
+    await user.type(screen.getByLabelText("Код бейджа"), badgeCode);
+    await user.click(screen.getByRole("button", { name: "Выпустить бейдж" }));
+
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/employees/1/badges",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    expect(
+      queryClient
+        .getMutationCache()
+        .getAll()
+        .some((mutation) => JSON.stringify(mutation.state).includes(badgeCode)),
+    ).toBe(false);
+
+    resolvePost?.(jsonResponse(201, JANE));
+  });
+
   it("preserves badge inputs and reports a persistent issue error", async () => {
     stubBadgePost(409, { message: "Badge code already active" });
     const reporters = {

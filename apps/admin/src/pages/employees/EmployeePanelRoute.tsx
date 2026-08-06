@@ -33,6 +33,8 @@ export interface EmployeesPanelContext {
   employees: EmployeeDto[];
   employeesPending: boolean;
   employeesError: boolean;
+  /** True once the Employees query has produced a usable result, including an empty list. */
+  employeesResolved: boolean;
   retryPanelData: () => Promise<void>;
 }
 
@@ -152,8 +154,9 @@ export function EmployeeCreatePanelRoute(): ReactElement {
   const mutation = useCreateEmployee();
   const [error, setError] = useState<string | null>(null);
   const guard = useRoutePanelGuard(close, mutation.isPending);
+  const { employeesResolved } = context;
 
-  if (context.employeesPending || (context.employeesError && context.employees.length === 0)) {
+  if (context.employeesPending || (context.employeesError && !employeesResolved)) {
     return <PanelState mode="create" />;
   }
 
@@ -214,6 +217,14 @@ export function EmployeeCreatePanelRoute(): ReactElement {
 
 export function EmployeeEditPanelRoute(): ReactElement {
   const { employeeId } = useParams();
+  return <EmployeeEditPanelContent key={employeeId ?? "missing"} employeeId={employeeId} />;
+}
+
+function EmployeeEditPanelContent({
+  employeeId,
+}: {
+  employeeId: string | undefined;
+}): ReactElement {
   const { t } = useTranslation();
   const { context, close } = usePanelContext();
   const updateMutation = useUpdateEmployee();
@@ -225,10 +236,16 @@ export function EmployeeEditPanelRoute(): ReactElement {
   const [accessStatus, setAccessStatus] = useState<EmployeeAccessSectionStatus>("loading");
   const [activeSection, setActiveSection] = useState<EmployeeSectionId>("profile");
   const [scrollRoot, setScrollRoot] = useState<HTMLElement | null>(null);
+  const [lastResolvedEmployee, setLastResolvedEmployee] = useState<EmployeeDto | null>(null);
   const profileSectionRef = useRef<HTMLElement>(null);
   const badgesHostRef = useRef<HTMLDivElement>(null);
   const accessHostRef = useRef<HTMLDivElement>(null);
-  const employee = context.employees.find((item) => item.id === employeeId);
+  const resolvedEmployee = context.employees.find((item) => item.id === employeeId);
+  const { employeesResolved } = context;
+  const retainedEmployee = lastResolvedEmployee?.id === employeeId ? lastResolvedEmployee : null;
+  const employee = resolvedEmployee ?? retainedEmployee;
+  const employeeDisappeared =
+    employeesResolved && resolvedEmployee === undefined && retainedEmployee !== null;
   const employeeFullName = employee?.fullName;
   const employeeRole = employee?.role;
   const initialValues = useMemo<EmployeeFormValues | undefined>(
@@ -280,6 +297,14 @@ export function EmployeeEditPanelRoute(): ReactElement {
     setGuardDirty(panelDirty);
   }, [panelDirty, setGuardDirty]);
 
+  useEffect(() => {
+    if (resolvedEmployee !== undefined) {
+      setLastResolvedEmployee((current) =>
+        current === resolvedEmployee ? current : resolvedEmployee,
+      );
+    }
+  }, [resolvedEmployee]);
+
   const getSectionElement = useCallback((id: EmployeeSectionId): HTMLElement | null => {
     if (id === "profile") return profileSectionRef.current;
     if (id === "badges") {
@@ -324,6 +349,14 @@ export function EmployeeEditPanelRoute(): ReactElement {
           section.getBoundingClientRect().top - scrollRootTop + scrollRoot.scrollTop;
         if (sectionTop <= threshold) nextSection = id;
       });
+      const scrollable = scrollRoot.scrollHeight > scrollRoot.clientHeight;
+      if (
+        scrollable &&
+        scrollRoot.scrollTop + scrollRoot.clientHeight >= scrollRoot.scrollHeight - 1 &&
+        getSectionElement("station-access")
+      ) {
+        nextSection = "station-access";
+      }
       setActiveSection(nextSection);
     };
 
@@ -331,7 +364,7 @@ export function EmployeeEditPanelRoute(): ReactElement {
     return () => scrollRoot.removeEventListener("scroll", updateActiveSection);
   }, [getSectionElement, scrollRoot]);
 
-  if (context.employeesPending || (context.employeesError && context.employees.length === 0)) {
+  if (context.employeesPending || (context.employeesError && !employeesResolved)) {
     return <PanelState mode="edit" />;
   }
 
@@ -365,7 +398,7 @@ export function EmployeeEditPanelRoute(): ReactElement {
     {
       id: "station-access",
       label: t("pages.employees.stationAccess.title"),
-      meta: t(`pages.employees.stationAccess.status.${accessStatus}`),
+      meta: errors.access ? undefined : t(`pages.employees.stationAccess.status.${accessStatus}`),
       hasError: errors.access,
     },
   ];
@@ -421,6 +454,9 @@ export function EmployeeEditPanelRoute(): ReactElement {
           </>
         }
       >
+        {employeeDisappeared ? (
+          <Alert tone="warn">{t("pages.employees.form.disappearedConflict")}</Alert>
+        ) : null}
         <div className="mk-employee-edit-panel__layout">
           <EmployeeSectionNav
             items={navItems}
