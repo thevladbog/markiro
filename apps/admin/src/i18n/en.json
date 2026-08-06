@@ -1100,6 +1100,11 @@
       "archiveConfirmAction": "Archive",
       "archivePersistentError": "Could not archive the kiosk. Try again.",
       "retry": "Retry",
+      "views": {
+        "label": "Kiosk views",
+        "kiosks": "Kiosks",
+        "reasons": "Write-off reasons"
+      },
       "resultCount_one": "{{count}} kiosk",
       "resultCount_other": "{{count}} kiosks",
       "lastActivity": "Last activity",
@@ -1170,15 +1175,29 @@
       },
       "reasons": {
         "title": "Write-off reasons",
+        "emptyTitle": "No write-off reasons yet",
         "emptyHint": "No reasons yet",
         "addAction": "Add reason",
+        "createAction": "Create",
+        "cancelAction": "Cancel",
         "nameLabel": "Name",
         "sortOrderLabel": "Order",
         "saveAction": "Save",
         "archiveAction": "Delete",
         "archiveConfirmTitle": "Delete this reason?",
         "archiveConfirmBody": "Reason \"{{name}}\" will be deleted.",
-        "archiveConfirmAction": "Delete"
+        "archiveConfirmAction": "Delete",
+        "discardConfirmTitle": "Discard changes?",
+        "discardConfirmBody": "Your unsaved changes will be lost.",
+        "continueEditing": "Continue editing",
+        "discardConfirmAction": "Discard",
+        "errors": {
+          "nameRequired": "Enter a name",
+          "sortOrderInvalid": "Enter a whole number for the order",
+          "createFailed": "Could not create the reason. Try again.",
+          "updateFailed": "Could not save the reason. Try again.",
+          "archiveFailed": "Could not delete the reason. Try again."
+        }
       },
       "toasts": {
         "createSuccess": "Kiosk added",

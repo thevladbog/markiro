@@ -108,6 +108,7 @@ function renderAccessRoute(
         return jsonResponse(200, { gln: null, gs1Prefixes: [], inn: null });
       }
       if (path.endsWith("/api/products")) return jsonResponse(200, { items: [] });
+      if (path.endsWith("/api/pickup-reasons")) return jsonResponse(200, { items: [] });
       if (path.endsWith("/api/counterparties")) return jsonResponse(200, { items: [] });
       if (path.endsWith("/api/employees")) return jsonResponse(200, { items: [JANE] });
       if (path.endsWith("/api/operators")) return jsonResponse(200, { items: [] });
@@ -180,6 +181,14 @@ it.each(["/catalog/new", "/catalog/p1/edit"])(
     expect(screen.queryByRole("dialog")).toBeNull();
   },
 );
+
+it("allows a read-only operator to open write-off reasons directly", async () => {
+  renderAccessRoute("/kiosks/reasons", OPERATIONS_READ_ONLY);
+
+  expect(await screen.findByRole("heading", { name: "Киоски" })).toBeDefined();
+  expect(screen.queryByTestId("forbidden-page")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Добавить причину" })).toBeNull();
+});
 
 it.each(["/counterparties/new", "/counterparties/p1/edit"])(
   "forbids the direct counterparty write route %s for a read-only operator",

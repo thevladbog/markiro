@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
@@ -9,6 +10,7 @@ import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider } from "../src/access/context.js";
 import type * as KiosksApiModule from "../src/pages/kiosks/api.js";
 import { KiosksPage } from "../src/pages/kiosks/index.js";
+import { ReasonsPage } from "../src/pages/kiosks/ReasonsPage.js";
 
 const { writeHookMountSpy } = vi.hoisted(() => ({ writeHookMountSpy: vi.fn() }));
 
@@ -103,7 +105,24 @@ function renderPage(access: AccessDocument = ADMIN_ACCESS) {
   return render(
     <QueryClientProvider client={queryClient}>
       <AccessProvider value={access}>
-        <KiosksPage />
+        <MemoryRouter>
+          <KiosksPage />
+        </MemoryRouter>
+      </AccessProvider>
+    </QueryClientProvider>,
+  );
+}
+
+function renderReasonsPage(access: AccessDocument = ADMIN_ACCESS) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <AccessProvider value={access}>
+        <MemoryRouter initialEntries={["/kiosks/reasons"]}>
+          <ReasonsPage />
+        </MemoryRouter>
       </AccessProvider>
     </QueryClientProvider>,
   );
@@ -395,12 +414,17 @@ describe("KiosksPage", () => {
     expect(screen.queryByRole("button", { name: "Добавить киоск" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Изменить" })).toBeNull();
     expect(screen.queryByRole("button", { name: "В архив" })).toBeNull();
-    expect(screen.getByText(REASON_A.name)).toBeDefined();
-    expect(screen.queryByRole("button", { name: "Добавить причину" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Сохранить" })).toBeNull();
     expect(
       fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/pickup-reasons")),
-    ).toBe(true);
+    ).toBe(false);
+    expect(writeHookMountSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not mount reason mutations for read-only reasons access", async () => {
+    stubFetch({ reasons: [REASON_A] });
+    renderReasonsPage(OPERATIONS_READ_ONLY);
+
+    expect(await screen.findByText(REASON_A.name)).toBeDefined();
     expect(writeHookMountSpy).not.toHaveBeenCalled();
   });
 
@@ -748,79 +772,5 @@ describe("KiosksPage", () => {
         expect.objectContaining({ method: "DELETE" }),
       );
     });
-  });
-
-  it("the embedded ReasonsEditor adds a reason via POST /api/pickup-reasons", async () => {
-    let didCreate = false;
-    const created = { id: "r2", name: "Брак упаковки", sortOrder: 2 };
-    const fetchMock = stubFetch({
-      kiosks: [],
-      reasons: [REASON_A],
-      onPost: (path, init) => {
-        if (path === "/api/pickup-reasons" && init?.method === "POST") {
-          didCreate = true;
-          return jsonResponse(201, created);
-        }
-        if (path.startsWith("/api/pickup-reasons")) {
-          return jsonResponse(200, { items: didCreate ? [REASON_A, created] : [REASON_A] });
-        }
-        return undefined;
-      },
-    });
-
-    renderPage();
-    await screen.findByDisplayValue("Испорчен товар");
-
-    const nameInputs = screen.getAllByLabelText("Название");
-    // The existing reason's row renders its name as an input's *value*
-    // (findByText won't match it) -- the reasons list has one existing row
-    // plus the add row, so target the add row specifically by its
-    // still-empty value.
-    const addInput = nameInputs.find((el) => (el as HTMLInputElement).value === "")!;
-    fireEvent.change(addInput, { target: { value: "Брак упаковки" } });
-    fireEvent.click(screen.getByRole("button", { name: "Добавить причину" }));
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/pickup-reasons",
-        expect.objectContaining({
-          method: "POST",
-          body: JSON.stringify({ name: "Брак упаковки" }),
-        }),
-      );
-    });
-  });
-
-  it("keeps the original sort order when a reason's sort-order input is cleared (does not persist 0)", async () => {
-    const fetchMock = stubFetch({
-      kiosks: [],
-      reasons: [REASON_A], // sortOrder: 1
-      onPost: (path, init) => {
-        if (path === "/api/pickup-reasons/r1" && init?.method === "PATCH") {
-          return jsonResponse(200, { ...REASON_A });
-        }
-        return undefined;
-      },
-    });
-
-    renderPage();
-    await screen.findByDisplayValue("Испорчен товар");
-
-    fireEvent.change(screen.getByLabelText("Порядок"), { target: { value: "" } });
-    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/pickup-reasons/r1",
-        expect.objectContaining({ method: "PATCH" }),
-      );
-    });
-    const patchCall = fetchMock.mock.calls.find(
-      (call) => call[0] === "/api/pickup-reasons/r1" && call[1]?.method === "PATCH",
-    )!;
-    const body = JSON.parse(patchCall[1]?.body as string);
-    // Number("") === 0 passes the finite guard; a blank input must fall back to
-    // the reason's existing order, not silently persist 0.
-    expect(body.sortOrder).toBe(1);
   });
 });

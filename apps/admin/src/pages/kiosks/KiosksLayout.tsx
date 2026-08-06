@@ -1,0 +1,41 @@
+import type { MouseEvent as ReactMouseEvent, ReactElement, ReactNode } from "react";
+import { useTranslation } from "react-i18next";
+import { NavLink } from "react-router";
+
+import { AdminPage, PageHeader } from "@markiro/ui";
+
+export interface KiosksLayoutProps {
+  actions?: ReactNode;
+  children: ReactNode;
+  onViewNavigate?: (to: "/kiosks" | "/kiosks/reasons") => void;
+}
+
+/** Shared kiosk-area heading and local navigation for the two sibling views. */
+export function KiosksLayout({
+  actions,
+  children,
+  onViewNavigate,
+}: KiosksLayoutProps): ReactElement {
+  const { t } = useTranslation();
+  const handleClick =
+    (to: "/kiosks" | "/kiosks/reasons") => (event: ReactMouseEvent<HTMLAnchorElement>) => {
+      if (!onViewNavigate) return;
+      event.preventDefault();
+      onViewNavigate(to);
+    };
+
+  return (
+    <AdminPage className="mk-kiosks-page">
+      <PageHeader title={t("pages.kiosks.title")} actions={actions} />
+      <nav className="mk-kiosks-view-nav" aria-label={t("pages.kiosks.views.label")}>
+        <NavLink end to="/kiosks" onClick={handleClick("/kiosks")}>
+          {t("pages.kiosks.views.kiosks")}
+        </NavLink>
+        <NavLink to="/kiosks/reasons" onClick={handleClick("/kiosks/reasons")}>
+          {t("pages.kiosks.views.reasons")}
+        </NavLink>
+      </nav>
+      {children}
+    </AdminPage>
+  );
+}

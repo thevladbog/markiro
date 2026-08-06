@@ -2,13 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
-  AdminPage,
   Alert,
   Button,
   ConfirmDialog,
   EmptyState,
   FilterBar,
-  PageHeader,
   RowActions,
   Select,
   StatusChip,
@@ -25,7 +23,7 @@ import { toast } from "../../lib/toast.js";
 import { useProducts, type ProductDto } from "../catalog/api.js";
 import { KioskForm, type KioskFormValues } from "./KioskForm.js";
 import { PairingCodeModal } from "./PairingCodeModal.js";
-import { ReasonsEditor } from "./ReasonsEditor.js";
+import { KiosksLayout } from "./KiosksLayout.js";
 import {
   useArchiveKiosk,
   useCreateKiosk,
@@ -256,8 +254,8 @@ function AuthorizedKioskRowActions({
 
 /**
  * Admin kiosk settings screen -- Plan A Task 17
- * (list/create/edit/pair/archive + product allowlist + embedded write-off
- * reasons editor). Mirrors `../employees/index.tsx`'s active/archived +
+ * (list/create/edit/pair/archive + product allowlist). Mirrors
+ * `../employees/index.tsx`'s active/archived +
  * confirm-modal pattern (Task 16) for the kiosk lifecycle, and
  * `../shifts/ShiftForm.tsx`'s "pass the already-fetched catalog list down as
  * a prop" convention for the allowlist's product candidates.
@@ -363,12 +361,9 @@ export function KiosksPage() {
   );
 
   return (
-    <AdminPage className="mk-kiosks-page" data-testid="kiosks-page">
-      <PageHeader
-        title={t("pages.kiosks.title")}
-        actions={canWrite ? <AuthorizedCreateKioskAction products={activeProducts} /> : null}
-      />
-
+    <KiosksLayout
+      actions={canWrite ? <AuthorizedCreateKioskAction products={activeProducts} /> : null}
+    >
       <FilterBar
         label={t("pages.kiosks.filters.label")}
         resultSummary={
@@ -414,9 +409,7 @@ export function KiosksPage() {
       ) : (
         <Table columns={columns} rows={visibleItems} />
       )}
-
-      <ReasonsEditor />
-    </AdminPage>
+    </KiosksLayout>
   );
 }
 

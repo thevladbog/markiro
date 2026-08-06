@@ -27,6 +27,7 @@ import { ChannelPage } from "./pages/integrations/ChannelPage.js";
 import { IntegrationsPage } from "./pages/integrations/index.js";
 import { InvitationPage } from "./pages/invitations/InvitationPage.js";
 import { KiosksPage } from "./pages/kiosks/index.js";
+import { ReasonsPage } from "./pages/kiosks/ReasonsPage.js";
 import { LabelEditorPage } from "./pages/labels/editor/index.js";
 import { LabelTemplatesPage } from "./pages/labels/index.js";
 import { OrderDetailPage } from "./pages/pickup/OrderDetail.js";
@@ -187,6 +188,14 @@ function appRouteElements() {
           element={
             <RequireCapability capability={C.OPERATIONS_READ}>
               <KiosksPage />
+            </RequireCapability>
+          }
+        />
+        <Route
+          path="kiosks/reasons"
+          element={
+            <RequireCapability capability={C.OPERATIONS_READ}>
+              <ReasonsPage />
             </RequireCapability>
           }
         />
