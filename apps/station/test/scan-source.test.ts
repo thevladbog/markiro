@@ -44,6 +44,23 @@ describe("keyboard wedge scan source", () => {
     stop();
   });
 
+  it("routes focused manual text away from badge authentication and resumes afterward", () => {
+    const scans: string[] = [];
+    const source = createKeyboardWedgeSource();
+    const stop = source.start((raw) => scans.push(raw));
+
+    source.setManualTextEntryActive?.(true);
+    for (const ch of "alBADGE") press(ch);
+    press("Enter");
+    expect(scans).toEqual([]);
+
+    source.setManualTextEntryActive?.(false);
+    for (const ch of "BADGE") press(ch);
+    press("Enter");
+    expect(scans).toEqual(["BADGE"]);
+    stop();
+  });
+
   it("ignores modifier and navigation keys", () => {
     const scans: string[] = [];
     const stop = createKeyboardWedgeSource().start((raw) => scans.push(raw));

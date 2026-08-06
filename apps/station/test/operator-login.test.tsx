@@ -7,6 +7,7 @@ import { hashSecret } from "../src/lib/crypto.js";
 import type { ScanListener, ScanSource } from "../src/lib/scan-source.js";
 import { createKeyboardWedgeSource } from "../src/lib/scan-source.js";
 import { OperatorLogin } from "../src/pages/OperatorLogin.js";
+import "../src/station.css";
 
 const silentSource: ScanSource = { start: () => () => {} };
 
@@ -196,6 +197,47 @@ describe("OperatorLogin", () => {
     await waitFor(() => expect(onAuthed).toHaveBeenCalledTimes(1));
   });
 
+  it("does not prefix an immediate badge scan with an active name query", async () => {
+    const exec = makeExec();
+    await applyMigrations(exec);
+    await replaceOperatorsMirror(exec, [
+      {
+        operatorId: "op-name",
+        name: "Alex Morgan",
+        login: "123",
+        role: "operator",
+        pinHash: await hashSecret("4821"),
+        badgeHash: await hashSecret("BADGE-1"),
+        active: true,
+      },
+    ]);
+    const onAuthed = vi.fn();
+    const wedge = createKeyboardWedgeSource();
+    const routing = vi.spyOn(wedge, "setManualTextEntryActive");
+    render(<OperatorLogin exec={exec} source={wedge} onAuthed={onAuthed} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Find by name" }));
+    const search = screen.getByRole("textbox", { name: "Operator name" });
+    fireEvent.focus(search);
+    expect(routing).toHaveBeenLastCalledWith(true);
+    fireEvent.keyDown(search, { key: "a" });
+    fireEvent.keyDown(search, { key: "l" });
+    fireEvent.change(search, { target: { value: "al" } });
+    await screen.findByRole("button", { name: "Alex Morgan" });
+
+    for (const key of "BADGE-1") fireEvent.keyDown(search, { key });
+    fireEvent.keyDown(search, { key: "Enter" });
+    expect(onAuthed).not.toHaveBeenCalled();
+    expect(screen.queryByText("Badge not recognized")).toBeNull();
+    expect((search as HTMLInputElement).value).toBe("al");
+
+    fireEvent.blur(search);
+    expect(routing).toHaveBeenLastCalledWith(false);
+    for (const key of "BADGE-1") fireEvent.keyDown(window, { key });
+    fireEvent.keyDown(window, { key: "Enter" });
+    await waitFor(() => expect(onAuthed).toHaveBeenCalledTimes(1));
+  });
+
   it("keeps critical authentication errors at floor-readable text size", async () => {
     const exec = makeExec();
     await applyMigrations(exec);
@@ -208,6 +250,9 @@ describe("OperatorLogin", () => {
     expect(message.className).toContain("operator-login__auth-message");
     expect((message as HTMLElement).style.fontSize).toBe("18px");
     expect(message.closest('[role="alert"]')).not.toBeNull();
+    const reservedSlot = message.closest(".operator-login__message");
+    expect(reservedSlot).not.toBeNull();
+    expect(getComputedStyle(reservedSlot as Element).minHeight).toBe("64px");
   });
 
   it("clamps long Cyrillic and Latin operator names to one result line", async () => {

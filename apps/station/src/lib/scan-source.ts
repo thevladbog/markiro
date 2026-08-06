@@ -9,6 +9,8 @@ export interface ScanSource {
   start(listener: ScanListener): () => void;
   /** Discards non-scan text accumulated by a keyboard-wedge implementation. */
   clearPendingInput?(): void;
+  /** Routes focused free-text entry away from keyboard-wedge authentication. */
+  setManualTextEntryActive?(active: boolean): void;
 }
 
 type KeyTarget = Pick<Window, "addEventListener" | "removeEventListener">;
@@ -21,6 +23,7 @@ type KeyTarget = Pick<Window, "addEventListener" | "removeEventListener">;
  */
 export function createKeyboardWedgeSource(target: KeyTarget = window): ScanSource {
   const activeBuffers = new Set<() => void>();
+  let manualTextEntryActive = false;
   return {
     start(listener: ScanListener) {
       let payload = "";
@@ -29,6 +32,7 @@ export function createKeyboardWedgeSource(target: KeyTarget = window): ScanSourc
       };
       activeBuffers.add(clear);
       const onKeyDown = (event: Event) => {
+        if (manualTextEntryActive) return;
         const { key } = event as KeyboardEvent;
         if (key === "Enter") {
           // A wedge scanner "types" into whatever element happens to hold DOM
@@ -56,6 +60,10 @@ export function createKeyboardWedgeSource(target: KeyTarget = window): ScanSourc
     },
     clearPendingInput() {
       for (const clear of activeBuffers) clear();
+    },
+    setManualTextEntryActive(active) {
+      for (const clear of activeBuffers) clear();
+      manualTextEntryActive = active;
     },
   };
 }

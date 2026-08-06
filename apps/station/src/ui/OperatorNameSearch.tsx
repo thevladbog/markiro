@@ -13,6 +13,7 @@ export interface OperatorNameSearchProps {
   query: string;
   onQueryChange: (query: string) => void;
   onSelect: (operator: OperatorSearchResult) => void;
+  onTextEntryActiveChange?: (active: boolean) => void;
   disabled?: boolean;
 }
 
@@ -21,6 +22,7 @@ export function OperatorNameSearch({
   query,
   onQueryChange,
   onSelect,
+  onTextEntryActiveChange,
   disabled = false,
 }: OperatorNameSearchProps) {
   const { t } = useTranslation();
@@ -40,6 +42,8 @@ export function OperatorNameSearch({
         autoComplete="off"
         autoCapitalize="none"
         disabled={disabled}
+        onFocus={() => onTextEntryActiveChange?.(true)}
+        onBlur={() => onTextEntryActiveChange?.(false)}
         onChange={(event) => onQueryChange(event.currentTarget.value)}
       />
       <div className="operator-name-search__results" aria-live="polite">

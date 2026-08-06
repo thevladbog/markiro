@@ -43,6 +43,13 @@ export function OperatorLogin({ exec, source, onAuthed, notice }: OperatorLoginP
     };
   }, []);
 
+  useEffect(
+    () => () => {
+      source.setManualTextEntryActive?.(false);
+    },
+    [source],
+  );
+
   useEffect(() => {
     let currentSource = true;
     const stop = source.start((raw) => {
@@ -145,12 +152,14 @@ export function OperatorLogin({ exec, source, onAuthed, notice }: OperatorLoginP
   }
 
   function selectName(operator: OperatorSearchResult) {
+    source.setManualTextEntryActive?.(false);
     source.clearPendingInput?.();
     moveToPin(operator.login, "search", operator.name);
   }
 
   function back() {
     if (busy) return;
+    source.setManualTextEntryActive?.(false);
     source.clearPendingInput?.();
     setError(null);
     setPin("");
@@ -182,7 +191,11 @@ export function OperatorLogin({ exec, source, onAuthed, notice }: OperatorLoginP
         <p>{prompt}</p>
       </header>
 
-      <div className="operator-login__message" aria-live="polite">
+      <div
+        className="operator-login__message"
+        aria-live="polite"
+        style={{ minHeight: 64, overflow: "hidden" }}
+      >
         {error ? (
           <Alert tone="error">
             <span
@@ -202,6 +215,7 @@ export function OperatorLogin({ exec, source, onAuthed, notice }: OperatorLoginP
             query={searchQuery}
             onQueryChange={setSearchQuery}
             onSelect={selectName}
+            onTextEntryActiveChange={(active) => source.setManualTextEntryActive?.(active)}
             disabled={busy}
           />
         ) : (
@@ -288,6 +302,7 @@ export function OperatorLogin({ exec, source, onAuthed, notice }: OperatorLoginP
               size="floor"
               disabled={busy}
               onClick={() => {
+                source.setManualTextEntryActive?.(false);
                 source.clearPendingInput?.();
                 setError(null);
                 setStage("login");
