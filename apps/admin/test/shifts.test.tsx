@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { createMemoryRouter, createRoutesFromElements, Route, RouterProvider } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
@@ -9,6 +10,7 @@ import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider } from "../src/access/context.js";
 import type * as ShiftsApiModule from "../src/pages/shifts/api.js";
 import { ShiftsPage } from "../src/pages/shifts/index.js";
+import { ShiftPanelRoute } from "../src/pages/shifts/ShiftPanelRoute.js";
 
 const { writeHookMountSpy } = vi.hoisted(() => ({ writeHookMountSpy: vi.fn() }));
 
@@ -42,13 +44,11 @@ afterEach(() => {
   writeHookMountSpy.mockClear();
 });
 
-/** Minimal Response stand-in -- only what apps/admin/src/api/client.ts reads. */
 function jsonResponse(status: number, body: unknown): Response {
-  return {
-    ok: status >= 200 && status < 300,
+  return new Response(body === undefined ? null : JSON.stringify(body), {
     status,
-    json: async () => body,
-  } as Response;
+    headers: { "content-type": "application/json" },
+  });
 }
 
 const OPERATIONS_READ_ONLY: AccessDocument = {
@@ -68,7 +68,17 @@ function renderPage(access: AccessDocument = OPERATIONS_WRITE_ACCESS) {
   return render(
     <QueryClientProvider client={queryClient}>
       <AccessProvider value={access}>
-        <ShiftsPage />
+        <RouterProvider
+          router={createMemoryRouter(
+            createRoutesFromElements(
+              <Route path="/shifts" element={<ShiftsPage />}>
+                <Route path="new" element={<ShiftPanelRoute mode="create" />} />
+                <Route path=":shiftId/edit" element={<ShiftPanelRoute mode="edit" />} />
+              </Route>,
+            ),
+            { initialEntries: ["/shifts"] },
+          )}
+        />
       </AccessProvider>
     </QueryClientProvider>,
   );

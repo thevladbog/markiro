@@ -635,6 +635,13 @@
       "deleteConfirmTitle": "Удалить смену?",
       "deleteConfirmBody": "Смена по продукту «{{name}}» будет удалена без возможности восстановления.",
       "deleteConfirmAction": "Удалить",
+      "sections": {
+        "product": "Продукт и режим",
+        "planning": "Планирование",
+        "assignment": "Назначение производства",
+        "templates": "Шаблоны",
+        "aggregation": "Агрегация"
+      },
       "filters": {
         "statusLabel": "Статус",
         "fromLabel": "С даты",
@@ -668,6 +675,13 @@
       "form": {
         "createTitle": "Новая смена",
         "editTitle": "Изменить смену",
+        "loadError": "Не удалось загрузить данные для смены.",
+        "notFound": "Смена не найдена",
+        "retry": "Повторить",
+        "discardTitle": "Отменить изменения?",
+        "discardBody": "Несохранённые изменения смены будут потеряны.",
+        "continueEditing": "Продолжить редактирование",
+        "discardAction": "Не сохранять",
         "productLabel": "Продукт",
         "productPlaceholder": "Выберите продукт",
         "draftHint": "черновик — недоступно",

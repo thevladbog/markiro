@@ -633,6 +633,13 @@
       "deleteConfirmTitle": "Delete shift?",
       "deleteConfirmBody": "The shift for \"{{name}}\" will be permanently deleted.",
       "deleteConfirmAction": "Delete",
+      "sections": {
+        "product": "Product and mode",
+        "planning": "Planning",
+        "assignment": "Production assignment",
+        "templates": "Templates",
+        "aggregation": "Aggregation"
+      },
       "filters": {
         "statusLabel": "Status",
         "fromLabel": "From",
@@ -666,6 +673,13 @@
       "form": {
         "createTitle": "New shift",
         "editTitle": "Edit shift",
+        "loadError": "Could not load shift data.",
+        "notFound": "Shift not found",
+        "retry": "Retry",
+        "discardTitle": "Discard changes?",
+        "discardBody": "Your unsaved shift changes will be lost.",
+        "continueEditing": "Continue editing",
+        "discardAction": "Discard",
         "productLabel": "Product",
         "productPlaceholder": "Select a product",
         "draftHint": "draft -- unavailable",

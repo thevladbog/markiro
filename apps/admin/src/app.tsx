@@ -31,6 +31,7 @@ import { PickupPage } from "./pages/pickup/index.js";
 import { ProfilePage } from "./pages/profile/ProfilePage.js";
 import { SettingsPage } from "./pages/settings/index.js";
 import { ShiftsPage } from "./pages/shifts/index.js";
+import { ShiftPanelRoute } from "./pages/shifts/ShiftPanelRoute.js";
 import { ShellPage } from "./pages/Shell.js";
 import { TeamPage } from "./pages/team/TeamPage.js";
 
@@ -93,7 +94,24 @@ function appRouteElements() {
               <ShiftsPage />
             </RequireCapability>
           }
-        />
+        >
+          <Route
+            path="new"
+            element={
+              <RequireCapability capability={C.OPERATIONS_WRITE}>
+                <ShiftPanelRoute mode="create" />
+              </RequireCapability>
+            }
+          />
+          <Route
+            path=":shiftId/edit"
+            element={
+              <RequireCapability capability={C.OPERATIONS_WRITE}>
+                <ShiftPanelRoute mode="edit" />
+              </RequireCapability>
+            }
+          />
+        </Route>
         <Route
           path="boxes"
           element={
