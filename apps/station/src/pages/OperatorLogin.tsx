@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, PinPad } from "@markiro/ui";
 import type { OperatorMirrorRecord } from "@markiro/db";
@@ -13,12 +13,13 @@ export interface OperatorLoginProps {
   exec: SqlExecutor;
   source: ScanSource;
   onAuthed: (operator: OperatorMirrorRecord) => void;
+  notice?: ReactNode;
 }
 
 type LoginStage = "badge" | "login" | "pin" | "search";
 
 /** Badge-first fixed-viewport operator sign-in with bounded offline fallbacks. */
-export function OperatorLogin({ exec, source, onAuthed }: OperatorLoginProps) {
+export function OperatorLogin({ exec, source, onAuthed, notice }: OperatorLoginProps) {
   const { t } = useTranslation();
   const [stage, setStage] = useState<LoginStage>("badge");
   const [login, setLogin] = useState("");
@@ -79,6 +80,7 @@ export function OperatorLogin({ exec, source, onAuthed }: OperatorLoginProps) {
   async function openNameSearch() {
     if (admitted.current || authInFlight.current) return;
     authInFlight.current = true;
+    source.clearPendingInput?.();
     setError(null);
     setBusy(true);
     setStage("search");
@@ -143,11 +145,13 @@ export function OperatorLogin({ exec, source, onAuthed }: OperatorLoginProps) {
   }
 
   function selectName(operator: OperatorSearchResult) {
+    source.clearPendingInput?.();
     moveToPin(operator.login, "search", operator.name);
   }
 
   function back() {
     if (busy) return;
+    source.clearPendingInput?.();
     setError(null);
     setPin("");
     if (stage === "pin") {
@@ -169,14 +173,26 @@ export function OperatorLogin({ exec, source, onAuthed }: OperatorLoginProps) {
             : t("login.pinPrompt");
 
   return (
-    <main className="operator-login" aria-labelledby="operator-login-title">
+    <main
+      className={`operator-login${notice ? " operator-login--with-notice" : ""}`}
+      aria-labelledby="operator-login-title"
+    >
       <header className="operator-login__prompt">
         <h1 id="operator-login-title">{t("login.title")}</h1>
         <p>{prompt}</p>
       </header>
 
       <div className="operator-login__message" aria-live="polite">
-        {error ? <Alert tone="error">{error}</Alert> : null}
+        {error ? (
+          <Alert tone="error">
+            <span
+              className="operator-login__auth-message"
+              style={{ font: "var(--floor-body)", fontSize: 18 }}
+            >
+              {error}
+            </span>
+          </Alert>
+        ) : null}
       </div>
 
       <div className="operator-login__body">
@@ -272,6 +288,7 @@ export function OperatorLogin({ exec, source, onAuthed }: OperatorLoginProps) {
               size="floor"
               disabled={busy}
               onClick={() => {
+                source.clearPendingInput?.();
                 setError(null);
                 setStage("login");
               }}
@@ -281,6 +298,7 @@ export function OperatorLogin({ exec, source, onAuthed }: OperatorLoginProps) {
           </>
         )}
       </div>
+      {notice ? <div className="operator-login__notice">{notice}</div> : null}
     </main>
   );
 }

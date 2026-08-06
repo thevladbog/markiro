@@ -57,7 +57,12 @@ export function OperatorNameSearch({
               disabled={disabled}
               onClick={() => onSelect(operator)}
             >
-              {operator.name}
+              <span
+                className="operator-name-search__result-label"
+                style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+              >
+                {operator.name}
+              </span>
             </Button>
           ))
         )}

@@ -5,6 +5,7 @@ import i18n from "../src/i18n/index.js";
 import { applyMigrations, replaceOperatorsMirror, type SqlExecutor } from "../src/lib/mirror.js";
 import { hashSecret } from "../src/lib/crypto.js";
 import type { ScanListener, ScanSource } from "../src/lib/scan-source.js";
+import { createKeyboardWedgeSource } from "../src/lib/scan-source.js";
 import { OperatorLogin } from "../src/pages/OperatorLogin.js";
 
 const silentSource: ScanSource = { start: () => () => {} };
@@ -162,6 +163,94 @@ describe("OperatorLogin", () => {
       "al",
     );
     expect(screen.getByRole("button", { name: "Alex Morgan" })).toBeDefined();
+  });
+
+  it("discards manual name keydowns before the next keyboard-wedge badge scan", async () => {
+    const exec = makeExec();
+    await applyMigrations(exec);
+    await replaceOperatorsMirror(exec, [
+      {
+        operatorId: "op-name",
+        name: "Alex Morgan",
+        login: "123",
+        role: "operator",
+        pinHash: await hashSecret("4821"),
+        badgeHash: await hashSecret("BADGE-1"),
+        active: true,
+      },
+    ]);
+    const onAuthed = vi.fn();
+    render(<OperatorLogin exec={exec} source={createKeyboardWedgeSource()} onAuthed={onAuthed} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Find by name" }));
+    const search = screen.getByRole("textbox", { name: "Operator name" });
+    fireEvent.keyDown(search, { key: "a" });
+    fireEvent.keyDown(search, { key: "l" });
+    fireEvent.change(search, { target: { value: "al" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Alex Morgan" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+
+    for (const key of "BADGE-1") fireEvent.keyDown(window, { key });
+    fireEvent.keyDown(window, { key: "Enter" });
+
+    await waitFor(() => expect(onAuthed).toHaveBeenCalledTimes(1));
+  });
+
+  it("keeps critical authentication errors at floor-readable text size", async () => {
+    const exec = makeExec();
+    await applyMigrations(exec);
+    const scanner = manualSource();
+    render(<OperatorLogin exec={exec} source={scanner.source} onAuthed={vi.fn()} />);
+
+    act(() => scanner.scan("unknown"));
+
+    const message = await screen.findByText("Badge not recognized");
+    expect(message.className).toContain("operator-login__auth-message");
+    expect((message as HTMLElement).style.fontSize).toBe("18px");
+    expect(message.closest('[role="alert"]')).not.toBeNull();
+  });
+
+  it("clamps long Cyrillic and Latin operator names to one result line", async () => {
+    const exec = makeExec();
+    await applyMigrations(exec);
+    const cyrillicName = `Ал${"ександровна".repeat(18)}`;
+    const latinName = `Al${"exanderson".repeat(18)}`;
+    await replaceOperatorsMirror(exec, [
+      {
+        operatorId: "op-ru",
+        name: cyrillicName,
+        login: "123",
+        role: "operator",
+        pinHash: await hashSecret("4821"),
+        badgeHash: null,
+        active: true,
+      },
+      {
+        operatorId: "op-en",
+        name: latinName,
+        login: "124",
+        role: "operator",
+        pinHash: await hashSecret("4821"),
+        badgeHash: null,
+        active: true,
+      },
+    ]);
+    render(<OperatorLogin exec={exec} source={silentSource} onAuthed={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Find by name" }));
+    const search = screen.getByRole("textbox", { name: "Operator name" });
+    for (const [query, name] of [
+      ["al", latinName],
+      ["ал", cyrillicName],
+    ] as const) {
+      fireEvent.change(search, { target: { value: query } });
+      const button = await screen.findByRole("button", { name });
+      const label = button.querySelector(".operator-name-search__result-label") as HTMLElement;
+      expect(label).not.toBeNull();
+      expect(label.style.overflow).toBe("hidden");
+      expect(label.style.textOverflow).toBe("ellipsis");
+      expect(label.style.whiteSpace).toBe("nowrap");
+    }
   });
 
   it("signs in with a personnel number then a PIN", async () => {

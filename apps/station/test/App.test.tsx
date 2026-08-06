@@ -859,12 +859,22 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(
-      await screen.findByText(
-        "Station identity update is waiting for a connection. Cached offline work remains available.",
-      ),
-    ).toBeDefined();
+    const degradedNotice = await screen.findByText(
+      "Station identity update is waiting for a connection. Cached offline work remains available.",
+    );
+    const loginFooter = degradedNotice.closest(".station-floor-footer");
+    expect(loginFooter).not.toBeNull();
+    expect(loginFooter?.closest(".operator-login")).not.toBeNull();
+    expect((loginFooter as HTMLElement).style.position).toBe("");
+    expect(screen.getByRole("button", { name: "Use personnel number" })).toBeDefined();
     await signInAsOperator();
+    const floorFooter = screen
+      .getByText(
+        "Station identity update is waiting for a connection. Cached offline work remains available.",
+      )
+      .closest(".station-floor-footer");
+    expect(floorFooter?.closest(".station-root")).not.toBeNull();
+    expect(floorFooter?.closest(".station-screen-slot")).toBeNull();
     expect(outbox).toHaveLength(1);
     expect(fetchMock).toHaveBeenCalledTimes(1);
 

@@ -55,6 +55,7 @@ import { NewShift } from "./pages/NewShift.js";
 import { WorkScreen } from "./pages/WorkScreen.js";
 import { WorkstationSetup } from "./pages/WorkstationSetup.js";
 import { FloorShell } from "./ui/FloorShell.js";
+import { FloorFooter } from "./ui/FloorFooter.js";
 import type { ScannerIndicator } from "./ui/StatusBar.js";
 
 interface ActiveShift {
@@ -760,21 +761,8 @@ export function App() {
   }
 
   const legacyNotice = legacyIdentityState ? (
-    <Card
-      style={{
-        position: "fixed",
-        zIndex: 10,
-        insetInline: 32,
-        bottom: 24,
-        padding: 16,
-        display: "flex",
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: 16,
-      }}
-    >
-      <p role="status">
+    <FloorFooter ariaLabel={t("legacyIdentity.title")}>
+      <p className="legacy-identity-notice__message" role="status">
         {t(
           legacyIdentityState === "resolving"
             ? "legacyIdentity.resolving"
@@ -782,11 +770,11 @@ export function App() {
         )}
       </p>
       {legacyIdentityState === "degraded" ? (
-        <Button style={{ minHeight: 64 }} onClick={attemptLegacyIdentity}>
+        <Button size="floor" onClick={attemptLegacyIdentity}>
           {t("legacyIdentity.retry")}
         </Button>
       ) : null}
-    </Card>
+    </FloorFooter>
   ) : null;
 
   // `config` is narrowed to non-null for the rest of this render.
@@ -829,8 +817,12 @@ export function App() {
   if (stage === "login") {
     return (
       <>
-        <OperatorLogin exec={tauriExecutor} source={scanSource} onAuthed={setOperator} />
-        {legacyNotice}
+        <OperatorLogin
+          exec={tauriExecutor}
+          source={scanSource}
+          onAuthed={setOperator}
+          notice={legacyNotice}
+        />
       </>
     );
   }
@@ -874,8 +866,8 @@ export function App() {
       syncPending={syncState.pending}
       syncStuck={syncState.stuck}
       conflicts={syncState.conflicts}
+      footer={legacyNotice}
     >
-      {legacyNotice}
       {showSetup ? (
         <WorkstationSetup
           hw={tauriHardware}
