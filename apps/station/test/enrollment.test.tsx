@@ -67,13 +67,24 @@ describe("Enrollment", () => {
   });
 
   it("sends recovery pairing to the retained trusted API base exactly", async () => {
-    pairingMock.redeemStationPairing.mockResolvedValue({ ok: false, error: "invalid" });
+    const provisioning = {
+      deviceId: "device-1",
+      deviceName: "Packing station",
+      tenantId: "tenant-1",
+      organizationName: "Factory",
+      apiKey: "replacement-credential",
+      serverUrl: "https://retained.factory.example",
+      operators: [],
+    };
+    pairingMock.redeemStationPairing.mockResolvedValue({ ok: true, provisioning });
+    pairingMock.persistStationProvisioning.mockResolvedValue(undefined);
 
     render(
       <Enrollment
         machineId="machine-1"
         onEnrolled={() => {}}
         pairingServerUrl="https://retained.factory.example"
+        expectedDeviceId="device-1"
       />,
     );
 
@@ -86,6 +97,11 @@ describe("Enrollment", () => {
         "12345678",
       ),
     );
+    expect(pairingMock.persistStationProvisioning).toHaveBeenCalledWith(
+      provisioning,
+      expect.objectContaining({ machineId: "machine-1", expectedDeviceId: "device-1" }),
+    );
+    expect(screen.queryByRole("button", { name: "Service setup" })).toBeNull();
   });
 
   it("shows a stable expired state without persisting", async () => {

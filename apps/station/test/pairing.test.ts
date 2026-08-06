@@ -39,6 +39,24 @@ const provisioning: StationProvisioning = {
 };
 
 describe("persistStationProvisioning", () => {
+  it("refuses to adopt sealed work from a different device before roster or config writes", async () => {
+    const exec: SqlExecutor = { run: vi.fn(), all: vi.fn() };
+    const writeConfig = vi.fn();
+
+    await expect(
+      persistStationProvisioning(provisioning, {
+        machineId: "machine-1",
+        expectedDeviceId: "device-that-owned-the-queue",
+        exec,
+        writeConfig,
+      }),
+    ).rejects.toThrow("Pairing device mismatch");
+
+    expect(exec.all).not.toHaveBeenCalled();
+    expect(exec.run).not.toHaveBeenCalled();
+    expect(writeConfig).not.toHaveBeenCalled();
+  });
+
   it("publishes the full roster before atomically saving the provisioning bundle", async () => {
     const exec = makeExec();
     await applyMigrations(exec);

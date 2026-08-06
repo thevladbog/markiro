@@ -49,18 +49,29 @@ import { addRange } from "./sscc-pool.js";
  * only caller) so it is unit-testable with a mocked client and a
  * `node:sqlite` executor, without rendering React or faking Tauri IPC.
  */
-export async function mirrorShiftBundle(
+const activeMirrors = new Set<Promise<void>>();
+
+/** Waits for bundle downloads/writes that started before credential sealing. */
+export async function waitForShiftBundleMirrors(): Promise<void> {
+  await Promise.all([...activeMirrors]);
+}
+
+export function mirrorShiftBundle(
   client: Pick<StationClient, "get">,
   exec: SqlExecutor,
   shiftId: string,
 ): Promise<void> {
-  try {
-    const bundle = await client.get<StationBundle>(`/shifts/${shiftId}/bundle`);
-    if (bundle.sscc) {
-      await addRange(exec, bundle.sscc);
+  const operation = (async () => {
+    try {
+      const bundle = await client.get<StationBundle>(`/shifts/${shiftId}/bundle`);
+      if (bundle.sscc) {
+        await addRange(exec, bundle.sscc);
+      }
+      await upsertBundle(exec, bundle);
+    } catch (err) {
+      console.error("station: shift bundle download/mirror failed", err);
     }
-    await upsertBundle(exec, bundle);
-  } catch (err) {
-    console.error("station: shift bundle download/mirror failed", err);
-  }
+  })();
+  activeMirrors.add(operation);
+  return operation.finally(() => activeMirrors.delete(operation));
 }

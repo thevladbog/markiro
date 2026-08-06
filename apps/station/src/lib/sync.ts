@@ -1,6 +1,7 @@
 import { MAX_BOX_CLOSURES_PER_SYNC_BATCH } from "@markiro/domain";
-import type { StationClient } from "./api-client.js";
+import { StationApiError, type StationClient } from "./api-client.js";
 import { conflictCount, recordConflicts } from "./conflicts.js";
+import { readSealedWorkSummary, type CredentialRejectedEvent } from "./credential-recovery.js";
 import { getInstallId } from "./install-id.js";
 import type { SqlExecutor } from "./mirror.js";
 import { ackThrough, oldestQueuedAt, outboxDepth, readBatch, type OutboxItem } from "./outbox.js";
@@ -59,6 +60,8 @@ export interface SyncEngineDeps {
   machineId: string;
   now?: () => number;
   onState(state: SyncState): void;
+  /** Terminal notification for a server-rejected device credential. */
+  onCredentialRejected?(event: CredentialRejectedEvent): void;
 }
 
 export interface SyncEngine {
@@ -515,6 +518,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
   const now = deps.now ?? (() => Date.now());
   let draining = false;
   let stopped = false;
+  let credentialRejected = false;
   let requested = false;
   let lastSuccessAt: number | null = null;
   let backoffMs = BACKOFF_START_MS;
@@ -599,6 +603,21 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
     const resolvers = idleResolvers;
     idleResolvers = [];
     for (const resolve of resolvers) resolve();
+  }
+
+  async function rejectCredential(): Promise<void> {
+    if (credentialRejected) return;
+    // Terminal before the first await: no nudge, retry timer, or continuation
+    // can start another request with the rejected client once the 401 is known.
+    credentialRejected = true;
+    stopped = true;
+    requested = false;
+    if (retryTimer !== null) {
+      clearTimeout(retryTimer);
+      retryTimer = null;
+    }
+    const sealed = await readSealedWorkSummary(deps.exec);
+    deps.onCredentialRejected?.({ machineId: deps.machineId, sealed });
   }
 
   async function publishState(): Promise<void> {
@@ -924,14 +943,16 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
           lastSuccessAt = now();
           backoffMs = BACKOFF_START_MS;
         } catch (err) {
-          // Every failure here — network error, non-2xx, bad JSON, wrong
-          // shape, or a terminal 4xx the server will never accept (e.g. a
-          // shift it no longer owns, or a device re-enrolled into a
-          // different tenant) — is retried indefinitely. This is
-          // deliberate: a batch is never quarantined or dropped, because
-          // losing scan data is worse than a stalled queue. That means a
-          // permanently-rejected batch wedges the queue by design; the
-          // `stuck` indicator below is what surfaces that to an operator.
+          if (err instanceof StationApiError && err.status === 401) {
+            await rejectCredential();
+            break;
+          }
+          // Every non-credential failure here — network error, timeout,
+          // non-401 response, bad JSON, or wrong shape — is retried
+          // indefinitely. A real authenticated 401 is the one terminal
+          // exception handled above: retrying a rejected key can never heal,
+          // so the queue is sealed for same-device re-pair instead. No batch
+          // is quarantined or dropped on either path.
           console.error("station: sync batch failed", err);
           scheduleRetry();
           break;

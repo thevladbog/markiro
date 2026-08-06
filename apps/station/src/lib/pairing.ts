@@ -24,6 +24,8 @@ export type PairingResult =
 
 export interface ProvisioningPersistenceDependencies {
   machineId: string;
+  /** Present during recovery: sealed work belongs only to this device record. */
+  expectedDeviceId?: string;
   exec: SqlExecutor;
   writeConfig: (config: StationConfig) => Promise<void>;
   /** Test-only/telemetry seam; normal callers signal only after this resolves. */
@@ -67,8 +69,17 @@ export async function redeemStationPairing(
  */
 export async function persistStationProvisioning(
   provisioning: StationProvisioning,
-  { machineId, exec, writeConfig, onRosterPublished }: ProvisioningPersistenceDependencies,
+  {
+    machineId,
+    expectedDeviceId,
+    exec,
+    writeConfig,
+    onRosterPublished,
+  }: ProvisioningPersistenceDependencies,
 ): Promise<void> {
+  if (expectedDeviceId !== undefined && provisioning.deviceId !== expectedDeviceId) {
+    throw new Error("Pairing device mismatch");
+  }
   if (!provisioning.operators.every(isOperator)) {
     throw new Error("Invalid operator roster");
   }

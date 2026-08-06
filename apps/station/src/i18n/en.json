@@ -12,6 +12,10 @@
     "serviceConnect": "Connect service credentials",
     "backToPairing": "Back to pairing",
     "success": "Station connected",
+    "sealedWork": "Unsynchronized work is sealed on this station: {{scans}} scans, {{boxes}} boxes, {{exceptions}} corrections.",
+    "recoverySealing": "Securing local work and removing the rejected credential…",
+    "recoveryFailed": "Local work is sealed, but station recovery could not be completed. Retry or contact support.",
+    "retryRecovery": "Retry recovery",
     "errors": {
       "invalid": "This pairing code is not valid.",
       "expired": "This pairing code has expired.",

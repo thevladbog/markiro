@@ -1,8 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { OperatorMirrorRecord } from "@markiro/db";
+import { Button, Card } from "@markiro/ui";
 import { clearCredential, isEnrolled, readConfig, type StationConfig } from "./lib/config.js";
 import { createStationClient } from "./lib/api-client.js";
+import {
+  clearRejectedCredentialState,
+  type CredentialRejectedEvent,
+} from "./lib/credential-recovery.js";
 import {
   DEFAULT_HARDWARE_CONFIG,
   loadHardwareConfig,
@@ -36,6 +41,11 @@ interface ActiveShift {
   id: string;
   status: string;
   mode: string;
+}
+
+interface CredentialRecoveryState {
+  event: CredentialRejectedEvent;
+  phase: "sealing" | "ready" | "failed";
 }
 
 /**
@@ -124,6 +134,10 @@ export function App() {
   const [scannerStatus, setScannerStatus] = useState<ScannerStatus | null>(null);
   const [showSetup, setShowSetup] = useState(false);
   const [showConflicts, setShowConflicts] = useState(false);
+  const [credentialRecovery, setCredentialRecovery] = useState<CredentialRecoveryState | null>(
+    null,
+  );
+  const recoveryCleanupStarted = useRef<CredentialRejectedEvent | null>(null);
   // Bumped every time the operator leaves the setup screen (Done or Back),
   // so the scanner-session effect below re-runs even when the saved
   // `hardwareConfig.scanner` port/baud are unchanged -- e.g. Setup's own
@@ -295,6 +309,22 @@ export function App() {
     [config?.apiKey, config?.serverUrl],
   );
 
+  const onCredentialRejected = useCallback((event: CredentialRejectedEvent) => {
+    // These updates gate every authenticated surface in the next render.
+    // Cache deletion happens only from the post-commit effect below.
+    setOperator(null);
+    setShift(null);
+    setShiftContext(null);
+    setBoxCapacity(null);
+    setIssuerPrefix(null);
+    setFloorView("select");
+    setShowSetup(false);
+    setShowConflicts(false);
+    setCredentialRecovery((current) => current ?? { event, phase: "sealing" });
+  }, []);
+
+  const authenticatedClient = credentialRecovery ? null : client;
+
   // One engine for the life of the app: the outbox belongs to the DEVICE, not
   // to a shift or an operator, so entering or leaving a shift must never stop
   // the drain. Built only once a client exists — before enrollment there is
@@ -304,18 +334,62 @@ export function App() {
   // engine's identity as a dependency.
   const { state: syncState, nudge: nudgeSync } = useSyncEngine({
     exec: tauriExecutor,
-    client,
+    client: authenticatedClient,
     machineId: config?.machineId,
+    onCredentialRejected,
   });
+
+  // React runs effects only after committing the recovery render. This is
+  // the ordering boundary that guarantees an operator can no longer act on
+  // the authenticated floor before roster/reference caches are removed.
+  useEffect(() => {
+    if (!credentialRecovery || credentialRecovery.phase !== "sealing" || !config) return;
+    if (recoveryCleanupStarted.current === credentialRecovery.event) return;
+    recoveryCleanupStarted.current = credentialRecovery.event;
+    const previous = config;
+    void (async () => {
+      try {
+        if (
+          !previous.deviceId ||
+          previous.machineId !== credentialRecovery.event.machineId ||
+          !previous.serverUrl
+        ) {
+          throw new Error("credential recovery identity unavailable");
+        }
+        await clearRejectedCredentialState({ exec: tauriExecutor, clearCredential });
+        const cleared = await readConfig();
+        if (
+          cleared.machineId !== previous.machineId ||
+          cleared.deviceId !== previous.deviceId ||
+          cleared.serverUrl !== previous.serverUrl ||
+          cleared.apiKey !== undefined
+        ) {
+          throw new Error("credential recovery clear contract violation");
+        }
+        setConfig(cleared);
+        setCredentialRecovery((current) =>
+          current?.event === credentialRecovery.event
+            ? { event: credentialRecovery.event, phase: "ready" }
+            : current,
+        );
+      } catch {
+        setCredentialRecovery((current) =>
+          current?.event === credentialRecovery.event
+            ? { event: credentialRecovery.event, phase: "failed" }
+            : current,
+        );
+      }
+    })();
+  }, [config, credentialRecovery]);
 
   // Initialization sync: as soon as the device has a credential — right after
   // enrollment, and on every later start — pull the operator roster so the
   // sign-in screen has someone to authenticate. Without this a freshly
   // enrolled station shows a PIN pad no PIN can ever satisfy.
   useEffect(() => {
-    if (!client) return;
-    void syncOperatorRoster(client, tauriExecutor);
-  }, [client]);
+    if (!authenticatedClient) return;
+    void syncOperatorRoster(authenticatedClient, tauriExecutor);
+  }, [authenticatedClient]);
 
   // Retry: the initial sync above runs exactly once, so a device that is
   // briefly offline at that moment would otherwise strand the operator at a
@@ -325,17 +399,34 @@ export function App() {
   // second, independent consumer of the same event — one listener, two
   // reasons to nudge.
   useEffect(() => {
-    if (!client) return;
+    if (!authenticatedClient) return;
     const retrySync = () => {
-      void syncOperatorRoster(client, tauriExecutor);
+      void syncOperatorRoster(authenticatedClient, tauriExecutor);
       nudgeSync();
     };
     window.addEventListener("online", retrySync);
     return () => window.removeEventListener("online", retrySync);
-  }, [client, nudgeSync]);
+  }, [authenticatedClient, nudgeSync]);
 
   async function refreshConfig() {
     setConfig(await readConfig());
+  }
+
+  async function finishCredentialRecovery() {
+    const refreshed = await readConfig();
+    if (
+      !credentialRecovery ||
+      refreshed.machineId !== credentialRecovery.event.machineId ||
+      refreshed.deviceId !== config?.deviceId
+    ) {
+      setCredentialRecovery((current) =>
+        current ? { event: current.event, phase: "failed" } : current,
+      );
+      return;
+    }
+    setConfig(refreshed);
+    recoveryCleanupStarted.current = null;
+    setCredentialRecovery(null);
   }
 
   /**
@@ -378,6 +469,45 @@ export function App() {
     );
   }
 
+  if (credentialRecovery) {
+    if (credentialRecovery.phase === "ready") {
+      return (
+        <Enrollment
+          machineId={config.machineId}
+          {...(config.deviceId ? { expectedDeviceId: config.deviceId } : {})}
+          sealedWork={credentialRecovery.event.sealed}
+          onEnrolled={() => void finishCredentialRecovery()}
+          scanSource={scanSource}
+          pairingServerUrl={pairingServerUrl(config, configuredStationApiUrl())}
+        />
+      );
+    }
+    return (
+      <main style={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>
+        <Card style={{ minWidth: 480, padding: 32 }}>
+          <h1 style={{ fontSize: "2rem", marginBottom: 24 }}>{t("enroll.title")}</h1>
+          <p role="status">
+            {t(
+              credentialRecovery.phase === "failed"
+                ? "enroll.recoveryFailed"
+                : "enroll.recoverySealing",
+            )}
+          </p>
+          {credentialRecovery.phase === "failed" ? (
+            <Button
+              onClick={() => {
+                recoveryCleanupStarted.current = null;
+                setCredentialRecovery({ event: credentialRecovery.event, phase: "sealing" });
+              }}
+            >
+              {t("enroll.retryRecovery")}
+            </Button>
+          ) : null}
+        </Card>
+      </main>
+    );
+  }
+
   // `config` is narrowed to non-null for the rest of this render.
   const stage = nextStationView(config, operator);
 
@@ -400,6 +530,7 @@ export function App() {
     return (
       <Enrollment
         machineId={config.machineId}
+        {...(config.deviceId ? { expectedDeviceId: config.deviceId } : {})}
         onEnrolled={() => void refreshConfig()}
         onSetup={() => setShowSetup(true)}
         scanSource={scanSource}

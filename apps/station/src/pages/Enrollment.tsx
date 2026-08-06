@@ -10,9 +10,13 @@ import {
 } from "../lib/pairing.js";
 import { tauriExecutor } from "../lib/sqlite.js";
 import type { ScanSource } from "../lib/scan-source.js";
+import type { SealedWorkSummary } from "../lib/credential-recovery.js";
 
 export interface EnrollmentProps {
   machineId: string;
+  /** Pins recovery pairing to the device record that owns the local queue. */
+  expectedDeviceId?: string;
+  sealedWork?: SealedWorkSummary;
   onEnrolled: () => void;
   pairingServerUrl: string | null;
   onSetup?: () => void;
@@ -28,6 +32,8 @@ type EnrollmentState = "waiting" | "redeeming" | "success" | "service";
  */
 export function Enrollment({
   machineId,
+  expectedDeviceId,
+  sealedWork,
   onEnrolled,
   pairingServerUrl,
   onSetup,
@@ -72,6 +78,7 @@ export function Enrollment({
     try {
       await persistStationProvisioning(result.provisioning, {
         machineId,
+        ...(expectedDeviceId ? { expectedDeviceId } : {}),
         exec: tauriExecutor,
         writeConfig,
       });
@@ -107,6 +114,17 @@ export function Enrollment({
     <main style={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>
       <Card style={{ minWidth: 480, padding: 32 }}>
         <h1 style={{ fontSize: "2rem", marginBottom: 24 }}>{t("enroll.title")}</h1>
+        {sealedWork ? (
+          <Alert tone="warn">
+            <p data-testid="sealed-work-summary">
+              {t("enroll.sealedWork", {
+                scans: sealedWork.scans,
+                boxes: sealedWork.boxes,
+                exceptions: sealedWork.exceptions,
+              })}
+            </p>
+          </Alert>
+        ) : null}
         {error ? <Alert tone="error">{t(`enroll.errors.${error}`)}</Alert> : null}
         {state === "success" ? <p role="status">{t("enroll.success")}</p> : null}
         {serviceMode ? (
@@ -160,9 +178,11 @@ export function Enrollment({
                 {t("enroll.setup")}
               </Button>
             ) : null}
-            <Button variant="secondary" onClick={() => setState("service")} disabled={busy}>
-              {t("enroll.serviceMode")}
-            </Button>
+            {expectedDeviceId ? null : (
+              <Button variant="secondary" onClick={() => setState("service")} disabled={busy}>
+                {t("enroll.serviceMode")}
+              </Button>
+            )}
           </>
         )}
       </Card>

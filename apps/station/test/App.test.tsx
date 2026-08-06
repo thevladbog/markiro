@@ -208,6 +208,7 @@ function mockInvokeForFloor(
     api_key: "mk_key",
     server_url: "http://localhost:3000",
   },
+  onInvoke?: (cmd: string, payload: unknown) => void,
 ): OutboxSeedRow[] {
   const outbox = [...outboxRows];
   // Mutated by a real `recordConflicts`/`conflictCount` round-trip through
@@ -217,6 +218,7 @@ function mockInvokeForFloor(
   // exactly as the previous unconditional `Promise.resolve([])` fallback did.
   const conflicts: ConflictSeedRow[] = [];
   invokeMock.mockImplementation((cmd: string, payload?: unknown): Promise<unknown> => {
+    onInvoke?.(cmd, payload);
     if (cmd === "read_config") {
       return Promise.resolve(stationConfig);
     }
@@ -766,6 +768,68 @@ describe("App", () => {
       device_id: "device-1",
       server_url: "https://api.factory.example",
     });
+    expect(screen.queryByText("credential-not-to-render")).toBeNull();
+  });
+
+  it("leaves the floor before clearing rejected credentials and shows the sealed queue in same-device pairing", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const persistedConfig: Record<string, unknown> = {
+      machine_id: "m1",
+      device_id: "device-1",
+      tenant_id: "tenant-1",
+      api_key: "credential-not-to-render",
+      server_url: "https://api.factory.example",
+    };
+    let checkedFloorExit = false;
+    const outbox = mockInvokeForFloor(
+      pinHash,
+      { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+      [outboxRow(1)],
+      persistedConfig,
+      (cmd) => {
+        if (cmd === "clear_credential") {
+          expect(screen.queryByTestId("scanner-status")).toBeNull();
+          checkedFloorExit = true;
+        }
+      },
+    );
+    let rejectSync!: () => void;
+    const rejectedResponse = new Promise<Response>((resolve) => {
+      rejectSync = () =>
+        resolve(
+          new Response(JSON.stringify({ message: "revoked" }), {
+            status: 401,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+    });
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit): Promise<Response> => {
+      if (init?.method === "POST" && new URL(url).pathname === "/station/scans") {
+        return rejectedResponse;
+      }
+      return new Response(JSON.stringify({ items: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    await signInAsOperator();
+    rejectSync();
+
+    await waitFor(() => expect(screen.getByText("Connect station")).toBeDefined());
+    expect(checkedFloorExit).toBe(true);
+    expect(screen.getByTestId("sealed-work-summary").textContent).toContain("1");
+    expect(screen.getByTestId("sealed-work-summary").textContent).toContain("0");
+    expect(invokeMock).toHaveBeenCalledWith("clear_credential");
+    expect(outbox).toHaveLength(1);
+    expect(persistedConfig).toEqual({
+      machine_id: "m1",
+      device_id: "device-1",
+      server_url: "https://api.factory.example",
+    });
+    expect(screen.queryByRole("button", { name: "Service setup" })).toBeNull();
     expect(screen.queryByText("credential-not-to-render")).toBeNull();
   });
 

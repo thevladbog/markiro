@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DatabaseSync } from "node:sqlite";
-import { createStationClient, REQUEST_TIMEOUT_MS } from "../src/lib/api-client.js";
+import { createStationClient, REQUEST_TIMEOUT_MS, StationApiError } from "../src/lib/api-client.js";
 import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
 import {
   BACKOFF_START_MS,
@@ -354,6 +354,94 @@ describe("sync engine", () => {
     expect(rows[0]!.n).toBe(2);
     engine.stop();
   });
+
+  it("seals a rejected credential exactly once without acking or retrying its pinned batch", async () => {
+    vi.useFakeTimers();
+    try {
+      const exec = await migratedExec();
+      await seedInstallId(exec, "install-sealed");
+      await seed(exec, 2);
+      const post = vi.fn().mockRejectedValue(new StationApiError(401, "rejected"));
+      const onCredentialRejected = vi.fn();
+
+      const engine = createSyncEngine({
+        exec,
+        client: { post },
+        machineId: "machine-1",
+        onState: () => {},
+        onCredentialRejected,
+      });
+      engine.nudge();
+      engine.nudge();
+      engine.nudge();
+      await engine.idle();
+      await vi.advanceTimersByTimeAsync(BACKOFF_START_MS * 4);
+      await engine.idle();
+
+      expect(post).toHaveBeenCalledTimes(1);
+      expect(onCredentialRejected).toHaveBeenCalledTimes(1);
+      expect(onCredentialRejected).toHaveBeenCalledWith({
+        machineId: "machine-1",
+        sealed: { scans: 2, boxes: 0, exceptions: 0, total: 2 },
+      });
+      expect(await exec.all<{ raw: string }>("SELECT raw FROM outbox ORDER BY id")).toEqual([
+        { raw: "RAW1" },
+        { raw: "RAW2" },
+      ]);
+      expect(
+        await exec.all<{ key: string; value: string }>(
+          "SELECT key, value FROM station_meta WHERE key LIKE 'sync_pending_%' ORDER BY key",
+        ),
+      ).toEqual([
+        { key: "sync_pending_batch_id", value: "machine-1:install-sealed:2" },
+        { key: "sync_pending_box_ceiling", value: "0" },
+        { key: "sync_pending_ceiling", value: "2" },
+        { key: "sync_pending_exception_ceiling", value: "0" },
+      ]);
+      engine.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    ["network", new Error("offline")],
+    ["timeout", new DOMException("timed out", "AbortError")],
+    ["rate limit", new StationApiError(429, "slow down")],
+    ["server failure", new StationApiError(503, "unavailable")],
+    ["untrusted status-shaped value", { status: 401 }],
+  ])(
+    "keeps %s failures on ordinary backoff and never emits credential recovery",
+    async (_label, failure) => {
+      vi.useFakeTimers();
+      try {
+        const exec = await migratedExec();
+        await seed(exec, 1);
+        const post = vi.fn().mockRejectedValue(failure);
+        const onCredentialRejected = vi.fn();
+        vi.spyOn(console, "error").mockImplementation(() => {});
+        const engine = createSyncEngine({
+          exec,
+          client: { post },
+          machineId: "machine-1",
+          onState: () => {},
+          onCredentialRejected,
+        });
+
+        engine.nudge();
+        await engine.idle();
+        await vi.advanceTimersByTimeAsync(BACKOFF_START_MS + 1);
+        await engine.idle();
+
+        expect(post).toHaveBeenCalledTimes(2);
+        expect(onCredentialRejected).not.toHaveBeenCalled();
+        expect(await outboxDepth(exec)).toBe(1);
+        engine.stop();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
 
   // Finding 1: a bare `fetch` has no built-in timeout, so a connection that
   // is accepted but whose response never arrives used to hang the drain's

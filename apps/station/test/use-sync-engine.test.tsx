@@ -3,6 +3,7 @@ import { StrictMode } from "react";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
+import { StationApiError } from "../src/lib/api-client.js";
 import { useSyncEngine, type UseSyncEngineDeps } from "../src/lib/use-sync-engine.js";
 
 // Several tests below deliberately fail the POST to exercise the retry path,
@@ -72,6 +73,42 @@ describe("useSyncEngine", () => {
     rerender({ exec, client, machineId: "m1" });
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(post).toHaveBeenCalledTimes(1);
+  });
+
+  it("forwards one sealed event and resumes the same pinned queue with a replacement client", async () => {
+    const exec = await migratedExec();
+    await seedOneRow(exec);
+    const rejectedPost = vi.fn().mockRejectedValue(new StationApiError(401, "rejected"));
+    const replacementPost = vi.fn().mockResolvedValue({ applied: 1, alreadyApplied: false });
+    const onCredentialRejected = vi.fn();
+
+    const { rerender } = renderHook((deps: UseSyncEngineDeps) => useSyncEngine(deps), {
+      initialProps: {
+        exec,
+        client: { post: rejectedPost },
+        machineId: "machine-1",
+        onCredentialRejected,
+      },
+    });
+
+    await waitFor(() => expect(onCredentialRejected).toHaveBeenCalledTimes(1));
+    const firstBatch = rejectedPost.mock.calls[0]![1] as { batchId: string; items: unknown[] };
+    expect(firstBatch.items).toHaveLength(1);
+    expect(await exec.all("SELECT * FROM outbox")).toHaveLength(1);
+
+    rerender({
+      exec,
+      client: { post: replacementPost },
+      machineId: "machine-1",
+      onCredentialRejected,
+    });
+
+    await waitFor(() => expect(replacementPost).toHaveBeenCalledTimes(1));
+    expect((replacementPost.mock.calls[0]![1] as { batchId: string }).batchId).toBe(
+      firstBatch.batchId,
+    );
+    expect(await exec.all("SELECT * FROM outbox")).toEqual([]);
+    expect(rejectedPost).toHaveBeenCalledTimes(1);
   });
 
   it(
