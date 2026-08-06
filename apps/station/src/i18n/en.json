@@ -193,11 +193,21 @@
   },
   "conflicts": {
     "title": "Codes claimed elsewhere",
+    "loading": "Reading the local conflict list…",
     "empty": "No conflicts",
     "readFailed": "Could not read the conflict list",
+    "retry": "Retry",
+    "explanation": "This device keeps a local copy. The server has already kept the earlier scan; production continues.",
     "wonBy": "Kept by {{terminal}} at {{time}}",
+    "recovery": "Do not rescan. Continue production; a manager will review it.",
     "back": "Back",
-    "unknownItem": "Item no longer on this device"
+    "unknownItem": "Item no longer on this device",
+    "actions": "Conflict list actions",
+    "items": "Conflicted items",
+    "pagination": "Conflict pages",
+    "previousPage": "Previous page",
+    "nextPage": "Next page",
+    "page": "Page {{page}} of {{pageCount}}"
   },
   "box": {
     "progress": "{{items}} / {{capacity}}",

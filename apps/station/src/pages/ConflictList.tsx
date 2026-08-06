@@ -1,106 +1,145 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Card } from "@markiro/ui";
-import { readConflicts, type DeviceConflict } from "../lib/conflicts.js";
+import { Button, Card, Pager } from "@markiro/ui";
+import { CONFLICTS_PAGE_SIZE, readConflicts, type DeviceConflictPage } from "../lib/conflicts.js";
 import type { SqlExecutor } from "../lib/mirror.js";
+import { FloorFooter } from "../ui/FloorFooter.js";
+import { StationScreen } from "../ui/StationScreen.js";
 
 export interface ConflictListProps {
   exec: SqlExecutor;
   onBack: () => void;
 }
 
+const EMPTY_PAGE: DeviceConflictPage = {
+  items: [],
+  page: 1,
+  pageSize: CONFLICTS_PAGE_SIZE,
+  total: 0,
+};
+
 /**
- * Reviewable, not thrown at the operator: opened deliberately from shift
- * selection (see App.tsx), never surfaced automatically. Each row shows the
- * item's GTIN and serial — what's printed under the DataMatrix, and
- * therefore what lets a person physically find it on the line — plus which
- * terminal kept the code and when.
+ * Reviewable, not thrown at the operator: App opens this screen only from the
+ * explicit Conflicts floor action. Every database read is a bounded page.
  */
 export function ConflictList({ exec, onBack }: ConflictListProps) {
   const { t, i18n } = useTranslation();
-  const [conflicts, setConflicts] = useState<DeviceConflict[]>([]);
-  // Distinct from "conflicts is still []" -- a genuine local read failure
-  // must not be told to the operator as "no conflicts", which may directly
-  // contradict the nonzero count they just tapped to investigate. This
-  // screen is not the verdict area (design brief 04's floor rule is about
-  // scan verdicts, not this reviewable list), so a calm, honest line here
-  // competes with nothing; the Back button stays live either way.
+  const [requestedPage, setRequestedPage] = useState(1);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [pageData, setPageData] = useState<DeviceConflictPage>(EMPTY_PAGE);
+  const [loading, setLoading] = useState(true);
   const [readFailed, setReadFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    void readConflicts(exec)
-      .then((rows) => {
-        if (!cancelled) setConflicts(rows);
+    setLoading(true);
+    setReadFailed(false);
+    void readConflicts(exec, requestedPage)
+      .then((result) => {
+        if (cancelled) return;
+        setPageData(result);
+        setLoading(false);
+        if (result.page !== requestedPage) setRequestedPage(result.page);
       })
       .catch((err: unknown) => {
         console.error("station: readConflicts failed", err);
-        if (!cancelled) setReadFailed(true);
+        if (!cancelled) {
+          setLoading(false);
+          setReadFailed(true);
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [exec]);
+  }, [exec, loadAttempt, requestedPage]);
 
   const timeFormat = new Intl.DateTimeFormat(i18n.language.startsWith("ru") ? "ru-RU" : "en-US", {
     dateStyle: "short",
     timeStyle: "medium",
   });
 
-  // `isBatchConflict` (lib/sync.ts) rejects a non-parsing `winningScannedAt`
-  // before it ever reaches `conflicts_mirror`, but this guard stays anyway:
-  // rows already stored before that check shipped, or written by any other
-  // path, must not be able to take the whole list down. `new Date("x")` is
-  // an Invalid Date, and `Intl.DateTimeFormat.format()` on one throws a
-  // `RangeError` -- one bad row must cost one row, never the screen.
-  //
-  // The fallback is the raw stored string, not a generic placeholder: this
-  // screen exists so the operator can find a physical item, and the exact
-  // win time is secondary to that -- but the raw value still tells rows
-  // apart from one another and may itself carry a clue (e.g. a
-  // differently-shaped but still-readable timestamp), which a blanket
-  // "unknown" would throw away.
+  // Rows written before timestamp validation shipped must degrade locally:
+  // one malformed winner time keeps its raw value and never crashes the page.
   function formatWinTime(raw: string): string {
     const date = new Date(raw);
     if (Number.isNaN(date.getTime())) return raw;
     return timeFormat.format(date);
   }
 
+  const pageCount = Math.max(1, Math.ceil(pageData.total / pageData.pageSize));
+  const showItems = !loading && !readFailed && pageData.total > 0;
+
   return (
-    <main style={{ padding: 32, display: "flex", flexDirection: "column", gap: 24 }}>
-      <h1 style={{ fontSize: "2rem" }}>{t("conflicts.title")}</h1>
-      {readFailed ? (
-        <p>{t("conflicts.readFailed")}</p>
-      ) : conflicts.length === 0 ? (
-        <p>{t("conflicts.empty")}</p>
-      ) : (
-        <div style={{ display: "grid", gap: 16 }}>
-          {conflicts.map((c) => (
-            <Card key={c.codeHash} style={{ padding: 24 }}>
-              <div style={{ fontSize: "1.5rem" }}>
-                {/* codes_mirror rows are inserted with gtin14 and serial
-                    together (see mirror.ts), so a left join miss (retention
-                    already purged the code row) leaves both null at once --
-                    checking either is enough, but both are checked so a
-                    future partial-write bug can't silently show one field
-                    blank instead of the intended fallback copy. */}
-                {c.gtin14 !== null && c.serial !== null
-                  ? `${c.gtin14} ${c.serial}`
-                  : t("conflicts.unknownItem")}
-              </div>
-              <div>
-                {t("conflicts.wonBy", {
-                  terminal: c.winningTerminalId ?? "—",
-                  time: formatWinTime(c.winningScannedAt),
-                })}
-              </div>
-            </Card>
-          ))}
+    <StationScreen
+      title={t("conflicts.title")}
+      actions={
+        <FloorFooter ariaLabel={t("conflicts.actions")}>
+          <Button type="button" size="floor" variant="secondary" onClick={onBack}>
+            {t("conflicts.back")}
+          </Button>
+        </FloorFooter>
+      }
+    >
+      <div className="conflict-list">
+        <div className="conflict-list__message" aria-live="polite">
+          {loading ? (
+            <p>{t("conflicts.loading")}</p>
+          ) : readFailed ? (
+            <>
+              <p>{t("conflicts.readFailed")}</p>
+              <Button
+                type="button"
+                size="floor"
+                variant="secondary"
+                onClick={() => setLoadAttempt((attempt) => attempt + 1)}
+              >
+                {t("conflicts.retry")}
+              </Button>
+            </>
+          ) : pageData.total === 0 ? (
+            <p>{t("conflicts.empty")}</p>
+          ) : (
+            <p>{t("conflicts.explanation")}</p>
+          )}
         </div>
-      )}
-      <Button variant="secondary" style={{ minHeight: 64 }} onClick={onBack}>
-        {t("conflicts.back")}
-      </Button>
-    </main>
+
+        <div className="conflict-list__cards" role="list" aria-label={t("conflicts.items")}>
+          {showItems
+            ? pageData.items.map((conflict) => (
+                <Card key={conflict.codeHash} className="conflict-list__card" role="listitem">
+                  <div className="conflict-list__identity">
+                    {conflict.gtin14 !== null && conflict.serial !== null
+                      ? `${conflict.gtin14} ${conflict.serial}`
+                      : t("conflicts.unknownItem")}
+                  </div>
+                  <div
+                    className="conflict-list__winner"
+                    {...(conflict.winningTerminalId !== null
+                      ? { title: conflict.winningTerminalId }
+                      : {})}
+                  >
+                    {t("conflicts.wonBy", {
+                      terminal: conflict.winningTerminalId ?? "—",
+                      time: formatWinTime(conflict.winningScannedAt),
+                    })}
+                  </div>
+                  <p className="conflict-list__recovery">{t("conflicts.recovery")}</p>
+                </Card>
+              ))
+            : null}
+        </div>
+
+        <Pager
+          page={pageData.page}
+          pageCount={pageCount}
+          onPageChange={setRequestedPage}
+          ariaLabel={t("conflicts.pagination")}
+          previousLabel={t("conflicts.previousPage")}
+          nextLabel={t("conflicts.nextPage")}
+          pageLabel={(page, count) => t("conflicts.page", { page, pageCount: count })}
+          className="conflict-list__pager"
+        />
+      </div>
+    </StationScreen>
   );
 }

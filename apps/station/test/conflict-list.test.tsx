@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import i18n from "../src/i18n/index.js";
 import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
@@ -22,6 +22,35 @@ async function migratedExec(): Promise<SqlExecutor> {
   };
   await applyMigrations(exec);
   return exec;
+}
+
+async function addConflict(
+  exec: SqlExecutor,
+  row: {
+    codeHash: string;
+    terminalId?: string | null;
+    detectedAt: string;
+    gtin14?: string;
+    serial?: string;
+  },
+): Promise<void> {
+  if (row.gtin14 && row.serial) {
+    await exec.run(
+      `INSERT INTO codes_mirror (code_hash, shift_id, gtin14, serial, scanned_at) VALUES (?,?,?,?,?)`,
+      [row.codeHash, "s1", row.gtin14, row.serial, "2026-07-28T10:00:00.000Z"],
+    );
+  }
+  await recordConflicts(
+    exec,
+    [
+      {
+        codeHash: row.codeHash,
+        winningTerminalId: row.terminalId ?? "t9",
+        winningScannedAt: "2026-07-28T10:00:00.000Z",
+      },
+    ],
+    row.detectedAt,
+  );
 }
 
 describe("ConflictList", () => {
@@ -113,8 +142,137 @@ describe("ConflictList", () => {
       expect(screen.queryByText("No conflicts")).toBeNull();
       // Calm, not an alarm: the Back button stays live.
       expect(screen.getByRole("button", { name: "Back" })).toBeDefined();
+      expect(screen.getByRole("button", { name: "Retry" })).toBeDefined();
     } finally {
       consoleErrorSpy.mockRestore();
     }
+  });
+
+  it("moves through bounded newest-first pages with accessible previous and next controls", async () => {
+    const exec = await migratedExec();
+    await addConflict(exec, {
+      codeHash: "h1",
+      detectedAt: "2026-07-28T10:01:00.000Z",
+      gtin14: "04600000000017",
+      serial: "OLD",
+    });
+    await addConflict(exec, {
+      codeHash: "h2",
+      detectedAt: "2026-07-28T10:02:00.000Z",
+      gtin14: "04600000000017",
+      serial: "MIDDLE",
+    });
+    await addConflict(exec, {
+      codeHash: "h3",
+      detectedAt: "2026-07-28T10:03:00.000Z",
+      gtin14: "04600000000017",
+      serial: "NEWEST",
+    });
+
+    render(<ConflictList exec={exec} onBack={() => {}} />);
+
+    expect(await screen.findByText(/NEWEST/)).toBeDefined();
+    expect(screen.getByText(/MIDDLE/)).toBeDefined();
+    expect(screen.queryByText(/OLD/)).toBeNull();
+    expect(screen.getByText("Page 1 of 2")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Previous page" }).hasAttribute("disabled")).toBe(
+      true,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+    await waitFor(() => expect(screen.getByText(/OLD/)).toBeDefined());
+    expect(screen.getByText("Page 2 of 2")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Next page" }).hasAttribute("disabled")).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Previous page" }));
+    await waitFor(() => expect(screen.getByText(/NEWEST/)).toBeDefined());
+    expect(screen.getByText("Page 1 of 2")).toBeDefined();
+  });
+
+  it("clamps back to the first page when the local dataset shrinks before a page read", async () => {
+    const exec = await migratedExec();
+    await addConflict(exec, {
+      codeHash: "h1",
+      detectedAt: "2026-07-28T10:01:00.000Z",
+      gtin14: "04600000000017",
+      serial: "OLD",
+    });
+    await addConflict(exec, {
+      codeHash: "h2",
+      detectedAt: "2026-07-28T10:02:00.000Z",
+      gtin14: "04600000000017",
+      serial: "MIDDLE",
+    });
+    await addConflict(exec, {
+      codeHash: "h3",
+      detectedAt: "2026-07-28T10:03:00.000Z",
+      gtin14: "04600000000017",
+      serial: "NEWEST",
+    });
+
+    render(<ConflictList exec={exec} onBack={() => {}} />);
+    expect(await screen.findByText("Page 1 of 2")).toBeDefined();
+
+    await exec.run("DELETE FROM conflicts_mirror WHERE code_hash <> ?", ["h3"]);
+    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+
+    await waitFor(() => expect(screen.getByText("Page 1 of 1")).toBeDefined());
+    expect(screen.getByText(/NEWEST/)).toBeDefined();
+    expect(screen.getByRole("button", { name: "Next page" }).hasAttribute("disabled")).toBe(true);
+  });
+
+  it("retries a transient local read failure without presenting it as an empty store", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const workingExec = await migratedExec();
+      let shouldFail = true;
+      const transientExec: SqlExecutor = {
+        run: (sql, params) => workingExec.run(sql, params),
+        async all<T>(sql: string, params: unknown[] = []): Promise<T[]> {
+          if (shouldFail) {
+            shouldFail = false;
+            throw new Error("device DB is locked once");
+          }
+          return workingExec.all<T>(sql, params);
+        },
+      };
+
+      render(<ConflictList exec={transientExec} onBack={() => {}} />);
+      fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+
+      expect(await screen.findByText("No conflicts")).toBeDefined();
+      expect(screen.queryByText("Could not read the conflict list")).toBeNull();
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it("keeps a long winning terminal identifiable while explaining the server recovery", async () => {
+    const exec = await migratedExec();
+    const terminalId = "terminal-production-line-04-west-corridor-with-a-very-long-identifier";
+    await addConflict(exec, {
+      codeHash: "h1",
+      terminalId,
+      detectedAt: "2026-07-28T10:01:00.000Z",
+      gtin14: "04600000000017",
+      serial: "AB1",
+    });
+
+    render(<ConflictList exec={exec} onBack={() => {}} />);
+
+    expect(await screen.findByTitle(terminalId)).toBeDefined();
+    expect(
+      screen.getByText("Do not rescan. Continue production; a manager will review it."),
+    ).toBeDefined();
+  });
+
+  it("is a deliberate main screen, never a modal, and Back remains a floor action", async () => {
+    const onBack = vi.fn();
+    render(<ConflictList exec={await migratedExec()} onBack={onBack} />);
+
+    expect(await screen.findByRole("main", { name: "Codes claimed elsewhere" })).toBeDefined();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(onBack).toHaveBeenCalledOnce();
   });
 });
