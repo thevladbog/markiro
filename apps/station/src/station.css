@@ -289,6 +289,306 @@ body,
   width: 100%;
 }
 
+.workstation-setup {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--sp-3);
+  overflow: hidden;
+  gap: var(--sp-2);
+  grid-template-rows: auto minmax(0, 1fr) 64px 64px;
+  background: var(--surface-page);
+  color: var(--fg-1);
+}
+
+.workstation-setup__header,
+.workstation-setup__header h1 {
+  min-width: 0;
+  margin: 0;
+}
+
+.workstation-setup__header h1 {
+  overflow: hidden;
+  font: var(--floor-title);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.setup-tabs {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  gap: var(--sp-2);
+  grid-template-rows: 64px minmax(0, 1fr);
+}
+
+.setup-tabs__list {
+  display: grid;
+  min-width: 0;
+  min-height: 64px;
+  gap: var(--sp-2);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.setup-tabs__tab {
+  min-width: 0;
+  min-height: 64px;
+  padding: 0 var(--sp-3);
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-2);
+  background: var(--surface-card);
+  color: var(--fg-2);
+  font: var(--floor-body-strong);
+  text-overflow: ellipsis;
+  touch-action: manipulation;
+  white-space: nowrap;
+}
+
+.setup-tabs__tab[aria-selected="true"] {
+  border-color: var(--surface-inverse);
+  background: var(--surface-inverse);
+  color: var(--fg-on-inverse);
+}
+
+.setup-tabs__tab:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.setup-tabs__panel {
+  min-width: 0;
+  min-height: 0;
+  padding: var(--sp-2);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  background: var(--surface-card);
+}
+
+.setup-panel {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  gap: var(--sp-2);
+  align-content: center;
+}
+
+.setup-panel--scanner {
+  grid-template-columns: minmax(0, 1.6fr) minmax(220px, 0.7fr) minmax(220px, 0.7fr);
+  align-items: end;
+}
+
+.setup-panel--printer {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+  grid-template-rows: auto auto;
+  align-content: center;
+}
+
+.setup-panel__fields {
+  display: grid;
+  min-width: 0;
+  min-height: 88px;
+  gap: var(--sp-2);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: end;
+}
+
+.setup-panel__empty {
+  display: flex;
+  min-height: 64px;
+  margin: 0;
+  grid-column: 1 / -1;
+  align-items: center;
+  color: var(--fg-2);
+  font: var(--floor-body);
+}
+
+.setup-panel__printer-actions {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-2);
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.4fr);
+  align-items: end;
+}
+
+.setup-panel--sound {
+  width: min(780px, 100%);
+  margin: 0 auto;
+  grid-template-columns: minmax(220px, 0.5fr) minmax(0, 1fr) minmax(220px, 0.5fr);
+  align-items: center;
+}
+
+.setup-choice-group {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.setup-choice-group legend {
+  margin-bottom: var(--sp-1);
+  color: var(--fg-2);
+  font: var(--floor-body-strong);
+}
+
+.setup-choice-group__options {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-2);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.setup-choice-group__options--compact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.setup-touch-choice {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 64px;
+  padding: 0 var(--sp-2);
+  overflow: hidden;
+  gap: var(--sp-2);
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-2);
+  background: var(--surface-page);
+  color: var(--fg-1);
+  font: var(--floor-body-strong);
+  text-align: center;
+  touch-action: manipulation;
+}
+
+.setup-touch-choice input {
+  width: 28px;
+  height: 28px;
+  margin: 0;
+  flex: 0 0 auto;
+  accent-color: var(--surface-inverse);
+}
+
+.setup-touch-choice:has(input:checked) {
+  border-color: var(--surface-inverse);
+  box-shadow: inset 0 0 0 2px var(--surface-inverse);
+}
+
+.setup-touch-choice:has(input:focus-visible) {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.setup-touch-choice:has(input:disabled) {
+  opacity: 0.45;
+}
+
+.setup-touch-choice span {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.setup-touch-choice--checkbox {
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.touch-range {
+  display: grid;
+  min-width: 0;
+  min-height: 64px;
+  padding: var(--sp-1) var(--sp-2);
+  gap: var(--sp-2);
+  grid-template-columns: auto minmax(0, 1fr) 52px;
+  align-items: center;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-2);
+  background: var(--surface-page);
+  font: var(--floor-body-strong);
+}
+
+.touch-range__input {
+  width: 100%;
+  min-height: 44px;
+  margin: 0;
+  accent-color: var(--surface-inverse);
+  touch-action: manipulation;
+}
+
+.touch-range__input:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.touch-range__value {
+  font: 600 18px/26px var(--font-mono);
+  text-align: right;
+}
+
+.workstation-setup__result {
+  display: -webkit-box;
+  min-width: 0;
+  height: 64px;
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  overflow: hidden;
+  align-content: center;
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface-card);
+  color: var(--fg-2);
+  font: var(--floor-body);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.workstation-setup__result--error {
+  border-color: var(--err-border);
+  background: var(--err-bg);
+  color: var(--err-fg);
+}
+
+.workstation-setup__footer {
+  display: flex;
+  min-width: 0;
+  height: 64px;
+  gap: var(--sp-2);
+  align-items: stretch;
+}
+
+.workstation-setup__footer-spacer {
+  min-width: 0;
+  flex: 1;
+}
+
+@media (max-width: 1100px) {
+  .workstation-setup {
+    padding: var(--sp-2);
+  }
+
+  .setup-tabs__panel {
+    padding: var(--sp-1);
+  }
+
+  .setup-panel--scanner {
+    grid-template-columns: minmax(0, 1.4fr) minmax(190px, 0.8fr) minmax(190px, 0.8fr);
+  }
+
+  .setup-panel__printer-actions {
+    grid-template-columns: minmax(0, 1fr) minmax(190px, 0.45fr);
+  }
+}
+
 .new-shift__panel {
   display: grid;
   width: 100%;

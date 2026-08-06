@@ -24,6 +24,16 @@ function hardware(overrides: Partial<HardwareContract> = {}): HardwareContract {
   };
 }
 
+async function selectSetupTab(name: "Scanner" | "Printer" | "Sound") {
+  fireEvent.click(await screen.findByRole("tab", { name }));
+}
+
+async function chooseScannerPort(value: string) {
+  fireEvent.change(await screen.findByRole("combobox", { name: "Port" }), {
+    target: { value },
+  });
+}
+
 describe("WorkstationSetup", () => {
   it("lists the discovered scanner ports", async () => {
     render(
@@ -37,6 +47,25 @@ describe("WorkstationSetup", () => {
       />,
     );
     expect(await screen.findByText("COM3")).toBeDefined();
+  });
+
+  it("keeps a long discovered scanner list in one bounded floor selector", async () => {
+    render(
+      <WorkstationSetup
+        hw={hardware({
+          listScannerPorts: async () => Array.from({ length: 12 }, (_, index) => `COM${index + 1}`),
+        })}
+        exec={noopExec}
+        sound={{ muted: false, volume: 1 }}
+        onSoundChange={() => {}}
+        onConfigChange={() => {}}
+        onDone={() => {}}
+      />,
+    );
+
+    const selector = await screen.findByRole("combobox", { name: "Port" });
+    expect(selector.className).toContain("mk-select__control");
+    expect(selector.querySelectorAll("option")).toHaveLength(13);
   });
 
   it("shows a scan received during the test", async () => {
@@ -60,7 +89,7 @@ describe("WorkstationSetup", () => {
 
     await waitFor(() => expect(emit).toBeTypeOf("function"));
     act(() => emit("0104600000000015"));
-    expect(await screen.findByText("0104600000000015")).toBeDefined();
+    expect(await screen.findByText(/0104600000000015/)).toBeDefined();
   });
 
   it("surfaces a printing failure instead of failing silently", async () => {
@@ -84,7 +113,8 @@ describe("WorkstationSetup", () => {
     // field, including the transport selector, until it does) before
     // switching to the serial transport to reveal "Printer port".
     await screen.findByText("COM3");
-    fireEvent.click(screen.getByRole("button", { name: "Serial (COM port)" }));
+    await selectSetupTab("Printer");
+    fireEvent.click(screen.getByRole("radio", { name: "Serial (COM port)" }));
     fireEvent.change(screen.getByLabelText("Printer port"), { target: { value: "COM5" } });
     fireEvent.click(screen.getByRole("button", { name: "Test print" }));
     expect(await screen.findByText(/printer offline/)).toBeDefined();
@@ -105,8 +135,9 @@ describe("WorkstationSetup", () => {
     );
 
     // Pick a scanner port — this must NOT end up in the print target.
-    fireEvent.click(await screen.findByText("COM3"));
-    fireEvent.click(screen.getByRole("button", { name: "Serial (COM port)" }));
+    await chooseScannerPort("COM3");
+    await selectSetupTab("Printer");
+    fireEvent.click(screen.getByRole("radio", { name: "Serial (COM port)" }));
     fireEvent.change(screen.getByLabelText("Printer port"), { target: { value: "COM9" } });
     fireEvent.click(screen.getByRole("button", { name: "Test print" }));
 
@@ -132,6 +163,7 @@ describe("WorkstationSetup", () => {
     // effects `render` kicked off don't trigger an act() warning after
     // this test's assertion has already run.
     await screen.findByText("COM3");
+    await selectSetupTab("Printer");
     const button = screen.getByRole("button", { name: "Test print" }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
   });
@@ -156,6 +188,7 @@ describe("WorkstationSetup", () => {
       />,
     );
 
+    await selectSetupTab("Sound");
     fireEvent.click(screen.getByLabelText("Mute"));
     await waitFor(() => expect(onSoundChange).toHaveBeenCalledWith({ muted: true, volume: 1 }));
     expect(runs.some((sql) => sql.includes("station_meta"))).toBe(true);
@@ -180,6 +213,7 @@ describe("WorkstationSetup", () => {
       />,
     );
 
+    await selectSetupTab("Sound");
     fireEvent.click(screen.getByLabelText("Mute"));
     expect(await screen.findByText(/database unavailable/)).toBeDefined();
     expect(onSoundChange).toHaveBeenCalledWith({ muted: true, volume: 1 });
@@ -206,13 +240,14 @@ describe("WorkstationSetup", () => {
       />,
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "COM3" }));
+    await chooseScannerPort("COM3");
+    await selectSetupTab("Printer");
     // "No printer" is the default transport; select TCP explicitly.
-    fireEvent.click(screen.getByRole("button", { name: "Network (TCP)" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Network (TCP)" }));
     fireEvent.change(screen.getByLabelText("Printer address"), {
       target: { value: "10.0.0.7" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "TSPL" }));
+    fireEvent.click(screen.getByRole("radio", { name: "TSPL" }));
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
 
     await waitFor(() => expect(onConfigChange).toHaveBeenCalled());
@@ -246,7 +281,8 @@ describe("WorkstationSetup", () => {
     );
 
     await screen.findByText("COM3");
-    fireEvent.click(screen.getByRole("button", { name: "Network (TCP)" }));
+    await selectSetupTab("Printer");
+    fireEvent.click(screen.getByRole("radio", { name: "Network (TCP)" }));
     fireEvent.change(screen.getByLabelText("Printer address"), {
       target: { value: "10.0.0.7" },
     });
@@ -274,12 +310,14 @@ describe("WorkstationSetup", () => {
     );
 
     await screen.findByText("COM3");
+    await selectSetupTab("Printer");
     const checkbox = screen.getByLabelText(
       "Verify each printed label by scanning it back",
     ) as HTMLInputElement;
     expect(checkbox.disabled).toBe(true);
 
-    fireEvent.click(screen.getByRole("button", { name: "COM3" }));
+    await selectSetupTab("Scanner");
+    await chooseScannerPort("COM3");
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
 
     await waitFor(() => expect(onConfigChange).toHaveBeenCalled());
@@ -315,6 +353,7 @@ describe("WorkstationSetup", () => {
       />,
     );
 
+    await selectSetupTab("Printer");
     // Wait for the seed effect to populate the printer port before pressing Done.
     await waitFor(() =>
       expect((screen.getByLabelText("Printer port") as HTMLInputElement).value).toBe("COM7"),
@@ -379,13 +418,11 @@ describe("WorkstationSetup", () => {
       />,
     );
 
-    const button = await screen.findByRole("button", {
-      name: "No serial scanner (keyboard-wedge)",
-    });
-    expect(button).toBeDefined();
-    // No port is selected by default, so this option shows as chosen, the
-    // same way a selected port button would (`variant="primary"`).
-    expect(button.className).toContain("mk-btn--primary");
+    const selector = (await screen.findByRole("combobox", { name: "Port" })) as HTMLSelectElement;
+    expect(selector.value).toBe("");
+    expect(
+      screen.getByRole("option", { name: "No serial scanner (keyboard-wedge)" }),
+    ).toBeDefined();
   });
 
   it("saves scanner: null after choosing the no-scanner option with a stored serial config (Finding 1)", async () => {
@@ -412,12 +449,13 @@ describe("WorkstationSetup", () => {
       />,
     );
 
-    // Wait for the seed effect to restore the stored port (shown selected,
-    // i.e. rendered with the primary variant) before deselecting it.
+    // Wait for the seed effect to restore the stored port before deselecting it.
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "COM3" }).className).toContain("mk-btn--primary"),
+      expect((screen.getByRole("combobox", { name: "Port" }) as HTMLSelectElement).value).toBe(
+        "COM3",
+      ),
     );
-    fireEvent.click(screen.getByRole("button", { name: "No serial scanner (keyboard-wedge)" }));
+    await chooseScannerPort("");
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
 
     await waitFor(() => expect(onConfigChange).toHaveBeenCalled());
@@ -452,6 +490,7 @@ describe("WorkstationSetup", () => {
       />,
     );
 
+    await selectSetupTab("Printer");
     // Wait for the seed effect to populate the TCP port before pressing Done.
     await waitFor(() =>
       expect((screen.getByLabelText("Printer TCP port") as HTMLInputElement).value).toBe("9200"),
@@ -492,15 +531,15 @@ describe("WorkstationSetup", () => {
       />,
     );
 
-    // The stored, undetected port must render as its own selected button --
+    // The stored, undetected port must render as its own selected option --
     // not silently absent, and not confusable with the unrelated "no
     // scanner" option, which would otherwise be the only thing on screen.
-    const staleButton = await screen.findByRole("button", {
+    const staleOption = await screen.findByRole("option", {
       name: "COM3 (configured, not detected)",
     });
-    expect(staleButton.className).toContain("mk-btn--primary");
+    expect((staleOption as HTMLOptionElement).selected).toBe(true);
 
-    fireEvent.click(screen.getByRole("button", { name: "No serial scanner (keyboard-wedge)" }));
+    await chooseScannerPort("");
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
 
     await waitFor(() => expect(onConfigChange).toHaveBeenCalled());
@@ -530,7 +569,7 @@ describe("WorkstationSetup", () => {
       />,
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "COM3" }));
+    await chooseScannerPort("COM3");
     fireEvent.click(screen.getByRole("button", { name: "Connect scanner" }));
     await waitFor(() => expect(calls).toEqual(["close", "open"]));
   });
@@ -557,9 +596,10 @@ describe("WorkstationSetup", () => {
     );
 
     await screen.findByText("COM3");
+    await selectSetupTab("Printer");
     // "No printer" is the default transport now (Finding 2, PR12 round 2),
     // so TCP must be selected explicitly before its fields render.
-    fireEvent.click(screen.getByRole("button", { name: "Network (TCP)" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Network (TCP)" }));
     fireEvent.change(screen.getByLabelText("Printer address"), {
       target: { value: "10.0.0.7" },
     });
@@ -590,7 +630,7 @@ describe("WorkstationSetup", () => {
       />,
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "COM3" }));
+    await chooseScannerPort("COM3");
 
     for (const bad of ["-1", "1.5", "Infinity"]) {
       fireEvent.change(screen.getByLabelText("Baud rate"), { target: { value: bad } });
@@ -620,7 +660,7 @@ describe("WorkstationSetup", () => {
       />,
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "COM3" }));
+    await chooseScannerPort("COM3");
     fireEvent.click(screen.getByRole("button", { name: "Connect scanner" }));
 
     // The open is still in flight: Back must not be available, or an
@@ -667,13 +707,14 @@ describe("WorkstationSetup", () => {
       />,
     );
 
+    await selectSetupTab("Printer");
     // Wait for the seed effect to restore the stored TCP printer before
     // switching transports.
     await waitFor(() =>
       expect((screen.getByLabelText("Printer address") as HTMLInputElement).value).toBe("10.0.0.9"),
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Serial (COM port)" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Serial (COM port)" }));
     fireEvent.change(screen.getByLabelText("Printer port"), { target: { value: "COM7" } });
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
 
@@ -749,7 +790,7 @@ describe("WorkstationSetup", () => {
       />,
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "COM3" }));
+    await chooseScannerPort("COM3");
     fireEvent.change(screen.getByLabelText("Baud rate"), { target: { value: "0" } });
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
 
@@ -784,11 +825,12 @@ describe("WorkstationSetup", () => {
       />,
     );
 
+    await selectSetupTab("Printer");
     await waitFor(() =>
       expect((screen.getByLabelText("Printer address") as HTMLInputElement).value).toBe("10.0.0.9"),
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Serial (COM port)" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Serial (COM port)" }));
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
 
     expect(
@@ -797,5 +839,49 @@ describe("WorkstationSetup", () => {
       ),
     ).toBeDefined();
     expect(onConfigChange).not.toHaveBeenCalled();
+  });
+
+  it("mounts one guided setup panel and makes Next equivalent to direct tab selection", async () => {
+    render(
+      <WorkstationSetup
+        hw={hardware()}
+        exec={noopExec}
+        sound={{ muted: false, volume: 0.7 }}
+        onSoundChange={() => {}}
+        onConfigChange={() => {}}
+        onDone={() => {}}
+      />,
+    );
+
+    await screen.findByText("COM3");
+    expect(screen.getByRole("tabpanel", { name: "Scanner" })).toBeDefined();
+    expect(screen.queryByLabelText("Printer address")).toBeNull();
+    expect(screen.queryByLabelText("Mute")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByRole("tabpanel", { name: "Printer" })).toBeDefined();
+    expect(screen.queryByLabelText("Baud rate")).toBeNull();
+
+    await selectSetupTab("Sound");
+    expect(screen.getByRole("tabpanel", { name: "Sound" })).toBeDefined();
+    expect(screen.getByLabelText("Mute")).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Next" })).toBeNull();
+  });
+
+  it("keeps the test result and exit controls in fixed layout regions", async () => {
+    render(
+      <WorkstationSetup
+        hw={hardware()}
+        exec={noopExec}
+        sound={{ muted: false, volume: 1 }}
+        onSoundChange={() => {}}
+        onConfigChange={() => {}}
+        onDone={() => {}}
+      />,
+    );
+
+    await screen.findByText("COM3");
+    expect(screen.getByTestId("setup-result").className).toContain("workstation-setup__result");
+    expect(screen.getByTestId("setup-footer").className).toContain("workstation-setup__footer");
   });
 });
