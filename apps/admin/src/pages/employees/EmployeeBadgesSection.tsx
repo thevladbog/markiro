@@ -108,7 +108,9 @@ export function EmployeeBadgesSection({
         {issueError ? <Alert tone="error">{issueError}</Alert> : null}
 
         {employee.badges.length === 0 ? (
-          <p className="mk-employee-badges-section__empty">{t("pages.employees.badges.emptyHint")}</p>
+          <p className="mk-employee-badges-section__empty">
+            {t("pages.employees.badges.emptyHint")}
+          </p>
         ) : (
           <ul className="mk-employee-badges-section__list">
             {employee.badges.map((badge) => (
