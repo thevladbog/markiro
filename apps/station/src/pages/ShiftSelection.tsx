@@ -1,7 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Alert, Button, Card } from "@markiro/ui";
+import { Alert, Button, Pager } from "@markiro/ui";
 import { StationApiError, type StationClient } from "../lib/api-client.js";
+import { paginate } from "../lib/pagination.js";
+import { FloorFooter } from "../ui/FloorFooter.js";
+import { ShiftCard } from "../ui/ShiftCard.js";
+import { StationScreen } from "../ui/StationScreen.js";
+
+const SHIFT_PAGE_SIZE = 3;
 
 interface ShiftListItem {
   id: string;
@@ -35,7 +41,11 @@ export function ShiftSelection({
   const { t } = useTranslation();
   const [items, setItems] = useState<ShiftListItem[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [requestedPage, setRequestedPage] = useState(1);
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -47,20 +57,33 @@ export function ShiftSelection({
 
   useEffect(() => {
     let cancelled = false;
+    setLoading(true);
+    setLoadFailed(false);
+    setError(null);
     client
       .get<{ items: ShiftListItem[] }>("/shifts")
-      .then((r) => {
-        if (!cancelled) setItems(r.items);
+      .then((response) => {
+        if (cancelled) return;
+        setItems(response.items);
+        setLoading(false);
       })
       .catch((err: unknown) => {
-        if (!cancelled) {
-          setError(err instanceof StationApiError ? err.message : t("shifts.actionFailed"));
-        }
+        if (cancelled) return;
+        setError(err instanceof StationApiError ? err.message : t("shifts.actionFailed"));
+        setLoadFailed(true);
+        setLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [client, t]);
+  }, [client, loadAttempt, t]);
+
+  const openItems = useMemo(() => items.filter((shift) => shift.status !== "closed"), [items]);
+  const currentPage = paginate(openItems, requestedPage, SHIFT_PAGE_SIZE);
+
+  useEffect(() => {
+    if (requestedPage !== currentPage.page) setRequestedPage(currentPage.page);
+  }, [currentPage.page, requestedPage]);
 
   async function open(shift: ShiftListItem) {
     if (busy) return;
@@ -81,56 +104,78 @@ export function ShiftSelection({
   }
 
   function rejoin(shift: ShiftListItem) {
-    if (busy) return;
-    if (isCurrent?.() === false) return;
+    if (busy || isCurrent?.() === false) return;
     onSelected(shift);
   }
 
+  const message = error ? <Alert tone="error">{error}</Alert> : <span aria-hidden="true" />;
+
   return (
-    <main style={{ minHeight: "100vh", padding: 32 }}>
-      <h1 style={{ fontSize: "2.25rem", marginBottom: 24 }}>{t("shifts.title")}</h1>
-      {error ? <Alert tone="error">{error}</Alert> : null}
-      <div style={{ display: "grid", gap: 16 }}>
-        {items
-          .filter((s) => s.status !== "closed")
-          .map((s) => (
-            <Card key={s.id} style={{ padding: 24 }}>
-              <div style={{ fontSize: "1.5rem" }}>{s.productName}</div>
-              {s.counterpartyName ? (
-                <div>
-                  {t("shifts.forCounterparty")} {s.counterpartyName}
-                </div>
-              ) : null}
-              <Button
-                style={{ minHeight: 64, marginTop: 12 }}
-                disabled={busy}
-                onClick={() => (s.status === "active" ? rejoin(s) : void open(s))}
-              >
-                {s.status === "active" ? t("shifts.rejoin") : t("shifts.open")}
-              </Button>
-            </Card>
-          ))}
-        <div style={{ display: "flex", gap: 16 }}>
-          <Button style={{ minHeight: 64 }} onClick={onNew}>
+    <StationScreen
+      title={t("shifts.title")}
+      header={<div className="shift-selection__message">{message}</div>}
+      actions={
+        <FloorFooter ariaLabel={t("shifts.actions")}>
+          <Button size="floor" onClick={onNew}>
             {t("shifts.new")}
           </Button>
-          {onSetup ? (
-            <Button variant="secondary" style={{ minHeight: 64 }} onClick={onSetup}>
-              {t("shell.setup")}
-            </Button>
-          ) : null}
-          {onConflicts ? (
-            <Button
-              variant="secondary"
-              style={{ minHeight: 64 }}
-              disabled={busy}
-              onClick={onConflicts}
-            >
-              {t("shell.conflicts")}
-            </Button>
-          ) : null}
+          <div className="shift-selection__secondary-actions">
+            {onSetup ? (
+              <Button size="floor" variant="secondary" onClick={onSetup}>
+                {t("shell.setup")}
+              </Button>
+            ) : null}
+            {onConflicts ? (
+              <Button size="floor" variant="secondary" disabled={busy} onClick={onConflicts}>
+                {t("shell.conflicts")}
+              </Button>
+            ) : null}
+          </div>
+        </FloorFooter>
+      }
+    >
+      <div className="shift-selection__content">
+        <div className="shift-selection__slot">
+          {loading ? (
+            <p className="shift-selection__state" role="status">
+              {t("shifts.loading")}
+            </p>
+          ) : loadFailed ? (
+            <div className="shift-selection__state">
+              <Button size="floor" variant="secondary" onClick={() => setLoadAttempt((n) => n + 1)}>
+                {t("shifts.retry")}
+              </Button>
+            </div>
+          ) : openItems.length === 0 ? (
+            <p className="shift-selection__state">{t("shifts.empty")}</p>
+          ) : (
+            <div className="shift-selection__grid">
+              {currentPage.items.map((shift) => (
+                <ShiftCard
+                  key={shift.id}
+                  productName={shift.productName}
+                  counterpartyName={shift.counterpartyName ?? null}
+                  counterpartyLabel={t("shifts.forCounterparty")}
+                  actionLabel={shift.status === "active" ? t("shifts.rejoin") : t("shifts.open")}
+                  active={shift.status === "active"}
+                  disabled={busy}
+                  onSelect={() => (shift.status === "active" ? rejoin(shift) : void open(shift))}
+                />
+              ))}
+            </div>
+          )}
         </div>
+        <Pager
+          page={currentPage.page}
+          pageCount={currentPage.pageCount}
+          onPageChange={setRequestedPage}
+          ariaLabel={t("shifts.pagination")}
+          previousLabel={t("shifts.previousPage")}
+          nextLabel={t("shifts.nextPage")}
+          pageLabel={(page, pageCount) => t("shifts.page", { page, pageCount })}
+          className="shift-selection__pager"
+        />
       </div>
-    </main>
+    </StationScreen>
   );
 }
