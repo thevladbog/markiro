@@ -736,6 +736,7 @@ export function App() {
           </p>
           {credentialRecovery.phase === "failed" ? (
             <Button
+              size="floor"
               onClick={() => {
                 recoveryCleanupStarted.current = null;
                 setCredentialRecovery({ event: credentialRecovery.event, phase: "sealing" });

@@ -1754,9 +1754,8 @@ describe("App", () => {
     render(<App />);
     await signInAsOperator();
     act(() => rejectSync());
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Retry recovery" })).toBeDefined(),
-    );
+    const retryRecovery = await screen.findByRole("button", { name: "Retry recovery" });
+    expect(retryRecovery.style.height).toBe("var(--control-floor)");
 
     expect(screen.queryByTestId("scanner-status")).toBeNull();
     expect(screen.queryByLabelText("Pairing code")).toBeNull();

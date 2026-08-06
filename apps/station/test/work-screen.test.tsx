@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { STATION_MIGRATIONS } from "@markiro/db";
 import { buildSscc, kmHash, parseKm, type LabelTemplateSpec } from "@markiro/domain";
 import i18n from "../src/i18n/index.js";
@@ -325,6 +325,11 @@ function renderWork(overrides: RenderWorkOverrides = {}) {
 }
 
 describe("WorkScreen", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
   it("keeps sequential scan commit and notification order before presentation extraction", async () => {
     const source = manualSource();
     const base = makeExec();
@@ -363,6 +368,131 @@ describe("WorkScreen", () => {
       expect(rows).toHaveLength(1);
     });
     expect(await screen.findByText("1")).toBeDefined();
+  });
+
+  it("announces accepted scans with a title instead of an icon or color alone", async () => {
+    const source = manualSource();
+    renderWorkScreen({ source });
+
+    act(() => source.emit(KM));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.dataset.tone).toBe("ok");
+    expect(alert.textContent).toContain("ACCEPTED");
+  });
+
+  it.each([
+    { tone: "ok", raw: KM, duration: 350 },
+    { tone: "error", raw: "not-a-code", duration: 1200 },
+  ] as const)(
+    "keeps the $tone verdict visible for exactly $duration ms",
+    async ({ tone, raw, duration }) => {
+      vi.useFakeTimers();
+      const source = manualSource();
+      renderWorkScreen({ source });
+
+      act(() => source.emit(raw));
+      await act(async () => vi.advanceTimersByTimeAsync(0));
+      expect(screen.getByRole("alert").dataset.tone).toBe(tone);
+
+      await act(async () => vi.advanceTimersByTimeAsync(duration - 1));
+      expect(screen.getByRole("alert").dataset.tone).toBe(tone);
+      await act(async () => vi.advanceTimersByTimeAsync(1));
+      expect(screen.queryByRole("alert")).toBeNull();
+    },
+  );
+
+  it("keeps a duplicate verdict for exactly 900 ms", async () => {
+    vi.useFakeTimers();
+    const source = manualSource();
+    renderWorkScreen({ source });
+
+    act(() => source.emit(KM));
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    await act(async () => vi.advanceTimersByTimeAsync(350));
+    act(() => source.emit(KM));
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(screen.getByRole("alert").dataset.tone).toBe("duplicate");
+
+    await act(async () => vi.advanceTimersByTimeAsync(899));
+    expect(screen.getByRole("alert").dataset.tone).toBe("duplicate");
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("does not let an older timer clear a newer signal", async () => {
+    vi.useFakeTimers();
+    const timeoutSpy = vi.spyOn(globalThis, "setTimeout");
+    const source = manualSource();
+    renderWorkScreen({ source });
+
+    act(() => source.emit(KM));
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(screen.getByRole("alert").dataset.tone).toBe("ok");
+    const staleCallback = timeoutSpy.mock.calls.find(([, delay]) => delay === 350)?.[0];
+    expect(staleCallback).toBeTypeOf("function");
+    await act(async () => vi.advanceTimersByTimeAsync(349));
+
+    act(() => source.emit("not-a-code"));
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(screen.getByRole("alert").dataset.tone).toBe("error");
+    act(() => staleCallback?.());
+    expect(screen.getByRole("alert").dataset.tone).toBe("error");
+
+    await act(async () => vi.advanceTimersByTimeAsync(1200));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("keeps visual rejection feedback visible when sound is muted", async () => {
+    const source = manualSource();
+    renderWorkScreen({ source, sound: { muted: true, volume: 1 } });
+
+    act(() => source.emit("not-a-code"));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.dataset.tone).toBe("error");
+    expect(alert.textContent).toContain("WRONG CODE");
+  });
+
+  it("uses the same error tone for the visual overlay and audible verdict", async () => {
+    const frequencies: number[] = [];
+    const context = {
+      currentTime: 0,
+      destination: {},
+      state: "running",
+      resume: vi.fn(async () => {}),
+      createOscillator: () => ({
+        type: "",
+        frequency: {
+          setValueAtTime: (frequency: number) => frequencies.push(frequency),
+        },
+        connect: vi.fn(),
+        start: vi.fn(),
+        stop: vi.fn(),
+      }),
+      createGain: () => ({
+        gain: {
+          setValueAtTime: vi.fn(),
+          exponentialRampToValueAtTime: vi.fn(),
+        },
+        connect: vi.fn(),
+      }),
+    } as unknown as AudioContext;
+    vi.stubGlobal(
+      "AudioContext",
+      vi.fn(function AudioContextStub() {
+        return context;
+      }),
+    );
+    const source = manualSource();
+    renderWorkScreen({ source, sound: { muted: false, volume: 1 } });
+
+    act(() => source.emit("not-a-code"));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.dataset.tone).toBe("error");
+    expect(frequencies).toEqual([220]);
+    vi.unstubAllGlobals();
   });
 
   it("renders the fixed instrument split with a bounded recent list and footer actions", async () => {
@@ -683,6 +813,10 @@ describe("WorkScreen", () => {
 });
 
 describe("WorkScreen box progress, closing and printing", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   // This whole block's copy is the box UI's -- Russian regardless of the
   // outer describe's "en" (see the floor rule in Task 13's brief: "Copy is
   // Russian"). i18n's own default is "ru" (src/i18n/index.ts), so switching
@@ -955,14 +1089,25 @@ describe("WorkScreen box progress, closing and printing", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  it("says plainly that numbers have run out, and keeps accepting scans", async () => {
+  it("blocks on serial exhaustion until the operator uses a floor-sized recovery action", async () => {
     const close = vi
       .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
       .mockResolvedValue({ status: "no-serials" });
     const onScan = vi.fn();
     renderWorkTracked({ boxCapacity: 10, boxItemCount: 9, closeCurrentBox: close, onScan });
     act(() => scan(KM));
-    await waitFor(() => expect(screen.getByText(/номера для коробов закончились/i)).toBeDefined());
+    const dialog = await screen.findByRole("dialog", {
+      name: /номера для коробов закончились/i,
+    });
+    const action = screen.getByRole("button", { name: "Вернуться к работе" });
+    expect(action.style.height).toBe("var(--control-floor)");
+
+    act(() => scan(OTHER_KM));
+    await act(async () => Promise.resolve());
+    expect(onScan).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(action);
+    expect(dialog.isConnected).toBe(false);
     act(() => scan(OTHER_KM));
     await waitFor(() => expect(onScan).toHaveBeenCalledTimes(2));
   });
@@ -988,6 +1133,23 @@ describe("WorkScreen box progress, closing and printing", () => {
     );
     act(() => scan(OTHER_KM));
     await waitFor(() => expect(onScan).toHaveBeenCalledTimes(2));
+  });
+
+  it("times an invalid box serial out as an ordinary 1200 ms error", async () => {
+    vi.useFakeTimers();
+    const close = vi
+      .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
+      .mockResolvedValue({ status: "invalid-serial" });
+    renderWorkTracked({ boxCapacity: 10, boxItemCount: 9, closeCurrentBox: close });
+
+    act(() => scan(KM));
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(screen.getByRole("alert").textContent).toContain("Не удалось сформировать номер короба");
+
+    await act(async () => vi.advanceTimersByTimeAsync(1199));
+    expect(screen.getByRole("alert")).toBeDefined();
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("does not prompt for verification when the setting is off", async () => {
@@ -1027,6 +1189,28 @@ describe("WorkScreen box progress, closing and printing", () => {
     await waitFor(() => expect(close).toHaveBeenCalled());
     expect(await screen.findByText(/печать не выполнена/i)).toBeDefined();
     expect(screen.queryByText("Отсканируйте распечатанную этикетку")).toBeNull();
+  });
+
+  it("times a print failure out as an ordinary 1200 ms error", async () => {
+    vi.useFakeTimers();
+    const close = vi
+      .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
+      .mockResolvedValue({ status: "closed", sscc: SSCC, itemCount: 10 });
+    renderWorkTracked({
+      boxCapacity: 10,
+      boxItemCount: 9,
+      closeCurrentBox: close,
+      verifyPrintedLabel: false,
+    });
+
+    act(() => scan(KM));
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(screen.getByRole("alert").textContent).toContain("Печать не выполнена");
+
+    await act(async () => vi.advanceTimersByTimeAsync(1199));
+    expect(screen.getByRole("alert")).toBeDefined();
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   // Self-review addition: none of the brief's own tests ever set

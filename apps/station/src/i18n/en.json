@@ -117,6 +117,7 @@
     "conflicts": "Conflicts"
   },
   "signal": {
+    "ok": "ACCEPTED",
     "wrongCode": "WRONG CODE",
     "wrongGtin": "WRONG GTIN",
     "duplicate": "DUPLICATE",
@@ -221,6 +222,7 @@
     "disassembleConfirmTitle": "This cannot be undone",
     "disassembleConfirmDetail": "The box number will be retired permanently.",
     "noSerials": "Box numbers have run out. Connect the station to the network to get more.",
+    "noSerialsDetail": "Scanning is paused. Restore the connection, then return to work to retry box closing.",
     "printExpected": "Scan the printed label",
     "printMismatch": "This is a different label",
     "printNotSscc": "This is not a group code",

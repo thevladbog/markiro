@@ -6,7 +6,7 @@ import {
   type LabelTemplateSpec,
   type ScanVerdict,
 } from "@markiro/domain";
-import { Alert, Button, SignalOverlay, type SignalTone } from "@markiro/ui";
+import { Alert, Button, FullScreenDialog, SignalOverlay, type SignalTone } from "@markiro/ui";
 import { boxLabelFields } from "../lib/box-label.js";
 import {
   clearBox,
@@ -132,6 +132,8 @@ export function WorkScreen({
   const [signal, setSignal] = useState<{ tone: SignalTone; title: string; detail?: string } | null>(
     null,
   );
+  const signalContext = useRef({ sound, t });
+  signalContext.current = { sound, t };
   const [confirmExit, setConfirmExit] = useState(false);
   const [showExceptions, setShowExceptions] = useState(false);
   const [recentOperations, setRecentOperations] = useState<RecentOperation[]>([]);
@@ -232,13 +234,6 @@ export function WorkScreen({
   }, [issuerPrefix, reloadClosedBoxes]);
 
   const [noSerials, setNoSerials] = useState(false);
-  // CodeRabbit PR33 review, Finding 4: `closeCurrentBox` burned a serial
-  // that `buildSscc` could not turn into a valid SSCC (an over-capacity
-  // local pool range -- see `close-box.ts`'s `invalid-serial` status for
-  // the full story). Surfaced plainly rather than a silent console.error:
-  // the box stays open (no sscc/closedAt written), so the operator can
-  // simply try closing it again.
-  const [invalidSerial, setInvalidSerial] = useState(false);
   // The box label's geometry -- a plain ref, not React state, the same shape
   // `keys` (above) already takes: nothing renders off this, and
   // `printAndMaybeVerify` reads it from inside `closeTheBox`, which can
@@ -286,12 +281,6 @@ export function WorkScreen({
   function dequeueVerification(): void {
     setVerificationQueue((q) => q.slice(1));
   }
-  // Verification was requested (the workstation setting is on) but the box
-  // closed without a genuine print -- no label spec, no printer configured,
-  // or rendering/printing itself threw (Task 13 review, Finding 3). Told to
-  // the operator plainly rather than opening a prompt to verify a label that
-  // was never produced.
-  const [printUnavailable, setPrintUnavailable] = useState(false);
   // Mirrors `verification` on every render (a plain assignment, not an
   // effect, so it is already current by the time anything reads it after
   // this commit) -- the same "read the latest value through a ref instead
@@ -345,6 +334,41 @@ export function WorkScreen({
   // are held in memory and updated on every insert rather than queried per scan.
   const keys = useRef<Set<string>>(new Set());
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const deferredSignalTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const deferredSoundTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const signalGeneration = useRef(0);
+
+  /**
+   * Visual and audio feedback share this single tone argument so the two
+   * channels cannot drift. A generation check is deliberately retained in
+   * addition to clearTimeout: it also protects a newer verdict if an older
+   * callback was already queued when the replacement signal arrived.
+   */
+  function showTimedSignal(tone: SignalTone, title: string, detail?: string): void {
+    const generation = ++signalGeneration.current;
+    playSignalTone(tone, signalContext.current.sound);
+    setSignal({ tone, title, ...(detail === undefined ? {} : { detail }) });
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => {
+      if (signalGeneration.current !== generation) return;
+      flashTimer.current = null;
+      setSignal(null);
+    }, FLASH_MS[tone]);
+  }
+
+  /**
+   * Box recovery can finish inside the accepted scan's process callback.
+   * Defer its error until after that callback publishes the ordinary OK
+   * verdict, otherwise the later OK would hide the more important recovery
+   * failure before the operator ever sees it.
+   */
+  function showDeferredError(title: string): void {
+    if (deferredSignalTimer.current) clearTimeout(deferredSignalTimer.current);
+    deferredSignalTimer.current = setTimeout(() => {
+      deferredSignalTimer.current = null;
+      showTimedSignal("error", title);
+    }, 0);
+  }
 
   // The duplicate index must be in memory before the first scan is judged.
   // The scan source starts listening immediately (so nothing is missed) and
@@ -464,15 +488,16 @@ export function WorkScreen({
    * template and printer.
    *
    * Whether printing happened at all -- NOT whether it is being verified --
-   * decides `printUnavailable` (Task 13 review, Finding 3): `labelSpecRef`
-   * may be null (no template, or an unparsable one), `printing` may be null
-   * (no printer configured on this workstation), or `renderLabelBytes`/
-   * `printing.print` may throw. Previously this notice was reachable only
-   * when `verifyPrintedLabel` was ALSO on, so in the default (verification
-   * off) configuration a box could close, burn a serial, and print nothing,
-   * with only a `console.error` -- silent to the operator. Verification is
-   * the separate, opt-in question of whether a print that DID happen gets
-   * checked; it is not what makes a failed print visible.
+   * decides whether to show the ordinary timed print-error signal (Task 13
+   * review, Finding 3): `labelSpecRef` may be null (no template, or an
+   * unparsable one), `printing` may be null (no printer configured on this
+   * workstation), or `renderLabelBytes`/`printing.print` may throw. Previously
+   * this notice was reachable only when `verifyPrintedLabel` was ALSO on, so
+   * in the default (verification off) configuration a box could close, burn a
+   * serial, and print nothing, with only a `console.error` -- silent to the
+   * operator. Verification is the separate, opt-in question of whether a
+   * print that DID happen gets checked; it is not what makes a failed print
+   * visible.
    *
    * `printing.print(...)` itself runs through `serializePrint` (CodeRabbit
    * PR33 review, Finding 9): rendering (`renderLabelBytes`, pure
@@ -518,10 +543,9 @@ export function WorkScreen({
       }
     }
     if (!printed) {
-      setPrintUnavailable(true);
+      showDeferredError(signalContext.current.t("box.printNotAvailable"));
       return;
     }
-    setPrintUnavailable(false);
     if (!verifyPrintedLabel) return;
     enqueueVerification({ sscc: result.sscc, bytes, boxId: closedBoxId });
   }
@@ -580,16 +604,19 @@ export function WorkScreen({
       if (result.status === "empty") return;
       if (result.status === "no-serials") {
         setNoSerials(true);
+        if (deferredSoundTimer.current) clearTimeout(deferredSoundTimer.current);
+        deferredSoundTimer.current = setTimeout(() => {
+          deferredSoundTimer.current = null;
+          playSignalTone("error", signalContext.current.sound);
+        }, 0);
         return;
       }
       if (result.status === "invalid-serial") {
-        setInvalidSerial(true);
+        showDeferredError(signalContext.current.t("box.invalidSerial"));
         return;
       }
 
       setNoSerials(false);
-      setInvalidSerial(false);
-      setPrintUnavailable(false);
       const newBoxId = crypto.randomUUID();
       try {
         await openBox(exec, shiftId, newBoxId, new Date().toISOString(), terminalId);
@@ -761,24 +788,19 @@ export function WorkScreen({
           return { raw, verdict, firstSeen };
         },
         onOutcome(outcome) {
-          const {
-            t: liveT,
-            language,
-            sound: liveSound,
-            onScanRecorded: liveOnScanRecorded,
-          } = live.current;
+          const { t: liveT, language, onScanRecorded: liveOnScanRecorded } = live.current;
           const tone = toneOf(outcome.verdict);
           if (outcome.verdict.status === "ok") setAccepted((n) => n + 1);
           else setRejected((n) => n + 1);
 
           const title =
-            outcome.verdict.status === "duplicate"
-              ? liveT("signal.duplicate")
-              : outcome.verdict.status === "wrong_gtin"
-                ? liveT("signal.wrongGtin")
-                : outcome.verdict.status === "invalid"
-                  ? liveT("signal.wrongCode")
-                  : "";
+            outcome.verdict.status === "ok"
+              ? liveT("signal.ok")
+              : outcome.verdict.status === "duplicate"
+                ? liveT("signal.duplicate")
+                : outcome.verdict.status === "wrong_gtin"
+                  ? liveT("signal.wrongGtin")
+                  : liveT("signal.wrongCode");
           const detail =
             outcome.firstSeen === null
               ? undefined
@@ -788,10 +810,7 @@ export function WorkScreen({
                   }).format(new Date(outcome.firstSeen)),
                 });
 
-          playSignalTone(tone, liveSound);
-          setSignal({ tone, title, ...(detail === undefined ? {} : { detail }) });
-          if (flashTimer.current) clearTimeout(flashTimer.current);
-          flashTimer.current = setTimeout(() => setSignal(null), FLASH_MS[tone]);
+          showTimedSignal(tone, title, detail);
 
           // Nudged last, strictly after the operator-visible signal is
           // rendered: `process()` above already wrote this outcome's outbox
@@ -812,18 +831,12 @@ export function WorkScreen({
           // rescan rather than assume the code was accepted.
           console.error("station: scan write failed", { category: "journal_write" });
           setRejected((n) => n + 1);
-          const { t: liveT, sound: liveSound } = live.current;
-          playSignalTone("error", liveSound);
-          setSignal({ tone: "error", title: liveT("signal.systemError") });
-          if (flashTimer.current) clearTimeout(flashTimer.current);
-          flashTimer.current = setTimeout(() => setSignal(null), FLASH_MS.error);
+          const { t: liveT } = live.current;
+          showTimedSignal("error", liveT("signal.systemError"));
         },
         onJobError() {
-          const { t: liveT, sound: liveSound } = live.current;
-          playSignalTone("error", liveSound);
-          setSignal({ tone: "error", title: liveT("signal.systemError") });
-          if (flashTimer.current) clearTimeout(flashTimer.current);
-          flashTimer.current = setTimeout(() => setSignal(null), FLASH_MS.error);
+          const { t: liveT } = live.current;
+          showTimedSignal("error", liveT("signal.systemError"));
         },
       }),
     [exec, shiftId, terminalId, expectedGtin14],
@@ -933,13 +946,15 @@ export function WorkScreen({
   // to compete with anything is print verification itself, not a stray
   // rejection from the loop underneath it.
   useEffect(() => {
-    if (verification || confirmClear || boxActionPending) return;
+    if (verification || noSerials || confirmClear || boxActionPending) return;
     return source.start((raw) => queue.enqueue(raw));
-  }, [source, queue, verification, confirmClear, boxActionPending]);
+  }, [source, queue, verification, noSerials, confirmClear, boxActionPending]);
 
   useEffect(
     () => () => {
       if (flashTimer.current) clearTimeout(flashTimer.current);
+      if (deferredSignalTimer.current) clearTimeout(deferredSignalTimer.current);
+      if (deferredSoundTimer.current) clearTimeout(deferredSoundTimer.current);
     },
     [],
   );
@@ -1087,10 +1102,18 @@ export function WorkScreen({
             </Button>
           </Alert>
         ) : null}
-        {noSerials ? <Alert tone="warn" title={t("box.noSerials")} /> : null}
-        {invalidSerial ? <Alert tone="warn" title={t("box.invalidSerial")} /> : null}
-        {printUnavailable ? <Alert tone="warn" title={t("box.printNotAvailable")} /> : null}
       </div>
+
+      <FullScreenDialog
+        open={noSerials}
+        title={t("box.noSerials")}
+        backLabel={t("work.backToWork")}
+        onClose={() => setNoSerials(false)}
+      >
+        <p style={{ color: "var(--fg-2)", font: "var(--floor-body)" }}>
+          {t("box.noSerialsDetail")}
+        </p>
+      </FullScreenDialog>
 
       {signal ? (
         <SignalOverlay

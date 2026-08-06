@@ -27,4 +27,16 @@ describe("SignalOverlay", () => {
     render(<SignalOverlay tone="ok" title="OK" />);
     expect(screen.queryByText(/First seen/)).toBeNull();
   });
+
+  it.each(["ok", "error", "duplicate"] as const)(
+    "uses a distinct non-color icon for the %s verdict while keeping the icon decorative",
+    (tone) => {
+      const { container } = render(<SignalOverlay tone={tone} title={`${tone} verdict`} />);
+      const icon = container.querySelector("svg");
+
+      expect(icon?.getAttribute("aria-hidden")).toBe("true");
+      expect(icon?.querySelectorAll("path, rect").length).toBeGreaterThan(0);
+      expect(screen.getByRole("alert").textContent).toContain(`${tone} verdict`);
+    },
+  );
 });
