@@ -221,11 +221,19 @@ it.each(["/employees/new", "/employees/1/edit"])(
   },
 );
 
+it("forbids the direct kiosk create route for a read-only operator", async () => {
+  renderAccessRoute("/kiosks/new", OPERATIONS_READ_ONLY);
+
+  expect(await screen.findByTestId("forbidden-page")).toBeDefined();
+  expect(screen.queryByRole("dialog")).toBeNull();
+});
+
 it.each([
   ["/catalog/new", "Новый продукт"],
   ["/catalog/p1/edit", "Изменить продукт"],
   ["/employees/new", "Новый сотрудник"],
   ["/employees/1/edit", "Изменить сотрудника"],
+  ["/kiosks/new", "Новый киоск"],
 ])("opens the direct write route %s for a write-capable operator", async (path, title) => {
   renderAccessRoute(path, MANAGER_ACCESS);
 

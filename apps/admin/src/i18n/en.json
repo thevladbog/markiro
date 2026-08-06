@@ -1154,6 +1154,13 @@
         "saveProductsAction": "Save list",
         "submitCreate": "Create",
         "submitUpdate": "Save",
+        "loadError": "Could not load kiosk data.",
+        "retry": "Retry",
+        "createError": "Could not create kiosk.",
+        "discardTitle": "Discard changes?",
+        "discardBody": "Unsaved changes will be lost.",
+        "continueEditing": "Continue editing",
+        "discardAction": "Discard",
         "errors": {
           "nameRequired": "Enter a name",
           "nameTooLong": "200 characters or fewer",

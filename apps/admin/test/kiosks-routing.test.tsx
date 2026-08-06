@@ -1,0 +1,321 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { userEvent } from "@testing-library/user-event";
+import { createMemoryRouter, createRoutesFromElements, Route, RouterProvider } from "react-router";
+import { afterEach, expect, it, vi } from "vitest";
+
+import { CABINET_CAPABILITY } from "@markiro/domain";
+
+import type { AccessDocument } from "../src/access/api.js";
+import { AccessProvider, RequireCapability } from "../src/access/context.js";
+import i18n from "../src/i18n/index.js";
+import type * as KiosksApiModule from "../src/pages/kiosks/api.js";
+import { KioskCreatePanelRoute } from "../src/pages/kiosks/KioskPanelRoute.js";
+import { KiosksPage } from "../src/pages/kiosks/index.js";
+import { jsonResponse } from "./helpers/http.js";
+
+const { createHookMountSpy } = vi.hoisted(() => ({ createHookMountSpy: vi.fn() }));
+
+vi.mock("../src/pages/kiosks/api.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof KiosksApiModule>();
+  return {
+    ...actual,
+    useCreateKiosk: () => {
+      createHookMountSpy();
+      return actual.useCreateKiosk();
+    },
+  };
+});
+
+const WRITE_ACCESS: AccessDocument = {
+  roles: ["manager"],
+  capabilities: [CABINET_CAPABILITY.OPERATIONS_READ, CABINET_CAPABILITY.OPERATIONS_WRITE],
+};
+
+const KIOSK = {
+  id: "k1",
+  name: "Касса у входа",
+  location: "Зал 1",
+  dayLimitPerEmployee: 5,
+  showPrices: true,
+  status: "active",
+  lastSeenAt: null,
+  enrolled: false,
+  productIds: [],
+  createdAt: "2026-08-06T00:00:00.000Z",
+};
+
+function requiredElement<T extends Element>(selector: string): T {
+  const element = document.querySelector<T>(selector);
+  if (!element) throw new Error(`Required element not found: ${selector}`);
+  return element;
+}
+
+function stubFetch(
+  handler: (path: string, init?: RequestInit) => Response | Promise<Response> | undefined,
+) {
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    const response = handler(String(url), init);
+    if (response) return response;
+    if (String(url) === "/api/kiosks") return jsonResponse(200, { items: [] });
+    if (String(url).startsWith("/api/products")) return jsonResponse(200, { items: [] });
+    throw new Error(`Unexpected request: ${String(url)}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+function renderKiosksRouter(
+  initialEntries: Array<string | { pathname: string; state: { kiosksBackground: true } }> = [
+    "/kiosks",
+  ],
+  access: AccessDocument = WRITE_ACCESS,
+) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  const router = createMemoryRouter(
+    createRoutesFromElements(
+      <Route
+        path="/kiosks"
+        element={
+          <RequireCapability capability={CABINET_CAPABILITY.OPERATIONS_READ}>
+            <KiosksPage />
+          </RequireCapability>
+        }
+      >
+        <Route
+          path="new"
+          element={
+            <RequireCapability capability={CABINET_CAPABILITY.OPERATIONS_WRITE}>
+              <KioskCreatePanelRoute />
+            </RequireCapability>
+          }
+        />
+      </Route>,
+    ),
+    { initialEntries, initialIndex: initialEntries.length - 1 },
+  );
+  render(
+    <QueryClientProvider client={queryClient}>
+      <AccessProvider value={access}>
+        <RouterProvider router={router} />
+      </AccessProvider>
+    </QueryClientProvider>,
+  );
+  return { router };
+}
+
+afterEach(async () => {
+  cleanup();
+  vi.unstubAllGlobals();
+  createHookMountSpy.mockClear();
+  await i18n.changeLanguage("ru");
+});
+
+it("opens kiosk creation at the nested panel route", async () => {
+  stubFetch(() => undefined);
+  const { router } = renderKiosksRouter();
+  const user = userEvent.setup();
+
+  await user.click(await screen.findByRole("button", { name: "Добавить киоск" }));
+
+  expect(router.state.location.pathname).toBe("/kiosks/new");
+});
+
+it("creates through the nested panel with the exact normalized payload and returns focus", async () => {
+  const created = {
+    ...KIOSK,
+    id: "k2",
+    name: "Киоск склада",
+    location: "Цех 2",
+    dayLimitPerEmployee: 8,
+  };
+  let didCreate = false;
+  const fetchMock = stubFetch((path, init) => {
+    if (path === "/api/kiosks" && init?.method === "POST") {
+      didCreate = true;
+      return jsonResponse(201, created);
+    }
+    if (path === "/api/kiosks")
+      return jsonResponse(200, { items: didCreate ? [KIOSK, created] : [KIOSK] });
+    return undefined;
+  });
+  const { router } = renderKiosksRouter();
+  const user = userEvent.setup();
+
+  const addAction = await screen.findByRole("button", { name: "Добавить киоск" });
+  await user.click(addAction);
+  expect(router.state.location.pathname).toBe("/kiosks/new");
+  expect(screen.getByText(KIOSK.name)).toBeDefined();
+  const panel = screen.getByRole("dialog", { name: "Новый киоск" });
+  await user.type(within(panel).getByLabelText("Название"), "  Киоск склада  ");
+  await user.type(within(panel).getByLabelText("Расположение"), "  Цех 2  ");
+  await user.clear(within(panel).getByLabelText("Лимит позиций на сотрудника в день"));
+  await user.type(within(panel).getByLabelText("Лимит позиций на сотрудника в день"), "8");
+  await user.click(within(panel).getByRole("button", { name: "Создать" }));
+
+  await waitFor(() =>
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/kiosks",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          name: "Киоск склада",
+          location: "Цех 2",
+          dayLimitPerEmployee: 8,
+          showPrices: true,
+        }),
+      }),
+    ),
+  );
+  await waitFor(() => expect(router.state.location.pathname).toBe("/kiosks"));
+  expect(document.activeElement).toBe(addAction);
+  expect(await screen.findByText("Киоск склада")).toBeDefined();
+});
+
+it("falls back to the kiosk list when a directly entered panel closes", async () => {
+  stubFetch(() => undefined);
+  const { router } = renderKiosksRouter(["/kiosks/new"]);
+  const user = userEvent.setup();
+
+  await screen.findByLabelText("Название");
+  const panel = await screen.findByRole("dialog", { name: "Новый киоск" });
+  await user.click(within(panel).getByRole("button", { name: "Закрыть" }));
+
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  await waitFor(() => expect(router.state.location.pathname).toBe("/kiosks"));
+});
+
+it("shows the panel load error and retries the kiosk request", async () => {
+  let attempts = 0;
+  stubFetch((path) => {
+    if (path === "/api/kiosks") {
+      attempts += 1;
+      return attempts === 1
+        ? jsonResponse(500, { message: "Unavailable" })
+        : jsonResponse(200, { items: [] });
+    }
+    return undefined;
+  });
+  renderKiosksRouter(["/kiosks/new"]);
+
+  const panel = await screen.findByRole("dialog", { name: "Новый киоск" });
+  expect((await within(panel).findByRole("alert")).textContent).toContain(
+    "Не удалось загрузить данные киоска.",
+  );
+  fireEvent.click(within(panel).getByRole("button", { name: "Повторить" }));
+
+  expect(await screen.findByLabelText("Название")).toBeDefined();
+  expect(attempts).toBe(2);
+});
+
+it("blocks dirty Back navigation until discarding the kiosk draft", async () => {
+  stubFetch(() => undefined);
+  const { router } = renderKiosksRouter([
+    "/kiosks",
+    { pathname: "/kiosks/new", state: { kiosksBackground: true } },
+  ]);
+  const user = userEvent.setup();
+
+  await user.type(await screen.findByLabelText("Название"), "Киоск склада");
+  await router.navigate(-1);
+
+  expect(router.state.location.pathname).toBe("/kiosks/new");
+  const confirmation = await screen.findByRole("alertdialog", { name: "Отменить изменения?" });
+  await user.click(within(confirmation).getByRole("button", { name: "Не сохранять" }));
+  await waitFor(() => expect(router.state.location.pathname).toBe("/kiosks"));
+});
+
+it("blocks every dismissal and duplicate submission while kiosk creation is pending", async () => {
+  let resolveCreate: ((response: Response) => void) | undefined;
+  const createResponse = new Promise<Response>((resolve) => {
+    resolveCreate = resolve;
+  });
+  const fetchMock = stubFetch((path, init) =>
+    path === "/api/kiosks" && init?.method === "POST" ? createResponse : undefined,
+  );
+  const { router } = renderKiosksRouter([
+    "/kiosks",
+    { pathname: "/kiosks/new", state: { kiosksBackground: true } },
+  ]);
+  const user = userEvent.setup();
+
+  await user.type(await screen.findByLabelText("Название"), "Киоск склада");
+  const panel = screen.getByRole("dialog", { name: "Новый киоск" });
+  const submit = within(panel).getByRole("button", { name: "Создать" });
+  await user.click(submit);
+  await waitFor(() =>
+    expect(
+      fetchMock.mock.calls.filter(
+        ([url, init]) => String(url) === "/api/kiosks" && init?.method === "POST",
+      ),
+    ).toHaveLength(1),
+  );
+
+  expect(
+    (within(panel).getByRole("button", { name: "Закрыть" }) as HTMLButtonElement).disabled,
+  ).toBe(true);
+  expect(
+    (within(panel).getByRole("button", { name: "Отмена" }) as HTMLButtonElement).disabled,
+  ).toBe(true);
+  expect((submit as HTMLButtonElement).disabled).toBe(true);
+  await user.click(submit);
+  await user.keyboard("{Escape}");
+  fireEvent.mouseDown(requiredElement<HTMLElement>(".mk-side-panel__scrim"));
+  await router.navigate(-1);
+
+  expect(router.state.location.pathname).toBe("/kiosks/new");
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  expect(
+    fetchMock.mock.calls.filter(
+      ([url, init]) => String(url) === "/api/kiosks" && init?.method === "POST",
+    ),
+  ).toHaveLength(1);
+
+  resolveCreate?.(jsonResponse(201, KIOSK));
+  await waitFor(() => expect(router.state.location.pathname).toBe("/kiosks"));
+});
+
+it("keeps validation client-side when the kiosk name is empty", async () => {
+  const fetchMock = stubFetch(() => undefined);
+  renderKiosksRouter(["/kiosks/new"]);
+  const user = userEvent.setup();
+
+  await screen.findByLabelText("Название");
+  const panel = await screen.findByRole("dialog", { name: "Новый киоск" });
+  await user.click(within(panel).getByRole("button", { name: "Создать" }));
+
+  expect(await within(panel).findByText("Укажите название")).toBeDefined();
+  expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+});
+
+it("keeps the panel, draft values, and persistent API error after a failed kiosk create", async () => {
+  stubFetch((path, init) =>
+    path === "/api/kiosks" && init?.method === "POST"
+      ? jsonResponse(409, { message: "Kiosk already exists" })
+      : undefined,
+  );
+  const { router } = renderKiosksRouter(["/kiosks/new"]);
+  const user = userEvent.setup();
+
+  await user.type(await screen.findByLabelText("Название"), "Киоск склада");
+  await user.click(screen.getByRole("button", { name: "Создать" }));
+
+  const panel = screen.getByRole("dialog", { name: "Новый киоск" });
+  expect(await within(panel).findByText("Kiosk already exists")).toBeDefined();
+  expect((within(panel).getByLabelText("Название") as HTMLInputElement).value).toBe("Киоск склада");
+  expect(router.state.location.pathname).toBe("/kiosks/new");
+});
+
+it("denies a direct read-only URL before the privileged create hook mounts", async () => {
+  stubFetch(() => undefined);
+  renderKiosksRouter(["/kiosks/new"], {
+    roles: [],
+    capabilities: [CABINET_CAPABILITY.OPERATIONS_READ],
+  });
+
+  expect(await screen.findByTestId("forbidden-page")).toBeDefined();
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(createHookMountSpy).not.toHaveBeenCalled();
+});

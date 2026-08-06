@@ -456,46 +456,6 @@ describe("KiosksPage", () => {
     expect(screen.getByText("Нет")).toBeDefined();
   });
 
-  it("opens the create modal and POSTs /api/kiosks with the entered name", async () => {
-    let didCreate = false;
-    const created = { ...ONLINE_KIOSK, id: "k3", name: "Новый киоск" };
-    const fetchMock = stubFetch({
-      kiosks: [],
-      onPost: (path, init) => {
-        if (path === "/api/kiosks" && init?.method === "POST") {
-          didCreate = true;
-          return jsonResponse(201, created);
-        }
-        if (path.startsWith("/api/kiosks")) {
-          return jsonResponse(200, { items: didCreate ? [created] : [] });
-        }
-        return undefined;
-      },
-    });
-
-    renderPage();
-    await screen.findByText("Киоски не добавлены");
-
-    fireEvent.click(screen.getAllByRole("button", { name: "Добавить киоск" })[0]!);
-    await screen.findByText("Новый киоск");
-
-    const dialog = within(await screen.findByRole("dialog"));
-    fireEvent.change(dialog.getByLabelText("Название"), { target: { value: "Новый киоск" } });
-    fireEvent.click(dialog.getByRole("button", { name: "Создать" }));
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/kiosks",
-        expect.objectContaining({ method: "POST" }),
-      );
-    });
-    const postCall = fetchMock.mock.calls.find(
-      (call) => call[0] === "/api/kiosks" && call[1]?.method === "POST",
-    )!;
-    const body = JSON.parse(postCall[1]?.body as string);
-    expect(body.name).toBe("Новый киоск");
-  });
-
   it('clicking "Код привязки" POSTs /api/kiosks/:id/pairing-code and reveals the code once', async () => {
     vi.stubGlobal("navigator", { clipboard: { writeText: vi.fn() } });
     const fetchMock = stubFetch({

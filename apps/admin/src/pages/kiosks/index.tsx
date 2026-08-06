@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Outlet, useNavigate } from "react-router";
 
 import {
   Alert,
@@ -22,11 +23,11 @@ import { formatCreatedAt } from "../../lib/datetime.js";
 import { toast } from "../../lib/toast.js";
 import { useProducts, type ProductDto } from "../catalog/api.js";
 import { KioskForm, type KioskFormValues } from "./KioskForm.js";
+import type { KiosksPanelContext, KiosksPanelLocationState } from "./KioskPanelRoute.js";
 import { PairingCodeModal } from "./PairingCodeModal.js";
 import { KiosksLayout } from "./KiosksLayout.js";
 import {
   useArchiveKiosk,
-  useCreateKiosk,
   useIssueKioskPairingCode,
   useKiosks,
   useSetKioskProducts,
@@ -98,40 +99,21 @@ function KiosksTableSkeleton({ label }: { label: string }) {
   );
 }
 
-function AuthorizedCreateKioskAction({ products }: { products: ProductDto[] }) {
+function AuthorizedCreateKioskAction() {
   const { t } = useTranslation();
-  const createMutation = useCreateKiosk();
-  const [open, setOpen] = useState(false);
-
-  const handleSubmit = async (input: CreateKioskInput | UpdateKioskInput) => {
-    try {
-      await createMutation.mutateAsync(input as CreateKioskInput);
-      toast("ok", t("pages.kiosks.toasts.createSuccess"));
-      setOpen(false);
-    } catch (error) {
-      toast(
-        "error",
-        error instanceof ApiRequestError ? error.message : t("pages.kiosks.toasts.createError"),
-      );
-    }
-  };
+  const navigate = useNavigate();
 
   return (
-    <>
-      <Button type="button" onClick={() => setOpen(true)}>
-        {t("pages.kiosks.addAction")}
-      </Button>
-      {open ? (
-        <KioskForm
-          open
-          mode="create"
-          products={products}
-          submitting={createMutation.isPending}
-          onSubmit={handleSubmit}
-          onClose={() => setOpen(false)}
-        />
-      ) : null}
-    </>
+    <Button
+      type="button"
+      onClick={() =>
+        void navigate("new", {
+          state: { kiosksBackground: true } satisfies KiosksPanelLocationState,
+        })
+      }
+    >
+      {t("pages.kiosks.addAction")}
+    </Button>
   );
 }
 
@@ -275,6 +257,7 @@ export function KiosksPage() {
   }, []);
 
   const items = useMemo(() => data ?? [], [data]);
+  const kiosksResolved = data !== undefined;
   const activeProducts = useMemo(() => productsData ?? [], [productsData]);
   const visibleItems = useMemo(
     () =>
@@ -361,9 +344,7 @@ export function KiosksPage() {
   );
 
   return (
-    <KiosksLayout
-      actions={canWrite ? <AuthorizedCreateKioskAction products={activeProducts} /> : null}
-    >
+    <KiosksLayout actions={canWrite ? <AuthorizedCreateKioskAction /> : null}>
       <FilterBar
         label={t("pages.kiosks.filters.label")}
         resultSummary={
@@ -399,7 +380,7 @@ export function KiosksPage() {
         <EmptyState
           title={t("pages.kiosks.emptyTitle")}
           hint={t("pages.kiosks.emptyHint")}
-          action={canWrite ? <AuthorizedCreateKioskAction products={activeProducts} /> : null}
+          action={canWrite ? <AuthorizedCreateKioskAction /> : null}
         />
       ) : visibleItems.length === 0 ? (
         <EmptyState
@@ -409,6 +390,19 @@ export function KiosksPage() {
       ) : (
         <Table columns={columns} rows={visibleItems} />
       )}
+      <Outlet
+        context={
+          {
+            kiosks: items,
+            kiosksPending: isPending,
+            kiosksError: isError,
+            kiosksResolved,
+            retryPanelData: async () => {
+              await refetch();
+            },
+          } satisfies KiosksPanelContext
+        }
+      />
     </KiosksLayout>
   );
 }
