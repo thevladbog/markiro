@@ -34,6 +34,7 @@ export interface KioskProfileFormProps {
   submissionError: string | null;
   onSubmit: (input: CreateKioskInput) => void | Promise<void>;
   onDirtyChange: (dirty: boolean) => void;
+  onValidationErrorChange?: (hasError: boolean) => void;
 }
 
 const EMPTY_VALUES: KioskFormValues = {
@@ -64,6 +65,7 @@ export function KioskProfileForm({
   submissionError,
   onSubmit,
   onDirtyChange,
+  onValidationErrorChange,
 }: KioskProfileFormProps) {
   const { t } = useTranslation();
   const {
@@ -82,6 +84,10 @@ export function KioskProfileForm({
     isDirtyRef.current = isDirty;
     onDirtyChange(isDirty);
   }, [isDirty, onDirtyChange]);
+
+  useEffect(() => {
+    onValidationErrorChange?.(Object.keys(errors).length > 0);
+  }, [errors, onValidationErrorChange]);
 
   useEffect(() => {
     if (isDirtyRef.current) return;

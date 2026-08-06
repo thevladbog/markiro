@@ -11,9 +11,18 @@ import { useSetKioskProducts } from "./api.js";
 
 export interface KioskProductsSectionProps {
   kiosk: KioskDto;
+  disabled?: boolean;
   onDirtyChange: (dirty: boolean) => void;
   onBusyChange: (busy: boolean) => void;
   onErrorChange: (hasError: boolean) => void;
+  onStatusChange?: (status: KioskProductsSectionStatus) => void;
+}
+
+export type KioskProductsSectionPhase = "loading" | "error" | "ready";
+
+export interface KioskProductsSectionStatus {
+  phase: KioskProductsSectionPhase;
+  selectedCount: number;
 }
 
 function sameIds(left: ReadonlySet<string>, right: ReadonlySet<string>): boolean {
@@ -31,9 +40,11 @@ function saveError(error: unknown, fallback: string): string {
  */
 export function KioskProductsSection({
   kiosk,
+  disabled = false,
   onDirtyChange,
   onBusyChange,
   onErrorChange,
+  onStatusChange,
 }: KioskProductsSectionProps) {
   const { t } = useTranslation();
   const query = useProducts({ status: "active" });
@@ -47,6 +58,11 @@ export function KioskProductsSection({
   const dirty = !sameIds(selectedIds, savedIds);
   const busy = setProductsMutation.isPending;
   const hasError = query.isError || mutationError !== null;
+  const phase: KioskProductsSectionPhase = query.isPending
+    ? "loading"
+    : query.isError
+      ? "error"
+      : "ready";
   const products = useMemo(() => query.data ?? [], [query.data]);
   const normalizedSearch = search.trim().normalize().toLocaleLowerCase();
   const filteredProducts = useMemo(
@@ -63,6 +79,10 @@ export function KioskProductsSection({
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
   useEffect(() => onBusyChange(busy), [busy, onBusyChange]);
   useEffect(() => onErrorChange(hasError), [hasError, onErrorChange]);
+  useEffect(
+    () => onStatusChange?.({ phase, selectedCount: selectedIds.size }),
+    [onStatusChange, phase, selectedIds.size],
+  );
   useEffect(() => {
     const incomingIds = new Set(kiosk.productIds);
     const previousKiosk = previousKioskRef.current;
@@ -80,6 +100,7 @@ export function KioskProductsSection({
   }, [dirty, kiosk.id, kiosk.productIds]);
 
   const toggleProduct = (productId: string) => {
+    if (disabled || busy) return;
     setSelectedIds((previous) => {
       const next = new Set(previous);
       if (next.has(productId)) next.delete(productId);
@@ -89,7 +110,7 @@ export function KioskProductsSection({
   };
 
   const saveProducts = async () => {
-    if (busy || query.data === undefined) return;
+    if (disabled || busy || query.data === undefined) return;
 
     const productIds = query.data
       .filter((product) => selectedIds.has(product.id))
@@ -152,6 +173,7 @@ export function KioskProductsSection({
               className="mk-kiosk-products-section__search"
               label={t("pages.kiosks.products.searchLabel")}
               value={search}
+              disabled={disabled || busy}
               onChange={(event) => setSearch(event.target.value)}
             />
             <span className="mk-kiosk-products-section__selected-count" aria-live="polite">
@@ -164,7 +186,7 @@ export function KioskProductsSection({
                 <Checkbox
                   label={product.name}
                   checked={selectedIds.has(product.id)}
-                  disabled={busy}
+                  disabled={disabled || busy}
                   onCheckedChange={() => toggleProduct(product.id)}
                 />
                 <span className="mk-kiosk-products-section__gtin">{product.gtin14}</span>
@@ -175,7 +197,7 @@ export function KioskProductsSection({
             <Button
               type="button"
               variant="secondary"
-              disabled={!dirty}
+              disabled={disabled || !dirty}
               loading={busy}
               onClick={() => void saveProducts()}
             >

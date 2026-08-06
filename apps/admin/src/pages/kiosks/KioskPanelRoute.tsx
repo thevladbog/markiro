@@ -8,7 +8,7 @@ import { ApiRequestError } from "../../api/client.js";
 import { toast } from "../../lib/toast.js";
 import { useRoutePanelGuard } from "../../lib/useRoutePanelGuard.js";
 import { useCreateKiosk, useUpdateKiosk, type KioskDto } from "./api.js";
-import { KioskProductsSection } from "./KioskProductsSection.js";
+import { KioskProductsSection, type KioskProductsSectionStatus } from "./KioskProductsSection.js";
 import {
   KIOSK_PROFILE_FORM_ID,
   KioskProfileForm,
@@ -213,10 +213,15 @@ function KioskEditPanelContent({ kioskId }: { kioskId: string | undefined }): Re
   const [dirty, setDirty] = useState<SectionFlags>(CLEAN_SECTIONS);
   const [busy, setBusy] = useState<SectionFlags>(CLEAN_SECTIONS);
   const [errors, setErrors] = useState<SectionFlags>(CLEAN_SECTIONS);
+  const [productsStatus, setProductsStatus] = useState<KioskProductsSectionStatus>({
+    phase: "loading",
+    selectedCount: 0,
+  });
   const [activeSection, setActiveSection] = useState<KioskSectionId>("profile");
   const [scrollRoot, setScrollRoot] = useState<HTMLElement | null>(null);
   const profileSectionRef = useRef<HTMLElement>(null);
   const productsHostRef = useRef<HTMLDivElement>(null);
+  const productsBusyRef = useRef(false);
   const kiosk = context.kiosks.find((item) => item.id === kioskId);
   const initialValues = useMemo<KioskFormValues | undefined>(
     () =>
@@ -242,11 +247,22 @@ function KioskEditPanelContent({ kioskId }: { kioskId: string | undefined }): Re
     setDirty((current) => (current.products === value ? current : { ...current, products: value }));
   }, []);
   const reportProductsBusy = useCallback((value: boolean) => {
+    productsBusyRef.current = value;
     setBusy((current) => (current.products === value ? current : { ...current, products: value }));
   }, []);
   const reportProductsError = useCallback((value: boolean) => {
     setErrors((current) =>
       current.products === value ? current : { ...current, products: value },
+    );
+  }, []);
+  const reportProfileValidationError = useCallback((value: boolean) => {
+    setErrors((current) => (current.profile === value ? current : { ...current, profile: value }));
+  }, []);
+  const reportProductsStatus = useCallback((value: KioskProductsSectionStatus) => {
+    setProductsStatus((current) =>
+      current.phase === value.phase && current.selectedCount === value.selectedCount
+        ? current
+        : value,
     );
   }, []);
 
@@ -338,21 +354,29 @@ function KioskEditPanelContent({ kioskId }: { kioskId: string | undefined }): Re
     {
       id: "products",
       label: t("pages.kiosks.products.title"),
-      meta: busy.products
-        ? t("pages.kiosks.sections.loading")
-        : t("pages.kiosks.products.selectedCount", { count: kiosk.productIds.length }),
-      hasError: errors.products,
+      ...(productsStatus.phase === "loading"
+        ? { meta: t("pages.kiosks.sections.loading") }
+        : productsStatus.phase === "ready"
+          ? {
+              meta: t("pages.kiosks.products.selectedCount", {
+                count: productsStatus.selectedCount,
+              }),
+            }
+          : {}),
+      hasError: errors.products || productsStatus.phase === "error",
     },
   ];
 
   const updateProfile = async (
     input: Parameters<typeof updateMutation.mutateAsync>[0]["input"],
   ) => {
+    if (updateMutation.isPending || productsBusyRef.current) return;
+
     try {
       setProfileError(null);
       await updateMutation.mutateAsync({ id: kiosk.id, input });
       toast("ok", t("pages.kiosks.toasts.updateSuccess"));
-      guard.finish();
+      if (!productsBusyRef.current) guard.finish();
     } catch (cause) {
       setProfileError(
         cause instanceof ApiRequestError ? cause.message : t("pages.kiosks.form.updateError"),
@@ -410,14 +434,17 @@ function KioskEditPanelContent({ kioskId }: { kioskId: string | undefined }): Re
                 submissionError={profileError}
                 onSubmit={updateProfile}
                 onDirtyChange={reportProfileDirty}
+                onValidationErrorChange={reportProfileValidationError}
               />
             </section>
             <div ref={productsHostRef} className="mk-kiosk-edit-panel__section-host">
               <KioskProductsSection
                 kiosk={kiosk}
+                disabled={updateMutation.isPending}
                 onDirtyChange={reportProductsDirty}
                 onBusyChange={reportProductsBusy}
                 onErrorChange={reportProductsError}
+                onStatusChange={reportProductsStatus}
               />
             </div>
           </div>

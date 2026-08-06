@@ -1106,6 +1106,8 @@
         "reasons": "Write-off reasons"
       },
       "resultCount_one": "{{count}} kiosk",
+      "resultCount_few": "{{count}} kiosks",
+      "resultCount_many": "{{count}} kiosks",
       "resultCount_other": "{{count}} kiosks",
       "lastActivity": "Last activity",
       "neverActivity": "Never",

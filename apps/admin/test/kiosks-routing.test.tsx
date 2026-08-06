@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { createMemoryRouter, createRoutesFromElements, Route, RouterProvider } from "react-router";
 import { afterEach, expect, it, vi } from "vitest";
@@ -79,6 +79,14 @@ const PRODUCT = {
   defaultCounterpartyId: null,
   defaultLabelTemplateId: null,
   createdAt: "2026-01-01T00:00:00.000Z",
+};
+
+const PRODUCT_B = {
+  ...PRODUCT,
+  id: "p2",
+  gtin14: "04600000000018",
+  name: "Сыр Российский",
+  createdAt: "2026-01-02T00:00:00.000Z",
 };
 
 function requiredElement<T extends Element>(selector: string): T {
@@ -542,7 +550,7 @@ it("keeps both sections mounted and activates a section by scrolling and focusin
   expect(profile).toBeDefined();
   const navigation = within(panel).getByRole("navigation", { name: "Разделы киоска" });
   const profileAction = within(navigation).getByRole("button", { name: /Профиль/ });
-  const productsAction = within(navigation).getByRole("button", {
+  const productsAction = await within(navigation).findByRole("button", {
     name: /Разрешённые товары.*Выбрано: 1/,
   });
   expect(profileAction.getAttribute("aria-current")).toBe("location");
@@ -556,6 +564,77 @@ it("keeps both sections mounted and activates a section by scrolling and focusin
   expect(productsAction.getAttribute("aria-current")).toBe("location");
   expect(document.activeElement).toBe(heading);
   expect(within(panel).getByRole("region", { name: "Профиль" })).toBe(profile);
+});
+
+it("keeps product rail metadata synchronized with loading, errors, and the current draft count", async () => {
+  let resolveProducts: ((response: Response) => void) | undefined;
+  const firstProductsResponse = new Promise<Response>((resolve) => {
+    resolveProducts = resolve;
+  });
+  let productAttempts = 0;
+  stubFetch((path) => {
+    if (path === "/api/kiosks") return jsonResponse(200, { items: [KIOSK] });
+    if (path === "/api/products?status=active") {
+      productAttempts += 1;
+      return productAttempts === 1
+        ? firstProductsResponse
+        : jsonResponse(200, { items: [PRODUCT, PRODUCT_B] });
+    }
+    return undefined;
+  });
+  renderKiosksRouter([`/kiosks/${KIOSK.id}/edit`]);
+  const user = userEvent.setup();
+
+  await screen.findByRole("region", { name: "Профиль" });
+  const panel = screen.getByRole("dialog", { name: "Изменить киоск" });
+  let navigation = within(panel).getByRole("navigation", { name: "Разделы киоска" });
+  expect(
+    within(navigation).getByRole("button", { name: /Разрешённые товары.*Загрузка/ }),
+  ).toBeDefined();
+
+  resolveProducts?.(jsonResponse(503, { message: "Catalog unavailable" }));
+  expect(await within(panel).findByText("Не удалось загрузить товары.")).toBeDefined();
+  navigation = within(panel).getByRole("navigation", { name: "Разделы киоска" });
+  expect(
+    within(navigation).getByRole("button", { name: /Разрешённые товары.*Ошибка/ }),
+  ).toBeDefined();
+
+  await user.click(within(panel).getByRole("button", { name: "Повторить" }));
+  await within(panel).findByRole("checkbox", { name: PRODUCT_B.name });
+  navigation = within(panel).getByRole("navigation", { name: "Разделы киоска" });
+  expect(
+    within(navigation).getByRole("button", { name: /Разрешённые товары.*Выбрано: 0/ }),
+  ).toBeDefined();
+
+  await user.click(within(panel).getByRole("checkbox", { name: PRODUCT_B.name }));
+
+  expect(
+    within(navigation).getByRole("button", { name: /Разрешённые товары.*Выбрано: 1/ }),
+  ).toBeDefined();
+});
+
+it("marks Profile navigation for client validation errors and clears it after correction", async () => {
+  stubFetch((path) => {
+    if (path === "/api/kiosks") return jsonResponse(200, { items: [KIOSK] });
+    if (path === "/api/products?status=active") return jsonResponse(200, { items: [] });
+    return undefined;
+  });
+  renderKiosksRouter([`/kiosks/${KIOSK.id}/edit`]);
+  const user = userEvent.setup();
+
+  const name = await screen.findByLabelText("Название");
+  const panel = screen.getByRole("dialog", { name: "Изменить киоск" });
+  const navigation = within(panel).getByRole("navigation", { name: "Разделы киоска" });
+  await user.clear(name);
+  await user.click(within(panel).getByRole("button", { name: "Сохранить" }));
+
+  expect(await within(navigation).findByRole("button", { name: /Профиль.*Ошибка/ })).toBeDefined();
+
+  await user.type(name, "Исправленный киоск");
+
+  await waitFor(() =>
+    expect(within(navigation).getByRole("button", { name: /^Профиль$/ })).toBeDefined(),
+  );
 });
 
 it("blocks dirty Back navigation until the kiosk edit is discarded", async () => {
@@ -610,6 +689,96 @@ it("blocks every dismissal while a product save is busy and keeps the panel open
   resolveSave?.(jsonResponse(200, { ...KIOSK, productIds: [PRODUCT.id] }));
   await waitFor(() => expect(panel.hasAttribute("aria-busy")).toBe(false));
   expect(router.state.location.pathname).toBe(`/kiosks/${KIOSK.id}/edit`);
+});
+
+it("does not start or finish a profile save while a product save is pending", async () => {
+  let resolveProductSave: ((response: Response) => void) | undefined;
+  const productSaveResponse = new Promise<Response>((resolve) => {
+    resolveProductSave = resolve;
+  });
+  const fetchMock = stubFetch((path, init) => {
+    if (path === "/api/kiosks") return jsonResponse(200, { items: [KIOSK] });
+    if (path === "/api/products?status=active") return jsonResponse(200, { items: [PRODUCT] });
+    if (path === `/api/kiosks/${KIOSK.id}/products` && init?.method === "PUT") {
+      return productSaveResponse;
+    }
+    if (path === `/api/kiosks/${KIOSK.id}` && init?.method === "PATCH") {
+      return jsonResponse(200, { ...KIOSK, name: "Новый киоск" });
+    }
+    return undefined;
+  });
+  const { router } = renderKiosksRouter([`/kiosks/${KIOSK.id}/edit`]);
+  const user = userEvent.setup();
+
+  const name = await screen.findByLabelText("Название");
+  await screen.findByRole("checkbox", { name: PRODUCT.name });
+  const panel = screen.getByRole("dialog", { name: "Изменить киоск" });
+  await user.clear(name);
+  await user.type(name, "Новый киоск");
+  await user.click(within(panel).getByRole("checkbox", { name: PRODUCT.name }));
+  await user.click(within(panel).getByRole("button", { name: "Сохранить список" }));
+  await waitFor(() => expect(panel.getAttribute("aria-busy")).toBe("true"));
+  expect(
+    (within(panel).getByRole("button", { name: "Сохранить" }) as HTMLButtonElement).disabled,
+  ).toBe(true);
+
+  await act(async () => {
+    fireEvent.submit(requiredElement<HTMLFormElement>("#kiosk-profile-form"));
+    await Promise.resolve();
+  });
+
+  expect(
+    fetchMock.mock.calls.filter(
+      ([path, init]) => path === `/api/kiosks/${KIOSK.id}` && init?.method === "PATCH",
+    ),
+  ).toHaveLength(0);
+  expect(router.state.location.pathname).toBe(`/kiosks/${KIOSK.id}/edit`);
+
+  resolveProductSave?.(jsonResponse(200, { ...KIOSK, productIds: [PRODUCT.id] }));
+  await waitFor(() => expect(panel.hasAttribute("aria-busy")).toBe(false));
+});
+
+it("does not start a product save while a profile save is pending", async () => {
+  let resolveProfileSave: ((response: Response) => void) | undefined;
+  const profileSaveResponse = new Promise<Response>((resolve) => {
+    resolveProfileSave = resolve;
+  });
+  const fetchMock = stubFetch((path, init) => {
+    if (path === "/api/kiosks") return jsonResponse(200, { items: [KIOSK] });
+    if (path === "/api/products?status=active") return jsonResponse(200, { items: [PRODUCT] });
+    if (path === `/api/kiosks/${KIOSK.id}` && init?.method === "PATCH") {
+      return profileSaveResponse;
+    }
+    if (path === `/api/kiosks/${KIOSK.id}/products` && init?.method === "PUT") {
+      return jsonResponse(200, { ...KIOSK, productIds: [PRODUCT.id] });
+    }
+    return undefined;
+  });
+  const { router } = renderKiosksRouter([`/kiosks/${KIOSK.id}/edit`]);
+  const user = userEvent.setup();
+
+  const name = await screen.findByLabelText("Название");
+  await screen.findByRole("checkbox", { name: PRODUCT.name });
+  const panel = screen.getByRole("dialog", { name: "Изменить киоск" });
+  const checkbox = within(panel).getByRole("checkbox", { name: PRODUCT.name });
+  await user.click(checkbox);
+  const productSave = within(panel).getByRole("button", { name: "Сохранить список" });
+  await user.type(name, " draft");
+  await user.click(within(panel).getByRole("button", { name: "Сохранить" }));
+  await waitFor(() => expect(panel.getAttribute("aria-busy")).toBe("true"));
+
+  expect((checkbox as HTMLButtonElement).disabled).toBe(true);
+  expect((productSave as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(productSave);
+  expect(
+    fetchMock.mock.calls.filter(
+      ([path, init]) => path === `/api/kiosks/${KIOSK.id}/products` && init?.method === "PUT",
+    ),
+  ).toHaveLength(0);
+  expect(router.state.location.pathname).toBe(`/kiosks/${KIOSK.id}/edit`);
+
+  resolveProfileSave?.(jsonResponse(200, { ...KIOSK, name: `${KIOSK.name} draft` }));
+  await waitFor(() => expect(router.state.location.pathname).toBe("/kiosks"));
 });
 
 it("denies a direct read-only edit URL before the privileged update hook mounts", async () => {

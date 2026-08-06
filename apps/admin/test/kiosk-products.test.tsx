@@ -94,6 +94,54 @@ afterEach(() => {
 });
 
 describe("KioskProductsSection", () => {
+  it("reports query state and the current draft selection count", async () => {
+    const productRequest = deferred<Response>();
+    let productRequests = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) => {
+        if (url === "/api/products?status=active") {
+          productRequests += 1;
+          return productRequests === 1
+            ? productRequest.promise
+            : Promise.resolve(jsonResponse(200, { items: [PRODUCT_A, PRODUCT_B] }));
+        }
+        return Promise.resolve(jsonResponse(200, { items: [] }));
+      }),
+    );
+    const reporters = {
+      onDirtyChange: vi.fn(),
+      onBusyChange: vi.fn(),
+      onErrorChange: vi.fn(),
+      onStatusChange: vi.fn(),
+    };
+    renderProductsSection(ONLINE_KIOSK, reporters);
+
+    expect(reporters.onStatusChange).toHaveBeenLastCalledWith({
+      phase: "loading",
+      selectedCount: 1,
+    });
+    productRequest.resolve(jsonResponse(503, { message: "Unavailable" }));
+    await screen.findByText("Не удалось загрузить товары.");
+    expect(reporters.onStatusChange).toHaveBeenLastCalledWith({
+      phase: "error",
+      selectedCount: 1,
+    });
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "Повторить" }));
+    await screen.findByRole("checkbox", { name: PRODUCT_B.name });
+    expect(reporters.onStatusChange).toHaveBeenLastCalledWith({
+      phase: "ready",
+      selectedCount: 1,
+    });
+
+    await userEvent.setup().click(screen.getByRole("checkbox", { name: PRODUCT_B.name }));
+    expect(reporters.onStatusChange).toHaveBeenLastCalledWith({
+      phase: "ready",
+      selectedCount: 2,
+    });
+  });
+
   it("renders a recoverable loading and catalog error state", async () => {
     const productRequest = deferred<Response>();
     let productRequests = 0;
