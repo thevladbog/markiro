@@ -70,7 +70,7 @@
   grid-column: 1 / -1;
 }
 
-.mk-kiosk-products-editor {
+.mk-kiosk-products-section {
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
@@ -79,28 +79,68 @@
   border-top: 1px solid var(--line);
 }
 
-.mk-kiosk-products-editor fieldset {
-  display: flex;
-  min-inline-size: 0;
-  flex-direction: column;
-  gap: var(--sp-2);
+.mk-kiosk-products-section__title {
   margin: 0;
-  padding: 0;
-  border: 0;
-}
-
-.mk-kiosk-products-editor legend {
-  padding: 0;
   color: var(--fg-2);
   font: var(--text-caption);
 }
 
-.mk-kiosk-products-editor fieldset > div {
+.mk-kiosk-products-section__controls,
+.mk-kiosk-products-section__actions,
+.mk-kiosk-products-section__state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--sp-3);
+}
+
+.mk-kiosk-products-section__search {
+  flex: 1 1 260px;
+}
+
+.mk-kiosk-products-section__selected-count,
+.mk-kiosk-products-section__empty,
+.mk-kiosk-products-section__gtin {
+  color: var(--fg-3);
+  font: var(--text-caption);
+}
+
+.mk-kiosk-products-section__list {
   display: flex;
   max-height: 220px;
   flex-direction: column;
   gap: var(--sp-2);
   overflow-y: auto;
+}
+
+.mk-kiosk-products-section__product {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.mk-kiosk-products-section__product > .mk-field {
+  min-width: 0;
+}
+
+.mk-kiosk-products-section__gtin {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+}
+
+.mk-kiosk-products-section__skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.mk-kiosk-products-section__skeleton > span[aria-hidden="true"] {
+  display: block;
+  height: 38px;
+  border-radius: var(--r-1);
+  background: var(--surface-panel);
 }
 
 .mk-kiosks-table-skeleton {
@@ -267,6 +307,12 @@
 
   .mk-kiosks-filter--state {
     width: 100%;
+  }
+
+  .mk-kiosk-products-section__controls,
+  .mk-kiosk-products-section__product {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .mk-kiosks-reason-row,

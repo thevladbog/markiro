@@ -21,7 +21,6 @@ import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
 import { formatCreatedAt } from "../../lib/datetime.js";
 import { toast } from "../../lib/toast.js";
-import { useProducts, type ProductDto } from "../catalog/api.js";
 import { KioskForm, type KioskFormValues } from "./KioskForm.js";
 import type { KiosksPanelContext, KiosksPanelLocationState } from "./KioskPanelRoute.js";
 import { PairingCodeModal } from "./PairingCodeModal.js";
@@ -30,7 +29,6 @@ import {
   useArchiveKiosk,
   useIssueKioskPairingCode,
   useKiosks,
-  useSetKioskProducts,
   useUpdateKiosk,
   type CreateKioskInput,
   type KioskDto,
@@ -117,17 +115,10 @@ function AuthorizedCreateKioskAction() {
   );
 }
 
-function AuthorizedKioskRowActions({
-  kiosk,
-  products,
-}: {
-  kiosk: KioskDto;
-  products: ProductDto[];
-}) {
+function AuthorizedKioskRowActions({ kiosk }: { kiosk: KioskDto }) {
   const { t } = useTranslation();
   const updateMutation = useUpdateKiosk();
   const archiveMutation = useArchiveKiosk();
-  const setProductsMutation = useSetKioskProducts();
   const [editing, setEditing] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const [archiveError, setArchiveError] = useState<string | null>(null);
@@ -148,20 +139,6 @@ function AuthorizedKioskRowActions({
       toast(
         "error",
         error instanceof ApiRequestError ? error.message : t("pages.kiosks.toasts.updateError"),
-      );
-    }
-  };
-
-  const handleSaveProducts = async (productIds: string[]) => {
-    try {
-      await setProductsMutation.mutateAsync({ id: kiosk.id, productIds });
-      toast("ok", t("pages.kiosks.toasts.setProductsSuccess"));
-    } catch (error) {
-      toast(
-        "error",
-        error instanceof ApiRequestError
-          ? error.message
-          : t("pages.kiosks.toasts.setProductsError"),
       );
     }
   };
@@ -205,11 +182,8 @@ function AuthorizedKioskRowActions({
           mode="edit"
           kiosk={kiosk}
           initialValues={initialValues}
-          products={products}
           submitting={updateMutation.isPending}
-          savingProducts={setProductsMutation.isPending}
           onSubmit={handleUpdate}
-          onSaveProducts={handleSaveProducts}
           onClose={() => setEditing(false)}
         />
       ) : null}
@@ -236,18 +210,15 @@ function AuthorizedKioskRowActions({
 
 /**
  * Admin kiosk settings screen -- Plan A Task 17
- * (list/create/edit/pair/archive + product allowlist). Mirrors
+ * (list/create/edit/pair/archive). Mirrors
  * `../employees/index.tsx`'s active/archived +
  * confirm-modal pattern (Task 16) for the kiosk lifecycle, and
- * `../shifts/ShiftForm.tsx`'s "pass the already-fetched catalog list down as
- * a prop" convention for the allowlist's product candidates.
  */
 export function KiosksPage() {
   const { t, i18n } = useTranslation();
   const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
   const canManageCredentials = useCan(CABINET_CAPABILITY.CREDENTIALS_MANAGE);
   const { data, isPending, isError, refetch } = useKiosks();
-  const { data: productsData } = useProducts({ status: "active" });
   const [stateFilter, setStateFilter] = useState<KioskStateFilter>("all");
   const [nowMs, setNowMs] = useState(() => Date.now());
 
@@ -258,7 +229,6 @@ export function KiosksPage() {
 
   const items = useMemo(() => data ?? [], [data]);
   const kiosksResolved = data !== undefined;
-  const activeProducts = useMemo(() => productsData ?? [], [productsData]);
   const visibleItems = useMemo(
     () =>
       items.filter(
@@ -332,7 +302,7 @@ export function KiosksPage() {
         align: "right",
         render: (row) => (
           <div className="mk-kiosk-row-actions">
-            {canWrite ? <AuthorizedKioskRowActions kiosk={row} products={activeProducts} /> : null}
+            {canWrite ? <AuthorizedKioskRowActions kiosk={row} /> : null}
             {row.status === "active" && canManageCredentials ? (
               <KioskPairingAction kiosk={row} />
             ) : null}
@@ -340,7 +310,7 @@ export function KiosksPage() {
         ),
       },
     ],
-    [t, i18n.language, canWrite, canManageCredentials, activeProducts, nowMs],
+    [t, i18n.language, canWrite, canManageCredentials, nowMs],
   );
 
   return (

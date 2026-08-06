@@ -236,6 +236,16 @@ function stubFetch(overrides: {
 }
 
 describe("KiosksPage", () => {
+  it("does not load products until an authorized edit surface opens", async () => {
+    const fetchMock = stubFetch({ kiosks: [ONLINE_KIOSK] });
+    renderPage();
+
+    expect(await screen.findByText(ONLINE_KIOSK.name)).toBeDefined();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/products"))).toBe(
+      false,
+    );
+  });
+
   it("renders the table-shaped loading state until the kiosk request resolves", async () => {
     const kioskResponse = deferred<Response>();
     stubFetch({
@@ -684,7 +694,7 @@ describe("KiosksPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
     await screen.findByText("Изменить киоск");
 
-    const productBCheckbox = screen.getByRole("checkbox", { name: PRODUCT_B.name });
+    const productBCheckbox = await screen.findByRole("checkbox", { name: PRODUCT_B.name });
     expect(productBCheckbox.getAttribute("aria-checked")).toBe("false");
     const productACheckbox = screen.getByRole("checkbox", { name: PRODUCT_A.name });
     expect(productACheckbox.getAttribute("aria-checked")).toBe("true");

@@ -1167,6 +1167,17 @@
           "dayLimitInvalid": "Enter a positive whole number"
         }
       },
+      "products": {
+        "title": "Allowed products",
+        "loading": "Loading products…",
+        "loadError": "Could not load products.",
+        "retryAction": "Retry",
+        "emptyHint": "There are no active products in the catalog.",
+        "searchLabel": "Search products",
+        "selectedCount": "Selected: {{count}}",
+        "saveAction": "Save list",
+        "saveError": "Could not save the product list."
+      },
       "pairing": {
         "action": "Pairing code",
         "modalTitle": "Kiosk pairing code",

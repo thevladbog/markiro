@@ -1,10 +1,9 @@
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Button, Checkbox, Modal } from "@markiro/ui";
+import { Button, Modal } from "@markiro/ui";
 
-import type { ProductDto } from "../catalog/api.js";
 import type { CreateKioskInput, KioskDto, UpdateKioskInput } from "./api.js";
+import { KioskProductsSection } from "./KioskProductsSection.js";
 import {
   KIOSK_PROFILE_FORM_ID,
   KioskProfileForm,
@@ -18,11 +17,8 @@ export interface KioskFormProps {
   mode: "create" | "edit";
   initialValues?: KioskFormValues;
   kiosk?: KioskDto;
-  products: ProductDto[];
   submitting?: boolean;
-  savingProducts?: boolean;
   onSubmit: (input: CreateKioskInput | UpdateKioskInput) => void | Promise<void>;
-  onSaveProducts?: (productIds: string[]) => void | Promise<void>;
   onClose: () => void;
 }
 
@@ -36,26 +32,11 @@ export function KioskForm({
   mode,
   initialValues,
   kiosk,
-  products,
   submitting = false,
-  savingProducts = false,
   onSubmit,
-  onSaveProducts,
   onClose,
 }: KioskFormProps) {
   const { t } = useTranslation();
-  const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(
-    () => new Set(kiosk?.productIds ?? []),
-  );
-
-  const toggleProduct = (productId: string) => {
-    setSelectedProductIds((previous) => {
-      const next = new Set(previous);
-      if (next.has(productId)) next.delete(productId);
-      else next.add(productId);
-      return next;
-    });
-  };
 
   return (
     <Modal
@@ -86,29 +67,12 @@ export function KioskForm({
         onDirtyChange={() => undefined}
       />
       {mode === "edit" && kiosk ? (
-        <div className="mk-kiosk-products-editor">
-          <fieldset>
-            <legend>{t("pages.kiosks.form.productsLabel")}</legend>
-            <div>
-              {products.map((product) => (
-                <Checkbox
-                  key={product.id}
-                  label={product.name}
-                  checked={selectedProductIds.has(product.id)}
-                  onCheckedChange={() => toggleProduct(product.id)}
-                />
-              ))}
-            </div>
-          </fieldset>
-          <Button
-            type="button"
-            variant="secondary"
-            loading={savingProducts}
-            onClick={() => void onSaveProducts?.(Array.from(selectedProductIds))}
-          >
-            {t("pages.kiosks.form.saveProductsAction")}
-          </Button>
-        </div>
+        <KioskProductsSection
+          kiosk={kiosk}
+          onDirtyChange={() => undefined}
+          onBusyChange={() => undefined}
+          onErrorChange={() => undefined}
+        />
       ) : null}
     </Modal>
   );
