@@ -14,6 +14,7 @@ export interface ConfirmDialogProps {
   cancelLabel: string;
   tone?: ConfirmDialogTone;
   busy?: boolean;
+  confirmDisabled?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -27,6 +28,7 @@ export function ConfirmDialog({
   cancelLabel,
   tone = "default",
   busy = false,
+  confirmDisabled = false,
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
@@ -67,7 +69,7 @@ export function ConfirmDialog({
               </Button>
               <Button
                 variant={tone === "destructive" ? "destructive" : "primary"}
-                disabled={busy}
+                disabled={busy || confirmDisabled}
                 loading={busy}
                 onClick={onConfirm}
               >

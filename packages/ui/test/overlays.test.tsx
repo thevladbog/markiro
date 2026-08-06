@@ -237,6 +237,32 @@ it("maps Escape and backdrop to Cancel but blocks dismissal and submit while bus
   expect(onConfirm).not.toHaveBeenCalled();
 });
 
+it("can disable only the confirm action while input is invalid", async () => {
+  const user = userEvent.setup();
+  const onCancel = vi.fn();
+  const onConfirm = vi.fn();
+  render(
+    <ConfirmDialog
+      open
+      confirmDisabled
+      title="Close shift?"
+      description="Enter a reason"
+      cancelLabel="Cancel"
+      confirmLabel="Close"
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />,
+  );
+
+  expect((screen.getByRole("button", { name: "Close" }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(
+    false,
+  );
+  await user.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(onCancel).toHaveBeenCalledOnce();
+  expect(onConfirm).not.toHaveBeenCalled();
+});
+
 it("keeps only the top confirmation layer interactive above a panel", async () => {
   const user = userEvent.setup();
   const onPanelClose = vi.fn();

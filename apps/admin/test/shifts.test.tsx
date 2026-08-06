@@ -307,6 +307,9 @@ describe("ShiftsPage", () => {
     expect(table.getByText("Активна")).toBeDefined();
     expect(table.getByText("Закрыта")).toBeDefined();
     expect(table.getByText("Брак линии")).toBeDefined();
+    expect(screen.getByTestId("shifts-page").classList).toContain("mk-admin-page");
+    expect(screen.getByRole("group", { name: "Фильтры смен" })).toBeDefined();
+    expect(screen.getByText("3 смены").getAttribute("aria-live")).toBe("polite");
     expect(fetchMock).toHaveBeenCalledWith("/api/shifts", expect.any(Object));
   });
 
@@ -403,7 +406,7 @@ describe("ShiftsPage", () => {
     await screen.findByText("Сыр Российский");
 
     fireEvent.click(screen.getByRole("button", { name: "Закрыть смену" }));
-    const dialog = await screen.findByRole("dialog");
+    const dialog = await screen.findByRole("alertdialog", { name: "Закрыть смену" });
     fireEvent.change(within(dialog).getByLabelText("Причина закрытия"), {
       target: { value: "Плановая остановка" },
     });
@@ -418,6 +421,56 @@ describe("ShiftsPage", () => {
         }),
       );
     });
+  });
+
+  it("keeps a close failure and its reason inside the confirmation", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/shifts/s2/close" && init?.method === "POST") {
+        return jsonResponse(409, { message: "Shift already closed" });
+      }
+      if (path.startsWith("/api/shifts")) {
+        return jsonResponse(200, { items: [ACTIVE_TOLLING_SHIFT] });
+      }
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Закрыть смену" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Закрыть смену" });
+    fireEvent.change(within(dialog).getByLabelText("Причина закрытия"), {
+      target: { value: "Переналадка линии" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Закрыть смену" }));
+
+    expect(await within(dialog).findByText("Shift already closed")).toBeDefined();
+    expect((within(dialog).getByLabelText("Причина закрытия") as HTMLInputElement).value).toBe(
+      "Переналадка линии",
+    );
+  });
+
+  it("confirms planned-shift deletion and keeps API failures in the dialog", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/shifts/s1" && init?.method === "DELETE") {
+        return jsonResponse(409, { message: "Shift has production data" });
+      }
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [PLANNED_SHIFT] });
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Удалить" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Удалить смену?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Удалить" }));
+
+    expect(await within(dialog).findByText("Shift has production data")).toBeDefined();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/shifts/s1",
+      expect.objectContaining({ method: "DELETE" }),
+    );
   });
 
   it("disables draft products in the shift form's product select and shows a hint", async () => {
@@ -801,6 +854,11 @@ describe("ShiftsPage", () => {
     await user.click(screen.getByRole("button", { name: "Очистить дату: По дату" }));
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith("/api/shifts?status=active", expect.any(Object));
+    });
+
+    await user.click(screen.getByRole("button", { name: "Сбросить" }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/shifts", expect.any(Object));
     });
   });
 

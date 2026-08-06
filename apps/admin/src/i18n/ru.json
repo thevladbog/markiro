@@ -627,6 +627,10 @@
       "emptyTitle": "Смены не запланированы",
       "emptyHint": "Запланируйте первую смену, чтобы начать выпуск продукции.",
       "addAction": "Запланировать смену",
+      "resultCount_one": "{{count}} смена",
+      "resultCount_few": "{{count}} смены",
+      "resultCount_many": "{{count}} смен",
+      "resultCount_other": "{{count}} смены",
       "edit": "Изменить",
       "delete": "Удалить",
       "close": "Закрыть смену",
@@ -643,6 +647,8 @@
         "aggregation": "Агрегация"
       },
       "filters": {
+        "label": "Фильтры смен",
+        "reset": "Сбросить",
         "statusLabel": "Статус",
         "fromLabel": "С даты",
         "toLabel": "По дату",

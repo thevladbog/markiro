@@ -625,6 +625,8 @@
       "emptyTitle": "No shifts planned",
       "emptyHint": "Plan your first shift to start production.",
       "addAction": "Plan a shift",
+      "resultCount_one": "{{count}} shift",
+      "resultCount_other": "{{count}} shifts",
       "edit": "Edit",
       "delete": "Delete",
       "close": "Close shift",
@@ -641,6 +643,8 @@
         "aggregation": "Aggregation"
       },
       "filters": {
+        "label": "Shift filters",
+        "reset": "Reset",
         "statusLabel": "Status",
         "fromLabel": "From",
         "toLabel": "To",

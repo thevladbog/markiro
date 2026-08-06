@@ -2,6 +2,14 @@
   min-width: 0;
 }
 
+.mk-shifts-filter--status {
+  width: 200px;
+}
+
+.mk-shifts-filter--date {
+  width: 180px;
+}
+
 .mk-shift-form {
   display: flex;
   flex-direction: column;
@@ -51,6 +59,11 @@
 }
 
 @media (max-width: 639px) {
+  .mk-shifts-filter--status,
+  .mk-shifts-filter--date {
+    width: 100%;
+  }
+
   .mk-shift-form__grid {
     grid-template-columns: minmax(0, 1fr);
   }

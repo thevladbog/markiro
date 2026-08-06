@@ -3,14 +3,17 @@ import { useTranslation } from "react-i18next";
 import { Outlet, useNavigate } from "react-router";
 
 import {
+  AdminPage,
   Alert,
   Badge,
   Button,
+  ConfirmDialog,
   DatePicker,
   EmptyState,
+  FilterBar,
   Input,
-  Modal,
   PageHeader,
+  RowActions,
   Select,
   Spinner,
   StatusChip,
@@ -73,15 +76,16 @@ function AuthorizedPlannedShiftActions({ shift }: { shift: ShiftDto }) {
   const navigate = useNavigate();
   const deleteMutation = useDeleteShift();
   const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const handleDelete = async () => {
     try {
+      setDeleteError(null);
       await deleteMutation.mutateAsync(shift.id);
       toast("ok", t("pages.shifts.toasts.deleteSuccess"));
       setDeleting(false);
     } catch (error) {
-      toast(
-        "error",
+      setDeleteError(
         error instanceof ApiRequestError ? error.message : t("pages.shifts.toasts.deleteError"),
       );
     }
@@ -89,7 +93,7 @@ function AuthorizedPlannedShiftActions({ shift }: { shift: ShiftDto }) {
 
   return (
     <>
-      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+      <RowActions>
         <Button
           type="button"
           size="compact"
@@ -106,36 +110,31 @@ function AuthorizedPlannedShiftActions({ shift }: { shift: ShiftDto }) {
           type="button"
           size="compact"
           variant="destructive"
-          onClick={() => setDeleting(true)}
+          onClick={() => {
+            setDeleteError(null);
+            setDeleting(true);
+          }}
         >
           {t("pages.shifts.delete")}
         </Button>
-      </div>
-      <Modal
+      </RowActions>
+      <ConfirmDialog
         open={deleting}
-        onClose={() => setDeleting(false)}
-        closeLabel={t("common.close")}
         title={t("pages.shifts.deleteConfirmTitle")}
-        footer={
+        description={
           <>
-            <Button type="button" variant="secondary" onClick={() => setDeleting(false)}>
-              {t("pages.shifts.cancel")}
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              loading={deleteMutation.isPending}
-              onClick={() => void handleDelete()}
-            >
-              {t("pages.shifts.deleteConfirmAction")}
-            </Button>
+            <p>{t("pages.shifts.deleteConfirmBody", { name: shift.productName ?? "" })}</p>
+            {deleteError ? <Alert tone="error">{deleteError}</Alert> : null}
           </>
         }
-      >
-        <p style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>
-          {t("pages.shifts.deleteConfirmBody", { name: shift.productName ?? "" })}
-        </p>
-      </Modal>
+        entity={shift.productName ?? shift.id}
+        cancelLabel={t("pages.shifts.cancel")}
+        confirmLabel={t("pages.shifts.deleteConfirmAction")}
+        tone="destructive"
+        busy={deleteMutation.isPending}
+        onCancel={() => setDeleting(false)}
+        onConfirm={() => void handleDelete()}
+      />
     </>
   );
 }
@@ -145,16 +144,17 @@ function AuthorizedCloseShiftAction({ shift }: { shift: ShiftDto }) {
   const closeMutation = useCloseShift();
   const [open, setOpen] = useState(false);
   const [closeReason, setCloseReason] = useState("");
+  const [closeError, setCloseError] = useState<string | null>(null);
 
   const handleCloseShift = async () => {
     try {
+      setCloseError(null);
       await closeMutation.mutateAsync({ id: shift.id, reason: closeReason.trim() });
       toast("ok", t("pages.shifts.toasts.closeSuccess"));
       setOpen(false);
       setCloseReason("");
     } catch (error) {
-      toast(
-        "error",
+      setCloseError(
         error instanceof ApiRequestError ? error.message : t("pages.shifts.toasts.closeError"),
       );
     }
@@ -162,37 +162,46 @@ function AuthorizedCloseShiftAction({ shift }: { shift: ShiftDto }) {
 
   return (
     <>
-      <Button type="button" size="compact" variant="secondary" onClick={() => setOpen(true)}>
-        {t("pages.shifts.close")}
-      </Button>
-      <Modal
+      <RowActions>
+        <Button
+          type="button"
+          size="compact"
+          variant="secondary"
+          onClick={() => {
+            setCloseError(null);
+            setOpen(true);
+          }}
+        >
+          {t("pages.shifts.close")}
+        </Button>
+      </RowActions>
+      <ConfirmDialog
         open={open}
-        onClose={() => setOpen(false)}
-        closeLabel={t("common.close")}
         title={t("pages.shifts.closeModal.title")}
-        footer={
+        description={
           <>
-            <Button type="button" variant="secondary" onClick={() => setOpen(false)}>
-              {t("pages.shifts.closeModal.cancel")}
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              loading={closeMutation.isPending}
-              disabled={closeReason.trim().length < 3}
-              onClick={() => void handleCloseShift()}
-            >
-              {t("pages.shifts.closeModal.submit")}
-            </Button>
+            <Input
+              label={t("pages.shifts.closeModal.reasonLabel")}
+              value={closeReason}
+              onChange={(event) => setCloseReason(event.target.value)}
+            />
+            {closeError ? <Alert tone="error">{closeError}</Alert> : null}
           </>
         }
-      >
-        <Input
-          label={t("pages.shifts.closeModal.reasonLabel")}
-          value={closeReason}
-          onChange={(event) => setCloseReason(event.target.value)}
-        />
-      </Modal>
+        entity={shift.productName ?? shift.id}
+        cancelLabel={t("pages.shifts.closeModal.cancel")}
+        confirmLabel={t("pages.shifts.closeModal.submit")}
+        tone="destructive"
+        busy={closeMutation.isPending}
+        confirmDisabled={closeReason.trim().length < 3}
+        onCancel={() => {
+          if (closeMutation.isPending) return;
+          setOpen(false);
+          setCloseReason("");
+          setCloseError(null);
+        }}
+        onConfirm={() => void handleCloseShift()}
+      />
     </>
   );
 }
@@ -221,6 +230,7 @@ export function ShiftsPage() {
   const lines = useMemo(() => linesQuery.data ?? [], [linesQuery.data]);
   const counterparties = useMemo(() => counterpartiesQuery.data ?? [], [counterpartiesQuery.data]);
   const labelTemplates = useMemo(() => labelTemplatesQuery.data ?? [], [labelTemplatesQuery.data]);
+  const filtersActive = statusFilter !== "all" || Boolean(fromDate) || Boolean(toDate);
 
   const statusFilterOptions: SelectOption<StatusFilter>[] = [
     { value: "all", label: t("pages.shifts.filters.status.all") },
@@ -306,14 +316,31 @@ export function ShiftsPage() {
   );
 
   return (
-    <div style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: 20 }}>
+    <AdminPage className="mk-shifts-page" data-testid="shifts-page">
       <PageHeader
         title={t("pages.shifts.title")}
         actions={canWrite ? <AuthorizedCreateShiftAction /> : null}
       />
 
-      <div style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
-        <div style={{ width: 200 }}>
+      <FilterBar
+        label={t("pages.shifts.filters.label")}
+        resultSummary={
+          !shiftsQuery.isPending && !shiftsQuery.isError
+            ? t("pages.shifts.resultCount", { count: items.length })
+            : ""
+        }
+        {...(filtersActive
+          ? {
+              resetLabel: t("pages.shifts.filters.reset"),
+              onReset: () => {
+                setStatusFilter("all");
+                setFromDate("");
+                setToDate("");
+              },
+            }
+          : {})}
+      >
+        <div className="mk-shifts-filter mk-shifts-filter--status">
           <Select
             label={t("pages.shifts.filters.statusLabel")}
             options={statusFilterOptions}
@@ -321,7 +348,7 @@ export function ShiftsPage() {
             onValueChange={setStatusFilter}
           />
         </div>
-        <div style={{ width: 180 }}>
+        <div className="mk-shifts-filter mk-shifts-filter--date">
           <DatePicker
             label={t("pages.shifts.filters.fromLabel")}
             placeholder={t("common.datePicker.placeholder")}
@@ -334,7 +361,7 @@ export function ShiftsPage() {
             onValueChange={(value) => setFromDate(value ?? "")}
           />
         </div>
-        <div style={{ width: 180 }}>
+        <div className="mk-shifts-filter mk-shifts-filter--date">
           <DatePicker
             label={t("pages.shifts.filters.toLabel")}
             placeholder={t("common.datePicker.placeholder")}
@@ -347,7 +374,7 @@ export function ShiftsPage() {
             onValueChange={(value) => setToDate(value ?? "")}
           />
         </div>
-      </div>
+      </FilterBar>
 
       {shiftsQuery.isPending ? (
         <div style={{ display: "flex", justifyContent: "center", padding: 48 }}>
@@ -396,6 +423,6 @@ export function ShiftsPage() {
           } satisfies ShiftsPanelContext
         }
       />
-    </div>
+    </AdminPage>
   );
 }
