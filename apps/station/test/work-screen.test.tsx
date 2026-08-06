@@ -4,6 +4,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import { STATION_MIGRATIONS } from "@markiro/db";
 import { buildSscc, kmHash, parseKm, type LabelTemplateSpec } from "@markiro/domain";
 import i18n from "../src/i18n/index.js";
+import { readExceptions, type PendingException } from "../src/lib/box-exceptions-mirror.js";
 import type { CloseBoxResult } from "../src/lib/close-box.js";
 import { createFloorWorkRegistry, readSealedWorkSummary } from "../src/lib/credential-recovery.js";
 import type { PrinterLanguage } from "../src/lib/hardware-config.js";
@@ -106,6 +107,30 @@ function manualSource(): ScanSource & { emit: ScanListener } {
       };
     },
     emit: (raw) => listener(raw),
+  };
+}
+
+/** Keeps every subscribed callback so tests can invoke one after its cleanup. */
+function retainingSource(): ScanSource & {
+  emit: ScanListener;
+  latestSubscribed: () => ScanListener;
+} {
+  let listener: ScanListener = () => {};
+  const subscribed: ScanListener[] = [];
+  return {
+    start(next) {
+      listener = next;
+      subscribed.push(next);
+      return () => {
+        if (listener === next) listener = () => {};
+      };
+    },
+    emit: (raw) => listener(raw),
+    latestSubscribed() {
+      const latest = subscribed.at(-1);
+      if (!latest) throw new Error("scan source has not subscribed yet");
+      return latest;
+    },
   };
 }
 
@@ -866,6 +891,10 @@ describe("WorkScreen box progress, closing and printing", () => {
     );
   }
 
+  function readExceptionFacts(exec: SqlExecutor): Promise<PendingException[]> {
+    return readExceptions(exec, 100);
+  }
+
   it("undoes the last accepted scan in the open box and queues its exception", async () => {
     const exec = makeExec();
     renderWorkTracked({ exec, boxItemCount: 0 });
@@ -874,6 +903,11 @@ describe("WorkScreen box progress, closing and printing", () => {
     await waitFor(async () => {
       expect(await exec.all("SELECT code_hash FROM codes_mirror")).toHaveLength(1);
     });
+    const target = (
+      await exec.all<{ code_hash: string; scanned_at: string; box_id: string }>(
+        "SELECT code_hash, scanned_at, box_id FROM codes_mirror",
+      )
+    )[0]!;
 
     fireEvent.click(screen.getByRole("button", { name: "Исключения" }));
     fireEvent.click(await screen.findByRole("button", { name: "Отменить последний скан" }));
@@ -887,10 +921,25 @@ describe("WorkScreen box progress, closing and printing", () => {
       (screen.getByRole("button", { name: "Отменить последний скан" }) as HTMLButtonElement)
         .disabled,
     ).toBe(true);
-    const exceptions = await exec.all<{ kind: string; operator_id: string }>(
-      "SELECT kind, operator_id FROM box_exceptions_mirror",
-    );
-    expect(exceptions).toEqual([{ kind: "undo", operator_id: "operator-1" }]);
+    expect(await readExceptionFacts(exec)).toEqual([
+      {
+        id: expect.any(Number),
+        kind: "undo",
+        boxId: target.box_id,
+        codeHash: target.code_hash,
+        targetScannedAt: target.scanned_at,
+        shiftId: "s1",
+        terminalId: "dev-1",
+        operatorId: "operator-1",
+        reason: null,
+        at: expect.any(String),
+      },
+    ]);
+    expect(
+      await exec.all("SELECT box_id FROM boxes_mirror WHERE box_id = ? AND closed_at IS NULL", [
+        target.box_id,
+      ]),
+    ).toHaveLength(1);
   });
 
   it("clears every scan from the open box only after confirmation", async () => {
@@ -917,8 +966,26 @@ describe("WorkScreen box progress, closing and printing", () => {
     await waitFor(async () => {
       expect(await exec.all("SELECT code_hash FROM codes_mirror")).toHaveLength(0);
     });
-    const exceptions = await exec.all<{ kind: string }>("SELECT kind FROM box_exceptions_mirror");
-    expect(exceptions).toEqual([{ kind: "clear" }]);
+    expect(await readExceptionFacts(exec)).toEqual([
+      {
+        id: expect.any(Number),
+        kind: "clear",
+        boxId: SEEDED_BOX_ID,
+        codeHash: null,
+        targetScannedAt: null,
+        shiftId: "s1",
+        terminalId: "dev-1",
+        operatorId: "operator-1",
+        reason: null,
+        at: expect.any(String),
+      },
+    ]);
+    expect(
+      await exec.all(
+        "SELECT box_id FROM boxes_mirror WHERE box_id = ? AND closed_at IS NULL AND sscc IS NULL",
+        [SEEDED_BOX_ID],
+      ),
+    ).toHaveLength(1);
 
     fireEvent.click(await screen.findByRole("button", { name: "Вернуться к работе" }));
     act(() => scan(KM));
@@ -931,6 +998,12 @@ describe("WorkScreen box progress, closing and printing", () => {
     const exec = makeExec();
     await seedClosedBox(exec);
     await seedLabelSpec(exec, "s1");
+    const boxBefore = await exec.all<Record<string, unknown>>(
+      "SELECT * FROM boxes_mirror WHERE box_id = 'closed-box'",
+    );
+    const codesBefore = await exec.all<Record<string, unknown>>(
+      "SELECT * FROM codes_mirror WHERE box_id = 'closed-box' ORDER BY code_hash",
+    );
     const print = vi.fn().mockResolvedValue(undefined);
     const onScanRecorded = vi.fn();
     renderWorkTracked({
@@ -940,7 +1013,9 @@ describe("WorkScreen box progress, closing and printing", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Исключения" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Перепечатать этикетку" }));
+    const reprintAction = await screen.findByRole("button", { name: "Перепечатать этикетку" });
+    await waitFor(() => expect((reprintAction as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(reprintAction);
     fireEvent.click(screen.getByRole("button", { name: new RegExp(`SSCC ${SSCC}`) }));
     fireEvent.click(screen.getByRole("button", { name: "Другая причина" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Причина" }), {
@@ -951,11 +1026,31 @@ describe("WorkScreen box progress, closing and printing", () => {
 
     await waitFor(() => expect(print).toHaveBeenCalledOnce());
     await waitFor(async () => {
-      const rows = await exec.all<{ kind: string; reason: string }>(
-        "SELECT kind, reason FROM box_exceptions_mirror",
-      );
-      expect(rows).toEqual([{ kind: "reprint", reason: "Замятие этикетки" }]);
+      expect(await readExceptionFacts(exec)).toEqual([
+        {
+          id: expect.any(Number),
+          kind: "reprint",
+          boxId: "closed-box",
+          codeHash: null,
+          targetScannedAt: null,
+          shiftId: "s1",
+          terminalId: "dev-1",
+          operatorId: "operator-1",
+          reason: "Замятие этикетки",
+          at: expect.any(String),
+        },
+      ]);
     });
+    expect(
+      await exec.all<Record<string, unknown>>(
+        "SELECT * FROM boxes_mirror WHERE box_id = 'closed-box'",
+      ),
+    ).toEqual(boxBefore);
+    expect(
+      await exec.all<Record<string, unknown>>(
+        "SELECT * FROM codes_mirror WHERE box_id = 'closed-box' ORDER BY code_hash",
+      ),
+    ).toEqual(codesBefore);
     expect(onScanRecorded).toHaveBeenCalledOnce();
   });
 
@@ -974,6 +1069,65 @@ describe("WorkScreen box progress, closing and printing", () => {
     await waitFor(() => expect(onScan).toHaveBeenCalledOnce());
   });
 
+  it("drops a stale physical-source callback after the exception screen commits", async () => {
+    const exec = makeExec();
+    const source = retainingSource();
+    const onScan = vi.fn();
+    let registeredQueue: ScanQueue | null = null;
+    renderWorkTracked({
+      exec,
+      source,
+      onScan,
+      onScanQueueRegister(queue) {
+        registeredQueue = queue;
+        return () => {};
+      },
+    });
+    await waitFor(() => expect(registeredQueue).not.toBeNull());
+    const staleCallback = source.latestSubscribed();
+
+    fireEvent.click(screen.getByRole("button", { name: "Исключения" }));
+    act(() => staleCallback(KM));
+    await act(async () => {
+      await registeredQueue!.idle();
+    });
+
+    expect(onScan).not.toHaveBeenCalled();
+    expect(await exec.all("SELECT * FROM outbox")).toHaveLength(0);
+  });
+
+  it("orders a confirmed UI correction behind work already accepted by the current scan queue", async () => {
+    const exec = makeExec();
+    let registeredQueue: ScanQueue | null = null;
+    renderWorkTracked({
+      exec,
+      boxItemCount: 0,
+      onScanQueueRegister(queue) {
+        registeredQueue = queue;
+        return () => {};
+      },
+    });
+    await waitFor(() => expect(registeredQueue).not.toBeNull());
+
+    let releaseBlocker!: () => void;
+    const blocker = new Promise<void>((resolve) => {
+      releaseBlocker = resolve;
+    });
+    expect(registeredQueue!.enqueueJob(() => blocker)).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Исключения" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Очистить короб" }));
+    fireEvent.click(screen.getByRole("button", { name: "Подтвердить очистку" }));
+    await act(async () => Promise.resolve());
+    expect(await readExceptionFacts(exec)).toHaveLength(0);
+
+    releaseBlocker();
+    await act(async () => {
+      await registeredQueue!.idle();
+    });
+    expect((await readExceptionFacts(exec)).map((fact) => fact.kind)).toEqual(["clear"]);
+  });
+
   it("disassembles a closed box, removes its codes and refreshes the panel", async () => {
     const exec = makeExec();
     await seedClosedBox(exec);
@@ -981,7 +1135,9 @@ describe("WorkScreen box progress, closing and printing", () => {
     renderWorkTracked({ exec, onScanRecorded });
 
     fireEvent.click(screen.getByRole("button", { name: "Исключения" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Расформировать короб" }));
+    const disassembleAction = await screen.findByRole("button", { name: "Расформировать короб" });
+    await waitFor(() => expect((disassembleAction as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(disassembleAction);
     fireEvent.click(screen.getByRole("button", { name: new RegExp(`SSCC ${SSCC}`) }));
     fireEvent.click(screen.getByRole("button", { name: "Другая причина" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Причина" }), {
@@ -1000,10 +1156,20 @@ describe("WorkScreen box progress, closing and printing", () => {
       ).toHaveLength(0);
     });
     expect(screen.queryByText(`SSCC ${SSCC}`)).toBeNull();
-    const exceptions = await exec.all<{ kind: string; reason: string }>(
-      "SELECT kind, reason FROM box_exceptions_mirror",
-    );
-    expect(exceptions).toEqual([{ kind: "disassemble", reason: "Чужой заказ" }]);
+    expect(await readExceptionFacts(exec)).toEqual([
+      {
+        id: expect.any(Number),
+        kind: "disassemble",
+        boxId: "closed-box",
+        codeHash: null,
+        targetScannedAt: null,
+        shiftId: "s1",
+        terminalId: "dev-1",
+        operatorId: "operator-1",
+        reason: "Чужой заказ",
+        at: expect.any(String),
+      },
+    ]);
     expect(onScanRecorded).toHaveBeenCalledOnce();
   });
 

@@ -324,6 +324,15 @@ export function WorkScreen({
   const closingRef = useRef(false);
   const [closing, setClosing] = useState(false);
   const [boxActionPending, setBoxActionPending] = useState(false);
+  // Render-time guard for callbacks already handed to physical scan sources.
+  // Effect cleanup cannot revoke a callback synchronously: a source may invoke
+  // the old function after this render commits but before the passive cleanup
+  // runs (or even after cleanup if native delivery was already queued). Keep
+  // the current blocking state in a ref so those stale callbacks are harmless.
+  const ordinaryScanBlockedRef = useRef(false);
+  ordinaryScanBlockedRef.current = Boolean(
+    verification || confirmClear || boxActionPending || showExceptions || noSerials,
+  );
 
   function requestExit() {
     if (pendingSync > 0) setConfirmExit(true);
@@ -967,15 +976,18 @@ export function WorkScreen({
   // to compete with anything is print verification itself, not a stray
   // rejection from the loop underneath it.
   useEffect(() => {
-    if (verification || confirmClear || boxActionPending) return;
+    if (verification || confirmClear || boxActionPending || showExceptions) return;
     // Keep the physical source subscribed while serial recovery owns the
     // screen, but deliberately discard its payloads. A keyboard-wedge source
     // must still preventDefault() on its terminating Enter; unsubscribing it
     // would let that Enter activate the dialog's focused recovery button and
     // dismiss a blocking state without an intentional operator action.
     if (noSerials) return source.start(() => {});
-    return source.start((raw) => queue.enqueue(raw));
-  }, [source, queue, verification, noSerials, confirmClear, boxActionPending]);
+    return source.start((raw) => {
+      if (ordinaryScanBlockedRef.current) return;
+      queue.enqueue(raw);
+    });
+  }, [source, queue, verification, noSerials, confirmClear, boxActionPending, showExceptions]);
 
   useEffect(
     () => () => {
