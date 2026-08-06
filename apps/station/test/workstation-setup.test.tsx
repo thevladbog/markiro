@@ -297,6 +297,9 @@ describe("WorkstationSetup", () => {
           params.some((value) => typeof value === "string" && value.includes('"volume":0.4')),
       ),
     ).toBe(true);
+    expect(screen.getByTestId("setup-result").textContent).toBe(
+      "Set a clearly audible level; visual signals remain available when muted.",
+    );
 
     view.rerender(
       <WorkstationSetup
@@ -314,6 +317,21 @@ describe("WorkstationSetup", () => {
     expect(screen.getByTestId("setup-result").textContent).toBe(
       "Enable sound and set volume above zero to play a test.",
     );
+
+    view.rerender(
+      <WorkstationSetup
+        hw={hardware()}
+        exec={exec}
+        sound={{ muted: false, volume: 0.4 }}
+        onSoundChange={onSoundChange}
+        onConfigChange={() => {}}
+        onDone={() => {}}
+      />,
+    );
+    expect(screen.getByTestId("setup-result").textContent).toBe(
+      "Set a clearly audible level; visual signals remain available when muted.",
+    );
+    expect(screen.queryByText("Sound test requested.")).toBeNull();
   });
 
   it("requires explicit confirmation before removing station credentials for re-pairing", async () => {

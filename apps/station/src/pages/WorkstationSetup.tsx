@@ -253,6 +253,7 @@ export function WorkstationSetup({
   }
 
   async function changeSound(next: SoundSettings) {
+    setTestResult((current) => (current?.tab === "sound" ? null : current));
     onSoundChange(next);
     try {
       await saveSoundSettings(exec, next);
