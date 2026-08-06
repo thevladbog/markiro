@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useParams } from "react-router";
 
 import {
   Alert,
@@ -215,12 +216,14 @@ function AuthorizedKioskRowActions({
  */
 export function KiosksPage() {
   const { t } = useTranslation();
+  const { id } = useParams<{ id: string }>();
   const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
   const canManageCredentials = useCan(CABINET_CAPABILITY.CREDENTIALS_MANAGE);
   const { data, isPending, isError } = useKiosks();
   const { data: productsData } = useProducts({ status: "active" });
 
   const items = data ?? [];
+  const visibleItems = id ? items.filter((item) => item.id === id) : items;
   const activeProducts = useMemo(() => productsData ?? [], [productsData]);
 
   const columns: TableColumn<KioskDto>[] = useMemo(
@@ -287,14 +290,16 @@ export function KiosksPage() {
         </div>
       ) : isError ? (
         <Alert tone="error">{t("common.loadError")}</Alert>
-      ) : items.length === 0 ? (
+      ) : id && visibleItems.length === 0 ? (
+        <EmptyState title={t("pages.kiosks.emptyTitle")} hint={t("common.loadError")} />
+      ) : visibleItems.length === 0 ? (
         <EmptyState
           title={t("pages.kiosks.emptyTitle")}
           hint={t("pages.kiosks.emptyHint")}
           action={canWrite ? <AuthorizedCreateKioskAction products={activeProducts} /> : null}
         />
       ) : (
-        <Table columns={columns} rows={items} />
+        <Table columns={columns} rows={visibleItems} />
       )}
 
       <ReasonsEditor />

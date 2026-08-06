@@ -930,11 +930,29 @@
       "emptyTitle": "No devices yet",
       "emptyHint": "Add a station or kiosk to get started.",
       "type": { "station": "Station", "kiosk": "Kiosk" },
-      "status": { "awaiting_pairing": "Awaiting pairing", "online": "Online", "offline": "Offline", "revoked": "Revoked" },
-      "table": { "name": "Name", "type": "Type", "place": "Place", "status": "Status", "actions": "Actions" },
+      "status": {
+        "awaiting_pairing": "Awaiting pairing",
+        "online": "Online",
+        "offline": "Offline",
+        "revoked": "Revoked"
+      },
+      "table": {
+        "name": "Name",
+        "type": "Type",
+        "place": "Place",
+        "status": "Status",
+        "actions": "Actions"
+      },
       "kioskSettings": "Kiosk settings",
       "pager": { "label": "Device pages", "previous": "Previous page", "next": "Next page" },
-      "drawer": { "title": "New device", "codeTitle": "Pair device", "codePending": "The device was created. The pairing code will be added in the next step." }
+      "drawer": {
+        "title": "New device",
+        "codeTitle": "Pair device",
+        "codePending": "The device was created. The pairing code will be added in the next step.",
+        "createError": "Could not create the device",
+        "issueError": "The device was created, but its pairing code was not issued.",
+        "retryIssue": "Retry issuing code"
+      }
     },
     "kiosks": {
       "title": "Kiosks",

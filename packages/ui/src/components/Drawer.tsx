@@ -56,11 +56,25 @@ export function Drawer({
     if (!open) return undefined;
 
     const previouslyFocused = document.activeElement as HTMLElement | null;
+    const bodyOverflow = document.body.style.overflow;
     const dialog = dialogRef.current;
     const focusable = dialog ? getFocusable(dialog) : [];
     (focusable[0] ?? dialog)?.focus();
 
-    return () => previouslyFocused?.focus();
+    document.body.style.overflow = "hidden";
+    const blockBackgroundScroll = (event: Event) => {
+      if (dialogRef.current?.contains(event.target as Node)) return;
+      event.preventDefault();
+    };
+    document.addEventListener("wheel", blockBackgroundScroll, { passive: false });
+    document.addEventListener("touchmove", blockBackgroundScroll, { passive: false });
+
+    return () => {
+      document.body.style.overflow = bodyOverflow;
+      document.removeEventListener("wheel", blockBackgroundScroll);
+      document.removeEventListener("touchmove", blockBackgroundScroll);
+      previouslyFocused?.focus();
+    };
   }, [open]);
 
   if (!open) return null;
@@ -111,7 +125,12 @@ export function Drawer({
           <h2 id={titleId} className="mk-drawer__title">
             {title}
           </h2>
-          <button type="button" className="mk-drawer__close" onClick={onClose} aria-label={closeLabel}>
+          <button
+            type="button"
+            className="mk-drawer__close"
+            onClick={onClose}
+            aria-label={closeLabel}
+          >
             ×
           </button>
         </header>

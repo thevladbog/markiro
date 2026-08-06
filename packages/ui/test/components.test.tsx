@@ -194,7 +194,16 @@ describe("Card", () => {
 describe("Drawer", () => {
   function DrawerHarness() {
     const [open, setOpen] = useState(false);
-    return <><button type="button" onClick={() => setOpen(true)}>Open drawer</button><Drawer open={open} title="Device setup" onClose={() => setOpen(false)}><button type="button">Save device</button></Drawer></>;
+    return (
+      <>
+        <button type="button" onClick={() => setOpen(true)}>
+          Open drawer
+        </button>
+        <Drawer open={open} title="Device setup" onClose={() => setOpen(false)}>
+          <button type="button">Save device</button>
+        </Drawer>
+      </>
+    );
   }
 
   it("keeps keyboard focus in a labelled modal dialog and restores its opener when closed", async () => {
@@ -228,6 +237,21 @@ describe("Drawer", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(document.activeElement).toBe(opener);
+  });
+
+  it("locks document background scrolling only while open and restores it after close", () => {
+    const { rerender } = render(
+      <Drawer open title="Device setup" onClose={() => undefined}>
+        Content
+      </Drawer>,
+    );
+    expect(document.body.style.overflow).toBe("hidden");
+    rerender(
+      <Drawer open={false} title="Device setup" onClose={() => undefined}>
+        Content
+      </Drawer>,
+    );
+    expect(document.body.style.overflow).toBe("");
   });
 
   it("closes from its overlay and its close control", async () => {

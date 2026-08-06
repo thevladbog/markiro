@@ -74,10 +74,16 @@
 }
 
 @keyframes mk-drawer-enter {
-  from { transform: translateX(100%); }
-  to { transform: translateX(0); }
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .mk-drawer { animation: none; }
+  .mk-drawer {
+    animation: none;
+  }
 }
