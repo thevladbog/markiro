@@ -202,8 +202,25 @@ export class PairingService {
   ): Promise<PairKioskResultDto> {
     const codeHash = hashPairingCode(code, loadEnv().PAIRING_CODE_PEPPER);
     const rows = await this.db
-      .select()
+      .select({
+        id: schema.kioskPairingCodes.id,
+        tenantId: schema.kioskPairingCodes.tenantId,
+        kioskId: schema.kioskPairingCodes.kioskId,
+        codeHash: schema.kioskPairingCodes.codeHash,
+        expiresAt: schema.kioskPairingCodes.expiresAt,
+        usedAt: schema.kioskPairingCodes.usedAt,
+        attempts: schema.kioskPairingCodes.attempts,
+        createdAt: schema.kioskPairingCodes.createdAt,
+        hasExistingCredential: sql<boolean>`${schema.kiosks.deviceTokenHash} is not null`,
+      })
       .from(schema.kioskPairingCodes)
+      .innerJoin(
+        schema.kiosks,
+        and(
+          eq(schema.kiosks.tenantId, schema.kioskPairingCodes.tenantId),
+          eq(schema.kiosks.id, schema.kioskPairingCodes.kioskId),
+        ),
+      )
       .where(eq(schema.kioskPairingCodes.codeHash, codeHash))
       // Deterministic order so that, when only dead rows share this hash
       // (see `candidate` below), which row's `attempts` gets bumped is
@@ -235,7 +252,7 @@ export class PairingService {
     if (!candidate) throw new UnauthorizedException();
     auditContext.tenantId = candidate.tenantId;
     auditContext.kioskId = candidate.kioskId;
-    await this.classifyResolvedPairing(auditContext);
+    auditContext.action = candidate.hasExistingCredential ? "kiosk.repair" : "kiosk.pair";
     if (candidate.attempts >= PAIR_CODE_MAX_ATTEMPTS) throw new UnauthorizedException();
     if (candidate.usedAt || candidate.expiresAt.getTime() <= now.getTime()) {
       await this.db
@@ -375,25 +392,6 @@ export class PairingService {
       // Pairing audit is best-effort. It must never replace the original
       // validation, rate-limit, bootstrap, or transaction result.
     }
-  }
-
-  /**
-   * Once the server has resolved a code to its tenant-scoped durable kiosk,
-   * classify subsequent failures from server state rather than from caller
-   * input. This read is deliberately used only for audit naming: the locked
-   * kiosk row inside the redemption transaction remains authoritative for
-   * authorization, lifecycle state, and credential rotation, and overwrites
-   * this label if the credential state changes before that lock is acquired.
-   */
-  private async classifyResolvedPairing(context: KioskPairAuditContext): Promise<void> {
-    if (context.tenantId === null || context.kioskId === null) return;
-    const [kiosk] = await this.db
-      .select({ deviceTokenHash: schema.kiosks.deviceTokenHash })
-      .from(schema.kiosks)
-      .where(
-        and(eq(schema.kiosks.tenantId, context.tenantId), eq(schema.kiosks.id, context.kioskId)),
-      );
-    context.action = kiosk?.deviceTokenHash ? "kiosk.repair" : "kiosk.pair";
   }
 
   private isOneLiveCodeViolation(error: unknown): boolean {

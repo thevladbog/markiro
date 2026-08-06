@@ -10,7 +10,7 @@ import { AppModule } from "../src/app.module";
 import { DB_POOL } from "../src/auth/auth.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
-import { hashPairingCode } from "../src/pickup/device-token";
+import { hashDeviceToken, hashPairingCode } from "../src/pickup/device-token";
 import { PairAttemptsService } from "../src/modules/device-pairing/pair-attempts.service";
 import { normalizePairSource } from "../src/modules/device-pairing/pair-source";
 import {
@@ -465,6 +465,7 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
       .update(schema.kioskPairingCodes)
       .set({ expiresAt: new Date(Date.now() - 1_000) })
       .where(eq(schema.kioskPairingCodes.codeHash, codeHashOf(expired.body.code)));
+    const selectSpy = vi.spyOn(db, "select");
     vi.mocked(audit.deviceCredentialMutation).mockClear();
     await request(app!.getHttpServer())
       .post("/kiosk/pair")
@@ -478,6 +479,10 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
       resourceId: kioskId,
       outcome: "failed",
     });
+    expect(selectSpy).not.toHaveBeenCalledWith({
+      deviceTokenHash: schema.kiosks.deviceTokenHash,
+    });
+    selectSpy.mockRestore();
 
     const locked = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
     await db
@@ -531,6 +536,36 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
       action: "kiosk.repair",
       resourceId: kioskId,
       outcome: "failed",
+    });
+  });
+
+  it("lets the locked kiosk row override the code lookup pairing classification", async () => {
+    const issued = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    vi.mocked(audit.deviceCredentialMutation).mockClear();
+
+    const pickupOrders = app!.get(PickupOrdersService);
+    const originalBootstrap = pickupOrders.bootstrap.bind(pickupOrders);
+    vi.spyOn(pickupOrders, "bootstrap").mockImplementationOnce(async (...args) => {
+      const bootstrap = await originalBootstrap(...args);
+      await db
+        .update(schema.kiosks)
+        .set({ deviceTokenHash: hashDeviceToken(randomUUID()) })
+        .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, kioskId)));
+      return bootstrap;
+    });
+
+    await request(app!.getHttpServer())
+      .post("/kiosk/pair")
+      .send({ code: issued.body.code })
+      .expect(201);
+
+    expect(audit.deviceCredentialMutation).toHaveBeenCalledWith({
+      tenantId,
+      actorType: "unauthenticated_device",
+      actorId: null,
+      action: "kiosk.repair",
+      resourceId: kioskId,
+      outcome: "succeeded",
     });
   });
 
