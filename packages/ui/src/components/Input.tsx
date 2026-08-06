@@ -2,8 +2,10 @@ import { useId, useState, type FocusEvent, type InputHTMLAttributes, type ReactN
 
 import { cn } from "../cn.js";
 
-/** Порт `design-system/components/forms/Input.jsx` — только офисный режим (высота 40px). */
-export interface InputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "prefix"> {
+export type InputSize = "md" | "floor";
+
+/** Порт `design-system/components/forms/Input.jsx` с офисным и цеховым размерами. */
+export interface InputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "prefix" | "size"> {
   label?: string;
   /** Подсказка под полем */
   hint?: string;
@@ -13,6 +15,7 @@ export interface InputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 
   mono?: boolean;
   prefix?: ReactNode;
   suffix?: ReactNode;
+  size?: InputSize;
 }
 
 export function Input({
@@ -22,6 +25,7 @@ export function Input({
   mono = false,
   prefix,
   suffix,
+  size = "md",
   disabled,
   className,
   style,
@@ -53,7 +57,13 @@ export function Input({
       style={{ display: "flex", flexDirection: "column", gap: 6, ...style }}
     >
       {label && (
-        <label htmlFor={inputId} style={{ font: "var(--text-caption)", color: "var(--fg-2)" }}>
+        <label
+          htmlFor={inputId}
+          style={{
+            font: size === "floor" ? "var(--floor-body-strong)" : "var(--text-caption)",
+            color: "var(--fg-2)",
+          }}
+        >
           {label}
         </label>
       )}
@@ -63,8 +73,8 @@ export function Input({
           display: "flex",
           alignItems: "center",
           gap: 8,
-          height: "var(--control-md)",
-          padding: "0 12px",
+          height: size === "floor" ? "var(--control-floor)" : "var(--control-md)",
+          padding: size === "floor" ? "0 16px" : "0 12px",
           borderRadius: "var(--r-2)",
           background: "var(--surface-card)",
           border: `1px solid ${
@@ -76,7 +86,16 @@ export function Input({
           opacity: disabled ? 0.45 : 1,
         }}
       >
-        {prefix && <span style={{ color: "var(--fg-3)", font: "var(--text-code)" }}>{prefix}</span>}
+        {prefix && (
+          <span
+            style={{
+              color: "var(--fg-3)",
+              font: size === "floor" ? "var(--floor-body)" : "var(--text-code)",
+            }}
+          >
+            {prefix}
+          </span>
+        )}
         <input
           id={inputId}
           disabled={disabled}
@@ -93,20 +112,27 @@ export function Input({
             background: "transparent",
             color: "var(--fg-1)",
             fontFamily: mono ? "var(--font-mono)" : "var(--font-ui)",
-            fontSize: 14,
+            fontSize: size === "floor" ? 20 : 14,
             fontVariantNumeric: "tabular-nums",
           }}
           {...rest}
         />
         {suffix && (
-          <span style={{ color: "var(--fg-3)", font: "var(--text-caption)" }}>{suffix}</span>
+          <span
+            style={{
+              color: "var(--fg-3)",
+              font: size === "floor" ? "var(--floor-body)" : "var(--text-caption)",
+            }}
+          >
+            {suffix}
+          </span>
         )}
       </span>
       {(error || hint) && (
         <span
           id={error ? errorId : hintId}
           style={{
-            font: "var(--text-body-sm)",
+            font: size === "floor" ? "var(--floor-body)" : "var(--text-body-sm)",
             color: error ? "var(--err-fg)" : "var(--fg-3)",
           }}
         >

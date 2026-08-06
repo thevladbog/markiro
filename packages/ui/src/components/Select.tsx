@@ -4,14 +4,19 @@ import { cn } from "../cn.js";
 
 /** Порт `design-system/components/forms/Select.jsx` (нативный select) — только офисный режим. */
 export type SelectOption = string | { value: string; label: string; disabled?: boolean };
+export type SelectSize = "md" | "floor";
 
-export interface SelectProps extends Omit<SelectHTMLAttributes<HTMLSelectElement>, "onChange"> {
+export interface SelectProps extends Omit<
+  SelectHTMLAttributes<HTMLSelectElement>,
+  "onChange" | "size"
+> {
   label?: string;
   /** Строки или {value, label} */
   options: SelectOption[];
   onChange?: (value: string) => void;
   hint?: string;
   error?: string;
+  size?: SelectSize;
 }
 
 export function Select({
@@ -22,6 +27,7 @@ export function Select({
   disabled,
   hint,
   error,
+  size = "md",
   className,
   style,
   id,
@@ -52,7 +58,13 @@ export function Select({
       style={{ display: "flex", flexDirection: "column", gap: 6, ...style }}
     >
       {label && (
-        <label htmlFor={selectId} style={{ font: "var(--text-caption)", color: "var(--fg-2)" }}>
+        <label
+          htmlFor={selectId}
+          style={{
+            font: size === "floor" ? "var(--floor-body-strong)" : "var(--text-caption)",
+            color: "var(--fg-2)",
+          }}
+        >
           {label}
         </label>
       )}
@@ -71,8 +83,8 @@ export function Select({
             appearance: "none",
             WebkitAppearance: "none",
             width: "100%",
-            height: "var(--control-md)",
-            padding: "0 36px 0 12px",
+            height: size === "floor" ? "var(--control-floor)" : "var(--control-md)",
+            padding: size === "floor" ? "0 48px 0 16px" : "0 36px 0 12px",
             borderRadius: "var(--r-2)",
             background: "var(--surface-card)",
             color: "var(--fg-1)",
@@ -82,7 +94,7 @@ export function Select({
             boxShadow: focus
               ? "0 0 0 2px color-mix(in srgb, var(--focus-ring) 25%, transparent)"
               : "none",
-            font: "var(--text-body)",
+            font: size === "floor" ? "var(--floor-body)" : "var(--text-body)",
             cursor: disabled ? "not-allowed" : "pointer",
             opacity: disabled ? 0.45 : 1,
           }}
@@ -109,7 +121,7 @@ export function Select({
           aria-hidden="true"
           style={{
             position: "absolute",
-            right: 12,
+            right: size === "floor" ? 16 : 12,
             top: "50%",
             transform: "translateY(-50%)",
             pointerEvents: "none",
@@ -122,7 +134,7 @@ export function Select({
         <span
           id={error ? errorId : hintId}
           style={{
-            font: "var(--text-body-sm)",
+            font: size === "floor" ? "var(--floor-body)" : "var(--text-body-sm)",
             color: error ? "var(--err-fg)" : "var(--fg-3)",
           }}
         >

@@ -2,10 +2,10 @@ export { Button } from "./Button.js";
 export type { ButtonProps, ButtonSize, ButtonVariant } from "./Button.js";
 
 export { Input } from "./Input.js";
-export type { InputProps } from "./Input.js";
+export type { InputProps, InputSize } from "./Input.js";
 
 export { Select } from "./Select.js";
-export type { SelectOption, SelectProps } from "./Select.js";
+export type { SelectOption, SelectProps, SelectSize } from "./Select.js";
 
 export { Field } from "./Field.js";
 export type { FieldProps } from "./Field.js";
@@ -47,7 +47,13 @@ export { toast } from "./Toast.js";
 export type { ToastTone } from "./Toast.js";
 
 export { PinPad } from "./PinPad.js";
-export type { PinPadProps } from "./PinPad.js";
+export type { PinPadProps, PinPadSize } from "./PinPad.js";
+
+export { Pager } from "./Pager.js";
+export type { PagerProps } from "./Pager.js";
+
+export { FullScreenDialog } from "./FullScreenDialog.js";
+export type { FullScreenDialogProps } from "./FullScreenDialog.js";
 
 export { SignalOverlay } from "./SignalOverlay.js";
 export type { SignalOverlayProps, SignalTone } from "./SignalOverlay.js";

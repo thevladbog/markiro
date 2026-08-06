@@ -1,5 +1,7 @@
 import { act, cleanup, render, screen, within } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
+// @ts-expect-error The UI test tsconfig omits Node globals; Vitest still runs in Node.
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -9,14 +11,21 @@ import {
   Modal,
   PageHeader,
   Sidebar,
+  SignalOverlay,
   Spinner,
   toast,
   type AlertTone,
   type SidebarItem,
 } from "../src/components/index.js";
 
+const tokenStyles = readFileSync("src/tokens.css", "utf8") as string;
+const tokenStyleElement = document.createElement("style");
+tokenStyleElement.textContent = tokenStyles;
+document.head.append(tokenStyleElement);
+
 afterEach(() => {
   cleanup();
+  delete document.documentElement.dataset.theme;
 });
 
 describe("Alert", () => {
@@ -46,6 +55,59 @@ describe("Alert", () => {
     expect(screen.getByText("Проверьте кабель и питание.")).toBeDefined();
     expect(screen.getByRole("button", { name: "Повторить" })).toBeDefined();
   });
+});
+
+function relativeLuminance(hex: string): number {
+  const channels = hex
+    .slice(1)
+    .match(/.{2}/g)
+    ?.map((channel) => Number.parseInt(channel, 16) / 255)
+    .map((channel) => (channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4));
+  if (!channels || channels.length !== 3) throw new Error(`Invalid RGB hex: ${hex}`);
+  return 0.2126 * channels[0]! + 0.7152 * channels[1]! + 0.0722 * channels[2]!;
+}
+
+function contrastRatio(first: string, second: string): number {
+  const [lighter, darker] = [relativeLuminance(first), relativeLuminance(second)].sort(
+    (a, b) => b - a,
+  );
+  return (lighter! + 0.05) / (darker! + 0.05);
+}
+
+describe("SignalOverlay", () => {
+  it.each([
+    ["ok", "var(--ok-solid)", "var(--fg-on-ok-solid)"],
+    ["error", "var(--err-solid)", "var(--fg-on-err-solid)"],
+    ["duplicate", "var(--warn-solid)", "var(--fg-on-warn-solid)"],
+  ] as const)("pairs tone=%s with an icon, title, detail, and on-solid token", (tone, bg, fg) => {
+    const { container } = render(
+      <SignalOverlay tone={tone} title="Scan result" detail="Additional context" />,
+    );
+
+    const alert = screen.getByRole("alert");
+    expect(alert.style.background).toBe(bg);
+    expect(alert.style.color).toBe(fg);
+    expect(container.querySelector("svg[aria-hidden='true']")).not.toBeNull();
+    expect(screen.getByText("Scan result")).toBeDefined();
+    expect(screen.getByText("Additional context")).toBeDefined();
+  });
+
+  it.each(["light", "dark"] as const)(
+    "keeps every %s semantic solid pair at 4.5:1 or higher",
+    (theme) => {
+      if (theme === "dark") document.documentElement.dataset.theme = "dark";
+      else delete document.documentElement.dataset.theme;
+
+      const styles = getComputedStyle(document.documentElement);
+      for (const tone of ["ok", "err", "warn", "info"] as const) {
+        const background = styles.getPropertyValue(`--${tone}-solid`).trim();
+        const foreground = styles.getPropertyValue(`--fg-on-${tone}-solid`).trim();
+        expect(contrastRatio(background, foreground), `${theme} ${tone}`).toBeGreaterThanOrEqual(
+          4.5,
+        );
+      }
+    },
+  );
 });
 
 describe("Modal", () => {

@@ -1,5 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
+// @ts-expect-error The UI test tsconfig omits Node globals; Vitest still runs in Node.
+import { readFileSync } from "node:fs";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -9,11 +11,18 @@ import {
   Card,
   Drawer,
   Field,
+  FullScreenDialog,
   Input,
+  Pager,
   Select,
   StatusChip,
   Table,
 } from "../src/components/index.js";
+
+const sharedStyles = readFileSync("src/styles.css", "utf8") as string;
+const sharedStyleElement = document.createElement("style");
+sharedStyleElement.textContent = sharedStyles;
+document.head.append(sharedStyleElement);
 
 afterEach(() => {
   cleanup();
@@ -68,6 +77,42 @@ describe("Button", () => {
     await user.click(screen.getByRole("button"));
 
     expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it("renders a disabled floor target without changing office defaults", async () => {
+    const user = userEvent.setup();
+    const onClick = vi.fn();
+    render(
+      <Button size="floor" disabled onClick={onClick}>
+        Start shift
+      </Button>,
+    );
+
+    const button = screen.getByRole("button", { name: "Start shift" });
+    expect(button.className).toContain("mk-btn--floor");
+    expect(button.style.height).toBe("var(--control-floor)");
+    expect(button.style.font).toBe("var(--floor-body-strong)");
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+
+    await user.click(button);
+    expect(onClick).not.toHaveBeenCalled();
+  });
+});
+
+describe("generic document reset", () => {
+  it("enables full-height layouts without globally hiding overflow", () => {
+    const root = document.createElement("div");
+    root.id = "root";
+    document.body.append(root);
+
+    expect(getComputedStyle(document.documentElement).height).toBe("100%");
+    expect(getComputedStyle(document.body).height).toBe("100%");
+    expect(getComputedStyle(root).height).toBe("100%");
+    expect(getComputedStyle(document.body).margin).toBe("0px");
+    expect(getComputedStyle(root).boxSizing).toBe("border-box");
+    expect(getComputedStyle(document.body).overflow).not.toBe("hidden");
+
+    root.remove();
   });
 });
 
@@ -140,6 +185,20 @@ describe("Input", () => {
     const input = screen.getByLabelText("GTIN");
     expect(input.style.fontFamily).toBe("var(--font-mono)");
   });
+
+  it("links a floor-sized input to its label and error", () => {
+    render(<Input size="floor" label="Quantity" error="Too large" disabled />);
+
+    const input = screen.getByRole("textbox", { name: "Quantity" });
+    expect((input as HTMLInputElement).disabled).toBe(true);
+    expect(input.style.fontSize).toBe("20px");
+    expect(input.parentElement?.style.height).toBe("var(--control-floor)");
+    expect(screen.getByText("Quantity").style.font).toBe("var(--floor-body-strong)");
+    expect(input.getAttribute("aria-describedby")).toBeTruthy();
+    expect(document.getElementById(input.getAttribute("aria-describedby")!)?.textContent).toBe(
+      "Too large",
+    );
+  });
 });
 
 describe("Select", () => {
@@ -174,6 +233,133 @@ describe("Select", () => {
     expect(milkOption.disabled).toBe(false);
     expect(cheeseOption.disabled).toBe(true);
     expect(yogurtOption.disabled).toBe(false);
+  });
+
+  it("links a floor-sized select to its label and error", () => {
+    render(
+      <Select
+        size="floor"
+        label="Line"
+        options={["Line 1"]}
+        value="Line 1"
+        error="Unavailable"
+        disabled
+      />,
+    );
+
+    const select = screen.getByRole("combobox", { name: "Line" });
+    expect((select as HTMLSelectElement).disabled).toBe(true);
+    expect(select.style.height).toBe("var(--control-floor)");
+    expect(select.style.font).toBe("var(--floor-body)");
+    expect(screen.getByText("Line").style.font).toBe("var(--floor-body-strong)");
+    expect(document.getElementById(select.getAttribute("aria-describedby")!)?.textContent).toBe(
+      "Unavailable",
+    );
+  });
+});
+
+describe("Pager", () => {
+  it("exports an accessible floor pager with deterministic adjacent page requests", async () => {
+    const user = userEvent.setup();
+    const onPageChange = vi.fn();
+    render(
+      <Pager
+        page={2}
+        pageCount={4}
+        onPageChange={onPageChange}
+        ariaLabel="Shift pages"
+        previousLabel="Previous"
+        nextLabel="Next"
+        pageLabel={(page, pageCount) => `Page ${page} of ${pageCount}`}
+      />,
+    );
+
+    const navigation = screen.getByRole("navigation", { name: "Shift pages" });
+    expect(navigation.textContent).toContain("Page 2 of 4");
+    const previous = screen.getByRole("button", { name: "Previous" });
+    const next = screen.getByRole("button", { name: "Next" });
+    expect(previous.style.height).toBe("var(--control-floor)");
+    expect(next.style.height).toBe("var(--control-floor)");
+
+    await user.click(previous);
+    await user.click(next);
+    expect(onPageChange.mock.calls).toEqual([[1], [3]]);
+  });
+
+  it("disables both page boundaries and never requests an out-of-range page", async () => {
+    const user = userEvent.setup();
+    const onPageChange = vi.fn();
+    const { rerender } = render(<Pager page={1} pageCount={4} onPageChange={onPageChange} />);
+
+    const previous = screen.getByRole("button", { name: "Previous" });
+    expect((previous as HTMLButtonElement).disabled).toBe(true);
+    await user.click(previous);
+
+    rerender(<Pager page={4} pageCount={4} onPageChange={onPageChange} />);
+    const next = screen.getByRole("button", { name: "Next" });
+    expect((next as HTMLButtonElement).disabled).toBe(true);
+    await user.click(next);
+    expect(onPageChange).not.toHaveBeenCalled();
+  });
+});
+
+describe("FullScreenDialog", () => {
+  function DialogHarness() {
+    const [open, setOpen] = useState(false);
+    return (
+      <>
+        <button type="button" onClick={() => setOpen(true)}>
+          Open setup
+        </button>
+        <FullScreenDialog
+          open={open}
+          title="Station setup"
+          backLabel="Cancel setup"
+          onClose={() => setOpen(false)}
+          footer={<button type="button">Save setup</button>}
+        >
+          <input aria-label="Station name" />
+        </FullScreenDialog>
+      </>
+    );
+  }
+
+  it("exports a full-screen dialog with an explicit floor-sized back action", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    render(
+      <FullScreenDialog open title="Confirm box" backLabel="Back" onClose={onClose}>
+        Confirm content
+      </FullScreenDialog>,
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "Confirm box" });
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    expect(dialog.style.overflow).not.toBe("auto");
+    const back = screen.getByRole("button", { name: "Back" });
+    expect(back.className).toContain("mk-btn--floor");
+    expect(back.style.height).toBe("var(--control-floor)");
+    expect(document.activeElement).toBe(back);
+    await user.click(back);
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("traps focus, closes on Escape, and restores focus to its opener", async () => {
+    const user = userEvent.setup();
+    render(<DialogHarness />);
+    const opener = screen.getByRole("button", { name: "Open setup" });
+    await user.click(opener);
+
+    const back = screen.getByRole("button", { name: "Cancel setup" });
+    const save = screen.getByRole("button", { name: "Save setup" });
+    expect(document.activeElement).toBe(back);
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(save);
+    await user.tab();
+    expect(document.activeElement).toBe(back);
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(opener);
   });
 });
 
