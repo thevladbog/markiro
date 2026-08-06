@@ -93,13 +93,14 @@ function renderPage(access: AccessDocument = ADMIN_ACCESS) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  return render(
+  const view = render(
     <QueryClientProvider client={queryClient}>
       <AccessProvider value={access}>
         <KiosksPage />
       </AccessProvider>
     </QueryClientProvider>,
   );
+  return { ...view, queryClient };
 }
 
 // A few seconds in the past -- well within the ~2 minute online window, and
@@ -327,6 +328,50 @@ describe("KiosksPage", () => {
     // only, and a space pasted into the kiosk's numeric keypad would not match.
     fireEvent.click(dialog.getByRole("button", { name: "Скопировать" }));
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith("12345678");
+  });
+
+  it("clears a legacy kiosk pairing secret from local state and the mutation cache on close or route teardown", async () => {
+    const fetchMock = stubFetch({
+      kiosks: [ONLINE_KIOSK],
+      onPost: (path, init) =>
+        path === "/api/kiosks/k1/pairing-code" && init?.method === "POST"
+          ? jsonResponse(201, {
+              code: "12345678",
+              expiresAt: new Date(Date.now() + PAIRING_TTL_MS).toISOString(),
+            })
+          : undefined,
+    });
+    const { queryClient, unmount } = renderPage();
+    await screen.findByText("Касса у входа");
+    fireEvent.click(screen.getByRole("button", { name: "Код привязки" }));
+    await screen.findByText("1234 5678");
+    expect(
+      queryClient
+        .getMutationCache()
+        .getAll()
+        .some((mutation) => JSON.stringify(mutation.state.data).includes("12345678")),
+    ).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Готово" }));
+    await waitFor(() => expect(screen.queryByText("1234 5678")).toBeNull());
+    expect(
+      queryClient
+        .getMutationCache()
+        .getAll()
+        .every((mutation) => !JSON.stringify(mutation.state.data).includes("12345678")),
+    ).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Код привязки" }));
+    await screen.findByText("1234 5678");
+    unmount();
+    expect(screen.queryByText("1234 5678")).toBeNull();
+    expect(
+      queryClient
+        .getMutationCache()
+        .getAll()
+        .every((mutation) => !JSON.stringify(mutation.state.data).includes("12345678")),
+    ).toBe(true);
+    expect(fetchMock.mock.calls.some(([path]) => String(path).includes("pairing-code"))).toBe(true);
   });
 
   it("hides pairing from managers while keeping operational kiosk management visible", async () => {

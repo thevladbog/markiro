@@ -10,7 +10,7 @@
  * (Task 11).
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
+import type { QueryClient, UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 
 import { apiFetch } from "../../api/client.js";
 
@@ -61,6 +61,8 @@ interface ListKiosksResponse {
 
 /** Shared TanStack Query cache key for the kiosks list. */
 export const KIOSKS_QUERY_KEY = ["kiosks"] as const;
+/** Mutation entries under this key can hold a one-time pairing secret. */
+export const KIOSK_PAIRING_CODE_MUTATION_KEY = ["kiosk-pairing-code"] as const;
 
 async function fetchKiosks(): Promise<KioskDto[]> {
   const response = await apiFetch<ListKiosksResponse>("/kiosks");
@@ -168,7 +170,20 @@ export function useIssueKioskPairingCode(): UseMutationResult<
   Error,
   string
 > {
-  return useMutation({ mutationFn: postKioskPairingCode });
+  return useMutation({
+    mutationKey: KIOSK_PAIRING_CODE_MUTATION_KEY,
+    mutationFn: postKioskPairingCode,
+    gcTime: 0,
+  });
+}
+
+/** Explicitly removes one-time pairing responses when their reveal is dismissed. */
+export function clearKioskPairingCodeMutations(queryClient: QueryClient): void {
+  for (const mutation of queryClient
+    .getMutationCache()
+    .findAll({ mutationKey: KIOSK_PAIRING_CODE_MUTATION_KEY })) {
+    queryClient.getMutationCache().remove(mutation);
+  }
 }
 
 // --- Pickup reasons mini-api ------------------------------------------------

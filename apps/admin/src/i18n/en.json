@@ -963,7 +963,12 @@
         "revokeTitle": "Revoke device?",
         "revokeBody": "{{name}} will no longer be able to connect with its current credentials.",
         "revokeOfflineNote": "An offline station or kiosk observes revocation only when it reconnects. Unsynchronized data stays on the device for recovery.",
-        "revokeError": "Could not revoke the device"
+        "revokeError": "Could not revoke the device",
+        "unbind": "Unbind",
+        "unbindTitle": "Unbind kiosk?",
+        "unbindBody": "{{name}} will lose its current credentials, while its kiosk record and history remain in the cabinet.",
+        "unbindOfflineNote": "An offline kiosk observes the credential removal only when it reconnects. Unsynchronized data stays on the device for recovery; a new pairing code can be issued immediately after unbinding.",
+        "unbindError": "Could not unbind the kiosk"
       },
       "pairing": {
         "issue": "Issue pairing code",

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, expect, it, vi } from "vitest";
 import { ThemeProvider } from "@markiro/ui";
@@ -36,6 +36,7 @@ function renderDrawer(
 afterEach(async () => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
   await i18n.changeLanguage("ru");
 });
 
@@ -107,10 +108,34 @@ it("uses the server expiry and replaces the reveal with an expired state", () =>
   expect(screen.getByRole("button", { name: "Создать новый код" })).toBeDefined();
 });
 
+it("crosses the server expiry on its interval and clears that interval on unmount", () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-08-06T10:00:00.000Z"));
+  const { unmount } = render(
+    <ThemeProvider defaultTheme="light">
+      <PairingCodePanel
+        pairing={{ code: "12345678", expiresAt: "2026-08-06T10:00:01.000Z" }}
+        issuedAt="2026-08-06T10:00:00.000Z"
+        deviceName="Packing"
+        deviceType="station"
+        placeName="Line 1"
+        organizationName="Markiro"
+        regenerating={false}
+        onRegenerate={vi.fn()}
+      />
+    </ThemeProvider>,
+  );
+  expect(screen.getByText("Осталось: 00:01")).toBeDefined();
+  act(() => vi.advanceTimersByTime(1_000));
+  expect(screen.getByText("Срок действия кода истёк. Создайте новый код.")).toBeDefined();
+  unmount();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
 it("uses the type-specific destructive endpoint only after confirmation", async () => {
   const request = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    expect(String(input)).toBe("/api/kiosks/kiosk-1");
-    expect(init?.method).toBe("DELETE");
+    expect(String(input)).toBe("/api/kiosks/kiosk-1/unbind");
+    expect(init?.method).toBe("POST");
     return { ok: true, status: 204, json: async () => undefined } as Response;
   });
   vi.stubGlobal("fetch", request);
@@ -146,11 +171,11 @@ it("uses the type-specific destructive endpoint only after confirmation", async 
   fireEvent.click(screen.getByRole("button", { name: "Выдать новый код" }));
   expect(onReassign).toHaveBeenCalledOnce();
   expect(onPair).toHaveBeenCalledOnce();
-  fireEvent.click(screen.getByRole("button", { name: "Отозвать" }));
+  fireEvent.click(screen.getByRole("button", { name: "Отвязать" }));
   expect(request).not.toHaveBeenCalled();
   fireEvent.click(
-    within(screen.getByRole("dialog", { name: "Отозвать устройство?" })).getByRole("button", {
-      name: "Отозвать",
+    within(screen.getByRole("dialog", { name: "Отвязать киоск?" })).getByRole("button", {
+      name: "Отвязать",
     }),
   );
   await waitFor(() => expect(request).toHaveBeenCalledOnce());

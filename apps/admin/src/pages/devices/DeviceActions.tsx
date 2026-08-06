@@ -4,7 +4,7 @@ import { Link } from "react-router";
 
 import { Button, Modal } from "@markiro/ui";
 
-import { useRevokeKiosk, useRevokeStation, type DeviceDto } from "./api.js";
+import { useRevokeStation, useUnbindKiosk, type DeviceDto } from "./api.js";
 
 export interface DeviceActionsProps {
   device: DeviceDto;
@@ -26,17 +26,19 @@ export function DeviceActions({
   const [confirmingRevoke, setConfirmingRevoke] = useState(false);
   const [revokeError, setRevokeError] = useState<string | null>(null);
   const revokeStation = useRevokeStation();
-  const revokeKiosk = useRevokeKiosk();
-  const isRevoking = revokeStation.isPending || revokeKiosk.isPending;
+  const unbindKiosk = useUnbindKiosk();
+  const isRevoking = revokeStation.isPending || unbindKiosk.isPending;
+  const isKiosk = device.type === "kiosk";
+  const actionKey = isKiosk ? "unbind" : "revoke";
 
   const revoke = async () => {
     setRevokeError(null);
     try {
       if (device.type === "station") await revokeStation.mutateAsync(device.id);
-      else await revokeKiosk.mutateAsync(device.id);
+      else await unbindKiosk.mutateAsync(device.id);
       setConfirmingRevoke(false);
     } catch {
-      setRevokeError(t("pages.devices.actions.revokeError"));
+      setRevokeError(t(`pages.devices.actions.${actionKey}Error`));
     }
   };
 
@@ -76,7 +78,7 @@ export function DeviceActions({
               variant="destructive"
               onClick={() => setConfirmingRevoke(true)}
             >
-              {t("pages.devices.actions.revoke")}
+              {t(`pages.devices.actions.${actionKey}`)}
             </Button>
           </>
         ) : null}
@@ -88,7 +90,7 @@ export function DeviceActions({
           setRevokeError(null);
         }}
         closeLabel={t("common.close")}
-        title={t("pages.devices.actions.revokeTitle")}
+        title={t(`pages.devices.actions.${actionKey}Title`)}
         footer={
           <>
             <Button
@@ -107,17 +109,17 @@ export function DeviceActions({
               loading={isRevoking}
               onClick={() => void revoke()}
             >
-              {t("pages.devices.actions.revoke")}
+              {t(`pages.devices.actions.${actionKey}`)}
             </Button>
           </>
         }
       >
         <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-3)" }}>
           <p style={{ margin: 0, font: "var(--text-body)", color: "var(--fg-2)" }}>
-            {t("pages.devices.actions.revokeBody", { name: device.name })}
+            {t(`pages.devices.actions.${actionKey}Body`, { name: device.name })}
           </p>
           <p style={{ margin: 0, font: "var(--text-body-sm)", color: "var(--fg-3)" }}>
-            {t("pages.devices.actions.revokeOfflineNote")}
+            {t(`pages.devices.actions.${actionKey}OfflineNote`)}
           </p>
           {revokeError ? (
             <p

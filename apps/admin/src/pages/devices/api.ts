@@ -124,9 +124,10 @@ export function useUpdateKiosk() {
     true,
   );
 }
-export function useRevokeKiosk() {
+/** Removes the kiosk credential while retaining the active kiosk record and history. */
+export function useUnbindKiosk() {
   return useDeviceMutation(
-    (id: string) => apiFetch<void>(`/kiosks/${id}`, { method: "DELETE" }),
+    (id: string) => apiFetch<void>(`/kiosks/${id}/unbind`, { method: "POST" }),
     true,
   );
 }

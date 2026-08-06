@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router";
+import { useQueryClient } from "@tanstack/react-query";
 
 import {
   Alert,
@@ -25,6 +26,7 @@ import { PairingCodeModal } from "./PairingCodeModal.js";
 import { ReasonsEditor } from "./ReasonsEditor.js";
 import {
   useArchiveKiosk,
+  clearKioskPairingCodeMutations,
   useCreateKiosk,
   useIssueKioskPairingCode,
   useKiosks,
@@ -311,7 +313,26 @@ export function KiosksPage() {
 function KioskPairingAction({ kiosk }: { kiosk: KioskDto }) {
   const { t } = useTranslation();
   const pairingMutation = useIssueKioskPairingCode();
+  const queryClient = useQueryClient();
   const [pairing, setPairing] = useState<PairingState>(null);
+  const resetPairingMutation = useRef<() => void>(() => {});
+  resetPairingMutation.current = pairingMutation.reset;
+
+  const clearPairing = () => {
+    setPairing(null);
+    resetPairingMutation.current();
+    clearKioskPairingCodeMutations(queryClient);
+  };
+
+  // A route change tears the row down without a close click; do not retain the
+  // one-time plaintext in the mutation cache after that unmount.
+  useEffect(
+    () => () => {
+      resetPairingMutation.current();
+      clearKioskPairingCodeMutations(queryClient);
+    },
+    [queryClient],
+  );
 
   const handleIssuePairingCode = async () => {
     try {
@@ -343,7 +364,7 @@ function KioskPairingAction({ kiosk }: { kiosk: KioskDto }) {
           expiresAt={pairing.expiresAt}
           regenerating={pairingMutation.isPending}
           onRegenerate={() => void handleIssuePairingCode()}
-          onClose={() => setPairing(null)}
+          onClose={clearPairing}
         />
       ) : null}
     </>
