@@ -8,6 +8,7 @@ import { CABINET_CAPABILITY } from "@markiro/domain";
 
 import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
+import { toast } from "../../lib/toast.js";
 import {
   useArchiveReason,
   useCreateReason,
@@ -180,6 +181,7 @@ function AuthorizedReasonsEditor({
       await createMutation.mutateAsync({ name });
       setCreateOpen(false);
       setNewName("");
+      toast("ok", t("pages.kiosks.toasts.reasonCreateSuccess"));
     } catch (error) {
       setCreateError(getErrorMessage(error, t("pages.kiosks.reasons.errors.createFailed")));
     }
@@ -188,12 +190,17 @@ function AuthorizedReasonsEditor({
   const handleSave = async () => {
     if (!editingReason || !editDraft) return;
     const name = editDraft.name.trim();
-    const parsedSortOrder = Number(editDraft.sortOrder.trim());
+    const sortOrderText = editDraft.sortOrder.trim();
+    const parsedSortOrder = Number(sortOrderText);
     if (!name) {
       setEditError(t("pages.kiosks.reasons.errors.nameRequired"));
       return;
     }
-    if (!Number.isFinite(parsedSortOrder) || !Number.isInteger(parsedSortOrder)) {
+    if (
+      sortOrderText === "" ||
+      !Number.isFinite(parsedSortOrder) ||
+      !Number.isInteger(parsedSortOrder)
+    ) {
       setEditError(t("pages.kiosks.reasons.errors.sortOrderInvalid"));
       return;
     }
@@ -205,6 +212,7 @@ function AuthorizedReasonsEditor({
       });
       setEditId(null);
       setEditDraft(null);
+      toast("ok", t("pages.kiosks.toasts.reasonUpdateSuccess"));
     } catch (error) {
       setEditError(getErrorMessage(error, t("pages.kiosks.reasons.errors.updateFailed")));
     }
@@ -216,6 +224,7 @@ function AuthorizedReasonsEditor({
     try {
       await archiveMutation.mutateAsync(deleteTarget.id);
       setDeleteTarget(null);
+      toast("ok", t("pages.kiosks.toasts.reasonArchiveSuccess"));
     } catch (error) {
       setDeleteError(getErrorMessage(error, t("pages.kiosks.reasons.errors.archiveFailed")));
     }

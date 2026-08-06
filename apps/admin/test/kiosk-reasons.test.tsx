@@ -196,7 +196,7 @@ it("keeps direct read-only reasons access readable", async () => {
   expect(screen.queryByRole("button", { name: "Изменить" })).toBeNull();
 });
 
-it("validates blank names and non-integer order without sending a reason mutation", async () => {
+it("validates blank names and blank or non-integer order without sending a reason mutation", async () => {
   const fetchMock = stubFetch({ reasons: [REASON_A] });
   renderKiosksRouter("/kiosks/reasons");
   const user = userEvent.setup();
@@ -208,6 +208,14 @@ it("validates blank names and non-integer order without sending a reason mutatio
 
   await user.click(screen.getByRole("button", { name: "Изменить" }));
   await user.clear(screen.getByLabelText("Порядок"));
+  await user.click(screen.getByRole("button", { name: "Сохранить" }));
+  expect((await screen.findByRole("alert")).textContent).toContain("Введите целое число");
+  expect(
+    fetchMock.mock.calls.some(
+      ([path, init]) => String(path).includes("/api/pickup-reasons") && init?.method !== undefined,
+    ),
+  ).toBe(false);
+
   await user.type(screen.getByLabelText("Порядок"), "1.5");
   await user.click(screen.getByRole("button", { name: "Сохранить" }));
   expect((await screen.findByRole("alert")).textContent).toContain("Введите целое число");
@@ -239,6 +247,41 @@ it("creates a reason with the exact trimmed payload", async () => {
       expect.objectContaining({ method: "POST", body: JSON.stringify({ name: "Брак упаковки" }) }),
     );
   });
+});
+
+it("announces successful reason create, update, and delete operations", async () => {
+  const createdReason = { id: "r2", name: "Брак упаковки", sortOrder: 2 };
+  stubFetch({
+    reasons: [REASON_A],
+    onRequest: (path, init) => {
+      if (path.endsWith("/api/pickup-reasons") && init?.method === "POST") {
+        return jsonResponse(201, createdReason);
+      }
+      if (path.endsWith(`/api/pickup-reasons/${REASON_A.id}`) && init?.method === "PATCH") {
+        return jsonResponse(200, REASON_A);
+      }
+      if (path.endsWith(`/api/pickup-reasons/${REASON_A.id}`) && init?.method === "DELETE") {
+        return jsonResponse(204, undefined);
+      }
+      return undefined;
+    },
+  });
+  renderKiosksRouter("/kiosks/reasons");
+  const user = userEvent.setup();
+
+  await user.click(await screen.findByRole("button", { name: "Добавить причину" }));
+  await user.type(screen.getByLabelText("Название"), createdReason.name);
+  await user.click(screen.getByRole("button", { name: "Создать" }));
+  expect((await screen.findAllByText("Причина добавлена")).length).toBeGreaterThan(0);
+
+  await user.click(screen.getByRole("button", { name: "Изменить" }));
+  await user.click(screen.getByRole("button", { name: "Сохранить" }));
+  expect((await screen.findAllByText("Причина обновлена")).length).toBeGreaterThan(0);
+
+  await user.click(screen.getByRole("button", { name: "Удалить" }));
+  const dialog = screen.getByRole("alertdialog", { name: "Удалить причину?" });
+  await user.click(within(dialog).getByRole("button", { name: "Удалить" }));
+  expect((await screen.findAllByText("Причина удалена")).length).toBeGreaterThan(0);
 });
 
 it("keeps a failed delete in its confirmation dialog", async () => {
