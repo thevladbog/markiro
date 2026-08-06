@@ -30,4 +30,15 @@ describe("fixed station viewport source contract", () => {
       /\.station-root\s*\{[^}]*font-family:\s*var\(--font-ui\);/s,
     );
   });
+
+  it("gives enabled actions pressed motion while disabled actions stay fixed", () => {
+    const css = stationSource("station.css");
+
+    expect(css).toMatch(
+      /#root :where\(button, \[role="button"\], a\[href\]\):active:not\(:disabled\):not\(\[aria-disabled="true"\]\)\s*\{[^}]*transform:\s*translateY\(1px\);/s,
+    );
+    expect(css).toMatch(
+      /#root :where\(button, \[role="button"\], a\[href\]\):is\(:disabled, \[aria-disabled="true"\]\)\s*\{[^}]*transform:\s*none;/s,
+    );
+  });
 });

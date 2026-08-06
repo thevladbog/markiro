@@ -19,7 +19,7 @@ environment.
 
 - Host: macOS 26.5.2 (Darwin 25.5.0), arm64.
 - Node.js: 24.18.0.
-- pnpm: 9.12.0 (repository-selected command runner in this checkout).
+- pnpm: 11.10.0 through Corepack, matching `packageManager`.
 - Rust/Cargo: 1.93.0.
 - Browser gallery: in-app Chromium through local Vite, using current-worktree
   UI and DB source aliases. The exact Chromium version was not recorded.
@@ -30,31 +30,54 @@ environment.
 
 | Gate                                                               | Result in this run             | Notes                                                                                                                                                                                                                                                                   |
 | ------------------------------------------------------------------ | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm --filter @markiro/ui test`                                   | PASS, 73/73                    | Four test files.                                                                                                                                                                                                                                                        |
-| `pnpm --filter @markiro/ui typecheck`                              | PASS                           | No diagnostics.                                                                                                                                                                                                                                                         |
-| `pnpm --filter @markiro/ui lint`                                   | PASS                           | No diagnostics.                                                                                                                                                                                                                                                         |
-| `pnpm --filter @markiro/ui build`                                  | PASS                           | TypeScript build completed.                                                                                                                                                                                                                                             |
-| `pnpm --filter @markiro/domain build`                              | PASS                           | TypeScript build completed.                                                                                                                                                                                                                                             |
-| `pnpm --filter @markiro/station test`                              | EXPECTED ENVIRONMENT FAILURE   | The inherited `apps/station/node_modules` overlay lacks current DB/UI exports: 42/82 suites passed, 40 failed; 145/162 executed tests passed and 17 failed. Most suites could not import `@markiro/db/station-sqlite`; remaining failures use the pre-floor UI runtime. |
-| mapped station Vitest using current worktree UI/DB source          | PASS, 571/571                  | 51 files. The only extra output was jsdom's existing missing-canvas notice.                                                                                                                                                                                             |
-| `pnpm --filter @markiro/station typecheck`                         | EXPECTED ENVIRONMENT FAILURE   | First diagnostic: `src/App.tsx(3,43): Cannot find module '@markiro/db/station-sqlite'`; stale declarations also reject floor controls and lack `Pager`/`FullScreenDialog`.                                                                                              |
-| mapped station typecheck using current worktree UI/DB declarations | PASS                           | `/private/tmp/station-task12-tsconfig.json`; no diagnostics.                                                                                                                                                                                                            |
-| `pnpm --filter @markiro/station build`                             | EXPECTED ENVIRONMENT FAILURE   | Vite transforms 289 modules, then the stale installed DB package rejects the new `./station-sqlite` export.                                                                                                                                                             |
+| `corepack pnpm --filter @markiro/ui test`                          | PASS, 73/73                    | Four test files.                                                                                                                                                                                                                                                        |
+| `corepack pnpm --filter @markiro/ui typecheck`                     | PASS                           | No diagnostics.                                                                                                                                                                                                                                                         |
+| `corepack pnpm --filter @markiro/ui lint`                          | PASS                           | No diagnostics.                                                                                                                                                                                                                                                         |
+| `corepack pnpm --filter @markiro/ui build`                         | PASS                           | TypeScript build completed.                                                                                                                                                                                                                                             |
+| `corepack pnpm --filter @markiro/domain build`                     | PASS                           | TypeScript build completed.                                                                                                                                                                                                                                             |
+| `corepack pnpm --filter @markiro/station test`                     | EXPECTED ENVIRONMENT FAILURE   | The inherited `apps/station/node_modules` overlay lacks current DB/UI exports: 42/82 suites passed, 40 failed; 146/163 executed tests passed and 17 failed. Most suites could not import `@markiro/db/station-sqlite`; remaining failures use the pre-floor UI runtime. |
+| mapped station Vitest using current worktree UI/DB source          | PASS, 572/572                  | 51 files. The only extra output was jsdom's existing missing-canvas notice.                                                                                                                                                                                             |
+| `corepack pnpm --filter @markiro/station typecheck`                | EXPECTED ENVIRONMENT FAILURE   | First diagnostic: `src/App.tsx(3,43): Cannot find module '@markiro/db/station-sqlite'`; stale declarations also reject floor controls and lack `Pager`/`FullScreenDialog`.                                                                                              |
+| mapped station typecheck using current worktree UI/DB declarations | PASS                           | Uses committed `docs/acceptance/station-touch-tsconfig.json`; no diagnostics.                                                                                                                                                                                           |
+| `corepack pnpm --filter @markiro/station build`                    | EXPECTED ENVIRONMENT FAILURE   | Vite transforms 289 modules, then the stale installed DB package rejects the new `./station-sqlite` export.                                                                                                                                                             |
 | mapped Vite build using current worktree UI/DB                     | PASS                           | 294 modules. The prior Postgres/browser externalization warnings disappeared; the output has no `postgres-bytea`, `pg-connection-string`, or node-postgres graph.                                                                                                       |
-| `pnpm --filter @markiro/station lint`                              | EXPECTED ENVIRONMENT FAILURE   | Type-aware lint reports 46 unresolved-type errors because the stale installed DB package lacks `@markiro/db/station-sqlite`; no product lint rule is suppressed.                                                                                                        |
-| mapped station lint using current worktree DB declarations         | PASS                           | Temporary config changes only TypeScript resolution to the mapped current-worktree declarations; no diagnostics.                                                                                                                                                        |
+| `corepack pnpm --filter @markiro/station lint`                     | EXPECTED ENVIRONMENT FAILURE   | Type-aware lint reports 46 unresolved-type errors because the stale installed DB package lacks `@markiro/db/station-sqlite`; no product lint rule is suppressed.                                                                                                        |
+| mapped station lint using current worktree DB declarations         | PASS                           | Committed acceptance config changes only TypeScript resolution to current-worktree declarations; no diagnostics.                                                                                                                                                        |
 | `cargo test --manifest-path apps/station/src-tauri/Cargo.toml`     | PASS, 28/28                    | Host Rust tests only; not Windows fullscreen or hardware proof.                                                                                                                                                                                                         |
-| `pnpm --filter @markiro/db test`                                   | PASS with infrastructure skips | 45 passed; 28 Postgres-backed tests skipped because the test database was not configured.                                                                                                                                                                               |
-| `pnpm --filter @markiro/db typecheck`                              | PASS                           | No diagnostics.                                                                                                                                                                                                                                                         |
-| `pnpm --filter @markiro/db lint`                                   | PASS                           | No diagnostics.                                                                                                                                                                                                                                                         |
-| `pnpm --filter @markiro/db build`                                  | PASS                           | Built the narrow station entry before station gates.                                                                                                                                                                                                                    |
-| `pnpm format:check`                                                | PASS                           | All repository files match Prettier; two earlier tracked branch documents received the approved mechanical-only format pass.                                                                                                                                            |
+| `corepack pnpm --filter @markiro/db test`                          | PASS with infrastructure skips | 45 passed; 28 Postgres-backed tests skipped because the test database was not configured.                                                                                                                                                                               |
+| `corepack pnpm --filter @markiro/db typecheck`                     | PASS                           | No diagnostics.                                                                                                                                                                                                                                                         |
+| `corepack pnpm --filter @markiro/db lint`                          | PASS                           | No diagnostics.                                                                                                                                                                                                                                                         |
+| `corepack pnpm --filter @markiro/db build`                         | PASS                           | Built the narrow station entry before station gates.                                                                                                                                                                                                                    |
+| `corepack pnpm format:check`                                       | PASS                           | All repository files match Prettier; two earlier tracked branch documents received the approved mechanical-only format pass.                                                                                                                                            |
 | `git diff --check`                                                 | PASS                           | No whitespace errors after the final report and acceptance edits.                                                                                                                                                                                                       |
 
 No `node_modules` link or dependency output was changed to conceal the stale
 overlay. The mapped commands exercise the committed UI source/build from this
 worktree; the standard failures remain recorded because they are the commands
 the plan required.
+
+### Reproducing the mapped gates
+
+The inherited dependency overlay was created by an older pnpm layout. Every
+JavaScript gate above was run through Corepack/pnpm 11.10.0 with
+`pnpm_config_verify_deps_before_run=false`. This disables pnpm's pre-command
+prompt to purge that overlay; it does not install packages or change module
+resolution. No `node_modules` path was modified.
+
+After building `@markiro/ui` and `@markiro/db`, the mapped station gates are:
+
+```bash
+pnpm_config_verify_deps_before_run=false corepack pnpm --filter @markiro/station exec vitest run --config ../../docs/acceptance/station-touch-vitest.config.mjs
+pnpm_config_verify_deps_before_run=false corepack pnpm --filter @markiro/station exec tsc -p ../../docs/acceptance/station-touch-tsconfig.json --noEmit
+pnpm_config_verify_deps_before_run=false corepack pnpm exec eslint apps/station --ignore-pattern 'apps/station/src-tauri/target/**' --ignore-pattern 'apps/station/src-tauri/gen/**' --config docs/acceptance/station-touch-eslint.config.mjs
+pnpm_config_verify_deps_before_run=false corepack pnpm --filter @markiro/station exec vite build --config ../../docs/acceptance/station-touch-vite.config.mjs
+```
+
+The committed Vitest and Vite configs alias `@markiro/ui` and the narrow
+station DB entry to this worktree. The TypeScript and ESLint configs use the
+freshly built current-worktree declarations. The mapped Vite output goes only
+to `/tmp/markiro-station-touch-acceptance-dist`; no development config is added
+to the station application.
 
 ## Source audit
 
@@ -94,10 +117,10 @@ Audit scope: `apps/station/src` plus station-consumed floor primitives in
    pins the station root to `var(--font-ui)` while leaving explicit mono copy
    unchanged.
 
-Focused GREEN evidence before the final broad rerun: viewport/typography source
-plus rendered shell 9/9; Enrollment floor-control case 1/1;
+Focused GREEN evidence before the final broad rerun: viewport/typography/pressed
+source plus rendered shell 10/10; Enrollment floor-control case 1/1;
 PrintVerification floor-control case 1/1. The final broad mapped suite is
-571/571.
+572/572.
 
 ## Browser gallery matrix
 
@@ -126,20 +149,35 @@ The 1024×768 name-search fixture displayed five 64 px result buttons; the last
 button ended at y=613 while the document remained exactly 1024×768. In the
 setup-scanner fixture, the clicked tab had a visible 2 px solid
 `rgb(109, 178, 255)` outline and a fully visible 322.7×64 px bounding box.
-Pressed feedback is covered by source and automated tests, but a held-pointer
-visual state was not captured; it is not claimed as browser-visual evidence.
+
+Held pressed feedback is not claimed as browser-visual evidence. The in-app
+browser API exposes click, drag, and move but no separate pointer-down/up
+primitive; concurrent drag sampling was serialized and never observed the held
+state. Automated source coverage pins the enabled
+`:active:not(:disabled):not([aria-disabled="true"])` transform to
+`translateY(1px)` and disabled actions to `transform: none`. A real touchscreen
+press remains part of external physical acceptance.
 
 Representative captures:
 
 - [Russian name search at 1024×768](screenshots/station-login-name-search-1024x768-ru.jpg)
 - [Russian aggregation work screen at 1280×800](screenshots/station-work-aggregation-1280x800-ru.jpg)
-- [Russian exception confirmation at 1280×1024](screenshots/station-exception-confirm-1280x1024-ru.jpg)
+- [Russian exception confirmation at CSS 1280×1024, DPR 2](screenshots/station-exception-confirm-1280x1024-at-2x.jpg)
 - [English long-copy state at 1024×768](screenshots/station-long-copy-1024x768-en.jpg)
 
-The compact results above were recorded from the run; a separate
-machine-readable matrix artifact was not retained. Browser environment: in-app
-Chromium through local Vite with current UI/DB source aliases; exact Chromium
-version not recorded.
+The DPR-aware exception capture is 2560×2048 pixels and contains the full
+1280×1024 CSS viewport, including its footer. Raw browser metrics were
+inner/document/visual 1280×1024, DPR 2, visual scale 1, CSS zoom 1; the confirm
+action remained within bounds at right 1248 and bottom 1004.5 CSS pixels.
+
+The complete 318,015-byte
+[machine-readable browser matrix](station-touch-browser-matrix.json) uses schema
+version 2 and retains all 336 raw state/locale/viewport rows. Each row records
+requested and actual window/document/visual viewport geometry, DPR, zoom,
+computed font, interactive count and minimum target, clipped interactives,
+scroll regions, and pass status; its summary is 336 passed and zero failed.
+Browser environment: in-app Chromium through local Vite with current UI/DB
+source aliases; exact Chromium version not recorded.
 
 ## Real application acceptance
 
