@@ -11,13 +11,13 @@ export interface StationScreenProps {
 export function StationScreen({ title, header, actions, children }: StationScreenProps) {
   const titleId = useId();
   return (
-    <section className="station-screen" aria-labelledby={titleId}>
+    <main className="station-screen" aria-labelledby={titleId}>
       <header className="station-screen__header">
         <h1 id={titleId}>{title}</h1>
         {header}
       </header>
       <div className="station-screen__content">{children}</div>
       {actions ? <div className="station-screen__actions">{actions}</div> : null}
-    </section>
+    </main>
   );
 }

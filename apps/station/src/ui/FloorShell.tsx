@@ -69,9 +69,9 @@ export function FloorShell({
           ))}
         </nav>
       ) : null}
-      <main className="station-screen-slot" aria-label={t("shell.activeScreen")}>
+      <div className="station-screen-slot" role="region" aria-label={t("shell.activeScreen")}>
         {children}
-      </main>
+      </div>
       {footer}
     </div>
   );

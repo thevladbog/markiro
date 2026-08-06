@@ -17,7 +17,7 @@ describe("StationScreen", () => {
       </StationScreen>,
     );
 
-    const screenRegion = screen.getByRole("region", { name: "Select a shift" });
+    const screenRegion = screen.getByRole("main", { name: "Select a shift" });
     expect(screenRegion.querySelector(".station-screen__header")?.textContent).toContain("Monday");
     expect(screenRegion.querySelector(".station-screen__content")?.textContent).toContain(
       "Shift cards",
@@ -39,16 +39,25 @@ const status = {
   conflicts: 1,
 };
 
+function CurrentFloorScreen() {
+  return (
+    <main aria-label="Current work screen">
+      <p>Current work</p>
+    </main>
+  );
+}
+
 describe("FloorShell", () => {
-  it("provides one persistent status banner and one labelled active screen", () => {
+  it("provides one persistent status banner and one labelled active screen region", () => {
     render(
       <FloorShell {...status} tasks={[]} activeTaskId="" onSelectTask={vi.fn()}>
-        <p>Current work</p>
+        <CurrentFloorScreen />
       </FloorShell>,
     );
 
     expect(screen.getAllByRole("banner")).toHaveLength(1);
-    const activeScreen = screen.getByRole("main", { name: "Active station screen" });
+    expect(screen.getAllByRole("main")).toHaveLength(1);
+    const activeScreen = screen.getByRole("region", { name: "Active station screen" });
     expect(activeScreen.textContent).toContain("Current work");
   });
 
