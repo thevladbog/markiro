@@ -263,7 +263,7 @@ describe("CounterpartiesPage", () => {
       );
     });
 
-    // Modal closes and the refetched list shows the newly created row.
+    // Panel closes and the refetched list shows the newly created row.
     await waitFor(() => expect(screen.queryByText("Новый контрагент")).toBeNull());
     expect(await screen.findByText("Good Co")).toBeDefined();
   });
