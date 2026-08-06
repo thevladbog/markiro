@@ -732,12 +732,12 @@ export function WorkScreen({
           // feedback must stay ahead of background sync work regardless.
           liveOnScanRecorded?.();
         },
-        onError(raw, err) {
+        onError() {
           // A throw from process() (e.g. the journal write) must never leave
           // the operator with silence: they scanned something and need SOME
           // signal, distinct from an ordinary rejection, so they know to
           // rescan rather than assume the code was accepted.
-          console.error("station: scan write failed", raw, err);
+          console.error("station: scan write failed", { category: "journal_write" });
           setRejected((n) => n + 1);
           const { t: liveT, sound: liveSound } = live.current;
           playSignalTone("error", liveSound);

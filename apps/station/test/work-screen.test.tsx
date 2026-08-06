@@ -479,6 +479,11 @@ describe("WorkScreen", () => {
     expect(await screen.findByText("1")).toBeDefined(); // rejected counter, not accepted
 
     expect(consoleError).toHaveBeenCalled();
+    const logged = JSON.stringify(consoleError.mock.calls);
+    expect(logged).toContain("station: scan write failed");
+    expect(logged).toContain("journal_write");
+    expect(logged).not.toContain(KM);
+    expect(logged).not.toContain("disk full");
     consoleError.mockRestore();
   });
 
