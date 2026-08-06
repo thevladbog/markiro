@@ -959,10 +959,19 @@
       "title": "Employees",
       "emptyTitle": "No employees yet",
       "emptyHint": "Add your first employee to issue them a self-service QR badge.",
+      "emptyReadOnlyHint": "Ask an administrator with edit access to add employees.",
+      "filteredEmptyTitle": "No employees match the selected status",
+      "filteredEmptyHint": "Change or reset the filter to see employees.",
       "addAction": "Add employee",
+      "resultCount_one": "{{count}} employee",
+      "resultCount_few": "{{count}} employees",
+      "resultCount_many": "{{count}} employees",
+      "resultCount_other": "{{count}} employees",
       "edit": "Edit",
       "archive": "Archive",
       "cancel": "Cancel",
+      "retry": "Retry",
+      "archivePersistentError": "Could not archive the employee.",
       "archiveConfirmTitle": "Archive this employee?",
       "archiveConfirmBody": "Employee \"{{name}}\" will be archived; their issued badges will be revoked.",
       "archiveConfirmAction": "Archive",
@@ -971,6 +980,8 @@
         "archived": "Archived"
       },
       "filters": {
+        "label": "Employee filters",
+        "reset": "Reset",
         "statusLabel": "Status",
         "status": {
           "all": "All statuses",
@@ -988,31 +999,57 @@
       "form": {
         "createTitle": "New employee",
         "editTitle": "Edit employee",
+        "editIdentity": "{{name}}",
+        "editIdentityWithRole": "{{name}} · {{role}}",
         "fullNameLabel": "Full name",
         "roleLabel": "Role",
         "submitCreate": "Create",
         "submitUpdate": "Save",
+        "loadError": "Could not load employee data.",
+        "retry": "Retry",
+        "notFound": "Employee not found.",
+        "disappearedConflict": "This employee is no longer in the current list. Drafts remain available while this panel is open.",
+        "updateError": "Could not save the employee profile.",
+        "discardTitle": "Discard changes?",
+        "discardBody": "Your unsaved changes will be lost.",
+        "continueEditing": "Continue editing",
+        "discardAction": "Discard",
         "errors": {
           "fullNameRequired": "Enter a full name",
           "fullNameTooLong": "200 characters or fewer",
           "roleTooLong": "120 characters or fewer"
         }
       },
+      "sections": {
+        "navigationLabel": "Employee sections",
+        "profile": "Profile",
+        "error": "Error"
+      },
       "badges": {
         "title": "Badges",
         "emptyHint": "No badges issued",
+        "unnamedBadge": "Unnamed badge",
         "codeLabel": "Badge code",
         "labelLabel": "Label",
         "issueAction": "Issue badge",
+        "issueError": "Could not issue the badge",
         "revokeAction": "Revoke",
+        "revokeTitle": "Revoke badge?",
+        "revokeBody": "The badge will be revoked and can no longer be used to confirm identity.",
+        "revokeConfirmAction": "Revoke",
+        "activeBadge": "Active",
         "revokedBadge": "Revoked",
+        "revokeError": "Could not revoke the badge",
         "issuedAt": "Issued {{date}}"
       },
       "stationAccess": {
         "title": "Station access",
         "emptyHint": "No line-station access granted",
-        "loadError": "Could not load station access status. Refresh the page before granting access.",
+        "draftConflict": "The access draft conflicts with access that has already been granted.",
+        "discardDraftAction": "Discard draft",
+        "loadError": "Could not load station access status.",
         "loading": "Loading station access status…",
+        "retryAction": "Retry",
         "loginLabel": "Personnel number",
         "pinLabel": "PIN",
         "grantAction": "Grant access",
@@ -1022,7 +1059,18 @@
         "revokeAction": "Remove access",
         "activeBadge": "Active",
         "disabledBadge": "Disabled",
-        "current": "Personnel number {{login}}"
+        "current": "Personnel number {{login}}",
+        "revokeTitle": "Remove station access?",
+        "revokeBody": "The employee will no longer be able to sign in at the line station.",
+        "revokeConfirmAction": "Remove access",
+        "revokeError": "Could not remove station access",
+        "status": {
+          "loading": "Loading",
+          "error": "Error",
+          "none": "No access",
+          "active": "Active",
+          "disabled": "Disabled"
+        }
       },
       "toasts": {
         "createSuccess": "Employee added",

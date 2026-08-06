@@ -51,6 +51,15 @@ const INTEGRATIONS_ONLY_ACCESS: AccessDocument = {
   capabilities: [CABINET_CAPABILITY.INTEGRATIONS_READ],
 };
 
+const JANE = {
+  id: "1",
+  fullName: "Jane Doe",
+  role: "Кассир",
+  status: "active",
+  badges: [],
+  createdAt: "2026-01-01T00:00:00.000Z",
+};
+
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(body === undefined ? null : JSON.stringify(body), {
     status,
@@ -100,6 +109,8 @@ function renderAccessRoute(
       }
       if (path.endsWith("/api/products")) return jsonResponse(200, { items: [] });
       if (path.endsWith("/api/counterparties")) return jsonResponse(200, { items: [] });
+      if (path.endsWith("/api/employees")) return jsonResponse(200, { items: [JANE] });
+      if (path.endsWith("/api/operators")) return jsonResponse(200, { items: [] });
       if (path.endsWith("/api/label-templates")) return jsonResponse(200, { items: [] });
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
       if (path.endsWith("/api/lines")) return jsonResponse(200, { items: [] });
@@ -190,9 +201,22 @@ it.each(["/shifts/new", "/shifts/s1/edit"])(
   },
 );
 
+it.each(["/employees/new", "/employees/1/edit"])(
+  "forbids the direct employee write route %s for a read-only operator",
+  async (path) => {
+    const { requests } = renderAccessRoute(path, OPERATIONS_READ_ONLY);
+
+    expect(await screen.findByTestId("forbidden-page")).toBeDefined();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(requests.some((request) => request.endsWith("/api/operators"))).toBe(false);
+  },
+);
+
 it.each([
   ["/catalog/new", "Новый продукт"],
   ["/catalog/p1/edit", "Изменить продукт"],
+  ["/employees/new", "Новый сотрудник"],
+  ["/employees/1/edit", "Изменить сотрудника"],
 ])("opens the direct write route %s for a write-capable operator", async (path, title) => {
   renderAccessRoute(path, MANAGER_ACCESS);
 

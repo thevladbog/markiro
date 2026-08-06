@@ -134,10 +134,14 @@
 }
 
 .mk-side-panel {
+  box-sizing: border-box;
   width: min(100%, var(--mk-panel-width));
   height: 100dvh;
+  max-height: 100dvh;
+  min-width: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
   background: var(--surface-card);
   border-left: 1px solid var(--line);
   box-shadow: var(--shadow-3);
@@ -209,16 +213,28 @@
   border-bottom: 1px solid var(--line);
 }
 
+.mk-side-panel__header > :first-child,
+.mk-side-panel__body,
+.mk-side-panel__footer {
+  min-width: 0;
+}
+
+.mk-side-panel__header > :last-child {
+  flex-shrink: 0;
+}
+
 .mk-side-panel__title {
   margin: 0;
   color: var(--fg-1);
   font: var(--text-h2);
+  overflow-wrap: anywhere;
 }
 
 .mk-side-panel__description {
   margin: var(--sp-1) 0 0;
   color: var(--fg-3);
   font: var(--text-body);
+  overflow-wrap: anywhere;
 }
 
 .mk-side-panel__body {
@@ -247,18 +263,27 @@
 }
 
 .mk-confirm-dialog__scrim {
+  box-sizing: border-box;
   position: fixed;
   inset: 0;
   display: grid;
   place-items: center;
   padding: var(--sp-4);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--surface-overlay);
   animation: mk-panel-scrim-in 160ms ease-out;
 }
 
 .mk-confirm-dialog {
-  width: min(440px, calc(100vw - 32px));
+  box-sizing: border-box;
+  width: min(440px, 100%);
+  max-width: 100%;
+  max-height: calc(100dvh - var(--sp-8));
+  min-width: 0;
   padding: var(--sp-6);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   border: 1px solid var(--line);
   border-radius: var(--r-3);
   background: var(--surface-card);
@@ -270,6 +295,7 @@
 .mk-confirm-dialog__title {
   margin: 0;
   font: var(--text-h2);
+  overflow-wrap: anywhere;
 }
 
 .mk-confirm-dialog__description {
@@ -277,19 +303,37 @@
   margin: var(--sp-3) 0 0;
   color: var(--fg-2);
   font: var(--text-body);
+  overflow-wrap: anywhere;
 }
 
 .mk-confirm-dialog__entity {
   margin-top: var(--sp-3);
   color: var(--fg-1);
   font: var(--text-h3);
+  overflow-wrap: anywhere;
+}
+
+.mk-confirm-dialog__error {
+  min-width: 0;
+  margin-top: var(--sp-4);
+  overflow-wrap: anywhere;
 }
 
 .mk-confirm-dialog__actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: var(--sp-2);
   margin-top: var(--sp-6);
+}
+
+.mk-alert,
+.mk-alert > div {
+  min-width: 0;
+}
+
+.mk-alert > div {
+  overflow-wrap: anywhere;
 }
 
 @keyframes mk-panel-in {

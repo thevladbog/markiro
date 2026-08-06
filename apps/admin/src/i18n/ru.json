@@ -959,10 +959,19 @@
       "title": "Сотрудники",
       "emptyTitle": "Сотрудники не добавлены",
       "emptyHint": "Добавьте первого сотрудника, чтобы выдать ему QR-бейдж для самообслуживания.",
+      "emptyReadOnlyHint": "Обратитесь к администратору с правом редактирования, чтобы добавить сотрудников.",
+      "filteredEmptyTitle": "Нет сотрудников с выбранным статусом",
+      "filteredEmptyHint": "Измените фильтр или сбросьте его, чтобы увидеть сотрудников.",
       "addAction": "Добавить сотрудника",
+      "resultCount_one": "{{count}} сотрудник",
+      "resultCount_few": "{{count}} сотрудника",
+      "resultCount_many": "{{count}} сотрудников",
+      "resultCount_other": "{{count}} сотрудника",
       "edit": "Изменить",
       "archive": "В архив",
       "cancel": "Отмена",
+      "retry": "Повторить",
+      "archivePersistentError": "Не удалось отправить сотрудника в архив.",
       "archiveConfirmTitle": "Отправить сотрудника в архив?",
       "archiveConfirmBody": "Сотрудник «{{name}}» будет перемещён в архив; выпущенные бейджи будут отозваны.",
       "archiveConfirmAction": "В архив",
@@ -971,6 +980,8 @@
         "archived": "В архиве"
       },
       "filters": {
+        "label": "Фильтры сотрудников",
+        "reset": "Сбросить",
         "statusLabel": "Статус",
         "status": {
           "all": "Все статусы",
@@ -988,31 +999,57 @@
       "form": {
         "createTitle": "Новый сотрудник",
         "editTitle": "Изменить сотрудника",
+        "editIdentity": "{{name}}",
+        "editIdentityWithRole": "{{name}} · {{role}}",
         "fullNameLabel": "ФИО",
         "roleLabel": "Должность",
         "submitCreate": "Создать",
         "submitUpdate": "Сохранить",
+        "loadError": "Не удалось загрузить данные сотрудника.",
+        "retry": "Повторить",
+        "notFound": "Сотрудник не найден.",
+        "disappearedConflict": "Сотрудник больше не входит в текущий список. Черновики сохранятся, пока открыта эта панель.",
+        "updateError": "Не удалось сохранить профиль сотрудника.",
+        "discardTitle": "Отменить изменения?",
+        "discardBody": "Несохранённые изменения будут потеряны.",
+        "continueEditing": "Продолжить редактирование",
+        "discardAction": "Не сохранять",
         "errors": {
           "fullNameRequired": "Укажите ФИО",
           "fullNameTooLong": "Не более 200 символов",
           "roleTooLong": "Не более 120 символов"
         }
       },
+      "sections": {
+        "navigationLabel": "Разделы сотрудника",
+        "profile": "Профиль",
+        "error": "Ошибка"
+      },
       "badges": {
         "title": "Бейджи",
         "emptyHint": "Бейджи не выпущены",
+        "unnamedBadge": "Без названия",
         "codeLabel": "Код бейджа",
         "labelLabel": "Метка",
         "issueAction": "Выпустить бейдж",
+        "issueError": "Не удалось выпустить бейдж",
         "revokeAction": "Отозвать",
+        "revokeTitle": "Отозвать бейдж?",
+        "revokeBody": "Бейдж будет отозван и больше не сможет использоваться для подтверждения личности.",
+        "revokeConfirmAction": "Отозвать",
+        "activeBadge": "Активен",
         "revokedBadge": "Отозван",
+        "revokeError": "Не удалось отозвать бейдж",
         "issuedAt": "Выпущен {{date}}"
       },
       "stationAccess": {
         "title": "Доступ на станцию",
         "emptyHint": "Доступ на линейную станцию не выдан",
-        "loadError": "Не удалось загрузить статус доступа на станцию. Обновите страницу перед выдачей доступа.",
+        "draftConflict": "Черновик доступа конфликтует с уже выданным доступом.",
+        "discardDraftAction": "Отменить черновик",
+        "loadError": "Не удалось загрузить статус доступа на станцию.",
         "loading": "Загрузка статуса доступа на станцию…",
+        "retryAction": "Повторить",
         "loginLabel": "Табельный номер",
         "pinLabel": "ПИН-код",
         "grantAction": "Выдать доступ",
@@ -1022,7 +1059,18 @@
         "revokeAction": "Убрать доступ",
         "activeBadge": "Активен",
         "disabledBadge": "Отключён",
-        "current": "Табельный номер {{login}}"
+        "current": "Табельный номер {{login}}",
+        "revokeTitle": "Убрать доступ на станцию?",
+        "revokeBody": "Сотрудник больше не сможет входить на линейную станцию.",
+        "revokeConfirmAction": "Убрать доступ",
+        "revokeError": "Не удалось убрать доступ на станцию",
+        "status": {
+          "loading": "Загрузка",
+          "error": "Ошибка",
+          "none": "Нет доступа",
+          "active": "Активен",
+          "disabled": "Отключён"
+        }
       },
       "toasts": {
         "createSuccess": "Сотрудник добавлен",

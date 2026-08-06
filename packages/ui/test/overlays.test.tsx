@@ -1,7 +1,9 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
+
+import componentStyles from "virtual:ui-component-styles";
 
 import {
   DatePicker,
@@ -53,6 +55,10 @@ afterEach(() => {
 });
 
 beforeAll(() => {
+  const style = document.createElement("style");
+  style.textContent = componentStyles;
+  document.head.append(style);
+
   Object.defineProperties(HTMLElement.prototype, {
     hasPointerCapture: { value: () => false },
     setPointerCapture: { value: () => undefined },
@@ -152,6 +158,46 @@ it.each(["compact", "standard", "complex"] as const)("applies the %s size token"
   expect(screen.getByRole("dialog").classList.contains(`mk-side-panel--${size}`)).toBe(true);
 });
 
+it("keeps panel and confirmation content viewport-bounded when copy is long", () => {
+  const longIdentity = "Employee-without-breaks-".repeat(20);
+  render(
+    <>
+      <SidePanel
+        open
+        title="Edit employee"
+        description={longIdentity}
+        closeLabel="Close"
+        onClose={() => {}}
+        footer={<button type="button">Save</button>}
+      >
+        Body
+      </SidePanel>
+      <ConfirmDialog
+        open
+        title="Remove access?"
+        description={longIdentity}
+        entity={longIdentity}
+        error={longIdentity}
+        cancelLabel="Cancel"
+        confirmLabel="Remove"
+        onCancel={() => {}}
+        onConfirm={() => {}}
+      />
+    </>,
+  );
+
+  const panel = screen.getByRole("dialog", { name: "Edit employee" });
+  const confirmation = screen.getByRole("alertdialog", { name: "Remove access?" });
+  const confirmationEntity = confirmation.querySelector<HTMLElement>(".mk-confirm-dialog__entity");
+  expect(confirmationEntity).not.toBeNull();
+  if (!confirmationEntity) throw new Error("Missing confirmation entity");
+  expect(getComputedStyle(panel).boxSizing).toBe("border-box");
+  expect(getComputedStyle(panel).maxHeight).toBe("100dvh");
+  expect(getComputedStyle(confirmation).boxSizing).toBe("border-box");
+  expect(getComputedStyle(confirmation).overflowY).toBe("auto");
+  expect(getComputedStyle(confirmationEntity).overflowWrap).toBe("anywhere");
+});
+
 it("keeps Radix child portals in the panel and lets each child consume Escape first", async () => {
   const user = userEvent.setup();
   const onClose = vi.fn();
@@ -196,6 +242,28 @@ it("focuses Cancel and exposes one explicit destructive action", () => {
   expect(document.activeElement).toBe(screen.getByRole("button", { name: "Cancel" }));
   expect(screen.getByRole("button", { name: "Delete" }).className).toContain("destructive");
   expect(screen.getByText("This cannot be undone.").tagName).toBe("DIV");
+});
+
+it("keeps a confirmed mutation error visible without changing dialog actions", () => {
+  render(
+    <ConfirmDialog
+      open
+      title="Archive employee?"
+      description="The employee will be archived."
+      entity="Anna Smirnova"
+      error="Archive conflict"
+      cancelLabel="Cancel"
+      confirmLabel="Archive"
+      tone="destructive"
+      onCancel={() => {}}
+      onConfirm={() => {}}
+    />,
+  );
+
+  const dialog = screen.getByRole("alertdialog", { name: "Archive employee?" });
+  expect(within(dialog).getByRole("alert").textContent).toContain("Archive conflict");
+  expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeDefined();
+  expect(within(dialog).getByRole("button", { name: "Archive" })).toBeDefined();
 });
 
 it("maps Escape and backdrop to Cancel but blocks dismissal and submit while busy", async () => {

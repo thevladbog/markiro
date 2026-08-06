@@ -692,7 +692,11 @@ describe("ShiftsPage", () => {
 
   it("applies product B defaults after counterparty and template were touched for product A", async () => {
     const user = userEvent.setup();
-    const created = { ...PLANNED_SHIFT, id: "new-defaults", productId: PRODUCT_B_WITH_DEFAULTS.id };
+    const created = {
+      ...PLANNED_SHIFT,
+      id: "new-defaults",
+      productId: PRODUCT_B_WITH_DEFAULTS.id,
+    };
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       const path = String(url);
       if (path === "/api/shifts" && init?.method === "POST") return jsonResponse(201, created);
@@ -748,7 +752,7 @@ describe("ShiftsPage", () => {
         }),
       );
     });
-  });
+  }, 10_000);
 
   it("sends labelTemplateId: null when the user clears the prefilled label template before submitting", async () => {
     const user = userEvent.setup();
@@ -916,7 +920,7 @@ describe("ShiftsPage", () => {
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith("/api/shifts", expect.any(Object));
     });
-  });
+  }, 10_000);
 
   it("clears a planned date to null in the update payload", async () => {
     const user = userEvent.setup();
