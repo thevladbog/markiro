@@ -375,7 +375,56 @@ describe("WorkScreen", () => {
     expect(screen.getByRole("button", { name: "Pause / finish" })).toBeDefined();
   });
 
-  it("does not let a delayed recent-operation refresh delay notification or the next scan", async () => {
+  it("coalesces a scan burst into one active and one trailing recent read without delaying commits", async () => {
+    const source = manualSource();
+    const base = makeExec();
+    let recentReads = 0;
+    let activeRecentReads = 0;
+    let maxActiveRecentReads = 0;
+    let releaseRefresh!: () => void;
+    const refreshGate = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    const order: string[] = [];
+    const exec: SqlExecutor = {
+      async run(sql, params = []) {
+        await base.run(sql, params);
+        if (sql.includes("INSERT INTO outbox")) order.push(`commit:${String(params[2])}`);
+      },
+      async all<T>(sql: string, params: unknown[] = []) {
+        if (sql.includes("FROM scan_events_mirror") && sql.includes("LIMIT ?")) {
+          recentReads += 1;
+          if (recentReads > 1) {
+            activeRecentReads += 1;
+            maxActiveRecentReads = Math.max(maxActiveRecentReads, activeRecentReads);
+            await refreshGate;
+            activeRecentReads -= 1;
+          }
+        }
+        return base.all<T>(sql, params);
+      },
+    };
+    const onScanRecorded = vi.fn(() => order.push("notify"));
+    renderWorkScreen({ source, exec, onScanRecorded });
+    await waitFor(() => expect(recentReads).toBe(1));
+    const burst = Array.from({ length: 6 }, (_, index) => `0104600000000015215Burst${index + 1}`);
+
+    act(() => {
+      for (const raw of burst) source.emit(raw);
+    });
+
+    await waitFor(() => expect(onScanRecorded).toHaveBeenCalledTimes(burst.length));
+    expect(await exec.all("SELECT code_hash FROM codes_mirror")).toHaveLength(burst.length);
+    expect(order).toEqual(burst.flatMap((raw) => [`commit:${raw}`, "notify"]));
+    expect(recentReads).toBe(2);
+    expect(maxActiveRecentReads).toBe(1);
+
+    releaseRefresh();
+    await waitFor(() => expect(recentReads).toBe(3));
+    await waitFor(() => expect(activeRecentReads).toBe(0));
+  });
+
+  it("drops a queued trailing recent read when the work screen unmounts", async () => {
     const source = manualSource();
     const base = makeExec();
     let recentReads = 0;
@@ -394,18 +443,20 @@ describe("WorkScreen", () => {
       },
     };
     const onScanRecorded = vi.fn();
-    renderWorkScreen({ source, exec, onScanRecorded });
+    const view = renderWorkScreen({ source, exec, onScanRecorded });
     await waitFor(() => expect(recentReads).toBe(1));
 
     act(() => {
       source.emit(KM);
       source.emit(OTHER_KM);
     });
-
     await waitFor(() => expect(onScanRecorded).toHaveBeenCalledTimes(2));
-    expect(await exec.all("SELECT code_hash FROM codes_mirror")).toHaveLength(2);
-    expect(recentReads).toBeGreaterThanOrEqual(2);
+    expect(recentReads).toBe(2);
+
+    view.unmount();
     releaseRefresh();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(recentReads).toBe(2);
   });
 
   it("keeps an unmounted queue registered until an accepted scan write becomes idle", async () => {

@@ -1,3 +1,4 @@
+import { classifyScan } from "@markiro/domain";
 import type { SqlExecutor } from "./mirror.js";
 import { insertException } from "./box-exceptions-mirror.js";
 
@@ -43,11 +44,14 @@ export interface RecentOperation {
 }
 
 const RECENT_OPERATION_LIMIT = 6;
+const PRODUCT_CODE_VERDICTS = new Set(["ok", "duplicate", "wrong_gtin"]);
 
 /**
- * The latest bounded scan facts for one shift. Valid timestamps sort newest
- * first, ties are resolved by the mirror's monotonic id, and malformed legacy
- * timestamps remain visible after valid rows without reaching date formatting.
+ * The latest bounded scan facts for one shift in durable journal order. The
+ * monotonic id is both the operation sequence and SQLite's primary-key order,
+ * so the query can stop after six matching rows instead of sorting the full
+ * shift on every scan. Malformed legacy timestamps remain visible without
+ * reaching date formatting.
  */
 export async function listRecentOperations(
   exec: SqlExecutor,
@@ -59,19 +63,23 @@ export async function listRecentOperations(
     scanned_at: string;
   }>(
     `SELECT raw, verdict, scanned_at
-       FROM scan_events_mirror
+      FROM scan_events_mirror
       WHERE shift_id = ?
-      ORDER BY (julianday(scanned_at) IS NULL) ASC, julianday(scanned_at) DESC, id DESC
+      ORDER BY id DESC
       LIMIT ?`,
     [shiftId, RECENT_OPERATION_LIMIT],
   );
 
   return rows.map((row) => {
-    const characters = Array.from(row.raw).filter((character) => /[\p{L}\p{N}]/u.test(character));
+    const scan = PRODUCT_CODE_VERDICTS.has(row.verdict) ? classifyScan(row.raw) : null;
+    const characters =
+      scan?.kind === "km"
+        ? Array.from(scan.km.serial).filter((character) => /[\p{L}\p{N}]/u.test(character))
+        : [];
     return {
       verdict: row.verdict,
       scannedAt: Number.isNaN(Date.parse(row.scanned_at)) ? null : row.scanned_at,
-      codeSuffix: characters.length < 8 ? null : `…${characters.slice(-4).join("")}`,
+      codeSuffix: characters.length > 0 ? `…${characters.slice(-4).join("")}` : null,
     };
   });
 }

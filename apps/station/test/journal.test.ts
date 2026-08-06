@@ -108,7 +108,7 @@ describe("journal", () => {
     expect(JSON.stringify(recent)).not.toContain("FOREIGN");
   });
 
-  it("sorts equal timestamps by insertion id and degrades malformed timestamps safely", async () => {
+  it("uses journal insertion order for newest-first display and degrades malformed timestamps safely", async () => {
     const exec = makeExec();
     await appendScanEvent(exec, {
       ...EVENT,
@@ -129,13 +129,13 @@ describe("journal", () => {
     });
 
     expect(await listRecentOperations(exec, "s1")).toEqual([
+      { verdict: "invalid", scannedAt: null, codeSuffix: null },
       {
         verdict: "duplicate",
         scannedAt: "2026-08-06T10:00:00.000Z",
         codeSuffix: "…COND",
       },
       { verdict: "ok", scannedAt: "2026-08-06T10:00:00.000Z", codeSuffix: "…IRST" },
-      { verdict: "invalid", scannedAt: null, codeSuffix: null },
     ]);
   });
 
@@ -143,11 +143,39 @@ describe("journal", () => {
     const exec = makeExec();
     await appendScanEvent(exec, {
       ...EVENT,
-      raw: "0104600000000015215A\u001dB\u001eC",
+      raw: "0104600000000015215ABC\u001d93TAIL",
     });
 
     expect(await listRecentOperations(exec, "s1")).toEqual([
       { verdict: "ok", scannedAt: EVENT.scannedAt, codeSuffix: "…5ABC" },
+    ]);
+  });
+
+  it("never exposes a suffix for a long invalid payload that may contain a secret", async () => {
+    const exec = makeExec();
+    const sensitiveRaw = "operator-pin-000012345678-secret";
+    await appendScanEvent(exec, {
+      ...EVENT,
+      raw: sensitiveRaw,
+      verdict: "invalid",
+    });
+
+    const recent = await listRecentOperations(exec, "s1");
+    expect(recent).toEqual([{ verdict: "invalid", scannedAt: EVENT.scannedAt, codeSuffix: null }]);
+    expect(JSON.stringify(recent)).not.toContain("secret");
+    expect(JSON.stringify(recent)).not.toContain("5678");
+  });
+
+  it("does not trust a product verdict when the stored payload is not a parsed KM", async () => {
+    const exec = makeExec();
+    await appendScanEvent(exec, {
+      ...EVENT,
+      raw: "legacy-secret-marked-ok-by-corrupt-row",
+      verdict: "ok",
+    });
+
+    expect(await listRecentOperations(exec, "s1")).toEqual([
+      { verdict: "ok", scannedAt: EVENT.scannedAt, codeSuffix: null },
     ]);
   });
 

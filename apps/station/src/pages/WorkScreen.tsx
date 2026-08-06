@@ -93,6 +93,12 @@ export interface WorkScreenProps {
 /** How long each verdict's full-screen flash stays up (design brief 04). */
 const FLASH_MS: Record<SignalTone, number> = { ok: 350, error: 1200, duplicate: 900 };
 
+interface RecentReadState {
+  mounted: boolean;
+  active: boolean;
+  trailing: boolean;
+}
+
 function toneOf(verdict: ScanVerdict): SignalTone {
   if (verdict.status === "ok") return "ok";
   if (verdict.status === "duplicate") return "duplicate";
@@ -129,20 +135,52 @@ export function WorkScreen({
   const [confirmExit, setConfirmExit] = useState(false);
   const [showExceptions, setShowExceptions] = useState(false);
   const [recentOperations, setRecentOperations] = useState<RecentOperation[]>([]);
-  const recentReadGeneration = useRef(0);
+  const recentReadState = useRef<RecentReadState>({
+    mounted: false,
+    active: false,
+    trailing: false,
+  });
 
-  const refreshRecentOperations = useCallback(async (): Promise<void> => {
-    const generation = ++recentReadGeneration.current;
-    try {
-      const rows = await listRecentOperations(exec, shiftId);
-      if (generation === recentReadGeneration.current) setRecentOperations(rows);
-    } catch (err) {
-      console.error("station: failed to read recent scan operations", err);
+  const refreshRecentOperations = useCallback((): void => {
+    const state = recentReadState.current;
+    if (!state.mounted) return;
+    if (state.active) {
+      state.trailing = true;
+      return;
     }
+    state.active = true;
+    void listRecentOperations(exec, shiftId)
+      .then((rows) => {
+        // If another scan committed while this read was active, its trailing
+        // read owns the visible result. Do not briefly publish this older
+        // snapshot before that read starts.
+        if (recentReadState.current === state && state.mounted && !state.trailing) {
+          setRecentOperations(rows);
+        }
+      })
+      .catch((err: unknown) => {
+        if (recentReadState.current === state && state.mounted) {
+          console.error("station: failed to read recent scan operations", err);
+        }
+      })
+      .finally(() => {
+        if (recentReadState.current !== state || !state.mounted) return;
+        state.active = false;
+        if (state.trailing) {
+          state.trailing = false;
+          refreshRecentOperations();
+        }
+      });
   }, [exec, shiftId]);
 
   useEffect(() => {
-    void refreshRecentOperations();
+    const state: RecentReadState = { mounted: true, active: false, trailing: false };
+    recentReadState.current = state;
+    refreshRecentOperations();
+    return () => {
+      state.mounted = false;
+      state.trailing = false;
+    };
   }, [refreshRecentOperations]);
 
   // Box aggregation state -- null (never loaded / no `issuerPrefix`) means no
