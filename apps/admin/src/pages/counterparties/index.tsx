@@ -3,7 +3,17 @@ import { useTranslation } from "react-i18next";
 import { Outlet, useNavigate } from "react-router";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
-import { Alert, Button, EmptyState, Modal, PageHeader, Spinner, Table } from "@markiro/ui";
+import {
+  AdminPage,
+  Alert,
+  Button,
+  ConfirmDialog,
+  EmptyState,
+  PageHeader,
+  RowActions,
+  Spinner,
+  Table,
+} from "@markiro/ui";
 import type { TableColumn } from "@markiro/ui";
 
 import { useCan } from "../../access/context.js";
@@ -38,15 +48,16 @@ function AuthorizedCounterpartyRowActions({ counterparty }: { counterparty: Coun
   const navigate = useNavigate();
   const deleteMutation = useDeleteCounterparty();
   const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const handleDelete = async () => {
     try {
+      setDeleteError(null);
       await deleteMutation.mutateAsync(counterparty.id);
       toast("ok", t("pages.counterparties.toasts.deleteSuccess"));
       setDeleting(false);
     } catch (error) {
-      toast(
-        "error",
+      setDeleteError(
         error instanceof ApiRequestError
           ? error.message
           : t("pages.counterparties.toasts.deleteError"),
@@ -56,7 +67,7 @@ function AuthorizedCounterpartyRowActions({ counterparty }: { counterparty: Coun
 
   return (
     <>
-      <div className="mk-row-actions">
+      <RowActions>
         <Button
           type="button"
           size="compact"
@@ -73,34 +84,31 @@ function AuthorizedCounterpartyRowActions({ counterparty }: { counterparty: Coun
           type="button"
           size="compact"
           variant="destructive"
-          onClick={() => setDeleting(true)}
+          onClick={() => {
+            setDeleteError(null);
+            setDeleting(true);
+          }}
         >
           {t("pages.counterparties.delete")}
         </Button>
-      </div>
-      <Modal
+      </RowActions>
+      <ConfirmDialog
         open={deleting}
-        onClose={() => setDeleting(false)}
-        closeLabel={t("common.close")}
         title={t("pages.counterparties.deleteConfirmTitle")}
-        footer={
+        description={
           <>
-            <Button type="button" variant="secondary" onClick={() => setDeleting(false)}>
-              {t("pages.counterparties.cancel")}
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              loading={deleteMutation.isPending}
-              onClick={() => void handleDelete()}
-            >
-              {t("pages.counterparties.deleteConfirmAction")}
-            </Button>
+            <p>{t("pages.counterparties.deleteConfirmBody", { name: counterparty.name })}</p>
+            {deleteError ? <Alert tone="error">{deleteError}</Alert> : null}
           </>
         }
-      >
-        <p>{t("pages.counterparties.deleteConfirmBody", { name: counterparty.name })}</p>
-      </Modal>
+        entity={counterparty.gln}
+        cancelLabel={t("pages.counterparties.cancel")}
+        confirmLabel={t("pages.counterparties.deleteConfirmAction")}
+        tone="destructive"
+        busy={deleteMutation.isPending}
+        onCancel={() => setDeleting(false)}
+        onConfirm={() => void handleDelete()}
+      />
     </>
   );
 }
@@ -139,11 +147,17 @@ export function CounterpartiesPage() {
   );
 
   return (
-    <div className="mk-counterparties-page" data-testid="counterparties-page">
+    <AdminPage className="mk-counterparties-page" data-testid="counterparties-page">
       <PageHeader
         title={t("pages.counterparties.title")}
         actions={canWrite ? <AuthorizedCreateCounterpartyAction /> : null}
       />
+
+      <p className="mk-counterparties-result" aria-live="polite">
+        {!query.isPending && !query.isError
+          ? t("pages.counterparties.resultCount", { count: items.length })
+          : ""}
+      </p>
 
       {query.isPending ? (
         <div className="mk-counterparty-section-state">
@@ -173,6 +187,6 @@ export function CounterpartiesPage() {
           } satisfies CounterpartiesPanelContext
         }
       />
-    </div>
+    </AdminPage>
   );
 }

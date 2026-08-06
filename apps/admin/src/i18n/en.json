@@ -451,6 +451,8 @@
       "emptyTitle": "No counterparties yet",
       "emptyHint": "Add your first counterparty — a GTIN owner or tolling partner.",
       "addAction": "Add counterparty",
+      "resultCount_one": "{{count}} counterparty",
+      "resultCount_other": "{{count}} counterparties",
       "edit": "Edit",
       "delete": "Delete",
       "cancel": "Cancel",

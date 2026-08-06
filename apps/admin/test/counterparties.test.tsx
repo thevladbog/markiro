@@ -117,6 +117,8 @@ describe("CounterpartiesPage", () => {
     expect(screen.getByText("6291041500213")).toBeDefined();
     expect(screen.getByText("7701234567")).toBeDefined();
     expect(screen.getByText("2")).toBeDefined(); // gs1Prefixes.length
+    expect(screen.getByTestId("counterparties-page").classList).toContain("mk-admin-page");
+    expect(screen.getByText("1 контрагент").getAttribute("aria-live")).toBe("polite");
     expect(fetchMock).toHaveBeenCalledWith("/api/counterparties", expect.any(Object));
   });
 
@@ -316,7 +318,7 @@ describe("CounterpartiesPage", () => {
     await screen.findByText("Acme Ltd");
 
     fireEvent.click(screen.getByRole("button", { name: "Удалить" }));
-    const dialog = await screen.findByRole("dialog");
+    const dialog = await screen.findByRole("alertdialog", { name: "Удалить контрагента?" });
     expect(within(dialog).getByText("Удалить контрагента?")).toBeDefined();
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Удалить" }));
@@ -343,9 +345,10 @@ describe("CounterpartiesPage", () => {
     await screen.findByText("Acme Ltd");
 
     fireEvent.click(screen.getByRole("button", { name: "Удалить" }));
-    const dialog = await screen.findByRole("dialog");
+    const dialog = await screen.findByRole("alertdialog", { name: "Удалить контрагента?" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Удалить" }));
 
-    expect(await screen.findByText(conflictMessage)).toBeDefined();
+    expect(await within(dialog).findByText(conflictMessage)).toBeDefined();
+    expect(screen.getByRole("alertdialog", { name: "Удалить контрагента?" })).toBeDefined();
   });
 });
