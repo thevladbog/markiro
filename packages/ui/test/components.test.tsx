@@ -395,6 +395,30 @@ describe("FullScreenDialog", () => {
     );
   }
 
+  function SimultaneousDialogHarness() {
+    const [outerOpen, setOuterOpen] = useState(true);
+    const [innerOpen, setInnerOpen] = useState(true);
+    return (
+      <FullScreenDialog
+        open={outerOpen}
+        title="Simultaneous outer"
+        backLabel="Close simultaneous outer"
+        onClose={() => setOuterOpen(false)}
+        footer={<button type="button">Simultaneous outer action</button>}
+      >
+        <FullScreenDialog
+          open={innerOpen}
+          title="Simultaneous inner"
+          backLabel="Close simultaneous inner"
+          onClose={() => setInnerOpen(false)}
+          footer={<button type="button">Simultaneous inner action</button>}
+        >
+          Inner content
+        </FullScreenDialog>
+      </FullScreenDialog>
+    );
+  }
+
   it("exports a full-screen dialog with an explicit floor-sized back action", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
@@ -457,6 +481,39 @@ describe("FullScreenDialog", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog", { name: "Outer dialog" })).toBeNull();
     expect(document.activeElement).toBe(originalOpener);
+  });
+
+  it("coordinates initial focus when nested dialogs are both open on their first render", async () => {
+    const originalFocus = document.createElement("button");
+    originalFocus.textContent = "Original focus";
+    document.body.append(originalFocus);
+    originalFocus.focus();
+
+    const user = userEvent.setup();
+    render(<SimultaneousDialogHarness />);
+    const innerBack = screen.getByRole("button", { name: "Close simultaneous inner" });
+    const innerLast = screen.getByRole("button", { name: "Simultaneous inner action" });
+    expect(document.activeElement).toBe(innerBack);
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(innerLast);
+    await user.tab();
+    expect(document.activeElement).toBe(innerBack);
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Simultaneous inner" })).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Simultaneous outer" })).toBeDefined();
+    const outerBack = screen.getByRole("button", { name: "Close simultaneous outer" });
+    const outerLast = screen.getByRole("button", { name: "Simultaneous outer action" });
+    expect(document.activeElement).toBe(outerBack);
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(outerLast);
+    await user.tab();
+    expect(document.activeElement).toBe(outerBack);
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Simultaneous outer" })).toBeNull();
+    expect(document.activeElement).toBe(originalFocus);
+    originalFocus.remove();
   });
 });
 

@@ -34,25 +34,78 @@ function getFocusable(container: HTMLElement): HTMLElement[] {
   return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
 }
 
-const OPEN_DIALOGS: HTMLElement[] = [];
+interface OpenDialogEntry {
+  dialog: HTMLElement;
+  returnFocus: HTMLElement | null;
+  rootReturnFocus: HTMLElement | null;
+}
 
-function registerDialog(dialog: HTMLElement): () => void {
-  OPEN_DIALOGS.push(dialog);
-  return () => {
-    const index = OPEN_DIALOGS.lastIndexOf(dialog);
-    if (index !== -1) OPEN_DIALOGS.splice(index, 1);
+const OPEN_DIALOGS: OpenDialogEntry[] = [];
+
+function connectedDialogs(): OpenDialogEntry[] {
+  return OPEN_DIALOGS.filter((entry) => entry.dialog.isConnected);
+}
+
+function topmostDialog(): OpenDialogEntry | undefined {
+  const connected = connectedDialogs();
+  for (let index = connected.length - 1; index >= 0; index -= 1) {
+    const candidate = connected[index];
+    if (
+      candidate &&
+      !connected.some((other) => other !== candidate && candidate.dialog.contains(other.dialog))
+    ) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+function registerDialog(
+  dialog: HTMLElement,
+  returnFocus: HTMLElement | null,
+): { entry: OpenDialogEntry; unregister: () => void } {
+  const connected = connectedDialogs();
+  const ancestor = connected.find((candidate) => candidate.dialog.contains(dialog));
+  const descendant = connected.find((candidate) => dialog.contains(candidate.dialog));
+  const entry: OpenDialogEntry = {
+    dialog,
+    returnFocus,
+    rootReturnFocus: ancestor?.rootReturnFocus ?? descendant?.rootReturnFocus ?? returnFocus,
+  };
+  OPEN_DIALOGS.push(entry);
+  return {
+    entry,
+    unregister: () => {
+      const index = OPEN_DIALOGS.lastIndexOf(entry);
+      if (index !== -1) OPEN_DIALOGS.splice(index, 1);
+    },
   };
 }
 
+function focusFirst(dialog: HTMLElement): void {
+  (getFocusable(dialog)[0] ?? dialog).focus();
+}
+
+function restoreFocusAfterClose(entry: OpenDialogEntry): void {
+  const topmost = topmostDialog();
+  if (topmost) {
+    if (entry.returnFocus?.isConnected && topmost.dialog.contains(entry.returnFocus)) {
+      entry.returnFocus.focus();
+    } else {
+      focusFirst(topmost.dialog);
+    }
+    return;
+  }
+
+  if (entry.rootReturnFocus?.isConnected) {
+    entry.rootReturnFocus.focus();
+  } else if (entry.returnFocus?.isConnected) {
+    entry.returnFocus.focus();
+  }
+}
+
 function isTopmostDialog(dialog: HTMLElement): boolean {
-  const connectedDialogs = OPEN_DIALOGS.filter((candidate) => candidate.isConnected);
-  if (connectedDialogs.some((candidate) => candidate !== dialog && dialog.contains(candidate))) {
-    return false;
-  }
-  if (connectedDialogs.some((candidate) => candidate !== dialog && candidate.contains(dialog))) {
-    return true;
-  }
-  return connectedDialogs.at(-1) === dialog;
+  return topmostDialog()?.dialog === dialog;
 }
 
 export function FullScreenDialog({
@@ -74,12 +127,12 @@ export function FullScreenDialog({
     const previouslyFocused = document.activeElement as HTMLElement | null;
     const dialog = dialogRef.current;
     if (!dialog) return undefined;
-    const unregister = registerDialog(dialog);
-    (dialog ? getFocusable(dialog)[0] : undefined)?.focus();
+    const { entry, unregister } = registerDialog(dialog, previouslyFocused);
+    if (isTopmostDialog(dialog)) focusFirst(dialog);
 
     return () => {
       unregister();
-      previouslyFocused?.focus();
+      restoreFocusAfterClose(entry);
     };
   }, [open]);
 
