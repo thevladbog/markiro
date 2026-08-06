@@ -235,6 +235,7 @@ const ADMINISTRATIVE_CONTROLLERS: readonly [
       createKiosk: writePolicy,
       updateKiosk: writePolicy,
       archiveKiosk: writePolicy,
+      unbindKiosk: credentialsPolicy,
       setProducts: writePolicy,
       enroll: credentialsPolicy,
       issuePairingCode: credentialsPolicy,

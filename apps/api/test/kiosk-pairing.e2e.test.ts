@@ -640,6 +640,86 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
     expect(paired.body.nextDeviceSeq).toBe(8);
   });
 
+  it("does not redeem a code after archive completes while bootstrap is still pending", async () => {
+    const pickupOrdersService = app!.get(PickupOrdersService);
+    const originalBootstrap = pickupOrdersService.bootstrap.bind(pickupOrdersService);
+    let releaseBootstrap: (() => void) | undefined;
+    const bootstrapPaused = new Promise<void>((resolve) => {
+      releaseBootstrap = resolve;
+    });
+    let bootstrapObserved: (() => void) | undefined;
+    const bootstrapStarted = new Promise<void>((resolve) => {
+      bootstrapObserved = resolve;
+    });
+    const bootstrapSpy = vi
+      .spyOn(pickupOrdersService, "bootstrap")
+      .mockImplementationOnce(async (tid: string, kid: string) => {
+        bootstrapObserved?.();
+        await bootstrapPaused;
+        return originalBootstrap(tid, kid);
+      });
+
+    try {
+      const issued = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+      const pair = request(app!.getHttpServer())
+        .post("/kiosk/pair")
+        .send({ code: issued.body.code })
+        .then((response) => response);
+      await bootstrapStarted;
+      await agent.delete(`/kiosks/${kioskId}`).expect(204);
+      releaseBootstrap?.();
+
+      expect((await pair).status).toBe(401);
+    } finally {
+      bootstrapSpy.mockRestore();
+    }
+  });
+
+  it("does not issue a pairing code after archive holds the kiosk lifecycle lock", async () => {
+    let releaseArchive: (() => void) | undefined;
+    const archivePaused = new Promise<void>((resolve) => {
+      releaseArchive = resolve;
+    });
+    let archiveLocked: (() => void) | undefined;
+    const archiveStarted = new Promise<void>((resolve) => {
+      archiveLocked = resolve;
+    });
+    const archive = db.transaction(async (tx) => {
+      await tx
+        .select({ id: schema.kiosks.id })
+        .from(schema.kiosks)
+        .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, kioskId)))
+        .for("update");
+      await tx
+        .update(schema.kiosks)
+        .set({ status: "archived", deviceTokenHash: null })
+        .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, kioskId)));
+      archiveLocked?.();
+      await archivePaused;
+    });
+    await archiveStarted;
+    const issue = agent
+      .post(`/kiosks/${kioskId}/pairing-code`)
+      .send({})
+      .then((response) => response);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    releaseArchive?.();
+    await archive;
+
+    expect((await issue).status).toBe(404);
+    const liveCodes = await db
+      .select({ id: schema.kioskPairingCodes.id })
+      .from(schema.kioskPairingCodes)
+      .where(
+        and(
+          eq(schema.kioskPairingCodes.tenantId, tenantId),
+          eq(schema.kioskPairingCodes.kioskId, kioskId),
+          isNull(schema.kioskPairingCodes.usedAt),
+        ),
+      );
+    expect(liveCodes).toEqual([]);
+  });
+
   // F2 regression: once the global backstop is already exhausted, a request
   // from a source with no row of its own yet (standing in for an attacker
   // rotating source addresses) must be turned away WITHOUT allocating one --

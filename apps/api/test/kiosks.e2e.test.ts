@@ -293,6 +293,45 @@ describe.skipIf(!ready)("kiosks e2e", () => {
     expect(kiosk).toEqual({ status: "active", deviceTokenHash: null });
   });
 
+  it("serializes enrollment behind an archive lock and revalidates the committed lifecycle state", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const created = await agent.post("/kiosks").send({ name: "Enrollment race kiosk" }).expect(201);
+    const id = created.body.id as string;
+    let releaseArchive: (() => void) | undefined;
+    const archivePaused = new Promise<void>((resolve) => {
+      releaseArchive = resolve;
+    });
+    let archiveLocked: (() => void) | undefined;
+    const archiveStarted = new Promise<void>((resolve) => {
+      archiveLocked = resolve;
+    });
+
+    const archive = db.transaction(async (tx) => {
+      await tx
+        .select({ id: schema.kiosks.id })
+        .from(schema.kiosks)
+        .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, id)))
+        .for("update");
+      await tx
+        .update(schema.kiosks)
+        .set({ status: "archived", deviceTokenHash: null })
+        .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, id)));
+      archiveLocked?.();
+      await archivePaused;
+    });
+    await archiveStarted;
+    const enroll = agent
+      .post(`/kiosks/${id}/enroll`)
+      .send({})
+      .then((response) => response);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    releaseArchive?.();
+    await archive;
+
+    expect((await enroll).status).toBe(404);
+  });
+
   it("cross-tenant isolation: org B cannot PATCH/DELETE org A's kiosk (404)", async () => {
     const agent1 = request.agent(app!.getHttpServer());
     await signUpAndActivate(agent1);

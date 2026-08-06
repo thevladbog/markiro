@@ -23,6 +23,9 @@ import {
 /** Bounded retries so a live-code hash collision can never be minted. */
 const MINT_ATTEMPTS = 5;
 
+/** Rolls back a mint attempt before the next random code is tried. */
+class PairingCodeHashCollisionError extends Error {}
+
 // The pairing code is hashed with `hashPairingCode` (HMAC-SHA256 keyed by
 // the server-held `PAIRING_CODE_PEPPER`), never `hashDeviceToken`'s plain
 // sha256: an unkeyed digest over the 10^8 code space is trivially
@@ -54,89 +57,62 @@ export class PairingService {
    * code retires any code still live for that kiosk.
    */
   async issueCode(tenantId: string, kioskId: string): Promise<IssuePairingCodeResultDto> {
-    // Restricted to an active kiosk, mirroring `attemptRedeem`'s own
-    // `status = 'active'` guard on the exchange: an archived kiosk can never
-    // redeem a code, so issuing one would show the cabinet a code that is
-    // guaranteed to come back as a generic 401 with no way to tell why. A 404
-    // here matches how the rest of this service treats a kiosk it will not
-    // act on.
-    const [kiosk] = await this.db
-      .select({ id: schema.kiosks.id })
-      .from(schema.kiosks)
-      .where(
-        and(
-          eq(schema.kiosks.tenantId, tenantId),
-          eq(schema.kiosks.id, kioskId),
-          eq(schema.kiosks.status, "active"),
-        ),
-      );
-    if (!kiosk) throw new NotFoundException();
-
-    // Retire the kiosk's live codes first: a device must never face two
-    // valid codes, and the cabinet only ever shows the newest.
-    await this.db
-      .update(schema.kioskPairingCodes)
-      .set({ usedAt: new Date() })
-      .where(
-        and(
-          eq(schema.kioskPairingCodes.tenantId, tenantId),
-          eq(schema.kioskPairingCodes.kioskId, kioskId),
-          isNull(schema.kioskPairingCodes.usedAt),
-        ),
-      );
-
     const expiresAt = new Date(Date.now() + PAIRING_TTL_MS);
     const pepper = loadEnv().PAIRING_CODE_PEPPER;
     for (let attempt = 0; attempt < MINT_ATTEMPTS; attempt++) {
       const code = mintPairingCode();
       const codeHash = hashPairingCode(code, pepper);
-      // The exchange looks a device up by hash alone, so a hash shared by two
-      // simultaneously-live codes would be ambiguous. Mint a different one.
-      // This is a best-effort SELECT-then-INSERT check with its own race
-      // window (closed for real by `kiosk_pairing_codes_code_hash_live_uq`
-      // below, a partial unique index on `code_hash WHERE used_at is null`) --
-      // kept because it avoids paying for that race on the common,
-      // non-colliding path.
-      const [clash] = await this.db
-        .select({ id: schema.kioskPairingCodes.id })
-        .from(schema.kioskPairingCodes)
-        .where(
-          and(
-            eq(schema.kioskPairingCodes.codeHash, codeHash),
-            isNull(schema.kioskPairingCodes.usedAt),
-            gt(schema.kioskPairingCodes.expiresAt, new Date()),
-          ),
-        );
-      if (clash) continue;
-
       try {
-        await this.db
-          .insert(schema.kioskPairingCodes)
-          .values({ tenantId, kioskId, codeHash, expiresAt });
-      } catch (error) {
-        if (this.isHashCollision(error)) continue; // another live code (any tenant) already has this hash -- mint a different one
-        if (!this.isOneLiveCodeViolation(error)) throw error;
-        // A concurrent caller inserted its own live code between our retire
-        // UPDATE and our INSERT. Retire it too, then retry the insert once --
-        // if it still fails, propagate rather than loop indefinitely.
-        await this.db
-          .update(schema.kioskPairingCodes)
-          .set({ usedAt: new Date() })
-          .where(
-            and(
-              eq(schema.kioskPairingCodes.tenantId, tenantId),
-              eq(schema.kioskPairingCodes.kioskId, kioskId),
-              isNull(schema.kioskPairingCodes.usedAt),
-            ),
-          );
-        try {
-          await this.db
+        await this.db.transaction(async (tx) => {
+          // Code issue, archive/unbind, enrollment, and redemption all
+          // serialize on this durable row. An earlier active read cannot
+          // mint a surviving code after lifecycle revocation commits.
+          const [kiosk] = await tx
+            .select({ id: schema.kiosks.id, status: schema.kiosks.status })
+            .from(schema.kiosks)
+            .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, kioskId)))
+            .for("update");
+          if (!kiosk || kiosk.status !== "active") throw new NotFoundException();
+
+          await tx
+            .update(schema.kioskPairingCodes)
+            .set({ usedAt: new Date() })
+            .where(
+              and(
+                eq(schema.kioskPairingCodes.tenantId, tenantId),
+                eq(schema.kioskPairingCodes.kioskId, kioskId),
+                isNull(schema.kioskPairingCodes.usedAt),
+              ),
+            );
+
+          const [clash] = await tx
+            .select({ id: schema.kioskPairingCodes.id })
+            .from(schema.kioskPairingCodes)
+            .where(
+              and(
+                eq(schema.kioskPairingCodes.codeHash, codeHash),
+                isNull(schema.kioskPairingCodes.usedAt),
+                gt(schema.kioskPairingCodes.expiresAt, new Date()),
+              ),
+            );
+          if (clash) throw new PairingCodeHashCollisionError();
+
+          await tx
             .insert(schema.kioskPairingCodes)
             .values({ tenantId, kioskId, codeHash, expiresAt });
-        } catch (retryError) {
-          if (this.isHashCollision(retryError)) continue;
-          throw retryError;
+        });
+      } catch (error) {
+        // A Postgres unique violation aborts its transaction. Retrying from a
+        // fresh transaction is therefore required; no partially retired code
+        // from this attempt can commit.
+        if (
+          error instanceof PairingCodeHashCollisionError ||
+          this.isHashCollision(error) ||
+          this.isOneLiveCodeViolation(error)
+        ) {
+          continue;
         }
+        throw error;
       }
       return { code, expiresAt };
     }

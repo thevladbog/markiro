@@ -111,14 +111,20 @@ export class KiosksService {
   }
 
   async enroll(tenantId: string, id: string): Promise<EnrollKioskResponseDto> {
-    const row = await this.findRow(tenantId, id);
-    if (!row || row.status !== "active") throw new NotFoundException();
-
     const token = generateDeviceToken();
-    await this.db
-      .update(schema.kiosks)
-      .set({ deviceTokenHash: hashDeviceToken(token) })
-      .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, id)));
+    await this.db.transaction(async (tx) => {
+      const [kiosk] = await tx
+        .select({ id: schema.kiosks.id, status: schema.kiosks.status })
+        .from(schema.kiosks)
+        .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, id)))
+        .for("update");
+      if (!kiosk || kiosk.status !== "active") throw new NotFoundException();
+
+      await tx
+        .update(schema.kiosks)
+        .set({ deviceTokenHash: hashDeviceToken(token) })
+        .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, id)));
+    });
     return { token };
   }
 
@@ -157,6 +163,13 @@ export class KiosksService {
   ): Promise<KioskRow> {
     const retiredAt = new Date();
     return this.db.transaction(async (tx) => {
+      const [current] = await tx
+        .select({ id: schema.kiosks.id })
+        .from(schema.kiosks)
+        .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, id)))
+        .for("update");
+      if (!current) throw new NotFoundException();
+
       const [row] = await tx
         .update(schema.kiosks)
         .set({ ...fields, status, deviceTokenHash: null })
