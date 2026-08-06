@@ -1,5 +1,5 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
 import { generateDeviceToken, hashDeviceToken } from "../../pickup/device-token";
@@ -59,22 +59,27 @@ export class KiosksService {
       return this.toDto(row, await this.productIdsForOne(tenantId, id));
     }
 
-    const [row] = await this.db
-      .update(schema.kiosks)
-      .set(set)
-      .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, id)))
-      .returning();
+    const current = dto.status === "active" ? await this.findRow(tenantId, id) : undefined;
+    if (dto.status === "active" && !current) throw new NotFoundException();
+    const row =
+      dto.status === "archived" || current?.status === "archived"
+        ? await this.transitionKiosk(tenantId, id, dto.status ?? "archived", set)
+        : await this.updateRow(tenantId, id, set);
     if (!row) throw new NotFoundException();
     return this.toDto(row, await this.productIdsForOne(tenantId, id));
   }
 
   async archiveKiosk(tenantId: string, id: string): Promise<void> {
-    const [row] = await this.db
-      .update(schema.kiosks)
-      .set({ status: "archived" })
-      .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, id)))
-      .returning();
-    if (!row) throw new NotFoundException();
+    await this.transitionKiosk(tenantId, id, "archived");
+  }
+
+  /**
+   * Ends the device credential without discarding the durable kiosk or its
+   * pickup history. Calling this on an archived kiosk is the explicit
+   * reactivate-and-unbind recovery path; no previous hash can be restored.
+   */
+  async unbindKiosk(tenantId: string, id: string): Promise<void> {
+    await this.transitionKiosk(tenantId, id, "active");
   }
 
   async setProducts(tenantId: string, id: string, dto: SetKioskProductsDto): Promise<KioskDto> {
@@ -107,7 +112,7 @@ export class KiosksService {
 
   async enroll(tenantId: string, id: string): Promise<EnrollKioskResponseDto> {
     const row = await this.findRow(tenantId, id);
-    if (!row) throw new NotFoundException();
+    if (!row || row.status !== "active") throw new NotFoundException();
 
     const token = generateDeviceToken();
     await this.db
@@ -123,6 +128,54 @@ export class KiosksService {
       .from(schema.kiosks)
       .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, id)));
     return row;
+  }
+
+  private async updateRow(
+    tenantId: string,
+    id: string,
+    set: Record<string, unknown>,
+  ): Promise<KioskRow | undefined> {
+    const [row] = await this.db
+      .update(schema.kiosks)
+      .set(set)
+      .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, id)))
+      .returning();
+    return row;
+  }
+
+  /**
+   * Revocation state, token invalidation, and pairing-code retirement are one
+   * tenant-scoped transaction. The same write remains safe to repeat: the row
+   * persists, already-retired codes are not touched, and no credential exists
+   * to revive when an archive is later made active again.
+   */
+  private async transitionKiosk(
+    tenantId: string,
+    id: string,
+    status: "active" | "archived",
+    fields: Record<string, unknown> = {},
+  ): Promise<KioskRow> {
+    const retiredAt = new Date();
+    return this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .update(schema.kiosks)
+        .set({ ...fields, status, deviceTokenHash: null })
+        .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, id)))
+        .returning();
+      if (!row) throw new NotFoundException();
+
+      await tx
+        .update(schema.kioskPairingCodes)
+        .set({ usedAt: retiredAt })
+        .where(
+          and(
+            eq(schema.kioskPairingCodes.tenantId, tenantId),
+            eq(schema.kioskPairingCodes.kioskId, id),
+            isNull(schema.kioskPairingCodes.usedAt),
+          ),
+        );
+      return row;
+    });
   }
 
   private async productIdsForOne(tenantId: string, kioskId: string): Promise<string[]> {

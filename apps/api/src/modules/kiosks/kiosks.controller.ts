@@ -75,7 +75,27 @@ export class KiosksController {
   @HttpCode(204)
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async archiveKiosk(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<void> {
-    return this.kiosksService.archiveKiosk(req.tenantId!, id);
+    try {
+      await this.kiosksService.archiveKiosk(req.tenantId!, id);
+    } catch (error) {
+      this.auditMutation(req, "kiosk.archive", id, "failed");
+      throw error;
+    }
+    this.auditMutation(req, "kiosk.archive", id, "succeeded");
+  }
+
+  /** Explicitly remove the active device credential while retaining the kiosk record. */
+  @Post(":id/unbind")
+  @HttpCode(204)
+  @RequirePermissions(CABINET_CAPABILITY.CREDENTIALS_MANAGE)
+  async unbindKiosk(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<void> {
+    try {
+      await this.kiosksService.unbindKiosk(req.tenantId!, id);
+    } catch (error) {
+      this.auditMutation(req, "kiosk.unbind", id, "failed");
+      throw error;
+    }
+    this.auditMutation(req, "kiosk.unbind", id, "succeeded");
   }
 
   @Put(":id/products")
@@ -123,5 +143,20 @@ export class KiosksController {
       outcome: "succeeded",
     });
     return result;
+  }
+
+  private auditMutation(
+    req: RequestWithTenant,
+    action: "kiosk.archive" | "kiosk.unbind",
+    resourceId: string,
+    outcome: "succeeded" | "failed",
+  ): void {
+    this.audit.credentialMutation({
+      tenantId: req.tenantId!,
+      userId: req.userId!,
+      action,
+      resourceId,
+      outcome,
+    });
   }
 }

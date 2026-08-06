@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { and, eq, isNull } from "drizzle-orm";
 import express from "express";
 import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
@@ -7,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
+import { hashDeviceToken } from "../src/pickup/device-token";
 import { schema, type Db } from "@markiro/db";
 import { listenOnLoopback } from "./support/listen-loopback";
 
@@ -227,6 +229,68 @@ describe.skipIf(!ready)("kiosks e2e", () => {
     const list = await agent.get("/kiosks").expect(200);
     const archived = list.body.items.find((k: { id: string }) => k.id === id);
     expect(archived.status).toEqual("archived");
+  });
+
+  it("POST /kiosks/:id/unbind keeps an active kiosk but removes its credential and live pairing code", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const created = await agent.post("/kiosks").send({ name: "Unbound kiosk" }).expect(201);
+    const id = created.body.id as string;
+    const enrolled = await agent.post(`/kiosks/${id}/enroll`).send({}).expect(200);
+    await agent.post(`/kiosks/${id}/pairing-code`).send({}).expect(201);
+
+    await agent.post(`/kiosks/${id}/unbind`).send({}).expect(204);
+    await agent.post(`/kiosks/${id}/unbind`).send({}).expect(204);
+
+    await request(app!.getHttpServer())
+      .get("/kiosk/bootstrap")
+      .set("x-kiosk-token", enrolled.body.token)
+      .expect(401);
+    const [kiosk] = await db
+      .select({ status: schema.kiosks.status, deviceTokenHash: schema.kiosks.deviceTokenHash })
+      .from(schema.kiosks)
+      .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, id)));
+    expect(kiosk).toEqual({ status: "active", deviceTokenHash: null });
+    const liveCodes = await db
+      .select({ id: schema.kioskPairingCodes.id })
+      .from(schema.kioskPairingCodes)
+      .where(
+        and(
+          eq(schema.kioskPairingCodes.tenantId, tenantId),
+          eq(schema.kioskPairingCodes.kioskId, id),
+          isNull(schema.kioskPairingCodes.usedAt),
+        ),
+      );
+    expect(liveCodes).toEqual([]);
+
+    const devices = await agent.get("/devices?type=kiosk&status=awaiting_pairing").expect(200);
+    expect(devices.body.items).toContainEqual(
+      expect.objectContaining({ id, status: "awaiting_pairing", paired: false }),
+    );
+  });
+
+  it("reactivating a legacy archived kiosk clears rather than revives its retained token", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const created = await agent.post("/kiosks").send({ name: "Legacy archived kiosk" }).expect(201);
+    const id = created.body.id as string;
+    const oldToken = "legacy-kiosk-token";
+    await db
+      .update(schema.kiosks)
+      .set({ status: "archived", deviceTokenHash: hashDeviceToken(oldToken) })
+      .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, id)));
+
+    await agent.patch(`/kiosks/${id}`).send({ status: "active" }).expect(200);
+
+    await request(app!.getHttpServer())
+      .get("/kiosk/bootstrap")
+      .set("x-kiosk-token", oldToken)
+      .expect(401);
+    const [kiosk] = await db
+      .select({ status: schema.kiosks.status, deviceTokenHash: schema.kiosks.deviceTokenHash })
+      .from(schema.kiosks)
+      .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, id)));
+    expect(kiosk).toEqual({ status: "active", deviceTokenHash: null });
   });
 
   it("cross-tenant isolation: org B cannot PATCH/DELETE org A's kiosk (404)", async () => {

@@ -243,6 +243,40 @@ describe("credential mutation audit", () => {
     expect(JSON.stringify(audit.credentialMutation.mock.calls)).not.toContain("12345678");
   });
 
+  it("audits kiosk archive and unbind outcomes with only the durable resource id", async () => {
+    const kiosks = {
+      archiveKiosk: vi.fn().mockResolvedValue(undefined),
+      unbindKiosk: vi.fn().mockRejectedValue(new Error("unbind failed")),
+    };
+    const audit = auditDouble();
+    const controller = new KiosksController(kiosks as never, {} as never, audit as never);
+
+    await controller.archiveKiosk(req, "kiosk_3");
+    await expect(controller.unbindKiosk(req, "kiosk_3")).rejects.toThrow("unbind failed");
+
+    expect(audit.credentialMutation.mock.calls).toEqual([
+      [
+        {
+          tenantId: "org_1",
+          userId: "user_1",
+          action: "kiosk.archive",
+          resourceId: "kiosk_3",
+          outcome: "succeeded",
+        },
+      ],
+      [
+        {
+          tenantId: "org_1",
+          userId: "user_1",
+          action: "kiosk.unbind",
+          resourceId: "kiosk_3",
+          outcome: "failed",
+        },
+      ],
+    ]);
+    expect(JSON.stringify(audit.credentialMutation.mock.calls)).not.toContain("unbind failed");
+  });
+
   it("does not audit a rejected kiosk mutation", async () => {
     const kiosks = { enroll: vi.fn().mockRejectedValue(new Error("enroll failed")) };
     const pairing = {};

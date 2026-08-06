@@ -338,6 +338,56 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
       .expect(200);
   });
 
+  it("archives durably, rejects the old token, and permits a fresh pairing without losing pickup state", async () => {
+    await db
+      .update(schema.pickupOrders)
+      .set({ deviceSeq: 7 })
+      .where(
+        and(eq(schema.pickupOrders.tenantId, tenantId), eq(schema.pickupOrders.id, seededOrder)),
+      );
+    const issued = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    const paired = await request(app!.getHttpServer())
+      .post("/kiosk/pair")
+      .send({ code: issued.body.code })
+      .expect(201);
+    const replacement = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+
+    await agent.delete(`/kiosks/${kioskId}`).expect(204);
+    await agent.delete(`/kiosks/${kioskId}`).expect(204);
+
+    await request(app!.getHttpServer())
+      .get("/kiosk/bootstrap")
+      .set("x-kiosk-token", paired.body.token)
+      .expect(401);
+    const [archived] = await db
+      .select({ status: schema.kiosks.status, deviceTokenHash: schema.kiosks.deviceTokenHash })
+      .from(schema.kiosks)
+      .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, kioskId)));
+    expect(archived).toEqual({ status: "archived", deviceTokenHash: null });
+    const [retired] = await db
+      .select({ usedAt: schema.kioskPairingCodes.usedAt })
+      .from(schema.kioskPairingCodes)
+      .where(eq(schema.kioskPairingCodes.codeHash, codeHashOf(replacement.body.code)));
+    expect(retired?.usedAt).toBeInstanceOf(Date);
+    const [preservedOrder] = await db
+      .select({ id: schema.pickupOrders.id, deviceSeq: schema.pickupOrders.deviceSeq })
+      .from(schema.pickupOrders)
+      .where(
+        and(eq(schema.pickupOrders.tenantId, tenantId), eq(schema.pickupOrders.id, seededOrder)),
+      );
+    expect(preservedOrder).toEqual({ id: seededOrder, deviceSeq: 7 });
+
+    await agent.patch(`/kiosks/${kioskId}`).send({ status: "active" }).expect(200);
+    const reissued = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    const repaired = await request(app!.getHttpServer())
+      .post("/kiosk/pair")
+      .send({ code: reissued.body.code })
+      .expect(201);
+    expect(repaired.body.token).not.toBe(paired.body.token);
+    expect(repaired.body.nextDeviceSeq).toBe(8);
+    expect(repaired.body.bootstrap.products).toHaveLength(1);
+  });
+
   it("refuses a second redemption of the same code", async () => {
     const issued = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
     await request(app!.getHttpServer())
