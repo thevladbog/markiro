@@ -164,6 +164,9 @@ function EditCounterpartyPanel() {
             notes: counterparty.notes ?? "",
           }
         : undefined,
+    // Primitive dependencies intentionally keep an unrelated list refetch from
+    // replacing a dirty form's initial-value object.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [counterparty?.gln, gs1Prefixes, counterparty?.inn, counterparty?.name, counterparty?.notes],
   );
   if (context.counterpartiesPending || context.counterpartiesError) {

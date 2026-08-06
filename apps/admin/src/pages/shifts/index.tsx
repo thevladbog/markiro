@@ -312,7 +312,7 @@ export function ShiftsPage() {
           ) : null,
       },
     ],
-    [t, canWrite, products, lines, counterparties, labelTemplates],
+    [t, canWrite],
   );
 
   return (

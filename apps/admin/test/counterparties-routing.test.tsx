@@ -167,9 +167,7 @@ it("treats an unsaved SSCC serial as panel-level dirty state", async () => {
   fireEvent.change(await screen.findByLabelText("Начальный серийный номер"), {
     target: { value: "11" },
   });
-  await user.click(
-    within(screen.getByRole("dialog")).getByRole("button", { name: "Закрыть" }),
-  );
+  await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Закрыть" }));
 
   expect(await screen.findByRole("alertdialog", { name: "Отменить изменения?" })).toBeDefined();
 });
