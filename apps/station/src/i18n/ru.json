@@ -69,11 +69,17 @@
     "preparing": "Готовим смену…"
   },
   "shell": {
+    "statusBar": "Состояние станции",
+    "activeScreen": "Рабочий экран станции",
+    "station": "Станция",
+    "line": "Линия",
+    "operator": "Оператор",
+    "shift": "Смена",
+    "network": "Сеть",
     "online": "В сети",
     "offline": "Не в сети",
     "sync": "Синхронизация",
     "syncStuck": "Не отправляется",
-    "agent": "Агент",
     "scanner": "Сканер",
     "printer": "Принтер",
     "notConfigured": "Не настроено",
@@ -81,7 +87,6 @@
     "printerConfigured": "Настроен",
     "scannerKeyboard": "Клавиатурный",
     "scannerDisconnected": "Нет связи",
-    "teammates": "Терминалы",
     "tasks": "Задачи",
     "setup": "Настройка рабочего места",
     "conflicts": "Расхождения"

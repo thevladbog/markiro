@@ -823,6 +823,11 @@ export function App() {
     );
   }
 
+  // Both floor-routing branches require an authenticated operator. Keep the
+  // runtime guard beside the render boundary so future routing changes cannot
+  // accidentally expose a floor screen with missing operator context.
+  if (!operator) return null;
+
   // stage === "floor" here, which requires `isEnrolled(config)` (apiKey +
   // serverUrl truthy) — the same condition the `client` memo above builds
   // from, so it is guaranteed non-null in this branch.
@@ -847,15 +852,16 @@ export function App() {
   // since it cannot be proven alive without printing to it.
   return (
     <FloorShell
+      stationName={config.deviceName ?? config.deviceId ?? config.machineId}
+      lineName={config.lineName ?? null}
+      operatorName={operator.name}
+      shiftLabel={shift ? (shiftContext?.productName ?? shift.id) : null}
       online={online}
       scanner={scannerIndicator(hardwareConfig, scannerStatus)}
       printerConfigured={hardwareConfig.printer !== null}
       syncPending={syncState.pending}
       syncStuck={syncState.stuck}
       conflicts={syncState.conflicts}
-      tasks={[]}
-      activeTaskId=""
-      onSelectTask={() => {}}
     >
       {legacyNotice}
       {showSetup ? (
@@ -886,7 +892,7 @@ export function App() {
             exec={tauriExecutor}
             shiftId={shift.id}
             terminalId={config.deviceId ?? null}
-            operatorId={operator!.operatorId}
+            operatorId={operator.operatorId}
             expectedGtin14={shiftContext.gtin14}
             productName={shiftContext.productName}
             counterpartyName={shiftContext.counterpartyName}

@@ -69,11 +69,17 @@
     "preparing": "Preparing the shift…"
   },
   "shell": {
+    "statusBar": "Station status",
+    "activeScreen": "Active station screen",
+    "station": "Station",
+    "line": "Line",
+    "operator": "Operator",
+    "shift": "Shift",
+    "network": "Network",
     "online": "Online",
     "offline": "Offline",
     "sync": "Sync",
     "syncStuck": "Not syncing",
-    "agent": "Agent",
     "scanner": "Scanner",
     "printer": "Printer",
     "notConfigured": "Not configured",
@@ -81,7 +87,6 @@
     "printerConfigured": "Configured",
     "scannerKeyboard": "Keyboard",
     "scannerDisconnected": "No signal",
-    "teammates": "Terminals",
     "tasks": "Tasks",
     "setup": "Workstation setup",
     "conflicts": "Conflicts"

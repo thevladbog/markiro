@@ -1,4 +1,5 @@
 import "@markiro/ui/styles.css";
+import "./station.css";
 import "./i18n/index.js";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
