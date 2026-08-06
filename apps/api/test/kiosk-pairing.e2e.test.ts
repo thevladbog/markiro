@@ -10,13 +10,13 @@ import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { hashPairingCode } from "../src/pickup/device-token";
-import { normalizePairSource } from "../src/modules/kiosk/pair-source";
+import { normalizePairSource } from "../src/modules/device-pairing/pair-source";
 import {
   GLOBAL_PAIR_ATTEMPT_BUDGET,
   GLOBAL_PAIR_SOURCE,
   PAIR_ATTEMPT_BUDGET,
   PAIR_ATTEMPT_WINDOW_MS,
-} from "../src/modules/kiosk/pairing.service";
+} from "../src/modules/device-pairing/pairing-policy";
 import { PickupOrdersService } from "../src/modules/pickup-orders/pickup-orders.service";
 import { schema, type Db } from "@markiro/db";
 import { listenOnLoopback } from "./support/listen-loopback";

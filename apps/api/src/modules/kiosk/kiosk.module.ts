@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { DevicePairingModule } from "../device-pairing/device-pairing.module";
 import { PickupOrdersModule } from "../pickup-orders/pickup-orders.module";
 import { KioskController } from "./kiosk.controller";
 import { KioskPairController } from "./kiosk-pair.controller";
@@ -11,7 +12,7 @@ import { PairingService } from "./pairing.service";
  * the class, which would silently give each controller its own instance.
  */
 @Module({
-  imports: [PickupOrdersModule],
+  imports: [DevicePairingModule, PickupOrdersModule],
   controllers: [KioskController, KioskPairController],
   providers: [PairingService],
   exports: [PairingService],

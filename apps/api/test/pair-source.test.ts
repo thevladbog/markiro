@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizePairSource } from "../src/modules/kiosk/pair-source";
+import { normalizePairSource } from "../src/modules/device-pairing/pair-source";
 
 describe("normalizePairSource", () => {
   it("leaves an IPv4 address unchanged", () => {

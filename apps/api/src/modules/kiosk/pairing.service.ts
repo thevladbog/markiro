@@ -1,4 +1,3 @@
-import { randomInt } from "node:crypto";
 import {
   Inject,
   Injectable,
@@ -13,38 +12,16 @@ import { loadEnv } from "../../env";
 import { generateDeviceToken, hashDeviceToken, hashPairingCode } from "../../pickup/device-token";
 import { PickupOrdersService } from "../pickup-orders/pickup-orders.service";
 import type { PairKioskResultDto } from "../pickup-orders/dto";
-import { normalizePairSource } from "./pair-source";
+import { PairAttemptsService } from "../device-pairing/pair-attempts.service";
+import {
+  PAIR_CODE_MAX_ATTEMPTS,
+  PAIRING_TTL_MS,
+  mintPairingCode,
+  pairAttemptWindowStart,
+} from "../device-pairing/pairing-policy";
 
-const CODE_DIGITS = 8;
-const TTL_MS = 15 * 60_000;
 /** Bounded retries so a live-code hash collision can never be minted. */
 const MINT_ATTEMPTS = 5;
-/** Per-code attempt lockout: bounds brute force on the one unauthenticated kiosk route. */
-const MAX_ATTEMPTS = 5;
-/**
- * Per-source attempt budget for the fixed window below. The per-code
- * counter above cannot bound guessing at all -- a wrong guess matches no
- * row, so nothing gets counted -- so this is the actual brute-force bound
- * on the one unauthenticated route in the system.
- */
-// Exported (not just `const`) so tests can assert against the real budget/
-// window rather than duplicating these numbers as literals that could drift
-// out of sync with the implementation.
-export const PAIR_ATTEMPT_BUDGET = 10;
-/**
- * Global backstop budget, keyed by the literal source `"*"`. Every attempt
- * counts toward it regardless of source, so it bounds guessing distributed
- * across many sources (rotated IPs, a botnet, ...) that would otherwise each
- * get their own fresh per-source budget. It is also the ONLY budget an
- * unattributable caller (empty `@Ip()`) can consume -- an unidentifiable
- * caller must never be able to exhaust a budget that identifiable callers
- * share.
- */
-export const GLOBAL_PAIR_ATTEMPT_BUDGET = 400;
-/** The reserved source key for the global backstop bucket above. */
-export const GLOBAL_PAIR_SOURCE = "*";
-/** Fixed window size for the limiter; deliberately the same as the code TTL. */
-export const PAIR_ATTEMPT_WINDOW_MS = TTL_MS;
 
 // The pairing code is hashed with `hashPairingCode` (HMAC-SHA256 keyed by
 // the server-held `PAIRING_CODE_PEPPER`), never `hashDeviceToken`'s plain
@@ -68,6 +45,7 @@ export class PairingService {
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly pickupOrdersService: PickupOrdersService,
+    private readonly pairAttemptsService: PairAttemptsService,
   ) {}
 
   /**
@@ -107,10 +85,10 @@ export class PairingService {
         ),
       );
 
-    const expiresAt = new Date(Date.now() + TTL_MS);
+    const expiresAt = new Date(Date.now() + PAIRING_TTL_MS);
     const pepper = loadEnv().PAIRING_CODE_PEPPER;
     for (let attempt = 0; attempt < MINT_ATTEMPTS; attempt++) {
-      const code = String(randomInt(0, 10 ** CODE_DIGITS)).padStart(CODE_DIGITS, "0");
+      const code = mintPairingCode();
       const codeHash = hashPairingCode(code, pepper);
       // The exchange looks a device up by hash alone, so a hash shared by two
       // simultaneously-live codes would be ambiguous. Mint a different one.
@@ -177,7 +155,7 @@ export class PairingService {
    */
   async redeem(code: string, source: string): Promise<PairKioskResultDto> {
     const now = new Date();
-    const windowStart = this.pairAttemptWindowStart(now);
+    const windowStart = pairAttemptWindowStart(now);
     // Record-then-check, atomically, BEFORE the code lookup: the per-code
     // counter below cannot bound guessing at all (a wrong guess matches no
     // row), so this is the only thing standing between the unauthenticated
@@ -186,7 +164,7 @@ export class PairingService {
     // `assertUnderPairRateLimit` -- which closes a concurrency race a
     // check-then-record shape would leave open: N concurrent callers could
     // otherwise all read the same pre-increment count and all pass.
-    await this.assertUnderPairRateLimit(source, windowStart);
+    await this.pairAttemptsService.assertUnderPairRateLimit(source, windowStart);
     const result = await this.attemptRedeem(code, now);
     // Compensating decrement, reached only once `attemptRedeem` has fully
     // resolved -- i.e. only after its internal transaction committed. Any
@@ -209,13 +187,15 @@ export class PairingService {
     // redemption exactly the way moving `bootstrap` before the transaction,
     // above, was meant to prevent. The worst case of a swallowed refund is
     // one unit of budget not returned.
-    await this.refundPairAttempt(source, windowStart).catch((error: unknown) => {
-      this.logger.warn(
-        `kiosk pairing refund failed after a committed redemption (budget not returned): ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    });
+    await this.pairAttemptsService
+      .refundPairAttempt(source, windowStart)
+      .catch((error: unknown) => {
+        this.logger.warn(
+          `kiosk pairing refund failed after a committed redemption (budget not returned): ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      });
     return result;
   }
 
@@ -253,7 +233,7 @@ export class PairingService {
     // the per-code lockout necessarily applies per issued code, exactly as
     // designed.
     if (!candidate) throw new UnauthorizedException();
-    if (candidate.attempts >= MAX_ATTEMPTS) throw new UnauthorizedException();
+    if (candidate.attempts >= PAIR_CODE_MAX_ATTEMPTS) throw new UnauthorizedException();
     if (candidate.usedAt || candidate.expiresAt.getTime() <= now.getTime()) {
       await this.db
         .update(schema.kioskPairingCodes)
@@ -375,174 +355,6 @@ export class PairingService {
       nextDeviceSeq,
       bootstrap,
     };
-  }
-
-  /** Floors `now` to the start of its fixed window -- the unit the limiter counts in. */
-  private pairAttemptWindowStart(now: Date): Date {
-    return new Date(Math.floor(now.getTime() / PAIR_ATTEMPT_WINDOW_MS) * PAIR_ATTEMPT_WINDOW_MS);
-  }
-
-  /**
-   * Two budgets, both consumed by every attempt through this route -- see
-   * `recordPairAttempt` for why it counts attempts rather than only
-   * failures:
-   *  - per-source (`PAIR_ATTEMPT_BUDGET`): bounds one identifiable caller's
-   *    guessing. Skipped entirely when `source` is unattributable (empty
-   *    `@Ip()`), so an unidentifiable caller can never consume a budget that
-   *    identifiable callers share.
-   *  - global backstop (`GLOBAL_PAIR_ATTEMPT_BUDGET`, key `"*"`): bounds
-   *    guessing distributed across many sources, and is the only budget an
-   *    unattributable caller can consume.
-   *
-   * The per-source verdict is rendered, and can throw, BEFORE the global
-   * counter is ever touched. That order is load-bearing: a caller that has
-   * already exhausted its own per-source budget must be turned away without
-   * charging the shared global bucket, or a single blocked source can keep
-   * burning the global budget on every subsequent request while denied --
-   * cheaply driving the global bucket past its own limit and taking down
-   * pairing for every tenant, not just the one source that tripped it. An
-   * unattributable source (empty/falsy) has no per-source bucket to trip, so
-   * it falls straight through to the global check, unchanged from before.
-   *
-   * Symmetrically, a read-only pre-check runs FIRST, before either budget is
-   * touched: once the global budget is already exhausted, a request from a
-   * source that has never been seen before must still be turned away
-   * WITHOUT allocating it a fresh `kiosk_pair_attempts` row. Without this, an
-   * attacker rotating sources (exactly the distributed case the global
-   * backstop exists to bound) grows the table without bound and keeps
-   * writing to the DB long after pairing is already globally locked out. This
-   * pre-check is a plain SELECT specifically so it never itself allocates a
-   * row; it only needs to be conservative (skip when in doubt), not exact --
-   * the atomic `RETURNING` increment below is still what actually decides
-   * and charges a genuine transition past the budget, so a concurrent race
-   * straddling the limit is still resolved correctly there.
-   */
-  private async assertUnderPairRateLimit(source: string, windowStart: Date): Promise<void> {
-    const globalSoFar = await this.currentPairAttempts(GLOBAL_PAIR_SOURCE, windowStart);
-    if (globalSoFar > GLOBAL_PAIR_ATTEMPT_BUDGET) {
-      throw new UnauthorizedException();
-    }
-
-    if (source) {
-      const normalizedSource = normalizePairSource(source);
-      const sourceAttempts = await this.recordPairAttempt(normalizedSource, windowStart);
-      if (sourceAttempts > PAIR_ATTEMPT_BUDGET) {
-        // A tripped budget is a security event (sustained guessing) AND,
-        // for the global bucket, a platform-wide outage -- and previously
-        // left zero server-side signal, with the on-site technician seeing
-        // only a generic "invalid code". Never log the submitted code
-        // itself; the HTTP response stays an unchanged generic 401 so the
-        // caller can't learn which limit they hit.
-        //
-        // Logged only on the transition past the budget (count === budget +
-        // 1), so it fires exactly once per source per window -- this route
-        // is unauthenticated, so logging every rejected request would let
-        // sustained abuse turn request volume straight into unbounded log
-        // volume. The normalised source key (never the raw submitted code)
-        // is included so this line can drive an alert.
-        if (sourceAttempts === PAIR_ATTEMPT_BUDGET + 1) {
-          this.logger.warn(
-            `kiosk pairing per-source budget exceeded for source ${normalizedSource}: ${sourceAttempts} attempts in window`,
-          );
-        }
-        throw new UnauthorizedException();
-      }
-    }
-
-    const globalAttempts = await this.recordPairAttempt(GLOBAL_PAIR_SOURCE, windowStart);
-    if (globalAttempts > GLOBAL_PAIR_ATTEMPT_BUDGET) {
-      // Same transition-only logging as the per-source branch above.
-      if (globalAttempts === GLOBAL_PAIR_ATTEMPT_BUDGET + 1) {
-        this.logger.warn(
-          `kiosk pairing global budget exceeded: ${globalAttempts} attempts in window`,
-        );
-      }
-      throw new UnauthorizedException();
-    }
-  }
-
-  /**
-   * Compensating decrement for a successful redemption -- see the call site
-   * in `redeem` for why this exists and why it can't be gamed. Mirrors
-   * `assertUnderPairRateLimit`'s source handling: the per-source bucket is
-   * only touched when `source` is attributable, the global bucket always.
-   */
-  private async refundPairAttempt(source: string, windowStart: Date): Promise<void> {
-    if (source) {
-      await this.decrementPairAttempt(normalizePairSource(source), windowStart);
-    }
-    await this.decrementPairAttempt(GLOBAL_PAIR_SOURCE, windowStart);
-  }
-
-  /**
-   * Atomically decrements `(source, windowStart)`, floored at zero
-   * (`GREATEST(failures - 1, 0)`) so a refund can never push the counter
-   * negative regardless of ordering with a concurrent increment. Only ever
-   * called for a `(source, windowStart)` pair that `recordPairAttempt`
-   * already inserted earlier in the same request, so a plain UPDATE (no
-   * upsert) is sufficient -- there is nothing to refund if the row doesn't
-   * exist, and it always does by this point.
-   */
-  private async decrementPairAttempt(source: string, windowStart: Date): Promise<void> {
-    await this.db
-      .update(schema.kioskPairAttempts)
-      .set({ failures: sql`GREATEST(${schema.kioskPairAttempts.failures} - 1, 0)` })
-      .where(
-        and(
-          eq(schema.kioskPairAttempts.source, source),
-          eq(schema.kioskPairAttempts.windowStartedAt, windowStart),
-        ),
-      );
-  }
-
-  /**
-   * Read-only lookup of the current `failures` count for `(source,
-   * windowStart)` -- no write, unlike `recordPairAttempt`. Used only for the
-   * global pre-check in `assertUnderPairRateLimit` above, so an already-
-   * exhausted global budget can be detected and turned away without
-   * allocating a row for a source seen for the first time. Zero when no row
-   * exists yet for this window (nothing recorded, so nothing to bound).
-   */
-  private async currentPairAttempts(source: string, windowStart: Date): Promise<number> {
-    const [row] = await this.db
-      .select({ failures: schema.kioskPairAttempts.failures })
-      .from(schema.kioskPairAttempts)
-      .where(
-        and(
-          eq(schema.kioskPairAttempts.source, source),
-          eq(schema.kioskPairAttempts.windowStartedAt, windowStart),
-        ),
-      );
-    return row?.failures ?? 0;
-  }
-
-  /**
-   * Atomically records one attempt against `(source, windowStart)` and
-   * returns the post-increment count, in a single upsert -- record-then-check,
-   * not check-then-record. The previous shape ran a SELECT, decided, and only
-   * then wrote an INSERT/UPDATE afterward; N concurrent callers could all
-   * read the same pre-increment count and all pass, landing the counter at
-   * `count + N` instead of bounding it. `RETURNING` closes that race by
-   * making the increment and the value used to decide in the same statement.
-   *
-   * The `failures` column name is unchanged (no new migration needed). It
-   * counts every attempt through this path up front, a successful redemption
-   * included -- `redeem` issues a compensating `decrementPairAttempt` once a
-   * redemption actually succeeds (see there), so the column's steady-state
-   * value bounds net failures again: a site provisioning many kiosks behind
-   * one NAT nets back down to ~0 as each one pairs, while a run of wrong
-   * guesses stays charged.
-   */
-  private async recordPairAttempt(source: string, windowStart: Date): Promise<number> {
-    const [row] = await this.db
-      .insert(schema.kioskPairAttempts)
-      .values({ source, windowStartedAt: windowStart, failures: 1 })
-      .onConflictDoUpdate({
-        target: [schema.kioskPairAttempts.source, schema.kioskPairAttempts.windowStartedAt],
-        set: { failures: sql`${schema.kioskPairAttempts.failures} + 1` },
-      })
-      .returning({ failures: schema.kioskPairAttempts.failures });
-    return row!.failures;
   }
 
   private isOneLiveCodeViolation(error: unknown): boolean {
