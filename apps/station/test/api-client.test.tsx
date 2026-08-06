@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createStationClient, REQUEST_TIMEOUT_MS } from "../src/lib/api-client.js";
+import { redeemStationPairing } from "../src/lib/pairing.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -73,5 +74,70 @@ describe("createStationClient", () => {
     await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS + 1_000);
     await assertion;
     expect(capturedSignal?.aborted).toBe(true);
+  });
+});
+
+describe("redeemStationPairing", () => {
+  it("posts the code without an enrolled-device credential", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          device: {
+            id: "device-1",
+            name: "Line station",
+            tenantId: "tenant-1",
+            organizationName: "Factory",
+            line: { id: "line-1", name: "Packing" },
+          },
+          credential: { apiKey: "station-credential", serverUrl: "https://station.example" },
+          operators: [],
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await expect(redeemStationPairing("https://station.example/", "12345678")).resolves.toEqual({
+      ok: true,
+      provisioning: expect.objectContaining({
+        deviceId: "device-1",
+        tenantId: "tenant-1",
+        apiKey: "station-credential",
+        serverUrl: "https://station.example",
+      }),
+    });
+
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("https://station.example/station/pair");
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBe(JSON.stringify({ code: "12345678" }));
+    expect(init?.headers).toEqual({ "Content-Type": "application/json" });
+  });
+
+  it("maps pairing error codes without exposing an unauthenticated response", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ code: "PAIR_EXPIRED", message: "do not surface this" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await expect(redeemStationPairing("https://station.example", "12345678")).resolves.toEqual({
+      ok: false,
+      error: "expired",
+    });
+  });
+
+  it("rejects a malformed provisioning response before it reaches persistence", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ credential: { apiKey: "station-credential" } }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await expect(redeemStationPairing("https://station.example", "12345678")).resolves.toEqual({
+      ok: false,
+      error: "invalid_response",
+    });
   });
 });

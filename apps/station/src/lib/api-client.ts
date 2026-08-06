@@ -41,6 +41,37 @@ export interface StationClient {
 export const REQUEST_TIMEOUT_MS = 30_000;
 
 /**
+ * Sends the one unauthenticated request an unpaired station is allowed to
+ * make. Pairing codes are deliberately redeemed without a device credential:
+ * there is no key before this request succeeds. Keeping the abort discipline
+ * beside the ordinary station client ensures a stalled provisioning request
+ * cannot leave the enrollment screen busy forever.
+ *
+ * The raw response is intentionally returned only to the pairing decoder.
+ * Callers must never log it: a successful body contains the one-time device
+ * credential.
+ */
+export async function postUnauthenticatedStationRequest(
+  serverUrl: string,
+  path: string,
+  body: unknown,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(`${serverUrl.replace(/\/+$/, "")}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "omit",
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Fetch client for the SaaS API. Sends the device api-key as `x-api-key`
  * (matching the TenantGuard station path) and prefixes every path with the
  * enrolled `serverUrl`. There is no session cookie — the station is stateless

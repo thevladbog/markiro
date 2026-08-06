@@ -44,16 +44,16 @@ interface ActiveShift {
  * the actual branch logic App renders from).
  *
  * - No config yet (still reading it on mount) -> "loading".
- * - Config present but the device has no tenant/key/server -> "enrollment".
+ * - Config present but the device has no credential -> "pairing".
  * - Enrolled but no operator has signed in this session -> "login".
  * - Enrolled + signed in -> "floor" (ShiftSelection/NewShift/active-shift area).
  */
 export function nextStationView(
   config: StationConfig | null,
   operator: OperatorMirrorRecord | null,
-): "loading" | "enrollment" | "login" | "floor" {
+): "loading" | "pairing" | "login" | "floor" {
   if (!config) return "loading";
-  if (!isEnrolled(config)) return "enrollment";
+  if (!isEnrolled(config)) return "pairing";
   if (!operator) return "login";
   return "floor";
 }
@@ -329,8 +329,30 @@ export function App() {
   // `config` is narrowed to non-null for the rest of this render.
   const stage = nextStationView(config, operator);
 
-  if (stage === "enrollment") {
-    return <Enrollment machineId={config.machineId} onEnrolled={() => void refreshConfig()} />;
+  if (stage === "pairing") {
+    if (showSetup) {
+      return (
+        <WorkstationSetup
+          hw={tauriHardware}
+          exec={tauriExecutor}
+          sound={sound}
+          onSoundChange={setSound}
+          onConfigChange={setHardwareConfig}
+          onDone={() => {
+            setShowSetup(false);
+            setSessionEpoch((epoch) => epoch + 1);
+          }}
+        />
+      );
+    }
+    return (
+      <Enrollment
+        machineId={config.machineId}
+        onEnrolled={() => void refreshConfig()}
+        onSetup={() => setShowSetup(true)}
+        scanSource={scanSource}
+      />
+    );
   }
 
   if (stage === "login") {

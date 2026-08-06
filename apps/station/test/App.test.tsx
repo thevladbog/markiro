@@ -381,8 +381,12 @@ describe("nextStationView", () => {
     expect(nextStationView(null, null)).toBe("loading");
   });
 
-  it("routes to enrollment when the device has no tenant/key/server", () => {
-    expect(nextStationView({ machineId: "m1" }, null)).toBe("enrollment");
+  it("routes an unpaired first-run device to pairing", () => {
+    expect(nextStationView({ machineId: "m1" }, null)).toBe("pairing");
+  });
+
+  it("routes a durable device without a credential to recovery pairing", () => {
+    expect(nextStationView({ machineId: "m1", deviceId: "device-1" }, null)).toBe("pairing");
   });
 
   it("routes to login once enrolled but no operator is signed in", () => {
@@ -412,12 +416,10 @@ describe("App", () => {
     await waitFor(() => expect(screen.getByText("Connect station")).toBeDefined());
   });
 
-  it("drives the real Enrollment success path and advances to OperatorLogin, not back to Enrollment (regression for C1)", async () => {
+  it("drives the real pairing success path to OperatorLogin, not back to pairing", async () => {
     // Mutable so a `write_config` call updates what the next `read_config`
-    // resolves to — this is what actually exercises the App.tsx C1 fix: with
-    // the old `isEnrolled` (requiring `tenantId`, which `Enrollment` never
-    // writes), App would read back the just-persisted config and bounce
-    // straight back to the Enrollment screen instead of advancing.
+    // resolves to. This exercises the upgrade-safe route: an enrolled bundle
+    // still advances directly to operator login after a refresh.
     let rustConfig: Record<string, unknown> = { machine_id: "m1" };
     invokeMock.mockImplementation((cmd: string, payload?: unknown): Promise<unknown> => {
       if (cmd === "read_config") return Promise.resolve(rustConfig);
@@ -430,21 +432,34 @@ describe("App", () => {
       if (cmd === "plugin:sql|select") return Promise.resolve([]);
       return Promise.resolve(undefined);
     });
-    // The enrollment probe is `GET /shifts` (see api-client.ts `whoami`); a
-    // 200 proves the key resolves a tenant.
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("[]", { status: 200 }));
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (new URL(url.toString()).pathname === "/station/pair") {
+        return new Response(
+          JSON.stringify({
+            device: {
+              id: "device-1",
+              name: "Packing station",
+              tenantId: "tenant-1",
+              organizationName: "Factory",
+              line: null,
+            },
+            credential: { apiKey: "station-credential", serverUrl: "http://localhost:3000" },
+            operators: [],
+          }),
+          { status: 201, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({ items: [] }), { status: 200 });
+    });
 
     render(<App />);
 
     await waitFor(() => expect(screen.getByText("Connect station")).toBeDefined());
-    fireEvent.change(screen.getByLabelText("Server URL"), {
-      target: { value: "http://localhost:3000" },
-    });
-    fireEvent.change(screen.getByLabelText("Device key"), { target: { value: "mk_key" } });
-    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    fireEvent.change(screen.getByLabelText("Pairing code"), { target: { value: "12345678" } });
+    fireEvent.click(screen.getByRole("button", { name: "Pair station" }));
 
     await waitFor(() => expect(screen.getByText("Operator sign-in")).toBeDefined());
-    expect(screen.queryByText("Connect station")).toBeNull();
+    expect(screen.queryByLabelText("Pairing code")).toBeNull();
 
     vi.restoreAllMocks();
   });

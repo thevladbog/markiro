@@ -2,11 +2,25 @@
   "app": { "title": "Markiro — Station", "booting": "Loading station…" },
   "enroll": {
     "title": "Connect station",
+    "code": "Pairing code",
     "serverUrl": "Server URL",
     "apiKey": "Device key",
-    "submit": "Connect",
-    "invalid": "Could not connect. Check the URL and key.",
-    "success": "Station connected"
+    "submit": "Pair station",
+    "redeeming": "Pairing…",
+    "setup": "Equipment setup",
+    "serviceMode": "Service setup",
+    "serviceConnect": "Connect service credentials",
+    "backToPairing": "Back to pairing",
+    "success": "Station connected",
+    "errors": {
+      "invalid": "This pairing code is not valid.",
+      "expired": "This pairing code has expired.",
+      "locked": "This pairing code is locked.",
+      "rate_limited": "Too many pairing attempts. Try again later.",
+      "unavailable": "The station could not reach the server. Check the connection and try again.",
+      "invalid_response": "The server returned an invalid pairing response.",
+      "service": "Could not connect. Check the URL and key."
+    }
   },
   "login": {
     "title": "Operator sign-in",

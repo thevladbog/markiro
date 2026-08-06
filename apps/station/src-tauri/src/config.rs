@@ -16,6 +16,14 @@ pub struct StationConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub organization_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server_url: Option<String>,
@@ -27,6 +35,10 @@ impl StationConfig {
             machine_id: Uuid::new_v4().to_string(),
             tenant_id: None,
             device_id: None,
+            device_name: None,
+            organization_name: None,
+            line_id: None,
+            line_name: None,
             api_key: None,
             server_url: None,
         }
@@ -50,20 +62,24 @@ pub fn read_config(dir: &Path) -> Result<StationConfig, String> {
     serde_json::from_str(&data).map_err(|e| format!("Invalid station.json: {e}"))
 }
 
-/// Writes `station.json` atomically-ish (create dir, write, tighten perms).
-/// On unix the file is *created* at mode 0600 (owner read/write only) so
-/// there is never a window where a fresh file is group/world-readable
-/// under a permissive umask; `set_owner_only` is then re-applied as a
-/// belt-and-suspenders to also tighten a pre-existing file whose mode was
-/// already wrong (create+truncate on an existing file keeps its old mode).
-/// On Windows the app-config dir is already per-user, so ACLs govern access.
+/// Atomically replaces `station.json` (create dir, write a private sibling,
+/// sync, then rename). A failed write therefore leaves the previous readable
+/// provisioning bundle in place instead of truncating it. On Unix the sibling
+/// is created at mode 0600; Windows uses the per-user app-config directory.
 pub fn write_config(dir: &Path, cfg: &StationConfig) -> Result<(), String> {
     fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let path = config_path(dir);
     let data = serde_json::to_string_pretty(cfg).map_err(|e| e.to_string())?;
-    write_owner_only(&path, data.as_bytes())?;
-    set_owner_only(&path)?;
-    Ok(())
+    let temporary = dir.join(format!(".station-{}.tmp", Uuid::new_v4()));
+    let write_result = write_owner_only(&temporary, data.as_bytes());
+    if let Err(error) = write_result {
+        let _ = fs::remove_file(&temporary);
+        return Err(error);
+    }
+    fs::rename(&temporary, &path).map_err(|e| {
+        let _ = fs::remove_file(&temporary);
+        e.to_string()
+    })
 }
 
 #[cfg(unix)]
@@ -76,23 +92,30 @@ fn write_owner_only(path: &Path, data: &[u8]) -> Result<(), String> {
         .mode(0o600)
         .open(path)
         .map_err(|e| e.to_string())?;
-    file.write_all(data).map_err(|e| e.to_string())
+    file.write_all(data).map_err(|e| e.to_string())?;
+    file.sync_all().map_err(|e| e.to_string())
 }
 
 #[cfg(not(unix))]
 fn write_owner_only(path: &Path, data: &[u8]) -> Result<(), String> {
-    fs::write(path, data).map_err(|e| e.to_string())
+    let mut file = fs::File::create(path).map_err(|e| e.to_string())?;
+    file.write_all(data).map_err(|e| e.to_string())?;
+    file.sync_all().map_err(|e| e.to_string())
 }
 
-#[cfg(unix)]
-fn set_owner_only(path: &Path) -> Result<(), String> {
-    use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())
-}
-
-#[cfg(not(unix))]
-fn set_owner_only(_path: &Path) -> Result<(), String> {
-    Ok(())
+/// Removes a rejected credential and all reproducible tenant/place metadata,
+/// while retaining the durable installation and station IDs for same-record
+/// re-pairing. It deliberately does not touch the SQLite operational journal.
+pub fn clear_credential(dir: &Path) -> Result<(), String> {
+    let mut cfg = read_config(dir)?;
+    cfg.tenant_id = None;
+    cfg.device_name = None;
+    cfg.organization_name = None;
+    cfg.line_id = None;
+    cfg.line_name = None;
+    cfg.api_key = None;
+    cfg.server_url = None;
+    write_config(dir, &cfg)
 }
 
 /// Validates an operator-entered http(s) URL. Mirrors idento's
@@ -134,12 +157,44 @@ mod tests {
         let mut cfg = read_config(&dir).unwrap();
         cfg.tenant_id = Some("org_1".into());
         cfg.device_id = Some("dev_1".into());
-        cfg.api_key = Some("mk_secret".into());
+        cfg.device_name = Some("Packing station".into());
+        cfg.organization_name = Some("Factory".into());
+        cfg.line_id = Some("line_1".into());
+        cfg.line_name = Some("Packing".into());
+        cfg.api_key = Some("credential-placeholder".into());
         cfg.server_url = Some("https://api.markiro.app".into());
         write_config(&dir, &cfg).unwrap();
 
         let reloaded = read_config(&dir).unwrap();
         assert_eq!(reloaded, cfg);
+    }
+
+    #[test]
+    fn clear_credential_keeps_the_durable_machine_and_device_identity() {
+        let dir = temp_dir();
+        let mut cfg = read_config(&dir).unwrap();
+        cfg.tenant_id = Some("tenant_1".into());
+        cfg.device_id = Some("device_1".into());
+        cfg.device_name = Some("Packing station".into());
+        cfg.organization_name = Some("Factory".into());
+        cfg.line_id = Some("line_1".into());
+        cfg.line_name = Some("Packing".into());
+        cfg.api_key = Some("credential-placeholder".into());
+        cfg.server_url = Some("https://station.example".into());
+        write_config(&dir, &cfg).unwrap();
+
+        clear_credential(&dir).unwrap();
+
+        let cleared = read_config(&dir).unwrap();
+        assert_eq!(cleared.machine_id, cfg.machine_id);
+        assert_eq!(cleared.device_id, cfg.device_id);
+        assert_eq!(cleared.tenant_id, None);
+        assert_eq!(cleared.device_name, None);
+        assert_eq!(cleared.organization_name, None);
+        assert_eq!(cleared.line_id, None);
+        assert_eq!(cleared.line_name, None);
+        assert_eq!(cleared.api_key, None);
+        assert_eq!(cleared.server_url, None);
     }
 
     #[cfg(unix)]
@@ -153,11 +208,8 @@ mod tests {
         assert_eq!(mode & 0o777, 0o600);
     }
 
-    /// Proves `set_owner_only` still earns its keep: a pre-existing
-    /// `station.json` created at a permissive 0644 (e.g. by an older binary,
-    /// or restored from a backup) must be tightened to 0600 by
-    /// `write_config`, even though create+truncate on an existing file does
-    /// not itself change its mode.
+    /// A pre-existing permissive config (for example, from an older binary)
+    /// is replaced by a private sibling rather than retaining its old mode.
     #[cfg(unix)]
     #[test]
     fn write_config_tightens_preexisting_permissive_file_to_0600() {
