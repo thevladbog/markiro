@@ -877,6 +877,43 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     );
   });
 
+  it("keeps a station with no assigned line on the existing tenant-wide shift list", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      productGroup: "Beverages",
+      boxCapacity: 12,
+      palletCapacity: 48,
+    });
+    const lineRes = await agent.post("/lines").send({ name: "First line" }).expect(201);
+    const firstLineId = lineRes.body.id as string;
+    const otherLineRes = await agent.post("/lines").send({ name: "Second line" }).expect(201);
+    const secondLineId = otherLineRes.body.id as string;
+    const [firstLineShift, unassignedShift, secondLineShift] = await Promise.all([
+      agent
+        .post("/shifts")
+        .send({ productId, mode: "validation", lineId: firstLineId })
+        .expect(201),
+      agent.post("/shifts").send({ productId, mode: "validation" }).expect(201),
+      agent
+        .post("/shifts")
+        .send({ productId, mode: "validation", lineId: secondLineId })
+        .expect(201),
+    ]);
+    // The fixture deliberately leaves station_devices.line_id as NULL.
+    const station = await createTestStationDevice(app!, agent, "Unassigned shift-list terminal");
+
+    const result = await request(app!.getHttpServer())
+      .get("/shifts")
+      .set("x-api-key", station.apiKey)
+      .expect(200);
+
+    expect(result.body.items.map((item: { id: string }) => item.id).sort()).toEqual(
+      [firstLineShift.body.id, unassignedShift.body.id, secondLineShift.body.id].sort(),
+    );
+  });
+
   // ---------------------------------------------------------------------
   // Device-key surface (Task 9): lines are cabinet-only; shifts is a mix --
   // the station's own four routes (list, create, open, bundle -- covered by

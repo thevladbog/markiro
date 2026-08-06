@@ -84,7 +84,10 @@ function fakeAuth(getSession: Auth["api"]["getSession"]): Auth {
  * exactly what lets the "device tagged with another tenant" test below tell
  * a scoped query apart from an unscoped one.
  */
-function fakeDb(deviceRows: FakeDeviceRow[] = []): Db {
+function fakeDb(
+  deviceRows: FakeDeviceRow[] = [],
+  beforeHeartbeatUpdate: (() => void) | undefined = undefined,
+): Db {
   return {
     select: () => ({
       from: () => ({
@@ -97,6 +100,7 @@ function fakeDb(deviceRows: FakeDeviceRow[] = []): Db {
     update: () => ({
       set: (set: Pick<FakeDeviceRow, "lastSeenAt">) => ({
         where: async (condition: FakeCondition) => {
+          beforeHeartbeatUpdate?.();
           for (const row of deviceRows.filter((candidate) => matches(condition, candidate))) {
             row.lastSeenAt = set.lastSeenAt;
           }
@@ -366,6 +370,44 @@ describe("TenantGuard api-key path", () => {
     const req: FakeRequest = { headers: { "x-api-key": "mk_revoked" } };
 
     await expect(guard.canActivate(contextFor(req))).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(deviceRows[0]?.lastSeenAt).toBeNull();
+  });
+
+  it("does not heartbeat a station revoked after resolution while preserving the resolved request", async () => {
+    const deviceRows: FakeDeviceRow[] = [
+      {
+        id: "device_1",
+        tenantId: "org_9",
+        apiKeyId: "key_1",
+        lineId: "line_1",
+        lastSeenAt: null,
+        revokedAt: null,
+      },
+    ];
+    const guard = new TenantGuard(
+      fakeAuthWithApiKey(
+        async () => null,
+        async () => ({
+          valid: true,
+          error: null,
+          key: { id: "key_1", referenceId: "org_9", enabled: true },
+        }),
+      ),
+      fakeDb(deviceRows, () => {
+        const device = deviceRows[0];
+        if (!device) throw new Error("Expected station fixture");
+        device.revokedAt = new Date("2026-08-06T01:00:00.000Z");
+      }),
+    );
+    const req: FakeRequest = { headers: { "x-api-key": "mk_valid" } };
+
+    await expect(guard.canActivate(contextFor(req))).resolves.toBe(true);
+    expect(req).toMatchObject({
+      tenantId: "org_9",
+      authKind: "station",
+      deviceId: "device_1",
+      deviceLineId: "line_1",
+    });
     expect(deviceRows[0]?.lastSeenAt).toBeNull();
   });
 });

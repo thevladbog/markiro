@@ -106,6 +106,7 @@ export class TenantGuard implements CanActivate {
             and(
               eq(schema.stationDevices.tenantId, req.tenantId),
               eq(schema.stationDevices.id, device.id),
+              isNull(schema.stationDevices.revokedAt),
             ),
           );
         return true;
