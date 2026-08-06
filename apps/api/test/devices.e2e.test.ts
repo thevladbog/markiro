@@ -16,6 +16,33 @@ const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
 );
 
+const deviceItemKeys = ["id", "lastSeenAt", "name", "paired", "place", "status", "type"];
+const sensitiveFieldName = /(?:api.?key|token|hash|quota|secret|credential|password|pin)/i;
+
+function expectExactDeviceDto(value: unknown): void {
+  expect(value).toBeTypeOf("object");
+  expect(value).not.toBeNull();
+  const item = value as Record<string, unknown>;
+  expect(Object.keys(item).sort()).toEqual(deviceItemKeys);
+  expect(item.place).toBeTypeOf("object");
+  expect(item.place).not.toBeNull();
+  expect(Object.keys(item.place as Record<string, unknown>).sort()).toEqual(["id", "name"]);
+  expectNoSensitiveFields(item);
+}
+
+function expectNoSensitiveFields(value: unknown): void {
+  if (Array.isArray(value)) {
+    for (const entry of value) expectNoSensitiveFields(entry);
+    return;
+  }
+  if (value === null || typeof value !== "object") return;
+
+  for (const [key, nestedValue] of Object.entries(value)) {
+    expect(key).not.toMatch(sensitiveFieldName);
+    expectNoSensitiveFields(nestedValue);
+  }
+}
+
 describe.skipIf(!ready)("unified devices read model e2e", () => {
   let app: INestApplication | undefined;
   let db: Db;
@@ -167,21 +194,43 @@ describe.skipIf(!ready)("unified devices read model e2e", () => {
       status: "revoked",
       paired: false,
     });
-    for (const item of response.body.items as Array<Record<string, unknown>>) {
-      expect(Object.keys(item).sort()).toEqual([
-        "id",
-        "lastSeenAt",
-        "name",
-        "paired",
-        "place",
-        "status",
-        "type",
-      ]);
-      expect(item).not.toHaveProperty("apiKeyId");
-      expect(item).not.toHaveProperty("deviceTokenHash");
-      expect(item).not.toHaveProperty("token");
-      expect(item).not.toHaveProperty("quota");
-    }
+    for (const item of response.body.items) expectExactDeviceDto(item);
+    expectNoSensitiveFields(response.body);
+  });
+
+  it("pages the combined lifecycle order without duplicate ids", async () => {
+    const [first, second, final, beyond] = await Promise.all([
+      cabinet.get("/devices").query({ page: 1, pageSize: 3 }).expect(200),
+      cabinet.get("/devices").query({ page: 2, pageSize: 3 }).expect(200),
+      cabinet.get("/devices").query({ page: 3, pageSize: 3 }).expect(200),
+      cabinet.get("/devices").query({ page: 4, pageSize: 3 }).expect(200),
+    ]);
+
+    const orderedIds = [
+      ids.kioskAwaiting,
+      ids.stationAwaiting,
+      ids.stationOffline,
+      ids.kioskOffline,
+      ids.kioskRevoked,
+      ids.stationRevoked,
+      ids.kioskOnline,
+      ids.stationOnline,
+    ];
+    expect(first.body).toMatchObject({ page: 1, pageSize: 3, total: 8 });
+    expect(second.body).toMatchObject({ page: 2, pageSize: 3, total: 8 });
+    expect(final.body).toMatchObject({ page: 3, pageSize: 3, total: 8 });
+    expect(beyond.body).toMatchObject({ page: 4, pageSize: 3, total: 8, items: [] });
+    expect(first.body.items.map((item: { id: string }) => item.id)).toEqual(orderedIds.slice(0, 3));
+    expect(second.body.items.map((item: { id: string }) => item.id)).toEqual(
+      orderedIds.slice(3, 6),
+    );
+    expect(final.body.items.map((item: { id: string }) => item.id)).toEqual(orderedIds.slice(6));
+
+    const returnedIds = [...first.body.items, ...second.body.items, ...final.body.items].map(
+      (item: { id: string }) => item.id,
+    );
+    expect(returnedIds).toEqual(orderedIds);
+    expect(new Set(returnedIds)).toHaveLength(orderedIds.length);
   });
 
   it("filters before counting and pages the combined result", async () => {
@@ -208,15 +257,36 @@ describe.skipIf(!ready)("unified devices read model e2e", () => {
     });
   });
 
-  it("rejects pages outside the documented bounds", async () => {
-    await cabinet.get("/devices").query({ page: 0 }).expect(400);
-    await cabinet.get("/devices").query({ pageSize: 51 }).expect(400);
-    await cabinet.get("/devices").query({ type: "printer" }).expect(400);
+  it.each([
+    { status: "printer" },
+    { page: "not-a-number" },
+    { pageSize: "not-a-number" },
+    { page: 0 },
+    { page: -1 },
+    { page: 1.5 },
+    { pageSize: 0 },
+    { pageSize: -1 },
+    { pageSize: 1.5 },
+    { pageSize: 51 },
+  ])("rejects an invalid list query: %o", async (query) => {
+    await cabinet.get("/devices").query(query).expect(400);
   });
 
   it("does not expose another tenant's devices", async () => {
     const otherCabinet = request.agent(app!.getHttpServer());
     const otherTenantId = await signUpAndActivate(otherCabinet);
+    const [otherLine] = await db
+      .insert(schema.lines)
+      .values({ tenantId: otherTenantId, name: "Other tenant line" })
+      .returning({ id: schema.lines.id });
+    if (!otherLine) throw new Error("Expected other-tenant line to persist");
+    await db.insert(schema.stationDevices).values({
+      tenantId: otherTenantId,
+      name: "Other tenant station",
+      lineId: otherLine.id,
+      apiKeyId: randomUUID(),
+      pairedAt: new Date(),
+    });
     await db.insert(schema.kiosks).values({
       tenantId: otherTenantId,
       name: "Other tenant kiosk",
@@ -225,9 +295,9 @@ describe.skipIf(!ready)("unified devices read model e2e", () => {
 
     const response = await cabinet.get("/devices").expect(200);
     expect(response.body.total).toBe(8);
-    expect(response.body.items.map((item: { name: string }) => item.name)).not.toContain(
-      "Other tenant kiosk",
-    );
+    const names = response.body.items.map((item: { name: string }) => item.name);
+    expect(names).not.toContain("Other tenant station");
+    expect(names).not.toContain("Other tenant kiosk");
   });
 
   it("rejects a real station key", async () => {
