@@ -1,5 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import i18n from "../src/i18n/index.js";
 import { applyMigrations, replaceOperatorsMirror, type SqlExecutor } from "../src/lib/mirror.js";
@@ -8,6 +10,12 @@ import type { ScanListener, ScanSource } from "../src/lib/scan-source.js";
 import { createKeyboardWedgeSource } from "../src/lib/scan-source.js";
 import { OperatorLogin } from "../src/pages/OperatorLogin.js";
 import "../src/station.css";
+
+const repositoryRoot = existsSync(resolve(process.cwd(), "apps/station/src/station.css"))
+  ? process.cwd()
+  : resolve(process.cwd(), "../..");
+const stationCss = readFileSync(resolve(repositoryRoot, "apps/station/src/station.css"), "utf8");
+const uiTokensCss = readFileSync(resolve(repositoryRoot, "packages/ui/src/tokens.css"), "utf8");
 
 const silentSource: ScanSource = { start: () => () => {} };
 
@@ -68,6 +76,11 @@ beforeAll(async () => {
 
 function openNumericFallback() {
   fireEvent.click(screen.getByRole("button", { name: "Use personnel number" }));
+}
+
+function cssRule(selector: string): string {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^\\s*${escaped}\\s*\\{([^}]*)\\}`, "ms").exec(stationCss)?.[1] ?? "";
 }
 
 describe("OperatorLogin", () => {
@@ -296,6 +309,59 @@ describe("OperatorLogin", () => {
       expect(label.style.textOverflow).toBe("ellipsis");
       expect(label.style.whiteSpace).toBe("nowrap");
     }
+  });
+
+  it("fits five full floor search targets in the 1024x768 degraded composition", async () => {
+    const exec = makeExec();
+    await applyMigrations(exec);
+    const pinHash = await hashSecret("4821");
+    await replaceOperatorsMirror(
+      exec,
+      Array.from({ length: 5 }, (_, index) => ({
+        operatorId: `op-al-${index}`,
+        name: `Alex Operator ${index + 1}`,
+        login: String(200 + index),
+        role: "operator",
+        pinHash,
+        badgeHash: null,
+        active: true,
+      })),
+    );
+    render(
+      <OperatorLogin
+        exec={exec}
+        source={silentSource}
+        onAuthed={vi.fn()}
+        notice={<div>Legacy identity unavailable</div>}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Find by name" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Operator name" }), {
+      target: { value: "al" },
+    });
+    await screen.findByRole("button", { name: "Alex Operator 5" });
+
+    const root = document.querySelector(".operator-login--with-notice");
+    const results = document.querySelector(".operator-name-search__results");
+    expect(root).not.toBeNull();
+    expect(results).not.toBeNull();
+    const targets = within(results as HTMLElement).getAllByRole("button");
+    expect(targets).toHaveLength(5);
+    for (const target of targets) expect(target.className).toContain("mk-btn--floor");
+    expect(uiTokensCss).toMatch(/--control-floor:\s*64px/);
+
+    expect(cssRule(".operator-name-search")).toContain("gap: var(--sp-3)");
+    expect(cssRule(".operator-login--with-notice .operator-name-search")).toContain(
+      "gap: var(--sp-1)",
+    );
+    expect(cssRule(".operator-login")).toContain("overflow: hidden");
+    expect(cssRule(".operator-name-search")).toContain("overflow: hidden");
+    expect(cssRule(".operator-name-search__results")).toContain("overflow: hidden");
+
+    const degradedBodyHeight = 452;
+    const requiredHeight = 96 + 4 + 5 * 64 + 4 * 8;
+    expect(requiredHeight).toBe(degradedBodyHeight);
   });
 
   it("signs in with a personnel number then a PIN", async () => {

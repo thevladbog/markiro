@@ -98,7 +98,7 @@ body,
 }
 
 .operator-login--with-notice .operator-name-search {
-  gap: var(--sp-2);
+  gap: var(--sp-1);
 }
 
 .operator-login__body {
