@@ -18,11 +18,25 @@ const pairingCodeSchema: ResponseSchema = {
   },
 };
 
-const operatorSchema: ResponseSchema = {
+const stationOperatorSchema: ResponseSchema = {
   type: "object",
   required: ["operatorId", "name", "login", "role", "pinHash", "badgeHash", "active"],
   properties: {
     operatorId: { type: "string" },
+    name: { type: "string" },
+    login: { type: "string" },
+    role: { type: "string" },
+    pinHash: { type: "string", description: "Offline verifier, not a plaintext PIN." },
+    badgeHash: { type: "string", nullable: true },
+    active: { type: "boolean" },
+  },
+};
+
+const kioskOperatorSchema: ResponseSchema = {
+  type: "object",
+  required: ["employeeId", "name", "login", "role", "pinHash", "badgeHash", "active"],
+  properties: {
+    employeeId: { type: "string" },
     name: { type: "string" },
     login: { type: "string" },
     role: { type: "string" },
@@ -60,7 +74,7 @@ const stationPairSchema: ResponseSchema = {
         serverUrl: { type: "string", format: "uri" },
       },
     },
-    operators: { type: "array", items: operatorSchema },
+    operators: { type: "array", items: stationOperatorSchema },
   },
 };
 
@@ -114,7 +128,7 @@ const kioskBootstrapSchema: ResponseSchema = {
         },
       },
     },
-    operators: { type: "array", items: operatorSchema },
+    operators: { type: "array", items: kioskOperatorSchema },
   },
 };
 

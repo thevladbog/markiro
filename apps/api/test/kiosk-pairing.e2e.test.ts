@@ -16,6 +16,7 @@ import { normalizePairSource } from "../src/modules/device-pairing/pair-source";
 import {
   GLOBAL_PAIR_ATTEMPT_BUDGET,
   GLOBAL_PAIR_SOURCE,
+  PAIR_CODE_MAX_ATTEMPTS,
   PAIR_ATTEMPT_BUDGET,
   PAIR_ATTEMPT_WINDOW_MS,
 } from "../src/modules/device-pairing/pairing-policy";
@@ -424,6 +425,80 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
     });
   });
 
+  it("classifies a failed bootstrap after a resolved existing credential as re-pair", async () => {
+    const first = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    await request(app!.getHttpServer())
+      .post("/kiosk/pair")
+      .send({ code: first.body.code })
+      .expect(201);
+    const replacement = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    vi.mocked(audit.deviceCredentialMutation).mockClear();
+
+    const bootstrapError = new Error("bootstrap failed after code resolution");
+    vi.spyOn(app!.get(PickupOrdersService), "bootstrap").mockRejectedValueOnce(bootstrapError);
+
+    await expect(
+      app!.get(PairingService).redeem(replacement.body.code as string, `test-${randomUUID()}`),
+    ).rejects.toBe(bootstrapError);
+    expect(audit.deviceCredentialMutation).toHaveBeenCalledWith({
+      tenantId,
+      actorType: "unauthenticated_device",
+      actorId: null,
+      action: "kiosk.repair",
+      resourceId: kioskId,
+      outcome: "failed",
+    });
+    expect(JSON.stringify(vi.mocked(audit.deviceCredentialMutation).mock.calls)).not.toContain(
+      replacement.body.code as string,
+    );
+  });
+
+  it("classifies resolved expired and attempt-locked codes for an existing credential as re-pair", async () => {
+    const first = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    await request(app!.getHttpServer())
+      .post("/kiosk/pair")
+      .send({ code: first.body.code })
+      .expect(201);
+
+    const expired = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    await db
+      .update(schema.kioskPairingCodes)
+      .set({ expiresAt: new Date(Date.now() - 1_000) })
+      .where(eq(schema.kioskPairingCodes.codeHash, codeHashOf(expired.body.code)));
+    vi.mocked(audit.deviceCredentialMutation).mockClear();
+    await request(app!.getHttpServer())
+      .post("/kiosk/pair")
+      .send({ code: expired.body.code })
+      .expect(401);
+    expect(audit.deviceCredentialMutation).toHaveBeenLastCalledWith({
+      tenantId,
+      actorType: "unauthenticated_device",
+      actorId: null,
+      action: "kiosk.repair",
+      resourceId: kioskId,
+      outcome: "failed",
+    });
+
+    const locked = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    await db
+      .update(schema.kioskPairingCodes)
+      .set({ attempts: PAIR_CODE_MAX_ATTEMPTS })
+      .where(eq(schema.kioskPairingCodes.codeHash, codeHashOf(locked.body.code)));
+    vi.mocked(audit.deviceCredentialMutation).mockClear();
+    await request(app!.getHttpServer())
+      .post("/kiosk/pair")
+      .send({ code: locked.body.code })
+      .expect(401);
+    expect(audit.deviceCredentialMutation).toHaveBeenLastCalledWith({
+      tenantId,
+      actorType: "unauthenticated_device",
+      actorId: null,
+      action: "kiosk.repair",
+      resourceId: kioskId,
+      outcome: "failed",
+    });
+  });
+
   it("audits a failed re-pair after the known kiosk becomes inactive", async () => {
     const first = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
     await request(app!.getHttpServer())
@@ -697,6 +772,14 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
 
   it("401s an unknown, never-issued code", async () => {
     await request(app!.getHttpServer()).post("/kiosk/pair").send({ code: "99999999" }).expect(401);
+    expect(audit.deviceCredentialMutation).toHaveBeenCalledWith({
+      tenantId: null,
+      actorType: "unauthenticated_device",
+      actorId: null,
+      action: "kiosk.pair",
+      resourceId: null,
+      outcome: "failed",
+    });
   });
 
   it("400s a malformed code", async () => {
@@ -1007,6 +1090,14 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
         .post("/kiosk/pair")
         .send({ code: "00000000" })
         .expect(401);
+      expect(audit.deviceCredentialMutation).toHaveBeenCalledWith({
+        tenantId: null,
+        actorType: "unauthenticated_device",
+        actorId: null,
+        action: "kiosk.pair",
+        resourceId: null,
+        outcome: "failed",
+      });
 
       const sourceRows = await db
         .select()

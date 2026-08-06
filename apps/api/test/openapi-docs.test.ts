@@ -75,6 +75,37 @@ function operationResponse(
   return response as unknown as Record<string, unknown>;
 }
 
+interface TestSchema {
+  type?: string;
+  required?: string[];
+  properties?: Record<string, TestSchema>;
+  items?: TestSchema;
+}
+
+function responseSchema(response: Record<string, unknown>): TestSchema {
+  const content = response.content as Record<string, { schema?: TestSchema }> | undefined;
+  const schema = content?.["application/json"]?.schema;
+  if (!schema) throw new Error("Missing application/json response schema");
+  return schema;
+}
+
+function property(schema: TestSchema, name: string): TestSchema {
+  const result = schema.properties?.[name];
+  if (!result) throw new Error(`Missing schema property ${name}`);
+  return result;
+}
+
+function arrayItems(schema: TestSchema): TestSchema {
+  if (schema.type !== "array" || !schema.items) throw new Error("Expected array item schema");
+  return schema.items;
+}
+
+function expectExactObjectFields(schema: TestSchema, fields: readonly string[]): void {
+  expect(schema.type).toBe("object");
+  expect([...(schema.required ?? [])].sort()).toEqual([...fields].sort());
+  expect(Object.keys(schema.properties ?? {}).sort()).toEqual([...fields].sort());
+}
+
 describe("self-hosted OpenAPI documentation", () => {
   let server: Server;
 
@@ -209,6 +240,84 @@ describe("self-hosted OpenAPI documentation", () => {
         expect(serialized).not.toMatch(/example/i);
         for (const field of fields) expect(serialized).toContain(`"${field}"`);
       }
+
+      const pairingCodeFields = ["code", "expiresAt"] as const;
+      expectExactObjectFields(
+        responseSchema(operationResponse(document, "/station-devices/{id}/pairing-code", "201")),
+        pairingCodeFields,
+      );
+      expectExactObjectFields(
+        responseSchema(operationResponse(document, "/kiosks/{id}/pairing-code", "201")),
+        pairingCodeFields,
+      );
+
+      const station = responseSchema(operationResponse(document, "/station/pair", "201"));
+      expectExactObjectFields(station, ["device", "credential", "operators"]);
+      const stationDevice = property(station, "device");
+      expectExactObjectFields(stationDevice, [
+        "id",
+        "name",
+        "tenantId",
+        "organizationName",
+        "line",
+      ]);
+      expectExactObjectFields(property(stationDevice, "line"), ["id", "name"]);
+      expectExactObjectFields(property(station, "credential"), ["apiKey", "serverUrl"]);
+      expectExactObjectFields(arrayItems(property(station, "operators")), [
+        "operatorId",
+        "name",
+        "login",
+        "role",
+        "pinHash",
+        "badgeHash",
+        "active",
+      ]);
+
+      const kiosk = responseSchema(operationResponse(document, "/kiosk/pair", "201"));
+      expectExactObjectFields(kiosk, ["device", "token", "nextDeviceSeq", "bootstrap"]);
+      expectExactObjectFields(property(kiosk, "device"), ["kioskId", "kioskName", "place"]);
+      const bootstrap = property(kiosk, "bootstrap");
+      expectExactObjectFields(bootstrap, [
+        "generatedAt",
+        "config",
+        "badgeSalt",
+        "reasons",
+        "products",
+        "employees",
+        "operators",
+      ]);
+      expectExactObjectFields(property(bootstrap, "config"), ["dayLimitPerEmployee", "showPrices"]);
+      expectExactObjectFields(arrayItems(property(bootstrap, "reasons")), ["id", "name"]);
+      expectExactObjectFields(arrayItems(property(bootstrap, "products")), [
+        "id",
+        "gtin14",
+        "name",
+        "unitPrice",
+        "egaisCode",
+      ]);
+      expectExactObjectFields(arrayItems(property(bootstrap, "employees")), [
+        "id",
+        "fullName",
+        "role",
+        "badgeHash",
+        "takenTodayElsewhere",
+      ]);
+      const kioskOperator = arrayItems(property(bootstrap, "operators"));
+      expectExactObjectFields(kioskOperator, [
+        "employeeId",
+        "name",
+        "login",
+        "role",
+        "pinHash",
+        "badgeHash",
+        "active",
+      ]);
+      expect(kioskOperator.properties).not.toHaveProperty("operatorId");
+
+      expectExactObjectFields(
+        responseSchema(operationResponse(document, "/kiosks/{id}/enroll", "200")),
+        ["token"],
+      );
     } finally {
       await app.close();
     }
