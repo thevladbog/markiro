@@ -913,7 +913,7 @@ git commit -m "feat(admin): move employee editing to side panels"
 - Produces: a review-ready Employees-only stage with explicit automated and external validation
   evidence.
 
-- [ ] **Step 1: Verify scope and source audits**
+- [x] **Step 1: Verify scope and source audits**
 
 Run: `git diff --name-only origin/main...HEAD`
 
@@ -929,7 +929,15 @@ Run: `rg -n "badgeCode|accessPin" apps/admin/src/pages/employees`
 Review every match manually. Expected: values exist only in transient component/form state and
 request construction; no URL, storage, logging, analytics, or toast interpolation.
 
-- [ ] **Step 2: Run focused shared and Admin tests**
+Evidence (2026-08-06): `git diff --name-only origin/main...HEAD` listed only the shared
+ConfirmDialog files/test, the Employees Admin feature/routes/i18n/tests, access-routing test, and
+this spec/plan; it contained no backend, database, dependency/lockfile, Kiosk, or later-wave paths.
+`rg -n "\bModal\b" apps/admin/src/pages/employees` returned no matches. The badge/PIN source audit
+returned only `BadgeDto`/`IssueBadgeInput`, the local badge issue state/request body, and current badge
+display/revoke confirmation entity; there were no `accessPin` matches and no URL, storage, logging,
+analytics, or toast interpolation of a badge/PIN value.
+
+- [x] **Step 2: Run focused shared and Admin tests**
 
 Run:
 
@@ -946,7 +954,10 @@ pnpm --filter @markiro/admin exec vitest run \
 
 Expected: every test passes with zero failures and zero skips.
 
-- [ ] **Step 3: Run package gates**
+Evidence (2026-08-06): UI overlay test passed 1 file / 16 tests (0 failed, 0 skipped). The six
+Admin focused files passed 6 files / 80 tests (0 failed, 0 skipped).
+
+- [x] **Step 3: Run package gates**
 
 Run each command separately:
 
@@ -964,7 +975,15 @@ pnpm --filter @markiro/admin build
 Expected: every command exits 0. Record pre-existing jsdom, hook-dependency, or bundle-size warnings
 separately; do not label them new without diff evidence.
 
-- [ ] **Step 4: Run repository hygiene checks**
+Evidence (2026-08-06): all eight commands exited 0. UI test passed 6 files / 105 tests (0 failed,
+0 skipped); UI typecheck, lint, and build were clean. Admin test passed 100 files / 463 tests (0
+failed, 0 skipped); Admin typecheck and build passed. Admin test emitted 57 jsdom canvas
+`getContext()` and 3 jsdom navigation-not-implemented messages. Admin lint emitted 5 existing
+`react-hooks/exhaustive-deps` warnings in Boxes and Conflicts, with 0 errors and no Employees match.
+The Admin build emitted its existing >500 kB chunk-size advisory. These warnings were not changed in
+the reviewed Employees/UI diff.
+
+- [x] **Step 4: Run repository hygiene checks**
 
 Run:
 
@@ -979,6 +998,9 @@ git diff --unified=0 origin/main...HEAD -- packages/ui apps/admin docs/superpowe
 Expected: formatting passes, no whitespace errors, and the added-line dash audit returns no
 matches. The audit intentionally scans only added lines so pre-existing prose cannot fail it.
 
+Evidence (2026-08-06): `pnpm format:check` passed; `git diff --check origin/main...HEAD` returned
+no whitespace errors; the added-line en/em-dash audit returned no matches.
+
 - [ ] **Step 5: Perform browser and accessibility review if infrastructure permits**
 
 With the normal authenticated Admin API, verify `/employees`, `/employees/new`, and one real
@@ -991,7 +1013,7 @@ navigation, focus restoration, long RU/EN labels, reduced motion, and no horizon
 Record screen reader, mobile virtual keyboard, browser, or infrastructure behavior not exercised.
 Automated DOM tests must not be reported as manual confirmation.
 
-- [ ] **Step 6: Review final diff and commit verification evidence**
+- [x] **Step 6: Review final diff and commit verification evidence**
 
 Review `git diff --stat origin/main...HEAD` and the complete diff. Update only completed checkboxes
 and factual evidence in this plan, then:
@@ -1000,6 +1022,11 @@ and factual evidence in this plan, then:
 git add docs/superpowers/plans/2026-08-06-admin-employees-redesign.md
 git commit -m "docs: record employee redesign verification"
 ```
+
+Evidence (2026-08-06): reviewed `git diff --stat origin/main...HEAD` and the complete scoped diff,
+including shared ConfirmDialog, routes, Employees components/styles/i18n, and focused test changes.
+The only untriaged observation remains the deferred create-panel cached-empty refetch observation;
+Task 7 intentionally does not modify it and the final whole-branch review owns triage.
 
 ## Completion Report Contract
 
