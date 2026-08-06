@@ -1,14 +1,19 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
+import { createMemoryRouter, createRoutesFromElements, Route, RouterProvider } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
 
 import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider } from "../src/access/context.js";
+import type { ProductDto } from "../src/pages/catalog/api.js";
 import type * as ShiftsApiModule from "../src/pages/shifts/api.js";
 import { ShiftsPage } from "../src/pages/shifts/index.js";
+import { ShiftForm, type ShiftFormValues } from "../src/pages/shifts/ShiftForm.js";
+import { ShiftPanelRoute } from "../src/pages/shifts/ShiftPanelRoute.js";
 
 const { writeHookMountSpy } = vi.hoisted(() => ({ writeHookMountSpy: vi.fn() }));
 
@@ -42,13 +47,11 @@ afterEach(() => {
   writeHookMountSpy.mockClear();
 });
 
-/** Minimal Response stand-in -- only what apps/admin/src/api/client.ts reads. */
 function jsonResponse(status: number, body: unknown): Response {
-  return {
-    ok: status >= 200 && status < 300,
+  return new Response(body === undefined ? null : JSON.stringify(body), {
     status,
-    json: async () => body,
-  } as Response;
+    headers: { "content-type": "application/json" },
+  });
 }
 
 const OPERATIONS_READ_ONLY: AccessDocument = {
@@ -68,7 +71,17 @@ function renderPage(access: AccessDocument = OPERATIONS_WRITE_ACCESS) {
   return render(
     <QueryClientProvider client={queryClient}>
       <AccessProvider value={access}>
-        <ShiftsPage />
+        <RouterProvider
+          router={createMemoryRouter(
+            createRoutesFromElements(
+              <Route path="/shifts" element={<ShiftsPage />}>
+                <Route path="new" element={<ShiftPanelRoute mode="create" />} />
+                <Route path=":shiftId/edit" element={<ShiftPanelRoute mode="edit" />} />
+              </Route>,
+            ),
+            { initialEntries: ["/shifts"] },
+          )}
+        />
       </AccessProvider>
     </QueryClientProvider>,
   );
@@ -93,13 +106,16 @@ async function chooseOption(
   expect(trigger.textContent).toContain(option);
 }
 
-const PRODUCT_A = {
+const PRODUCT_A: ProductDto = {
   id: "p1",
   gtin14: "04006381333931",
   name: "Молоко 1л",
   productGroup: "Молочные продукты",
   boxCapacity: 12,
   palletCapacity: 48,
+  unitPrice: null,
+  egaisCode: null,
+  externalRef: null,
   status: "active",
   defaultCounterpartyId: "cp1",
   defaultLabelTemplateId: "lt1",
@@ -155,6 +171,56 @@ const LABEL_TEMPLATE = {
   language: "zpl",
   updatedAt: "2026-01-01T00:00:00.000Z",
 };
+
+const INITIAL_SHIFT_FORM_VALUES: ShiftFormValues = {
+  productId: PRODUCT_A.id,
+  mode: "validation",
+  plannedQty: "500",
+  plannedDate: "2026-08-06",
+  lineId: "",
+  counterpartyId: "",
+  labelTemplateId: "",
+  ssccIssuerCounterpartyId: "",
+  boxLabelTemplateId: "",
+  boxCapacity: "",
+  palletCapacity: "",
+  palletsEnabled: false,
+};
+
+function DirtyReseedHarness() {
+  const [initialValues, setInitialValues] = useState(INITIAL_SHIFT_FORM_VALUES);
+  return (
+    <div
+      onChange={() =>
+        setInitialValues({
+          ...INITIAL_SHIFT_FORM_VALUES,
+          plannedQty: "900",
+        })
+      }
+    >
+      <ShiftForm
+        mode="edit"
+        initialValues={initialValues}
+        products={[PRODUCT_A]}
+        lines={[]}
+        counterparties={[]}
+        labelTemplates={[]}
+        onSubmit={() => undefined}
+        onDirtyChange={() => undefined}
+        onClose={() => undefined}
+      />
+    </div>
+  );
+}
+
+it("does not re-seed over an operator edit when initial values change in the same commit", () => {
+  render(<DirtyReseedHarness />);
+
+  const quantity = screen.getByLabelText("Плановое количество, шт");
+  fireEvent.change(quantity, { target: { value: "501" } });
+
+  expect((quantity as HTMLInputElement).value).toBe("501");
+});
 
 // Task 6: a second, distinct label template -- used together with
 // LABEL_TEMPLATE so the item-label-template select and the box-label-template
@@ -297,6 +363,9 @@ describe("ShiftsPage", () => {
     expect(table.getByText("Активна")).toBeDefined();
     expect(table.getByText("Закрыта")).toBeDefined();
     expect(table.getByText("Брак линии")).toBeDefined();
+    expect(screen.getByTestId("shifts-page").classList).toContain("mk-admin-page");
+    expect(screen.getByRole("group", { name: "Фильтры смен" })).toBeDefined();
+    expect(screen.getByText("3 смены").getAttribute("aria-live")).toBe("polite");
     expect(fetchMock).toHaveBeenCalledWith("/api/shifts", expect.any(Object));
   });
 
@@ -393,7 +462,7 @@ describe("ShiftsPage", () => {
     await screen.findByText("Сыр Российский");
 
     fireEvent.click(screen.getByRole("button", { name: "Закрыть смену" }));
-    const dialog = await screen.findByRole("dialog");
+    const dialog = await screen.findByRole("alertdialog", { name: "Закрыть смену" });
     fireEvent.change(within(dialog).getByLabelText("Причина закрытия"), {
       target: { value: "Плановая остановка" },
     });
@@ -408,6 +477,56 @@ describe("ShiftsPage", () => {
         }),
       );
     });
+  });
+
+  it("keeps a close failure and its reason inside the confirmation", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/shifts/s2/close" && init?.method === "POST") {
+        return jsonResponse(409, { message: "Shift already closed" });
+      }
+      if (path.startsWith("/api/shifts")) {
+        return jsonResponse(200, { items: [ACTIVE_TOLLING_SHIFT] });
+      }
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Закрыть смену" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Закрыть смену" });
+    fireEvent.change(within(dialog).getByLabelText("Причина закрытия"), {
+      target: { value: "Переналадка линии" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Закрыть смену" }));
+
+    expect(await within(dialog).findByText("Shift already closed")).toBeDefined();
+    expect((within(dialog).getByLabelText("Причина закрытия") as HTMLInputElement).value).toBe(
+      "Переналадка линии",
+    );
+  });
+
+  it("confirms planned-shift deletion and keeps API failures in the dialog", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/shifts/s1" && init?.method === "DELETE") {
+        return jsonResponse(409, { message: "Shift has production data" });
+      }
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [PLANNED_SHIFT] });
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Удалить" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Удалить смену?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Удалить" }));
+
+    expect(await within(dialog).findByText("Shift has production data")).toBeDefined();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/shifts/s1",
+      expect.objectContaining({ method: "DELETE" }),
+    );
   });
 
   it("disables draft products in the shift form's product select and shows a hint", async () => {
@@ -791,6 +910,11 @@ describe("ShiftsPage", () => {
     await user.click(screen.getByRole("button", { name: "Очистить дату: По дату" }));
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith("/api/shifts?status=active", expect.any(Object));
+    });
+
+    await user.click(screen.getByRole("button", { name: "Сбросить" }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/shifts", expect.any(Object));
     });
   });
 

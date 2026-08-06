@@ -149,6 +149,44 @@
   --mk-panel-width: 480px;
 }
 
+.mk-admin-page {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 28px var(--sp-7) var(--sp-8);
+}
+
+.mk-filter-bar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.mk-filter-bar__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--sp-3);
+}
+
+.mk-filter-bar__result {
+  min-height: 20px;
+  margin: 0;
+  color: var(--fg-3);
+  font: var(--text-body-sm);
+}
+
+.mk-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}
+
 .mk-side-panel--standard {
   --mk-panel-width: min(640px, 64vw);
 }
@@ -273,6 +311,10 @@
 }
 
 @media (max-width: 767px) {
+  .mk-admin-page {
+    padding: var(--sp-5) var(--sp-4) var(--sp-7);
+  }
+
   .mk-side-panel {
     --mk-panel-width: 100vw;
 

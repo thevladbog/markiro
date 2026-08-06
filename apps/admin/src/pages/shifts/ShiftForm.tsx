@@ -5,7 +5,16 @@ import { Controller, useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
 
-import { Button, Checkbox, DatePicker, Input, Modal, RadioGroup, Select } from "@markiro/ui";
+import {
+  Alert,
+  Button,
+  Checkbox,
+  DatePicker,
+  Input,
+  RadioGroup,
+  Select,
+  SidePanel,
+} from "@markiro/ui";
 import type { SelectOption } from "@markiro/ui";
 
 import { errorProp } from "../../lib/form-error.js";
@@ -59,7 +68,6 @@ const shiftFormSchema = z.object({
 export type ShiftFormValues = z.infer<typeof shiftFormSchema>;
 
 export interface ShiftFormProps {
-  open: boolean;
   mode: "create" | "edit";
   initialValues?: ShiftFormValues;
   /** All products (both draft and active) -- draft ones render disabled with a hint. */
@@ -68,7 +76,9 @@ export interface ShiftFormProps {
   counterparties: CounterpartyDto[];
   labelTemplates: LabelTemplateSummaryDto[];
   submitting?: boolean;
+  submissionError?: string | null;
   onSubmit: (input: CreateShiftInput | UpdateShiftInput) => void | Promise<void>;
+  onDirtyChange: (dirty: boolean) => void;
   onClose: () => void;
 }
 
@@ -95,7 +105,6 @@ function translateFieldError(t: TFunction, message: string | undefined): string 
 }
 
 export function ShiftForm({
-  open,
   mode: formMode,
   initialValues,
   products,
@@ -103,7 +112,9 @@ export function ShiftForm({
   counterparties,
   labelTemplates,
   submitting = false,
+  submissionError,
   onSubmit,
+  onDirtyChange,
   onClose,
 }: ShiftFormProps) {
   const { t, i18n } = useTranslation();
@@ -131,7 +142,7 @@ export function ShiftForm({
     reset,
     watch,
     setValue,
-    formState: { errors },
+    formState: { errors, isDirty },
   } = useForm<ShiftFormValues>({
     resolver: zodResolver(shiftFormSchema),
     defaultValues: initialValues ?? EMPTY_VALUES,
@@ -146,23 +157,25 @@ export function ShiftForm({
   const boxLabelTemplateId = watch("boxLabelTemplateId");
   const palletsEnabled = watch("palletsEnabled");
 
-  // Re-seed the form whenever the modal opens (covers both the create ->
-  // create and edit A -> edit B cases, since defaultValues is only read once
-  // by react-hook-form on mount) -- same convention as
-  // `../catalog/ProductForm.tsx`. The prefill guard ref is reset too, so a
-  // fresh "create" open can prefill again for whichever product is picked
-  // first.
+  const isDirtyRef = useRef(false);
+
   useEffect(() => {
-    if (open) {
-      const seeded = initialValues ?? EMPTY_VALUES;
-      reset(seeded);
-      lastPrefilledProductRef.current = formMode === "create" ? null : seeded.productId || null;
-      counterpartyTouchedRef.current = false;
-      labelTemplateTouchedRef.current = false;
-      ssccIssuerTouchedRef.current = false;
-      boxLabelTemplateTouchedRef.current = false;
-    }
-  }, [open, initialValues, reset, formMode]);
+    isDirtyRef.current = isDirty;
+    onDirtyChange(isDirty);
+  }, [isDirty, onDirtyChange]);
+
+  // Re-seed clean forms only. Background dependency refetches must not erase
+  // operator input from a still-open route panel.
+  useEffect(() => {
+    if (isDirtyRef.current) return;
+    const seeded = initialValues ?? EMPTY_VALUES;
+    reset(seeded);
+    lastPrefilledProductRef.current = formMode === "create" ? null : seeded.productId || null;
+    counterpartyTouchedRef.current = false;
+    labelTemplateTouchedRef.current = false;
+    ssccIssuerTouchedRef.current = false;
+    boxLabelTemplateTouchedRef.current = false;
+  }, [initialValues, reset, formMode]);
 
   // Product-change prefill (create mode only -- the product can't change once
   // a shift exists, and the product select is disabled while editing): applies
@@ -172,7 +185,7 @@ export function ShiftForm({
   // operator had previously changed these fields for payload purposes, while
   // the actual values always follow the latest product selection.
   useEffect(() => {
-    if (!open || formMode !== "create") return;
+    if (formMode !== "create") return;
     if (!productId || lastPrefilledProductRef.current === productId) return;
     lastPrefilledProductRef.current = productId;
     const product = products.find((p) => p.id === productId);
@@ -184,7 +197,7 @@ export function ShiftForm({
       "palletCapacity",
       product.palletCapacity !== null ? String(product.palletCapacity) : "",
     );
-  }, [open, formMode, productId, products, setValue]);
+  }, [formMode, productId, products, setValue]);
 
   // A Radix select needs its matching item before it can safely represent a
   // product default. Reconcile defaults while a field is still untouched so a
@@ -193,7 +206,7 @@ export function ShiftForm({
   // operator has touched a field, this effect deliberately leaves that latest
   // product value intact.
   useEffect(() => {
-    if (!open || formMode !== "create" || !productId) return;
+    if (formMode !== "create" || !productId) return;
     const product = products.find((item) => item.id === productId);
     if (!product) return;
 
@@ -216,7 +229,7 @@ export function ShiftForm({
           : "",
       );
     }
-  }, [open, formMode, productId, products, counterparties, labelTemplates, setValue]);
+  }, [formMode, productId, products, counterparties, labelTemplates, setValue]);
 
   const submit = handleSubmit(async (values) => {
     await onSubmit(
@@ -277,8 +290,10 @@ export function ShiftForm({
   ];
 
   return (
-    <Modal
-      open={open}
+    <SidePanel
+      open
+      size="complex"
+      busy={submitting}
       onClose={onClose}
       closeLabel={t("common.close")}
       title={
@@ -288,7 +303,7 @@ export function ShiftForm({
       }
       footer={
         <>
-          <Button type="button" variant="secondary" onClick={onClose}>
+          <Button type="button" variant="secondary" disabled={submitting} onClick={onClose}>
             {t("pages.shifts.cancel")}
           </Button>
           <Button type="submit" form={FORM_ID} loading={submitting}>
@@ -299,150 +314,174 @@ export function ShiftForm({
         </>
       }
     >
+      {submissionError ? <Alert tone="error">{submissionError}</Alert> : null}
       <form
         id={FORM_ID}
+        className="mk-shift-form"
         onSubmit={(event) => void submit(event)}
         noValidate
-        style={{ display: "flex", flexDirection: "column", gap: 16 }}
       >
-        <Select
-          label={t("pages.shifts.form.productLabel")}
-          options={productOptions}
-          value={productId}
-          disabled={formMode === "edit"}
-          {...errorProp(translateFieldError(t, errors.productId?.message))}
-          onValueChange={(value) =>
-            setValue("productId", value, { shouldDirty: true, shouldValidate: true })
-          }
-        />
-
-        <Controller
-          control={control}
-          name="mode"
-          render={({ field }) => (
-            <RadioGroup
-              label={t("pages.shifts.form.modeLabel")}
-              options={[
-                { value: "validation", label: t("pages.shifts.form.modeValidation") },
-                { value: "aggregation", label: t("pages.shifts.form.modeAggregation") },
-              ]}
-              value={field.value}
-              onValueChange={field.onChange}
-            />
-          )}
-        />
-
-        <Input
-          label={t("pages.shifts.form.plannedQtyLabel")}
-          mono
-          inputMode="numeric"
-          {...errorProp(translateFieldError(t, errors.plannedQty?.message))}
-          {...register("plannedQty")}
-        />
-
-        <Controller
-          control={control}
-          name="plannedDate"
-          render={({ field }) => (
-            <DatePicker
-              label={t("pages.shifts.form.plannedDateLabel")}
-              placeholder={t("common.datePicker.placeholder")}
-              clearLabel={t("common.datePicker.clear")}
-              calendarLabel={t("common.datePicker.calendar")}
-              previousMonthLabel={t("common.datePicker.previousMonth")}
-              nextMonthLabel={t("common.datePicker.nextMonth")}
-              locale={i18n.language}
-              {...(field.value ? { value: field.value } : {})}
-              onValueChange={(value) => field.onChange(value ?? "")}
-            />
-          )}
-        />
-
-        <Select
-          label={t("pages.shifts.form.lineLabel")}
-          options={lineOptions}
-          value={lineId ?? ""}
-          {...(lines.length === 0 ? { hint: t("pages.shifts.form.noLinesHint") } : {})}
-          onValueChange={(value) => setValue("lineId", value, { shouldDirty: true })}
-        />
-
-        <Select
-          label={t("pages.shifts.form.counterpartyLabel")}
-          options={counterpartyOptions}
-          value={counterpartyId ?? ""}
-          onValueChange={(value) => {
-            counterpartyTouchedRef.current = true;
-            setValue("counterpartyId", value, { shouldDirty: true, shouldValidate: true });
-          }}
-        />
-
-        <Select
-          label={t("pages.shifts.form.ssccIssuerLabel")}
-          options={ssccIssuerOptions}
-          value={ssccIssuerCounterpartyId ?? ""}
-          hint={t("pages.shifts.form.ssccIssuerHint")}
-          onValueChange={(value) => {
-            ssccIssuerTouchedRef.current = true;
-            setValue("ssccIssuerCounterpartyId", value, {
-              shouldDirty: true,
-              shouldValidate: true,
-            });
-          }}
-        />
-
-        <Select
-          label={t("pages.shifts.form.labelTemplateLabel")}
-          options={labelTemplateOptions}
-          value={labelTemplateId ?? ""}
-          onValueChange={(value) => {
-            labelTemplateTouchedRef.current = true;
-            setValue("labelTemplateId", value, { shouldDirty: true, shouldValidate: true });
-          }}
-        />
-
-        <Select
-          label={t("pages.shifts.form.boxLabelTemplateLabel")}
-          options={boxLabelTemplateOptions}
-          value={boxLabelTemplateId ?? ""}
-          onValueChange={(value) => {
-            boxLabelTemplateTouchedRef.current = true;
-            setValue("boxLabelTemplateId", value, { shouldDirty: true, shouldValidate: true });
-          }}
-        />
-
-        {shiftMode === "aggregation" && (
-          <>
-            <Input
-              label={t("pages.shifts.form.boxCapacityLabel")}
-              mono
-              inputMode="numeric"
-              {...errorProp(translateFieldError(t, errors.boxCapacity?.message))}
-              {...register("boxCapacity")}
+        <section className="mk-shift-form__section">
+          <h3>{t("pages.shifts.sections.product")}</h3>
+          <div className="mk-shift-form__grid">
+            <Select
+              label={t("pages.shifts.form.productLabel")}
+              options={productOptions}
+              value={productId}
+              disabled={formMode === "edit"}
+              {...errorProp(translateFieldError(t, errors.productId?.message))}
+              onValueChange={(value) =>
+                setValue("productId", value, { shouldDirty: true, shouldValidate: true })
+              }
             />
             <Controller
               control={control}
-              name="palletsEnabled"
+              name="mode"
               render={({ field }) => (
-                <Checkbox
-                  label={t("pages.shifts.form.palletsEnabledLabel")}
-                  checked={field.value}
-                  onCheckedChange={field.onChange}
+                <RadioGroup
+                  label={t("pages.shifts.form.modeLabel")}
+                  options={[
+                    { value: "validation", label: t("pages.shifts.form.modeValidation") },
+                    { value: "aggregation", label: t("pages.shifts.form.modeAggregation") },
+                  ]}
+                  value={field.value}
+                  onValueChange={field.onChange}
                 />
               )}
             />
-            {palletsEnabled && (
+          </div>
+        </section>
+
+        <section className="mk-shift-form__section">
+          <h3>{t("pages.shifts.sections.planning")}</h3>
+          <div className="mk-shift-form__grid">
+            <Input
+              label={t("pages.shifts.form.plannedQtyLabel")}
+              mono
+              inputMode="numeric"
+              {...errorProp(translateFieldError(t, errors.plannedQty?.message))}
+              {...register("plannedQty")}
+            />
+            <Controller
+              control={control}
+              name="plannedDate"
+              render={({ field }) => (
+                <DatePicker
+                  label={t("pages.shifts.form.plannedDateLabel")}
+                  placeholder={t("common.datePicker.placeholder")}
+                  clearLabel={t("common.datePicker.clear")}
+                  calendarLabel={t("common.datePicker.calendar")}
+                  previousMonthLabel={t("common.datePicker.previousMonth")}
+                  nextMonthLabel={t("common.datePicker.nextMonth")}
+                  locale={i18n.language}
+                  {...(field.value ? { value: field.value } : {})}
+                  onValueChange={(value) => field.onChange(value ?? "")}
+                />
+              )}
+            />
+          </div>
+        </section>
+
+        <section className="mk-shift-form__section">
+          <h3>{t("pages.shifts.sections.assignment")}</h3>
+          <div className="mk-shift-form__grid">
+            <Select
+              label={t("pages.shifts.form.lineLabel")}
+              options={lineOptions}
+              value={lineId ?? ""}
+              {...(lines.length === 0 ? { hint: t("pages.shifts.form.noLinesHint") } : {})}
+              onValueChange={(value) => setValue("lineId", value, { shouldDirty: true })}
+            />
+            <Select
+              label={t("pages.shifts.form.counterpartyLabel")}
+              options={counterpartyOptions}
+              value={counterpartyId ?? ""}
+              onValueChange={(value) => {
+                counterpartyTouchedRef.current = true;
+                setValue("counterpartyId", value, { shouldDirty: true, shouldValidate: true });
+              }}
+            />
+            <div className="mk-shift-form__wide">
+              <Select
+                label={t("pages.shifts.form.ssccIssuerLabel")}
+                options={ssccIssuerOptions}
+                value={ssccIssuerCounterpartyId ?? ""}
+                hint={t("pages.shifts.form.ssccIssuerHint")}
+                onValueChange={(value) => {
+                  ssccIssuerTouchedRef.current = true;
+                  setValue("ssccIssuerCounterpartyId", value, {
+                    shouldDirty: true,
+                    shouldValidate: true,
+                  });
+                }}
+              />
+            </div>
+          </div>
+        </section>
+
+        <section className="mk-shift-form__section">
+          <h3>{t("pages.shifts.sections.templates")}</h3>
+          <div className="mk-shift-form__grid">
+            <Select
+              label={t("pages.shifts.form.labelTemplateLabel")}
+              options={labelTemplateOptions}
+              value={labelTemplateId ?? ""}
+              onValueChange={(value) => {
+                labelTemplateTouchedRef.current = true;
+                setValue("labelTemplateId", value, { shouldDirty: true, shouldValidate: true });
+              }}
+            />
+            <Select
+              label={t("pages.shifts.form.boxLabelTemplateLabel")}
+              options={boxLabelTemplateOptions}
+              value={boxLabelTemplateId ?? ""}
+              onValueChange={(value) => {
+                boxLabelTemplateTouchedRef.current = true;
+                setValue("boxLabelTemplateId", value, {
+                  shouldDirty: true,
+                  shouldValidate: true,
+                });
+              }}
+            />
+          </div>
+        </section>
+
+        {shiftMode === "aggregation" && (
+          <section className="mk-shift-form__section">
+            <h3>{t("pages.shifts.sections.aggregation")}</h3>
+            <div className="mk-shift-form__grid">
               <Input
-                label={t("pages.shifts.form.palletCapacityLabel")}
+                label={t("pages.shifts.form.boxCapacityLabel")}
                 mono
                 inputMode="numeric"
-                {...errorProp(translateFieldError(t, errors.palletCapacity?.message))}
-                {...register("palletCapacity")}
+                {...errorProp(translateFieldError(t, errors.boxCapacity?.message))}
+                {...register("boxCapacity")}
               />
-            )}
-          </>
+              <Controller
+                control={control}
+                name="palletsEnabled"
+                render={({ field }) => (
+                  <Checkbox
+                    label={t("pages.shifts.form.palletsEnabledLabel")}
+                    checked={field.value}
+                    onCheckedChange={field.onChange}
+                  />
+                )}
+              />
+              {palletsEnabled ? (
+                <Input
+                  label={t("pages.shifts.form.palletCapacityLabel")}
+                  mono
+                  inputMode="numeric"
+                  {...errorProp(translateFieldError(t, errors.palletCapacity?.message))}
+                  {...register("palletCapacity")}
+                />
+              ) : null}
+            </div>
+          </section>
         )}
       </form>
-    </Modal>
+    </SidePanel>
   );
 }
 

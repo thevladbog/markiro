@@ -379,7 +379,7 @@ describe("CatalogPage", () => {
 
     renderPage();
 
-    const resultCount = screen.getByText("", { selector: ".mk-catalog-result-count" });
+    const resultCount = screen.getByText("", { selector: ".mk-filter-bar__result" });
     expect(resultCount.getAttribute("aria-live")).toBe("polite");
     expect(await screen.findByRole("status")).toBeDefined();
     expect(screen.queryByText("Каталог пуст")).toBeNull();

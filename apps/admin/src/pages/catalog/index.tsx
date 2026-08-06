@@ -3,12 +3,15 @@ import { useTranslation } from "react-i18next";
 import { Link, Outlet, useNavigate } from "react-router";
 
 import {
+  AdminPage,
   Alert,
   Button,
   ConfirmDialog,
   EmptyState,
+  FilterBar,
   Input,
   PageHeader,
+  RowActions,
   Select,
   Spinner,
   StatusChip,
@@ -115,7 +118,7 @@ function AuthorizedProductRowActions({ product }: { product: ProductDto }) {
 
   return (
     <>
-      <div className="mk-catalog-row-actions">
+      <RowActions>
         <Button
           type="button"
           size="compact"
@@ -139,7 +142,7 @@ function AuthorizedProductRowActions({ product }: { product: ProductDto }) {
         >
           {t("pages.catalog.delete")}
         </Button>
-      </div>
+      </RowActions>
       <ConfirmDialog
         open={deleting}
         title={t("pages.catalog.deleteConfirmTitle")}
@@ -256,7 +259,7 @@ export function CatalogPage() {
   };
 
   return (
-    <div className="mk-catalog-page" data-testid="catalog-page">
+    <AdminPage className="mk-catalog-page" data-testid="catalog-page">
       <PageHeader
         title={t("pages.catalog.title")}
         actions={canWrite ? <AuthorizedCreateProductAction /> : null}
@@ -264,7 +267,12 @@ export function CatalogPage() {
 
       {canReadIntegrations ? <AuthorizedCandidatesPlaque /> : null}
 
-      <div className="mk-catalog-filters" role="group" aria-label={t("pages.catalog.filtersLabel")}>
+      <FilterBar
+        label={t("pages.catalog.filtersLabel")}
+        resultSummary={
+          !isPending && !isError ? t("pages.catalog.resultCount", { count: items.length }) : ""
+        }
+      >
         <div className="mk-catalog-filters__search">
           <Input
             label={t("pages.catalog.searchLabel")}
@@ -281,11 +289,7 @@ export function CatalogPage() {
             onValueChange={setStatusFilter}
           />
         </div>
-      </div>
-
-      <p className="mk-catalog-result-count" aria-live="polite">
-        {!isPending && !isError ? t("pages.catalog.resultCount", { count: items.length }) : ""}
-      </p>
+      </FilterBar>
 
       {isPending ? (
         <div style={{ display: "flex", justifyContent: "center", padding: 48 }}>
@@ -318,6 +322,6 @@ export function CatalogPage() {
           } satisfies CatalogPanelContext
         }
       />
-    </div>
+    </AdminPage>
   );
 }

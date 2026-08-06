@@ -16,6 +16,7 @@ import { CatalogPage } from "./pages/catalog/index.js";
 import { ProductPanelRoute } from "./pages/catalog/ProductPanelRoute.js";
 import { ConflictsPage } from "./pages/conflicts/index.js";
 import { CounterpartiesPage } from "./pages/counterparties/index.js";
+import { CounterpartyPanelRoute } from "./pages/counterparties/CounterpartyPanelRoute.js";
 import { DashboardPage } from "./pages/dashboard/index.js";
 import { EmployeesPage } from "./pages/employees/index.js";
 import { ChannelPage } from "./pages/integrations/ChannelPage.js";
@@ -30,6 +31,7 @@ import { PickupPage } from "./pages/pickup/index.js";
 import { ProfilePage } from "./pages/profile/ProfilePage.js";
 import { SettingsPage } from "./pages/settings/index.js";
 import { ShiftsPage } from "./pages/shifts/index.js";
+import { ShiftPanelRoute } from "./pages/shifts/ShiftPanelRoute.js";
 import { ShellPage } from "./pages/Shell.js";
 import { TeamPage } from "./pages/team/TeamPage.js";
 
@@ -92,7 +94,24 @@ function appRouteElements() {
               <ShiftsPage />
             </RequireCapability>
           }
-        />
+        >
+          <Route
+            path="new"
+            element={
+              <RequireCapability capability={C.OPERATIONS_WRITE}>
+                <ShiftPanelRoute mode="create" />
+              </RequireCapability>
+            }
+          />
+          <Route
+            path=":shiftId/edit"
+            element={
+              <RequireCapability capability={C.OPERATIONS_WRITE}>
+                <ShiftPanelRoute mode="edit" />
+              </RequireCapability>
+            }
+          />
+        </Route>
         <Route
           path="boxes"
           element={
@@ -116,7 +135,24 @@ function appRouteElements() {
               <CounterpartiesPage />
             </RequireCapability>
           }
-        />
+        >
+          <Route
+            path="new"
+            element={
+              <RequireCapability capability={C.OPERATIONS_WRITE}>
+                <CounterpartyPanelRoute mode="create" />
+              </RequireCapability>
+            }
+          />
+          <Route
+            path=":counterpartyId/edit"
+            element={
+              <RequireCapability capability={C.OPERATIONS_WRITE}>
+                <CounterpartyPanelRoute mode="edit" />
+              </RequireCapability>
+            }
+          />
+        </Route>
         <Route
           path="employees"
           element={

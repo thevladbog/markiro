@@ -1,10 +1,11 @@
 import { Alert, Button, ConfirmDialog, SidePanel, Spinner } from "@markiro/ui";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useBlocker, useLocation, useNavigate, useOutletContext, useParams } from "react-router";
+import { useLocation, useNavigate, useOutletContext, useParams } from "react-router";
 
 import { ApiRequestError } from "../../api/client.js";
 import { toast } from "../../lib/toast.js";
+import { useRoutePanelGuard } from "../../lib/useRoutePanelGuard.js";
 import type { CounterpartyDto } from "../counterparties/api.js";
 import type { LabelTemplateSummaryDto } from "../labels/api.js";
 import {
@@ -79,50 +80,11 @@ function PanelState({ mode }: { mode: "create" | "edit" }) {
   return null;
 }
 
-function useDirtyGuard(close: () => void, busy: boolean) {
-  const [dirty, setDirty] = useState(false);
-  const [pendingDismiss, setPendingDismiss] = useState(false);
-  const allowNavigationRef = useRef(false);
-  const blocker = useBlocker(
-    ({ currentLocation, nextLocation }) =>
-      !allowNavigationRef.current &&
-      (dirty || busy) &&
-      currentLocation.pathname !== nextLocation.pathname,
-  );
-  useEffect(() => {
-    if (blocker.state !== "blocked") return;
-    if (busy || !dirty) blocker.reset();
-    else setPendingDismiss(true);
-  }, [blocker, busy, dirty]);
-  const requestClose = () => {
-    if (busy) return;
-    if (dirty) setPendingDismiss(true);
-    else close();
-  };
-  const cancel = () => {
-    setPendingDismiss(false);
-    if (blocker.state === "blocked") blocker.reset();
-  };
-  const discard = () => {
-    allowNavigationRef.current = true;
-    setDirty(false);
-    setPendingDismiss(false);
-    if (blocker.state === "blocked") blocker.proceed();
-    else close();
-  };
-  const finish = () => {
-    allowNavigationRef.current = true;
-    setDirty(false);
-    close();
-  };
-  return { setDirty, requestClose, confirmOpen: dirty && pendingDismiss, cancel, discard, finish };
-}
-
 function CreateProductPanel() {
   const { t, context, loading, failed, close } = usePanelContext();
   const mutation = useCreateProduct();
   const [error, setError] = useState<string | null>(null);
-  const guard = useDirtyGuard(close, mutation.isPending);
+  const guard = useRoutePanelGuard(close, mutation.isPending);
   if (loading || failed) return <PanelState mode="create" />;
   return (
     <>
@@ -157,8 +119,8 @@ function CreateProductPanel() {
           cancelLabel={t("pages.catalog.form.continueEditing")}
           confirmLabel={t("pages.catalog.form.discardAction")}
           tone="destructive"
-          onCancel={guard.cancel}
-          onConfirm={guard.discard}
+          onCancel={guard.cancelDiscard}
+          onConfirm={guard.confirmDiscard}
         />
       ) : null}
     </>
@@ -170,7 +132,7 @@ function EditProductPanel() {
   const { t, context, loading, failed, close } = usePanelContext();
   const mutation = useUpdateProduct();
   const [error, setError] = useState<string | null>(null);
-  const guard = useDirtyGuard(close, mutation.isPending);
+  const guard = useRoutePanelGuard(close, mutation.isPending);
   const product = context.products.find((item) => item.id === productId);
   const initialValues = useMemo<ProductFormValues | undefined>(
     () =>
@@ -250,8 +212,8 @@ function EditProductPanel() {
           cancelLabel={t("pages.catalog.form.continueEditing")}
           confirmLabel={t("pages.catalog.form.discardAction")}
           tone="destructive"
-          onCancel={guard.cancel}
-          onConfirm={guard.discard}
+          onCancel={guard.cancelDiscard}
+          onConfirm={guard.confirmDiscard}
         />
       ) : null}
     </>

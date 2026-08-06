@@ -52,11 +52,10 @@ const INTEGRATIONS_ONLY_ACCESS: AccessDocument = {
 };
 
 function jsonResponse(status: number, body: unknown): Response {
-  return {
-    ok: status >= 200 && status < 300,
+  return new Response(body === undefined ? null : JSON.stringify(body), {
     status,
-    json: async () => body,
-  } as Response;
+    headers: { "content-type": "application/json" },
+  });
 }
 
 function createFakeAuthClient(): AuthClientLike {
@@ -102,6 +101,8 @@ function renderAccessRoute(
       if (path.endsWith("/api/products")) return jsonResponse(200, { items: [] });
       if (path.endsWith("/api/counterparties")) return jsonResponse(200, { items: [] });
       if (path.endsWith("/api/label-templates")) return jsonResponse(200, { items: [] });
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
+      if (path.endsWith("/api/lines")) return jsonResponse(200, { items: [] });
       if (path.includes("/api/integrations/commerceml/candidates")) {
         return jsonResponse(200, { candidates: [] });
       }
@@ -161,6 +162,26 @@ it("allows a manager to open the catalog directly", async () => {
 
 it.each(["/catalog/new", "/catalog/p1/edit"])(
   "forbids the direct write route %s for a read-only operator",
+  async (path) => {
+    renderAccessRoute(path, OPERATIONS_READ_ONLY);
+
+    expect(await screen.findByTestId("forbidden-page")).toBeDefined();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  },
+);
+
+it.each(["/counterparties/new", "/counterparties/p1/edit"])(
+  "forbids the direct counterparty write route %s for a read-only operator",
+  async (path) => {
+    renderAccessRoute(path, OPERATIONS_READ_ONLY);
+
+    expect(await screen.findByTestId("forbidden-page")).toBeDefined();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  },
+);
+
+it.each(["/shifts/new", "/shifts/s1/edit"])(
+  "forbids the direct shift write route %s for a read-only operator",
   async (path) => {
     renderAccessRoute(path, OPERATIONS_READ_ONLY);
 
