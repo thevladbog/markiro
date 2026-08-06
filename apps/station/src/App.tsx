@@ -500,7 +500,36 @@ export function App() {
     setCredentialRecovery((current) => current ?? { event, phase: "sealing" });
   }, []);
 
-  const authenticatedClient = credentialRecovery ? null : verifiedClient;
+  const credentialBoundClient = useMemo(() => {
+    if (
+      !config?.apiKey ||
+      !config.deviceId ||
+      !config.serverUrl ||
+      !verifiedClient ||
+      !credentialGeneration
+    ) {
+      return null;
+    }
+    return createStationClient(config, {
+      credentialBoundary: {
+        machineId: config.machineId,
+        generation: credentialGeneration,
+        onCredentialRejected,
+      },
+    });
+    // The raw verified client and generation already have these exact identity
+    // dependencies; listing primitives keeps unrelated config refreshes stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    config?.apiKey,
+    config?.deviceId,
+    config?.machineId,
+    config?.serverUrl,
+    credentialGeneration,
+    onCredentialRejected,
+    verifiedClient,
+  ]);
+  const authenticatedClient = credentialRecovery ? null : credentialBoundClient;
 
   // One engine for the life of the app: the outbox belongs to the DEVICE, not
   // to a shift or an operator, so entering or leaving a shift must never stop

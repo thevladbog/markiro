@@ -7,7 +7,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 // `plugin:sql|execute`, ...), so mocking this one module covers both the
 // config bridge (`read_config`/`write_config`) and the SQLite mirror
 // migrations App runs on mount — no real Tauri runtime needed under jsdom.
-const invokeMock = vi.fn<(cmd: string) => Promise<unknown>>((cmd) => {
+const invokeMock = vi.fn<(cmd: string, payload?: unknown) => Promise<unknown>>((cmd) => {
   if (cmd === "plugin:sql|load") return Promise.resolve("sqlite:station-mirror.db");
   if (cmd === "plugin:sql|execute") return Promise.resolve([0, 0]);
   if (cmd === "plugin:sql|select") return Promise.resolve([]);
@@ -343,6 +343,32 @@ async function signInAsOperator() {
   clickDigits(OPERATOR_PIN);
   fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
   await waitFor(() => expect(screen.getByTestId("scanner-status")).toBeDefined());
+}
+
+async function expectEmptyQueueCredentialRecovery(
+  persistedConfig: Record<string, unknown>,
+  outbox: OutboxSeedRow[],
+): Promise<void> {
+  await waitFor(() => expect(screen.getByTestId("sealed-work-summary")).toBeDefined());
+  expect(screen.getByTestId("sealed-work-summary").textContent).toBe(
+    "Unsynchronized work is sealed on this station: 0 scans, 0 boxes, 0 corrections.",
+  );
+  expect(screen.queryByTestId("scanner-status")).toBeNull();
+  expect(invokeMock.mock.calls.filter(([cmd]) => cmd === "clear_credential")).toHaveLength(1);
+  expect(outbox).toEqual([]);
+  expect(persistedConfig).toEqual({
+    machine_id: "m1",
+    device_id: "device-1",
+    server_url: "https://api.factory.example",
+  });
+  const destructiveFactWrites = invokeMock.mock.calls.filter(([cmd, payload]) => {
+    if (cmd !== "plugin:sql|execute") return false;
+    const query = (((payload ?? {}) as { query?: string }).query ?? "").trimStart();
+    return /^DELETE FROM (outbox|codes_mirror|scan_events_mirror|boxes_mirror|box_exceptions_mirror|conflicts_mirror|sscc_pool)/.test(
+      query,
+    );
+  });
+  expect(destructiveFactWrites).toEqual([]);
 }
 
 /**
@@ -1314,6 +1340,266 @@ describe("App", () => {
       server_url: "https://api.factory.example",
     });
     expect(screen.queryByText("credential-not-to-render")).toBeNull();
+  });
+
+  it("recovers an empty-queue station when the swallowed roster refresh receives 401", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const persistedConfig: Record<string, unknown> = {
+      machine_id: "m1",
+      device_id: "device-1",
+      tenant_id: "tenant-1",
+      api_key: "revoked-key",
+      server_url: "https://api.factory.example",
+    };
+    const outbox = mockInvokeForFloor(
+      pinHash,
+      { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+      [],
+      persistedConfig,
+    );
+    let rejectRoster!: () => void;
+    const roster = new Promise<Response>((resolve) => {
+      rejectRoster = () =>
+        resolve(new Response(JSON.stringify({ message: "revoked" }), { status: 401 }));
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) => {
+        if (new URL(url).pathname === "/station/operators") return roster;
+        return Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+      }),
+    );
+
+    render(<App />);
+    await signInAsOperator();
+    rejectRoster();
+
+    await expectEmptyQueueCredentialRecovery(persistedConfig, outbox);
+  });
+
+  it("recovers an empty-queue station when the shift list receives 401", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const persistedConfig: Record<string, unknown> = {
+      machine_id: "m1",
+      device_id: "device-1",
+      api_key: "revoked-key",
+      server_url: "https://api.factory.example",
+    };
+    const outbox = mockInvokeForFloor(
+      pinHash,
+      { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+      [],
+      persistedConfig,
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) => {
+        const path = new URL(url).pathname;
+        if (path === "/station/operators") {
+          return Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+        }
+        if (path === "/shifts") {
+          return Promise.resolve(
+            new Response(JSON.stringify({ message: "revoked" }), { status: 401 }),
+          );
+        }
+        return Promise.resolve(new Response("{}", { status: 200 }));
+      }),
+    );
+
+    render(<App />);
+    await signInAsOperator();
+
+    await expectEmptyQueueCredentialRecovery(persistedConfig, outbox);
+  });
+
+  it("recovers an empty-queue station when opening a listed shift receives 401", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const persistedConfig: Record<string, unknown> = {
+      machine_id: "m1",
+      device_id: "device-1",
+      api_key: "revoked-key",
+      server_url: "https://api.factory.example",
+    };
+    const outbox = mockInvokeForFloor(
+      pinHash,
+      { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+      [],
+      persistedConfig,
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string, init?: RequestInit) => {
+        const path = new URL(url).pathname;
+        if (path === "/station/operators") {
+          return Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+        }
+        if (path === "/shifts") {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                items: [
+                  {
+                    id: "shift-1",
+                    status: "planned",
+                    mode: "validation",
+                    productName: "Product",
+                    plannedQty: 10,
+                  },
+                ],
+              }),
+              { status: 200 },
+            ),
+          );
+        }
+        if (init?.method === "POST" && path === "/shifts/shift-1/open") {
+          return Promise.resolve(
+            new Response(JSON.stringify({ message: "revoked" }), { status: 401 }),
+          );
+        }
+        return Promise.resolve(new Response("{}", { status: 200 }));
+      }),
+    );
+
+    render(<App />);
+    await signInAsOperator();
+    fireEvent.click(await screen.findByRole("button", { name: "Open" }));
+
+    await expectEmptyQueueCredentialRecovery(persistedConfig, outbox);
+  });
+
+  it("recovers an empty-queue station when a swallowed shift bundle receives 401", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const persistedConfig: Record<string, unknown> = {
+      machine_id: "m1",
+      device_id: "device-1",
+      api_key: "revoked-key",
+      server_url: "https://api.factory.example",
+    };
+    const outbox = mockInvokeForFloor(
+      pinHash,
+      { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+      [],
+      persistedConfig,
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string, init?: RequestInit) => {
+        const path = new URL(url).pathname;
+        if (path === "/station/operators") {
+          return Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+        }
+        if (path === "/shifts") {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                items: [
+                  {
+                    id: "shift-1",
+                    status: "planned",
+                    mode: "validation",
+                    productName: "Product",
+                    plannedQty: 10,
+                  },
+                ],
+              }),
+              { status: 200 },
+            ),
+          );
+        }
+        if (init?.method === "POST" && path === "/shifts/shift-1/open") {
+          return Promise.resolve(
+            new Response(JSON.stringify({ id: "shift-1", status: "active", mode: "validation" }), {
+              status: 200,
+            }),
+          );
+        }
+        if (path === "/shifts/shift-1/bundle") {
+          return Promise.resolve(
+            new Response(JSON.stringify({ message: "revoked" }), { status: 401 }),
+          );
+        }
+        return Promise.resolve(new Response("{}", { status: 200 }));
+      }),
+    );
+
+    render(<App />);
+    await signInAsOperator();
+    fireEvent.click(await screen.findByRole("button", { name: "Open" }));
+
+    await expectEmptyQueueCredentialRecovery(persistedConfig, outbox);
+  });
+
+  it("publishes and clears once when roster, shift list, and sync concurrently reject one credential", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const persistedConfig: Record<string, unknown> = {
+      machine_id: "m1",
+      device_id: "device-1",
+      api_key: "revoked-key",
+      server_url: "https://api.factory.example",
+    };
+    const outbox = mockInvokeForFloor(
+      pinHash,
+      { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+      [outboxRow(1)],
+      persistedConfig,
+    );
+    let rejectRoster!: () => void;
+    let rejectShiftList!: () => void;
+    let rejectSync!: () => void;
+    const roster = new Promise<Response>((resolve) => {
+      rejectRoster = () =>
+        resolve(new Response(JSON.stringify({ message: "revoked roster" }), { status: 401 }));
+    });
+    const shiftList = new Promise<Response>((resolve) => {
+      rejectShiftList = () =>
+        resolve(new Response(JSON.stringify({ message: "revoked shifts" }), { status: 401 }));
+    });
+    const sync = new Promise<Response>((resolve) => {
+      rejectSync = () =>
+        resolve(new Response(JSON.stringify({ message: "revoked sync" }), { status: 401 }));
+    });
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const path = new URL(url).pathname;
+      if (path === "/station/operators") return roster;
+      if (path === "/shifts") return shiftList;
+      if (init?.method === "POST" && path === "/station/scans") return sync;
+      return Promise.resolve(new Response("{}", { status: 200 }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    await signInAsOperator();
+    await waitFor(() => {
+      const paths = fetchMock.mock.calls.map(([url]) => new URL(url).pathname);
+      expect(paths).toContain("/station/operators");
+      expect(paths).toContain("/shifts");
+      expect(paths).toContain("/station/scans");
+    });
+    act(() => {
+      rejectRoster();
+      rejectShiftList();
+      rejectSync();
+    });
+
+    await waitFor(() => expect(screen.getByTestId("sealed-work-summary")).toBeDefined());
+    expect(screen.getByTestId("sealed-work-summary").textContent).toBe(
+      "Unsynchronized work is sealed on this station: 1 scans, 0 boxes, 0 corrections.",
+    );
+    expect(invokeMock.mock.calls.filter(([cmd]) => cmd === "clear_credential")).toHaveLength(1);
+    expect(outbox).toHaveLength(1);
+    expect(
+      invokeMock.mock.calls.filter(([cmd, payload]) => {
+        if (cmd !== "plugin:sql|execute") return false;
+        const query = (((payload ?? {}) as { query?: string }).query ?? "").trimStart();
+        return query.startsWith("DELETE FROM outbox");
+      }),
+    ).toEqual([]);
+    expect(persistedConfig).toEqual({
+      machine_id: "m1",
+      device_id: "device-1",
+      server_url: "https://api.factory.example",
+    });
   });
 
   it("leaves the floor before clearing rejected credentials and shows the sealed queue in same-device pairing", async () => {

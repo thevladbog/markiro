@@ -109,6 +109,21 @@ export async function sealCredentialGeneration(generation: CredentialGeneration)
   return first;
 }
 
+/**
+ * Shared terminal boundary for every authenticated surface using one API key.
+ * Sealing intent is installed synchronously by `sealCredentialGeneration`
+ * before its first await; publication waits any commit lease that was already
+ * issued and happens exactly once for the generation.
+ */
+export async function rejectCredentialGeneration(
+  event: CredentialRejectedEvent,
+  onCredentialRejected?: (event: CredentialRejectedEvent) => void,
+): Promise<void> {
+  if (await sealCredentialGeneration(event.generation)) {
+    onCredentialRejected?.(event);
+  }
+}
+
 export interface FloorWorkBarrier {
   idle(): Promise<void>;
 }

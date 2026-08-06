@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createStationClient, REQUEST_TIMEOUT_MS } from "../src/lib/api-client.js";
+import { createStationClient, REQUEST_TIMEOUT_MS, StationApiError } from "../src/lib/api-client.js";
+import {
+  acquireCredentialCommitLease,
+  createCredentialGeneration,
+} from "../src/lib/credential-recovery.js";
 import { redeemStationPairing } from "../src/lib/pairing.js";
 
 afterEach(() => {
@@ -42,6 +46,98 @@ describe("createStationClient", () => {
       serverUrl: "http://localhost:3000",
     });
     await expect(client.get("/shifts")).rejects.toThrow("nope");
+  });
+
+  it("seals an authenticated generation before rejecting the original 401 and blocks new requests", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ message: "revoked" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    const generation = createCredentialGeneration();
+    const lease = acquireCredentialCommitLease(generation)!;
+    const onCredentialRejected = vi.fn();
+    const client = createStationClient(
+      { machineId: "m1", apiKey: "revoked", serverUrl: "http://localhost:3000" },
+      { credentialBoundary: { machineId: "m1", generation, onCredentialRejected } },
+    );
+
+    const rejected = client.get("/station/operators");
+    let settled = false;
+    void rejected
+      .catch(() => {})
+      .finally(() => {
+        settled = true;
+      });
+    await vi.waitFor(() => expect(generation.phase).toBe("sealing"));
+
+    expect(settled).toBe(false);
+    expect(onCredentialRejected).not.toHaveBeenCalled();
+    await expect(client.get("/shifts")).rejects.toThrow("credential generation is sealed");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    lease.release();
+    await expect(rejected).rejects.toEqual(new StationApiError(401, "revoked"));
+    expect(generation.phase).toBe("sealed");
+    expect(onCredentialRejected).toHaveBeenCalledTimes(1);
+  });
+
+  it("publishes one rejection when concurrent authenticated requests receive 401", async () => {
+    let resolveFirst!: (value: Response) => void;
+    let resolveSecond!: (value: Response) => void;
+    vi.spyOn(globalThis, "fetch")
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveFirst = resolve;
+        }),
+      )
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveSecond = resolve;
+        }),
+      );
+    const generation = createCredentialGeneration();
+    const onCredentialRejected = vi.fn();
+    const client = createStationClient(
+      { machineId: "m1", apiKey: "revoked", serverUrl: "http://localhost:3000" },
+      { credentialBoundary: { machineId: "m1", generation, onCredentialRejected } },
+    );
+    const first = client.get("/station/operators");
+    const second = client.get("/shifts");
+
+    resolveFirst(new Response(JSON.stringify({ message: "revoked" }), { status: 401 }));
+    resolveSecond(new Response(JSON.stringify({ message: "revoked" }), { status: 401 }));
+    const results = await Promise.allSettled([first, second]);
+
+    expect(results).toEqual([
+      expect.objectContaining({ status: "rejected", reason: expect.any(StationApiError) }),
+      expect.objectContaining({ status: "rejected", reason: expect.any(StationApiError) }),
+    ]);
+    expect(onCredentialRejected).toHaveBeenCalledTimes(1);
+    expect(generation.phase).toBe("sealed");
+  });
+
+  it.each([
+    ["403", () => Promise.resolve(new Response("forbidden", { status: 403 }))],
+    ["429", () => Promise.resolve(new Response("slow down", { status: 429 }))],
+    ["503", () => Promise.resolve(new Response("unavailable", { status: 503 }))],
+    ["network error", () => Promise.reject(new Error("offline"))],
+    ["status-shaped value", () => Promise.reject({ status: 401 })],
+    ["abort", () => Promise.reject(new DOMException("aborted", "AbortError"))],
+  ])("does not seal an authenticated generation for %s", async (_name, response) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(response);
+    const generation = createCredentialGeneration();
+    const onCredentialRejected = vi.fn();
+    const client = createStationClient(
+      { machineId: "m1", apiKey: "still-valid", serverUrl: "http://localhost:3000" },
+      { credentialBoundary: { machineId: "m1", generation, onCredentialRejected } },
+    );
+
+    await expect(client.get("/shifts")).rejects.toBeDefined();
+
+    expect(generation.phase).toBe("active");
+    expect(onCredentialRejected).not.toHaveBeenCalled();
   });
 
   // Finding 1: a bare `fetch` has no built-in timeout, so a connection that

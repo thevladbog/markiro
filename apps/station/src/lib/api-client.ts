@@ -1,4 +1,9 @@
 import type { StationConfig } from "./config.js";
+import {
+  rejectCredentialGeneration,
+  type CredentialGeneration,
+  type CredentialRejectedEvent,
+} from "./credential-recovery.js";
 
 export class StationApiError extends Error {
   readonly status: number;
@@ -9,10 +14,23 @@ export class StationApiError extends Error {
   }
 }
 
+export function isStationCredentialRejection(error: unknown): error is StationApiError {
+  return error instanceof StationApiError && error.status === 401;
+}
+
 export interface StationClient {
   get<T>(path: string): Promise<T>;
   post<T>(path: string, body?: unknown): Promise<T>;
   whoami(signal?: AbortSignal): Promise<{ ok: true }>;
+}
+
+export interface StationClientOptions {
+  /** Present only for the normal, durably enrolled authenticated client. */
+  credentialBoundary?: {
+    machineId: string;
+    generation: CredentialGeneration;
+    onCredentialRejected: (event: CredentialRejectedEvent) => void;
+  };
 }
 
 /**
@@ -85,8 +103,10 @@ export async function postUnauthenticatedStationRequest(
 export function createStationClient(
   cfg: Pick<StationConfig, "apiKey" | "serverUrl"> &
     Partial<Omit<StationConfig, "apiKey" | "serverUrl">>,
+  options: StationClientOptions = {},
 ): StationClient {
   const base = (cfg.serverUrl ?? "").replace(/\/+$/, "");
+  const credentialBoundary = options.credentialBoundary;
 
   async function request<T>(
     method: "GET" | "POST",
@@ -94,6 +114,9 @@ export function createStationClient(
     body?: unknown,
     signal?: AbortSignal,
   ): Promise<T> {
+    if (credentialBoundary?.generation.sealed) {
+      throw new Error("station credential generation is sealed");
+    }
     // One `AbortController` per attempt, cleared in `finally` so the timer
     // never leaks on the success path (nor on an ordinary HTTP-error path —
     // both go through the same `finally`). `controller.abort()` makes the
@@ -118,6 +141,17 @@ export function createStationClient(
       if (!res.ok) throw new StationApiError(res.status, await readError(res));
       if (res.status === 204) return undefined as T;
       return (await res.json()) as T;
+    } catch (error) {
+      if (credentialBoundary && isStationCredentialRejection(error)) {
+        await rejectCredentialGeneration(
+          {
+            machineId: credentialBoundary.machineId,
+            generation: credentialBoundary.generation,
+          },
+          credentialBoundary.onCredentialRejected,
+        );
+      }
+      throw error;
     } finally {
       clearTimeout(timer);
       signal?.removeEventListener("abort", abort);

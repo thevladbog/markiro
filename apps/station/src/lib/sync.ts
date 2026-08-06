@@ -1,10 +1,10 @@
 import { MAX_BOX_CLOSURES_PER_SYNC_BATCH } from "@markiro/domain";
-import { StationApiError, type StationClient } from "./api-client.js";
+import { isStationCredentialRejection, type StationClient } from "./api-client.js";
 import { conflictCount, recordConflicts } from "./conflicts.js";
 import {
   acquireCredentialCommitLease,
   createCredentialGeneration,
-  sealCredentialGeneration,
+  rejectCredentialGeneration,
   type CredentialGeneration,
   type CredentialRejectedEvent,
 } from "./credential-recovery.js";
@@ -69,7 +69,7 @@ export interface SyncEngineDeps {
   /** Shared by every engine using the same durable API-key generation. */
   credentialGeneration?: CredentialGeneration;
   /** Terminal notification for a server-rejected device credential. */
-  onCredentialRejected?(event: CredentialRejectedEvent): void;
+  onCredentialRejected?: (event: CredentialRejectedEvent) => void;
 }
 
 export interface SyncEngine {
@@ -625,9 +625,10 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
       clearTimeout(retryTimer);
       retryTimer = null;
     }
-    if (await sealCredentialGeneration(credentialGeneration)) {
-      deps.onCredentialRejected?.({ machineId: deps.machineId, generation: credentialGeneration });
-    }
+    await rejectCredentialGeneration(
+      { machineId: deps.machineId, generation: credentialGeneration },
+      deps.onCredentialRejected,
+    );
   }
 
   async function publishState(): Promise<void> {
@@ -983,7 +984,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
             commitLease.release();
           }
         } catch (err) {
-          if (err instanceof StationApiError && err.status === 401) {
+          if (isStationCredentialRejection(err)) {
             await rejectCredential();
             break;
           }
