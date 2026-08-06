@@ -258,6 +258,7 @@ describe.skipIf(!ready)("unified devices read model e2e", () => {
   });
 
   it.each([
+    { type: "printer" },
     { status: "printer" },
     { page: "not-a-number" },
     { pageSize: "not-a-number" },
@@ -270,6 +271,11 @@ describe.skipIf(!ready)("unified devices read model e2e", () => {
     { pageSize: 51 },
   ])("rejects an invalid list query: %o", async (query) => {
     await cabinet.get("/devices").query(query).expect(400);
+  });
+
+  it("accepts the documented maximum page size", async () => {
+    const response = await cabinet.get("/devices").query({ pageSize: 50 }).expect(200);
+    expect(response.body).toMatchObject({ page: 1, pageSize: 50, total: 8 });
   });
 
   it("does not expose another tenant's devices", async () => {
