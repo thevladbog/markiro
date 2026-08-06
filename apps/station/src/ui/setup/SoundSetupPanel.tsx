@@ -17,6 +17,7 @@ export function SoundSetupPanel({
   onTestSound,
 }: SoundSetupPanelProps) {
   const { t } = useTranslation();
+  const testUnavailable = sound.muted || sound.volume <= 0;
   return (
     <div className="setup-panel setup-panel--sound">
       <label className="setup-touch-choice setup-touch-choice--checkbox">
@@ -37,7 +38,12 @@ export function SoundSetupPanel({
         disabled={disabled}
         onChange={(volume) => onSoundChange({ ...sound, volume })}
       />
-      <Button size="floor" variant="secondary" disabled={disabled} onClick={onTestSound}>
+      <Button
+        size="floor"
+        variant="secondary"
+        disabled={disabled || testUnavailable}
+        onClick={onTestSound}
+      >
         {t("setup.testSound")}
       </Button>
     </div>

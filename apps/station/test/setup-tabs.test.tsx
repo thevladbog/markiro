@@ -1,8 +1,15 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { SetupTabs, type SetupTabId } from "../src/ui/setup/SetupTabs.js";
 import { TouchRange } from "../src/ui/setup/TouchRange.js";
+
+const repositoryRoot = existsSync(resolve(process.cwd(), "apps/station/src/station.css"))
+  ? process.cwd()
+  : resolve(process.cwd(), "../..");
+const stationCss = readFileSync(resolve(repositoryRoot, "apps/station/src/station.css"), "utf8");
 
 const tabs = [
   { id: "scanner" as const, label: "Scanner", panel: <p>Scanner panel</p> },
@@ -58,6 +65,7 @@ describe("TouchRange", () => {
 
     const slider = screen.getByRole("slider", { name: "Volume" });
     expect(slider.tagName).toBe("INPUT");
+    expect(stationCss).toMatch(/\.touch-range__input\s*\{[^}]*min-height:\s*64px/s);
     expect(screen.getByText("0.5").tagName).toBe("OUTPUT");
 
     fireEvent.keyDown(slider, { key: "ArrowRight" });

@@ -219,6 +219,144 @@ describe("WorkstationSetup", () => {
     expect(onSoundChange).toHaveBeenCalledWith({ muted: true, volume: 1 });
   });
 
+  it("does not claim to play a sound while muted or at zero volume", async () => {
+    const mutedView = render(
+      <WorkstationSetup
+        hw={hardware()}
+        exec={noopExec}
+        sound={{ muted: true, volume: 1 }}
+        onSoundChange={() => {}}
+        onConfigChange={() => {}}
+        onDone={() => {}}
+      />,
+    );
+
+    await selectSetupTab("Sound");
+    const mutedTest = screen.getByRole("button", { name: "Test sound" }) as HTMLButtonElement;
+    expect(mutedTest.disabled).toBe(true);
+    expect(screen.getByTestId("setup-result").textContent).toBe(
+      "Enable sound and set volume above zero to play a test.",
+    );
+
+    mutedView.unmount();
+
+    render(
+      <WorkstationSetup
+        hw={hardware()}
+        exec={noopExec}
+        sound={{ muted: false, volume: 0 }}
+        onSoundChange={() => {}}
+        onConfigChange={() => {}}
+        onDone={() => {}}
+      />,
+    );
+
+    await selectSetupTab("Sound");
+    const zeroTest = screen.getByRole("button", { name: "Test sound" }) as HTMLButtonElement;
+    expect(zeroTest.disabled).toBe(true);
+    expect(screen.getByTestId("setup-result").textContent).toBe(
+      "Enable sound and set volume above zero to play a test.",
+    );
+  });
+
+  it("reports a non-zero sound test as requested and still persists volume changes", async () => {
+    const onSoundChange = vi.fn();
+    const runs: [string, unknown[]][] = [];
+    const exec: SqlExecutor = {
+      run: async (sql, params = []) => {
+        runs.push([sql, params]);
+      },
+      all: async () => [],
+    };
+
+    const view = render(
+      <WorkstationSetup
+        hw={hardware()}
+        exec={exec}
+        sound={{ muted: false, volume: 0.7 }}
+        onSoundChange={onSoundChange}
+        onConfigChange={() => {}}
+        onDone={() => {}}
+      />,
+    );
+
+    await selectSetupTab("Sound");
+    const testButton = screen.getByRole("button", { name: "Test sound" }) as HTMLButtonElement;
+    expect(testButton.disabled).toBe(false);
+    fireEvent.click(testButton);
+    expect(screen.getByTestId("setup-result").textContent).toBe("Sound test requested.");
+
+    fireEvent.change(screen.getByRole("slider", { name: "Volume" }), {
+      target: { value: "0.4" },
+    });
+    await waitFor(() => expect(onSoundChange).toHaveBeenCalledWith({ muted: false, volume: 0.4 }));
+    expect(
+      runs.some(
+        ([sql, params]) =>
+          sql.includes("station_meta") &&
+          params.some((value) => typeof value === "string" && value.includes('"volume":0.4')),
+      ),
+    ).toBe(true);
+
+    view.rerender(
+      <WorkstationSetup
+        hw={hardware()}
+        exec={exec}
+        sound={{ muted: true, volume: 0.4 }}
+        onSoundChange={onSoundChange}
+        onConfigChange={() => {}}
+        onDone={() => {}}
+      />,
+    );
+    expect((screen.getByRole("button", { name: "Test sound" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect(screen.getByTestId("setup-result").textContent).toBe(
+      "Enable sound and set volume above zero to play a test.",
+    );
+  });
+
+  it("requires explicit confirmation before removing station credentials for re-pairing", async () => {
+    const onResetCredential = vi.fn(async () => {});
+
+    render(
+      <WorkstationSetup
+        hw={hardware()}
+        exec={noopExec}
+        sound={{ muted: false, volume: 1 }}
+        onSoundChange={() => {}}
+        onConfigChange={() => {}}
+        onResetCredential={onResetCredential}
+        onDone={() => {}}
+      />,
+    );
+
+    await selectSetupTab("Printer");
+    fireEvent.click(screen.getByRole("button", { name: "Re-pair this station" }));
+
+    expect(onResetCredential).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "Remove credentials and re-pair?" })).toBeDefined();
+    expect(
+      screen.getByText(
+        "This removes this station's credentials and returns to pairing. Local production records remain preserved.",
+      ),
+    ).toBeDefined();
+
+    const cancel = screen.getByRole("button", { name: "Cancel" });
+    const confirm = screen.getByRole("button", { name: "Remove credentials and re-pair" });
+    expect(cancel.style.height).toBe("var(--control-floor)");
+    expect(confirm.style.height).toBe("var(--control-floor)");
+
+    fireEvent.click(cancel);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(onResetCredential).not.toHaveBeenCalled();
+
+    await selectSetupTab("Sound");
+    fireEvent.click(screen.getByRole("button", { name: "Re-pair this station" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove credentials and re-pair" }));
+    await waitFor(() => expect(onResetCredential).toHaveBeenCalledTimes(1));
+  });
+
   it("saves the chosen scanner, printer and language", async () => {
     const runs: [string, unknown[]][] = [];
     const exec: SqlExecutor = {

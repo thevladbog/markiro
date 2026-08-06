@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button } from "@markiro/ui";
+import { Button, FullScreenDialog } from "@markiro/ui";
 import { sampleLabelData, type LabelTemplateSpec } from "@markiro/domain";
 import { playSignalTone, saveSoundSettings, type SoundSettings } from "../lib/signal-sound.js";
 import type { HardwareContract, PrintTarget } from "../lib/hardware.js";
@@ -81,6 +81,7 @@ export function WorkstationSetup({
   const [testResult, setTestResult] = useState<{ tab: SetupTabId; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [resetConfirmationOpen, setResetConfirmationOpen] = useState(false);
 
   useEffect(() => {
     void hw
@@ -261,13 +262,15 @@ export function WorkstationSetup({
   }
 
   function testSound() {
+    if (sound.muted || sound.volume <= 0) return;
     setError(null);
     playSignalTone("ok", sound);
-    setTestResult({ tab: "sound", text: t("setup.soundTested") });
+    setTestResult({ tab: "sound", text: t("setup.soundTestRequested") });
   }
 
   async function resetCredential() {
     if (!onResetCredential || busy) return;
+    setResetConfirmationOpen(false);
     setBusy(true);
     setError(null);
     try {
@@ -342,7 +345,11 @@ export function WorkstationSetup({
     },
   ];
 
-  const activeResult = testResult?.tab === activeTab ? testResult.text : null;
+  const soundTestUnavailable = sound.muted || sound.volume <= 0;
+  const activeResult =
+    testResult?.tab === activeTab && !(activeTab === "sound" && soundTestUnavailable)
+      ? testResult.text
+      : null;
   const resultText = error
     ? error
     : loading
@@ -356,9 +363,11 @@ export function WorkstationSetup({
               : t("setup.testScanHint")
             : activeTab === "printer"
               ? t("setup.testPrintHint")
-              : onResetCredential
-                ? t("setup.repairHint")
-                : t("setup.soundHint")));
+              : soundTestUnavailable
+                ? t("setup.soundTestUnavailable")
+                : onResetCredential
+                  ? t("setup.repairHint")
+                  : t("setup.soundHint")));
 
   return (
     <main className="workstation-setup" aria-labelledby="workstation-setup-title">
@@ -385,7 +394,7 @@ export function WorkstationSetup({
             size="floor"
             variant="secondary"
             disabled={busy || loading}
-            onClick={() => void resetCredential()}
+            onClick={() => setResetConfirmationOpen(true)}
           >
             {t("setup.repairAction")}
           </Button>
@@ -400,6 +409,29 @@ export function WorkstationSetup({
           {t("setup.done")}
         </Button>
       </footer>
+
+      {onResetCredential ? (
+        <FullScreenDialog
+          open={resetConfirmationOpen}
+          title={t("setup.resetCredentialConfirmTitle")}
+          backLabel={t("setup.cancel")}
+          onClose={() => setResetConfirmationOpen(false)}
+          footer={
+            <Button
+              size="floor"
+              variant="destructive"
+              disabled={busy}
+              onClick={() => void resetCredential()}
+            >
+              {t("setup.resetCredentialConfirmAction")}
+            </Button>
+          }
+        >
+          <div className="workstation-setup__reset-confirmation">
+            <p>{t("setup.resetCredentialConfirmDetail")}</p>
+          </div>
+        </FullScreenDialog>
+      ) : null}
     </main>
   );
 }

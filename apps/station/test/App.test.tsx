@@ -1386,6 +1386,7 @@ describe("App", () => {
     await signInAsOperator();
     fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
     fireEvent.click(await screen.findByRole("button", { name: "Re-pair this station" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove credentials and re-pair" }));
 
     await waitFor(() => expect(screen.getByText("Connect station")).toBeDefined());
     expect(invokeMock).toHaveBeenCalledWith("clear_credential");
@@ -1823,6 +1824,7 @@ describe("App", () => {
     await signInAsOperator();
     fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
     fireEvent.click(await screen.findByRole("button", { name: "Re-pair this station" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove credentials and re-pair" }));
 
     expect(
       await screen.findByText("Could not reset station credentials. Try again or contact support."),
