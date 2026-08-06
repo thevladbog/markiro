@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { MemoryRouter } from "react-router";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -117,31 +118,36 @@ const JANE = {
   createdAt: "2026-01-01T00:00:00.000Z",
 };
 
-describe("EmployeesPage", () => {
-  it("does not reseed a dirty profile when refreshed initial values change", () => {
-    const view = render(
+const INITIAL_EMPLOYEE_PROFILE_VALUES = { fullName: "Jane Doe", role: "Кассир" };
+
+function DirtyProfileReseedHarness() {
+  const [initialValues, setInitialValues] = useState(INITIAL_EMPLOYEE_PROFILE_VALUES);
+  return (
+    <div
+      onChange={() =>
+        setInitialValues({
+          ...INITIAL_EMPLOYEE_PROFILE_VALUES,
+          fullName: "Jane Refetched",
+        })
+      }
+    >
       <EmployeeProfileForm
         mode="edit"
-        initialValues={{ fullName: "Jane Doe", role: "Кассир" }}
+        initialValues={initialValues}
         submitting={false}
         submissionError={null}
-        onSubmit={vi.fn()}
-        onDirtyChange={vi.fn()}
-      />,
-    );
+        onSubmit={() => undefined}
+        onDirtyChange={() => undefined}
+      />
+    </div>
+  );
+}
+
+describe("EmployeesPage", () => {
+  it("does not reseed over an employee edit when initial values change in the same commit", () => {
+    render(<DirtyProfileReseedHarness />);
     const name = screen.getByLabelText("ФИО") as HTMLInputElement;
     fireEvent.change(name, { target: { value: "Jane Draft" } });
-
-    view.rerender(
-      <EmployeeProfileForm
-        mode="edit"
-        initialValues={{ fullName: "Jane Refetched", role: "Кассир" }}
-        submitting={false}
-        submissionError={null}
-        onSubmit={vi.fn()}
-        onDirtyChange={vi.fn()}
-      />,
-    );
 
     expect(name.value).toBe("Jane Draft");
   });
