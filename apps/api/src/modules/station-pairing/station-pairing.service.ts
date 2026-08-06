@@ -20,6 +20,7 @@ import {
   pairAttemptWindowStart,
 } from "../device-pairing/pairing-policy";
 import { OperatorsService } from "../operators/operators.service";
+import { SecurityAuditService } from "../../authorization/security-audit.service";
 import type {
   IssueStationPairingCodeResultDto,
   PairStationResultDto,
@@ -37,6 +38,12 @@ class StationPairingException extends UnauthorizedException {
 
 class PairClaimLostError extends Error {}
 
+interface StationPairAuditContext {
+  tenantId: string | null;
+  stationDeviceId: string | null;
+  action: "station.pair" | "station.repair";
+}
+
 @Injectable()
 export class StationPairingService {
   private readonly logger = new Logger(StationPairingService.name);
@@ -47,6 +54,7 @@ export class StationPairingService {
     @Inject(DB_POOL) private readonly pool: AuthSetup["pool"],
     private readonly operators: OperatorsService,
     private readonly pairAttempts: PairAttemptsService,
+    private readonly audit: SecurityAuditService,
   ) {}
 
   /** Resolves metadata only from the tenant/device principal proven by TenantGuard. */
@@ -158,36 +166,73 @@ export class StationPairingService {
   async redeem(code: string, source: string): Promise<PairStationResultDto> {
     const now = new Date();
     const windowStart = pairAttemptWindowStart(now);
+    const auditContext: StationPairAuditContext = {
+      tenantId: null,
+      stationDeviceId: null,
+      action: "station.pair",
+    };
+    let result: PairStationResultDto;
     try {
-      await this.pairAttempts.assertUnderPairRateLimit(source, windowStart);
-    } catch (error) {
-      if (error instanceof UnauthorizedException) {
-        throw new StationPairingException("PAIR_RATE_LIMITED");
+      try {
+        await this.pairAttempts.assertUnderPairRateLimit(source, windowStart);
+      } catch (error) {
+        if (error instanceof UnauthorizedException) {
+          throw new StationPairingException("PAIR_RATE_LIMITED");
+        }
+        throw error;
       }
+      result = await this.attemptRedeem(code, now, auditContext);
+    } catch (error) {
+      this.auditPairing(auditContext, "failed");
       throw error;
     }
-
-    const result = await this.attemptRedeem(code, now);
+    this.auditPairing(auditContext, "succeeded");
     await this.pairAttempts.refundPairAttempt(source, windowStart).catch(() => {
       this.logger.warn("station pairing refund failed after a committed redemption");
     });
     return result;
   }
 
-  private async attemptRedeem(code: string, now: Date): Promise<PairStationResultDto> {
+  private async attemptRedeem(
+    code: string,
+    now: Date,
+    auditContext: StationPairAuditContext,
+  ): Promise<PairStationResultDto> {
     const codeHash = hashPairingCode(code, loadEnv().PAIRING_CODE_PEPPER);
     const rows = await this.db
-      .select()
+      .select({
+        id: schema.stationPairingCodes.id,
+        tenantId: schema.stationPairingCodes.tenantId,
+        stationDeviceId: schema.stationPairingCodes.stationDeviceId,
+        codeHash: schema.stationPairingCodes.codeHash,
+        expiresAt: schema.stationPairingCodes.expiresAt,
+        usedAt: schema.stationPairingCodes.usedAt,
+        attempts: schema.stationPairingCodes.attempts,
+        issuedByUserId: schema.stationPairingCodes.issuedByUserId,
+        createdAt: schema.stationPairingCodes.createdAt,
+        hasExistingCredential: sql<boolean>`${schema.stationDevices.apiKeyId} is not null`,
+      })
       .from(schema.stationPairingCodes)
+      .innerJoin(
+        schema.stationDevices,
+        and(
+          eq(schema.stationDevices.tenantId, schema.stationPairingCodes.tenantId),
+          eq(schema.stationDevices.id, schema.stationPairingCodes.stationDeviceId),
+        ),
+      )
       .where(eq(schema.stationPairingCodes.codeHash, codeHash))
       .orderBy(desc(schema.stationPairingCodes.createdAt), asc(schema.stationPairingCodes.id));
     const liveRows = rows.filter(
       (row) => row.usedAt === null && row.expiresAt.getTime() > now.getTime(),
     );
     const candidate = liveRows[0] ?? rows[0];
-    if (!candidate || candidate.usedAt !== null) {
+    if (!candidate) {
       throw new StationPairingException("PAIR_INVALID");
     }
+    auditContext.tenantId = candidate.tenantId;
+    auditContext.stationDeviceId = candidate.stationDeviceId;
+    auditContext.action = candidate.hasExistingCredential ? "station.repair" : "station.pair";
+    if (candidate.usedAt !== null) throw new StationPairingException("PAIR_INVALID");
     if (candidate.attempts >= PAIR_CODE_MAX_ATTEMPTS) {
       throw new StationPairingException("PAIR_LOCKED");
     }
@@ -210,7 +255,6 @@ export class StationPairingService {
         id: schema.stationDevices.id,
         tenantId: schema.stationDevices.tenantId,
         name: schema.stationDevices.name,
-        apiKeyId: schema.stationDevices.apiKeyId,
         lineId: schema.stationDevices.lineId,
         lineName: schema.lines.name,
         organizationName: schema.organization.name,
@@ -250,6 +294,19 @@ export class StationPairingService {
 
     try {
       await this.db.transaction(async (tx) => {
+        const [lockedStation] = await tx
+          .select({ apiKeyId: schema.stationDevices.apiKeyId })
+          .from(schema.stationDevices)
+          .where(
+            and(
+              eq(schema.stationDevices.tenantId, candidate.tenantId),
+              eq(schema.stationDevices.id, candidate.stationDeviceId),
+            ),
+          )
+          .for("update");
+        if (!lockedStation) throw new PairClaimLostError();
+        auditContext.action = lockedStation.apiKeyId === null ? "station.pair" : "station.repair";
+
         const [claimed] = await tx
           .update(schema.stationPairingCodes)
           .set({ usedAt: new Date() })
@@ -269,10 +326,10 @@ export class StationPairingService {
         // candidate are one unit of work. In particular, a code that loses
         // its claim after candidate provisioning cannot invalidate the
         // station's existing credential.
-        if (station.apiKeyId !== null) {
+        if (lockedStation.apiKeyId !== null) {
           const [deleted] = await tx
             .delete(schema.apikey)
-            .where(eq(schema.apikey.id, station.apiKeyId))
+            .where(eq(schema.apikey.id, lockedStation.apiKeyId))
             .returning({ id: schema.apikey.id });
           if (!deleted) {
             throw new InternalServerErrorException("Station credential cleanup failed");
@@ -286,9 +343,9 @@ export class StationPairingService {
             and(
               eq(schema.stationDevices.tenantId, candidate.tenantId),
               eq(schema.stationDevices.id, candidate.stationDeviceId),
-              station.apiKeyId === null
+              lockedStation.apiKeyId === null
                 ? isNull(schema.stationDevices.apiKeyId)
-                : eq(schema.stationDevices.apiKeyId, station.apiKeyId),
+                : eq(schema.stationDevices.apiKeyId, lockedStation.apiKeyId),
             ),
           )
           .returning({ id: schema.stationDevices.id });
@@ -316,6 +373,22 @@ export class StationPairingService {
       credential: { apiKey: key.key, serverUrl: loadEnv().BETTER_AUTH_URL },
       operators,
     };
+  }
+
+  private auditPairing(context: StationPairAuditContext, outcome: "succeeded" | "failed"): void {
+    try {
+      this.audit.deviceCredentialMutation({
+        tenantId: context.tenantId,
+        actorType: "unauthenticated_device",
+        actorId: null,
+        action: context.action,
+        resourceId: context.stationDeviceId,
+        outcome,
+      });
+    } catch {
+      // Pairing audit is best-effort. It must never replace the original
+      // validation, rate-limit, roster, credential, or transaction result.
+    }
   }
 
   private async retireLiveCodes(tenantId: string, stationDeviceId: string): Promise<void> {

@@ -32,7 +32,7 @@ import {
   type SetKioskProductsDto,
   type UpdateKioskDto,
 } from "./dto";
-import { KiosksService } from "./kiosks.service";
+import { KiosksService, type KioskUpdateAuditAction } from "./kiosks.service";
 import {
   ApiLegacyKioskEnrollSecretResponse,
   ApiPairingCodeSecretResponse,
@@ -80,12 +80,18 @@ export class KiosksController {
     @Param("id") id: string,
     @Body(new ZodValidationPipe(updateKioskSchema)) body: UpdateKioskDto,
   ): Promise<KioskDto> {
+    const attemptedAction: KioskUpdateAuditAction =
+      body.status === "archived"
+        ? "kiosk.archive"
+        : body.status === "active"
+          ? "kiosk.unbind"
+          : "kiosk.update";
     try {
       const result = await this.kiosksService.updateKiosk(req.tenantId!, id, body);
-      this.auditMutation(req, "kiosk.update", id, "succeeded");
-      return result;
+      this.auditMutation(req, result.auditAction, id, "succeeded");
+      return result.kiosk;
     } catch (error) {
-      this.auditMutation(req, "kiosk.update", id, "failed");
+      this.auditMutation(req, attemptedAction, id, "failed");
       throw error;
     }
   }

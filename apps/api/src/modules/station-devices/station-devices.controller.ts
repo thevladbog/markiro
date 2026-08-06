@@ -117,12 +117,17 @@ export class StationDevicesController {
     resourceId: string | null,
     outcome: "succeeded" | "failed",
   ): void {
-    this.audit.credentialMutation({
-      tenantId: req.tenantId!,
-      userId: req.userId!,
-      action,
-      resourceId,
-      outcome,
-    });
+    try {
+      this.audit.credentialMutation({
+        tenantId: req.tenantId!,
+        userId: req.userId!,
+        action,
+        resourceId,
+        outcome,
+      });
+    } catch {
+      // Audit is best-effort. A logging sink failure must never replace the
+      // cabinet mutation's original result or transient infrastructure error.
+    }
   }
 }

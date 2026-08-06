@@ -14,6 +14,13 @@ import type {
 
 type KioskRow = typeof schema.kiosks.$inferSelect;
 
+export type KioskUpdateAuditAction = "kiosk.update" | "kiosk.archive" | "kiosk.unbind";
+
+export interface UpdateKioskResult {
+  kiosk: KioskDto;
+  auditAction: KioskUpdateAuditAction;
+}
+
 @Injectable()
 export class KiosksService {
   constructor(@Inject(DB) private readonly db: Db) {}
@@ -45,7 +52,7 @@ export class KiosksService {
     return this.toDto(row!, []);
   }
 
-  async updateKiosk(tenantId: string, id: string, dto: UpdateKioskDto): Promise<KioskDto> {
+  async updateKiosk(tenantId: string, id: string, dto: UpdateKioskDto): Promise<UpdateKioskResult> {
     const set: Record<string, unknown> = {};
     if (dto.name !== undefined) set.name = dto.name;
     if (dto.location !== undefined) set.location = dto.location;
@@ -56,17 +63,28 @@ export class KiosksService {
     if (Object.keys(set).length === 0) {
       const row = await this.findRow(tenantId, id);
       if (!row) throw new NotFoundException();
-      return this.toDto(row, await this.productIdsForOne(tenantId, id));
+      return {
+        kiosk: this.toDto(row, await this.productIdsForOne(tenantId, id)),
+        auditAction: "kiosk.update",
+      };
     }
 
-    const current = dto.status === "active" ? await this.findRow(tenantId, id) : undefined;
-    if (dto.status === "active" && !current) throw new NotFoundException();
-    const row =
-      dto.status === "archived" || current?.status === "archived"
-        ? await this.transitionKiosk(tenantId, id, dto.status ?? "archived", set)
-        : await this.updateRow(tenantId, id, set);
+    let row: KioskRow | undefined;
+    let auditAction: KioskUpdateAuditAction = "kiosk.update";
+    if (dto.status === undefined) {
+      row = await this.updateRow(tenantId, id, set);
+    } else {
+      const transition = await this.updateKioskStatus(tenantId, id, dto.status, set);
+      row = transition.row;
+      if (transition.previousStatus !== dto.status) {
+        auditAction = dto.status === "archived" ? "kiosk.archive" : "kiosk.unbind";
+      }
+    }
     if (!row) throw new NotFoundException();
-    return this.toDto(row, await this.productIdsForOne(tenantId, id));
+    return {
+      kiosk: this.toDto(row, await this.productIdsForOne(tenantId, id)),
+      auditAction,
+    };
   }
 
   async archiveKiosk(tenantId: string, id: string): Promise<void> {
@@ -147,6 +165,51 @@ export class KiosksService {
       .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, id)))
       .returning();
     return row;
+  }
+
+  /**
+   * PATCH status classification and the lifecycle mutation share the same
+   * locked pre-state, so the audit action cannot race a concurrent archive or
+   * reactivation. An unchanged status is a metadata update and retains the
+   * current credential; a real transition clears it and retires live codes.
+   */
+  private async updateKioskStatus(
+    tenantId: string,
+    id: string,
+    status: "active" | "archived",
+    fields: Record<string, unknown>,
+  ): Promise<{ row: KioskRow; previousStatus: "active" | "archived" }> {
+    const retiredAt = new Date();
+    return this.db.transaction(async (tx) => {
+      const [current] = await tx
+        .select({ id: schema.kiosks.id, status: schema.kiosks.status })
+        .from(schema.kiosks)
+        .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, id)))
+        .for("update");
+      if (!current) throw new NotFoundException();
+
+      const statusChanged = current.status !== status;
+      const [row] = await tx
+        .update(schema.kiosks)
+        .set({ ...fields, status, ...(statusChanged ? { deviceTokenHash: null } : {}) })
+        .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, id)))
+        .returning();
+      if (!row) throw new NotFoundException();
+
+      if (statusChanged) {
+        await tx
+          .update(schema.kioskPairingCodes)
+          .set({ usedAt: retiredAt })
+          .where(
+            and(
+              eq(schema.kioskPairingCodes.tenantId, tenantId),
+              eq(schema.kioskPairingCodes.kioskId, id),
+              isNull(schema.kioskPairingCodes.usedAt),
+            ),
+          );
+      }
+      return { row, previousStatus: current.status };
+    });
   }
 
   /**

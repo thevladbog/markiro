@@ -218,6 +218,145 @@ describe("credential mutation audit", () => {
     expect(JSON.stringify(audit.credentialMutation.mock.calls)).not.toContain("issuance failed");
   });
 
+  it("does not let audit sink failures replace completed station mutations", async () => {
+    const created = { id: "station_create" };
+    const updated = { id: "station_update" };
+    const issued = { code: "87654321", expiresAt: new Date("2026-08-06T12:00:00.000Z") };
+    const service = {
+      create: vi.fn().mockResolvedValue(created),
+      update: vi.fn().mockResolvedValue(updated),
+      revoke: vi.fn().mockResolvedValue(undefined),
+    };
+    const pairing = { issueCode: vi.fn().mockResolvedValue(issued) };
+    const audit = {
+      credentialMutation: vi.fn(() => {
+        throw new Error("audit sink unavailable");
+      }),
+    };
+    const controller = new StationDevicesController(
+      service as never,
+      pairing as never,
+      audit as never,
+    );
+
+    await expect(controller.create(req, { name: "Packing station", lineId: null })).resolves.toBe(
+      created,
+    );
+    await expect(controller.update(req, "station_update", { lineId: null })).resolves.toBe(updated);
+    await expect(controller.revoke(req, "station_revoke")).resolves.toBeUndefined();
+    await expect(controller.issuePairingCode(req, "station_issue")).resolves.toBe(issued);
+
+    expect(audit.credentialMutation.mock.calls).toEqual([
+      [
+        {
+          tenantId: "org_1",
+          userId: "user_1",
+          action: "station_device.create",
+          resourceId: "station_create",
+          outcome: "succeeded",
+        },
+      ],
+      [
+        {
+          tenantId: "org_1",
+          userId: "user_1",
+          action: "station_device.update",
+          resourceId: "station_update",
+          outcome: "succeeded",
+        },
+      ],
+      [
+        {
+          tenantId: "org_1",
+          userId: "user_1",
+          action: "station_device.revoke",
+          resourceId: "station_revoke",
+          outcome: "succeeded",
+        },
+      ],
+      [
+        {
+          tenantId: "org_1",
+          userId: "user_1",
+          action: "station_pairing_code.issue",
+          resourceId: "station_issue",
+          outcome: "succeeded",
+        },
+      ],
+    ]);
+  });
+
+  it("does not let audit sink failures mask rejected station mutations", async () => {
+    const createError = new Error("create business failure");
+    const updateError = new Error("update business failure");
+    const revokeError = new Error("revoke business failure");
+    const issueError = new Error("issue business failure");
+    const service = {
+      create: vi.fn().mockRejectedValue(createError),
+      update: vi.fn().mockRejectedValue(updateError),
+      revoke: vi.fn().mockRejectedValue(revokeError),
+    };
+    const pairing = { issueCode: vi.fn().mockRejectedValue(issueError) };
+    const audit = {
+      credentialMutation: vi.fn(() => {
+        throw new Error("audit sink unavailable");
+      }),
+    };
+    const controller = new StationDevicesController(
+      service as never,
+      pairing as never,
+      audit as never,
+    );
+
+    await expect(controller.create(req, { name: "Packing station", lineId: null })).rejects.toBe(
+      createError,
+    );
+    await expect(controller.update(req, "station_update", { lineId: null })).rejects.toBe(
+      updateError,
+    );
+    await expect(controller.revoke(req, "station_revoke")).rejects.toBe(revokeError);
+    await expect(controller.issuePairingCode(req, "station_issue")).rejects.toBe(issueError);
+
+    expect(audit.credentialMutation.mock.calls).toEqual([
+      [
+        {
+          tenantId: "org_1",
+          userId: "user_1",
+          action: "station_device.create",
+          resourceId: null,
+          outcome: "failed",
+        },
+      ],
+      [
+        {
+          tenantId: "org_1",
+          userId: "user_1",
+          action: "station_device.update",
+          resourceId: "station_update",
+          outcome: "failed",
+        },
+      ],
+      [
+        {
+          tenantId: "org_1",
+          userId: "user_1",
+          action: "station_device.revoke",
+          resourceId: "station_revoke",
+          outcome: "failed",
+        },
+      ],
+      [
+        {
+          tenantId: "org_1",
+          userId: "user_1",
+          action: "station_pairing_code.issue",
+          resourceId: "station_issue",
+          outcome: "failed",
+        },
+      ],
+    ]);
+  });
+
   it("audits kiosk creation with the cabinet actor and durable result id", async () => {
     const created = { id: "kiosk_1" };
     const kiosks = { createKiosk: vi.fn().mockResolvedValue(created) };
@@ -267,16 +406,19 @@ describe("credential mutation audit", () => {
   });
 
   it("audits kiosk update/change-place success and failure against the route id", async () => {
+    const updated = { id: "kiosk_2" };
     const kiosks = {
       updateKiosk: vi
         .fn()
-        .mockResolvedValueOnce({ id: "kiosk_2" })
+        .mockResolvedValueOnce({ kiosk: updated, auditAction: "kiosk.update" })
         .mockRejectedValueOnce(new Error("update failed")),
     };
     const audit = auditDouble();
     const controller = new KiosksController(kiosks as never, {} as never, audit as never);
 
-    await controller.updateKiosk(req, "kiosk_2", { location: "Loading bay" });
+    await expect(controller.updateKiosk(req, "kiosk_2", { location: "Loading bay" })).resolves.toBe(
+      updated,
+    );
     await expect(
       controller.updateKiosk(req, "kiosk_2", { location: "Secret place" }),
     ).rejects.toThrow("update failed");
@@ -302,6 +444,74 @@ describe("credential mutation audit", () => {
       ],
     ]);
     expect(JSON.stringify(audit.credentialMutation.mock.calls)).not.toContain("Secret place");
+  });
+
+  it("classifies actual kiosk PATCH lifecycle transitions without duplicating audit", async () => {
+    const archived = { id: "kiosk_3", status: "archived" };
+    const unchanged = { id: "kiosk_3", status: "archived" };
+    const reactivated = { id: "kiosk_3", status: "active" };
+    const kiosks = {
+      updateKiosk: vi
+        .fn()
+        .mockResolvedValueOnce({ kiosk: archived, auditAction: "kiosk.archive" })
+        .mockResolvedValueOnce({ kiosk: unchanged, auditAction: "kiosk.update" })
+        .mockResolvedValueOnce({ kiosk: reactivated, auditAction: "kiosk.unbind" })
+        .mockRejectedValueOnce(new Error("archive failed")),
+    };
+    const audit = auditDouble();
+    const controller = new KiosksController(kiosks as never, {} as never, audit as never);
+
+    await expect(
+      controller.updateKiosk(req, "kiosk_3", { status: "archived", name: "Archived name" }),
+    ).resolves.toBe(archived);
+    await expect(controller.updateKiosk(req, "kiosk_3", { status: "archived" })).resolves.toBe(
+      unchanged,
+    );
+    await expect(
+      controller.updateKiosk(req, "kiosk_3", { status: "active", location: "New place" }),
+    ).resolves.toBe(reactivated);
+    await expect(controller.updateKiosk(req, "kiosk_3", { status: "archived" })).rejects.toThrow(
+      "archive failed",
+    );
+
+    expect(audit.credentialMutation.mock.calls).toEqual([
+      [
+        {
+          tenantId: "org_1",
+          userId: "user_1",
+          action: "kiosk.archive",
+          resourceId: "kiosk_3",
+          outcome: "succeeded",
+        },
+      ],
+      [
+        {
+          tenantId: "org_1",
+          userId: "user_1",
+          action: "kiosk.update",
+          resourceId: "kiosk_3",
+          outcome: "succeeded",
+        },
+      ],
+      [
+        {
+          tenantId: "org_1",
+          userId: "user_1",
+          action: "kiosk.unbind",
+          resourceId: "kiosk_3",
+          outcome: "succeeded",
+        },
+      ],
+      [
+        {
+          tenantId: "org_1",
+          userId: "user_1",
+          action: "kiosk.archive",
+          resourceId: "kiosk_3",
+          outcome: "failed",
+        },
+      ],
+    ]);
   });
 
   it("audits kiosk enrollment without the plaintext token", async () => {

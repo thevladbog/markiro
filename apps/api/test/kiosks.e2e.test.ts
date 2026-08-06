@@ -4,13 +4,14 @@ import express from "express";
 import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { hashDeviceToken } from "../src/pickup/device-token";
 import { schema, type Db } from "@markiro/db";
 import { listenOnLoopback } from "./support/listen-loopback";
+import { SecurityAuditService } from "../src/authorization/security-audit.service";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -46,6 +47,7 @@ describe.skipIf(!ready)("kiosks e2e", () => {
   let app: INestApplication | undefined;
   let setup: AuthSetup;
   let db: Db;
+  let audit: SecurityAuditService;
 
   beforeAll(async () => {
     const env = loadEnv();
@@ -62,10 +64,15 @@ describe.skipIf(!ready)("kiosks e2e", () => {
     server.use(express.json());
     await app.init();
     await listenOnLoopback(app);
+    audit = app.get(SecurityAuditService);
   });
 
   afterAll(async () => {
     await app?.close();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   async function signUpWithInactiveOrg(agent: ReturnType<typeof request.agent>): Promise<string> {
@@ -321,6 +328,100 @@ describe.skipIf(!ready)("kiosks e2e", () => {
       .from(schema.kiosks)
       .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, id)));
     expect(kiosk).toEqual({ status: "active", deviceTokenHash: null });
+  });
+
+  it("audits PATCH lifecycle transitions while unchanged status remains an update", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const created = await agent.post("/kiosks").send({ name: "Lifecycle kiosk" }).expect(201);
+    const id = created.body.id as string;
+    const enrolled = await agent.post(`/kiosks/${id}/enroll`).send({}).expect(200);
+    await agent.post(`/kiosks/${id}/pairing-code`).send({}).expect(201);
+    const auditSpy = vi.spyOn(audit, "credentialMutation").mockImplementation(() => {});
+
+    const archived = await agent
+      .patch(`/kiosks/${id}`)
+      .send({ status: "archived", name: "Archived lifecycle kiosk" })
+      .expect(200);
+    expect(archived.body).toMatchObject({
+      id,
+      name: "Archived lifecycle kiosk",
+      status: "archived",
+      enrolled: false,
+    });
+    expect(auditSpy).toHaveBeenLastCalledWith({
+      tenantId,
+      userId: expect.any(String),
+      action: "kiosk.archive",
+      resourceId: id,
+      outcome: "succeeded",
+    });
+    await request(app!.getHttpServer())
+      .get("/kiosk/bootstrap")
+      .set("x-kiosk-token", enrolled.body.token)
+      .expect(401);
+    const [retired] = await db
+      .select({ usedAt: schema.kioskPairingCodes.usedAt })
+      .from(schema.kioskPairingCodes)
+      .where(
+        and(
+          eq(schema.kioskPairingCodes.tenantId, tenantId),
+          eq(schema.kioskPairingCodes.kioskId, id),
+        ),
+      );
+    expect(retired?.usedAt).toBeInstanceOf(Date);
+
+    auditSpy.mockClear();
+    await agent
+      .patch(`/kiosks/${id}`)
+      .send({ status: "archived", location: "Archive shelf" })
+      .expect(200);
+    expect(auditSpy).toHaveBeenLastCalledWith({
+      tenantId,
+      userId: expect.any(String),
+      action: "kiosk.update",
+      resourceId: id,
+      outcome: "succeeded",
+    });
+
+    auditSpy.mockClear();
+    await agent
+      .patch(`/kiosks/${id}`)
+      .send({ status: "active", location: "Packing line" })
+      .expect(200);
+    expect(auditSpy).toHaveBeenLastCalledWith({
+      tenantId,
+      userId: expect.any(String),
+      action: "kiosk.unbind",
+      resourceId: id,
+      outcome: "succeeded",
+    });
+
+    const activeEnrollment = await agent.post(`/kiosks/${id}/enroll`).send({}).expect(200);
+    auditSpy.mockClear();
+    await agent.patch(`/kiosks/${id}`).send({ status: "active", name: "Still active" }).expect(200);
+    expect(auditSpy).toHaveBeenLastCalledWith({
+      tenantId,
+      userId: expect.any(String),
+      action: "kiosk.update",
+      resourceId: id,
+      outcome: "succeeded",
+    });
+    await request(app!.getHttpServer())
+      .get("/kiosk/bootstrap")
+      .set("x-kiosk-token", activeEnrollment.body.token)
+      .expect(200);
+
+    const missingId = randomUUID();
+    auditSpy.mockClear();
+    await agent.patch(`/kiosks/${missingId}`).send({ status: "archived" }).expect(404);
+    expect(auditSpy).toHaveBeenLastCalledWith({
+      tenantId,
+      userId: expect.any(String),
+      action: "kiosk.archive",
+      resourceId: missingId,
+      outcome: "failed",
+    });
   });
 
   it("serializes enrollment behind an archive lock and revalidates the committed lifecycle state", async () => {

@@ -4,7 +4,7 @@ import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import { and, eq, inArray } from "drizzle-orm";
 import request from "supertest";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { schema, type Auth, type Db } from "@markiro/db";
 import { AppModule } from "../src/app.module";
 import type { AuthSetup } from "../src/auth/auth.setup";
@@ -18,6 +18,9 @@ import {
 } from "../src/modules/device-pairing/pairing-policy";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { signUpAndActivate } from "./support/auth";
+import { SecurityAuditService } from "../src/authorization/security-audit.service";
+import { OperatorsService } from "../src/modules/operators/operators.service";
+import { StationPairingService } from "../src/modules/station-pairing/station-pairing.service";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -50,6 +53,8 @@ describe.skipIf(!ready)("station pairing e2e", () => {
   let deviceId: string;
   let deviceName: string;
   let pairingCodePepper: string;
+  let audit: SecurityAuditService;
+  let auditSpy: ReturnType<typeof vi.spyOn>;
 
   beforeAll(async () => {
     const env = loadEnv();
@@ -65,14 +70,20 @@ describe.skipIf(!ready)("station pairing e2e", () => {
     server.use(express.json());
     await app.init();
     await listenOnLoopback(app);
+    audit = app.get(SecurityAuditService);
   });
 
   afterAll(async () => {
     await app?.close();
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   beforeEach(async () => {
     await clearPairAttemptBudget(db);
+    auditSpy = vi.spyOn(audit, "deviceCredentialMutation").mockImplementation(() => {});
     agent = request.agent(app!.getHttpServer());
     tenantId = await signUpAndActivate(agent);
     otherAgent = request.agent(app!.getHttpServer());
@@ -140,6 +151,18 @@ describe.skipIf(!ready)("station pairing e2e", () => {
       .send({ code: issued.body.code })
       .expect("Cache-Control", "no-store")
       .expect(201);
+
+    expect(auditSpy).toHaveBeenCalledWith({
+      tenantId,
+      actorType: "unauthenticated_device",
+      actorId: null,
+      action: "station.pair",
+      resourceId: deviceId,
+      outcome: "succeeded",
+    });
+    const auditCalls = JSON.stringify(auditSpy.mock.calls);
+    expect(auditCalls).not.toContain(issued.body.code as string);
+    expect(auditCalls).not.toContain(paired.body.credential.apiKey as string);
 
     expect(paired.body).toMatchObject({
       device: {
@@ -272,12 +295,23 @@ describe.skipIf(!ready)("station pairing e2e", () => {
   });
 
   it("uses stable public error codes without exposing station details", async () => {
+    auditSpy.mockClear();
     const unknown = await request(app!.getHttpServer())
       .post("/station/pair")
       .send({ code: "99999999" })
       .expect(401);
     expect(unknown.body).toMatchObject({ code: "PAIR_INVALID" });
     expect(JSON.stringify(unknown.body)).not.toContain(deviceId);
+    expect(auditSpy).toHaveBeenLastCalledWith({
+      tenantId: null,
+      actorType: "unauthenticated_device",
+      actorId: null,
+      action: "station.pair",
+      resourceId: null,
+      outcome: "failed",
+    });
+
+    await pairCurrentDevice();
 
     const expired = await agent
       .post(`/station-devices/${deviceId}/pairing-code`)
@@ -292,11 +326,20 @@ describe.skipIf(!ready)("station pairing e2e", () => {
           hashPairingCode(expired.body.code, pairingCodePepper),
         ),
       );
+    auditSpy.mockClear();
     const expiredResult = await request(app!.getHttpServer())
       .post("/station/pair")
       .send({ code: expired.body.code })
       .expect(401);
     expect(expiredResult.body).toMatchObject({ code: "PAIR_EXPIRED" });
+    expect(auditSpy).toHaveBeenLastCalledWith({
+      tenantId,
+      actorType: "unauthenticated_device",
+      actorId: null,
+      action: "station.repair",
+      resourceId: deviceId,
+      outcome: "failed",
+    });
 
     const locked = await agent
       .post(`/station-devices/${deviceId}/pairing-code`)
@@ -311,11 +354,20 @@ describe.skipIf(!ready)("station pairing e2e", () => {
           hashPairingCode(locked.body.code, pairingCodePepper),
         ),
       );
+    auditSpy.mockClear();
     const lockedResult = await request(app!.getHttpServer())
       .post("/station/pair")
       .send({ code: locked.body.code })
       .expect(401);
     expect(lockedResult.body).toMatchObject({ code: "PAIR_LOCKED" });
+    expect(auditSpy).toHaveBeenLastCalledWith({
+      tenantId,
+      actorType: "unauthenticated_device",
+      actorId: null,
+      action: "station.repair",
+      resourceId: deviceId,
+      outcome: "failed",
+    });
   });
 
   it("applies the global limiter before lookup and leaves its code live", async () => {
@@ -334,6 +386,14 @@ describe.skipIf(!ready)("station pairing e2e", () => {
       .send({ code: issued.body.code })
       .expect(401);
     expect(limited.body).toMatchObject({ code: "PAIR_RATE_LIMITED" });
+    expect(auditSpy).toHaveBeenLastCalledWith({
+      tenantId: null,
+      actorType: "unauthenticated_device",
+      actorId: null,
+      action: "station.pair",
+      resourceId: null,
+      outcome: "failed",
+    });
     const [code] = await db
       .select({ usedAt: schema.stationPairingCodes.usedAt })
       .from(schema.stationPairingCodes)
@@ -405,11 +465,21 @@ describe.skipIf(!ready)("station pairing e2e", () => {
       .post(`/station-devices/${deviceId}/pairing-code`)
       .send({})
       .expect(201);
+    auditSpy.mockClear();
     const replacementPair = await request(app!.getHttpServer())
       .post("/station/pair")
       .send({ code: replacementCode.body.code })
       .expect(201);
     const newKey = replacementPair.body.credential.apiKey as string;
+
+    expect(auditSpy).toHaveBeenCalledWith({
+      tenantId,
+      actorType: "unauthenticated_device",
+      actorId: null,
+      action: "station.repair",
+      resourceId: deviceId,
+      outcome: "succeeded",
+    });
 
     expect(replacementPair.body.device.id).toBe(deviceId);
     expect(newKey).not.toBe(oldKey);
@@ -508,6 +578,14 @@ describe.skipIf(!ready)("station pairing e2e", () => {
         .post("/station/pair")
         .send({ code: replacementCode.body.code })
         .expect(500);
+      expect(auditSpy).toHaveBeenLastCalledWith({
+        tenantId,
+        actorType: "unauthenticated_device",
+        actorId: null,
+        action: "station.repair",
+        resourceId: deviceId,
+        outcome: "failed",
+      });
     } catch (error) {
       primaryError = error;
       hasPrimaryError = true;
@@ -577,6 +655,14 @@ describe.skipIf(!ready)("station pairing e2e", () => {
         .send({ code: issued.body.code })
         .expect(401);
       expect(lost.body).toMatchObject({ code: "PAIR_INVALID" });
+      expect(auditSpy).toHaveBeenLastCalledWith({
+        tenantId,
+        actorType: "unauthenticated_device",
+        actorId: null,
+        action: "station.repair",
+        resourceId: deviceId,
+        outcome: "failed",
+      });
     } finally {
       candidateBeforeClaim.mockRestore();
     }
@@ -612,6 +698,148 @@ describe.skipIf(!ready)("station pairing e2e", () => {
       .send({ code: issued.body.code })
       .expect(401);
     expect(reused.body).toMatchObject({ code: "PAIR_INVALID" });
+  });
+
+  it("classifies a roster failure for an already paired station as repair", async () => {
+    await pairCurrentDevice();
+    const issued = await agent
+      .post(`/station-devices/${deviceId}/pairing-code`)
+      .send({})
+      .expect(201);
+    const rosterError = new Error("operator roster unavailable");
+    vi.spyOn(app!.get(OperatorsService), "buildRoster").mockRejectedValueOnce(rosterError);
+    const selectSpy = vi.spyOn(db, "select");
+    auditSpy.mockClear();
+
+    await expect(
+      app!.get(StationPairingService).redeem(issued.body.code as string, `test-${randomUUID()}`),
+    ).rejects.toBe(rosterError);
+    expect(auditSpy).toHaveBeenCalledWith({
+      tenantId,
+      actorType: "unauthenticated_device",
+      actorId: null,
+      action: "station.repair",
+      resourceId: deviceId,
+      outcome: "failed",
+    });
+    const calls = JSON.stringify(auditSpy.mock.calls);
+    expect(calls).not.toContain(issued.body.code as string);
+    expect(calls).not.toContain("operator roster unavailable");
+    expect(
+      selectSpy.mock.calls.some(
+        ([projection]) =>
+          projection !== undefined && "hasExistingCredential" in (projection as object),
+      ),
+    ).toBe(true);
+    expect(selectSpy).not.toHaveBeenCalledWith({ apiKeyId: schema.stationDevices.apiKeyId });
+  });
+
+  it("does not let an audit sink failure replace validation or roster errors", async () => {
+    const pairing = app!.get(StationPairingService);
+    auditSpy.mockImplementation(() => {
+      throw new Error("audit sink unavailable");
+    });
+
+    await expect(pairing.redeem("99999999", `test-${randomUUID()}`)).rejects.toMatchObject({
+      response: { code: "PAIR_INVALID" },
+    });
+
+    const issued = await agent
+      .post(`/station-devices/${deviceId}/pairing-code`)
+      .send({})
+      .expect(201);
+    const rosterError = new Error("roster database unavailable");
+    vi.spyOn(app!.get(OperatorsService), "buildRoster").mockRejectedValueOnce(rosterError);
+    await expect(pairing.redeem(issued.body.code as string, `test-${randomUUID()}`)).rejects.toBe(
+      rosterError,
+    );
+  });
+
+  it("lets the locked station row override the code lookup classification", async () => {
+    const issued = await agent
+      .post(`/station-devices/${deviceId}/pairing-code`)
+      .send({})
+      .expect(201);
+    const [member] = await db
+      .select({ userId: schema.member.userId })
+      .from(schema.member)
+      .where(eq(schema.member.organizationId, tenantId));
+    const auth = app!.get<Auth>(AUTH);
+    const operators = app!.get(OperatorsService);
+    const buildRoster = operators.buildRoster.bind(operators);
+    vi.spyOn(operators, "buildRoster").mockImplementationOnce(async (resolvedTenantId) => {
+      const roster = await buildRoster(resolvedTenantId);
+      const existing = await auth.api.createApiKey({
+        body: {
+          configId: "station",
+          organizationId: tenantId,
+          userId: member!.userId,
+          name: "Station device",
+          metadata: { kind: "station" },
+        },
+      });
+      await db
+        .update(schema.stationDevices)
+        .set({ apiKeyId: existing.id, pairedAt: new Date() })
+        .where(
+          and(eq(schema.stationDevices.tenantId, tenantId), eq(schema.stationDevices.id, deviceId)),
+        );
+      return roster;
+    });
+    auditSpy.mockClear();
+
+    await request(app!.getHttpServer())
+      .post("/station/pair")
+      .send({ code: issued.body.code })
+      .expect(201);
+    expect(auditSpy).toHaveBeenCalledWith({
+      tenantId,
+      actorType: "unauthenticated_device",
+      actorId: null,
+      action: "station.repair",
+      resourceId: deviceId,
+      outcome: "succeeded",
+    });
+  });
+
+  it("audits a station revoked after code resolution from the locked credential state", async () => {
+    await pairCurrentDevice();
+    const issued = await agent
+      .post(`/station-devices/${deviceId}/pairing-code`)
+      .send({})
+      .expect(201);
+    const operators = app!.get(OperatorsService);
+    const buildRoster = operators.buildRoster.bind(operators);
+    vi.spyOn(operators, "buildRoster").mockImplementationOnce(async (resolvedTenantId) => {
+      const roster = await buildRoster(resolvedTenantId);
+      await agent.delete(`/station-devices/${deviceId}`).expect(204);
+      return roster;
+    });
+    auditSpy.mockClear();
+
+    const rejected = await request(app!.getHttpServer())
+      .post("/station/pair")
+      .send({ code: issued.body.code })
+      .expect(401);
+    expect(rejected.body).toMatchObject({ code: "PAIR_INVALID" });
+    expect(auditSpy).toHaveBeenCalledWith({
+      tenantId,
+      actorType: "unauthenticated_device",
+      actorId: null,
+      action: "station.pair",
+      resourceId: deviceId,
+      outcome: "failed",
+    });
+    const [station] = await db
+      .select({
+        apiKeyId: schema.stationDevices.apiKeyId,
+        revokedAt: schema.stationDevices.revokedAt,
+      })
+      .from(schema.stationDevices)
+      .where(
+        and(eq(schema.stationDevices.tenantId, tenantId), eq(schema.stationDevices.id, deviceId)),
+      );
+    expect(station).toMatchObject({ apiKeyId: null, revokedAt: expect.any(Date) });
   });
 
   it("hides a station from another tenant when issuing a pairing code", async () => {
