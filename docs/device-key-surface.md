@@ -13,6 +13,37 @@ every such route in the API is expected to appear in one of the two tables
 below. See "Rule for new routes" for how it stays that way as routes are
 added.
 
+## Provisioning and durable device lifecycle
+
+Station and kiosk credentials share one server-side generation boundary, but
+remain separate trust domains. Cabinet users create or retain a durable device
+record and reveal an eight-digit, 15-minute pairing code once. Only the keyed
+digest is stored; issuing another code retires the previous live code, and
+successful redemption consumes it atomically. Responses that contain a code,
+device token, or station key carry `Cache-Control: no-store`.
+
+The unauthenticated redemption routes are deliberately narrow:
+`POST /station/pair` provisions the pre-created station record and
+`POST /kiosk/pair` provisions the active kiosk record. Both use the shared
+persisted per-source/global attempt limiter. Re-pairing rotates the credential
+on the same durable device ID; revoke/unbind clears the credential and live
+codes without deleting the device or its production history.
+
+A fresh station obtains its API base only from the trusted build-time
+`VITE_STATION_API_URL`; it never derives a backend host from the webview URL.
+After pairing, the durable station config retains that server URL for recovery.
+Cross-origin station requests require the exact `STATION_ORIGIN`, which is
+scoped to `/station` and `/station/*` and is not added to cabinet-session or
+kiosk routes.
+
+An authenticated station `401` seals its current credential generation before
+recovery is shown. The station keeps its machine/device IDs and every local
+production fact (outbox, journal, boxes, exceptions, conflicts, SSCC ranges,
+batch IDs and sync ceilings). It removes only the rejected credential and
+reproducible operator/shift/product caches. Pairing the same device record then
+rebuilds those caches and resumes the unchanged queue; network errors, timeouts,
+`429`, and `5xx` do not enter this recovery path.
+
 ## Reachable by a device key
 
 | Route                                                                            | Why the station needs it                                                                                                                                                                                                                                                                                                     |
