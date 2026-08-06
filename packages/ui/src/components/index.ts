@@ -28,6 +28,9 @@ export type { AlertProps, AlertTone } from "./Alert.js";
 export { Modal } from "./Modal.js";
 export type { ModalProps } from "./Modal.js";
 
+export { Drawer } from "./Drawer.js";
+export type { DrawerProps } from "./Drawer.js";
+
 export { EmptyState } from "./EmptyState.js";
 export type { EmptyStateProps } from "./EmptyState.js";
 

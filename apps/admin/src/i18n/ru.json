@@ -139,6 +139,7 @@
     "pickup": "Для себя",
     "employees": "Сотрудники",
     "kiosks": "Киоски",
+    "devices": "Устройства",
     "integrations": "Интеграции",
     "team": "Команда",
     "settings": "Настройки"
@@ -911,6 +912,29 @@
         "stationAccessSuccess": "Доступ на станцию обновлён",
         "stationAccessError": "Не удалось обновить доступ на станцию"
       }
+    },
+    "devices": {
+      "title": "Устройства",
+      "add": "Добавить устройство",
+      "cancel": "Отмена",
+      "create": "Создать",
+      "done": "Готово",
+      "typeLabel": "Тип",
+      "statusLabel": "Статус",
+      "nameLabel": "Название",
+      "lineLabel": "Линия",
+      "noLine": "Без линии",
+      "locationLabel": "Расположение",
+      "allTypes": "Все типы",
+      "allStatuses": "Все статусы",
+      "emptyTitle": "Устройства не добавлены",
+      "emptyHint": "Добавьте станцию или киоск для начала работы.",
+      "type": { "station": "Станция", "kiosk": "Киоск" },
+      "status": { "awaiting_pairing": "Ожидает привязки", "online": "В сети", "offline": "Не в сети", "revoked": "Отозвано" },
+      "table": { "name": "Название", "type": "Тип", "place": "Место", "status": "Статус", "actions": "Действия" },
+      "kioskSettings": "Настройки киоска",
+      "pager": { "label": "Страницы устройств", "previous": "Предыдущая страница", "next": "Следующая страница" },
+      "drawer": { "title": "Новое устройство", "codeTitle": "Привязка устройства", "codePending": "Устройство создано. Код привязки будет добавлен следующим шагом." }
     },
     "kiosks": {
       "title": "Киоски",

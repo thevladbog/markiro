@@ -139,6 +139,7 @@
     "pickup": "Self-pickup",
     "employees": "Employees",
     "kiosks": "Kiosks",
+    "devices": "Devices",
     "integrations": "Integrations",
     "team": "Team",
     "settings": "Settings"
@@ -911,6 +912,29 @@
         "stationAccessSuccess": "Station access updated",
         "stationAccessError": "Could not update station access"
       }
+    },
+    "devices": {
+      "title": "Devices",
+      "add": "Add device",
+      "cancel": "Cancel",
+      "create": "Create",
+      "done": "Done",
+      "typeLabel": "Type",
+      "statusLabel": "Status",
+      "nameLabel": "Name",
+      "lineLabel": "Line",
+      "noLine": "No line",
+      "locationLabel": "Location",
+      "allTypes": "All types",
+      "allStatuses": "All statuses",
+      "emptyTitle": "No devices yet",
+      "emptyHint": "Add a station or kiosk to get started.",
+      "type": { "station": "Station", "kiosk": "Kiosk" },
+      "status": { "awaiting_pairing": "Awaiting pairing", "online": "Online", "offline": "Offline", "revoked": "Revoked" },
+      "table": { "name": "Name", "type": "Type", "place": "Place", "status": "Status", "actions": "Actions" },
+      "kioskSettings": "Kiosk settings",
+      "pager": { "label": "Device pages", "previous": "Previous page", "next": "Next page" },
+      "drawer": { "title": "New device", "codeTitle": "Pair device", "codePending": "The device was created. The pairing code will be added in the next step." }
     },
     "kiosks": {
       "title": "Kiosks",

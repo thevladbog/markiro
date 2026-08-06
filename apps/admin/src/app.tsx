@@ -1,4 +1,4 @@
-import { BrowserRouter, Route, Routes } from "react-router";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
 
@@ -15,6 +15,7 @@ import { CatalogPage } from "./pages/catalog/index.js";
 import { ConflictsPage } from "./pages/conflicts/index.js";
 import { CounterpartiesPage } from "./pages/counterparties/index.js";
 import { DashboardPage } from "./pages/dashboard/index.js";
+import { DevicesPage } from "./pages/devices/index.js";
 import { EmployeesPage } from "./pages/employees/index.js";
 import { ChannelPage } from "./pages/integrations/ChannelPage.js";
 import { IntegrationsPage } from "./pages/integrations/index.js";
@@ -111,7 +112,16 @@ export function AppRoutes() {
           }
         />
         <Route
-          path="kiosks"
+          path="devices"
+          element={
+            <RequireCapability capability={C.OPERATIONS_READ}>
+              <DevicesPage />
+            </RequireCapability>
+          }
+        />
+        <Route path="kiosks" element={<Navigate to="/devices?type=kiosk" replace />} />
+        <Route
+          path="kiosks/:id"
           element={
             <RequireCapability capability={C.OPERATIONS_READ}>
               <KiosksPage />

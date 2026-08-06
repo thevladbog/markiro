@@ -1,11 +1,13 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   Badge,
   Button,
   Card,
+  Drawer,
   Field,
   Input,
   Select,
@@ -186,6 +188,62 @@ describe("Card", () => {
     expect(screen.getByText("Задания")).toBeDefined();
     expect(screen.getByText("Все")).toBeDefined();
     expect(screen.getByText("Содержимое")).toBeDefined();
+  });
+});
+
+describe("Drawer", () => {
+  function DrawerHarness() {
+    const [open, setOpen] = useState(false);
+    return <><button type="button" onClick={() => setOpen(true)}>Open drawer</button><Drawer open={open} title="Device setup" onClose={() => setOpen(false)}><button type="button">Save device</button></Drawer></>;
+  }
+
+  it("keeps keyboard focus in a labelled modal dialog and restores its opener when closed", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    render(
+      <>
+        <button type="button">Open device</button>
+        <Drawer open title="Device setup" onClose={onClose} closeLabel="Close drawer">
+          <input aria-label="Device name" />
+          <button type="button">Save device</button>
+        </Drawer>
+      </>,
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "Device setup" });
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    expect(document.activeElement).toBe(screen.getByLabelText("Close drawer"));
+
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Save device" }));
+    await user.keyboard("{Escape}");
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("restores focus to its opener after Escape closes it", async () => {
+    const user = userEvent.setup();
+    render(<DrawerHarness />);
+    const opener = screen.getByRole("button", { name: "Open drawer" });
+    await user.click(opener);
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it("closes from its overlay and its close control", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    const { container } = render(
+      <Drawer open title="Device setup" onClose={onClose} closeLabel="Close drawer">
+        Content
+      </Drawer>,
+    );
+
+    await user.click(screen.getByLabelText("Close drawer"));
+    expect(onClose).toHaveBeenCalledOnce();
+
+    await user.click(container.querySelector(".mk-drawer-overlay")!);
+    expect(onClose).toHaveBeenCalledTimes(2);
   });
 });
 

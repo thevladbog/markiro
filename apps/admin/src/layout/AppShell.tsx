@@ -25,7 +25,7 @@ export const NAV_ITEMS: ReadonlyArray<{
   { to: "/conflicts", key: "nav.conflicts", capability: C.OPERATIONS_READ },
   { to: "/counterparties", key: "nav.counterparties", capability: C.OPERATIONS_READ },
   { to: "/employees", key: "nav.employees", capability: C.OPERATIONS_READ },
-  { to: "/kiosks", key: "nav.kiosks", capability: C.OPERATIONS_READ },
+  { to: "/devices", key: "nav.devices", capability: C.OPERATIONS_READ },
   { to: "/integrations", key: "nav.integrations", capability: C.INTEGRATIONS_READ },
   { to: "/labels", key: "nav.labels", capability: C.OPERATIONS_READ },
   { to: "/pickup", key: "nav.pickup", capability: C.OPERATIONS_READ },
