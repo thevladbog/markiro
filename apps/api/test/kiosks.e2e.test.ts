@@ -16,6 +16,24 @@ const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
 );
 
+async function waitForKioskLockWait(pool: AuthSetup["pool"]): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const result = await pool.query(`
+      SELECT EXISTS (
+        SELECT 1
+        FROM pg_stat_activity
+        WHERE datname = current_database()
+          AND wait_event_type = 'Lock'
+          AND query ILIKE '%kiosks%'
+          AND query ILIKE '%for update%'
+      )
+    `);
+    if (result.rows[0]?.exists === true) return;
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Timed out waiting for enrollment to block on the kiosk row lock");
+}
+
 describe.skipIf(!ready)("kiosks e2e", () => {
   let app: INestApplication | undefined;
   let setup: AuthSetup;
@@ -320,16 +338,22 @@ describe.skipIf(!ready)("kiosks e2e", () => {
       archiveLocked?.();
       await archivePaused;
     });
-    await archiveStarted;
-    const enroll = agent
-      .post(`/kiosks/${id}/enroll`)
-      .send({})
-      .then((response) => response);
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    releaseArchive?.();
-    await archive;
+    let enroll: Promise<request.Response> | undefined;
+    try {
+      await archiveStarted;
+      enroll = agent
+        .post(`/kiosks/${id}/enroll`)
+        .send({})
+        .then((response) => response);
+      await waitForKioskLockWait(setup.pool);
+      releaseArchive?.();
+      await archive;
 
-    expect((await enroll).status).toBe(404);
+      expect((await enroll).status).toBe(404);
+    } finally {
+      releaseArchive?.();
+      await Promise.allSettled([archive, enroll].filter((pending) => pending !== undefined));
+    }
   });
 
   it("cross-tenant isolation: org B cannot PATCH/DELETE org A's kiosk (404)", async () => {

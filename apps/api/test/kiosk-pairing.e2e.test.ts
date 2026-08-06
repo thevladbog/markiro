@@ -7,6 +7,7 @@ import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { AppModule } from "../src/app.module";
+import { DB_POOL } from "../src/auth/auth.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { hashPairingCode } from "../src/pickup/device-token";
@@ -104,6 +105,41 @@ async function seedPairAttemptFailures(db: Db, failures: number): Promise<void> 
         set: { failures },
       });
   }
+}
+
+async function waitForCodeClaimPause(pool: AuthSetup["pool"]): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const result = await pool.query(`
+      SELECT EXISTS (
+        SELECT 1
+        FROM pg_stat_activity
+        WHERE datname = current_database()
+          AND wait_event = 'PgSleep'
+          AND query ILIKE '%kiosk_pairing_codes%'
+      )
+    `);
+    if (result.rows[0]?.exists === true) return;
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Timed out waiting for the controlled pairing-code claim pause");
+}
+
+async function waitForKioskLockWait(pool: AuthSetup["pool"]): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const result = await pool.query(`
+      SELECT EXISTS (
+        SELECT 1
+        FROM pg_stat_activity
+        WHERE datname = current_database()
+          AND wait_event_type = 'Lock'
+          AND query ILIKE '%kiosks%'
+          AND query ILIKE '%for update%'
+      )
+    `);
+    if (result.rows[0]?.exists === true) return;
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Timed out waiting for code issuance to block on the kiosk row lock");
 }
 
 describe.skipIf(!ready)("kiosk pairing e2e", () => {
@@ -659,9 +695,10 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
         return originalBootstrap(tid, kid);
       });
 
+    let pair: Promise<request.Response> | undefined;
     try {
       const issued = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
-      const pair = request(app!.getHttpServer())
+      pair = request(app!.getHttpServer())
         .post("/kiosk/pair")
         .send({ code: issued.body.code })
         .then((response) => response);
@@ -671,6 +708,10 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
 
       expect((await pair).status).toBe(401);
     } finally {
+      releaseBootstrap?.();
+      await Promise.allSettled(
+        [pair].filter((pending): pending is Promise<request.Response> => pending !== undefined),
+      );
       bootstrapSpy.mockRestore();
     }
   });
@@ -697,28 +738,114 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
       archiveLocked?.();
       await archivePaused;
     });
-    await archiveStarted;
-    const issue = agent
-      .post(`/kiosks/${kioskId}/pairing-code`)
-      .send({})
-      .then((response) => response);
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    releaseArchive?.();
-    await archive;
+    let issue: Promise<request.Response> | undefined;
+    try {
+      await archiveStarted;
+      issue = agent
+        .post(`/kiosks/${kioskId}/pairing-code`)
+        .send({})
+        .then((response) => response);
+      await waitForKioskLockWait(app!.get<AuthSetup["pool"]>(DB_POOL));
+      releaseArchive?.();
+      await archive;
 
-    expect((await issue).status).toBe(404);
-    const liveCodes = await db
+      expect((await issue).status).toBe(404);
+      const liveCodes = await db
+        .select({ id: schema.kioskPairingCodes.id })
+        .from(schema.kioskPairingCodes)
+        .where(
+          and(
+            eq(schema.kioskPairingCodes.tenantId, tenantId),
+            eq(schema.kioskPairingCodes.kioskId, kioskId),
+            isNull(schema.kioskPairingCodes.usedAt),
+          ),
+        );
+      expect(liveCodes).toEqual([]);
+    } finally {
+      releaseArchive?.();
+      await Promise.allSettled([archive, issue].filter((pending) => pending !== undefined));
+    }
+  });
+
+  it("serializes redemption before archive without a code-to-kiosk deadlock", async () => {
+    const issued = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    const [code] = await db
       .select({ id: schema.kioskPairingCodes.id })
       .from(schema.kioskPairingCodes)
-      .where(
-        and(
-          eq(schema.kioskPairingCodes.tenantId, tenantId),
-          eq(schema.kioskPairingCodes.kioskId, kioskId),
-          isNull(schema.kioskPairingCodes.usedAt),
-        ),
-      );
-    expect(liveCodes).toEqual([]);
-  });
+      .where(eq(schema.kioskPairingCodes.codeHash, codeHashOf(issued.body.code)));
+    expect(code).toBeDefined();
+
+    const pool = app!.get<AuthSetup["pool"]>(DB_POOL);
+    const objectScope = code!.id.replaceAll("-", "");
+    const pauseFunction = `kp_pause_code_claim_${objectScope}`;
+    const pauseTrigger = `kp_pause_code_claim_trigger_${objectScope}`;
+    const identifier = (value: string) => `"${value}"`;
+    let pair: Promise<request.Response> | undefined;
+    let archive: Promise<request.Response> | undefined;
+    let primaryError: unknown;
+
+    try {
+      await pool.query(`
+        CREATE FUNCTION ${identifier(pauseFunction)}()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+          IF OLD.id = '${code!.id}'::uuid THEN
+            PERFORM pg_sleep(2);
+          END IF;
+          RETURN NEW;
+        END;
+        $$
+      `);
+      await pool.query(`
+        CREATE TRIGGER ${identifier(pauseTrigger)}
+        BEFORE UPDATE ON kiosk_pairing_codes
+        FOR EACH ROW EXECUTE FUNCTION ${identifier(pauseFunction)}()
+      `);
+
+      pair = request(app!.getHttpServer())
+        .post("/kiosk/pair")
+        .send({ code: issued.body.code })
+        .then((response) => response);
+      await waitForCodeClaimPause(pool);
+      archive = agent.delete(`/kiosks/${kioskId}`).then((response) => response);
+
+      const [paired, archived] = await Promise.all([pair, archive]);
+      expect(paired.status).toBe(201);
+      expect(archived.status).toBe(204);
+      await request(app!.getHttpServer())
+        .get("/kiosk/bootstrap")
+        .set("x-kiosk-token", paired.body.token)
+        .expect(401);
+      const [kiosk] = await db
+        .select({ deviceTokenHash: schema.kiosks.deviceTokenHash })
+        .from(schema.kiosks)
+        .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, kioskId)));
+      expect(kiosk?.deviceTokenHash).toBeNull();
+    } catch (error) {
+      primaryError = error;
+    }
+
+    let cleanupError: unknown;
+    for (const cleanup of [
+      () => pool.query(`DROP TRIGGER IF EXISTS ${identifier(pauseTrigger)} ON kiosk_pairing_codes`),
+      () => pool.query(`DROP FUNCTION IF EXISTS ${identifier(pauseFunction)}() CASCADE`),
+    ]) {
+      try {
+        await cleanup();
+      } catch (error) {
+        cleanupError ??= error;
+      }
+    }
+    await Promise.allSettled(
+      [pair, archive].filter(
+        (request): request is Promise<request.Response> => request !== undefined,
+      ),
+    );
+    if (primaryError !== undefined) throw primaryError;
+    if (cleanupError !== undefined) throw cleanupError;
+  }, 10_000);
 
   // F2 regression: once the global backstop is already exhausted, a request
   // from a source with no row of its own yet (standing in for an attacker

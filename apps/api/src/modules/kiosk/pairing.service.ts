@@ -243,6 +243,17 @@ export class PairingService {
     // token (or vice versa) would deauthenticate the previously paired
     // device while leaving the new one without a credential either.
     const { kiosk, nextDeviceSeq } = await this.db.transaction(async (tx) => {
+      // Kiosk lifecycle and code issuance lock this durable row before they
+      // touch pairing codes. Keep redemption in the same order: taking the
+      // code first would let an archive hold the kiosk while waiting on this
+      // code, deadlocking both paths and leaving the old token usable.
+      const [lockedKiosk] = await tx
+        .select({ id: schema.kiosks.id, status: schema.kiosks.status })
+        .from(schema.kiosks)
+        .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, kioskId)))
+        .for("update");
+      if (!lockedKiosk || lockedKiosk.status !== "active") throw new UnauthorizedException();
+
       const [claimed] = await tx
         .update(schema.kioskPairingCodes)
         .set({ usedAt: new Date() })
@@ -276,25 +287,9 @@ export class PairingService {
         .returning({ name: schema.kiosks.name, location: schema.kiosks.location });
       if (!kiosk) throw new UnauthorizedException();
 
-      // Lock the kiosk row before computing nextDeviceSeq. The previously
-      // paired device can be past `KioskDeviceGuard` and still mid-flight,
-      // inserting its own order, when this re-pair runs -- `createFromKiosk`
-      // (`insertOrderWithRetry` in pickup-orders.service.ts) takes this SAME
-      // row lock before it inserts, so the two paths can never interleave
-      // around this read. That makes the MAX below unable to miss an order
-      // that is already committing: whichever of the two transactions asks
-      // for the lock first now runs to completion before the other
-      // proceeds, instead of the MAX read racing a commit that lands right
-      // after it -- which, since (tenant, kiosk, deviceSeq) is the order
-      // idempotency key, would otherwise hand this replacement device a
-      // deviceSeq the late order already used and silently discard its
-      // first genuine order as a false replay. Scoped to just this one row,
-      // for only the remainder of this transaction.
-      await tx
-        .select({ id: schema.kiosks.id })
-        .from(schema.kiosks)
-        .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, kioskId)))
-        .for("update");
+      // The kiosk row is already locked above. `createFromKiosk`
+      // (`insertOrderWithRetry`) takes this same row lock before inserting,
+      // so its committed device sequence is visible before this MAX runs.
 
       const [orderSeq] = await tx
         .select({ max: max(schema.pickupOrders.deviceSeq) })
