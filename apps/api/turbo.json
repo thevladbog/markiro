@@ -10,6 +10,7 @@
         "BETTER_AUTH_URL",
         "ADMIN_ORIGIN",
         "KIOSK_ORIGIN",
+        "STATION_ORIGIN",
         "PAIRING_CODE_PEPPER"
       ]
     }

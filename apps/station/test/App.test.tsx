@@ -79,7 +79,13 @@ vi.mock("../src/lib/hardware.js", async (importOriginal) => {
 });
 
 import i18n from "../src/i18n/index.js";
-import { App, nextStationView, pickScanSource, scannerIndicator } from "../src/App.js";
+import {
+  App,
+  nextStationView,
+  pairingServerUrl,
+  pickScanSource,
+  scannerIndicator,
+} from "../src/App.js";
 import type { StationConfig } from "../src/lib/config.js";
 import { hashSecret } from "../src/lib/crypto.js";
 import type { HardwareConfig } from "../src/lib/hardware-config.js";
@@ -120,7 +126,8 @@ const operator: OperatorMirrorRecord = {
   name: "Ivan",
   login: "1001",
   role: "operator",
-  pinHash: "hash",
+  pinHash:
+    "pbkdf2$sha256$100000$fwGrIt01vwgBxxDlhqLVRQ==$PGnhdQA2lW09CcvuOhCmvp0z4HbztWXaYIq7+dqmLoQ=",
   badgeHash: null,
   active: true,
 };
@@ -398,6 +405,31 @@ describe("nextStationView", () => {
   });
 });
 
+describe("pairingServerUrl", () => {
+  it("uses the trusted build API base for a fresh station, never the webview origin", () => {
+    expect(pairingServerUrl({ machineId: "m1" }, "https://api.factory.example/")).toBe(
+      "https://api.factory.example",
+    );
+  });
+
+  it("keeps the persisted API base for durable credential recovery", () => {
+    const credentialClearedConfig: StationConfig = {
+      machineId: "m1",
+      deviceId: "device-1",
+      serverUrl: "https://recovery.factory.example",
+    };
+    expect(nextStationView(credentialClearedConfig, null)).toBe("pairing");
+    expect(pairingServerUrl(credentialClearedConfig, "https://api.factory.example")).toBe(
+      "https://recovery.factory.example",
+    );
+  });
+
+  it("refuses a missing or unsafe build base instead of falling back to location.origin", () => {
+    expect(pairingServerUrl({ machineId: "m1" }, undefined)).toBeNull();
+    expect(pairingServerUrl({ machineId: "m1" }, "https://operator:secret@api.example")).toBeNull();
+  });
+});
+
 describe("App", () => {
   it("renders Enrollment when readConfig resolves an un-enrolled config", async () => {
     invokeMock.mockImplementation((cmd: string): Promise<unknown> => {
@@ -420,7 +452,11 @@ describe("App", () => {
     // Mutable so a `write_config` call updates what the next `read_config`
     // resolves to. This exercises the upgrade-safe route: an enrolled bundle
     // still advances directly to operator login after a refresh.
-    let rustConfig: Record<string, unknown> = { machine_id: "m1" };
+    let rustConfig: Record<string, unknown> = {
+      machine_id: "m1",
+      device_id: "device-1",
+      server_url: "http://localhost:3000",
+    };
     invokeMock.mockImplementation((cmd: string, payload?: unknown): Promise<unknown> => {
       if (cmd === "read_config") return Promise.resolve(rustConfig);
       if (cmd === "write_config") {
@@ -486,7 +522,8 @@ describe("App", () => {
           name: "Ivan",
           login: "1001",
           role: "operator",
-          pinHash: "hash",
+          pinHash:
+            "pbkdf2$sha256$100000$fwGrIt01vwgBxxDlhqLVRQ==$PGnhdQA2lW09CcvuOhCmvp0z4HbztWXaYIq7+dqmLoQ=",
           badgeHash: null,
           active: true,
         },

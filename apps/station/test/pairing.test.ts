@@ -30,7 +30,8 @@ const provisioning: StationProvisioning = {
       name: "Operator",
       login: "1001",
       role: "operator",
-      pinHash: "hash",
+      pinHash:
+        "pbkdf2$sha256$100000$fwGrIt01vwgBxxDlhqLVRQ==$PGnhdQA2lW09CcvuOhCmvp0z4HbztWXaYIq7+dqmLoQ=",
       badgeHash: null,
       active: true,
     },
@@ -79,6 +80,24 @@ describe("persistStationProvisioning", () => {
     await expect(
       persistStationProvisioning(provisioning, { machineId: "machine-1", exec, writeConfig }),
     ).rejects.toThrow("mirror unavailable");
+    expect(writeConfig).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a plaintext PIN verifier", { pinHash: "not-a-phc" }],
+    ["a malformed badge verifier", { badgeHash: "not-a-phc" }],
+  ])("rejects %s before publishing roster or config", async (_label, operatorPatch) => {
+    const exec: SqlExecutor = { run: vi.fn(), all: vi.fn() };
+    const writeConfig = vi.fn();
+    const invalid: StationProvisioning = {
+      ...provisioning,
+      operators: [{ ...provisioning.operators[0]!, ...operatorPatch }],
+    };
+
+    await expect(
+      persistStationProvisioning(invalid, { machineId: "machine-1", exec, writeConfig }),
+    ).rejects.toThrow("Invalid operator roster");
+    expect(exec.run).not.toHaveBeenCalled();
     expect(writeConfig).not.toHaveBeenCalled();
   });
 

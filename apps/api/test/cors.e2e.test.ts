@@ -27,6 +27,7 @@ const FOREIGN_ORIGIN = "https://evil.example";
  * be absent. A literal also keeps it provably distinct from ADMIN_ORIGIN.
  */
 const KIOSK_ORIGIN = "https://kiosk.markiro.test";
+const STATION_ORIGIN = "https://station.markiro.test";
 
 describe.skipIf(!ready)("cors e2e", () => {
   let app: INestApplication | undefined;
@@ -34,7 +35,7 @@ describe.skipIf(!ready)("cors e2e", () => {
   let adminOrigin: string;
 
   beforeAll(async () => {
-    const env = { ...loadEnv(), KIOSK_ORIGIN };
+    const env = { ...loadEnv(), KIOSK_ORIGIN, STATION_ORIGIN };
     adminOrigin = env.ADMIN_ORIGIN;
     setup = setupAuth(env);
 
@@ -142,6 +143,18 @@ describe.skipIf(!ready)("cors e2e", () => {
     expect(res.headers["access-control-allow-origin"]).toBe(KIOSK_ORIGIN);
   });
 
+  it("OPTIONS preflight from STATION_ORIGIN on unauthenticated /station/pair is accepted", async () => {
+    const res = await request(app!.getHttpServer())
+      .options("/station/pair")
+      .set("Origin", STATION_ORIGIN)
+      .set("Access-Control-Request-Method", "POST")
+      .set("Access-Control-Request-Headers", "content-type")
+      .expect(204);
+
+    expect(res.headers["access-control-allow-origin"]).toBe(STATION_ORIGIN);
+    expect(res.headers["access-control-allow-credentials"]).toBe("true");
+  });
+
   /**
    * The kiosk origin is scoped to `/kiosk/*`, not granted globally.
    *
@@ -214,6 +227,34 @@ describe.skipIf(!ready)("cors e2e", () => {
         expect({ path, acao: res.headers["access-control-allow-origin"] }).toEqual({
           path,
           acao: adminOrigin,
+        });
+      }
+    });
+  });
+
+  describe("the station origin is scoped to /station/*", () => {
+    it("is accepted on a station route and refused on kiosk and session routes", async () => {
+      const granted = await request(app!.getHttpServer())
+        .options("/station/pair")
+        .set("Origin", STATION_ORIGIN)
+        .set("Access-Control-Request-Method", "POST")
+        .expect(204);
+      expect(granted.headers["access-control-allow-origin"]).toBe(STATION_ORIGIN);
+
+      for (const path of [
+        "/kiosk/bootstrap",
+        "/counterparties",
+        "/api/auth/sign-in/email",
+        "/stations",
+      ]) {
+        const refused = await request(app!.getHttpServer())
+          .options(path)
+          .set("Origin", STATION_ORIGIN)
+          .set("Access-Control-Request-Method", "POST")
+          .expect(204);
+        expect({ path, acao: refused.headers["access-control-allow-origin"] }).toEqual({
+          path,
+          acao: undefined,
         });
       }
     });

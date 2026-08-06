@@ -140,4 +140,38 @@ describe("redeemStationPairing", () => {
       error: "invalid_response",
     });
   });
+
+  it("rejects plaintext operator verifiers before provisioning can begin", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          device: {
+            id: "device-1",
+            name: "Line station",
+            tenantId: "tenant-1",
+            organizationName: "Factory",
+            line: null,
+          },
+          credential: { apiKey: "station-credential", serverUrl: "https://station.example" },
+          operators: [
+            {
+              operatorId: "operator-1",
+              name: "Operator",
+              login: "1001",
+              role: "operator",
+              pinHash: "not-a-phc",
+              badgeHash: null,
+              active: true,
+            },
+          ],
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await expect(redeemStationPairing("https://station.example", "12345678")).resolves.toEqual({
+      ok: false,
+      error: "invalid_response",
+    });
+  });
 });

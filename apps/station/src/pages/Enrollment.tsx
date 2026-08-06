@@ -14,6 +14,7 @@ import type { ScanSource } from "../lib/scan-source.js";
 export interface EnrollmentProps {
   machineId: string;
   onEnrolled: () => void;
+  pairingServerUrl: string | null;
   onSetup?: () => void;
   scanSource?: ScanSource;
 }
@@ -25,12 +26,20 @@ type EnrollmentState = "waiting" | "redeeming" | "success" | "service";
  * service recovery action, not an ordinary operator workflow, and still
  * proves reachability/authentication before it can write a credential.
  */
-export function Enrollment({ machineId, onEnrolled, onSetup, scanSource }: EnrollmentProps) {
+export function Enrollment({
+  machineId,
+  onEnrolled,
+  pairingServerUrl,
+  onSetup,
+  scanSource,
+}: EnrollmentProps) {
   const { t } = useTranslation();
   const [code, setCode] = useState("");
   const [state, setState] = useState<EnrollmentState>("waiting");
-  const [error, setError] = useState<PairingError | "service" | null>(null);
-  const [serverUrl, setServerUrl] = useState(() => window.location.origin);
+  const [error, setError] = useState<PairingError | "service" | "setup_required" | null>(() =>
+    pairingServerUrl ? null : "setup_required",
+  );
+  const [serverUrl, setServerUrl] = useState(() => pairingServerUrl ?? "");
   const [apiKey, setApiKey] = useState("");
 
   const busy = state === "redeeming";
@@ -47,9 +56,13 @@ export function Enrollment({ machineId, onEnrolled, onSetup, scanSource }: Enrol
 
   async function redeem() {
     if (busy || !/^\d{8}$/.test(code)) return;
+    if (!pairingServerUrl) {
+      setError("setup_required");
+      return;
+    }
     setState("redeeming");
     setError(null);
-    const result = await redeemStationPairing(serverUrl, code);
+    const result = await redeemStationPairing(pairingServerUrl, code);
     if (!result.ok) {
       setError(result.error);
       setState("waiting");
@@ -136,7 +149,10 @@ export function Enrollment({ machineId, onEnrolled, onSetup, scanSource }: Enrol
                 }
               }}
             />
-            <Button onClick={() => void redeem()} disabled={busy || code.length !== 8}>
+            <Button
+              onClick={() => void redeem()}
+              disabled={busy || code.length !== 8 || !pairingServerUrl}
+            >
               {busy ? t("enroll.redeeming") : t("enroll.submit")}
             </Button>
             {onSetup ? (

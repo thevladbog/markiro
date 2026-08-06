@@ -19,6 +19,7 @@
       "rate_limited": "Too many pairing attempts. Try again later.",
       "unavailable": "The station could not reach the server. Check the connection and try again.",
       "invalid_response": "The server returned an invalid pairing response.",
+      "setup_required": "Station API setup is required before pairing.",
       "service": "Could not connect. Check the URL and key."
     }
   },

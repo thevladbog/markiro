@@ -18,6 +18,7 @@ import {
 import { mirrorShiftBundle } from "./lib/shift-bundle.js";
 import { syncOperatorRoster } from "./lib/roster-sync.js";
 import { createKeyboardWedgeSource } from "./lib/scan-source.js";
+import { canonicalStationApiUrl } from "./lib/station-api-url.js";
 import { loadSoundSettings, type SoundSettings } from "./lib/signal-sound.js";
 import { tauriExecutor } from "./lib/sqlite.js";
 import { useSyncEngine } from "./lib/use-sync-engine.js";
@@ -56,6 +57,25 @@ export function nextStationView(
   if (!isEnrolled(config)) return "pairing";
   if (!operator) return "login";
   return "floor";
+}
+
+/**
+ * Fresh devices use the build-time deployment base. A durable device that
+ * lost only its key re-pairs with its already trusted persisted API base;
+ * neither path ever derives an API target from `window.location.origin`.
+ */
+export function pairingServerUrl(
+  config: StationConfig,
+  buildApiUrl: string | undefined,
+): string | null {
+  return canonicalStationApiUrl(config.deviceId ? config.serverUrl : buildApiUrl);
+}
+
+function configuredStationApiUrl(): string | undefined {
+  // `import.meta.env` is untyped in this Tauri build, so narrow its untrusted
+  // build-time value before it reaches the URL parser.
+  const value = (import.meta.env as unknown as Record<string, unknown>).VITE_STATION_API_URL;
+  return typeof value === "string" ? value : undefined;
 }
 
 /**
@@ -351,6 +371,7 @@ export function App() {
         onEnrolled={() => void refreshConfig()}
         onSetup={() => setShowSetup(true)}
         scanSource={scanSource}
+        pairingServerUrl={pairingServerUrl(config, configuredStationApiUrl())}
       />
     );
   }

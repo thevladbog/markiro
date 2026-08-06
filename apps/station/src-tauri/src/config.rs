@@ -76,10 +76,77 @@ pub fn write_config(dir: &Path, cfg: &StationConfig) -> Result<(), String> {
         let _ = fs::remove_file(&temporary);
         return Err(error);
     }
-    fs::rename(&temporary, &path).map_err(|e| {
+    replace_config_file(&temporary, &path).map_err(|e| {
         let _ = fs::remove_file(&temporary);
         e.to_string()
-    })
+    })?;
+    sync_parent_directory(dir)
+}
+
+/// Replaces the destination without truncating it in place. Windows cannot
+/// rely on `rename` replacing an existing file, so it uses `ReplaceFileW`
+/// when a prior config exists; that API either keeps the old destination or
+/// atomically installs the completed sibling. A first write has no destination
+/// and uses `MoveFileExW` with write-through semantics instead.
+#[cfg(windows)]
+fn replace_config_file(temporary: &Path, destination: &Path) -> std::io::Result<()> {
+    use std::iter::once;
+    use std::os::windows::ffi::OsStrExt;
+    use std::ptr::null;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, ReplaceFileW, MOVEFILE_WRITE_THROUGH, REPLACEFILE_WRITE_THROUGH,
+    };
+
+    let temporary_wide = temporary
+        .as_os_str()
+        .encode_wide()
+        .chain(once(0))
+        .collect::<Vec<_>>();
+    let destination_wide = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(once(0))
+        .collect::<Vec<_>>();
+    let succeeded = unsafe {
+        if destination.exists() {
+            ReplaceFileW(
+                destination_wide.as_ptr(),
+                temporary_wide.as_ptr(),
+                null(),
+                REPLACEFILE_WRITE_THROUGH,
+                null(),
+                null(),
+            ) != 0
+        } else {
+            MoveFileExW(
+                temporary_wide.as_ptr(),
+                destination_wide.as_ptr(),
+                MOVEFILE_WRITE_THROUGH,
+            ) != 0
+        }
+    };
+    if succeeded {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+#[cfg(not(windows))]
+fn replace_config_file(temporary: &Path, destination: &Path) -> std::io::Result<()> {
+    fs::rename(temporary, destination)
+}
+
+#[cfg(unix)]
+fn sync_parent_directory(dir: &Path) -> Result<(), String> {
+    fs::File::open(dir)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|e| e.to_string())
+}
+
+#[cfg(not(unix))]
+fn sync_parent_directory(_dir: &Path) -> Result<(), String> {
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -114,7 +181,6 @@ pub fn clear_credential(dir: &Path) -> Result<(), String> {
     cfg.line_id = None;
     cfg.line_name = None;
     cfg.api_key = None;
-    cfg.server_url = None;
     write_config(dir, &cfg)
 }
 
@@ -170,6 +236,32 @@ mod tests {
     }
 
     #[test]
+    fn replace_config_file_installs_a_complete_new_document_over_an_existing_one() {
+        let dir = temp_dir();
+        let mut original = read_config(&dir).unwrap();
+        original.device_id = Some("device_before".into());
+        original.api_key = Some("credential-before".into());
+        write_config(&dir, &original).unwrap();
+
+        let mut replacement = original.clone();
+        replacement.device_id = Some("device_after".into());
+        replacement.api_key = Some("credential-after".into());
+        replacement.server_url = Some("https://api.example".into());
+        write_config(&dir, &replacement).unwrap();
+
+        let on_disk: StationConfig = serde_json::from_str(
+            &fs::read_to_string(config_path(&dir)).expect("replacement is readable"),
+        )
+        .expect("replacement is complete JSON");
+        assert_eq!(on_disk, replacement);
+        assert!(fs::read_dir(&dir).unwrap().all(|entry| !entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .ends_with(".tmp")));
+    }
+
+    #[test]
     fn clear_credential_keeps_the_durable_machine_and_device_identity() {
         let dir = temp_dir();
         let mut cfg = read_config(&dir).unwrap();
@@ -194,7 +286,7 @@ mod tests {
         assert_eq!(cleared.line_id, None);
         assert_eq!(cleared.line_name, None);
         assert_eq!(cleared.api_key, None);
-        assert_eq!(cleared.server_url, None);
+        assert_eq!(cleared.server_url, cfg.server_url);
     }
 
     #[cfg(unix)]
@@ -204,7 +296,10 @@ mod tests {
         let dir = temp_dir();
         let cfg = read_config(&dir).unwrap();
         write_config(&dir, &cfg).unwrap();
-        let mode = fs::metadata(config_path(&dir)).unwrap().permissions().mode();
+        let mode = fs::metadata(config_path(&dir))
+            .unwrap()
+            .permissions()
+            .mode();
         assert_eq!(mode & 0o777, 0o600);
     }
 

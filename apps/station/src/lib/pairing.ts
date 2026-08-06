@@ -1,3 +1,4 @@
+import { parsePhc } from "@markiro/domain";
 import type { OperatorMirrorRecord } from "@markiro/db";
 import { postUnauthenticatedStationRequest } from "./api-client.js";
 import type { StationConfig } from "./config.js";
@@ -68,6 +69,9 @@ export async function persistStationProvisioning(
   provisioning: StationProvisioning,
   { machineId, exec, writeConfig, onRosterPublished }: ProvisioningPersistenceDependencies,
 ): Promise<void> {
+  if (!provisioning.operators.every(isOperator)) {
+    throw new Error("Invalid operator roster");
+  }
   await replaceOperatorsMirror(exec, provisioning.operators);
   onRosterPublished?.();
   await writeConfig({
@@ -163,7 +167,9 @@ function isOperator(value: unknown): value is OperatorMirrorRecord {
     isNonEmptyString(value.login) &&
     isNonEmptyString(value.role) &&
     isNonEmptyString(value.pinHash) &&
-    (value.badgeHash === null || isNonEmptyString(value.badgeHash)) &&
+    parsePhc(value.pinHash) !== null &&
+    (value.badgeHash === null ||
+      (isNonEmptyString(value.badgeHash) && parsePhc(value.badgeHash) !== null)) &&
     typeof value.active === "boolean"
   );
 }

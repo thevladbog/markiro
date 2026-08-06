@@ -26,13 +26,35 @@ The Windows installer is produced in CI (see `.github/workflows/ci.yml`); a
 
 ## Enrollment
 
-1. In the admin panel, create a station device (`POST /station-devices`) and
-   copy the one-time api-key.
-2. Launch the station, enter the server URL + api-key on the enrollment screen.
-3. The station probes `GET /shifts` (200 = the key resolves a tenant), persists
-   the config, and routes to operator sign-in (`OperatorLogin`) — not
-   directly to shift selection, since an operator still has to authenticate
-   locally by PIN/badge first.
+1. In the admin panel, create a station device and copy its one-time pairing
+   code.
+2. Launch the station and enter or scan that code. The station redeems it at
+   the API base embedded at build time, then persists the returned device
+   credential and roster before it routes to operator sign-in (`OperatorLogin`).
+3. The manual URL + API-key screen is retained only as a service recovery
+   path; it probes `GET /shifts` before persisting a credential.
+
+### Pairing API base and CORS
+
+`VITE_STATION_API_URL` is a **build-time** setting for the station Vite build.
+It must be the canonical HTTP(S) API origin (no path, query, fragment, or
+userinfo). Fresh pairing is intentionally disabled when it is absent or
+invalid; a packaged station must never infer an API target from its webview
+URL. After a credential is cleared, the persisted trusted `server_url` is used
+for re-pairing instead.
+
+Set the API deployment's `STATION_ORIGIN` to the exact station webview origin.
+The API allows that origin only on `/station` and `/station/*`, never on
+session/auth or kiosk endpoints. Tauri v2's documented non-opaque custom
+protocol origin is `tauri://localhost`; Windows builds can instead use the
+documented `http://tauri.localhost` origin. Configure whichever exact origin
+the shipped platform uses, or an exact HTTP(S) origin for a hosted webview;
+never configure opaque `null`.
+
+`clear_credential` retains the machine, device, and trusted server identities
+but removes the API key and tenant/place metadata. It deliberately does not
+seal an actively running station on HTTP 401; Task 11 owns that runtime
+boundary. It also does not touch the local SQLite operational journal.
 
 ## Operator credential hash contract
 

@@ -41,7 +41,13 @@ describe("Enrollment", () => {
     pairingMock.persistStationProvisioning.mockResolvedValue(undefined);
     const onEnrolled = vi.fn();
 
-    render(<Enrollment machineId="machine-1" onEnrolled={onEnrolled} />);
+    render(
+      <Enrollment
+        machineId="machine-1"
+        onEnrolled={onEnrolled}
+        pairingServerUrl="https://api.factory.example"
+      />,
+    );
 
     expect(screen.getByLabelText("Pairing code")).toBeDefined();
     expect(screen.queryByLabelText("Server URL")).toBeNull();
@@ -52,7 +58,7 @@ describe("Enrollment", () => {
     await waitFor(() => expect(pairingMock.persistStationProvisioning).toHaveBeenCalledTimes(1));
     expect(onEnrolled).toHaveBeenCalledTimes(1);
     expect(pairingMock.redeemStationPairing).toHaveBeenCalledWith(
-      window.location.origin,
+      "https://api.factory.example",
       "12345678",
     );
     expect(pairingMock.persistStationProvisioning.mock.invocationCallOrder[0]).toBeLessThan(
@@ -60,10 +66,38 @@ describe("Enrollment", () => {
     );
   });
 
+  it("sends recovery pairing to the retained trusted API base exactly", async () => {
+    pairingMock.redeemStationPairing.mockResolvedValue({ ok: false, error: "invalid" });
+
+    render(
+      <Enrollment
+        machineId="machine-1"
+        onEnrolled={() => {}}
+        pairingServerUrl="https://retained.factory.example"
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Pairing code"), { target: { value: "12345678" } });
+    fireEvent.click(screen.getByRole("button", { name: "Pair station" }));
+
+    await waitFor(() =>
+      expect(pairingMock.redeemStationPairing).toHaveBeenCalledWith(
+        "https://retained.factory.example",
+        "12345678",
+      ),
+    );
+  });
+
   it("shows a stable expired state without persisting", async () => {
     pairingMock.redeemStationPairing.mockResolvedValue({ ok: false, error: "expired" });
     const onEnrolled = vi.fn();
-    render(<Enrollment machineId="machine-1" onEnrolled={onEnrolled} />);
+    render(
+      <Enrollment
+        machineId="machine-1"
+        onEnrolled={onEnrolled}
+        pairingServerUrl="https://api.factory.example"
+      />,
+    );
 
     fireEvent.change(screen.getByLabelText("Pairing code"), { target: { value: "12345678" } });
     fireEvent.click(screen.getByRole("button", { name: "Pair station" }));
@@ -81,7 +115,14 @@ describe("Enrollment", () => {
         return () => {};
       },
     };
-    render(<Enrollment machineId="machine-1" onEnrolled={() => {}} scanSource={scanSource} />);
+    render(
+      <Enrollment
+        machineId="machine-1"
+        onEnrolled={() => {}}
+        pairingServerUrl="https://api.factory.example"
+        scanSource={scanSource}
+      />,
+    );
 
     act(() => listener?.("12345678"));
 
@@ -89,11 +130,27 @@ describe("Enrollment", () => {
   });
 
   it("keeps legacy URL and credential entry behind the explicit service action", async () => {
-    render(<Enrollment machineId="machine-1" onEnrolled={() => {}} />);
+    render(
+      <Enrollment
+        machineId="machine-1"
+        onEnrolled={() => {}}
+        pairingServerUrl="https://api.factory.example"
+      />,
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Service setup" }));
 
     expect(screen.getByLabelText("Server URL")).toBeDefined();
     expect(screen.getByLabelText("Device key")).toBeDefined();
+  });
+
+  it("shows setup-required and does not redeem when no trusted pairing base is configured", () => {
+    render(<Enrollment machineId="machine-1" onEnrolled={() => {}} pairingServerUrl={null} />);
+
+    expect(screen.getByText("Station API setup is required before pairing.")).toBeDefined();
+    fireEvent.change(screen.getByLabelText("Pairing code"), { target: { value: "12345678" } });
+    fireEvent.click(screen.getByRole("button", { name: "Pair station" }));
+
+    expect(pairingMock.redeemStationPairing).not.toHaveBeenCalled();
   });
 });
