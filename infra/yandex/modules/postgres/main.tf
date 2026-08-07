@@ -27,7 +27,7 @@ resource "yandex_mdb_postgresql_cluster" "production" {
     }
 
     resources {
-      resource_preset_id = "s2.medium"
+      resource_preset_id = "s3-c2-m8"
       disk_type_id       = "network-ssd"
       disk_size          = var.database_disk_size_gb
     }

@@ -900,6 +900,23 @@ function assertPrivateNetworkAndCompute({
       "instance metadata must not contain a runtime credential payload",
     );
   }
+  const app = terraformResourceBlock(compute, "yandex_compute_instance", "app");
+  const appResources = terraformNestedBlocks(app, "resources");
+  assert.equal(appResources.length, 1, "app VM must define one exact resource profile");
+  assert.match(
+    appResources[0],
+    /cores\s*=\s*2[\s\S]*?memory\s*=\s*4[\s\S]*?core_fraction\s*=\s*100/,
+    "app VM must use the approved 2 vCPU / 4 GiB MVP profile",
+  );
+
+  const runner = terraformResourceBlock(compute, "yandex_compute_instance", "runner");
+  const runnerResources = terraformNestedBlocks(runner, "resources");
+  assert.equal(runnerResources.length, 1, "runner VM must define one exact resource profile");
+  assert.match(
+    runnerResources[0],
+    /cores\s*=\s*2[\s\S]*?memory\s*=\s*4[\s\S]*?core_fraction\s*=\s*100/,
+    "deployment runner must retain its approved 2 vCPU / 4 GiB profile",
+  );
   assert.doesNotMatch(compute, /nat\s*=\s*true/);
   assert.match(
     compute,
@@ -1194,6 +1211,11 @@ function assertProtectedManagedData({
     "application",
   );
   assert.match(cluster, /version\s*=\s*"17"/);
+  assert.match(
+    cluster,
+    /resource_preset_id\s*=\s*"s3-c2-m8"/,
+    "PostgreSQL must use the approved 2 vCPU / 8 GiB MVP preset",
+  );
   assert.match(cluster, /backup_retain_period_days\s*=\s*14/);
   assert.match(cluster, /backup_window_start\s*\{/);
   assert.match(cluster, /maintenance_window\s*\{/);
@@ -2810,6 +2832,19 @@ test("production ingress contract rejects bypasses, computed certificate keys, f
 });
 
 test("managed-data contract rejects unsafe PostgreSQL, buckets, access, and credentials", async () => {
+  const oversizedPostgres = await managedDataSources();
+  oversizedPostgres.postgres = replaceTerraformResource(
+    oversizedPostgres.postgres,
+    "yandex_mdb_postgresql_cluster",
+    "production",
+    (block) =>
+      block.replace('resource_preset_id = "s3-c2-m8"', 'resource_preset_id = "s2.medium"'),
+  );
+  assert.throws(
+    () => assertProtectedManagedData(oversizedPostgres),
+    /approved 2 vCPU \/ 8 GiB MVP preset/,
+  );
+
   const publicPostgres = await managedDataSources();
   publicPostgres.postgres = replaceTerraformResource(
     publicPostgres.postgres,
@@ -2980,6 +3015,18 @@ test("managed-data contract rejects unsafe PostgreSQL, buckets, access, and cred
 });
 
 test("production private-compute contract rejects public NAT, CIDR SSH, public app traffic, and embedded credentials", async () => {
+  const oversizedApp = await privateNetworkAndComputeSources();
+  oversizedApp.compute = replaceTerraformResource(
+    oversizedApp.compute,
+    "yandex_compute_instance",
+    "app",
+    (block) => block.replace(/cores\s*=\s*2/, "cores = 4"),
+  );
+  assert.throws(
+    () => assertPrivateNetworkAndCompute(oversizedApp),
+    /approved 2 vCPU \/ 4 GiB MVP profile/,
+  );
+
   const natEnabled = await privateNetworkAndComputeSources();
   natEnabled.compute = replaceTerraformResource(
     natEnabled.compute,
