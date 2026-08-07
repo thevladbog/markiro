@@ -1591,9 +1591,15 @@ function assertProtectedObservability({
   }
   assert.match(observability, /yandex\.cloud\.audit\.lockbox\.GetPayload/);
   assert.match(observability, /yandex\.cloud\.audit\.lockbox\.GetPayloadEx/);
-  for (const event of ["ObjectCreate", "ObjectUpdate", "ObjectDelete", "ObjectGet"]) {
+  for (const event of [
+    "ObjectCreate",
+    "ObjectUpdate",
+    "ObjectDelete",
+    "ObjectGetByPresignURL",
+  ]) {
     assert.match(observability, new RegExp(`yandex\\.cloud\\.audit\\.storage\\.${event}`));
   }
+  assert.doesNotMatch(observability, /yandex\.cloud\.audit\.storage\.ObjectGet"/);
 
   const loadBalancer = terraformResourceBlock(ingress, "yandex_alb_load_balancer", "markiro");
   const securityProfile = terraformResourceBlock(ingress, "yandex_sws_security_profile", "markiro");

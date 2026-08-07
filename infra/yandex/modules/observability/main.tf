@@ -16,7 +16,7 @@ locals {
     "yandex.cloud.audit.storage.ObjectCreate",
     "yandex.cloud.audit.storage.ObjectUpdate",
     "yandex.cloud.audit.storage.ObjectDelete",
-    "yandex.cloud.audit.storage.ObjectGet",
+    "yandex.cloud.audit.storage.ObjectGetByPresignURL",
   ]
 
   # Provider 0.215.0 has no Monitoring alert resource. These specifications are
