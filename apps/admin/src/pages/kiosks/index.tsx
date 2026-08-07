@@ -1,253 +1,253 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useParams } from "react-router";
-import { useQueryClient } from "@tanstack/react-query";
+import { Outlet, useNavigate } from "react-router";
 
 import {
   Alert,
   Button,
+  ConfirmDialog,
   EmptyState,
-  Modal,
-  PageHeader,
-  Spinner,
+  FilterBar,
+  RowActions,
+  Select,
   StatusChip,
   Table,
 } from "@markiro/ui";
-import type { TableColumn } from "@markiro/ui";
+import type { SelectOption, StatusChipStatus, TableColumn } from "@markiro/ui";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
 
 import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
+import { formatCreatedAt } from "../../lib/datetime.js";
 import { toast } from "../../lib/toast.js";
-import { useProducts, type ProductDto } from "../catalog/api.js";
-import { KioskForm, type KioskFormValues } from "./KioskForm.js";
-import { PairingCodeModal } from "./PairingCodeModal.js";
-import { ReasonsEditor } from "./ReasonsEditor.js";
+import type { KiosksPanelContext, KiosksPanelLocationState } from "./KioskPanelRoute.js";
+import { KiosksLayout } from "./KiosksLayout.js";
+import { useArchiveKiosk, useKiosks, type KioskDto } from "./api.js";
 import {
-  useArchiveKiosk,
-  clearKioskPairingCodeMutations,
-  useCreateKiosk,
-  useIssueKioskPairingCode,
-  useKiosks,
-  useSetKioskProducts,
-  useUpdateKiosk,
-  type CreateKioskInput,
-  type KioskDto,
-  type UpdateKioskInput,
-} from "./api.js";
+  formatRelativeLastSeen,
+  getKioskOperationalState,
+  type KioskOperationalState,
+  type KioskStateFilter,
+} from "./kioskState.js";
+import "./kiosks.css";
 
-/**
- * The live pairing reveal. Holds the plaintext code, which the server returns
- * exactly once and stores only as a hash -- dropping this state is what makes
- * the reveal one-time, so nothing else may cache it.
- */
-type PairingState = { kiosk: KioskDto; code: string; expiresAt: string } | null;
+const STATE_TO_CHIP: Record<KioskOperationalState, StatusChipStatus> = {
+  archived: "neutral",
+  "awaiting-pairing": "warn",
+  online: "ok",
+  offline: "neutral",
+};
 
-/** A kiosk is considered "online" if it has phoned home within this window. */
-const ONLINE_THRESHOLD_MS = 2 * 60 * 1000;
+const TABLE_SKELETON_COLUMNS = ["identity", "state", "activity", "limit", "prices", "actions"];
+const TABLE_SKELETON_ROWS = ["first", "second", "third"];
 
-function isKioskOnline(lastSeenAt: string | null): boolean {
-  if (!lastSeenAt) return false;
-  return Date.now() - new Date(lastSeenAt).getTime() <= ONLINE_THRESHOLD_MS;
-}
-
-function AuthorizedCreateKioskAction({ products }: { products: ProductDto[] }) {
-  const { t } = useTranslation();
-  const createMutation = useCreateKiosk();
-  const [open, setOpen] = useState(false);
-
-  const handleSubmit = async (input: CreateKioskInput | UpdateKioskInput) => {
-    try {
-      await createMutation.mutateAsync(input as CreateKioskInput);
-      toast("ok", t("pages.kiosks.toasts.createSuccess"));
-      setOpen(false);
-    } catch (error) {
-      toast(
-        "error",
-        error instanceof ApiRequestError ? error.message : t("pages.kiosks.toasts.createError"),
-      );
-    }
-  };
-
+function KiosksTableSkeleton({ label }: { label: string }) {
   return (
-    <>
-      <Button type="button" onClick={() => setOpen(true)}>
-        {t("pages.kiosks.addAction")}
-      </Button>
-      {open ? (
-        <KioskForm
-          open
-          mode="create"
-          products={products}
-          submitting={createMutation.isPending}
-          onSubmit={handleSubmit}
-          onClose={() => setOpen(false)}
-        />
-      ) : null}
-    </>
+    <div
+      className="mk-kiosks-table-skeleton"
+      role="status"
+      aria-label={label}
+      aria-live="polite"
+      aria-busy="true"
+    >
+      <span className="mk-visually-hidden">{label}</span>
+      <div className="mk-kiosks-table-skeleton__scroll" aria-hidden="true">
+        <table>
+          <thead>
+            <tr>
+              {TABLE_SKELETON_COLUMNS.map((column) => (
+                <th key={column}>
+                  <span />
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {TABLE_SKELETON_ROWS.map((row) => (
+              <tr key={row}>
+                {TABLE_SKELETON_COLUMNS.map((column) => (
+                  <td key={column}>
+                    <span />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 
-function AuthorizedKioskRowActions({
-  kiosk,
-  products,
-}: {
-  kiosk: KioskDto;
-  products: ProductDto[];
-}) {
+function AuthorizedCreateKioskAction() {
   const { t } = useTranslation();
-  const updateMutation = useUpdateKiosk();
+  const navigate = useNavigate();
+
+  return (
+    <Button
+      type="button"
+      onClick={() =>
+        void navigate("new", {
+          state: { kiosksBackground: true } satisfies KiosksPanelLocationState,
+        })
+      }
+    >
+      {t("pages.kiosks.addAction")}
+    </Button>
+  );
+}
+
+function AuthorizedKioskRowActions({ kiosk }: { kiosk: KioskDto }) {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
   const archiveMutation = useArchiveKiosk();
-  const setProductsMutation = useSetKioskProducts();
-  const [editing, setEditing] = useState(false);
   const [archiving, setArchiving] = useState(false);
-
-  const initialValues: KioskFormValues = {
-    name: kiosk.name,
-    location: kiosk.location ?? "",
-    dayLimitPerEmployee: String(kiosk.dayLimitPerEmployee),
-    showPrices: kiosk.showPrices,
-  };
-
-  const handleUpdate = async (input: CreateKioskInput | UpdateKioskInput) => {
-    try {
-      await updateMutation.mutateAsync({ id: kiosk.id, input });
-      toast("ok", t("pages.kiosks.toasts.updateSuccess"));
-      setEditing(false);
-    } catch (error) {
-      toast(
-        "error",
-        error instanceof ApiRequestError ? error.message : t("pages.kiosks.toasts.updateError"),
-      );
-    }
-  };
-
-  const handleSaveProducts = async (productIds: string[]) => {
-    try {
-      await setProductsMutation.mutateAsync({ id: kiosk.id, productIds });
-      toast("ok", t("pages.kiosks.toasts.setProductsSuccess"));
-    } catch (error) {
-      toast(
-        "error",
-        error instanceof ApiRequestError
-          ? error.message
-          : t("pages.kiosks.toasts.setProductsError"),
-      );
-    }
-  };
+  const [archiveError, setArchiveError] = useState<string | null>(null);
 
   const handleArchive = async () => {
     try {
+      setArchiveError(null);
       await archiveMutation.mutateAsync(kiosk.id);
       toast("ok", t("pages.kiosks.toasts.archiveSuccess"));
       setArchiving(false);
     } catch (error) {
-      toast(
-        "error",
-        error instanceof ApiRequestError ? error.message : t("pages.kiosks.toasts.archiveError"),
+      setArchiveError(
+        error instanceof ApiRequestError ? error.message : t("pages.kiosks.archivePersistentError"),
       );
     }
   };
 
   return (
     <>
-      <Button type="button" size="compact" variant="secondary" onClick={() => setEditing(true)}>
-        {t("pages.kiosks.edit")}
-      </Button>
-      {kiosk.status === "active" ? (
+      <RowActions>
         <Button
           type="button"
           size="compact"
-          variant="destructive"
-          onClick={() => setArchiving(true)}
+          variant="secondary"
+          onClick={() =>
+            void navigate(`${kiosk.id}/edit`, {
+              state: { kiosksBackground: true } satisfies KiosksPanelLocationState,
+            })
+          }
         >
-          {t("pages.kiosks.archive")}
+          {t("pages.kiosks.edit")}
         </Button>
-      ) : null}
-      {editing ? (
-        <KioskForm
-          open
-          mode="edit"
-          kiosk={kiosk}
-          initialValues={initialValues}
-          products={products}
-          submitting={updateMutation.isPending}
-          savingProducts={setProductsMutation.isPending}
-          onSubmit={handleUpdate}
-          onSaveProducts={handleSaveProducts}
-          onClose={() => setEditing(false)}
-        />
-      ) : null}
-      <Modal
+        {kiosk.status === "active" ? (
+          <Button
+            type="button"
+            size="compact"
+            variant="destructive"
+            onClick={() => {
+              setArchiveError(null);
+              setArchiving(true);
+            }}
+          >
+            {t("pages.kiosks.archive")}
+          </Button>
+        ) : null}
+      </RowActions>
+      <ConfirmDialog
         open={archiving}
-        onClose={() => setArchiving(false)}
-        closeLabel={t("common.close")}
         title={t("pages.kiosks.archiveConfirmTitle")}
-        footer={
-          <>
-            <Button type="button" variant="secondary" onClick={() => setArchiving(false)}>
-              {t("pages.kiosks.cancel")}
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              loading={archiveMutation.isPending}
-              onClick={() => void handleArchive()}
-            >
-              {t("pages.kiosks.archiveConfirmAction")}
-            </Button>
-          </>
-        }
-      >
-        <p style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>
-          {t("pages.kiosks.archiveConfirmBody", { name: kiosk.name })}
-        </p>
-      </Modal>
+        description={t("pages.kiosks.archiveConfirmBody", { name: kiosk.name })}
+        entity={kiosk.name}
+        error={archiveError}
+        cancelLabel={t("pages.kiosks.cancel")}
+        confirmLabel={t("pages.kiosks.archiveConfirmAction")}
+        tone="destructive"
+        busy={archiveMutation.isPending}
+        onCancel={() => {
+          if (archiveMutation.isPending) return;
+          setArchiving(false);
+          setArchiveError(null);
+        }}
+        onConfirm={() => void handleArchive()}
+      />
     </>
   );
 }
 
 /**
  * Admin kiosk settings screen -- Plan A Task 17
- * (list/create/edit/pair/archive + product allowlist + embedded write-off
- * reasons editor). Mirrors `../employees/index.tsx`'s active/archived +
+ * (list/create/edit/pair/archive). Mirrors
+ * `../employees/index.tsx`'s active/archived +
  * confirm-modal pattern (Task 16) for the kiosk lifecycle, and
- * `../shifts/ShiftForm.tsx`'s "pass the already-fetched catalog list down as
- * a prop" convention for the allowlist's product candidates.
  */
 export function KiosksPage() {
-  const { t } = useTranslation();
-  const { id } = useParams<{ id: string }>();
+  const { t, i18n } = useTranslation();
   const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
   const canManageCredentials = useCan(CABINET_CAPABILITY.CREDENTIALS_MANAGE);
-  const { data, isPending, isError } = useKiosks();
-  const { data: productsData } = useProducts({ status: "active" });
+  const { data, isPending, isError, refetch } = useKiosks();
+  const [stateFilter, setStateFilter] = useState<KioskStateFilter>("all");
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
-  const items = data ?? [];
-  const visibleItems = id ? items.filter((item) => item.id === id) : items;
-  const activeProducts = useMemo(() => productsData ?? [], [productsData]);
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const items = useMemo(() => data ?? [], [data]);
+  const kiosksResolved = data !== undefined;
+  const visibleItems = useMemo(
+    () =>
+      items.filter(
+        (kiosk) => stateFilter === "all" || getKioskOperationalState(kiosk, nowMs) === stateFilter,
+      ),
+    [items, nowMs, stateFilter],
+  );
+  const stateOptions: SelectOption<KioskStateFilter>[] = [
+    { value: "all", label: t("pages.kiosks.filters.state.all") },
+    { value: "awaiting-pairing", label: t("pages.kiosks.states.awaiting-pairing") },
+    { value: "online", label: t("pages.kiosks.states.online") },
+    { value: "offline", label: t("pages.kiosks.states.offline") },
+    { value: "archived", label: t("pages.kiosks.states.archived") },
+  ];
 
   const columns: TableColumn<KioskDto>[] = useMemo(
     () => [
-      { key: "name", title: t("pages.kiosks.table.name") },
       {
-        key: "location",
-        title: t("pages.kiosks.table.location"),
-        render: (row) => row.location ?? "—",
+        key: "name",
+        title: t("pages.kiosks.table.name"),
+        render: (row) => (
+          <div className="mk-kiosk-identity">
+            <span className="mk-kiosk-identity__name">{row.name}</span>
+            <span className="mk-kiosk-identity__location">{row.location ?? "—"}</span>
+          </div>
+        ),
       },
       {
-        key: "online",
-        title: t("pages.kiosks.table.online"),
+        key: "state",
+        title: t("pages.kiosks.table.state"),
         render: (row) => {
-          const online = isKioskOnline(row.lastSeenAt);
+          const state = getKioskOperationalState(row, nowMs);
           return (
-            <StatusChip
-              status={online ? "ok" : "neutral"}
-              label={t(
-                online ? "pages.kiosks.onlineStatus.online" : "pages.kiosks.onlineStatus.offline",
-              )}
-            />
+            <StatusChip status={STATE_TO_CHIP[state]} label={t(`pages.kiosks.states.${state}`)} />
+          );
+        },
+      },
+      {
+        key: "lastSeenAt",
+        title: t("pages.kiosks.table.lastActivity"),
+        render: (row) => {
+          if (!row.lastSeenAt) {
+            return (
+              <span className="mk-kiosk-activity__label">{t("pages.kiosks.neverActivity")}</span>
+            );
+          }
+          const relative = formatRelativeLastSeen(row.lastSeenAt, nowMs, i18n.language);
+          const absolute = formatCreatedAt(row.lastSeenAt, i18n.language);
+          return (
+            <div className="mk-kiosk-activity">
+              <time
+                dateTime={row.lastSeenAt}
+                title={absolute}
+                aria-label={t("pages.kiosks.lastActivityAccessible", { relative, absolute })}
+              >
+                {relative}
+              </time>
+              <span className="mk-kiosk-activity__label">{t("pages.kiosks.lastActivity")}</span>
+            </div>
           );
         },
       },
@@ -256,6 +256,7 @@ export function KiosksPage() {
         title: t("pages.kiosks.table.dayLimit"),
         align: "right",
         mono: true,
+        render: (row) => <span className="mk-kiosk-day-limit">{row.dayLimitPerEmployee}</span>,
       },
       {
         key: "showPrices",
@@ -267,8 +268,8 @@ export function KiosksPage() {
         title: t("pages.kiosks.table.actions"),
         align: "right",
         render: (row) => (
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            {canWrite ? <AuthorizedKioskRowActions kiosk={row} products={activeProducts} /> : null}
+          <div className="mk-kiosk-row-actions">
+            {canWrite ? <AuthorizedKioskRowActions kiosk={row} /> : null}
             {row.status === "active" && canManageCredentials ? (
               <KioskPairingAction kiosk={row} />
             ) : null}
@@ -276,114 +277,89 @@ export function KiosksPage() {
         ),
       },
     ],
-    [t, canWrite, canManageCredentials, activeProducts],
+    [t, i18n.language, canWrite, canManageCredentials, nowMs],
   );
 
   return (
-    <div style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: 20 }}>
-      <PageHeader
-        title={t("pages.kiosks.title")}
-        actions={canWrite ? <AuthorizedCreateKioskAction products={activeProducts} /> : null}
-      />
+    <KiosksLayout actions={canWrite ? <AuthorizedCreateKioskAction /> : null}>
+      <FilterBar
+        label={t("pages.kiosks.filters.label")}
+        resultSummary={
+          !isPending && !isError
+            ? t("pages.kiosks.resultCount", { count: visibleItems.length })
+            : ""
+        }
+        {...(stateFilter !== "all"
+          ? { resetLabel: t("pages.kiosks.filters.reset"), onReset: () => setStateFilter("all") }
+          : {})}
+      >
+        <Select
+          className="mk-kiosks-filter--state"
+          label={t("pages.kiosks.filters.stateLabel")}
+          value={stateFilter}
+          options={stateOptions}
+          onValueChange={setStateFilter}
+        />
+      </FilterBar>
 
       {isPending ? (
-        <div style={{ display: "flex", justifyContent: "center", padding: 48 }}>
-          <Spinner label={t("common.loading")} />
-        </div>
+        <KiosksTableSkeleton label={t("common.loading")} />
       ) : isError ? (
-        <Alert tone="error">{t("common.loadError")}</Alert>
-      ) : id && visibleItems.length === 0 ? (
-        <EmptyState title={t("pages.kiosks.emptyTitle")} hint={t("common.loadError")} />
-      ) : visibleItems.length === 0 ? (
+        <div className="mk-kiosks-section-state">
+          <Alert tone="error">{t("common.loadError")}</Alert>
+          <div>
+            <Button type="button" variant="secondary" onClick={() => void refetch()}>
+              {t("pages.kiosks.retry")}
+            </Button>
+          </div>
+        </div>
+      ) : items.length === 0 ? (
         <EmptyState
           title={t("pages.kiosks.emptyTitle")}
           hint={t("pages.kiosks.emptyHint")}
-          action={canWrite ? <AuthorizedCreateKioskAction products={activeProducts} /> : null}
+          action={canWrite ? <AuthorizedCreateKioskAction /> : null}
+        />
+      ) : visibleItems.length === 0 ? (
+        <EmptyState
+          title={t("pages.kiosks.filteredEmptyTitle")}
+          hint={t("pages.kiosks.filteredEmptyHint")}
         />
       ) : (
         <Table columns={columns} rows={visibleItems} />
       )}
-
-      <ReasonsEditor />
-    </div>
+      <Outlet
+        context={
+          {
+            kiosks: items,
+            kiosksPending: isPending,
+            kiosksError: isError,
+            kiosksResolved,
+            retryPanelData: async () => {
+              await refetch();
+            },
+          } satisfies KiosksPanelContext
+        }
+      />
+    </KiosksLayout>
   );
 }
 
-/** Owns the credential mutation so it never mounts for an unauthorized manager. */
 function KioskPairingAction({ kiosk }: { kiosk: KioskDto }) {
   const { t } = useTranslation();
-  const pairingMutation = useIssueKioskPairingCode(kiosk.id);
-  const queryClient = useQueryClient();
-  const [pairing, setPairing] = useState<PairingState>(null);
-  const resetPairingMutation = useRef<() => void>(() => {});
-  const requestGeneration = useRef(0);
-  const mounted = useRef(false);
-  resetPairingMutation.current = pairingMutation.reset;
-
-  const clearPairing = () => {
-    requestGeneration.current += 1;
-    setPairing(null);
-    resetPairingMutation.current();
-    clearKioskPairingCodeMutations(queryClient, kiosk.id);
-  };
-
-  // A route change tears the row down without a close click; do not retain the
-  // one-time plaintext in the mutation cache after that unmount.
-  useEffect(() => {
-    mounted.current = true;
-
-    return () => {
-      mounted.current = false;
-      requestGeneration.current += 1;
-      resetPairingMutation.current();
-      clearKioskPairingCodeMutations(queryClient, kiosk.id);
-    };
-  }, [kiosk.id, queryClient]);
-
-  const handleIssuePairingCode = async () => {
-    const generation = ++requestGeneration.current;
-
-    try {
-      const result = await pairingMutation.mutateAsync();
-      if (!mounted.current || generation !== requestGeneration.current) {
-        clearKioskPairingCodeMutations(queryClient, kiosk.id, result);
-        return;
-      }
-
-      setPairing({ kiosk, code: result.code, expiresAt: result.expiresAt });
-      toast("ok", t("pages.kiosks.toasts.pairingSuccess"));
-    } catch (error) {
-      if (!mounted.current || generation !== requestGeneration.current) {
-        return;
-      }
-
-      toast(
-        "error",
-        error instanceof ApiRequestError ? error.message : t("pages.kiosks.toasts.pairingError"),
-      );
-    }
-  };
+  const navigate = useNavigate();
 
   return (
-    <>
-      <Button
-        type="button"
-        size="compact"
-        variant="secondary"
-        onClick={() => void handleIssuePairingCode()}
-      >
-        {t("pages.kiosks.pairing.action")}
-      </Button>
-      {pairing ? (
-        <PairingCodeModal
-          kioskName={pairing.kiosk.name}
-          code={pairing.code}
-          expiresAt={pairing.expiresAt}
-          regenerating={pairingMutation.isPending}
-          onRegenerate={() => void handleIssuePairingCode()}
-          onClose={clearPairing}
-        />
-      ) : null}
-    </>
+    <Button
+      type="button"
+      size="compact"
+      variant="secondary"
+      onClick={() =>
+        void navigate(`${kiosk.id}/pair`, {
+          state: { kiosksBackground: true } satisfies KiosksPanelLocationState,
+        })
+      }
+    >
+      {t("pages.kiosks.pairing.action")}
+    </Button>
   );
 }

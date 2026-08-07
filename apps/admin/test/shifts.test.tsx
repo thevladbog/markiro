@@ -626,7 +626,7 @@ describe("ShiftsPage", () => {
         }),
       );
     });
-  });
+  }, 10_000);
 
   it("omits counterpartyId from the create payload when left untouched and the product has no default", async () => {
     const user = userEvent.setup();

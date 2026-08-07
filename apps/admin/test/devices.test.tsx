@@ -74,7 +74,7 @@ it("keeps kiosk settings reachable from the unified device row", async () => {
   renderPage();
   await screen.findByText("Entrance kiosk");
   expect(screen.getByRole("link", { name: "Настройки киоска" }).getAttribute("href")).toBe(
-    "/kiosks/kiosk-1",
+    "/kiosks/kiosk-1/edit",
   );
 });
 

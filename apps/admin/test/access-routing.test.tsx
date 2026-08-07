@@ -60,6 +60,19 @@ const JANE = {
   createdAt: "2026-01-01T00:00:00.000Z",
 };
 
+const KIOSK = {
+  id: "k1",
+  name: "Касса у входа",
+  location: "Зал 1",
+  dayLimitPerEmployee: 5,
+  showPrices: true,
+  status: "active",
+  lastSeenAt: null,
+  enrolled: false,
+  productIds: [],
+  createdAt: "2026-08-06T00:00:00.000Z",
+};
+
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(body === undefined ? null : JSON.stringify(body), {
     status,
@@ -108,8 +121,10 @@ function renderAccessRoute(
         return jsonResponse(200, { gln: null, gs1Prefixes: [], inn: null });
       }
       if (path.endsWith("/api/products")) return jsonResponse(200, { items: [] });
+      if (path.endsWith("/api/pickup-reasons")) return jsonResponse(200, { items: [] });
       if (path.endsWith("/api/counterparties")) return jsonResponse(200, { items: [] });
       if (path.endsWith("/api/employees")) return jsonResponse(200, { items: [JANE] });
+      if (path.endsWith("/api/kiosks")) return jsonResponse(200, { items: [KIOSK] });
       if (path.endsWith("/api/operators")) return jsonResponse(200, { items: [] });
       if (path.endsWith("/api/label-templates")) return jsonResponse(200, { items: [] });
       if (path.includes("/api/devices"))
@@ -153,6 +168,7 @@ it("keeps operational navigation for managers while hiding integrations and sett
   expect(await screen.findByRole("link", { name: "Обзор" })).toBeDefined();
   expect(screen.getByRole("link", { name: "Каталог" })).toBeDefined();
   expect(screen.getByRole("link", { name: "Устройства" })).toBeDefined();
+  expect(screen.getByRole("link", { name: "Киоски" })).toBeDefined();
   expect(screen.queryByRole("link", { name: "Интеграции" })).toBeNull();
   expect(screen.queryByRole("link", { name: "Настройки" })).toBeNull();
 });
@@ -173,11 +189,12 @@ it("allows a manager to open the catalog directly", async () => {
   expect(screen.queryByTestId("forbidden-page")).toBeNull();
 });
 
-it("redirects the legacy kiosks index to the kiosk-filtered devices page", async () => {
+it("keeps kiosk management separate from the unified devices page", async () => {
   const { requests } = renderAccessRoute("/kiosks", MANAGER_ACCESS);
 
-  expect(await screen.findByRole("heading", { name: "Устройства" })).toBeDefined();
-  await expect.poll(() => requests).toContain("/api/devices?page=1&pageSize=8&type=kiosk");
+  expect(await screen.findByRole("heading", { name: "Киоски" })).toBeDefined();
+  await expect.poll(() => requests).toContain("/api/kiosks");
+  expect(requests.some((request) => request.startsWith("/api/devices"))).toBe(false);
 });
 
 it.each(["/catalog/new", "/catalog/p1/edit"])(
@@ -189,6 +206,15 @@ it.each(["/catalog/new", "/catalog/p1/edit"])(
     expect(screen.queryByRole("dialog")).toBeNull();
   },
 );
+
+it("allows a read-only operator to open write-off reasons directly", async () => {
+  renderAccessRoute("/kiosks/reasons", OPERATIONS_READ_ONLY);
+
+  expect(await screen.findByRole("heading", { name: "Киоски" })).toBeDefined();
+  expect(await screen.findByText("Причины списания не добавлены")).toBeDefined();
+  expect(screen.queryByTestId("forbidden-page")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Добавить причину" })).toBeNull();
+});
 
 it.each(["/counterparties/new", "/counterparties/p1/edit"])(
   "forbids the direct counterparty write route %s for a read-only operator",
@@ -221,11 +247,42 @@ it.each(["/employees/new", "/employees/1/edit"])(
   },
 );
 
+it.each(["/kiosks/new", "/kiosks/k1/edit"])(
+  "forbids the direct kiosk write route %s for a read-only operator",
+  async (path) => {
+    renderAccessRoute(path, OPERATIONS_READ_ONLY);
+
+    expect(await screen.findByTestId("forbidden-page")).toBeDefined();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  },
+);
+
+it.each([
+  ["read-only operator", OPERATIONS_READ_ONLY],
+  ["operations writer", MANAGER_ACCESS],
+])("forbids the direct kiosk pairing route for a %s", async (_label, access) => {
+  const { requests } = renderAccessRoute("/kiosks/k1/pair", access);
+
+  expect(await screen.findByTestId("forbidden-page")).toBeDefined();
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(requests.some((request) => request.includes("/pairing-code"))).toBe(false);
+});
+
+it("opens the direct kiosk pairing route for a credential manager without minting", async () => {
+  const { requests } = renderAccessRoute("/kiosks/k1/pair", ADMIN_ACCESS);
+
+  expect(await screen.findByRole("dialog", { name: "Привязка киоска" })).toBeDefined();
+  expect(screen.queryByTestId("forbidden-page")).toBeNull();
+  expect(requests.some((request) => request.includes("/pairing-code"))).toBe(false);
+});
+
 it.each([
   ["/catalog/new", "Новый продукт"],
   ["/catalog/p1/edit", "Изменить продукт"],
   ["/employees/new", "Новый сотрудник"],
   ["/employees/1/edit", "Изменить сотрудника"],
+  ["/kiosks/new", "Новый киоск"],
+  ["/kiosks/k1/edit", "Изменить киоск"],
 ])("opens the direct write route %s for a write-capable operator", async (path, title) => {
   renderAccessRoute(path, MANAGER_ACCESS);
 

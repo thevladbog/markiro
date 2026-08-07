@@ -1,11 +1,5 @@
 import { useMemo } from "react";
-import {
-  createBrowserRouter,
-  createRoutesFromElements,
-  Navigate,
-  Route,
-  RouterProvider,
-} from "react-router";
+import { createBrowserRouter, createRoutesFromElements, Route, RouterProvider } from "react-router";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
 
@@ -34,6 +28,9 @@ import { ChannelPage } from "./pages/integrations/ChannelPage.js";
 import { IntegrationsPage } from "./pages/integrations/index.js";
 import { InvitationPage } from "./pages/invitations/InvitationPage.js";
 import { KiosksPage } from "./pages/kiosks/index.js";
+import { KioskPairingPanelRoute } from "./pages/kiosks/KioskPairingPanelRoute.js";
+import { KioskCreatePanelRoute, KioskEditPanelRoute } from "./pages/kiosks/KioskPanelRoute.js";
+import { ReasonsPage } from "./pages/kiosks/ReasonsPage.js";
 import { LabelEditorPage } from "./pages/labels/editor/index.js";
 import { LabelTemplatesPage } from "./pages/labels/index.js";
 import { OrderDetailPage } from "./pages/pickup/OrderDetail.js";
@@ -197,12 +194,44 @@ function appRouteElements() {
             </RequireCapability>
           }
         />
-        <Route path="kiosks" element={<Navigate to="/devices?type=kiosk" replace />} />
         <Route
-          path="kiosks/:id"
+          path="kiosks"
           element={
             <RequireCapability capability={C.OPERATIONS_READ}>
               <KiosksPage />
+            </RequireCapability>
+          }
+        >
+          <Route
+            path="new"
+            element={
+              <RequireCapability capability={C.OPERATIONS_WRITE}>
+                <KioskCreatePanelRoute />
+              </RequireCapability>
+            }
+          />
+          <Route
+            path=":kioskId/edit"
+            element={
+              <RequireCapability capability={C.OPERATIONS_WRITE}>
+                <KioskEditPanelRoute />
+              </RequireCapability>
+            }
+          />
+          <Route
+            path=":kioskId/pair"
+            element={
+              <RequireCapability capability={C.CREDENTIALS_MANAGE}>
+                <KioskPairingPanelRoute />
+              </RequireCapability>
+            }
+          />
+        </Route>
+        <Route
+          path="kiosks/reasons"
+          element={
+            <RequireCapability capability={C.OPERATIONS_READ}>
+              <ReasonsPage />
             </RequireCapability>
           }
         />

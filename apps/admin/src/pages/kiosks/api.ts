@@ -1,7 +1,8 @@
 /**
  * Typed fetchers + TanStack Query hooks for the kiosks endpoints (Task 4:
  * `GET /kiosks`, `POST /kiosks`, `PATCH /kiosks/:id`, `DELETE /kiosks/:id`
- * (archive), `PUT /kiosks/:id/products`, `POST /kiosks/:id/pairing-code`), plus the
+ * (archive), `PUT /kiosks/:id/products`, and an uncached
+ * `POST /kiosks/:id/pairing-code` request, plus the
  * pickup-reasons endpoints (Task 4: `GET /pickup-reasons`,
  * `POST /pickup-reasons`, `PATCH /pickup-reasons/:id`,
  * `DELETE /pickup-reasons/:id`). Thin wrapper over `../../api/client.ts`'s
@@ -10,7 +11,7 @@
  * (Task 11).
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { QueryClient, UseMutationResult, UseQueryResult } from "@tanstack/react-query";
+import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 
 import { apiFetch } from "../../api/client.js";
 
@@ -61,12 +62,6 @@ interface ListKiosksResponse {
 
 /** Shared TanStack Query cache key for the kiosks list. */
 export const KIOSKS_QUERY_KEY = ["kiosks"] as const;
-/** Base key for per-kiosk mutations that can hold a one-time pairing secret. */
-export const KIOSK_PAIRING_CODE_MUTATION_KEY = ["kiosk-pairing-code"] as const;
-
-function kioskPairingCodeMutationKey(kioskId: string) {
-  return [...KIOSK_PAIRING_CODE_MUTATION_KEY, kioskId] as const;
-}
 
 async function fetchKiosks(): Promise<KioskDto[]> {
   const response = await apiFetch<ListKiosksResponse>("/kiosks");
@@ -98,7 +93,8 @@ function putKioskProducts(id: string, productIds: string[]): Promise<KioskDto> {
   });
 }
 
-function postKioskPairingCode(id: string): Promise<IssuePairingCodeResult> {
+/** Direct, uncached issue request. The mounted pairing route owns the plaintext response. */
+export async function issueKioskPairingCode(id: string): Promise<IssuePairingCodeResult> {
   return apiFetch<IssuePairingCodeResult>(`/kiosks/${id}/pairing-code`, { method: "POST" });
 }
 
@@ -112,7 +108,13 @@ export function useCreateKiosk(): UseMutationResult<KioskDto, Error, CreateKiosk
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: postKiosk,
-    onSuccess: () => {
+    onSuccess: (created) => {
+      queryClient.setQueryData<KioskDto[]>(KIOSKS_QUERY_KEY, (current) => {
+        if (!current) return [created];
+        const existingIndex = current.findIndex((kiosk) => kiosk.id === created.id);
+        if (existingIndex === -1) return [...current, created];
+        return current.map((kiosk, index) => (index === existingIndex ? created : kiosk));
+      });
       void queryClient.invalidateQueries({ queryKey: KIOSKS_QUERY_KEY });
     },
   });
@@ -127,7 +129,11 @@ export function useUpdateKiosk(): UseMutationResult<
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, input }) => patchKiosk(id, input),
-    onSuccess: () => {
+    onSuccess: (updated) => {
+      queryClient.setQueryData<KioskDto[]>(KIOSKS_QUERY_KEY, (current) => {
+        if (!current) return [updated];
+        return current.map((kiosk) => (kiosk.id === updated.id ? updated : kiosk));
+      });
       void queryClient.invalidateQueries({ queryKey: KIOSKS_QUERY_KEY });
     },
   });
@@ -159,45 +165,7 @@ export function useSetKioskProducts(): UseMutationResult<
   });
 }
 
-/**
- * `POST /kiosks/:id/pairing-code` -- mints a single-use 8-digit pairing code
- * for the device to redeem via `POST /kiosk/pair`, retiring whatever code was
- * still live for that kiosk. The plaintext comes back exactly once (only its
- * hash is stored), so the caller owns the one-time reveal.
- *
- * Deliberately does NOT invalidate the kiosks list, unlike the mutations
- * above: issuing a code touches nothing `KioskDto` exposes, so a refetch would
- * be pure noise.
- */
-export function useIssueKioskPairingCode(
-  kioskId: string,
-): UseMutationResult<IssuePairingCodeResult, Error, void> {
-  return useMutation({
-    mutationKey: kioskPairingCodeMutationKey(kioskId),
-    mutationFn: () => postKioskPairingCode(kioskId),
-    gcTime: 0,
-  });
-}
-
-/** Explicitly removes one-time pairing responses when their reveal is dismissed. */
-export function clearKioskPairingCodeMutations(
-  queryClient: QueryClient,
-  kioskId: string,
-  expectedResult?: IssuePairingCodeResult,
-): void {
-  for (const mutation of queryClient
-    .getMutationCache()
-    .findAll({ mutationKey: kioskPairingCodeMutationKey(kioskId) })) {
-    if (expectedResult === undefined || mutation.state.data === expectedResult) {
-      queryClient.getMutationCache().remove(mutation);
-    }
-  }
-}
-
-// --- Pickup reasons mini-api ------------------------------------------------
-// Write-off reasons feed the kiosks settings screen (Task 18); listed here
-// rather than a separate page directory since there's no standalone
-// "reasons" page -- they're managed alongside kiosks.
+// --- Pickup reasons API for the route-backed write-off reasons view ---------
 
 /** Mirrors `apps/api/src/modules/pickup-reasons/dto.ts`'s `ReasonDto`. */
 export interface ReasonDto {

@@ -80,6 +80,12 @@ export const NAV_ITEMS: ReadonlyArray<{
     capability: C.OPERATIONS_READ,
   },
   {
+    to: "/kiosks",
+    key: "nav.kiosks",
+    sectionKey: "shell.sections.equipment",
+    capability: C.OPERATIONS_READ,
+  },
+  {
     to: "/integrations",
     key: "nav.integrations",
     sectionKey: "shell.sections.equipment",

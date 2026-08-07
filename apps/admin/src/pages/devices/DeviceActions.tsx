@@ -53,7 +53,7 @@ export function DeviceActions({
         }}
       >
         {device.type === "kiosk" ? (
-          <Link to={`/kiosks/${device.id}`} aria-label={t("pages.devices.kioskSettings")}>
+          <Link to={`/kiosks/${device.id}/edit`} aria-label={t("pages.devices.kioskSettings")}>
             {t("pages.devices.kioskSettings")}
           </Link>
         ) : null}
