@@ -735,7 +735,7 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, productionResources
     "audit_encrypter",
   );
   assert.match(auditKms, /symmetric_key_id\s*=\s*var\.kms_key_id/);
-  assert.match(auditKms, /role\s*=\s*"kms\.keys\.encrypter"/);
+  assert.match(auditKms, /role\s*=\s*"kms\.keys\.encrypterDecrypter"/);
 }
 
 async function bootstrapContractSources() {

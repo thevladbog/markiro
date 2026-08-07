@@ -135,6 +135,6 @@ resource "yandex_kms_symmetric_key_iam_member" "app_encrypter_decrypter" {
 
 resource "yandex_kms_symmetric_key_iam_member" "audit_encrypter" {
   symmetric_key_id = var.kms_key_id
-  role             = "kms.keys.encrypter"
+  role             = "kms.keys.encrypterDecrypter"
   member           = "serviceAccount:${module.iam.service_account_ids.audit}"
 }
