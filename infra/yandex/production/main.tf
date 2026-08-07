@@ -84,13 +84,14 @@ module "postgres" {
 module "object_storage" {
   source = "../modules/object-storage"
 
-  folder_id                = var.folder_id
-  kms_key_id               = var.kms_key_id
-  state_bucket_name        = var.state_bucket_name
-  media_bucket_name        = var.media_bucket_name
-  audit_bucket_name        = var.audit_bucket_name
-  app_service_account_id   = var.app_service_account_id
-  audit_service_account_id = var.audit_service_account_id
+  folder_id                    = var.folder_id
+  kms_key_id                   = var.kms_key_id
+  state_bucket_name            = var.state_bucket_name
+  media_bucket_name            = var.media_bucket_name
+  audit_bucket_name            = var.audit_bucket_name
+  app_service_account_id       = var.app_service_account_id
+  audit_service_account_id     = var.audit_service_account_id
+  terraform_service_account_id = var.terraform_service_account_id
 }
 
 module "ingress" {

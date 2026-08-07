@@ -54,3 +54,9 @@ variable "audit_service_account_id" {
   type        = string
   nullable    = false
 }
+
+variable "terraform_service_account_id" {
+  description = "Terraform identity allowed to manage the two protected bucket configurations."
+  type        = string
+  nullable    = false
+}

@@ -785,6 +785,15 @@ function assertRunnerControllerProviderGrants({ bootstrap, compute, controller, 
   assert.match(appViewer, /instance_id\s*=\s*yandex_compute_instance\.app\.id/);
   assert.match(appViewer, /role\s*=\s*"compute\.viewer"/);
   assert.match(appViewer, /serviceAccount:\$\{var\.deployment_controller_service_account_id\}/);
+  assert.match(appViewer, /serviceAccount:\$\{var\.runner_service_account_id\}/);
+  assert.doesNotMatch(
+    compute,
+    /resource\s+"yandex_compute_instance_iam_binding"\s+"runner_app_viewer"/,
+  );
+  assert.match(
+    compute,
+    /removed\s*\{[\s\S]*?from\s*=\s*yandex_compute_instance_iam_binding\.runner_app_viewer[\s\S]*?destroy\s*=\s*false[\s\S]*?\}/,
+  );
 
   const runner = terraformResourceBlock(compute, "yandex_compute_instance", "runner");
   assert.match(runner, /kms_key_id\s*=\s*var\.kms_key_id/);
@@ -1330,6 +1339,16 @@ function assertProtectedManagedData({
         Action: ["s3:ListBucket"],
         Resource: ["arn:aws:s3:::${yandex_storage_bucket.media.bucket}"],
       },
+      {
+        Sid: "AllowTerraformMediaManagement",
+        Effect: "Allow",
+        Principal: { CanonicalUser: "var.terraform_service_account_id" },
+        Action: ["s3:*"],
+        Resource: [
+          "arn:aws:s3:::${yandex_storage_bucket.media.bucket}",
+          "arn:aws:s3:::${yandex_storage_bucket.media.bucket}/*",
+        ],
+      },
     ],
   });
 
@@ -1348,6 +1367,16 @@ function assertProtectedManagedData({
         Principal: { CanonicalUser: "var.audit_service_account_id" },
         Action: ["s3:PutObject"],
         Resource: ["arn:aws:s3:::${yandex_storage_bucket.audit.bucket}/*"],
+      },
+      {
+        Sid: "AllowTerraformAuditManagement",
+        Effect: "Allow",
+        Principal: { CanonicalUser: "var.terraform_service_account_id" },
+        Action: ["s3:*"],
+        Resource: [
+          "arn:aws:s3:::${yandex_storage_bucket.audit.bucket}",
+          "arn:aws:s3:::${yandex_storage_bucket.audit.bucket}/*",
+        ],
       },
     ],
   });
