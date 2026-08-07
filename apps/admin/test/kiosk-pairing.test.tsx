@@ -481,7 +481,7 @@ describe("one-time pairing reveal", () => {
     expect(await screen.findByText("8765 4321")).toBeDefined();
     await router.navigate(-1);
     await waitFor(() => expect(router.state.location.pathname).toBe("/kiosks"));
-    expect(screen.queryByText("8765 4321")).toBeNull();
+    await waitFor(() => expect(screen.queryByText("8765 4321")).toBeNull());
     expect(
       fetchMock.mock.calls.filter(([url]) => String(url).includes("/pairing-code")),
     ).toHaveLength(2);
