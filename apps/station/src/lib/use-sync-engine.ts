@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { StationClient } from "./api-client.js";
+import type { CredentialGeneration, CredentialRejectedEvent } from "./credential-recovery.js";
 import type { SqlExecutor } from "./mirror.js";
 import { createSyncEngine, type SyncEngine, type SyncState } from "./sync.js";
 
@@ -16,6 +17,8 @@ export interface UseSyncEngineDeps {
   client: Pick<StationClient, "post"> | null;
   /** `null`/`undefined` whenever `client` is `null`. */
   machineId: string | null | undefined;
+  credentialGeneration?: CredentialGeneration;
+  onCredentialRejected?: (event: CredentialRejectedEvent) => void;
 }
 
 export interface UseSyncEngineResult {
@@ -63,7 +66,7 @@ export interface UseSyncEngineResult {
  * assumes `stop()` is instantaneous.
  */
 export function useSyncEngine(deps: UseSyncEngineDeps): UseSyncEngineResult {
-  const { exec, client, machineId } = deps;
+  const { exec, client, machineId, credentialGeneration, onCredentialRejected } = deps;
   const [state, setState] = useState<SyncState>({
     pending: 0,
     lastSuccessAt: null,
@@ -78,7 +81,14 @@ export function useSyncEngine(deps: UseSyncEngineDeps): UseSyncEngineResult {
       engineRef.current = null;
       return;
     }
-    const engine = createSyncEngine({ exec, client, machineId, onState: setState });
+    const engine = createSyncEngine({
+      exec,
+      client,
+      machineId,
+      onState: setState,
+      ...(credentialGeneration ? { credentialGeneration } : {}),
+      ...(onCredentialRejected ? { onCredentialRejected } : {}),
+    });
     engineRef.current = engine;
     engine.nudge();
     const heartbeat = setInterval(() => engine.nudge(), HEARTBEAT_MS);
@@ -90,7 +100,7 @@ export function useSyncEngine(deps: UseSyncEngineDeps): UseSyncEngineResult {
       // invariant explicit instead of assumed.
       if (engineRef.current === engine) engineRef.current = null;
     };
-  }, [exec, client, machineId]);
+  }, [exec, client, machineId, credentialGeneration, onCredentialRejected]);
 
   const nudge = useCallback(() => {
     engineRef.current?.nudge();

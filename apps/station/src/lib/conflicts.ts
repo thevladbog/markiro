@@ -11,6 +11,16 @@ export interface DeviceConflict {
   serial: string | null;
 }
 
+export interface DeviceConflictPage {
+  items: DeviceConflict[];
+  page: number;
+  pageSize: number;
+  total: number;
+}
+
+/** Two fixed-height cards leave room for the message, pager, and floor footer at 1024x768. */
+export const CONFLICTS_PAGE_SIZE = 2;
+
 /**
  * Records conflicts the server reported for a batch. Keyed by code, so the
  * same conflict arriving twice is one row — one statement per conflict, no
@@ -32,10 +42,20 @@ export async function recordConflicts(
 }
 
 /**
- * Newest first. Left-outer against `codes_mirror` because retention may have
- * purged the code row, and a conflict must still be listable without it.
+ * Reads one bounded local page. Left-outer against `codes_mirror` because
+ * retention may have purged the code row, and a conflict must still be
+ * listable without it. Equal detection times use the code hash as a stable
+ * tie-break without exposing that hash to the operator.
  */
-export async function readConflicts(exec: SqlExecutor): Promise<DeviceConflict[]> {
+export async function readConflicts(
+  exec: SqlExecutor,
+  requestedPage: number,
+): Promise<DeviceConflictPage> {
+  const total = await conflictCount(exec);
+  const pageCount = Math.max(1, Math.ceil(total / CONFLICTS_PAGE_SIZE));
+  const finitePage = Number.isFinite(requestedPage) ? Math.trunc(requestedPage) : 1;
+  const page = Math.min(pageCount, Math.max(1, finitePage));
+  const offset = (page - 1) * CONFLICTS_PAGE_SIZE;
   const rows = await exec.all<{
     code_hash: string;
     winning_terminal_id: string | null;
@@ -48,16 +68,23 @@ export async function readConflicts(exec: SqlExecutor): Promise<DeviceConflict[]
             m.gtin14, m.serial
        FROM conflicts_mirror c
        LEFT JOIN codes_mirror m ON m.code_hash = c.code_hash
-      ORDER BY c.detected_at DESC`,
+      ORDER BY c.detected_at DESC, c.code_hash ASC
+      LIMIT ? OFFSET ?`,
+    [CONFLICTS_PAGE_SIZE, offset],
   );
-  return rows.map((r) => ({
-    codeHash: r.code_hash,
-    winningTerminalId: r.winning_terminal_id,
-    winningScannedAt: r.winning_scanned_at,
-    detectedAt: r.detected_at,
-    gtin14: r.gtin14,
-    serial: r.serial,
-  }));
+  return {
+    items: rows.map((r) => ({
+      codeHash: r.code_hash,
+      winningTerminalId: r.winning_terminal_id,
+      winningScannedAt: r.winning_scanned_at,
+      detectedAt: r.detected_at,
+      gtin14: r.gtin14,
+      serial: r.serial,
+    })),
+    page,
+    pageSize: CONFLICTS_PAGE_SIZE,
+    total,
+  };
 }
 
 export async function conflictCount(exec: SqlExecutor): Promise<number> {

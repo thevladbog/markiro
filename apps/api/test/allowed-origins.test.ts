@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { kioskAllowedOrigins, loadEnv, sessionAllowedOrigins } from "../src/env";
+import {
+  kioskAllowedOrigins,
+  loadEnv,
+  sessionAllowedOrigins,
+  stationAllowedOrigins,
+} from "../src/env";
 
 /**
  * Pure unit coverage for the origin allowlists. The HTTP-level proof that a
@@ -65,6 +70,31 @@ describe("sessionAllowedOrigins", () => {
   });
 });
 
+describe("stationAllowedOrigins", () => {
+  it("is just the admin origin when STATION_ORIGIN is unset", () => {
+    expect(stationAllowedOrigins(loadEnv(BASE))).toEqual(["https://admin.example.ru"]);
+  });
+
+  it("includes an exact HTTP(S) station origin", () => {
+    const env = loadEnv({ ...BASE, STATION_ORIGIN: "https://station.example.ru/" });
+    expect(stationAllowedOrigins(env)).toEqual([
+      "https://admin.example.ru",
+      "https://station.example.ru",
+    ]);
+  });
+
+  it("allows only the supported non-opaque Tauri origin", () => {
+    const env = loadEnv({ ...BASE, STATION_ORIGIN: "tauri://localhost" });
+    expect(stationAllowedOrigins(env)).toEqual(["https://admin.example.ru", "tauri://localhost"]);
+  });
+
+  it("does not grant the station origin to the session or kiosk surface", () => {
+    const env = loadEnv({ ...BASE, STATION_ORIGIN: "https://station.example.ru" });
+    expect(sessionAllowedOrigins(env)).toEqual(["https://admin.example.ru"]);
+    expect(kioskAllowedOrigins(env)).toEqual(["https://admin.example.ru"]);
+  });
+});
+
 describe("loadEnv KIOSK_ORIGIN", () => {
   it("treats an empty value as unset rather than failing to boot", () => {
     // `KIOSK_ORIGIN: ${KIOSK_ORIGIN}` in a compose file with nothing to
@@ -116,6 +146,34 @@ describe("loadEnv KIOSK_ORIGIN", () => {
     // otherwise opaque origin — allowlisting it would trust all of them.
     expect(() => loadEnv({ ...BASE, KIOSK_ORIGIN: "mailto:ops@example.ru" })).toThrow();
     expect(() => loadEnv({ ...BASE, KIOSK_ORIGIN: "ftp://kiosk.example.ru" })).toThrow();
+  });
+});
+
+describe("loadEnv STATION_ORIGIN", () => {
+  it("treats an empty value as unset rather than failing to boot", () => {
+    expect(loadEnv({ ...BASE, STATION_ORIGIN: "" }).STATION_ORIGIN).toBeUndefined();
+  });
+
+  it("canonicalizes a HTTP(S) URL to its browser origin", () => {
+    expect(
+      loadEnv({ ...BASE, STATION_ORIGIN: "https://Station.Example.RU:5273/pair?a=1#x" })
+        .STATION_ORIGIN,
+    ).toBe("https://station.example.ru:5273");
+  });
+
+  it("permits tauri://localhost but never the opaque null origin", () => {
+    expect(loadEnv({ ...BASE, STATION_ORIGIN: "tauri://localhost" }).STATION_ORIGIN).toBe(
+      "tauri://localhost",
+    );
+    expect(() => loadEnv({ ...BASE, STATION_ORIGIN: "null" })).toThrow();
+    expect(() => loadEnv({ ...BASE, STATION_ORIGIN: "tauri://other-host" })).toThrow();
+    expect(() => loadEnv({ ...BASE, STATION_ORIGIN: "file:///station" })).toThrow();
+  });
+
+  it("rejects userinfo instead of normalizing a credential-bearing origin", () => {
+    expect(() =>
+      loadEnv({ ...BASE, STATION_ORIGIN: "https://user:pass@station.example.ru" }),
+    ).toThrow();
   });
 });
 

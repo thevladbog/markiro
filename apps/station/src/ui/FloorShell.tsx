@@ -1,36 +1,51 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { Button } from "@markiro/ui";
 import { StatusBar, type ScannerIndicator } from "./StatusBar.js";
 
 export interface FloorShellProps {
+  stationName: string;
+  lineName: string | null;
+  operatorName: string;
+  shiftLabel: string | null;
   online: boolean;
   scanner: ScannerIndicator;
   printerConfigured: boolean;
   syncPending: number;
   syncStuck: boolean;
   conflicts: number;
-  tasks: Array<{ id: string; label: string }>;
-  activeTaskId: string;
-  onSelectTask: (id: string) => void;
+  tasks?: ReadonlyArray<{ id: string; label: string }>;
+  activeTaskId?: string;
+  onSelectTask?: (id: string) => void;
+  footer?: ReactNode;
   children: ReactNode;
 }
 
 export function FloorShell({
+  stationName,
+  lineName,
+  operatorName,
+  shiftLabel,
   online,
   scanner,
   printerConfigured,
   syncPending,
   syncStuck,
   conflicts,
-  tasks,
+  tasks = [],
   activeTaskId,
   onSelectTask,
+  footer,
   children,
 }: FloorShellProps) {
   const { t } = useTranslation();
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+    <div className="station-root">
       <StatusBar
+        stationName={stationName}
+        lineName={lineName}
+        operatorName={operatorName}
+        shiftLabel={shiftLabel}
         online={online}
         scanner={scanner}
         printerConfigured={printerConfigured}
@@ -38,20 +53,26 @@ export function FloorShell({
         syncStuck={syncStuck}
         conflicts={conflicts}
       />
-      <nav aria-label={t("shell.tasks")} style={{ display: "flex", gap: 8, padding: "8px 16px" }}>
-        {tasks.map((task) => (
-          <button
-            key={task.id}
-            type="button"
-            aria-pressed={task.id === activeTaskId}
-            style={{ minHeight: 64, minWidth: 120, fontSize: "1.1rem" }}
-            onClick={() => onSelectTask(task.id)}
-          >
-            {task.label}
-          </button>
-        ))}
-      </nav>
-      <div style={{ flex: 1 }}>{children}</div>
+      {tasks.length > 0 ? (
+        <nav aria-label={t("shell.tasks")} className="station-task-nav">
+          {tasks.map((task) => (
+            <Button
+              key={task.id}
+              type="button"
+              size="floor"
+              variant="secondary"
+              aria-pressed={task.id === activeTaskId}
+              onClick={() => onSelectTask?.(task.id)}
+            >
+              {task.label}
+            </Button>
+          ))}
+        </nav>
+      ) : null}
+      <div className="station-screen-slot" role="region" aria-label={t("shell.activeScreen")}>
+        {children}
+      </div>
+      {footer}
     </div>
   );
 }

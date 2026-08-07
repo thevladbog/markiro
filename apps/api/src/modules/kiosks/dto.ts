@@ -17,6 +17,9 @@ export const updateKioskSchema = z.object({
 });
 export type UpdateKioskDto = z.infer<typeof updateKioskSchema>;
 
+/** `POST /kiosks/:id/unbind` has no request body and responds with 204. */
+export type UnbindKioskResponseDto = void;
+
 export const setKioskProductsSchema = z.object({
   productIds: z.array(z.string().uuid()),
 });

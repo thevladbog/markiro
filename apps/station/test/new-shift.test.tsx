@@ -16,6 +16,46 @@ const client = createStationClient({
 });
 
 describe("NewShift", () => {
+  it("renders input, found, and missing as mutually exclusive fixed state panels", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            items: [{ id: "p1", gtin14: "04600000000015", name: "Cola", status: "active" }],
+          }),
+          { status: 200 },
+        ),
+      );
+
+    render(<NewShift client={client} onStarted={vi.fn()} onBack={() => {}} />);
+    expect(screen.getByTestId("new-shift-input")).toBeDefined();
+    expect(screen.queryByTestId("new-shift-found")).toBeNull();
+    expect(screen.queryByTestId("new-shift-missing")).toBeNull();
+
+    fireEvent.change(screen.getByLabelText("Type or scan a GTIN"), {
+      target: { value: "4600000000015" },
+    });
+    fireEvent.submit(screen.getByLabelText("Type or scan a GTIN").closest("form")!);
+
+    await waitFor(() => expect(screen.getByTestId("new-shift-found")).toBeDefined());
+    expect(screen.queryByTestId("new-shift-input")).toBeNull();
+    expect(screen.queryByTestId("new-shift-missing")).toBeNull();
+    expect(screen.getByTestId("new-shift-message-slot")).toBeDefined();
+  });
+
+  it("keeps validation errors in the reserved message slot", async () => {
+    render(<NewShift client={client} onStarted={vi.fn()} onBack={() => {}} />);
+    fireEvent.change(screen.getByLabelText("Type or scan a GTIN"), { target: { value: "123" } });
+    fireEvent.submit(screen.getByLabelText("Type or scan a GTIN").closest("form")!);
+
+    await waitFor(() => expect(screen.getByText("Invalid GTIN")).toBeDefined());
+    const messageSlot = screen.getByTestId("new-shift-message-slot");
+    expect(messageSlot.textContent).toContain("Invalid GTIN");
+  });
+
   it("resolves a known GTIN, creates + opens a validation shift", async () => {
     vi.spyOn(globalThis, "fetch")
       // POST /products/gtin-check
@@ -77,6 +117,9 @@ describe("NewShift", () => {
     fireEvent.submit(screen.getByLabelText("Type or scan a GTIN").closest("form")!);
 
     await waitFor(() => expect(screen.getByText("Product is not in the catalog")).toBeDefined());
+    expect(screen.getByTestId("new-shift-missing")).toBeDefined();
+    expect(screen.queryByTestId("new-shift-input")).toBeNull();
+    expect(screen.queryByTestId("new-shift-found")).toBeNull();
   });
 
   it("rejects an invalid GTIN inline", async () => {

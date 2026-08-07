@@ -9,6 +9,7 @@ import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { schema, type Db } from "@markiro/db";
 import { listenOnLoopback } from "./support/listen-loopback";
+import { createTestStationDevice } from "./support/auth";
 
 /**
  * GTIN test vectors. Computed with node + @markiro/domain's gs1CheckDigit
@@ -603,11 +604,8 @@ describe.skipIf(!ready)("products e2e", () => {
       .expect(201);
     const id = createRes.body.id as string;
 
-    const device = await agent
-      .post("/station-devices")
-      .send({ name: "Line 1 terminal" })
-      .expect(201);
-    const apiKey = (device.body as { apiKey: string }).apiKey;
+    const device = await createTestStationDevice(app!, agent, "Line 1 terminal");
+    const apiKey = device.apiKey;
     const server = app!.getHttpServer();
 
     // Session-only: not part of the station's two routes.

@@ -6,7 +6,7 @@ import {
   type LabelTemplateSpec,
   type ScanVerdict,
 } from "@markiro/domain";
-import { Alert, Button, SignalOverlay, type SignalTone } from "@markiro/ui";
+import { Alert, Button, FullScreenDialog, SignalOverlay, type SignalTone } from "@markiro/ui";
 import { boxLabelFields } from "../lib/box-label.js";
 import {
   clearBox,
@@ -23,15 +23,27 @@ import {
 import { closeCurrentBox as closeCurrentBoxLib, type CloseBoxResult } from "../lib/close-box.js";
 import type { PrintTarget } from "../lib/hardware.js";
 import type { PrinterLanguage } from "../lib/hardware-config.js";
-import { findFirstSeen, loadCodeKeys, recordScan, undoLastScan } from "../lib/journal.js";
+import {
+  findFirstSeen,
+  listRecentOperations,
+  loadCodeKeys,
+  recordScan,
+  undoLastScan,
+  type RecentOperation,
+} from "../lib/journal.js";
 import { readShiftMirror, type SqlExecutor } from "../lib/mirror.js";
 import { renderLabelBytes } from "../lib/print-label.js";
 import { rasterizeText } from "../lib/rasterizer.js";
-import { createScanQueue, type ScanOutcome } from "../lib/scan-queue.js";
+import { createScanQueue, type ScanOutcome, type ScanQueue } from "../lib/scan-queue.js";
 import type { ScanSource } from "../lib/scan-source.js";
 import { playSignalTone, type SoundSettings } from "../lib/signal-sound.js";
 import { PrintVerification } from "../ui/PrintVerification.js";
-import { ShiftBoxesPanel } from "../ui/ShiftBoxesPanel.js";
+import { BoxFillInstrument } from "../ui/work/BoxFillInstrument.js";
+import { RecentOperations } from "../ui/work/RecentOperations.js";
+import { ScanResultInstrument, type ScanResultLabels } from "../ui/work/ScanResultInstrument.js";
+import { WorkCounters } from "../ui/work/WorkCounters.js";
+import { WorkFooter } from "../ui/work/WorkFooter.js";
+import { ExceptionFlow } from "./ExceptionFlow.js";
 
 export interface WorkScreenProps {
   exec: SqlExecutor;
@@ -46,6 +58,8 @@ export interface WorkScreenProps {
   /** Signals a scan was just written, so a queued outbox row does not have
    * to wait for the sync engine's 15s heartbeat before draining. */
   onScanRecorded?: () => void;
+  /** Registers the ordered scan/job queue with App's credential-recovery barrier. */
+  onScanQueueRegister?: (queue: ScanQueue) => () => void;
   /** Return to shift selection. Does NOT close the shift — that is a cabinet action. */
   onExit: () => void;
   /** Scans still queued on this device, shown before the operator walks away. */
@@ -76,8 +90,17 @@ export interface WorkScreenProps {
   } | null;
 }
 
+export type WorkBlockingState = "serial-exhaustion";
+export type WorkOverlayState = "exit-pending" | "clear-confirm";
+
 /** How long each verdict's full-screen flash stays up (design brief 04). */
 const FLASH_MS: Record<SignalTone, number> = { ok: 350, error: 1200, duplicate: 900 };
+
+interface RecentReadState {
+  mounted: boolean;
+  active: boolean;
+  trailing: boolean;
+}
 
 function toneOf(verdict: ScanVerdict): SignalTone {
   if (verdict.status === "ok") return "ok";
@@ -96,6 +119,7 @@ export function WorkScreen({
   source,
   sound,
   onScanRecorded,
+  onScanQueueRegister,
   onExit,
   pendingSync,
   issuerPrefix,
@@ -111,7 +135,58 @@ export function WorkScreen({
   const [signal, setSignal] = useState<{ tone: SignalTone; title: string; detail?: string } | null>(
     null,
   );
+  const signalContext = useRef({ sound, t });
+  signalContext.current = { sound, t };
   const [confirmExit, setConfirmExit] = useState(false);
+  const [showExceptions, setShowExceptions] = useState(false);
+  const [recentOperations, setRecentOperations] = useState<RecentOperation[]>([]);
+  const recentReadState = useRef<RecentReadState>({
+    mounted: false,
+    active: false,
+    trailing: false,
+  });
+
+  const refreshRecentOperations = useCallback((): void => {
+    const state = recentReadState.current;
+    if (!state.mounted) return;
+    if (state.active) {
+      state.trailing = true;
+      return;
+    }
+    state.active = true;
+    void listRecentOperations(exec, shiftId)
+      .then((rows) => {
+        // If another scan committed while this read was active, its trailing
+        // read owns the visible result. Do not briefly publish this older
+        // snapshot before that read starts.
+        if (recentReadState.current === state && state.mounted && !state.trailing) {
+          setRecentOperations(rows);
+        }
+      })
+      .catch((err: unknown) => {
+        if (recentReadState.current === state && state.mounted) {
+          console.error("station: failed to read recent scan operations", err);
+        }
+      })
+      .finally(() => {
+        if (recentReadState.current !== state || !state.mounted) return;
+        state.active = false;
+        if (state.trailing) {
+          state.trailing = false;
+          refreshRecentOperations();
+        }
+      });
+  }, [exec, shiftId]);
+
+  useEffect(() => {
+    const state: RecentReadState = { mounted: true, active: false, trailing: false };
+    recentReadState.current = state;
+    refreshRecentOperations();
+    return () => {
+      state.mounted = false;
+      state.trailing = false;
+    };
+  }, [refreshRecentOperations]);
 
   // Box aggregation state -- null (never loaded / no `issuerPrefix`) means no
   // box UI at all, per Task 13's correction: a validation-mode shift, or a
@@ -162,13 +237,6 @@ export function WorkScreen({
   }, [issuerPrefix, reloadClosedBoxes]);
 
   const [noSerials, setNoSerials] = useState(false);
-  // CodeRabbit PR33 review, Finding 4: `closeCurrentBox` burned a serial
-  // that `buildSscc` could not turn into a valid SSCC (an over-capacity
-  // local pool range -- see `close-box.ts`'s `invalid-serial` status for
-  // the full story). Surfaced plainly rather than a silent console.error:
-  // the box stays open (no sscc/closedAt written), so the operator can
-  // simply try closing it again.
-  const [invalidSerial, setInvalidSerial] = useState(false);
   // The box label's geometry -- a plain ref, not React state, the same shape
   // `keys` (above) already takes: nothing renders off this, and
   // `printAndMaybeVerify` reads it from inside `closeTheBox`, which can
@@ -216,12 +284,6 @@ export function WorkScreen({
   function dequeueVerification(): void {
     setVerificationQueue((q) => q.slice(1));
   }
-  // Verification was requested (the workstation setting is on) but the box
-  // closed without a genuine print -- no label spec, no printer configured,
-  // or rendering/printing itself threw (Task 13 review, Finding 3). Told to
-  // the operator plainly rather than opening a prompt to verify a label that
-  // was never produced.
-  const [printUnavailable, setPrintUnavailable] = useState(false);
   // Mirrors `verification` on every render (a plain assignment, not an
   // effect, so it is already current by the time anything reads it after
   // this commit) -- the same "read the latest value through a ref instead
@@ -265,6 +327,15 @@ export function WorkScreen({
   const closingRef = useRef(false);
   const [closing, setClosing] = useState(false);
   const [boxActionPending, setBoxActionPending] = useState(false);
+  // Render-time guard for callbacks already handed to physical scan sources.
+  // Effect cleanup cannot revoke a callback synchronously: a source may invoke
+  // the old function after this render commits but before the passive cleanup
+  // runs (or even after cleanup if native delivery was already queued). Keep
+  // the current blocking state in a ref so those stale callbacks are harmless.
+  const ordinaryScanBlockedRef = useRef(false);
+  ordinaryScanBlockedRef.current = Boolean(
+    verification || confirmClear || boxActionPending || showExceptions || noSerials,
+  );
 
   function requestExit() {
     if (pendingSync > 0) setConfirmExit(true);
@@ -275,6 +346,41 @@ export function WorkScreen({
   // are held in memory and updated on every insert rather than queried per scan.
   const keys = useRef<Set<string>>(new Set());
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const deferredSignalTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const deferredSoundTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const signalGeneration = useRef(0);
+
+  /**
+   * Visual and audio feedback share this single tone argument so the two
+   * channels cannot drift. A generation check is deliberately retained in
+   * addition to clearTimeout: it also protects a newer verdict if an older
+   * callback was already queued when the replacement signal arrived.
+   */
+  function showTimedSignal(tone: SignalTone, title: string, detail?: string): void {
+    const generation = ++signalGeneration.current;
+    playSignalTone(tone, signalContext.current.sound);
+    setSignal({ tone, title, ...(detail === undefined ? {} : { detail }) });
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => {
+      if (signalGeneration.current !== generation) return;
+      flashTimer.current = null;
+      setSignal(null);
+    }, FLASH_MS[tone]);
+  }
+
+  /**
+   * Box recovery can finish inside the accepted scan's process callback.
+   * Defer its error until after that callback publishes the ordinary OK
+   * verdict, otherwise the later OK would hide the more important recovery
+   * failure before the operator ever sees it.
+   */
+  function showDeferredError(title: string): void {
+    if (deferredSignalTimer.current) clearTimeout(deferredSignalTimer.current);
+    deferredSignalTimer.current = setTimeout(() => {
+      deferredSignalTimer.current = null;
+      showTimedSignal("error", title);
+    }, 0);
+  }
 
   // The duplicate index must be in memory before the first scan is judged.
   // The scan source starts listening immediately (so nothing is missed) and
@@ -394,15 +500,16 @@ export function WorkScreen({
    * template and printer.
    *
    * Whether printing happened at all -- NOT whether it is being verified --
-   * decides `printUnavailable` (Task 13 review, Finding 3): `labelSpecRef`
-   * may be null (no template, or an unparsable one), `printing` may be null
-   * (no printer configured on this workstation), or `renderLabelBytes`/
-   * `printing.print` may throw. Previously this notice was reachable only
-   * when `verifyPrintedLabel` was ALSO on, so in the default (verification
-   * off) configuration a box could close, burn a serial, and print nothing,
-   * with only a `console.error` -- silent to the operator. Verification is
-   * the separate, opt-in question of whether a print that DID happen gets
-   * checked; it is not what makes a failed print visible.
+   * decides whether to show the ordinary timed print-error signal (Task 13
+   * review, Finding 3): `labelSpecRef` may be null (no template, or an
+   * unparsable one), `printing` may be null (no printer configured on this
+   * workstation), or `renderLabelBytes`/`printing.print` may throw. Previously
+   * this notice was reachable only when `verifyPrintedLabel` was ALSO on, so
+   * in the default (verification off) configuration a box could close, burn a
+   * serial, and print nothing, with only a `console.error` -- silent to the
+   * operator. Verification is the separate, opt-in question of whether a
+   * print that DID happen gets checked; it is not what makes a failed print
+   * visible.
    *
    * `printing.print(...)` itself runs through `serializePrint` (CodeRabbit
    * PR33 review, Finding 9): rendering (`renderLabelBytes`, pure
@@ -448,10 +555,9 @@ export function WorkScreen({
       }
     }
     if (!printed) {
-      setPrintUnavailable(true);
+      showDeferredError(signalContext.current.t("box.printNotAvailable"));
       return;
     }
-    setPrintUnavailable(false);
     if (!verifyPrintedLabel) return;
     enqueueVerification({ sscc: result.sscc, bytes, boxId: closedBoxId });
   }
@@ -471,11 +577,19 @@ export function WorkScreen({
    * both calls would burn a serial and print a label each, and the box's
    * stored SSCC would end up as whichever write lands second.
    */
-  async function closeTheBox(): Promise<void> {
-    if (issuerPrefix === null) return;
-    if (closingRef.current) return;
+  function reserveClose(): string | null {
+    if (issuerPrefix === null || closingRef.current) return null;
     closingRef.current = true;
     setClosing(true);
+    return issuerPrefix;
+  }
+
+  function releaseClose(): void {
+    closingRef.current = false;
+    setClosing(false);
+  }
+
+  async function performReservedClose(reservedIssuerPrefix: string): Promise<void> {
     try {
       // `boxRef.current`, not the `box` state variable: this file's own
       // comments on `boxRef` document that `box` can lag a `process()`-driven
@@ -489,7 +603,7 @@ export function WorkScreen({
       const impl =
         closeCurrentBoxProp ??
         ((sid: string, operatorId: string | null) =>
-          closeCurrentBoxLib({ exec, issuerPrefix }, sid, operatorId));
+          closeCurrentBoxLib({ exec, issuerPrefix: reservedIssuerPrefix }, sid, operatorId));
 
       let result: CloseBoxResult;
       try {
@@ -502,16 +616,19 @@ export function WorkScreen({
       if (result.status === "empty") return;
       if (result.status === "no-serials") {
         setNoSerials(true);
+        if (deferredSoundTimer.current) clearTimeout(deferredSoundTimer.current);
+        deferredSoundTimer.current = setTimeout(() => {
+          deferredSoundTimer.current = null;
+          playSignalTone("error", signalContext.current.sound);
+        }, 0);
         return;
       }
       if (result.status === "invalid-serial") {
-        setInvalidSerial(true);
+        showDeferredError(signalContext.current.t("box.invalidSerial"));
         return;
       }
 
       setNoSerials(false);
-      setInvalidSerial(false);
-      setPrintUnavailable(false);
       const newBoxId = crypto.randomUUID();
       try {
         await openBox(exec, shiftId, newBoxId, new Date().toISOString(), terminalId);
@@ -524,9 +641,22 @@ export function WorkScreen({
 
       void printAndMaybeVerify(result, closingBoxId);
     } finally {
-      closingRef.current = false;
-      setClosing(false);
+      releaseClose();
     }
+  }
+
+  /** Auto-close already runs inside the ordered scan queue. */
+  async function closeTheBox(): Promise<void> {
+    const reservedIssuerPrefix = reserveClose();
+    if (reservedIssuerPrefix === null) return;
+    await performReservedClose(reservedIssuerPrefix);
+  }
+
+  /** Manual admission reserves synchronously so a double-tap cannot queue two closes. */
+  function enqueueManualClose(): void {
+    const reservedIssuerPrefix = reserveClose();
+    if (reservedIssuerPrefix === null) return;
+    if (!queue.enqueueJob(() => performReservedClose(reservedIssuerPrefix))) releaseClose();
   }
 
   /**
@@ -573,6 +703,7 @@ export function WorkScreen({
     onScan,
     operatorId,
     refreshBox: refreshBoxAndMaybeClose,
+    refreshRecentOperations,
   });
   useEffect(() => {
     live.current = {
@@ -583,6 +714,7 @@ export function WorkScreen({
       onScan,
       operatorId,
       refreshBox: refreshBoxAndMaybeClose,
+      refreshRecentOperations,
     };
   });
 
@@ -668,24 +800,19 @@ export function WorkScreen({
           return { raw, verdict, firstSeen };
         },
         onOutcome(outcome) {
-          const {
-            t: liveT,
-            language,
-            sound: liveSound,
-            onScanRecorded: liveOnScanRecorded,
-          } = live.current;
+          const { t: liveT, language, onScanRecorded: liveOnScanRecorded } = live.current;
           const tone = toneOf(outcome.verdict);
           if (outcome.verdict.status === "ok") setAccepted((n) => n + 1);
           else setRejected((n) => n + 1);
 
           const title =
-            outcome.verdict.status === "duplicate"
-              ? liveT("signal.duplicate")
-              : outcome.verdict.status === "wrong_gtin"
-                ? liveT("signal.wrongGtin")
-                : outcome.verdict.status === "invalid"
-                  ? liveT("signal.wrongCode")
-                  : "";
+            outcome.verdict.status === "ok"
+              ? liveT("signal.ok")
+              : outcome.verdict.status === "duplicate"
+                ? liveT("signal.duplicate")
+                : outcome.verdict.status === "wrong_gtin"
+                  ? liveT("signal.wrongGtin")
+                  : liveT("signal.wrongCode");
           const detail =
             outcome.firstSeen === null
               ? undefined
@@ -695,10 +822,7 @@ export function WorkScreen({
                   }).format(new Date(outcome.firstSeen)),
                 });
 
-          playSignalTone(tone, liveSound);
-          setSignal({ tone, title, ...(detail === undefined ? {} : { detail }) });
-          if (flashTimer.current) clearTimeout(flashTimer.current);
-          flashTimer.current = setTimeout(() => setSignal(null), FLASH_MS[tone]);
+          showTimedSignal(tone, title, detail);
 
           // Nudged last, strictly after the operator-visible signal is
           // rendered: `process()` above already wrote this outcome's outbox
@@ -707,35 +831,33 @@ export function WorkScreen({
           // `nudge()` cannot throw synchronously -- but the operator's
           // feedback must stay ahead of background sync work regardless.
           liveOnScanRecorded?.();
+          // The journal commit and sync nudge remain the scan queue's critical
+          // path. This display-only read is deliberately detached so a slow
+          // mirror query cannot delay intake or the next queued scan.
+          void live.current.refreshRecentOperations();
         },
-        onError(raw, err) {
+        onError() {
           // A throw from process() (e.g. the journal write) must never leave
           // the operator with silence: they scanned something and need SOME
           // signal, distinct from an ordinary rejection, so they know to
           // rescan rather than assume the code was accepted.
-          console.error("station: scan write failed", raw, err);
+          console.error("station: scan write failed", { category: "journal_write" });
           setRejected((n) => n + 1);
-          const { t: liveT, sound: liveSound } = live.current;
-          playSignalTone("error", liveSound);
-          setSignal({ tone: "error", title: liveT("signal.systemError") });
-          if (flashTimer.current) clearTimeout(flashTimer.current);
-          flashTimer.current = setTimeout(() => setSignal(null), FLASH_MS.error);
+          const { t: liveT } = live.current;
+          showTimedSignal("error", liveT("signal.systemError"));
         },
         onJobError() {
-          const { t: liveT, sound: liveSound } = live.current;
-          playSignalTone("error", liveSound);
-          setSignal({ tone: "error", title: liveT("signal.systemError") });
-          if (flashTimer.current) clearTimeout(flashTimer.current);
-          flashTimer.current = setTimeout(() => setSignal(null), FLASH_MS.error);
+          const { t: liveT } = live.current;
+          showTimedSignal("error", liveT("signal.systemError"));
         },
       }),
     [exec, shiftId, terminalId, expectedGtin14],
   );
 
-  function handleUndo(): void {
+  function handleUndo(): Promise<void> {
     const target = lastScanned;
-    if (!target) return;
-    queue.enqueueJob(async () => {
+    if (!target) return Promise.reject(new Error("last scan is no longer available"));
+    return enqueueExceptionJob(async () => {
       await undoLastScan(exec, {
         boxId: target.boxId,
         codeHash: target.codeHash,
@@ -752,11 +874,10 @@ export function WorkScreen({
     });
   }
 
-  function confirmClearBox(): void {
-    setConfirmClear(false);
+  function clearCurrentBox(): Promise<void> {
     const boxId = boxRef.current?.boxId;
-    if (!boxId) return;
-    queue.enqueueJob(async () => {
+    if (!boxId) return Promise.reject(new Error("open box is no longer available"));
+    return enqueueExceptionJob(async () => {
       const clearedCodes = await exec.all<{ code_hash: string }>(
         "SELECT code_hash FROM codes_mirror WHERE box_id = ?",
         [boxId],
@@ -775,10 +896,30 @@ export function WorkScreen({
     });
   }
 
-  function handleReprint(boxId: string, reason: string): void {
+  function confirmClearBox(): void {
+    setConfirmClear(false);
+    void clearCurrentBox();
+  }
+
+  function enqueueExceptionJob(job: () => Promise<void>): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const accepted = queue.enqueueJob(async () => {
+        try {
+          await job();
+          resolve();
+        } catch (err) {
+          reject(err instanceof Error ? err : new Error(String(err)));
+          throw err;
+        }
+      });
+      if (!accepted) reject(new Error("station correction queue is closed"));
+    });
+  }
+
+  function handleReprint(boxId: string, reason: string): Promise<void> {
     const target = closedBoxes.find((candidate) => candidate.boxId === boxId);
-    if (!target) return;
-    queue.enqueueJob(async () => {
+    if (!target) return Promise.reject(new Error("closed box is no longer available"));
+    return enqueueExceptionJob(async () => {
       await reprintBox(exec, {
         boxId,
         shiftId,
@@ -793,8 +934,10 @@ export function WorkScreen({
     });
   }
 
-  function handleDisassemble(boxId: string, reason: string): void {
-    queue.enqueueJob(async () => {
+  function handleDisassemble(boxId: string, reason: string): Promise<void> {
+    const target = closedBoxes.find((candidate) => candidate.boxId === boxId);
+    if (!target) return Promise.reject(new Error("closed box is no longer available"));
+    return enqueueExceptionJob(async () => {
       const releasedCodes = await exec.all<{ code_hash: string }>(
         "SELECT code_hash FROM codes_mirror WHERE box_id = ?",
         [boxId],
@@ -813,6 +956,22 @@ export function WorkScreen({
     });
   }
 
+  // Registration owns the intake lifecycle too. Closing first prevents a
+  // source callback racing unmount from adding work after recovery's barrier
+  // snapshot; unregister only after every scan/job accepted before close has
+  // settled. `open()` makes StrictMode's setup -> cleanup -> setup cycle safe
+  // even though useMemo deliberately preserves this one queue instance.
+  useEffect(() => {
+    queue.open();
+    const unregister = onScanQueueRegister?.(queue);
+    return () => {
+      void queue.close().then(
+        () => unregister?.(),
+        () => unregister?.(),
+      );
+    };
+  }, [onScanQueueRegister, queue]);
+
   // Paused while print verification is up: that scan source is reading the
   // box label's SSCC, not a product KM, and feeding it into this ordinary
   // queue would misjudge it as an invalid code and flash an error signal
@@ -820,13 +979,24 @@ export function WorkScreen({
   // to compete with anything is print verification itself, not a stray
   // rejection from the loop underneath it.
   useEffect(() => {
-    if (verification || confirmClear || boxActionPending) return;
-    return source.start((raw) => queue.enqueue(raw));
-  }, [source, queue, verification, confirmClear, boxActionPending]);
+    if (verification || confirmClear || boxActionPending || showExceptions) return;
+    // Keep the physical source subscribed while serial recovery owns the
+    // screen, but deliberately discard its payloads. A keyboard-wedge source
+    // must still preventDefault() on its terminating Enter; unsubscribing it
+    // would let that Enter activate the dialog's focused recovery button and
+    // dismiss a blocking state without an intentional operator action.
+    if (noSerials) return source.start(() => {});
+    return source.start((raw) => {
+      if (ordinaryScanBlockedRef.current) return;
+      queue.enqueue(raw);
+    });
+  }, [source, queue, verification, noSerials, confirmClear, boxActionPending, showExceptions]);
 
   useEffect(
     () => () => {
       if (flashTimer.current) clearTimeout(flashTimer.current);
+      if (deferredSignalTimer.current) clearTimeout(deferredSignalTimer.current);
+      if (deferredSoundTimer.current) clearTimeout(deferredSoundTimer.current);
     },
     [],
   );
@@ -845,175 +1015,150 @@ export function WorkScreen({
     // empty outright (Finding 9) -- see `verificationQueue`'s own doc
     // comment.
     dequeueVerification();
-    // `.catch`, not a bare `void` (Task 13 review, "also fix, cheap"): a
-    // locked-DB write here would otherwise become an unhandled rejection,
-    // and unlike a rendering/printing failure (which the operator can see
-    // and retry), a failed verification record is silently dropped with
-    // nothing but a console trace to find it by -- the same discipline
-    // `hardware.ts`'s scan/status subscriptions already apply to their own
-    // fallible calls.
+    // The outcome is an ordered queue job, so credential recovery waits it
+    // alongside accepted scans and box/correction work. Keep the existing
+    // console reporting: a locked DB must not become an unhandled rejection.
     if (boxId) {
-      markPrintVerified(exec, boxId, new Date().toISOString()).catch((err: unknown) => {
-        console.error("station: recording print verification failed", err);
+      queue.enqueueJob(async () => {
+        try {
+          await markPrintVerified(exec, boxId, new Date().toISOString());
+        } catch (err) {
+          console.error("station: recording print verification failed", err);
+        }
       });
     }
-  }, [exec]);
+  }, [exec, queue]);
+
+  const statusLabels: ScanResultLabels = {
+    waiting: t("work.waiting"),
+    ok: t("work.accepted"),
+    duplicate: t("signal.duplicate"),
+    invalid: t("signal.wrongCode"),
+    wrong_gtin: t("signal.wrongGtin"),
+    unknown: t("work.rejected"),
+  };
+  const locale = i18n.language.startsWith("ru") ? "ru-RU" : "en-US";
+  const blockingState: WorkBlockingState | null = noSerials ? "serial-exhaustion" : null;
+  const overlayState: WorkOverlayState | null = confirmExit
+    ? "exit-pending"
+    : confirmClear
+      ? "clear-confirm"
+      : null;
 
   return (
-    <main
-      style={{ minHeight: "100%", padding: 32, display: "flex", flexDirection: "column", gap: 24 }}
-    >
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <span style={{ fontSize: "2rem", fontWeight: 700 }}>{productName}</span>
-          {counterpartyName ? (
-            <span style={{ fontSize: "1.25rem", opacity: 0.85 }}>
-              {t("shifts.forCounterparty")} {counterpartyName}
-            </span>
-          ) : null}
-        </div>
-        <Button
-          type="button"
-          variant="secondary"
-          style={{ minHeight: 64 }}
-          onClick={(event) => {
-            requestExit();
-            // A tap leaves this button focused in Chromium-based webviews.
-            // Left focused, the terminating Enter of the operator's next
-            // scan would fire a native click on it (see scan-source.ts) --
-            // possibly re-running requestExit() with the queue since
-            // drained and exiting with no operator decision. Blur it so no
-            // control holds focus while scanning continues.
-            event.currentTarget.blur();
-          }}
-        >
-          {t("work.exit")}
-        </Button>
-      </div>
-
-      {confirmExit ? (
-        // Given a higher stacking context (not just later JSX) than
-        // SignalOverlay: SignalOverlay is `position: fixed`, so it is a
-        // positioned box that paints after this alert's normal-flow content
-        // regardless of DOM order (CSS painting order puts non-positioned
-        // in-flow content before positioned descendants). An explicit
-        // z-index here -- but not on SignalOverlay -- lifts this whole
-        // block, including its buttons, above the fixed flash so the
-        // confirmation stays reachable while a verdict is still showing,
-        // without touching the flash's own full-screen visibility.
-        <Alert tone="warn" style={{ position: "relative", zIndex: 1 }}>
-          <p>{t("work.exitPending", { count: pendingSync })}</p>
-          <Button
-            type="button"
-            style={{ minHeight: 64 }}
-            onClick={(event) => {
-              onExit();
-              event.currentTarget.blur();
-            }}
-          >
-            {t("work.exitAnyway")}
-          </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            style={{ minHeight: 64 }}
-            onClick={(event) => {
-              setConfirmExit(false);
-              event.currentTarget.blur();
-            }}
-          >
-            {t("work.stay")}
-          </Button>
-        </Alert>
-      ) : null}
-
-      <div style={{ display: "flex", gap: 48 }}>
-        <div style={{ display: "flex", flexDirection: "column" }}>
-          <span style={{ fontSize: "1.25rem", opacity: 0.8 }}>{t("work.accepted")}</span>
-          <span style={{ fontSize: "6rem", fontWeight: 800, lineHeight: 1 }}>{accepted}</span>
-        </div>
-        <div style={{ display: "flex", flexDirection: "column" }}>
-          <span style={{ fontSize: "1.25rem", opacity: 0.8 }}>{t("work.rejected")}</span>
-          <span style={{ fontSize: "6rem", fontWeight: 800, lineHeight: 1 }}>{rejected}</span>
-        </div>
-      </div>
-
-      <span style={{ fontSize: "1.25rem", opacity: 0.7 }}>{t("work.waiting")}</span>
-
-      {/* Null `issuerPrefix` is a validation-mode shift, or a device the
-          server could not resolve one for -- no box section at all, not
-          even a disabled one. */}
-      {issuerPrefix !== null ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {box ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
-              <div data-testid="box-progress" style={{ fontSize: "1.5rem" }}>
-                {boxCapacity !== null
-                  ? t("box.progress", { items: box.itemCount, capacity: boxCapacity })
-                  : box.itemCount}
-              </div>
-              <Button
-                type="button"
-                variant="secondary"
-                style={{ minHeight: 64 }}
-                disabled={closing}
-                onClick={(event) => {
-                  void closeTheBox();
-                  event.currentTarget.blur();
-                }}
-              >
-                {t("box.close")}
-              </Button>
-              {lastScanned?.boxId === box.boxId ? (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  style={{ minHeight: 64 }}
-                  onClick={(event) => {
-                    handleUndo();
-                    event.currentTarget.blur();
+    <main className="work-screen" aria-label={productName}>
+      <div className="work-screen__content">
+        {showExceptions ? (
+          <ExceptionFlow
+            boxes={closedBoxes}
+            canUndo={lastScanned?.boxId === box?.boxId}
+            hasOpenBox={box !== null}
+            onUndo={handleUndo}
+            onClear={clearCurrentBox}
+            onReprint={handleReprint}
+            onDisassemble={handleDisassemble}
+            onBack={() => setShowExceptions(false)}
+            onPendingChange={setBoxActionPending}
+          />
+        ) : (
+          <div className="work-screen__instruments">
+            <div className="work-screen__primary">
+              <ScanResultInstrument
+                productName={productName}
+                counterpartyName={counterpartyName ?? null}
+                operation={recentOperations[0] ?? null}
+                labels={statusLabels}
+              />
+              {issuerPrefix !== null ? (
+                <BoxFillInstrument
+                  box={box}
+                  capacity={boxCapacity}
+                  canUndo={lastScanned?.boxId === box?.boxId}
+                  closeDisabled={closing}
+                  labels={{
+                    title: t("work.openBox"),
+                    absent: t("work.noOpenBox"),
+                    count: t("work.boxItems"),
+                    capacityUnknown: t("work.capacityUnknown"),
+                    close: t("box.close"),
+                    undo: t("box.undoLastScan"),
+                    clear: t("box.clear"),
                   }}
-                >
-                  {t("box.undoLastScan")}
-                </Button>
+                  onClose={enqueueManualClose}
+                  onUndo={() => void handleUndo()}
+                  onClear={() => setConfirmClear(true)}
+                />
               ) : null}
-              <Button
-                type="button"
-                variant="secondary"
-                style={{ minHeight: 64 }}
-                onClick={(event) => {
-                  setConfirmClear(true);
-                  event.currentTarget.blur();
-                }}
-              >
-                {t("box.clear")}
-              </Button>
             </div>
-          ) : null}
-          {confirmClear ? (
-            <Alert tone="warn" title={t("box.confirmClearTitle")}>
-              <p>{t("box.confirmClearDetail")}</p>
-              <Button type="button" onClick={confirmClearBox}>
-                {t("box.confirmClear")}
-              </Button>
-              <Button type="button" variant="secondary" onClick={() => setConfirmClear(false)}>
-                {t("box.cancelClear")}
-              </Button>
-            </Alert>
-          ) : null}
-          {noSerials ? <Alert tone="warn" title={t("box.noSerials")} /> : null}
-          {invalidSerial ? <Alert tone="warn" title={t("box.invalidSerial")} /> : null}
-          {printUnavailable ? <Alert tone="warn" title={t("box.printNotAvailable")} /> : null}
-          {verification ? null : (
-            <ShiftBoxesPanel
-              boxes={closedBoxes}
-              onReprint={handleReprint}
-              onDisassemble={handleDisassemble}
-              onPendingChange={setBoxActionPending}
-            />
-          )}
-        </div>
-      ) : null}
+            <aside className="work-screen__secondary" aria-label={t("work.summary")}>
+              <WorkCounters
+                accepted={accepted}
+                rejected={rejected}
+                pendingSync={pendingSync}
+                locale={locale}
+                labels={{
+                  accepted: t("work.accepted"),
+                  rejected: t("work.rejected"),
+                  synchronized: t("work.synchronized"),
+                  pending: (count) => t("work.pendingSync", { count }),
+                }}
+              />
+              <RecentOperations
+                operations={recentOperations}
+                labels={{
+                  title: t("work.recentOperations"),
+                  empty: t("work.noRecentOperations"),
+                  invalidTime: t("work.timeUnknown"),
+                }}
+                statusLabels={statusLabels}
+                locale={locale}
+              />
+            </aside>
+          </div>
+        )}
+      </div>
+
+      <WorkFooter
+        labels={{ exceptions: t("work.exceptions"), exit: t("work.pauseFinish") }}
+        onExceptions={() => setShowExceptions(true)}
+        onExit={requestExit}
+      />
+
+      <div className="work-screen__overlays">
+        {overlayState === "exit-pending" ? (
+          <Alert tone="warn" style={{ position: "relative", zIndex: 1 }}>
+            <p>{t("work.exitPending", { count: pendingSync })}</p>
+            <Button size="floor" onClick={onExit}>
+              {t("work.exitAnyway")}
+            </Button>
+            <Button size="floor" variant="secondary" onClick={() => setConfirmExit(false)}>
+              {t("work.stay")}
+            </Button>
+          </Alert>
+        ) : null}
+        {overlayState === "clear-confirm" ? (
+          <Alert tone="warn" title={t("box.confirmClearTitle")}>
+            <p>{t("box.confirmClearDetail")}</p>
+            <Button size="floor" onClick={confirmClearBox}>
+              {t("box.confirmClear")}
+            </Button>
+            <Button size="floor" variant="secondary" onClick={() => setConfirmClear(false)}>
+              {t("box.cancelClear")}
+            </Button>
+          </Alert>
+        ) : null}
+      </div>
+
+      <FullScreenDialog
+        open={blockingState === "serial-exhaustion"}
+        title={t("box.noSerials")}
+        backLabel={t("work.backToWork")}
+        onClose={() => setNoSerials(false)}
+      >
+        <p style={{ color: "var(--fg-2)", font: "var(--floor-body)" }}>
+          {t("box.noSerialsDetail")}
+        </p>
+      </FullScreenDialog>
 
       {signal ? (
         <SignalOverlay
@@ -1049,11 +1194,14 @@ export function WorkScreen({
             // Reveals the next queued prompt (if any) -- see
             // `verificationQueue`'s own doc comment (Finding 9).
             dequeueVerification();
-            // `.catch`, not a bare `void` -- see `handleVerified` above for
-            // why.
+            // Same ordered recovery barrier and error behavior as verified.
             if (boxId) {
-              markPrintSkipped(exec, boxId, new Date().toISOString()).catch((err: unknown) => {
-                console.error("station: recording print skip failed", err);
+              queue.enqueueJob(async () => {
+                try {
+                  await markPrintSkipped(exec, boxId, new Date().toISOString());
+                } catch (err) {
+                  console.error("station: recording print skip failed", err);
+                }
               });
             }
           }}

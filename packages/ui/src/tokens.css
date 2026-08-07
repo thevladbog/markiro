@@ -33,21 +33,25 @@
   --ok-bg: #e7f6ec;
   --ok-border: #cfe8d8;
   --ok-solid: #0faf56;
+  --fg-on-ok-solid: #0b2a17; /* 5.37:1 */
   /* semantic: error */
   --err-fg: #a1231a;
   --err-bg: #fdeae7;
   --err-border: #f2d4d0;
   --err-solid: #c0392b;
+  --fg-on-err-solid: #ffffff; /* 5.44:1 */
   /* semantic: duplicate / attention */
   --warn-fg: #8a4c07;
   --warn-bg: #fdf0dc;
   --warn-border: #efdfbe;
   --warn-solid: #dd9420;
+  --fg-on-warn-solid: #33250e; /* 5.90:1 */
   /* semantic: syncing */
   --info-fg: #1a4f9c;
   --info-bg: #e5effc;
   --info-border: #d2e2f7;
   --info-solid: #2e6fd0;
+  --fg-on-info-solid: #ffffff; /* 4.88:1 */
 
   --focus-ring: #1a4f9c;
 }
@@ -76,21 +80,25 @@
   --ok-bg: #142e1d;
   --ok-border: #1f4a2e;
   --ok-solid: #3ddc7a;
+  --fg-on-ok-solid: #0b2a17; /* 8.63:1 */
 
   --err-fg: #ff6b5e;
   --err-bg: #391a16;
   --err-border: #5c2a24;
   --err-solid: #ff6b5e;
+  --fg-on-err-solid: #391a16; /* 5.64:1 */
 
   --warn-fg: #ffb84d;
   --warn-bg: #33250e;
   --warn-border: #543e19;
   --warn-solid: #ffb84d;
+  --fg-on-warn-solid: #33250e; /* 8.65:1 */
 
   --info-fg: #6db2ff;
   --info-bg: #152740;
   --info-border: #234066;
   --info-solid: #6db2ff;
+  --fg-on-info-solid: #152740; /* 6.78:1 */
 
   --focus-ring: #6db2ff;
 }
@@ -158,6 +166,7 @@
   --control-sm: 32px; /* компактные таблицы, офис */
   --control-md: 40px; /* минимальная цель, офис */
   --control-floor: 64px; /* минимальная цель, цех (перчатка) */
+  --control-keypad: 96px; /* клавиша цифрового блока; station compact может снизить до 80px */
   --focus-ring-w: 2px;
   --focus-ring-offset: 2px;
 }

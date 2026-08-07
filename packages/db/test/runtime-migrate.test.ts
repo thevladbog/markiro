@@ -1,3 +1,6 @@
+import { execFile as execFileCallback } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 const harness = vi.hoisted(() => {
@@ -47,6 +50,124 @@ const configureTimeoutsQuery =
   "SELECT set_config('lock_timeout', $1, false), set_config('statement_timeout', $2, false)";
 const lockKeys = [1296126539, 1230131023];
 const timeoutValues = ["120000ms", "900000ms"];
+const execFile = promisify(execFileCallback);
+const databaseUrlFromEnvironment = process.env.DATABASE_URL;
+const migrationsFolderOnDisk = fileURLToPath(new URL("../migrations", import.meta.url));
+const runtimeMigrateModule = fileURLToPath(new URL("../src/runtime-migrate.ts", import.meta.url));
+
+const legacyStationMigrationFixture = String.raw`
+import { randomUUID } from "node:crypto";
+import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
+import pg from "pg";
+
+const databaseUrl = process.env.MARKIRO_LEGACY_FIXTURE_DATABASE_URL;
+const migrationsFolder = process.env.MARKIRO_LEGACY_FIXTURE_MIGRATIONS_FOLDER;
+const runtimeModule = process.env.MARKIRO_LEGACY_FIXTURE_RUNTIME_MODULE;
+
+if (!databaseUrl || !migrationsFolder || !runtimeModule) {
+  throw new Error("Legacy migration fixture is missing required configuration");
+}
+
+const databaseName = "markiro_runtime_" + randomUUID().replaceAll("-", "_");
+const scratchUrl = new URL(databaseUrl);
+scratchUrl.pathname = "/" + databaseName;
+scratchUrl.search = "";
+const temporaryRoot = await mkdtemp(join(tmpdir(), "markiro-runtime-migrate-"));
+const legacyMigrationsFolder = join(temporaryRoot, "migrations");
+const maintenancePool = new pg.Pool({ connectionString: databaseUrl });
+let pool;
+let databaseCreated = false;
+let primaryError;
+let cleanupError;
+
+function quoteDatabaseIdentifier(identifier) {
+  if (!/^[a-z_][a-z0-9_]*$/.test(identifier)) {
+    throw new Error("Unsafe temporary database identifier");
+  }
+  return '"' + identifier + '"';
+}
+
+try {
+  await maintenancePool.query("CREATE DATABASE " + quoteDatabaseIdentifier(databaseName));
+  databaseCreated = true;
+  await cp(migrationsFolder, legacyMigrationsFolder, { recursive: true });
+  await rm(join(legacyMigrationsFolder, "0029_loving_triathlon.sql"));
+  await rm(join(legacyMigrationsFolder, "meta", "0029_snapshot.json"));
+  const journalPath = join(legacyMigrationsFolder, "meta", "_journal.json");
+  const journal = JSON.parse(await readFile(journalPath, "utf8"));
+  journal.entries = journal.entries.filter((entry) => entry.tag !== "0029_loving_triathlon");
+  await writeFile(journalPath, JSON.stringify(journal));
+
+  pool = new pg.Pool({ connectionString: scratchUrl.toString() });
+  await migrate(drizzle(pool), { migrationsFolder: legacyMigrationsFolder });
+  await pool.query(
+    "INSERT INTO organization (id, name, slug, created_at) VALUES ($1, $2, $3, $4)",
+    ["runtime-fixture-tenant", "Runtime fixture", "runtime-fixture", new Date("2026-08-06T00:00:00.000Z")],
+  );
+  await pool.query(
+    "INSERT INTO station_devices (id, tenant_id, name, api_key_id, enrolled_at) VALUES ($1, $2, $3, $4, $5)",
+    [
+      "00000000-0000-0000-0000-000000000001",
+      "runtime-fixture-tenant",
+      "Legacy station",
+      "legacy-api-key",
+      new Date("2026-08-06T00:00:00.000Z"),
+    ],
+  );
+  await pool.query(
+    "INSERT INTO sscc_blocks (tenant_id, issuer_prefix, extension_digit, device_id, from_serial, to_serial) VALUES ($1, $2, $3, $4, $5, $6)",
+    ["runtime-fixture-tenant", "460000000", 1, "00000000-0000-0000-0000-000000000001", 1, 1],
+  );
+
+  const { runRuntimeMigrations } = await import(pathToFileURL(runtimeModule).href);
+  await runRuntimeMigrations({ databaseUrl: scratchUrl.toString(), migrationsFolder, log: () => {} });
+
+  const result = await pool.query(
+    "SELECT d.id, d.api_key_id, d.enrolled_at, b.device_id FROM station_devices d JOIN sscc_blocks b ON b.tenant_id = d.tenant_id AND b.device_id = d.id WHERE d.id = $1",
+    ["00000000-0000-0000-0000-000000000001"],
+  );
+  process.stdout.write(
+    JSON.stringify({
+      record: result.rows[0],
+      databaseUrlArguments: process.argv.filter((argument) => argument.includes(databaseUrl)),
+    }),
+  );
+} catch (error) {
+  primaryError = error;
+  throw error;
+} finally {
+  try {
+    await pool?.end();
+  } catch (error) {
+    cleanupError ??= error;
+  }
+  try {
+    await rm(temporaryRoot, { recursive: true, force: true });
+  } catch (error) {
+    cleanupError ??= error;
+  }
+  if (databaseCreated) {
+    try {
+      await maintenancePool.query("DROP DATABASE " + quoteDatabaseIdentifier(databaseName));
+    } catch (error) {
+      cleanupError ??= error;
+    }
+  }
+  try {
+    await maintenancePool.end();
+  } catch (error) {
+    cleanupError ??= error;
+  }
+  if (primaryError === undefined && cleanupError !== undefined) {
+    throw cleanupError;
+  }
+}
+`;
 
 function resetHarness() {
   harness.calls.splice(0);
@@ -62,7 +183,9 @@ function resetHarness() {
   harness.pool.end.mockClear();
   harness.readFile.mockReset();
   harness.readFile.mockResolvedValue(
-    JSON.stringify({ entries: [{ tag: "0028_avatar-owner-integrity" }] }),
+    JSON.stringify({
+      entries: [{ tag: "0028_avatar-owner-integrity" }, { tag: "0029_loving_triathlon" }],
+    }),
   );
   harness.migration.mockImplementation(
     async (_db: unknown, config: { migrationsFolder: string }) => {
@@ -101,10 +224,43 @@ describe("runRuntimeMigrations", () => {
       connectionTimeoutMillis: 30_000,
     });
     expect(result).toEqual({
-      packaged: ["0028_avatar-owner-integrity"],
+      packaged: ["0028_avatar-owner-integrity", "0029_loving_triathlon"],
       completedAt: "2026-08-04T12:00:00.000Z",
     });
   });
+
+  test.skipIf(!databaseUrlFromEnvironment)(
+    "preserves a legacy keyed station and SSCC reference through the real 0029 migration",
+    async () => {
+      const { stdout } = await execFile(
+        process.execPath,
+        [
+          "--experimental-strip-types",
+          "--input-type=module",
+          "--eval",
+          legacyStationMigrationFixture,
+        ],
+        {
+          env: {
+            ...process.env,
+            MARKIRO_LEGACY_FIXTURE_DATABASE_URL: databaseUrlFromEnvironment!,
+            MARKIRO_LEGACY_FIXTURE_MIGRATIONS_FOLDER: migrationsFolderOnDisk,
+            MARKIRO_LEGACY_FIXTURE_RUNTIME_MODULE: runtimeMigrateModule,
+          },
+        },
+      );
+
+      expect(JSON.parse(stdout)).toEqual({
+        record: {
+          id: "00000000-0000-0000-0000-000000000001",
+          api_key_id: "legacy-api-key",
+          enrolled_at: "2026-08-06T00:00:00.000Z",
+          device_id: "00000000-0000-0000-0000-000000000001",
+        },
+        databaseUrlArguments: [],
+      });
+    },
+  );
 
   test("releases the lock, client, and pool when migration fails", async () => {
     const migrationError = new Error("provider says " + databaseUrl);
@@ -177,6 +333,7 @@ describe("runRuntimeMigrations", () => {
     expect(logs).toEqual([
       "runtime migration started",
       "migration packaged: 0028_avatar-owner-integrity",
+      "migration packaged: 0029_loving_triathlon",
       "runtime migration failed",
     ]);
     expect(logs.join("\n")).not.toContain(databaseUrl);

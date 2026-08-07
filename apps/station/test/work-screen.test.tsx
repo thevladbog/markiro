@@ -1,14 +1,21 @@
 import { DatabaseSync } from "node:sqlite";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { STATION_MIGRATIONS } from "@markiro/db";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { STATION_MIGRATIONS } from "@markiro/db/station-sqlite";
 import { buildSscc, kmHash, parseKm, type LabelTemplateSpec } from "@markiro/domain";
 import i18n from "../src/i18n/index.js";
+import { readExceptions, type PendingException } from "../src/lib/box-exceptions-mirror.js";
 import type { CloseBoxResult } from "../src/lib/close-box.js";
+import { createFloorWorkRegistry, readSealedWorkSummary } from "../src/lib/credential-recovery.js";
 import type { PrinterLanguage } from "../src/lib/hardware-config.js";
 import type { PrintTarget } from "../src/lib/hardware.js";
 import type { SqlExecutor } from "../src/lib/mirror.js";
-import type { ScanListener, ScanSource } from "../src/lib/scan-source.js";
+import {
+  createKeyboardWedgeSource,
+  type ScanListener,
+  type ScanSource,
+} from "../src/lib/scan-source.js";
+import type { ScanQueue } from "../src/lib/scan-queue.js";
 import type { SoundSettings } from "../src/lib/signal-sound.js";
 import { addRange } from "../src/lib/sscc-pool.js";
 import { WorkScreen } from "../src/pages/WorkScreen.js";
@@ -103,6 +110,30 @@ function manualSource(): ScanSource & { emit: ScanListener } {
   };
 }
 
+/** Keeps every subscribed callback so tests can invoke one after its cleanup. */
+function retainingSource(): ScanSource & {
+  emit: ScanListener;
+  latestSubscribed: () => ScanListener;
+} {
+  let listener: ScanListener = () => {};
+  const subscribed: ScanListener[] = [];
+  return {
+    start(next) {
+      listener = next;
+      subscribed.push(next);
+      return () => {
+        if (listener === next) listener = () => {};
+      };
+    },
+    emit: (raw) => listener(raw),
+    latestSubscribed() {
+      const latest = subscribed.at(-1);
+      if (!latest) throw new Error("scan source has not subscribed yet");
+      return latest;
+    },
+  };
+}
+
 // A valid KM for GTIN 04600000000015 (check digit verified) with serial "5Ab1".
 const KM = "0104600000000015215Ab1";
 
@@ -117,6 +148,7 @@ interface RenderWorkScreenOverrides {
   source?: ScanSource;
   sound?: SoundSettings;
   onScanRecorded?: () => void;
+  onScanQueueRegister?: (queue: ScanQueue) => () => void;
   onExit?: () => void;
   pendingSync?: number;
 }
@@ -133,6 +165,7 @@ function renderWorkScreen(overrides: RenderWorkScreenOverrides = {}) {
     source = manualSource(),
     sound = { muted: true, volume: 1 },
     onScanRecorded,
+    onScanQueueRegister,
     onExit = () => {},
     pendingSync = 0,
   } = overrides;
@@ -149,6 +182,7 @@ function renderWorkScreen(overrides: RenderWorkScreenOverrides = {}) {
       source={source}
       sound={sound}
       {...(onScanRecorded ? { onScanRecorded } : {})}
+      {...(onScanQueueRegister ? { onScanQueueRegister } : {})}
       onExit={onExit}
       pendingSync={pendingSync}
       // None of the tests in this file's outer `describe` care about boxes:
@@ -174,6 +208,7 @@ const OTHER_KM = "0104600000000015215Ab2";
 const THIRD_KM = "0104600000000015215Ab3";
 
 const SSCC = buildSscc(0, TEST_ISSUER_PREFIX, 777);
+const MISMATCH_SSCC = buildSscc(0, TEST_ISSUER_PREFIX, 999);
 
 interface RenderWorkOverrides extends RenderWorkScreenOverrides {
   issuerPrefix?: string | null;
@@ -255,6 +290,7 @@ function renderWork(overrides: RenderWorkOverrides = {}) {
     source = manualSource(),
     sound = { muted: true, volume: 1 },
     onScanRecorded,
+    onScanQueueRegister,
     onExit = () => {},
     pendingSync = 0,
     issuerPrefix = TEST_ISSUER_PREFIX,
@@ -305,6 +341,7 @@ function renderWork(overrides: RenderWorkOverrides = {}) {
       source={source}
       sound={sound}
       {...(onScanRecorded ? { onScanRecorded } : {})}
+      {...(onScanQueueRegister ? { onScanQueueRegister } : {})}
       onExit={onExit}
       pendingSync={pendingSync}
       issuerPrefix={issuerPrefix}
@@ -318,6 +355,37 @@ function renderWork(overrides: RenderWorkOverrides = {}) {
 }
 
 describe("WorkScreen", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps sequential scan commit and notification order before presentation extraction", async () => {
+    const source = manualSource();
+    const base = makeExec();
+    const order: string[] = [];
+    const exec: SqlExecutor = {
+      all: base.all,
+      async run(sql, params = []) {
+        await base.run(sql, params);
+        if (sql.includes("INSERT INTO outbox")) order.push(`commit:${String(params[2])}`);
+      },
+    };
+    renderWorkScreen({
+      source,
+      exec,
+      onScanRecorded: () => order.push("notify"),
+    });
+
+    act(() => {
+      source.emit(KM);
+      source.emit(OTHER_KM);
+    });
+
+    await waitFor(() => expect(order).toHaveLength(4));
+    expect(order).toEqual([`commit:${KM}`, "notify", `commit:${OTHER_KM}`, "notify"]);
+  });
+
   it("accepts a valid code, counts it and journals it", async () => {
     const source = manualSource();
     const exec = makeExec();
@@ -330,6 +398,267 @@ describe("WorkScreen", () => {
       expect(rows).toHaveLength(1);
     });
     expect(await screen.findByText("1")).toBeDefined();
+  });
+
+  it("announces accepted scans with a title instead of an icon or color alone", async () => {
+    const source = manualSource();
+    renderWorkScreen({ source });
+
+    act(() => source.emit(KM));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.dataset.tone).toBe("ok");
+    expect(alert.textContent).toContain("ACCEPTED");
+  });
+
+  it.each([
+    { tone: "ok", raw: KM, duration: 350 },
+    { tone: "error", raw: "not-a-code", duration: 1200 },
+  ] as const)(
+    "keeps the $tone verdict visible for exactly $duration ms",
+    async ({ tone, raw, duration }) => {
+      vi.useFakeTimers();
+      const source = manualSource();
+      renderWorkScreen({ source });
+
+      act(() => source.emit(raw));
+      await act(async () => vi.advanceTimersByTimeAsync(0));
+      expect(screen.getByRole("alert").dataset.tone).toBe(tone);
+
+      await act(async () => vi.advanceTimersByTimeAsync(duration - 1));
+      expect(screen.getByRole("alert").dataset.tone).toBe(tone);
+      await act(async () => vi.advanceTimersByTimeAsync(1));
+      expect(screen.queryByRole("alert")).toBeNull();
+    },
+  );
+
+  it("keeps a duplicate verdict for exactly 900 ms", async () => {
+    vi.useFakeTimers();
+    const source = manualSource();
+    renderWorkScreen({ source });
+
+    act(() => source.emit(KM));
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    await act(async () => vi.advanceTimersByTimeAsync(350));
+    act(() => source.emit(KM));
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(screen.getByRole("alert").dataset.tone).toBe("duplicate");
+
+    await act(async () => vi.advanceTimersByTimeAsync(899));
+    expect(screen.getByRole("alert").dataset.tone).toBe("duplicate");
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("does not let an older timer clear a newer signal", async () => {
+    vi.useFakeTimers();
+    const timeoutSpy = vi.spyOn(globalThis, "setTimeout");
+    const source = manualSource();
+    renderWorkScreen({ source });
+
+    act(() => source.emit(KM));
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(screen.getByRole("alert").dataset.tone).toBe("ok");
+    const staleCallback = timeoutSpy.mock.calls.find(([, delay]) => delay === 350)?.[0];
+    expect(staleCallback).toBeTypeOf("function");
+    await act(async () => vi.advanceTimersByTimeAsync(349));
+
+    act(() => source.emit("not-a-code"));
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(screen.getByRole("alert").dataset.tone).toBe("error");
+    act(() => staleCallback?.());
+    expect(screen.getByRole("alert").dataset.tone).toBe("error");
+
+    await act(async () => vi.advanceTimersByTimeAsync(1200));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("keeps visual rejection feedback visible when sound is muted", async () => {
+    const source = manualSource();
+    renderWorkScreen({ source, sound: { muted: true, volume: 1 } });
+
+    act(() => source.emit("not-a-code"));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.dataset.tone).toBe("error");
+    expect(alert.textContent).toContain("WRONG CODE");
+  });
+
+  it("uses the same error tone for the visual overlay and audible verdict", async () => {
+    const frequencies: number[] = [];
+    const context = {
+      currentTime: 0,
+      destination: {},
+      state: "running",
+      resume: vi.fn(async () => {}),
+      createOscillator: () => ({
+        type: "",
+        frequency: {
+          setValueAtTime: (frequency: number) => frequencies.push(frequency),
+        },
+        connect: vi.fn(),
+        start: vi.fn(),
+        stop: vi.fn(),
+      }),
+      createGain: () => ({
+        gain: {
+          setValueAtTime: vi.fn(),
+          exponentialRampToValueAtTime: vi.fn(),
+        },
+        connect: vi.fn(),
+      }),
+    } as unknown as AudioContext;
+    vi.stubGlobal(
+      "AudioContext",
+      vi.fn(function AudioContextStub() {
+        return context;
+      }),
+    );
+    const source = manualSource();
+    renderWorkScreen({ source, sound: { muted: false, volume: 1 } });
+
+    act(() => source.emit("not-a-code"));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.dataset.tone).toBe("error");
+    expect(frequencies).toEqual([220]);
+    vi.unstubAllGlobals();
+  });
+
+  it("renders the fixed instrument split with a bounded recent list and footer actions", async () => {
+    const source = manualSource();
+    const view = renderWorkScreen({ source });
+
+    expect(view.container.querySelector(".work-screen__instruments")).not.toBeNull();
+    expect(screen.getByRole("heading", { name: "Recent operations" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Exceptions" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Pause / finish" })).toBeDefined();
+  });
+
+  it("coalesces a scan burst into one active and one trailing recent read without delaying commits", async () => {
+    const source = manualSource();
+    const base = makeExec();
+    let recentReads = 0;
+    let activeRecentReads = 0;
+    let maxActiveRecentReads = 0;
+    let releaseRefresh!: () => void;
+    const refreshGate = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    const order: string[] = [];
+    const exec: SqlExecutor = {
+      async run(sql, params = []) {
+        await base.run(sql, params);
+        if (sql.includes("INSERT INTO outbox")) order.push(`commit:${String(params[2])}`);
+      },
+      async all<T>(sql: string, params: unknown[] = []) {
+        if (sql.includes("FROM scan_events_mirror") && sql.includes("LIMIT ?")) {
+          recentReads += 1;
+          if (recentReads > 1) {
+            activeRecentReads += 1;
+            maxActiveRecentReads = Math.max(maxActiveRecentReads, activeRecentReads);
+            await refreshGate;
+            activeRecentReads -= 1;
+          }
+        }
+        return base.all<T>(sql, params);
+      },
+    };
+    const onScanRecorded = vi.fn(() => order.push("notify"));
+    renderWorkScreen({ source, exec, onScanRecorded });
+    await waitFor(() => expect(recentReads).toBe(1));
+    const burst = Array.from({ length: 6 }, (_, index) => `0104600000000015215Burst${index + 1}`);
+
+    act(() => {
+      for (const raw of burst) source.emit(raw);
+    });
+
+    await waitFor(() => expect(onScanRecorded).toHaveBeenCalledTimes(burst.length));
+    expect(await exec.all("SELECT code_hash FROM codes_mirror")).toHaveLength(burst.length);
+    expect(order).toEqual(burst.flatMap((raw) => [`commit:${raw}`, "notify"]));
+    expect(recentReads).toBe(2);
+    expect(maxActiveRecentReads).toBe(1);
+
+    releaseRefresh();
+    await waitFor(() => expect(recentReads).toBe(3));
+    await waitFor(() => expect(activeRecentReads).toBe(0));
+  });
+
+  it("drops a queued trailing recent read when the work screen unmounts", async () => {
+    const source = manualSource();
+    const base = makeExec();
+    let recentReads = 0;
+    let releaseRefresh!: () => void;
+    const refreshGate = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    const exec: SqlExecutor = {
+      run: base.run,
+      async all<T>(sql: string, params: unknown[] = []) {
+        if (sql.includes("FROM scan_events_mirror") && sql.includes("LIMIT ?")) {
+          recentReads += 1;
+          if (recentReads > 1) await refreshGate;
+        }
+        return base.all<T>(sql, params);
+      },
+    };
+    const onScanRecorded = vi.fn();
+    const view = renderWorkScreen({ source, exec, onScanRecorded });
+    await waitFor(() => expect(recentReads).toBe(1));
+
+    act(() => {
+      source.emit(KM);
+      source.emit(OTHER_KM);
+    });
+    await waitFor(() => expect(onScanRecorded).toHaveBeenCalledTimes(2));
+    expect(recentReads).toBe(2);
+
+    view.unmount();
+    releaseRefresh();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(recentReads).toBe(2);
+  });
+
+  it("keeps an unmounted queue registered until an accepted scan write becomes idle", async () => {
+    const source = manualSource();
+    const base = makeExec();
+    let releaseOutbox!: () => void;
+    let announceOutbox!: () => void;
+    const outboxGate = new Promise<void>((resolve) => {
+      releaseOutbox = resolve;
+    });
+    const outboxReached = new Promise<void>((resolve) => {
+      announceOutbox = resolve;
+    });
+    const exec: SqlExecutor = {
+      all: base.all,
+      async run(sql, params = []) {
+        if (sql.includes("INSERT INTO outbox")) {
+          announceOutbox();
+          await outboxGate;
+        }
+        await base.run(sql, params);
+      },
+    };
+    const registered = new Set<ScanQueue>();
+    const view = renderWorkScreen({
+      source,
+      exec,
+      onScanQueueRegister(queue) {
+        registered.add(queue);
+        return () => registered.delete(queue);
+      },
+    });
+
+    act(() => source.emit(KM));
+    await outboxReached;
+    view.unmount();
+    expect(registered.size).toBe(1);
+
+    releaseOutbox();
+    await Promise.all([...registered].map((queue) => queue.idle()));
+    await waitFor(() => expect(registered.size).toBe(0));
+    expect(await exec.all("SELECT raw FROM outbox")).toHaveLength(1);
   });
 
   it("flags the second scan of the same code as a duplicate", async () => {
@@ -430,6 +759,11 @@ describe("WorkScreen", () => {
     expect(await screen.findByText("1")).toBeDefined(); // rejected counter, not accepted
 
     expect(consoleError).toHaveBeenCalled();
+    const logged = JSON.stringify(consoleError.mock.calls);
+    expect(logged).toContain("station: scan write failed");
+    expect(logged).toContain("journal_write");
+    expect(logged).not.toContain(KM);
+    expect(logged).not.toContain("disk full");
     consoleError.mockRestore();
   });
 
@@ -455,7 +789,7 @@ describe("WorkScreen", () => {
     const onExit = vi.fn();
     renderWorkScreen({ onExit, pendingSync: 0 });
 
-    fireEvent.click(screen.getByRole("button", { name: "Leave shift" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pause / finish" }));
     expect(onExit).toHaveBeenCalledTimes(1);
   });
 
@@ -463,7 +797,7 @@ describe("WorkScreen", () => {
     const onExit = vi.fn();
     renderWorkScreen({ onExit, pendingSync: 12 });
 
-    fireEvent.click(screen.getByRole("button", { name: "Leave shift" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pause / finish" }));
     expect(onExit).not.toHaveBeenCalled();
     expect(screen.getByText("12 scans have not reached the server yet.")).toBeDefined();
 
@@ -475,7 +809,7 @@ describe("WorkScreen", () => {
     const onExit = vi.fn();
     renderWorkScreen({ onExit, pendingSync: 12 });
 
-    fireEvent.click(screen.getByRole("button", { name: "Leave shift" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pause / finish" }));
     fireEvent.click(screen.getByRole("button", { name: "Stay" }));
     expect(onExit).not.toHaveBeenCalled();
   });
@@ -490,7 +824,7 @@ describe("WorkScreen", () => {
     const onExit = vi.fn();
     renderWorkScreen({ onExit, pendingSync: 12 });
 
-    const exitButton = screen.getByRole("button", { name: "Leave shift" });
+    const exitButton = screen.getByRole("button", { name: "Pause / finish" });
     exitButton.focus();
     expect(document.activeElement).toBe(exitButton);
 
@@ -503,12 +837,16 @@ describe("WorkScreen", () => {
     const onExit = vi.fn();
     renderWorkScreen({ onExit, pendingSync: 1 });
 
-    fireEvent.click(screen.getByRole("button", { name: "Leave shift" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pause / finish" }));
     expect(screen.getByText("1 scan has not reached the server yet.")).toBeDefined();
   });
 });
 
 describe("WorkScreen box progress, closing and printing", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   // This whole block's copy is the box UI's -- Russian regardless of the
   // outer describe's "en" (see the floor rule in Task 13's brief: "Copy is
   // Russian"). i18n's own default is "ru" (src/i18n/index.ts), so switching
@@ -554,6 +892,10 @@ describe("WorkScreen box progress, closing and printing", () => {
     );
   }
 
+  function readExceptionFacts(exec: SqlExecutor): Promise<PendingException[]> {
+    return readExceptions(exec, 100);
+  }
+
   it("undoes the last accepted scan in the open box and queues its exception", async () => {
     const exec = makeExec();
     renderWorkTracked({ exec, boxItemCount: 0 });
@@ -562,17 +904,43 @@ describe("WorkScreen box progress, closing and printing", () => {
     await waitFor(async () => {
       expect(await exec.all("SELECT code_hash FROM codes_mirror")).toHaveLength(1);
     });
+    const target = (
+      await exec.all<{ code_hash: string; scanned_at: string; box_id: string }>(
+        "SELECT code_hash, scanned_at, box_id FROM codes_mirror",
+      )
+    )[0]!;
 
+    fireEvent.click(screen.getByRole("button", { name: "Исключения" }));
     fireEvent.click(await screen.findByRole("button", { name: "Отменить последний скан" }));
 
     await waitFor(async () => {
       expect(await exec.all("SELECT code_hash FROM codes_mirror")).toHaveLength(0);
     });
-    expect(screen.queryByRole("button", { name: "Отменить последний скан" })).toBeNull();
-    const exceptions = await exec.all<{ kind: string; operator_id: string }>(
-      "SELECT kind, operator_id FROM box_exceptions_mirror",
-    );
-    expect(exceptions).toEqual([{ kind: "undo", operator_id: "operator-1" }]);
+    fireEvent.click(await screen.findByRole("button", { name: "Вернуться к работе" }));
+    fireEvent.click(screen.getByRole("button", { name: "Исключения" }));
+    expect(
+      (screen.getByRole("button", { name: "Отменить последний скан" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(await readExceptionFacts(exec)).toEqual([
+      {
+        id: expect.any(Number),
+        kind: "undo",
+        boxId: target.box_id,
+        codeHash: target.code_hash,
+        targetScannedAt: target.scanned_at,
+        shiftId: "s1",
+        terminalId: "dev-1",
+        operatorId: "operator-1",
+        reason: null,
+        at: expect.any(String),
+      },
+    ]);
+    expect(
+      await exec.all("SELECT box_id FROM boxes_mirror WHERE box_id = ? AND closed_at IS NULL", [
+        target.box_id,
+      ]),
+    ).toHaveLength(1);
   });
 
   it("clears every scan from the open box only after confirmation", async () => {
@@ -589,6 +957,7 @@ describe("WorkScreen box progress, closing and printing", () => {
       expect(await exec.all("SELECT code_hash FROM codes_mirror")).toHaveLength(2);
     });
 
+    fireEvent.click(screen.getByRole("button", { name: "Исключения" }));
     fireEvent.click(await screen.findByRole("button", { name: "Очистить короб" }));
     act(() => scan(THIRD_KM));
     expect(onScan).toHaveBeenCalledTimes(2);
@@ -598,9 +967,28 @@ describe("WorkScreen box progress, closing and printing", () => {
     await waitFor(async () => {
       expect(await exec.all("SELECT code_hash FROM codes_mirror")).toHaveLength(0);
     });
-    const exceptions = await exec.all<{ kind: string }>("SELECT kind FROM box_exceptions_mirror");
-    expect(exceptions).toEqual([{ kind: "clear" }]);
+    expect(await readExceptionFacts(exec)).toEqual([
+      {
+        id: expect.any(Number),
+        kind: "clear",
+        boxId: SEEDED_BOX_ID,
+        codeHash: null,
+        targetScannedAt: null,
+        shiftId: "s1",
+        terminalId: "dev-1",
+        operatorId: "operator-1",
+        reason: null,
+        at: expect.any(String),
+      },
+    ]);
+    expect(
+      await exec.all(
+        "SELECT box_id FROM boxes_mirror WHERE box_id = ? AND closed_at IS NULL AND sscc IS NULL",
+        [SEEDED_BOX_ID],
+      ),
+    ).toHaveLength(1);
 
+    fireEvent.click(await screen.findByRole("button", { name: "Вернуться к работе" }));
     act(() => scan(KM));
     await waitFor(async () => {
       expect(await exec.all("SELECT code_hash FROM codes_mirror")).toHaveLength(1);
@@ -611,6 +999,12 @@ describe("WorkScreen box progress, closing and printing", () => {
     const exec = makeExec();
     await seedClosedBox(exec);
     await seedLabelSpec(exec, "s1");
+    const boxBefore = await exec.all<Record<string, unknown>>(
+      "SELECT * FROM boxes_mirror WHERE box_id = 'closed-box'",
+    );
+    const codesBefore = await exec.all<Record<string, unknown>>(
+      "SELECT * FROM codes_mirror WHERE box_id = 'closed-box' ORDER BY code_hash",
+    );
     const print = vi.fn().mockResolvedValue(undefined);
     const onScanRecorded = vi.fn();
     renderWorkTracked({
@@ -619,35 +1013,120 @@ describe("WorkScreen box progress, closing and printing", () => {
       onScanRecorded,
     });
 
-    fireEvent.click(await screen.findByRole("button", { name: "Перепечатать" }));
+    fireEvent.click(screen.getByRole("button", { name: "Исключения" }));
+    const reprintAction = await screen.findByRole("button", { name: "Перепечатать этикетку" });
+    await waitFor(() => expect((reprintAction as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(reprintAction);
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(`SSCC ${SSCC}`) }));
+    fireEvent.click(screen.getByRole("button", { name: "Другая причина" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Причина" }), {
       target: { value: "Замятие этикетки" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Подтвердить" }));
+    fireEvent.click(screen.getByRole("button", { name: "Использовать причину" }));
+    fireEvent.click(screen.getByRole("button", { name: "Подтвердить перепечатку" }));
 
     await waitFor(() => expect(print).toHaveBeenCalledOnce());
     await waitFor(async () => {
-      const rows = await exec.all<{ kind: string; reason: string }>(
-        "SELECT kind, reason FROM box_exceptions_mirror",
-      );
-      expect(rows).toEqual([{ kind: "reprint", reason: "Замятие этикетки" }]);
+      expect(await readExceptionFacts(exec)).toEqual([
+        {
+          id: expect.any(Number),
+          kind: "reprint",
+          boxId: "closed-box",
+          codeHash: null,
+          targetScannedAt: null,
+          shiftId: "s1",
+          terminalId: "dev-1",
+          operatorId: "operator-1",
+          reason: "Замятие этикетки",
+          at: expect.any(String),
+        },
+      ]);
     });
+    expect(
+      await exec.all<Record<string, unknown>>(
+        "SELECT * FROM boxes_mirror WHERE box_id = 'closed-box'",
+      ),
+    ).toEqual(boxBefore);
+    expect(
+      await exec.all<Record<string, unknown>>(
+        "SELECT * FROM codes_mirror WHERE box_id = 'closed-box' ORDER BY code_hash",
+      ),
+    ).toEqual(codesBefore);
     expect(onScanRecorded).toHaveBeenCalledOnce();
   });
 
-  it("pauses ordinary scanning while a box-action reason dialog is open", async () => {
+  it("pauses ordinary scanning while the exception flow is open", async () => {
     const exec = makeExec();
     await seedClosedBox(exec);
     const onScan = vi.fn();
     renderWorkTracked({ exec, onScan });
 
-    fireEvent.click(await screen.findByRole("button", { name: "Перепечатать" }));
+    fireEvent.click(screen.getByRole("button", { name: "Исключения" }));
     act(() => scan(KM));
     expect(onScan).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
+    fireEvent.click(screen.getByRole("button", { name: "Назад" }));
     act(() => scan(KM));
     await waitFor(() => expect(onScan).toHaveBeenCalledOnce());
+  });
+
+  it("drops a stale physical-source callback after the exception screen commits", async () => {
+    const exec = makeExec();
+    const source = retainingSource();
+    const onScan = vi.fn();
+    let registeredQueue: ScanQueue | null = null;
+    renderWorkTracked({
+      exec,
+      source,
+      onScan,
+      onScanQueueRegister(queue) {
+        registeredQueue = queue;
+        return () => {};
+      },
+    });
+    await waitFor(() => expect(registeredQueue).not.toBeNull());
+    const staleCallback = source.latestSubscribed();
+
+    fireEvent.click(screen.getByRole("button", { name: "Исключения" }));
+    act(() => staleCallback(KM));
+    await act(async () => {
+      await registeredQueue!.idle();
+    });
+
+    expect(onScan).not.toHaveBeenCalled();
+    expect(await exec.all("SELECT * FROM outbox")).toHaveLength(0);
+  });
+
+  it("orders a confirmed UI correction behind work already accepted by the current scan queue", async () => {
+    const exec = makeExec();
+    let registeredQueue: ScanQueue | null = null;
+    renderWorkTracked({
+      exec,
+      boxItemCount: 0,
+      onScanQueueRegister(queue) {
+        registeredQueue = queue;
+        return () => {};
+      },
+    });
+    await waitFor(() => expect(registeredQueue).not.toBeNull());
+
+    let releaseBlocker!: () => void;
+    const blocker = new Promise<void>((resolve) => {
+      releaseBlocker = resolve;
+    });
+    expect(registeredQueue!.enqueueJob(() => blocker)).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Исключения" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Очистить короб" }));
+    fireEvent.click(screen.getByRole("button", { name: "Подтвердить очистку" }));
+    await act(async () => Promise.resolve());
+    expect(await readExceptionFacts(exec)).toHaveLength(0);
+
+    releaseBlocker();
+    await act(async () => {
+      await registeredQueue!.idle();
+    });
+    expect((await readExceptionFacts(exec)).map((fact) => fact.kind)).toEqual(["clear"]);
   });
 
   it("disassembles a closed box, removes its codes and refreshes the panel", async () => {
@@ -656,11 +1135,17 @@ describe("WorkScreen box progress, closing and printing", () => {
     const onScanRecorded = vi.fn();
     renderWorkTracked({ exec, onScanRecorded });
 
-    fireEvent.click(await screen.findByRole("button", { name: "Расформировать" }));
+    fireEvent.click(screen.getByRole("button", { name: "Исключения" }));
+    const disassembleAction = await screen.findByRole("button", { name: "Расформировать короб" });
+    await waitFor(() => expect((disassembleAction as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(disassembleAction);
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(`SSCC ${SSCC}`) }));
+    fireEvent.click(screen.getByRole("button", { name: "Другая причина" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Причина" }), {
       target: { value: "Чужой заказ" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Подтвердить" }));
+    fireEvent.click(screen.getByRole("button", { name: "Использовать причину" }));
+    fireEvent.click(screen.getByRole("button", { name: "Расформировать безвозвратно" }));
 
     await waitFor(async () => {
       const rows = await exec.all<{ disassembled_at: string | null }>(
@@ -672,10 +1157,20 @@ describe("WorkScreen box progress, closing and printing", () => {
       ).toHaveLength(0);
     });
     expect(screen.queryByText(`SSCC ${SSCC}`)).toBeNull();
-    const exceptions = await exec.all<{ kind: string; reason: string }>(
-      "SELECT kind, reason FROM box_exceptions_mirror",
-    );
-    expect(exceptions).toEqual([{ kind: "disassemble", reason: "Чужой заказ" }]);
+    expect(await readExceptionFacts(exec)).toEqual([
+      {
+        id: expect.any(Number),
+        kind: "disassemble",
+        boxId: "closed-box",
+        codeHash: null,
+        targetScannedAt: null,
+        shiftId: "s1",
+        terminalId: "dev-1",
+        operatorId: "operator-1",
+        reason: "Чужой заказ",
+        at: expect.any(String),
+      },
+    ]);
     expect(onScanRecorded).toHaveBeenCalledOnce();
   });
 
@@ -702,6 +1197,49 @@ describe("WorkScreen box progress, closing and printing", () => {
     renderWorkTracked({ boxCapacity: 10, boxItemCount: 3, closeCurrentBox: close });
     fireEvent.click(await screen.findByRole("button", { name: "Закрыть короб" }));
     await waitFor(() => expect(close).toHaveBeenCalledOnce());
+  });
+
+  it("keeps a delayed manual close inside the recovery work barrier", async () => {
+    const base = makeExec();
+    await addRange(base, {
+      issuerPrefix: TEST_ISSUER_PREFIX,
+      extensionDigit: 0,
+      fromSerial: 1,
+      toSerial: 5,
+    });
+    let releaseClose!: () => void;
+    let announceClose!: () => void;
+    const closeGate = new Promise<void>((resolve) => {
+      releaseClose = resolve;
+    });
+    const closeReached = new Promise<void>((resolve) => {
+      announceClose = resolve;
+    });
+    const exec: SqlExecutor = {
+      all: base.all,
+      async run(sql, params = []) {
+        if (sql.includes("SET sscc = ?, closed_at = ?")) {
+          announceClose();
+          await closeGate;
+        }
+        await base.run(sql, params);
+      },
+    };
+    const registry = createFloorWorkRegistry();
+    const view = renderWorkTracked({
+      exec,
+      boxCapacity: 10,
+      boxItemCount: 3,
+      onScanQueueRegister: (queue) => registry.register(queue),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Закрыть короб" }));
+    await closeReached;
+    view.unmount();
+    const summary = readSealedWorkSummary(exec, registry.current(), 1_000);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    releaseClose();
+
+    await expect(summary).resolves.toMatchObject({ boxes: 1, total: 1 });
   });
 
   // Task 13 review, Finding 2: a double-tap (or a tap racing an auto-close
@@ -735,16 +1273,60 @@ describe("WorkScreen box progress, closing and printing", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  it("says plainly that numbers have run out, and keeps accepting scans", async () => {
+  it("blocks on serial exhaustion until the operator uses a floor-sized recovery action", async () => {
     const close = vi
       .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
       .mockResolvedValue({ status: "no-serials" });
     const onScan = vi.fn();
     renderWorkTracked({ boxCapacity: 10, boxItemCount: 9, closeCurrentBox: close, onScan });
     act(() => scan(KM));
-    await waitFor(() => expect(screen.getByText(/номера для коробов закончились/i)).toBeDefined());
+    const dialog = await screen.findByRole("dialog", {
+      name: /номера для коробов закончились/i,
+    });
+    const action = screen.getByRole("button", { name: "Вернуться к работе" });
+    expect(action.style.height).toBe("var(--control-floor)");
+
+    act(() => scan(OTHER_KM));
+    await act(async () => Promise.resolve());
+    expect(onScan).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(action);
+    expect(dialog.isConnected).toBe(false);
     act(() => scan(OTHER_KM));
     await waitFor(() => expect(onScan).toHaveBeenCalledTimes(2));
+  });
+
+  it("discards a keyboard-wedge scan and suppresses its terminating Enter while serial recovery owns focus", async () => {
+    const close = vi
+      .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
+      .mockResolvedValue({ status: "no-serials" });
+    const source = createKeyboardWedgeSource(window);
+    const onScan = vi.fn();
+    renderWorkTracked({ source, boxCapacity: 10, boxItemCount: 9, closeCurrentBox: close, onScan });
+
+    act(() => {
+      for (const key of KM) window.dispatchEvent(new KeyboardEvent("keydown", { key }));
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", cancelable: true }));
+    });
+    const dialog = await screen.findByRole("dialog", {
+      name: /номера для коробов закончились/i,
+    });
+    const action = screen.getByRole("button", { name: "Вернуться к работе" });
+    action.focus();
+    expect(document.activeElement).toBe(action);
+
+    const terminatingEnter = new KeyboardEvent("keydown", { key: "Enter", cancelable: true });
+    act(() => {
+      for (const key of OTHER_KM) window.dispatchEvent(new KeyboardEvent("keydown", { key }));
+      window.dispatchEvent(terminatingEnter);
+    });
+
+    expect(terminatingEnter.defaultPrevented).toBe(true);
+    expect(dialog.isConnected).toBe(true);
+    expect(onScan).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(action);
+    expect(dialog.isConnected).toBe(false);
   });
 
   // CodeRabbit PR33 review, Finding 4: `closeCurrentBox` used to only ever
@@ -768,6 +1350,23 @@ describe("WorkScreen box progress, closing and printing", () => {
     );
     act(() => scan(OTHER_KM));
     await waitFor(() => expect(onScan).toHaveBeenCalledTimes(2));
+  });
+
+  it("times an invalid box serial out as an ordinary 1200 ms error", async () => {
+    vi.useFakeTimers();
+    const close = vi
+      .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
+      .mockResolvedValue({ status: "invalid-serial" });
+    renderWorkTracked({ boxCapacity: 10, boxItemCount: 9, closeCurrentBox: close });
+
+    act(() => scan(KM));
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(screen.getByRole("alert").textContent).toContain("Не удалось сформировать номер короба");
+
+    await act(async () => vi.advanceTimersByTimeAsync(1199));
+    expect(screen.getByRole("alert")).toBeDefined();
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("does not prompt for verification when the setting is off", async () => {
@@ -809,6 +1408,28 @@ describe("WorkScreen box progress, closing and printing", () => {
     expect(screen.queryByText("Отсканируйте распечатанную этикетку")).toBeNull();
   });
 
+  it("times a print failure out as an ordinary 1200 ms error", async () => {
+    vi.useFakeTimers();
+    const close = vi
+      .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
+      .mockResolvedValue({ status: "closed", sscc: SSCC, itemCount: 10 });
+    renderWorkTracked({
+      boxCapacity: 10,
+      boxItemCount: 9,
+      closeCurrentBox: close,
+      verifyPrintedLabel: false,
+    });
+
+    act(() => scan(KM));
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(screen.getByRole("alert").textContent).toContain("Печать не выполнена");
+
+    await act(async () => vi.advanceTimersByTimeAsync(1199));
+    expect(screen.getByRole("alert")).toBeDefined();
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   // Self-review addition: none of the brief's own tests ever set
   // `verifyPrintedLabel: true`, so the "on" branch of that setting was never
   // actually exercised -- only its negation was. This is the positive half.
@@ -835,6 +1456,10 @@ describe("WorkScreen box progress, closing and printing", () => {
     act(() => scan(KM));
     await waitFor(() => expect(close).toHaveBeenCalled());
     expect(await screen.findByText("Отсканируйте распечатанную этикетку")).toBeDefined();
+    expect(screen.getAllByRole("main")).toHaveLength(1);
+    expect(
+      screen.getByRole("dialog", { name: "Отсканируйте распечатанную этикетку" }),
+    ).toBeDefined();
   });
 
   // Task 13 review, Finding 3: opening the verification prompt when the
@@ -1056,6 +1681,77 @@ describe("WorkScreen box progress, closing and printing", () => {
     });
   });
 
+  it.each(["skip", "verify"] as const)(
+    "keeps a delayed print-%s outcome inside the recovery work barrier",
+    async (outcome) => {
+      const base = makeExec();
+      await seedLabelSpec(base, "s1");
+      await addRange(base, {
+        issuerPrefix: TEST_ISSUER_PREFIX,
+        extensionDigit: 0,
+        fromSerial: 1,
+        toSerial: 5,
+      });
+      let releaseOutcome!: () => void;
+      let announceOutcome!: () => void;
+      const outcomeGate = new Promise<void>((resolve) => {
+        releaseOutcome = resolve;
+      });
+      const outcomeReached = new Promise<void>((resolve) => {
+        announceOutcome = resolve;
+      });
+      const marker = outcome === "skip" ? "print_skipped_at" : "print_verified_at";
+      const exec: SqlExecutor = {
+        all: base.all,
+        async run(sql, params = []) {
+          if (sql.includes(`SET ${marker} = ?`)) {
+            announceOutcome();
+            await outcomeGate;
+          }
+          await base.run(sql, params);
+        },
+      };
+      const registry = createFloorWorkRegistry();
+      const view = renderWorkTracked({
+        exec,
+        boxCapacity: 10,
+        boxItemCount: 9,
+        verifyPrintedLabel: true,
+        printing: { target: PRINT_TARGET, language: "zpl", print: vi.fn(async () => {}) },
+        onScanQueueRegister: (queue) => registry.register(queue),
+      });
+      act(() => scan(KM));
+      await screen.findByText("Отсканируйте распечатанную этикетку");
+      await base.run("UPDATE boxes_mirror SET acked_at = ? WHERE box_id = ?", [
+        "2026-08-06T08:00:00Z",
+        SEEDED_BOX_ID,
+      ]);
+
+      if (outcome === "skip") {
+        fireEvent.click(screen.getByRole("button", { name: "Пропустить" }));
+      } else {
+        const rows = await base.all<{ sscc: string }>(
+          "SELECT sscc FROM boxes_mirror WHERE box_id = ?",
+          [SEEDED_BOX_ID],
+        );
+        act(() => scan(`]C100${rows[0]!.sscc}`));
+      }
+      await outcomeReached;
+      view.unmount();
+      const summary = readSealedWorkSummary(exec, registry.current(), 1_000);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      releaseOutcome();
+
+      await expect(summary).resolves.toMatchObject({ boxes: 1, total: 2 });
+      const rows = await base.all<Record<string, string | null>>(
+        `SELECT ${marker}, acked_at FROM boxes_mirror WHERE box_id = ?`,
+        [SEEDED_BOX_ID],
+      );
+      expect(rows[0]?.[marker]).not.toBeNull();
+      expect(rows[0]?.acked_at).toBeNull();
+    },
+  );
+
   // Task 13 review, Finding 4: `closeTheBox` used to capture the box id for
   // the verification/skip record from the `box` REACT STATE variable, which
   // this file's own comments (on `boxRef`) already document as able to lag a
@@ -1139,6 +1835,7 @@ describe("WorkScreen box progress, closing and printing", () => {
   // the first one being silently lost.
   it("serializes concurrent box-label prints and loses neither box's verification outcome", async () => {
     const exec = makeExec();
+    const source = retainingSource();
     await seedLabelSpec(exec, "s1");
     await addRange(exec, {
       issuerPrefix: TEST_ISSUER_PREFIX,
@@ -1161,6 +1858,7 @@ describe("WorkScreen box progress, closing and printing", () => {
 
     renderWorkTracked({
       exec,
+      source,
       boxCapacity: 1,
       boxItemCount: 0,
       verifyPrintedLabel: true,
@@ -1178,6 +1876,7 @@ describe("WorkScreen box progress, closing and printing", () => {
     // The core serialization assertion: never more than one physical
     // print call in flight, however close together the two boxes closed.
     expect(maxInFlight).toBe(1);
+    await waitFor(() => expect(inFlight).toBe(0));
 
     await waitFor(async () => {
       const rows = await exec.all<{ n: number }>(
@@ -1186,10 +1885,16 @@ describe("WorkScreen box progress, closing and printing", () => {
       expect(rows[0]?.n).toBe(2);
     });
 
-    // First prompt: resolve it (skip), then the SECOND must appear --
-    // proving it was queued, not dropped, while the first was showing.
+    // First prompt: show a mismatch, resolve it (skip), then the SECOND must
+    // appear clean -- proving both that it was queued (not dropped) and that
+    // feedback belongs to the expected label which produced it.
     const firstSscc = (await screen.findByText(/^\d{18}$/)).textContent;
+    const firstPromptListener = source.latestSubscribed();
+    act(() => scan(`]C100${MISMATCH_SSCC}`));
+    await screen.findByText("Это другая этикетка");
     fireEvent.click(screen.getByRole("button", { name: "Пропустить" }));
+
+    expect(screen.queryByText("Это другая этикетка")).toBeNull();
 
     const secondSscc = await waitFor(() => {
       const text = screen.getByText(/^\d{18}$/).textContent;
@@ -1197,6 +1902,8 @@ describe("WorkScreen box progress, closing and printing", () => {
       return text;
     });
     expect(secondSscc).not.toBe(firstSscc);
+    act(() => firstPromptListener(`]C100${MISMATCH_SSCC}`));
+    expect(screen.queryByText("Это другая этикетка")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Пропустить" }));
 
     // Neither box was left without an outcome -- both boxes_mirror rows

@@ -2,10 +2,10 @@ export { Button } from "./Button.js";
 export type { ButtonProps, ButtonSize, ButtonVariant } from "./Button.js";
 
 export { Input } from "./Input.js";
-export type { InputProps } from "./Input.js";
+export type { InputProps, InputSize } from "./Input.js";
 
 export { Select } from "./Select.js";
-export type { SelectOption, SelectProps } from "./Select.js";
+export type { SelectOption, SelectProps, SelectSize } from "./Select.js";
 
 export { Checkbox } from "./Checkbox.js";
 export type { CheckboxProps } from "./Checkbox.js";
@@ -42,6 +42,9 @@ export type { AlertProps, AlertTone } from "./Alert.js";
 export { Modal } from "./Modal.js";
 export type { ModalProps } from "./Modal.js";
 
+export { Drawer } from "./Drawer.js";
+export type { DrawerProps } from "./Drawer.js";
+
 export { SidePanel } from "./SidePanel.js";
 export type { OverlayDismissReason, SidePanelProps, SidePanelSize } from "./SidePanel.js";
 
@@ -73,7 +76,13 @@ export { toast } from "./Toast.js";
 export type { ToastTone } from "./Toast.js";
 
 export { PinPad } from "./PinPad.js";
-export type { PinPadProps } from "./PinPad.js";
+export type { PinPadProps, PinPadSize } from "./PinPad.js";
+
+export { Pager } from "./Pager.js";
+export type { PagerProps } from "./Pager.js";
+
+export { FullScreenDialog } from "./FullScreenDialog.js";
+export type { FullScreenDialogProps } from "./FullScreenDialog.js";
 
 export { SignalOverlay } from "./SignalOverlay.js";
 export type { SignalOverlayProps, SignalTone } from "./SignalOverlay.js";

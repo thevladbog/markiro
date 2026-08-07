@@ -10,6 +10,7 @@ import { BoxExceptionsController } from "../src/modules/box-exceptions/box-excep
 import { BoxesController } from "../src/modules/boxes/boxes.controller";
 import { ConflictsController } from "../src/modules/conflicts/conflicts.controller";
 import { CounterpartiesController } from "../src/modules/counterparties/counterparties.controller";
+import { DevicesController } from "../src/modules/devices/devices.controller";
 import { EmployeesController } from "../src/modules/employees/employees.controller";
 import { LabelTemplatesController } from "../src/modules/label-templates/label-templates.controller";
 import { LinesController } from "../src/modules/lines/lines.controller";
@@ -27,6 +28,7 @@ import { PickupRejectionsController } from "../src/modules/pickup-rejections/pic
 import { ProductsController } from "../src/modules/products/products.controller";
 import { ShiftsController } from "../src/modules/shifts/shifts.controller";
 import { StationDevicesController } from "../src/modules/station-devices/station-devices.controller";
+import { StationPairController } from "../src/modules/station-pairing/station-pair.controller";
 import { StationScansController } from "../src/modules/station-scans/station-scans.controller";
 import { StationOnlyGuard } from "../src/tenancy/station-only.guard";
 import { TenantGuard } from "../src/tenancy/tenant.guard";
@@ -80,6 +82,7 @@ const OPERATIONAL_CONTROLLERS: readonly [
   ControllerClass,
   Readonly<Record<string, RouteAccessPolicy>>,
 ][] = [
+  [DevicesController, { listDevices: readPolicy }],
   [BoxesController, { listBoxes: readPolicy }],
   [BoxExceptionsController, { listBoxExceptions: readPolicy }],
   [
@@ -217,7 +220,13 @@ const ADMINISTRATIVE_CONTROLLERS: readonly [
   ],
   [
     StationDevicesController,
-    { list: credentialsPolicy, enroll: credentialsPolicy, revoke: credentialsPolicy },
+    {
+      list: credentialsPolicy,
+      create: credentialsPolicy,
+      update: credentialsPolicy,
+      revoke: credentialsPolicy,
+      issuePairingCode: credentialsPolicy,
+    },
   ],
   [
     KiosksController,
@@ -226,6 +235,7 @@ const ADMINISTRATIVE_CONTROLLERS: readonly [
       createKiosk: writePolicy,
       updateKiosk: writePolicy,
       archiveKiosk: writePolicy,
+      unbindKiosk: credentialsPolicy,
       setProducts: writePolicy,
       enroll: credentialsPolicy,
       issuePairingCode: credentialsPolicy,
@@ -287,4 +297,21 @@ describe("cabinet route authorization metadata", () => {
       expect(routeMethods(controller).sort()).toEqual([...expectedMethods].sort());
     },
   );
+
+  it("keeps station pairing unauthenticated because an unpaired device has no credential", () => {
+    const guards = Reflect.getMetadata(GUARDS_METADATA, StationPairController) ?? [];
+    expect(guards).not.toContain(TenantGuard);
+    expect(guards).not.toContain(AuthorizationGuard);
+    expect(routeMethods(StationPairController).sort()).toEqual(["identity", "pair"]);
+
+    const prototype = StationPairController.prototype as unknown as Record<
+      string,
+      (...args: never[]) => unknown
+    >;
+    expect(Reflect.getMetadata(GUARDS_METADATA, prototype.pair!)).toBeUndefined();
+    expect(Reflect.getMetadata(GUARDS_METADATA, prototype.identity!)).toEqual([
+      TenantGuard,
+      StationOnlyGuard,
+    ]);
+  });
 });

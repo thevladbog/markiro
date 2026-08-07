@@ -1,3 +1,4 @@
+import { classifyScan } from "@markiro/domain";
 import type { SqlExecutor } from "./mirror.js";
 import { insertException } from "./box-exceptions-mirror.js";
 
@@ -31,6 +32,56 @@ export interface AcceptedCode {
    * favour of riding the insert already made here.
    */
   boxId: string | null;
+}
+
+/** Display-only scan fact. Raw scanner payloads never leave this boundary. */
+export interface RecentOperation {
+  verdict: string;
+  /** Null when a legacy/corrupt row does not contain a parseable timestamp. */
+  scannedAt: string | null;
+  /** A deliberately short suffix for operator recognition, never the full code. */
+  codeSuffix: string | null;
+}
+
+const RECENT_OPERATION_LIMIT = 6;
+const PRODUCT_CODE_VERDICTS = new Set(["ok", "duplicate", "wrong_gtin"]);
+
+/**
+ * The latest bounded scan facts for one shift in durable journal order. The
+ * monotonic id is both the operation sequence and SQLite's primary-key order,
+ * so the query can stop after six matching rows instead of sorting the full
+ * shift on every scan. Malformed legacy timestamps remain visible without
+ * reaching date formatting.
+ */
+export async function listRecentOperations(
+  exec: SqlExecutor,
+  shiftId: string,
+): Promise<RecentOperation[]> {
+  const rows = await exec.all<{
+    raw: string;
+    verdict: string;
+    scanned_at: string;
+  }>(
+    `SELECT raw, verdict, scanned_at
+      FROM scan_events_mirror
+      WHERE shift_id = ?
+      ORDER BY id DESC
+      LIMIT ?`,
+    [shiftId, RECENT_OPERATION_LIMIT],
+  );
+
+  return rows.map((row) => {
+    const scan = PRODUCT_CODE_VERDICTS.has(row.verdict) ? classifyScan(row.raw) : null;
+    const characters =
+      scan?.kind === "km"
+        ? Array.from(scan.km.serial).filter((character) => /[\p{L}\p{N}]/u.test(character))
+        : [];
+    return {
+      verdict: row.verdict,
+      scannedAt: Number.isNaN(Date.parse(row.scanned_at)) ? null : row.scanned_at,
+      codeSuffix: characters.length > 0 ? `…${characters.slice(-4).join("")}` : null,
+    };
+  });
 }
 
 /**

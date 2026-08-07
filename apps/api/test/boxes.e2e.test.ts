@@ -10,7 +10,7 @@ import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import type { ScanItemDto } from "../src/modules/station-scans/dto";
 import { listenOnLoopback } from "./support/listen-loopback";
-import { signUpAndActivate } from "./support/auth";
+import { createTestStationDevice, signUpAndActivate } from "./support/auth";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -189,8 +189,7 @@ describe.skipIf(!ready)("boxes e2e", () => {
   async function deviceKey(
     a: ReturnType<typeof request.agent>,
   ): Promise<{ apiKey: string; deviceId: string }> {
-    const device = await a.post("/station-devices").send({ name: "Line 1" }).expect(201);
-    return device.body as { apiKey: string; deviceId: string };
+    return createTestStationDevice(app!, a, "Line 1");
   }
 
   // Same fixture as conflicts.e2e.test.ts / station-scans.e2e.test.ts.

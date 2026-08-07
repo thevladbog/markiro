@@ -7,7 +7,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 // `plugin:sql|execute`, ...), so mocking this one module covers both the
 // config bridge (`read_config`/`write_config`) and the SQLite mirror
 // migrations App runs on mount — no real Tauri runtime needed under jsdom.
-const invokeMock = vi.fn<(cmd: string) => Promise<unknown>>((cmd) => {
+const invokeMock = vi.fn<(cmd: string, payload?: unknown) => Promise<unknown>>((cmd) => {
   if (cmd === "plugin:sql|load") return Promise.resolve("sqlite:station-mirror.db");
   if (cmd === "plugin:sql|execute") return Promise.resolve([0, 0]);
   if (cmd === "plugin:sql|select") return Promise.resolve([]);
@@ -73,22 +73,41 @@ const hardwareMock = vi.hoisted(() => ({
   print: vi.fn<(target: unknown, bytes: Uint8Array) => Promise<void>>(async () => {}),
 }));
 
+const lockdownMock = vi.hoisted(() => ({
+  start: vi.fn<() => () => void>(() => () => {}),
+  enter: vi.fn<() => Promise<void>>(async () => {}),
+  exit: vi.fn<() => Promise<void>>(async () => {}),
+  whenSettled: vi.fn<() => Promise<void>>(async () => {}),
+}));
+
+vi.mock("../src/lib/lockdown.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof LockdownModule>();
+  return { ...actual, createLockdownLifecycle: () => lockdownMock };
+});
+
 vi.mock("../src/lib/hardware.js", async (importOriginal) => {
   const actual = await importOriginal<typeof HardwareModule>();
   return { ...actual, tauriHardware: hardwareMock };
 });
 
 import i18n from "../src/i18n/index.js";
-import { App, nextStationView, pickScanSource, scannerIndicator } from "../src/App.js";
+import {
+  App,
+  nextStationView,
+  pairingServerUrl,
+  pickScanSource,
+  scannerIndicator,
+} from "../src/App.js";
 import type { StationConfig } from "../src/lib/config.js";
 import { hashSecret } from "../src/lib/crypto.js";
 import type { HardwareConfig } from "../src/lib/hardware-config.js";
 import type * as HardwareModule from "../src/lib/hardware.js";
 import type { ScannerStatus } from "../src/lib/hardware.js";
+import type * as LockdownModule from "../src/lib/lockdown.js";
 import { readShiftContext } from "../src/lib/mirror.js";
 import { tauriExecutor } from "../src/lib/sqlite.js";
 import { BACKOFF_START_MS } from "../src/lib/sync.js";
-import type { OperatorMirrorRecord } from "@markiro/db";
+import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -97,12 +116,17 @@ beforeAll(async () => {
 afterEach(() => {
   invokeMock.mockClear();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   hardwareMock.listScannerPorts.mockReset().mockResolvedValue([]);
   hardwareMock.openScanner.mockReset().mockResolvedValue(undefined);
   hardwareMock.closeScanner.mockReset().mockResolvedValue(undefined);
   hardwareMock.onScan.mockReset().mockResolvedValue(() => {});
   hardwareMock.onScannerStatus.mockReset().mockResolvedValue(() => {});
   hardwareMock.print.mockReset().mockResolvedValue(undefined);
+  lockdownMock.start.mockReset().mockReturnValue(() => {});
+  lockdownMock.enter.mockReset().mockResolvedValue(undefined);
+  lockdownMock.exit.mockReset().mockResolvedValue(undefined);
+  lockdownMock.whenSettled.mockReset().mockResolvedValue(undefined);
 });
 
 // No `tenantId` here on purpose: `Enrollment` never persists one (the
@@ -120,7 +144,8 @@ const operator: OperatorMirrorRecord = {
   name: "Ivan",
   login: "1001",
   role: "operator",
-  pinHash: "hash",
+  pinHash:
+    "pbkdf2$sha256$100000$fwGrIt01vwgBxxDlhqLVRQ==$PGnhdQA2lW09CcvuOhCmvp0z4HbztWXaYIq7+dqmLoQ=",
   badgeHash: null,
   active: true,
 };
@@ -195,6 +220,15 @@ function mockInvokeForFloor(
   pinHash: string,
   hardwareConfig: HardwareConfig,
   outboxRows: OutboxSeedRow[] = [],
+  stationConfig: Record<string, unknown> = {
+    machine_id: "m1",
+    device_id: "device-1",
+    api_key: "mk_key",
+    server_url: "http://localhost:3000",
+  },
+  onInvoke?: (cmd: string, payload: unknown) => void,
+  recoverySnapshotFailure?: Error,
+  configWriteFailure?: Error,
 ): OutboxSeedRow[] {
   const outbox = [...outboxRows];
   // Mutated by a real `recordConflicts`/`conflictCount` round-trip through
@@ -204,12 +238,25 @@ function mockInvokeForFloor(
   // exactly as the previous unconditional `Promise.resolve([])` fallback did.
   const conflicts: ConflictSeedRow[] = [];
   invokeMock.mockImplementation((cmd: string, payload?: unknown): Promise<unknown> => {
+    onInvoke?.(cmd, payload);
     if (cmd === "read_config") {
-      return Promise.resolve({
-        machine_id: "m1",
-        api_key: "mk_key",
-        server_url: "http://localhost:3000",
-      });
+      return Promise.resolve(stationConfig);
+    }
+    if (cmd === "write_config") {
+      if (configWriteFailure) return Promise.reject(configWriteFailure);
+      const next = (payload as { cfg: Record<string, unknown> }).cfg;
+      for (const key of Object.keys(stationConfig)) delete stationConfig[key];
+      Object.assign(stationConfig, next);
+      return Promise.resolve(undefined);
+    }
+    if (cmd === "clear_credential") {
+      delete stationConfig.api_key;
+      delete stationConfig.tenant_id;
+      delete stationConfig.device_name;
+      delete stationConfig.organization_name;
+      delete stationConfig.line_id;
+      delete stationConfig.line_name;
+      return Promise.resolve(undefined);
     }
     if (cmd === "plugin:sql|load") return Promise.resolve("sqlite:station-mirror.db");
     if (cmd === "plugin:sql|execute") {
@@ -245,6 +292,10 @@ function mockInvokeForFloor(
     }
     if (cmd === "plugin:sql|select") {
       const { query, values } = (payload ?? {}) as { query: string; values?: unknown[] };
+      if (query.includes("AS scans")) {
+        if (recoverySnapshotFailure) return Promise.reject(recoverySnapshotFailure);
+        return Promise.resolve([{ scans: outbox.length, boxes: 0, exceptions: 0 }]);
+      }
       // Checked before every other branch: none of the other queries below
       // reference the outbox table, so matching on it first is just the
       // narrowest check, not a correctness requirement.
@@ -301,14 +352,41 @@ function clickDigits(value: string) {
   }
 }
 
-/** Drives the real OperatorLogin PIN-pad flow to reach the floor stage. */
+/** Drives the real badge-first OperatorLogin fallback to reach the floor stage. */
 async function signInAsOperator() {
   await waitFor(() => expect(screen.getByText("Operator sign-in")).toBeDefined());
+  fireEvent.click(screen.getByRole("button", { name: "Use personnel number" }));
   clickDigits(OPERATOR_LOGIN);
   fireEvent.click(screen.getByRole("button", { name: "Next" }));
   clickDigits(OPERATOR_PIN);
   fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
   await waitFor(() => expect(screen.getByTestId("scanner-status")).toBeDefined());
+}
+
+async function expectEmptyQueueCredentialRecovery(
+  persistedConfig: Record<string, unknown>,
+  outbox: OutboxSeedRow[],
+): Promise<void> {
+  await waitFor(() => expect(screen.getByTestId("sealed-work-summary")).toBeDefined());
+  expect(screen.getByTestId("sealed-work-summary").textContent).toBe(
+    "Unsynchronized work is sealed on this station: 0 scans, 0 boxes, 0 corrections.",
+  );
+  expect(screen.queryByTestId("scanner-status")).toBeNull();
+  expect(invokeMock.mock.calls.filter(([cmd]) => cmd === "clear_credential")).toHaveLength(1);
+  expect(outbox).toEqual([]);
+  expect(persistedConfig).toEqual({
+    machine_id: "m1",
+    device_id: "device-1",
+    server_url: "https://api.factory.example",
+  });
+  const destructiveFactWrites = invokeMock.mock.calls.filter(([cmd, payload]) => {
+    if (cmd !== "plugin:sql|execute") return false;
+    const query = (((payload ?? {}) as { query?: string }).query ?? "").trimStart();
+    return /^DELETE FROM (outbox|codes_mirror|scan_events_mirror|boxes_mirror|box_exceptions_mirror|conflicts_mirror|sscc_pool)/.test(
+      query,
+    );
+  });
+  expect(destructiveFactWrites).toEqual([]);
 }
 
 /**
@@ -381,8 +459,12 @@ describe("nextStationView", () => {
     expect(nextStationView(null, null)).toBe("loading");
   });
 
-  it("routes to enrollment when the device has no tenant/key/server", () => {
-    expect(nextStationView({ machineId: "m1" }, null)).toBe("enrollment");
+  it("routes an unpaired first-run device to pairing", () => {
+    expect(nextStationView({ machineId: "m1" }, null)).toBe("pairing");
+  });
+
+  it("routes a durable device without a credential to recovery pairing", () => {
+    expect(nextStationView({ machineId: "m1", deviceId: "device-1" }, null)).toBe("pairing");
   });
 
   it("routes to login once enrolled but no operator is signed in", () => {
@@ -394,7 +476,57 @@ describe("nextStationView", () => {
   });
 });
 
+describe("pairingServerUrl", () => {
+  it("uses the trusted build API base for a fresh station, never the webview origin", () => {
+    expect(pairingServerUrl({ machineId: "m1" }, "https://api.factory.example/")).toBe(
+      "https://api.factory.example",
+    );
+  });
+
+  it("keeps the persisted API base for durable credential recovery", () => {
+    const credentialClearedConfig: StationConfig = {
+      machineId: "m1",
+      deviceId: "device-1",
+      serverUrl: "https://recovery.factory.example",
+    };
+    expect(nextStationView(credentialClearedConfig, null)).toBe("pairing");
+    expect(pairingServerUrl(credentialClearedConfig, "https://api.factory.example")).toBe(
+      "https://recovery.factory.example",
+    );
+  });
+
+  it("refuses a missing or unsafe build base instead of falling back to location.origin", () => {
+    expect(pairingServerUrl({ machineId: "m1" }, undefined)).toBeNull();
+    expect(pairingServerUrl({ machineId: "m1" }, "https://operator:secret@api.example")).toBeNull();
+  });
+});
+
 describe("App", () => {
+  it("leaves lockdown only for workstation service setup and re-enters on return", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    mockInvokeForFloor(pinHash, {
+      scanner: null,
+      printer: null,
+      printerLanguage: "zpl",
+      verifyPrintedLabel: false,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ items: [] }), { status: 200 })),
+    );
+
+    render(<App />);
+    await signInAsOperator();
+
+    expect(lockdownMock.start).toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /exit.*lockdown/i })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
+    await waitFor(() => expect(lockdownMock.exit).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Done" }));
+    await waitFor(() => expect(lockdownMock.enter).toHaveBeenCalledTimes(1));
+  });
+
   it("renders Enrollment when readConfig resolves an un-enrolled config", async () => {
     invokeMock.mockImplementation((cmd: string): Promise<unknown> => {
       if (cmd === "read_config") return Promise.resolve({ machine_id: "m1" });
@@ -412,13 +544,15 @@ describe("App", () => {
     await waitFor(() => expect(screen.getByText("Connect station")).toBeDefined());
   });
 
-  it("drives the real Enrollment success path and advances to OperatorLogin, not back to Enrollment (regression for C1)", async () => {
+  it("drives the real pairing success path to OperatorLogin, not back to pairing", async () => {
     // Mutable so a `write_config` call updates what the next `read_config`
-    // resolves to — this is what actually exercises the App.tsx C1 fix: with
-    // the old `isEnrolled` (requiring `tenantId`, which `Enrollment` never
-    // writes), App would read back the just-persisted config and bounce
-    // straight back to the Enrollment screen instead of advancing.
-    let rustConfig: Record<string, unknown> = { machine_id: "m1" };
+    // resolves to. This exercises the upgrade-safe route: an enrolled bundle
+    // still advances directly to operator login after a refresh.
+    let rustConfig: Record<string, unknown> = {
+      machine_id: "m1",
+      device_id: "device-1",
+      server_url: "http://localhost:3000",
+    };
     invokeMock.mockImplementation((cmd: string, payload?: unknown): Promise<unknown> => {
       if (cmd === "read_config") return Promise.resolve(rustConfig);
       if (cmd === "write_config") {
@@ -430,21 +564,34 @@ describe("App", () => {
       if (cmd === "plugin:sql|select") return Promise.resolve([]);
       return Promise.resolve(undefined);
     });
-    // The enrollment probe is `GET /shifts` (see api-client.ts `whoami`); a
-    // 200 proves the key resolves a tenant.
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("[]", { status: 200 }));
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (new URL(url.toString()).pathname === "/station/pair") {
+        return new Response(
+          JSON.stringify({
+            device: {
+              id: "device-1",
+              name: "Packing station",
+              tenantId: "tenant-1",
+              organizationName: "Factory",
+              line: null,
+            },
+            credential: { apiKey: "station-credential", serverUrl: "http://localhost:3000" },
+            operators: [],
+          }),
+          { status: 201, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({ items: [] }), { status: 200 });
+    });
 
     render(<App />);
 
     await waitFor(() => expect(screen.getByText("Connect station")).toBeDefined());
-    fireEvent.change(screen.getByLabelText("Server URL"), {
-      target: { value: "http://localhost:3000" },
-    });
-    fireEvent.change(screen.getByLabelText("Device key"), { target: { value: "mk_key" } });
-    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    fireEvent.change(screen.getByLabelText("Pairing code"), { target: { value: "12345678" } });
+    fireEvent.click(screen.getByRole("button", { name: "Pair station" }));
 
     await waitFor(() => expect(screen.getByText("Operator sign-in")).toBeDefined());
-    expect(screen.queryByText("Connect station")).toBeNull();
+    expect(screen.queryByLabelText("Pairing code")).toBeNull();
 
     vi.restoreAllMocks();
   });
@@ -454,6 +601,7 @@ describe("App", () => {
       if (cmd === "read_config") {
         return Promise.resolve({
           machine_id: "m1",
+          device_id: "device-1",
           api_key: "mk_key",
           server_url: "http://localhost:3000",
         });
@@ -471,7 +619,8 @@ describe("App", () => {
           name: "Ivan",
           login: "1001",
           role: "operator",
-          pinHash: "hash",
+          pinHash:
+            "pbkdf2$sha256$100000$fwGrIt01vwgBxxDlhqLVRQ==$PGnhdQA2lW09CcvuOhCmvp0z4HbztWXaYIq7+dqmLoQ=",
           badgeHash: null,
           active: true,
         },
@@ -505,6 +654,546 @@ describe("App", () => {
         }),
       ),
     );
+  });
+
+  it("backfills a real legacy config before sync and later recovers a 401 against the same durable device", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const persistedConfig: Record<string, unknown> = {
+      machine_id: "legacy-machine",
+      api_key: "legacy-key-not-to-render",
+      server_url: "https://api.factory.example",
+    };
+    const order: string[] = [];
+    let backfillWrite: Record<string, unknown> | null = null;
+    const outbox = mockInvokeForFloor(
+      pinHash,
+      { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+      [outboxRow(1)],
+      persistedConfig,
+      (cmd, payload) => {
+        if (cmd === "write_config") {
+          order.push("write-config");
+          backfillWrite = (payload as { cfg: Record<string, unknown> }).cfg;
+        }
+      },
+    );
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit): Promise<Response> => {
+      const path = new URL(url).pathname;
+      if (path === "/station/identity") {
+        order.push("identity");
+        return new Response(
+          JSON.stringify({
+            device: {
+              id: "device-legacy",
+              name: "Legacy packing station",
+              tenantId: "tenant-legacy",
+              organizationName: "Factory",
+              line: { id: "line-1", name: "Packing" },
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (init?.method === "POST" && path === "/station/scans") {
+        order.push("sync");
+        return new Response(JSON.stringify({ message: "revoked" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ items: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByTestId("sealed-work-summary")).toBeDefined());
+    expect(order.slice(0, 3)).toEqual(["identity", "write-config", "sync"]);
+    expect(backfillWrite).toMatchObject({
+      machine_id: "legacy-machine",
+      device_id: "device-legacy",
+      api_key: "legacy-key-not-to-render",
+      server_url: "https://api.factory.example",
+    });
+    expect(persistedConfig).toEqual({
+      machine_id: "legacy-machine",
+      device_id: "device-legacy",
+      server_url: "https://api.factory.example",
+    });
+    expect(outbox).toHaveLength(1);
+    expect(screen.queryByText("legacy-key-not-to-render")).toBeNull();
+  });
+
+  it.each([
+    ["missing", {}],
+    ["empty", { server_url: "" }],
+    ["invalid", { server_url: "not a valid station API URL" }],
+  ])(
+    "keeps a legacy keyed config with a %s server URL out of every enrollment path",
+    async (_case, serverFields) => {
+      vi.stubEnv("VITE_STATION_API_URL", "");
+      const pinHash = await hashSecret(OPERATOR_PIN);
+      const persistedConfig: Record<string, unknown> = {
+        machine_id: "legacy-machine",
+        api_key: "legacy-key",
+        ...serverFields,
+      };
+      const outbox = mockInvokeForFloor(
+        pinHash,
+        { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+        [outboxRow(1)],
+        persistedConfig,
+      );
+      const originalQueue = JSON.stringify(outbox);
+      const fetchMock = vi.fn(async () => new Response(null, { status: 500 }));
+      vi.stubGlobal("fetch", fetchMock);
+
+      render(<App />);
+
+      expect(
+        await screen.findByText(
+          "Station identity cannot be updated because no trusted API address is available. Local work and the device key are preserved; contact service support.",
+        ),
+      ).toBeDefined();
+      expect(screen.queryByLabelText("Pairing code")).toBeNull();
+      expect(screen.queryByLabelText("Server URL")).toBeNull();
+      expect(screen.queryByLabelText("Device key")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Service setup" })).toBeNull();
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(invokeMock).not.toHaveBeenCalledWith("clear_credential");
+      expect(invokeMock).not.toHaveBeenCalledWith("write_config", expect.anything());
+      expect(persistedConfig).toEqual({
+        machine_id: "legacy-machine",
+        api_key: "legacy-key",
+        ...serverFields,
+      });
+      expect(JSON.stringify(outbox)).toBe(originalQueue);
+    },
+  );
+
+  it("uses and persists the canonical trusted build-time base for a partial legacy config", async () => {
+    vi.stubEnv("VITE_STATION_API_URL", "https://api.factory.example/deployment/path");
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const persistedConfig: Record<string, unknown> = {
+      machine_id: "legacy-machine",
+      api_key: "legacy-key",
+      server_url: "not a valid station API URL",
+    };
+    const outbox = mockInvokeForFloor(
+      pinHash,
+      { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+      [outboxRow(1)],
+      persistedConfig,
+    );
+    const originalQueue = JSON.stringify(outbox);
+    let resolveIdentity!: (response: Response) => void;
+    const fetchMock = vi.fn((url: string) => {
+      if (new URL(url).pathname === "/station/identity") {
+        return new Promise<Response>((resolve) => {
+          resolveIdentity = resolve;
+        });
+      }
+      return new Promise<Response>(() => {});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const view = render(<App />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.factory.example/station/identity");
+    expect(screen.queryByLabelText("Pairing code")).toBeNull();
+    expect(screen.queryByLabelText("Server URL")).toBeNull();
+    expect(screen.queryByLabelText("Device key")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Service setup" })).toBeNull();
+
+    resolveIdentity(
+      new Response(
+        JSON.stringify({
+          device: {
+            id: "legacy-device",
+            name: "Legacy station",
+            tenantId: "legacy-tenant",
+            organizationName: "Factory",
+            line: null,
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    await waitFor(() =>
+      expect(persistedConfig).toMatchObject({
+        machine_id: "legacy-machine",
+        device_id: "legacy-device",
+        api_key: "legacy-key",
+        server_url: "https://api.factory.example",
+      }),
+    );
+    expect(JSON.stringify(outbox)).toBe(originalQueue);
+    view.unmount();
+  });
+
+  it("keeps cached floor login available while legacy identity is offline and coalesces reconnect retries", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const persistedConfig: Record<string, unknown> = {
+      machine_id: "legacy-machine",
+      api_key: "legacy-key",
+      server_url: "https://api.factory.example",
+    };
+    const outbox = mockInvokeForFloor(
+      pinHash,
+      { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+      [outboxRow(1)],
+      persistedConfig,
+    );
+    let resolveReconnect!: (response: Response) => void;
+    const reconnect = new Promise<Response>((resolve) => {
+      resolveReconnect = resolve;
+    });
+    const fetchMock = vi
+      .fn<(url: string, init?: RequestInit) => Promise<Response>>()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockReturnValueOnce(reconnect);
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    const degradedNotice = await screen.findByText(
+      "Station identity update is waiting for a connection. Cached offline work remains available.",
+    );
+    const loginFooter = degradedNotice.closest(".station-floor-footer");
+    expect(loginFooter).not.toBeNull();
+    expect(loginFooter?.closest(".operator-login")).not.toBeNull();
+    expect((loginFooter as HTMLElement).style.position).toBe("");
+    expect(screen.getByRole("button", { name: "Use personnel number" })).toBeDefined();
+    await signInAsOperator();
+    const floorFooter = screen
+      .getByText(
+        "Station identity update is waiting for a connection. Cached offline work remains available.",
+      )
+      .closest(".station-floor-footer");
+    expect(floorFooter?.closest(".station-root")).not.toBeNull();
+    expect(floorFooter?.closest(".station-screen-slot")).toBeNull();
+    expect(outbox).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      window.dispatchEvent(new Event("online"));
+      window.dispatchEvent(new Event("online"));
+      window.dispatchEvent(new Event("online"));
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(
+      fetchMock.mock.calls.every(([url]) => new URL(url).pathname === "/station/identity"),
+    ).toBe(true);
+    expect(outbox).toHaveLength(1);
+    resolveReconnect(new Response("{}", { status: 503 }));
+  });
+
+  it("keeps re-pairing unavailable in Setup while a legacy identity request is pending", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const persistedConfig: Record<string, unknown> = {
+      machine_id: "legacy-machine",
+      api_key: "legacy-key",
+      server_url: "https://api.factory.example",
+    };
+    const outbox = mockInvokeForFloor(
+      pinHash,
+      { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+      [outboxRow(1)],
+      persistedConfig,
+    );
+    const originalQueue = JSON.stringify(outbox);
+    let resolveIdentity!: (response: Response) => void;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveIdentity = resolve;
+          }),
+      ),
+    );
+
+    const view = render(<App />);
+    await screen.findByText("Updating station identity. Cached offline work remains available.");
+    await signInAsOperator();
+    fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
+
+    expect(
+      await screen.findByText(
+        "Re-pairing is unavailable until this legacy station identity is safely updated. Local production records remain preserved; retry the identity update or contact support.",
+      ),
+    ).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Re-pair this station" })).toBeNull();
+    expect(invokeMock).not.toHaveBeenCalledWith("clear_credential");
+    expect(screen.queryByLabelText("Pairing code")).toBeNull();
+    expect(JSON.stringify(outbox)).toBe(originalQueue);
+
+    view.unmount();
+    resolveIdentity(
+      new Response(
+        JSON.stringify({
+          device: {
+            id: "legacy-device",
+            name: "Legacy station",
+            tenantId: "tenant-legacy",
+            organizationName: "Factory",
+            line: null,
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(invokeMock).not.toHaveBeenCalledWith("write_config", expect.anything());
+    expect(persistedConfig).toEqual({
+      machine_id: "legacy-machine",
+      api_key: "legacy-key",
+      server_url: "https://api.factory.example",
+    });
+    expect(JSON.stringify(outbox)).toBe(originalQueue);
+  });
+
+  it("seals a degraded retry on unmount before a late identity response can write", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const persistedConfig: Record<string, unknown> = {
+      machine_id: "legacy-machine",
+      api_key: "legacy-key",
+      server_url: "https://api.factory.example",
+    };
+    const outbox = mockInvokeForFloor(
+      pinHash,
+      { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+      [outboxRow(1)],
+      persistedConfig,
+    );
+    const originalQueue = JSON.stringify(outbox);
+    let resolveRetry!: (response: Response) => void;
+    const fetchMock = vi
+      .fn<() => Promise<Response>>()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveRetry = resolve;
+          }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const view = render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Retry identity update" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    view.unmount();
+    resolveRetry(
+      new Response(
+        JSON.stringify({
+          device: {
+            id: "legacy-device",
+            name: "Legacy station",
+            tenantId: "tenant-legacy",
+            organizationName: "Factory",
+            line: null,
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(invokeMock).not.toHaveBeenCalledWith("write_config", expect.anything());
+    expect(persistedConfig).toEqual({
+      machine_id: "legacy-machine",
+      api_key: "legacy-key",
+      server_url: "https://api.factory.example",
+    });
+    expect(JSON.stringify(outbox)).toBe(originalQueue);
+  });
+
+  it("keeps only the current legacy identity generation under StrictMode effect remounting", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const persistedConfig: Record<string, unknown> = {
+      machine_id: "legacy-machine",
+      api_key: "legacy-key",
+      server_url: "https://api.factory.example",
+    };
+    const outbox = mockInvokeForFloor(
+      pinHash,
+      { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+      [outboxRow(1)],
+      persistedConfig,
+    );
+    const originalQueue = JSON.stringify(outbox);
+    const identityResolvers: Array<(response: Response) => void> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) => {
+        if (new URL(url).pathname !== "/station/identity") {
+          return new Promise<Response>(() => {});
+        }
+        return new Promise<Response>((resolve) => identityResolvers.push(resolve));
+      }),
+    );
+
+    const view = render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
+    await waitFor(() => expect(identityResolvers.length).toBeGreaterThan(0));
+    act(() => {
+      for (const resolve of identityResolvers) {
+        resolve(
+          new Response(
+            JSON.stringify({
+              device: {
+                id: "legacy-device",
+                name: "Legacy station",
+                tenantId: "tenant-legacy",
+                organizationName: "Factory",
+                line: null,
+              },
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        );
+      }
+    });
+
+    await waitFor(() =>
+      expect(invokeMock.mock.calls.filter(([cmd]) => cmd === "write_config")).toHaveLength(1),
+    );
+    expect(persistedConfig).toMatchObject({
+      machine_id: "legacy-machine",
+      device_id: "legacy-device",
+      api_key: "legacy-key",
+    });
+    expect(JSON.stringify(outbox)).toBe(originalQueue);
+    view.unmount();
+  });
+
+  it("holds a rejected legacy identity in stable service recovery without clearing or pairing the queue", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const invoked: string[] = [];
+    const outbox = mockInvokeForFloor(
+      pinHash,
+      { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+      [outboxRow(1)],
+      {
+        machine_id: "legacy-machine",
+        api_key: "rejected-legacy-key",
+        server_url: "https://api.factory.example",
+      },
+      (cmd) => invoked.push(cmd),
+    );
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ message: "revoked" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(
+      await screen.findByText(
+        "This legacy station key could not prove its device identity. Local work is preserved; contact service support before pairing again.",
+      ),
+    ).toBeDefined();
+    window.dispatchEvent(new Event("online"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(invoked).not.toContain("clear_credential");
+    expect(invoked).not.toContain("write_config");
+    expect(outbox).toHaveLength(1);
+    expect(screen.queryByLabelText("Pairing code")).toBeNull();
+  });
+
+  it("keeps the legacy queue and key untouched when atomic identity persistence fails", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const persistedConfig: Record<string, unknown> = {
+      machine_id: "legacy-machine",
+      api_key: "legacy-key",
+      server_url: "https://api.factory.example",
+    };
+    const outbox = mockInvokeForFloor(
+      pinHash,
+      { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+      [outboxRow(1)],
+      persistedConfig,
+      undefined,
+      undefined,
+      new Error("disk full"),
+    );
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            device: {
+              id: "device-legacy",
+              name: "Legacy station",
+              tenantId: "tenant-legacy",
+              organizationName: "Factory",
+              line: null,
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(
+      await screen.findByText(
+        "Station identity update is waiting for a connection. Cached offline work remains available.",
+      ),
+    ).toBeDefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(persistedConfig).toEqual({
+      machine_id: "legacy-machine",
+      api_key: "legacy-key",
+      server_url: "https://api.factory.example",
+    });
+    expect(outbox).toHaveLength(1);
+  });
+
+  it("starts normally from a persisted backfill without requesting identity again", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const outbox = mockInvokeForFloor(
+      pinHash,
+      { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+      [outboxRow(1)],
+      {
+        machine_id: "legacy-machine",
+        device_id: "device-legacy",
+        tenant_id: "tenant-legacy",
+        api_key: "legacy-key",
+        server_url: "https://api.factory.example",
+      },
+    );
+    const paths: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const path = new URL(url).pathname;
+        paths.push(path);
+        if (init?.method === "POST" && path === "/station/scans") {
+          return new Response(JSON.stringify({ applied: 1, alreadyApplied: false }), {
+            status: 200,
+          });
+        }
+        return new Response(JSON.stringify({ items: [] }), { status: 200 });
+      }),
+    );
+
+    render(<App />);
+
+    await waitFor(() => expect(outbox).toHaveLength(0));
+    expect(paths).not.toContain("/station/identity");
   });
 
   it("readShiftContext resolves null for a shift whose bundle has not been mirrored yet, so the 'preparing' branch is genuinely reachable", async () => {
@@ -663,12 +1352,486 @@ describe("App", () => {
     // where the open effect's dependency array (keyed on port/baud) alone
     // would never re-run.
     fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
-    fireEvent.click(await screen.findByRole("button", { name: "COM3" }));
+    fireEvent.change(await screen.findByRole("combobox", { name: "Port" }), {
+      target: { value: "COM3" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
 
     await waitFor(() =>
       expect(hardwareMock.openScanner.mock.calls.length).toBeGreaterThan(openCallsBeforeSetup),
     );
+  });
+
+  it("explicit reset clears the shell credential then returns the same device record to pairing", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const persistedConfig: Record<string, unknown> = {
+      machine_id: "m1",
+      device_id: "device-1",
+      tenant_id: "tenant-1",
+      api_key: "credential-not-to-render",
+      server_url: "https://api.factory.example",
+    };
+    mockInvokeForFloor(
+      pinHash,
+      { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+      [],
+      persistedConfig,
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ items: [] }), { status: 200 })),
+    );
+
+    render(<App />);
+    await signInAsOperator();
+    fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Re-pair this station" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove credentials and re-pair" }));
+
+    await waitFor(() => expect(screen.getByText("Connect station")).toBeDefined());
+    expect(invokeMock).toHaveBeenCalledWith("clear_credential");
+    expect(persistedConfig).toEqual({
+      machine_id: "m1",
+      device_id: "device-1",
+      server_url: "https://api.factory.example",
+    });
+    expect(screen.queryByText("credential-not-to-render")).toBeNull();
+  });
+
+  it("recovers an empty-queue station when the swallowed roster refresh receives 401", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const persistedConfig: Record<string, unknown> = {
+      machine_id: "m1",
+      device_id: "device-1",
+      tenant_id: "tenant-1",
+      api_key: "revoked-key",
+      server_url: "https://api.factory.example",
+    };
+    const outbox = mockInvokeForFloor(
+      pinHash,
+      { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+      [],
+      persistedConfig,
+    );
+    let rejectRoster!: () => void;
+    const roster = new Promise<Response>((resolve) => {
+      rejectRoster = () =>
+        resolve(new Response(JSON.stringify({ message: "revoked" }), { status: 401 }));
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) => {
+        if (new URL(url).pathname === "/station/operators") return roster;
+        return Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+      }),
+    );
+
+    render(<App />);
+    await signInAsOperator();
+    rejectRoster();
+
+    await expectEmptyQueueCredentialRecovery(persistedConfig, outbox);
+  });
+
+  it("recovers an empty-queue station when the shift list receives 401", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const persistedConfig: Record<string, unknown> = {
+      machine_id: "m1",
+      device_id: "device-1",
+      api_key: "revoked-key",
+      server_url: "https://api.factory.example",
+    };
+    const outbox = mockInvokeForFloor(
+      pinHash,
+      { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+      [],
+      persistedConfig,
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) => {
+        const path = new URL(url).pathname;
+        if (path === "/station/operators") {
+          return Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+        }
+        if (path === "/shifts") {
+          return Promise.resolve(
+            new Response(JSON.stringify({ message: "revoked" }), { status: 401 }),
+          );
+        }
+        return Promise.resolve(new Response("{}", { status: 200 }));
+      }),
+    );
+
+    render(<App />);
+    await signInAsOperator();
+
+    await expectEmptyQueueCredentialRecovery(persistedConfig, outbox);
+  });
+
+  it("recovers an empty-queue station when opening a listed shift receives 401", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const persistedConfig: Record<string, unknown> = {
+      machine_id: "m1",
+      device_id: "device-1",
+      api_key: "revoked-key",
+      server_url: "https://api.factory.example",
+    };
+    const outbox = mockInvokeForFloor(
+      pinHash,
+      { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+      [],
+      persistedConfig,
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string, init?: RequestInit) => {
+        const path = new URL(url).pathname;
+        if (path === "/station/operators") {
+          return Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+        }
+        if (path === "/shifts") {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                items: [
+                  {
+                    id: "shift-1",
+                    status: "planned",
+                    mode: "validation",
+                    productName: "Product",
+                    plannedQty: 10,
+                  },
+                ],
+              }),
+              { status: 200 },
+            ),
+          );
+        }
+        if (init?.method === "POST" && path === "/shifts/shift-1/open") {
+          return Promise.resolve(
+            new Response(JSON.stringify({ message: "revoked" }), { status: 401 }),
+          );
+        }
+        return Promise.resolve(new Response("{}", { status: 200 }));
+      }),
+    );
+
+    render(<App />);
+    await signInAsOperator();
+    fireEvent.click(await screen.findByRole("button", { name: "Open" }));
+
+    await expectEmptyQueueCredentialRecovery(persistedConfig, outbox);
+  });
+
+  it("recovers an empty-queue station when a swallowed shift bundle receives 401", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const persistedConfig: Record<string, unknown> = {
+      machine_id: "m1",
+      device_id: "device-1",
+      api_key: "revoked-key",
+      server_url: "https://api.factory.example",
+    };
+    const outbox = mockInvokeForFloor(
+      pinHash,
+      { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+      [],
+      persistedConfig,
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string, init?: RequestInit) => {
+        const path = new URL(url).pathname;
+        if (path === "/station/operators") {
+          return Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+        }
+        if (path === "/shifts") {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                items: [
+                  {
+                    id: "shift-1",
+                    status: "planned",
+                    mode: "validation",
+                    productName: "Product",
+                    plannedQty: 10,
+                  },
+                ],
+              }),
+              { status: 200 },
+            ),
+          );
+        }
+        if (init?.method === "POST" && path === "/shifts/shift-1/open") {
+          return Promise.resolve(
+            new Response(JSON.stringify({ id: "shift-1", status: "active", mode: "validation" }), {
+              status: 200,
+            }),
+          );
+        }
+        if (path === "/shifts/shift-1/bundle") {
+          return Promise.resolve(
+            new Response(JSON.stringify({ message: "revoked" }), { status: 401 }),
+          );
+        }
+        return Promise.resolve(new Response("{}", { status: 200 }));
+      }),
+    );
+
+    render(<App />);
+    await signInAsOperator();
+    fireEvent.click(await screen.findByRole("button", { name: "Open" }));
+
+    await expectEmptyQueueCredentialRecovery(persistedConfig, outbox);
+  });
+
+  it("publishes and clears once when roster, shift list, and sync concurrently reject one credential", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const persistedConfig: Record<string, unknown> = {
+      machine_id: "m1",
+      device_id: "device-1",
+      api_key: "revoked-key",
+      server_url: "https://api.factory.example",
+    };
+    const outbox = mockInvokeForFloor(
+      pinHash,
+      { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+      [outboxRow(1)],
+      persistedConfig,
+    );
+    let rejectRoster!: () => void;
+    let rejectShiftList!: () => void;
+    let rejectSync!: () => void;
+    const roster = new Promise<Response>((resolve) => {
+      rejectRoster = () =>
+        resolve(new Response(JSON.stringify({ message: "revoked roster" }), { status: 401 }));
+    });
+    const shiftList = new Promise<Response>((resolve) => {
+      rejectShiftList = () =>
+        resolve(new Response(JSON.stringify({ message: "revoked shifts" }), { status: 401 }));
+    });
+    const sync = new Promise<Response>((resolve) => {
+      rejectSync = () =>
+        resolve(new Response(JSON.stringify({ message: "revoked sync" }), { status: 401 }));
+    });
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const path = new URL(url).pathname;
+      if (path === "/station/operators") return roster;
+      if (path === "/shifts") return shiftList;
+      if (init?.method === "POST" && path === "/station/scans") return sync;
+      return Promise.resolve(new Response("{}", { status: 200 }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    await signInAsOperator();
+    await waitFor(() => {
+      const paths = fetchMock.mock.calls.map(([url]) => new URL(url).pathname);
+      expect(paths).toContain("/station/operators");
+      expect(paths).toContain("/shifts");
+      expect(paths).toContain("/station/scans");
+    });
+    act(() => {
+      rejectRoster();
+      rejectShiftList();
+      rejectSync();
+    });
+
+    await waitFor(() => expect(screen.getByTestId("sealed-work-summary")).toBeDefined());
+    expect(screen.getByTestId("sealed-work-summary").textContent).toBe(
+      "Unsynchronized work is sealed on this station: 1 scans, 0 boxes, 0 corrections.",
+    );
+    expect(invokeMock.mock.calls.filter(([cmd]) => cmd === "clear_credential")).toHaveLength(1);
+    expect(outbox).toHaveLength(1);
+    expect(
+      invokeMock.mock.calls.filter(([cmd, payload]) => {
+        if (cmd !== "plugin:sql|execute") return false;
+        const query = (((payload ?? {}) as { query?: string }).query ?? "").trimStart();
+        return query.startsWith("DELETE FROM outbox");
+      }),
+    ).toEqual([]);
+    expect(persistedConfig).toEqual({
+      machine_id: "m1",
+      device_id: "device-1",
+      server_url: "https://api.factory.example",
+    });
+  });
+
+  it("leaves the floor before clearing rejected credentials and shows the sealed queue in same-device pairing", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const persistedConfig: Record<string, unknown> = {
+      machine_id: "m1",
+      device_id: "device-1",
+      tenant_id: "tenant-1",
+      api_key: "credential-not-to-render",
+      server_url: "https://api.factory.example",
+    };
+    let checkedFloorExit = false;
+    const outbox = mockInvokeForFloor(
+      pinHash,
+      { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+      [outboxRow(1)],
+      persistedConfig,
+      (cmd) => {
+        if (cmd === "clear_credential") {
+          expect(screen.queryByTestId("scanner-status")).toBeNull();
+          checkedFloorExit = true;
+        }
+      },
+    );
+    let rejectSync!: () => void;
+    const rejectedResponse = new Promise<Response>((resolve) => {
+      rejectSync = () =>
+        resolve(
+          new Response(JSON.stringify({ message: "revoked" }), {
+            status: 401,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+    });
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit): Promise<Response> => {
+      if (init?.method === "POST" && new URL(url).pathname === "/station/scans") {
+        return rejectedResponse;
+      }
+      return new Response(JSON.stringify({ items: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    await signInAsOperator();
+    rejectSync();
+
+    await waitFor(() => expect(screen.getByTestId("sealed-work-summary")).toBeDefined());
+    expect(checkedFloorExit).toBe(true);
+    expect(screen.getByTestId("sealed-work-summary").textContent).toContain("1");
+    expect(screen.getByTestId("sealed-work-summary").textContent).toContain("0");
+    expect(invokeMock).toHaveBeenCalledWith("clear_credential");
+    expect(outbox).toHaveLength(1);
+    expect(persistedConfig).toEqual({
+      machine_id: "m1",
+      device_id: "device-1",
+      server_url: "https://api.factory.example",
+    });
+    expect(screen.queryByRole("button", { name: "Service setup" })).toBeNull();
+    expect(screen.queryByText("credential-not-to-render")).toBeNull();
+  });
+
+  it("stays fail-closed when the sealed-work snapshot cannot be read", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const invoked: string[] = [];
+    const outbox = mockInvokeForFloor(
+      pinHash,
+      { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+      [outboxRow(1)],
+      {
+        machine_id: "m1",
+        device_id: "device-1",
+        api_key: "mk_key",
+        server_url: "https://api.factory.example",
+      },
+      (cmd) => invoked.push(cmd),
+      new Error("snapshot unavailable"),
+    );
+    let rejectSync!: () => void;
+    const rejectedResponse = new Promise<Response>((resolve) => {
+      rejectSync = () =>
+        resolve(
+          new Response(JSON.stringify({ message: "revoked" }), {
+            status: 401,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+    });
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit): Promise<Response> => {
+      if (init?.method === "POST" && new URL(url).pathname === "/station/scans") {
+        return rejectedResponse;
+      }
+      return new Response(JSON.stringify({ items: [] }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    await signInAsOperator();
+    act(() => rejectSync());
+    const retryRecovery = await screen.findByRole("button", { name: "Retry recovery" });
+    expect(retryRecovery.style.height).toBe("var(--control-floor)");
+
+    expect(screen.queryByTestId("scanner-status")).toBeNull();
+    expect(screen.queryByLabelText("Pairing code")).toBeNull();
+    expect(invoked).not.toContain("clear_credential");
+    expect(outbox).toHaveLength(1);
+    expect(
+      fetchMock.mock.calls.filter(
+        ([url, init]) =>
+          init?.method === "POST" && new URL(url as string).pathname === "/station/scans",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("keeps the enrolled state and shows a useful error when explicit credential reset fails", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    mockInvokeForFloor(pinHash, {
+      scanner: null,
+      printer: null,
+      printerLanguage: "zpl",
+      verifyPrintedLabel: false,
+    });
+    invokeMock.mockImplementation((cmd: string, payload?: unknown): Promise<unknown> => {
+      if (cmd === "clear_credential") return Promise.reject(new Error("shell unavailable"));
+      if (cmd === "read_config") {
+        return Promise.resolve({
+          machine_id: "m1",
+          device_id: "device-1",
+          api_key: "mk_key",
+          server_url: "http://localhost:3000",
+        });
+      }
+      if (cmd === "plugin:sql|load") return Promise.resolve("sqlite:station-mirror.db");
+      if (cmd === "plugin:sql|execute") return Promise.resolve([0, 0]);
+      if (cmd === "plugin:sql|select") {
+        const { query, values } = (payload ?? {}) as { query: string; values?: unknown[] };
+        if (/FROM operators_mirror\b/.test(query))
+          return Promise.resolve([operatorMirrorRow(pinHash)]);
+        if (query.includes("station_meta") && values?.[0] === "hardware_config") {
+          return Promise.resolve([
+            {
+              value: JSON.stringify({
+                scanner: null,
+                printer: null,
+                printerLanguage: "zpl",
+                verifyPrintedLabel: false,
+              }),
+            },
+          ]);
+        }
+        if (query.includes("station_meta") && values?.[0] === "install_id") {
+          return Promise.resolve([{ value: "test-install-id" }]);
+        }
+        return Promise.resolve([]);
+      }
+      return Promise.resolve(undefined);
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ items: [] }), { status: 200 })),
+    );
+
+    render(<App />);
+    await signInAsOperator();
+    fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Re-pair this station" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove credentials and re-pair" }));
+
+    expect(
+      await screen.findByText("Could not reset station credentials. Try again or contact support."),
+    ).toBeDefined();
+    expect(screen.queryByText("Connect station")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    await waitFor(() => expect(screen.getByText("Shifts")).toBeDefined());
   });
 
   it("regression (Finding 2, Back): leaving Setup via Back after a manual test-connect retires that session without saving it", async () => {
@@ -695,7 +1858,9 @@ describe("App", () => {
     // leaves running must still be retired and the still-configured COM3
     // session reopened, without an app restart.
     fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
-    fireEvent.click(await screen.findByRole("button", { name: "COM9" }));
+    fireEvent.change(await screen.findByRole("combobox", { name: "Port" }), {
+      target: { value: "COM9" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Connect scanner" }));
     await waitFor(() => expect(hardwareMock.openScanner).toHaveBeenCalledWith("COM9", 9600));
 
@@ -762,7 +1927,9 @@ describe("App", () => {
       // the operator action from Finding 1 (no "Connect scanner" test-press
       // first).
       fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
-      fireEvent.click(await screen.findByRole("button", { name: "COM9" }));
+      fireEvent.change(await screen.findByRole("combobox", { name: "Port" }), {
+        target: { value: "COM9" },
+      });
       fireEvent.click(screen.getByRole("button", { name: "Done" }));
 
       await waitFor(() => expect(hardwareMock.openScanner).toHaveBeenCalledWith("COM9", 9600));
@@ -993,6 +2160,7 @@ describe("App", () => {
         if (cmd === "read_config") {
           return Promise.resolve({
             machine_id: "m1",
+            device_id: "device-1",
             api_key: "mk_key",
             server_url: "http://localhost:3000",
           });
@@ -1092,13 +2260,13 @@ describe("App", () => {
       fireEvent.click(screen.getByRole("button", { name: "Start" }));
 
       // Reached the floor via NewShift's own path -- floorView is "new" here.
-      // WorkScreen's exit button reads "Leave shift" (work.exit, en.json);
+      // WorkScreen's fixed footer reads "Pause / finish" (work.pauseFinish, en.json);
       // waiting for it also proves shiftContext landed.
       await waitFor(() =>
-        expect(screen.getByRole("button", { name: "Leave shift" })).toBeDefined(),
+        expect(screen.getByRole("button", { name: "Pause / finish" })).toBeDefined(),
       );
 
-      fireEvent.click(screen.getByRole("button", { name: "Leave shift" }));
+      fireEvent.click(screen.getByRole("button", { name: "Pause / finish" }));
 
       // No scans were queued for this shift, so Exit leaves immediately
       // without the pending-sync confirmation step.
@@ -1128,6 +2296,7 @@ describe("App", () => {
         if (cmd === "read_config") {
           return Promise.resolve({
             machine_id: "m1",
+            device_id: "device-1",
             api_key: "mk_key",
             server_url: "http://localhost:3000",
           });
@@ -1230,7 +2399,7 @@ describe("App", () => {
       // Reaches the work screen despite `readShiftMirror`'s rejection --
       // stuck on "Preparing the shift…" is exactly the bug this fix removes.
       await waitFor(() =>
-        expect(screen.getByRole("button", { name: "Leave shift" })).toBeDefined(),
+        expect(screen.getByRole("button", { name: "Pause / finish" })).toBeDefined(),
       );
       expect(screen.queryByText("Preparing the shift…")).toBeNull();
     } finally {
@@ -1255,6 +2424,7 @@ describe("App", () => {
         if (cmd === "read_config") {
           return Promise.resolve({
             machine_id: "m1",
+            device_id: "device-1",
             api_key: "mk_key",
             server_url: "http://localhost:3000",
           });

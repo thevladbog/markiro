@@ -10,7 +10,7 @@ import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { DB } from "../src/auth/auth.module";
 import { loadEnv } from "../src/env";
 import { listenOnLoopback } from "./support/listen-loopback";
-import { signUpAndActivate } from "./support/auth";
+import { createTestStationDevice, signUpAndActivate } from "./support/auth";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -79,7 +79,7 @@ describe.skipIf(!ready)("public api keys", () => {
     // one here makes "ключ станции не виден среди публичных" below an
     // actual test of the `metadata.kind` filter, rather than something
     // that would pass even if the filter were missing.
-    await agent.post("/station-devices").send({ name: "Terminal filter probe" }).expect(201);
+    await createTestStationDevice(app!, agent, "Terminal filter probe");
   });
 
   afterAll(async () => {

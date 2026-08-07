@@ -127,6 +127,8 @@ function renderAccessRoute(
       if (path.endsWith("/api/kiosks")) return jsonResponse(200, { items: [KIOSK] });
       if (path.endsWith("/api/operators")) return jsonResponse(200, { items: [] });
       if (path.endsWith("/api/label-templates")) return jsonResponse(200, { items: [] });
+      if (path.includes("/api/devices"))
+        return jsonResponse(200, { items: [], page: 1, pageSize: 8, total: 0 });
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
       if (path.endsWith("/api/lines")) return jsonResponse(200, { items: [] });
       if (path.includes("/api/integrations/commerceml/candidates")) {
@@ -165,6 +167,7 @@ it("keeps operational navigation for managers while hiding integrations and sett
 
   expect(await screen.findByRole("link", { name: "Обзор" })).toBeDefined();
   expect(screen.getByRole("link", { name: "Каталог" })).toBeDefined();
+  expect(screen.getByRole("link", { name: "Устройства" })).toBeDefined();
   expect(screen.getByRole("link", { name: "Киоски" })).toBeDefined();
   expect(screen.queryByRole("link", { name: "Интеграции" })).toBeNull();
   expect(screen.queryByRole("link", { name: "Настройки" })).toBeNull();
@@ -184,6 +187,14 @@ it("allows a manager to open the catalog directly", async () => {
 
   expect(await screen.findByRole("heading", { name: "Каталог продукции" })).toBeDefined();
   expect(screen.queryByTestId("forbidden-page")).toBeNull();
+});
+
+it("keeps kiosk management separate from the unified devices page", async () => {
+  const { requests } = renderAccessRoute("/kiosks", MANAGER_ACCESS);
+
+  expect(await screen.findByRole("heading", { name: "Киоски" })).toBeDefined();
+  await expect.poll(() => requests).toContain("/api/kiosks");
+  expect(requests.some((request) => request.startsWith("/api/devices"))).toBe(false);
 });
 
 it.each(["/catalog/new", "/catalog/p1/edit"])(

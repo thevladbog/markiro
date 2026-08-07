@@ -27,6 +27,15 @@ pub fn write_config(app: AppHandle, cfg: StationConfig) -> Result<(), String> {
     config::write_config(&dir, &cfg)
 }
 
+/// Clears only the rejected station credential and reproducible display
+/// metadata. `machine_id` and `device_id` stay durable for a same-record
+/// recovery pairing; local production facts live in SQLite and are untouched.
+#[tauri::command]
+pub fn clear_credential(app: AppHandle) -> Result<(), String> {
+    let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    config::clear_credential(&dir)
+}
+
 use std::sync::Mutex;
 
 use tauri::State;
@@ -125,5 +134,11 @@ mod tests {
         assert!(validate_endpoint_url("https://releases.markiro.app/station/latest.json").is_ok());
         assert!(validate_endpoint_url("ftp://releases.markiro.app/x").is_err());
         assert!(validate_endpoint_url("https://user:pass@evil.example.com/x").is_err());
+    }
+
+    #[test]
+    fn lockdown_state_starts_unlocked() {
+        let state = LockdownState::default();
+        assert!(!*state.0.lock().expect("lockdown mutex should be available"));
     }
 }

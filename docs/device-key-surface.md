@@ -13,10 +13,58 @@ every such route in the API is expected to appear in one of the two tables
 below. See "Rule for new routes" for how it stays that way as routes are
 added.
 
+## Provisioning and durable device lifecycle
+
+Station and kiosk credentials share one server-side generation boundary, but
+remain separate trust domains. Cabinet users create or retain a durable device
+record and reveal an eight-digit, 15-minute pairing code once. Only the keyed
+digest is stored; issuing another code retires the previous live code, and
+successful redemption consumes it atomically. Responses that contain a code,
+device token, or station key carry `Cache-Control: no-store`.
+
+The unauthenticated redemption routes are deliberately narrow:
+`POST /station/pair` provisions the pre-created station record and
+`POST /kiosk/pair` provisions the active kiosk record. Both use the shared
+persisted per-source/global attempt limiter. Re-pairing rotates the credential
+on the same durable device ID; revoke/unbind clears the credential and live
+codes without deleting the device or its production history.
+
+A fresh station obtains its API base only from the trusted build-time
+`VITE_STATION_API_URL`; it never derives a backend host from the webview URL.
+After pairing, the durable station config retains that server URL for recovery.
+Cross-origin station requests require the exact `STATION_ORIGIN`. CORS grants
+it only to the exact method/path pairs in the device table below, including
+the shared `/shifts` and `/products` routes; it is not added to adjacent
+cabinet-only methods, cabinet-session routes, or kiosk routes. Preflight is
+classified by `Access-Control-Request-Method`, while path matching ignores a
+query string and normalizes a trailing slash in the same way as the router.
+
+An authenticated station `401` seals its current credential generation before
+recovery is shown. The station keeps its machine/device IDs and every local
+production fact (outbox, journal, boxes, exceptions, conflicts, SSCC ranges,
+batch IDs and sync ceilings). It removes only the rejected credential and
+reproducible operator/shift/product caches. Pairing the same device record then
+rebuilds those caches and resumes the unchanged queue; network errors, timeouts,
+`429`, and `5xx` do not enter this recovery path.
+
+Stations enrolled before the durable `deviceId` field was added require a
+one-time authenticated identity backfill. Roll out the API first: the station
+calls `GET /station/identity` with its existing key, persists the server-resolved
+device ID and display metadata through the atomic config writer, and only then
+starts roster, shift, or sync requests. A timeout, network error, `429`, or `5xx`
+leaves the key, config, and local facts untouched; cached offline sign-in remains
+available and the station retries only on reconnect or an explicit operator
+retry. A `401` at this pre-backfill boundary cannot safely enter ordinary
+same-device re-pairing because the local queue has no proven durable owner. It
+therefore stays in a service-recovery state without clearing the key or exposing
+pairing; service must restore a valid same-device credential/identity path before
+that legacy queue can be adopted.
+
 ## Reachable by a device key
 
 | Route                                                                            | Why the station needs it                                                                                                                                                                                                                                                                                                     |
 | -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /station/identity`                                                          | one-time migration of pre-`deviceId` configs; `TenantGuard` resolves the durable row solely from the presented station key and `StationOnlyGuard` rejects cabinet sessions; the request accepts no client device or tenant identifier                                                                                        |
 | `GET /station/operators`                                                         | the offline sign-in roster (hashes only); `StationOnlyGuard` explicitly rejects a Better Auth session                                                                                                                                                                                                                        |
 | `GET /shifts`, `POST /shifts`, `GET /shifts/:id/bundle`, `POST /shifts/:id/open` | shift selection, ad-hoc shift creation, and the offline bundle — `GET /shifts` is also the enrollment reachability probe (`whoami()` in `apps/station/src/lib/api-client.ts`, called by `Enrollment.tsx`); `AllowStationOrPermissions` keeps the station path while requiring the matching cabinet capability from a session |
 | `GET /products`, `POST /products/gtin-check`                                     | resolving a scanned GTIN when creating a shift; `AllowStationOrPermissions` keeps the station path while requiring `operations.read` from a cabinet session                                                                                                                                                                  |
@@ -27,6 +75,7 @@ added.
 | Module / route                                                                                                             | Why a device must not reach it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `GET /access/me`                                                                                                           | the admin UI's membership-only bootstrap; `RequireMembership` reloads a Better Auth organization membership and explicitly rejects a station key                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `GET /devices`                                                                                                             | unified cabinet inventory of stations and kiosks; a floor key must not enumerate peer device names, places, lifecycle, or activity. The MVP sorts actionable status as awaiting pairing, offline, revoked, then online; each group is name/type/id ascending.                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `station-devices`                                                                                                          | a stolen device could enrol or revoke other devices                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `GET /conflicts`, `POST /conflicts/:id/review`                                                                             | the manager's backstop for scans a station never learns it lost (see Task 06b-7) — a station has no business reading, let alone reviewing, another terminal's conflicts; pinned by a 403 e2e test for both routes (`apps/api/test/conflicts.e2e.test.ts`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `GET /boxes`                                                                                                               | the per-shift box list, including `contentsChangedAfterClose` (Task 14) — a manager-only signal that a closed, taped-and-labelled box a station cannot correct is short an item; pinned by a 403 e2e test (`apps/api/test/boxes.e2e.test.ts`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -72,6 +121,13 @@ belong in either section:
   dimension only distinguishes callers when `TRUST_PROXY_HOPS` is set correctly behind
   a proxy; misconfigured, every caller collapses onto the proxy's own address and only
   the (much larger) global backstop bounds guessing.
+- `POST /station/pair` (`apps/api/src/modules/station-pairing/station-pair.controller.ts`)
+  also carries **no guard**: a factory station has no credential until it redeems its
+  one-time eight-digit pairing code. Its HMAC-protected code and the same persisted
+  per-source/global pairing limiter are the deliberate boundary; it must not gain
+  `TenantGuard` or a cabinet authorization policy. Conversely,
+  `POST /station-devices/:id/pairing-code` stays cabinet-only under
+  `CREDENTIALS_MANAGE`, so a station key cannot issue a replacement credential.
 - `GET/POST /1c_exchange` (`apps/api/src/modules/exchange/exchange.controller.ts`)
   carries **no guard either**, and unlike every other exception in this section, it
   never falls back on `TenantGuard`/`AuthorizationGuard` at all — not even indirectly.

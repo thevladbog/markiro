@@ -54,6 +54,39 @@ beside each item.
 - [ ] Updater endpoint reachable; the `{{target}}` placeholder allowlist works.
 - [ ] Kiosk lockdown is actually invoked and cannot trap an operator.
 
+## Station touch workplace (fullscreen touch UI)
+
+Record the Windows version, station build/commit, display model and native
+resolution, touch controller, scanner and printer models, and whether gloves
+were used. A host browser or macOS Tauri run does not satisfy these checks.
+
+- [ ] On the target Windows station, production startup enters fullscreen and
+      blocks ordinary close/minimize/resize paths. The hidden service workflow
+      can leave lockdown, and Done/Back reliably re-enters it.
+- [ ] At native 1280×800 and 1024×768, and secondarily at 1280×1024, every
+      pairing, login, shift, work, correction, conflict, setup, offline, and
+      print-verification state has no document or nested scroll region and no
+      clipped primary action.
+- [ ] Every floor action remains at least 64×64 px and readable with a gloved
+      finger. Keypad keys remain 80–96 px. Disabled controls do not move when
+      pressed; enabled controls show pressed feedback.
+- [ ] Keyboard-only traversal has a visible focus indicator on representative
+      pairing, login, pager, work, correction, setup, and dialog controls. No
+      required instruction or action appears only on hover.
+- [ ] Russian and English long copy remains readable without obscuring the
+      current scan, box state, recovery action, or footer.
+- [ ] With work pending, physically remove the network, continue scanning, and
+      restore it. The local journal survives, status changes are truthful, the
+      queue drains idempotently, and conflicts remain a deliberate review
+      screen rather than interrupting scan intake.
+- [ ] Restart the packaged station while scans, box closures, exceptions, and
+      print outcomes are pending. All durable facts recover and sync without
+      duplication or loss.
+- [ ] Test the touchscreen with the production gloves and cleaning/protective
+      film used on the line. Confirm taps near adjacent actions do not select
+      the wrong control and that repeated scanning does not leave focus on a
+      destructive or exit action.
+
 ## Scanner and printer (plans 05b-2, 05b-3)
 
 - [ ] Serial scanner: real device, baud negotiation, payload terminators.

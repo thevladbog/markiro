@@ -7,21 +7,14 @@ export interface SignalOverlayProps {
   detail?: string;
 }
 
-// Renders a full-screen colored state given a tone + title, driven by
-// WorkScreen's signal system (flash timing in FLASH_MS, sound in
-// playSignalTone). Color is paired with the title text per the
-// color-blind-safety rule (no color-only signal).
-// Uses the same status token family as the rest of this package
-// (--ok-solid / --err-solid / --warn-solid, per Input/StatusChip) with
-// literal hex fallbacks so the overlay still renders correctly even if a
-// token is absent.
-const TONE_BG: Record<SignalTone, string> = {
-  ok: "var(--ok-solid, #1f8a4c)",
-  error: "var(--err-solid, #b3261e)",
-  duplicate: "var(--warn-solid, #a66500)",
+const TONE_STYLE: Record<SignalTone, { background: string; foreground: string }> = {
+  ok: { background: "var(--ok-solid)", foreground: "var(--fg-on-ok-solid)" },
+  error: { background: "var(--err-solid)", foreground: "var(--fg-on-err-solid)" },
+  duplicate: { background: "var(--warn-solid)", foreground: "var(--fg-on-warn-solid)" },
 };
 
 export function SignalOverlay({ tone, title, detail }: SignalOverlayProps) {
+  const toneStyle = TONE_STYLE[tone];
   return (
     <div
       role="alert"
@@ -33,14 +26,45 @@ export function SignalOverlay({ tone, title, detail }: SignalOverlayProps) {
         placeItems: "center",
         alignContent: "center",
         gap: 16,
-        background: TONE_BG[tone],
-        color: "#fff",
+        background: toneStyle.background,
+        color: toneStyle.foreground,
         textAlign: "center",
         padding: 32,
       }}
     >
-      <span style={{ fontSize: "4rem", fontWeight: 800 }}>{title}</span>
-      {detail !== undefined && <span style={{ fontSize: "1.75rem" }}>{detail}</span>}
+      <SignalIcon tone={tone} />
+      <span style={{ font: "var(--floor-counter-sm)", fontFamily: "var(--font-ui)" }}>{title}</span>
+      {detail !== undefined && <span style={{ font: "var(--floor-lg)" }}>{detail}</span>}
     </div>
+  );
+}
+
+function SignalIcon({ tone }: { tone: SignalTone }) {
+  return (
+    <svg
+      aria-hidden="true"
+      width="96"
+      height="96"
+      viewBox="0 0 96 96"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="8"
+      strokeLinecap="square"
+      strokeLinejoin="miter"
+    >
+      {tone === "ok" ? <path d="M20 50 39 69 76 27" /> : null}
+      {tone === "error" ? (
+        <>
+          <path d="m24 24 48 48" />
+          <path d="M72 24 24 72" />
+        </>
+      ) : null}
+      {tone === "duplicate" ? (
+        <>
+          <rect x="18" y="18" width="42" height="42" />
+          <rect x="36" y="36" width="42" height="42" />
+        </>
+      ) : null}
+    </svg>
   );
 }

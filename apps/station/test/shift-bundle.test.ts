@@ -3,6 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 import { applyMigrations, type SqlExecutor, type StationBundle } from "../src/lib/mirror.js";
 import { mirrorShiftBundle } from "../src/lib/shift-bundle.js";
 import { remaining } from "../src/lib/sscc-pool.js";
+import {
+  createCredentialGeneration,
+  sealCredentialGeneration,
+} from "../src/lib/credential-recovery.js";
 
 function nodeExecutor(): SqlExecutor {
   const db = new DatabaseSync(":memory:");
@@ -114,6 +118,29 @@ describe("mirrorShiftBundle", () => {
     const rows = await exec.all("SELECT id FROM shift_mirror");
     expect(rows).toHaveLength(0);
     consoleError.mockRestore();
+  });
+
+  it("does not write a bundle response that resolves after its credential is sealed", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    let resolveBundle!: (value: StationBundle) => void;
+    const response = new Promise<StationBundle>((resolve) => {
+      resolveBundle = resolve;
+    });
+    const generation = createCredentialGeneration();
+    const mirroring = mirrorShiftBundle(
+      { get: vi.fn().mockReturnValue(response) },
+      exec,
+      "s1",
+      generation,
+    );
+
+    await sealCredentialGeneration(generation);
+    resolveBundle(bundle);
+    await mirroring;
+
+    expect(await exec.all("SELECT id FROM shift_mirror")).toEqual([]);
+    expect(await exec.all("SELECT id FROM product_mirror")).toEqual([]);
   });
 
   // CodeRabbit PR33 review, Finding 10: `addRange` used to run AFTER

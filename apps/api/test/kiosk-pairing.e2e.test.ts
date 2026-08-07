@@ -4,22 +4,28 @@ import express from "express";
 import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { AppModule } from "../src/app.module";
+import { DB_POOL } from "../src/auth/auth.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
-import { hashPairingCode } from "../src/pickup/device-token";
-import { normalizePairSource } from "../src/modules/kiosk/pair-source";
+import { hashDeviceToken, hashPairingCode } from "../src/pickup/device-token";
+import { PairAttemptsService } from "../src/modules/device-pairing/pair-attempts.service";
+import { normalizePairSource } from "../src/modules/device-pairing/pair-source";
 import {
   GLOBAL_PAIR_ATTEMPT_BUDGET,
   GLOBAL_PAIR_SOURCE,
+  PAIR_CODE_MAX_ATTEMPTS,
   PAIR_ATTEMPT_BUDGET,
   PAIR_ATTEMPT_WINDOW_MS,
-} from "../src/modules/kiosk/pairing.service";
+} from "../src/modules/device-pairing/pairing-policy";
 import { PickupOrdersService } from "../src/modules/pickup-orders/pickup-orders.service";
+import { PairingService } from "../src/modules/kiosk/pairing.service";
 import { schema, type Db } from "@markiro/db";
 import { listenOnLoopback } from "./support/listen-loopback";
+import { createTestStationDevice } from "./support/auth";
+import { SecurityAuditService } from "../src/authorization/security-audit.service";
 
 // Only `randomInt` is ever mocked (F3 below, one call, one test) -- every
 // other export (including `randomUUID`, used throughout this file) passes
@@ -103,6 +109,41 @@ async function seedPairAttemptFailures(db: Db, failures: number): Promise<void> 
   }
 }
 
+async function waitForCodeClaimPause(pool: AuthSetup["pool"]): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const result = await pool.query(`
+      SELECT EXISTS (
+        SELECT 1
+        FROM pg_stat_activity
+        WHERE datname = current_database()
+          AND wait_event = 'PgSleep'
+          AND query ILIKE '%kiosk_pairing_codes%'
+      )
+    `);
+    if (result.rows[0]?.exists === true) return;
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Timed out waiting for the controlled pairing-code claim pause");
+}
+
+async function waitForKioskLockWait(pool: AuthSetup["pool"]): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const result = await pool.query(`
+      SELECT EXISTS (
+        SELECT 1
+        FROM pg_stat_activity
+        WHERE datname = current_database()
+          AND wait_event_type = 'Lock'
+          AND query ILIKE '%kiosks%'
+          AND query ILIKE '%for update%'
+      )
+    `);
+    if (result.rows[0]?.exists === true) return;
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Timed out waiting for code issuance to block on the kiosk row lock");
+}
+
 describe.skipIf(!ready)("kiosk pairing e2e", () => {
   let app: INestApplication | undefined;
   let setup: AuthSetup;
@@ -113,6 +154,7 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
   let kioskId: string;
   let seededOrder: string;
   let pairingCodePepper: string;
+  let audit: SecurityAuditService;
 
   /**
    * This suite's own stand-in for `PairingService`'s real `hashPairingCode`
@@ -142,10 +184,15 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
     server.use(express.json());
     await app.init();
     await listenOnLoopback(app);
+    audit = app.get(SecurityAuditService);
   });
 
   afterAll(async () => {
     await app?.close();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   async function signUpWithInactiveOrg(agent: ReturnType<typeof request.agent>): Promise<string> {
@@ -228,10 +275,16 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
 
     otherAgent = request.agent(app!.getHttpServer());
     await signUpAndActivate(otherAgent);
+
+    vi.spyOn(audit, "deviceCredentialMutation").mockImplementation(() => undefined);
   });
 
   it("issues an 8-digit code that expires in 15 minutes", async () => {
-    const res = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    const res = await agent
+      .post(`/kiosks/${kioskId}/pairing-code`)
+      .send({})
+      .expect("Cache-Control", "no-store")
+      .expect(201);
     expect(res.body.code).toMatch(/^\d{8}$/);
     const ttlMs = new Date(res.body.expiresAt).getTime() - Date.now();
     expect(ttlMs).toBeGreaterThan(13 * 60_000);
@@ -267,11 +320,8 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
   // must never be able to mint a kiosk pairing code -- SessionOnlyGuard is
   // what actually blocks it.
   it("rejects a station device api-key even though TenantGuard would accept it", async () => {
-    const device = await agent
-      .post("/station-devices")
-      .send({ name: "Kiosk cabinet terminal" })
-      .expect(201);
-    const apiKey = (device.body as { apiKey: string }).apiKey;
+    const device = await createTestStationDevice(app!, agent, "Kiosk cabinet terminal");
+    const apiKey = device.apiKey;
 
     await request(app!.getHttpServer())
       .post(`/kiosks/${kioskId}/pairing-code`)
@@ -306,10 +356,30 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
     const paired = await request(app!.getHttpServer())
       .post("/kiosk/pair")
       .send({ code: issued.body.code })
+      .expect("Cache-Control", "no-store")
       .expect(201);
 
-    expect(paired.body.device.kioskId).toBe(kioskId);
-    expect(paired.body.nextDeviceSeq).toBe(0);
+    expect(paired.body).toStrictEqual({
+      device: {
+        kioskId,
+        kioskName: expect.any(String),
+        place: null,
+      },
+      token: expect.any(String),
+      nextDeviceSeq: 0,
+      bootstrap: {
+        generatedAt: expect.any(String),
+        config: {
+          dayLimitPerEmployee: expect.any(Number),
+          showPrices: expect.any(Boolean),
+        },
+        badgeSalt: expect.any(String),
+        reasons: expect.any(Array),
+        products: expect.any(Array),
+        employees: expect.any(Array),
+        operators: expect.any(Array),
+      },
+    });
     expect(paired.body.bootstrap.products.length).toBeGreaterThan(0);
 
     // the token works straight away
@@ -317,6 +387,285 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
       .get("/kiosk/bootstrap")
       .set("x-kiosk-token", paired.body.token)
       .expect(200);
+
+    expect(audit.deviceCredentialMutation).toHaveBeenCalledWith({
+      tenantId,
+      actorType: "unauthenticated_device",
+      actorId: null,
+      action: "kiosk.pair",
+      resourceId: kioskId,
+      outcome: "succeeded",
+    });
+    const auditCalls = JSON.stringify(vi.mocked(audit.deviceCredentialMutation).mock.calls);
+    expect(auditCalls).not.toContain(issued.body.code as string);
+    expect(auditCalls).not.toContain(paired.body.token as string);
+  });
+
+  it("audits re-pair as a distinct unauthenticated-device credential rotation", async () => {
+    const first = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    await request(app!.getHttpServer())
+      .post("/kiosk/pair")
+      .send({ code: first.body.code })
+      .expect(201);
+
+    vi.mocked(audit.deviceCredentialMutation).mockClear();
+    const replacement = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    await request(app!.getHttpServer())
+      .post("/kiosk/pair")
+      .send({ code: replacement.body.code })
+      .expect(201);
+
+    expect(audit.deviceCredentialMutation).toHaveBeenCalledWith({
+      tenantId,
+      actorType: "unauthenticated_device",
+      actorId: null,
+      action: "kiosk.repair",
+      resourceId: kioskId,
+      outcome: "succeeded",
+    });
+  });
+
+  it("classifies a failed bootstrap after a resolved existing credential as re-pair", async () => {
+    const first = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    await request(app!.getHttpServer())
+      .post("/kiosk/pair")
+      .send({ code: first.body.code })
+      .expect(201);
+    const replacement = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    vi.mocked(audit.deviceCredentialMutation).mockClear();
+
+    const bootstrapError = new Error("bootstrap failed after code resolution");
+    vi.spyOn(app!.get(PickupOrdersService), "bootstrap").mockRejectedValueOnce(bootstrapError);
+
+    await expect(
+      app!.get(PairingService).redeem(replacement.body.code as string, `test-${randomUUID()}`),
+    ).rejects.toBe(bootstrapError);
+    expect(audit.deviceCredentialMutation).toHaveBeenCalledWith({
+      tenantId,
+      actorType: "unauthenticated_device",
+      actorId: null,
+      action: "kiosk.repair",
+      resourceId: kioskId,
+      outcome: "failed",
+    });
+    expect(JSON.stringify(vi.mocked(audit.deviceCredentialMutation).mock.calls)).not.toContain(
+      replacement.body.code as string,
+    );
+  });
+
+  it("classifies resolved expired and attempt-locked codes for an existing credential as re-pair", async () => {
+    const first = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    await request(app!.getHttpServer())
+      .post("/kiosk/pair")
+      .send({ code: first.body.code })
+      .expect(201);
+
+    const expired = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    await db
+      .update(schema.kioskPairingCodes)
+      .set({ expiresAt: new Date(Date.now() - 1_000) })
+      .where(eq(schema.kioskPairingCodes.codeHash, codeHashOf(expired.body.code)));
+    const selectSpy = vi.spyOn(db, "select");
+    vi.mocked(audit.deviceCredentialMutation).mockClear();
+    await request(app!.getHttpServer())
+      .post("/kiosk/pair")
+      .send({ code: expired.body.code })
+      .expect(401);
+    expect(audit.deviceCredentialMutation).toHaveBeenLastCalledWith({
+      tenantId,
+      actorType: "unauthenticated_device",
+      actorId: null,
+      action: "kiosk.repair",
+      resourceId: kioskId,
+      outcome: "failed",
+    });
+    expect(selectSpy).not.toHaveBeenCalledWith({
+      deviceTokenHash: schema.kiosks.deviceTokenHash,
+    });
+    selectSpy.mockRestore();
+
+    const locked = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    await db
+      .update(schema.kioskPairingCodes)
+      .set({ attempts: PAIR_CODE_MAX_ATTEMPTS })
+      .where(eq(schema.kioskPairingCodes.codeHash, codeHashOf(locked.body.code)));
+    vi.mocked(audit.deviceCredentialMutation).mockClear();
+    await request(app!.getHttpServer())
+      .post("/kiosk/pair")
+      .send({ code: locked.body.code })
+      .expect(401);
+    expect(audit.deviceCredentialMutation).toHaveBeenLastCalledWith({
+      tenantId,
+      actorType: "unauthenticated_device",
+      actorId: null,
+      action: "kiosk.repair",
+      resourceId: kioskId,
+      outcome: "failed",
+    });
+  });
+
+  it("audits a failed re-pair after the known kiosk becomes inactive", async () => {
+    const first = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    await request(app!.getHttpServer())
+      .post("/kiosk/pair")
+      .send({ code: first.body.code })
+      .expect(201);
+    const replacement = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    vi.mocked(audit.deviceCredentialMutation).mockClear();
+
+    const pickupOrders = app!.get(PickupOrdersService);
+    const originalBootstrap = pickupOrders.bootstrap.bind(pickupOrders);
+    vi.spyOn(pickupOrders, "bootstrap").mockImplementationOnce(async (...args) => {
+      const bootstrap = await originalBootstrap(...args);
+      await db
+        .update(schema.kiosks)
+        .set({ status: "archived" })
+        .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, kioskId)));
+      return bootstrap;
+    });
+
+    await request(app!.getHttpServer())
+      .post("/kiosk/pair")
+      .send({ code: replacement.body.code })
+      .expect(401);
+
+    expect(audit.deviceCredentialMutation).toHaveBeenCalledWith({
+      tenantId,
+      actorType: "unauthenticated_device",
+      actorId: null,
+      action: "kiosk.repair",
+      resourceId: kioskId,
+      outcome: "failed",
+    });
+  });
+
+  it("lets the locked kiosk row override the code lookup pairing classification", async () => {
+    const issued = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    vi.mocked(audit.deviceCredentialMutation).mockClear();
+
+    const pickupOrders = app!.get(PickupOrdersService);
+    const originalBootstrap = pickupOrders.bootstrap.bind(pickupOrders);
+    vi.spyOn(pickupOrders, "bootstrap").mockImplementationOnce(async (...args) => {
+      const bootstrap = await originalBootstrap(...args);
+      await db
+        .update(schema.kiosks)
+        .set({ deviceTokenHash: hashDeviceToken(randomUUID()) })
+        .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, kioskId)));
+      return bootstrap;
+    });
+
+    await request(app!.getHttpServer())
+      .post("/kiosk/pair")
+      .send({ code: issued.body.code })
+      .expect(201);
+
+    expect(audit.deviceCredentialMutation).toHaveBeenCalledWith({
+      tenantId,
+      actorType: "unauthenticated_device",
+      actorId: null,
+      action: "kiosk.repair",
+      resourceId: kioskId,
+      outcome: "succeeded",
+    });
+  });
+
+  it("audits a failed resolved-code redemption against its durable kiosk without the code", async () => {
+    const issued = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    await db
+      .update(schema.kioskPairingCodes)
+      .set({ expiresAt: new Date(Date.now() - 1_000) })
+      .where(eq(schema.kioskPairingCodes.codeHash, codeHashOf(issued.body.code)));
+
+    await request(app!.getHttpServer())
+      .post("/kiosk/pair")
+      .send({ code: issued.body.code })
+      .expect(401);
+
+    expect(audit.deviceCredentialMutation).toHaveBeenCalledWith({
+      tenantId,
+      actorType: "unauthenticated_device",
+      actorId: null,
+      action: "kiosk.pair",
+      resourceId: kioskId,
+      outcome: "failed",
+    });
+    expect(JSON.stringify(vi.mocked(audit.deviceCredentialMutation).mock.calls)).not.toContain(
+      issued.body.code as string,
+    );
+  });
+
+  it("does not let an audit sink failure obscure a transient pairing failure", async () => {
+    const issued = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    const transientError = new Error("bootstrap storage unavailable");
+    vi.spyOn(app!.get(PickupOrdersService), "bootstrap").mockRejectedValueOnce(transientError);
+    vi.mocked(audit.deviceCredentialMutation).mockImplementation(() => {
+      throw new Error("audit sink unavailable");
+    });
+
+    await expect(
+      app!.get(PairingService).redeem(issued.body.code as string, `test-${randomUUID()}`),
+    ).rejects.toBe(transientError);
+    expect(audit.deviceCredentialMutation).toHaveBeenCalledWith({
+      tenantId,
+      actorType: "unauthenticated_device",
+      actorId: null,
+      action: "kiosk.pair",
+      resourceId: kioskId,
+      outcome: "failed",
+    });
+    expect(JSON.stringify(vi.mocked(audit.deviceCredentialMutation).mock.calls)).not.toContain(
+      "bootstrap storage unavailable",
+    );
+  });
+
+  it("archives durably, rejects the old token, and permits a fresh pairing without losing pickup state", async () => {
+    await db
+      .update(schema.pickupOrders)
+      .set({ deviceSeq: 7 })
+      .where(
+        and(eq(schema.pickupOrders.tenantId, tenantId), eq(schema.pickupOrders.id, seededOrder)),
+      );
+    const issued = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    const paired = await request(app!.getHttpServer())
+      .post("/kiosk/pair")
+      .send({ code: issued.body.code })
+      .expect(201);
+    const replacement = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+
+    await agent.delete(`/kiosks/${kioskId}`).expect(204);
+    await agent.delete(`/kiosks/${kioskId}`).expect(204);
+
+    await request(app!.getHttpServer())
+      .get("/kiosk/bootstrap")
+      .set("x-kiosk-token", paired.body.token)
+      .expect(401);
+    const [archived] = await db
+      .select({ status: schema.kiosks.status, deviceTokenHash: schema.kiosks.deviceTokenHash })
+      .from(schema.kiosks)
+      .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, kioskId)));
+    expect(archived).toEqual({ status: "archived", deviceTokenHash: null });
+    const [retired] = await db
+      .select({ usedAt: schema.kioskPairingCodes.usedAt })
+      .from(schema.kioskPairingCodes)
+      .where(eq(schema.kioskPairingCodes.codeHash, codeHashOf(replacement.body.code)));
+    expect(retired?.usedAt).toBeInstanceOf(Date);
+    const [preservedOrder] = await db
+      .select({ id: schema.pickupOrders.id, deviceSeq: schema.pickupOrders.deviceSeq })
+      .from(schema.pickupOrders)
+      .where(
+        and(eq(schema.pickupOrders.tenantId, tenantId), eq(schema.pickupOrders.id, seededOrder)),
+      );
+    expect(preservedOrder).toEqual({ id: seededOrder, deviceSeq: 7 });
+
+    await agent.patch(`/kiosks/${kioskId}`).send({ status: "active" }).expect(200);
+    const reissued = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    const repaired = await request(app!.getHttpServer())
+      .post("/kiosk/pair")
+      .send({ code: reissued.body.code })
+      .expect(201);
+    expect(repaired.body.token).not.toBe(paired.body.token);
+    expect(repaired.body.nextDeviceSeq).toBe(8);
+    expect(repaired.body.bootstrap.products).toHaveLength(1);
   });
 
   it("refuses a second redemption of the same code", async () => {
@@ -329,6 +678,96 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
       .post("/kiosk/pair")
       .send({ code: issued.body.code })
       .expect(401);
+  });
+
+  it("allows exactly one winner when the same issued code is redeemed concurrently", async () => {
+    const issued = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+
+    const [first, second] = await Promise.all([
+      request(app!.getHttpServer()).post("/kiosk/pair").send({ code: issued.body.code }),
+      request(app!.getHttpServer()).post("/kiosk/pair").send({ code: issued.body.code }),
+    ]);
+
+    expect([first.status, second.status].sort()).toEqual([201, 401]);
+    const winner = [first, second].find((response) => response.status === 201);
+    expect(winner?.body.device.kioskId).toBe(kioskId);
+  });
+
+  it("refunds persisted source and global attempts after a successful redemption", async () => {
+    const issued = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    await request(app!.getHttpServer())
+      .post("/kiosk/pair")
+      .send({ code: issued.body.code })
+      .expect(201);
+
+    const currentWindow = pairAttemptWindowStart(Date.now());
+    const previousWindow = new Date(currentWindow.getTime() - PAIR_ATTEMPT_WINDOW_MS);
+    const rows = await db
+      .select({
+        source: schema.kioskPairAttempts.source,
+        failures: schema.kioskPairAttempts.failures,
+      })
+      .from(schema.kioskPairAttempts)
+      .where(
+        and(
+          inArray(schema.kioskPairAttempts.source, [...LOOPBACK_PAIR_SOURCES, GLOBAL_PAIR_SOURCE]),
+          inArray(schema.kioskPairAttempts.windowStartedAt, [currentWindow, previousWindow]),
+        ),
+      );
+
+    expect(rows).toContainEqual({ source: GLOBAL_PAIR_SOURCE, failures: 0 });
+    expect(rows.filter((row) => LOOPBACK_PAIR_SOURCES.includes(row.source))).toEqual([
+      expect.objectContaining({ failures: 0 }),
+    ]);
+  });
+
+  it("floors an unattributable source refund at zero", async () => {
+    const pairAttemptsService = app!.get(PairAttemptsService);
+    const windowStart = pairAttemptWindowStart(Date.now());
+    await db.insert(schema.kioskPairAttempts).values({
+      source: GLOBAL_PAIR_SOURCE,
+      windowStartedAt: windowStart,
+      failures: 0,
+    });
+
+    await pairAttemptsService.refundPairAttempt("", windowStart);
+
+    const [row] = await db
+      .select({ failures: schema.kioskPairAttempts.failures })
+      .from(schema.kioskPairAttempts)
+      .where(
+        and(
+          eq(schema.kioskPairAttempts.source, GLOBAL_PAIR_SOURCE),
+          eq(schema.kioskPairAttempts.windowStartedAt, windowStart),
+        ),
+      );
+    expect(row).toEqual({ failures: 0 });
+  });
+
+  it("charges an unattributable failed redemption only to the global limiter", async () => {
+    const pairingService = app!.get(PairingService);
+    await expect(pairingService.redeem("99999999", "")).rejects.toMatchObject({ status: 401 });
+
+    const currentWindow = pairAttemptWindowStart(Date.now());
+    const previousWindow = new Date(currentWindow.getTime() - PAIR_ATTEMPT_WINDOW_MS);
+    const rows = await db
+      .select({
+        source: schema.kioskPairAttempts.source,
+        failures: schema.kioskPairAttempts.failures,
+      })
+      .from(schema.kioskPairAttempts)
+      .where(
+        and(
+          inArray(schema.kioskPairAttempts.windowStartedAt, [currentWindow, previousWindow]),
+          inArray(schema.kioskPairAttempts.source, [
+            "",
+            ...LOOPBACK_PAIR_SOURCES,
+            GLOBAL_PAIR_SOURCE,
+          ]),
+        ),
+      );
+
+    expect(rows).toEqual([{ source: GLOBAL_PAIR_SOURCE, failures: 1 }]);
   });
 
   it("refuses an expired code", async () => {
@@ -368,6 +807,14 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
 
   it("401s an unknown, never-issued code", async () => {
     await request(app!.getHttpServer()).post("/kiosk/pair").send({ code: "99999999" }).expect(401);
+    expect(audit.deviceCredentialMutation).toHaveBeenCalledWith({
+      tenantId: null,
+      actorType: "unauthenticated_device",
+      actorId: null,
+      action: "kiosk.pair",
+      resourceId: null,
+      outcome: "failed",
+    });
   });
 
   it("400s a malformed code", async () => {
@@ -481,6 +928,182 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
     expect(paired.body.nextDeviceSeq).toBe(8);
   });
 
+  it("does not redeem a code after archive completes while bootstrap is still pending", async () => {
+    const pickupOrdersService = app!.get(PickupOrdersService);
+    const originalBootstrap = pickupOrdersService.bootstrap.bind(pickupOrdersService);
+    let releaseBootstrap: (() => void) | undefined;
+    const bootstrapPaused = new Promise<void>((resolve) => {
+      releaseBootstrap = resolve;
+    });
+    let bootstrapObserved: (() => void) | undefined;
+    const bootstrapStarted = new Promise<void>((resolve) => {
+      bootstrapObserved = resolve;
+    });
+    const bootstrapSpy = vi
+      .spyOn(pickupOrdersService, "bootstrap")
+      .mockImplementationOnce(async (tid: string, kid: string) => {
+        bootstrapObserved?.();
+        await bootstrapPaused;
+        return originalBootstrap(tid, kid);
+      });
+
+    let pair: Promise<request.Response> | undefined;
+    try {
+      const issued = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+      pair = request(app!.getHttpServer())
+        .post("/kiosk/pair")
+        .send({ code: issued.body.code })
+        .then((response) => response);
+      await bootstrapStarted;
+      await agent.delete(`/kiosks/${kioskId}`).expect(204);
+      releaseBootstrap?.();
+
+      expect((await pair).status).toBe(401);
+    } finally {
+      releaseBootstrap?.();
+      await Promise.allSettled(
+        [pair].filter((pending): pending is Promise<request.Response> => pending !== undefined),
+      );
+      bootstrapSpy.mockRestore();
+    }
+  });
+
+  it("does not issue a pairing code after archive holds the kiosk lifecycle lock", async () => {
+    let releaseArchive: (() => void) | undefined;
+    const archivePaused = new Promise<void>((resolve) => {
+      releaseArchive = resolve;
+    });
+    let archiveLocked: (() => void) | undefined;
+    const archiveStarted = new Promise<void>((resolve) => {
+      archiveLocked = resolve;
+    });
+    const archive = db.transaction(async (tx) => {
+      await tx
+        .select({ id: schema.kiosks.id })
+        .from(schema.kiosks)
+        .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, kioskId)))
+        .for("update");
+      await tx
+        .update(schema.kiosks)
+        .set({ status: "archived", deviceTokenHash: null })
+        .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, kioskId)));
+      archiveLocked?.();
+      await archivePaused;
+    });
+    let issue: Promise<request.Response> | undefined;
+    try {
+      await archiveStarted;
+      issue = agent
+        .post(`/kiosks/${kioskId}/pairing-code`)
+        .send({})
+        .then((response) => response);
+      await waitForKioskLockWait(app!.get<AuthSetup["pool"]>(DB_POOL));
+      releaseArchive?.();
+      await archive;
+
+      expect((await issue).status).toBe(404);
+      const liveCodes = await db
+        .select({ id: schema.kioskPairingCodes.id })
+        .from(schema.kioskPairingCodes)
+        .where(
+          and(
+            eq(schema.kioskPairingCodes.tenantId, tenantId),
+            eq(schema.kioskPairingCodes.kioskId, kioskId),
+            isNull(schema.kioskPairingCodes.usedAt),
+          ),
+        );
+      expect(liveCodes).toEqual([]);
+    } finally {
+      releaseArchive?.();
+      await Promise.allSettled([archive, issue].filter((pending) => pending !== undefined));
+    }
+  });
+
+  it("serializes redemption before archive without a code-to-kiosk deadlock", async () => {
+    const issued = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
+    const [code] = await db
+      .select({ id: schema.kioskPairingCodes.id })
+      .from(schema.kioskPairingCodes)
+      .where(eq(schema.kioskPairingCodes.codeHash, codeHashOf(issued.body.code)));
+    expect(code).toBeDefined();
+
+    const pool = app!.get<AuthSetup["pool"]>(DB_POOL);
+    const objectScope = code!.id.replaceAll("-", "");
+    const pauseFunction = `kp_pause_code_claim_${objectScope}`;
+    const pauseTrigger = `kp_pause_code_claim_trigger_${objectScope}`;
+    const identifier = (value: string) => `"${value}"`;
+    let pair: Promise<request.Response> | undefined;
+    let archive: Promise<request.Response> | undefined;
+    let primaryError: unknown;
+
+    try {
+      await pool.query(`
+        CREATE FUNCTION ${identifier(pauseFunction)}()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+          IF OLD.id = '${code!.id}'::uuid THEN
+            PERFORM pg_sleep(2);
+          END IF;
+          RETURN NEW;
+        END;
+        $$
+      `);
+      await pool.query(`
+        CREATE TRIGGER ${identifier(pauseTrigger)}
+        BEFORE UPDATE ON kiosk_pairing_codes
+        FOR EACH ROW EXECUTE FUNCTION ${identifier(pauseFunction)}()
+      `);
+
+      pair = request(app!.getHttpServer())
+        .post("/kiosk/pair")
+        .send({ code: issued.body.code })
+        .then((response) => response);
+      await waitForCodeClaimPause(pool);
+      archive = agent.delete(`/kiosks/${kioskId}`).then((response) => response);
+      // The archive has now reached the opposite lock boundary. Without this
+      // barrier, a fast host can let the trigger sleep end before archive has
+      // attempted `kiosks ... FOR UPDATE`, turning this into a timing probe
+      // rather than a forced lock-order regression.
+      await waitForKioskLockWait(pool);
+
+      const [paired, archived] = await Promise.all([pair, archive]);
+      expect(paired.status).toBe(201);
+      expect(archived.status).toBe(204);
+      await request(app!.getHttpServer())
+        .get("/kiosk/bootstrap")
+        .set("x-kiosk-token", paired.body.token)
+        .expect(401);
+      const [kiosk] = await db
+        .select({ deviceTokenHash: schema.kiosks.deviceTokenHash })
+        .from(schema.kiosks)
+        .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, kioskId)));
+      expect(kiosk?.deviceTokenHash).toBeNull();
+    } catch (error) {
+      primaryError = error;
+    }
+
+    let cleanupError: unknown;
+    for (const cleanup of [
+      () => pool.query(`DROP TRIGGER IF EXISTS ${identifier(pauseTrigger)} ON kiosk_pairing_codes`),
+      () => pool.query(`DROP FUNCTION IF EXISTS ${identifier(pauseFunction)}() CASCADE`),
+    ]) {
+      try {
+        await cleanup();
+      } catch (error) {
+        cleanupError ??= error;
+      }
+    }
+    await Promise.allSettled(
+      [pair, archive].filter(
+        (request): request is Promise<request.Response> => request !== undefined,
+      ),
+    );
+    if (primaryError !== undefined) throw primaryError;
+    if (cleanupError !== undefined) throw cleanupError;
+  }, 10_000);
+
   // F2 regression: once the global backstop is already exhausted, a request
   // from a source with no row of its own yet (standing in for an attacker
   // rotating source addresses) must be turned away WITHOUT allocating one --
@@ -502,6 +1125,14 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
         .post("/kiosk/pair")
         .send({ code: "00000000" })
         .expect(401);
+      expect(audit.deviceCredentialMutation).toHaveBeenCalledWith({
+        tenantId: null,
+        actorType: "unauthenticated_device",
+        actorId: null,
+        action: "kiosk.pair",
+        resourceId: null,
+        outcome: "failed",
+      });
 
       const sourceRows = await db
         .select()

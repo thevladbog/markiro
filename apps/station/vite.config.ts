@@ -5,6 +5,10 @@ import { defineConfig } from "vite";
 // Rust compiler output visible during `tauri dev`. Port is fixed so the Rust
 // `devUrl` in tauri.conf.json matches.
 export default defineConfig({
+  // The repository-level `.env` inventory is also the build-time source for
+  // VITE_STATION_API_URL; a packaged station must never infer its API target
+  // from the Tauri webview origin.
+  envDir: "../..",
   plugins: [react()],
   clearScreen: false,
   server: { port: 5273, strictPort: true },

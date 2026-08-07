@@ -22,9 +22,14 @@ export interface ScanQueueDeps {
 }
 
 export interface ScanQueue {
-  enqueue(raw: string): void;
+  /** Reopens intake after React StrictMode's simulated setup/cleanup cycle. */
+  open(): void;
+  /** Stops accepting new work and resolves after every already accepted entry finishes. */
+  close(): Promise<void>;
+  /** Returns false after close, when intake is no longer accepted. */
+  enqueue(raw: string): boolean;
   /** Runs a side-channel write in strict order with scans. */
-  enqueueJob(job: () => Promise<void>): void;
+  enqueueJob(job: () => Promise<void>): boolean;
   /** Resolves once the queue has drained (tests await this instead of sleeping). */
   idle(): Promise<void>;
   pending(): number;
@@ -50,6 +55,7 @@ type QueueEntry = { type: "scan"; raw: string } | { type: "job"; run: () => Prom
 export function createScanQueue(deps: ScanQueueDeps): ScanQueue {
   const buffer: QueueEntry[] = [];
   let draining = false;
+  let accepting = true;
   let idleResolvers: (() => void)[] = [];
 
   function settleIdle() {
@@ -95,13 +101,25 @@ export function createScanQueue(deps: ScanQueueDeps): ScanQueue {
   }
 
   return {
+    open() {
+      accepting = true;
+    },
+    close() {
+      accepting = false;
+      if (!draining && buffer.length === 0) return Promise.resolve();
+      return new Promise<void>((resolve) => idleResolvers.push(resolve));
+    },
     enqueue(raw: string) {
+      if (!accepting) return false;
       buffer.push({ type: "scan", raw });
       void drain();
+      return true;
     },
     enqueueJob(job: () => Promise<void>) {
+      if (!accepting) return false;
       buffer.push({ type: "job", run: job });
       void drain();
+      return true;
     },
     idle() {
       if (!draining && buffer.length === 0) return Promise.resolve();

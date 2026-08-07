@@ -1,133 +1,68 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Alert, Button, Input } from "@markiro/ui";
+import { Button, Pager } from "@markiro/ui";
 import type { ClosedBoxSummary } from "../lib/boxes.js";
+
+const BOXES_PER_PAGE = 4;
 
 export interface ShiftBoxesPanelProps {
   boxes: ClosedBoxSummary[];
-  onReprint: (boxId: string, reason: string) => void;
-  onDisassemble: (boxId: string, reason: string) => void;
-  onPendingChange?: (pending: boolean) => void;
+  selectedBoxId: string | null;
+  onSelectionChange: (box: ClosedBoxSummary | null) => void;
 }
 
-type PendingAction = { boxId: string; kind: "reprint" | "disassemble" };
-
-/** Actions for closed boxes produced by this terminal during the current shift. */
-export function ShiftBoxesPanel({
-  boxes,
-  onReprint,
-  onDisassemble,
-  onPendingChange,
-}: ShiftBoxesPanelProps) {
+/** Bounded target picker for boxes produced by this terminal during the current shift. */
+export function ShiftBoxesPanel({ boxes, selectedBoxId, onSelectionChange }: ShiftBoxesPanelProps) {
   const { t } = useTranslation();
-  const [pending, setPending] = useState<PendingAction | null>(null);
-  const [reason, setReason] = useState("");
-  const trimmedReason = reason.trim();
+  const [page, setPage] = useState(1);
+  const pageCount = Math.max(1, Math.ceil(boxes.length / BOXES_PER_PAGE));
+  const currentPage = Math.min(page, pageCount);
+  const offset = (currentPage - 1) * BOXES_PER_PAGE;
+  const pageBoxes = boxes.slice(offset, offset + BOXES_PER_PAGE);
 
-  useEffect(() => () => onPendingChange?.(false), [onPendingChange]);
+  useEffect(() => {
+    if (page > pageCount) setPage(pageCount);
+  }, [page, pageCount]);
 
-  function startAction(boxId: string, kind: PendingAction["kind"]): void {
-    setPending({ boxId, kind });
-    setReason("");
-    onPendingChange?.(true);
-  }
-
-  function confirm(): void {
-    if (!pending || !trimmedReason) return;
-    if (pending.kind === "reprint") onReprint(pending.boxId, trimmedReason);
-    else onDisassemble(pending.boxId, trimmedReason);
-    setPending(null);
-    setReason("");
-    onPendingChange?.(false);
-  }
+  useEffect(() => {
+    if (selectedBoxId && !boxes.some((box) => box.boxId === selectedBoxId)) {
+      onSelectionChange(null);
+    }
+  }, [boxes, onSelectionChange, selectedBoxId]);
 
   return (
-    <section aria-labelledby="closed-boxes-title" style={{ display: "grid", gap: 12 }}>
-      <h2 id="closed-boxes-title" style={{ margin: 0, fontSize: "1.25rem" }}>
-        {t("box.closedTitle")}
-      </h2>
+    <section className="shift-boxes" aria-labelledby="closed-boxes-title">
+      <h2 id="closed-boxes-title">{t("box.selectTarget")}</h2>
       {boxes.length === 0 ? (
-        <p style={{ margin: 0, opacity: 0.7 }}>{t("box.closedEmpty")}</p>
+        <p className="shift-boxes__empty">{t("box.closedEmpty")}</p>
       ) : (
-        <ul style={{ display: "grid", gap: 8, margin: 0, padding: 0, listStyle: "none" }}>
-          {boxes.map((box) => (
-            <li
-              key={box.boxId}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 16,
-                paddingBlock: 10,
-                borderBottom: "1px solid var(--line-subtle)",
-              }}
-            >
-              <span style={{ fontFamily: "var(--font-mono)", fontWeight: 600 }}>
-                SSCC {box.sscc}
-              </span>
-              <span>{t("box.closedItems", { count: box.itemCount })}</span>
+        <div className="shift-boxes__list" role="list">
+          {pageBoxes.map((box) => (
+            <div key={box.boxId} role="listitem">
               <Button
                 type="button"
-                variant="secondary"
-                style={{ minHeight: 64, marginInlineStart: "auto" }}
-                onClick={() => startAction(box.boxId, "reprint")}
+                size="floor"
+                variant={selectedBoxId === box.boxId ? "primary" : "secondary"}
+                className="shift-boxes__row"
+                aria-pressed={selectedBoxId === box.boxId}
+                onClick={() => onSelectionChange(box)}
               >
-                {t("box.reprint")}
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                style={{ minHeight: 64 }}
-                onClick={() => startAction(box.boxId, "disassemble")}
-              >
-                {t("box.disassemble")}
-              </Button>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {pending ? (
-        <Alert
-          tone={pending.kind === "disassemble" ? "warn" : "info"}
-          title={
-            pending.kind === "disassemble"
-              ? t("box.disassembleConfirmTitle")
-              : t("box.reprintConfirmTitle")
-          }
-        >
-          {pending.kind === "disassemble" ? <p>{t("box.disassembleConfirmDetail")}</p> : null}
-          <div style={{ display: "grid", gap: 12 }}>
-            <Input
-              label={t("box.reason")}
-              value={reason}
-              onChange={(event) => setReason(event.target.value)}
-              maxLength={500}
-              autoFocus
-            />
-            <div style={{ display: "flex", gap: 12 }}>
-              <Button
-                type="button"
-                style={{ minHeight: 64 }}
-                disabled={!trimmedReason}
-                onClick={confirm}
-              >
-                {t("box.confirmAction")}
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                style={{ minHeight: 64 }}
-                onClick={() => {
-                  setPending(null);
-                  onPendingChange?.(false);
-                }}
-              >
-                {t("box.cancelClear")}
+                <strong>SSCC {box.sscc}</strong>
+                <span>{t("box.closedItems", { count: box.itemCount })}</span>
               </Button>
             </div>
-          </div>
-        </Alert>
-      ) : null}
+          ))}
+        </div>
+      )}
+      <Pager
+        page={currentPage}
+        pageCount={pageCount}
+        onPageChange={setPage}
+        ariaLabel={t("box.pagination")}
+        previousLabel={t("box.previousPage")}
+        nextLabel={t("box.nextPage")}
+        pageLabel={(activePage, count) => t("box.page", { page: activePage, pageCount: count })}
+      />
     </section>
   );
 }

@@ -204,6 +204,13 @@
       "when": 1785786507980,
       "tag": "0028_avatar-owner-integrity",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1785972845175,
+      "tag": "0029_loving_triathlon",
+      "breakpoints": true
     }
   ]
 }

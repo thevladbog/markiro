@@ -10,6 +10,7 @@ import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { schema, type Db } from "@markiro/db";
 import { listenOnLoopback } from "./support/listen-loopback";
+import { createTestStationDevice } from "./support/auth";
 
 /**
  * A minimal, valid `LabelTemplateSpec` (see packages/domain/src/labels/model.ts)
@@ -394,11 +395,8 @@ describe.skipIf(!ready)("label-templates e2e", () => {
     const agent = request.agent(app!.getHttpServer());
     await signUpAndActivate(agent);
 
-    const device = await agent
-      .post("/station-devices")
-      .send({ name: "Line 1 terminal" })
-      .expect(201);
-    const apiKey = (device.body as { apiKey: string }).apiKey;
+    const device = await createTestStationDevice(app!, agent, "Line 1 terminal");
+    const apiKey = device.apiKey;
 
     await request(app!.getHttpServer())
       .get("/label-templates")

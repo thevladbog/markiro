@@ -16,6 +16,14 @@ pub struct StationConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub organization_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server_url: Option<String>,
@@ -27,6 +35,10 @@ impl StationConfig {
             machine_id: Uuid::new_v4().to_string(),
             tenant_id: None,
             device_id: None,
+            device_name: None,
+            organization_name: None,
+            line_id: None,
+            line_name: None,
             api_key: None,
             server_url: None,
         }
@@ -50,19 +62,180 @@ pub fn read_config(dir: &Path) -> Result<StationConfig, String> {
     serde_json::from_str(&data).map_err(|e| format!("Invalid station.json: {e}"))
 }
 
-/// Writes `station.json` atomically-ish (create dir, write, tighten perms).
-/// On unix the file is *created* at mode 0600 (owner read/write only) so
-/// there is never a window where a fresh file is group/world-readable
-/// under a permissive umask; `set_owner_only` is then re-applied as a
-/// belt-and-suspenders to also tighten a pre-existing file whose mode was
-/// already wrong (create+truncate on an existing file keeps its old mode).
-/// On Windows the app-config dir is already per-user, so ACLs govern access.
+/// Atomically replaces `station.json` (create dir, write a private sibling,
+/// sync, then replace). A failed write restores the previous readable
+/// provisioning bundle instead of truncating it. On Unix the sibling is
+/// created at mode 0600; Windows uses the per-user app-config directory.
 pub fn write_config(dir: &Path, cfg: &StationConfig) -> Result<(), String> {
+    write_config_with_parent_syncs(dir, cfg, sync_parent_directory, sync_parent_directory)
+}
+
+/// The two directory sync operations are injected only so both post-replace
+/// paths can be proven in unit tests. Production always uses
+/// `sync_parent_directory` for both boundaries.
+fn write_config_with_parent_syncs<F, G>(
+    dir: &Path,
+    cfg: &StationConfig,
+    commit_sync: F,
+    rollback_sync: G,
+) -> Result<(), String>
+where
+    F: Fn(&Path) -> Result<(), String>,
+    G: Fn(&Path) -> Result<(), String>,
+{
     fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let path = config_path(dir);
     let data = serde_json::to_string_pretty(cfg).map_err(|e| e.to_string())?;
-    write_owner_only(&path, data.as_bytes())?;
-    set_owner_only(&path)?;
+    let temporary = dir.join(format!(".station-{}.tmp", Uuid::new_v4()));
+    if let Err(error) = write_owner_only(&temporary, data.as_bytes()) {
+        let _ = fs::remove_file(&temporary);
+        return Err(error);
+    }
+    let backup = dir.join(format!(".station-{}.bak", Uuid::new_v4()));
+    let had_previous = match backup_existing_config(&path, &backup) {
+        Ok(had_previous) => had_previous,
+        Err(error) => {
+            let _ = fs::remove_file(&temporary);
+            let _ = fs::remove_file(&backup);
+            return Err(error);
+        }
+    };
+    // The backup must itself be durable before the destination can change.
+    if had_previous {
+        if let Err(error) = sync_parent_directory(dir) {
+            let _ = fs::remove_file(&temporary);
+            let _ = fs::remove_file(&backup);
+            return Err(error);
+        }
+    }
+    replace_config_file(&temporary, &path).map_err(|e| {
+        let _ = fs::remove_file(&temporary);
+        let _ = fs::remove_file(&backup);
+        e.to_string()
+    })?;
+    match commit_sync(dir) {
+        Ok(()) => {
+            let _ = fs::remove_file(&backup);
+            Ok(())
+        }
+        Err(sync_error) => {
+            let restored = if had_previous {
+                restore_config_from_backup(dir, &backup, &path)
+            } else {
+                fs::remove_file(&path).map_err(|error| error.to_string())
+            };
+            match restored {
+                Ok(()) => match rollback_sync(dir) {
+                    Ok(()) => {
+                        let _ = fs::remove_file(&backup);
+                        Err(format!(
+                            "Configuration write was rolled back after directory sync failed: {sync_error}"
+                        ))
+                    }
+                    Err(rollback_sync_error) => Err(format!(
+                        "Configuration durability is uncertain after replacement; rollback directory sync failed: {rollback_sync_error}; original sync error: {sync_error}"
+                    )),
+                },
+                Err(restore_error) => Err(format!(
+                    "Configuration durability is uncertain after replacement; automatic restoration failed: {restore_error}; original sync error: {sync_error}"
+                )),
+            }
+        }
+    }
+}
+
+/// Makes a private byte-for-byte recovery copy of an existing config. A
+/// missing destination is the first-write case and needs no backup.
+fn backup_existing_config(destination: &Path, backup: &Path) -> Result<bool, String> {
+    match fs::read(destination) {
+        Ok(data) => {
+            write_owner_only(backup, &data)?;
+            Ok(true)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+/// Restores a backup through a fresh private sibling, retaining the backup
+/// itself until the final directory sync confirms the restored destination.
+/// This path works with Unix rename and the Windows replacement primitive.
+fn restore_config_from_backup(dir: &Path, backup: &Path, destination: &Path) -> Result<(), String> {
+    let restoration = dir.join(format!(".station-{}.tmp", Uuid::new_v4()));
+    let backup_bytes = fs::read(backup).map_err(|error| error.to_string())?;
+    if let Err(error) = write_owner_only(&restoration, &backup_bytes) {
+        let _ = fs::remove_file(&restoration);
+        return Err(error);
+    }
+    replace_config_file(&restoration, destination).map_err(|error| {
+        let _ = fs::remove_file(&restoration);
+        error.to_string()
+    })
+}
+
+/// Replaces the destination without truncating it in place. Windows cannot
+/// rely on `rename` replacing an existing file, so it uses `ReplaceFileW`
+/// when a prior config exists; that API either keeps the old destination or
+/// atomically installs the completed sibling. A first write has no destination
+/// and uses `MoveFileExW` with write-through semantics instead.
+#[cfg(windows)]
+fn replace_config_file(temporary: &Path, destination: &Path) -> std::io::Result<()> {
+    use std::iter::once;
+    use std::os::windows::ffi::OsStrExt;
+    use std::ptr::null;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, ReplaceFileW, MOVEFILE_WRITE_THROUGH, REPLACEFILE_WRITE_THROUGH,
+    };
+
+    let temporary_wide = temporary
+        .as_os_str()
+        .encode_wide()
+        .chain(once(0))
+        .collect::<Vec<_>>();
+    let destination_wide = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(once(0))
+        .collect::<Vec<_>>();
+    let succeeded = unsafe {
+        if destination.exists() {
+            ReplaceFileW(
+                destination_wide.as_ptr(),
+                temporary_wide.as_ptr(),
+                null(),
+                REPLACEFILE_WRITE_THROUGH,
+                null(),
+                null(),
+            ) != 0
+        } else {
+            MoveFileExW(
+                temporary_wide.as_ptr(),
+                destination_wide.as_ptr(),
+                MOVEFILE_WRITE_THROUGH,
+            ) != 0
+        }
+    };
+    if succeeded {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+#[cfg(not(windows))]
+fn replace_config_file(temporary: &Path, destination: &Path) -> std::io::Result<()> {
+    fs::rename(temporary, destination)
+}
+
+#[cfg(unix)]
+fn sync_parent_directory(dir: &Path) -> Result<(), String> {
+    fs::File::open(dir)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|e| e.to_string())
+}
+
+#[cfg(not(unix))]
+fn sync_parent_directory(_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
@@ -76,23 +249,29 @@ fn write_owner_only(path: &Path, data: &[u8]) -> Result<(), String> {
         .mode(0o600)
         .open(path)
         .map_err(|e| e.to_string())?;
-    file.write_all(data).map_err(|e| e.to_string())
+    file.write_all(data).map_err(|e| e.to_string())?;
+    file.sync_all().map_err(|e| e.to_string())
 }
 
 #[cfg(not(unix))]
 fn write_owner_only(path: &Path, data: &[u8]) -> Result<(), String> {
-    fs::write(path, data).map_err(|e| e.to_string())
+    let mut file = fs::File::create(path).map_err(|e| e.to_string())?;
+    file.write_all(data).map_err(|e| e.to_string())?;
+    file.sync_all().map_err(|e| e.to_string())
 }
 
-#[cfg(unix)]
-fn set_owner_only(path: &Path) -> Result<(), String> {
-    use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())
-}
-
-#[cfg(not(unix))]
-fn set_owner_only(_path: &Path) -> Result<(), String> {
-    Ok(())
+/// Removes a rejected credential and all reproducible tenant/place metadata,
+/// while retaining the durable installation and station IDs for same-record
+/// re-pairing. It deliberately does not touch the SQLite operational journal.
+pub fn clear_credential(dir: &Path) -> Result<(), String> {
+    let mut cfg = read_config(dir)?;
+    cfg.tenant_id = None;
+    cfg.device_name = None;
+    cfg.organization_name = None;
+    cfg.line_id = None;
+    cfg.line_name = None;
+    cfg.api_key = None;
+    write_config(dir, &cfg)
 }
 
 /// Validates an operator-entered http(s) URL. Mirrors idento's
@@ -134,12 +313,184 @@ mod tests {
         let mut cfg = read_config(&dir).unwrap();
         cfg.tenant_id = Some("org_1".into());
         cfg.device_id = Some("dev_1".into());
-        cfg.api_key = Some("mk_secret".into());
+        cfg.device_name = Some("Packing station".into());
+        cfg.organization_name = Some("Factory".into());
+        cfg.line_id = Some("line_1".into());
+        cfg.line_name = Some("Packing".into());
+        cfg.api_key = Some("credential-placeholder".into());
         cfg.server_url = Some("https://api.markiro.app".into());
         write_config(&dir, &cfg).unwrap();
 
         let reloaded = read_config(&dir).unwrap();
         assert_eq!(reloaded, cfg);
+    }
+
+    #[test]
+    fn replace_config_file_installs_a_complete_new_document_over_an_existing_one() {
+        let dir = temp_dir();
+        let mut original = read_config(&dir).unwrap();
+        original.device_id = Some("device_before".into());
+        original.api_key = Some("credential-before".into());
+        write_config(&dir, &original).unwrap();
+
+        let mut replacement = original.clone();
+        replacement.device_id = Some("device_after".into());
+        replacement.api_key = Some("credential-after".into());
+        replacement.server_url = Some("https://api.example".into());
+        write_config(&dir, &replacement).unwrap();
+
+        let on_disk: StationConfig = serde_json::from_str(
+            &fs::read_to_string(config_path(&dir)).expect("replacement is readable"),
+        )
+        .expect("replacement is complete JSON");
+        assert_eq!(on_disk, replacement);
+        assert!(fs::read_dir(&dir).unwrap().all(|entry| !entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .ends_with(".tmp")));
+    }
+
+    #[test]
+    fn parent_sync_failure_restores_the_previous_config_and_cleans_recovery_files() {
+        let dir = temp_dir();
+        let mut original = read_config(&dir).unwrap();
+        original.device_id = Some("device_before".into());
+        original.api_key = Some("credential-before".into());
+        original.server_url = Some("https://api.before.example".into());
+        write_config(&dir, &original).unwrap();
+
+        let mut replacement = original.clone();
+        replacement.api_key = Some("credential-after".into());
+        replacement.server_url = Some("https://api.after.example".into());
+
+        let result = write_config_with_parent_syncs(
+            &dir,
+            &replacement,
+            |_| Err("injected directory sync failure".to_string()),
+            sync_parent_directory,
+        );
+
+        assert!(result.is_err());
+        assert_eq!(read_config(&dir).unwrap(), original);
+        assert!(fs::read_dir(&dir).unwrap().all(|entry| {
+            let name = entry.unwrap().file_name();
+            let name = name.to_string_lossy();
+            !name.ends_with(".tmp") && !name.ends_with(".bak")
+        }));
+    }
+
+    #[test]
+    fn parent_sync_failure_on_first_write_removes_the_new_config_and_recovery_files() {
+        let dir = temp_dir();
+        let cfg = StationConfig::new_with_machine_id();
+
+        let result = write_config_with_parent_syncs(
+            &dir,
+            &cfg,
+            |_| Err("injected directory sync failure".to_string()),
+            sync_parent_directory,
+        );
+
+        assert!(result.is_err());
+        assert!(!config_path(&dir).exists());
+        assert!(fs::read_dir(&dir).unwrap().all(|entry| {
+            let name = entry.unwrap().file_name();
+            let name = name.to_string_lossy();
+            !name.ends_with(".tmp") && !name.ends_with(".bak")
+        }));
+    }
+
+    #[test]
+    fn failed_final_restore_sync_preserves_the_prior_backup_as_durability_recovery() {
+        let dir = temp_dir();
+        let mut original = read_config(&dir).unwrap();
+        original.device_id = Some("device_before".into());
+        original.api_key = Some("credential-before".into());
+        original.server_url = Some("https://api.before.example".into());
+        write_config(&dir, &original).unwrap();
+
+        let mut replacement = original.clone();
+        replacement.api_key = Some("credential-after".into());
+
+        let result = write_config_with_parent_syncs(
+            &dir,
+            &replacement,
+            |_| Err("injected commit directory sync failure".to_string()),
+            |_| Err("injected restore directory sync failure".to_string()),
+        );
+
+        expect_durability_uncertainty(&result);
+        assert_eq!(read_config(&dir).unwrap(), original);
+        assert!(fs::read_dir(&dir).unwrap().any(|entry| {
+            entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".bak")
+        }));
+        assert!(fs::read_dir(&dir).unwrap().all(|entry| {
+            !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".tmp")
+        }));
+    }
+
+    #[test]
+    fn failed_final_first_write_removal_sync_is_durability_uncertainty_not_rollback() {
+        let dir = temp_dir();
+        let cfg = StationConfig::new_with_machine_id();
+
+        let result = write_config_with_parent_syncs(
+            &dir,
+            &cfg,
+            |_| Err("injected commit directory sync failure".to_string()),
+            |_| Err("injected deletion directory sync failure".to_string()),
+        );
+
+        expect_durability_uncertainty(&result);
+        assert!(!config_path(&dir).exists());
+        assert!(fs::read_dir(&dir).unwrap().all(|entry| {
+            let name = entry.unwrap().file_name();
+            let name = name.to_string_lossy();
+            !name.ends_with(".tmp") && !name.ends_with(".bak")
+        }));
+    }
+
+    fn expect_durability_uncertainty(result: &Result<(), String>) {
+        assert!(result
+            .as_ref()
+            .is_err_and(|error| error.contains("durability is uncertain")));
+    }
+
+    #[test]
+    fn clear_credential_keeps_the_durable_machine_and_device_identity() {
+        let dir = temp_dir();
+        let mut cfg = read_config(&dir).unwrap();
+        cfg.tenant_id = Some("tenant_1".into());
+        cfg.device_id = Some("device_1".into());
+        cfg.device_name = Some("Packing station".into());
+        cfg.organization_name = Some("Factory".into());
+        cfg.line_id = Some("line_1".into());
+        cfg.line_name = Some("Packing".into());
+        cfg.api_key = Some("credential-placeholder".into());
+        cfg.server_url = Some("https://station.example".into());
+        write_config(&dir, &cfg).unwrap();
+
+        clear_credential(&dir).unwrap();
+
+        let cleared = read_config(&dir).unwrap();
+        assert_eq!(cleared.machine_id, cfg.machine_id);
+        assert_eq!(cleared.device_id, cfg.device_id);
+        assert_eq!(cleared.tenant_id, None);
+        assert_eq!(cleared.device_name, None);
+        assert_eq!(cleared.organization_name, None);
+        assert_eq!(cleared.line_id, None);
+        assert_eq!(cleared.line_name, None);
+        assert_eq!(cleared.api_key, None);
+        assert_eq!(cleared.server_url, cfg.server_url);
     }
 
     #[cfg(unix)]
@@ -149,15 +500,15 @@ mod tests {
         let dir = temp_dir();
         let cfg = read_config(&dir).unwrap();
         write_config(&dir, &cfg).unwrap();
-        let mode = fs::metadata(config_path(&dir)).unwrap().permissions().mode();
+        let mode = fs::metadata(config_path(&dir))
+            .unwrap()
+            .permissions()
+            .mode();
         assert_eq!(mode & 0o777, 0o600);
     }
 
-    /// Proves `set_owner_only` still earns its keep: a pre-existing
-    /// `station.json` created at a permissive 0644 (e.g. by an older binary,
-    /// or restored from a backup) must be tightened to 0600 by
-    /// `write_config`, even though create+truncate on an existing file does
-    /// not itself change its mode.
+    /// A pre-existing permissive config (for example, from an older binary)
+    /// is replaced by a private sibling rather than retaining its old mode.
     #[cfg(unix)]
     #[test]
     fn write_config_tightens_preexisting_permissive_file_to_0600() {

@@ -12,6 +12,7 @@ import { loadEnv } from "../src/env";
 import { partitionName, schema, type Db } from "@markiro/db";
 import type { ScanItemDto } from "../src/modules/station-scans/dto";
 import { SsccService } from "../src/modules/sscc/sscc.service";
+import { createTestStationDevice } from "./support/auth";
 import { listenOnLoopback } from "./support/listen-loopback";
 
 const ready = Boolean(
@@ -74,10 +75,9 @@ describe.skipIf(!ready)("station-scans e2e", () => {
   }
 
   async function deviceKey(agent: ReturnType<typeof request.agent>): Promise<string> {
-    const device = await agent.post("/station-devices").send({ name: "Line 1" }).expect(201);
-    const body = device.body as { apiKey: string; deviceId: string };
-    deviceIdsByKey.set(body.apiKey, body.deviceId);
-    return body.apiKey;
+    const device = await createTestStationDevice(app!, agent, "Line 1");
+    deviceIdsByKey.set(device.apiKey, device.deviceId);
+    return device.apiKey;
   }
 
   // A genuinely valid GTIN-14 (same fixture as products.e2e.test.ts's
@@ -1332,8 +1332,8 @@ describe.skipIf(!ready)("station-scans e2e", () => {
     // present and unreachable -- the concern the parent task calls out
     // explicitly ("Call it for every closure this batch applies").
     it("advances the covering sscc_blocks row's consumedThroughSerial when a closure names a real serial", async () => {
-      const device = await agent.post("/station-devices").send({ name: "Box device" }).expect(201);
-      const deviceId = (device.body as { deviceId: string }).deviceId;
+      const device = await createTestStationDevice(app!, agent, "Box device");
+      const deviceId = device.deviceId;
 
       const prefix = "800000001";
       const block = await app!.get(SsccService).allocate(tenantId, prefix, 0, deviceId, 20);
@@ -1618,16 +1618,10 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       "advances both sscc_blocks rows' consumedThroughSerial when one batch carries two " +
         "closures",
       async () => {
-        const deviceA = await agent
-          .post("/station-devices")
-          .send({ name: "Box device A" })
-          .expect(201);
-        const deviceAId = (deviceA.body as { deviceId: string }).deviceId;
-        const deviceB = await agent
-          .post("/station-devices")
-          .send({ name: "Box device B" })
-          .expect(201);
-        const deviceBId = (deviceB.body as { deviceId: string }).deviceId;
+        const deviceA = await createTestStationDevice(app!, agent, "Box device A");
+        const deviceAId = deviceA.deviceId;
+        const deviceB = await createTestStationDevice(app!, agent, "Box device B");
+        const deviceBId = deviceB.deviceId;
 
         const prefixA = "800000001";
         const prefixB = "800000002";
@@ -1684,11 +1678,8 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       "advances the covering sscc_blocks row's consumedThroughSerial for a closure whose box " +
         "row does not exist (Finding 17)",
       async () => {
-        const device = await agent
-          .post("/station-devices")
-          .send({ name: "Ghost box device" })
-          .expect(201);
-        const deviceId = (device.body as { deviceId: string }).deviceId;
+        const device = await createTestStationDevice(app!, agent, "Ghost box device");
+        const deviceId = device.deviceId;
 
         const prefix = "800000003";
         const block = await app!.get(SsccService).allocate(tenantId, prefix, 0, deviceId, 20);
@@ -1791,11 +1782,8 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       "rolls back a closure's consumedThroughSerial advance when a later statement in the " +
         "same batch fails (transaction wiring)",
       async () => {
-        const device = await agent
-          .post("/station-devices")
-          .send({ name: "Rollback device" })
-          .expect(201);
-        const deviceId = (device.body as { deviceId: string }).deviceId;
+        const device = await createTestStationDevice(app!, agent, "Rollback device");
+        const deviceId = device.deviceId;
         const prefix = "800000004";
         const block = await app!.get(SsccService).allocate(tenantId, prefix, 0, deviceId, 20);
         const sscc = buildSscc(0, prefix, block.fromSerial + 2);

@@ -26,10 +26,14 @@ const sourceDist = join(sourcePackageRoot, "dist");
 const sourceNodeModules = join(sourcePackageRoot, "node_modules");
 const compiler = join(root, "node_modules/typescript/bin/tsc");
 const packageJson = JSON.parse(await readFile(join(sourcePackageRoot, "package.json"), "utf8"));
-const expectedExportKeys = [".", "./organization-access", "./runtime-migrate"];
+const expectedExportKeys = [".", "./organization-access", "./runtime-migrate", "./station-sqlite"];
 const expectedRuntimeExport = {
   types: "./dist/runtime-migrate.d.ts",
   default: "./dist/runtime-migrate.js",
+};
+const expectedStationSqliteExport = {
+  types: "./dist/station-sqlite.d.ts",
+  default: "./dist/station-sqlite.js",
 };
 const expectedRootValueExports = [
   "STATION_MIGRATIONS",
@@ -115,6 +119,7 @@ after(async () => {
 function assertRuntimeExportContract(manifest) {
   assert.deepEqual(Object.keys(manifest.exports).sort(), [...expectedExportKeys].sort());
   assert.deepEqual(manifest.exports["./runtime-migrate"], expectedRuntimeExport);
+  assert.deepEqual(manifest.exports["./station-sqlite"], expectedStationSqliteExport);
 }
 
 function assertRootRuntimeValueContract(actualExports) {
@@ -291,6 +296,7 @@ test("the isolated runtime-migrate subpath exports the built migration function"
 test("the package export allowlist is exact and every runtime mapping artifact exists", async () => {
   assertRuntimeExportContract(packageJson);
   await assertMappedArtifactsExist(isolatedPackageRoot);
+  await assertMappedArtifactsExist(isolatedPackageRoot, expectedStationSqliteExport);
 });
 
 test("the export contract rejects alternate files, missing declarations, and neutral aliases", async () => {

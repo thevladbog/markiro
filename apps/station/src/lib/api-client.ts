@@ -1,4 +1,9 @@
 import type { StationConfig } from "./config.js";
+import {
+  rejectCredentialGeneration,
+  type CredentialGeneration,
+  type CredentialRejectedEvent,
+} from "./credential-recovery.js";
 
 export class StationApiError extends Error {
   readonly status: number;
@@ -9,10 +14,23 @@ export class StationApiError extends Error {
   }
 }
 
+export function isStationCredentialRejection(error: unknown): error is StationApiError {
+  return error instanceof StationApiError && error.status === 401;
+}
+
 export interface StationClient {
   get<T>(path: string): Promise<T>;
   post<T>(path: string, body?: unknown): Promise<T>;
-  whoami(): Promise<{ ok: true }>;
+  whoami(signal?: AbortSignal): Promise<{ ok: true }>;
+}
+
+export interface StationClientOptions {
+  /** Present only for the normal, durably enrolled authenticated client. */
+  credentialBoundary?: {
+    machineId: string;
+    generation: CredentialGeneration;
+    onCredentialRejected: (event: CredentialRejectedEvent) => void;
+  };
 }
 
 /**
@@ -41,6 +59,42 @@ export interface StationClient {
 export const REQUEST_TIMEOUT_MS = 30_000;
 
 /**
+ * Sends the one unauthenticated request an unpaired station is allowed to
+ * make. Pairing codes are deliberately redeemed without a device credential:
+ * there is no key before this request succeeds. Keeping the abort discipline
+ * beside the ordinary station client ensures a stalled provisioning request
+ * cannot leave the enrollment screen busy forever.
+ *
+ * The raw response is intentionally returned only to the pairing decoder.
+ * Callers must never log it: a successful body contains the one-time device
+ * credential.
+ */
+export async function postUnauthenticatedStationRequest(
+  serverUrl: string,
+  path: string,
+  body: unknown,
+  signal?: AbortSignal,
+): Promise<Response> {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (signal?.aborted) controller.abort();
+  else signal?.addEventListener("abort", abort, { once: true });
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(`${serverUrl.replace(/\/+$/, "")}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "omit",
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", abort);
+  }
+}
+
+/**
  * Fetch client for the SaaS API. Sends the device api-key as `x-api-key`
  * (matching the TenantGuard station path) and prefixes every path with the
  * enrolled `serverUrl`. There is no session cookie — the station is stateless
@@ -49,10 +103,20 @@ export const REQUEST_TIMEOUT_MS = 30_000;
 export function createStationClient(
   cfg: Pick<StationConfig, "apiKey" | "serverUrl"> &
     Partial<Omit<StationConfig, "apiKey" | "serverUrl">>,
+  options: StationClientOptions = {},
 ): StationClient {
   const base = (cfg.serverUrl ?? "").replace(/\/+$/, "");
+  const credentialBoundary = options.credentialBoundary;
 
-  async function request<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
+  async function request<T>(
+    method: "GET" | "POST",
+    path: string,
+    body?: unknown,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    if (credentialBoundary?.generation.sealed) {
+      throw new Error("station credential generation is sealed");
+    }
     // One `AbortController` per attempt, cleared in `finally` so the timer
     // never leaks on the success path (nor on an ordinary HTTP-error path —
     // both go through the same `finally`). `controller.abort()` makes the
@@ -60,6 +124,9 @@ export function createStationClient(
     // rejection the caller (the sync drain, or any other station request)
     // already has to handle like any other network failure.
     const controller = new AbortController();
+    const abort = () => controller.abort();
+    if (signal?.aborted) controller.abort();
+    else signal?.addEventListener("abort", abort, { once: true });
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
       const res = await fetch(`${base}${path}`, {
@@ -74,8 +141,20 @@ export function createStationClient(
       if (!res.ok) throw new StationApiError(res.status, await readError(res));
       if (res.status === 204) return undefined as T;
       return (await res.json()) as T;
+    } catch (error) {
+      if (credentialBoundary && isStationCredentialRejection(error)) {
+        await rejectCredentialGeneration(
+          {
+            machineId: credentialBoundary.machineId,
+            generation: credentialBoundary.generation,
+          },
+          credentialBoundary.onCredentialRejected,
+        );
+      }
+      throw error;
     } finally {
       clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
     }
   }
 
@@ -84,8 +163,8 @@ export function createStationClient(
     post: (path, body) => request("POST", path, body),
     // A cheap reachability + auth probe used by enrollment; GET /shifts is
     // TenantGuard-protected, so a 200 proves the key resolves a tenant.
-    whoami: async () => {
-      await request("GET", "/shifts");
+    whoami: async (signal) => {
+      await request("GET", "/shifts", undefined, signal);
       return { ok: true };
     },
   };

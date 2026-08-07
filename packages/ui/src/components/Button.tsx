@@ -2,14 +2,14 @@ import type { ButtonHTMLAttributes, CSSProperties, ReactNode } from "react";
 
 import { cn } from "../cn.js";
 
-/** Порт `design-system/components/forms/Button.jsx` — только офисный режим (40px / 32px). */
+/** Порт `design-system/components/forms/Button.jsx` с офисными и цеховым размерами. */
 export type ButtonVariant = "primary" | "secondary" | "destructive";
-export type ButtonSize = "md" | "compact";
+export type ButtonSize = "md" | "compact" | "floor";
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   /** primary — главное действие экрана (одно); secondary — обычное; destructive — необратимое */
   variant?: ButtonVariant;
-  /** md — 40px (по умолчанию); compact — 32px, для плотных панелей/таблиц */
+  /** md — 40px (по умолчанию); compact — 32px; floor — 64px, для работы в перчатках */
   size?: ButtonSize;
   fullWidth?: boolean;
   /** Показывает спиннер и блокирует onClick */
@@ -21,6 +21,7 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 const HEIGHT: Record<ButtonSize, string> = {
   md: "var(--control-md)",
   compact: "var(--control-sm)",
+  floor: "var(--control-floor)",
 };
 
 const VARIANT_STYLE: Record<ButtonVariant, CSSProperties> = {
@@ -74,22 +75,37 @@ export function Button({
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
-        gap: 8,
+        gap: size === "floor" ? 12 : 8,
         minHeight: HEIGHT[size],
-        padding: "0 16px",
+        height: size === "floor" ? HEIGHT[size] : undefined,
+        minWidth: size === "floor" ? "var(--control-floor)" : undefined,
+        padding: size === "floor" ? "0 24px" : "0 16px",
         borderRadius: "var(--r-2)",
-        font: "600 14px/1 var(--font-ui)",
-        fontSize: size === "compact" ? 13 : 14,
+        font: size === "floor" ? "var(--floor-body-strong)" : "600 14px/1 var(--font-ui)",
+        fontSize: size === "floor" ? 18 : size === "compact" ? 13 : 14,
         width: fullWidth ? "100%" : undefined,
         cursor: isDisabled ? "not-allowed" : "pointer",
         opacity: disabled ? 0.45 : 1,
         transition: "filter 120ms, transform 60ms",
         ...VARIANT_STYLE[variant],
+        ...(size === "floor" && variant === "destructive"
+          ? { color: "var(--fg-on-err-solid)" }
+          : {}),
         ...style,
       }}
       {...rest}
     >
-      {loading && <span aria-hidden="true" className="mk-spin" style={SPIN_STYLE} />}
+      {loading && (
+        <span
+          aria-hidden="true"
+          className="mk-spin"
+          style={{
+            ...SPIN_STYLE,
+            width: size === "floor" ? 20 : SPIN_STYLE.width,
+            height: size === "floor" ? 20 : SPIN_STYLE.height,
+          }}
+        />
+      )}
       {!loading && icon}
       {children}
       {loading && <style>{"@keyframes mk-spin{to{transform:rotate(360deg)}}"}</style>}

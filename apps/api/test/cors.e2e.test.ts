@@ -27,6 +27,7 @@ const FOREIGN_ORIGIN = "https://evil.example";
  * be absent. A literal also keeps it provably distinct from ADMIN_ORIGIN.
  */
 const KIOSK_ORIGIN = "https://kiosk.markiro.test";
+const STATION_ORIGIN = "https://station.markiro.test";
 
 describe.skipIf(!ready)("cors e2e", () => {
   let app: INestApplication | undefined;
@@ -34,7 +35,7 @@ describe.skipIf(!ready)("cors e2e", () => {
   let adminOrigin: string;
 
   beforeAll(async () => {
-    const env = { ...loadEnv(), KIOSK_ORIGIN };
+    const env = { ...loadEnv(), KIOSK_ORIGIN, STATION_ORIGIN };
     adminOrigin = env.ADMIN_ORIGIN;
     setup = setupAuth(env);
 
@@ -142,6 +143,18 @@ describe.skipIf(!ready)("cors e2e", () => {
     expect(res.headers["access-control-allow-origin"]).toBe(KIOSK_ORIGIN);
   });
 
+  it("OPTIONS preflight from STATION_ORIGIN on unauthenticated /station/pair is accepted", async () => {
+    const res = await request(app!.getHttpServer())
+      .options("/station/pair")
+      .set("Origin", STATION_ORIGIN)
+      .set("Access-Control-Request-Method", "POST")
+      .set("Access-Control-Request-Headers", "content-type")
+      .expect(204);
+
+    expect(res.headers["access-control-allow-origin"]).toBe(STATION_ORIGIN);
+    expect(res.headers["access-control-allow-credentials"]).toBe("true");
+  });
+
   /**
    * The kiosk origin is scoped to `/kiosk/*`, not granted globally.
    *
@@ -216,6 +229,74 @@ describe.skipIf(!ready)("cors e2e", () => {
           acao: adminOrigin,
         });
       }
+    });
+  });
+
+  describe("the station origin is scoped to its exact method/path surface", () => {
+    it("accepts a preflight for every documented station request", async () => {
+      for (const [method, path] of [
+        ["POST", "/station/pair"],
+        ["GET", "/station/identity"],
+        ["GET", "/station/operators"],
+        ["POST", "/station/scans"],
+        ["GET", "/shifts"],
+        ["POST", "/shifts"],
+        ["GET", "/shifts/shift-1/bundle"],
+        ["POST", "/shifts/shift-1/open"],
+        ["GET", "/products?search=04600000000000"],
+        ["POST", "/products/gtin-check/"],
+      ] as const) {
+        const granted = await request(app!.getHttpServer())
+          .options(path)
+          .set("Origin", STATION_ORIGIN)
+          .set("Access-Control-Request-Method", method)
+          .expect(204);
+        expect({ method, path, acao: granted.headers["access-control-allow-origin"] }).toEqual({
+          method,
+          path,
+          acao: STATION_ORIGIN,
+        });
+      }
+    });
+
+    it("refuses adjacent methods, cabinet paths, kiosk/auth paths, and unknown routes", async () => {
+      for (const [method, path] of [
+        ["GET", "/station/pair"],
+        ["POST", "/station/identity"],
+        ["POST", "/station/operators"],
+        ["GET", "/station/scans"],
+        ["PATCH", "/shifts"],
+        ["GET", "/shifts/shift-1"],
+        ["POST", "/shifts/shift-1/close"],
+        ["POST", "/products"],
+        ["GET", "/products/product-1"],
+        ["POST", "/products/gtin-check/extra"],
+        ["GET", "/kiosk/bootstrap"],
+        ["GET", "/counterparties"],
+        ["POST", "/api/auth/sign-in/email"],
+        ["GET", "/stations"],
+        ["GET", "/station-devices"],
+        ["GET", "/unknown"],
+      ] as const) {
+        const refused = await request(app!.getHttpServer())
+          .options(path)
+          .set("Origin", STATION_ORIGIN)
+          .set("Access-Control-Request-Method", method)
+          .expect(204);
+        expect({ method, path, acao: refused.headers["access-control-allow-origin"] }).toEqual({
+          method,
+          path,
+          acao: undefined,
+        });
+      }
+    });
+
+    it("refuses OPTIONS without an Access-Control-Request-Method", async () => {
+      const refused = await request(app!.getHttpServer())
+        .options("/station/scans")
+        .set("Origin", STATION_ORIGIN)
+        .expect(204);
+      expect(refused.headers["access-control-allow-origin"]).toBeUndefined();
     });
   });
 

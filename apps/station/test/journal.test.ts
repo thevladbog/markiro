@@ -1,10 +1,11 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
-import { STATION_MIGRATIONS } from "@markiro/db";
+import { STATION_MIGRATIONS } from "@markiro/db/station-sqlite";
 import type { SqlExecutor } from "../src/lib/mirror.js";
 import {
   appendScanEvent,
   findFirstSeen,
+  listRecentOperations,
   loadCodeKeys,
   recordScan,
   undoLastScan,
@@ -64,6 +65,120 @@ function failingExecOn(exec: SqlExecutor, pattern: RegExp): SqlExecutor {
 }
 
 describe("journal", () => {
+  it("returns at most six display-safe shift operations in deterministic newest-first order", async () => {
+    const exec = makeExec();
+    const times = [
+      "2026-08-06T10:00:00.000Z",
+      "2026-08-06T10:01:00.000Z",
+      "2026-08-06T10:02:00.000Z",
+      "2026-08-06T10:03:00.000Z",
+      "2026-08-06T10:04:00.000Z",
+      "2026-08-06T10:05:00.000Z",
+      "2026-08-06T10:06:00.000Z",
+      "2026-08-06T10:07:00.000Z",
+    ];
+    for (const [index, scannedAt] of times.entries()) {
+      await appendScanEvent(exec, {
+        ...EVENT,
+        raw: `0104600000000015215SECRET${index}`,
+        scannedAt,
+        verdict: index % 2 === 0 ? "ok" : "wrong_gtin",
+      });
+    }
+    await appendScanEvent(exec, {
+      ...EVENT,
+      shiftId: "other-shift",
+      raw: "0104600000000015215FOREIGN",
+      scannedAt: "2026-08-06T11:00:00.000Z",
+    });
+
+    const recent = await listRecentOperations(exec, "s1");
+
+    expect(recent).toHaveLength(6);
+    expect(recent.map((item) => item.scannedAt)).toEqual(times.slice(2).reverse());
+    expect(recent.map((item) => item.codeSuffix)).toEqual([
+      "…RET7",
+      "…RET6",
+      "…RET5",
+      "…RET4",
+      "…RET3",
+      "…RET2",
+    ]);
+    expect(JSON.stringify(recent)).not.toContain("SECRET");
+    expect(JSON.stringify(recent)).not.toContain("FOREIGN");
+  });
+
+  it("uses journal insertion order for newest-first display and degrades malformed timestamps safely", async () => {
+    const exec = makeExec();
+    await appendScanEvent(exec, {
+      ...EVENT,
+      raw: "0104600000000015215FIRST",
+      scannedAt: "2026-08-06T10:00:00.000Z",
+    });
+    await appendScanEvent(exec, {
+      ...EVENT,
+      raw: "0104600000000015215SECOND",
+      scannedAt: "2026-08-06T10:00:00.000Z",
+      verdict: "duplicate",
+    });
+    await appendScanEvent(exec, {
+      ...EVENT,
+      raw: "short",
+      scannedAt: "not-a-date",
+      verdict: "invalid",
+    });
+
+    expect(await listRecentOperations(exec, "s1")).toEqual([
+      { verdict: "invalid", scannedAt: null, codeSuffix: null },
+      {
+        verdict: "duplicate",
+        scannedAt: "2026-08-06T10:00:00.000Z",
+        codeSuffix: "…COND",
+      },
+      { verdict: "ok", scannedAt: "2026-08-06T10:00:00.000Z", codeSuffix: "…IRST" },
+    ]);
+  });
+
+  it("removes scanner control characters from the display suffix", async () => {
+    const exec = makeExec();
+    await appendScanEvent(exec, {
+      ...EVENT,
+      raw: "0104600000000015215ABC\u001d93TAIL",
+    });
+
+    expect(await listRecentOperations(exec, "s1")).toEqual([
+      { verdict: "ok", scannedAt: EVENT.scannedAt, codeSuffix: "…5ABC" },
+    ]);
+  });
+
+  it("never exposes a suffix for a long invalid payload that may contain a secret", async () => {
+    const exec = makeExec();
+    const sensitiveRaw = "operator-pin-000012345678-secret";
+    await appendScanEvent(exec, {
+      ...EVENT,
+      raw: sensitiveRaw,
+      verdict: "invalid",
+    });
+
+    const recent = await listRecentOperations(exec, "s1");
+    expect(recent).toEqual([{ verdict: "invalid", scannedAt: EVENT.scannedAt, codeSuffix: null }]);
+    expect(JSON.stringify(recent)).not.toContain("secret");
+    expect(JSON.stringify(recent)).not.toContain("5678");
+  });
+
+  it("does not trust a product verdict when the stored payload is not a parsed KM", async () => {
+    const exec = makeExec();
+    await appendScanEvent(exec, {
+      ...EVENT,
+      raw: "legacy-secret-marked-ok-by-corrupt-row",
+      verdict: "ok",
+    });
+
+    expect(await listRecentOperations(exec, "s1")).toEqual([
+      { verdict: "ok", scannedAt: EVENT.scannedAt, codeSuffix: null },
+    ]);
+  });
+
   it("appendScanEvent writes exactly one event row and touches nothing else", async () => {
     const exec = makeExec();
     await appendScanEvent(exec, EVENT);

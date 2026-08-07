@@ -8,7 +8,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from "@nestjs/common";
-import { and, eq, gte, lte } from "drizzle-orm";
+import { and, eq, gte, isNull, lte, or } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import type { LabelTemplateSpec } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
@@ -32,6 +32,7 @@ import type {
 
 type ShiftRow = typeof schema.shifts.$inferSelect;
 type ProductRow = typeof schema.products.$inferSelect;
+export type EffectiveListShiftsQuery = ListShiftsQueryDto & { includeUnassigned?: boolean };
 
 /**
  * One block must outlast a shift even if the network drops at the worst
@@ -51,11 +52,19 @@ export class ShiftsService {
   ) {}
 
   /** List a tenant's shifts, joined with product/line/counterparty names. */
-  async listShifts(tenantId: string, query: ListShiftsQueryDto): Promise<ListShiftsResponseDto> {
+  async listShifts(
+    tenantId: string,
+    query: EffectiveListShiftsQuery,
+  ): Promise<ListShiftsResponseDto> {
     const conditions = [eq(schema.shifts.tenantId, tenantId)];
 
     if (query.status) conditions.push(eq(schema.shifts.status, query.status));
-    if (query.lineId) conditions.push(eq(schema.shifts.lineId, query.lineId));
+    if (query.lineId) {
+      const lineCondition = query.includeUnassigned
+        ? or(eq(schema.shifts.lineId, query.lineId), isNull(schema.shifts.lineId))
+        : eq(schema.shifts.lineId, query.lineId);
+      if (lineCondition) conditions.push(lineCondition);
+    }
     if (query.from) conditions.push(gte(schema.shifts.plannedDate, query.from));
     if (query.to) conditions.push(lte(schema.shifts.plannedDate, query.to));
 

@@ -3,6 +3,8 @@ import { useTranslation } from "react-i18next";
 import { Alert, Button, Card, Input } from "@markiro/ui";
 import { DomainError, normalizeToGtin14 } from "@markiro/domain";
 import { StationApiError, type StationClient } from "../lib/api-client.js";
+import { FloorFooter } from "../ui/FloorFooter.js";
+import { StationScreen } from "../ui/StationScreen.js";
 
 interface ResolvedProduct {
   id: string;
@@ -17,16 +19,17 @@ export interface NewShiftProps {
   onBack: () => void;
 }
 
-type View = "input" | "found" | "notFound";
+export type NewShiftView = "input" | "found" | "notFound";
+export type NewShiftMode = "validation" | "aggregation";
 
 export function NewShift({ client, onStarted, onBack }: NewShiftProps) {
   const { t } = useTranslation();
   const [raw, setRaw] = useState("");
-  const [view, setView] = useState<View>("input");
+  const [view, setView] = useState<NewShiftView>("input");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [product, setProduct] = useState<ResolvedProduct | null>(null);
-  const [mode, setMode] = useState<"validation" | "aggregation">("validation");
+  const [mode, setMode] = useState<NewShiftMode>("validation");
   const [unknownGtin, setUnknownGtin] = useState<string>("");
 
   async function resolve(e: FormEvent) {
@@ -47,7 +50,7 @@ export function NewShift({ client, onStarted, onBack }: NewShiftProps) {
         gtin: gtin14,
       });
       const list = await client.get<{ items: ResolvedProduct[] }>(`/products?search=${gtin14}`);
-      const match = list.items.find((p) => p.gtin14 === gtin14) ?? null;
+      const match = list.items.find((candidate) => candidate.gtin14 === gtin14) ?? null;
       if (!match) {
         setUnknownGtin(gtin14);
         setView("notFound");
@@ -79,79 +82,118 @@ export function NewShift({ client, onStarted, onBack }: NewShiftProps) {
     }
   }
 
+  const messageSlot = (
+    <div className="new-shift__message" data-testid="new-shift-message-slot">
+      {error ? <Alert tone="error">{error}</Alert> : <span aria-hidden="true" />}
+    </div>
+  );
+
   if (view === "notFound") {
     return (
-      <main
-        style={{ minHeight: "100vh", display: "grid", placeItems: "center", gap: 16, padding: 32 }}
+      <StationScreen
+        title={t("shifts.new")}
+        actions={
+          <FloorFooter ariaLabel={t("shifts.newActions")}>
+            <Button
+              size="floor"
+              onClick={() => {
+                setRaw("");
+                setError(null);
+                setView("input");
+              }}
+            >
+              {t("shifts.scanAgain")}
+            </Button>
+            <Button size="floor" variant="secondary" onClick={onBack}>
+              {t("shifts.back")}
+            </Button>
+          </FloorFooter>
+        }
       >
-        <h1 style={{ fontSize: "2rem" }}>{t("shifts.notInCatalog")}</h1>
-        <p style={{ fontSize: "1.25rem" }}>GTIN: {unknownGtin}</p>
-        <p>{t("shifts.notInCatalogHint")}</p>
-        <div style={{ display: "flex", gap: 12 }}>
-          <Button
-            style={{ minHeight: 64 }}
-            onClick={() => {
-              setRaw("");
-              setView("input");
-            }}
-          >
-            {t("shifts.scanAgain")}
-          </Button>
-          <Button variant="secondary" style={{ minHeight: 64 }} onClick={onBack}>
-            {t("shifts.back")}
-          </Button>
-        </div>
-      </main>
+        <section
+          className="new-shift__panel new-shift__panel--missing"
+          data-testid="new-shift-missing"
+        >
+          <div className="new-shift__center">
+            <h2>{t("shifts.notInCatalog")}</h2>
+            <p className="new-shift__code">GTIN: {unknownGtin}</p>
+            <p>{t("shifts.notInCatalogHint")}</p>
+          </div>
+          {messageSlot}
+        </section>
+      </StationScreen>
     );
   }
 
   if (view === "found" && product) {
     return (
-      <main
-        style={{ minHeight: "100vh", display: "grid", placeItems: "center", gap: 16, padding: 32 }}
+      <StationScreen
+        title={t("shifts.new")}
+        actions={
+          <FloorFooter ariaLabel={t("shifts.newActions")}>
+            <Button size="floor" fullWidth loading={busy} onClick={() => void start()}>
+              {t("shifts.start")}
+            </Button>
+          </FloorFooter>
+        }
       >
-        <Card style={{ padding: 24, minWidth: 480 }}>
-          <div style={{ fontSize: "1.75rem" }}>{product.name}</div>
-          <div>{product.gtin14}</div>
-        </Card>
-        <div style={{ display: "flex", gap: 12 }}>
-          <Button
-            variant={mode === "validation" ? "primary" : "secondary"}
-            style={{ minHeight: 64 }}
-            onClick={() => setMode("validation")}
-          >
-            {t("shifts.modeValidation")}
-          </Button>
-          <Button
-            variant={mode === "aggregation" ? "primary" : "secondary"}
-            style={{ minHeight: 64 }}
-            onClick={() => setMode("aggregation")}
-          >
-            {t("shifts.modeAggregation")}
-          </Button>
-        </div>
-        {error ? <Alert tone="error">{error}</Alert> : null}
-        <Button style={{ minHeight: 64 }} disabled={busy} onClick={() => void start()}>
-          {t("shifts.start")}
-        </Button>
-      </main>
+        <section className="new-shift__panel new-shift__panel--found" data-testid="new-shift-found">
+          <Card className="new-shift__product" padding="var(--sp-3)">
+            <h2>{product.name}</h2>
+            <div className="new-shift__code">{product.gtin14}</div>
+          </Card>
+          <div className="new-shift__modes" role="group" aria-label={t("shifts.modeLabel")}>
+            <Button
+              size="floor"
+              fullWidth
+              variant={mode === "validation" ? "primary" : "secondary"}
+              aria-pressed={mode === "validation"}
+              onClick={() => setMode("validation")}
+            >
+              {t("shifts.modeValidation")}
+            </Button>
+            <Button
+              size="floor"
+              fullWidth
+              variant={mode === "aggregation" ? "primary" : "secondary"}
+              aria-pressed={mode === "aggregation"}
+              onClick={() => setMode("aggregation")}
+            >
+              {t("shifts.modeAggregation")}
+            </Button>
+          </div>
+          {messageSlot}
+        </section>
+      </StationScreen>
     );
   }
 
   return (
-    <main
-      style={{ minHeight: "100vh", display: "grid", placeItems: "center", gap: 16, padding: 32 }}
+    <StationScreen
+      title={t("shifts.new")}
+      actions={
+        <FloorFooter ariaLabel={t("shifts.newActions")}>
+          <Button size="floor" type="submit" form="new-shift-resolve" fullWidth loading={busy}>
+            {t("shifts.open")}
+          </Button>
+        </FloorFooter>
+      }
     >
-      <form onSubmit={(e) => void resolve(e)} style={{ display: "grid", gap: 16, minWidth: 480 }}>
-        <label htmlFor="gtin" style={{ fontSize: "1.25rem" }}>
-          {t("shifts.gtinPrompt")}
-        </label>
-        <Input id="gtin" autoFocus value={raw} onChange={(e) => setRaw(e.target.value)} />
-        {error ? <Alert tone="error">{error}</Alert> : null}
-        <Button type="submit" style={{ minHeight: 64 }} disabled={busy}>
-          {t("shifts.open")}
-        </Button>
-      </form>
-    </main>
+      <section className="new-shift__panel new-shift__panel--input" data-testid="new-shift-input">
+        <form id="new-shift-resolve" onSubmit={(event) => void resolve(event)}>
+          <Input
+            id="gtin"
+            size="floor"
+            mono
+            label={t("shifts.gtinPrompt")}
+            autoFocus
+            value={raw}
+            disabled={busy}
+            onChange={(event) => setRaw(event.target.value)}
+          />
+        </form>
+        {messageSlot}
+      </section>
+    </StationScreen>
   );
 }

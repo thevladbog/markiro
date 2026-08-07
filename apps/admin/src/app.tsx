@@ -18,6 +18,7 @@ import { ConflictsPage } from "./pages/conflicts/index.js";
 import { CounterpartiesPage } from "./pages/counterparties/index.js";
 import { CounterpartyPanelRoute } from "./pages/counterparties/CounterpartyPanelRoute.js";
 import { DashboardPage } from "./pages/dashboard/index.js";
+import { DevicesPage } from "./pages/devices/index.js";
 import { EmployeesPage } from "./pages/employees/index.js";
 import {
   EmployeeCreatePanelRoute,
@@ -185,6 +186,14 @@ function appRouteElements() {
             }
           />
         </Route>
+        <Route
+          path="devices"
+          element={
+            <RequireCapability capability={C.OPERATIONS_READ}>
+              <DevicesPage />
+            </RequireCapability>
+          }
+        />
         <Route
           path="kiosks"
           element={

@@ -2,6 +2,32 @@
 @import "./tokens.css";
 @import "./components.css";
 
+* {
+  box-sizing: border-box;
+}
+
+*::before,
+*::after {
+  box-sizing: inherit;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
 /* Paint the page from tokens: without this the browser's own (possibly dark)
    canvas shows through transparent html/body and breaks the light theme. */
 html {

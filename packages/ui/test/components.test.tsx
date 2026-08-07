@@ -1,5 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
+// @ts-expect-error The UI test tsconfig omits Node globals; Vitest still runs in Node.
+import { readFileSync } from "node:fs";
 import { useState } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -11,16 +13,24 @@ import {
   Button,
   Card,
   Checkbox,
+  Drawer,
   Field,
   FilterBar,
+  FullScreenDialog,
   IconButton,
   Input,
+  Pager,
   RadioGroup,
   RowActions,
   Select,
   StatusChip,
   Table,
 } from "../src/components/index.js";
+
+const sharedStyles = readFileSync("src/styles.css", "utf8") as string;
+const sharedStyleElement = document.createElement("style");
+sharedStyleElement.textContent = sharedStyles;
+document.head.append(sharedStyleElement);
 
 void (
   (
@@ -147,6 +157,43 @@ describe("Button", () => {
 
     expect(onClick).not.toHaveBeenCalled();
   });
+
+  it("renders a disabled floor target without changing office defaults", async () => {
+    const user = userEvent.setup();
+    const onClick = vi.fn();
+    render(
+      <Button size="floor" disabled onClick={onClick}>
+        Start shift
+      </Button>,
+    );
+
+    const button = screen.getByRole("button", { name: "Start shift" });
+    expect(button.className).toContain("mk-btn--floor");
+    expect(button.style.height).toBe("var(--control-floor)");
+    expect(button.style.minWidth).toBe("var(--control-floor)");
+    expect(button.style.font).toBe("var(--floor-body-strong)");
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+
+    await user.click(button);
+    expect(onClick).not.toHaveBeenCalled();
+  });
+});
+
+describe("generic document reset", () => {
+  it("enables full-height layouts without globally hiding overflow", () => {
+    const root = document.createElement("div");
+    root.id = "root";
+    document.body.append(root);
+
+    expect(getComputedStyle(document.documentElement).height).toBe("100%");
+    expect(getComputedStyle(document.body).height).toBe("100%");
+    expect(getComputedStyle(root).height).toBe("100%");
+    expect(getComputedStyle(document.body).margin).toBe("0px");
+    expect(getComputedStyle(root).boxSizing).toBe("border-box");
+    expect(getComputedStyle(document.body).overflow).not.toBe("hidden");
+
+    root.remove();
+  });
 });
 
 describe("StatusChip", () => {
@@ -217,6 +264,34 @@ describe("Input", () => {
     render(<Input label="GTIN" mono />);
     const input = screen.getByLabelText("GTIN");
     expect(input.style.fontFamily).toBe("var(--font-mono)");
+  });
+
+  it("links a floor-sized input to its label and error", () => {
+    render(<Input size="floor" label="Quantity" error="Too large" disabled />);
+
+    const input = screen.getByRole("textbox", { name: "Quantity" });
+    expect((input as HTMLInputElement).disabled).toBe(true);
+    expect(input.style.fontSize).toBe("20px");
+    expect(input.parentElement?.style.height).toBe("var(--control-floor)");
+    expect(screen.getByText("Quantity").style.font).toBe("var(--floor-body-strong)");
+    expect(input.getAttribute("aria-describedby")).toBeTruthy();
+    expect(document.getElementById(input.getAttribute("aria-describedby")!)?.textContent).toBe(
+      "Too large",
+    );
+  });
+
+  it("makes the floor input itself a 64px target and focuses it from the visual field", async () => {
+    const user = userEvent.setup();
+    render(<Input size="floor" label="Code" prefix="01" suffix="GTIN" />);
+
+    const input = screen.getByRole("textbox", { name: "Code" });
+    const visualField = input.parentElement;
+    expect(visualField).not.toBeNull();
+    expect(input.style.minHeight).toBe("var(--control-floor)");
+    expect(input.style.height).toBe("100%");
+
+    await user.click(visualField!);
+    expect(document.activeElement).toBe(input);
   });
 });
 
@@ -588,6 +663,298 @@ describe("shared control styles", () => {
 
     expect(container.querySelector("style")).toBeNull();
   });
+
+  it("links a floor-sized select to its label and error", () => {
+    render(
+      <Select
+        size="floor"
+        label="Line"
+        options={["Line 1"]}
+        value="Line 1"
+        error="Unavailable"
+        disabled
+      />,
+    );
+
+    const select = screen.getByRole("combobox", { name: "Line" });
+    expect((select as HTMLSelectElement).disabled).toBe(true);
+    expect(select.tagName).toBe("SELECT");
+    expect(select.style.height).toBe("var(--control-floor)");
+    expect(select.style.font).toBe("var(--floor-body)");
+    expect(screen.getByText("Line").style.font).toBe("var(--floor-body-strong)");
+    expect(document.getElementById(select.getAttribute("aria-describedby")!)?.textContent).toBe(
+      "Unavailable",
+    );
+  });
+});
+
+describe("Pager", () => {
+  it("exports an accessible floor pager with deterministic adjacent page requests", async () => {
+    const user = userEvent.setup();
+    const onPageChange = vi.fn();
+    render(
+      <Pager
+        page={2}
+        pageCount={4}
+        onPageChange={onPageChange}
+        ariaLabel="Shift pages"
+        previousLabel="Previous"
+        nextLabel="Next"
+        pageLabel={(page, pageCount) => `Page ${page} of ${pageCount}`}
+      />,
+    );
+
+    const navigation = screen.getByRole("navigation", { name: "Shift pages" });
+    expect(navigation.textContent).toContain("Page 2 of 4");
+    const previous = screen.getByRole("button", { name: "Previous" });
+    const next = screen.getByRole("button", { name: "Next" });
+    expect(previous.style.height).toBe("var(--control-floor)");
+    expect(next.style.height).toBe("var(--control-floor)");
+
+    await user.click(previous);
+    await user.click(next);
+    expect(onPageChange.mock.calls).toEqual([[1], [3]]);
+  });
+
+  it("disables both page boundaries and never requests an out-of-range page", async () => {
+    const user = userEvent.setup();
+    const onPageChange = vi.fn();
+    const { rerender } = render(<Pager page={1} pageCount={4} onPageChange={onPageChange} />);
+
+    const previous = screen.getByRole("button", { name: "Previous" });
+    expect((previous as HTMLButtonElement).disabled).toBe(true);
+    await user.click(previous);
+
+    rerender(<Pager page={4} pageCount={4} onPageChange={onPageChange} />);
+    const next = screen.getByRole("button", { name: "Next" });
+    expect((next as HTMLButtonElement).disabled).toBe(true);
+    await user.click(next);
+    expect(onPageChange).not.toHaveBeenCalled();
+  });
+
+  it("normalizes non-finite and non-positive inputs to finite pages and callbacks", async () => {
+    const user = userEvent.setup();
+    const onPageChange = vi.fn();
+    const { rerender } = render(
+      <Pager page={Number.NaN} pageCount={Number.POSITIVE_INFINITY} onPageChange={onPageChange} />,
+    );
+
+    expect(screen.getByText("Page 1 of 1")).toBeDefined();
+    expect((screen.getByRole("button", { name: "Previous" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect((screen.getByRole("button", { name: "Next" }) as HTMLButtonElement).disabled).toBe(true);
+
+    rerender(<Pager page={Number.POSITIVE_INFINITY} pageCount={4} onPageChange={onPageChange} />);
+    expect(screen.getByText("Page 4 of 4")).toBeDefined();
+    await user.click(screen.getByRole("button", { name: "Previous" }));
+    expect(onPageChange).toHaveBeenLastCalledWith(3);
+    expect(Number.isFinite(onPageChange.mock.calls.at(-1)?.[0])).toBe(true);
+
+    rerender(<Pager page={Number.NEGATIVE_INFINITY} pageCount={0} onPageChange={onPageChange} />);
+    expect(screen.getByText("Page 1 of 1")).toBeDefined();
+  });
+});
+
+describe("FullScreenDialog", () => {
+  function DialogHarness() {
+    const [open, setOpen] = useState(false);
+    return (
+      <>
+        <button type="button" onClick={() => setOpen(true)}>
+          Open setup
+        </button>
+        <FullScreenDialog
+          open={open}
+          title="Station setup"
+          backLabel="Cancel setup"
+          onClose={() => setOpen(false)}
+          footer={<button type="button">Save setup</button>}
+        >
+          <input aria-label="Station name" />
+        </FullScreenDialog>
+      </>
+    );
+  }
+
+  function NestedDialogHarness() {
+    const [outerOpen, setOuterOpen] = useState(false);
+    const [innerOpen, setInnerOpen] = useState(false);
+    return (
+      <>
+        <button type="button" onClick={() => setOuterOpen(true)}>
+          Open outer
+        </button>
+        <FullScreenDialog
+          open={outerOpen}
+          title="Outer dialog"
+          backLabel="Back from outer"
+          onClose={() => setOuterOpen(false)}
+          footer={<button type="button">Outer action</button>}
+        >
+          <button type="button" onClick={() => setInnerOpen(true)}>
+            Open inner
+          </button>
+          <FullScreenDialog
+            open={innerOpen}
+            title="Inner dialog"
+            backLabel="Back from inner"
+            onClose={() => setInnerOpen(false)}
+            footer={<button type="button">Inner action</button>}
+          >
+            Inner content
+          </FullScreenDialog>
+        </FullScreenDialog>
+      </>
+    );
+  }
+
+  function SimultaneousDialogHarness() {
+    const [outerOpen, setOuterOpen] = useState(true);
+    const [innerOpen, setInnerOpen] = useState(true);
+    return (
+      <FullScreenDialog
+        open={outerOpen}
+        title="Simultaneous outer"
+        backLabel="Close simultaneous outer"
+        onClose={() => setOuterOpen(false)}
+        footer={<button type="button">Simultaneous outer action</button>}
+      >
+        <FullScreenDialog
+          open={innerOpen}
+          title="Simultaneous inner"
+          backLabel="Close simultaneous inner"
+          onClose={() => setInnerOpen(false)}
+          footer={<button type="button">Simultaneous inner action</button>}
+        >
+          Inner content
+        </FullScreenDialog>
+      </FullScreenDialog>
+    );
+  }
+
+  it("exports a full-screen dialog with an explicit floor-sized back action", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    render(
+      <FullScreenDialog open title="Confirm box" backLabel="Back" onClose={onClose}>
+        Confirm content
+      </FullScreenDialog>,
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "Confirm box" });
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    expect(dialog.style.overflow).not.toBe("auto");
+    const back = screen.getByRole("button", { name: "Back" });
+    expect(back.className).toContain("mk-btn--floor");
+    expect(back.style.height).toBe("var(--control-floor)");
+    expect(document.activeElement).toBe(back);
+    await user.click(back);
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("can initially focus the dialog container before exposing any destructive action", async () => {
+    const user = userEvent.setup();
+    render(
+      <FullScreenDialog
+        open
+        title="Verify print"
+        backLabel="Skip verification"
+        onClose={() => undefined}
+        initialFocus="dialog"
+        footer={<button type="button">Reprint</button>}
+      >
+        Scan the label
+      </FullScreenDialog>,
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "Verify print" });
+    const skip = screen.getByRole("button", { name: "Skip verification" });
+    const reprint = screen.getByRole("button", { name: "Reprint" });
+    expect(document.activeElement).toBe(dialog);
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(reprint);
+    dialog.focus();
+    await user.tab();
+    expect(document.activeElement).toBe(skip);
+  });
+
+  it("traps focus, closes on Escape, and restores focus to its opener", async () => {
+    const user = userEvent.setup();
+    render(<DialogHarness />);
+    const opener = screen.getByRole("button", { name: "Open setup" });
+    await user.click(opener);
+
+    const back = screen.getByRole("button", { name: "Cancel setup" });
+    const save = screen.getByRole("button", { name: "Save setup" });
+    expect(document.activeElement).toBe(back);
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(save);
+    await user.tab();
+    expect(document.activeElement).toBe(back);
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it("keeps Escape and Tab scoped to the topmost nested dialog and restores focus by layer", async () => {
+    const user = userEvent.setup();
+    render(<NestedDialogHarness />);
+    const originalOpener = screen.getByRole("button", { name: "Open outer" });
+    await user.click(originalOpener);
+    const innerOpener = screen.getByRole("button", { name: "Open inner" });
+    await user.click(innerOpener);
+
+    const innerBack = screen.getByRole("button", { name: "Back from inner" });
+    const innerLast = screen.getByRole("button", { name: "Inner action" });
+    expect(document.activeElement).toBe(innerBack);
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(innerLast);
+    await user.tab();
+    expect(document.activeElement).toBe(innerBack);
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Inner dialog" })).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Outer dialog" })).toBeDefined();
+    expect(document.activeElement).toBe(innerOpener);
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Outer dialog" })).toBeNull();
+    expect(document.activeElement).toBe(originalOpener);
+  });
+
+  it("coordinates initial focus when nested dialogs are both open on their first render", async () => {
+    const originalFocus = document.createElement("button");
+    originalFocus.textContent = "Original focus";
+    document.body.append(originalFocus);
+    originalFocus.focus();
+
+    const user = userEvent.setup();
+    render(<SimultaneousDialogHarness />);
+    const innerBack = screen.getByRole("button", { name: "Close simultaneous inner" });
+    const innerLast = screen.getByRole("button", { name: "Simultaneous inner action" });
+    expect(document.activeElement).toBe(innerBack);
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(innerLast);
+    await user.tab();
+    expect(document.activeElement).toBe(innerBack);
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Simultaneous inner" })).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Simultaneous outer" })).toBeDefined();
+    const outerBack = screen.getByRole("button", { name: "Close simultaneous outer" });
+    const outerLast = screen.getByRole("button", { name: "Simultaneous outer action" });
+    expect(document.activeElement).toBe(outerBack);
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(outerLast);
+    await user.tab();
+    expect(document.activeElement).toBe(outerBack);
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Simultaneous outer" })).toBeNull();
+    expect(document.activeElement).toBe(originalFocus);
+    originalFocus.remove();
+  });
 });
 
 describe("Card", () => {
@@ -601,6 +968,86 @@ describe("Card", () => {
     expect(screen.getByText("Задания")).toBeDefined();
     expect(screen.getByText("Все")).toBeDefined();
     expect(screen.getByText("Содержимое")).toBeDefined();
+  });
+});
+
+describe("Drawer", () => {
+  function DrawerHarness() {
+    const [open, setOpen] = useState(false);
+    return (
+      <>
+        <button type="button" onClick={() => setOpen(true)}>
+          Open drawer
+        </button>
+        <Drawer open={open} title="Device setup" onClose={() => setOpen(false)}>
+          <button type="button">Save device</button>
+        </Drawer>
+      </>
+    );
+  }
+
+  it("keeps keyboard focus in a labelled modal dialog and restores its opener when closed", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    render(
+      <>
+        <button type="button">Open device</button>
+        <Drawer open title="Device setup" onClose={onClose} closeLabel="Close drawer">
+          <input aria-label="Device name" />
+          <button type="button">Save device</button>
+        </Drawer>
+      </>,
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "Device setup" });
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    expect(document.activeElement).toBe(screen.getByLabelText("Close drawer"));
+
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Save device" }));
+    await user.keyboard("{Escape}");
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("restores focus to its opener after Escape closes it", async () => {
+    const user = userEvent.setup();
+    render(<DrawerHarness />);
+    const opener = screen.getByRole("button", { name: "Open drawer" });
+    await user.click(opener);
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it("locks document background scrolling only while open and restores it after close", () => {
+    const { rerender } = render(
+      <Drawer open title="Device setup" onClose={() => undefined}>
+        Content
+      </Drawer>,
+    );
+    expect(document.body.style.overflow).toBe("hidden");
+    rerender(
+      <Drawer open={false} title="Device setup" onClose={() => undefined}>
+        Content
+      </Drawer>,
+    );
+    expect(document.body.style.overflow).toBe("");
+  });
+
+  it("closes from its overlay and its close control", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    const { container } = render(
+      <Drawer open title="Device setup" onClose={onClose} closeLabel="Close drawer">
+        Content
+      </Drawer>,
+    );
+
+    await user.click(screen.getByLabelText("Close drawer"));
+    expect(onClose).toHaveBeenCalledOnce();
+
+    await user.click(container.querySelector(".mk-drawer-overlay")!);
+    expect(onClose).toHaveBeenCalledTimes(2);
   });
 });
 

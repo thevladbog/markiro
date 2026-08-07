@@ -179,7 +179,7 @@ function stubFetch(impl: (...args: Parameters<typeof fetch>) => Promise<Response
 }
 
 describe("Pairing", () => {
-  it("separates commissioning details from the keypad without changing the form", () => {
+  it("separates commissioning details and keeps the digit-only keypad contract", () => {
     render(
       <Pairing
         defaultServerUrl={SERVER}
@@ -198,6 +198,8 @@ describe("Pairing", () => {
     expect(details.contains(scannerSetupButton())).toBe(true);
     expect(keypad.contains(submitButton())).toBe(true);
     expect(submitButton().classList.contains("kiosk-control")).toBe(true);
+    expect(screen.getAllByRole("button", { name: "Clear" })).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Backspace" })).toBeNull();
   });
 
   it("enables the submit only once all eight digits are entered", () => {
