@@ -53,6 +53,8 @@ test("default Terraform executable is resolved from PATH", async () => {
   const temporaryDirectory = await mkdtemp(path.join(tmpdir(), "markiro-smoke-path-"));
   const binaryDirectory = path.join(temporaryDirectory, "bin");
   const marker = path.join(temporaryDirectory, "terraform-arguments.txt");
+  const environment = { ...process.env };
+  delete environment.MARKIRO_TERRAFORM_BIN;
   await mkdir(binaryDirectory);
   const fakeTerraform = path.join(binaryDirectory, "terraform");
   await writeFile(
@@ -64,7 +66,7 @@ test("default Terraform executable is resolved from PATH", async () => {
     await assert.rejects(
       smoke.runBootstrapStateMigrationSmoke({
         environment: {
-          ...process.env,
+          ...environment,
           PATH: `${binaryDirectory}:${process.env.PATH ?? ""}`,
           MARKIRO_DISPOSABLE_S3_FORCE_LISTENER_ERROR: "EPERM",
           MARKIRO_FAKE_TERRAFORM_LOG: marker,

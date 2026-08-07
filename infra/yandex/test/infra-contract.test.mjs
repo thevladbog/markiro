@@ -58,6 +58,18 @@ const reviewedNonUtf8Candidates = new Map([
     "24386a483f0c6ca48467cd16e4fc3e49d5712d72d549802ee8a91053a7bdb6de",
   ],
   [
+    "docs/assets/readme/admin.webp",
+    "45f839a00b6a2862f026c5c4955b15531db61d5f853112b0dbb453af9b767d75",
+  ],
+  [
+    "docs/assets/readme/kiosk.webp",
+    "a42b51e25673dafa9d1e572af940b7287279a53dd931576cd14b1575028c9296",
+  ],
+  [
+    "docs/assets/readme/station.webp",
+    "69e930e4f088da58508c55134e3843c659a6e82499c4be6348673520dc2fcdbf",
+  ],
+  [
     "docs/superpowers/plans/2026-07-23-pickup-kiosk-a-backend-admin.md",
     "b9a52ee02b06e261de44439b99a09e085b99cae68ac501b0567d519aef38e6bd",
   ],
