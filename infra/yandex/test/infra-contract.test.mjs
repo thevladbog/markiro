@@ -1787,7 +1787,10 @@ function assertProtectedInfrastructureWorkflow(source) {
   assert.match(plan.if, /needs\.dns_approval\.result/);
   assert.match(plan.if, /needs\.postgres_owner_approval\.result/);
   assert.deepEqual(plan.needs, ["dns_approval", "postgres_owner_approval"]);
-  assert.match(apply.if, /github\.event_name\s*==\s*'workflow_dispatch'/);
+  assert.match(
+    apply.if,
+    /always\(\)\s*&&\s*github\.event_name\s*==\s*'workflow_dispatch'\s*&&\s*needs\.plan\.result\s*==\s*'success'/,
+  );
   assert.deepEqual(apply.needs, ["plan"]);
   const postgresOwnerApprovalCommands = workflowCommands(postgresOwnerApproval);
   assert.match(
@@ -2062,8 +2065,15 @@ test("infrastructure workflow contract rejects security-boundary mutations", asy
     [
       "PR apply",
       source.replace(
+        "if: always() && github.event_name == 'workflow_dispatch' && needs.plan.result == 'success'",
+        "if: always() && github.event_name == 'pull_request' && needs.plan.result == 'success'",
+      ),
+    ],
+    [
+      "apply without transitive skip override",
+      source.replace(
+        "if: always() && github.event_name == 'workflow_dispatch' && needs.plan.result == 'success'",
         "if: github.event_name == 'workflow_dispatch' && needs.plan.result == 'success'",
-        "if: github.event_name == 'pull_request' && needs.plan.result == 'success'",
       ),
     ],
     [
