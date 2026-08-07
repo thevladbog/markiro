@@ -474,20 +474,25 @@ jobs:
           test ! -e "$cleanup_path"
           [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
-          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          release_identity="$RELEASE_SHA"
+          if [[ -z "$release_identity" ]]; then
+            release_identity=no-release
+          elif [[ ! "$release_identity" =~ ^[0-9a-f]{40}$ ]]; then
+            exit 1
+          fi
           umask 077
           jq -n \
             --arg cleanup_at "$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')" \
             --argjson deployment_run_attempt "$GITHUB_RUN_ATTEMPT" \
             --arg deployment_run_id "$GITHUB_RUN_ID" \
-            --arg release_sha "$RELEASE_SHA" \
+            --arg release_sha "$release_identity" \
             '{cleanupAt: $cleanup_at, deploymentRunAttempt: $deployment_run_attempt, deploymentRunId: $deployment_run_id, releaseSha: $release_sha, runnerDeregistered: true, runnerVmStopped: true, state: "clean"}' \
             > "$cleanup_path"
           chmod 600 "$cleanup_path"
       - name: Upload cleanup receipt
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: markiro-cleanup-${{ needs.controller.outputs.release-sha }}-attempt-${{ github.run_attempt }}
+          name: markiro-cleanup-${{ needs.controller.outputs.release-sha || 'no-release' }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/cleanup-receipt.json
           retention-days: 90
           if-no-files-found: error

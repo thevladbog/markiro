@@ -795,7 +795,7 @@ function assertProductionDeploymentWorkflow(
   assert.equal(cleanupSteps[cleanupUploadIndex].uses, UPLOAD_ARTIFACT);
   assert.equal(
     cleanupSteps[cleanupUploadIndex].with.name,
-    "markiro-cleanup-${{ needs.controller.outputs.release-sha }}-attempt-${{ github.run_attempt }}",
+    "markiro-cleanup-${{ needs.controller.outputs.release-sha || 'no-release' }}-attempt-${{ github.run_attempt }}",
   );
   assert.match(runnerControlSource, /await waitForRunnerCleanup\(clients\)/);
   assert.match(runnerControlSource, /const gateToken = requiredEnvironment\("YC_GATE_IAM_TOKEN"\)/);
@@ -951,6 +951,69 @@ test("embedded release gate accepts documented provider fields without inputs an
     const rejected = await executeReleaseIdentityGate({ rehearsalRun });
     assert.notEqual(rejected.status, 0, name);
   }
+});
+
+async function executeCleanupReceipt(releaseSha) {
+  const workflow = parseWorkflow(
+    await source(".github/workflows/deploy-production.yml"),
+    "production deployment workflow",
+  );
+  const receiptStep = workflow.jobs.cleanup.steps.find(
+    ({ name }) => name === "Record authenticated bounded cleanup receipt",
+  );
+  const uploadStep = workflow.jobs.cleanup.steps.find(
+    ({ name }) => name === "Upload cleanup receipt",
+  );
+  const directory = await mkdtemp(join(tmpdir(), "markiro-cleanup-receipt-"));
+  const receiptPath = join(directory, "cleanup-receipt.json");
+  const result = spawnSync("bash", ["-c", receiptStep.run], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      GITHUB_RUN_ATTEMPT: "2",
+      GITHUB_RUN_ID: "12345",
+      RELEASE_SHA: releaseSha,
+      RUNNER_TEMP: directory,
+    },
+  });
+
+  return {
+    artifactName: uploadStep.with.name,
+    receipt: result.status === 0 ? JSON.parse(await readFile(receiptPath, "utf8")) : undefined,
+    result,
+  };
+}
+
+test("successful cleanup records and uploads evidence when release identity resolution wrote no SHA", async () => {
+  const { artifactName, receipt, result } = await executeCleanupReceipt("");
+  const malformed = await executeCleanupReceipt("not-a-release-sha");
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.notEqual(
+    malformed.result.status,
+    0,
+    "a malformed non-empty release SHA must stay invalid",
+  );
+  assert.deepEqual(Object.keys(receipt).sort(), [
+    "cleanupAt",
+    "deploymentRunAttempt",
+    "deploymentRunId",
+    "releaseSha",
+    "runnerDeregistered",
+    "runnerVmStopped",
+    "state",
+  ]);
+  assert.match(receipt.cleanupAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.000Z$/);
+  assert.equal(receipt.deploymentRunAttempt, 2);
+  assert.equal(receipt.deploymentRunId, "12345");
+  assert.equal(receipt.releaseSha, "no-release");
+  assert.equal(receipt.runnerDeregistered, true);
+  assert.equal(receipt.runnerVmStopped, true);
+  assert.equal(receipt.state, "clean");
+  assert.equal(
+    artifactName,
+    "markiro-cleanup-${{ needs.controller.outputs.release-sha || 'no-release' }}-attempt-${{ github.run_attempt }}",
+  );
 });
 
 test("production deployment contract rejects trigger, label, cleanup, and gate mutations", async () => {
