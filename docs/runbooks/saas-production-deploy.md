@@ -50,7 +50,7 @@ Populate the bootstrap-created runner-registration Lockbox container out of
 band with exactly one text entry named `GITHUB_RUNNER_ADMIN_TOKEN`. Prefer a
 GitHub App installation token (a GitHub App user token is also supported). For
 the MVP only, a fine-grained PAT is an accepted fallback when it is restricted
-to the `thevladbog/q` repository and grants only repository
+to the `thevladbog/markiro` repository and grants only repository
 `Administration: write`, which GitHub requires for repository JIT configuration
 and forced stale-runner deletion. Rotate it out of band. Do not copy this token
 into a GitHub repository or environment secret, Terraform, cloud-init, VM

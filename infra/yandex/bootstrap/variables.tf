@@ -37,8 +37,8 @@ variable "github_repository" {
   nullable    = false
 
   validation {
-    condition     = var.github_repository == "thevladbog/q"
-    error_message = "github_repository must be exactly thevladbog/q."
+    condition     = var.github_repository == "thevladbog/markiro"
+    error_message = "github_repository must be exactly thevladbog/markiro."
   }
 }
 

@@ -462,7 +462,7 @@ export function createYandexClient({ token, request = requestJson, operation = {
 async function cliClients() {
   const yandexToken = requiredEnvironment("YC_IAM_TOKEN");
   const githubToken = requiredEnvironment("GITHUB_RUNNER_ADMIN_TOKEN");
-  const repository = process.env.GITHUB_REPOSITORY || "thevladbog/q";
+  const repository = process.env.GITHUB_REPOSITORY || "thevladbog/markiro";
   const instanceId = requiredEnvironment("YC_RUNNER_INSTANCE_ID");
   const githubBase = `https://api.github.com/repos/${repository}/actions/runners`;
   const githubHeaders = bearer(githubToken, {
