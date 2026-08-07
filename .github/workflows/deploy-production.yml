@@ -410,7 +410,7 @@ jobs:
 
   cleanup:
     needs: [controller, deploy]
-    if: always()
+    if: always() && needs.controller.result != 'skipped'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: production-cleanup

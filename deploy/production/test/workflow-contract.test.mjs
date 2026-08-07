@@ -290,6 +290,10 @@ const UPLOAD_RELEASE_MANIFEST_STEP = {
 
 const RELEASE_STEPS = [
   {
+    uses: CHECKOUT,
+    with: { ref: "${{ github.sha }}", "persist-credentials": false },
+  },
+  {
     name: "Download the verified production images",
     uses: DOWNLOAD_ARTIFACT,
     with: {
@@ -764,7 +768,11 @@ function assertProductionDeploymentWorkflow(
     deploymentSource,
     /APP_SSH_HOST_KEYS_B64:\s*\$\{\{ needs\.controller\.outputs\.app-host-keys-b64 \}\}/,
   );
-  assert.equal(workflow.jobs.cleanup?.if, "always()");
+  assert.equal(
+    workflow.jobs.cleanup?.if,
+    "always() && needs.controller.result != 'skipped'",
+    "cleanup must run after every attempted controller, but not when publication skipped it",
+  );
   const cleanupSteps = workflow.jobs.cleanup.steps;
   const cleanupRunnerIndex = cleanupSteps.findIndex(
     ({ name }) => name === "Deregister any stale runner and stop the VM independently",
@@ -969,7 +977,8 @@ test("production deployment contract rejects trigger, label, cleanup, and gate m
     },
     {
       name: "cleanup only on success",
-      search: "  cleanup:\n    needs: [controller, deploy]\n    if: always()",
+      search:
+        "  cleanup:\n    needs: [controller, deploy]\n    if: always() && needs.controller.result != 'skipped'",
       replacement: "  cleanup:\n    needs: [controller, deploy]\n    if: success()",
     },
     {
