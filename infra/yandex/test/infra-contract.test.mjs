@@ -441,6 +441,16 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, productionResources
     iam,
     /terraform_folder_roles\s*=\s*toset\(values\(local\.terraform_production_action_roles\)\)/,
   );
+  const terraformServiceAccountUser = terraformResourceBlock(
+    iam,
+    "yandex_iam_service_account_iam_member",
+    "terraform_service_account_user",
+  );
+  assert.match(
+    terraformServiceAccountUser,
+    /for_each\s*=\s*\{\s*app\s*=\s*yandex_iam_service_account\.app\.id\s*runner\s*=\s*yandex_iam_service_account\.runner\.id\s*audit\s*=\s*yandex_iam_service_account\.audit\.id,?\s*\}/,
+  );
+  assert.match(terraformServiceAccountUser, /service_account_id\s*=\s*each\.value/);
   const terraformServiceAccountViewer = terraformResourceBlock(
     iam,
     "yandex_iam_service_account_iam_member",
@@ -448,7 +458,7 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, productionResources
   );
   assert.match(
     terraformServiceAccountViewer,
-    /for_each\s*=\s*toset\(\[\s*yandex_iam_service_account\.deployment_controller\.id,\s*yandex_iam_service_account\.terraform\.id,?\s*\]\)/,
+    /for_each\s*=\s*\{\s*deployment_controller\s*=\s*yandex_iam_service_account\.deployment_controller\.id\s*terraform\s*=\s*yandex_iam_service_account\.terraform\.id,?\s*\}/,
   );
   assert.match(terraformServiceAccountViewer, /service_account_id\s*=\s*each\.value/);
   assert.match(terraformServiceAccountViewer, /role\s*=\s*"viewer"/);

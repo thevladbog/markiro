@@ -164,11 +164,11 @@ resource "yandex_resourcemanager_folder_iam_member" "terraform_service_role" {
 }
 
 resource "yandex_iam_service_account_iam_member" "terraform_service_account_user" {
-  for_each = toset([
-    yandex_iam_service_account.app.id,
-    yandex_iam_service_account.runner.id,
-    yandex_iam_service_account.audit.id,
-  ])
+  for_each = {
+    app    = yandex_iam_service_account.app.id
+    runner = yandex_iam_service_account.runner.id
+    audit  = yandex_iam_service_account.audit.id
+  }
 
   service_account_id = each.value
   role               = "iam.serviceAccounts.user"
@@ -179,10 +179,10 @@ resource "yandex_iam_service_account_iam_member" "terraform_service_account_user
 # runner, and audit. These resource-scoped viewer bindings complete the exact
 # five-identity provenance check without exposing every account in the folder.
 resource "yandex_iam_service_account_iam_member" "terraform_service_account_viewer" {
-  for_each = toset([
-    yandex_iam_service_account.deployment_controller.id,
-    yandex_iam_service_account.terraform.id,
-  ])
+  for_each = {
+    deployment_controller = yandex_iam_service_account.deployment_controller.id
+    terraform              = yandex_iam_service_account.terraform.id
+  }
 
   service_account_id = each.value
   role               = "viewer"
