@@ -19,7 +19,7 @@ resource "yandex_vpc_address" "markiro" {
 }
 
 resource "yandex_cm_certificate" "markiro" {
-  name      = "markiro-production-${var.domain}"
+  name      = "markiro-production-tls"
   folder_id = var.folder_id
   domains   = [var.domain]
   labels    = var.labels

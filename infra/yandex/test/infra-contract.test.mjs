@@ -1057,6 +1057,7 @@ function assertProtectedIngress({
   assert.doesNotMatch(publicAddress, /internal_ipv4_address|ipv6/i);
 
   const certificate = terraformResourceBlock(ingress, "yandex_cm_certificate", "markiro");
+  assert.match(certificate, /name\s*=\s*"markiro-production-tls"/);
   assert.match(certificate, /domains\s*=\s*\[var\.domain\]/);
   assert.match(
     certificate,
