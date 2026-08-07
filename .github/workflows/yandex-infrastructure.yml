@@ -581,7 +581,7 @@ jobs:
           evidence_postgres_owner_change_reference="$(jq -er '.postgres_owner_change_reference' "$evidence_path")"
           evidence_postgres_provisioning_phase="$(jq -er '.postgres_provisioning_phase' "$evidence_path")"
           evidence_observability_phase="$(jq -er '.observability_phase' "$evidence_path")"
-          evidence_public_dns="$(jq -er '.public_dns_enabled' "$evidence_path")"
+          evidence_public_dns="$(jq -r '.public_dns_enabled' "$evidence_path")"
           evidence_service_account_provenance_sha256="$(jq -er '.service_account_provenance_sha256' "$evidence_path")"
           [[ "$evidence_commit" == "$target_sha" ]]
           [[ "$artifact_sha256" =~ ^[0-9a-f]{64}$ ]]
