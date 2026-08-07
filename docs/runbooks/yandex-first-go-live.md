@@ -26,14 +26,19 @@ system.
    Manager validation records are present. Verify the certificate is active for
    the exact production domain while `public_dns_enabled=false`.
 
-<!-- runbook-contract:go-live-gate-04-alb-waf-arl -->
+<!-- runbook-contract:go-live-gate-04-alb-sws-arl -->
 
 4. **Ingress protection before the first application release.** Verify the
    reserved ALB address, HTTPS listener, active Certificate Manager certificate,
-   Smart Web Security (SWS) web application firewall (WAF) profile, and Advanced
-   Rate Limiter (ARL) profile use the reviewed hostname and private back-end
-   configuration. Do **not** require a `HEALTHY` back end yet: the first app
-   release has not started the edge listener. Keep the app VM private.
+   Smart Web Security (SWS) profile, and attached Advanced Rate Limiter (ARL)
+   profile use the reviewed hostname and private back-end configuration. Confirm
+   both the global and per-IP ARL rules. The reviewed transition plan may contain
+   approved WAF destroy actions for WAF resources managed by the prior
+   configuration. Reject any WAF create, update, or unchanged actions. After the
+   approved removals are applied, confirm that no WAF resources remain in the
+   configuration, state, or a fresh plan. Do **not** require a `HEALTHY` back end
+   yet: the first app release has not started the edge listener. Keep the app VM
+   private.
 
 <!-- runbook-contract:go-live-gate-05-alert-specs -->
 

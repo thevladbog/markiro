@@ -351,7 +351,6 @@ const productionResourceActionRoles = {
   yandex_storage_bucket_policy: ["storage.buckets-and-policies.manage"],
   yandex_sws_advanced_rate_limiter_profile: ["smart-web-security.resources.manage"],
   yandex_sws_security_profile: ["smart-web-security.resources.manage"],
-  yandex_sws_waf_profile: ["smart-web-security.resources.manage"],
   yandex_vpc_address: ["vpc.public-addresses.manage"],
   yandex_vpc_gateway: ["vpc.gateways.manage"],
   yandex_vpc_network: ["vpc.networks-subnets-routes.manage"],
@@ -900,6 +899,35 @@ function assertPrivateNetworkAndCompute({
       "instance metadata must not contain a runtime credential payload",
     );
   }
+  const app = terraformResourceBlock(compute, "yandex_compute_instance", "app");
+  const appResources = terraformNestedBlocks(app, "resources");
+  assert.equal(appResources.length, 1, "app VM must define one exact resource profile");
+  for (const [attribute, value] of [
+    ["cores", 2],
+    ["memory", 4],
+    ["core_fraction", 100],
+  ]) {
+    assert.match(
+      appResources[0],
+      new RegExp(`^\\s*${attribute}\\s*=\\s*${value}\\s*$`, "m"),
+      "app VM must use the approved 2 vCPU / 4 GiB MVP profile",
+    );
+  }
+
+  const runner = terraformResourceBlock(compute, "yandex_compute_instance", "runner");
+  const runnerResources = terraformNestedBlocks(runner, "resources");
+  assert.equal(runnerResources.length, 1, "runner VM must define one exact resource profile");
+  for (const [attribute, value] of [
+    ["cores", 2],
+    ["memory", 4],
+    ["core_fraction", 100],
+  ]) {
+    assert.match(
+      runnerResources[0],
+      new RegExp(`^\\s*${attribute}\\s*=\\s*${value}\\s*$`, "m"),
+      "deployment runner must retain its approved 2 vCPU / 4 GiB profile",
+    );
+  }
   assert.doesNotMatch(compute, /nat\s*=\s*true/);
   assert.match(
     compute,
@@ -1051,12 +1079,24 @@ function assertProtectedIngress({
     "yandex_sws_advanced_rate_limiter_profile",
     "markiro",
   );
-  for (const ruleName of ["global-request-rate", "per-ip-request-rate"]) {
-    assert.match(rateLimiter, new RegExp(`name\\s*=\\s*"${ruleName}"`));
-  }
-  assert.match(rateLimiter, /limit\s*=\s*var\.global_rate_limit/);
-  assert.match(rateLimiter, /limit\s*=\s*var\.per_ip_rate_limit/);
-  assert.match(rateLimiter, /simple_characteristic\s*\{[\s\S]*?type\s*=\s*"IP"/);
+  const rateLimitRules = terraformNestedBlocks(rateLimiter, "advanced_rate_limiter_rule");
+  assert.equal(rateLimitRules.length, 2, "ARL must define exactly global and per-IP rules");
+  const globalRule = rateLimitRules.find((rule) => /name\s*=\s*"global-request-rate"/.test(rule));
+  assert.ok(globalRule, "global ARL rule is required");
+  assert.match(
+    globalRule,
+    /static_quota\s*\{[\s\S]*?limit\s*=\s*var\.global_rate_limit/,
+    "global ARL rule must use the global static quota",
+  );
+  assert.doesNotMatch(globalRule, /dynamic_quota|characteristic/);
+  const perIpRule = rateLimitRules.find((rule) => /name\s*=\s*"per-ip-request-rate"/.test(rule));
+  assert.ok(perIpRule, "per-IP ARL rule is required");
+  assert.match(
+    perIpRule,
+    /dynamic_quota\s*\{[\s\S]*?limit\s*=\s*var\.per_ip_rate_limit[\s\S]*?simple_characteristic\s*\{[\s\S]*?type\s*=\s*"IP"/,
+    "per-IP ARL rule must use the IP-scoped dynamic quota",
+  );
+  assert.doesNotMatch(perIpRule, /static_quota/);
 
   const securityProfile = terraformResourceBlock(ingress, "yandex_sws_security_profile", "markiro");
   assert.match(securityProfile, /default_action\s*=\s*"ALLOW"/);
@@ -1064,21 +1104,18 @@ function assertProtectedIngress({
     securityProfile,
     /advanced_rate_limiter_profile_id\s*=\s*yandex_sws_advanced_rate_limiter_profile\.markiro\.id/,
   );
-  const wafProfile = terraformResourceBlock(ingress, "yandex_sws_waf_profile", "markiro");
-  assert.match(
-    wafProfile,
-    /rule_set\s*\{[\s\S]*?action\s*=\s*"DENY"[\s\S]*?is_enabled\s*=\s*true[\s\S]*?core_rule_set\s*\{[\s\S]*?inbound_anomaly_score\s*=\s*5/,
-  );
-  assert.match(
-    wafProfile,
-    /rule_set\s*\{[\s\S]*?name\s*=\s*"OWASP Core Ruleset"[\s\S]*?version\s*=\s*"4\.0\.0"/,
+  const logOptions = terraformNestedBlocks(securityProfile, "log_options");
+  assert.equal(logOptions.length, 1, "SWS must define one logging boundary");
+  assert.match(logOptions[0], /enable\s*=\s*true/, "SWS logging must stay enabled");
+  assert.match(logOptions[0], /log_group_id\s*=\s*var\.security_log_group_id/);
+  assert.doesNotMatch(
+    allIngress,
+    /resource\s+"yandex_sws_waf_profile"/,
+    "the one-customer MVP must not provision a WAF profile",
   );
   const rules = terraformNestedBlocks(securityProfile, "security_rule");
-  assert.equal(rules.length, 1, "all traffic must reach one unconditional WAF rule");
-  assert.match(
-    rules[0],
-    /name\s*=\s*"waf-api"[\s\S]*?waf\s*\{[\s\S]*?mode\s*=\s*"API"[\s\S]*?waf_profile_id\s*=\s*yandex_sws_waf_profile\.markiro\.id/,
-  );
+  assert.equal(rules.length, 0, "the MVP SWS profile must delegate only to ARL");
+  assert.doesNotMatch(securityProfile, /\bwaf\s*\{/);
   assert.doesNotMatch(securityProfile, /smart_protection\s*\{/);
   assert.doesNotMatch(securityProfile, /analyze_request_body|size_limit/i);
 
@@ -1110,11 +1147,14 @@ function assertProtectedIngress({
     "load_balancer_address",
     "backend_group_id",
     "security_profile_id",
-    "waf_profile_id",
+    "rate_limiter_profile_id",
     "approved_a_records",
   ]) {
     assert.match(ingressOutputs, new RegExp(`output\\s+"${output}"\\s*\\{`));
     assert.match(productionOutputs, new RegExp(`output\\s+"${output}"\\s*\\{`));
+  }
+  for (const outputs of [ingressOutputs, productionOutputs]) {
+    assert.doesNotMatch(outputs, /output\s+"waf_profile_id"\s*\{/);
   }
 
   assert.match(production, /module\s+"ingress"\s*\{/);
@@ -1194,6 +1234,11 @@ function assertProtectedManagedData({
     "application",
   );
   assert.match(cluster, /version\s*=\s*"17"/);
+  assert.match(
+    cluster,
+    /resource_preset_id\s*=\s*"s3-c2-m8"/,
+    "PostgreSQL must use the approved 2 vCPU / 8 GiB MVP preset",
+  );
   assert.match(cluster, /backup_retain_period_days\s*=\s*14/);
   assert.match(cluster, /backup_window_start\s*\{/);
   assert.match(cluster, /maintenance_window\s*\{/);
@@ -2717,22 +2762,59 @@ test("production ingress contract rejects bypasses, computed certificate keys, f
   );
   assert.throws(() => assertProtectedIngress(missingSws));
 
-  const shadowedWaf = await protectedIngressSources();
-  shadowedWaf.ingress = replaceTerraformResource(
-    shadowedWaf.ingress,
+  const reintroducedWafProfile = await protectedIngressSources();
+  reintroducedWafProfile.ingress +=
+    '\nresource "yandex_sws_waf_profile" "markiro" { folder_id = var.folder_id }\n';
+  assert.throws(
+    () => assertProtectedIngress(reintroducedWafProfile),
+    /must not provision a WAF profile/,
+  );
+
+  const reintroducedWafRule = await protectedIngressSources();
+  reintroducedWafRule.ingress = replaceTerraformResource(
+    reintroducedWafRule.ingress,
     "yandex_sws_security_profile",
     "markiro",
     (block) =>
       block.replace(
-        /\n\s*security_rule\s*\{/,
-        '\n  security_rule {\n    name = "shadowing-smart-protection"\n    priority = 1\n    smart_protection { mode = "API" }\n  }\n\n  security_rule {',
+        "\n}",
+        '\n  security_rule {\n    name = "waf-api"\n    priority = 100\n    waf { mode = "API" }\n  }\n}',
       ),
   );
-  assert.throws(() => assertProtectedIngress(shadowedWaf), /one unconditional WAF rule/);
+  assert.throws(() => assertProtectedIngress(reintroducedWafRule), /must delegate only to ARL/);
 
-  const noWaf = await protectedIngressSources();
-  noWaf.ingress = noWaf.ingress.replace("waf {", "smart_protection {");
-  assert.throws(() => assertProtectedIngress(noWaf));
+  const disabledSwsLogging = await protectedIngressSources();
+  disabledSwsLogging.ingress = replaceTerraformResource(
+    disabledSwsLogging.ingress,
+    "yandex_sws_security_profile",
+    "markiro",
+    (block) => block.replace(/enable\s*=\s*true/, "enable = false"),
+  );
+  assert.throws(() => assertProtectedIngress(disabledSwsLogging), /SWS logging must stay enabled/);
+
+  const globalRuleWithoutStaticScope = await protectedIngressSources();
+  globalRuleWithoutStaticScope.ingress = replaceTerraformResource(
+    globalRuleWithoutStaticScope.ingress,
+    "yandex_sws_advanced_rate_limiter_profile",
+    "markiro",
+    (block) => block.replace("static_quota {", "dynamic_quota {"),
+  );
+  assert.throws(
+    () => assertProtectedIngress(globalRuleWithoutStaticScope),
+    /global ARL rule must use the global static quota/,
+  );
+
+  const perIpRuleWithoutDynamicScope = await protectedIngressSources();
+  perIpRuleWithoutDynamicScope.ingress = replaceTerraformResource(
+    perIpRuleWithoutDynamicScope.ingress,
+    "yandex_sws_advanced_rate_limiter_profile",
+    "markiro",
+    (block) => block.replace("dynamic_quota {", "static_quota {"),
+  );
+  assert.throws(
+    () => assertProtectedIngress(perIpRuleWithoutDynamicScope),
+    /per-IP ARL rule must use the IP-scoped dynamic quota/,
+  );
 
   const apiBypass = await protectedIngressSources();
   apiBypass.ingress = replaceTerraformResource(
@@ -2810,6 +2892,18 @@ test("production ingress contract rejects bypasses, computed certificate keys, f
 });
 
 test("managed-data contract rejects unsafe PostgreSQL, buckets, access, and credentials", async () => {
+  const oversizedPostgres = await managedDataSources();
+  oversizedPostgres.postgres = replaceTerraformResource(
+    oversizedPostgres.postgres,
+    "yandex_mdb_postgresql_cluster",
+    "production",
+    (block) => block.replace('resource_preset_id = "s3-c2-m8"', 'resource_preset_id = "s2.medium"'),
+  );
+  assert.throws(
+    () => assertProtectedManagedData(oversizedPostgres),
+    /approved 2 vCPU \/ 8 GiB MVP preset/,
+  );
+
   const publicPostgres = await managedDataSources();
   publicPostgres.postgres = replaceTerraformResource(
     publicPostgres.postgres,
@@ -2980,6 +3074,30 @@ test("managed-data contract rejects unsafe PostgreSQL, buckets, access, and cred
 });
 
 test("production private-compute contract rejects public NAT, CIDR SSH, public app traffic, and embedded credentials", async () => {
+  const oversizedApp = await privateNetworkAndComputeSources();
+  oversizedApp.compute = replaceTerraformResource(
+    oversizedApp.compute,
+    "yandex_compute_instance",
+    "app",
+    (block) => block.replace(/cores\s*=\s*2/, "cores = 20"),
+  );
+
+  const oversizedRunner = await privateNetworkAndComputeSources();
+  oversizedRunner.compute = replaceTerraformResource(
+    oversizedRunner.compute,
+    "yandex_compute_instance",
+    "runner",
+    (block) => block.replace(/cores\s*=\s*2/, "cores = 20"),
+  );
+  assert.throws(
+    () => assertPrivateNetworkAndCompute(oversizedRunner),
+    /deployment runner must retain its approved 2 vCPU \/ 4 GiB profile/,
+  );
+  assert.throws(
+    () => assertPrivateNetworkAndCompute(oversizedApp),
+    /approved 2 vCPU \/ 4 GiB MVP profile/,
+  );
+
   const natEnabled = await privateNetworkAndComputeSources();
   natEnabled.compute = replaceTerraformResource(
     natEnabled.compute,
@@ -3084,6 +3202,15 @@ test("production private-compute contract rejects public NAT, CIDR SSH, public a
       block.replace(/metadata\s*=\s*\{/, 'metadata = {\n    runtime_secret = "unsafe-value"'),
   );
   assert.throws(() => assertPrivateNetworkAndCompute(embeddedMetadataCredential));
+});
+
+test("production compute resource profiles allow exact attributes in any order", async () => {
+  const reorderedProfiles = await privateNetworkAndComputeSources();
+  reorderedProfiles.compute = reorderedProfiles.compute.replaceAll(
+    "    cores         = 2\n    memory        = 4\n    core_fraction = 100",
+    "    memory        = 4\n    core_fraction = 100\n    cores         = 2",
+  );
+  assert.doesNotThrow(() => assertPrivateNetworkAndCompute(reorderedProfiles));
 });
 
 function assertRuntimeNodeProvisioning(cloudInit) {

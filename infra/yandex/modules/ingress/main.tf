@@ -103,29 +103,6 @@ resource "yandex_sws_advanced_rate_limiter_profile" "markiro" {
   }
 }
 
-resource "yandex_sws_waf_profile" "markiro" {
-  name      = "markiro-production-waf"
-  folder_id = var.folder_id
-  labels    = var.labels
-
-  rule_set {
-    action     = "DENY"
-    is_enabled = true
-    priority   = 1
-
-    core_rule_set {
-      inbound_anomaly_score = 5
-      paranoia_level        = 1
-
-      rule_set {
-        name    = "OWASP Core Ruleset"
-        type    = "CORE"
-        version = "4.0.0"
-      }
-    }
-  }
-}
-
 resource "yandex_sws_security_profile" "markiro" {
   name                             = "markiro-production"
   folder_id                        = var.folder_id
@@ -136,16 +113,6 @@ resource "yandex_sws_security_profile" "markiro" {
   log_options {
     enable       = true
     log_group_id = var.security_log_group_id
-  }
-
-  security_rule {
-    name     = "waf-api"
-    priority = 100
-
-    waf {
-      mode           = "API"
-      waf_profile_id = yandex_sws_waf_profile.markiro.id
-    }
   }
 }
 

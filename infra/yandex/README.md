@@ -8,6 +8,30 @@ backend and introduces its S3 declaration only for the one-time migration:
 - `bootstrap` creates prerequisites that must exist before remote state is used.
 - `production` manages the SaaS environment.
 
+## MVP capacity and edge profile
+
+The initial one-customer production profile uses one private 2 vCPU / 4 GiB
+application VM and one private Managed PostgreSQL `s3-c2-m8` host. PostgreSQL
+keeps its 50 GiB minimum disk, 14-day backups, KMS encryption, and
+`prevent_destroy` boundary.
+
+The public ALB virtual host remains attached to Smart Web Security and its
+global/per-IP Advanced Rate Limiter profile. The MVP deliberately omits WAF;
+reintroduce it before a second external customer, public self-registration, a
+contractual WAF requirement, or observed exploit traffic that ARL does not
+contain. See the approved budget specification and first-go-live runbook.
+
+The 15,000–18,000 RUB monthly amount is a planning target, not a Terraform
+guarantee. Configure a billing alert and validate the first complete billing
+period because traffic, logs, storage, NAT egress, public IP use, and provider
+pricing remain variable.
+
+Resize the application VM when CPU stays above 70% or memory stays above 80%
+for 15 minutes, or when readiness, restart, or latency alerts identify host
+saturation. Resize PostgreSQL through the provider-supported maintenance path
+when sustained CPU, memory, connection, query-latency, or storage pressure is
+the cause; keep backups and durable-resource protection intact.
+
 ## Runtime inputs
 
 Set the deployment identifiers as Terraform variables from the existing Yandex

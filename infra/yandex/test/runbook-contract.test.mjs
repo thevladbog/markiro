@@ -37,7 +37,7 @@ const runbooks = {
     "go-live-gate-01-plan-drift",
     "go-live-gate-02-durable-protection",
     "go-live-gate-03-certificate",
-    "go-live-gate-04-alb-waf-arl",
+    "go-live-gate-04-alb-sws-arl",
     "go-live-gate-05-alert-specs",
     "go-live-gate-06-backup-restore",
     "go-live-gate-07-smtp-s3",
@@ -345,6 +345,10 @@ function assertRunbookContract({
   assert.match(goLive, /rollback_rehearsal=true/);
   assert.match(goLive, /rollback_rehearsal=false/);
   assert.match(goLive, /automatic\s+`workflow_run` delivery always fixes this input to false/i);
+  const ingressGate = markerProcedure(goLive, "go-live-gate-04-alb-sws-arl");
+  assert.match(ingressGate, /approved WAF destroy actions/i);
+  assert.match(ingressGate, /reject[\s\S]*WAF create, update, or unchanged actions/i);
+  assert.match(ingressGate, /no WAF resources remain/i);
   const secrets = documents["docs/runbooks/yandex-secrets.md"];
   const preFirstSecrets = markerProcedure(secrets, "secrets-mode-verification");
   assert.doesNotMatch(preFirstSecrets, /\/opt\/markiro\/active-release/);
