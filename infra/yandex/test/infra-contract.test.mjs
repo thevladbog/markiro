@@ -1902,6 +1902,23 @@ function assertProtectedInfrastructureWorkflow(source) {
   assert.match(applyStep.run, /rm -rf -- "\$\{RUNNER_TEMP:\?\}\/yandex-infrastructure-plan"/);
 
   const applyCommands = workflowCommands(apply);
+  for (const commands of [planCommands, applyCommands]) {
+    for (const diagnostic of [
+      "GitHub main ref authentication failed",
+      "GitHub OIDC token request failed",
+      "Yandex workload identity token exchange failed",
+    ]) {
+      assert.equal(
+        (commands.match(new RegExp(diagnostic, "g")) ?? []).length,
+        1,
+        `${diagnostic} must identify its exact authentication boundary`,
+      );
+    }
+    assert.doesNotMatch(
+      commands,
+      /::error::[^\n]*\$(?:github_oidc_response|github_oidc_token|iam_response|iam_token)/,
+    );
+  }
   assert.match(applyCommands, /git rev-parse HEAD/);
   assert.match(applyCommands, /\[\[ "\$target_sha" == "\$dispatch_sha" \]\]/);
   assert.match(applyCommands, /artifact_sha256/);
