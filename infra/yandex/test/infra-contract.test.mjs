@@ -1916,6 +1916,30 @@ function assertProtectedInfrastructureWorkflow(source) {
   assert.match(applyStep.run, /rm -rf -- "\$\{RUNNER_TEMP:\?\}\/yandex-production-terraform-data"/);
   assert.match(applyStep.run, /rm -rf -- "\$\{RUNNER_TEMP:\?\}\/yandex-infrastructure-plan"/);
 
+  const evidencePublicDnsAssignment = applyStep.run
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line.startsWith("evidence_public_dns="));
+  assert.ok(evidencePublicDnsAssignment);
+  assert.equal(
+    execFileSync(
+      "bash",
+      [
+        "-c",
+        `set -euo pipefail
+umask 077
+evidence_path="$(mktemp)"
+trap 'rm -f "$evidence_path"' EXIT
+printf '%s\n' '{"public_dns_enabled":false}' > "$evidence_path"
+${evidencePublicDnsAssignment}
+printf '%s\\n' "$evidence_public_dns"`,
+      ],
+      { encoding: "utf8" },
+    ),
+    "false\n",
+    "the apply evidence guard must accept an explicitly disabled public DNS cutover",
+  );
+
   const applyCommands = workflowCommands(apply);
   for (const commands of [planCommands, applyCommands]) {
     assert.match(
