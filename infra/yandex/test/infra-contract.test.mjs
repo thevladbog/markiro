@@ -351,7 +351,6 @@ const productionResourceActionRoles = {
   yandex_storage_bucket_policy: ["storage.buckets-and-policies.manage"],
   yandex_sws_advanced_rate_limiter_profile: ["smart-web-security.resources.manage"],
   yandex_sws_security_profile: ["smart-web-security.resources.manage"],
-  yandex_sws_waf_profile: ["smart-web-security.resources.manage"],
   yandex_vpc_address: ["vpc.public-addresses.manage"],
   yandex_vpc_gateway: ["vpc.gateways.manage"],
   yandex_vpc_network: ["vpc.networks-subnets-routes.manage"],
@@ -1081,21 +1080,14 @@ function assertProtectedIngress({
     securityProfile,
     /advanced_rate_limiter_profile_id\s*=\s*yandex_sws_advanced_rate_limiter_profile\.markiro\.id/,
   );
-  const wafProfile = terraformResourceBlock(ingress, "yandex_sws_waf_profile", "markiro");
-  assert.match(
-    wafProfile,
-    /rule_set\s*\{[\s\S]*?action\s*=\s*"DENY"[\s\S]*?is_enabled\s*=\s*true[\s\S]*?core_rule_set\s*\{[\s\S]*?inbound_anomaly_score\s*=\s*5/,
-  );
-  assert.match(
-    wafProfile,
-    /rule_set\s*\{[\s\S]*?name\s*=\s*"OWASP Core Ruleset"[\s\S]*?version\s*=\s*"4\.0\.0"/,
+  assert.doesNotMatch(
+    allIngress,
+    /resource\s+"yandex_sws_waf_profile"/,
+    "the one-customer MVP must not provision a WAF profile",
   );
   const rules = terraformNestedBlocks(securityProfile, "security_rule");
-  assert.equal(rules.length, 1, "all traffic must reach one unconditional WAF rule");
-  assert.match(
-    rules[0],
-    /name\s*=\s*"waf-api"[\s\S]*?waf\s*\{[\s\S]*?mode\s*=\s*"API"[\s\S]*?waf_profile_id\s*=\s*yandex_sws_waf_profile\.markiro\.id/,
-  );
+  assert.equal(rules.length, 0, "the MVP SWS profile must delegate only to ARL");
+  assert.doesNotMatch(securityProfile, /\bwaf\s*\{/);
   assert.doesNotMatch(securityProfile, /smart_protection\s*\{/);
   assert.doesNotMatch(securityProfile, /analyze_request_body|size_limit/i);
 
@@ -1127,11 +1119,14 @@ function assertProtectedIngress({
     "load_balancer_address",
     "backend_group_id",
     "security_profile_id",
-    "waf_profile_id",
+    "rate_limiter_profile_id",
     "approved_a_records",
   ]) {
     assert.match(ingressOutputs, new RegExp(`output\\s+"${output}"\\s*\\{`));
     assert.match(productionOutputs, new RegExp(`output\\s+"${output}"\\s*\\{`));
+  }
+  for (const outputs of [ingressOutputs, productionOutputs]) {
+    assert.doesNotMatch(outputs, /output\s+"waf_profile_id"\s*\{/);
   }
 
   assert.match(production, /module\s+"ingress"\s*\{/);
@@ -2739,22 +2734,26 @@ test("production ingress contract rejects bypasses, computed certificate keys, f
   );
   assert.throws(() => assertProtectedIngress(missingSws));
 
-  const shadowedWaf = await protectedIngressSources();
-  shadowedWaf.ingress = replaceTerraformResource(
-    shadowedWaf.ingress,
+  const reintroducedWafProfile = await protectedIngressSources();
+  reintroducedWafProfile.ingress +=
+    '\nresource "yandex_sws_waf_profile" "markiro" { folder_id = var.folder_id }\n';
+  assert.throws(
+    () => assertProtectedIngress(reintroducedWafProfile),
+    /must not provision a WAF profile/,
+  );
+
+  const reintroducedWafRule = await protectedIngressSources();
+  reintroducedWafRule.ingress = replaceTerraformResource(
+    reintroducedWafRule.ingress,
     "yandex_sws_security_profile",
     "markiro",
     (block) =>
       block.replace(
-        /\n\s*security_rule\s*\{/,
-        '\n  security_rule {\n    name = "shadowing-smart-protection"\n    priority = 1\n    smart_protection { mode = "API" }\n  }\n\n  security_rule {',
+        "\n}",
+        '\n  security_rule {\n    name = "waf-api"\n    priority = 100\n    waf { mode = "API" }\n  }\n}',
       ),
   );
-  assert.throws(() => assertProtectedIngress(shadowedWaf), /one unconditional WAF rule/);
-
-  const noWaf = await protectedIngressSources();
-  noWaf.ingress = noWaf.ingress.replace("waf {", "smart_protection {");
-  assert.throws(() => assertProtectedIngress(noWaf));
+  assert.throws(() => assertProtectedIngress(reintroducedWafRule), /must delegate only to ARL/);
 
   const apiBypass = await protectedIngressSources();
   apiBypass.ingress = replaceTerraformResource(
