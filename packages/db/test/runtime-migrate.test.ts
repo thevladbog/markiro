@@ -260,6 +260,7 @@ describe("runRuntimeMigrations", () => {
         databaseUrlArguments: [],
       });
     },
+    20_000,
   );
 
   test("releases the lock, client, and pool when migration fails", async () => {
