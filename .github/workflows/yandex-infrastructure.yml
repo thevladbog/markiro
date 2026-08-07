@@ -234,7 +234,7 @@ jobs:
           target_sha="$TARGET_SHA"
           dispatch_sha="$DISPATCH_SHA"
           cleanup() {
-            unset github_oidc_response github_oidc_token iam_response lockbox_payload
+            unset github_oidc_token lockbox_payload
             unset iam_token aws_access_key_id aws_secret_access_key YC_TOKEN AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY TF_DATA_DIR
             rm -f "$backend_config"
             rm -rf -- "${RUNNER_TEMP:?}/yandex-production-terraform-data"
@@ -244,11 +244,14 @@ jobs:
           [[ "$target_sha" =~ ^[0-9a-f]{40}$ ]]
           [[ "$(git rev-parse HEAD)" == "$target_sha" ]]
           [[ "$GITHUB_REF" == "refs/heads/main" ]]
-          repository_head="$(curl --fail --silent --show-error \
+          if ! repository_head="$(curl --fail --silent --show-error \
             --header "Accept: application/vnd.github+json" \
             --header "Authorization: Bearer $GITHUB_TOKEN" \
             --header "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/$GITHUB_REPOSITORY/git/ref/heads/main" | jq -er '.object.sha')"
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/git/ref/heads/main" | jq -er '.object.sha')"; then
+            printf '%s\n' '::error::GitHub main ref authentication failed' >&2
+            exit 1
+          fi
           [[ "$repository_head" == "$target_sha" ]]
           if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
             [[ "$target_sha" == "$dispatch_sha" ]]
@@ -312,13 +315,15 @@ jobs:
             *) exit 1 ;;
           esac
           node infra/yandex/scripts/validate-workload-identities.mjs
-          github_oidc_response="$(curl --fail --silent --show-error --get \
+          if ! github_oidc_token="$(curl --fail --silent --show-error --get \
             --header "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
             --data-urlencode "audience=$YC_OIDC_AUDIENCE" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL")"
-          github_oidc_token="$(jq -er '.value | select(type == "string" and length > 0)' <<<"$github_oidc_response")"
+            "$ACTIONS_ID_TOKEN_REQUEST_URL" | jq -er '.value | select(type == "string" and length > 0)')"; then
+            printf '%s\n' '::error::GitHub OIDC token request failed' >&2
+            exit 1
+          fi
           echo "::add-mask::$github_oidc_token"
-          iam_response="$(curl --fail --silent --show-error \
+          if ! iam_token="$(curl --fail --silent --show-error \
             --request POST \
             --header "Content-Type: application/x-www-form-urlencoded" \
             --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' \
@@ -326,8 +331,10 @@ jobs:
             --data-urlencode "audience=$YC_TERRAFORM_SERVICE_ACCOUNT_ID" \
             --data-urlencode "subject_token=$github_oidc_token" \
             --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:id_token' \
-            https://auth.yandex.cloud/oauth/token)"
-          iam_token="$(jq -er '.access_token | select(type == "string" and length > 0)' <<<"$iam_response")"
+            https://auth.yandex.cloud/oauth/token | jq -er '.access_token | select(type == "string" and length > 0)')"; then
+            printf '%s\n' '::error::Yandex workload identity token exchange failed' >&2
+            exit 1
+          fi
           echo "::add-mask::$iam_token"
           export YC_TOKEN=$iam_token
           test ! -e "$artifact_dir"
@@ -520,7 +527,7 @@ jobs:
           target_sha="$TARGET_SHA"
           dispatch_sha="$DISPATCH_SHA"
           cleanup() {
-            unset github_oidc_response github_oidc_token iam_response lockbox_payload
+            unset github_oidc_token lockbox_payload
             unset iam_token aws_access_key_id aws_secret_access_key YC_TOKEN AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY TF_DATA_DIR
             rm -f "$backend_config" "$fresh_identity_path"
             rm -rf -- "${RUNNER_TEMP:?}/yandex-production-terraform-data"
@@ -533,11 +540,14 @@ jobs:
           [[ "$target_sha" == "${{ needs.plan.outputs.target-sha }}" ]]
           [[ "$(git rev-parse HEAD)" == "$target_sha" ]]
           [[ "$GITHUB_REF" == "refs/heads/main" ]]
-          repository_head="$(curl --fail --silent --show-error \
+          if ! repository_head="$(curl --fail --silent --show-error \
             --header "Accept: application/vnd.github+json" \
             --header "Authorization: Bearer $GITHUB_TOKEN" \
             --header "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/$GITHUB_REPOSITORY/git/ref/heads/main" | jq -er '.object.sha')"
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/git/ref/heads/main" | jq -er '.object.sha')"; then
+            printf '%s\n' '::error::GitHub main ref authentication failed' >&2
+            exit 1
+          fi
           [[ "$repository_head" == "$target_sha" ]]
           test -f "$plan_path"
           test ! -L "$plan_path"
@@ -622,13 +632,15 @@ jobs:
             "$YC_STATE_BUCKET_NAME"; do
             test -n "$required_value"
           done
-          github_oidc_response="$(curl --fail --silent --show-error --get \
+          if ! github_oidc_token="$(curl --fail --silent --show-error --get \
             --header "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
             --data-urlencode "audience=$YC_OIDC_AUDIENCE" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL")"
-          github_oidc_token="$(jq -er '.value | select(type == "string" and length > 0)' <<<"$github_oidc_response")"
+            "$ACTIONS_ID_TOKEN_REQUEST_URL" | jq -er '.value | select(type == "string" and length > 0)')"; then
+            printf '%s\n' '::error::GitHub OIDC token request failed' >&2
+            exit 1
+          fi
           echo "::add-mask::$github_oidc_token"
-          iam_response="$(curl --fail --silent --show-error \
+          if ! iam_token="$(curl --fail --silent --show-error \
             --request POST \
             --header "Content-Type: application/x-www-form-urlencoded" \
             --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' \
@@ -636,8 +648,10 @@ jobs:
             --data-urlencode "audience=$YC_TERRAFORM_SERVICE_ACCOUNT_ID" \
             --data-urlencode "subject_token=$github_oidc_token" \
             --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:id_token' \
-            https://auth.yandex.cloud/oauth/token)"
-          iam_token="$(jq -er '.access_token | select(type == "string" and length > 0)' <<<"$iam_response")"
+            https://auth.yandex.cloud/oauth/token | jq -er '.access_token | select(type == "string" and length > 0)')"; then
+            printf '%s\n' '::error::Yandex workload identity token exchange failed' >&2
+            exit 1
+          fi
           echo "::add-mask::$iam_token"
           export YC_TOKEN=$iam_token
           node infra/yandex/scripts/verify-service-account-provenance.mjs validate < "$identity_path" > /dev/null
