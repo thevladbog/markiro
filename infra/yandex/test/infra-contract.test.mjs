@@ -527,6 +527,14 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, productionResources
   );
   assert.match(
     variables,
+    /variable\s+"github_repository_owner_id"\s*\{[\s\S]*?condition\s*=\s*var\.github_repository_owner_id\s*==\s*"47273232"/,
+  );
+  assert.match(
+    variables,
+    /variable\s+"github_repository_id"\s*\{[\s\S]*?condition\s*=\s*var\.github_repository_id\s*==\s*"1308139775"/,
+  );
+  assert.match(
+    variables,
     /variable\s+"github_controller_environment"\s*\{[\s\S]*?condition\s*=\s*var\.github_controller_environment\s*==\s*"production-controller"/,
   );
   assert.match(
@@ -539,15 +547,19 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, productionResources
   );
   assert.match(
     iam,
-    /github_controller_subject\s*=\s*"repo:\$\{var\.github_repository\}:environment:\$\{var\.github_controller_environment\}"/,
+    /github_controller_subject\s*=\s*"repo:\$\{local\.github_repository_subject\}:environment:\$\{var\.github_controller_environment\}"/,
   );
   assert.match(
     iam,
-    /github_cleanup_subject\s*=\s*"repo:\$\{var\.github_repository\}:environment:\$\{var\.github_cleanup_environment\}"/,
+    /github_cleanup_subject\s*=\s*"repo:\$\{local\.github_repository_subject\}:environment:\$\{var\.github_cleanup_environment\}"/,
   );
   assert.match(
     iam,
-    /github_infrastructure_subject\s*=\s*"repo:\$\{var\.github_repository\}:environment:\$\{var\.github_infrastructure_environment\}"/,
+    /github_infrastructure_subject\s*=\s*"repo:\$\{local\.github_repository_subject\}:environment:\$\{var\.github_infrastructure_environment\}"/,
+  );
+  assert.match(
+    iam,
+    /github_repository_subject\s*=\s*"\$\{local\.github_owner\}@\$\{var\.github_repository_owner_id\}\/\$\{local\.github_repository_name\}@\$\{var\.github_repository_id\}"/,
   );
 
   const federation = terraformResourceBlock(

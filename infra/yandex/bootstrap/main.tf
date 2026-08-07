@@ -79,6 +79,8 @@ module "iam" {
   folder_id                         = var.folder_id
   organization_id                   = var.organization_id
   github_repository                 = var.github_repository
+  github_repository_owner_id        = var.github_repository_owner_id
+  github_repository_id              = var.github_repository_id
   github_controller_environment     = var.github_controller_environment
   github_cleanup_environment        = var.github_cleanup_environment
   github_infrastructure_environment = var.github_infrastructure_environment
