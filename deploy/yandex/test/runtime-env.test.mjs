@@ -168,6 +168,8 @@ test("uses every and only the production environment example keys", async () => 
     "BETTER_AUTH_URL",
     "ADMIN_ORIGIN",
     "KIOSK_ORIGIN",
+    "STATION_ORIGIN",
+    "VITE_STATION_API_URL",
     "PAIRING_CODE_PEPPER",
     "SMTP_HOST",
     "SMTP_PORT",

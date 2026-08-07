@@ -58,6 +58,22 @@ const reviewedNonUtf8Candidates = new Map([
     "24386a483f0c6ca48467cd16e4fc3e49d5712d72d549802ee8a91053a7bdb6de",
   ],
   [
+    "docs/acceptance/screenshots/station-exception-confirm-1280x1024-at-2x.jpg",
+    "564a51d06e97ed7335afce1e15922b4f37c2a479e0c627c1a9dab287bcf1ae1a",
+  ],
+  [
+    "docs/acceptance/screenshots/station-login-name-search-1024x768-ru.jpg",
+    "a990fdd2a83aad04760a35ac94936083ac33b7bbc6d361e9bf24cbdb5c0e3326",
+  ],
+  [
+    "docs/acceptance/screenshots/station-long-copy-1024x768-en.jpg",
+    "c9acd518ecbac86ac9f4f88c84d62f4d57d03de037b36cedd65b86dfe69486f3",
+  ],
+  [
+    "docs/acceptance/screenshots/station-work-aggregation-1280x800-ru.jpg",
+    "c9218e2d11ee2536084ed081b95dcd450cead540dc9d500714af81e6a376f8ac",
+  ],
+  [
     "docs/assets/readme/admin.webp",
     "45f839a00b6a2862f026c5c4955b15531db61d5f853112b0dbb453af9b767d75",
   ],
