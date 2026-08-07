@@ -481,7 +481,7 @@ runbook fails.
 ## Routine deploy
 
 Routine deploy assumes public DNS and valid TLS already exist at the protected
-ingress. It also assumes the approved provider/WAF or reviewed custom-Caddy
+ingress. It also assumes the approved provider ARL or reviewed custom-Caddy
 rate limits remain enforced. If DNS, TLS termination, ACME routing, ingress
 policy, or the allowlist changes, treat that as a separately approved
 infrastructure change and re-enter the relevant first-deploy gates.
@@ -733,7 +733,7 @@ no standard rate-limit directive. Before a first-deploy DNS change, one of
 these alternatives must be deployed and evidenced in front of anonymous
 routes:
 
-1. a provider/WAF policy with both per-source limits and a global
+1. a provider ARL policy with both per-source limits and a global
    anonymous-route limit; or
 2. a separately reviewed reproducible custom Caddy image with an exact source
    revision, SBOM, vulnerability scan, and the same per-source/global policy.
@@ -749,13 +749,13 @@ source, and keep the required certificate bootstrap path reachable. If Caddy
 terminates TLS, the ACME HTTP-01 challenge must be transparent pass-through on
 public port 80 to Caddy. If the provider terminates TLS, use a separately
 verified pre-provisioned certificate and reviewed custom-edge procedure. The
-repository intentionally provides no DNS, WAF, certificate, or other provider
+repository intentionally provides no DNS, certificate, or other provider
 command.
 
 ```bash
-read -r -p 'Rate-limit control (provider-waf/reviewed-custom-caddy): ' RATE_LIMIT_CONTROL
+read -r -p 'Rate-limit control (provider-arl/reviewed-custom-caddy): ' RATE_LIMIT_CONTROL
 case "$RATE_LIMIT_CONTROL" in
-  provider-waf|reviewed-custom-caddy) ;;
+  provider-arl|reviewed-custom-caddy) ;;
   *) echo 'STOP: no approved public edge rate-limit control' >&2; exit 1 ;;
 esac
 read -r -p 'Rate-limit verification evidence ID: ' RATE_LIMIT_EVIDENCE_ID

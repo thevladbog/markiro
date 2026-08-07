@@ -37,7 +37,7 @@ const runbooks = {
     "go-live-gate-01-plan-drift",
     "go-live-gate-02-durable-protection",
     "go-live-gate-03-certificate",
-    "go-live-gate-04-alb-waf-arl",
+    "go-live-gate-04-alb-sws-arl",
     "go-live-gate-05-alert-specs",
     "go-live-gate-06-backup-restore",
     "go-live-gate-07-smtp-s3",

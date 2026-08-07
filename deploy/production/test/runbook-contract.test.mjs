@@ -426,10 +426,10 @@ function assertRunbook(source) {
     "observation window must retain previous release evidence",
   );
   invariant(
-    /provider\/WAF/i.test(goLive) &&
+    /provider ARL/i.test(goLive) &&
       /per-source/i.test(goLive) &&
       /global\s+anonymous-route/i.test(goLive),
-    "provider/WAF rate-limit gate is incomplete",
+    "provider ARL rate-limit gate is incomplete",
   );
   invariant(
     /standard Caddy image cannot satisfy/i.test(goLive),

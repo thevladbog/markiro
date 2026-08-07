@@ -241,9 +241,11 @@ boundaries, and operator runbooks. This is repository implementation, not a
 live deployment. No real cloud IDs, domain, secret payloads, SMTP delivery,
 alert delivery, restore evidence, or DNS convergence evidence is committed.
 
-The MVP has one application VM and one Managed PostgreSQL host. A host failure
-or deployment can interrupt service; the design does not claim high
-availability or zero downtime. The deferred HA path adds an application target
+The one-customer MVP has one private 2 vCPU / 4 GiB application VM and one
+private Managed PostgreSQL `s3-c2-m8` host. The public ALB remains attached to
+SWS and global/per-IP ARL; WAF is deferred only for this one-customer phase. A
+host failure or deployment can interrupt service; the design does not claim
+high availability or zero downtime. The deferred HA path adds an application target
 and a multi-host PostgreSQL topology after load and recovery evidence justify
 it. GHCR keeps digest-addressed API and edge releases under its approved
 retention policy. The shared media bucket remains private and separates avatar
