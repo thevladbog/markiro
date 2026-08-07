@@ -1,9 +1,31 @@
 import assert from "node:assert/strict";
+import { X509Certificate } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import ts from "typescript";
 
 const root = new URL("../../..", import.meta.url);
+
+test("API runtime trusts the pinned Yandex Managed PostgreSQL CA", async () => {
+  const source = await readFile(new URL("deploy/production/api.Dockerfile", root), "utf8");
+  const pem = await readFile(new URL("deploy/production/yandex-cloud-ca.pem", root), "utf8").catch(
+    () => "",
+  );
+  const certificates =
+    pem.match(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g) ?? [];
+
+  assert.match(
+    source,
+    /COPY --chown=root:root deploy\/production\/yandex-cloud-ca\.pem \/etc\/ssl\/certs\/yandex-cloud-ca\.pem/,
+  );
+  assert.match(source, /ENV NODE_EXTRA_CA_CERTS=\/etc\/ssl\/certs\/yandex-cloud-ca\.pem/);
+  assert.equal(certificates.length, 2);
+  assert.equal(
+    new X509Certificate(certificates[0]).fingerprint256,
+    "E1:D5:3D:D1:D7:56:6D:0D:C6:91:C9:ED:6F:CA:0C:91:0F:58:B9:5D:4E:D7:F0:A9:58:AC:C7:67:A1:B2:49:37",
+  );
+  assert.match(new X509Certificate(certificates[1]).subject, /CN=YandexInternalRootCA/);
+});
 
 test("API image keeps the production runtime closure minimal and hardened", async () => {
   const source = await readFile(new URL("deploy/production/api.Dockerfile", root), "utf8");
@@ -76,6 +98,7 @@ test("Docker build context excludes local state while retaining required build i
     "!packages/domain/**",
     "!packages/email/**",
     "!packages/db/migrations/**",
+    "!deploy/production/yandex-cloud-ca.pem",
   ]) {
     assert.match(source, new RegExp(`^${entry.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m"));
   }

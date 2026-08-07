@@ -27,6 +27,7 @@
 !deploy/production/Caddyfile.alb
 !deploy/production/edge-entrypoint.sh
 !deploy/production/healthcheck.mjs
+!deploy/production/yandex-cloud-ca.pem
 
 .git
 .worktrees
