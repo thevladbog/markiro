@@ -522,6 +522,8 @@ jobs:
           fresh_identity_path="$RUNNER_TEMP/yandex-service-account-provenance-current.json"
           alert_dir="$RUNNER_TEMP/yandex-alert-specs"
           alert_artifact="$alert_dir/alert-specs.json"
+          terraform_apply_stream="$RUNNER_TEMP/yandex-terraform-apply.ndjson"
+          terraform_apply_stderr="$RUNNER_TEMP/yandex-terraform-apply.stderr"
           backend_config="$RUNNER_TEMP/yandex-production-backend.hcl"
           terraform_data_dir="$RUNNER_TEMP/yandex-production-terraform-data"
           target_sha="$TARGET_SHA"
@@ -529,7 +531,7 @@ jobs:
           cleanup() {
             unset github_oidc_token lockbox_payload
             unset iam_token aws_access_key_id aws_secret_access_key YC_TOKEN AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY TF_DATA_DIR
-            rm -f "$backend_config" "$fresh_identity_path"
+            rm -f "$backend_config" "$fresh_identity_path" "$terraform_apply_stream" "$terraform_apply_stderr"
             rm -rf -- "${RUNNER_TEMP:?}/yandex-production-terraform-data"
             rm -rf -- "${RUNNER_TEMP:?}/yandex-infrastructure-plan"
           }
@@ -689,6 +691,16 @@ jobs:
             'use_path_style = true' > "$backend_config"
           chmod 600 "$backend_config"
           terraform -chdir=infra/yandex/production init -input=false -lockfile=readonly -backend-config="$backend_config"
+          test ! -e "$terraform_apply_stream"
+          test ! -e "$terraform_apply_stderr"
+          set +e
+          terraform -chdir=infra/yandex/production apply -json -input=false "$plan_path" > "$terraform_apply_stream" 2> "$terraform_apply_stderr"
+          terraform_apply_status=$?
+          set -e
+          if (( terraform_apply_status != 0 )); then
+            node infra/yandex/scripts/extract-alert-specs.mjs diagnose < "$terraform_apply_stream"
+            exit "$terraform_apply_status"
+          fi
           if [[ "$OBSERVABILITY_PHASE" == first && "$POSTGRES_PROVISIONING_PHASE" == none ]]; then
             test ! -e "$alert_dir"
             install -d -m 700 "$alert_dir"
@@ -698,16 +710,14 @@ jobs:
             export ALERT_SPECS_GITHUB_RUN_ID="$evidence_github_run_id"
             export ALERT_SPECS_OBSERVABILITY_PHASE="$evidence_observability_phase"
             export ALERT_SPECS_PLAN_SHA256="$artifact_sha256"
-            terraform -chdir=infra/yandex/production apply -json -input=false "$plan_path" 2>/dev/null |
-              node infra/yandex/scripts/extract-alert-specs.mjs extract > "$alert_artifact"
+            node infra/yandex/scripts/extract-alert-specs.mjs extract < "$terraform_apply_stream" > "$alert_artifact"
             chmod 600 "$alert_artifact"
             test "$(wc -c < "$alert_artifact")" -le 262145
             node infra/yandex/scripts/extract-alert-specs.mjs validate < "$alert_artifact" > /dev/null
             unset ALERT_SPECS_COMMIT_SHA ALERT_SPECS_EVIDENCE_SHA256 ALERT_SPECS_GITHUB_RUN_ATTEMPT
             unset ALERT_SPECS_GITHUB_RUN_ID ALERT_SPECS_OBSERVABILITY_PHASE ALERT_SPECS_PLAN_SHA256
-          else
-            terraform -chdir=infra/yandex/production apply -json -input=false "$plan_path" > /dev/null 2>&1
           fi
+          rm -f "$terraform_apply_stream" "$terraform_apply_stderr"
       - name: Upload exact first-phase alert specifications
         if: inputs.observability_phase == 'first' && inputs.postgres_provisioning_phase == 'none'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

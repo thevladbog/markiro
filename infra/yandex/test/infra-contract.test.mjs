@@ -2055,12 +2055,18 @@ ${applyObservabilityCase}
   );
   assert.match(
     applyCommands,
-    /terraform -chdir=infra\/yandex\/production apply -json -input=false "\$plan_path" 2>\/dev\/null \|\s+node infra\/yandex\/scripts\/extract-alert-specs\.mjs extract > "\$alert_artifact"/,
+    /terraform -chdir=infra\/yandex\/production apply -json -input=false "\$plan_path" > "\$terraform_apply_stream" 2> "\$terraform_apply_stderr"/,
   );
   assert.match(
     applyCommands,
-    /terraform -chdir=infra\/yandex\/production apply -json -input=false "\$plan_path" > \/dev\/null/,
+    /node infra\/yandex\/scripts\/extract-alert-specs\.mjs diagnose < "\$terraform_apply_stream"/,
   );
+  assert.match(
+    applyCommands,
+    /node infra\/yandex\/scripts\/extract-alert-specs\.mjs extract < "\$terraform_apply_stream" > "\$alert_artifact"/,
+  );
+  assert.match(applyCommands, /rm -f "\$terraform_apply_stream" "\$terraform_apply_stderr"/);
+  assert.doesNotMatch(applyCommands, /cat "\$terraform_apply_(?:stream|stderr)"/);
   assert.doesNotMatch(applyCommands, /terraform[^\n]*apply[^\n]*\$plan_path"\s*$/m);
 
   const alertUploadStep = apply.steps.find(
@@ -2203,7 +2209,7 @@ test("infrastructure workflow contract rejects security-boundary mutations", asy
     [
       "raw Terraform apply output",
       source.replace(
-        'terraform -chdir=infra/yandex/production apply -json -input=false "$plan_path" > /dev/null',
+        'terraform -chdir=infra/yandex/production apply -json -input=false "$plan_path" > "$terraform_apply_stream" 2> "$terraform_apply_stderr"',
         'terraform -chdir=infra/yandex/production apply -input=false "$plan_path"',
       ),
     ],
