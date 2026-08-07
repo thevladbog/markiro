@@ -1,0 +1,734 @@
+name: Yandex infrastructure
+
+"on":
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: Exact current main commit to plan and apply
+        required: true
+        type: string
+      enable_public_dns:
+        description: Request the separately approved public DNS cutover
+        required: true
+        default: false
+        type: boolean
+      observability_phase:
+        description: First provisioning emits alert specs; protected binds reviewed console alert IDs
+        required: true
+        type: choice
+        default: protected
+        options: [first, protected]
+      postgres_provisioning_phase:
+        description: Create only the required first-provisioning PostgreSQL boundary
+        required: true
+        type: choice
+        default: none
+        options: [none, cluster, database]
+      postgres_owner_change_reference:
+        description: Protected non-secret change record reference for the database-owner boundary
+        required: true
+        type: string
+        default: none
+
+permissions:
+  contents: read
+
+concurrency:
+  group: markiro-yandex-production-state
+  cancel-in-progress: false
+
+env:
+  TERRAFORM_VERSION: 1.15.8
+
+jobs:
+  validate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.15.8
+          terraform_wrapper: false
+      - name: Install locked JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Configure the reviewed Yandex provider mirror
+        env:
+          TF_CLI_CONFIG_FILE: ${{ runner.temp }}/terraform.tfrc
+        run: |
+          set -euo pipefail
+          printf '%s\n' \
+            'provider_installation {' \
+            '  network_mirror {' \
+            '    url     = "https://terraform-mirror.yandexcloud.net/"' \
+            '    include = ["registry.terraform.io/yandex-cloud/yandex"]' \
+            '  }' \
+            '  direct {' \
+            '    exclude = ["registry.terraform.io/yandex-cloud/yandex"]' \
+            '  }' \
+            '}' > "$TF_CLI_CONFIG_FILE"
+          chmod 600 "$TF_CLI_CONFIG_FILE"
+          printf 'TF_CLI_CONFIG_FILE=%s\n' "$TF_CLI_CONFIG_FILE" >> "$GITHUB_ENV"
+      - name: Verify formatting, locks, validation, and contracts without a backend
+        run: |
+          set -euo pipefail
+          terraform fmt -check -recursive infra/yandex
+          node infra/yandex/scripts/check-toolchain.mjs
+          terraform -chdir=infra/yandex/bootstrap init -backend=false -lockfile=readonly
+          terraform -chdir=infra/yandex/bootstrap validate
+          terraform -chdir=infra/yandex/production init -backend=false -lockfile=readonly
+          terraform -chdir=infra/yandex/production validate
+          pnpm test:yandex-infra:contract
+
+  dns_approval:
+    if: github.event_name == 'workflow_dispatch' && inputs.enable_public_dns == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production-public-dns
+    permissions:
+      contents: read
+    steps:
+      - name: Record separate public DNS approval
+        run: printf '%s\n' 'Public DNS approval granted; the protected plan will still default explicitly.'
+
+  postgres_owner_approval:
+    if: github.event_name == 'workflow_dispatch' && inputs.postgres_provisioning_phase == 'database'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production-postgres-owner
+    permissions:
+      contents: read
+    outputs:
+      run-id: ${{ steps.attest.outputs.run_id }}
+      run-attempt: ${{ steps.attest.outputs.run_attempt }}
+      change-reference: ${{ steps.attest.outputs.change_reference }}
+    steps:
+      - name: Attest cluster apply, exact owner creation, and runtime Lockbox write
+        id: attest
+        env:
+          POSTGRES_OWNER_CHANGE_REFERENCE: ${{ inputs.postgres_owner_change_reference }}
+        run: |
+          set -euo pipefail
+          [[ "$POSTGRES_OWNER_CHANGE_REFERENCE" =~ ^[a-z][a-z0-9_]{2,63}$ ]]
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          printf 'run_id=%s\n' "$GITHUB_RUN_ID" >> "$GITHUB_OUTPUT"
+          printf 'run_attempt=%s\n' "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          printf 'change_reference=%s\n' "$POSTGRES_OWNER_CHANGE_REFERENCE" >> "$GITHUB_OUTPUT"
+
+  plan:
+    needs: [dns_approval, postgres_owner_approval]
+    if: >-
+      always() &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      (needs.dns_approval.result == 'success' || needs.dns_approval.result == 'skipped') &&
+      (needs.postgres_owner_approval.result == 'success' || needs.postgres_owner_approval.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production-infrastructure
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      artifact-id: ${{ steps.plan-artifact.outputs.artifact-id }}
+      target-sha: ${{ steps.create-plan.outputs.target_sha }}
+    env:
+      ENABLE_PUBLIC_DNS: ${{ github.event_name == 'workflow_dispatch' && inputs.enable_public_dns || false }}
+      POSTGRES_PROVISIONING_PHASE: ${{ github.event_name == 'workflow_dispatch' && inputs.postgres_provisioning_phase || 'none' }}
+      OBSERVABILITY_PHASE: ${{ github.event_name == 'workflow_dispatch' && inputs.observability_phase || 'protected' }}
+      POSTGRES_OWNER_CHANGE_REFERENCE: ${{ github.event_name == 'workflow_dispatch' && inputs.postgres_owner_change_reference || 'none' }}
+      POSTGRES_OWNER_APPROVAL_RESULT: ${{ needs.postgres_owner_approval.result }}
+      POSTGRES_OWNER_APPROVAL_RUN_ID: ${{ needs.postgres_owner_approval.outputs.run-id || 'none' }}
+      POSTGRES_OWNER_APPROVAL_RUN_ATTEMPT: ${{ needs.postgres_owner_approval.outputs.run-attempt || 'none' }}
+      POSTGRES_OWNER_APPROVAL_CHANGE_REFERENCE: ${{ needs.postgres_owner_approval.outputs.change-reference || 'none' }}
+      TARGET_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.target_sha || github.sha }}
+      YC_CLOUD_ID: ${{ vars.YC_CLOUD_ID }}
+      YC_FOLDER_ID: ${{ vars.YC_FOLDER_ID }}
+      YC_OIDC_AUDIENCE: ${{ vars.YC_OIDC_AUDIENCE }}
+      YC_TERRAFORM_SERVICE_ACCOUNT_ID: ${{ vars.YC_TERRAFORM_SERVICE_ACCOUNT_ID }}
+      YC_STATE_BACKEND_SECRET_ID: ${{ vars.YC_STATE_BACKEND_SECRET_ID }}
+      YC_STATE_BUCKET_NAME: ${{ vars.YC_STATE_BUCKET_NAME }}
+      TF_VAR_cloud_id: ${{ vars.YC_CLOUD_ID }}
+      TF_VAR_folder_id: ${{ vars.YC_FOLDER_ID }}
+      TF_VAR_zone: ${{ vars.YC_ZONE }}
+      TF_VAR_alb_subnet_cidr: ${{ vars.YC_ALB_SUBNET_CIDR }}
+      TF_VAR_app_subnet_cidr: ${{ vars.YC_APP_SUBNET_CIDR }}
+      TF_VAR_data_subnet_cidr: ${{ vars.YC_DATA_SUBNET_CIDR }}
+      TF_VAR_management_subnet_cidr: ${{ vars.YC_MANAGEMENT_SUBNET_CIDR }}
+      TF_VAR_ubuntu_lts_image_family: ubuntu-2404-lts
+      TF_VAR_kms_key_id: ${{ vars.YC_KMS_KEY_ID }}
+      TF_VAR_terraform_service_account_id: ${{ vars.YC_TERRAFORM_SERVICE_ACCOUNT_ID }}
+      TF_VAR_app_service_account_id: ${{ vars.YC_APP_SERVICE_ACCOUNT_ID }}
+      TF_VAR_runtime_secret_id: ${{ vars.YC_RUNTIME_SECRET_ID }}
+      TF_VAR_registry_secret_id: ${{ vars.YC_REGISTRY_SECRET_ID }}
+      TF_VAR_runner_service_account_id: ${{ vars.YC_RUNNER_SERVICE_ACCOUNT_ID }}
+      TF_VAR_deployment_controller_service_account_id: ${{ vars.YC_DEPLOYMENT_CONTROLLER_SERVICE_ACCOUNT_ID }}
+      TF_VAR_runner_registration_secret_id: ${{ vars.YC_RUNNER_REGISTRATION_SECRET_ID }}
+      TF_VAR_audit_service_account_id: ${{ vars.YC_AUDIT_SERVICE_ACCOUNT_ID }}
+      TF_VAR_audit_log_group_id: ${{ vars.YC_AUDIT_LOG_GROUP_ID }}
+      TF_VAR_database_name: ${{ vars.YC_DATABASE_NAME }}
+      TF_VAR_database_disk_size_gb: ${{ vars.YC_DATABASE_DISK_SIZE_GB }}
+      TF_VAR_state_bucket_name: ${{ vars.YC_STATE_BUCKET_NAME }}
+      TF_VAR_media_bucket_name: ${{ vars.YC_MEDIA_BUCKET_NAME }}
+      TF_VAR_audit_bucket_name: ${{ vars.YC_AUDIT_BUCKET_NAME }}
+      TF_VAR_domain: ${{ vars.MARKIRO_DOMAIN }}
+      TF_VAR_dns_zone_id: ${{ vars.YC_DNS_ZONE_ID }}
+      TF_VAR_observability_phase: ${{ github.event_name == 'workflow_dispatch' && inputs.observability_phase || 'protected' }}
+      TF_VAR_notification_channel_id: ${{ vars.YC_NOTIFICATION_CHANNEL_ID }}
+      TF_VAR_alert_ids: ${{ vars.YC_ALERT_IDS }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.target_sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.15.8
+          terraform_wrapper: false
+      - name: Configure the reviewed Yandex provider mirror
+        env:
+          TF_CLI_CONFIG_FILE: ${{ runner.temp }}/terraform.tfrc
+        run: |
+          set -euo pipefail
+          printf '%s\n' \
+            'provider_installation {' \
+            '  network_mirror {' \
+            '    url     = "https://terraform-mirror.yandexcloud.net/"' \
+            '    include = ["registry.terraform.io/yandex-cloud/yandex"]' \
+            '  }' \
+            '  direct {' \
+            '    exclude = ["registry.terraform.io/yandex-cloud/yandex"]' \
+            '  }' \
+            '}' > "$TF_CLI_CONFIG_FILE"
+          chmod 600 "$TF_CLI_CONFIG_FILE"
+          printf 'TF_CLI_CONFIG_FILE=%s\n' "$TF_CLI_CONFIG_FILE" >> "$GITHUB_ENV"
+      - name: Verify current main, authenticate, and create the saved plan
+        id: create-plan
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          DISPATCH_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          artifact_dir="$RUNNER_TEMP/yandex-infrastructure-plan"
+          backend_config="$RUNNER_TEMP/yandex-production-backend.hcl"
+          terraform_data_dir="$RUNNER_TEMP/yandex-production-terraform-data"
+          plan_path="$artifact_dir/saved.tfplan"
+          summary_path="$artifact_dir/plan-summary.json"
+          evidence_path="$artifact_dir/evidence.json"
+          identity_path="$artifact_dir/service-account-provenance.json"
+          target_sha="$TARGET_SHA"
+          dispatch_sha="$DISPATCH_SHA"
+          cleanup() {
+            unset github_oidc_response github_oidc_token iam_response lockbox_payload
+            unset iam_token aws_access_key_id aws_secret_access_key YC_TOKEN AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY TF_DATA_DIR
+            rm -f "$backend_config"
+            rm -rf -- "${RUNNER_TEMP:?}/yandex-production-terraform-data"
+          }
+          trap cleanup EXIT
+          umask 077
+          [[ "$target_sha" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$(git rev-parse HEAD)" == "$target_sha" ]]
+          [[ "$GITHUB_REF" == "refs/heads/main" ]]
+          repository_head="$(curl --fail --silent --show-error \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer $GITHUB_TOKEN" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/git/ref/heads/main" | jq -er '.object.sha')"
+          [[ "$repository_head" == "$target_sha" ]]
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            [[ "$target_sha" == "$dispatch_sha" ]]
+          fi
+          for required_value in \
+            "$YC_CLOUD_ID" \
+            "$YC_FOLDER_ID" \
+            "$YC_OIDC_AUDIENCE" \
+            "$YC_TERRAFORM_SERVICE_ACCOUNT_ID" \
+            "$YC_STATE_BACKEND_SECRET_ID" \
+            "$YC_STATE_BUCKET_NAME"; do
+            test -n "$required_value"
+          done
+          case "$ENABLE_PUBLIC_DNS" in
+            true) public_dns_enabled=true ;;
+            false) public_dns_enabled=false ;;
+            *) exit 1 ;;
+          esac
+          if [[ "$public_dns_enabled" == true ]]; then
+            [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]
+            [[ "${{ needs.dns_approval.result }}" == "success" ]]
+          fi
+          case "$POSTGRES_PROVISIONING_PHASE" in
+            none)
+              [[ "$POSTGRES_OWNER_CHANGE_REFERENCE" == none ]]
+              [[ "$POSTGRES_OWNER_APPROVAL_RESULT" == skipped ]]
+              [[ "$POSTGRES_OWNER_APPROVAL_RUN_ID" == none ]]
+              [[ "$POSTGRES_OWNER_APPROVAL_RUN_ATTEMPT" == none ]]
+              [[ "$POSTGRES_OWNER_APPROVAL_CHANGE_REFERENCE" == none ]]
+              terraform_targets=()
+              ;;
+            cluster)
+              [[ "$public_dns_enabled" == false ]]
+              [[ "$POSTGRES_OWNER_CHANGE_REFERENCE" == none ]]
+              [[ "$POSTGRES_OWNER_APPROVAL_RESULT" == skipped ]]
+              [[ "$POSTGRES_OWNER_APPROVAL_RUN_ID" == none ]]
+              [[ "$POSTGRES_OWNER_APPROVAL_RUN_ATTEMPT" == none ]]
+              [[ "$POSTGRES_OWNER_APPROVAL_CHANGE_REFERENCE" == none ]]
+              terraform_targets=(-target=module.postgres.yandex_mdb_postgresql_cluster.production)
+              ;;
+            database)
+              [[ "$public_dns_enabled" == false ]]
+              [[ "$POSTGRES_OWNER_CHANGE_REFERENCE" =~ ^[a-z][a-z0-9_]{2,63}$ ]]
+              [[ "$POSTGRES_OWNER_APPROVAL_RESULT" == success ]]
+              [[ "$POSTGRES_OWNER_APPROVAL_RUN_ID" == "$GITHUB_RUN_ID" ]]
+              [[ "$POSTGRES_OWNER_APPROVAL_RUN_ATTEMPT" == "$GITHUB_RUN_ATTEMPT" ]]
+              [[ "$POSTGRES_OWNER_APPROVAL_CHANGE_REFERENCE" == "$POSTGRES_OWNER_CHANGE_REFERENCE" ]]
+              terraform_targets=(-target=module.postgres.yandex_mdb_postgresql_database.application)
+              ;;
+            *) exit 1 ;;
+          esac
+          case "$OBSERVABILITY_PHASE" in
+            first)
+              [[ "$public_dns_enabled" == false ]]
+              unset TF_VAR_notification_channel_id TF_VAR_alert_ids
+              ;;
+            protected)
+              test -n "$TF_VAR_notification_channel_id"
+              test -n "$TF_VAR_alert_ids"
+              ;;
+            *) exit 1 ;;
+          esac
+          node infra/yandex/scripts/validate-workload-identities.mjs
+          github_oidc_response="$(curl --fail --silent --show-error --get \
+            --header "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            --data-urlencode "audience=$YC_OIDC_AUDIENCE" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL")"
+          github_oidc_token="$(jq -er '.value | select(type == "string" and length > 0)' <<<"$github_oidc_response")"
+          echo "::add-mask::$github_oidc_token"
+          iam_response="$(curl --fail --silent --show-error \
+            --request POST \
+            --header "Content-Type: application/x-www-form-urlencoded" \
+            --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' \
+            --data-urlencode 'requested_token_type=urn:ietf:params:oauth:token-type:access_token' \
+            --data-urlencode "audience=$YC_TERRAFORM_SERVICE_ACCOUNT_ID" \
+            --data-urlencode "subject_token=$github_oidc_token" \
+            --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:id_token' \
+            https://auth.yandex.cloud/oauth/token)"
+          iam_token="$(jq -er '.access_token | select(type == "string" and length > 0)' <<<"$iam_response")"
+          echo "::add-mask::$iam_token"
+          export YC_TOKEN=$iam_token
+          test ! -e "$artifact_dir"
+          install -d -m 700 "$artifact_dir"
+          node infra/yandex/scripts/verify-service-account-provenance.mjs fetch > "$identity_path"
+          chmod 600 "$identity_path"
+          service_account_provenance_sha256="$(sha256sum "$identity_path" | cut -d' ' -f1)"
+          [[ "$service_account_provenance_sha256" =~ ^[0-9a-f]{64}$ ]]
+          lockbox_payload="$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer $iam_token" \
+            "https://payload.lockbox.api.cloud.yandex.net/lockbox/v1/secrets/$YC_STATE_BACKEND_SECRET_ID/payload")"
+          jq -e '
+            type == "object" and
+            (.entries | type == "array" and length == 2) and
+            ([.entries[].key] | sort) == ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"] and
+            all(.entries[]; ((keys | sort) == ["key", "textValue"]) and (.textValue | type == "string" and length > 0))
+          ' <<<"$lockbox_payload" > /dev/null
+          aws_access_key_id="$(jq -er '.entries[] | select(.key == "AWS_ACCESS_KEY_ID") | .textValue' <<<"$lockbox_payload")"
+          aws_secret_access_key="$(jq -er '.entries[] | select(.key == "AWS_SECRET_ACCESS_KEY") | .textValue' <<<"$lockbox_payload")"
+          echo "::add-mask::$aws_access_key_id"
+          echo "::add-mask::$aws_secret_access_key"
+          export AWS_ACCESS_KEY_ID=$aws_access_key_id
+          export AWS_SECRET_ACCESS_KEY=$aws_secret_access_key
+          export TF_DATA_DIR="$terraform_data_dir"
+          install -d -m 700 "$terraform_data_dir"
+          printf '%s\n' \
+            'endpoints = { s3 = "https://storage.yandexcloud.net" }' \
+            "bucket = \"$YC_STATE_BUCKET_NAME\"" \
+            'region = "ru-central1"' \
+            'key = "production/terraform.tfstate"' \
+            'skip_region_validation = true' \
+            'skip_credentials_validation = true' \
+            'skip_requesting_account_id = true' \
+            'skip_s3_checksum = true' \
+            'use_path_style = true' > "$backend_config"
+          chmod 600 "$backend_config"
+          terraform -chdir=infra/yandex/production init -input=false -lockfile=readonly -backend-config="$backend_config"
+          terraform -chdir=infra/yandex/production plan -json -out="$plan_path" -var="public_dns_enabled=$public_dns_enabled" "${terraform_targets[@]}" |
+            jq -c '
+              if .type == "planned_change" then
+                {type: "planned_change", action: .change.action}
+              elif .type == "change_summary" and .changes.operation == "plan" then
+                {type: "change_summary", changes: {add: .changes.add, change: .changes.change, remove: .changes.remove, operation: .changes.operation}}
+              else empty end
+            ' |
+            node infra/yandex/scripts/validate-plan-summary.mjs > "$summary_path"
+          test -s "$plan_path"
+          test -s "$summary_path"
+          plan_sha256="$(sha256sum "$plan_path" | cut -d' ' -f1)"
+          summary_sha256="$(sha256sum "$summary_path" | cut -d' ' -f1)"
+          [[ "$plan_sha256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$summary_sha256" =~ ^[0-9a-f]{64}$ ]]
+          jq -n \
+            --arg commit_sha "$target_sha" \
+            --arg plan_sha256 "$plan_sha256" \
+            --arg summary_sha256 "$summary_sha256" \
+            --arg github_run_id "$GITHUB_RUN_ID" \
+            --arg github_run_attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg postgres_owner_approval_result "$POSTGRES_OWNER_APPROVAL_RESULT" \
+            --arg postgres_owner_change_reference "$POSTGRES_OWNER_CHANGE_REFERENCE" \
+            --arg postgres_provisioning_phase "$POSTGRES_PROVISIONING_PHASE" \
+            --arg observability_phase "$OBSERVABILITY_PHASE" \
+            --arg service_account_provenance_sha256 "$service_account_provenance_sha256" \
+            --argjson public_dns_enabled "$public_dns_enabled" \
+            '{commit_sha: $commit_sha, github_run_attempt: $github_run_attempt, github_run_id: $github_run_id, observability_phase: $observability_phase, plan_sha256: $plan_sha256, postgres_owner_approval_result: $postgres_owner_approval_result, postgres_owner_change_reference: $postgres_owner_change_reference, postgres_provisioning_phase: $postgres_provisioning_phase, public_dns_enabled: $public_dns_enabled, service_account_provenance_sha256: $service_account_provenance_sha256, summary_sha256: $summary_sha256}' \
+            > "$evidence_path"
+          chmod 600 "$plan_path" "$summary_path" "$evidence_path" "$identity_path"
+          printf 'target_sha=%s\n' "$target_sha" >> "$GITHUB_OUTPUT"
+          {
+            printf '### Yandex production Terraform plan\n\n'
+            printf -- '- Commit: `%s`\n' "$target_sha"
+            printf -- '- Public DNS requested: `%s`\n' "$public_dns_enabled"
+            printf -- '- Observability phase: `%s`\n' "$OBSERVABILITY_PHASE"
+            jq -r '
+              "- Resource counts: add=\(.resource_counts.add), change=\(.resource_counts.change), remove=\(.resource_counts.remove)",
+              "- Action classes: " + ((.action_classes | to_entries | map("\(.key)=\(.value)")) | if length == 0 then "none" else join(", ") end)
+            ' "$summary_path"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload exact saved plan and evidence
+        id: plan-artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: yandex-infrastructure-plan-${{ steps.create-plan.outputs.target_sha }}
+          path: ${{ runner.temp }}/yandex-infrastructure-plan
+          if-no-files-found: error
+          retention-days: 1
+      - name: Remove saved plan and temporary Terraform data
+        if: always()
+        run: |
+          set -euo pipefail
+          rm -rf -- "${RUNNER_TEMP:?}/yandex-infrastructure-plan"
+
+  apply:
+    needs: [plan]
+    if: github.event_name == 'workflow_dispatch' && needs.plan.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: production-infrastructure
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ENABLE_PUBLIC_DNS: ${{ inputs.enable_public_dns }}
+      POSTGRES_PROVISIONING_PHASE: ${{ inputs.postgres_provisioning_phase }}
+      OBSERVABILITY_PHASE: ${{ inputs.observability_phase }}
+      POSTGRES_OWNER_CHANGE_REFERENCE: ${{ inputs.postgres_owner_change_reference }}
+      TARGET_SHA: ${{ inputs.target_sha }}
+      YC_CLOUD_ID: ${{ vars.YC_CLOUD_ID }}
+      YC_FOLDER_ID: ${{ vars.YC_FOLDER_ID }}
+      YC_OIDC_AUDIENCE: ${{ vars.YC_OIDC_AUDIENCE }}
+      YC_TERRAFORM_SERVICE_ACCOUNT_ID: ${{ vars.YC_TERRAFORM_SERVICE_ACCOUNT_ID }}
+      YC_STATE_BACKEND_SECRET_ID: ${{ vars.YC_STATE_BACKEND_SECRET_ID }}
+      YC_STATE_BUCKET_NAME: ${{ vars.YC_STATE_BUCKET_NAME }}
+      TF_VAR_cloud_id: ${{ vars.YC_CLOUD_ID }}
+      TF_VAR_folder_id: ${{ vars.YC_FOLDER_ID }}
+      TF_VAR_zone: ${{ vars.YC_ZONE }}
+      TF_VAR_alb_subnet_cidr: ${{ vars.YC_ALB_SUBNET_CIDR }}
+      TF_VAR_app_subnet_cidr: ${{ vars.YC_APP_SUBNET_CIDR }}
+      TF_VAR_data_subnet_cidr: ${{ vars.YC_DATA_SUBNET_CIDR }}
+      TF_VAR_management_subnet_cidr: ${{ vars.YC_MANAGEMENT_SUBNET_CIDR }}
+      TF_VAR_ubuntu_lts_image_family: ubuntu-2404-lts
+      TF_VAR_kms_key_id: ${{ vars.YC_KMS_KEY_ID }}
+      TF_VAR_terraform_service_account_id: ${{ vars.YC_TERRAFORM_SERVICE_ACCOUNT_ID }}
+      TF_VAR_app_service_account_id: ${{ vars.YC_APP_SERVICE_ACCOUNT_ID }}
+      TF_VAR_runtime_secret_id: ${{ vars.YC_RUNTIME_SECRET_ID }}
+      TF_VAR_registry_secret_id: ${{ vars.YC_REGISTRY_SECRET_ID }}
+      TF_VAR_runner_service_account_id: ${{ vars.YC_RUNNER_SERVICE_ACCOUNT_ID }}
+      TF_VAR_deployment_controller_service_account_id: ${{ vars.YC_DEPLOYMENT_CONTROLLER_SERVICE_ACCOUNT_ID }}
+      TF_VAR_runner_registration_secret_id: ${{ vars.YC_RUNNER_REGISTRATION_SECRET_ID }}
+      TF_VAR_audit_service_account_id: ${{ vars.YC_AUDIT_SERVICE_ACCOUNT_ID }}
+      TF_VAR_audit_log_group_id: ${{ vars.YC_AUDIT_LOG_GROUP_ID }}
+      TF_VAR_database_name: ${{ vars.YC_DATABASE_NAME }}
+      TF_VAR_database_disk_size_gb: ${{ vars.YC_DATABASE_DISK_SIZE_GB }}
+      TF_VAR_state_bucket_name: ${{ vars.YC_STATE_BUCKET_NAME }}
+      TF_VAR_media_bucket_name: ${{ vars.YC_MEDIA_BUCKET_NAME }}
+      TF_VAR_audit_bucket_name: ${{ vars.YC_AUDIT_BUCKET_NAME }}
+      TF_VAR_domain: ${{ vars.MARKIRO_DOMAIN }}
+      TF_VAR_dns_zone_id: ${{ vars.YC_DNS_ZONE_ID }}
+      TF_VAR_observability_phase: ${{ inputs.observability_phase }}
+      TF_VAR_notification_channel_id: ${{ vars.YC_NOTIFICATION_CHANNEL_ID }}
+      TF_VAR_alert_ids: ${{ vars.YC_ALERT_IDS }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.plan.outputs.target-sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.15.8
+          terraform_wrapper: false
+      - name: Download the exact saved plan
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.plan.outputs.artifact-id }}
+          path: ${{ runner.temp }}/yandex-infrastructure-plan
+      - name: Configure the reviewed Yandex provider mirror
+        env:
+          TF_CLI_CONFIG_FILE: ${{ runner.temp }}/terraform.tfrc
+        run: |
+          set -euo pipefail
+          printf '%s\n' \
+            'provider_installation {' \
+            '  network_mirror {' \
+            '    url     = "https://terraform-mirror.yandexcloud.net/"' \
+            '    include = ["registry.terraform.io/yandex-cloud/yandex"]' \
+            '  }' \
+            '  direct {' \
+            '    exclude = ["registry.terraform.io/yandex-cloud/yandex"]' \
+            '  }' \
+            '}' > "$TF_CLI_CONFIG_FILE"
+          chmod 600 "$TF_CLI_CONFIG_FILE"
+          printf 'TF_CLI_CONFIG_FILE=%s\n' "$TF_CLI_CONFIG_FILE" >> "$GITHUB_ENV"
+      - name: Verify evidence, authenticate, and apply only the saved plan
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          DISPATCH_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          artifact_dir="$RUNNER_TEMP/yandex-infrastructure-plan"
+          plan_path="$artifact_dir/saved.tfplan"
+          summary_path="$artifact_dir/plan-summary.json"
+          evidence_path="$artifact_dir/evidence.json"
+          identity_path="$artifact_dir/service-account-provenance.json"
+          fresh_identity_path="$RUNNER_TEMP/yandex-service-account-provenance-current.json"
+          alert_dir="$RUNNER_TEMP/yandex-alert-specs"
+          alert_artifact="$alert_dir/alert-specs.json"
+          backend_config="$RUNNER_TEMP/yandex-production-backend.hcl"
+          terraform_data_dir="$RUNNER_TEMP/yandex-production-terraform-data"
+          target_sha="$TARGET_SHA"
+          dispatch_sha="$DISPATCH_SHA"
+          cleanup() {
+            unset github_oidc_response github_oidc_token iam_response lockbox_payload
+            unset iam_token aws_access_key_id aws_secret_access_key YC_TOKEN AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY TF_DATA_DIR
+            rm -f "$backend_config" "$fresh_identity_path"
+            rm -rf -- "${RUNNER_TEMP:?}/yandex-production-terraform-data"
+            rm -rf -- "${RUNNER_TEMP:?}/yandex-infrastructure-plan"
+          }
+          trap cleanup EXIT
+          umask 077
+          [[ "$target_sha" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$target_sha" == "$dispatch_sha" ]]
+          [[ "$target_sha" == "${{ needs.plan.outputs.target-sha }}" ]]
+          [[ "$(git rev-parse HEAD)" == "$target_sha" ]]
+          [[ "$GITHUB_REF" == "refs/heads/main" ]]
+          repository_head="$(curl --fail --silent --show-error \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer $GITHUB_TOKEN" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/git/ref/heads/main" | jq -er '.object.sha')"
+          [[ "$repository_head" == "$target_sha" ]]
+          test -f "$plan_path"
+          test ! -L "$plan_path"
+          test -s "$summary_path"
+          test ! -L "$summary_path"
+          test -s "$evidence_path"
+          test ! -L "$evidence_path"
+          test -s "$identity_path"
+          test ! -L "$identity_path"
+          jq -e '
+            type == "object" and
+            (keys | sort) == ["commit_sha", "github_run_attempt", "github_run_id", "observability_phase", "plan_sha256", "postgres_owner_approval_result", "postgres_owner_change_reference", "postgres_provisioning_phase", "public_dns_enabled", "service_account_provenance_sha256", "summary_sha256"] and
+            (.commit_sha | type == "string") and
+            (.github_run_attempt | type == "string" and test("^[1-9][0-9]*$")) and
+            (.github_run_id | type == "string" and test("^[1-9][0-9]*$")) and
+            (.observability_phase | type == "string" and (. == "first" or . == "protected")) and
+            (.plan_sha256 | type == "string") and
+            (.postgres_owner_approval_result | type == "string" and (. == "success" or . == "skipped")) and
+            (.postgres_owner_change_reference | type == "string") and
+            (.postgres_provisioning_phase | type == "string") and
+            (.public_dns_enabled | type == "boolean") and
+            (.service_account_provenance_sha256 | type == "string") and
+            (.summary_sha256 | type == "string")
+          ' "$evidence_path" > /dev/null
+          evidence_commit="$(jq -er '.commit_sha' "$evidence_path")"
+          artifact_sha256="$(jq -er '.plan_sha256' "$evidence_path")"
+          summary_sha256="$(jq -er '.summary_sha256' "$evidence_path")"
+          evidence_github_run_attempt="$(jq -er '.github_run_attempt' "$evidence_path")"
+          evidence_github_run_id="$(jq -er '.github_run_id' "$evidence_path")"
+          evidence_postgres_owner_approval_result="$(jq -er '.postgres_owner_approval_result' "$evidence_path")"
+          evidence_postgres_owner_change_reference="$(jq -er '.postgres_owner_change_reference' "$evidence_path")"
+          evidence_postgres_provisioning_phase="$(jq -er '.postgres_provisioning_phase' "$evidence_path")"
+          evidence_observability_phase="$(jq -er '.observability_phase' "$evidence_path")"
+          evidence_public_dns="$(jq -er '.public_dns_enabled' "$evidence_path")"
+          evidence_service_account_provenance_sha256="$(jq -er '.service_account_provenance_sha256' "$evidence_path")"
+          [[ "$evidence_commit" == "$target_sha" ]]
+          [[ "$artifact_sha256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$summary_sha256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$evidence_service_account_provenance_sha256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$(sha256sum "$plan_path" | cut -d' ' -f1)" == "$artifact_sha256" ]]
+          [[ "$(sha256sum "$summary_path" | cut -d' ' -f1)" == "$summary_sha256" ]]
+          [[ "$(sha256sum "$identity_path" | cut -d' ' -f1)" == "$evidence_service_account_provenance_sha256" ]]
+          [[ "$evidence_github_run_id" == "$GITHUB_RUN_ID" ]]
+          [[ "$evidence_github_run_attempt" == "$GITHUB_RUN_ATTEMPT" ]]
+          [[ "$evidence_postgres_owner_change_reference" == "$POSTGRES_OWNER_CHANGE_REFERENCE" ]]
+          [[ "$evidence_postgres_provisioning_phase" == "$POSTGRES_PROVISIONING_PHASE" ]]
+          [[ "$evidence_observability_phase" == "$OBSERVABILITY_PHASE" ]]
+          case "$POSTGRES_PROVISIONING_PHASE" in
+            none|cluster)
+              [[ "$POSTGRES_OWNER_CHANGE_REFERENCE" == none ]]
+              [[ "$evidence_postgres_owner_approval_result" == skipped ]]
+              ;;
+            database)
+              [[ "$POSTGRES_OWNER_CHANGE_REFERENCE" =~ ^[a-z][a-z0-9_]{2,63}$ ]]
+              [[ "$evidence_postgres_owner_approval_result" == success ]]
+              ;;
+            *) exit 1 ;;
+          esac
+          case "$ENABLE_PUBLIC_DNS" in
+            true) expected_public_dns=true ;;
+            false) expected_public_dns=false ;;
+            *) exit 1 ;;
+          esac
+          case "$OBSERVABILITY_PHASE" in
+            first)
+              [[ "$expected_public_dns" == false ]]
+              ;;
+            protected)
+              test -n "$TF_VAR_notification_channel_id"
+              test -n "$TF_VAR_alert_ids"
+              ;;
+            *) exit 1 ;;
+          esac
+          node infra/yandex/scripts/validate-workload-identities.mjs
+          [[ "$evidence_public_dns" == "$expected_public_dns" ]]
+          for required_value in \
+            "$YC_CLOUD_ID" \
+            "$YC_FOLDER_ID" \
+            "$YC_OIDC_AUDIENCE" \
+            "$YC_TERRAFORM_SERVICE_ACCOUNT_ID" \
+            "$YC_STATE_BACKEND_SECRET_ID" \
+            "$YC_STATE_BUCKET_NAME"; do
+            test -n "$required_value"
+          done
+          github_oidc_response="$(curl --fail --silent --show-error --get \
+            --header "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            --data-urlencode "audience=$YC_OIDC_AUDIENCE" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL")"
+          github_oidc_token="$(jq -er '.value | select(type == "string" and length > 0)' <<<"$github_oidc_response")"
+          echo "::add-mask::$github_oidc_token"
+          iam_response="$(curl --fail --silent --show-error \
+            --request POST \
+            --header "Content-Type: application/x-www-form-urlencoded" \
+            --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' \
+            --data-urlencode 'requested_token_type=urn:ietf:params:oauth:token-type:access_token' \
+            --data-urlencode "audience=$YC_TERRAFORM_SERVICE_ACCOUNT_ID" \
+            --data-urlencode "subject_token=$github_oidc_token" \
+            --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:id_token' \
+            https://auth.yandex.cloud/oauth/token)"
+          iam_token="$(jq -er '.access_token | select(type == "string" and length > 0)' <<<"$iam_response")"
+          echo "::add-mask::$iam_token"
+          export YC_TOKEN=$iam_token
+          node infra/yandex/scripts/verify-service-account-provenance.mjs validate < "$identity_path" > /dev/null
+          test ! -e "$fresh_identity_path"
+          node infra/yandex/scripts/verify-service-account-provenance.mjs fetch > "$fresh_identity_path"
+          cmp --silent "$identity_path" "$fresh_identity_path"
+          rm -f "$fresh_identity_path"
+          lockbox_payload="$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer $iam_token" \
+            "https://payload.lockbox.api.cloud.yandex.net/lockbox/v1/secrets/$YC_STATE_BACKEND_SECRET_ID/payload")"
+          jq -e '
+            type == "object" and
+            (.entries | type == "array" and length == 2) and
+            ([.entries[].key] | sort) == ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"] and
+            all(.entries[]; ((keys | sort) == ["key", "textValue"]) and (.textValue | type == "string" and length > 0))
+          ' <<<"$lockbox_payload" > /dev/null
+          aws_access_key_id="$(jq -er '.entries[] | select(.key == "AWS_ACCESS_KEY_ID") | .textValue' <<<"$lockbox_payload")"
+          aws_secret_access_key="$(jq -er '.entries[] | select(.key == "AWS_SECRET_ACCESS_KEY") | .textValue' <<<"$lockbox_payload")"
+          echo "::add-mask::$aws_access_key_id"
+          echo "::add-mask::$aws_secret_access_key"
+          export AWS_ACCESS_KEY_ID=$aws_access_key_id
+          export AWS_SECRET_ACCESS_KEY=$aws_secret_access_key
+          export TF_DATA_DIR="$terraform_data_dir"
+          install -d -m 700 "$terraform_data_dir"
+          printf '%s\n' \
+            'endpoints = { s3 = "https://storage.yandexcloud.net" }' \
+            "bucket = \"$YC_STATE_BUCKET_NAME\"" \
+            'region = "ru-central1"' \
+            'key = "production/terraform.tfstate"' \
+            'skip_region_validation = true' \
+            'skip_credentials_validation = true' \
+            'skip_requesting_account_id = true' \
+            'skip_s3_checksum = true' \
+            'use_path_style = true' > "$backend_config"
+          chmod 600 "$backend_config"
+          terraform -chdir=infra/yandex/production init -input=false -lockfile=readonly -backend-config="$backend_config"
+          if [[ "$OBSERVABILITY_PHASE" == first && "$POSTGRES_PROVISIONING_PHASE" == none ]]; then
+            test ! -e "$alert_dir"
+            install -d -m 700 "$alert_dir"
+            export ALERT_SPECS_COMMIT_SHA="$evidence_commit"
+            export ALERT_SPECS_EVIDENCE_SHA256="$(sha256sum "$evidence_path" | cut -d' ' -f1)"
+            export ALERT_SPECS_GITHUB_RUN_ATTEMPT="$evidence_github_run_attempt"
+            export ALERT_SPECS_GITHUB_RUN_ID="$evidence_github_run_id"
+            export ALERT_SPECS_OBSERVABILITY_PHASE="$evidence_observability_phase"
+            export ALERT_SPECS_PLAN_SHA256="$artifact_sha256"
+            terraform -chdir=infra/yandex/production apply -json -input=false "$plan_path" 2>/dev/null |
+              node infra/yandex/scripts/extract-alert-specs.mjs extract > "$alert_artifact"
+            chmod 600 "$alert_artifact"
+            test "$(wc -c < "$alert_artifact")" -le 262145
+            node infra/yandex/scripts/extract-alert-specs.mjs validate < "$alert_artifact" > /dev/null
+            unset ALERT_SPECS_COMMIT_SHA ALERT_SPECS_EVIDENCE_SHA256 ALERT_SPECS_GITHUB_RUN_ATTEMPT
+            unset ALERT_SPECS_GITHUB_RUN_ID ALERT_SPECS_OBSERVABILITY_PHASE ALERT_SPECS_PLAN_SHA256
+          else
+            terraform -chdir=infra/yandex/production apply -json -input=false "$plan_path" > /dev/null 2>&1
+          fi
+      - name: Upload exact first-phase alert specifications
+        if: inputs.observability_phase == 'first' && inputs.postgres_provisioning_phase == 'none'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: yandex-alert-specs-${{ inputs.target_sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/yandex-alert-specs/alert-specs.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Record exact public DNS apply evidence
+        if: inputs.enable_public_dns == true
+        run: |
+          set -euo pipefail
+          receipt_path="$RUNNER_TEMP/public-dns-apply.json"
+          test ! -e "$receipt_path"
+          umask 077
+          applied_at="$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')"
+          jq -n \
+            --arg applied_at "$applied_at" \
+            --arg dns_apply_run_id "$GITHUB_RUN_ID" \
+            --arg release_sha "$TARGET_SHA" \
+            '{appliedAt: $applied_at, dnsApplyRunId: $dns_apply_run_id, publicDnsEnabled: true, releaseSha: $release_sha}' \
+            > "$receipt_path"
+          chmod 600 "$receipt_path"
+      - name: Upload exact public DNS apply evidence
+        if: inputs.enable_public_dns == true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: yandex-public-dns-apply-${{ inputs.target_sha }}
+          path: ${{ runner.temp }}/public-dns-apply.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Remove downloaded plan and temporary Terraform data
+        if: always()
+        run: |
+          set -euo pipefail
+          rm -rf -- "${RUNNER_TEMP:?}/yandex-infrastructure-plan"
+          rm -rf -- "${RUNNER_TEMP:?}/yandex-production-terraform-data"
+          rm -rf -- "${RUNNER_TEMP:?}/yandex-alert-specs"
+          rm -f -- "${RUNNER_TEMP:?}/public-dns-apply.json"

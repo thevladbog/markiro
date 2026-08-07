@@ -10,6 +10,26 @@ const envExample = ".env.production.example";
 const apiDigest = `sha256:${"a".repeat(64)}`;
 const edgeDigest = `sha256:${"b".repeat(64)}`;
 
+function renderCompose(files) {
+  return JSON.parse(
+    execFileSync(
+      "docker",
+      ["compose", ...files.flatMap((file) => ["-f", file]), "config", "--format", "json"],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          MARKIRO_DOMAIN: "localhost",
+          MARKIRO_ENV_FILE: ".env.production.example",
+          MARKIRO_IMAGE_TAG: "a".repeat(40),
+          MARKIRO_API_IMAGE_DIGEST: `sha256:${"b".repeat(64)}`,
+          MARKIRO_EDGE_IMAGE_DIGEST: `sha256:${"c".repeat(64)}`,
+        },
+      },
+    ),
+  );
+}
+
 function assertDigestImageRefs(compose) {
   const model = loadYaml(compose);
   assert.equal(
@@ -32,6 +52,15 @@ test("production application services use exact restart policies", async () => {
   assert.equal(model.services.migrate.restart, "no");
   assert.equal(model.services.api.restart, "unless-stopped");
   assert.equal(model.services.edge.restart, "unless-stopped");
+});
+
+test("production edge receives the immutable release SHA used by its public identity header", async () => {
+  const model = loadYaml(await readFile(productionCompose, "utf8"));
+
+  assert.equal(
+    model.services.edge.environment.MARKIRO_RELEASE_SHA,
+    "${MARKIRO_IMAGE_TAG:?MARKIRO_IMAGE_TAG is required}",
+  );
 });
 
 test("merged CI Compose config preserves production restart policies", () => {
@@ -241,4 +270,21 @@ test("production environment example is a blank loadEnv inventory", async () => 
   for (const line of example.split("\n")) {
     if (/^[A-Z0-9_]+=/.test(line)) assert.match(line, /^[A-Z0-9_]+=$/);
   }
+});
+
+test("Yandex overlay exposes only backend HTTP and two proxy hops", () => {
+  const model = renderCompose(["compose.production.yml", "deploy/production/compose.yandex.yml"]);
+  assert.deepEqual(model.services.edge.ports, [
+    { target: 8080, published: "8080", protocol: "tcp", mode: "host" },
+  ]);
+  assert.equal(model.services.edge.environment.MARKIRO_EDGE_MODE, "behind-alb");
+  assert.equal(model.services.api.environment.TRUST_PROXY_HOPS, "2");
+  assert.equal(model.services.migrate.environment.TRUST_PROXY_HOPS, "1");
+});
+
+test("Yandex overlay cannot publish the direct HTTPS listener", async () => {
+  const overlay = await readFile("deploy/production/compose.yandex.yml", "utf8");
+
+  assert.doesNotMatch(overlay, /8443/);
+  assert.match(overlay, /ports: !override/);
 });

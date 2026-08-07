@@ -3,11 +3,11 @@ import { spawn } from "node:child_process";
 import process from "node:process";
 
 import { isMainModule } from "./cli-main.mjs";
+import { productionComposeArgs } from "./compose-files.mjs";
+import { validateProductionDomain } from "./production-domain.mjs";
 
 const IMAGE_TAG_PATTERN = /^[0-9a-f]{40}$/;
 const IMAGE_DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/;
-const DOMAIN_PATTERN =
-  /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const COMPOSE_TIMEOUT_MS = 30_000;
 const TERMINATION_GRACE_MS = 1_000;
 const STDERR_LIMIT_BYTES = 8 * 1024;
@@ -44,13 +44,16 @@ export async function composeQuiet(environment, supplied = {}) {
   const childEnvironment = {
     PATH: process.env.PATH,
     HOME: process.env.HOME,
-    MARKIRO_IMAGE_TAG: environment.MARKIRO_IMAGE_TAG,
     MARKIRO_API_IMAGE_DIGEST: environment.MARKIRO_API_IMAGE_DIGEST,
     MARKIRO_EDGE_IMAGE_DIGEST: environment.MARKIRO_EDGE_IMAGE_DIGEST,
     MARKIRO_DOMAIN: environment.MARKIRO_DOMAIN,
-    ACME_EMAIL: environment.ACME_EMAIL,
+    MARKIRO_EDGE_MODE: environment.MARKIRO_EDGE_MODE,
     MARKIRO_ENV_FILE: environment.MARKIRO_ENV_FILE,
+    MARKIRO_COMPOSE_PROJECT: environment.MARKIRO_COMPOSE_PROJECT,
   };
+  if (environment.MARKIRO_IMAGE_TAG !== undefined)
+    childEnvironment.MARKIRO_IMAGE_TAG = environment.MARKIRO_IMAGE_TAG;
+  if (environment.ACME_EMAIL !== undefined) childEnvironment.ACME_EMAIL = environment.ACME_EMAIL;
   if (environment.MARKIRO_HTTP_PORT !== undefined)
     childEnvironment.MARKIRO_HTTP_PORT = environment.MARKIRO_HTTP_PORT;
   if (environment.MARKIRO_HTTPS_PORT !== undefined)
@@ -61,15 +64,7 @@ export async function composeQuiet(environment, supplied = {}) {
     try {
       child = dependencies.spawn(
         "docker",
-        [
-          "compose",
-          "--env-file",
-          environment.MARKIRO_ENV_FILE,
-          "-f",
-          "compose.production.yml",
-          "config",
-          "--quiet",
-        ],
+        [...productionComposeArgs(environment), "config", "--quiet"],
         { env: childEnvironment, stdio: ["ignore", "ignore", "pipe"] },
       );
     } catch {
@@ -140,6 +135,7 @@ export async function composeQuiet(environment, supplied = {}) {
  * @property {string | undefined} MARKIRO_API_IMAGE_DIGEST
  * @property {string | undefined} MARKIRO_EDGE_IMAGE_DIGEST
  * @property {string | undefined} MARKIRO_DOMAIN
+ * @property {string | undefined} MARKIRO_EDGE_MODE
  * @property {string | undefined} ACME_EMAIL
  * @property {string | undefined} MARKIRO_ENV_FILE
  * @property {string | undefined} MARKIRO_HTTP_PORT
@@ -148,12 +144,13 @@ export async function composeQuiet(environment, supplied = {}) {
 
 /**
  * @typedef {object} PreflightResult
- * @property {string} imageTag
+ * @property {string | undefined} imageTag
  * @property {string} apiImageDigest
  * @property {string} edgeImageDigest
  * @property {string} domain
- * @property {string} acmeEmail
+ * @property {string | undefined} acmeEmail
  * @property {string} envFile
+ * @property {"direct" | "behind-alb"} edgeMode
  */
 
 /**
@@ -175,16 +172,19 @@ export async function runPreflight(
   const apiImageDigest = environment.MARKIRO_API_IMAGE_DIGEST;
   const edgeImageDigest = environment.MARKIRO_EDGE_IMAGE_DIGEST;
   const domain = environment.MARKIRO_DOMAIN;
+  const edgeMode = environment.MARKIRO_EDGE_MODE || "direct";
   const acmeEmail = environment.ACME_EMAIL;
   const envFile = environment.MARKIRO_ENV_FILE || ".env.production";
 
-  if (!imageTag || !IMAGE_TAG_PATTERN.test(imageTag)) throw invalid("MARKIRO_IMAGE_TAG");
+  if (edgeMode === "direct" && (!imageTag || !IMAGE_TAG_PATTERN.test(imageTag)))
+    throw invalid("MARKIRO_IMAGE_TAG");
   if (!apiImageDigest || !IMAGE_DIGEST_PATTERN.test(apiImageDigest))
     throw invalid("MARKIRO_API_IMAGE_DIGEST");
   if (!edgeImageDigest || !IMAGE_DIGEST_PATTERN.test(edgeImageDigest))
     throw invalid("MARKIRO_EDGE_IMAGE_DIGEST");
-  if (!domain || !DOMAIN_PATTERN.test(domain)) throw invalid("MARKIRO_DOMAIN");
-  if (!acmeEmail || !isEmail(acmeEmail)) throw invalid("ACME_EMAIL");
+  validateProductionDomain(domain);
+  if (edgeMode !== "direct" && edgeMode !== "behind-alb") throw invalid("MARKIRO_EDGE_MODE");
+  if (edgeMode === "direct" && (!acmeEmail || !isEmail(acmeEmail))) throw invalid("ACME_EMAIL");
 
   try {
     const mode = await dependencies.mode(envFile);
@@ -201,8 +201,10 @@ export async function runPreflight(
       MARKIRO_API_IMAGE_DIGEST: apiImageDigest,
       MARKIRO_EDGE_IMAGE_DIGEST: edgeImageDigest,
       MARKIRO_DOMAIN: domain,
+      MARKIRO_EDGE_MODE: edgeMode,
       ACME_EMAIL: acmeEmail,
       MARKIRO_ENV_FILE: envFile,
+      MARKIRO_COMPOSE_PROJECT: environment.MARKIRO_COMPOSE_PROJECT,
     };
     if (environment.MARKIRO_HTTP_PORT !== undefined)
       composeEnvironment.MARKIRO_HTTP_PORT = environment.MARKIRO_HTTP_PORT;
@@ -213,7 +215,7 @@ export async function runPreflight(
     throw new Error("Compose validation failed");
   }
 
-  return { imageTag, apiImageDigest, edgeImageDigest, domain, acmeEmail, envFile };
+  return { imageTag, apiImageDigest, edgeImageDigest, domain, acmeEmail, envFile, edgeMode };
 }
 
 if (isMainModule(import.meta.url)) {

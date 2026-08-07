@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { load } from "js-yaml";
 
@@ -10,6 +13,7 @@ const LOGIN = "docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1";
 const UPLOAD_ARTIFACT = "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a";
 const DOWNLOAD_ARTIFACT = "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c";
 const RELEASE_ARTIFACT_NAME = "markiro-production-images-${{ github.sha }}";
+const RELEASE_MANIFEST_ARTIFACT_NAME = "markiro-release-manifest-${{ github.sha }}";
 const RELEASE_ARTIFACT_OUTPUTS = {
   "verified-images-artifact-id": "${{ steps.verified-images-artifact.outputs.artifact-id }}",
 };
@@ -72,6 +76,7 @@ const GENERATE_ENVIRONMENT =
   ].join("\n") + "\n";
 
 const PRODUCTION_BUNDLE_ENV = {
+  COMPOSE_PROJECT_NAME: "markiro-production",
   MARKIRO_IMAGE_TAG: "${{ github.sha }}",
   MARKIRO_API_IMAGE_DIGEST: `sha256:${"a".repeat(64)}`,
   MARKIRO_EDGE_IMAGE_DIGEST: `sha256:${"b".repeat(64)}`,
@@ -254,6 +259,35 @@ const PUSH_VERIFIED_IMAGES =
   'printf \'api_digest=%s\\n\' "$api_digest" >> "$GITHUB_OUTPUT"\n' +
   'printf \'edge_digest=%s\\n\' "$edge_digest" >> "$GITHUB_OUTPUT"\n';
 
+const RELEASE_TIME_STEP = {
+  name: "Record release timestamp",
+  id: "release-time",
+  run: `printf 'created_at=%s\\n' "$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')" >> "$GITHUB_OUTPUT"`,
+};
+
+const CREATE_RELEASE_MANIFEST_STEP = {
+  name: "Create trusted release manifest",
+  env: {
+    RELEASE_SHA: "${{ github.sha }}",
+    API_DIGEST: "${{ steps.published-images.outputs.api_digest }}",
+    EDGE_DIGEST: "${{ steps.published-images.outputs.edge_digest }}",
+    GITHUB_RUN_ID: "${{ github.run_id }}",
+    CREATED_AT: "${{ steps.release-time.outputs.created_at }}",
+  },
+  run: 'node deploy/production/release-manifest.mjs create "$RUNNER_TEMP/release-manifest.json"',
+};
+
+const UPLOAD_RELEASE_MANIFEST_STEP = {
+  name: "Upload trusted release manifest",
+  uses: UPLOAD_ARTIFACT,
+  with: {
+    name: RELEASE_MANIFEST_ARTIFACT_NAME,
+    path: "${{ runner.temp }}/release-manifest.json",
+    "retention-days": 90,
+    "if-no-files-found": "error",
+  },
+};
+
 const RELEASE_STEPS = [
   {
     name: "Download the verified production images",
@@ -282,6 +316,9 @@ const RELEASE_STEPS = [
     env: { RELEASE_SHA: "${{ github.sha }}" },
     run: PUSH_VERIFIED_IMAGES,
   },
+  RELEASE_TIME_STEP,
+  CREATE_RELEASE_MANIFEST_STEP,
+  UPLOAD_RELEASE_MANIFEST_STEP,
   {
     name: "Record trusted image digest evidence",
     env: {
@@ -381,8 +418,16 @@ function assertNoForbiddenWorkflowText(sourceText, label) {
 
 function assertCiWorkflow(ciSource) {
   const workflow = parseWorkflow(ciSource, "CI workflow");
+  const verify = workflow.jobs?.verify;
   const job = workflow.jobs?.["production-bundle"];
 
+  assert.ok(verify, "missing verify job");
+  assert.equal(verify["timeout-minutes"], 20, "unexpected verify timeout");
+  assert.equal(
+    verify.steps?.find((step) => step.run?.startsWith("pnpm turbo lint typecheck test build"))?.run,
+    "pnpm turbo lint typecheck test build --concurrency=1 --force",
+    "unexpected verify Turbo gate",
+  );
   assert.ok(job, "missing production-bundle job");
   assert.deepEqual(
     Object.keys(job).sort(),
@@ -521,11 +566,715 @@ test("CI structurally verifies the production bundle and secret-safe cleanup", a
   assertCiWorkflow(await source(".github/workflows/ci.yml"));
 });
 
-test("main publication structurally pushes SHA tags and records trusted digest evidence", async () => {
+test("main publication records a durable trusted release manifest after image publication", async () => {
   assertReleaseWorkflow(
     await source(".github/workflows/release-images.yml"),
     await source(".github/workflows/ci.yml"),
   );
+});
+
+function assertProductionDeploymentWorkflow(
+  deploymentSource,
+  remoteDeploySource,
+  runnerControlSource,
+) {
+  const workflow = parseWorkflow(deploymentSource, "production deployment workflow");
+
+  assert.deepEqual(Object.keys(workflow.on).sort(), ["workflow_dispatch", "workflow_run"]);
+  assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), [
+    "deployment_phase",
+    "rehearsal_run_attempt",
+    "rehearsal_run_id",
+    "release_run_id",
+    "release_sha",
+    "rollback_rehearsal",
+  ]);
+  assert.deepEqual(workflow.on.workflow_dispatch.inputs.rollback_rehearsal, {
+    description:
+      "Separately approved first-release rollback rehearsal; never enabled by automatic delivery.",
+    required: true,
+    default: false,
+    type: "boolean",
+  });
+  assert.deepEqual(workflow.on.workflow_dispatch.inputs.rehearsal_run_id, {
+    description:
+      "Exact prior rollback-rehearsal run ID; required only for a successful first deployment.",
+    required: true,
+    default: "none",
+    type: "string",
+  });
+  assert.deepEqual(workflow.on.workflow_dispatch.inputs.rehearsal_run_attempt, {
+    description:
+      "Exact prior rollback-rehearsal run attempt; required only for a successful first deployment.",
+    required: true,
+    default: "none",
+    type: "string",
+  });
+  assert.deepEqual(workflow.on.workflow_run, {
+    workflows: ["Publish production images"],
+    types: ["completed"],
+    branches: ["main"],
+  });
+  assert.equal("pull_request" in workflow.on, false);
+  assert.deepEqual(workflow.permissions, {});
+  assert.deepEqual(workflow.jobs.controller.permissions, {
+    actions: "read",
+    contents: "read",
+    "id-token": "write",
+  });
+  assert.deepEqual(workflow.jobs.deploy.permissions, {
+    actions: "read",
+    contents: "read",
+    "id-token": "none",
+  });
+  assert.deepEqual(workflow.jobs.cleanup.permissions, {
+    contents: "read",
+    "id-token": "write",
+  });
+  assert.doesNotMatch(deploymentSource, /packages:\s*write/);
+  assert.match(deploymentSource, /github\.event\.workflow_run\.conclusion == 'success'/);
+  assert.match(deploymentSource, /github\.event\.workflow_run\.id/);
+  assert.match(deploymentSource, /github\.event\.workflow_run\.head_sha/);
+  assert.equal(
+    (
+      deploymentSource.match(/name: markiro-release-manifest-\$\{\{[^}]*release-sha[^}]*\}\}/g) ??
+      []
+    ).length,
+    2,
+  );
+  assert.match(deploymentSource, /run-id:\s*\$\{\{[^}]*release-run-id[^}]*\}\}/);
+  assert.equal(workflow.jobs.controller.environment, "production-controller");
+  assert.equal(workflow.jobs.deploy.environment, "production-deploy");
+  assert.equal(workflow.jobs.cleanup.environment, "production-cleanup");
+  assert.equal(
+    new Set([
+      workflow.jobs.controller.environment,
+      workflow.jobs.deploy.environment,
+      workflow.jobs.cleanup.environment,
+    ]).size,
+    3,
+    "controller, deploy, and cleanup must never share an OIDC environment subject",
+  );
+  assert.match(
+    deploymentSource,
+    /runs-on:\s*\[self-hosted, linux, "\$\{\{ needs\.controller\.outputs\.runner-label \}\}"\]/,
+  );
+  assert.doesNotMatch(deploymentSource, /runs-on:\s*\[self-hosted, linux, markiro-production\]/);
+  assert.match(deploymentSource, /GITHUB_RUNNER_ADMIN_TOKEN/);
+  assert.match(
+    deploymentSource,
+    /MARKIRO_ROLLBACK_REHEARSAL:\s*\$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.rollback_rehearsal && '1' \|\| '0' \}\}/,
+  );
+  const rollbackSelector =
+    "${{ github.event_name == 'workflow_dispatch' && inputs.rollback_rehearsal && '1' || '0' }}";
+  assert.equal(workflow.jobs.controller.env.MARKIRO_ROLLBACK_REHEARSAL, rollbackSelector);
+  assert.equal(workflow.jobs.deploy.env.MARKIRO_ROLLBACK_REHEARSAL, rollbackSelector);
+  assert.match(remoteDeploySource, /rollback rehearsal requires a first deployment/);
+  assert.match(
+    remoteDeploySource,
+    /if \(dependencies\.rollbackRehearsal\) \{[\s\S]*?return \{ state: "rehearsed", tag: candidate\.tag \};[\s\S]*?\}\n\s+return await dependencies\.finalize\(candidate\);/,
+  );
+  assert.match(
+    deploymentSource,
+    /markiro-rollback-rehearsal-\$\{\{ needs\.controller\.outputs\.release-sha \}\}/,
+  );
+  assert.match(deploymentSource, /Record authenticated bounded rollback rehearsal evidence/);
+  const successfulFirstCondition =
+    "github.event_name == 'workflow_dispatch' && inputs.deployment_phase == 'first' && inputs.rollback_rehearsal == false";
+  const controllerSteps = workflow.jobs.controller.steps;
+  const rehearsalDownload = controllerSteps.find(
+    ({ name }) => name === "Download prerequisite rollback rehearsal evidence",
+  );
+  const cleanupDownload = controllerSteps.find(
+    ({ name }) => name === "Download prerequisite cleanup receipt",
+  );
+  assert.equal(rehearsalDownload.if, successfulFirstCondition);
+  assert.equal(cleanupDownload.if, successfulFirstCondition);
+  assert.equal(
+    rehearsalDownload.with.name,
+    "markiro-rollback-rehearsal-${{ steps.release.outputs.release-sha }}-attempt-${{ inputs.rehearsal_run_attempt }}",
+  );
+  assert.equal(
+    cleanupDownload.with.name,
+    "markiro-cleanup-${{ steps.release.outputs.release-sha }}-attempt-${{ inputs.rehearsal_run_attempt }}",
+  );
+  assert.equal(rehearsalDownload.with["run-id"], "${{ inputs.rehearsal_run_id }}");
+  assert.equal(cleanupDownload.with["run-id"], "${{ inputs.rehearsal_run_id }}");
+  const releaseGate = controllerSteps.find(
+    ({ name }) => name === "Resolve exact trusted release identity",
+  );
+  assert.doesNotMatch(releaseGate.run, /\.inputs(?:\.|\[)/);
+  assert.match(releaseGate.run, /rtrimstr\("@refs\/heads\/main"\)/);
+  assert.match(releaseGate.run, /rtrimstr\("@main"\)/);
+  assert.match(releaseGate.run, /\.run_attempt == \(\$rehearsal_run_attempt \| tonumber\)/);
+  assert.match(releaseGate.run, /\.head_sha == \$sha/);
+  assert.match(releaseGate.run, /\.conclusion == "success"/);
+  assert.match(releaseGate.run, /\[\[ "\$DISPATCH_PHASE" == repeat \]\]/);
+  assert.match(
+    releaseGate.run,
+    /if \[\[ "\$DISPATCH_REHEARSAL" == true \]\]; then\n\s+\[\[ "\$DISPATCH_PHASE" == first \]\]/,
+  );
+  assert.match(releaseGate.run, /\[\[ "\$REHEARSAL_RUN_ID" == none \]\]/);
+  const runnerGate = controllerSteps.find(
+    ({ name }) =>
+      name === "Validate manifest, infrastructure, backup, then start the one-use runner",
+  );
+  assert.match(runnerGate.run, /rollback-rehearsal-prerequisite/);
+  assert.match(runnerGate.run, /cleanup-prerequisite/);
+  assert.match(runnerGate.run, /\.runnerDeregistered == true/);
+  assert.match(runnerGate.run, /\.runnerVmStopped == true/);
+  assert.match(runnerGate.run, /\.deploymentRunAttempt == \$deployment_run_attempt/);
+  assert.match(runnerGate.run, /\.releaseRunId == \$release_run_id/);
+  assert.match(runnerGate.run, /\.deploymentPhase == "first"/);
+  assert.match(runnerGate.run, /\.rollbackRehearsal == true/);
+  assert.match(runnerGate.run, /\.sourceEvent == "workflow_dispatch"/);
+  assert.match(runnerGate.run, /\.sourceRef == "refs\/heads\/main"/);
+  assert.match(runnerGate.run, /\.deploymentRunId == \$deployment_run_id/);
+  assert.match(runnerGate.run, /\.releaseSha == \$release_sha/);
+  const deploySteps = workflow.jobs.deploy.steps;
+  const rehearsalEvidence = deploySteps.find(
+    ({ name }) => name === "Record authenticated bounded rollback rehearsal evidence",
+  );
+  const rehearsalUpload = deploySteps.find(
+    ({ name }) => name === "Upload rollback rehearsal evidence",
+  );
+  const finalizedEvidence = deploySteps.find(
+    ({ name }) => name === "Record the exact finalized release",
+  );
+  const finalizedUpload = deploySteps.find(
+    ({ name }) => name === "Upload finalized release evidence",
+  );
+  assert.equal(rehearsalEvidence.if, "env.MARKIRO_ROLLBACK_REHEARSAL == '1'");
+  assert.equal(rehearsalUpload.if, "env.MARKIRO_ROLLBACK_REHEARSAL == '1'");
+  assert.equal(finalizedEvidence.if, "env.MARKIRO_ROLLBACK_REHEARSAL != '1'");
+  assert.equal(finalizedUpload.if, "env.MARKIRO_ROLLBACK_REHEARSAL != '1'");
+  assert.match(remoteDeploySource, /rollbackRehearsal/);
+  assert.match(deploymentSource, /YC_DEPLOYMENT_CONTROLLER_SERVICE_ACCOUNT_ID/);
+  assert.doesNotMatch(
+    deploymentSource,
+    /YC_TERRAFORM_SERVICE_ACCOUNT_ID/,
+    "deployment controller subjects must never exchange for the infrastructure identity",
+  );
+  assert.doesNotMatch(deploymentSource, /YC_RUNNER_SERVICE_ACCOUNT_ID/);
+  assert.match(
+    deploymentSource,
+    /app-host-keys-b64:\s*\$\{\{ steps\.runner\.outputs\.app-host-keys-b64 \}\}/,
+  );
+  assert.match(
+    deploymentSource,
+    /APP_SSH_HOST_KEYS_B64:\s*\$\{\{ needs\.controller\.outputs\.app-host-keys-b64 \}\}/,
+  );
+  assert.equal(workflow.jobs.cleanup?.if, "always()");
+  const cleanupSteps = workflow.jobs.cleanup.steps;
+  const cleanupRunnerIndex = cleanupSteps.findIndex(
+    ({ name }) => name === "Deregister any stale runner and stop the VM independently",
+  );
+  const cleanupReceiptIndex = cleanupSteps.findIndex(
+    ({ name }) => name === "Record authenticated bounded cleanup receipt",
+  );
+  const cleanupUploadIndex = cleanupSteps.findIndex(
+    ({ name }) => name === "Upload cleanup receipt",
+  );
+  assert.ok(cleanupRunnerIndex >= 0);
+  assert.ok(cleanupReceiptIndex > cleanupRunnerIndex);
+  assert.ok(cleanupUploadIndex > cleanupReceiptIndex);
+  assert.match(
+    cleanupSteps[cleanupRunnerIndex].run,
+    /node deploy\/yandex\/runner-control\.mjs cleanup/,
+  );
+  assert.match(cleanupSteps[cleanupReceiptIndex].run, /runnerDeregistered: true/);
+  assert.match(cleanupSteps[cleanupReceiptIndex].run, /runnerVmStopped: true/);
+  assert.equal(cleanupSteps[cleanupUploadIndex].uses, UPLOAD_ARTIFACT);
+  assert.equal(
+    cleanupSteps[cleanupUploadIndex].with.name,
+    "markiro-cleanup-${{ needs.controller.outputs.release-sha }}-attempt-${{ github.run_attempt }}",
+  );
+  assert.match(runnerControlSource, /await waitForRunnerCleanup\(clients\)/);
+  assert.match(runnerControlSource, /const gateToken = requiredEnvironment\("YC_GATE_IAM_TOKEN"\)/);
+  assert.match(runnerControlSource, /await verifyControllerGates\(gateToken\)/);
+  assert.match(runnerControlSource, /await authenticatedAppHostKeys\(gateToken\)/);
+  assert.match(runnerControlSource, /const appAddress = privateAppIpv4\(app\)/);
+  assert.match(runnerControlSource, /target\?\.target\?\.ipAddress/);
+  assert.match(remoteDeploySource, /targetState\?\.target\?\.ipAddress/);
+  assert.match(
+    runnerControlSource,
+    /const targetZones = requireSingleAlbTarget\(targets, appAddress\);\s+if \(phase === "repeat"\) requireHealthyAlbTarget\(targetZones\);/,
+  );
+  const controllerGate = runnerControlSource.slice(
+    runnerControlSource.indexOf("export async function verifyControllerGates"),
+    runnerControlSource.indexOf("async function authenticatedAppHostKeys"),
+  );
+  assert.ok(controllerGate.length > 0, "controller gate function must be inspectable");
+  assert.equal(
+    controllerGate
+      .slice(0, controllerGate.indexOf("const targetZones = requireSingleAlbTarget"))
+      .lastIndexOf('if (phase === "repeat")'),
+    -1,
+    "exact target inventory must be unconditional",
+  );
+  assert.ok(
+    runnerControlSource.indexOf("await verifyControllerGates(gateToken)") <
+      runnerControlSource.indexOf("await authenticatedAppHostKeys(gateToken)"),
+    "provider gates must precede host-key and JIT work",
+  );
+  assert.ok(
+    runnerControlSource.indexOf("await verifyControllerGates(gateToken)") <
+      runnerControlSource.indexOf("await prepareAndStartRunner"),
+    "provider gates must precede JIT metadata and runner mutation",
+  );
+  assert.match(runnerControlSource, /production backup gate failed/);
+  assert.match(runnerControlSource, /production ALB gate failed/);
+  assert.doesNotMatch(deploymentSource, /ssh-key|identity-file|--public-address/i);
+  assert.match(remoteDeploySource, /--internal-address/);
+  assertPinnedComments(deploymentSource, CHECKOUT, "v4");
+  assertPinnedComments(deploymentSource, DOWNLOAD_ARTIFACT, "v8.0.1");
+  assertPinnedComments(deploymentSource, UPLOAD_ARTIFACT, "v7.0.1");
+}
+
+test("production deployment is protected, release-bound, dynamically labelled, and always cleaned", async () => {
+  assertProductionDeploymentWorkflow(
+    await source(".github/workflows/deploy-production.yml"),
+    await source("deploy/yandex/remote-deploy.mjs"),
+    await source("deploy/yandex/runner-control.mjs"),
+  );
+});
+
+async function executeReleaseIdentityGate({ releaseRun = {}, rehearsalRun = {} } = {}) {
+  const workflow = parseWorkflow(
+    await source(".github/workflows/deploy-production.yml"),
+    "production deployment workflow",
+  );
+  const step = workflow.jobs.controller.steps.find(
+    ({ name }) => name === "Resolve exact trusted release identity",
+  );
+  const directory = await mkdtemp(join(tmpdir(), "markiro-release-identity-gate-"));
+  const fakeBin = join(directory, "bin");
+  const outputPath = join(directory, "github-output");
+  const releasePath = join(directory, "provider-release-run.json");
+  const rehearsalPath = join(directory, "provider-rehearsal-run.json");
+  await mkdir(fakeBin);
+  await writeFile(
+    join(fakeBin, "curl"),
+    `#!/usr/bin/env bash
+set -euo pipefail
+output=""
+url=""
+while (( $# )); do
+  case "$1" in
+    --output) output="$2"; shift 2 ;;
+    https://*) url="$1"; shift ;;
+    *) shift ;;
+  esac
+done
+if [[ "$url" == */actions/runs/111 ]]; then
+  cp "$FIXTURE_RELEASE_RUN" "$output"
+elif [[ "$url" == */actions/runs/222 ]]; then
+  cp "$FIXTURE_REHEARSAL_RUN" "$output"
+else
+  exit 64
+fi
+`,
+    { mode: 0o700 },
+  );
+  await chmod(join(fakeBin, "curl"), 0o700);
+  await writeFile(
+    releasePath,
+    JSON.stringify({
+      id: 111,
+      name: "Publish production images",
+      path: ".github/workflows/release-images.yml@refs/heads/main",
+      event: "push",
+      head_branch: "main",
+      head_sha: "a".repeat(40),
+      conclusion: "success",
+      run_attempt: 2,
+      ...releaseRun,
+    }),
+  );
+  await writeFile(
+    rehearsalPath,
+    JSON.stringify({
+      id: 222,
+      name: "Deploy production",
+      path: ".github/workflows/deploy-production.yml@main",
+      event: "workflow_dispatch",
+      head_branch: "main",
+      head_sha: "a".repeat(40),
+      conclusion: "success",
+      run_attempt: 3,
+      ...rehearsalRun,
+    }),
+  );
+  return spawnSync("bash", ["-c", step.run], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${fakeBin}:${process.env.PATH}`,
+      DISPATCH_RUN_ID: "111",
+      DISPATCH_SHA: "a".repeat(40),
+      DISPATCH_PHASE: "first",
+      DISPATCH_REHEARSAL: "false",
+      REHEARSAL_RUN_ID: "222",
+      REHEARSAL_RUN_ATTEMPT: "3",
+      EVENT_RUN_ID: "",
+      EVENT_SHA: "",
+      FIXTURE_RELEASE_RUN: releasePath,
+      FIXTURE_REHEARSAL_RUN: rehearsalPath,
+      GITHUB_EVENT_NAME: "workflow_dispatch",
+      GITHUB_OUTPUT: outputPath,
+      GITHUB_REPOSITORY: "thevladbog/q",
+      GITHUB_TOKEN: "masked-test-token",
+      MARKIRO_DEPLOYMENT_PHASE: "first",
+      MARKIRO_ROLLBACK_REHEARSAL: "0",
+      RUNNER_TEMP: directory,
+    },
+  });
+}
+
+test("embedded release gate accepts documented provider fields without inputs and normalizes main-qualified paths", async () => {
+  const accepted = await executeReleaseIdentityGate();
+  assert.equal(accepted.status, 0, accepted.stderr);
+
+  for (const [name, rehearsalRun] of [
+    ["missing attempt", { run_attempt: null }],
+    ["wrong attempt", { run_attempt: 4 }],
+    ["wrong ref-qualified path", { path: ".github/workflows/deploy-production.yml@release" }],
+  ]) {
+    const rejected = await executeReleaseIdentityGate({ rehearsalRun });
+    assert.notEqual(rejected.status, 0, name);
+  }
+});
+
+test("production deployment contract rejects trigger, label, cleanup, and gate mutations", async () => {
+  const deployment = await source(".github/workflows/deploy-production.yml");
+  const remote = await source("deploy/yandex/remote-deploy.mjs");
+  const controller = await source("deploy/yandex/runner-control.mjs");
+
+  for (const mutation of [
+    {
+      name: "pull request deployment trigger",
+      search: "  workflow_run:\n",
+      replacement: "  pull_request:\n  workflow_run:\n",
+    },
+    {
+      name: "static deployment runner label",
+      search: 'runs-on: [self-hosted, linux, "${{ needs.controller.outputs.runner-label }}"]',
+      replacement: "runs-on: [self-hosted, linux, markiro-production]",
+    },
+    {
+      name: "cleanup only on success",
+      search: "  cleanup:\n    needs: [controller, deploy]\n    if: always()",
+      replacement: "  cleanup:\n    needs: [controller, deploy]\n    if: success()",
+    },
+    {
+      name: "tag-shaped manifest artifact",
+      search: "name: markiro-release-manifest-${{ steps.release.outputs.release-sha }}",
+      replacement: "name: markiro-release-manifest-main",
+    },
+    {
+      name: "self-hosted deploy OIDC permission",
+      search: '      id-token: "none"',
+      replacement: "      id-token: write",
+    },
+    {
+      name: "shared controller and cleanup privileged subject",
+      search: "environment: production-cleanup",
+      replacement: "environment: production-controller",
+    },
+    {
+      name: "automatic delivery can select rehearsal",
+      search:
+        "MARKIRO_DEPLOYMENT_PHASE: ${{ github.event_name == 'workflow_dispatch' && inputs.deployment_phase || 'repeat' }}\n      MARKIRO_ROLLBACK_REHEARSAL: ${{ github.event_name == 'workflow_dispatch' && inputs.rollback_rehearsal && '1' || '0' }}",
+      replacement:
+        "MARKIRO_DEPLOYMENT_PHASE: ${{ github.event_name == 'workflow_dispatch' && inputs.deployment_phase || 'repeat' }}\n      MARKIRO_ROLLBACK_REHEARSAL: ${{ inputs.rollback_rehearsal && '1' || '0' }}",
+    },
+    {
+      name: "cleanup prerequisite is no longer run-bound",
+      search:
+        "name: markiro-cleanup-${{ steps.release.outputs.release-sha }}-attempt-${{ inputs.rehearsal_run_attempt }}\n          path: ${{ runner.temp }}/cleanup-prerequisite\n          github-token: ${{ github.token }}\n          repository: ${{ github.repository }}\n          run-id: ${{ inputs.rehearsal_run_id }}",
+      replacement:
+        "name: markiro-cleanup-${{ steps.release.outputs.release-sha }}-attempt-${{ inputs.rehearsal_run_attempt }}\n          path: ${{ runner.temp }}/cleanup-prerequisite\n          github-token: ${{ github.token }}\n          repository: ${{ github.repository }}\n          run-id: ${{ steps.release.outputs.release-run-id }}",
+    },
+    {
+      name: "cleanup prerequisite is missing",
+      search: "- name: Download prerequisite cleanup receipt",
+      replacement: "- name: Download optional cleanup receipt",
+    },
+    {
+      name: "rehearsal prerequisite is missing",
+      search: "- name: Download prerequisite rollback rehearsal evidence",
+      replacement: "- name: Download optional rollback rehearsal evidence",
+    },
+    {
+      name: "repeat deployment can select rehearsal",
+      search:
+        'if [[ "$DISPATCH_REHEARSAL" == true ]]; then\n              [[ "$DISPATCH_PHASE" == first ]]',
+      replacement:
+        'if [[ "$DISPATCH_REHEARSAL" == true ]]; then\n              [[ "$DISPATCH_PHASE" == repeat ]]',
+    },
+    {
+      name: "rehearsal evidence includes successful releases",
+      search:
+        "- name: Record authenticated bounded rollback rehearsal evidence\n        if: env.MARKIRO_ROLLBACK_REHEARSAL == '1'",
+      replacement:
+        "- name: Record authenticated bounded rollback rehearsal evidence\n        if: always()",
+    },
+    {
+      name: "finalized evidence includes rehearsals",
+      search:
+        "- name: Record the exact finalized release\n        if: env.MARKIRO_ROLLBACK_REHEARSAL != '1'",
+      replacement: "- name: Record the exact finalized release\n        if: always()",
+    },
+    {
+      name: "cleanup receipt precedes cleanup",
+      search: "      - name: Deregister any stale runner and stop the VM independently\n",
+      replacement:
+        "      - name: Deregister any stale runner and stop the VM independently later\n",
+    },
+    {
+      name: "cleanup evidence omits runner deregistration",
+      search: ".runnerDeregistered == true and .runnerVmStopped == true",
+      replacement: ".runnerVmStopped == true",
+    },
+  ]) {
+    const mutated = replaceExactlyOnce(
+      deployment,
+      mutation.search,
+      mutation.replacement,
+      mutation.name,
+    );
+    assert.throws(
+      () => assertProductionDeploymentWorkflow(mutated, remote, controller),
+      undefined,
+      mutation.name,
+    );
+  }
+
+  for (const search of ["production backup gate failed", "production ALB gate failed"]) {
+    const mutated = replaceExactlyOnce(controller, search, "gate omitted", `${search} removal`);
+    assert.throws(() => assertProductionDeploymentWorkflow(deployment, remote, mutated));
+  }
+  for (const [search, replacement, label] of [
+    [
+      "const appAddress = privateAppIpv4(app);",
+      'const appAddress = "10.20.0.8";',
+      "controller ignores the authenticated app address",
+    ],
+    [
+      "const targetZones = requireSingleAlbTarget(targets, appAddress);",
+      "// exact target inventory gate omitted",
+      "controller conditionally omits exact target inventory",
+    ],
+    [
+      'if (phase === "repeat") requireHealthyAlbTarget(targetZones);',
+      "requireHealthyAlbTarget(targetZones);",
+      "controller incorrectly requires first target health",
+    ],
+  ]) {
+    const mutated = replaceExactlyOnce(controller, search, replacement, label);
+    assert.throws(() => assertProductionDeploymentWorkflow(deployment, remote, mutated), label);
+  }
+  const conditionallyCheckedInventory = replaceExactlyOnce(
+    controller,
+    '  const targetZones = requireSingleAlbTarget(targets, appAddress);\n  if (phase === "repeat") requireHealthyAlbTarget(targetZones);',
+    '  if (phase === "repeat") {\n    const targetZones = requireSingleAlbTarget(targets, appAddress);\n    if (phase === "repeat") requireHealthyAlbTarget(targetZones);\n  }',
+    "controller limits exact target inventory to repeats",
+  );
+  assert.throws(
+    () => assertProductionDeploymentWorkflow(deployment, remote, conditionallyCheckedInventory),
+    undefined,
+    "controller limits exact target inventory to repeats",
+  );
+  const unverifiedCleanup = replaceExactlyOnce(
+    controller,
+    "await waitForRunnerCleanup(clients);",
+    "// cleanup verification omitted",
+    "cleanup receipt without provider verification",
+  );
+  assert.throws(() => assertProductionDeploymentWorkflow(deployment, remote, unverifiedCleanup));
+  const receiptsWithoutAttempt = deployment.replaceAll(
+    ".deploymentRunAttempt == $deployment_run_attempt and",
+    "true and",
+  );
+  assert.notEqual(receiptsWithoutAttempt, deployment);
+  assert.throws(() =>
+    assertProductionDeploymentWorkflow(receiptsWithoutAttempt, remote, controller),
+  );
+  const rehearsalFinalizes = replaceExactlyOnce(
+    remote,
+    "if (dependencies.rollbackRehearsal) {",
+    "if (false && dependencies.rollbackRehearsal) {",
+    "rehearsal reaches finalize",
+  );
+  assert.throws(() =>
+    assertProductionDeploymentWorkflow(deployment, rehearsalFinalizes, controller),
+  );
+});
+
+function assertPostDnsSmokeWorkflow(
+  postDnsSource,
+  deploymentSource,
+  infrastructureSource,
+  convergenceSource,
+  scriptSource,
+) {
+  const workflow = parseWorkflow(postDnsSource, "post-DNS smoke workflow");
+  assert.deepEqual(Object.keys(workflow.on), ["workflow_dispatch"]);
+  assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), [
+    "deployment_run_id",
+    "dns_apply_run_id",
+    "dns_verifier_run_id",
+    "release_run_id",
+    "release_sha",
+  ]);
+  assert.deepEqual(workflow.permissions, { actions: "read", contents: "read" });
+  assert.equal(workflow.concurrency.group, "markiro-production-deployment");
+  assert.equal(workflow.concurrency["cancel-in-progress"], false);
+  const job = workflow.jobs?.smoke;
+  assert.equal(job.environment, "production-public-smoke");
+  assert.equal(job["runs-on"], "ubuntu-latest");
+  assert.deepEqual(job.steps.map((step) => step.name).filter(Boolean), [
+    "Validate current main, finalized release, DNS apply, and convergence provenance",
+    "Download exact finalized release evidence",
+    "Download exact approved public DNS apply evidence",
+    "Download exact authenticated DNS convergence evidence",
+    "Run the full non-mutating public route smoke",
+    "Upload post-DNS smoke evidence",
+    "Remove local evidence material",
+  ]);
+  const commands = job.steps
+    .map((step) => step.run)
+    .filter(Boolean)
+    .join("\n");
+  assert.match(commands, /git\/ref\/heads\/main/);
+  assert.match(commands, /GITHUB_REF.*refs\/heads\/main/);
+  assert.match(commands, /GITHUB_SHA.*RELEASE_SHA/);
+  assert.match(commands, /\.github\/workflows\/deploy-production\.yml/);
+  assert.match(commands, /\.github\/workflows\/yandex-infrastructure\.yml/);
+  assert.match(commands, /\.github\/workflows\/yandex-dns-convergence\.yml/);
+  assert.match(commands, /artifact-digest/);
+  assert.match(commands, /node deploy\/yandex\/post-dns-smoke\.mjs run/);
+  assert.match(postDnsSource, /name: markiro-finalized-release-\$\{\{ inputs\.release_sha \}\}/);
+  assert.match(postDnsSource, /run-id: \$\{\{ inputs\.deployment_run_id \}\}/);
+  assert.match(postDnsSource, /name: yandex-public-dns-apply-\$\{\{ inputs\.release_sha \}\}/);
+  assert.match(postDnsSource, /run-id: \$\{\{ inputs\.dns_apply_run_id \}\}/);
+  assert.match(postDnsSource, /name: markiro-dns-convergence-\$\{\{ inputs\.release_sha \}\}/);
+  assert.match(postDnsSource, /run-id: \$\{\{ inputs\.dns_verifier_run_id \}\}/);
+  assert.doesNotMatch(
+    postDnsSource,
+    /remote-deploy|runner-control|deploy[.]mjs|docker|migrate|systemctl|terraform|\byc\b|\bssh\b|curl\s+(?:--request\s+POST|-X\s+POST)/i,
+  );
+  assert.doesNotMatch(scriptSource, /child_process|deploy[.]mjs|remote-deploy|docker|migrate/i);
+  assert.match(scriptSource, /import \{ runPublicSmoke \} from "\.\.\/production\/smoke\.mjs"/);
+  assert.match(deploymentSource, /name: markiro-finalized-release-\$\{\{[^}]*release-sha[^}]*\}\}/);
+  assert.match(deploymentSource, /deploymentPhase: \$phase/);
+  assert.match(deploymentSource, /deploymentRunId: \$deployment_run_id/);
+  assert.match(infrastructureSource, /if: inputs\.enable_public_dns == true/);
+  assert.match(infrastructureSource, /publicDnsEnabled: true/);
+  assert.match(
+    infrastructureSource,
+    /name: yandex-public-dns-apply-\$\{\{ inputs\.target_sha \}\}/,
+  );
+  assert.match(convergenceSource, /name: markiro-dns-convergence-\$\{\{ inputs\.release_sha \}\}/);
+  assert.match(convergenceSource, /node deploy\/yandex\/dns-convergence\.mjs run/);
+  assertPinnedComments(postDnsSource, CHECKOUT, "v4");
+  assertPinnedComments(postDnsSource, DOWNLOAD_ARTIFACT, "v8.0.1");
+  assertPinnedComments(postDnsSource, UPLOAD_ARTIFACT, "v7.0.1");
+  assertPinnedComments(deploymentSource, UPLOAD_ARTIFACT, "v7.0.1");
+  assertPinnedComments(infrastructureSource, UPLOAD_ARTIFACT, "v7.0.1");
+}
+
+function assertDnsConvergenceWorkflow(sourceText, infrastructureSource, scriptSource) {
+  const workflow = parseWorkflow(sourceText, "DNS convergence workflow");
+  assert.deepEqual(Object.keys(workflow.on), ["workflow_dispatch"]);
+  assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), [
+    "dns_apply_run_id",
+    "release_sha",
+  ]);
+  assert.deepEqual(workflow.permissions, { actions: "read", contents: "read" });
+  assert.equal(workflow.concurrency.group, "markiro-production-dns-convergence");
+  assert.equal(workflow.concurrency["cancel-in-progress"], false);
+  const job = workflow.jobs?.verify;
+  assert.equal(job.environment, "production-dns-convergence");
+  assert.equal(job["runs-on"], "ubuntu-latest");
+  assert.deepEqual(job.steps.map((step) => step.name).filter(Boolean), [
+    "Authenticate exact DNS apply and current main",
+    "Download exact approved public DNS apply evidence",
+    "Run authoritative and public DNS convergence verifier",
+    "Upload immutable DNS convergence evidence",
+    "Remove local DNS evidence",
+  ]);
+  const commands = job.steps
+    .map((step) => step.run)
+    .filter(Boolean)
+    .join("\n");
+  assert.match(commands, /GITHUB_REF.*refs\/heads\/main/);
+  assert.match(commands, /GITHUB_SHA.*RELEASE_SHA/);
+  assert.match(commands, /git\/ref\/heads\/main/);
+  assert.match(commands, /\.github\/workflows\/yandex-infrastructure\.yml/);
+  assert.match(commands, /artifacts\?name=/);
+  assert.match(commands, /sha256:\[0-9a-f\]\{64\}/);
+  assert.match(commands, /node deploy\/yandex\/dns-convergence\.mjs run/);
+  for (const variable of [
+    "MARKIRO_AUTHORITATIVE_DNS_SERVER",
+    "MARKIRO_PUBLIC_DNS_RESOLVERS",
+    "MARKIRO_APPROVED_DNS_A",
+    "MARKIRO_APPROVED_DNS_AAAA",
+  ])
+    assert.match(sourceText, new RegExp(variable));
+  assert.match(sourceText, /name: yandex-public-dns-apply-\$\{\{ inputs\.release_sha \}\}/);
+  assert.match(sourceText, /run-id: \$\{\{ inputs\.dns_apply_run_id \}\}/);
+  assert.match(sourceText, /name: markiro-dns-convergence-\$\{\{ inputs\.release_sha \}\}/);
+  assert.match(
+    infrastructureSource,
+    /name: yandex-public-dns-apply-\$\{\{ inputs\.target_sha \}\}/,
+  );
+  assert.match(scriptSource, /verifyDnsConvergence/);
+  assert.doesNotMatch(
+    sourceText,
+    /remote-deploy|runner-control|deploy[.]mjs|docker|migrate|systemctl|terraform|\byc\b|\bssh\b|curl\s+(?:--request\s+POST|-X\s+POST)/i,
+  );
+  assertPinnedComments(sourceText, CHECKOUT, "v4");
+  assertPinnedComments(sourceText, DOWNLOAD_ARTIFACT, "v8.0.1");
+  assertPinnedComments(sourceText, UPLOAD_ARTIFACT, "v7.0.1");
+}
+
+test("DNS convergence is a separately protected authenticated verifier workflow", async () => {
+  assertDnsConvergenceWorkflow(
+    await source(".github/workflows/yandex-dns-convergence.yml"),
+    await source(".github/workflows/yandex-infrastructure.yml"),
+    await source("deploy/yandex/dns-convergence.mjs"),
+  );
+});
+
+test("post-DNS public smoke is a protected release-bound non-mutating workflow", async () => {
+  assertPostDnsSmokeWorkflow(
+    await source(".github/workflows/yandex-post-dns-smoke.yml"),
+    await source(".github/workflows/deploy-production.yml"),
+    await source(".github/workflows/yandex-infrastructure.yml"),
+    await source(".github/workflows/yandex-dns-convergence.yml"),
+    await source("deploy/yandex/post-dns-smoke.mjs"),
+  );
+});
+
+test("post-DNS workflow contract rejects lost approval and redeployment mutations", async () => {
+  const postDns = await source(".github/workflows/yandex-post-dns-smoke.yml");
+  const deployment = await source(".github/workflows/deploy-production.yml");
+  const infrastructure = await source(".github/workflows/yandex-infrastructure.yml");
+  const convergence = await source(".github/workflows/yandex-dns-convergence.yml");
+  const script = await source("deploy/yandex/post-dns-smoke.mjs");
+
+  for (const [search, replacement] of [
+    ["environment: production-public-smoke", "environment: production"],
+    ["group: markiro-production-deployment", "group: markiro-production-post-dns-smoke"],
+    ["node deploy/yandex/post-dns-smoke.mjs run", "node deploy/yandex/remote-deploy.mjs run"],
+    ["run-id: ${{ inputs.dns_verifier_run_id }}", "run-id: ${{ inputs.deployment_run_id }}"],
+  ]) {
+    const mutated = replaceExactlyOnce(postDns, search, replacement, "post-DNS mutation");
+    assert.throws(() =>
+      assertPostDnsSmokeWorkflow(mutated, deployment, infrastructure, convergence, script),
+    );
+  }
 });
 
 test("CI contract rejects each hidden-step, shell, log, and cleanup mutation for its own reason", async () => {
@@ -686,6 +1435,15 @@ test("release contract rejects verification, artifact identity, publication, and
   const release = await source(".github/workflows/release-images.yml");
   const ci = await source(".github/workflows/ci.yml");
   const publishStep = "      - name: Publish the exact verified production images";
+  const createManifestStep =
+    "      - name: Create trusted release manifest\n" +
+    "        env:\n" +
+    "          RELEASE_SHA: ${{ github.sha }}\n" +
+    "          API_DIGEST: ${{ steps.published-images.outputs.api_digest }}\n" +
+    "          EDGE_DIGEST: ${{ steps.published-images.outputs.edge_digest }}\n" +
+    "          GITHUB_RUN_ID: ${{ github.run_id }}\n" +
+    "          CREATED_AT: ${{ steps.release-time.outputs.created_at }}\n" +
+    '        run: node deploy/production/release-manifest.mjs create "$RUNNER_TEMP/release-manifest.json"\n';
   const cleanupIf =
     "      - name: Remove production-bundle containers and volumes\n" + "        if: always()";
 
@@ -749,8 +1507,14 @@ test("release contract rejects verification, artifact identity, publication, and
     },
     {
       name: "incorrect upload-artifact revision comment",
-      search: `${UPLOAD_ARTIFACT} # v7.0.1`,
-      replacement: `${UPLOAD_ARTIFACT} # v4.6.X`,
+      search:
+        `        uses: ${UPLOAD_ARTIFACT} # v7.0.1\n` +
+        "        with:\n" +
+        `          name: ${RELEASE_MANIFEST_ARTIFACT_NAME}`,
+      replacement:
+        `        uses: ${UPLOAD_ARTIFACT} # v4.6.X\n` +
+        "        with:\n" +
+        `          name: ${RELEASE_MANIFEST_ARTIFACT_NAME}`,
       expected: /missing v7\.0\.1 revision comment/,
     },
     {
@@ -785,9 +1549,17 @@ test("release contract rejects verification, artifact identity, publication, and
     },
     {
       name: "artifact upload tolerates missing files",
-      search: "          if-no-files-found: error",
-      replacement: "          if-no-files-found: ignore",
-      expected: /unexpected Upload the verified production images step/,
+      search:
+        `          name: ${RELEASE_MANIFEST_ARTIFACT_NAME}\n` +
+        "          path: ${{ runner.temp }}/release-manifest.json\n" +
+        "          retention-days: 90\n" +
+        "          if-no-files-found: error",
+      replacement:
+        `          name: ${RELEASE_MANIFEST_ARTIFACT_NAME}\n` +
+        "          path: ${{ runner.temp }}/release-manifest.json\n" +
+        "          retention-days: 90\n" +
+        "          if-no-files-found: ignore",
+      expected: /unexpected Upload trusted release manifest step/,
     },
     {
       name: "download falls back to ambiguous name lookup",
@@ -860,6 +1632,33 @@ test("release contract rejects verification, artifact identity, publication, and
       replacement: "      - name: Omit trusted image digest evidence\n",
       expected: /unexpected release publish steps/,
     },
+    {
+      name: "manifest uses a tag instead of the API repository digest",
+      search: createManifestStep,
+      replacement: createManifestStep.replace(
+        "          API_DIGEST: ${{ steps.published-images.outputs.api_digest }}\n",
+        "          API_DIGEST: ${{ github.sha }}\n",
+      ),
+      expected: /unexpected Create trusted release manifest step/,
+    },
   ])
     expectRejected((mutated) => assertReleaseWorkflow(mutated, ci), release, mutation);
+
+  const withoutManifest = replaceExactlyOnce(
+    release,
+    createManifestStep,
+    "",
+    "manifest move source removal",
+  );
+  const movedManifest = replaceExactlyOnce(
+    withoutManifest,
+    publishStep,
+    `${createManifestStep}${publishStep}`,
+    "manifest moved before image pushes",
+  );
+  assert.throws(
+    () => assertReleaseWorkflow(movedManifest, ci),
+    /unexpected release publish steps/,
+    "manifest creation must remain after both image pushes",
+  );
 });

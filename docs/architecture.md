@@ -232,6 +232,32 @@ and the [cabinet RBAC rollout runbook](runbooks/cabinet-rbac-rollout.md).
   request, taking down kiosk pairing for every tenant for the rest of the
   window.
 
+### Yandex SaaS production status
+
+The repository now contains a Yandex SaaS implementation: reviewed Terraform
+roots, protected GitHub plan/apply and deployment workflows, a private ALB
+path, managed PostgreSQL, private versioned state/media/audit storage, Lockbox
+boundaries, and operator runbooks. This is repository implementation, not a
+live deployment. No real cloud IDs, domain, secret payloads, SMTP delivery,
+alert delivery, restore evidence, or DNS convergence evidence is committed.
+
+The MVP has one application VM and one Managed PostgreSQL host. A host failure
+or deployment can interrupt service; the design does not claim high
+availability or zero downtime. The deferred HA path adds an application target
+and a multi-host PostgreSQL topology after load and recovery evidence justify
+it. GHCR keeps digest-addressed API and edge releases under its approved
+retention policy. The shared media bucket remains private and separates avatar
+and future product-image keys by prefix; the application controls access.
+
+Runbooks require the exact protected GitHub environments `production`,
+`production-infrastructure`, `production-public-dns`, and
+`production-postgres-owner`. Public DNS stays false until the separately
+approved first go-live procedure passes. The database-only owner environment
+attests the completed cluster apply, exact owner creation, and runtime Lockbox
+write before the saved database plan can proceed. The
+production controller uses serial-console host-key evidence and OS Login for
+the private app host; it does not trust a static SSH key.
+
 ## Open items (tracked for later phases)
 
 - Direct Chestny ZNAK integration (SUZ code ordering, report submission,

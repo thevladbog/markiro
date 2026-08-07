@@ -1,0 +1,12 @@
+[Unit]
+Description=Sanitize bounded Markiro journals every five minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+RandomizedDelaySec=30s
+Persistent=true
+Unit=markiro-log-sanitizer.service
+
+[Install]
+WantedBy=timers.target

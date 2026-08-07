@@ -1,0 +1,15 @@
+[Unit]
+Description=Create bounded sanitized Markiro journal export
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0027
+ExecStart=/usr/bin/node /usr/local/lib/markiro/log-sanitizer.mjs
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/log/markiro

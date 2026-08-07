@@ -1,0 +1,14 @@
+services:
+  api:
+    environment:
+      TRUST_PROXY_HOPS: "2"
+
+  edge:
+    environment:
+      MARKIRO_EDGE_MODE: behind-alb
+      ACME_EMAIL: ""
+    ports: !override
+      - target: 8080
+        published: "8080"
+        protocol: tcp
+        mode: host

@@ -21,6 +21,7 @@ test("documents every digest selector input and output in the preflight interfac
     "MARKIRO_API_IMAGE_DIGEST",
     "MARKIRO_EDGE_IMAGE_DIGEST",
     "MARKIRO_DOMAIN",
+    "MARKIRO_EDGE_MODE",
     "ACME_EMAIL",
     "MARKIRO_ENV_FILE",
     "MARKIRO_HTTP_PORT",
@@ -28,15 +29,11 @@ test("documents every digest selector input and output in the preflight interfac
   ])
     assert.match(source, new RegExp(`@property \\{string \\| undefined\\} ${input}`));
 
-  for (const output of [
-    "imageTag",
-    "apiImageDigest",
-    "edgeImageDigest",
-    "domain",
-    "acmeEmail",
-    "envFile",
-  ])
+  for (const output of ["apiImageDigest", "edgeImageDigest", "domain", "envFile"])
     assert.match(source, new RegExp(`@property \\{string\\} ${output}`));
+  assert.match(source, /@property \{string \| undefined\} imageTag/);
+  assert.match(source, /@property \{string \| undefined\} acmeEmail/);
+  assert.match(source, /@property \{"direct" \| "behind-alb"\} edgeMode/);
 });
 
 function dependencies({ mode = 0o600, composeError } = {}) {
@@ -72,7 +69,71 @@ test("accepts digest-pinned release inputs and a private environment file", asyn
     domain: release.MARKIRO_DOMAIN,
     acmeEmail: release.ACME_EMAIL,
     envFile: ".env.production",
+    edgeMode: "direct",
   });
+});
+
+test("requires ACME email only in direct edge mode", async () => {
+  await assertRejected({ ...release, ACME_EMAIL: undefined }, "ACME_EMAIL is invalid");
+  const result = await runPreflight(
+    { ...release, MARKIRO_EDGE_MODE: "behind-alb", ACME_EMAIL: undefined },
+    dependencies(),
+  );
+
+  assert.equal(result.edgeMode, "behind-alb");
+  assert.equal(result.acmeEmail, undefined);
+});
+
+test("behind-alb preflight requires only the edge mode, domain, env file, and image digests", async () => {
+  const result = await runPreflight(
+    {
+      ...release,
+      MARKIRO_EDGE_MODE: "behind-alb",
+      MARKIRO_IMAGE_TAG: undefined,
+      ACME_EMAIL: undefined,
+    },
+    dependencies(),
+  );
+
+  assert.equal(result.imageTag, undefined);
+  assert.equal(result.acmeEmail, undefined);
+});
+
+test("rejects an unknown edge mode without disclosing it", async () => {
+  await assertRejected(
+    { ...release, MARKIRO_EDGE_MODE: "private-value" },
+    "MARKIRO_EDGE_MODE is invalid",
+  );
+});
+
+test("uses the Yandex overlay only for the behind-alb edge mode", async () => {
+  const child = fakeChild();
+  let args;
+  const validation = composeQuiet(
+    { ...release, MARKIRO_EDGE_MODE: "behind-alb", MARKIRO_ENV_FILE: "/private/production.env" },
+    {
+      spawn: (_command, commandArgs) => {
+        args = commandArgs;
+        return child;
+      },
+    },
+  );
+  child.emit("close", 0);
+  await validation;
+
+  assert.deepEqual(args, [
+    "compose",
+    "--project-name",
+    "markiro-production",
+    "--env-file",
+    "/private/production.env",
+    "-f",
+    "compose.production.yml",
+    "-f",
+    "deploy/production/compose.yandex.yml",
+    "config",
+    "--quiet",
+  ]);
 });
 
 test("passes optional host port overrides unchanged to Compose validation", async () => {

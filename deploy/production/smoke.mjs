@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import process from "node:process";
 
 import { isMainModule } from "./cli-main.mjs";
+import { productionComposeArgs } from "./compose-files.mjs";
 import { RUNTIME_DEPENDENCY_PROBE_SOURCE } from "./runtime-dependency-probe.mjs";
 
 const CSP =
@@ -142,19 +143,6 @@ function dockerRunner(environment, timeoutMs) {
 
 function requestClient() {
   return { request: (url, init) => fetch(url, init) };
-}
-
-function composeArgs(environment) {
-  const args = [
-    "compose",
-    "--env-file",
-    environment.MARKIRO_ENV_FILE || ".env.production",
-    "-f",
-    "compose.production.yml",
-  ];
-  if (environment.MARKIRO_SMOKE_CI_OVERLAY === "1")
-    args.push("-f", "deploy/production/compose.ci.yml");
-  return args;
 }
 
 function assertHeaders(response, requiresHsts) {
@@ -447,7 +435,7 @@ async function waitForRestoredReadiness(client, baseUrl, attempts, intervalMs, s
 }
 
 async function runtimeSmoke(environment, docker, client, baseUrl, options) {
-  const compose = composeArgs(environment);
+  const compose = productionComposeArgs(environment, { includeCiOverlay: true });
   const apiId = await runDocker(docker, [...compose, "ps", "-q", "api"], options.commandTimeoutMs);
   const containerId = apiId.stdout.trim();
   if (apiId.code !== 0 || !containerId) throw new Error("API container ID is unavailable");
@@ -570,24 +558,14 @@ async function runtimeSmoke(environment, docker, client, baseUrl, options) {
   if (restoreError) throw restoreError;
 }
 
-/**
- * @param {{baseUrl: string, assetName?: string, environment?: Record<string, string | undefined>, commandTimeoutMs?: number, readinessAttempts?: number, readinessIntervalMs?: number, sleep?: (milliseconds: number) => Promise<void>}} options
- * @param {{request(url: string | URL, init: RequestInit): Promise<{status: number, headers: Headers, text(): Promise<string>}>}=} client
- * @param {{run(command: string, args: string[]): Promise<{code: number, stdout: string, stderr: string, durationMs?: number}>}=} docker
- */
-export async function runSmoke(options, client = requestClient(), docker) {
-  const environment = options.environment || process.env;
-  const runtimeOptions = {
-    commandTimeoutMs: options.commandTimeoutMs ?? COMMAND_TIMEOUT_MS,
-    readinessAttempts: options.readinessAttempts ?? 30,
-    readinessIntervalMs: options.readinessIntervalMs ?? 2_000,
-    sleep:
-      options.sleep ||
-      ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))),
-  };
-  const dockerClient = docker || dockerRunner(environment, runtimeOptions.commandTimeoutMs);
+export async function runPublicSmoke(options, client = requestClient()) {
   const baseUrl = options.baseUrl.replace(/\/$/, "");
   const root = await publicRequest(client, new URL("/", baseUrl), { method: "GET" });
+  if (
+    options.expectedReleaseSha &&
+    root.headers.get("x-markiro-release-sha") !== options.expectedReleaseSha
+  )
+    throw new Error("live release identity does not match the expected release");
   const rootHtml = await getText(root);
   assertHeaders(root, new URL(baseUrl).protocol === "https:");
   const signature = shellSignature(rootHtml);
@@ -615,6 +593,26 @@ export async function runSmoke(options, client = requestClient(), docker) {
     assertRoute(check, response, body, signature);
     if (check.kind === "docs") await assertDocumentation(client, body, baseUrl);
   }
+}
+
+/**
+ * @param {{baseUrl: string, assetName?: string, environment?: Record<string, string | undefined>, commandTimeoutMs?: number, readinessAttempts?: number, readinessIntervalMs?: number, sleep?: (milliseconds: number) => Promise<void>}} options
+ * @param {{request(url: string | URL, init: RequestInit): Promise<{status: number, headers: Headers, text(): Promise<string>}>}=} client
+ * @param {{run(command: string, args: string[]): Promise<{code: number, stdout: string, stderr: string, durationMs?: number}>}=} docker
+ */
+export async function runSmoke(options, client = requestClient(), docker) {
+  const environment = options.environment || process.env;
+  const runtimeOptions = {
+    commandTimeoutMs: options.commandTimeoutMs ?? COMMAND_TIMEOUT_MS,
+    readinessAttempts: options.readinessAttempts ?? 30,
+    readinessIntervalMs: options.readinessIntervalMs ?? 2_000,
+    sleep:
+      options.sleep ||
+      ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))),
+  };
+  const dockerClient = docker || dockerRunner(environment, runtimeOptions.commandTimeoutMs);
+  await runPublicSmoke(options, client);
+  const baseUrl = options.baseUrl.replace(/\/$/, "");
   await runtimeSmoke(environment, dockerClient, client, baseUrl, runtimeOptions);
 }
 

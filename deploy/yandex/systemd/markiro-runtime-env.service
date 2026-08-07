@@ -1,0 +1,28 @@
+[Unit]
+Description=Materialize Markiro runtime environment from Yandex Lockbox
+Wants=network-online.target
+After=network-online.target
+Before=markiro-compose.service markiro-deploy.service
+ConditionPathExists=/usr/local/lib/markiro/runtime-env.mjs
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/markiro/runtime-secret-id
+ExecStart=/usr/bin/node /usr/local/lib/markiro/runtime-env.mjs
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/etc/markiro
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+LockPersonality=true
+RestrictRealtime=true
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

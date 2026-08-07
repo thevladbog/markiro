@@ -78,7 +78,7 @@ install -d -m 0700 "$PROTECTED_ROLLOUT_DIR"
 OWNER_RESULT_FILE="$(mktemp "$PROTECTED_ROLLOUT_DIR/first-owner.XXXXXX")"
 chmod 600 "$OWNER_RESULT_FILE"
 
-docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml run --rm --no-deps api \\
+docker compose --project-name markiro-production --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml run --rm --no-deps api \\
   node dist/cli/provision-tenant-owner.js \\
   --email "$OWNER_EMAIL" \\
   --tenant-name "$TENANT_NAME" \\
@@ -172,7 +172,7 @@ MARKIRO_IMAGE_TAG="$PREVIOUS_TAG"
 export MARKIRO_IMAGE_TAG MARKIRO_API_IMAGE_DIGEST MARKIRO_EDGE_IMAGE_DIGEST
 node deploy/production/preflight.mjs`;
 
-const ROLLBACK_EXECUTION_BLOCK = `docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml pull api edge
+const ROLLBACK_EXECUTION_BLOCK = `docker compose --project-name markiro-production --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml pull api edge
 
 ACTUAL_API_DIGESTS="$(docker image inspect --format '{{json .RepoDigests}}' "ghcr.io/thevladbog/markiro-api@\${MARKIRO_API_IMAGE_DIGEST}")"
 ACTUAL_EDGE_DIGESTS="$(docker image inspect --format '{{json .RepoDigests}}' "ghcr.io/thevladbog/markiro-edge@\${MARKIRO_EDGE_IMAGE_DIGEST}")"
@@ -212,12 +212,12 @@ if (
 console.log("rollback image digests verified");
 NODE
 
-docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml run --rm migrate
-docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml up -d --no-deps api
+docker compose --project-name markiro-production --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml run --rm migrate
+docker compose --project-name markiro-production --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml up -d --no-deps api
 
 READY=0
 for attempt in $(seq 1 30); do
-  if docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml exec -T api \\
+  if docker compose --project-name markiro-production --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml exec -T api \\
     node /opt/markiro/healthcheck.mjs; then
     READY=1
     break
@@ -229,7 +229,7 @@ test "$READY" = 1 || {
   exit 1
 }
 
-docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml up -d --no-deps edge
+docker compose --project-name markiro-production --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml up -d --no-deps edge
 node deploy/production/smoke.mjs`;
 
 function invariant(condition, message) {
@@ -715,9 +715,9 @@ test("each documentation contract rejects its own stale identity and migration c
 test("the contract rejects each portability, record-safety, linkage, and command mutation for its own reason", async () => {
   const source = await readFile(RUNBOOK, "utf8");
   const migrate =
-    'docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml run --rm migrate';
+    'docker compose --project-name markiro-production --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml run --rm migrate';
   const api =
-    'docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml up -d --no-deps api';
+    'docker compose --project-name markiro-production --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml up -d --no-deps api';
 
   const reorderedDns = source
     .replaceAll("MARKIRO_PUBLIC_DNS_RESOLVERS", "PUBLIC_DNS_REORDERED")
@@ -825,7 +825,7 @@ test("the contract rejects each portability, record-safety, linkage, and command
     source,
     "extra rollback command",
     `${migrate}\n${api}`,
-    `${migrate}\ndocker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml restart\n${api}`,
+    `${migrate}\ndocker compose --project-name markiro-production --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml restart\n${api}`,
     "rollback command sequence must be exact with no reordered or extra commands",
   );
 });

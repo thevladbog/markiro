@@ -16,6 +16,7 @@ jobs:
     permissions:
       contents: read
     env:
+      COMPOSE_PROJECT_NAME: markiro-production
       MARKIRO_IMAGE_TAG: ${{ github.sha }}
       MARKIRO_API_IMAGE_DIGEST: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
       MARKIRO_EDGE_IMAGE_DIGEST: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
@@ -262,6 +263,24 @@ jobs:
           [[ "$edge_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
           printf 'api_digest=%s\n' "$api_digest" >> "$GITHUB_OUTPUT"
           printf 'edge_digest=%s\n' "$edge_digest" >> "$GITHUB_OUTPUT"
+      - name: Record release timestamp
+        id: release-time
+        run: printf 'created_at=%s\n' "$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')" >> "$GITHUB_OUTPUT"
+      - name: Create trusted release manifest
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+          API_DIGEST: ${{ steps.published-images.outputs.api_digest }}
+          EDGE_DIGEST: ${{ steps.published-images.outputs.edge_digest }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          CREATED_AT: ${{ steps.release-time.outputs.created_at }}
+        run: node deploy/production/release-manifest.mjs create "$RUNNER_TEMP/release-manifest.json"
+      - name: Upload trusted release manifest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: markiro-release-manifest-${{ github.sha }}
+          path: ${{ runner.temp }}/release-manifest.json
+          retention-days: 90
+          if-no-files-found: error
       - name: Record trusted image digest evidence
         env:
           RELEASE_SHA: ${{ github.sha }}

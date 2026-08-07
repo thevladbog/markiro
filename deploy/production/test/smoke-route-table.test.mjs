@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { productionBaseUrl, ROUTE_CHECKS, runSmoke } from "../smoke.mjs";
+import { productionBaseUrl, ROUTE_CHECKS, runPublicSmoke, runSmoke } from "../smoke.mjs";
 
 const csp =
   "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'";
@@ -28,6 +28,13 @@ test("uses the configured HTTPS port for production-bundle smoke", () => {
   assert.equal(productionBaseUrl({ MARKIRO_DOMAIN: "markiro.example" }), "https://markiro.example");
 });
 
+test("keeps the public route table HTTPS-facing when ALB terminates TLS", () => {
+  assert.equal(
+    productionBaseUrl({ MARKIRO_DOMAIN: "markiro.example", MARKIRO_EDGE_MODE: "behind-alb" }),
+    "https://markiro.example",
+  );
+});
+
 function response({ status = 200, body = "{}", headers = {} } = {}) {
   return {
     status,
@@ -43,7 +50,7 @@ function response({ status = 200, body = "{}", headers = {} } = {}) {
   };
 }
 
-function smokeClient() {
+function smokeClient(releaseSha) {
   const requests = [];
   return {
     requests,
@@ -53,7 +60,11 @@ function smokeClient() {
       if (path === "/" || path === "/team/deep-link")
         return response({
           body: shell,
-          headers: { "cache-control": "no-cache", "content-type": "text/html" },
+          headers: {
+            "cache-control": "no-cache",
+            "content-type": "text/html",
+            ...(releaseSha ? { "x-markiro-release-sha": releaseSha } : {}),
+          },
         });
       if (path === "/assets/main.js")
         return response({
@@ -92,6 +103,40 @@ function smokeClient() {
     },
   };
 }
+
+test("runner public smoke exercises the external route contract without local Docker access", async () => {
+  const client = smokeClient();
+
+  await runPublicSmoke({ baseUrl: "https://markiro.example" }, client);
+
+  assert.ok(client.requests.some(({ url }) => new URL(url).pathname === "/health/ready"));
+});
+
+test("public smoke rejects a different live release identity before exercising routes", async () => {
+  const client = smokeClient("b".repeat(40));
+
+  await assert.rejects(
+    runPublicSmoke(
+      { baseUrl: "https://markiro.example", expectedReleaseSha: "a".repeat(40) },
+      client,
+    ),
+    /live release identity does not match/,
+  );
+
+  assert.equal(client.requests.length, 1);
+});
+
+test("public smoke accepts the exact live release identity", async () => {
+  const releaseSha = "a".repeat(40);
+  const client = smokeClient(releaseSha);
+
+  await runPublicSmoke(
+    { baseUrl: "https://markiro.example", expectedReleaseSha: releaseSha },
+    client,
+  );
+
+  assert.ok(client.requests.length > 1);
+});
 
 const cleanStoppedState = Object.freeze({
   Status: "exited",
@@ -679,6 +724,8 @@ test("restores the API through the fixed CI image override when requested", asyn
   const restored = calls.find((args) => args.includes("up") && args.at(-1) === "api");
   assert.deepEqual(restored, [
     "compose",
+    "--project-name",
+    "markiro-production",
     "--env-file",
     "/private/ci.env",
     "-f",

@@ -1,0 +1,22 @@
+[Unit]
+Description=Observe Markiro local readiness category
+After=network-online.target
+ConditionPathExists=/usr/local/lib/markiro/readiness-observer.mjs
+
+[Service]
+Type=oneshot
+User=markiro-monitor
+Group=markiro-monitor
+ExecStart=/usr/bin/node /usr/local/lib/markiro/readiness-observer.mjs
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+LockPersonality=true
+RestrictRealtime=true
+SystemCallArchitectures=native
+CapabilityBoundingSet=
