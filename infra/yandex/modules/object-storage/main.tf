@@ -151,3 +151,9 @@ resource "yandex_storage_bucket_policy" "audit_writer" {
     ]
   })
 }
+
+resource "yandex_storage_bucket_iam_binding" "audit_uploader" {
+  bucket  = yandex_storage_bucket.audit.bucket
+  role    = "storage.uploader"
+  members = ["serviceAccount:${var.audit_service_account_id}"]
+}

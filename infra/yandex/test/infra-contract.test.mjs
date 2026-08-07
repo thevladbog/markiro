@@ -348,6 +348,7 @@ const productionResourceActionRoles = {
   yandex_mdb_postgresql_database: ["managed-postgresql.resources.manage"],
   yandex_monitoring_dashboard: ["monitoring.dashboards.manage"],
   yandex_storage_bucket: ["storage.buckets-and-policies.manage"],
+  yandex_storage_bucket_iam_binding: ["storage.buckets-and-policies.manage"],
   yandex_storage_bucket_policy: ["storage.buckets-and-policies.manage"],
   yandex_sws_advanced_rate_limiter_profile: ["smart-web-security.resources.manage"],
   yandex_sws_security_profile: ["smart-web-security.resources.manage"],
@@ -1318,7 +1319,28 @@ function assertProtectedManagedData({
     .map((match) => match[1])
     .sort();
   assert.deepEqual(bucketPolicies, ["audit_writer", "media_app"]);
-  assert.doesNotMatch(storage, /yandex_storage_bucket_iam_binding/);
+  const bucketIamBindings = [
+    ...storage.matchAll(/resource\s+"yandex_storage_bucket_iam_binding"\s+"([^"]+)"/g),
+  ]
+    .map((match) => match[1])
+    .sort();
+  assert.deepEqual(bucketIamBindings, ["audit_uploader"]);
+  const auditUploader = terraformResourceBlock(
+    storage,
+    "yandex_storage_bucket_iam_binding",
+    "audit_uploader",
+  );
+  assert.match(auditUploader, /bucket\s*=\s*yandex_storage_bucket\.audit\.bucket/);
+  assert.match(auditUploader, /role\s*=\s*"storage\.uploader"/);
+  assert.match(
+    auditUploader,
+    /members\s*=\s*\["serviceAccount:\$\{var\.audit_service_account_id\}"\]/,
+  );
+  assert.match(
+    terraformOutputBlock(storageOutputs, "audit_bucket_name"),
+    /depends_on\s*=\s*\[yandex_storage_bucket_iam_binding\.audit_uploader\]/,
+    "the audit destination must wait for its required uploader grant",
+  );
 
   const mediaPolicy = terraformResourceBlock(storage, "yandex_storage_bucket_policy", "media_app");
   assert.match(mediaPolicy, /bucket\s*=\s*yandex_storage_bucket\.media\.bucket/);
