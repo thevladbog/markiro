@@ -2836,8 +2836,7 @@ test("managed-data contract rejects unsafe PostgreSQL, buckets, access, and cred
     oversizedPostgres.postgres,
     "yandex_mdb_postgresql_cluster",
     "production",
-    (block) =>
-      block.replace('resource_preset_id = "s3-c2-m8"', 'resource_preset_id = "s2.medium"'),
+    (block) => block.replace('resource_preset_id = "s3-c2-m8"', 'resource_preset_id = "s2.medium"'),
   );
   assert.throws(
     () => assertProtectedManagedData(oversizedPostgres),
