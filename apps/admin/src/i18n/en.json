@@ -1098,6 +1098,36 @@
       "archiveConfirmTitle": "Archive this kiosk?",
       "archiveConfirmBody": "Kiosk \"{{name}}\" will be archived.",
       "archiveConfirmAction": "Archive",
+      "archivePersistentError": "Could not archive the kiosk. Try again.",
+      "retry": "Retry",
+      "views": {
+        "label": "Kiosk views",
+        "kiosks": "Kiosks",
+        "reasons": "Write-off reasons"
+      },
+      "resultCount_one": "{{count}} kiosk",
+      "resultCount_few": "{{count}} kiosks",
+      "resultCount_many": "{{count}} kiosks",
+      "resultCount_other": "{{count}} kiosks",
+      "lastActivity": "Last activity",
+      "lastActivityAccessible": "{{relative}}. Exact time: {{absolute}}.",
+      "neverActivity": "Never",
+      "filteredEmptyTitle": "No kiosks match this state",
+      "filteredEmptyHint": "Change or reset the state filter to see all kiosks.",
+      "filters": {
+        "label": "Kiosk filters",
+        "reset": "Reset",
+        "stateLabel": "State",
+        "state": {
+          "all": "All states"
+        }
+      },
+      "states": {
+        "archived": "Archived",
+        "awaiting-pairing": "Awaiting pairing",
+        "online": "Online",
+        "offline": "Offline"
+      },
       "onlineStatus": {
         "online": "Online",
         "offline": "Offline"
@@ -1110,6 +1140,8 @@
         "name": "Name",
         "location": "Location",
         "online": "Status",
+        "state": "State",
+        "lastActivity": "Activity",
         "dayLimit": "Limit/employee",
         "showPrices": "Prices",
         "actions": "Actions"
@@ -1125,16 +1157,54 @@
         "saveProductsAction": "Save list",
         "submitCreate": "Create",
         "submitUpdate": "Save",
+        "createdTitle": "Kiosk created",
+        "createdHint": "Kiosk “{{name}}” was created. Finish setup or continue directly to device pairing.",
+        "createdDoneAction": "Done",
+        "setupPairingAction": "Set up pairing",
+        "loadError": "Could not load kiosk data.",
+        "retry": "Retry",
+        "createError": "Could not create kiosk.",
+        "updateError": "Could not update the kiosk.",
+        "notFound": "Kiosk not found.",
+        "missingWhileDirtyWarning": "The kiosk is missing from the refreshed list. Your unsaved changes remain in the editor.",
+        "editIdentity": "{{name}} · {{state}}",
+        "discardTitle": "Discard changes?",
+        "discardBody": "Unsaved changes will be lost.",
+        "continueEditing": "Continue editing",
+        "discardAction": "Discard",
         "errors": {
           "nameRequired": "Enter a name",
           "nameTooLong": "200 characters or fewer",
           "dayLimitInvalid": "Enter a positive whole number"
         }
       },
+      "sections": {
+        "navigationLabel": "Kiosk sections",
+        "profile": "Profile",
+        "loading": "Loading",
+        "error": "Error"
+      },
+      "products": {
+        "title": "Allowed products",
+        "loading": "Loading products…",
+        "loadError": "Could not load products.",
+        "retryAction": "Retry",
+        "emptyHint": "There are no active products in the catalog.",
+        "searchLabel": "Search products",
+        "selectedCount": "Selected: {{count}}",
+        "saveAction": "Save list",
+        "saveError": "Could not save the product list."
+      },
       "pairing": {
         "action": "Pairing code",
-        "modalTitle": "Kiosk pairing code",
-        "hint": "Enter the code on kiosk “{{name}}” or scan the barcode. The code is shown once and works once.",
+        "panelTitle": "Pair kiosk",
+        "safeHint": "Prepare kiosk “{{name}}” for pairing. The code will be shown only once.",
+        "invalidationWarning": "A new code invalidates any previously issued code that has not been used.",
+        "revealHint": "Enter the code on kiosk “{{name}}” or scan the barcode. The code is shown once and works once.",
+        "issueAction": "Issue pairing code",
+        "issueError": "Could not issue the pairing code.",
+        "unavailable": "Pairing is unavailable for an archived kiosk.",
+        "backAction": "Back",
         "barcodeLabel": "Barcode for pairing code {{code}}",
         "barcodeLoading": "Loading the barcode…",
         "expiresIn": "Valid for another {{time}}",
@@ -1146,15 +1216,30 @@
       },
       "reasons": {
         "title": "Write-off reasons",
+        "emptyTitle": "No write-off reasons yet",
         "emptyHint": "No reasons yet",
+        "refetchError": "Could not refresh reasons. Showing the last loaded data.",
         "addAction": "Add reason",
+        "createAction": "Create",
+        "cancelAction": "Cancel",
         "nameLabel": "Name",
         "sortOrderLabel": "Order",
         "saveAction": "Save",
         "archiveAction": "Delete",
         "archiveConfirmTitle": "Delete this reason?",
         "archiveConfirmBody": "Reason \"{{name}}\" will be deleted.",
-        "archiveConfirmAction": "Delete"
+        "archiveConfirmAction": "Delete",
+        "discardConfirmTitle": "Discard changes?",
+        "discardConfirmBody": "Your unsaved changes will be lost.",
+        "continueEditing": "Continue editing",
+        "discardConfirmAction": "Discard",
+        "errors": {
+          "nameRequired": "Enter a name",
+          "sortOrderInvalid": "Enter a whole number for the order",
+          "createFailed": "Could not create the reason. Try again.",
+          "updateFailed": "Could not save the reason. Try again.",
+          "archiveFailed": "Could not delete the reason. Try again."
+        }
       },
       "toasts": {
         "createSuccess": "Kiosk added",

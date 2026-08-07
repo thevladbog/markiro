@@ -12,9 +12,9 @@ import { pairingBarcodeBoxStyle } from "./pairingBarcodeBox.js";
  * `../pickup/ItemCode.tsx`. The input is always eight digits minted
  * server-side, which Code 128 encodes unconditionally, but the render is still
  * wrapped in try/catch so an unexpected encoder throw degrades to the plain
- * digits (already shown above it) instead of taking down the reveal modal.
+ * digits (already shown above it) instead of taking down the reveal panel.
  *
- * Isolated in its own module (default export) so `PairingCodeModal` can pull
+ * Isolated in its own module (default export) so `PairingCodeReveal` can pull
  * it in via `React.lazy`, keeping bwip-js -- a heavy dependency reached
  * through `@markiro/domain`'s barcode renderers -- out of the main admin
  * bundle and in a chunk fetched only when a code is actually issued.
