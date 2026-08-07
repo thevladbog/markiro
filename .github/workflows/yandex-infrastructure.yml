@@ -234,7 +234,7 @@ jobs:
           target_sha="$TARGET_SHA"
           dispatch_sha="$DISPATCH_SHA"
           cleanup() {
-            unset github_oidc_response github_oidc_token iam_response lockbox_payload
+            unset github_oidc_token lockbox_payload
             unset iam_token aws_access_key_id aws_secret_access_key YC_TOKEN AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY TF_DATA_DIR
             rm -f "$backend_config"
             rm -rf -- "${RUNNER_TEMP:?}/yandex-production-terraform-data"
@@ -315,16 +315,15 @@ jobs:
             *) exit 1 ;;
           esac
           node infra/yandex/scripts/validate-workload-identities.mjs
-          if ! github_oidc_response="$(curl --fail --silent --show-error --get \
+          if ! github_oidc_token="$(curl --fail --silent --show-error --get \
             --header "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
             --data-urlencode "audience=$YC_OIDC_AUDIENCE" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL")"; then
+            "$ACTIONS_ID_TOKEN_REQUEST_URL" | jq -er '.value | select(type == "string" and length > 0)')"; then
             printf '%s\n' '::error::GitHub OIDC token request failed' >&2
             exit 1
           fi
-          github_oidc_token="$(jq -er '.value | select(type == "string" and length > 0)' <<<"$github_oidc_response")"
           echo "::add-mask::$github_oidc_token"
-          if ! iam_response="$(curl --fail --silent --show-error \
+          if ! iam_token="$(curl --fail --silent --show-error \
             --request POST \
             --header "Content-Type: application/x-www-form-urlencoded" \
             --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' \
@@ -332,11 +331,10 @@ jobs:
             --data-urlencode "audience=$YC_TERRAFORM_SERVICE_ACCOUNT_ID" \
             --data-urlencode "subject_token=$github_oidc_token" \
             --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:id_token' \
-            https://auth.yandex.cloud/oauth/token)"; then
+            https://auth.yandex.cloud/oauth/token | jq -er '.access_token | select(type == "string" and length > 0)')"; then
             printf '%s\n' '::error::Yandex workload identity token exchange failed' >&2
             exit 1
           fi
-          iam_token="$(jq -er '.access_token | select(type == "string" and length > 0)' <<<"$iam_response")"
           echo "::add-mask::$iam_token"
           export YC_TOKEN=$iam_token
           test ! -e "$artifact_dir"
@@ -529,7 +527,7 @@ jobs:
           target_sha="$TARGET_SHA"
           dispatch_sha="$DISPATCH_SHA"
           cleanup() {
-            unset github_oidc_response github_oidc_token iam_response lockbox_payload
+            unset github_oidc_token lockbox_payload
             unset iam_token aws_access_key_id aws_secret_access_key YC_TOKEN AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY TF_DATA_DIR
             rm -f "$backend_config" "$fresh_identity_path"
             rm -rf -- "${RUNNER_TEMP:?}/yandex-production-terraform-data"
@@ -634,16 +632,15 @@ jobs:
             "$YC_STATE_BUCKET_NAME"; do
             test -n "$required_value"
           done
-          if ! github_oidc_response="$(curl --fail --silent --show-error --get \
+          if ! github_oidc_token="$(curl --fail --silent --show-error --get \
             --header "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
             --data-urlencode "audience=$YC_OIDC_AUDIENCE" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL")"; then
+            "$ACTIONS_ID_TOKEN_REQUEST_URL" | jq -er '.value | select(type == "string" and length > 0)')"; then
             printf '%s\n' '::error::GitHub OIDC token request failed' >&2
             exit 1
           fi
-          github_oidc_token="$(jq -er '.value | select(type == "string" and length > 0)' <<<"$github_oidc_response")"
           echo "::add-mask::$github_oidc_token"
-          if ! iam_response="$(curl --fail --silent --show-error \
+          if ! iam_token="$(curl --fail --silent --show-error \
             --request POST \
             --header "Content-Type: application/x-www-form-urlencoded" \
             --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' \
@@ -651,11 +648,10 @@ jobs:
             --data-urlencode "audience=$YC_TERRAFORM_SERVICE_ACCOUNT_ID" \
             --data-urlencode "subject_token=$github_oidc_token" \
             --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:id_token' \
-            https://auth.yandex.cloud/oauth/token)"; then
+            https://auth.yandex.cloud/oauth/token | jq -er '.access_token | select(type == "string" and length > 0)')"; then
             printf '%s\n' '::error::Yandex workload identity token exchange failed' >&2
             exit 1
           fi
-          iam_token="$(jq -er '.access_token | select(type == "string" and length > 0)' <<<"$iam_response")"
           echo "::add-mask::$iam_token"
           export YC_TOKEN=$iam_token
           node infra/yandex/scripts/verify-service-account-provenance.mjs validate < "$identity_path" > /dev/null

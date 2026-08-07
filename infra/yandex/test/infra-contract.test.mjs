@@ -1903,6 +1903,14 @@ function assertProtectedInfrastructureWorkflow(source) {
 
   const applyCommands = workflowCommands(apply);
   for (const commands of [planCommands, applyCommands]) {
+    assert.match(
+      commands,
+      /if ! github_oidc_token="\$\(curl[\s\S]*?\|\s+jq -er '\.value \| select\(type == "string" and length > 0\)'\)"; then/,
+    );
+    assert.match(
+      commands,
+      /if ! iam_token="\$\(curl[\s\S]*?\|\s+jq -er '\.access_token \| select\(type == "string" and length > 0\)'\)"; then/,
+    );
     for (const diagnostic of [
       "GitHub main ref authentication failed",
       "GitHub OIDC token request failed",
@@ -1916,7 +1924,7 @@ function assertProtectedInfrastructureWorkflow(source) {
     }
     assert.doesNotMatch(
       commands,
-      /::error::[^\n]*\$(?:github_oidc_response|github_oidc_token|iam_response|iam_token)/,
+      /::error::[^\n]*\$(?:(?:github_oidc_response|github_oidc_token|iam_response|iam_token)\b|\{(?:github_oidc_response|github_oidc_token|iam_response|iam_token)\})/,
     );
   }
   assert.match(applyCommands, /git rev-parse HEAD/);
