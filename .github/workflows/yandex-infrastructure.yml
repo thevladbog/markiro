@@ -429,7 +429,7 @@ jobs:
 
   apply:
     needs: [plan]
-    if: github.event_name == 'workflow_dispatch' && needs.plan.result == 'success'
+    if: always() && github.event_name == 'workflow_dispatch' && needs.plan.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment: production-infrastructure
