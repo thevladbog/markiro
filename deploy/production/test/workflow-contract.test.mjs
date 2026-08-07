@@ -76,6 +76,7 @@ const GENERATE_ENVIRONMENT =
   ].join("\n") + "\n";
 
 const PRODUCTION_BUNDLE_ENV = {
+  COMPOSE_PROJECT_NAME: "markiro-production",
   MARKIRO_IMAGE_TAG: "${{ github.sha }}",
   MARKIRO_API_IMAGE_DIGEST: `sha256:${"a".repeat(64)}`,
   MARKIRO_EDGE_IMAGE_DIGEST: `sha256:${"b".repeat(64)}`,
