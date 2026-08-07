@@ -1636,6 +1636,7 @@ function assertProtectedObservability({
     "production",
   );
   assert.match(dashboard, /for_each\s*=\s*local\.alert_specs/);
+  assert.match(dashboard, /chart_id\s*=\s*replace\(widgets\.key,\s*"_",\s*"-"\)/);
   assert.match(dashboard, /query\s*=\s*widgets\.value\.query/);
 
   for (const output of [

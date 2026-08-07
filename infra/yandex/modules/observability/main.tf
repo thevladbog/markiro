@@ -321,6 +321,7 @@ resource "yandex_monitoring_dashboard" "production" {
     for_each = local.alert_specs
     content {
       chart {
+        chart_id       = replace(widgets.key, "_", "-")
         title          = widgets.value.title
         display_legend = true
 
