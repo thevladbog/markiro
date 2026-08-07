@@ -1940,6 +1940,26 @@ printf '%s\\n' "$evidence_public_dns"`,
     "the apply evidence guard must accept an explicitly disabled public DNS cutover",
   );
 
+  const applyObservabilityCase = applyStep.run.match(
+    /case "\$OBSERVABILITY_PHASE" in[\s\S]*?^esac$/m,
+  )?.[0];
+  assert.ok(applyObservabilityCase);
+  execFileSync(
+    "bash",
+    [
+      "-c",
+      `set -euo pipefail
+OBSERVABILITY_PHASE=first
+expected_public_dns=false
+TF_VAR_notification_channel_id=
+TF_VAR_alert_ids=
+${applyObservabilityCase}
+[[ -z "\${TF_VAR_notification_channel_id+x}" ]]
+[[ -z "\${TF_VAR_alert_ids+x}" ]]`,
+    ],
+    { stdio: "pipe" },
+  );
+
   const applyCommands = workflowCommands(apply);
   for (const commands of [planCommands, applyCommands]) {
     assert.match(

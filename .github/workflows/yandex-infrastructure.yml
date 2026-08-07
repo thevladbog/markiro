@@ -614,6 +614,7 @@ jobs:
           case "$OBSERVABILITY_PHASE" in
             first)
               [[ "$expected_public_dns" == false ]]
+              unset TF_VAR_notification_channel_id TF_VAR_alert_ids
               ;;
             protected)
               test -n "$TF_VAR_notification_channel_id"
