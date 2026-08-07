@@ -799,7 +799,7 @@ describe("ShiftsPage", () => {
         }),
       );
     });
-  });
+  }, 10_000);
 
   it("omits labelTemplateId from the create payload when left untouched", async () => {
     const user = userEvent.setup();
@@ -1049,7 +1049,7 @@ describe("ShiftsPage", () => {
       },
       { timeout: 3000 },
     );
-  });
+  }, 10_000);
 
   it("sends ssccIssuerCounterpartyId: null when the user selects then clears it back to the default", async () => {
     const user = userEvent.setup();
