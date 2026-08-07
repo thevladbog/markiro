@@ -181,7 +181,7 @@ resource "yandex_iam_service_account_iam_member" "terraform_service_account_user
 resource "yandex_iam_service_account_iam_member" "terraform_service_account_viewer" {
   for_each = {
     deployment_controller = yandex_iam_service_account.deployment_controller.id
-    terraform              = yandex_iam_service_account.terraform.id
+    terraform             = yandex_iam_service_account.terraform.id
   }
 
   service_account_id = each.value
