@@ -191,9 +191,9 @@ Protect `production-controller`, `production-deploy`, and
 `production-cleanup` independently with main-branch deployment restrictions.
 Use distinct required-reviewer policies for controller and cleanup so approval
 of one privileged subject cannot authorize the other. The exact external
-subjects are `repo:thevladbog/q:environment:production-controller`,
-`repo:thevladbog/q:environment:production-deploy`, and
-`repo:thevladbog/q:environment:production-cleanup`; only the first and third
+subjects are `repo:thevladbog/markiro:environment:production-controller`,
+`repo:thevladbog/markiro:environment:production-deploy`, and
+`repo:thevladbog/markiro:environment:production-cleanup`; only the first and third
 receive deployment-controller credentials. Neither may exchange for the
 Terraform service account.
 

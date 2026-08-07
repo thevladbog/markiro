@@ -514,7 +514,7 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, productionResources
 
   assert.match(
     variables,
-    /variable\s+"github_repository"\s*\{[\s\S]*?condition\s*=\s*var\.github_repository\s*==\s*"thevladbog\/q"/,
+    /variable\s+"github_repository"\s*\{[\s\S]*?condition\s*=\s*var\.github_repository\s*==\s*"thevladbog\/markiro"/,
   );
   assert.match(
     variables,

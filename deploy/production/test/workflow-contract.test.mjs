@@ -922,7 +922,7 @@ fi
       FIXTURE_REHEARSAL_RUN: rehearsalPath,
       GITHUB_EVENT_NAME: "workflow_dispatch",
       GITHUB_OUTPUT: outputPath,
-      GITHUB_REPOSITORY: "thevladbog/q",
+      GITHUB_REPOSITORY: "thevladbog/markiro",
       GITHUB_TOKEN: "masked-test-token",
       MARKIRO_DEPLOYMENT_PHASE: "first",
       MARKIRO_ROLLBACK_REHEARSAL: "0",
@@ -949,6 +949,12 @@ test("production deployment contract rejects trigger, label, cleanup, and gate m
   const deployment = await source(".github/workflows/deploy-production.yml");
   const remote = await source("deploy/yandex/remote-deploy.mjs");
   const controller = await source("deploy/yandex/runner-control.mjs");
+
+  assert.match(
+    controller,
+    /process\.env\.GITHUB_REPOSITORY \|\| "thevladbog\/markiro"/,
+    "deployment runner must default to the current repository",
+  );
 
   for (const mutation of [
     {
