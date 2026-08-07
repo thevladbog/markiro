@@ -1591,12 +1591,7 @@ function assertProtectedObservability({
   }
   assert.match(observability, /yandex\.cloud\.audit\.lockbox\.GetPayload/);
   assert.match(observability, /yandex\.cloud\.audit\.lockbox\.GetPayloadEx/);
-  for (const event of [
-    "ObjectCreate",
-    "ObjectUpdate",
-    "ObjectDelete",
-    "ObjectGetByPresignURL",
-  ]) {
+  for (const event of ["ObjectCreate", "ObjectUpdate", "ObjectDelete", "ObjectGetByPresignURL"]) {
     assert.match(observability, new RegExp(`yandex\\.cloud\\.audit\\.storage\\.${event}`));
   }
   assert.doesNotMatch(observability, /yandex\.cloud\.audit\.storage\.ObjectGet"/);
