@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
 
 import * as logSanitizer from "../log-sanitizer.mjs";
 
 const { sanitizeJournal } = logSanitizer;
+const execute = promisify(execFile);
 
 test("journal sanitizer allowlists units, redacts credential shapes, and enforces byte and line bounds", () => {
   const output = sanitizeJournal(
@@ -443,6 +446,28 @@ test("journal sanitizer remains bounded for large adversarial quoted input", () 
   assert.ok(Buffer.byteLength(output) <= 64 * 1024);
   assert.match(output, /\[REDACTED\]/);
   assert.doesNotMatch(output, /�/);
+});
+
+test("journal sanitizer bounds repeated escaped punctuation in unterminated credentials", async () => {
+  const messages = [
+    `Authorization="${String.raw`\!`.repeat(256)}`,
+    `Authorization='${String.raw`\&`.repeat(256)}`,
+    `password="${String.raw`\!`.repeat(256)}`,
+    `token='${String.raw`\&`.repeat(256)}`,
+  ];
+  const sanitizerUrl = new URL("../log-sanitizer.mjs", import.meta.url).href;
+  const script = `
+    import { sanitizeJournal } from ${JSON.stringify(sanitizerUrl)};
+    const messages = ${JSON.stringify(messages)};
+    for (const message of messages) {
+      const output = sanitizeJournal([{ unit: "markiro-deploy.service", message }]);
+      if (!output.includes("[REDACTED]")) throw new Error("credential was not redacted");
+    }
+  `;
+
+  await execute(process.execPath, ["--input-type=module", "--eval", script], {
+    timeout: 1_500,
+  });
 });
 
 test("durable spool stays size and age bounded across rename rotation and restart", async () => {

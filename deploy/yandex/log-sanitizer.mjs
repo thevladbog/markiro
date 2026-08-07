@@ -27,12 +27,12 @@ function redactText(message) {
   return message
     .replace(/\b(Cookie|Set-Cookie)\s*[:=]\s*.*$/gi, (_match, name) => `${name}: [REDACTED]`)
     .replace(
-      /\b(Authorization\s*[:=]\s*)(?:"(?:\\.|[^"])*"|'(?:\\.|[^'])*'|(?:Basic|Bearer)\s+\S+|\S+)/gi,
+      /\b(Authorization\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|(?:Basic|Bearer)\s+\S+|\S+)/gi,
       "$1[REDACTED]",
     )
     .replace(/\b(Basic|Bearer)\s+\S+/gi, "$1 [REDACTED]")
     .replace(
-      /\b(authorization|password|passwd|secret|token|cookie|api[-_]?key|credential|session|client_secret|access_token|refresh_token)\s*[:=]\s*(?:"(?:\\.|[^"])*"|'(?:\\.|[^'])*'|\S+)/gi,
+      /\b(authorization|password|passwd|secret|token|cookie|api[-_]?key|credential|session|client_secret|access_token|refresh_token)\s*[:=]\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\S+)/gi,
       "$1=[REDACTED]",
     )
     .replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@"']+:[^\s/@"']+@/gi, "$1[REDACTED]@")
