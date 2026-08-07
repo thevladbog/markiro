@@ -9,6 +9,7 @@ import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { schema, type Db } from "@markiro/db";
 import { listenOnLoopback } from "./support/listen-loopback";
+import { createTestStationDevice } from "./support/auth";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -410,11 +411,8 @@ describe.skipIf(!ready)("counterparties e2e", () => {
       .send({ organizationId: orgId })
       .expect(200);
 
-    const device = await agent
-      .post("/station-devices")
-      .send({ name: "Line 1 terminal" })
-      .expect(201);
-    const apiKey = (device.body as { apiKey: string }).apiKey;
+    const device = await createTestStationDevice(app!, agent, "Line 1 terminal");
+    const apiKey = device.apiKey;
 
     await request(app!.getHttpServer()).get("/counterparties").set("x-api-key", apiKey).expect(403);
   });

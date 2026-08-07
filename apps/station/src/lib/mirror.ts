@@ -1,4 +1,4 @@
-import { STATION_MIGRATIONS, type OperatorMirrorRecord } from "@markiro/db";
+import { STATION_MIGRATIONS, type OperatorMirrorRecord } from "@markiro/db/station-sqlite";
 
 /** Backend-agnostic SQL surface so mirror logic is testable with node:sqlite. */
 export interface SqlExecutor {
@@ -272,6 +272,13 @@ async function activeSlot(exec: SqlExecutor): Promise<RosterSlot> {
  */
 let refreshChain: Promise<void> = Promise.resolve();
 
+const OPERATORS_BLOCKED_KEY = "operators_blocked";
+
+export interface OperatorRosterPublishOptions {
+  /** Checked inside the serialized turn and again immediately before publish. */
+  isCurrent?: () => boolean;
+}
+
 /**
  * Publishes a complete roster atomically.
  *
@@ -299,8 +306,12 @@ let refreshChain: Promise<void> = Promise.resolve();
 export function replaceOperatorsMirror(
   exec: SqlExecutor,
   operators: OperatorMirrorRecord[],
+  options: OperatorRosterPublishOptions = {},
 ): Promise<void> {
-  const turn = refreshChain.then(() => publishOperatorsMirror(exec, operators));
+  const turn = refreshChain.then(async () => {
+    if (options.isCurrent?.() === false) return;
+    await publishOperatorsMirror(exec, operators, options);
+  });
   refreshChain = turn.then(
     () => undefined,
     () => undefined,
@@ -311,6 +322,7 @@ export function replaceOperatorsMirror(
 async function publishOperatorsMirror(
   exec: SqlExecutor,
   operators: OperatorMirrorRecord[],
+  options: OperatorRosterPublishOptions,
 ): Promise<void> {
   const target: RosterSlot = otherSlot(await activeSlot(exec));
   const table = SLOT_TABLES[target];
@@ -324,12 +336,20 @@ async function publishOperatorsMirror(
     );
   }
 
+  // A credential may be rejected while this roster is being staged. Never
+  // let that now-stale request flip the live pointer or lift a recovery gate.
+  if (options.isCurrent?.() === false) return;
+
   // The publish. Everything above this line is invisible to sign-in.
   await exec.run(
     `INSERT INTO station_meta (key, value) VALUES (?,?)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
     [ACTIVE_SLOT_KEY, target],
   );
+
+  // A successful authoritative publish is the only operation allowed to
+  // lift the fail-closed gate left by credential recovery.
+  await exec.run("DELETE FROM station_meta WHERE key = ?", [OPERATORS_BLOCKED_KEY]);
 
   // Best-effort: clear the generation that just went stale so a removed or
   // deactivated operator's PIN/badge hashes don't linger in the unencrypted
@@ -358,6 +378,30 @@ async function publishOperatorsMirror(
   } catch {
     // Swallowed intentionally: see comment above.
   }
+}
+
+/**
+ * Fail-closed credential-recovery purge, serialized with roster publishes.
+ * The gate is written first and intentionally remains set after any partial
+ * deletion failure, so neither slot can authenticate until a later complete
+ * authoritative publish succeeds.
+ */
+export function purgeOperatorsMirror(exec: SqlExecutor): Promise<void> {
+  const turn = refreshChain.then(async () => {
+    await exec.run(
+      `INSERT INTO station_meta (key, value) VALUES (?,?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      [OPERATORS_BLOCKED_KEY, "1"],
+    );
+    await exec.run(`DELETE FROM ${SLOT_TABLES.a}`);
+    await exec.run(`DELETE FROM ${SLOT_TABLES.b}`);
+    await exec.run("DELETE FROM station_meta WHERE key = ?", [ACTIVE_SLOT_KEY]);
+  });
+  refreshChain = turn.then(
+    () => undefined,
+    () => undefined,
+  );
+  return turn;
 }
 
 export async function readShiftMirror(
@@ -476,11 +520,13 @@ export async function readOperatorsMirror(exec: SqlExecutor): Promise<OperatorMi
     `SELECT operator_id, name, login, role, pin_hash, badge_hash, active
        FROM ${SLOT_TABLES.a}
       WHERE COALESCE((SELECT value FROM station_meta WHERE key = ?), 'a') <> 'b'
+        AND COALESCE((SELECT value FROM station_meta WHERE key = ?), '0') <> '1'
      UNION ALL
      SELECT operator_id, name, login, role, pin_hash, badge_hash, active
        FROM ${SLOT_TABLES.b}
-      WHERE COALESCE((SELECT value FROM station_meta WHERE key = ?), 'a') = 'b'`,
-    [ACTIVE_SLOT_KEY, ACTIVE_SLOT_KEY],
+      WHERE COALESCE((SELECT value FROM station_meta WHERE key = ?), 'a') = 'b'
+        AND COALESCE((SELECT value FROM station_meta WHERE key = ?), '0') <> '1'`,
+    [ACTIVE_SLOT_KEY, OPERATORS_BLOCKED_KEY, ACTIVE_SLOT_KEY, OPERATORS_BLOCKED_KEY],
   );
   return rows.map((r) => ({
     operatorId: r.operator_id,

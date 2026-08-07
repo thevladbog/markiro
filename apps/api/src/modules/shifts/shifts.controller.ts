@@ -30,7 +30,7 @@ import {
   type ShiftDto,
   type UpdateShiftDto,
 } from "./dto";
-import { ShiftsService } from "./shifts.service";
+import { ShiftsService, type EffectiveListShiftsQuery } from "./shifts.service";
 
 @ApiTags("shifts")
 @Controller("shifts")
@@ -44,7 +44,11 @@ export class ShiftsController {
     @Req() req: RequestWithTenant,
     @Query(new ZodValidationPipe(listShiftsQuerySchema)) query: ListShiftsQueryDto,
   ): Promise<ListShiftsResponseDto> {
-    return this.shiftsService.listShifts(req.tenantId!, query);
+    const effectiveQuery: EffectiveListShiftsQuery =
+      req.authKind === "station" && query.lineId === undefined && req.deviceLineId
+        ? { ...query, lineId: req.deviceLineId, includeUnassigned: true }
+        : query;
+    return this.shiftsService.listShifts(req.tenantId!, effectiveQuery);
   }
 
   // Cabinet-only: not one of the station's four routes (list, create, open,

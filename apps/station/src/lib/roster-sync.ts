@@ -1,5 +1,6 @@
-import type { OperatorMirrorRecord } from "@markiro/db";
+import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
 import type { StationClient } from "./api-client.js";
+import { credentialGenerationIsCurrent, type CredentialGeneration } from "./credential-recovery.js";
 import { replaceOperatorsMirror, type SqlExecutor } from "./mirror.js";
 
 /**
@@ -26,10 +27,13 @@ import { replaceOperatorsMirror, type SqlExecutor } from "./mirror.js";
 export async function syncOperatorRoster(
   client: Pick<StationClient, "get">,
   exec: SqlExecutor,
+  generation?: CredentialGeneration,
 ): Promise<void> {
   try {
     const { items } = await client.get<{ items: OperatorMirrorRecord[] }>("/station/operators");
-    await replaceOperatorsMirror(exec, items);
+    await replaceOperatorsMirror(exec, items, {
+      ...(generation ? { isCurrent: () => credentialGenerationIsCurrent(generation) } : {}),
+    });
   } catch (err) {
     console.error("station: operator roster sync failed", err);
   }

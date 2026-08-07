@@ -99,7 +99,7 @@ export function InvitationForm({
         <Select
           label={t("pages.team.invite.role")}
           value={role}
-          onChange={(value) => setRole(value as CreateInvitationInput["role"])}
+          onValueChange={setRole}
           options={[
             { value: "manager", label: t("pages.team.roles.manager") },
             { value: "admin", label: t("pages.team.roles.admin") },
@@ -115,7 +115,7 @@ export function InvitationForm({
           label={t("pages.team.invite.employee")}
           value={employeeId}
           disabled={employees.isPending || employees.isError}
-          onChange={setEmployeeId}
+          onValueChange={setEmployeeId}
           options={[
             { value: "", label: t("pages.team.invite.noEmployee") },
             ...availableEmployees.map((employee) => ({

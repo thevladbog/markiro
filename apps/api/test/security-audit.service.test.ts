@@ -78,4 +78,41 @@ describe("SecurityAuditService", () => {
     ]);
     expect(serialized).not.toMatch(FORBIDDEN_FIELD);
   });
+
+  it("records an unauthenticated device pairing actor without source or secret material", () => {
+    const eventWithUnsafeExtras = {
+      tenantId: "org_1",
+      actorType: "unauthenticated_device",
+      actorId: null,
+      action: "kiosk.repair",
+      resourceId: "kiosk_1",
+      outcome: "succeeded",
+      source: "192.0.2.10",
+      token: "device-token",
+      code: "12345678",
+      error: new Error("database detail"),
+    } as const;
+    const deviceCredentialMutation = (
+      service as unknown as {
+        deviceCredentialMutation(event: typeof eventWithUnsafeExtras): void;
+      }
+    ).deviceCredentialMutation;
+
+    deviceCredentialMutation.call(service, eventWithUnsafeExtras);
+
+    expect(log).toHaveBeenCalledTimes(1);
+    const serialized = log.mock.calls[0]![0];
+    expect(typeof serialized).toBe("string");
+    expect(Object.keys(JSON.parse(serialized as string)).sort()).toEqual([
+      "action",
+      "actorId",
+      "actorType",
+      "outcome",
+      "resourceId",
+      "tenantId",
+    ]);
+    expect(serialized).not.toContain("192.0.2.10");
+    expect(serialized).not.toContain("database detail");
+    expect(serialized).not.toMatch(FORBIDDEN_FIELD);
+  });
 });

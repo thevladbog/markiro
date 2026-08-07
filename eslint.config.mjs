@@ -29,6 +29,39 @@ export default tseslint.config(
       "react-hooks/exhaustive-deps": "warn",
     },
   },
+  {
+    files: ["apps/admin/src/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "JSXOpeningElement[name.name='input']",
+          message:
+            "Use the appropriate @markiro/ui control (Input, Checkbox, RadioGroup, or DatePicker) instead of a native input.",
+        },
+        {
+          selector: "JSXOpeningElement[name.name='select']",
+          message: "Use @markiro/ui Select instead of a native select.",
+        },
+        {
+          selector: "JSXOpeningElement[name.name='textarea']",
+          message: "Add and use a custom @markiro/ui Textarea instead of a native textarea.",
+        },
+        {
+          selector: "JSXOpeningElement[name.name='button']",
+          message: "Use @markiro/ui Button or IconButton instead of a native button.",
+        },
+        {
+          selector: "JSXOpeningElement[name.name='option']",
+          message: "Use @markiro/ui Select instead of native option elements.",
+        },
+        {
+          selector: "JSXOpeningElement[name.name='datalist']",
+          message: "Use a custom @markiro/ui Combobox instead of a native datalist.",
+        },
+      ],
+    },
+  },
   { files: ["**/*.{js,mjs,cjs}"], ...tseslint.configs.disableTypeChecked },
   {
     files: ["**/test/**", "**/emails/**", "**/vitest.config.ts", "**/drizzle*.config.ts"],

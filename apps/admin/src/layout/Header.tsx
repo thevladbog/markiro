@@ -1,27 +1,12 @@
-import { useState, type CSSProperties } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
 
-import { Button, useTheme } from "@markiro/ui";
+import { Button, IconButton, useTheme } from "@markiro/ui";
 
 import { useAuthClient } from "../auth/client.js";
 import { useClearAuthQueryCache } from "../query/AuthQueryBoundary.js";
 import { useActiveOrg } from "./useActiveOrg.js";
-
-const ICON_BUTTON_STYLE: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  height: "var(--control-sm)",
-  minWidth: "var(--control-sm)",
-  padding: "0 10px",
-  borderRadius: "var(--r-2)",
-  border: "1px solid var(--line-strong)",
-  background: "var(--surface-card)",
-  color: "var(--fg-1)",
-  font: "600 12px/1 var(--font-ui)",
-  cursor: "pointer",
-};
 
 /**
  * Global top bar, rendered once by `AppShell` above the routed `<Outlet/>`
@@ -98,22 +83,20 @@ export function Header() {
         </span>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-        <button
-          type="button"
+        <IconButton
           aria-label={t("shell.header.toggleTheme")}
+          variant="secondary"
+          size="compact"
+          icon={<span aria-hidden="true">{theme === "dark" ? "🌙" : "☀️"}</span>}
           onClick={handleToggleTheme}
-          style={ICON_BUTTON_STYLE}
-        >
-          {theme === "dark" ? "\u{1F319}" : "☀️"}
-        </button>
-        <button
-          type="button"
+        />
+        <IconButton
           aria-label={t("shell.header.toggleLanguage")}
+          variant="secondary"
+          size="compact"
+          icon={<span aria-hidden="true">{nextLanguage.toUpperCase()}</span>}
           onClick={handleToggleLanguage}
-          style={ICON_BUTTON_STYLE}
-        >
-          {nextLanguage.toUpperCase()}
-        </button>
+        />
         <Button
           variant="secondary"
           size="compact"

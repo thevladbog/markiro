@@ -10,6 +10,10 @@ export interface StationConfig {
   machineId: string;
   tenantId?: string;
   deviceId?: string;
+  deviceName?: string;
+  organizationName?: string;
+  lineId?: string;
+  lineName?: string;
   apiKey?: string;
   serverUrl?: string;
 }
@@ -18,6 +22,10 @@ interface RustConfig {
   machine_id: string;
   tenant_id?: string;
   device_id?: string;
+  device_name?: string;
+  organization_name?: string;
+  line_id?: string;
+  line_name?: string;
   api_key?: string;
   server_url?: string;
 }
@@ -32,6 +40,10 @@ function fromRust(c: RustConfig): StationConfig {
     machineId: c.machine_id,
     ...(c.tenant_id !== undefined ? { tenantId: c.tenant_id } : {}),
     ...(c.device_id !== undefined ? { deviceId: c.device_id } : {}),
+    ...(c.device_name !== undefined ? { deviceName: c.device_name } : {}),
+    ...(c.organization_name !== undefined ? { organizationName: c.organization_name } : {}),
+    ...(c.line_id !== undefined ? { lineId: c.line_id } : {}),
+    ...(c.line_name !== undefined ? { lineName: c.line_name } : {}),
     ...(c.api_key !== undefined ? { apiKey: c.api_key } : {}),
     ...(c.server_url !== undefined ? { serverUrl: c.server_url } : {}),
   };
@@ -42,6 +54,10 @@ function toRust(c: StationConfig): RustConfig {
     machine_id: c.machineId,
     ...(c.tenantId !== undefined ? { tenant_id: c.tenantId } : {}),
     ...(c.deviceId !== undefined ? { device_id: c.deviceId } : {}),
+    ...(c.deviceName !== undefined ? { device_name: c.deviceName } : {}),
+    ...(c.organizationName !== undefined ? { organization_name: c.organizationName } : {}),
+    ...(c.lineId !== undefined ? { line_id: c.lineId } : {}),
+    ...(c.lineName !== undefined ? { line_name: c.lineName } : {}),
     ...(c.apiKey !== undefined ? { api_key: c.apiKey } : {}),
     ...(c.serverUrl !== undefined ? { server_url: c.serverUrl } : {}),
   };
@@ -53,6 +69,11 @@ export async function readConfig(): Promise<StationConfig> {
 
 export async function writeConfig(cfg: StationConfig): Promise<void> {
   await invoke("write_config", { cfg: toRust(cfg) });
+}
+
+/** Drops only the rejected credential and reproducible display metadata. */
+export async function clearCredential(): Promise<void> {
+  await invoke("clear_credential");
 }
 
 /**

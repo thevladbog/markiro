@@ -4,7 +4,18 @@ import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { isValidGtin } from "@markiro/domain";
-import { Alert, Button, Card, EmptyState, Input, Modal, Select, Spinner, Table } from "@markiro/ui";
+import {
+  Alert,
+  Button,
+  Card,
+  Checkbox,
+  EmptyState,
+  Input,
+  Modal,
+  Select,
+  Spinner,
+  Table,
+} from "@markiro/ui";
 import type { SelectOption, TableColumn } from "@markiro/ui";
 
 import { ApiRequestError } from "../../api/client.js";
@@ -90,7 +101,7 @@ function LinkModal({
         label={t("pages.integrations.channel.candidates.link.productLabel")}
         options={options}
         value={productId}
-        onChange={setProductId}
+        onValueChange={setProductId}
       />
     </Modal>
   );
@@ -433,16 +444,11 @@ export function CandidatesQueue({ type }: { type: string }) {
             flexWrap: "wrap",
           }}
         >
-          <label
-            style={{ display: "flex", alignItems: "center", gap: 8, font: "var(--text-body)" }}
-          >
-            <input
-              type="checkbox"
-              checked={hidden}
-              onChange={(event) => setHidden(event.target.checked)}
-            />
-            {t("pages.integrations.channel.candidates.showHiddenLabel")}
-          </label>
+          <Checkbox
+            label={t("pages.integrations.channel.candidates.showHiddenLabel")}
+            checked={hidden}
+            onCheckedChange={setHidden}
+          />
 
           {!hidden && suggestedCandidates.length > 0 && (
             <Button

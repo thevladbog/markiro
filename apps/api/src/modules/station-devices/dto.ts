@@ -1,25 +1,58 @@
 import { z } from "zod";
 
-/** POST /station-devices body. */
+/** POST /station-devices body. A station exists before it has a credential. */
 export const createStationDeviceSchema = z.object({
-  name: z.string().min(1).max(200),
+  name: z.string().trim().min(1).max(200),
+  lineId: z.string().uuid().nullable(),
 });
 export type CreateStationDeviceDto = z.infer<typeof createStationDeviceSchema>;
 
-/** A station device summary (never carries the plaintext key). */
-export interface StationDeviceDto {
-  id: string;
-  name: string;
-  enrolledAt: Date;
+/** PATCH /station-devices/:id body. Omitted fields are preserved. */
+export const updateStationDeviceSchema = z.object({
+  name: z.string().trim().min(1).max(200).optional(),
+  lineId: z.string().uuid().nullable().optional(),
+});
+export type UpdateStationDeviceDto = z.infer<typeof updateStationDeviceSchema>;
+
+export type StationDeviceLifecycle = "awaiting_pairing" | "online" | "offline" | "revoked";
+
+/** A device is online only when it has phoned home during the last two minutes. */
+export const STATION_ONLINE_THRESHOLD_MS = 2 * 60 * 1000;
+
+export interface StationDeviceLifecycleInput {
+  apiKeyId: string | null;
+  revokedAt: Date | null;
   lastSeenAt: Date | null;
 }
 
-/** POST /station-devices response — the plaintext apiKey is returned ONCE. */
-export interface EnrollStationDeviceResponseDto {
-  deviceId: string;
+/** Single source for the API and tests; `now` keeps the boundary deterministic. */
+export function stationDeviceLifecycle(
+  device: StationDeviceLifecycleInput,
+  now: Date = new Date(),
+): StationDeviceLifecycle {
+  if (device.revokedAt !== null) return "revoked";
+  if (device.apiKeyId === null) return "awaiting_pairing";
+  if (
+    device.lastSeenAt !== null &&
+    device.lastSeenAt.getTime() <= now.getTime() &&
+    now.getTime() - device.lastSeenAt.getTime() <= STATION_ONLINE_THRESHOLD_MS
+  ) {
+    return "online";
+  }
+  return "offline";
+}
+
+/** A station summary (never carries credential or pairing-code plaintext). */
+export interface StationDeviceDto {
+  id: string;
   name: string;
-  apiKey: string;
-  serverUrl: string;
+  lineId: string | null;
+  lineName: string | null;
+  lifecycle: StationDeviceLifecycle;
+  pairedAt: Date | null;
+  revokedAt: Date | null;
+  lastSeenAt: Date | null;
+  createdAt: Date;
 }
 
 /** GET /station-devices response. */

@@ -15,7 +15,16 @@ interface CredentialMutationEvent {
   userId: string;
   action: string;
   resourceId: string | null;
-  outcome: "succeeded";
+  outcome: "succeeded" | "failed";
+}
+
+interface DeviceCredentialMutationEvent {
+  tenantId: string | null;
+  actorType: "unauthenticated_device" | "kiosk_device" | "system";
+  actorId: string | null;
+  action: string;
+  resourceId: string | null;
+  outcome: "succeeded" | "failed";
 }
 
 @Injectable()
@@ -40,6 +49,19 @@ export class SecurityAuditService {
       JSON.stringify({
         tenantId: event.tenantId,
         userId: event.userId,
+        action: event.action,
+        resourceId: event.resourceId,
+        outcome: event.outcome,
+      }),
+    );
+  }
+
+  deviceCredentialMutation(event: DeviceCredentialMutationEvent): void {
+    this.logger.log(
+      JSON.stringify({
+        tenantId: event.tenantId,
+        actorType: event.actorType,
+        actorId: event.actorId,
         action: event.action,
         resourceId: event.resourceId,
         outcome: event.outcome,

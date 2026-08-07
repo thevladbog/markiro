@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { parseScannedSscc } from "@markiro/domain";
-import { Alert, Button } from "@markiro/ui";
+import { Alert, Button, FullScreenDialog } from "@markiro/ui";
 import type { ScanSource } from "../lib/scan-source.js";
 
 export interface PrintVerificationProps {
@@ -17,7 +17,7 @@ export interface PrintVerificationProps {
   scanSource: ScanSource;
 }
 
-type Message = "mismatch" | "notSscc" | null;
+export type PrintVerificationMessage = "waiting" | "mismatch" | "notSscc";
 
 /**
  * The one deliberate exception to "nothing competes with a scan verdict"
@@ -39,50 +39,65 @@ export function PrintVerification({
   scanSource,
 }: PrintVerificationProps) {
   const { t } = useTranslation();
-  const [message, setMessage] = useState<Message>(null);
+  const [feedback, setFeedback] = useState<{
+    expected: string;
+    message: PrintVerificationMessage;
+  }>({ expected, message: "waiting" });
+  const message = feedback.expected === expected ? feedback.message : "waiting";
 
   useEffect(() => {
-    return scanSource.start((raw) => {
+    let active = true;
+    const stop = scanSource.start((raw) => {
+      if (!active) return;
       const parsed = parseScannedSscc(raw);
       if (parsed === null) {
-        setMessage("notSscc");
+        setFeedback({ expected, message: "notSscc" });
         return;
       }
       if (parsed !== expected) {
-        setMessage("mismatch");
+        setFeedback({ expected, message: "mismatch" });
         return;
       }
-      setMessage(null);
+      setFeedback({ expected, message: "waiting" });
       onVerified();
     });
+    return () => {
+      active = false;
+      stop();
+    };
   }, [scanSource, expected, onVerified]);
 
   return (
-    <main
-      style={{
-        position: "fixed",
-        inset: 0,
-        display: "flex",
-        flexDirection: "column",
-        gap: 24,
-        padding: 32,
-        background: "var(--surface-page, #fff)",
-      }}
-    >
-      <h1 style={{ fontSize: "2rem" }}>{t("box.printExpected")}</h1>
-      <p style={{ fontSize: "2rem", fontWeight: 800, letterSpacing: "0.05em" }}>{expected}</p>
-
-      {message === "mismatch" && <Alert tone="error" title={t("box.printMismatch")} />}
-      {message === "notSscc" && <Alert tone="error" title={t("box.printNotSscc")} />}
-
-      <div style={{ display: "flex", gap: 12, marginTop: "auto" }}>
-        <Button type="button" style={{ minHeight: 64 }} onClick={onReprint}>
+    <FullScreenDialog
+      open
+      title={t("box.printExpected")}
+      backLabel={t("box.printSkip")}
+      onClose={onSkip}
+      initialFocus="dialog"
+      footer={
+        <Button type="button" size="floor" onClick={onReprint}>
           {t("box.printReprint")}
         </Button>
-        <Button type="button" variant="secondary" style={{ minHeight: 64 }} onClick={onSkip}>
-          {t("box.printSkip")}
-        </Button>
+      }
+    >
+      <div
+        style={{
+          height: "100%",
+          minHeight: 0,
+          minWidth: 0,
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+          gap: 24,
+        }}
+      >
+        <p style={{ margin: 0, fontSize: "2rem", fontWeight: 800, letterSpacing: "0.05em" }}>
+          {expected}
+        </p>
+
+        {message === "mismatch" && <Alert tone="error" title={t("box.printMismatch")} />}
+        {message === "notSscc" && <Alert tone="error" title={t("box.printNotSscc")} />}
       </div>
-    </main>
+    </FullScreenDialog>
   );
 }

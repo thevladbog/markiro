@@ -1,0 +1,32 @@
+.mk-catalog-page {
+  min-width: 0;
+}
+
+.mk-catalog-filters__search {
+  flex: 1;
+  max-width: 320px;
+}
+.mk-catalog-filters__status {
+  width: 200px;
+}
+.mk-catalog-panel-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.mk-catalog-panel-section + .mk-catalog-panel-section {
+  margin-top: var(--sp-6);
+}
+.mk-catalog-panel-section h3 {
+  margin: 0;
+  color: var(--fg-1);
+  font: var(--text-h3);
+}
+
+@media (max-width: 767px) {
+  .mk-catalog-filters__search,
+  .mk-catalog-filters__status {
+    width: 100%;
+    max-width: none;
+  }
+}

@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { createMemoryRouter, createRoutesFromElements, Route, RouterProvider } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
@@ -8,6 +9,7 @@ import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider } from "../src/access/context.js";
 import type * as CounterpartiesApiModule from "../src/pages/counterparties/api.js";
 import { CounterpartiesPage } from "../src/pages/counterparties/index.js";
+import { CounterpartyPanelRoute } from "../src/pages/counterparties/CounterpartyPanelRoute.js";
 
 const { writeHookMountSpy } = vi.hoisted(() => ({ writeHookMountSpy: vi.fn() }));
 
@@ -36,13 +38,11 @@ afterEach(() => {
   writeHookMountSpy.mockClear();
 });
 
-/** Minimal Response stand-in -- only what apps/admin/src/api/client.ts reads. */
 function jsonResponse(status: number, body: unknown): Response {
-  return {
-    ok: status >= 200 && status < 300,
+  return new Response(body === undefined ? null : JSON.stringify(body), {
     status,
-    json: async () => body,
-  } as Response;
+    headers: { "content-type": "application/json" },
+  });
 }
 
 const OPERATIONS_READ_ONLY: AccessDocument = {
@@ -62,7 +62,20 @@ function renderPage(access: AccessDocument = OPERATIONS_WRITE_ACCESS) {
   return render(
     <QueryClientProvider client={queryClient}>
       <AccessProvider value={access}>
-        <CounterpartiesPage />
+        <RouterProvider
+          router={createMemoryRouter(
+            createRoutesFromElements(
+              <Route path="/counterparties" element={<CounterpartiesPage />}>
+                <Route path="new" element={<CounterpartyPanelRoute mode="create" />} />
+                <Route
+                  path=":counterpartyId/edit"
+                  element={<CounterpartyPanelRoute mode="edit" />}
+                />
+              </Route>,
+            ),
+            { initialEntries: ["/counterparties"] },
+          )}
+        />
       </AccessProvider>
     </QueryClientProvider>,
   );
@@ -104,6 +117,8 @@ describe("CounterpartiesPage", () => {
     expect(screen.getByText("6291041500213")).toBeDefined();
     expect(screen.getByText("7701234567")).toBeDefined();
     expect(screen.getByText("2")).toBeDefined(); // gs1Prefixes.length
+    expect(screen.getByTestId("counterparties-page").classList).toContain("mk-admin-page");
+    expect(screen.getByText("1 контрагент").getAttribute("aria-live")).toBe("polite");
     expect(fetchMock).toHaveBeenCalledWith("/api/counterparties", expect.any(Object));
   });
 
@@ -248,7 +263,7 @@ describe("CounterpartiesPage", () => {
       );
     });
 
-    // Modal closes and the refetched list shows the newly created row.
+    // Panel closes and the refetched list shows the newly created row.
     await waitFor(() => expect(screen.queryByText("Новый контрагент")).toBeNull());
     expect(await screen.findByText("Good Co")).toBeDefined();
   });
@@ -303,7 +318,7 @@ describe("CounterpartiesPage", () => {
     await screen.findByText("Acme Ltd");
 
     fireEvent.click(screen.getByRole("button", { name: "Удалить" }));
-    const dialog = await screen.findByRole("dialog");
+    const dialog = await screen.findByRole("alertdialog", { name: "Удалить контрагента?" });
     expect(within(dialog).getByText("Удалить контрагента?")).toBeDefined();
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Удалить" }));
@@ -330,9 +345,10 @@ describe("CounterpartiesPage", () => {
     await screen.findByText("Acme Ltd");
 
     fireEvent.click(screen.getByRole("button", { name: "Удалить" }));
-    const dialog = await screen.findByRole("dialog");
+    const dialog = await screen.findByRole("alertdialog", { name: "Удалить контрагента?" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Удалить" }));
 
-    expect(await screen.findByText(conflictMessage)).toBeDefined();
+    expect(await within(dialog).findByText(conflictMessage)).toBeDefined();
+    expect(screen.getByRole("alertdialog", { name: "Удалить контрагента?" })).toBeDefined();
   });
 });

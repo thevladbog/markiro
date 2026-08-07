@@ -1,8 +1,22 @@
 import express from "express";
 import { createServer, type Server } from "node:http";
+import { Test } from "@nestjs/testing";
+import { DocumentBuilder, SwaggerModule, type OpenAPIObject } from "@nestjs/swagger";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { AuthorizationGuard } from "../src/authorization/authorization.guard";
+import { SecurityAuditService } from "../src/authorization/security-audit.service";
+import { KioskPairController } from "../src/modules/kiosk/kiosk-pair.controller";
+import { PairingService } from "../src/modules/kiosk/pairing.service";
+import { KiosksController } from "../src/modules/kiosks/kiosks.controller";
+import { KiosksService } from "../src/modules/kiosks/kiosks.service";
+import { StationDevicesController } from "../src/modules/station-devices/station-devices.controller";
+import { StationDevicesService } from "../src/modules/station-devices/station-devices.service";
+import { StationPairController } from "../src/modules/station-pairing/station-pair.controller";
+import { StationPairingService } from "../src/modules/station-pairing/station-pairing.service";
 import { disableScalarDynamicCodeProbe, mountOpenApiDocs } from "../src/openapi-docs";
+import { TenantGuard } from "../src/tenancy/tenant.guard";
+import { StationOnlyGuard } from "../src/tenancy/station-only.guard";
 
 function scriptElements(html: string): Array<{ attributes: string; body: string }> {
   const lower = html.toLowerCase();
@@ -49,6 +63,51 @@ function scriptSources(html: string): string[] {
   });
 }
 
+function operationResponse(
+  document: OpenAPIObject,
+  path: string,
+  status: "200" | "201",
+  method: "get" | "post" = "post",
+): Record<string, unknown> {
+  const operation = document.paths[path]?.[method];
+  if (!operation) throw new Error(`Missing ${method.toUpperCase()} operation for ${path}`);
+  const response = operation.responses[status];
+  if (!response || "$ref" in response)
+    throw new Error(`Missing inline ${status} response for ${path}`);
+  return response as unknown as Record<string, unknown>;
+}
+
+interface TestSchema {
+  type?: string;
+  required?: string[];
+  properties?: Record<string, TestSchema>;
+  items?: TestSchema;
+}
+
+function responseSchema(response: Record<string, unknown>): TestSchema {
+  const content = response.content as Record<string, { schema?: TestSchema }> | undefined;
+  const schema = content?.["application/json"]?.schema;
+  if (!schema) throw new Error("Missing application/json response schema");
+  return schema;
+}
+
+function property(schema: TestSchema, name: string): TestSchema {
+  const result = schema.properties?.[name];
+  if (!result) throw new Error(`Missing schema property ${name}`);
+  return result;
+}
+
+function arrayItems(schema: TestSchema): TestSchema {
+  if (schema.type !== "array" || !schema.items) throw new Error("Expected array item schema");
+  return schema.items;
+}
+
+function expectExactObjectFields(schema: TestSchema, fields: readonly string[]): void {
+  expect(schema.type).toBe("object");
+  expect([...(schema.required ?? [])].sort()).toEqual([...fields].sort());
+  expect(Object.keys(schema.properties ?? {}).sort()).toEqual([...fields].sort());
+}
+
 describe("self-hosted OpenAPI documentation", () => {
   let server: Server;
 
@@ -56,6 +115,50 @@ describe("self-hosted OpenAPI documentation", () => {
     expect(scriptSources('<script src="/docs/scalar.js"></script   >')).toEqual([
       "/docs/scalar.js",
     ]);
+  });
+
+  it("documents the authenticated station identity backfill response exactly", async () => {
+    const moduleRef = await Test.createTestingModule({
+      controllers: [StationPairController],
+      providers: [{ provide: StationPairingService, useValue: {} }],
+    })
+      .overrideGuard(TenantGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(StationOnlyGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
+    const app = moduleRef.createNestApplication();
+    await app.init();
+
+    try {
+      const document = SwaggerModule.createDocument(
+        app,
+        new DocumentBuilder().setTitle("contract test").setVersion("test").build(),
+      );
+      const response = operationResponse(document, "/station/identity", "200", "get");
+      expect(response).toMatchObject({
+        headers: {
+          "Cache-Control": { schema: { type: "string", enum: ["no-store"] } },
+        },
+        content: {
+          "application/json": {
+            schema: { type: "object", required: ["device"] },
+          },
+        },
+      });
+      const schema = responseSchema(response);
+      expectExactObjectFields(schema, ["device"]);
+      expectExactObjectFields(schema.properties!.device!, [
+        "id",
+        "name",
+        "tenantId",
+        "organizationName",
+        "line",
+      ]);
+      expect(JSON.stringify(response)).not.toMatch(/apiKey|credential|secret/i);
+    } finally {
+      await app.close();
+    }
   });
 
   it("does not mistake data-src for the executable script src attribute", () => {
@@ -128,5 +231,141 @@ describe("self-hosted OpenAPI documentation", () => {
 
   it("does not turn unknown documentation resources into the documentation shell", async () => {
     await request(server).get("/docs/missing.js").expect(404);
+  });
+
+  it("documents every one-time secret response with no-store and a concrete body schema", async () => {
+    const moduleRef = await Test.createTestingModule({
+      controllers: [
+        KiosksController,
+        KioskPairController,
+        StationDevicesController,
+        StationPairController,
+      ],
+      providers: [
+        { provide: KiosksService, useValue: {} },
+        { provide: PairingService, useValue: {} },
+        { provide: StationDevicesService, useValue: {} },
+        { provide: StationPairingService, useValue: {} },
+        { provide: SecurityAuditService, useValue: {} },
+      ],
+    })
+      .overrideGuard(TenantGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(AuthorizationGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
+    const app = moduleRef.createNestApplication();
+    await app.init();
+
+    try {
+      const document = SwaggerModule.createDocument(
+        app,
+        new DocumentBuilder().setTitle("contract test").setVersion("test").build(),
+      );
+      const contracts = [
+        ["/station-devices/{id}/pairing-code", "201", ["code", "expiresAt"]],
+        ["/station/pair", "201", ["device", "credential", "operators"]],
+        ["/kiosks/{id}/pairing-code", "201", ["code", "expiresAt"]],
+        ["/kiosk/pair", "201", ["device", "token", "nextDeviceSeq", "bootstrap"]],
+        ["/kiosks/{id}/enroll", "200", ["token"]],
+      ] as const;
+
+      for (const [path, status, fields] of contracts) {
+        const response = operationResponse(document, path, status);
+        expect(response).toMatchObject({
+          headers: {
+            "Cache-Control": { schema: { type: "string", enum: ["no-store"] } },
+          },
+          content: {
+            "application/json": {
+              schema: { type: "object", required: [...fields] },
+            },
+          },
+        });
+        const serialized = JSON.stringify(response);
+        expect(serialized).not.toMatch(/example/i);
+        for (const field of fields) expect(serialized).toContain(`"${field}"`);
+      }
+
+      const pairingCodeFields = ["code", "expiresAt"] as const;
+      expectExactObjectFields(
+        responseSchema(operationResponse(document, "/station-devices/{id}/pairing-code", "201")),
+        pairingCodeFields,
+      );
+      expectExactObjectFields(
+        responseSchema(operationResponse(document, "/kiosks/{id}/pairing-code", "201")),
+        pairingCodeFields,
+      );
+
+      const station = responseSchema(operationResponse(document, "/station/pair", "201"));
+      expectExactObjectFields(station, ["device", "credential", "operators"]);
+      const stationDevice = property(station, "device");
+      expectExactObjectFields(stationDevice, [
+        "id",
+        "name",
+        "tenantId",
+        "organizationName",
+        "line",
+      ]);
+      expectExactObjectFields(property(stationDevice, "line"), ["id", "name"]);
+      expectExactObjectFields(property(station, "credential"), ["apiKey", "serverUrl"]);
+      expectExactObjectFields(arrayItems(property(station, "operators")), [
+        "operatorId",
+        "name",
+        "login",
+        "role",
+        "pinHash",
+        "badgeHash",
+        "active",
+      ]);
+
+      const kiosk = responseSchema(operationResponse(document, "/kiosk/pair", "201"));
+      expectExactObjectFields(kiosk, ["device", "token", "nextDeviceSeq", "bootstrap"]);
+      expectExactObjectFields(property(kiosk, "device"), ["kioskId", "kioskName", "place"]);
+      const bootstrap = property(kiosk, "bootstrap");
+      expectExactObjectFields(bootstrap, [
+        "generatedAt",
+        "config",
+        "badgeSalt",
+        "reasons",
+        "products",
+        "employees",
+        "operators",
+      ]);
+      expectExactObjectFields(property(bootstrap, "config"), ["dayLimitPerEmployee", "showPrices"]);
+      expectExactObjectFields(arrayItems(property(bootstrap, "reasons")), ["id", "name"]);
+      expectExactObjectFields(arrayItems(property(bootstrap, "products")), [
+        "id",
+        "gtin14",
+        "name",
+        "unitPrice",
+        "egaisCode",
+      ]);
+      expectExactObjectFields(arrayItems(property(bootstrap, "employees")), [
+        "id",
+        "fullName",
+        "role",
+        "badgeHash",
+        "takenTodayElsewhere",
+      ]);
+      const kioskOperator = arrayItems(property(bootstrap, "operators"));
+      expectExactObjectFields(kioskOperator, [
+        "employeeId",
+        "name",
+        "login",
+        "role",
+        "pinHash",
+        "badgeHash",
+        "active",
+      ]);
+      expect(kioskOperator.properties).not.toHaveProperty("operatorId");
+
+      expectExactObjectFields(
+        responseSchema(operationResponse(document, "/kiosks/{id}/enroll", "200")),
+        ["token"],
+      );
+    } finally {
+      await app.close();
+    }
   });
 });

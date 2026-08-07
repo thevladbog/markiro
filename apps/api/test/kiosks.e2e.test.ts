@@ -1,23 +1,53 @@
 import { randomUUID } from "node:crypto";
+import { and, eq, isNull } from "drizzle-orm";
 import express from "express";
 import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
+import { hashDeviceToken } from "../src/pickup/device-token";
 import { schema, type Db } from "@markiro/db";
 import { listenOnLoopback } from "./support/listen-loopback";
+import { SecurityAuditService } from "../src/authorization/security-audit.service";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
 );
 
+async function waitForKioskLockWait(
+  pool: AuthSetup["pool"],
+  blockingPid: number,
+  kioskId: string,
+): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const result = await pool.query(
+      `
+      SELECT EXISTS (
+        SELECT 1
+        FROM pg_stat_activity
+        WHERE datname = current_database()
+          AND wait_event_type = 'Lock'
+          AND query ILIKE '%kiosks%'
+          AND query ILIKE '%for update%'
+          AND $1 = ANY(pg_blocking_pids(pid))
+      )
+    `,
+      [blockingPid],
+    );
+    if (result.rows[0]?.exists === true) return;
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting for enrollment to block on kiosk ${kioskId}`);
+}
+
 describe.skipIf(!ready)("kiosks e2e", () => {
   let app: INestApplication | undefined;
   let setup: AuthSetup;
   let db: Db;
+  let audit: SecurityAuditService;
 
   beforeAll(async () => {
     const env = loadEnv();
@@ -34,10 +64,15 @@ describe.skipIf(!ready)("kiosks e2e", () => {
     server.use(express.json());
     await app.init();
     await listenOnLoopback(app);
+    audit = app.get(SecurityAuditService);
   });
 
   afterAll(async () => {
     await app?.close();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   async function signUpWithInactiveOrg(agent: ReturnType<typeof request.agent>): Promise<string> {
@@ -95,7 +130,11 @@ describe.skipIf(!ready)("kiosks e2e", () => {
       .expect(200);
     expect(withList.body.productIds).toEqual([productId]);
 
-    const enroll = await agent.post(`/kiosks/${id}/enroll`).send({}).expect(200);
+    const enroll = await agent
+      .post(`/kiosks/${id}/enroll`)
+      .send({})
+      .expect("Cache-Control", "no-store")
+      .expect(200);
     expect(typeof enroll.body.token).toBe("string");
     expect(enroll.body.token.length).toBeGreaterThan(0);
 
@@ -227,6 +266,211 @@ describe.skipIf(!ready)("kiosks e2e", () => {
     const list = await agent.get("/kiosks").expect(200);
     const archived = list.body.items.find((k: { id: string }) => k.id === id);
     expect(archived.status).toEqual("archived");
+  });
+
+  it("POST /kiosks/:id/unbind keeps an active kiosk but removes its credential and live pairing code", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const created = await agent.post("/kiosks").send({ name: "Unbound kiosk" }).expect(201);
+    const id = created.body.id as string;
+    const enrolled = await agent.post(`/kiosks/${id}/enroll`).send({}).expect(200);
+    await agent.post(`/kiosks/${id}/pairing-code`).send({}).expect(201);
+
+    await agent.post(`/kiosks/${id}/unbind`).send({}).expect(204);
+    await agent.post(`/kiosks/${id}/unbind`).send({}).expect(204);
+
+    await request(app!.getHttpServer())
+      .get("/kiosk/bootstrap")
+      .set("x-kiosk-token", enrolled.body.token)
+      .expect(401);
+    const [kiosk] = await db
+      .select({ status: schema.kiosks.status, deviceTokenHash: schema.kiosks.deviceTokenHash })
+      .from(schema.kiosks)
+      .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, id)));
+    expect(kiosk).toEqual({ status: "active", deviceTokenHash: null });
+    const liveCodes = await db
+      .select({ id: schema.kioskPairingCodes.id })
+      .from(schema.kioskPairingCodes)
+      .where(
+        and(
+          eq(schema.kioskPairingCodes.tenantId, tenantId),
+          eq(schema.kioskPairingCodes.kioskId, id),
+          isNull(schema.kioskPairingCodes.usedAt),
+        ),
+      );
+    expect(liveCodes).toEqual([]);
+
+    const devices = await agent.get("/devices?type=kiosk&status=awaiting_pairing").expect(200);
+    expect(devices.body.items).toContainEqual(
+      expect.objectContaining({ id, status: "awaiting_pairing", paired: false }),
+    );
+  });
+
+  it("reactivating a legacy archived kiosk clears rather than revives its retained token", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const created = await agent.post("/kiosks").send({ name: "Legacy archived kiosk" }).expect(201);
+    const id = created.body.id as string;
+    const oldToken = "legacy-kiosk-token";
+    await db
+      .update(schema.kiosks)
+      .set({ status: "archived", deviceTokenHash: hashDeviceToken(oldToken) })
+      .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, id)));
+
+    await agent.patch(`/kiosks/${id}`).send({ status: "active" }).expect(200);
+
+    await request(app!.getHttpServer())
+      .get("/kiosk/bootstrap")
+      .set("x-kiosk-token", oldToken)
+      .expect(401);
+    const [kiosk] = await db
+      .select({ status: schema.kiosks.status, deviceTokenHash: schema.kiosks.deviceTokenHash })
+      .from(schema.kiosks)
+      .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, id)));
+    expect(kiosk).toEqual({ status: "active", deviceTokenHash: null });
+  });
+
+  it("audits PATCH lifecycle transitions while unchanged status remains an update", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const created = await agent.post("/kiosks").send({ name: "Lifecycle kiosk" }).expect(201);
+    const id = created.body.id as string;
+    const enrolled = await agent.post(`/kiosks/${id}/enroll`).send({}).expect(200);
+    await agent.post(`/kiosks/${id}/pairing-code`).send({}).expect(201);
+    const auditSpy = vi.spyOn(audit, "credentialMutation").mockImplementation(() => {});
+
+    const archived = await agent
+      .patch(`/kiosks/${id}`)
+      .send({ status: "archived", name: "Archived lifecycle kiosk" })
+      .expect(200);
+    expect(archived.body).toMatchObject({
+      id,
+      name: "Archived lifecycle kiosk",
+      status: "archived",
+      enrolled: false,
+    });
+    expect(auditSpy).toHaveBeenLastCalledWith({
+      tenantId,
+      userId: expect.any(String),
+      action: "kiosk.archive",
+      resourceId: id,
+      outcome: "succeeded",
+    });
+    await request(app!.getHttpServer())
+      .get("/kiosk/bootstrap")
+      .set("x-kiosk-token", enrolled.body.token)
+      .expect(401);
+    const [retired] = await db
+      .select({ usedAt: schema.kioskPairingCodes.usedAt })
+      .from(schema.kioskPairingCodes)
+      .where(
+        and(
+          eq(schema.kioskPairingCodes.tenantId, tenantId),
+          eq(schema.kioskPairingCodes.kioskId, id),
+        ),
+      );
+    expect(retired?.usedAt).toBeInstanceOf(Date);
+
+    auditSpy.mockClear();
+    await agent
+      .patch(`/kiosks/${id}`)
+      .send({ status: "archived", location: "Archive shelf" })
+      .expect(200);
+    expect(auditSpy).toHaveBeenLastCalledWith({
+      tenantId,
+      userId: expect.any(String),
+      action: "kiosk.update",
+      resourceId: id,
+      outcome: "succeeded",
+    });
+
+    auditSpy.mockClear();
+    await agent
+      .patch(`/kiosks/${id}`)
+      .send({ status: "active", location: "Packing line" })
+      .expect(200);
+    expect(auditSpy).toHaveBeenLastCalledWith({
+      tenantId,
+      userId: expect.any(String),
+      action: "kiosk.unbind",
+      resourceId: id,
+      outcome: "succeeded",
+    });
+
+    const activeEnrollment = await agent.post(`/kiosks/${id}/enroll`).send({}).expect(200);
+    auditSpy.mockClear();
+    await agent.patch(`/kiosks/${id}`).send({ status: "active", name: "Still active" }).expect(200);
+    expect(auditSpy).toHaveBeenLastCalledWith({
+      tenantId,
+      userId: expect.any(String),
+      action: "kiosk.update",
+      resourceId: id,
+      outcome: "succeeded",
+    });
+    await request(app!.getHttpServer())
+      .get("/kiosk/bootstrap")
+      .set("x-kiosk-token", activeEnrollment.body.token)
+      .expect(200);
+
+    const missingId = randomUUID();
+    auditSpy.mockClear();
+    await agent.patch(`/kiosks/${missingId}`).send({ status: "archived" }).expect(404);
+    expect(auditSpy).toHaveBeenLastCalledWith({
+      tenantId,
+      userId: expect.any(String),
+      action: "kiosk.archive",
+      resourceId: missingId,
+      outcome: "failed",
+    });
+  });
+
+  it("serializes enrollment behind an archive lock and revalidates the committed lifecycle state", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const created = await agent.post("/kiosks").send({ name: "Enrollment race kiosk" }).expect(201);
+    const id = created.body.id as string;
+    let releaseArchive: (() => void) | undefined;
+    const archivePaused = new Promise<void>((resolve) => {
+      releaseArchive = resolve;
+    });
+    let archiveLocked: (() => void) | undefined;
+    const archiveStarted = new Promise<void>((resolve) => {
+      archiveLocked = resolve;
+    });
+    let archivePid: number | undefined;
+
+    const archive = db.transaction(async (tx) => {
+      const pidResult = await tx.execute<{ pid: number }>("select pg_backend_pid() as pid");
+      archivePid = pidResult.rows[0]?.pid;
+      await tx
+        .select({ id: schema.kiosks.id })
+        .from(schema.kiosks)
+        .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, id)))
+        .for("update");
+      await tx
+        .update(schema.kiosks)
+        .set({ status: "archived", deviceTokenHash: null })
+        .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, id)));
+      archiveLocked?.();
+      await archivePaused;
+    });
+    let enroll: Promise<request.Response> | undefined;
+    try {
+      await archiveStarted;
+      enroll = agent
+        .post(`/kiosks/${id}/enroll`)
+        .send({})
+        .then((response) => response);
+      if (archivePid === undefined) throw new Error("Archive transaction PID was not captured");
+      await waitForKioskLockWait(setup.pool, archivePid, id);
+      releaseArchive?.();
+      await archive;
+
+      expect((await enroll).status).toBe(404);
+    } finally {
+      releaseArchive?.();
+      await Promise.allSettled([archive, enroll].filter((pending) => pending !== undefined));
+    }
   });
 
   it("cross-tenant isolation: org B cannot PATCH/DELETE org A's kiosk (404)", async () => {

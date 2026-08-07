@@ -211,20 +211,7 @@ export function Done({ result, cart, showPrices, onReset }: DoneProps): React.JS
   }
 
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        boxSizing: "border-box",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 26,
-        padding: 40,
-        background: "var(--surface-page)",
-        color: "var(--fg-1)",
-      }}
-    >
+    <main className="kiosk-screen kiosk-screen--centered kiosk-done">
       {/* Decoration: the prototype's tick in a square. Hidden from assistive
           tech — everything it signals is said in words below. A refusal gets
           no tick, because nothing succeeded. */}
@@ -318,6 +305,7 @@ export function Done({ result, cart, showPrices, onReset }: DoneProps): React.JS
         // `role="alert"`, like `Cart`'s banner: this is the one thing on the
         // screen the worker must not walk past.
         <div
+          className="kiosk-done__conflicts"
           role="alert"
           style={{
             maxWidth: 720,
@@ -361,6 +349,7 @@ export function Done({ result, cart, showPrices, onReset }: DoneProps): React.JS
       ) : null}
 
       <button
+        className="kiosk-control"
         type="button"
         onClick={reset}
         style={{

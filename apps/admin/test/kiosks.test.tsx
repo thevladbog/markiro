@@ -1,5 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
@@ -8,6 +10,7 @@ import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider } from "../src/access/context.js";
 import type * as KiosksApiModule from "../src/pages/kiosks/api.js";
 import { KiosksPage } from "../src/pages/kiosks/index.js";
+import { ReasonsPage } from "../src/pages/kiosks/ReasonsPage.js";
 
 const { writeHookMountSpy } = vi.hoisted(() => ({ writeHookMountSpy: vi.fn() }));
 
@@ -53,13 +56,19 @@ afterEach(() => {
   writeHookMountSpy.mockClear();
 });
 
-/** Minimal Response stand-in -- only what apps/admin/src/api/client.ts reads. */
 function jsonResponse(status: number, body: unknown): Response {
-  return {
-    ok: status >= 200 && status < 300,
+  return new Response(JSON.stringify(body), {
     status,
-    json: async () => body,
-  } as Response;
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+function deferred<T>() {
+  let resolve: (value: T) => void = () => undefined;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
 }
 
 const ADMIN_ACCESS: AccessDocument = {
@@ -96,22 +105,41 @@ function renderPage(access: AccessDocument = ADMIN_ACCESS) {
   return render(
     <QueryClientProvider client={queryClient}>
       <AccessProvider value={access}>
-        <KiosksPage />
+        <MemoryRouter>
+          <KiosksPage />
+        </MemoryRouter>
       </AccessProvider>
     </QueryClientProvider>,
   );
 }
 
+function renderReasonsPage(access: AccessDocument = ADMIN_ACCESS) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <AccessProvider value={access}>
+        <MemoryRouter initialEntries={["/kiosks/reasons"]}>
+          <ReasonsPage />
+        </MemoryRouter>
+      </AccessProvider>
+    </QueryClientProvider>,
+  );
+}
+
+async function chooseOption(
+  user: ReturnType<typeof userEvent.setup>,
+  label: string,
+  option: string,
+) {
+  await user.click(screen.getByRole("combobox", { name: label }));
+  await user.click(await screen.findByRole("option", { name: option }));
+}
+
 // A few seconds in the past -- well within the ~2 minute online window, and
 // not timing-flaky (see the task brief's note on avoiding a fixed clock).
 const RECENT_LAST_SEEN = new Date(Date.now() - 5_000).toISOString();
-
-/**
- * Mirrors `TTL_MS` in `apps/api/src/modules/kiosk/pairing.service.ts` -- the
- * stub has to hand back the same 15-minute window the real endpoint does, so
- * the countdown assertions below reflect production behaviour.
- */
-const PAIRING_TTL_MS = 15 * 60_000;
 
 const ONLINE_KIOSK = {
   id: "k1",
@@ -179,7 +207,7 @@ function stubFetch(overrides: {
   kiosks?: unknown[];
   products?: unknown[];
   reasons?: unknown[];
-  onPost?: (path: string, init?: RequestInit) => Response | undefined;
+  onPost?: (path: string, init?: RequestInit) => Response | Promise<Response> | undefined;
 }) {
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     const path = String(url);
@@ -201,6 +229,199 @@ function stubFetch(overrides: {
 }
 
 describe("KiosksPage", () => {
+  it("does not load products until an authorized edit surface opens", async () => {
+    const fetchMock = stubFetch({ kiosks: [ONLINE_KIOSK] });
+    renderPage();
+
+    expect(await screen.findByText(ONLINE_KIOSK.name)).toBeDefined();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/products"))).toBe(
+      false,
+    );
+  });
+
+  it("renders the table-shaped loading state until the kiosk request resolves", async () => {
+    const kioskResponse = deferred<Response>();
+    stubFetch({
+      onPost: (path) => (path === "/api/kiosks" ? kioskResponse.promise : undefined),
+    });
+    renderPage();
+
+    expect(screen.getByRole("status", { name: "Загрузка…" }).querySelector("table")).not.toBeNull();
+    await act(async () => {
+      kioskResponse.resolve(jsonResponse(200, { items: [ONLINE_KIOSK] }));
+    });
+    expect(await screen.findByText(ONLINE_KIOSK.name)).toBeDefined();
+  });
+
+  it("retries a failed kiosk list request", async () => {
+    let kioskRequests = 0;
+    const fetchMock = stubFetch({
+      kiosks: [ONLINE_KIOSK],
+      onPost: (path) => {
+        if (path !== "/api/kiosks") return undefined;
+        kioskRequests += 1;
+        return kioskRequests === 1
+          ? jsonResponse(500, { message: "Temporary error" })
+          : jsonResponse(200, { items: [ONLINE_KIOSK] });
+      },
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByRole("alert")).toBeDefined();
+    await user.click(screen.getByRole("button", { name: "Повторить" }));
+    expect(await screen.findByText(ONLINE_KIOSK.name)).toBeDefined();
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/kiosks")).toHaveLength(2);
+  });
+
+  it("distinguishes awaiting pairing from an enrolled offline kiosk", async () => {
+    const now = Date.parse("2026-08-06T10:00:00.000Z");
+    vi.setSystemTime(now);
+    stubFetch({
+      kiosks: [
+        { ...OFFLINE_KIOSK, id: "awaiting", enrolled: false, lastSeenAt: null },
+        {
+          ...OFFLINE_KIOSK,
+          id: "offline",
+          enrolled: true,
+          lastSeenAt: new Date(now - 2 * 60_000 - 1).toISOString(),
+        },
+      ],
+      products: [],
+      reasons: [],
+    });
+    renderPage();
+
+    expect(await screen.findByText("Ожидает привязки")).toBeDefined();
+    expect(screen.getByText("Не в сети")).toBeDefined();
+  });
+
+  it("gives archived kiosks precedence and treats the online threshold as online", async () => {
+    const now = Date.parse("2026-08-06T10:00:00.000Z");
+    vi.setSystemTime(now);
+    stubFetch({
+      kiosks: [
+        { ...ARCHIVED_KIOSK, lastSeenAt: null, enrolled: false },
+        {
+          ...ONLINE_KIOSK,
+          id: "threshold",
+          lastSeenAt: new Date(now - 2 * 60_000).toISOString(),
+        },
+      ],
+      products: [],
+      reasons: [],
+    });
+    renderPage();
+
+    expect(await screen.findByText("В архиве")).toBeDefined();
+    expect(screen.getByText("В сети")).toBeDefined();
+  });
+
+  it("shows Never for a kiosk with no recorded activity", async () => {
+    stubFetch({ kiosks: [OFFLINE_KIOSK], products: [], reasons: [] });
+    renderPage();
+
+    expect(await screen.findByText("Никогда")).toBeDefined();
+  });
+
+  it("includes the absolute last activity in the time element's accessible label", async () => {
+    const now = Date.parse("2026-08-06T10:00:00.000Z");
+    vi.setSystemTime(now);
+    const lastSeenAt = new Date(now - 60_000).toISOString();
+    stubFetch({ kiosks: [{ ...ONLINE_KIOSK, lastSeenAt }], products: [], reasons: [] });
+    renderPage();
+
+    await screen.findByText(ONLINE_KIOSK.name);
+    const time = document.querySelector<HTMLTimeElement>(`time[datetime="${lastSeenAt}"]`);
+    expect(time).not.toBeNull();
+    const relative = time?.textContent ?? "";
+    const absolute = time?.getAttribute("title") ?? "";
+    expect(relative).not.toBe("");
+    expect(absolute).not.toBe("");
+    expect(time?.getAttribute("aria-label")).toContain(relative);
+    expect(time?.getAttribute("aria-label")).toContain(absolute);
+  });
+
+  it("filters the fetched rows without adding query parameters", async () => {
+    const now = Date.parse("2026-08-06T10:00:00.000Z");
+    vi.setSystemTime(now);
+    const fetchMock = stubFetch({
+      kiosks: [
+        { ...ONLINE_KIOSK, lastSeenAt: new Date(now - 1_000).toISOString() },
+        { ...OFFLINE_KIOSK, enrolled: true },
+      ],
+      products: [],
+      reasons: [],
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await chooseOption(user, "Состояние", "В сети");
+    expect(screen.getByText(ONLINE_KIOSK.name)).toBeDefined();
+    expect(screen.queryByText(OFFLINE_KIOSK.name)).toBeNull();
+    const kioskCalls = fetchMock.mock.calls.filter(([url]) =>
+      String(url).startsWith("/api/kiosks"),
+    );
+    expect(kioskCalls).toHaveLength(1);
+    expect(kioskCalls[0]?.[0]).toBe("/api/kiosks");
+  });
+
+  it("resets the state filter and renders the filtered empty state", async () => {
+    const user = userEvent.setup();
+    stubFetch({ kiosks: [OFFLINE_KIOSK], products: [], reasons: [] });
+    renderPage();
+
+    await chooseOption(user, "Состояние", "В сети");
+    expect(await screen.findByText("Нет киосков в выбранном состоянии")).toBeDefined();
+    await user.click(screen.getByRole("button", { name: "Сбросить" }));
+    expect(await screen.findByText(OFFLINE_KIOSK.name)).toBeDefined();
+  });
+
+  it("updates all rows from online to offline on the shared clock tick", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const now = Date.parse("2026-08-06T10:00:00.000Z");
+    vi.setSystemTime(now);
+    stubFetch({
+      kiosks: [
+        {
+          ...ONLINE_KIOSK,
+          lastSeenAt: new Date(now - 2 * 60_000 + 1).toISOString(),
+        },
+      ],
+      products: [],
+      reasons: [],
+    });
+    renderPage();
+
+    expect(await screen.findByText("В сети")).toBeDefined();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(screen.getByText("Не в сети")).toBeDefined();
+  });
+
+  it("keeps kiosk archive confirmation open with the server error", async () => {
+    stubFetch({
+      kiosks: [ONLINE_KIOSK],
+      products: [],
+      reasons: [],
+      onPost: (_path, init) =>
+        init?.method === "DELETE"
+          ? jsonResponse(409, { message: "Kiosk has pending pickup work" })
+          : undefined,
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "В архив" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Отправить киоск в архив?" });
+    await user.click(within(dialog).getByRole("button", { name: "В архив" }));
+
+    expect((await within(dialog).findByRole("alert")).textContent).toContain(
+      "Kiosk has pending pickup work",
+    );
+  });
+
   it("keeps kiosk rows readable while hiding operational mutations without operations.write", async () => {
     const fetchMock = stubFetch({
       kiosks: [ONLINE_KIOSK],
@@ -214,12 +435,17 @@ describe("KiosksPage", () => {
     expect(screen.queryByRole("button", { name: "Добавить киоск" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Изменить" })).toBeNull();
     expect(screen.queryByRole("button", { name: "В архив" })).toBeNull();
-    expect(screen.getByText(REASON_A.name)).toBeDefined();
-    expect(screen.queryByRole("button", { name: "Добавить причину" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Сохранить" })).toBeNull();
     expect(
       fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/pickup-reasons")),
-    ).toBe(true);
+    ).toBe(false);
+    expect(writeHookMountSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not mount reason mutations for read-only reasons access", async () => {
+    stubFetch({ reasons: [REASON_A] });
+    renderReasonsPage(OPERATIONS_READ_ONLY);
+
+    expect(await screen.findByText(REASON_A.name)).toBeDefined();
     expect(writeHookMountSpy).not.toHaveBeenCalled();
   });
 
@@ -234,7 +460,7 @@ describe("KiosksPage", () => {
     expect(screen.queryByRole("button", { name: "В архив" })).toBeNull();
   });
 
-  it("renders the kiosks list with online/offline status derived from lastSeenAt", async () => {
+  it("renders the kiosks list with state derived from enrollment and last activity", async () => {
     stubFetch({ kiosks: [ONLINE_KIOSK, OFFLINE_KIOSK], products: [PRODUCT_A, PRODUCT_B] });
 
     renderPage();
@@ -244,89 +470,23 @@ describe("KiosksPage", () => {
     expect(screen.getByText("Зал 1")).toBeDefined();
     expect(screen.getByText("—")).toBeDefined(); // OFFLINE_KIOSK.location is null
     expect(screen.getByText("В сети")).toBeDefined();
-    expect(screen.getByText("Не в сети")).toBeDefined();
+    expect(screen.getByText("Ожидает привязки")).toBeDefined();
     expect(screen.getByText("5")).toBeDefined();
     expect(screen.getByText("3")).toBeDefined();
     expect(screen.getByText("Да")).toBeDefined();
     expect(screen.getByText("Нет")).toBeDefined();
   });
 
-  it("opens the create modal and POSTs /api/kiosks with the entered name", async () => {
-    let didCreate = false;
-    const created = { ...ONLINE_KIOSK, id: "k3", name: "Новый киоск" };
-    const fetchMock = stubFetch({
-      kiosks: [],
-      onPost: (path, init) => {
-        if (path === "/api/kiosks" && init?.method === "POST") {
-          didCreate = true;
-          return jsonResponse(201, created);
-        }
-        if (path.startsWith("/api/kiosks")) {
-          return jsonResponse(200, { items: didCreate ? [created] : [] });
-        }
-        return undefined;
-      },
-    });
+  it('clicking "Код привязки" does not mint or reveal a code from the list', async () => {
+    const fetchMock = stubFetch({ kiosks: [ONLINE_KIOSK] });
 
     renderPage();
-    await screen.findByText("Киоски не добавлены");
+    fireEvent.click(await screen.findByRole("button", { name: "Код привязки" }));
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Добавить киоск" })[0]!);
-    await screen.findByText("Новый киоск");
-
-    const dialog = within(await screen.findByRole("dialog"));
-    fireEvent.change(dialog.getByLabelText("Название"), { target: { value: "Новый киоск" } });
-    fireEvent.click(dialog.getByRole("button", { name: "Создать" }));
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/kiosks",
-        expect.objectContaining({ method: "POST" }),
-      );
-    });
-    const postCall = fetchMock.mock.calls.find(
-      (call) => call[0] === "/api/kiosks" && call[1]?.method === "POST",
-    )!;
-    const body = JSON.parse(postCall[1]?.body as string);
-    expect(body.name).toBe("Новый киоск");
-  });
-
-  it('clicking "Код привязки" POSTs /api/kiosks/:id/pairing-code and reveals the code once', async () => {
-    vi.stubGlobal("navigator", { clipboard: { writeText: vi.fn() } });
-    const fetchMock = stubFetch({
-      kiosks: [ONLINE_KIOSK],
-      onPost: (path, init) => {
-        if (path === "/api/kiosks/k1/pairing-code" && init?.method === "POST") {
-          return jsonResponse(201, {
-            code: "12345678",
-            expiresAt: new Date(Date.now() + PAIRING_TTL_MS).toISOString(),
-          });
-        }
-        return undefined;
-      },
-    });
-
-    renderPage();
-    await screen.findByText("Касса у входа");
-
-    fireEvent.click(screen.getByRole("button", { name: "Код привязки" }));
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/kiosks/k1/pairing-code",
-        expect.objectContaining({ method: "POST" }),
-      );
-    });
-
-    const dialog = within(await screen.findByRole("dialog"));
-    // Grouped for readability per design brief 07 §"States & constraints".
-    expect(dialog.getByText("1234 5678")).toBeDefined();
-    expect(screen.getByText("Код привязки киоска")).toBeDefined();
-
-    // Copying hands over the bare digits -- the display grouping is presentation
-    // only, and a space pasted into the kiosk's numeric keypad would not match.
-    fireEvent.click(dialog.getByRole("button", { name: "Скопировать" }));
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith("12345678");
+    expect(fetchMock.mock.calls.some(([path]) => String(path).includes("/pairing-code"))).toBe(
+      false,
+    );
+    expect(screen.queryByText("1234 5678")).toBeNull();
   });
 
   it("hides pairing from managers while keeping operational kiosk management visible", async () => {
@@ -341,139 +501,6 @@ describe("KiosksPage", () => {
     expect(fetchMock.mock.calls.some(([path]) => String(path).includes("/pairing-code"))).toBe(
       false,
     );
-  });
-
-  it("renders the pairing code as a scannable barcode", async () => {
-    stubFetch({
-      kiosks: [ONLINE_KIOSK],
-      onPost: (path, init) => {
-        if (path === "/api/kiosks/k1/pairing-code" && init?.method === "POST") {
-          return jsonResponse(201, {
-            code: "12345678",
-            expiresAt: new Date(Date.now() + PAIRING_TTL_MS).toISOString(),
-          });
-        }
-        return undefined;
-      },
-    });
-
-    renderPage();
-    await screen.findByText("Касса у входа");
-    fireEvent.click(screen.getByRole("button", { name: "Код привязки" }));
-
-    // The barcode is lazy-loaded (bwip-js stays out of the main bundle), so it
-    // resolves well after the dialog itself: the dynamic import has to fetch
-    // and evaluate a ~1 MB chunk, measured at ~300ms even on an idle dev
-    // machine. Testing Library's default 1000ms wait left too thin a margin and
-    // timed out on CI's 2-core runner under parallel workers, so this one query
-    // gets an explicit budget (same escape hatch as `shifts.test.tsx`). Kept
-    // under vitest's 5000ms per-test default, which would otherwise fire first
-    // and turn a slow import into a less legible test-level timeout.
-    const barcode = await screen.findByRole("img", { name: /12345678/ }, { timeout: 3000 });
-    await waitFor(() => expect(barcode.querySelector("svg")).not.toBeNull());
-
-    // bwip-js emits an `<svg>` with a `viewBox` but no width/height, which
-    // collapses to 0x0 inside the panel's fit-content column flex -- the box
-    // has to stay pinned for the symbol to be visible at all, and to match the
-    // placeholder that held its place. jsdom cannot lay this out, so the guard
-    // is on the declared size rather than a measured one.
-    expect(barcode.style.width).toBe("158px");
-    expect(barcode.style.height).toBe("74px");
-  });
-
-  it("counts the TTL down and drops into an expired state once it elapses", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    stubFetch({
-      kiosks: [ONLINE_KIOSK],
-      onPost: (path, init) => {
-        if (path === "/api/kiosks/k1/pairing-code" && init?.method === "POST") {
-          return jsonResponse(201, {
-            code: "12345678",
-            expiresAt: new Date(Date.now() + PAIRING_TTL_MS).toISOString(),
-          });
-        }
-        return undefined;
-      },
-    });
-
-    renderPage();
-    await screen.findByText("Касса у входа");
-    fireEvent.click(screen.getByRole("button", { name: "Код привязки" }));
-
-    const dialog = within(await screen.findByRole("dialog"));
-    expect(dialog.getByText("Действителен ещё 15:00")).toBeDefined();
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(60_000);
-    });
-    expect(dialog.getByText("Действителен ещё 14:00")).toBeDefined();
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(PAIRING_TTL_MS);
-    });
-    expect(dialog.getByText("Срок действия кода истёк. Сформируйте новый код.")).toBeDefined();
-    expect(dialog.queryByText("1234 5678")).toBeNull();
-  });
-
-  it("regenerates the code, replacing the revealed one with the freshly issued code", async () => {
-    let issued = 0;
-    const codes = ["12345678", "87654321"];
-    const fetchMock = stubFetch({
-      kiosks: [ONLINE_KIOSK],
-      onPost: (path, init) => {
-        if (path === "/api/kiosks/k1/pairing-code" && init?.method === "POST") {
-          const code = codes[issued++]!;
-          return jsonResponse(201, {
-            code,
-            expiresAt: new Date(Date.now() + PAIRING_TTL_MS).toISOString(),
-          });
-        }
-        return undefined;
-      },
-    });
-
-    renderPage();
-    await screen.findByText("Касса у входа");
-    fireEvent.click(screen.getByRole("button", { name: "Код привязки" }));
-
-    const dialog = within(await screen.findByRole("dialog"));
-    await dialog.findByText("1234 5678");
-
-    fireEvent.click(dialog.getByRole("button", { name: "Сформировать новый" }));
-
-    expect(await dialog.findByText("8765 4321")).toBeDefined();
-    expect(dialog.queryByText("1234 5678")).toBeNull();
-    expect(
-      fetchMock.mock.calls.filter(
-        (call) => call[0] === "/api/kiosks/k1/pairing-code" && call[1]?.method === "POST",
-      ),
-    ).toHaveLength(2);
-  });
-
-  it("closing the modal discards the code so it can never be revealed twice", async () => {
-    stubFetch({
-      kiosks: [ONLINE_KIOSK],
-      onPost: (path, init) => {
-        if (path === "/api/kiosks/k1/pairing-code" && init?.method === "POST") {
-          return jsonResponse(201, {
-            code: "12345678",
-            expiresAt: new Date(Date.now() + PAIRING_TTL_MS).toISOString(),
-          });
-        }
-        return undefined;
-      },
-    });
-
-    renderPage();
-    await screen.findByText("Касса у входа");
-    fireEvent.click(screen.getByRole("button", { name: "Код привязки" }));
-
-    const dialog = await screen.findByRole("dialog");
-    await within(dialog).findByText("1234 5678");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Готово" }));
-
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(screen.queryByText("1234 5678")).toBeNull();
   });
 
   it("no longer offers the raw-token enroll action", async () => {
@@ -499,44 +526,6 @@ describe("KiosksPage", () => {
     expect(screen.getByRole("button", { name: "Изменить" })).toBeDefined();
   });
 
-  it("edits a kiosk and toggles the product allowlist, saving via PUT /api/kiosks/:id/products", async () => {
-    const updated = { ...ONLINE_KIOSK, productIds: ["p1", "p2"] };
-    const fetchMock = stubFetch({
-      kiosks: [ONLINE_KIOSK],
-      products: [PRODUCT_A, PRODUCT_B],
-      onPost: (path, init) => {
-        if (path === "/api/kiosks/k1/products" && init?.method === "PUT") {
-          return jsonResponse(200, updated);
-        }
-        return undefined;
-      },
-    });
-
-    renderPage();
-    await screen.findByText("Касса у входа");
-
-    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
-    await screen.findByText("Изменить киоск");
-
-    const productBCheckbox = screen.getByLabelText(PRODUCT_B.name) as HTMLInputElement;
-    expect(productBCheckbox.checked).toBe(false);
-    const productACheckbox = screen.getByLabelText(PRODUCT_A.name) as HTMLInputElement;
-    expect(productACheckbox.checked).toBe(true);
-
-    fireEvent.click(productBCheckbox);
-    fireEvent.click(screen.getByRole("button", { name: "Сохранить список" }));
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/kiosks/k1/products",
-        expect.objectContaining({
-          method: "PUT",
-          body: JSON.stringify({ productIds: ["p1", "p2"] }),
-        }),
-      );
-    });
-  });
-
   it("archives a kiosk via the row action + confirm modal", async () => {
     let didArchive = false;
     const fetchMock = stubFetch({
@@ -557,7 +546,7 @@ describe("KiosksPage", () => {
     await screen.findByText("Касса у входа");
 
     fireEvent.click(screen.getByRole("button", { name: "В архив" }));
-    const dialog = await screen.findByRole("dialog");
+    const dialog = await screen.findByRole("alertdialog");
     fireEvent.click(within(dialog).getByRole("button", { name: "В архив" }));
 
     await waitFor(() => {
@@ -566,79 +555,5 @@ describe("KiosksPage", () => {
         expect.objectContaining({ method: "DELETE" }),
       );
     });
-  });
-
-  it("the embedded ReasonsEditor adds a reason via POST /api/pickup-reasons", async () => {
-    let didCreate = false;
-    const created = { id: "r2", name: "Брак упаковки", sortOrder: 2 };
-    const fetchMock = stubFetch({
-      kiosks: [],
-      reasons: [REASON_A],
-      onPost: (path, init) => {
-        if (path === "/api/pickup-reasons" && init?.method === "POST") {
-          didCreate = true;
-          return jsonResponse(201, created);
-        }
-        if (path.startsWith("/api/pickup-reasons")) {
-          return jsonResponse(200, { items: didCreate ? [REASON_A, created] : [REASON_A] });
-        }
-        return undefined;
-      },
-    });
-
-    renderPage();
-    await screen.findByDisplayValue("Испорчен товар");
-
-    const nameInputs = screen.getAllByLabelText("Название");
-    // The existing reason's row renders its name as an input's *value*
-    // (findByText won't match it) -- the reasons list has one existing row
-    // plus the add row, so target the add row specifically by its
-    // still-empty value.
-    const addInput = nameInputs.find((el) => (el as HTMLInputElement).value === "")!;
-    fireEvent.change(addInput, { target: { value: "Брак упаковки" } });
-    fireEvent.click(screen.getByRole("button", { name: "Добавить причину" }));
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/pickup-reasons",
-        expect.objectContaining({
-          method: "POST",
-          body: JSON.stringify({ name: "Брак упаковки" }),
-        }),
-      );
-    });
-  });
-
-  it("keeps the original sort order when a reason's sort-order input is cleared (does not persist 0)", async () => {
-    const fetchMock = stubFetch({
-      kiosks: [],
-      reasons: [REASON_A], // sortOrder: 1
-      onPost: (path, init) => {
-        if (path === "/api/pickup-reasons/r1" && init?.method === "PATCH") {
-          return jsonResponse(200, { ...REASON_A });
-        }
-        return undefined;
-      },
-    });
-
-    renderPage();
-    await screen.findByDisplayValue("Испорчен товар");
-
-    fireEvent.change(screen.getByLabelText("Порядок"), { target: { value: "" } });
-    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/pickup-reasons/r1",
-        expect.objectContaining({ method: "PATCH" }),
-      );
-    });
-    const patchCall = fetchMock.mock.calls.find(
-      (call) => call[0] === "/api/pickup-reasons/r1" && call[1]?.method === "PATCH",
-    )!;
-    const body = JSON.parse(patchCall[1]?.body as string);
-    // Number("") === 0 passes the finite guard; a blank input must fall back to
-    // the reason's existing order, not silently persist 0.
-    expect(body.sortOrder).toBe(1);
   });
 });

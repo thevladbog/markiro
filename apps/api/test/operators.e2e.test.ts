@@ -10,6 +10,7 @@ import { loadEnv } from "../src/env";
 import { OperatorsService } from "../src/modules/operators/operators.service";
 import { verifySecret } from "../src/lib/pin-hash";
 import { listenOnLoopback } from "./support/listen-loopback";
+import { createTestStationDevice } from "./support/auth";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -198,11 +199,8 @@ describe.skipIf(!ready)("operators e2e", () => {
       .send({ badgeCode: `BADGE-${randomUUID()}` })
       .expect(201);
 
-    const device = await agent
-      .post("/station-devices")
-      .send({ name: "Line 1 terminal" })
-      .expect(201);
-    const apiKey = device.body.apiKey as string;
+    const device = await createTestStationDevice(app!, agent, "Line 1 terminal");
+    const apiKey = device.apiKey;
 
     const roster = await request(app!.getHttpServer())
       .get("/station/operators")
@@ -238,13 +236,13 @@ describe.skipIf(!ready)("operators e2e", () => {
 
     const bob = request.agent(app!.getHttpServer());
     await signUpAndActivate(bob);
-    const bobDevice = await bob.post("/station-devices").send({ name: "Bob terminal" }).expect(201);
+    const bobDevice = await createTestStationDevice(app!, bob, "Bob terminal");
 
     await request(app!.getHttpServer()).get("/station/operators").expect(401);
 
     const bobRoster = await request(app!.getHttpServer())
       .get("/station/operators")
-      .set("x-api-key", bobDevice.body.apiKey as string)
+      .set("x-api-key", bobDevice.apiKey)
       .expect(200);
     expect(bobRoster.body.items).toHaveLength(0);
   });

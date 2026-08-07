@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizePairSource } from "../src/modules/kiosk/pair-source";
+import { normalizePairSource } from "../src/modules/device-pairing/pair-source";
 
 describe("normalizePairSource", () => {
   it("leaves an IPv4 address unchanged", () => {
@@ -8,6 +8,10 @@ describe("normalizePairSource", () => {
 
   it("leaves an opaque non-IP key (the global bucket) unchanged", () => {
     expect(normalizePairSource("*")).toBe("*");
+  });
+
+  it("leaves an unattributable empty source empty", () => {
+    expect(normalizePairSource("")).toBe("");
   });
 
   it("collapses a full 8-hextet IPv6 address to its /64 prefix", () => {

@@ -8,6 +8,7 @@
  * `../shifts/api.ts` (Task 12) for the filtered-list query key + optional
  * `buildListPath` pattern.
  */
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 
@@ -151,19 +152,31 @@ export function useArchiveEmployee(): UseMutationResult<void, Error, string> {
   });
 }
 
-/** `POST /employees/:id/badges`. Invalidates every employees list query variant on success. */
-export function useIssueBadge(): UseMutationResult<
-  EmployeeDto,
-  Error,
-  { id: string; input: IssueBadgeInput }
-> {
+/**
+ * `POST /employees/:id/badges`. Badge codes are transient credentials, so
+ * this deliberately avoids `useMutation`: MutationCache retains mutation
+ * variables after the section clears its inputs. Pending state remains local
+ * while the established list invalidation still occurs after success.
+ */
+export function useIssueBadge(): {
+  issue: (variables: { id: string; input: IssueBadgeInput }) => Promise<EmployeeDto>;
+  isPending: boolean;
+} {
   const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, input }) => postIssueBadge(id, input),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: EMPLOYEES_QUERY_KEY });
+  const [isPending, setIsPending] = useState(false);
+  return {
+    isPending,
+    issue: async ({ id, input }) => {
+      setIsPending(true);
+      try {
+        const data = await postIssueBadge(id, input);
+        void queryClient.invalidateQueries({ queryKey: EMPLOYEES_QUERY_KEY });
+        return data;
+      } finally {
+        setIsPending(false);
+      }
     },
-  });
+  };
 }
 
 /** `DELETE /employees/:id/badges/:badgeId`. Invalidates every employees list query variant on success. */

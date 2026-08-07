@@ -8,9 +8,58 @@ beforeAll(async () => {
 });
 
 describe("StatusBar", () => {
+  const context = {
+    stationName: "Station 04",
+    lineName: "Packing A",
+    operatorName: "Alex Morgan",
+    shiftLabel: "Shift 17",
+  };
+
+  it("shows each live context and operational status exactly once", () => {
+    render(
+      <StatusBar
+        {...context}
+        online={false}
+        scanner="connected"
+        printerConfigured
+        syncPending={5}
+        syncStuck={false}
+        conflicts={2}
+      />,
+    );
+
+    expect(screen.getAllByText("Station 04")).toHaveLength(1);
+    expect(screen.getAllByText("Packing A")).toHaveLength(1);
+    expect(screen.getAllByText("Alex Morgan")).toHaveLength(1);
+    expect(screen.getAllByText("Shift 17")).toHaveLength(1);
+    expect(screen.getAllByText("Offline")).toHaveLength(1);
+    expect(screen.getAllByText("Connected")).toHaveLength(1);
+    expect(screen.getAllByText("Configured")).toHaveLength(1);
+    expect(screen.getAllByText("5")).toHaveLength(1);
+    expect(screen.getAllByText("2")).toHaveLength(1);
+  });
+
+  it("does not invent agent or teammate status without a live source", () => {
+    render(
+      <StatusBar
+        {...context}
+        online
+        scanner="keyboard"
+        printerConfigured={false}
+        syncPending={0}
+        syncStuck={false}
+        conflicts={0}
+      />,
+    );
+
+    expect(screen.queryByText("Agent")).toBeNull();
+    expect(screen.queryByText("Terminals")).toBeNull();
+  });
+
   it("reports the keyboard wedge when no serial scanner is configured", () => {
     render(
       <StatusBar
+        {...context}
         online
         scanner="keyboard"
         printerConfigured={false}
@@ -25,6 +74,7 @@ describe("StatusBar", () => {
   it("reports a connected serial scanner", () => {
     render(
       <StatusBar
+        {...context}
         online
         scanner="connected"
         printerConfigured
@@ -39,6 +89,7 @@ describe("StatusBar", () => {
   it("raises the alarm when a configured scanner drops", () => {
     render(
       <StatusBar
+        {...context}
         online
         scanner="disconnected"
         printerConfigured
@@ -53,6 +104,7 @@ describe("StatusBar", () => {
   it("reports a printer that is not configured", () => {
     render(
       <StatusBar
+        {...context}
         online
         scanner="keyboard"
         printerConfigured={false}
@@ -67,6 +119,7 @@ describe("StatusBar", () => {
   it("reports a configured printer as configured, not connected (a printer cannot be proven alive without printing)", () => {
     render(
       <StatusBar
+        {...context}
         online
         scanner="keyboard"
         printerConfigured
@@ -81,6 +134,7 @@ describe("StatusBar", () => {
   it("shows the pending count", () => {
     render(
       <StatusBar
+        {...context}
         online
         scanner="keyboard"
         printerConfigured={false}
@@ -95,6 +149,7 @@ describe("StatusBar", () => {
   it("shows zero pending without a warning", () => {
     render(
       <StatusBar
+        {...context}
         online
         scanner="keyboard"
         printerConfigured={false}
@@ -109,6 +164,7 @@ describe("StatusBar", () => {
   it("warns when the queue has stopped moving", () => {
     render(
       <StatusBar
+        {...context}
         online
         scanner="keyboard"
         printerConfigured={false}
@@ -123,6 +179,7 @@ describe("StatusBar", () => {
   it("shows the conflict count in the status bar", () => {
     render(
       <StatusBar
+        {...context}
         online
         scanner="keyboard"
         printerConfigured={false}
@@ -137,6 +194,7 @@ describe("StatusBar", () => {
   it("shows nothing to worry about at zero", () => {
     render(
       <StatusBar
+        {...context}
         online
         scanner="keyboard"
         printerConfigured={false}

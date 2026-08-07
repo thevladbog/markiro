@@ -1,4 +1,5 @@
-import { BrowserRouter, Route, Routes } from "react-router";
+import { useMemo } from "react";
+import { createBrowserRouter, createRoutesFromElements, Route, RouterProvider } from "react-router";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
 
@@ -12,14 +13,24 @@ import { ResetPasswordPage } from "./pages/auth/ResetPassword.js";
 import { SelectOrgPage } from "./pages/auth/SelectOrg.js";
 import { BoxesPage } from "./pages/boxes/index.js";
 import { CatalogPage } from "./pages/catalog/index.js";
+import { ProductPanelRoute } from "./pages/catalog/ProductPanelRoute.js";
 import { ConflictsPage } from "./pages/conflicts/index.js";
 import { CounterpartiesPage } from "./pages/counterparties/index.js";
+import { CounterpartyPanelRoute } from "./pages/counterparties/CounterpartyPanelRoute.js";
 import { DashboardPage } from "./pages/dashboard/index.js";
+import { DevicesPage } from "./pages/devices/index.js";
 import { EmployeesPage } from "./pages/employees/index.js";
+import {
+  EmployeeCreatePanelRoute,
+  EmployeeEditPanelRoute,
+} from "./pages/employees/EmployeePanelRoute.js";
 import { ChannelPage } from "./pages/integrations/ChannelPage.js";
 import { IntegrationsPage } from "./pages/integrations/index.js";
 import { InvitationPage } from "./pages/invitations/InvitationPage.js";
 import { KiosksPage } from "./pages/kiosks/index.js";
+import { KioskPairingPanelRoute } from "./pages/kiosks/KioskPairingPanelRoute.js";
+import { KioskCreatePanelRoute, KioskEditPanelRoute } from "./pages/kiosks/KioskPanelRoute.js";
+import { ReasonsPage } from "./pages/kiosks/ReasonsPage.js";
 import { LabelEditorPage } from "./pages/labels/editor/index.js";
 import { LabelTemplatesPage } from "./pages/labels/index.js";
 import { OrderDetailPage } from "./pages/pickup/OrderDetail.js";
@@ -28,23 +39,20 @@ import { PickupPage } from "./pages/pickup/index.js";
 import { ProfilePage } from "./pages/profile/ProfilePage.js";
 import { SettingsPage } from "./pages/settings/index.js";
 import { ShiftsPage } from "./pages/shifts/index.js";
+import { ShiftPanelRoute } from "./pages/shifts/ShiftPanelRoute.js";
 import { ShellPage } from "./pages/Shell.js";
 import { TeamPage } from "./pages/team/TeamPage.js";
 
 /**
- * Component routing (<BrowserRouter>/<Routes>/<Route>) rather than a data
- * router (createBrowserRouter/RouterProvider): this app has no loaders,
- * actions, or route-level data dependencies yet -- all data fetching so far
- * happens inside components via the auth client / react-query (wired at the
- * root in main.tsx). Component routing also composes more simply with
- * jsdom-based render tests (MemoryRouter drop-in, no router object to
- * construct per test).
+ * The data router is used even though route data is fetched through React
+ * Query: it provides navigation blocking for unsaved work in route-backed
+ * panels. Tests use the exported route objects with createMemoryRouter.
  */
 const C = CABINET_CAPABILITY;
 
-export function AppRoutes() {
+function appRouteElements() {
   return (
-    <Routes>
+    <>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
@@ -69,7 +77,24 @@ export function AppRoutes() {
               <CatalogPage />
             </RequireCapability>
           }
-        />
+        >
+          <Route
+            path="new"
+            element={
+              <RequireCapability capability={C.OPERATIONS_WRITE}>
+                <ProductPanelRoute mode="create" />
+              </RequireCapability>
+            }
+          />
+          <Route
+            path=":productId/edit"
+            element={
+              <RequireCapability capability={C.OPERATIONS_WRITE}>
+                <ProductPanelRoute mode="edit" />
+              </RequireCapability>
+            }
+          />
+        </Route>
         <Route
           path="shifts"
           element={
@@ -77,7 +102,24 @@ export function AppRoutes() {
               <ShiftsPage />
             </RequireCapability>
           }
-        />
+        >
+          <Route
+            path="new"
+            element={
+              <RequireCapability capability={C.OPERATIONS_WRITE}>
+                <ShiftPanelRoute mode="create" />
+              </RequireCapability>
+            }
+          />
+          <Route
+            path=":shiftId/edit"
+            element={
+              <RequireCapability capability={C.OPERATIONS_WRITE}>
+                <ShiftPanelRoute mode="edit" />
+              </RequireCapability>
+            }
+          />
+        </Route>
         <Route
           path="boxes"
           element={
@@ -101,12 +143,54 @@ export function AppRoutes() {
               <CounterpartiesPage />
             </RequireCapability>
           }
-        />
+        >
+          <Route
+            path="new"
+            element={
+              <RequireCapability capability={C.OPERATIONS_WRITE}>
+                <CounterpartyPanelRoute mode="create" />
+              </RequireCapability>
+            }
+          />
+          <Route
+            path=":counterpartyId/edit"
+            element={
+              <RequireCapability capability={C.OPERATIONS_WRITE}>
+                <CounterpartyPanelRoute mode="edit" />
+              </RequireCapability>
+            }
+          />
+        </Route>
         <Route
           path="employees"
           element={
             <RequireCapability capability={C.OPERATIONS_READ}>
               <EmployeesPage />
+            </RequireCapability>
+          }
+        >
+          <Route
+            path="new"
+            element={
+              <RequireCapability capability={C.OPERATIONS_WRITE}>
+                <EmployeeCreatePanelRoute />
+              </RequireCapability>
+            }
+          />
+          <Route
+            path=":employeeId/edit"
+            element={
+              <RequireCapability capability={C.OPERATIONS_WRITE}>
+                <EmployeeEditPanelRoute />
+              </RequireCapability>
+            }
+          />
+        </Route>
+        <Route
+          path="devices"
+          element={
+            <RequireCapability capability={C.OPERATIONS_READ}>
+              <DevicesPage />
             </RequireCapability>
           }
         />
@@ -115,6 +199,39 @@ export function AppRoutes() {
           element={
             <RequireCapability capability={C.OPERATIONS_READ}>
               <KiosksPage />
+            </RequireCapability>
+          }
+        >
+          <Route
+            path="new"
+            element={
+              <RequireCapability capability={C.OPERATIONS_WRITE}>
+                <KioskCreatePanelRoute />
+              </RequireCapability>
+            }
+          />
+          <Route
+            path=":kioskId/edit"
+            element={
+              <RequireCapability capability={C.OPERATIONS_WRITE}>
+                <KioskEditPanelRoute />
+              </RequireCapability>
+            }
+          />
+          <Route
+            path=":kioskId/pair"
+            element={
+              <RequireCapability capability={C.CREDENTIALS_MANAGE}>
+                <KioskPairingPanelRoute />
+              </RequireCapability>
+            }
+          />
+        </Route>
+        <Route
+          path="kiosks/reasons"
+          element={
+            <RequireCapability capability={C.OPERATIONS_READ}>
+              <ReasonsPage />
             </RequireCapability>
           }
         />
@@ -199,16 +316,22 @@ export function AppRoutes() {
           }
         />
       </Route>
-    </Routes>
+    </>
   );
 }
 
+export const appRoutes = createRoutesFromElements(appRouteElements());
+
+export function createAppRouter() {
+  return createBrowserRouter(appRoutes);
+}
+
 export function App() {
+  const router = useMemo(createAppRouter, []);
+
   return (
-    <BrowserRouter>
-      <AuthQueryBoundary>
-        <AppRoutes />
-      </AuthQueryBoundary>
-    </BrowserRouter>
+    <AuthQueryBoundary>
+      <RouterProvider router={router} />
+    </AuthQueryBoundary>
   );
 }

@@ -1,8 +1,26 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { OperatorMirrorRecord } from "@markiro/db";
-import { isEnrolled, readConfig, type StationConfig } from "./lib/config.js";
-import { createStationClient } from "./lib/api-client.js";
+import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
+import { Button, Card } from "@markiro/ui";
+import {
+  clearCredential,
+  isEnrolled,
+  readConfig,
+  writeConfig,
+  type StationConfig,
+} from "./lib/config.js";
+import { createStationClient, StationApiError, type StationClient } from "./lib/api-client.js";
+import {
+  clearRejectedCredentialState,
+  createCredentialGeneration,
+  createFloorWorkRegistry,
+  credentialGenerationIsCurrent,
+  readSealedWorkSummary,
+  type CredentialGeneration,
+  type CredentialRejectedEvent,
+  type FloorWorkBarrier,
+  type SealedWorkSummary,
+} from "./lib/credential-recovery.js";
 import {
   DEFAULT_HARDWARE_CONFIG,
   loadHardwareConfig,
@@ -18,8 +36,16 @@ import {
 import { mirrorShiftBundle } from "./lib/shift-bundle.js";
 import { syncOperatorRoster } from "./lib/roster-sync.js";
 import { createKeyboardWedgeSource } from "./lib/scan-source.js";
+import { canonicalStationApiUrl } from "./lib/station-api-url.js";
 import { loadSoundSettings, type SoundSettings } from "./lib/signal-sound.js";
 import { tauriExecutor } from "./lib/sqlite.js";
+import { resolveLegacyStationIdentity } from "./lib/legacy-identity.js";
+import { createLockdownLifecycle } from "./lib/lockdown.js";
+import { ConfigTransitionCoordinator } from "./lib/config-transition.js";
+import {
+  resetCredentialForPairing as resetCredentialConfig,
+  type RunConfigTransition,
+} from "./lib/credential-reset.js";
 import { useSyncEngine } from "./lib/use-sync-engine.js";
 import { ConflictList } from "./pages/ConflictList.js";
 import { Enrollment } from "./pages/Enrollment.js";
@@ -29,6 +55,7 @@ import { NewShift } from "./pages/NewShift.js";
 import { WorkScreen } from "./pages/WorkScreen.js";
 import { WorkstationSetup } from "./pages/WorkstationSetup.js";
 import { FloorShell } from "./ui/FloorShell.js";
+import { FloorFooter } from "./ui/FloorFooter.js";
 import type { ScannerIndicator } from "./ui/StatusBar.js";
 
 interface ActiveShift {
@@ -37,6 +64,28 @@ interface ActiveShift {
   mode: string;
 }
 
+export type CredentialRecoveryPhase = "sealing" | "failed" | "ready";
+
+export type CredentialRecoveryState =
+  | { event: CredentialRejectedEvent; phase: Exclude<CredentialRecoveryPhase, "ready"> }
+  | { event: CredentialRejectedEvent; phase: "ready"; sealed: SealedWorkSummary };
+
+export type LegacyIdentityState = "resolving" | "degraded" | "rejected" | null;
+
+export type StationView = "loading" | "pairing" | "login" | "floor";
+
+const legacyGatedClient: StationClient = {
+  get<T>() {
+    return Promise.reject<T>(new Error("legacy station identity is not yet available"));
+  },
+  post<T>() {
+    return Promise.reject<T>(new Error("legacy station identity is not yet available"));
+  },
+  whoami() {
+    return Promise.reject(new Error("legacy station identity is not yet available"));
+  },
+};
+
 /**
  * Pure routing decision for the top-level App state machine, factored out so
  * it is unit-testable without rendering (jsdom has no real Tauri runtime, so
@@ -44,18 +93,50 @@ interface ActiveShift {
  * the actual branch logic App renders from).
  *
  * - No config yet (still reading it on mount) -> "loading".
- * - Config present but the device has no tenant/key/server -> "enrollment".
+ * - Config present but the device has no credential -> "pairing".
  * - Enrolled but no operator has signed in this session -> "login".
  * - Enrolled + signed in -> "floor" (ShiftSelection/NewShift/active-shift area).
  */
 export function nextStationView(
   config: StationConfig | null,
   operator: OperatorMirrorRecord | null,
-): "loading" | "enrollment" | "login" | "floor" {
+): StationView {
   if (!config) return "loading";
-  if (!isEnrolled(config)) return "enrollment";
+  if (!isEnrolled(config)) return "pairing";
   if (!operator) return "login";
   return "floor";
+}
+
+/**
+ * Fresh devices use the build-time deployment base. A durable device that
+ * lost only its key re-pairs with its already trusted persisted API base;
+ * neither path ever derives an API target from `window.location.origin`.
+ */
+export function pairingServerUrl(
+  config: StationConfig,
+  buildApiUrl: string | undefined,
+): string | null {
+  return canonicalStationApiUrl(config.deviceId ? config.serverUrl : buildApiUrl);
+}
+
+/**
+ * A legacy key may prove only its own station identity. Prefer a valid base
+ * already persisted on the device, then the deployment-supplied origin. An
+ * invalid persisted value is never used as a request prefix.
+ */
+export function legacyIdentityServerUrl(
+  config: StationConfig,
+  buildApiUrl: string | undefined,
+): string | null {
+  if (!config.apiKey || config.deviceId) return null;
+  return canonicalStationApiUrl(config.serverUrl) ?? canonicalStationApiUrl(buildApiUrl);
+}
+
+function configuredStationApiUrl(): string | undefined {
+  // `import.meta.env` is untyped in this Tauri build, so narrow its untrusted
+  // build-time value before it reaches the URL parser.
+  const value = (import.meta.env as unknown as Record<string, unknown>).VITE_STATION_API_URL;
+  return typeof value === "string" ? value : undefined;
 }
 
 /**
@@ -86,6 +167,8 @@ export function scannerIndicator(
 export function App() {
   const { t } = useTranslation();
   const [config, setConfig] = useState<StationConfig | null>(null);
+  const configRef = useRef<StationConfig | null>(null);
+  const configTransitions = useRef(new ConfigTransitionCoordinator());
   const [operator, setOperator] = useState<OperatorMirrorRecord | null>(null);
   const [floorView, setFloorView] = useState<"select" | "new">("select");
   const [shift, setShift] = useState<ActiveShift | null>(null);
@@ -104,6 +187,44 @@ export function App() {
   const [scannerStatus, setScannerStatus] = useState<ScannerStatus | null>(null);
   const [showSetup, setShowSetup] = useState(false);
   const [showConflicts, setShowConflicts] = useState(false);
+  const [credentialRecovery, setCredentialRecovery] = useState<CredentialRecoveryState | null>(
+    null,
+  );
+  const [legacyIdentityState, setLegacyIdentityState] = useState<LegacyIdentityState>(null);
+  const legacyIdentityAttempt = useRef<Promise<unknown> | null>(null);
+  const recoveryCleanupStarted = useRef<CredentialRejectedEvent | null>(null);
+  const floorWorkRegistry = useMemo(() => createFloorWorkRegistry(), []);
+  const lockdown = useMemo(() => createLockdownLifecycle({ dev: import.meta.env.DEV }), []);
+  const registerFloorWorkBarrier = useCallback(
+    (barrier: FloorWorkBarrier) => floorWorkRegistry.register(barrier),
+    [floorWorkRegistry],
+  );
+  const publishConfig = useCallback((next: StationConfig) => {
+    configRef.current = next;
+    setConfig(next);
+  }, []);
+  const runConfigTransition: RunConfigTransition = useCallback(
+    async <T,>(transition: () => Promise<T>, publish: (value: T) => void): Promise<T> => {
+      const generation = configTransitions.current.begin();
+      let committedValue: T | undefined;
+      const result = await configTransitions.current.commit({
+        generation,
+        isOriginCurrent: () => true,
+        transition,
+        publish: (value) => {
+          committedValue = value;
+          publish(value);
+        },
+      });
+      if (result === "stale") throw new Error("config transition superseded");
+      return committedValue as T;
+    },
+    [],
+  );
+  const runEnrollmentConfigTransition = useCallback(
+    (transition: () => Promise<void>) => runConfigTransition(transition, () => {}),
+    [runConfigTransition],
+  );
   // Bumped every time the operator leaves the setup screen (Done or Back),
   // so the scanner-session effect below re-runs even when the saved
   // `hardwareConfig.scanner` port/baud are unchanged -- e.g. Setup's own
@@ -115,6 +236,16 @@ export function App() {
   // it in.
   const [sessionEpoch, setSessionEpoch] = useState(0);
 
+  useEffect(() => lockdown.start(), [lockdown]);
+
+  useEffect(() => {
+    if (!showSetup) return;
+    void lockdown.exit();
+    return () => {
+      void lockdown.enter();
+    };
+  }, [lockdown, showSetup]);
+
   useEffect(() => {
     void loadSoundSettings(tauriExecutor).then(setSound);
   }, []);
@@ -122,6 +253,17 @@ export function App() {
   useEffect(() => {
     void loadHardwareConfig(tauriExecutor).then(setHardwareConfig);
   }, []);
+
+  useEffect(
+    () => () => {
+      // Invalidate responses from both initial and reconnect identity attempts.
+      // Clearing the ref lets React StrictMode's effect remount launch a fresh
+      // generation while the first development-only request becomes a no-op.
+      configTransitions.current.seal();
+      legacyIdentityAttempt.current = null;
+    },
+    [],
+  );
 
   // Open a configured scanner at start so a set-up station comes up ready,
   // and again whenever the configured scanner changes (e.g. from Setup).
@@ -245,12 +387,12 @@ export function App() {
         console.error("station: applyMigrations failed", err);
       }
       const cfg = await readConfig();
-      if (!cancelled) setConfig(cfg);
+      if (!cancelled) publishConfig(cfg);
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [publishConfig]);
 
   useEffect(() => {
     const goOnline = () => setOnline(true);
@@ -263,17 +405,148 @@ export function App() {
     };
   }, []);
 
-  // Memoized (keyed on apiKey+serverUrl, not the whole `config` object, which
+  const legacyKeyedConfig = Boolean(config?.apiKey && !config.deviceId);
+  const legacyApiUrl = config ? legacyIdentityServerUrl(config, configuredStationApiUrl()) : null;
+
+  // Memoized (keyed on identity-bearing fields and canonical legacy base, not
+  // the whole `config` object, which
   // is a fresh reference on every `readConfig()`/`refreshConfig()` call) so
   // ShiftSelection's fetch-on-mount effect (keyed on `client`) does not
   // refetch on every render — e.g. every online/offline flap re-renders App.
   // Must run unconditionally (before the `!config` early return below) to
   // respect the Rules of Hooks; it degrades to `null` until enrolled.
   const client = useMemo(
-    () => (config?.apiKey && config.serverUrl ? createStationClient(config) : null),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- see above; `createStationClient` reads only apiKey/serverUrl, so these deps cover everything the client is built from.
-    [config?.apiKey, config?.serverUrl],
+    () => {
+      if (!config?.apiKey) return null;
+      if (!config.deviceId) {
+        return legacyApiUrl ? createStationClient({ ...config, serverUrl: legacyApiUrl }) : null;
+      }
+      return config.serverUrl ? createStationClient(config) : null;
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- see above; the client reads only these credential/base fields.
+    [config?.apiKey, config?.deviceId, config?.serverUrl, legacyApiUrl],
   );
+
+  const verifiedClient = config?.deviceId ? client : null;
+
+  const attemptLegacyIdentity = useCallback(() => {
+    if (
+      !config ||
+      !client ||
+      !legacyApiUrl ||
+      config.deviceId ||
+      legacyIdentityState === "rejected"
+    ) {
+      return;
+    }
+    if (legacyIdentityAttempt.current) return;
+    const origin = config;
+    const generation = configTransitions.current.begin();
+    setLegacyIdentityState("resolving");
+    const attempt = resolveLegacyStationIdentity(client, { ...origin, serverUrl: legacyApiUrl })
+      .then((backfilled) => {
+        return configTransitions.current.commit({
+          generation,
+          isOriginCurrent: () => configRef.current === origin,
+          transition: async () => {
+            await writeConfig(backfilled);
+            return backfilled;
+          },
+          publish: (committed) => {
+            publishConfig(committed);
+            setLegacyIdentityState(null);
+          },
+        });
+      })
+      .catch((error: unknown) => {
+        if (!configTransitions.current.isCurrent(generation) || configRef.current !== origin) {
+          return;
+        }
+        setLegacyIdentityState(
+          error instanceof StationApiError && error.status === 401 ? "rejected" : "degraded",
+        );
+      })
+      .finally(() => {
+        if (legacyIdentityAttempt.current === attempt) legacyIdentityAttempt.current = null;
+      });
+    legacyIdentityAttempt.current = attempt;
+  }, [client, config, legacyApiUrl, legacyIdentityState, publishConfig]);
+
+  useEffect(() => {
+    if (
+      !config ||
+      !client ||
+      config.deviceId ||
+      (legacyIdentityState !== null && legacyIdentityState !== "resolving")
+    ) {
+      return;
+    }
+    attemptLegacyIdentity();
+  }, [attemptLegacyIdentity, client, config, legacyIdentityState]);
+
+  useEffect(() => {
+    if (legacyIdentityState !== "degraded") return;
+    const retry = () => attemptLegacyIdentity();
+    window.addEventListener("online", retry);
+    return () => window.removeEventListener("online", retry);
+  }, [attemptLegacyIdentity, legacyIdentityState]);
+
+  // One shared generation per authenticated key, not per sync-engine instance.
+  // This makes React StrictMode overlap and any late async response obey the
+  // same terminal seal. A newly provisioned apiKey creates a fresh generation.
+  const credentialGeneration = useMemo(
+    () => (verifiedClient ? createCredentialGeneration() : null),
+    [verifiedClient],
+  );
+  const currentCredentialGeneration = useRef<CredentialGeneration | null>(null);
+  currentCredentialGeneration.current = credentialGeneration;
+
+  const onCredentialRejected = useCallback((event: CredentialRejectedEvent) => {
+    if (currentCredentialGeneration.current !== event.generation) return;
+    configTransitions.current.seal();
+    // These updates gate every authenticated surface in the next render.
+    // Cache deletion happens only from the post-commit effect below.
+    setOperator(null);
+    setShift(null);
+    setShiftContext(null);
+    setBoxCapacity(null);
+    setIssuerPrefix(null);
+    setFloorView("select");
+    setShowSetup(false);
+    setShowConflicts(false);
+    setCredentialRecovery((current) => current ?? { event, phase: "sealing" });
+  }, []);
+
+  const credentialBoundClient = useMemo(() => {
+    if (
+      !config?.apiKey ||
+      !config.deviceId ||
+      !config.serverUrl ||
+      !verifiedClient ||
+      !credentialGeneration
+    ) {
+      return null;
+    }
+    return createStationClient(config, {
+      credentialBoundary: {
+        machineId: config.machineId,
+        generation: credentialGeneration,
+        onCredentialRejected,
+      },
+    });
+    // The raw verified client and generation already have these exact identity
+    // dependencies; listing primitives keeps unrelated config refreshes stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    config?.apiKey,
+    config?.deviceId,
+    config?.machineId,
+    config?.serverUrl,
+    credentialGeneration,
+    onCredentialRejected,
+    verifiedClient,
+  ]);
+  const authenticatedClient = credentialRecovery ? null : credentialBoundClient;
 
   // One engine for the life of the app: the outbox belongs to the DEVICE, not
   // to a shift or an operator, so entering or leaving a shift must never stop
@@ -284,18 +557,70 @@ export function App() {
   // engine's identity as a dependency.
   const { state: syncState, nudge: nudgeSync } = useSyncEngine({
     exec: tauriExecutor,
-    client,
+    client: authenticatedClient,
     machineId: config?.machineId,
+    ...(credentialGeneration ? { credentialGeneration } : {}),
+    onCredentialRejected,
   });
+
+  // React runs effects only after committing the recovery render. This is
+  // the ordering boundary that guarantees an operator can no longer act on
+  // the authenticated floor before roster/reference caches are removed.
+  useEffect(() => {
+    if (!credentialRecovery || credentialRecovery.phase !== "sealing" || !config) return;
+    if (recoveryCleanupStarted.current === credentialRecovery.event) return;
+    recoveryCleanupStarted.current = credentialRecovery.event;
+    const previous = config;
+    void runConfigTransition(
+      async () => {
+        if (
+          !previous.deviceId ||
+          previous.machineId !== credentialRecovery.event.machineId ||
+          !previous.serverUrl
+        ) {
+          throw new Error("credential recovery identity unavailable");
+        }
+        // The recovery render above has already removed every authenticated
+        // action. Count all durable unsent facts in one SQLite snapshot before
+        // deleting any reproducible state; a count failure stays fail-closed.
+        const sealed = await readSealedWorkSummary(tauriExecutor, floorWorkRegistry.current());
+        await clearRejectedCredentialState({ exec: tauriExecutor, clearCredential });
+        const cleared = await readConfig();
+        if (
+          cleared.machineId !== previous.machineId ||
+          cleared.deviceId !== previous.deviceId ||
+          cleared.serverUrl !== previous.serverUrl ||
+          cleared.apiKey !== undefined
+        ) {
+          throw new Error("credential recovery clear contract violation");
+        }
+        return { cleared, sealed };
+      },
+      ({ cleared, sealed }) => {
+        publishConfig(cleared);
+        setCredentialRecovery((current) =>
+          current?.event === credentialRecovery.event
+            ? { event: credentialRecovery.event, phase: "ready", sealed }
+            : current,
+        );
+      },
+    ).catch(() => {
+      setCredentialRecovery((current) =>
+        current?.event === credentialRecovery.event
+          ? { event: credentialRecovery.event, phase: "failed" }
+          : current,
+      );
+    });
+  }, [config, credentialRecovery, floorWorkRegistry, publishConfig, runConfigTransition]);
 
   // Initialization sync: as soon as the device has a credential — right after
   // enrollment, and on every later start — pull the operator roster so the
   // sign-in screen has someone to authenticate. Without this a freshly
   // enrolled station shows a PIN pad no PIN can ever satisfy.
   useEffect(() => {
-    if (!client) return;
-    void syncOperatorRoster(client, tauriExecutor);
-  }, [client]);
+    if (!authenticatedClient || !credentialGeneration) return;
+    void syncOperatorRoster(authenticatedClient, tauriExecutor, credentialGeneration);
+  }, [authenticatedClient, credentialGeneration]);
 
   // Retry: the initial sync above runs exactly once, so a device that is
   // briefly offline at that moment would otherwise strand the operator at a
@@ -305,42 +630,218 @@ export function App() {
   // second, independent consumer of the same event — one listener, two
   // reasons to nudge.
   useEffect(() => {
-    if (!client) return;
+    if (!authenticatedClient || !credentialGeneration) return;
     const retrySync = () => {
-      void syncOperatorRoster(client, tauriExecutor);
+      void syncOperatorRoster(authenticatedClient, tauriExecutor, credentialGeneration);
       nudgeSync();
     };
     window.addEventListener("online", retrySync);
     return () => window.removeEventListener("online", retrySync);
-  }, [client, nudgeSync]);
+  }, [authenticatedClient, credentialGeneration, nudgeSync]);
 
   async function refreshConfig() {
-    setConfig(await readConfig());
+    await runConfigTransition(readConfig, publishConfig);
+  }
+
+  async function finishCredentialRecovery() {
+    try {
+      await runConfigTransition(
+        async () => {
+          const refreshed = await readConfig();
+          if (
+            !credentialRecovery ||
+            refreshed.machineId !== credentialRecovery.event.machineId ||
+            refreshed.deviceId !== configRef.current?.deviceId
+          ) {
+            throw new Error("credential recovery identity changed");
+          }
+          return refreshed;
+        },
+        (refreshed) => {
+          publishConfig(refreshed);
+          recoveryCleanupStarted.current = null;
+          setCredentialRecovery(null);
+        },
+      );
+    } catch {
+      setCredentialRecovery((current) =>
+        current ? { event: current.event, phase: "failed" } : current,
+      );
+    }
+  }
+
+  /**
+   * Explicit service action only. Task 11 owns automatic 401 sealing; this
+   * handler is never called by a network failure path.
+   */
+  async function resetCredentialForPairing() {
+    const previous = configRef.current;
+    if (!previous) throw new Error(t("setup.resetCredentialFailed"));
+    try {
+      await resetCredentialConfig(previous, {
+        clearCredential,
+        readConfig,
+        runTransition: runConfigTransition,
+        publishConfig,
+      });
+      setOperator(null);
+      setShift(null);
+      setFloorView("select");
+      setShowSetup(false);
+    } catch {
+      // Never expose IPC details or a device key in the service UI.
+      throw new Error(t("setup.resetCredentialFailed"));
+    }
   }
 
   if (!config) {
     return (
-      <main style={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>
+      <main className="station-centered-screen">
         <h1 style={{ fontSize: "2rem" }}>{t("app.booting")}</h1>
       </main>
     );
   }
 
-  // `config` is narrowed to non-null for the rest of this render.
-  const stage = nextStationView(config, operator);
+  if (legacyKeyedConfig && !legacyApiUrl) {
+    return (
+      <main className="station-centered-screen">
+        <Card style={{ width: "min(720px, calc(100vw - 64px))", padding: 32 }}>
+          <h1 style={{ fontSize: "2rem", marginBottom: 24 }}>{t("legacyIdentity.title")}</h1>
+          <p role="alert">{t("legacyIdentity.missingServer")}</p>
+        </Card>
+      </main>
+    );
+  }
 
-  if (stage === "enrollment") {
-    return <Enrollment machineId={config.machineId} onEnrolled={() => void refreshConfig()} />;
+  if (credentialRecovery) {
+    if (credentialRecovery.phase === "ready") {
+      return (
+        <Enrollment
+          machineId={config.machineId}
+          {...(config.deviceId ? { expectedDeviceId: config.deviceId } : {})}
+          sealedWork={credentialRecovery.sealed}
+          onEnrolled={() => void finishCredentialRecovery()}
+          runConfigTransition={runEnrollmentConfigTransition}
+          scanSource={scanSource}
+          pairingServerUrl={pairingServerUrl(config, configuredStationApiUrl())}
+        />
+      );
+    }
+    return (
+      <main className="station-centered-screen">
+        <Card style={{ minWidth: 480, padding: 32 }}>
+          <h1 style={{ fontSize: "2rem", marginBottom: 24 }}>{t("enroll.title")}</h1>
+          <p role="status">
+            {t(
+              credentialRecovery.phase === "failed"
+                ? "enroll.recoveryFailed"
+                : "enroll.recoverySealing",
+            )}
+          </p>
+          {credentialRecovery.phase === "failed" ? (
+            <Button
+              size="floor"
+              onClick={() => {
+                recoveryCleanupStarted.current = null;
+                setCredentialRecovery({ event: credentialRecovery.event, phase: "sealing" });
+              }}
+            >
+              {t("enroll.retryRecovery")}
+            </Button>
+          ) : null}
+        </Card>
+      </main>
+    );
+  }
+
+  if (legacyIdentityState === "rejected") {
+    return (
+      <main className="station-centered-screen">
+        <Card style={{ width: "min(720px, calc(100vw - 64px))", padding: 32 }}>
+          <h1 style={{ fontSize: "2rem", marginBottom: 24 }}>{t("legacyIdentity.title")}</h1>
+          <p role="alert">{t("legacyIdentity.rejected")}</p>
+        </Card>
+      </main>
+    );
+  }
+
+  const legacyNotice = legacyIdentityState ? (
+    <FloorFooter ariaLabel={t("legacyIdentity.title")}>
+      <p className="legacy-identity-notice__message" role="status">
+        {t(
+          legacyIdentityState === "resolving"
+            ? "legacyIdentity.resolving"
+            : "legacyIdentity.degraded",
+        )}
+      </p>
+      {legacyIdentityState === "degraded" ? (
+        <Button size="floor" onClick={attemptLegacyIdentity}>
+          {t("legacyIdentity.retry")}
+        </Button>
+      ) : null}
+    </FloorFooter>
+  ) : null;
+
+  // `config` is narrowed to non-null for the rest of this render.
+  const stage = legacyKeyedConfig
+    ? operator
+      ? "floor"
+      : "login"
+    : nextStationView(config, operator);
+  const legacyCredentialResetBlocked = Boolean(config.apiKey && !config.deviceId);
+
+  if (stage === "pairing") {
+    if (showSetup) {
+      return (
+        <WorkstationSetup
+          hw={tauriHardware}
+          exec={tauriExecutor}
+          sound={sound}
+          onSoundChange={setSound}
+          onConfigChange={setHardwareConfig}
+          onDone={() => {
+            setShowSetup(false);
+            setSessionEpoch((epoch) => epoch + 1);
+          }}
+        />
+      );
+    }
+    return (
+      <Enrollment
+        machineId={config.machineId}
+        {...(config.deviceId ? { expectedDeviceId: config.deviceId } : {})}
+        onEnrolled={() => void refreshConfig()}
+        runConfigTransition={runEnrollmentConfigTransition}
+        onSetup={() => setShowSetup(true)}
+        scanSource={scanSource}
+        pairingServerUrl={pairingServerUrl(config, configuredStationApiUrl())}
+      />
+    );
   }
 
   if (stage === "login") {
-    return <OperatorLogin exec={tauriExecutor} source={scanSource} onAuthed={setOperator} />;
+    return (
+      <>
+        <OperatorLogin
+          exec={tauriExecutor}
+          source={scanSource}
+          onAuthed={setOperator}
+          notice={legacyNotice}
+        />
+      </>
+    );
   }
+
+  // Both floor-routing branches require an authenticated operator. Keep the
+  // runtime guard beside the render boundary so future routing changes cannot
+  // accidentally expose a floor screen with missing operator context.
+  if (!operator) return null;
 
   // stage === "floor" here, which requires `isEnrolled(config)` (apiKey +
   // serverUrl truthy) — the same condition the `client` memo above builds
   // from, so it is guaranteed non-null in this branch.
-  const activeClient = client!;
+  const activeClient = authenticatedClient ?? legacyGatedClient;
+  const floorGeneration = credentialGeneration;
 
   // Shared by ShiftSelection's `onSelected` and NewShift's `onStarted`: the
   // shift is entered immediately (never blocked on the network), and the
@@ -348,24 +849,29 @@ export function App() {
   // available offline afterward. See `mirrorShiftBundle` for the
   // resilience contract (a download failure must not block entry).
   function handleShiftEntered(entered: ActiveShift) {
+    if (floorGeneration && !credentialGenerationIsCurrent(floorGeneration)) return;
     setShift(entered);
-    void mirrorShiftBundle(activeClient, tauriExecutor, entered.id);
+    if (floorGeneration) {
+      void mirrorShiftBundle(activeClient, tauriExecutor, entered.id, floorGeneration);
+    }
   }
 
+  // The scanner reads green only once the Rust side has confirmed a port is
+  // actually open; the printer only reflects whether one is configured,
+  // since it cannot be proven alive without printing to it.
   return (
-    // The scanner reads green only once the Rust side has confirmed a port
-    // is actually open; the printer only reflects whether one is configured,
-    // since it cannot be proven alive without printing to it.
     <FloorShell
+      stationName={config.deviceName ?? config.deviceId ?? config.machineId}
+      lineName={config.lineName ?? null}
+      operatorName={operator.name}
+      shiftLabel={shift ? (shiftContext?.productName ?? shift.id) : null}
       online={online}
       scanner={scannerIndicator(hardwareConfig, scannerStatus)}
       printerConfigured={hardwareConfig.printer !== null}
       syncPending={syncState.pending}
       syncStuck={syncState.stuck}
       conflicts={syncState.conflicts}
-      tasks={[]}
-      activeTaskId=""
-      onSelectTask={() => {}}
+      footer={legacyNotice}
     >
       {showSetup ? (
         <WorkstationSetup
@@ -374,6 +880,9 @@ export function App() {
           sound={sound}
           onSoundChange={setSound}
           onConfigChange={setHardwareConfig}
+          {...(legacyCredentialResetBlocked
+            ? { credentialResetBlockedReason: t("setup.legacyRepairBlocked") }
+            : { onResetCredential: resetCredentialForPairing })}
           onDone={() => {
             setShowSetup(false);
             // Covers both exits from Setup with one line: `finish()` calls
@@ -392,13 +901,14 @@ export function App() {
             exec={tauriExecutor}
             shiftId={shift.id}
             terminalId={config.deviceId ?? null}
-            operatorId={operator!.operatorId}
+            operatorId={operator.operatorId}
             expectedGtin14={shiftContext.gtin14}
             productName={shiftContext.productName}
             counterpartyName={shiftContext.counterpartyName}
             source={scanSource}
             sound={sound}
             onScanRecorded={nudgeSync}
+            onScanQueueRegister={registerFloorWorkBarrier}
             onExit={() => {
               // Both cleared together: `floorView` is separate state that
               // stays "new" when this shift was entered through NewShift, so
@@ -435,6 +945,9 @@ export function App() {
         <ShiftSelection
           client={activeClient}
           onSelected={handleShiftEntered}
+          isCurrent={() =>
+            floorGeneration ? credentialGenerationIsCurrent(floorGeneration) : false
+          }
           onNew={() => setFloorView("new")}
           onSetup={() => setShowSetup(true)}
           onConflicts={() => setShowConflicts(true)}

@@ -16,6 +16,127 @@ const client = createStationClient({
 });
 
 describe("ShiftSelection", () => {
+  it("renders a bounded three-card page after filtering closed shifts", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          items: [
+            { id: "closed", status: "closed", mode: "validation", productName: "Closed" },
+            { id: "s1", status: "active", mode: "validation", productName: "One" },
+            { id: "s2", status: "planned", mode: "validation", productName: "Two" },
+            { id: "s3", status: "planned", mode: "aggregation", productName: "Three" },
+            { id: "s4", status: "planned", mode: "validation", productName: "Four" },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+
+    render(<ShiftSelection client={client} onSelected={() => {}} onNew={() => {}} />);
+
+    await waitFor(() => expect(screen.getByText("One")).toBeDefined());
+    expect(screen.queryByText("Closed")).toBeNull();
+    expect(screen.getByText("Two")).toBeDefined();
+    expect(screen.getByText("Three")).toBeDefined();
+    expect(screen.queryByText("Four")).toBeNull();
+    expect(screen.getByText("Page 1 of 2")).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+    expect(screen.queryByText("One")).toBeNull();
+    expect(screen.getByText("Four")).toBeDefined();
+    expect(screen.getByText("Page 2 of 2")).toBeDefined();
+    expect((screen.getByRole("button", { name: "Next page" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+  });
+
+  it("keeps the clamped page after a shrinking dataset grows again", async () => {
+    const fourItems = Array.from({ length: 4 }, (_, index) => ({
+      id: `s${index + 1}`,
+      status: "planned",
+      mode: "validation",
+      productName: `Product ${index + 1}`,
+      plannedQty: null,
+    }));
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: fourItems }), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ items: fourItems.slice(0, 1) }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: fourItems }), { status: 200 }));
+    const secondClient = createStationClient({
+      machineId: "m1",
+      apiKey: "k",
+      serverUrl: "http://localhost:3001",
+    });
+    const thirdClient = createStationClient({
+      machineId: "m1",
+      apiKey: "k",
+      serverUrl: "http://localhost:3002",
+    });
+
+    const view = render(<ShiftSelection client={client} onSelected={() => {}} onNew={() => {}} />);
+    await waitFor(() => expect(screen.getByText("Page 1 of 2")).toBeDefined());
+    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+    expect(screen.getByText("Page 2 of 2")).toBeDefined();
+
+    view.rerender(<ShiftSelection client={secondClient} onSelected={() => {}} onNew={() => {}} />);
+    await waitFor(() => expect(screen.getByText("Page 1 of 1")).toBeDefined());
+
+    view.rerender(<ShiftSelection client={thirdClient} onSelected={() => {}} onNew={() => {}} />);
+    await waitFor(() => expect(screen.getByText("Page 1 of 2")).toBeDefined());
+    expect(screen.getByText("Product 1")).toBeDefined();
+    expect(screen.queryByText("Product 4")).toBeNull();
+  });
+
+  it("shows bounded loading, empty, and retry states", async () => {
+    let rejectList!: (reason: unknown) => void;
+    const pendingList = new Promise<Response>((_resolve, reject) => {
+      rejectList = reject;
+    });
+    vi.spyOn(globalThis, "fetch")
+      .mockReturnValueOnce(pendingList)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+
+    render(<ShiftSelection client={client} onSelected={() => {}} onNew={() => {}} />);
+    expect(screen.getByText("Loading shifts…")).toBeDefined();
+
+    rejectList(new Error("offline"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Retry" })).toBeDefined());
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    await waitFor(() => expect(screen.getByText("No open shifts")).toBeDefined());
+  });
+
+  it("keeps new-shift, setup, and conflict actions available in the fixed footer", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ items: [] }), { status: 200 }),
+    );
+    const onNew = vi.fn();
+    const onSetup = vi.fn();
+    const onConflicts = vi.fn();
+
+    render(
+      <ShiftSelection
+        client={client}
+        onSelected={() => {}}
+        onNew={onNew}
+        onSetup={onSetup}
+        onConflicts={onConflicts}
+      />,
+    );
+    await waitFor(() => expect(screen.getByText("No open shifts")).toBeDefined());
+
+    const footer = screen.getByRole("contentinfo", { name: "Shift actions" });
+    expect(footer).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "New shift" }));
+    fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
+    fireEvent.click(screen.getByRole("button", { name: "Conflicts" }));
+    expect(onNew).toHaveBeenCalledOnce();
+    expect(onSetup).toHaveBeenCalledOnce();
+    expect(onConflicts).toHaveBeenCalledOnce();
+  });
+
   it("renders the counterparty label through i18n, not a hard-coded Russian string (regression for M8)", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(
@@ -72,6 +193,35 @@ describe("ShiftSelection", () => {
         expect.objectContaining({ id: "s1", status: "active" }),
       ),
     );
+  });
+
+  it("rejoins an active shift without posting an open request", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          items: [
+            {
+              id: "s1",
+              status: "active",
+              mode: "aggregation",
+              productName: "Cola",
+              plannedQty: null,
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+    const onSelected = vi.fn();
+
+    render(<ShiftSelection client={client} onSelected={onSelected} onNew={() => {}} />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Rejoin" })).toBeDefined());
+    fireEvent.click(screen.getByRole("button", { name: "Rejoin" }));
+
+    expect(onSelected).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "s1", status: "active", mode: "aggregation" }),
+    );
+    expect(fetchSpy).toHaveBeenCalledOnce();
   });
 
   // Finding 3: while `open()` is in flight, the Conflicts button must not
@@ -156,5 +306,67 @@ describe("ShiftSelection", () => {
 
     await waitFor(() => expect(screen.getByText("Shift already closed")).toBeDefined());
     expect(onSelected).not.toHaveBeenCalled();
+  });
+
+  it("ignores an old open response after cleanup and a replacement floor mounts", async () => {
+    let resolveOpen!: (response: Response) => void;
+    const pendingOpen = new Promise<Response>((resolve) => {
+      resolveOpen = resolve;
+    });
+    const list = new Response(
+      JSON.stringify({
+        items: [
+          {
+            id: "s1",
+            status: "planned",
+            mode: "validation",
+            productName: "Cola",
+            plannedQty: 100,
+          },
+        ],
+      }),
+      { status: 200 },
+    );
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(list)
+      .mockReturnValueOnce(pendingOpen)
+      .mockResolvedValueOnce(list.clone());
+    const oldSelected = vi.fn();
+    const oldFloor = render(
+      <ShiftSelection
+        client={client}
+        onSelected={oldSelected}
+        onNew={() => {}}
+        isCurrent={() => false}
+      />,
+    );
+    await waitFor(() => expect(screen.getByText("Cola")).toBeDefined());
+    // The request began while current; credential recovery happens while it
+    // is in flight and unmounts the authenticated floor.
+    oldFloor.rerender(
+      <ShiftSelection
+        client={client}
+        onSelected={oldSelected}
+        onNew={() => {}}
+        isCurrent={() => true}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    oldFloor.unmount();
+
+    const freshSelected = vi.fn();
+    render(
+      <ShiftSelection
+        client={client}
+        onSelected={freshSelected}
+        onNew={() => {}}
+        isCurrent={() => true}
+      />,
+    );
+    resolveOpen(new Response(JSON.stringify({ id: "s1", status: "active", mode: "validation" })));
+    await waitFor(() => expect(screen.getByText("Cola")).toBeDefined());
+
+    expect(oldSelected).not.toHaveBeenCalled();
+    expect(freshSelected).not.toHaveBeenCalled();
   });
 });

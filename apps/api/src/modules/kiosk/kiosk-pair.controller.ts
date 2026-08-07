@@ -1,8 +1,9 @@
-import { Body, Controller, Ip, Post } from "@nestjs/common";
+import { Body, Controller, Header, Ip, Post } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "../../zod.pipe";
 import { pairKioskSchema, type PairKioskDto, type PairKioskResultDto } from "../pickup-orders/dto";
 import { PairingService } from "./pairing.service";
+import { ApiKioskPairSecretResponse } from "../device-pairing/secret-response.openapi";
 
 /**
  * The one unauthenticated kiosk route: a device has no credential until this
@@ -21,6 +22,8 @@ export class KioskPairController {
   constructor(private readonly pairingService: PairingService) {}
 
   @Post("pair")
+  @Header("Cache-Control", "no-store")
+  @ApiKioskPairSecretResponse()
   async pair(
     @Body(new ZodValidationPipe(pairKioskSchema)) body: PairKioskDto,
     @Ip() ip: string,

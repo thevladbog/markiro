@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
-import { STATION_MIGRATIONS } from "@markiro/db";
+import { STATION_MIGRATIONS } from "@markiro/db/station-sqlite";
 import type { SqlExecutor } from "../src/lib/mirror.js";
 import { loadSoundSettings, playSignalTone, saveSoundSettings } from "../src/lib/signal-sound.js";
 
@@ -69,18 +69,16 @@ describe("sound settings", () => {
 });
 
 describe("signal tones", () => {
-  it("plays a distinct frequency per verdict", () => {
-    const ok = fakeAudio();
-    playSignalTone("ok", { muted: false, volume: 1 }, () => ok.ctx);
-    const err = fakeAudio();
-    playSignalTone("error", { muted: false, volume: 1 }, () => err.ctx);
+  it.each([
+    ["ok", 880],
+    ["error", 220],
+    ["duplicate", 440],
+  ] as const)("maps the %s verdict to its pinned %i Hz sound", (tone, expectedHz) => {
+    const audio = fakeAudio();
+    playSignalTone(tone, { muted: false, volume: 1 }, () => audio.ctx);
 
-    expect(ok.osc.start).toHaveBeenCalled();
-    expect(err.osc.start).toHaveBeenCalled();
-    expect(ok.osc.frequency.setValueAtTime).not.toHaveBeenCalledWith(
-      err.osc.frequency.setValueAtTime.mock.calls[0]![0],
-      expect.anything(),
-    );
+    expect(audio.osc.frequency.setValueAtTime).toHaveBeenCalledWith(expectedHz, 0);
+    expect(audio.osc.start).toHaveBeenCalledOnce();
   });
 
   it("stays silent when muted", () => {

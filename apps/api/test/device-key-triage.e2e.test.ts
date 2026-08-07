@@ -11,6 +11,7 @@ import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { hashDeviceToken } from "../src/pickup/device-token";
 import { listenOnLoopback } from "./support/listen-loopback";
+import { createTestStationDevice } from "./support/auth";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -59,8 +60,7 @@ describe.skipIf(!ready)("device key surface triage e2e", () => {
       .send({ organizationId: tenantId })
       .expect(200);
 
-    const enroll = await agent.post("/station-devices").send({ name: "Terminal" }).expect(201);
-    stationKey = enroll.body.apiKey as string;
+    stationKey = (await createTestStationDevice(app!, agent, "Terminal")).apiKey;
 
     const kioskId = randomUUID();
     await db.insert(schema.kiosks).values({ id: kioskId, tenantId, name: "Киоск" });
@@ -76,6 +76,10 @@ describe.skipIf(!ready)("device key surface triage e2e", () => {
 
   it("refuses a station api-key on kiosk management", async () => {
     await request(app!.getHttpServer()).get("/kiosks").set("x-api-key", stationKey).expect(403);
+  });
+
+  it("refuses a station api-key on the unified devices read model", async () => {
+    await request(app!.getHttpServer()).get("/devices").set("x-api-key", stationKey).expect(403);
   });
 
   it("refuses a station api-key on the pickup order flow", async () => {

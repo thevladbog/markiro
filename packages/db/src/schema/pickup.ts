@@ -341,7 +341,7 @@ export const kioskPairingCodes = pgTable(
  *
  * One row per `(source, windowStartedAt)`. `source` is either the caller's
  * resolved address (an IPv6 address normalised to its /64 prefix -- see
- * `normalizePairSource` in the API) or the reserved literal `"*"` for the
+ * `normalizePairSource` in the shared device-pairing API module) or the reserved literal `"*"` for the
  * global backstop bucket that every attempt also counts toward, so it can
  * never grow past the number of distinct sources seen in a window plus one.
  *
@@ -352,8 +352,8 @@ export const kioskPairingCodes = pgTable(
  * ones). A successful redemption then issues a compensating atomic
  * decrement (floored at zero), so the column's steady-state value bounds
  * net failures again rather than capping legitimate high-volume
- * provisioning -- see `PairingService.redeem`/`refundPairAttempt` in the
- * API.
+ * provisioning -- see `PairingService.redeem` and `PairAttemptsService` in
+ * the API.
  */
 export const kioskPairAttempts = pgTable(
   "kiosk_pair_attempts",

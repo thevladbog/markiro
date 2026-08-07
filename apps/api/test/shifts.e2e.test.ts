@@ -4,12 +4,13 @@ import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { schema, type Db } from "@markiro/db";
 import { listenOnLoopback } from "./support/listen-loopback";
+import { createTestStationDevice } from "./support/auth";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -815,6 +816,104 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     expect(byRange.body.items.some((i: { id: string }) => i.id === shift3.body.id)).toBe(false);
   });
 
+  it("defaults a station shift list to its assigned line plus unassigned shifts without restricting explicit tenant filters", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      productGroup: "Beverages",
+      boxCapacity: 12,
+      palletCapacity: 48,
+    });
+    const lineRes = await agent.post("/lines").send({ name: "Station line" }).expect(201);
+    const stationLineId = lineRes.body.id as string;
+    const otherLineRes = await agent.post("/lines").send({ name: "Other line" }).expect(201);
+    const otherLineId = otherLineRes.body.id as string;
+
+    const [assigned, unassigned, otherLine] = await Promise.all([
+      agent
+        .post("/shifts")
+        .send({ productId, mode: "validation", lineId: stationLineId })
+        .expect(201),
+      agent.post("/shifts").send({ productId, mode: "validation" }).expect(201),
+      agent
+        .post("/shifts")
+        .send({ productId, mode: "validation", lineId: otherLineId })
+        .expect(201),
+    ]);
+    const station = await createTestStationDevice(app!, agent, "Shift-list terminal");
+    await db
+      .update(schema.stationDevices)
+      .set({ lineId: stationLineId })
+      .where(
+        and(
+          eq(schema.stationDevices.tenantId, orgId),
+          eq(schema.stationDevices.id, station.deviceId),
+        ),
+      );
+
+    const server = app!.getHttpServer();
+    const stationDefault = await request(server)
+      .get("/shifts")
+      .set("x-api-key", station.apiKey)
+      .expect(200);
+    expect(stationDefault.body.items.map((item: { id: string }) => item.id).sort()).toEqual(
+      [assigned.body.id, unassigned.body.id].sort(),
+    );
+
+    // A supplied line remains a tenant-scoped filter, not a station authorization boundary.
+    const stationExplicit = await request(server)
+      .get("/shifts")
+      .query({ lineId: otherLineId })
+      .set("x-api-key", station.apiKey)
+      .expect(200);
+    expect(stationExplicit.body.items.map((item: { id: string }) => item.id)).toEqual([
+      otherLine.body.id,
+    ]);
+
+    const cabinet = await agent.get("/shifts").expect(200);
+    expect(cabinet.body.items.map((item: { id: string }) => item.id).sort()).toEqual(
+      [assigned.body.id, unassigned.body.id, otherLine.body.id].sort(),
+    );
+  });
+
+  it("keeps a station with no assigned line on the existing tenant-wide shift list", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      productGroup: "Beverages",
+      boxCapacity: 12,
+      palletCapacity: 48,
+    });
+    const lineRes = await agent.post("/lines").send({ name: "First line" }).expect(201);
+    const firstLineId = lineRes.body.id as string;
+    const otherLineRes = await agent.post("/lines").send({ name: "Second line" }).expect(201);
+    const secondLineId = otherLineRes.body.id as string;
+    const [firstLineShift, unassignedShift, secondLineShift] = await Promise.all([
+      agent
+        .post("/shifts")
+        .send({ productId, mode: "validation", lineId: firstLineId })
+        .expect(201),
+      agent.post("/shifts").send({ productId, mode: "validation" }).expect(201),
+      agent
+        .post("/shifts")
+        .send({ productId, mode: "validation", lineId: secondLineId })
+        .expect(201),
+    ]);
+    // The fixture deliberately leaves station_devices.line_id as NULL.
+    const station = await createTestStationDevice(app!, agent, "Unassigned shift-list terminal");
+
+    const result = await request(app!.getHttpServer())
+      .get("/shifts")
+      .set("x-api-key", station.apiKey)
+      .expect(200);
+
+    expect(result.body.items.map((item: { id: string }) => item.id).sort()).toEqual(
+      [firstLineShift.body.id, unassignedShift.body.id, secondLineShift.body.id].sort(),
+    );
+  });
+
   // ---------------------------------------------------------------------
   // Device-key surface (Task 9): lines are cabinet-only; shifts is a mix --
   // the station's own four routes (list, create, open, bundle -- covered by
@@ -829,11 +928,8 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const agent = request.agent(app!.getHttpServer());
     await signUpAndActivate(agent);
 
-    const device = await agent
-      .post("/station-devices")
-      .send({ name: "Line 1 terminal" })
-      .expect(201);
-    const apiKey = (device.body as { apiKey: string }).apiKey;
+    const device = await createTestStationDevice(app!, agent, "Line 1 terminal");
+    const apiKey = device.apiKey;
 
     await request(app!.getHttpServer()).get("/lines").set("x-api-key", apiKey).expect(403);
   });
@@ -857,11 +953,8 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const created = await agent.post("/shifts").send({ productId, mode: "validation" }).expect(201);
     const id = created.body.id as string;
 
-    const device = await agent
-      .post("/station-devices")
-      .send({ name: "Line 1 terminal" })
-      .expect(201);
-    const apiKey = (device.body as { apiKey: string }).apiKey;
+    const device = await createTestStationDevice(app!, agent, "Line 1 terminal");
+    const apiKey = device.apiKey;
     const server = app!.getHttpServer();
 
     // Session-only: not part of the station's four routes.

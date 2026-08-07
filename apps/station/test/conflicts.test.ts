@@ -27,9 +27,10 @@ describe("device conflicts", () => {
   it("records and reads back a conflict", async () => {
     const exec = await migratedExec();
     await recordConflicts(exec, [ROW], "2026-07-28T10:00:09.000Z");
-    const rows = await readConflicts(exec);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ codeHash: "h1", winningTerminalId: "t1" });
+    const page = await readConflicts(exec, 1);
+    expect(page).toMatchObject({ page: 1, pageSize: 2, total: 1 });
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]).toMatchObject({ codeHash: "h1", winningTerminalId: "t1" });
     expect(await conflictCount(exec)).toBe(1);
   });
 
@@ -47,14 +48,14 @@ describe("device conflicts", () => {
       ["h1", "s1", "04600000000017", "AB1", "2026-07-28T10:00:00.000Z"],
     );
     await recordConflicts(exec, [ROW], "2026-07-28T10:00:09.000Z");
-    const [row] = await readConflicts(exec);
+    const [row] = (await readConflicts(exec, 1)).items;
     expect(row).toMatchObject({ gtin14: "04600000000017", serial: "AB1" });
   });
 
   it("still reports a conflict whose code row is gone", async () => {
     const exec = await migratedExec();
     await recordConflicts(exec, [ROW], "2026-07-28T10:00:09.000Z");
-    const [row] = await readConflicts(exec);
+    const [row] = (await readConflicts(exec, 1)).items;
     expect(row).toMatchObject({ codeHash: "h1", gtin14: null, serial: null });
   });
 
@@ -70,7 +71,7 @@ describe("device conflicts", () => {
   it("round-trips winningScannedAt and detectedAt distinctly", async () => {
     const exec = await migratedExec();
     await recordConflicts(exec, [ROW], "2026-07-28T10:00:09.000Z");
-    const [row] = await readConflicts(exec);
+    const [row] = (await readConflicts(exec, 1)).items;
     expect(row).toEqual({
       codeHash: "h1",
       winningTerminalId: "t1",
@@ -88,7 +89,7 @@ describe("device conflicts", () => {
     const exec = await migratedExec();
     await recordConflicts(exec, [{ ...ROW, codeHash: "h1" }], "2026-07-28T10:00:09.000Z");
     await recordConflicts(exec, [{ ...ROW, codeHash: "h2" }], "2026-07-28T10:05:00.000Z");
-    const rows = await readConflicts(exec);
+    const rows = (await readConflicts(exec, 1)).items;
     expect(rows.map((r) => r.codeHash)).toEqual(["h2", "h1"]);
   });
 
@@ -99,7 +100,83 @@ describe("device conflicts", () => {
   it("stores and reads a null winningTerminalId", async () => {
     const exec = await migratedExec();
     await recordConflicts(exec, [{ ...ROW, winningTerminalId: null }], "2026-07-28T10:00:09.000Z");
-    const [row] = await readConflicts(exec);
+    const [row] = (await readConflicts(exec, 1)).items;
     expect(row).toMatchObject({ winningTerminalId: null });
+  });
+
+  it("reads bounded SQL pages with a separate count and exact LIMIT/OFFSET parameters", async () => {
+    const calls: Array<{ sql: string; params: unknown[] }> = [];
+    const exec: SqlExecutor = {
+      async run() {},
+      async all<T>(sql: string, params: unknown[] = []): Promise<T[]> {
+        calls.push({ sql, params });
+        if (sql.startsWith("SELECT COUNT(*)")) return [{ n: 5 }] as T[];
+        return [];
+      },
+    };
+
+    const page = await readConflicts(exec, 2);
+
+    expect(page).toEqual({ items: [], page: 2, pageSize: 2, total: 5 });
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toEqual({
+      sql: "SELECT COUNT(*) AS n FROM conflicts_mirror",
+      params: [],
+    });
+    expect(calls[1]?.sql).toContain("LEFT JOIN codes_mirror m ON m.code_hash = c.code_hash");
+    expect(calls[1]?.sql).toContain(
+      "ORDER BY c.detected_at DESC, c.code_hash ASC\n      LIMIT ? OFFSET ?",
+    );
+    expect(calls[1]?.params).toEqual([2, 2]);
+  });
+
+  it("returns stable newest-first pages and breaks equal detected times by code hash", async () => {
+    const exec = await migratedExec();
+    await recordConflicts(exec, [{ ...ROW, codeHash: "h2" }], "2026-07-28T10:05:00.000Z");
+    await recordConflicts(exec, [{ ...ROW, codeHash: "h1" }], "2026-07-28T10:05:00.000Z");
+    await recordConflicts(exec, [{ ...ROW, codeHash: "h3" }], "2026-07-28T10:10:00.000Z");
+    await recordConflicts(exec, [{ ...ROW, codeHash: "h0" }], "2026-07-28T09:00:00.000Z");
+
+    expect(await readConflicts(exec, 1)).toMatchObject({
+      page: 1,
+      pageSize: 2,
+      total: 4,
+      items: [{ codeHash: "h3" }, { codeHash: "h1" }],
+    });
+    expect(await readConflicts(exec, 2)).toMatchObject({
+      page: 2,
+      pageSize: 2,
+      total: 4,
+      items: [{ codeHash: "h2" }, { codeHash: "h0" }],
+    });
+  });
+
+  it("clamps invalid and out-of-range pages against the current count", async () => {
+    const exec = await migratedExec();
+    await recordConflicts(exec, [{ ...ROW, codeHash: "h1" }], "2026-07-28T10:00:00.000Z");
+    await recordConflicts(exec, [{ ...ROW, codeHash: "h2" }], "2026-07-28T10:01:00.000Z");
+    await recordConflicts(exec, [{ ...ROW, codeHash: "h3" }], "2026-07-28T10:02:00.000Z");
+
+    expect(await readConflicts(exec, Number.NaN)).toMatchObject({ page: 1, total: 3 });
+    expect(await readConflicts(exec, -4)).toMatchObject({ page: 1, total: 3 });
+    expect(await readConflicts(exec, 99)).toMatchObject({
+      page: 2,
+      total: 3,
+      items: [{ codeHash: "h1" }],
+    });
+  });
+
+  it("keeps malformed stored timestamps intact for the screen fallback", async () => {
+    const exec = await migratedExec();
+    await exec.run(
+      `INSERT INTO conflicts_mirror (code_hash, winning_terminal_id, winning_scanned_at, detected_at)
+       VALUES (?,?,?,?)`,
+      ["h1", "t1", "not-an-iso-time", "also-not-an-iso-time"],
+    );
+
+    expect((await readConflicts(exec, 1)).items[0]).toMatchObject({
+      winningScannedAt: "not-an-iso-time",
+      detectedAt: "also-not-an-iso-time",
+    });
   });
 });

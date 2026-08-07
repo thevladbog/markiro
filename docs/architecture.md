@@ -66,6 +66,9 @@ registry, `save-exact`, `engine-strict`, `minimum-release-age=10080`
   Tauri scaffold, Rust config/lockdown/updater skeletons, SQLite mirror, device
   enrollment (api-key), shift bundle download, and offline operator auth.
   The scan pipeline, hardware module, and signal behavior land in 05b.
+- A station is pre-created in the cabinet and pairs by a short-lived one-time
+  code. Re-pair rotates its credential on the same durable device record; the
+  paired line is the default floor filter, not an authorization boundary.
 
 ## 3. Offline & sync
 
@@ -78,6 +81,12 @@ registry, `save-exact`, `engine-strict`, `minimum-release-age=10080`
   manager (design screen 8), the line never stops.
 - Operator sign-in works offline: PIN hashes / badge tokens sync to the
   station at enrollment.
+- Credential rejection seals the current generation before recovery. Local
+  outbox, journal, boxes, exceptions, conflicts, SSCC ranges, stable
+  machine/device IDs, idempotency keys and sync ceilings remain intact.
+  Cleanup is limited to the rejected credential and reproducible
+  operator/shift/product caches; same-device re-pair reseeds those caches and
+  resumes the unchanged queue.
 
 ## 4. Data & retention (hot / warm / cold)
 
@@ -121,9 +130,16 @@ registry, `save-exact`, `engine-strict`, `minimum-release-age=10080`
   Plugins: `organization` (tenancy: orgs, invites, admin/manager roles),
   `api-key` (public API), email+password with Argon2, httpOnly sessions;
   2FA available later.
-- **Station: custom** (offline-first, outside Better Auth): device enrolled
-  with an org token; operators authenticate locally by numeric PIN or badge
-  barcode against synced hashes.
+- **Station device: Better Auth API key.** A pre-created durable station
+  redeems a single-use pairing code for an organization-owned key from Better
+  Auth's dedicated `station` API-key configuration. Operators authenticate
+  locally by numeric PIN or badge barcode against synced hashes.
+- **Kiosk device: separate token.** Kiosk pairing generates its own random
+  device token and stores only that token's hash; it is not a Better Auth API
+  key. Station and kiosk share pairing-code generation, expiry,
+  single-consumption, attempt-lockout, and source/global rate-limit policy —
+  not credential generation. Their credentials retain separate headers,
+  guards, persistence, and device tables.
 
 ### Cabinet authorization
 
@@ -185,6 +201,12 @@ and the [cabinet RBAC rollout runbook](runbooks/cabinet-rbac-rollout.md).
   safelisted value, so it is preflighted too, and pairing itself fails
   without this variable. Dev never sees any of it —
   `apps/kiosk/vite.config.ts` proxies `/api` same-origin.
+- Station webviews use a separate exact `STATION_ORIGIN`, trusted only for
+  `/station` and `/station/*`; it is never a Better Auth trusted origin and
+  never broadens kiosk or cabinet routes. Fresh station pairing uses the
+  canonical HTTP(S) API base embedded as `VITE_STATION_API_URL`, not the
+  webview's own origin. A paired station retains its server URL in durable
+  config for same-device recovery.
 - CI: GitHub Actions — lint/test/build, DB migrations, Docker images,
   Tauri Windows installer build + signing, release channels for the updater.
 - Future on-prem = the same compose bundle.
@@ -193,9 +215,9 @@ and the [cabinet RBAC rollout runbook](runbooks/cabinet-rbac-rollout.md).
   `req.ip` resolves to Caddy's own address for every request. IP-keyed rate
   limiting belongs in Caddy itself as the primary layer (it sees the real
   client address unconditionally and can shed load before it reaches the
-  app); the API's own DB-backed limiter (currently just kiosk pairing) is a
-  backstop for when that layer is missing or misconfigured, not a
-  replacement for it.
+  app); the API's own DB-backed limiter for station and kiosk pairing is a
+  backstop for when that layer is missing or misconfigured, not a replacement
+  for it.
 - **Deployment checklist item:** the API container must run with both
   `NODE_ENV=production` **and** `TRUST_PROXY_HOPS` set to the number of
   reverse proxies that append to `X-Forwarded-For` (`1` behind the single

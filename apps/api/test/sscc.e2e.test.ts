@@ -12,7 +12,7 @@ import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { SsccCapacityExhaustedException, SsccService } from "../src/modules/sscc/sscc.service";
 import { listenOnLoopback } from "./support/listen-loopback";
-import { signUpAndActivate } from "./support/auth";
+import { createTestStationDevice, signUpAndActivate } from "./support/auth";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -114,8 +114,7 @@ describe.skipIf(!ready)("sscc e2e", () => {
 
   /** Registers a real station_devices row -- sscc_blocks.device_id carries a real FK to it. */
   async function registerDevice(name: string): Promise<string> {
-    const device = await agent.post("/station-devices").send({ name }).expect(201);
-    return (device.body as { deviceId: string }).deviceId;
+    return (await createTestStationDevice(app!, agent, name)).deviceId;
   }
 
   /** Creates a counterparty + shift pointing at it as the sscc issuer, returning the shift id. */
@@ -301,11 +300,8 @@ describe.skipIf(!ready)("sscc e2e", () => {
       // clause, not just the range match, is what keeps the two apart.
       const otherAgent = request.agent(app!.getHttpServer());
       const otherTenantId = await signUpAndActivate(otherAgent);
-      const otherDeviceRes = await otherAgent
-        .post("/station-devices")
-        .send({ name: "Other tenant device" })
-        .expect(201);
-      const otherDeviceId = (otherDeviceRes.body as { deviceId: string }).deviceId;
+      const otherDeviceId = (await createTestStationDevice(app!, otherAgent, "Other tenant device"))
+        .deviceId;
       await svc.allocate(otherTenantId, prefix, 0, otherDeviceId, 20);
 
       const sscc = buildSscc(0, prefix, block.fromSerial + 1);
@@ -586,12 +582,9 @@ describe.skipIf(!ready)("sscc e2e", () => {
       const svc = app!.get(SsccService);
       const prefix = "900000001";
 
-      const device = await agent
-        .post("/station-devices")
-        .send({ name: "Disassemble-lockdown device" })
-        .expect(201);
-      const deviceId = (device.body as { deviceId: string }).deviceId;
-      const apiKey = (device.body as { apiKey: string }).apiKey;
+      const device = await createTestStationDevice(app!, agent, "Disassemble-lockdown device");
+      const deviceId = device.deviceId;
+      const apiKey = device.apiKey;
 
       // A dedicated, OPENED shift -- this describe's shared `shiftWithIssuerId`/
       // `plainShiftId` fixtures are never opened, and posting scans against a

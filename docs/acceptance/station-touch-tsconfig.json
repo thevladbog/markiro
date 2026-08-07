@@ -1,0 +1,15 @@
+{
+  "extends": "../../apps/station/tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": "../../apps/station",
+    "ignoreDeprecations": "6.0",
+    "types": [
+      "../../apps/station/node_modules/vite/client",
+      "../../apps/station/node_modules/vitest/globals"
+    ],
+    "paths": {
+      "@markiro/ui": ["../../packages/ui/dist/index.d.ts"],
+      "@markiro/db/station-sqlite": ["../../packages/db/dist/station-sqlite.d.ts"]
+    }
+  }
+}

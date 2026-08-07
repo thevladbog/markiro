@@ -12,7 +12,7 @@ import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { SILENT_AFTER_HOURS_MAX } from "../src/modules/integrations/dto";
 import { JOURNAL_EVENTS_LIMIT } from "../src/modules/integrations/integrations.service";
 import { listenOnLoopback } from "./support/listen-loopback";
-import { signUpAndActivate } from "./support/auth";
+import { createTestStationDevice, signUpAndActivate } from "./support/auth";
 
 describe("integrations (cabinet)", () => {
   let app: INestApplication | undefined;
@@ -353,8 +353,7 @@ describe("integrations (cabinet)", () => {
   // проверкой не покрыт. Заводим реальное устройство и ждём 403, как в
   // apps/api/test/pickup-rejections.e2e.test.ts:507-519.
   it("не пускает ключ станции в кабинетный маршрут", async () => {
-    const enroll = await agent.post("/station-devices").send({ name: "Terminal" }).expect(201);
-    const stationKey = enroll.body.apiKey as string;
+    const stationKey = (await createTestStationDevice(app!, agent, "Terminal")).apiKey;
 
     await request(app!.getHttpServer())
       .get("/integrations")

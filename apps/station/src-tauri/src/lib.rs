@@ -33,6 +33,7 @@ pub fn run() {
             commands::hello,
             commands::read_config,
             commands::write_config,
+            commands::clear_credential,
             commands::enter_lockdown,
             commands::exit_lockdown,
             commands::set_update_endpoint,

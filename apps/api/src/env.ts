@@ -30,6 +30,28 @@ const browserOriginSchema = z.url().transform((value, ctx) => {
   return url.origin;
 });
 
+/**
+ * A station webview origin. In addition to a canonical HTTP(S) origin, Tauri
+ * desktop builds may identify their non-opaque production webview as exactly
+ * `tauri://localhost`. Do not accept `null`, `file:`, or arbitrary custom
+ * schemes: they represent opaque origins or widen CORS beyond an identifiable
+ * station webview.
+ */
+const stationOriginSchema = z.url().transform((value, ctx) => {
+  if (value === "tauri://localhost") return value;
+
+  const url = new URL(value);
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    ctx.addIssue({ code: "custom", message: "must be an http(s) or tauri://localhost origin" });
+    return z.NEVER;
+  }
+  if (url.username || url.password) {
+    ctx.addIssue({ code: "custom", message: "must not include userinfo" });
+    return z.NEVER;
+  }
+  return url.origin;
+});
+
 const explicitBooleanSchema = z.enum(["true", "false"]).transform((value) => value === "true");
 
 const mailEncryptionKeySchema = z
@@ -97,6 +119,12 @@ const EnvSchema = z
     // deployment the kiosk's own pairing screen advertises (a server-address
     // field) that needs this set.
     KIOSK_ORIGIN: browserOriginSchema.optional(),
+    // Exact origin used by the Tauri station shell. This is intentionally
+    // optional for existing admin-only deployments; unset means that only the
+    // admin origin may reach `/station/*`. Configure an exact HTTP(S) origin
+    // for a deployed webview, or `tauri://localhost` for Tauri's supported
+    // non-opaque custom-protocol origin. Never use `null`.
+    STATION_ORIGIN: stationOriginSchema.optional(),
     PORT: z.coerce.number().int().min(1).max(65535).default(3000),
     // Keys `hashPairingCode` (apps/api/src/pickup/device-token.ts), the HMAC
     // that hashes the 8-digit kiosk pairing code before it is stored/looked up.
@@ -182,6 +210,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     ...storageDefaults,
     ...normalizedSource,
     KIOSK_ORIGIN: normalizedSource.KIOSK_ORIGIN || undefined,
+    STATION_ORIGIN: normalizedSource.STATION_ORIGIN || undefined,
   });
 }
 
@@ -221,4 +250,13 @@ export function kioskAllowedOrigins(env: Env): string[] {
   // Deduplicated: a single-host deployment that serves admin and kiosk from
   // the same origin sets both variables to the same value.
   return [...new Set([env.ADMIN_ORIGIN, ...(env.KIOSK_ORIGIN ? [env.KIOSK_ORIGIN] : [])])];
+}
+
+/**
+ * Origins allowed on the device-facing `/station/*` routes. Like the kiosk,
+ * a station has a device credential rather than a browser session, so its
+ * origin must not gain access to the session-guarded or kiosk surfaces.
+ */
+export function stationAllowedOrigins(env: Env): string[] {
+  return [...new Set([env.ADMIN_ORIGIN, ...(env.STATION_ORIGIN ? [env.STATION_ORIGIN] : [])])];
 }
