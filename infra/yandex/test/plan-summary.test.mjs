@@ -33,6 +33,22 @@ test("plan summary emits only action classes and aggregate resource counts", () 
   });
 });
 
+test("plan summary accepts a state-only remove without reporting resource destruction", () => {
+  const result = summarize([
+    { type: "planned_change", action: "remove" },
+    {
+      type: "change_summary",
+      changes: { add: 0, change: 0, remove: 0, operation: "plan" },
+    },
+  ]);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), {
+    action_classes: { remove: 1 },
+    resource_counts: { add: 0, change: 0, remove: 0 },
+  });
+});
+
 test("plan summary rejects full changes, outputs, sensitive fields, and malformed summaries", () => {
   const unsafeInputs = [
     [

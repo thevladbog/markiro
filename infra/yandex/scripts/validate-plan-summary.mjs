@@ -10,6 +10,7 @@ const allowedActions = new Set([
   "move",
   "noop",
   "read",
+  "remove",
   "replace",
   "update",
 ]);
