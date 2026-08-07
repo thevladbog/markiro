@@ -14,7 +14,7 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:17-alpine
@@ -45,7 +45,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm format:check
       - run: pnpm --filter @markiro/db db:migrate
-      - run: pnpm turbo lint typecheck test build
+      - run: pnpm turbo lint typecheck test build --concurrency=1 --force
 
   tenant-team-infrastructure:
     runs-on: ubuntu-latest

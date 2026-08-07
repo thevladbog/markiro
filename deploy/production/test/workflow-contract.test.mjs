@@ -418,8 +418,16 @@ function assertNoForbiddenWorkflowText(sourceText, label) {
 
 function assertCiWorkflow(ciSource) {
   const workflow = parseWorkflow(ciSource, "CI workflow");
+  const verify = workflow.jobs?.verify;
   const job = workflow.jobs?.["production-bundle"];
 
+  assert.ok(verify, "missing verify job");
+  assert.equal(verify["timeout-minutes"], 20, "unexpected verify timeout");
+  assert.equal(
+    verify.steps?.find((step) => step.run?.startsWith("pnpm turbo lint typecheck test build"))?.run,
+    "pnpm turbo lint typecheck test build --concurrency=1 --force",
+    "unexpected verify Turbo gate",
+  );
   assert.ok(job, "missing production-bundle job");
   assert.deepEqual(
     Object.keys(job).sort(),
