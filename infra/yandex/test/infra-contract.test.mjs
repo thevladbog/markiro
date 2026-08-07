@@ -902,20 +902,32 @@ function assertPrivateNetworkAndCompute({
   const app = terraformResourceBlock(compute, "yandex_compute_instance", "app");
   const appResources = terraformNestedBlocks(app, "resources");
   assert.equal(appResources.length, 1, "app VM must define one exact resource profile");
-  assert.match(
-    appResources[0],
-    /cores\s*=\s*2[\s\S]*?memory\s*=\s*4[\s\S]*?core_fraction\s*=\s*100/,
-    "app VM must use the approved 2 vCPU / 4 GiB MVP profile",
-  );
+  for (const [attribute, value] of [
+    ["cores", 2],
+    ["memory", 4],
+    ["core_fraction", 100],
+  ]) {
+    assert.match(
+      appResources[0],
+      new RegExp(`^\\s*${attribute}\\s*=\\s*${value}\\s*$`, "m"),
+      "app VM must use the approved 2 vCPU / 4 GiB MVP profile",
+    );
+  }
 
   const runner = terraformResourceBlock(compute, "yandex_compute_instance", "runner");
   const runnerResources = terraformNestedBlocks(runner, "resources");
   assert.equal(runnerResources.length, 1, "runner VM must define one exact resource profile");
-  assert.match(
-    runnerResources[0],
-    /cores\s*=\s*2[\s\S]*?memory\s*=\s*4[\s\S]*?core_fraction\s*=\s*100/,
-    "deployment runner must retain its approved 2 vCPU / 4 GiB profile",
-  );
+  for (const [attribute, value] of [
+    ["cores", 2],
+    ["memory", 4],
+    ["core_fraction", 100],
+  ]) {
+    assert.match(
+      runnerResources[0],
+      new RegExp(`^\\s*${attribute}\\s*=\\s*${value}\\s*$`, "m"),
+      "deployment runner must retain its approved 2 vCPU / 4 GiB profile",
+    );
+  }
   assert.doesNotMatch(compute, /nat\s*=\s*true/);
   assert.match(
     compute,
@@ -1067,12 +1079,24 @@ function assertProtectedIngress({
     "yandex_sws_advanced_rate_limiter_profile",
     "markiro",
   );
-  for (const ruleName of ["global-request-rate", "per-ip-request-rate"]) {
-    assert.match(rateLimiter, new RegExp(`name\\s*=\\s*"${ruleName}"`));
-  }
-  assert.match(rateLimiter, /limit\s*=\s*var\.global_rate_limit/);
-  assert.match(rateLimiter, /limit\s*=\s*var\.per_ip_rate_limit/);
-  assert.match(rateLimiter, /simple_characteristic\s*\{[\s\S]*?type\s*=\s*"IP"/);
+  const rateLimitRules = terraformNestedBlocks(rateLimiter, "advanced_rate_limiter_rule");
+  assert.equal(rateLimitRules.length, 2, "ARL must define exactly global and per-IP rules");
+  const globalRule = rateLimitRules.find((rule) => /name\s*=\s*"global-request-rate"/.test(rule));
+  assert.ok(globalRule, "global ARL rule is required");
+  assert.match(
+    globalRule,
+    /static_quota\s*\{[\s\S]*?limit\s*=\s*var\.global_rate_limit/,
+    "global ARL rule must use the global static quota",
+  );
+  assert.doesNotMatch(globalRule, /dynamic_quota|characteristic/);
+  const perIpRule = rateLimitRules.find((rule) => /name\s*=\s*"per-ip-request-rate"/.test(rule));
+  assert.ok(perIpRule, "per-IP ARL rule is required");
+  assert.match(
+    perIpRule,
+    /dynamic_quota\s*\{[\s\S]*?limit\s*=\s*var\.per_ip_rate_limit[\s\S]*?simple_characteristic\s*\{[\s\S]*?type\s*=\s*"IP"/,
+    "per-IP ARL rule must use the IP-scoped dynamic quota",
+  );
+  assert.doesNotMatch(perIpRule, /static_quota/);
 
   const securityProfile = terraformResourceBlock(ingress, "yandex_sws_security_profile", "markiro");
   assert.match(securityProfile, /default_action\s*=\s*"ALLOW"/);
@@ -1080,6 +1104,10 @@ function assertProtectedIngress({
     securityProfile,
     /advanced_rate_limiter_profile_id\s*=\s*yandex_sws_advanced_rate_limiter_profile\.markiro\.id/,
   );
+  const logOptions = terraformNestedBlocks(securityProfile, "log_options");
+  assert.equal(logOptions.length, 1, "SWS must define one logging boundary");
+  assert.match(logOptions[0], /enable\s*=\s*true/, "SWS logging must stay enabled");
+  assert.match(logOptions[0], /log_group_id\s*=\s*var\.security_log_group_id/);
   assert.doesNotMatch(
     allIngress,
     /resource\s+"yandex_sws_waf_profile"/,
@@ -2755,6 +2783,39 @@ test("production ingress contract rejects bypasses, computed certificate keys, f
   );
   assert.throws(() => assertProtectedIngress(reintroducedWafRule), /must delegate only to ARL/);
 
+  const disabledSwsLogging = await protectedIngressSources();
+  disabledSwsLogging.ingress = replaceTerraformResource(
+    disabledSwsLogging.ingress,
+    "yandex_sws_security_profile",
+    "markiro",
+    (block) => block.replace(/enable\s*=\s*true/, "enable = false"),
+  );
+  assert.throws(() => assertProtectedIngress(disabledSwsLogging), /SWS logging must stay enabled/);
+
+  const globalRuleWithoutStaticScope = await protectedIngressSources();
+  globalRuleWithoutStaticScope.ingress = replaceTerraformResource(
+    globalRuleWithoutStaticScope.ingress,
+    "yandex_sws_advanced_rate_limiter_profile",
+    "markiro",
+    (block) => block.replace("static_quota {", "dynamic_quota {"),
+  );
+  assert.throws(
+    () => assertProtectedIngress(globalRuleWithoutStaticScope),
+    /global ARL rule must use the global static quota/,
+  );
+
+  const perIpRuleWithoutDynamicScope = await protectedIngressSources();
+  perIpRuleWithoutDynamicScope.ingress = replaceTerraformResource(
+    perIpRuleWithoutDynamicScope.ingress,
+    "yandex_sws_advanced_rate_limiter_profile",
+    "markiro",
+    (block) => block.replace("dynamic_quota {", "static_quota {"),
+  );
+  assert.throws(
+    () => assertProtectedIngress(perIpRuleWithoutDynamicScope),
+    /per-IP ARL rule must use the IP-scoped dynamic quota/,
+  );
+
   const apiBypass = await protectedIngressSources();
   apiBypass.ingress = replaceTerraformResource(
     apiBypass.ingress,
@@ -3018,7 +3079,19 @@ test("production private-compute contract rejects public NAT, CIDR SSH, public a
     oversizedApp.compute,
     "yandex_compute_instance",
     "app",
-    (block) => block.replace(/cores\s*=\s*2/, "cores = 4"),
+    (block) => block.replace(/cores\s*=\s*2/, "cores = 20"),
+  );
+
+  const oversizedRunner = await privateNetworkAndComputeSources();
+  oversizedRunner.compute = replaceTerraformResource(
+    oversizedRunner.compute,
+    "yandex_compute_instance",
+    "runner",
+    (block) => block.replace(/cores\s*=\s*2/, "cores = 20"),
+  );
+  assert.throws(
+    () => assertPrivateNetworkAndCompute(oversizedRunner),
+    /deployment runner must retain its approved 2 vCPU \/ 4 GiB profile/,
   );
   assert.throws(
     () => assertPrivateNetworkAndCompute(oversizedApp),
@@ -3129,6 +3202,15 @@ test("production private-compute contract rejects public NAT, CIDR SSH, public a
       block.replace(/metadata\s*=\s*\{/, 'metadata = {\n    runtime_secret = "unsafe-value"'),
   );
   assert.throws(() => assertPrivateNetworkAndCompute(embeddedMetadataCredential));
+});
+
+test("production compute resource profiles allow exact attributes in any order", async () => {
+  const reorderedProfiles = await privateNetworkAndComputeSources();
+  reorderedProfiles.compute = reorderedProfiles.compute.replaceAll(
+    "    cores         = 2\n    memory        = 4\n    core_fraction = 100",
+    "    memory        = 4\n    core_fraction = 100\n    cores         = 2",
+  );
+  assert.doesNotThrow(() => assertPrivateNetworkAndCompute(reorderedProfiles));
 });
 
 function assertRuntimeNodeProvisioning(cloudInit) {

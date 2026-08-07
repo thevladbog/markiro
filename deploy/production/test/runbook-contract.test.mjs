@@ -426,7 +426,10 @@ function assertRunbook(source) {
     "observation window must retain previous release evidence",
   );
   invariant(
-    /provider ARL/i.test(goLive) &&
+    /case\s+"\$RATE_LIMIT_CONTROL"\s+in\s+provider-arl\|reviewed-custom-caddy\)\s*;;/m.test(
+      goLive,
+    ) &&
+      !/provider-waf/.test(goLive) &&
       /per-source/i.test(goLive) &&
       /global\s+anonymous-route/i.test(goLive),
     "provider ARL rate-limit gate is incomplete",
@@ -718,6 +721,14 @@ test("the contract rejects each portability, record-safety, linkage, and command
     'docker compose --project-name markiro-production --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml run --rm migrate';
   const api =
     'docker compose --project-name markiro-production --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml up -d --no-deps api';
+
+  rejectsMutation(
+    source,
+    "legacy provider WAF selector",
+    "provider-arl|reviewed-custom-caddy",
+    "provider-waf|reviewed-custom-caddy",
+    "provider ARL rate-limit gate is incomplete",
+  );
 
   const reorderedDns = source
     .replaceAll("MARKIRO_PUBLIC_DNS_RESOLVERS", "PUBLIC_DNS_REORDERED")

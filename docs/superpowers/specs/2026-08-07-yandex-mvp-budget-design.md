@@ -81,7 +81,7 @@ WAF must be reconsidered before any of these events:
 
 - onboarding a second external customer;
 - enabling public self-registration or other anonymous write-heavy flows;
-- a customer contract or security review requires managed WAF controls;
+- a customer contract or security review requires WAF protection;
 - edge or application telemetry shows probing, exploit attempts, or abuse that
   rate limits do not adequately contain.
 
@@ -144,8 +144,11 @@ Implementation is accepted when:
 
 - focused Terraform contract tests fail on the old configuration and pass on the
   MVP configuration;
-- the full Yandex infrastructure contract suite passes;
-- production bundle and documentation contracts affected by the wording pass;
+- every contract suite available in the verification environment is executed
+  and passes with zero failures;
+- a contract suite is skipped only when its required pinned Terraform provider
+  or code access is unavailable, and the skipped validation and reason are
+  reported separately rather than presented as a pass;
 - `terraform fmt -check` and `terraform validate` pass where provider access and
   initialization are available;
 - `git diff --check` and repository formatting checks pass;

@@ -42,20 +42,32 @@ In `assertPrivateNetworkAndCompute()`, after the existing private-instance loop,
 const app = terraformResourceBlock(compute, "yandex_compute_instance", "app");
 const appResources = terraformNestedBlocks(app, "resources");
 assert.equal(appResources.length, 1, "app VM must define one exact resource profile");
-assert.match(
-  appResources[0],
-  /cores\s*=\s*2[\s\S]*?memory\s*=\s*4[\s\S]*?core_fraction\s*=\s*100/,
-  "app VM must use the approved 2 vCPU / 4 GiB MVP profile",
-);
+for (const [attribute, value] of [
+  ["cores", 2],
+  ["memory", 4],
+  ["core_fraction", 100],
+]) {
+  assert.match(
+    appResources[0],
+    new RegExp(`^\\s*${attribute}\\s*=\\s*${value}\\s*$`, "m"),
+    "app VM must use the approved 2 vCPU / 4 GiB MVP profile",
+  );
+}
 
 const runner = terraformResourceBlock(compute, "yandex_compute_instance", "runner");
 const runnerResources = terraformNestedBlocks(runner, "resources");
 assert.equal(runnerResources.length, 1, "runner VM must define one exact resource profile");
-assert.match(
-  runnerResources[0],
-  /cores\s*=\s*2[\s\S]*?memory\s*=\s*4[\s\S]*?core_fraction\s*=\s*100/,
-  "deployment runner must retain its approved 2 vCPU / 4 GiB profile",
-);
+for (const [attribute, value] of [
+  ["cores", 2],
+  ["memory", 4],
+  ["core_fraction", 100],
+]) {
+  assert.match(
+    runnerResources[0],
+    new RegExp(`^\\s*${attribute}\\s*=\\s*${value}\\s*$`, "m"),
+    "deployment runner must retain its approved 2 vCPU / 4 GiB profile",
+  );
+}
 ```
 
 In `assertProtectedManagedData()`, after the PostgreSQL version assertion, add:
@@ -172,6 +184,29 @@ assert.doesNotMatch(
 );
 const rules = terraformNestedBlocks(securityProfile, "security_rule");
 assert.equal(rules.length, 0, "the MVP SWS profile must delegate only to ARL");
+const logOptions = terraformNestedBlocks(securityProfile, "log_options");
+assert.equal(logOptions.length, 1, "SWS must define one logging boundary");
+assert.match(logOptions[0], /enable\s*=\s*true/, "SWS logging must stay enabled");
+assert.match(logOptions[0], /log_group_id\s*=\s*var\.security_log_group_id/);
+
+const rateLimitRules = terraformNestedBlocks(rateLimiter, "advanced_rate_limiter_rule");
+assert.equal(rateLimitRules.length, 2, "ARL must define exactly global and per-IP rules");
+const globalRule = rateLimitRules.find((rule) => /name\s*=\s*"global-request-rate"/.test(rule));
+assert.ok(globalRule, "global ARL rule is required");
+assert.match(
+  globalRule,
+  /static_quota\s*\{[\s\S]*?limit\s*=\s*var\.global_rate_limit/,
+  "global ARL rule must use the global static quota",
+);
+assert.doesNotMatch(globalRule, /dynamic_quota|characteristic/);
+const perIpRule = rateLimitRules.find((rule) => /name\s*=\s*"per-ip-request-rate"/.test(rule));
+assert.ok(perIpRule, "per-IP ARL rule is required");
+assert.match(
+  perIpRule,
+  /dynamic_quota\s*\{[\s\S]*?limit\s*=\s*var\.per_ip_rate_limit[\s\S]*?simple_characteristic\s*\{[\s\S]*?type\s*=\s*"IP"/,
+  "per-IP ARL rule must use the IP-scoped dynamic quota",
+);
+assert.doesNotMatch(perIpRule, /static_quota/);
 assert.doesNotMatch(securityProfile, /\bwaf\s*\{/);
 assert.doesNotMatch(securityProfile, /smart_protection\s*\{/);
 assert.doesNotMatch(securityProfile, /analyze_request_body|size_limit/i);
@@ -472,7 +507,10 @@ pnpm test:yandex-runbooks:contract
 pnpm test:production-bundle:contract
 ```
 
-Expected: all suites PASS with no skipped tests.
+Expected: every executed suite PASS with zero failures. Skip a suite only when
+its required pinned Terraform provider or code access is unavailable; record the
+skipped suite and reason separately, never as a pass. Execute and require PASS
+from every other suite available in the verification environment.
 
 - [ ] **Step 3: Run repository hygiene checks**
 
