@@ -9,10 +9,12 @@ terraform {
 
 locals {
   github_owner                  = split("/", var.github_repository)[0]
+  github_repository_name        = split("/", var.github_repository)[1]
+  github_repository_subject     = "${local.github_owner}@${var.github_repository_owner_id}/${local.github_repository_name}@${var.github_repository_id}"
   github_audience               = "https://github.com/${local.github_owner}"
-  github_controller_subject     = "repo:${var.github_repository}:environment:${var.github_controller_environment}"
-  github_cleanup_subject        = "repo:${var.github_repository}:environment:${var.github_cleanup_environment}"
-  github_infrastructure_subject = "repo:${var.github_repository}:environment:${var.github_infrastructure_environment}"
+  github_controller_subject     = "repo:${local.github_repository_subject}:environment:${var.github_controller_environment}"
+  github_cleanup_subject        = "repo:${local.github_repository_subject}:environment:${var.github_cleanup_environment}"
+  github_infrastructure_subject = "repo:${local.github_repository_subject}:environment:${var.github_infrastructure_environment}"
 }
 
 resource "yandex_iam_service_account" "terraform" {

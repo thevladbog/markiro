@@ -195,7 +195,9 @@ subjects on the shared federation:
   attests the completed cluster apply, exact owner creation, and runtime
   Lockbox write before the database plan is created.
 
-Configure `github_controller_environment = "production-controller"`,
+Configure `github_repository_owner_id = "47273232"`,
+`github_repository_id = "1308139775"`,
+`github_controller_environment = "production-controller"`,
 `github_cleanup_environment = "production-cleanup"`, and
 `github_infrastructure_environment = "production-infrastructure"` when
 bootstrapping. In GitHub, protect the `production-infrastructure`
@@ -215,11 +217,14 @@ Protect `production-controller`, `production-deploy`, and
 `production-cleanup` independently with main-branch deployment restrictions.
 Use distinct required-reviewer policies for controller and cleanup so approval
 of one privileged subject cannot authorize the other. The exact external
-subjects are `repo:thevladbog/markiro:environment:production-controller`,
-`repo:thevladbog/markiro:environment:production-deploy`, and
-`repo:thevladbog/markiro:environment:production-cleanup`; only the first and third
-receive deployment-controller credentials. Neither may exchange for the
-Terraform service account.
+subjects include GitHub's immutable owner and repository IDs:
+`repo:thevladbog@47273232/markiro@1308139775:environment:production-controller`,
+`repo:thevladbog@47273232/markiro@1308139775:environment:production-deploy`, and
+`repo:thevladbog@47273232/markiro@1308139775:environment:production-cleanup`;
+only the first and third receive deployment-controller credentials. Neither
+may exchange for the Terraform service account. The infrastructure credential
+uses the same immutable repository prefix with the
+`production-infrastructure` environment.
 
 The infrastructure environment supplies repository/environment variables, not
 long-lived secrets. Required identity and state variables are

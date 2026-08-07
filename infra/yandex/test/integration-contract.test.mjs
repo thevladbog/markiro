@@ -90,17 +90,23 @@ function assertIntegratedGraph(sources) {
   }
   assert.match(iamVariables, /var\.github_controller_environment\s*==\s*"production-controller"/);
   assert.match(iamVariables, /var\.github_cleanup_environment\s*==\s*"production-cleanup"/);
+  assert.match(iamVariables, /var\.github_repository_owner_id\s*==\s*"47273232"/);
+  assert.match(iamVariables, /var\.github_repository_id\s*==\s*"1308139775"/);
   assert.match(
     iamVariables,
     /var\.github_infrastructure_environment\s*==\s*"production-infrastructure"/,
   );
   assert.match(
     iam,
-    /github_controller_subject\s*=\s*"repo:\$\{var\.github_repository\}:environment:\$\{var\.github_controller_environment\}"/,
+    /github_controller_subject\s*=\s*"repo:\$\{local\.github_repository_subject\}:environment:\$\{var\.github_controller_environment\}"/,
   );
   assert.match(
     iam,
-    /github_cleanup_subject\s*=\s*"repo:\$\{var\.github_repository\}:environment:\$\{var\.github_cleanup_environment\}"/,
+    /github_cleanup_subject\s*=\s*"repo:\$\{local\.github_repository_subject\}:environment:\$\{var\.github_cleanup_environment\}"/,
+  );
+  assert.match(
+    iam,
+    /github_repository_subject\s*=\s*"\$\{local\.github_owner\}@\$\{var\.github_repository_owner_id\}\/\$\{local\.github_repository_name\}@\$\{var\.github_repository_id\}"/,
   );
   assert.doesNotMatch(
     iam,

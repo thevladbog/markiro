@@ -21,6 +21,28 @@ variable "github_repository" {
   }
 }
 
+variable "github_repository_owner_id" {
+  description = "Immutable GitHub repository owner ID allowed by the workload credential."
+  type        = string
+  nullable    = false
+
+  validation {
+    condition     = var.github_repository_owner_id == "47273232"
+    error_message = "github_repository_owner_id must be exactly 47273232."
+  }
+}
+
+variable "github_repository_id" {
+  description = "Immutable GitHub repository ID allowed by the workload credential."
+  type        = string
+  nullable    = false
+
+  validation {
+    condition     = var.github_repository_id == "1308139775"
+    error_message = "github_repository_id must be exactly 1308139775."
+  }
+}
+
 variable "github_controller_environment" {
   description = "Exact protected GitHub environment allowed to control the deployment runner."
   type        = string
