@@ -43,6 +43,8 @@ const REQUIRED_SPEC_KEYS = Object.freeze([
   "warning_threshold",
 ]);
 const OPTIONAL_SPEC_KEYS = Object.freeze(["missing_data_behavior", "producer"]);
+const SAFE_TERRAFORM_ADDRESS =
+  /^(?:module\.[A-Za-z0-9_-]+\.)*(?:data\.)?[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+(?:\[[0-9]+\])?$/;
 
 function invalid() {
   throw new Error("alert specs artifact input is invalid");
@@ -164,6 +166,47 @@ export function extractAlertSpecsArtifact(input, binding) {
   return validateAlertSpecsArtifact({ alert_specs: alertSpecs, ...binding });
 }
 
+function classifyDiagnostic(summary) {
+  if (typeof summary !== "string") return "terraform-error";
+  if (/forbidden|permission denied|not authorized|unauthorized|access denied/i.test(summary))
+    return "permission-denied";
+  if (/timed? out|timeout|deadline exceeded/i.test(summary)) return "timeout";
+  if (/quota|limit exceeded|resource exhausted/i.test(summary)) return "quota-exceeded";
+  if (/conflict|already exists/i.test(summary)) return "conflict";
+  if (/not found/i.test(summary)) return "not-found";
+  if (/invalid|bad request/i.test(summary)) return "invalid-request";
+  return "terraform-error";
+}
+
+export function diagnoseTerraformApplyFailure(input) {
+  if (typeof input !== "string" || Buffer.byteLength(input) > MAXIMUM_APPLY_BYTES)
+    return "Terraform apply failed: terraform-error";
+
+  for (const line of input.split(/\r?\n/)) {
+    if (line.length === 0) continue;
+    let record;
+    try {
+      record = JSON.parse(line);
+    } catch {
+      return "Terraform apply failed: terraform-error";
+    }
+    if (!isPlainObject(record)) return "Terraform apply failed: terraform-error";
+    if (
+      record.type !== "diagnostic" ||
+      (record["@level"] !== "error" && record.diagnostic?.severity !== "error")
+    )
+      continue;
+
+    const failureClass = classifyDiagnostic(record.diagnostic?.summary);
+    const address = record.diagnostic?.address;
+    if (typeof address === "string" && SAFE_TERRAFORM_ADDRESS.test(address))
+      return `Terraform apply failed: ${failureClass} at ${address}`;
+    return `Terraform apply failed: ${failureClass}`;
+  }
+
+  return "Terraform apply failed: terraform-error";
+}
+
 async function readBoundedInput() {
   const chunks = [];
   let bytes = 0;
@@ -189,6 +232,10 @@ function bindingFromEnvironment() {
 async function runCli() {
   const mode = process.argv[2];
   const input = await readBoundedInput();
+  if (mode === "diagnose") {
+    process.stderr.write(`${diagnoseTerraformApplyFailure(input)}\n`);
+    return;
+  }
   let artifact;
   if (mode === "extract") artifact = extractAlertSpecsArtifact(input, bindingFromEnvironment());
   else if (mode === "validate") {

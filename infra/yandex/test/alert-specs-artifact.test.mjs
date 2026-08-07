@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  diagnoseTerraformApplyFailure,
   extractAlertSpecsArtifact,
   validateAlertSpecsArtifact,
 } from "../scripts/extract-alert-specs.mjs";
@@ -199,6 +200,50 @@ test("rejects malformed or oversized apply streams without echoing their content
         return true;
       },
     );
+  }
+});
+
+test("reports only a bounded failure class and safe Terraform address", () => {
+  const input = ndjson([
+    {
+      type: "diagnostic",
+      "@level": "error",
+      diagnostic: {
+        severity: "error",
+        summary: "Forbidden: token=must-not-leak",
+        detail: "password=must-not-leak-either",
+        address: "module.ingress.yandex_cm_certificate.markiro",
+      },
+    },
+    { type: "apply_errored" },
+  ]);
+
+  const message = diagnoseTerraformApplyFailure(input);
+  assert.equal(
+    message,
+    "Terraform apply failed: permission-denied at module.ingress.yandex_cm_certificate.markiro",
+  );
+  assert.doesNotMatch(message, /token|password|must-not-leak|Forbidden/);
+});
+
+test("falls back to a generic failure without reflecting malformed or unsafe input", () => {
+  for (const input of [
+    "not-json\n",
+    ndjson([
+      {
+        type: "diagnostic",
+        "@level": "error",
+        diagnostic: {
+          severity: "error",
+          summary: "deadline exceeded for secret=must-not-leak",
+          address: 'module.example.resource.name["tenant-secret"]',
+        },
+      },
+    ]),
+  ]) {
+    const message = diagnoseTerraformApplyFailure(input);
+    assert.match(message, /^Terraform apply failed: (?:terraform-error|timeout)$/);
+    assert.doesNotMatch(message, /secret|tenant|must-not-leak|deadline/);
   }
 });
 
