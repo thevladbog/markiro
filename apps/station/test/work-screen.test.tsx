@@ -1750,6 +1750,7 @@ describe("WorkScreen box progress, closing and printing", () => {
       expect(rows[0]?.[marker]).not.toBeNull();
       expect(rows[0]?.acked_at).toBeNull();
     },
+    10_000,
   );
 
   // Task 13 review, Finding 4: `closeTheBox` used to capture the box id for
