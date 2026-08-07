@@ -1,7 +1,7 @@
 # Station Exceptions: Undo, Clear, Reprint & Disassemble — Design Spec
 
 **Date:** 2026-07-30
-**Status:** Approved, not yet planned.
+**Status:** Delivered 2026-07-31 (PR #35).
 **Slice of:** roadmap plan 06 (aggregation & remaining shift flow). 06a delivered sync, 06b cross-terminal conflicts, 06c boxes & SSCC; **this slice is the "exceptions" quarter of what plan 06 called out as remaining** (disassemble/replace/reprint/undo) — pallets (06d) and cross-terminal presence are deliberately deferred, not part of this slice.
 **Related:** `docs/superpowers/specs/2026-07-28-cross-terminal-duplicates-design.md` (the ownership registry this slice releases from), `docs/superpowers/specs/2026-07-29-aggregation-boxes-design.md` (the box/SSCC model this slice corrects into).
 
