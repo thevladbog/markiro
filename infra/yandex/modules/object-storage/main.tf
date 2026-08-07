@@ -110,6 +110,16 @@ resource "yandex_storage_bucket_policy" "media_app" {
         Action    = ["s3:ListBucket"]
         Resource  = ["arn:aws:s3:::${yandex_storage_bucket.media.bucket}"]
       },
+      {
+        Sid       = "AllowTerraformMediaManagement"
+        Effect    = "Allow"
+        Principal = { CanonicalUser = var.terraform_service_account_id }
+        Action    = ["s3:*"]
+        Resource = [
+          "arn:aws:s3:::${yandex_storage_bucket.media.bucket}",
+          "arn:aws:s3:::${yandex_storage_bucket.media.bucket}/*",
+        ]
+      },
     ]
   })
 }
@@ -127,6 +137,16 @@ resource "yandex_storage_bucket_policy" "audit_writer" {
         Principal = { CanonicalUser = var.audit_service_account_id }
         Action    = ["s3:PutObject"]
         Resource  = ["arn:aws:s3:::${yandex_storage_bucket.audit.bucket}/*"]
+      },
+      {
+        Sid       = "AllowTerraformAuditManagement"
+        Effect    = "Allow"
+        Principal = { CanonicalUser = var.terraform_service_account_id }
+        Action    = ["s3:*"]
+        Resource = [
+          "arn:aws:s3:::${yandex_storage_bucket.audit.bucket}",
+          "arn:aws:s3:::${yandex_storage_bucket.audit.bucket}/*",
+        ]
       },
     ]
   })

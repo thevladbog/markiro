@@ -145,7 +145,10 @@ resource "yandex_compute_instance_iam_binding" "runner_editor" {
 resource "yandex_compute_instance_iam_binding" "deployment_controller_app_viewer" {
   instance_id = yandex_compute_instance.app.id
   role        = "compute.viewer"
-  members     = ["serviceAccount:${var.deployment_controller_service_account_id}"]
+  members = [
+    "serviceAccount:${var.deployment_controller_service_account_id}",
+    "serviceAccount:${var.runner_service_account_id}",
+  ]
 }
 
 resource "yandex_compute_instance_iam_binding" "runner_app_os_login" {
@@ -154,10 +157,12 @@ resource "yandex_compute_instance_iam_binding" "runner_app_os_login" {
   members     = ["serviceAccount:${var.runner_service_account_id}"]
 }
 
-resource "yandex_compute_instance_iam_binding" "runner_app_viewer" {
-  instance_id = yandex_compute_instance.app.id
-  role        = "compute.viewer"
-  members     = ["serviceAccount:${var.runner_service_account_id}"]
+removed {
+  from = yandex_compute_instance_iam_binding.runner_app_viewer
+
+  lifecycle {
+    destroy = false
+  }
 }
 
 resource "yandex_alb_target_group" "app" {

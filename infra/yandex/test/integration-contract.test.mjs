@@ -138,18 +138,28 @@ function assertIntegratedGraph(sources) {
     /yandex_resourcemanager_folder_iam_(?:member|binding)[\s\S]{0,500}?role\s*=\s*"compute\.(?:editor|admin|operator)"/,
   );
   for (const [name, role, member] of [
-    [
-      "deployment_controller_app_viewer",
-      "compute.viewer",
-      "deployment_controller_service_account_id",
-    ],
-    ["runner_app_viewer", "compute.viewer", "runner_service_account_id"],
     ["runner_app_os_login", "compute.osAdminLogin", "runner_service_account_id"],
   ]) {
     const grant = resourceBlock(compute, "yandex_compute_instance_iam_binding", name);
     assert.match(grant, new RegExp(`role\\s*=\\s*"${role.replaceAll(".", "\\.")}"`));
     assert.match(grant, new RegExp(member));
   }
+  const appViewer = resourceBlock(
+    compute,
+    "yandex_compute_instance_iam_binding",
+    "deployment_controller_app_viewer",
+  );
+  assert.match(appViewer, /role\s*=\s*"compute\.viewer"/);
+  assert.match(appViewer, /deployment_controller_service_account_id/);
+  assert.match(appViewer, /runner_service_account_id/);
+  assert.doesNotMatch(
+    compute,
+    /resource\s+"yandex_compute_instance_iam_binding"\s+"runner_app_viewer"/,
+  );
+  assert.match(
+    compute,
+    /removed\s*\{[\s\S]*?from\s*=\s*yandex_compute_instance_iam_binding\.runner_app_viewer[\s\S]*?destroy\s*=\s*false[\s\S]*?\}/,
+  );
 
   for (const [name, account] of [
     ["terraform_key_user", "terraform"],
