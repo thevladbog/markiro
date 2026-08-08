@@ -137,9 +137,11 @@ runcmd:
   - chown root:markiro-monitor /etc/markiro-monitor/monitoring.conf
   - chmod 0640 /etc/markiro-monitor/monitoring.conf
   - chown -R markiro-runner:markiro-runner /opt/actions-runner
+  - printf '%s\n' 'MARKIRO_RUNNER_BOOTSTRAP_STAGE container-runtime' > /dev/ttyS0
   - /usr/local/lib/markiro/install-container-runtime
   - |
       set -eu
+      printf '%s\n' 'MARKIRO_RUNNER_BOOTSTRAP_STAGE node' > /dev/ttyS0
       NODE_VERSION=24.11.1
       NODE_SHA256=60e3b0a8500819514aca603487c254298cd776de0698d3cd08f11dba5b8289a8
       archive=/tmp/node.tar.xz
@@ -153,6 +155,7 @@ runcmd:
       test "$(node --version)" = "v$${NODE_VERSION}"
   - |
       set -eu
+      printf '%s\n' 'MARKIRO_RUNNER_BOOTSTRAP_STAGE unified-agent' > /dev/ttyS0
       UA_VERSION=26.07.11
       UA_SHA256=30e216b61b44eecb443942b986e44c0d83c0548a1bc6dbebb134067d678e2dc7
       package=/tmp/yandex-unified-agent.deb
@@ -174,6 +177,7 @@ runcmd:
       runuser --user unified_agent -- /usr/bin/unified_agent --config /etc/yandex/unified_agent/config.yml check-config > /dev/null
   - |
       set -eu
+      printf '%s\n' 'MARKIRO_RUNNER_BOOTSTRAP_STAGE actions-runner' > /dev/ttyS0
       RUNNER_VERSION=2.336.0
       RUNNER_SHA256=04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d
       archive=/tmp/actions-runner-linux-x64.tar.gz
@@ -187,6 +191,7 @@ runcmd:
       chown -R markiro-runner:markiro-runner /opt/actions-runner
   - |
       set -eu
+      printf '%s\n' 'MARKIRO_RUNNER_BOOTSTRAP_STAGE yc' > /dev/ttyS0
       YC_VERSION=1.23.0
       YC_SHA256=3e287905b63685847aa77f17f92bf7156037cc63b9a42c6cd901db69a61604c9
       binary=/tmp/yc
@@ -197,6 +202,7 @@ runcmd:
       install -m 0755 "$binary" /usr/local/bin/yc
       rm -f "$binary"
       test "$(/usr/local/bin/yc version --semantic)" = "$YC_VERSION"
+  - printf '%s\n' 'MARKIRO_RUNNER_BOOTSTRAP_STAGE systemd' > /dev/ttyS0
   - systemctl daemon-reload
   - systemctl enable docker.service markiro-runner-monitoring.timer markiro-log-sanitizer.timer
   - systemctl start docker.service
@@ -206,9 +212,10 @@ runcmd:
   - systemctl is-active --quiet unified-agent.service
   - systemctl enable markiro-runner.service
   - touch /var/lib/markiro/markiro-runner-bootstrap-complete
+  - printf '%s\n' 'MARKIRO_RUNNER_BOOTSTRAP_STAGE complete' > /dev/ttyS0
 power_state:
   delay: now
   mode: poweroff
   message: Runner bootstrap complete; controller may start the one-use JIT runner.
   timeout: 30
-  condition: true
+  condition: test -f /var/lib/markiro/markiro-runner-bootstrap-complete

@@ -2912,6 +2912,33 @@ test("production network and compute keep application and runner traffic private
   assertPrivateNetworkAndCompute(await privateNetworkAndComputeSources());
 });
 
+test("runner bootstrap fails observable and powers off only after the success marker", async () => {
+  const cloudInit = await readRepositoryFile(
+    "infra/yandex/modules/compute/cloud-init-runner.yaml.tftpl",
+  );
+
+  for (const stage of [
+    "container-runtime",
+    "node",
+    "unified-agent",
+    "actions-runner",
+    "yc",
+    "systemd",
+    "complete",
+  ]) {
+    assert.match(
+      cloudInit,
+      new RegExp(`MARKIRO_RUNNER_BOOTSTRAP_STAGE ${stage}`),
+      `runner bootstrap must expose the fixed ${stage} stage without payload data`,
+    );
+  }
+  assert.match(
+    cloudInit,
+    /power_state\s*:\s*[\s\S]*?condition:\s*test -f \/var\/lib\/markiro\/markiro-runner-bootstrap-complete/,
+  );
+  assert.doesNotMatch(cloudInit, /power_state\s*:\s*[\s\S]*?condition:\s*true/);
+});
+
 test("deployment runner uses exact production federation, VM-scoped editor, and one-use JIT boot", async () => {
   const iam = await readRepositoryFile("infra/yandex/modules/iam/main.tf");
   const compute = await readRepositoryFile("infra/yandex/modules/compute/main.tf");
