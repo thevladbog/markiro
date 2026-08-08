@@ -2912,6 +2912,81 @@ test("production network and compute keep application and runner traffic private
   assertPrivateNetworkAndCompute(await privateNetworkAndComputeSources());
 });
 
+function assertRunnerBootstrapFailsObservable(cloudInit) {
+  const document = yaml.load(cloudInit);
+  assert.ok(document && typeof document === "object" && !Array.isArray(document));
+  for (const stage of [
+    "container-runtime",
+    "node",
+    "unified-agent",
+    "actions-runner",
+    "yc",
+    "systemd",
+    "complete",
+  ]) {
+    assert.match(
+      cloudInit,
+      new RegExp(`MARKIRO_RUNNER_BOOTSTRAP_STAGE ${stage}`),
+      `runner bootstrap must expose the fixed ${stage} stage without payload data`,
+    );
+  }
+  assert.equal(
+    document.power_state?.condition,
+    "test -f /var/lib/markiro/markiro-runner-bootstrap-complete",
+  );
+  assert.deepEqual(
+    document.runcmd?.slice(0, 1).map((command) => command?.slice(0, 2)),
+    [["/usr/bin/bash", "-ceu"]],
+  );
+  assert.equal(
+    document.runcmd?.length,
+    1,
+    "all runner bootstrap steps must share one fail-fast shell",
+  );
+  assert.match(document.runcmd[0][2], /^set -o pipefail\n/);
+  assert.equal(
+    document.runcmd[0][2].trimEnd().split("\n").at(-1),
+    "touch /var/lib/markiro/markiro-runner-bootstrap-complete",
+    "the success marker must be the final bootstrap operation",
+  );
+  return document.runcmd[0];
+}
+
+test("runner bootstrap fails observable and powers off only after the success marker", async () => {
+  const cloudInit = await readRepositoryFile(
+    "infra/yandex/modules/compute/cloud-init-runner.yaml.tftpl",
+  );
+  const [shell, flags] = assertRunnerBootstrapFailsObservable(cloudInit);
+
+  const probeDirectory = await mkdtemp(path.join(tmpdir(), "markiro-runner-bootstrap-"));
+  try {
+    for (const failedStep of [0, 1, 2]) {
+      const marker = path.join(probeDirectory, `complete-${failedStep}`);
+      const steps = ["true", "true", "true"];
+      steps[failedStep] = "false";
+      assert.throws(() =>
+        execFileSync(shell, [flags, `set -o pipefail\n${steps.join("\n")}\ntouch ${marker}`], {
+          stdio: "ignore",
+        }),
+      );
+      await assert.rejects(readFile(marker), { code: "ENOENT" });
+    }
+  } finally {
+    await rm(probeDirectory, { force: true, recursive: true });
+  }
+
+  const weakenedCondition = cloudInit.replace(
+    "condition: test -f /var/lib/markiro/markiro-runner-bootstrap-complete",
+    "condition: test -f /var/lib/markiro/markiro-runner-bootstrap-complete || true",
+  );
+  assert.throws(() => assertRunnerBootstrapFailsObservable(weakenedCondition));
+  const unconditionalCondition = cloudInit.replace(
+    "condition: test -f /var/lib/markiro/markiro-runner-bootstrap-complete",
+    "condition: true",
+  );
+  assert.throws(() => assertRunnerBootstrapFailsObservable(unconditionalCondition));
+});
+
 test("deployment runner uses exact production federation, VM-scoped editor, and one-use JIT boot", async () => {
   const iam = await readRepositoryFile("infra/yandex/modules/iam/main.tf");
   const compute = await readRepositoryFile("infra/yandex/modules/compute/main.tf");
