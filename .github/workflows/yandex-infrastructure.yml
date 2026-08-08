@@ -731,16 +731,21 @@ jobs:
               $outputs.admin_domain as $admin |
               $outputs.kiosk_domain as $kiosk |
               $outputs.approved_a_records as $approved |
+              def valid_ipv4:
+                type == "string" and
+                test("^(?:0|[1-9][0-9]{0,2})(?:\\.(?:0|[1-9][0-9]{0,2})){3}$") and
+                (split(".") | all(.[]; (tonumber >= 0 and tonumber <= 255)));
               select(($admin | keys | sort) == ["sensitive", "type", "value"]) |
               select(($kiosk | keys | sort) == ["sensitive", "type", "value"]) |
               select(($approved | keys | sort) == ["sensitive", "type", "value"]) |
               select($admin.sensitive == false and $admin.type == "string" and $admin.value == $admin_domain) |
               select($kiosk.sensitive == false and $kiosk.type == "string" and $kiosk.value == $kiosk_domain) |
               select($admin.value != $kiosk.value) |
+              select($approved.type == ["tuple", ["string"]]) |
               select($approved.sensitive == false and ($approved.value | type) == "array") |
               ($approved.value | sort) as $answers |
               select(($answers | length) > 0 and ($answers | unique) == $answers) |
-              select(all($answers[]; type == "string" and test("^[0-9]{1,3}(\\.[0-9]{1,3}){3}$"))) |
+              select(all($answers[]; valid_ipv4)) |
               {
                 adminDomain: $admin.value,
                 answers: {($admin.value): $answers, ($kiosk.value): $answers},

@@ -231,11 +231,11 @@ export async function runPostDnsSmoke(environment = process.env, supplied = {}) 
   if (!(finalizedAt < appliedAt && appliedAt < verifiedAt && verifiedAt < smokeStartedAt))
     throw invalid();
   if ((await dependencies.currentMainSha()) !== releaseSha) throw invalid();
-  for (const smokeDomain of [domain, kioskDomain])
-    await dependencies.smoke({
-      baseUrl: `https://${smokeDomain}`,
-      expectedReleaseSha: releaseSha,
-    });
+  await dependencies.smoke({
+    adminBaseUrl: `https://${domain}`,
+    kioskBaseUrl: `https://${kioskDomain}`,
+    expectedReleaseSha: releaseSha,
+  });
   if ((await dependencies.currentMainSha()) !== releaseSha) throw invalid();
   const smokeAt = dependencies.now();
   if (!(verifiedAt < smokeAt)) throw invalid();

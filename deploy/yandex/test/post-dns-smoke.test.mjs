@@ -103,8 +103,14 @@ test("post-DNS mode binds the exact ordered evidence chain to current main and t
 
   assert.deepEqual(calls, [
     ["current main", RELEASE_SHA],
-    ["public smoke", { baseUrl: `https://${ADMIN_DOMAIN}`, expectedReleaseSha: RELEASE_SHA }],
-    ["public smoke", { baseUrl: `https://${KIOSK_DOMAIN}`, expectedReleaseSha: RELEASE_SHA }],
+    [
+      "public smoke",
+      {
+        adminBaseUrl: `https://${ADMIN_DOMAIN}`,
+        expectedReleaseSha: RELEASE_SHA,
+        kioskBaseUrl: `https://${KIOSK_DOMAIN}`,
+      },
+    ],
     ["current main", RELEASE_SHA],
     [
       "write receipt",
@@ -130,6 +136,23 @@ test("post-DNS mode binds the exact ordered evidence chain to current main and t
     ],
   ]);
   assert.equal(receipt.releaseSha, RELEASE_SHA);
+});
+
+test("post-DNS mode invokes the production dual-host smoke interface exactly once", async () => {
+  const { dependencies, environment } = fixture();
+  const smokeCalls = [];
+  dependencies.smoke = async (options) => {
+    assert.deepEqual(options, {
+      adminBaseUrl: `https://${ADMIN_DOMAIN}`,
+      expectedReleaseSha: RELEASE_SHA,
+      kioskBaseUrl: `https://${KIOSK_DOMAIN}`,
+    });
+    smokeCalls.push(options);
+  };
+
+  await runPostDnsSmoke(environment, dependencies);
+
+  assert.equal(smokeCalls.length, 1);
 });
 
 test("post-DNS mode rejects alternate dispatch refs and SHAs before public requests", async () => {
@@ -169,8 +192,14 @@ test("post-DNS mode rejects an advancing main after smoke and never writes a rec
 
   assert.deepEqual(calls, [
     ["current main", RELEASE_SHA],
-    ["public smoke", { baseUrl: `https://${ADMIN_DOMAIN}`, expectedReleaseSha: RELEASE_SHA }],
-    ["public smoke", { baseUrl: `https://${KIOSK_DOMAIN}`, expectedReleaseSha: RELEASE_SHA }],
+    [
+      "public smoke",
+      {
+        adminBaseUrl: `https://${ADMIN_DOMAIN}`,
+        expectedReleaseSha: RELEASE_SHA,
+        kioskBaseUrl: `https://${KIOSK_DOMAIN}`,
+      },
+    ],
     ["current main", OTHER_SHA],
   ]);
 });

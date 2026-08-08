@@ -2040,6 +2040,57 @@ function workflowCommands(job) {
     .join("\n");
 }
 
+function publicDnsApplyFilter(applyStep) {
+  const startMarker = '--arg kiosk_domain "$TF_VAR_kiosk_domain" \'';
+  const start = applyStep.run.indexOf(startMarker);
+  assert.ok(start >= 0, "public DNS extractor must bind the protected kiosk domain");
+  const filterStart = start + startMarker.length;
+  const end = applyStep.run.indexOf(
+    '\' "$terraform_apply_stream" > "$dns_values_path"',
+    filterStart,
+  );
+  assert.ok(end > filterStart, "public DNS extractor must consume the authenticated apply stream");
+  return applyStep.run.slice(filterStart, end).trim();
+}
+
+function runPublicDnsApplyFilter(filter, records, approvedType = ["tuple", ["string"]]) {
+  const adminDomain = "admin.markiro.example";
+  const kioskDomain = "kiosk.markiro.example";
+  const events = records.map((record) =>
+    record === "outputs"
+      ? {
+          type: "outputs",
+          outputs: {
+            admin_domain: { sensitive: false, type: "string", value: adminDomain },
+            kiosk_domain: { sensitive: false, type: "string", value: kioskDomain },
+            approved_a_records: {
+              sensitive: false,
+              type: approvedType,
+              value: ["203.0.113.10"],
+            },
+          },
+        }
+      : record,
+  );
+  return JSON.parse(
+    execFileSync(
+      "jq",
+      [
+        "-s",
+        "-e",
+        "--arg",
+        "admin_domain",
+        adminDomain,
+        "--arg",
+        "kiosk_domain",
+        kioskDomain,
+        filter,
+      ],
+      { encoding: "utf8", input: `${events.map(JSON.stringify).join("\n")}\n` },
+    ),
+  );
+}
+
 function mutateWorkflowSource(source, mutate) {
   const workflow = yaml.load(source, { schema: yaml.JSON_SCHEMA });
   mutate(workflow);
@@ -2240,6 +2291,17 @@ function assertProtectedInfrastructureWorkflow(source) {
       'rm -rf -- "${RUNNER_TEMP:?}/yandex-alert-specs"',
     ],
   );
+  assert.deepEqual(
+    finalApplyCleanupStep.run
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith("rm -f --")),
+    [
+      'rm -f -- "${RUNNER_TEMP:?}/public-dns-values.json"',
+      'rm -f -- "${RUNNER_TEMP:?}/public-dns-apply.json"',
+    ],
+    "public DNS values and receipt cleanup must remain exact and unconditional",
+  );
   assert.doesNotMatch(finalApplyCleanupStep.run, /\bunset\b/);
   assert.match(applyStep.run, /unset [^\n]*TF_DATA_DIR/);
   assert.match(applyStep.run, /rm -rf -- "\$\{RUNNER_TEMP:\?\}\/yandex-production-terraform-data"/);
@@ -2368,6 +2430,61 @@ ${applyObservabilityCase}
   assert.match(applyCommands, /rm -f "\$terraform_apply_stream" "\$terraform_apply_stderr"/);
   assert.doesNotMatch(applyCommands, /cat "\$terraform_apply_(?:stream|stderr)"/);
   assert.doesNotMatch(applyCommands, /terraform[^\n]*apply[^\n]*\$plan_path"\s*$/m);
+
+  const publicDnsFilter = publicDnsApplyFilter(applyStep);
+  assert.deepEqual(runPublicDnsApplyFilter(publicDnsFilter, ["outputs"]), {
+    adminDomain: "admin.markiro.example",
+    answers: {
+      "admin.markiro.example": ["203.0.113.10"],
+      "kiosk.markiro.example": ["203.0.113.10"],
+    },
+    kioskDomain: "kiosk.markiro.example",
+  });
+  assert.throws(
+    () => runPublicDnsApplyFilter(publicDnsFilter, ["outputs", "outputs"]),
+    "public DNS evidence must contain exactly one Terraform outputs event",
+  );
+  assert.throws(
+    () => runPublicDnsApplyFilter(publicDnsFilter, ["outputs"], "string"),
+    "approved A records must have the exact Terraform tuple-of-string type",
+  );
+  assert.throws(() => {
+    const event = {
+      type: "outputs",
+      outputs: {
+        admin_domain: {
+          sensitive: false,
+          type: "string",
+          value: "admin.markiro.example",
+        },
+        kiosk_domain: {
+          sensitive: false,
+          type: "string",
+          value: "kiosk.markiro.example",
+        },
+        approved_a_records: {
+          sensitive: false,
+          type: ["tuple", ["string"]],
+          value: ["999.999.999.999"],
+        },
+      },
+    };
+    execFileSync(
+      "jq",
+      [
+        "-s",
+        "-e",
+        "--arg",
+        "admin_domain",
+        "admin.markiro.example",
+        "--arg",
+        "kiosk_domain",
+        "kiosk.markiro.example",
+        publicDnsFilter,
+      ],
+      { encoding: "utf8", input: `${JSON.stringify(event)}\n` },
+    );
+  }, "public DNS evidence must reject IPv4 octets outside 0..255");
 
   const alertUploadStep = apply.steps.find(
     (step) => step.name === "Upload exact first-phase alert specifications",
@@ -2541,6 +2658,25 @@ test("infrastructure workflow contract rejects security-boundary mutations", asy
       ),
     ],
     [
+      "public DNS extractor accepts multiple outputs events",
+      source.replace("select(($records | length) == 1) |", "select(($records | length) >= 1) |"),
+    ],
+    [
+      "public DNS extractor omits the approved output type",
+      source.replace('select($approved.type == ["tuple", ["string"]]) |\n', ""),
+    ],
+    [
+      "public DNS extractor accepts out-of-range IPv4 octets",
+      source.replace("(tonumber >= 0 and tonumber <= 255)", "true"),
+    ],
+    [
+      "public DNS extractor maps a different kiosk answer set",
+      source.replace(
+        "answers: {($admin.value): $answers, ($kiosk.value): $answers}",
+        'answers: {($admin.value): $answers, ($kiosk.value): ["203.0.113.11"]}',
+      ),
+    ],
+    [
       "targeted first apply requires alert extraction",
       source.replace(
         'if [[ "$OBSERVABILITY_PHASE" == first && "$POSTGRES_PROVISIONING_PHASE" == none ]]; then',
@@ -2636,6 +2772,14 @@ test("infrastructure workflow contract rejects security-boundary mutations", asy
         );
         if (step) step.if = "success()";
       }),
+    ],
+    [
+      "missing public DNS extracted-values cleanup",
+      source.replace('rm -f -- "${RUNNER_TEMP:?}/public-dns-values.json"\n', ""),
+    ],
+    [
+      "missing public DNS receipt cleanup",
+      source.replace('rm -f -- "${RUNNER_TEMP:?}/public-dns-apply.json"\n', ""),
     ],
   ]);
 

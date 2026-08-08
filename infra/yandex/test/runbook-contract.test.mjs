@@ -73,21 +73,66 @@ const verifierInputs = [
   "MARKIRO_APPROVED_DNS_A",
   "MARKIRO_APPROVED_DNS_AAAA",
 ];
-const dualHostGoLiveSemantics = [
-  "MARKIRO_KIOSK_DOMAIN=kiosk.markiro.app",
-  "KIOSK_ORIGIN=https://kiosk.markiro.app",
-  "one additional kiosk certificate",
-  "one additional kiosk certificate validation record",
-  "issued status for both certificates",
-  "curl --resolve <admin-domain>:443:<reserved-alb-ip>",
-  "curl --resolve <kiosk-domain>:443:<reserved-alb-ip>",
-  "existing `certificate_risk` alert ID",
-  "two-certificate artifact",
-  "publishes both approved A records",
-  "two-domain convergence receipt",
-  "two-domain post-DNS smoke receipt",
-  "desktop Tauri kiosk remains outside this web/TLS gate",
-];
+const dualHostGoLiveProcedures = {
+  preamble: [
+    "MARKIRO_KIOSK_DOMAIN=kiosk.markiro.app",
+    "desktop Tauri kiosk remains outside this web/TLS gate",
+    "browser kiosk PWA served by the protected ingress",
+  ],
+  "go-live-gate-01-plan-drift": [
+    "public_dns_enabled=false",
+    "expect exactly",
+    "one additional kiosk certificate",
+    "one additional kiosk certificate validation record",
+    "no replacement",
+    "no deletion",
+  ],
+  "go-live-gate-03-certificate": [
+    "issued status for both certificates",
+    "exact admin and kiosk",
+    "public_dns_enabled=false",
+  ],
+  "go-live-gate-05-alert-specs": [
+    "two-certificate artifact",
+    "existing `certificate_risk` alert ID",
+  ],
+  "go-live-gate-07-smtp-s3": [
+    "sanitized comparison",
+    "KIOSK_ORIGIN=https://kiosk.markiro.app",
+    "present exactly once",
+    "matches the protected kiosk domain",
+  ],
+  "go-live-gate-09-deploy-smoke-rollback": [
+    "http://127.0.0.1:8080/health/ready",
+    "curl --resolve <admin-domain>:443:<reserved-alb-ip>",
+    "curl --resolve <kiosk-domain>:443:<reserved-alb-ip>",
+    "These probes preserve",
+    "TLS SNI and both production authorities",
+  ],
+  "go-live-public-dns-apply": [
+    "public_dns_enabled=true",
+    "publishes both approved A records",
+    "exact admin domain",
+    "exact kiosk domain",
+    "same reserved ALB address",
+  ],
+  "go-live-dns-convergence": [
+    "two-domain convergence receipt",
+    "exact distinct admin and kiosk names",
+    "independently sorted",
+    "nonempty answer sets",
+    "same approved ALB address",
+    "production-public-smoke",
+    "full public route smoke through both",
+    "https://MARKIRO_DOMAIN",
+    "https://MARKIRO_KIOSK_DOMAIN",
+    "release header on both authorities",
+    "two-domain post-DNS smoke receipt",
+    "receipt proves only TLS, routes, security headers, readiness,",
+    "documentation, proxy behavior",
+    "SWS/ARL and alert-delivery confirmation remain separate",
+  ],
+};
 
 async function contents(relativePath) {
   return readFile(path.join(repositoryRoot, relativePath), "utf8");
@@ -136,6 +181,28 @@ function markerProcedure(source, marker) {
   assert.ok(start >= 0, `missing marker ${marker}`);
   const next = source.indexOf("<!-- runbook-contract:", start + 1);
   return source.slice(start, next === -1 ? source.length : next);
+}
+
+function goLiveProcedure(source, marker) {
+  if (marker !== "preamble") return markerProcedure(source, marker);
+  const firstMarker = source.indexOf("<!-- runbook-contract:");
+  assert.ok(firstMarker >= 0, "first-go-live runbook must contain contract markers");
+  return source.slice(0, firstMarker);
+}
+
+function escaped(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function positiveOrdered(source, values, label) {
+  ordered(source, values, label);
+  for (const value of values) {
+    assert.doesNotMatch(
+      source,
+      new RegExp(`(?:do not|never|must not)\\s+${escaped(value)}`, "i"),
+      `${label} negates required dual-host meaning: ${value}`,
+    );
+  }
 }
 
 const markerProcedures = {
@@ -358,13 +425,8 @@ function assertRunbookContract({
   }
 
   const goLive = documents["docs/runbooks/yandex-first-go-live.md"];
-  for (const semantic of dualHostGoLiveSemantics)
-    assert.match(goLive, new RegExp(semantic.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.match(goLive, /sanitized[\s\S]{0,180}KIOSK_ORIGIN=https:\/\/kiosk\.markiro\.app/i);
-  assert.match(
-    goLive,
-    /public_dns_enabled=false[\s\S]{0,260}no replacement[\s\S]{0,160}no deletion/i,
-  );
+  for (const [marker, values] of Object.entries(dualHostGoLiveProcedures))
+    positiveOrdered(goLiveProcedure(goLive, marker), values, `dual host ${marker}`);
   assert.match(goLive, /rollback_rehearsal=true/);
   assert.match(goLive, /rollback_rehearsal=false/);
   assert.match(goLive, /automatic\s+`workflow_run` delivery always fixes this input to false/i);
@@ -478,16 +540,9 @@ function assertRunbookContract({
   assert.match(postDnsWorkflow, /environment:\s*production-public-smoke/);
   assert.match(postDnsWorkflow, /node deploy\/yandex\/post-dns-smoke\.mjs run/);
   assert.doesNotMatch(postDnsWorkflow, /remote-deploy|deploy[.]mjs|\bmigrate\b|\bdocker\b/i);
-  assert.match(
-    goLive,
-    /receipt proves only TLS, routes, security headers, readiness,\s+documentation, proxy behavior/i,
-  );
-  assert.match(
-    goLive,
-    /SWS[/]ARL and alert-delivery[\s\S]{0,120}separate\s+protected gate records/i,
-  );
+  const convergenceProcedure = markerProcedure(goLive, "go-live-dns-convergence");
   assert.doesNotMatch(
-    goLive,
+    convergenceProcedure,
     /confirm the certificate, SWS[/]ARL behavior,[\s\S]{0,160}from the uploaded post-DNS smoke receipt/i,
   );
   for (const input of verifierInputs) {
@@ -518,12 +573,45 @@ test("runbook contract rejects every unsafe command and missing DNS verifier inp
     assert.throws(() => assertRunbookContract(mutated), input);
   }
 
-  for (const semantic of dualHostGoLiveSemantics) {
-    const mutated = structuredClone(current);
-    mutated.documents["docs/runbooks/yandex-first-go-live.md"] = mutated.documents[
-      "docs/runbooks/yandex-first-go-live.md"
-    ].replaceAll(semantic, "REMOVED_DUAL_HOST_SEMANTIC");
-    assert.throws(() => assertRunbookContract(mutated), semantic);
+  for (const [marker, values] of Object.entries(dualHostGoLiveProcedures)) {
+    for (const value of values) {
+      const missing = structuredClone(current);
+      const runbook = missing.documents["docs/runbooks/yandex-first-go-live.md"];
+      const procedure = goLiveProcedure(runbook, marker);
+      missing.documents["docs/runbooks/yandex-first-go-live.md"] = runbook.replace(
+        procedure,
+        procedure.replace(value, "REMOVED_DUAL_HOST_SEMANTIC"),
+      );
+      assert.throws(() => assertRunbookContract(missing), `${marker}:${value}:missing`);
+
+      const moved = structuredClone(current);
+      const movedRunbook = moved.documents["docs/runbooks/yandex-first-go-live.md"];
+      const movedProcedure = goLiveProcedure(movedRunbook, marker);
+      let movedDocument = movedRunbook.replace(
+        movedProcedure,
+        movedProcedure.replace(value, "MOVED_DUAL_HOST_SEMANTIC"),
+      );
+      if (marker === "preamble") {
+        const destination = markerProcedure(movedDocument, "go-live-gate-01-plan-drift");
+        movedDocument = movedDocument.replace(destination, `${destination}\n${value}\n`);
+      } else {
+        movedDocument = movedDocument.replace(
+          "<!-- runbook-contract:go-live-gate-01-plan-drift -->",
+          `${value}\n<!-- runbook-contract:go-live-gate-01-plan-drift -->`,
+        );
+      }
+      moved.documents["docs/runbooks/yandex-first-go-live.md"] = movedDocument;
+      assert.throws(() => assertRunbookContract(moved), `${marker}:${value}:moved`);
+
+      const negated = structuredClone(current);
+      const negatedRunbook = negated.documents["docs/runbooks/yandex-first-go-live.md"];
+      const negatedProcedure = goLiveProcedure(negatedRunbook, marker);
+      negated.documents["docs/runbooks/yandex-first-go-live.md"] = negatedRunbook.replace(
+        negatedProcedure,
+        negatedProcedure.replace(value, `Do not ${value}`),
+      );
+      assert.throws(() => assertRunbookContract(negated), `${marker}:${value}:negated`);
+    }
   }
 
   for (const [runbook, procedures] of Object.entries(markerProcedures)) {
