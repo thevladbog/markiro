@@ -646,6 +646,13 @@ test("real CLI adapter stages remote prepare, ALB, runner smoke, and remote fina
   assert.ok(events.indexOf("activate release pointer") > events.indexOf("remote finalize"));
 });
 
+test("repeat ALB smoke ignores an ambient direct-mode HTTPS port", async () => {
+  const { environment, system } = cliFixture();
+  environment.MARKIRO_HTTPS_PORT = "18443";
+
+  await runRemoteDeployment(environment, system);
+});
+
 test("actual remote prepare argv satisfies the real app-side preflight environment boundary", async () => {
   const { commands, environment, system } = cliFixture();
 

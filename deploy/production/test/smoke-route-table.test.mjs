@@ -71,12 +71,69 @@ test("keeps the public route table HTTPS-facing when ALB terminates TLS", () => 
       MARKIRO_DOMAIN: "markiro.example",
       MARKIRO_KIOSK_DOMAIN: "kiosk.markiro.example",
       MARKIRO_EDGE_MODE: "behind-alb",
+      MARKIRO_HTTPS_PORT: "18443",
     }),
     {
       admin: "https://markiro.example",
       kiosk: "https://kiosk.markiro.example",
     },
   );
+});
+
+test("rejects malformed and equal smoke authorities without disclosing their values", () => {
+  const cases = [
+    [
+      {
+        MARKIRO_DOMAIN: "markiro.example@evil.example",
+        MARKIRO_KIOSK_DOMAIN: "kiosk.markiro.example",
+      },
+      "MARKIRO_DOMAIN is invalid",
+      "evil.example",
+    ],
+    [
+      {
+        MARKIRO_DOMAIN: "markiro.example",
+        MARKIRO_KIOSK_DOMAIN: "kiosk.markiro.example/private",
+      },
+      "MARKIRO_KIOSK_DOMAIN is invalid",
+      "private",
+    ],
+    [
+      { MARKIRO_DOMAIN: "markiro.example", MARKIRO_KIOSK_DOMAIN: "markiro.example" },
+      "production domains must be distinct",
+      "markiro.example",
+    ],
+    [
+      { MARKIRO_DOMAIN: "localhost", MARKIRO_KIOSK_DOMAIN: "kiosk.markiro.example" },
+      "MARKIRO_DOMAIN is invalid",
+      "kiosk.markiro.example",
+    ],
+    [
+      { MARKIRO_DOMAIN: "markiro.example", MARKIRO_KIOSK_DOMAIN: "kiosk.localhost" },
+      "MARKIRO_KIOSK_DOMAIN is invalid",
+      "markiro.example",
+    ],
+    [
+      {
+        MARKIRO_DOMAIN: "localhost",
+        MARKIRO_KIOSK_DOMAIN: "kiosk.localhost",
+        MARKIRO_EDGE_MODE: "behind-alb",
+      },
+      "MARKIRO_DOMAIN is invalid",
+      "kiosk.localhost",
+    ],
+  ];
+
+  for (const [environment, message, privateValue] of cases) {
+    assert.throws(
+      () => productionBaseUrls(environment),
+      (error) => {
+        assert.equal(error.message, message);
+        assert.doesNotMatch(error.message, new RegExp(privateValue.replaceAll(".", "\\.")));
+        return true;
+      },
+    );
+  }
 });
 
 function response({ status = 200, body = "{}", headers = {} } = {}) {

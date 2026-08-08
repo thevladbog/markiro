@@ -594,6 +594,7 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
           const baseUrls = productionBaseUrls({
             MARKIRO_DOMAIN: domain,
             MARKIRO_KIOSK_DOMAIN: kioskDomain,
+            MARKIRO_EDGE_MODE: "behind-alb",
             MARKIRO_HTTPS_PORT: environment.MARKIRO_HTTPS_PORT,
           });
           return system.smoke({

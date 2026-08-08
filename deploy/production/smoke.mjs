@@ -3,6 +3,7 @@ import process from "node:process";
 
 import { isMainModule } from "./cli-main.mjs";
 import { productionComposeArgs } from "./compose-files.mjs";
+import { validateProductionDomains } from "./production-domain.mjs";
 import { RUNTIME_DEPENDENCY_PROBE_SOURCE } from "./runtime-dependency-probe.mjs";
 
 const CSP =
@@ -114,10 +115,22 @@ function productionBaseUrl(domain, port) {
 }
 
 export function productionBaseUrls(environment) {
-  const port = environment.MARKIRO_HTTPS_PORT;
+  const { domain, kioskDomain } = validateProductionDomains(
+    environment.MARKIRO_DOMAIN,
+    environment.MARKIRO_KIOSK_DOMAIN,
+  );
+  const isLocalPair =
+    (environment.MARKIRO_EDGE_MODE || "direct") === "direct" &&
+    domain === "localhost" &&
+    kioskDomain === "kiosk.localhost";
+  if (domain === "localhost" && !isLocalPair) throw new Error("MARKIRO_DOMAIN is invalid");
+  if (kioskDomain === "kiosk.localhost" && !isLocalPair)
+    throw new Error("MARKIRO_KIOSK_DOMAIN is invalid");
+  const port =
+    environment.MARKIRO_EDGE_MODE === "behind-alb" ? undefined : environment.MARKIRO_HTTPS_PORT;
   return {
-    admin: productionBaseUrl(environment.MARKIRO_DOMAIN, port),
-    kiosk: productionBaseUrl(environment.MARKIRO_KIOSK_DOMAIN, port),
+    admin: productionBaseUrl(domain, port),
+    kiosk: productionBaseUrl(kioskDomain, port),
   };
 }
 
