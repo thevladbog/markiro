@@ -69,7 +69,9 @@ The remaining background treatment is deliberately sparse:
 - a dynamic local date in the lower metadata row;
 - the metadata label `MARKIRO / TENANT ADMIN`;
 - no large DataMatrix, tilted square, crosshair, scan line, photo, color or background gradient, or
-  looping decorative animation. The sole gradient exception is the diagonal grid-opacity mask,
+  looping decorative animation. The two `background-image: linear-gradient(...)` declarations that
+  draw the 24 px engineering grid are structural and permitted. Beyond those grid-drawing gradients,
+  the diagonal grid-opacity mask is the sole decorative gradient exception:
   `mask-image: linear-gradient(135deg, transparent 3%, black 34%, black 100%)`; it must not add
   color or background shading.
 
