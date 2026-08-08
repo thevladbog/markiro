@@ -71,7 +71,11 @@ export function LoginShell({ children }: { children: ReactNode }) {
 
       <section className="mk-login-page__login">
         <header className="mk-login-page__header">
-          <picture className="mk-login-page__mobile-logo" aria-hidden="true">
+          <picture
+            className="mk-login-page__mobile-logo"
+            role="img"
+            aria-label={t("auth.login.logoAlt")}
+          >
             <img className="mk-login-page__logo-on-light" src={logoOnLight} alt="" />
             <img className="mk-login-page__logo-on-dark" src={logoOnDark} alt="" />
           </picture>

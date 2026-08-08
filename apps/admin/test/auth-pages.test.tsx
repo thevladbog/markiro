@@ -185,7 +185,14 @@ describe("LoginPage", () => {
 
     renderRouted(createFakeAuthClient(), "/login", <LoginPage />);
 
-    expect(screen.getByRole("img", { name: "Маркиро" })).toBeDefined();
+    expect(screen.getAllByRole("img", { name: "Маркиро" })).toHaveLength(2);
+    const mobileLogo = document.querySelector(".mk-login-page__mobile-logo");
+    expect(mobileLogo?.getAttribute("role")).toBe("img");
+    expect(mobileLogo?.getAttribute("aria-label")).toBe("Маркиро");
+    expect(mobileLogo?.hasAttribute("aria-hidden")).toBe(false);
+    expect(Array.from(mobileLogo?.querySelectorAll("img") ?? []).map((image) => image.alt)).toEqual(
+      ["", ""],
+    );
     expect(screen.getByRole("heading", { level: 1, name: "Войти" })).toBeDefined();
     expect(screen.getByText("Производство видно целиком.")).toBeDefined();
     expect(screen.getByText("Смены, коды и агрегация — в одном рабочем кабинете.")).toBeDefined();
